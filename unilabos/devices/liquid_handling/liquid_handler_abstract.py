@@ -1090,7 +1090,10 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     pass
         if mix_times is not None:
             mix_times = int(mix_times)
-            
+
+        # 设置tip racks
+        self.set_tiprack(tip_racks)
+
         # 识别传输模式（mix_times 为 None 也应该能正常移液，只是不做 mix）
         num_sources = len(sources)
         num_targets = len(targets)
@@ -1153,9 +1156,15 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         """一对一传输模式：N sources -> N targets"""
         # 验证参数长度
         if len(asp_vols) != len(targets):
-            raise ValueError(f"Length of `asp_vols` {len(asp_vols)} must match `targets` {len(targets)}.")
+            if len(asp_vols) == 1:
+                asp_vols = [asp_vols[0]] * len(targets)
+            else:
+                raise ValueError(f"Length of `asp_vols` {len(asp_vols)} must match `targets` {len(targets)}.")
         if len(dis_vols) != len(targets):
-            raise ValueError(f"Length of `dis_vols` {len(dis_vols)} must match `targets` {len(targets)}.")
+            if len(dis_vols) == 1:
+                dis_vols = [dis_vols[0]] * len(targets)
+            else:
+                raise ValueError(f"Length of `dis_vols` {len(dis_vols)} must match `targets` {len(targets)}.")
         if len(sources) != len(targets):
             raise ValueError(f"Length of `sources` {len(sources)} must match `targets` {len(targets)}.")
 
@@ -1495,7 +1504,10 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         """多对一传输模式：N sources -> 1 target（汇总/混合）"""
         # 验证和扩展体积参数
         if len(asp_vols) != len(sources):
-            raise ValueError(f"Length of `asp_vols` {len(asp_vols)} must match `sources` {len(sources)}.")
+            if len(asp_vols) == 1:
+                asp_vols = [asp_vols[0]] * len(sources)
+            else:
+                raise ValueError(f"Length of `asp_vols` {len(asp_vols)} must match `sources` {len(sources)}.")
         
         # 支持两种模式：
         # 1. dis_vols 为单个值：所有源汇总，使用总吸液体积或指定分液体积

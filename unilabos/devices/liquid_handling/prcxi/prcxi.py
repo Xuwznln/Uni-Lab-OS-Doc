@@ -1011,6 +1011,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
     async def shaker_action(self, time: int, module_no: int, amplitude: int, is_wait: bool):
         return await self._unilabos_backend.shaker_action(time, module_no, amplitude, is_wait)
 
+    async def magnetic_action(self, time: int, module_no: int, height: int, is_wait: bool):
+        return await self._unilabos_backend.magnetic_action(time, module_no, height, is_wait)
+    
+    async def shaking_incubation_action(self, time: int, module_no: int, amplitude: int, is_wait: bool, temperature: int):
+        return await self._unilabos_backend.shaking_incubation_action(time, module_no, amplitude, is_wait, temperature)
     async def heater_action(self, temperature: float, time: int):
         return await self._unilabos_backend.heater_action(temperature, time)  
     async def move_plate(
@@ -1116,6 +1121,26 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.steps_todo_list.append(step)
         return step
 
+    async def shaking_incubation_action(self, time: int, module_no: int, amplitude: int, is_wait: bool, temperature: int):
+        step = self.api_client.shaking_incubation_action(
+            time=time,
+            module_no=module_no,
+            amplitude=amplitude,
+            is_wait=is_wait,
+            temperature=temperature,
+        )
+        self.steps_todo_list.append(step)
+        return step
+
+    async def magnetic_action(self, time: int, module_no: int, height: int, is_wait: bool): 
+        step = self.api_client.magnetic_action(
+            time=time,
+            module_no=module_no,
+            height=height,
+            is_wait=is_wait,
+        )
+        self.steps_todo_list.append(step)
+        return step
 
     async def pick_up_resource(self, pickup: ResourcePickup, **backend_kwargs):
         
@@ -1982,6 +2007,27 @@ class PRCXI9300Api:
             "AssistFun1": time,
             "AssistFun2": module_no,
             "AssistFun3": amplitude,
+            "AssistFun4": is_wait,
+        }
+
+    def shaking_incubation_action(self, time: int, module_no: int, amplitude: int, is_wait: bool, temperature: int):
+        return {
+            "StepAxis": "Left",
+            "Function": "Shaking_Incubation",
+            "AssistFun1": time,
+            "AssistFun2": module_no,
+            "AssistFun3": amplitude,
+            "AssistFun4": is_wait,
+            "AssistFun5": temperature,
+        }
+    
+    def magnetic_action(self, time: int, module_no: int, height: int, is_wait: bool):
+        return {
+            "StepAxis": "Left",
+            "Function": "Magnetic",
+            "AssistFun1": time,
+            "AssistFun2": module_no,
+            "AssistFun3": height,
             "AssistFun4": is_wait,
         }
 

@@ -1,3 +1,4 @@
+from ast import Try
 import inspect
 import io
 import json
@@ -1341,12 +1342,17 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                                 uuids = [item[1] for item in uuid_indices]
                                 resource_tree = await self.get_resource(uuids)
                                 plr_resources = resource_tree.to_plr_resources()
-                                for i, (idx, _, resource_data) in enumerate(uuid_indices):
-                                    plr_resource = plr_resources[i]
-                                    if "sample_id" in resource_data:
-                                        plr_resource.unilabos_extra["sample_uuid"] = resource_data["sample_id"]
-                                    queried_resources[idx] = plr_resource
-
+                                # 通过uuid查找对应的plr_resource
+                                tracker = self.resource_tracker
+                                for idx, uuid, resource_data in uuid_indices:
+                                    try:
+                                        plr_resource = tracker.loop_find_with_uuid(plr_resources, uuid)
+                                        if "sample_id" in resource_data:
+                                            plr_resource.unilabos_extra["sample_uuid"] = resource_data["sample_id"]
+                                        queried_resources[idx] = plr_resource
+                                    except Exception as e:
+                                        self.lab_logger().error(f"资源查询失败: {e}\n{traceback.format_exc()}")
+                                        continue
                             self.lab_logger().debug(f"资源查询结果: 共 {len(queried_resources)} 个资源")
 
                             # 通过资源跟踪器获取本地实例
