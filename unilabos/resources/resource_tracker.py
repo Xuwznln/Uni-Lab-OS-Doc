@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from pylabrobot.resources import Resource as PLRResource
 
 
+EXTRA_CLASS = "unilabos_resource_class"
+
+
 class ResourceDictPositionSize(BaseModel):
     depth: float = Field(description="Depth", default=0.0)  # z
     width: float = Field(description="Width", default=0.0)  # x
@@ -393,7 +396,7 @@ class ResourceTreeSet(object):
                 "parent": parent_resource,  # 直接传入 ResourceDict 对象
                 "parent_uuid": parent_uuid,  # 使用 parent_uuid 而不是 parent 对象
                 "type": replace_plr_type(d.get("category", "")),
-                "class": d.get("class", ""),
+                "class": extra.get(EXTRA_CLASS, ""),
                 "position": pos,
                 "pose": pos,
                 "config": {
@@ -443,7 +446,7 @@ class ResourceTreeSet(object):
             trees.append(tree_instance)
         return cls(trees)
 
-    def to_plr_resources(self) -> List["PLRResource"]:
+    def to_plr_resources(self, skip_devices=True) -> List["PLRResource"]:
         """
         将 ResourceTreeSet 转换为 PLR 资源列表
 
@@ -468,6 +471,7 @@ class ResourceTreeSet(object):
             name_to_uuid[node.res_content.name] = node.res_content.uuid
             all_states[node.res_content.name] = node.res_content.data
             name_to_extra[node.res_content.name] = node.res_content.extra
+            name_to_extra[node.res_content.name][EXTRA_CLASS] = node.res_content.klass
             for child in node.children:
                 collect_node_data(child, name_to_uuid, all_states, name_to_extra)
 
@@ -512,7 +516,10 @@ class ResourceTreeSet(object):
             plr_dict = node_to_plr_dict(tree.root_node, has_model)
             try:
                 sub_cls = find_subclass(plr_dict["type"], PLRResource)
-                if sub_cls is None:
+                if skip_devices and plr_dict["type"] == "device":
+                    logger.info(f"跳过更新 {plr_dict['name']} 设备是class")
+                    continue
+                elif sub_cls is None:
                     raise ValueError(
                         f"无法找到类型 {plr_dict['type']} 对应的 PLR 资源类。原始信息：{tree.root_node.res_content}"
                     )
@@ -520,6 +527,10 @@ class ResourceTreeSet(object):
                 if "category" not in spec.parameters:
                     plr_dict.pop("category", None)
                 plr_resource = sub_cls.deserialize(plr_dict, allow_marshal=True)
+                from pylabrobot.resources import Coordinate
+                from pylabrobot.serializer import deserialize
+                location = cast(Coordinate, deserialize(plr_dict["location"]))
+                plr_resource.location = location
                 plr_resource.load_all_state(all_states)
                 # 使用 DeviceNodeResourceTracker 设置 UUID 和 Extra
                 tracker.loop_set_uuid(plr_resource, name_to_uuid)
@@ -976,7 +987,7 @@ class DeviceNodeResourceTracker(object):
                 extra = name_to_extra_map[resource_name]
                 self.set_resource_extra(res, extra)
                 if len(extra):
-                    logger.debug(f"设置资源Extra: {resource_name} -> {extra}")
+                    logger.trace(f"设置资源Extra: {resource_name} -> {extra}")
                 return 1
             return 0
 

@@ -886,6 +886,9 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                                 parent_appended = True
 
                 # 加载状态
+                original_instance.location = plr_resource.location
+                original_instance.rotation = plr_resource.rotation
+                original_instance.barcode = plr_resource.barcode
                 original_instance.load_all_state(states)
                 child_count = len(original_instance.get_all_children())
                 self.lab_logger().info(
@@ -1342,6 +1345,17 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                                 uuids = [item[1] for item in uuid_indices]
                                 resource_tree = await self.get_resource(uuids)
                                 plr_resources = resource_tree.to_plr_resources()
+                                for i, (idx, _, resource_data) in enumerate(uuid_indices):
+                                    plr_resource = plr_resources[i]
+                                    if "sample_id" in resource_data:
+                                        plr_resource.unilabos_extra["sample_uuid"] = resource_data["sample_id"]
+                                    queried_resources[idx] = plr_resource
+
+                            # 第二遍：批量查询有uuid的资源
+                            if uuid_indices:
+                                uuids = [item[1] for item in uuid_indices]
+                                resource_tree = await self.get_resource(uuids)
+                                plr_resources = resource_tree.to_plr_resources()
                                 # 通过uuid查找对应的plr_resource
                                 tracker = self.resource_tracker
                                 for idx, uuid, resource_data in uuid_indices:
@@ -1587,7 +1601,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                                     f"转换ResourceSlot列表参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
                                 )
                                 raise JsonCommandInitError(f"ResourceSlot列表参数转换失败: {arg_name}")
-
+            # todo: 默认反报送
             return function(**function_args)
         except KeyError as ex:
             raise JsonCommandInitError(
@@ -1620,8 +1634,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         timeout = 30.0
         elapsed = 0.0
         while not future.done() and elapsed < timeout:
-            time.sleep(0.05)
-            elapsed += 0.05
+            time.sleep(0.02)
+            elapsed += 0.02
 
         if not future.done():
             raise Exception(f"资源查询超时: {uuids_list}")

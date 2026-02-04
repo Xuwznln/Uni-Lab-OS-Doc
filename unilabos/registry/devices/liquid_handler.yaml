@@ -638,7 +638,7 @@ liquid_handler:
         placeholder_keys: {}
         result: {}
         schema:
-          description: 吸头迭代函数。用于自动管理和切换吸头架中的吸头，实现批量实验中的吸头自动分配和追踪。该函数监控吸头使用状态，自动切换到下一个可用吸头位置，确保实验流程的连续性。适用于高通量实验、批量处理、自动化流水线等需要大量吸头管理的应用场景。
+          description: 吸头迭代函数。用于自动管理和切换枪头盒中的吸头，实现批量实验中的吸头自动分配和追踪。该函数监控吸头使用状态，自动切换到下一个可用吸头位置，确保实验流程的连续性。适用于高通量实验、批量处理、自动化流水线等需要大量吸头管理的应用场景。
           properties:
             feedback: {}
             goal:
@@ -712,6 +712,43 @@ liquid_handler:
           title: set_group参数
           type: object
         type: UniLabJsonCommand
+      auto-set_liquid_from_plate:
+        feedback: {}
+        goal: {}
+        goal_default:
+          liquid_names: null
+          plate: null
+          volumes: null
+          well_names: null
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: ''
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                liquid_names:
+                  type: string
+                plate:
+                  type: string
+                volumes:
+                  type: string
+                well_names:
+                  type: string
+              required:
+              - plate
+              - well_names
+              - liquid_names
+              - volumes
+              type: object
+            result: {}
+          required:
+          - goal
+          title: set_liquid_from_plate参数
+          type: object
+        type: UniLabJsonCommand
       auto-set_tiprack:
         feedback: {}
         goal: {}
@@ -721,7 +758,7 @@ liquid_handler:
         placeholder_keys: {}
         result: {}
         schema:
-          description: 吸头架设置函数。用于配置和初始化液体处理系统的吸头架信息，包括吸头架位置、类型、容量等参数。该函数建立吸头资源管理系统，为后续的吸头选择和使用提供基础配置。适用于系统初始化、吸头架更换、实验配置等需要吸头资源管理的操作场景。
+          description: 枪头盒设置函数。用于配置和初始化液体处理系统的枪头盒信息，包括枪头盒位置、类型、容量等参数。该函数建立吸头资源管理系统，为后续的吸头选择和使用提供基础配置。适用于系统初始化、枪头盒更换、实验配置等需要吸头资源管理的操作场景。
           properties:
             feedback: {}
             goal:
@@ -4112,13 +4149,24 @@ liquid_handler:
           - data_key: sources
             data_source: handle
             data_type: resource
+            handler_key: targets
+            label: 转移目标
+          - data_key: tip_racks
+            data_source: handle
+            data_type: resource
+            handler_key: tip_rack
+            label: 枪头盒
+          output:
+          - data_key: sources.@flatten
+            data_source: executor
+            data_type: resource
             handler_key: sources_out
             label: sources
           - data_key: targets
             data_source: handle
             data_type: resource
             handler_key: targets_out
-            label: targets
+            label: 移液后目标孔
         placeholder_keys:
           sources: unilabos_resources
           targets: unilabos_resources
@@ -9412,7 +9460,13 @@ liquid_handler.prcxi:
             data_source: handle
             data_type: resource
             handler_key: input_wells
-            label: InputWells
+            label: 待设定液体孔
+          output:
+          - data_key: wells.@flatten
+            data_source: executor
+            data_type: resource
+            handler_key: output_wells
+            label: 已设定液体孔
         placeholder_keys:
           wells: unilabos_resources
         result: {}
@@ -9528,6 +9582,165 @@ liquid_handler.prcxi:
           title: LiquidHandlerSetLiquid
           type: object
         type: LiquidHandlerSetLiquid
+      set_liquid_from_plate:
+        feedback: {}
+        goal: {}
+        goal_default:
+          liquid_names: null
+          plate: null
+          volumes: null
+          well_names: null
+        handles:
+          input:
+          - data_key: plate
+            data_source: handle
+            data_type: resource
+            handler_key: input_plate
+            label: 待设定液体板
+          output:
+          - data_key: plate.@flatten
+            data_source: executor
+            data_type: resource
+            handler_key: output_plate
+            label: 已设定液体板
+          - data_key: wells.@flatten
+            data_source: executor
+            data_type: resource
+            handler_key: output_wells
+            label: 已设定液体孔
+          - data_key: volumes
+            data_source: executor
+            data_type: number_array
+            handler_key: output_volumes
+            label: 各孔设定体积
+        placeholder_keys:
+          plate: unilabos_resources
+        result: {}
+        schema:
+          description: ''
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                liquid_names:
+                  items:
+                    type: string
+                  type: array
+                plate:
+                  items:
+                    properties:
+                      category:
+                        type: string
+                      children:
+                        items:
+                          type: string
+                        type: array
+                      config:
+                        type: string
+                      data:
+                        type: string
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      parent:
+                        type: string
+                      pose:
+                        properties:
+                          orientation:
+                            properties:
+                              w:
+                                type: number
+                              x:
+                                type: number
+                              y:
+                                type: number
+                              z:
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            type: object
+                          position:
+                            properties:
+                              x:
+                                type: number
+                              y:
+                                type: number
+                              z:
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            type: object
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        type: object
+                      sample_id:
+                        type: string
+                      type:
+                        type: string
+                    required:
+                    - id
+                    - name
+                    - sample_id
+                    - children
+                    - parent
+                    - type
+                    - category
+                    - pose
+                    - config
+                    - data
+                    title: plate
+                    type: object
+                  title: plate
+                  type: array
+                volumes:
+                  items:
+                    type: number
+                  type: array
+                well_names:
+                  items:
+                    type: string
+                  type: array
+              required:
+              - plate
+              - well_names
+              - liquid_names
+              - volumes
+              type: object
+            result:
+              properties:
+                plate:
+                  items: {}
+                  title: Plate
+                  type: array
+                volumes:
+                  items: {}
+                  title: Volumes
+                  type: array
+                wells:
+                  items: {}
+                  title: Wells
+                  type: array
+              required:
+              - plate
+              - wells
+              - volumes
+              title: SetLiquidFromPlateReturn
+              type: object
+          required:
+          - goal
+          title: set_liquid_from_plate参数
+          type: object
+        type: UniLabJsonCommand
       set_tiprack:
         feedback: {}
         goal:
@@ -9898,7 +10111,7 @@ liquid_handler.prcxi:
             data_source: handle
             data_type: resource
             handler_key: targets_out
-            label: targets
+            label: 移液后目标孔
         placeholder_keys:
           sources: unilabos_resources
           targets: unilabos_resources

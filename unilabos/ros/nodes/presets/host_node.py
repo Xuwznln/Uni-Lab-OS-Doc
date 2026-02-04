@@ -794,7 +794,7 @@ class HostNode(BaseROS2DeviceNode):
         assign_sample_id(action_kwargs)
         goal_msg = convert_to_ros_msg(action_client._action_type.Goal(), action_kwargs)
 
-        self.lab_logger().info(f"[Host Node] Sending goal for {action_id}: {str(goal_msg)[:1000]}")
+        # self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {str(goal_msg)[:1000]}")
         self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {action_kwargs}")
         self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {goal_msg}")
         action_client.wait_for_server()
@@ -1162,7 +1162,7 @@ class HostNode(BaseROS2DeviceNode):
         """
         更新节点信息回调
         """
-        # self.lab_logger().info(f"[Host Node] Node info update request received: {request}")
+        self.lab_logger().trace(f"[Host Node] Node info update request received: {request}")
         try:
             from unilabos.app.communication import get_communication_client
             from unilabos.app.web.client import HTTPClient, http_client
