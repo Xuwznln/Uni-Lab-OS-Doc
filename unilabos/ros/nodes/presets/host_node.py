@@ -1,16 +1,17 @@
 import collections
-from dataclasses import dataclass, field
 import json
 import threading
 import time
 import traceback
 import uuid
-from typing import TYPE_CHECKING, Optional, Dict, Any, List, ClassVar, Set, TypedDict, Union
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Optional, Dict, Any, List, ClassVar, Set, Union
 
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import Point
 from rclpy.action import ActionClient, get_action_server_names_and_types_by_node
 from rclpy.service import Service
+from typing_extensions import TypedDict
 from unilabos_msgs.msg import Resource  # type: ignore
 from unilabos_msgs.srv import (
     ResourceAdd,
@@ -22,10 +23,20 @@ from unilabos_msgs.srv import (
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
 from unique_identifier_msgs.msg import UUID
 
+from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.registry.registry import lab_registry
 from unilabos.resources.container import RegularContainer
 from unilabos.resources.graphio import initialize_resource
 from unilabos.resources.registry import add_schema
+from unilabos.resources.resource_tracker import (
+    ResourceDict,
+    ResourceDictInstance,
+    ResourceTreeSet,
+    ResourceTreeInstance,
+    RETURN_UNILABOS_SAMPLES,
+    JSON_UNILABOS_PARAM,
+    PARAM_SAMPLE_UUIDS,
+)
 from unilabos.ros.initialize_device import initialize_device_from_dict
 from unilabos.ros.msgs.message_converter import (
     get_msg_type,
@@ -36,17 +47,10 @@ from unilabos.ros.msgs.message_converter import (
 )
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode, ROS2DeviceNode, DeviceNodeResourceTracker
 from unilabos.ros.nodes.presets.controller_node import ControllerNode
-from unilabos.resources.resource_tracker import (
-    ResourceDict,
-    ResourceDictInstance,
-    ResourceTreeSet,
-    ResourceTreeInstance,
-)
 from unilabos.utils import logger
 from unilabos.utils.exception import DeviceClassInvalid
 from unilabos.utils.log import warning
 from unilabos.utils.type_check import serialize_result_info
-from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 
 if TYPE_CHECKING:
     from unilabos.app.ws_client import QueueItem
@@ -60,6 +64,18 @@ class DeviceActionStatus:
 class TestResourceReturn(TypedDict):
     resources: List[List[ResourceDict]]
     devices: List[DeviceSlot]
+
+
+class TestLatencyReturn(TypedDict):
+    """test_latency方法的返回值类型"""
+
+    avg_rtt_ms: float
+    avg_time_diff_ms: float
+    max_time_error_ms: float
+    task_delay_ms: float
+    raw_delay_ms: float
+    test_count: int
+    status: str
 
 
 class HostNode(BaseROS2DeviceNode):
@@ -735,13 +751,14 @@ class HostNode(BaseROS2DeviceNode):
                         if bCreate:
                             self.lab_logger().trace(f"Status created: {device_id}.{property_name} = {msg.data}")
                         else:
-                            self.lab_logger().debug(f"Status updated: {device_id}.{property_name} = {msg.data}")
+                            self.lab_logger().trace(f"Status updated: {device_id}.{property_name} = {msg.data}")
 
     def send_goal(
         self,
         item: "QueueItem",
         action_type: str,
         action_kwargs: Dict[str, Any],
+        sample_material: Dict[str, str],
         server_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
@@ -759,14 +776,14 @@ class HostNode(BaseROS2DeviceNode):
             if action_name.startswith("auto-"):
                 action_name = action_name[5:]
             action_id = f"/devices/{device_id}/_execute_driver_command"
-            action_kwargs = {
-                "string": json.dumps(
-                    {
-                        "function_name": action_name,
-                        "function_args": action_kwargs,
-                    }
-                )
+            json_command: Dict[str, Any] = {
+                "function_name": action_name,
+                "function_args": action_kwargs,
+                JSON_UNILABOS_PARAM: {
+                    PARAM_SAMPLE_UUIDS: sample_material,
+                },
             }
+            action_kwargs = {"string": json.dumps(json_command)}
             if action_type.startswith("UniLabJsonCommandAsync"):
                 action_id = f"/devices/{device_id}/_execute_driver_command_async"
         else:
@@ -777,21 +794,6 @@ class HostNode(BaseROS2DeviceNode):
             raise ValueError(f"ActionClient {action_id} not found.")
 
         action_client: ActionClient = self._action_clients[action_id]
-
-        # 遍历action_kwargs下的所有子dict，将"sample_uuid"的值赋给"sample_id"
-        def assign_sample_id(obj):
-            if isinstance(obj, dict):
-                if "sample_uuid" in obj:
-                    obj["sample_id"] = obj["sample_uuid"]
-                    obj.pop("sample_uuid")
-                for k, v in obj.items():
-                    if k != "unilabos_extra":
-                        assign_sample_id(v)
-            elif isinstance(obj, list):
-                for item in obj:
-                    assign_sample_id(item)
-
-        assign_sample_id(action_kwargs)
         goal_msg = convert_to_ros_msg(action_client._action_type.Goal(), action_kwargs)
 
         # self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {str(goal_msg)[:1000]}")
@@ -854,9 +856,14 @@ class HostNode(BaseROS2DeviceNode):
                         # 适配后端的一些额外处理
                         return_value = return_info.get("return_value")
                         if isinstance(return_value, dict):
-                            unilabos_samples = return_info.get("unilabos_samples")
-                            if isinstance(unilabos_samples, list):
-                                return_info["unilabos_samples"] = unilabos_samples
+                            unilabos_samples = return_value.pop(RETURN_UNILABOS_SAMPLES, None)
+                            if isinstance(unilabos_samples, list) and unilabos_samples:
+                                self.lab_logger().info(
+                                    f"[Host Node] Job {job_id[:8]} returned {len(unilabos_samples)} sample(s): "
+                                    f"{[s.get('name', s.get('id', 'unknown')) if isinstance(s, dict) else str(s)[:20] for s in unilabos_samples[:5]]}"
+                                    f"{'...' if len(unilabos_samples) > 5 else ''}"
+                                )
+                                return_info["samples"] = unilabos_samples
                         suc = return_info.get("suc", False)
                         if not suc:
                             status = "failed"
@@ -882,7 +889,7 @@ class HostNode(BaseROS2DeviceNode):
             # 清理 _goals 中的记录
             if job_id in self._goals:
                 del self._goals[job_id]
-                self.lab_logger().debug(f"[Host Node] Removed goal {job_id[:8]} from _goals")
+                self.lab_logger().trace(f"[Host Node] Removed goal {job_id[:8]} from _goals")
 
             # 存储结果供 HTTP API 查询
             try:
@@ -1327,10 +1334,20 @@ class HostNode(BaseROS2DeviceNode):
         self.lab_logger().debug(f"[Host Node-Resource] List parameters: {request}")
         return response
 
-    def test_latency(self):
+    def test_latency(self) -> TestLatencyReturn:
         """
         测试网络延迟的action实现
         通过5次ping-pong机制校对时间误差并计算实际延迟
+
+        Returns:
+            TestLatencyReturn: 包含延迟测试结果的字典，包括：
+                - avg_rtt_ms: 平均往返时间（毫秒）
+                - avg_time_diff_ms: 平均时间差（毫秒）
+                - max_time_error_ms: 最大时间误差（毫秒）
+                - task_delay_ms: 实际任务延迟（毫秒），-1表示无法计算
+                - raw_delay_ms: 原始时间差（毫秒），-1表示无法计算
+                - test_count: 有效测试次数
+                - status: 测试状态，"success"表示成功，"all_timeout"表示全部超时
         """
         import uuid as uuid_module
 
@@ -1393,7 +1410,15 @@ class HostNode(BaseROS2DeviceNode):
 
         if not ping_results:
             self.lab_logger().error("❌ 所有ping-pong测试都失败了")
-            return {"status": "all_timeout"}
+            return {
+                "avg_rtt_ms": -1.0,
+                "avg_time_diff_ms": -1.0,
+                "max_time_error_ms": -1.0,
+                "task_delay_ms": -1.0,
+                "raw_delay_ms": -1.0,
+                "test_count": 0,
+                "status": "all_timeout",
+            }
 
         # 统计分析
         rtts = [r["rtt_ms"] for r in ping_results]
@@ -1401,7 +1426,7 @@ class HostNode(BaseROS2DeviceNode):
 
         avg_rtt_ms = sum(rtts) / len(rtts)
         avg_time_diff_ms = sum(time_diffs) / len(time_diffs)
-        max_time_diff_error_ms = max(abs(min(time_diffs)), abs(max(time_diffs)))
+        max_time_diff_error_ms: float = max(abs(min(time_diffs)), abs(max(time_diffs)))
 
         self.lab_logger().info("-" * 50)
         self.lab_logger().info("[测试统计]")
@@ -1441,7 +1466,7 @@ class HostNode(BaseROS2DeviceNode):
 
         self.lab_logger().info("=" * 60)
 
-        return {
+        res: TestLatencyReturn = {
             "avg_rtt_ms": avg_rtt_ms,
             "avg_time_diff_ms": avg_time_diff_ms,
             "max_time_error_ms": max_time_diff_error_ms,
@@ -1452,9 +1477,14 @@ class HostNode(BaseROS2DeviceNode):
             "test_count": len(ping_results),
             "status": "success",
         }
+        return res
 
     def test_resource(
-        self, resource: ResourceSlot = None, resources: List[ResourceSlot] = None, device: DeviceSlot = None, devices: List[DeviceSlot] = None
+        self,
+        resource: ResourceSlot = None,
+        resources: List[ResourceSlot] = None,
+        device: DeviceSlot = None,
+        devices: List[DeviceSlot] = None,
     ) -> TestResourceReturn:
         if resources is None:
             resources = []
@@ -1515,7 +1545,9 @@ class HostNode(BaseROS2DeviceNode):
 
             # 构建服务地址
             srv_address = f"/srv{namespace}/s2c_resource_tree"
-            self.lab_logger().trace(f"[Host Node-Resource] Host -> {device_id} ResourceTree {action} operation started -------")
+            self.lab_logger().trace(
+                f"[Host Node-Resource] Host -> {device_id} ResourceTree {action} operation started -------"
+            )
 
             # 创建服务客户端
             sclient = self.create_client(SerialCommand, srv_address)
@@ -1550,7 +1582,9 @@ class HostNode(BaseROS2DeviceNode):
                 time.sleep(0.05)
 
             response = future.result()
-            self.lab_logger().trace(f"[Host Node-Resource] Host -> {device_id} ResourceTree {action} operation completed -------")
+            self.lab_logger().trace(
+                f"[Host Node-Resource] Host -> {device_id} ResourceTree {action} operation completed -------"
+            )
             return True
 
         except Exception as e:

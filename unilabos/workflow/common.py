@@ -60,7 +60,11 @@
 ==================== 连接关系图 ====================
 
 控制流 (ready 端口串联):
-    create_resource_1 -> create_resource_2 -> ... -> set_liquid_1 -> set_liquid_2 -> ... -> transfer_liquid_1 -> transfer_liquid_2 -> ...
+    - create_resource 之间: 无 ready 连接
+    - set_liquid_from_plate 之间: 无 ready 连接
+    - create_resource 与 set_liquid_from_plate 之间: 无 ready 连接
+    - transfer_liquid 之间: 通过 ready 端口串联
+        transfer_liquid_1 -> transfer_liquid_2 -> transfer_liquid_3 -> ...
 
 物料流:
     [create_resource] --labware--> [set_liquid_from_plate] --output_wells--> [transfer_liquid] --sources_out/targets_out--> [下一个 transfer_liquid]
@@ -402,7 +406,6 @@ def build_protocol_graph(
 
     # 为每个唯一的 slot 创建 create_resource 节点
     res_index = 0
-    last_create_resource_id = None
     for slot, info in slots_info.items():
         node_id = str(uuid.uuid4())
         res_id = info["res_id"]
@@ -431,10 +434,7 @@ def build_protocol_graph(
         )
         slot_to_create_resource[slot] = node_id
 
-        # create_resource 之间通过 ready 串联
-        if last_create_resource_id is not None:
-            G.add_edge(last_create_resource_id, node_id, source_port="ready", target_port="ready")
-        last_create_resource_id = node_id
+        # create_resource 之间不需要 ready 连接
 
     # ==================== 第二步：为每个 reagent 创建 set_liquid_from_plate 节点 ====================
     # 创建 Group 节点，包含所有 set_liquid_from_plate 节点
@@ -453,7 +453,6 @@ def build_protocol_graph(
     )
 
     set_liquid_index = 0
-    last_set_liquid_id = last_create_resource_id  # set_liquid_from_plate 连接在 create_resource 之后
 
     for labware_id, item in labware_info.items():
         # 跳过 Tip/Rack 类型
@@ -494,10 +493,7 @@ def build_protocol_graph(
             },
         )
 
-        # ready 连接：上一个节点 -> set_liquid_from_plate
-        if last_set_liquid_id is not None:
-            G.add_edge(last_set_liquid_id, node_id, source_port="ready", target_port="ready")
-        last_set_liquid_id = node_id
+        # set_liquid_from_plate 之间不需要 ready 连接
 
         # 物料流：create_resource 的 labware -> set_liquid_from_plate 的 input_plate
         create_res_node_id = slot_to_create_resource.get(slot)
@@ -507,7 +503,8 @@ def build_protocol_graph(
         # set_liquid_from_plate 的输出 output_wells 用于连接 transfer_liquid
         resource_last_writer[labware_id] = f"{node_id}:output_wells"
 
-    last_control_node_id = last_set_liquid_id
+    # transfer_liquid 之间通过 ready 串联，从 None 开始
+    last_control_node_id = None
 
     # 端口名称映射：JSON 字段名 -> 实际 handle key
     INPUT_PORT_MAPPING = {

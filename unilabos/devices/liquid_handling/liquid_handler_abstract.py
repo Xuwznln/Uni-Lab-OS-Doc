@@ -27,7 +27,12 @@ from typing_extensions import TypedDict
 
 from unilabos.devices.liquid_handling.rviz_backend import UniLiquidHandlerRvizBackend
 from unilabos.registry.placeholder_type import ResourceSlot
-from unilabos.resources.resource_tracker import ResourceTreeSet, ResourceDict
+from unilabos.resources.resource_tracker import (
+    ResourceTreeSet,
+    ResourceDict,
+    EXTRA_SAMPLE_UUID,
+    EXTRA_UNILABOS_SAMPLE_UUID,
+)
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode, ROS2DeviceNode
 
 
@@ -241,7 +246,7 @@ class LiquidHandlerMiddleware(LiquidHandler):
             res_samples.append({"name": resource.name, "sample_uuid": resource.unilabos_extra.get("sample_uuid", None)})
             res_volumes.append(volume)
             self.pending_liquids_dict[channel] = {
-                "sample_uuid": resource.unilabos_extra.get("sample_uuid", None),
+                EXTRA_SAMPLE_UUID: sample_uuid_value,
                 "volume": volume,
             }
         return SimpleReturn(samples=res_samples, volumes=res_volumes)
@@ -283,10 +288,10 @@ class LiquidHandlerMiddleware(LiquidHandler):
         res_samples = []
         res_volumes = []
         for resource, volume, channel in zip(resources, vols, use_channels):
-            res_uuid = self.pending_liquids_dict[channel]["sample_uuid"]
+            res_uuid = self.pending_liquids_dict[channel][EXTRA_SAMPLE_UUID]
             self.pending_liquids_dict[channel]["volume"] -= volume
-            resource.unilabos_extra["sample_uuid"] = res_uuid
-            res_samples.append({"name": resource.name, "sample_uuid": res_uuid})
+            resource.unilabos_extra[EXTRA_SAMPLE_UUID] = res_uuid
+            res_samples.append({"name": resource.name, EXTRA_SAMPLE_UUID: res_uuid})
             res_volumes.append(volume)
 
         return SimpleReturn(samples=res_samples, volumes=res_volumes)
@@ -691,16 +696,14 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         )
 
     def set_liquid_from_plate(
-        self, plate: List[ResourceSlot], well_names: list[str], liquid_names: list[str], volumes: list[float]
+        self, plate: ResourceSlot, well_names: list[str], liquid_names: list[str], volumes: list[float]
     ) -> SetLiquidFromPlateReturn:
         """Set the liquid in wells of a plate by well names (e.g., A1, A2, B3).
 
         如果 liquid_names 和 volumes 为空，但 plate 和 well_names 不为空，直接返回 plate 和 wells。
         """
-        if isinstance(plate, list):  # 未来移除
-            plate = plate[0]
         assert issubclass(plate.__class__, Plate), "plate must be a Plate"
-        plate: Plate = cast(Plate, plate)
+        plate: Plate = cast(Plate, cast(Resource, plate))
         # 根据 well_names 获取对应的 Well 对象
         wells = [plate.get_well(name) for name in well_names]
         res_volumes = []
