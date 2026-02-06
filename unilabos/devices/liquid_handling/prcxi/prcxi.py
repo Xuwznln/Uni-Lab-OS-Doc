@@ -45,6 +45,7 @@ from pylabrobot.resources import (
     Trash,
     PlateAdapter,
     TubeRack,
+    create_homogeneous_resources,
 )
 
 from unilabos.devices.liquid_handling.liquid_handler_abstract import (
@@ -55,7 +56,8 @@ from unilabos.devices.liquid_handling.liquid_handler_abstract import (
     TransferLiquidReturn,
 )
 from unilabos.registry.placeholder_type import ResourceSlot
-from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
+from unilabos.resources.itemized_carrier import ItemizedCarrier
+from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode, ROS2DeviceNode
 
 
 class PRCXIError(RuntimeError):
@@ -925,7 +927,10 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         delays: Optional[List[int]] = None,
         none_keys: List[str] = [],
     ) -> TransferLiquidReturn:
-        return await super().transfer_liquid(
+        if self.step_mode:
+            self._unilabos_backend.create_protocol(f"step_mode_protocol_{time.time()}")
+                
+            res =await super().transfer_liquid(
             sources,
             targets,
             tip_racks,
@@ -947,7 +952,33 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             mix_liquid_height=mix_liquid_height,
             delays=delays,
             none_keys=none_keys,
-        )
+            )   
+            self._unilabos_backend.run_protocol()
+            return res
+        else:
+            return await super().transfer_liquid(
+                sources,
+                targets,
+                tip_racks,
+                use_channels=use_channels,
+                asp_vols=asp_vols,
+                dis_vols=dis_vols,
+                asp_flow_rates=asp_flow_rates,
+                dis_flow_rates=dis_flow_rates,
+                offsets=offsets,
+                touch_tip=touch_tip,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                spread=spread,
+                is_96_well=is_96_well,
+                mix_stage=mix_stage,
+                mix_times=mix_times,
+                mix_vol=mix_vol,
+                mix_rate=mix_rate,
+                mix_liquid_height=mix_liquid_height,
+                delays=delays,
+                none_keys=none_keys,
+                )   
 
     async def custom_delay(self, seconds=0, msg=None):
         return await super().custom_delay(seconds, msg)

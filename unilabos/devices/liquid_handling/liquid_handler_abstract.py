@@ -1315,7 +1315,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         if len(sources) != len(targets):
             raise ValueError(f"Length of `sources` {len(sources)} must match `targets` {len(targets)}.")
 
-        if len(use_channels) == 1:
+        if len(use_channels) != 1:
             for _ in range(len(targets)):
                 tip = []
                 for ___ in range(len(use_channels)):

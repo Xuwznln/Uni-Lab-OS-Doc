@@ -22,11 +22,12 @@
         "host": "10.20.30.184",
         "port": 9999,
         "debug": false,
-        "setup": false,
+        "setup": true,
         "is_9320": true,
         "timeout": 10,
         "matrix_id": "5de524d0-3f95-406c-86dd-f83626ebc7cb",
         "simulator": false,
+        "step_mode": false,
         "channel_num": 2
       },
       "data": {
