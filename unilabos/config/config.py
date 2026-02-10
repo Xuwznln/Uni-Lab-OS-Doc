@@ -144,5 +144,5 @@ def load_config(config_path=None):
             traceback.print_exc()
             exit(1)
     else:
-        config_path = os.path.join(os.path.dirname(__file__), "local_config.py")
+        config_path = os.path.join(os.path.dirname(__file__), "example_config.py")
         load_config(config_path)

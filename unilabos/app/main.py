@@ -288,7 +288,9 @@ def main():
 
     if hasattr(BasicConfig, "log_level"):
         logger.info(f"Log level set to '{BasicConfig.log_level}' from config file.")
-    configure_logger(loglevel=BasicConfig.log_level, working_dir=working_dir)
+    file_path = configure_logger(loglevel=BasicConfig.log_level, working_dir=working_dir)
+    if file_path is not None:
+        logger.info(f"[LOG_FILE] {file_path}")
 
     if args.addr != parser.get_default("addr"):
         if args.addr == "test":
