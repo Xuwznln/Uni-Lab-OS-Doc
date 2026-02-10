@@ -5,6 +5,7 @@ import sys
 import inspect
 import importlib
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Union, Tuple
@@ -944,6 +945,7 @@ class Registry:
                     if is_valid:
                         results.append((file, data, device_ids))
                 except Exception as e:
+                    traceback.print_exc()
                     logger.warning(f"[UniLab Registry] 处理设备文件异常: {file}, 错误: {e}")
 
         # 线程安全地更新注册表

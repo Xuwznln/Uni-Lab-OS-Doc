@@ -1,16 +1,20 @@
 """
 JSON 工作流转换模块
 
-将 workflow/reagent 格式的 JSON 转换为统一工作流格式。
+将 workflow/reagent/labware 格式的 JSON 转换为统一工作流格式。
 
 输入格式:
 {
+    "labware": [
+        {"name": "...", "slot": "1", "type": "lab_xxx"},
+        ...
+    ],
     "workflow": [
         {"action": "...", "action_args": {...}},
         ...
     ],
     "reagent": {
-        "reagent_name": {"slot": int, "well": [...], "labware": "..."},
+        "reagent_name": {"slot": int, "well": [...]},
         ...
     }
 }
@@ -245,18 +249,18 @@ def convert_from_json(
     if "workflow" not in json_data or "reagent" not in json_data:
         raise ValueError(
             "不支持的 JSON 格式。请使用标准格式:\n"
-            '{"workflow": [{"action": "...", "action_args": {...}}, ...], '
-            '"reagent": {"name": {"slot": int, "well": [...], "labware": "..."}, ...}}'
+            '{"labware": [...], "workflow": [...], "reagent": {...}}'
         )
 
     # 提取数据
     workflow = json_data["workflow"]
     reagent = json_data["reagent"]
+    labware_defs = json_data.get("labware", [])  # 新的 labware 定义列表
 
     # 规范化步骤数据
     protocol_steps = normalize_workflow_steps(workflow)
 
-    # reagent 已经是字典格式，直接使用
+    # reagent 已经是字典格式，用于 set_liquid 和 well 数量查找
     labware_info = reagent
 
     # 构建工作流图
@@ -265,6 +269,7 @@ def convert_from_json(
         protocol_steps=protocol_steps,
         workstation_name=workstation_name,
         action_resource_mapping=ACTION_RESOURCE_MAPPING,
+        labware_defs=labware_defs,
     )
 
     # 校验句柄配置
