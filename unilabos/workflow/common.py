@@ -424,7 +424,7 @@ def build_protocol_graph(
                 "res_id": res_id,
                 "device_id": CREATE_RESOURCE_DEFAULTS["device_id"],
                 "class_name": lw_type,
-                "parent": CREATE_RESOURCE_DEFAULTS["parent_template"],
+                "parent": CREATE_RESOURCE_DEFAULTS["parent_template"].format(slot=slot),
                 "bind_locations": {"x": 0.0, "y": 0.0, "z": 0.0},
                 "slot_on_deck": slot,
             },
