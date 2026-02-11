@@ -1184,6 +1184,11 @@ class QueueProcessor:
         logger.debug(f"[QueueProcessor] Sending busy status for {len(queued_jobs)} queued jobs")
 
         for job_info in queued_jobs:
+            # 快照可能已过期：在遍历过程中 end_job() 可能已将此 job 移至 READY，
+            # 此时不应再发送 busy/need_more，否则会覆盖已发出的 free=True 通知
+            if job_info.status != JobStatus.QUEUE:
+                continue
+
             message = {
                 "action": "report_action_state",
                 "data": {
