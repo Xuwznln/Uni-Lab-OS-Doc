@@ -22,6 +22,8 @@ class BasicConfig:
     startup_json_path = None  # 填写绝对路径
     disable_browser = False  # 禁止浏览器自动打开
     port = 8002  # 本地HTTP服务
+    check_mode = False  # CI 检查模式，用于验证 registry 导入和文件一致性
+    test_mode = False  # 测试模式，所有动作不实际执行，返回模拟结果
     # 'TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
     log_level: Literal["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
 
