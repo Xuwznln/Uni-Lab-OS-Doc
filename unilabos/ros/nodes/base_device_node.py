@@ -460,7 +460,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             }
             res.response = json.dumps(final_response)
             # 如果driver自己就有assign的方法，那就使用driver自己的assign方法
-            if hasattr(self.driver_instance, "create_resource"):
+            if hasattr(self.driver_instance, "create_resource") and self.node_name != "host_node":
                 create_resource_func = getattr(self.driver_instance, "create_resource")
                 try:
                     ret = create_resource_func(

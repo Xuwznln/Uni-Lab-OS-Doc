@@ -91,7 +91,7 @@ class PRCXI9300Deck(Deck):
     """
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float, **kwargs):
-        super().__init__(name, size_x, size_y, size_z)
+        super().__init__(size_x, size_y, size_z, name)
         self.slots = [None] * 16  # PRCXI 9300/9320 最大有 16 个槽位
         self.slot_locations = [Coordinate(0, 0, 0)] * 16
 
@@ -248,14 +248,15 @@ class PRCXI9300TipRack(TipRack):
         if ordered_items is not None:
             items = ordered_items
         elif ordering is not None:
-            # 检查 ordering 中的值是否是字符串（从 JSON 反序列化时的情况）
-            # 如果是字符串，说明这是位置名称，需要让 TipRack 自己创建 Tip 对象
-            # 我们只传递位置信息（键），不传递值，使用 ordering 参数
-            if ordering and isinstance(next(iter(ordering.values()), None), str):
-                # ordering 的值是字符串，只使用键（位置信息）创建新的 OrderedDict
+            # 检查 ordering 中的值类型来决定如何处理：
+            # - 字符串值（从 JSON 反序列化）: 只用键创建 ordering_param
+            # - None 值（从第二次往返序列化）: 同样只用键创建 ordering_param
+            # - 对象值（已经是实际的 Resource 对象）: 直接作为 ordered_items 使用
+            first_val = next(iter(ordering.values()), None) if ordering else None
+            if not ordering or first_val is None or isinstance(first_val, str):
+                # ordering 的值是字符串或 None，只使用键（位置信息）创建新的 OrderedDict
                 # 传递 ordering 参数而不是 ordered_items，让 TipRack 自己创建 Tip 对象
                 items = None
-                # 使用 ordering 参数，只包含位置信息（键）
                 ordering_param = collections.OrderedDict((k, None) for k in ordering.keys())
             else:
                 # ordering 的值已经是对象，可以直接使用
@@ -397,14 +398,15 @@ class PRCXI9300TubeRack(TubeRack):
             items_to_pass = ordered_items
             ordering_param = None
         elif ordering is not None:
-            # 检查 ordering 中的值是否是字符串（从 JSON 反序列化时的情况）
-            # 如果是字符串，说明这是位置名称，需要让 TubeRack 自己创建 Tube 对象
-            # 我们只传递位置信息（键），不传递值，使用 ordering 参数
-            if ordering and isinstance(next(iter(ordering.values()), None), str):
-                # ordering 的值是字符串，只使用键（位置信息）创建新的 OrderedDict
+            # 检查 ordering 中的值类型来决定如何处理：
+            # - 字符串值（从 JSON 反序列化）: 只用键创建 ordering_param
+            # - None 值（从第二次往返序列化）: 同样只用键创建 ordering_param
+            # - 对象值（已经是实际的 Resource 对象）: 直接作为 ordered_items 使用
+            first_val = next(iter(ordering.values()), None) if ordering else None
+            if not ordering or first_val is None or isinstance(first_val, str):
+                # ordering 的值是字符串或 None，只使用键（位置信息）创建新的 OrderedDict
                 # 传递 ordering 参数而不是 ordered_items，让 TubeRack 自己创建 Tube 对象
                 items_to_pass = None
-                # 使用 ordering 参数，只包含位置信息（键）
                 ordering_param = collections.OrderedDict((k, None) for k in ordering.keys())
             else:
                 # ordering 的值已经是对象，可以直接使用
