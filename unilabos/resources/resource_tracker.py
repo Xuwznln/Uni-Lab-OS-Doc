@@ -38,10 +38,22 @@ class LabSample(TypedDict):
     extra: Dict[str, Any]
 
 
+class ResourceDictPositionSizeType(TypedDict):
+    depth: float
+    width: float
+    height: float
+
+
 class ResourceDictPositionSize(BaseModel):
     depth: float = Field(description="Depth", default=0.0)  # z
     width: float = Field(description="Width", default=0.0)  # x
     height: float = Field(description="Height", default=0.0)  # y
+
+
+class ResourceDictPositionScaleType(TypedDict):
+    x: float
+    y: float
+    z: float
 
 
 class ResourceDictPositionScale(BaseModel):
@@ -50,10 +62,26 @@ class ResourceDictPositionScale(BaseModel):
     z: float = Field(description="z scale", default=0.0)
 
 
+class ResourceDictPositionObjectType(TypedDict):
+    x: float
+    y: float
+    z: float
+
+
 class ResourceDictPositionObject(BaseModel):
     x: float = Field(description="X coordinate", default=0.0)
     y: float = Field(description="Y coordinate", default=0.0)
     z: float = Field(description="Z coordinate", default=0.0)
+
+
+class ResourceDictPositionType(TypedDict):
+    size: ResourceDictPositionSizeType
+    scale: ResourceDictPositionScaleType
+    layout: Literal["2d", "x-y", "z-y", "x-z"]
+    position: ResourceDictPositionObjectType
+    position3d: ResourceDictPositionObjectType
+    rotation: ResourceDictPositionObjectType
+    cross_section_type: Literal["rectangle", "circle", "rounded_rectangle"]
 
 
 class ResourceDictPosition(BaseModel):
@@ -72,6 +100,24 @@ class ResourceDictPosition(BaseModel):
     cross_section_type: Literal["rectangle", "circle", "rounded_rectangle"] = Field(
         description="Cross section type", default="rectangle"
     )
+
+
+class ResourceDictType(TypedDict):
+    id: str
+    uuid: str
+    name: str
+    description: str
+    resource_schema: Dict[str, Any]
+    model: Dict[str, Any]
+    icon: str
+    parent_uuid: Optional[str]
+    parent: Optional["ResourceDictType"]
+    type: Union[Literal["device"], str]
+    klass: str
+    pose: ResourceDictPositionType
+    config: Dict[str, Any]
+    data: Dict[str, Any]
+    extra: Dict[str, Any]
 
 
 # 统一的资源字典模型，parent 自动序列化为 parent_uuid，children 不序列化

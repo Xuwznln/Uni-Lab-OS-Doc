@@ -89,6 +89,14 @@ class Registry:
         )
         test_latency_schema["description"] = "用于测试延迟的动作，返回延迟时间和时间差。"
 
+        test_resource_method_info = host_node_enhanced_info.get("action_methods", {}).get("test_resource", {})
+        test_resource_schema = self._generate_unilab_json_command_schema(
+            test_resource_method_info.get("args", []),
+            "test_resource",
+            test_resource_method_info.get("return_annotation"),
+        )
+        test_resource_schema["description"] = "用于测试物料、设备和样本。"
+
         self.device_type_registry.update(
             {
                 "host_node": {
@@ -190,32 +198,7 @@ class Registry:
                                 "goal": {},
                                 "feedback": {},
                                 "result": {},
-                                "schema": {
-                                    "description": "",
-                                    "properties": {
-                                        "feedback": {},
-                                        "goal": {
-                                            "properties": {
-                                                "resource": ros_message_to_json_schema(Resource, "resource"),
-                                                "resources": {
-                                                    "items": {
-                                                        "properties": ros_message_to_json_schema(
-                                                            Resource, "resources"
-                                                        ),
-                                                        "type": "object",
-                                                    },
-                                                    "type": "array",
-                                                },
-                                                "device": {"type": "string"},
-                                                "devices": {"items": {"type": "string"}, "type": "array"},
-                                            },
-                                            "type": "object",
-                                        },
-                                        "result": {},
-                                    },
-                                    "title": "test_resource",
-                                    "type": "object",
-                                },
+                                "schema": test_resource_schema,
                                 "placeholder_keys": {
                                     "device": "unilabos_devices",
                                     "devices": "unilabos_devices",
