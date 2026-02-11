@@ -21,7 +21,7 @@ from pylabrobot.resources import (
     ResourceHolder,
     Lid,
     Trash,
-    Tip,
+    Tip, TubeRack,
 )
 from typing_extensions import TypedDict
 
@@ -696,10 +696,13 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
         如果 liquid_names 和 volumes 为空，但 plate 和 well_names 不为空，直接返回 plate 和 wells。
         """
-        assert issubclass(plate.__class__, Plate), "plate must be a Plate"
-        plate: Plate = cast(Plate, cast(Resource, plate))
+        assert issubclass(plate.__class__, Plate) or issubclass(plate.__class__, TubeRack) , f"plate must be a Plate, now: {type(plate)}"
+        plate: Union[Plate, TubeRack]
         # 根据 well_names 获取对应的 Well 对象
-        wells = [plate.get_well(name) for name in well_names]
+        if issubclass(plate.__class__, Plate):
+            wells = [plate.get_well(name) for name in well_names]
+        elif issubclass(plate.__class__, TubeRack):
+            wells = [plate.get_tube(name) for name in well_names]
         res_volumes = []
 
         # 如果 liquid_names 和 volumes 都为空，直接返回
