@@ -721,7 +721,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         delays: Optional[List[int]] = None,
         none_keys: List[str] = [],
     ) -> TransferLiquidReturn:
-        return await super().transfer_liquid(
+        if self.step_mode:
+            await self.create_protocol(f"transfer_liquid{time.time()}")
+        res =  await super().transfer_liquid(
             sources,
             targets,
             tip_racks,
@@ -744,6 +746,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             delays=delays,
             none_keys=none_keys,
         )
+        if self.step_mode:
+            await self.run_protocol()
+        return res
 
     async def custom_delay(self, seconds=0, msg=None):
         return await super().custom_delay(seconds, msg)
