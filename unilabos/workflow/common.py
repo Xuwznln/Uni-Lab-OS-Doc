@@ -413,17 +413,14 @@ def build_protocol_graph(
     for slot, info in slots_info.items():
         node_id = str(uuid.uuid4())
         res_id = info["res_id"]
-        res_type_name = info["labware"]
-        if "tip" in res_type_name.lower():
-            res_type = "tip_rack"
-        else:
-            res_type = "plate"
+        res_type_name = info["labware"].lower().replace(".", "point")
+        res_type_name = f"lab_{res_type_name}"
         
         G.add_node(
             node_id,
             template_name="create_resource",
             resource_name="host_node",
-            name=f"{res_type} {slot}",
+            name=f"{res_type_name}_slot{slot}",
             description=f"Create plate on slot {slot}",
             lab_node_type="Labware",
             footer="create_resource-host_node",
@@ -434,14 +431,14 @@ def build_protocol_graph(
             param={
                 "res_id": res_id,
                 "device_id": CREATE_RESOURCE_DEFAULTS["device_id"],
-                "class_name": CLASS_NAMES_MAPPING[res_type],
+                "class_name": res_type_name,
                 "parent": CREATE_RESOURCE_DEFAULTS["parent_template"].format(slot=slot),
                 "bind_locations": {"x": 0.0, "y": 0.0, "z": 0.0},
                 "slot_on_deck": slot,
             },
         )
         slot_to_create_resource[slot] = node_id
-        if res_type == "tip_rack":
+        if "tip" in res_type_name and "rack" in res_type_name:
             resource_last_writer[info["labware_id"]] = f"{node_id}:labware"
         # create_resource 之间不需要 ready 连接
 
