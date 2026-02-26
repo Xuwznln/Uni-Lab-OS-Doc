@@ -581,6 +581,71 @@ class ResourceTreeSet(object):
                 d["model"] = res.config.get("model", None)
             return d
 
+        # deserialize 会单独处理的元数据 key，不传给构造函数
+        _META_KEYS = {"type", "parent_name", "location", "children", "rotation", "barcode"}
+        # deserialize 自定义逻辑使用的 key（如 TipSpot 用 prototype_tip 构建 make_tip），需保留
+        _DESERIALIZE_PRESERVED_KEYS = {"prototype_tip"}
+
+        def remove_incompatible_params(plr_d: dict) -> None:
+            """递归移除 PLR 类不接受的参数，避免 deserialize 报错。
+            - 移除构造函数不接受的参数（如 compute_height_from_volume、ordering、category）
+            - 对 TubeRack：将 ordering 转为 ordered_items
+            - 保留 deserialize 自定义逻辑需要的 key（如 prototype_tip）
+            """
+            if "type" in plr_d:
+                sub_cls = find_subclass(plr_d["type"], PLRResource)
+                if sub_cls is not None:
+                    spec = inspect.signature(sub_cls)
+                    valid_params = set(spec.parameters.keys())
+                    # TubeRack 特殊处理：先转换 ordering，再参与后续过滤
+                    if "ordering" not in valid_params and "ordering" in plr_d:
+                        ordering = plr_d.pop("ordering", None)
+                        if sub_cls.__name__ == "TubeRack":
+                            plr_d["ordered_items"] = (
+                                _ordering_to_ordered_items(plr_d, ordering)
+                                if ordering
+                                else {}
+                            )
+                    # 移除构造函数不接受的参数（保留 META 和 deserialize 自定义逻辑需要的 key）
+                    for key in list(plr_d.keys()):
+                        if (
+                            key not in _META_KEYS
+                            and key not in _DESERIALIZE_PRESERVED_KEYS
+                            and key not in valid_params
+                        ):
+                            plr_d.pop(key, None)
+            for child in plr_d.get("children", []):
+                remove_incompatible_params(child)
+
+        def _ordering_to_ordered_items(plr_d: dict, ordering: dict) -> dict:
+            """将 ordering 转为 ordered_items，从 children 构建 Tube 对象"""
+            from pylabrobot.resources import Tube, Coordinate
+            from pylabrobot.serializer import deserialize as plr_deserialize
+
+            children = plr_d.get("children", [])
+            ordered_items = {}
+            for idx, (ident, child_name) in enumerate(ordering.items()):
+                child_data = children[idx] if idx < len(children) else None
+                if child_data is None:
+                    continue
+                loc_data = child_data.get("location")
+                loc = (
+                    plr_deserialize(loc_data)
+                    if loc_data
+                    else Coordinate(0, 0, 0)
+                )
+                tube = Tube(
+                    name=child_data.get("name", child_name or ident),
+                    size_x=child_data.get("size_x", 10),
+                    size_y=child_data.get("size_y", 10),
+                    size_z=child_data.get("size_z", 50),
+                    max_volume=child_data.get("max_volume", 1000),
+                )
+                tube.location = loc
+                ordered_items[ident] = tube
+            plr_d["children"] = []  # 已并入 ordered_items，避免重复反序列化
+            return ordered_items
+
         plr_resources = []
         tracker = DeviceNodeResourceTracker()
 
@@ -600,9 +665,7 @@ class ResourceTreeSet(object):
                     raise ValueError(
                         f"无法找到类型 {plr_dict['type']} 对应的 PLR 资源类。原始信息：{tree.root_node.res_content}"
                     )
-                spec = inspect.signature(sub_cls)
-                if "category" not in spec.parameters:
-                    plr_dict.pop("category", None)
+                remove_incompatible_params(plr_dict)
                 plr_resource = sub_cls.deserialize(plr_dict, allow_marshal=True)
                 from pylabrobot.resources import Coordinate
                 from pylabrobot.serializer import deserialize

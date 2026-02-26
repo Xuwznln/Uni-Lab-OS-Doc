@@ -1208,11 +1208,11 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         len_asp_vols = len(asp_vols)
         len_dis_vols = len(dis_vols)
 
-        if num_targets != 1 and num_sources != 1:
-            if len_asp_vols != num_sources and len_asp_vols != num_targets:
-                raise ValueError(f"asp_vols length must be equal to sources or targets length, but got {len_asp_vols} and {num_sources} and {num_targets}")
-            if len_dis_vols != num_sources and len_dis_vols != num_targets:
-                raise ValueError(f"dis_vols length must be equal to sources or targets length, but got {len_dis_vols} and {num_sources} and {num_targets}")
+        # if num_targets != 1 and num_sources != 1:
+        #     if len_asp_vols != num_sources and len_asp_vols != num_targets:
+        #         raise ValueError(f"asp_vols length must be equal to sources or targets length, but got {len_asp_vols} and {num_sources} and {num_targets}")
+        #     if len_dis_vols != num_sources and len_dis_vols != num_targets:
+        #         raise ValueError(f"dis_vols length must be equal to sources or targets length, but got {len_dis_vols} and {num_sources} and {num_targets}")
 
         if len(use_channels) == 1:
             max_len = max(num_sources, num_targets)
