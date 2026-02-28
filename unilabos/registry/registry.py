@@ -92,7 +92,7 @@ class Registry:
         test_resource_method_info = host_node_enhanced_info.get("action_methods", {}).get("test_resource", {})
         test_resource_schema = self._generate_unilab_json_command_schema(
             test_resource_method_info.get("args", []),
-            "auto-test_resource",
+            "test_resource",
             test_resource_method_info.get("return_annotation"),
         )
         test_resource_schema["description"] = "用于测试物料、设备和样本。"

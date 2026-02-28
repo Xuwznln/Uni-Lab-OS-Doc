@@ -928,57 +928,35 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         none_keys: List[str] = [],
     ) -> TransferLiquidReturn:
         if self.step_mode:
-            self._unilabos_backend.create_protocol(f"step_mode_protocol_{time.time()}")
+            await self.create_protocol(f"step_mode_protocol_{time.time()}")
                 
-            res =await super().transfer_liquid(
-            sources,
-            targets,
-            tip_racks,
-            use_channels=use_channels,
-            asp_vols=asp_vols,
-            dis_vols=dis_vols,
-            asp_flow_rates=asp_flow_rates,
-            dis_flow_rates=dis_flow_rates,
-            offsets=offsets,
-            touch_tip=touch_tip,
-            liquid_height=liquid_height,
-            blow_out_air_volume=blow_out_air_volume,
-            spread=spread,
-            is_96_well=is_96_well,
-            mix_stage=mix_stage,
-            mix_times=mix_times,
-            mix_vol=mix_vol,
-            mix_rate=mix_rate,
-            mix_liquid_height=mix_liquid_height,
-            delays=delays,
-            none_keys=none_keys,
-            )   
-            self._unilabos_backend.run_protocol()
-            return res
-        else:
-            return await super().transfer_liquid(
-                sources,
-                targets,
-                tip_racks,
-                use_channels=use_channels,
-                asp_vols=asp_vols,
-                dis_vols=dis_vols,
-                asp_flow_rates=asp_flow_rates,
-                dis_flow_rates=dis_flow_rates,
-                offsets=offsets,
-                touch_tip=touch_tip,
-                liquid_height=liquid_height,
-                blow_out_air_volume=blow_out_air_volume,
-                spread=spread,
-                is_96_well=is_96_well,
-                mix_stage=mix_stage,
-                mix_times=mix_times,
-                mix_vol=mix_vol,
-                mix_rate=mix_rate,
-                mix_liquid_height=mix_liquid_height,
-                delays=delays,
-                none_keys=none_keys,
-                )   
+        res =await super().transfer_liquid(
+        sources,
+        targets,
+        tip_racks,
+        use_channels=use_channels,
+        asp_vols=asp_vols,
+        dis_vols=dis_vols,
+        asp_flow_rates=asp_flow_rates,
+        dis_flow_rates=dis_flow_rates,
+        offsets=offsets,
+        touch_tip=touch_tip,
+        liquid_height=liquid_height,
+        blow_out_air_volume=blow_out_air_volume,
+        spread=spread,
+        is_96_well=is_96_well,
+        mix_stage=mix_stage,
+        mix_times=mix_times,
+        mix_vol=mix_vol,
+        mix_rate=mix_rate,
+        mix_liquid_height=mix_liquid_height,
+        delays=delays,
+        none_keys=none_keys,
+        )   
+        if self.step_mode:
+            await self.run_protocol()
+
+        return res
 
     async def custom_delay(self, seconds=0, msg=None):
         return await super().custom_delay(seconds, msg)
@@ -1028,18 +1006,32 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         spread: Literal["wide", "tight", "custom"] = "wide",
         **backend_kwargs,
     ):
-
-        return await super().aspirate(
-            resources,
-            vols,
-            use_channels,
-            flow_rates,
-            offsets,
-            liquid_height,
-            blow_out_air_volume,
-            spread,
-            **backend_kwargs,
-        )
+        try:
+            return await super().aspirate(
+                resources,
+                vols,
+                use_channels,
+                flow_rates,
+                offsets,
+                liquid_height,
+                blow_out_air_volume,
+                spread,
+                **backend_kwargs,
+            )
+        except ValueError as e:
+            if "Resource is too small to space channels" in str(e) and spread != "custom":
+                return await super().aspirate(
+                    resources,
+                    vols,
+                    use_channels,
+                    flow_rates,
+                    offsets,
+                    liquid_height,
+                    blow_out_air_volume,
+                    spread="custom",
+                    **backend_kwargs,
+                )
+            raise
 
     async def drop_tips(
         self,
@@ -1063,17 +1055,33 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         spread: Literal["wide", "tight", "custom"] = "wide",
         **backend_kwargs,
     ):
-        return await super().dispense(
-            resources,
-            vols,
-            use_channels,
-            flow_rates,
-            offsets,
-            liquid_height,
-            blow_out_air_volume,
-            spread,
-            **backend_kwargs,
-        )
+        try:
+            return await super().dispense(
+                resources,
+                vols,
+                use_channels,
+                flow_rates,
+                offsets,
+                liquid_height,
+                blow_out_air_volume,
+                spread,
+                **backend_kwargs,
+            )
+        except ValueError as e:
+            if "Resource is too small to space channels" in str(e) and spread != "custom":
+                # 目标资源过小无法分布多通道时，退化为 custom（所有通道对准中心）
+                return await super().dispense(
+                    resources,
+                    vols,
+                    use_channels,
+                    flow_rates,
+                    offsets,
+                    liquid_height,
+                    blow_out_air_volume,
+                    "custom",
+                    **backend_kwargs,
+                )
+            raise
 
     async def discard_tips(
         self,

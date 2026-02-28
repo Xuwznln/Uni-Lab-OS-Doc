@@ -21,12 +21,12 @@
         },
         "host": "10.20.30.184",
         "port": 9999,
-        "debug": true,
-        "setup": true,
+        "debug": false,
+        "setup": false,
         "is_9320": true,
         "timeout": 10,
         "matrix_id": "5de524d0-3f95-406c-86dd-f83626ebc7cb",
-        "simulator": true,
+        "simulator": false,
         "channel_num": 2
       },
       "data": {
@@ -789,6 +789,47 @@
         ]
       },
       "data": {}
+    },
+    {
+      "id": "trash",
+      "name": "trash",
+
+      "children": [],
+      "parent": "T16",
+      "type": "trash",
+      "class": "",
+      "position": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "config": {
+        "type": "PRCXI9300Trash",
+        "size_x": 127.5,
+        "size_y": 86,
+        "size_z": 10,
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0,
+          "type": "Rotation"
+        },
+        "category": "trash",
+        "model": null,
+        "barcode": null,
+        "max_volume": "Infinity",
+        "material_z_thickness": 0,
+        "compute_volume_from_height": null,
+        "compute_height_from_volume": null
+      },
+      "data": {
+        "liquids": [],
+        "pending_liquids": [],
+        "liquid_history": [],
+        "Material": {
+          "uuid": "730067cf07ae43849ddf4034299030e9"
+        }
+      }
     }
   ],
   "edges": []

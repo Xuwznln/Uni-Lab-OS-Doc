@@ -35,7 +35,7 @@ from unilabos.resources.resource_tracker import (
     ResourceTreeInstance,
     RETURN_UNILABOS_SAMPLES,
     JSON_UNILABOS_PARAM,
-    PARAM_SAMPLE_UUIDS,
+    PARAM_SAMPLE_UUIDS, SampleUUIDsType, LabSample,
 )
 from unilabos.ros.initialize_device import initialize_device_from_dict
 from unilabos.ros.msgs.message_converter import (
@@ -65,6 +65,7 @@ class DeviceActionStatus:
 class TestResourceReturn(TypedDict):
     resources: List[List[ResourceDict]]
     devices: List[Dict[str, Any]]
+    unilabos_samples: List[LabSample]
 
 
 class TestLatencyReturn(TypedDict):
@@ -1582,6 +1583,7 @@ class HostNode(BaseROS2DeviceNode):
 
     def test_resource(
         self,
+        sample_uuids: SampleUUIDsType,
         resource: ResourceSlot = None,
         resources: List[ResourceSlot] = None,
         device: DeviceSlot = None,
@@ -1596,6 +1598,7 @@ class HostNode(BaseROS2DeviceNode):
         return {
             "resources": ResourceTreeSet.from_plr_resources([resource, *resources], known_newly_created=True).dump(),
             "devices": [device, *devices],
+            "unilabos_samples": [LabSample(sample_uuid=sample_uuid, oss_path="", extra={"material_uuid": content} if isinstance(content, str) else content.serialize()) for sample_uuid, content in sample_uuids.items()]
         }
 
     def handle_pong_response(self, pong_data: dict):

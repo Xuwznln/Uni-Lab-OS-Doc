@@ -4134,19 +4134,8 @@ liquid_handler:
             data_source: handle
             data_type: resource
             handler_key: sources
-            label: sources
+            label: 待移动液体
           - data_key: targets
-            data_source: handle
-            data_type: resource
-            handler_key: targets
-            label: targets
-          - data_key: tip_racks
-            data_source: handle
-            data_type: resource
-            handler_key: tip_racks
-            label: tip_racks
-          output:
-          - data_key: sources
             data_source: handle
             data_type: resource
             handler_key: targets
@@ -4161,9 +4150,9 @@ liquid_handler:
             data_source: executor
             data_type: resource
             handler_key: sources_out
-            label: sources
-          - data_key: targets
-            data_source: handle
+            label: 移液后源孔
+          - data_key: targets.@flatten
+            data_source: executor
             data_type: resource
             handler_key: targets_out
             label: 移液后目标孔
@@ -4812,13 +4801,13 @@ liquid_handler.biomek:
           targets: ''
         handles:
           input:
-          - data_key: sources
+          - data_key: liquid
             data_source: handle
             data_type: resource
             handler_key: sources
             label: sources
           output:
-          - data_key: targets
+          - data_key: liquid
             data_source: handle
             data_type: resource
             handler_key: targets
@@ -4971,21 +4960,21 @@ liquid_handler.biomek:
           volume: 0.0
         handles:
           input:
-          - data_key: sources
+          - data_key: liquid
             data_source: handle
             data_type: resource
             handler_key: sources
             label: sources
-          - data_key: targets
-            data_source: handle
+          - data_key: liquid
+            data_source: executor
             data_type: resource
             handler_key: targets
             label: targets
-          - data_key: tip_racks
-            data_source: handle
+          - data_key: liquid
+            data_source: executor
             data_type: resource
-            handler_key: tip_racks
-            label: tip_racks
+            handler_key: tip_rack
+            label: tip_rack
           output:
           - data_key: sources
             data_source: handle
@@ -5166,28 +5155,30 @@ liquid_handler.biomek:
             data_source: handle
             data_type: resource
             handler_key: sources
-            label: sources
+            io_type: target
+            label: 待移动液体
           - data_key: targets
             data_source: handle
             data_type: resource
             handler_key: targets
-            label: targets
+            label: 转移目标
           - data_key: tip_racks
             data_source: handle
             data_type: resource
-            handler_key: tip_racks
-            label: tip_racks
+            handler_key: tip_rack
+            label: 枪头盒
           output:
-          - data_key: sources
-            data_source: handle
+          - data_key: sources.@flatten
+            data_source: executor
             data_type: resource
             handler_key: sources_out
-            label: sources
-          - data_key: targets
-            data_source: handle
+            io_type: source
+            label: 移液后源孔
+          - data_key: targets.@flatten
+            data_source: executor
             data_type: resource
             handler_key: targets_out
-            label: targets
+            label: 移液后目标孔
         placeholder_keys:
           sources: unilabos_resources
           targets: unilabos_resources
@@ -7735,31 +7726,6 @@ liquid_handler.prcxi:
           title: move_to参数
           type: object
         type: UniLabJsonCommandAsync
-      auto-plr_pos_to_prcxi:
-        feedback: {}
-        goal: {}
-        goal_default:
-          resource: null
-        handles: {}
-        placeholder_keys: {}
-        result: {}
-        schema:
-          description: ''
-          properties:
-            feedback: {}
-            goal:
-              properties:
-                resource:
-                  type: object
-              required:
-              - resource
-              type: object
-            result: {}
-          required:
-          - goal
-          title: plr_pos_to_prcxi参数
-          type: object
-        type: UniLabJsonCommand
       auto-post_init:
         feedback: {}
         goal: {}
@@ -8655,19 +8621,7 @@ liquid_handler.prcxi:
                 z: 0.0
             sample_id: ''
             type: ''
-        handles:
-          input:
-          - data_key: plate
-            data_source: handle
-            data_type: resource
-            handler_key: plate
-            label: plate
-          output:
-          - data_key: plate
-            data_source: handle
-            data_type: resource
-            handler_key: plate
-            label: plate
+        handles: {}
         placeholder_keys:
           plate: unilabos_resources
           to: unilabos_resources
@@ -10276,26 +10230,26 @@ liquid_handler.prcxi:
           - data_key: sources
             data_source: handle
             data_type: resource
-            handler_key: sources
-            label: sources
+            handler_key: sources_identifier
+            label: 待移动液体
           - data_key: targets
             data_source: handle
             data_type: resource
-            handler_key: targets
-            label: targets
+            handler_key: targets_identifier
+            label: 转移目标
           - data_key: tip_racks
             data_source: handle
             data_type: resource
-            handler_key: tip_racks
-            label: tip_racks
+            handler_key: tip_rack_identifier
+            label: 枪头盒
           output:
-          - data_key: sources
-            data_source: handle
+          - data_key: sources.@flatten
+            data_source: executor
             data_type: resource
             handler_key: sources_out
-            label: sources
-          - data_key: targets
-            data_source: handle
+            label: 移液后源孔
+          - data_key: targets.@flatten
+            data_source: executor
             data_type: resource
             handler_key: targets_out
             label: 移液后目标孔
@@ -10679,12 +10633,6 @@ liquid_handler.prcxi:
           type: string
         deck:
           type: object
-        deck_y:
-          default: 400
-          type: string
-        deck_z:
-          default: 300
-          type: string
         host:
           type: string
         is_9320:
@@ -10695,44 +10643,17 @@ liquid_handler.prcxi:
           type: string
         port:
           type: integer
-        rail_interval:
-          default: 0
-          type: string
-        rail_nums:
-          default: 4
-          type: string
-        rail_width:
-          default: 27.5
-          type: string
         setup:
           default: true
           type: string
         simulator:
           default: false
           type: string
-        start_rail:
-          default: 2
-          type: string
         step_mode:
           default: false
           type: string
         timeout:
           type: number
-        x_increase:
-          default: -0.003636
-          type: string
-        x_offset:
-          default: -0.8
-          type: string
-        xy_coupling:
-          default: -0.0045
-          type: string
-        y_increase:
-          default: -0.003636
-          type: string
-        y_offset:
-          default: -37.98
-          type: string
       required:
       - deck
       - host

@@ -119,11 +119,14 @@ DEVICE_NAME_DEFAULT = "PRCXI"  # transfer_liquid, set_liquid_from_plate 等动�
 # 节点类型
 NODE_TYPE_DEFAULT = "ILab"  # 所有节点的默认类型
 
+CLASS_NAMES_MAPPING = {
+    "plate": "PRCXI_BioER_96_wellplate",
+    "tip_rack": "PRCXI_300ul_Tips",
+}
 # create_resource 节点默认参数
 CREATE_RESOURCE_DEFAULTS = {
     "device_id": "/PRCXI",
     "parent_template": "/PRCXI/PRCXI_Deck/T{slot}",  # {slot} 会被替换为实际的 slot 值
-    "class_name": "PRCXI_BioER_96_wellplate",
 }
 
 # 默认液体体积 (uL)
@@ -367,11 +370,10 @@ def build_protocol_graph(
     """统一的协议图构建函数，根据设备类型自动选择构建逻辑
 
     Args:
-        labware_info: reagent 信息字典，格式为 {name: {slot, well}, ...}，用于 set_liquid 和 well 查找
+        labware_info: labware 信息字典，格式为 {name: {slot, well, labware, ...}, ...}
         protocol_steps: 协议步骤列表
         workstation_name: 工作站名称
         action_resource_mapping: action 到 resource_name 的映射字典，可选
-        labware_defs: labware 定义列表，格式为 [{"name": "...", "slot": "1", "type": "lab_xxx"}, ...]
     """
     G = WorkflowGraph()
     resource_last_writer = {}  # reagent_name -> "node_id:port"
@@ -379,7 +381,19 @@ def build_protocol_graph(
 
     protocol_steps = refactor_data(protocol_steps, action_resource_mapping)
 
-    # ==================== 第一步：按 slot 创建 create_resource 节点 ====================
+    # ==================== 第一步：按 slot 去重创建 create_resource 节点 ====================
+    # 收集所有唯一的 slot
+    slots_info = {}  # slot -> {labware, res_id}
+    for labware_id, item in labware_info.items():
+        slot = str(item.get("slot", ""))
+        if slot and slot not in slots_info:
+            res_id = f"plate_slot_{slot}"
+            slots_info[slot] = {
+                "labware": item.get("labware", ""),
+                "res_id": res_id,
+                "labware_id": labware_id,
+            }
+
     # 创建 Group 节点，包含所有 create_resource 节点
     group_node_id = str(uuid.uuid4())
     G.add_node(
@@ -395,41 +409,38 @@ def build_protocol_graph(
         param=None,
     )
 
-    # 直接使用 JSON 中的 labware 定义，每个 slot 一条记录，type 即 class_name
-    res_index = 0
-    for lw in (labware_defs or []):
-        slot = str(lw.get("slot", ""))
-        if not slot or slot in slot_to_create_resource:
-            continue  # 跳过空 slot 或已处理的 slot
-
-        lw_name = lw.get("name", f"slot {slot}")
-        lw_type = lw.get("type", CREATE_RESOURCE_DEFAULTS["class_name"])
-        res_id = f"plate_slot_{slot}"
-
-        res_index += 1
+    # 为每个唯一的 slot 创建 create_resource 节点
+    for slot, info in slots_info.items():
         node_id = str(uuid.uuid4())
+        res_id = info["res_id"]
+        res_type_name = info["labware"].lower().replace(".", "point")
+        res_type_name = f"lab_{res_type_name}"
+        
         G.add_node(
             node_id,
             template_name="create_resource",
             resource_name="host_node",
-            name=lw_name,
-            description=f"Create {lw_name}",
+            name=f"{res_type_name}_slot{slot}",
+            description=f"Create plate on slot {slot}",
             lab_node_type="Labware",
             footer="create_resource-host_node",
             device_name=DEVICE_NAME_HOST,
             type=NODE_TYPE_DEFAULT,
-            parent_uuid=group_node_id,
-            minimized=True,
+            parent_uuid=group_node_id,  # 指向 Group 节点
+            minimized=True,  # 折叠显示
             param={
                 "res_id": res_id,
                 "device_id": CREATE_RESOURCE_DEFAULTS["device_id"],
-                "class_name": lw_type,
+                "class_name": res_type_name,
                 "parent": CREATE_RESOURCE_DEFAULTS["parent_template"].format(slot=slot),
                 "bind_locations": {"x": 0.0, "y": 0.0, "z": 0.0},
                 "slot_on_deck": slot,
             },
         )
         slot_to_create_resource[slot] = node_id
+        if "tip" in res_type_name and "rack" in res_type_name:
+            resource_last_writer[info["labware_id"]] = f"{node_id}:labware"
+        # create_resource 之间不需要 ready 连接
 
     # ==================== 第二步：为每个 reagent 创建 set_liquid_from_plate 节点 ====================
     # 创建 Group 节点，包含所有 set_liquid_from_plate 节点
@@ -511,6 +522,7 @@ def build_protocol_graph(
         "reagent": "reagent",
         "solvent": "solvent",
         "compound": "compound",
+        "tip_racks": "tip_rack_identifier",
     }
 
     OUTPUT_PORT_MAPPING = {
