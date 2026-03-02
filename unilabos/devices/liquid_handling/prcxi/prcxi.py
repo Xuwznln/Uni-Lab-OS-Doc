@@ -540,7 +540,8 @@ class PRCXI9300PlateAdapterSite(ItemizedCarrier):
               "tip_rack",
               "plates",
               "tip_racks",
-              "tube_rack"
+              "tube_rack",
+              "plateadapter"
             ]
         # 如果提供了sites参数，则用sites_in中的值替换sites_dict中对应的元素
         if sites_in is not None and isinstance(sites_in, dict):
