@@ -83,6 +83,7 @@
                             "depth": 0
                         },
                         "content_type": [
+                            "container",
                             "plate",
                             "tip_rack",
                             "plates",

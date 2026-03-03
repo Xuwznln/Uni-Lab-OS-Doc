@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 
 EXTRA_CLASS = "unilabos_resource_class"
+FRONTEND_POSE_EXTRA = "unilabos_frontend_pose_extra"
 EXTRA_SAMPLE_UUID = "sample_uuid"
 EXTRA_UNILABOS_SAMPLE_UUID = "unilabos_sample_uuid"
 
@@ -74,6 +75,14 @@ class ResourceDictPositionObject(BaseModel):
     z: float = Field(description="Z coordinate", default=0.0)
 
 
+class ResourceDictPoseExtraObjectType(BaseModel):
+    z_index: int
+
+
+class ResourceDictPoseExtraObject(BaseModel):
+    z_index: Optional[int] = Field(alias="zIndex", default=None)
+
+
 class ResourceDictPositionType(TypedDict):
     size: ResourceDictPositionSizeType
     scale: ResourceDictPositionScaleType
@@ -100,6 +109,7 @@ class ResourceDictPosition(BaseModel):
     cross_section_type: Literal["rectangle", "circle", "rounded_rectangle"] = Field(
         description="Cross section type", default="rectangle"
     )
+    extra: Optional[ResourceDictPoseExtraObject] = Field(description="Extra data", default=None)
 
 
 class ResourceDictType(TypedDict):
@@ -463,6 +473,7 @@ class ResourceTreeSet(object):
                 "position3d": raw_pos,
                 "rotation": d["rotation"],
                 "cross_section_type": d.get("cross_section_type", "rectangle"),
+                "extra": extra.get(FRONTEND_POSE_EXTRA)
             }
 
             # 先构建当前节点的字典（不包含children）
@@ -548,6 +559,7 @@ class ResourceTreeSet(object):
             name_to_uuid[node.res_content.name] = node.res_content.uuid
             all_states[node.res_content.name] = node.res_content.data
             name_to_extra[node.res_content.name] = node.res_content.extra
+            name_to_extra[node.res_content.name][FRONTEND_POSE_EXTRA] = node.res_content.pose.extra
             name_to_extra[node.res_content.name][EXTRA_CLASS] = node.res_content.klass
             for child in node.children:
                 collect_node_data(child, name_to_uuid, all_states, name_to_extra)
