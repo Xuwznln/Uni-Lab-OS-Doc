@@ -1195,7 +1195,7 @@ class HostNode(BaseROS2DeviceNode):
                 self.lab_logger().info(f"[Host Node-Resource] UUID映射: {len(uuid_mapping)} 个节点")
             # 还需要加入到资源图中，暂不实现，考虑资源图新的获取方式
             response.response = json.dumps(uuid_mapping)
-            self.lab_logger().info(f"[Host Node-Resource] Resource tree add completed, success: {success}")
+            self.lab_logger().info(f"[Host Node-Resource] Resource tree update completed, success: {success}")
 
     async def _resource_tree_update_callback(self, request: SerialCommand_Request, response: SerialCommand_Response):
         """

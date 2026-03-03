@@ -411,6 +411,15 @@ class ResourceTreeSet(object):
                 "tip_spot": "tip_spot",
                 "tube": "tube",
                 "bottle_carrier": "bottle_carrier",
+                "material_hole": "material_hole",
+                "container": "container",
+                "material_plate": "material_plate",
+                "electrode_sheet": "electrode_sheet",
+                "warehouse": "warehouse",
+                "magazine_holder": "magazine_holder",
+                "resource_group": "resource_group",
+                "trash": "trash",
+                "plate_adapter": "plate_adapter",
             }
             if source in replace_info:
                 return replace_info[source]
@@ -670,7 +679,7 @@ class ResourceTreeSet(object):
                 plr_resources.append(plr_resource)
 
             except Exception as e:
-                logger.error(f"转换 PLR 资源失败: {e}")
+                logger.error(f"转换 PLR 资源失败: {e} {str(plr_dict)[:1000]}")
                 import traceback
 
                 logger.error(f"堆栈: {traceback.format_exc()}")

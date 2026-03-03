@@ -26,7 +26,7 @@
     res_id: plate_slot_{slot}
     device_id: /PRCXI
     class_name: PRCXI_BioER_96_wellplate
-    parent: /PRCXI/PRCXI_Deck/T{slot}
+    parent: /PRCXI/PRCXI_Deck
     slot_on_deck: "{slot}"
 - 输出端口: labware（用于连接 set_liquid_from_plate）
 - 控制流: create_resource 之间通过 ready 端口串联
@@ -126,7 +126,7 @@ CLASS_NAMES_MAPPING = {
 # create_resource 节点默认参数
 CREATE_RESOURCE_DEFAULTS = {
     "device_id": "/PRCXI",
-    "parent_template": "/PRCXI/PRCXI_Deck/T{slot}",  # {slot} 会被替换为实际的 slot 值
+    "parent_template": "/PRCXI/PRCXI_Deck",
 }
 
 # 默认液体体积 (uL)
