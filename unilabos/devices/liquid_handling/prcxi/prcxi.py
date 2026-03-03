@@ -93,13 +93,13 @@ class PRCXI9300Deck(Deck):
 
     # T1-T16 默认位置 (4列×4行)
     _DEFAULT_SITE_POSITIONS = [
-        (0, 288, 0), (138, 288, 0), (276, 288, 0), (414, 288, 0),   # T1-T4
-        (0, 192, 0), (138, 192, 0), (276, 192, 0), (414, 192, 0),   # T5-T8
-        (0, 96, 0),  (138, 96, 0),  (276, 96, 0),  (414, 96, 0),    # T9-T12
-        (0, 0, 0),   (138, 0, 0),   (276, 0, 0),   (414, 0, 0),     # T13-T16
+        (0, 0, 0), (138, 0, 0), (276, 0, 0), (414, 0, 0),         # T1-T4
+        (0, 96, 0), (138, 96, 0), (276, 96, 0), (414, 96, 0),     # T5-T8
+        (0, 192, 0), (138, 192, 0), (276, 192, 0), (414, 192, 0), # T9-T12
+        (0, 288, 0), (138, 288, 0), (276, 288, 0), (414, 288, 0), # T13-T16
     ]
     _DEFAULT_SITE_SIZE = {"width": 128.0, "height": 86, "depth": 0}
-    _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack"]
+    _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor"]
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
                  sites: Optional[List[Dict[str, Any]]] = None, **kwargs):
