@@ -534,9 +534,16 @@ class ResourceTreeSet(object):
             trees.append(tree_instance)
         return cls(trees)
 
-    def to_plr_resources(self, skip_devices=True) -> List["PLRResource"]:
+    def to_plr_resources(
+        self, skip_devices: bool = True, requested_uuids: Optional[List[str]] = None
+    ) -> List["PLRResource"]:
         """
         将 ResourceTreeSet 转换为 PLR 资源列表
+
+        Args:
+            skip_devices: 是否跳过 device 类型节点
+            requested_uuids: 若指定，则按此 UUID 顺序返回对应资源（用于批量查询时一一对应），
+                否则返回各树的根节点列表
 
         Returns:
             List[PLRResource]: PLR 资源实例列表
@@ -691,12 +698,24 @@ class ResourceTreeSet(object):
                 plr_resources.append(plr_resource)
 
             except Exception as e:
-                logger.error(f"转换 PLR 资源失败: {e} {str(plr_dict)[:1000]}")
+                logger.error(f"转换 PLR 资源失败: {e}")
                 import traceback
 
                 logger.error(f"堆栈: {traceback.format_exc()}")
                 raise
 
+        if requested_uuids:
+            # 按请求的 UUID 顺序返回对应资源（从整棵树中按 uuid 提取）
+            result = []
+            for uid in requested_uuids:
+                if uid in tracker.uuid_to_resources:
+                    result.append(tracker.uuid_to_resources[uid])
+                else:
+                    raise ValueError(
+                        f"请求的 UUID {uid} 在资源树中未找到。"
+                        f"可用 UUID 数量: {len(tracker.uuid_to_resources)}"
+                    )
+            return result
         return plr_resources
 
     @classmethod

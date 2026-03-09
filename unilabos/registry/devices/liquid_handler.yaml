@@ -4976,13 +4976,13 @@ liquid_handler.biomek:
             handler_key: tip_rack
             label: tip_rack
           output:
-          - data_key: liquid
+          - data_key: sources
             data_source: handle
             data_type: resource
             handler_key: sources_out
             label: sources
-          - data_key: liquid
-            data_source: executor
+          - data_key: targets
+            data_source: handle
             data_type: resource
             handler_key: targets_out
             label: targets
@@ -7656,6 +7656,43 @@ liquid_handler.prcxi:
           title: iter_tips参数
           type: object
         type: UniLabJsonCommand
+      auto-magnetic_action:
+        feedback: {}
+        goal: {}
+        goal_default:
+          height: null
+          is_wait: null
+          module_no: null
+          time: null
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: ''
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                height:
+                  type: integer
+                is_wait:
+                  type: boolean
+                module_no:
+                  type: integer
+                time:
+                  type: integer
+              required:
+              - time
+              - module_no
+              - height
+              - is_wait
+              type: object
+            result: {}
+          required:
+          - goal
+          title: magnetic_action参数
+          type: object
+        type: UniLabJsonCommandAsync
       auto-move_to:
         feedback: {}
         goal: {}
@@ -7689,6 +7726,31 @@ liquid_handler.prcxi:
           title: move_to参数
           type: object
         type: UniLabJsonCommandAsync
+      auto-plr_pos_to_prcxi:
+        feedback: {}
+        goal: {}
+        goal_default:
+          resource: null
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: ''
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                resource:
+                  type: object
+              required:
+              - resource
+              type: object
+            result: {}
+          required:
+          - goal
+          title: plr_pos_to_prcxi参数
+          type: object
+        type: UniLabJsonCommand
       auto-post_init:
         feedback: {}
         goal: {}
@@ -7807,6 +7869,47 @@ liquid_handler.prcxi:
           required:
           - goal
           title: shaker_action参数
+          type: object
+        type: UniLabJsonCommandAsync
+      auto-shaking_incubation_action:
+        feedback: {}
+        goal: {}
+        goal_default:
+          amplitude: null
+          is_wait: null
+          module_no: null
+          temperature: null
+          time: null
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: ''
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                amplitude:
+                  type: integer
+                is_wait:
+                  type: boolean
+                module_no:
+                  type: integer
+                temperature:
+                  type: integer
+                time:
+                  type: integer
+              required:
+              - time
+              - module_no
+              - amplitude
+              - is_wait
+              - temperature
+              type: object
+            result: {}
+          required:
+          - goal
+          title: shaking_incubation_action参数
           type: object
         type: UniLabJsonCommandAsync
       auto-touch_tip:
@@ -10034,116 +10137,28 @@ liquid_handler.prcxi:
         type: Transfer
       transfer_liquid:
         feedback: {}
-        goal:
-          asp_flow_rates: asp_flow_rates
-          asp_vols: asp_vols
-          blow_out_air_volume: blow_out_air_volume
-          delays: delays
-          dis_flow_rates: dis_flow_rates
-          dis_vols: dis_vols
-          is_96_well: is_96_well
-          liquid_height: liquid_height
-          mix_liquid_height: mix_liquid_height
-          mix_rate: mix_rate
-          mix_stage: mix_stage
-          mix_times: mix_times
-          mix_vol: mix_vol
-          none_keys: none_keys
-          offsets: offsets
-          sources: sources
-          spread: spread
-          targets: targets
-          tip_racks: tip_racks
-          touch_tip: touch_tip
-          use_channels: use_channels
+        goal: {}
         goal_default:
-          asp_flow_rates:
-          - 0.0
-          asp_vols:
-          - 0.0
-          blow_out_air_volume:
-          - 0.0
-          delays:
-          - 0
-          dis_flow_rates:
-          - 0.0
-          dis_vols:
-          - 0.0
+          asp_flow_rates: null
+          asp_vols: null
+          blow_out_air_volume: null
+          blow_out_air_volume_before: null
+          delays: null
+          dis_flow_rates: null
+          dis_vols: null
           is_96_well: false
-          liquid_height:
-          - 0.0
-          mix_liquid_height: 0.0
-          mix_rate: 0
-          mix_stage: ''
-          mix_times: 0
-          mix_vol: 0
-          none_keys:
-          - ''
-          offsets:
-          - x: 0.0
-            y: 0.0
-            z: 0.0
-          sources:
-          - category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          spread: ''
-          targets:
-          - category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          tip_racks:
-          - category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          liquid_height: null
+          mix_liquid_height: null
+          mix_rate: null
+          mix_stage: none
+          mix_times: null
+          mix_vol: null
+          none_keys: []
+          offsets: null
+          sources: null
+          spread: wide
+          targets: null
+          tip_racks: null
           touch_tip: false
           use_channels:
           - 0
@@ -10159,7 +10174,7 @@ liquid_handler.prcxi:
             data_type: resource
             handler_key: targets_identifier
             label: 转移目标
-          - data_key: tip_rack
+          - data_key: tip_racks
             data_source: handle
             data_type: resource
             handler_key: tip_rack_identifier
@@ -10183,11 +10198,7 @@ liquid_handler.prcxi:
         schema:
           description: ''
           properties:
-            feedback:
-              properties: {}
-              required: []
-              title: LiquidHandlerTransfer_Feedback
-              type: object
+            feedback: {}
             goal:
               properties:
                 asp_flow_rates:
@@ -10199,6 +10210,10 @@ liquid_handler.prcxi:
                     type: number
                   type: array
                 blow_out_air_volume:
+                  items:
+                    type: number
+                  type: array
+                blow_out_air_volume_before:
                   items:
                     type: number
                   type: array
@@ -10217,6 +10232,7 @@ liquid_handler.prcxi:
                     type: number
                   type: array
                 is_96_well:
+                  default: false
                   type: boolean
                 liquid_height:
                   items:
@@ -10229,6 +10245,7 @@ liquid_handler.prcxi:
                   minimum: -2147483648
                   type: integer
                 mix_stage:
+                  default: none
                   type: string
                 mix_times:
                   maximum: 2147483647
@@ -10239,6 +10256,7 @@ liquid_handler.prcxi:
                   minimum: -2147483648
                   type: integer
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
@@ -10334,6 +10352,7 @@ liquid_handler.prcxi:
                     type: object
                   type: array
                 spread:
+                  default: wide
                   type: string
                 targets:
                   items:
@@ -10486,6 +10505,7 @@ liquid_handler.prcxi:
                     type: object
                   type: array
                 touch_tip:
+                  default: false
                   type: boolean
                 use_channels:
                   items:
@@ -10494,45 +10514,221 @@ liquid_handler.prcxi:
                     type: integer
                   type: array
               required:
-              - asp_vols
-              - dis_vols
               - sources
               - targets
               - tip_racks
-              - use_channels
-              - asp_flow_rates
-              - dis_flow_rates
-              - offsets
-              - touch_tip
-              - liquid_height
-              - blow_out_air_volume
-              - spread
-              - is_96_well
-              - mix_stage
-              - mix_times
-              - mix_vol
-              - mix_rate
-              - mix_liquid_height
-              - delays
-              - none_keys
-              title: LiquidHandlerTransfer_Goal
+              - asp_vols
+              - dis_vols
               type: object
             result:
+              $defs:
+                ResourceDict:
+                  properties:
+                    class:
+                      description: Resource class name
+                      title: Class
+                      type: string
+                    config:
+                      additionalProperties: true
+                      description: Resource configuration
+                      title: Config
+                      type: object
+                    data:
+                      additionalProperties: true
+                      description: 'Resource data, eg: container liquid data'
+                      title: Data
+                      type: object
+                    description:
+                      default: ''
+                      description: Resource description
+                      title: Description
+                      type: string
+                    extra:
+                      additionalProperties: true
+                      description: 'Extra data, eg: slot index'
+                      title: Extra
+                      type: object
+                    icon:
+                      default: ''
+                      description: Resource icon
+                      title: Icon
+                      type: string
+                    id:
+                      description: Resource ID
+                      title: Id
+                      type: string
+                    model:
+                      additionalProperties: true
+                      description: Resource model
+                      title: Model
+                      type: object
+                    name:
+                      description: Resource name
+                      title: Name
+                      type: string
+                    parent:
+                      anyOf:
+                      - $ref: '#/$defs/ResourceDict'
+                      - type: 'null'
+                      default: null
+                      description: Parent resource object
+                    parent_uuid:
+                      anyOf:
+                      - type: string
+                      - type: 'null'
+                      default: null
+                      description: Parent resource uuid
+                      title: Parent Uuid
+                    pose:
+                      $ref: '#/$defs/ResourceDictPosition'
+                      description: Resource position
+                    schema:
+                      additionalProperties: true
+                      description: Resource schema
+                      title: Schema
+                      type: object
+                    type:
+                      anyOf:
+                      - const: device
+                        type: string
+                      - type: string
+                      description: Resource type
+                      title: Type
+                    uuid:
+                      description: Resource UUID
+                      title: Uuid
+                      type: string
+                  required:
+                  - id
+                  - uuid
+                  - name
+                  - type
+                  - class
+                  - config
+                  - data
+                  - extra
+                  title: ResourceDict
+                  type: object
+                ResourceDictPosition:
+                  properties:
+                    cross_section_type:
+                      default: rectangle
+                      description: Cross section type
+                      enum:
+                      - rectangle
+                      - circle
+                      - rounded_rectangle
+                      title: Cross Section Type
+                      type: string
+                    layout:
+                      default: x-y
+                      description: Resource layout
+                      enum:
+                      - 2d
+                      - x-y
+                      - z-y
+                      - x-z
+                      title: Layout
+                      type: string
+                    position:
+                      $ref: '#/$defs/ResourceDictPositionObject'
+                      description: Resource position
+                    position3d:
+                      $ref: '#/$defs/ResourceDictPositionObject'
+                      description: Resource position in 3D space
+                    rotation:
+                      $ref: '#/$defs/ResourceDictPositionObject'
+                      description: Resource rotation
+                    scale:
+                      $ref: '#/$defs/ResourceDictPositionScale'
+                      description: Resource scale
+                    size:
+                      $ref: '#/$defs/ResourceDictPositionSize'
+                      description: Resource size
+                  title: ResourceDictPosition
+                  type: object
+                ResourceDictPositionObject:
+                  properties:
+                    x:
+                      default: 0.0
+                      description: X coordinate
+                      title: X
+                      type: number
+                    y:
+                      default: 0.0
+                      description: Y coordinate
+                      title: Y
+                      type: number
+                    z:
+                      default: 0.0
+                      description: Z coordinate
+                      title: Z
+                      type: number
+                  title: ResourceDictPositionObject
+                  type: object
+                ResourceDictPositionScale:
+                  properties:
+                    x:
+                      default: 0.0
+                      description: x scale
+                      title: X
+                      type: number
+                    y:
+                      default: 0.0
+                      description: y scale
+                      title: Y
+                      type: number
+                    z:
+                      default: 0.0
+                      description: z scale
+                      title: Z
+                      type: number
+                  title: ResourceDictPositionScale
+                  type: object
+                ResourceDictPositionSize:
+                  properties:
+                    depth:
+                      default: 0.0
+                      description: Depth
+                      title: Depth
+                      type: number
+                    height:
+                      default: 0.0
+                      description: Height
+                      title: Height
+                      type: number
+                    width:
+                      default: 0.0
+                      description: Width
+                      title: Width
+                      type: number
+                  title: ResourceDictPositionSize
+                  type: object
               properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
+                sources:
+                  items:
+                    items:
+                      $ref: '#/$defs/ResourceDict'
+                    type: array
+                  title: Sources
+                  type: array
+                targets:
+                  items:
+                    items:
+                      $ref: '#/$defs/ResourceDict'
+                    type: array
+                  title: Targets
+                  type: array
               required:
-              - return_info
-              - success
-              title: LiquidHandlerTransfer_Result
+              - sources
+              - targets
+              title: TransferLiquidReturn
               type: object
           required:
           - goal
-          title: LiquidHandlerTransfer
+          title: transfer_liquid参数
           type: object
-        type: LiquidHandlerTransfer
+        type: UniLabJsonCommandAsync
     module: unilabos.devices.liquid_handling.prcxi.prcxi:PRCXI9300Handler
     status_types:
       reset_ok: bool
@@ -10555,6 +10751,12 @@ liquid_handler.prcxi:
           type: string
         deck:
           type: object
+        deck_y:
+          default: 400
+          type: string
+        deck_z:
+          default: 300
+          type: string
         host:
           type: string
         is_9320:
@@ -10565,17 +10767,44 @@ liquid_handler.prcxi:
           type: string
         port:
           type: integer
+        rail_interval:
+          default: 0
+          type: string
+        rail_nums:
+          default: 4
+          type: string
+        rail_width:
+          default: 27.5
+          type: string
         setup:
           default: true
           type: string
         simulator:
           default: false
           type: string
+        start_rail:
+          default: 2
+          type: string
         step_mode:
           default: false
           type: string
         timeout:
           type: number
+        x_increase:
+          default: -0.003636
+          type: string
+        x_offset:
+          default: -0.8
+          type: string
+        xy_coupling:
+          default: -0.0045
+          type: string
+        y_increase:
+          default: -0.003636
+          type: string
+        y_offset:
+          default: -37.98
+          type: string
       required:
       - deck
       - host

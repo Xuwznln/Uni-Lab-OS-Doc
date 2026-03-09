@@ -103,7 +103,7 @@ class PRCXI9300Deck(Deck):
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
                  sites: Optional[List[Dict[str, Any]]] = None, **kwargs):
-        super().__init__(size_x, size_y, size_z, name)
+        super().__init__(name, size_x, size_y, size_z)
         if sites is not None:
             self.sites: List[Dict[str, Any]] = [dict(s) for s in sites]
         else:
@@ -120,6 +120,7 @@ class PRCXI9300Deck(Deck):
         self._ordering = collections.OrderedDict(
             (site["label"], None) for site in self.sites
         )
+        self.root = self.get_root()
 
     def _get_site_location(self, idx: int) -> Coordinate:
         pos = self.sites[idx]["position"]
@@ -162,7 +163,10 @@ class PRCXI9300Deck(Deck):
             raise ValueError(f"No available site on deck '{self.name}' for resource '{resource.name}'")
 
         if not reassign and self._get_site_resource(idx) is not None:
-            raise ValueError(f"Site {idx} ('{self.sites[idx]['label']}') is already occupied")
+            existing = self.root.get_resource(resource.name)
+            if existing is not resource and existing.parent is not None:
+                existing.parent.unassign_child_resource(existing)
+
 
         loc = self._get_site_location(idx)
         super().assign_child_resource(resource, location=loc, reassign=reassign)
@@ -794,6 +798,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         touch_tip: bool = False,
         liquid_height: Optional[List[Optional[float]]] = None,
         blow_out_air_volume: Optional[List[Optional[float]]] = None,
+        blow_out_air_volume_before: Optional[List[Optional[float]]] = None,
         spread: Literal["wide", "tight", "custom"] = "wide",
         is_96_well: bool = False,
         mix_stage: Optional[Literal["none", "before", "after", "both"]] = "none",
@@ -819,6 +824,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             touch_tip=touch_tip,
             liquid_height=liquid_height,
             blow_out_air_volume=blow_out_air_volume,
+            blow_out_air_volume_before=blow_out_air_volume_before,
             spread=spread,
             is_96_well=is_96_well,
             mix_stage=mix_stage,

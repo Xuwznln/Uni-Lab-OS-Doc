@@ -386,12 +386,14 @@ def build_protocol_graph(
     slots_info = {}  # slot -> {labware, res_id}
     for labware_id, item in labware_info.items():
         slot = str(item.get("slot", ""))
+        labware = item.get("labware", "")
         if slot and slot not in slots_info:
-            res_id = f"plate_slot_{slot}"
+            res_id = f"{labware}_slot_{slot}"
             slots_info[slot] = {
-                "labware": item.get("labware", ""),
+                "labware": labware,
                 "res_id": res_id,
                 "labware_id": labware_id,
+                "object": item.get("object", ""),
             }
 
     # 创建 Group 节点，包含所有 create_resource 节点
@@ -414,8 +416,10 @@ def build_protocol_graph(
         node_id = str(uuid.uuid4())
         res_id = info["res_id"]
         res_type_name = info["labware"].lower().replace(".", "point")
+        object_type = info.get("object", "")
         res_type_name = f"lab_{res_type_name}"
-        
+        if object_type == "trash":
+            res_type_name = "PRCXI_trash"
         G.add_node(
             node_id,
             template_name="create_resource",
@@ -438,7 +442,7 @@ def build_protocol_graph(
             },
         )
         slot_to_create_resource[slot] = node_id
-        if "tip" in res_type_name and "rack" in res_type_name:
+        if object_type == "tiprack":
             resource_last_writer[info["labware_id"]] = f"{node_id}:labware"
         # create_resource 之间不需要 ready 连接
 
@@ -475,6 +479,8 @@ def build_protocol_graph(
         # res_id 不能有空格
         res_id = str(labware_id).replace(" ", "_")
         well_count = len(wells)
+        object_type = item.get("object", "")
+        liquid_volume = DEFAULT_LIQUID_VOLUME if object_type == "source" else 0
 
         node_id = str(uuid.uuid4())
         set_liquid_index += 1
@@ -495,7 +501,7 @@ def build_protocol_graph(
                 "plate": [],  # 通过连接传递
                 "well_names": wells,  # 孔位名数组，如 ["A1", "A3", "A5"]
                 "liquid_names": [res_id] * well_count,
-                "volumes": [DEFAULT_LIQUID_VOLUME] * well_count,
+                "volumes": [liquid_volume] * well_count,
             },
         )
 
