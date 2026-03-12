@@ -51,6 +51,7 @@
 --------------------------------------------------------------------------------
 - 遍历 workflow 数组，为每个动作创建步骤节点
 - 参数重命名: asp_vol -> asp_vols, dis_vol -> dis_vols, asp_flow_rate -> asp_flow_rates, dis_flow_rate -> dis_flow_rates
+- 参数输入转换: liquid_height（按 wells 扩展）；mix_stage/mix_times/mix_vol/mix_rate/mix_liquid_height 保持标量
 - 参数扩展: 根据 targets 的 wells 数量，将单值扩展为数组
     例: asp_vol=100.0, targets 有 3 个 wells -> asp_vols=[100.0, 100.0, 100.0]
 - 连接处理: 如果 sources/targets 已通过 set_liquid_from_plate 连接，参数值改为 []
@@ -543,8 +544,17 @@ def build_protocol_graph(
         "compound": "compound",
     }
 
-    # 需要根据 wells 数量扩展的参数列表（复数形式）
-    EXPAND_BY_WELLS_PARAMS = ["asp_vols", "dis_vols", "asp_flow_rates", "dis_flow_rates"]
+    # 需要根据 wells 数量扩展的参数列表：
+    # - 复数参数（asp_vols 等）支持单值自动扩展
+    # - liquid_height 按 wells 扩展为数组
+    # - mix_* 参数保持标量，避免被转换为 list
+    EXPAND_BY_WELLS_PARAMS = [
+        "asp_vols",
+        "dis_vols",
+        "asp_flow_rates",
+        "dis_flow_rates",
+        "liquid_height",
+    ]
 
     # 处理协议步骤
     for step in protocol_steps:
@@ -557,6 +567,57 @@ def build_protocol_graph(
         for old_name, new_name in PARAM_RENAME_MAPPING.items():
             if old_name in params:
                 params[new_name] = params.pop(old_name)
+
+        # touch_tip 输入归一化：
+        # - 支持 bool / 0/1 / "true"/"false" / 单元素 list
+        # - 最终统一为 bool 标量，避免被下游误当作序列处理
+        if "touch_tip" in params:
+            touch_tip_value = params.get("touch_tip")
+            if isinstance(touch_tip_value, list):
+                if len(touch_tip_value) == 1:
+                    touch_tip_value = touch_tip_value[0]
+                elif len(touch_tip_value) == 0:
+                    touch_tip_value = False
+                else:
+                    warnings.append(f"touch_tip 期望标量，但收到长度为 {len(touch_tip_value)} 的列表，使用首个值")
+                    touch_tip_value = touch_tip_value[0]
+            if isinstance(touch_tip_value, str):
+                norm = touch_tip_value.strip().lower()
+                if norm in {"true", "1", "yes", "y", "on"}:
+                    touch_tip_value = True
+                elif norm in {"false", "0", "no", "n", "off", ""}:
+                    touch_tip_value = False
+                else:
+                    warnings.append(f"touch_tip 字符串值无法识别: {touch_tip_value}，按 True 处理")
+                    touch_tip_value = True
+            elif isinstance(touch_tip_value, (int, float)):
+                touch_tip_value = bool(touch_tip_value)
+            elif touch_tip_value is None:
+                touch_tip_value = False
+            else:
+                touch_tip_value = bool(touch_tip_value)
+            params["touch_tip"] = touch_tip_value
+
+        # delays 输入归一化：
+        # - 支持标量（int/float/字符串数字）与 list
+        # - 最终统一为数字列表，供下游按 delays[0]/delays[1] 使用
+        if "delays" in params:
+            delays_value = params.get("delays")
+            if delays_value is None or delays_value == "":
+                params["delays"] = []
+            else:
+                raw_list = delays_value if isinstance(delays_value, list) else [delays_value]
+                normalized_delays = []
+                for delay_item in raw_list:
+                    if isinstance(delay_item, str):
+                        delay_item = delay_item.strip()
+                        if delay_item == "":
+                            continue
+                    try:
+                        normalized_delays.append(float(delay_item))
+                    except (TypeError, ValueError):
+                        warnings.append(f"delays 包含无法转换为数字的值: {delay_item}，已忽略")
+                params["delays"] = normalized_delays
 
         # 处理输入连接
         for param_key, target_port in INPUT_PORT_MAPPING.items():

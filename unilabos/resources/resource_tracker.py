@@ -706,15 +706,38 @@ class ResourceTreeSet(object):
 
         if requested_uuids:
             # 按请求的 UUID 顺序返回对应资源（从整棵树中按 uuid 提取）
+            # 优先使用 tracker.uuid_to_resources；若映射缺失，再递归遍历 PLR 树兜底搜索。
+            def _find_plr_by_uuid(roots: List["PLRResource"], uid: str) -> Optional["PLRResource"]:
+                stack = list(roots)
+                while stack:
+                    node = stack.pop()
+                    node_uid = getattr(node, "unilabos_uuid", None)
+                    if node_uid == uid:
+                        return node
+                    children = getattr(node, "children", None) or []
+                    stack.extend(children)
+                return None
+
             result = []
+            missing_uuids = []
             for uid in requested_uuids:
-                if uid in tracker.uuid_to_resources:
-                    result.append(tracker.uuid_to_resources[uid])
+                found = tracker.uuid_to_resources.get(uid)
+                if found is None:
+                    found = _find_plr_by_uuid(plr_resources, uid)
+                    if found is not None:
+                        # 回填缓存，后续相同 uuid 可直接命中
+                        tracker.uuid_to_resources[uid] = found
+                if found is None:
+                    missing_uuids.append(uid)
                 else:
-                    raise ValueError(
-                        f"请求的 UUID {uid} 在资源树中未找到。"
-                        f"可用 UUID 数量: {len(tracker.uuid_to_resources)}"
-                    )
+                    result.append(found)
+
+            if missing_uuids:
+                raise ValueError(
+                    f"请求的 UUID 未在资源树中找到: {missing_uuids}。"
+                    f"可用 UUID 数量: {len(tracker.uuid_to_resources)}，"
+                    f"资源树数量: {len(self.trees)}"
+                )
             return result
         return plr_resources
 

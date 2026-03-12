@@ -854,9 +854,10 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         offsets: Optional[Coordinate] = None,
         mix_rate: Optional[float] = None,
         none_keys: List[str] = [],
+        use_channels: Optional[List[int]] = [0],
     ):
         return await self._unilabos_backend.mix(
-            targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys
+            targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys, use_channels
         )
 
     def iter_tips(self, tip_racks: Sequence[TipRack]) -> Iterator[Resource]:
@@ -1285,9 +1286,15 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         offsets: Optional[Coordinate] = None,
         mix_rate: Optional[float] = None,
         none_keys: List[str] = [],
+        use_channels: Optional[List[int]] = [0],
     ):
         """Mix liquid in the specified resources."""
-
+        if use_channels == [0]:
+            axis = "Left"
+        elif use_channels == [1]:
+            axis = "Right"
+        else:
+            raise ValueError("Invalid use channels: " + str(use_channels))
         plate_indexes = []
         for op in targets:
             deck = op.parent.parent.parent
