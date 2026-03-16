@@ -103,7 +103,7 @@ class PRCXI9300Deck(Deck):
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
                  sites: Optional[List[Dict[str, Any]]] = None, **kwargs):
-        super().__init__(name, size_x, size_y, size_z)
+        super().__init__( size_x, size_y, size_z, name=name)
         if sites is not None:
             self.sites: List[Dict[str, Any]] = [dict(s) for s in sites]
         else:

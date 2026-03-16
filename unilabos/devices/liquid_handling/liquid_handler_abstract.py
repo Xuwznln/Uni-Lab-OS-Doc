@@ -207,32 +207,44 @@ class LiquidHandlerMiddleware(LiquidHandler):
         offsets: Optional[List[Coordinate]] = None,
         liquid_height: Optional[List[Optional[float]]] = None,
         blow_out_air_volume: Optional[List[Optional[float]]] = None,
-        spread: Literal["wide", "tight", "custom"] = "wide",
+        spread: Literal["wide", "tight", "custom"] = "custom",
         **backend_kwargs,
     ):
         if spread == "":
-            spread = "wide"
+            spread = "custom"
 
         def _safe_aspirate_volumes(_resources: Sequence[Container], _vols: List[float]) -> List[float]:
-            """将 aspirate 体积裁剪到源容器当前液量范围内，避免 volume tracker 报错。"""
+            """将 aspirate 体积裁剪到源容器当前液量及 tip 剩余容量范围内，避免 volume tracker 报错。"""
             safe: List[float] = []
-            for res, vol in zip(_resources, _vols):
+            _head_owner = getattr(self, '_simulate_handler', None) or self
+            _head = getattr(_head_owner, 'head', {})
+            _channels = use_channels or list(range(len(_resources)))
+            for i, (res, vol) in enumerate(zip(_resources, _vols)):
                 req = max(float(vol), 0.0)
-                used_volume = None
+                tracker_disabled = False
                 try:
                     tracker = getattr(res, "tracker", None)
-                    if bool(getattr(tracker, "is_disabled", False)):
-                        # tracker 关闭时（例如预吸空气），不按液体体积裁剪
-                        safe.append(req)
-                        continue
-                    get_used = getattr(tracker, "get_used_volume", None)
-                    if callable(get_used):
-                        used_volume = get_used()
+                    tracker_disabled = bool(getattr(tracker, "is_disabled", False))
+                    if not tracker_disabled:
+                        get_used = getattr(tracker, "get_used_volume", None)
+                        if callable(get_used):
+                            used_volume = get_used()
+                            if isinstance(used_volume, (int, float)) and used_volume > 0:
+                                req = min(req, float(used_volume))
                 except Exception:
-                    used_volume = None
+                    pass
 
-                if isinstance(used_volume, (int, float)):
-                    req = min(req, max(float(used_volume), 0.0))
+                if not tracker_disabled:
+                    try:
+                        ch = _channels[i] if i < len(_channels) else i
+                        if ch in _head and _head[ch].has_tip:
+                            _tip = _head[ch].get_tip()
+                            _tip_free = _tip.maximal_volume - _tip.tracker.get_used_volume()
+                            if _tip_free >= 0:
+                                req = min(req, _tip_free)
+                    except Exception:
+                        pass
+
                 safe.append(req)
             return safe
 
