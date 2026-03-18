@@ -1469,6 +1469,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
         if len(use_channels) != 8:
             max_len = max(num_sources, num_targets)
+            prev_dropped = True  # 循环开始前通道上无 tip
             for i in range(max_len):
 
                 # 辅助函数：
@@ -1528,6 +1529,29 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 if delays is not None:
                     kwargs['delays'] = safe_get(delays, i)
 
+                cur_source = sources[i % num_sources]
+                cur_target = targets[i % num_targets]
+
+                # drop: 仅当下一轮的 source 和 target 都相同时才保留 tip（下一轮可以复用）
+                drop_tip = True
+                if i < max_len - 1:
+                    next_source = sources[(i + 1) % num_sources]
+                    next_target = targets[(i + 1) % num_targets]
+                    if cur_target is next_target and cur_source is next_source:
+                        drop_tip = False
+
+                # pick_up: 仅当上一轮保留了 tip（未 drop）且 source 相同时才复用
+                pick_up_tip = True
+                if i > 0 and not prev_dropped:
+                    prev_source = sources[(i - 1) % num_sources]
+                    if cur_source is prev_source:
+                        pick_up_tip = False
+
+                prev_dropped = drop_tip
+
+                kwargs['pick_up'] = pick_up_tip
+                kwargs['drop'] = drop_tip
+
                 await self._transfer_base_method(**kwargs)
 
 
@@ -1543,6 +1567,8 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         use_channels: List[int],
         asp_vols: List[float],
         dis_vols: List[float],
+        pick_up: bool = True,
+        drop: bool = True,
         **kwargs
     ):
 
@@ -1563,8 +1589,9 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         delays = kwargs.get('delays')
 
         tip = []
-        tip.append(self._get_next_tip())
-        await self.pick_up_tips(tip)
+        if pick_up:
+            tip.append(self._get_next_tip())
+            await self.pick_up_tips(tip)
         blow_out_air_volume_before_vol = 0.0
         if blow_out_air_volume_before is not None and len(blow_out_air_volume_before) > 0:
             blow_out_air_volume_before_vol = float(blow_out_air_volume_before[0] or 0.0)
@@ -1646,7 +1673,8 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         if delays is not None and len(delays) > 1:
             await self.custom_delay(seconds=delays[0])
         await self.touch_tip(targets[0])
-        await self.discard_tips(use_channels=use_channels)
+        if drop:
+            await self.discard_tips(use_channels=use_channels)
 
     # except Exception as e:
     #     traceback.print_exc()
@@ -1768,25 +1796,75 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         for rack in tip_racks:
             if isinstance(rack, TipSpot):
                 yield rack
-            elif hasattr(rack, "get_all_items"):
-                yield from rack.get_all_items()
-            else:
-                for tip in rack:
-                    yield tip
+            elif isinstance(rack, TipRack):
+                for item in rack:
+                    if isinstance(item, list):
+                        yield from item
+                    else:
+                        yield item
 
     def _get_next_tip(self):
         """从 current_tip 迭代器获取下一个 tip，耗尽时抛出明确错误而非 StopIteration"""
         try:
             return next(self.current_tip)
         except StopIteration as e:
-            raise RuntimeError("Tip rack exhausted: no more tips available for transfer") from e
+            diag_parts = []
+            tip_racks = getattr(self, 'tip_racks', None)
+            if tip_racks is not None:
+                for idx, rack in enumerate(tip_racks):
+                    r_name = getattr(rack, 'name', '?')
+                    r_type = type(rack).__name__
+                    is_tr = isinstance(rack, TipRack)
+                    is_ts = isinstance(rack, TipSpot)
+                    n_children = len(getattr(rack, 'children', []))
+                    diag_parts.append(
+                        f"rack[{idx}] name={r_name}, type={r_type}, "
+                        f"is_TipRack={is_tr}, is_TipSpot={is_ts}, children={n_children}"
+                    )
+            else:
+                diag_parts.append("tip_racks=None")
+            by_type = getattr(self, '_tip_racks_by_type', {})
+            diag_parts.append(f"_tip_racks_by_type keys={list(by_type.keys())}")
+            raise RuntimeError(
+                f"Tip rack exhausted: no more tips available for transfer. "
+                f"Diagnostics: {'; '.join(diag_parts)}"
+            ) from e
 
     def set_tiprack(self, tip_racks: Sequence[TipRack]):
-        """Set the tip racks for the liquid handler."""
+        """Set the tip racks for the liquid handler.
+
+        Groups tip racks by type name (``type(rack).__name__``).
+        - Only actual TipRack / TipSpot instances are registered.
+        - If a rack has already been registered (by ``name``), it is skipped.
+        - If a rack is new and its type already exists, it is appended to that type's list.
+        - If the type is new, a new key-value pair is created.
+
+        If the current ``tip_racks`` contain no valid TipRack/TipSpot (e.g. a
+        Plate was passed by mistake), the iterator falls back to all previously
+        registered racks.
+        """
+        if not hasattr(self, '_tip_racks_by_type'):
+            self._tip_racks_by_type: Dict[str, List[TipRack]] = {}
+            self._seen_rack_names: Set[str] = set()
+
+        for rack in tip_racks:
+            if not isinstance(rack, (TipRack, TipSpot)):
+                continue
+            rack_name = rack.name if hasattr(rack, 'name') else str(id(rack))
+            if rack_name in self._seen_rack_names:
+                continue
+            self._seen_rack_names.add(rack_name)
+            type_key = type(rack).__name__
+            if type_key not in self._tip_racks_by_type:
+                self._tip_racks_by_type[type_key] = []
+            self._tip_racks_by_type[type_key].append(rack)
+
+        valid_racks = [r for r in tip_racks if isinstance(r, (TipRack, TipSpot))]
+        if not valid_racks:
+            valid_racks = [r for racks in self._tip_racks_by_type.values() for r in racks]
 
         self.tip_racks = tip_racks
-        tip_iter = self.iter_tips(tip_racks)
-        self.current_tip = tip_iter
+        self.current_tip = self.iter_tips(valid_racks)
 
     async def move_to(self, well: Well, dis_to_top: float = 0, channel: int = 0):
         """

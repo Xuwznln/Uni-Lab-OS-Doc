@@ -412,6 +412,8 @@ def build_protocol_graph(
         param=None,
     )
 
+    trash_create_node_id = None  # 记录 trash 的 create_resource 节点
+
     # 为每个唯一的 slot 创建 create_resource 节点
     for slot, info in slots_info.items():
         node_id = str(uuid.uuid4())
@@ -445,6 +447,8 @@ def build_protocol_graph(
         slot_to_create_resource[slot] = node_id
         if object_type == "tiprack":
             resource_last_writer[info["labware_id"]] = f"{node_id}:labware"
+        if object_type == "trash":
+            trash_create_node_id = node_id
         # create_resource 之间不需要 ready 连接
 
     # ==================== 第二步：为每个 reagent 创建 set_liquid_from_plate 节点 ====================
@@ -516,8 +520,8 @@ def build_protocol_graph(
         # set_liquid_from_plate 的输出 output_wells 用于连接 transfer_liquid
         resource_last_writer[labware_id] = f"{node_id}:output_wells"
 
-    # transfer_liquid 之间通过 ready 串联，从 None 开始
-    last_control_node_id = None
+    # transfer_liquid 之间通过 ready 串联；若存在 trash 节点，第一个 transfer_liquid 从 trash 的 ready 开始
+    last_control_node_id = trash_create_node_id
 
     # 端口名称映射：JSON 字段名 -> 实际 handle key
     INPUT_PORT_MAPPING = {
