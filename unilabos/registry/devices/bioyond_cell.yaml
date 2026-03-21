@@ -188,6 +188,108 @@ bioyond_cell:
           title: create_orders参数
           type: object
         type: UniLabJsonCommand
+      auto-create_orders_formulation:
+        always_free: true
+        feedback: {}
+        goal: {}
+        goal_default:
+          batch_id: ''
+          bottle_type: 配液小瓶
+          conductivity_bottle_count: 0
+          conductivity_info: 0.0
+          formulation: null
+          load_shedding_info: 0.0
+          mix_time: 0
+          pouch_cell_info: 0.0
+        handles:
+          output:
+          - data_key: total_orders
+            data_source: executor
+            data_type: integer
+            handler_key: bottle_count
+            label: 配液瓶数
+          - data_key: vial_plates
+            data_source: executor
+            data_type: array
+            handler_key: vial_plates_output
+            label: 分液瓶板列表
+          - data_key: mass_ratios
+            data_source: executor
+            data_type: array
+            handler_key: mass_ratios_output
+            label: 配方信息列表
+        placeholder_keys:
+          formulation: unilabos_formulation
+        result: {}
+        schema:
+          description: 配方批量输入版本的创建实验——通过前端配方组件输入物料配比，替代Excel导入
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                batch_id:
+                  default: ''
+                  description: 批次ID，为空则自动生成时间戳
+                  type: string
+                bottle_type:
+                  default: 配液小瓶
+                  description: 配液瓶类型
+                  type: string
+                conductivity_bottle_count:
+                  default: 0
+                  description: 电导测试分液瓶数
+                  type: integer
+                conductivity_info:
+                  default: 0.0
+                  description: 电导测试分液体积
+                  type: number
+                formulation:
+                  description: 配方列表，每个元素代表一个订单（一瓶）
+                  items:
+                    properties:
+                      materials:
+                        description: 物料列表
+                        items:
+                          properties:
+                            mass:
+                              description: 质量(g)
+                              type: number
+                            name:
+                              description: 物料名称
+                              type: string
+                          required:
+                          - name
+                          - mass
+                          type: object
+                        type: array
+                      order_name:
+                        description: 配方名称（可选）
+                        type: string
+                    required:
+                    - materials
+                    type: object
+                  type: array
+                load_shedding_info:
+                  default: 0.0
+                  description: 扣电组装分液体积
+                  type: number
+                mix_time:
+                  default: 0
+                  description: 混匀时间(秒)
+                  type: integer
+                pouch_cell_info:
+                  default: 0.0
+                  description: 软包组装分液体积
+                  type: number
+              required:
+              - formulation
+              type: object
+            result: {}
+          required:
+          - goal
+          title: create_orders_formulation参数
+          type: object
+        type: UniLabJsonCommand
       auto-create_sample:
         feedback: {}
         goal: {}

@@ -1000,6 +1000,183 @@ class BioyondCellWorkstation(BioyondWorkstation):
         
         return final_result
     
+    def create_orders_formulation(
+        self,
+        formulation: List[Dict[str, Any]],
+        batch_id: str = "",
+        bottle_type: str = "配液小瓶",
+        mix_time: int = 0,
+        load_shedding_info: float = 0.0,
+        pouch_cell_info: float = 0.0,
+        conductivity_info: float = 0.0,
+        conductivity_bottle_count: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        配方批量输入版本的 create_orders —— 等价于 create_orders，
+        但参数来源于前端 FormulationBatchWidget，而非 Excel 文件。
+
+        Args:
+            formulation: 配方列表，每个元素代表一个订单（一瓶），格式：
+                [
+                    {
+                        "order_name": "配方A",          # 可选，配方名称
+                        "materials": [                   # 物料列表
+                            {"name": "LiPF6", "mass": 12.5},
+                            {"name": "EC",    "mass": 50.0},
+                        ]
+                    },
+                    ...
+                ]
+            batch_id: 批次ID，若为空则用当前时间戳
+            bottle_type: 配液瓶类型，默认 "配液小瓶"
+            mix_time: 混匀时间(秒)
+            load_shedding_info: 扣电组装分液体积
+            pouch_cell_info: 软包组装分液体积
+            conductivity_info: 电导测试分液体积
+            conductivity_bottle_count: 电导测试分液瓶数
+
+        Returns:
+            与 create_orders 返回格式一致的结果字典
+        """
+        if not formulation:
+            raise ValueError("formulation 参数不能为空")
+
+        if not batch_id:
+            batch_id = f"formulation_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        create_time = f"{datetime.now().year}/{datetime.now().month}/{datetime.now().day}"
+
+        # 将 formulation 转换为 LIMS orders 格式（与 create_orders 中的格式一致）
+        orders: List[Dict[str, Any]] = []
+        for idx, item in enumerate(formulation):
+            materials = item.get("materials", [])
+            order_name = item.get("order_name", f"{batch_id}_order_{idx + 1}")
+
+            mats: List[Dict[str, Any]] = []
+            total_mass = 0.0
+            for mat in materials:
+                name = mat.get("name", "")
+                mass = float(mat.get("mass", 0.0))
+                if name and mass > 0:
+                    mats.append({"name": name, "mass": mass})
+                    total_mass += mass
+
+            if not mats:
+                logger.warning(f"[create_orders_formulation] 第 {idx + 1} 个配方无有效物料，跳过")
+                continue
+
+            orders.append({
+                "batchId": batch_id,
+                "orderName": order_name,
+                "createTime": create_time,
+                "bottleType": bottle_type,
+                "mixTime": mix_time,
+                "loadSheddingInfo": load_shedding_info,
+                "pouchCellInfo": pouch_cell_info,
+                "conductivityInfo": conductivity_info,
+                "conductivityBottleCount": conductivity_bottle_count,
+                "materialInfos": mats,
+                "totalMass": round(total_mass, 4),
+            })
+
+        if not orders:
+            logger.error("[create_orders_formulation] 没有有效的订单可提交")
+            return {"status": "error", "message": "没有有效配方数据"}
+
+        logger.info(f"[create_orders_formulation] 即将提交 {len(orders)} 个订单 (batchId={batch_id})")
+
+        # ========== 提交订单到 LIMS ==========
+        response = self._post_lims("/api/lims/order/orders", orders)
+        logger.info(f"[create_orders_formulation] 接口返回: {response}")
+
+        data_list = response.get("data", [])
+        if not data_list:
+            logger.error("创建订单未返回有效数据！")
+            return response
+
+        order_codes = [item.get("orderCode") for item in data_list if item.get("orderCode")]
+        if not order_codes:
+            logger.error("未找到任何有效的 orderCode！")
+            return response
+
+        logger.info(f"[create_orders_formulation] 等待 {len(order_codes)} 个订单完成: {order_codes}")
+
+        # ========== 等待所有订单完成 ==========
+        all_reports = []
+        for idx, order_code in enumerate(order_codes, 1):
+            logger.info(f"[create_orders_formulation] 等待第 {idx}/{len(order_codes)} 个订单: {order_code}")
+            result = self.wait_for_order_finish(order_code)
+            if result.get("status") == "success":
+                all_reports.append(result.get("report", {}))
+                logger.info(f"[create_orders_formulation] ✓ 订单 {order_code} 完成")
+            else:
+                logger.warning(f"订单 {order_code} 状态异常: {result.get('status')}")
+                all_reports.append({
+                    "orderCode": order_code,
+                    "status": result.get("status"),
+                    "error": result.get("message", "未知错误"),
+                })
+
+        # ========== 计算质量比 ==========
+        all_mass_ratios = []
+        for idx, report in enumerate(all_reports, 1):
+            order_code = report.get("orderCode", "N/A")
+            if "error" not in report:
+                try:
+                    mass_ratios = self._process_order_reagents(report)
+                    all_mass_ratios.append({
+                        "orderCode": order_code,
+                        "orderName": report.get("orderName", "N/A"),
+                        "real_mass_ratio": mass_ratios.get("real_mass_ratio", {}),
+                        "target_mass_ratio": mass_ratios.get("target_mass_ratio", {}),
+                    })
+                except Exception as e:
+                    logger.error(f"计算订单 {order_code} 质量比失败: {e}")
+                    all_mass_ratios.append({
+                        "orderCode": order_code,
+                        "real_mass_ratio": {},
+                        "target_mass_ratio": {},
+                        "error": str(e),
+                    })
+            else:
+                all_mass_ratios.append({
+                    "orderCode": order_code,
+                    "real_mass_ratio": {},
+                    "target_mass_ratio": {},
+                    "error": "订单未成功完成",
+                })
+
+        # ========== 提取分液瓶板 + 创建资源 ==========
+        all_vial_plates = []
+        processed_material_ids = set()
+        for report in all_reports:
+            vial_plate_info = self._extract_vial_plate_from_report(report)
+            if vial_plate_info:
+                material_id = vial_plate_info.get("materialId")
+                all_vial_plates.append(vial_plate_info)
+                if material_id in processed_material_ids:
+                    continue
+                try:
+                    self._create_vial_plate_resource(vial_plate_info)
+                    processed_material_ids.add(material_id)
+                except Exception as e:
+                    logger.error(f"[资源树] 创建失败: {e}")
+
+        logger.info(
+            f"[create_orders_formulation] 完成: "
+            f"{len(all_reports)} 个订单, {len(all_vial_plates)} 个分液瓶板"
+        )
+
+        return {
+            "status": "all_completed",
+            "total_orders": len(order_codes),
+            "bottle_count": len(order_codes),
+            "reports": all_reports,
+            "mass_ratios": all_mass_ratios,
+            "vial_plates": all_vial_plates,
+            "original_response": response,
+        }
+
     def _extract_vial_plate_from_report(self, report: Dict) -> Optional[Dict]:
         """
         从 order_finish 报文中提取分液瓶板信息
