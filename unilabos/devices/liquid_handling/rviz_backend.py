@@ -59,6 +59,7 @@ class UniLiquidHandlerRvizBackend(LiquidHandlerBackend):
     self.total_height = total_height
     self.joint_config = kwargs.get("joint_config", None)
     self.lh_device_id = kwargs.get("lh_device_id", "lh_joint_publisher")
+    self.simulate_rviz = kwargs.get("simulate_rviz", False)
     if not rclpy.ok():
         rclpy.init()
     self.joint_state_publisher = None
@@ -69,7 +70,7 @@ class UniLiquidHandlerRvizBackend(LiquidHandlerBackend):
     self.joint_state_publisher = LiquidHandlerJointPublisher(
                                 joint_config=self.joint_config,
                                 lh_device_id=self.lh_device_id,
-                                simulate_rviz=True)
+                                simulate_rviz=self.simulate_rviz)
 
     # 启动ROS executor
     self.executor = rclpy.executors.MultiThreadedExecutor()

@@ -71,7 +71,8 @@ class LiquidHandlerMiddleware(LiquidHandler):
         if simulator:
             if joint_config:
                 self._simulate_backend = UniLiquidHandlerRvizBackend(
-                    channel_num, kwargs["total_height"], joint_config=joint_config, lh_device_id=deck.name
+                    channel_num, kwargs["total_height"], joint_config=joint_config, lh_device_id=deck.name,
+                    simulate_rviz=kwargs.get("simulate_rviz", True)
                 )
             else:
                 self._simulate_backend = LiquidHandlerChatterboxBackend(channel_num)
@@ -770,6 +771,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         simulator: bool = False,
         channel_num: int = 8,
         total_height: float = 310,
+        **kwargs,
     ):
         """Initialize a LiquidHandler.
 
@@ -809,14 +811,20 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                         except Exception:
                             backend_cls = None
                 if backend_cls is not None and isinstance(backend_cls, type):
-                    backend_type = backend_cls(**backend_dict)  # pass the rest of dict as kwargs
+                    if simulator:
+                        backend_type = LiquidHandlerChatterboxBackend(channel_num)
+                    else:
+                        init_kwargs = dict(backend_dict)
+                        init_kwargs["total_height"] = total_height
+                        init_kwargs.update(kwargs)
+                        backend_type = backend_cls(**init_kwargs)
             except Exception as exc:
                 raise RuntimeError(f"Failed to convert backend type '{type_str}' to class: {exc}")
         else:
             backend_type = backend
         self._simulator = simulator
         self.group_info = dict()
-        super().__init__(backend_type, deck, simulator, channel_num)
+        super().__init__(backend_type, deck, simulator, channel_num, total_height=total_height, **kwargs)
 
     def post_init(self, ros_node: BaseROS2DeviceNode):
         self._ros_node = ros_node
