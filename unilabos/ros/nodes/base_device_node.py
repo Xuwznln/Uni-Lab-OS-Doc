@@ -1413,9 +1413,13 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             if uuid_indices:
                                 uuids = [item[1] for item in uuid_indices]
                                 resource_tree = await self.get_resource(uuids)
-                                plr_resources = resource_tree.to_plr_resources()
+                                plr_resources = resource_tree.to_plr_resources(requested_uuids=uuids)
                                 for i, (idx, _, resource_data) in enumerate(uuid_indices):
-                                    plr_resource = plr_resources[i]
+                                    try:
+                                        plr_resource = plr_resources[i]
+                                    except Exception as e:
+                                        self.lab_logger().error(f"资源查询结果: 共 {len(queried_resources)} 个资源，但查询结果只有 {len(plr_resources)} 个资源，索引为 {i} 的资源不存在")
+                                        raise e
                                     if "sample_id" in resource_data:
                                         plr_resource.unilabos_extra[EXTRA_SAMPLE_UUID] = resource_data["sample_id"]
                                     queried_resources[idx] = plr_resource

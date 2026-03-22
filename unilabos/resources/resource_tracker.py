@@ -130,6 +130,24 @@ class ResourceDictType(TypedDict):
     extra: Dict[str, Any]
 
 
+class ResourceDictType(TypedDict):
+    id: str
+    uuid: str
+    name: str
+    description: str
+    resource_schema: Dict[str, Any]
+    model: Dict[str, Any]
+    icon: str
+    parent_uuid: Optional[str]
+    parent: Optional["ResourceDictType"]
+    type: Union[Literal["device"], str]
+    klass: str
+    pose: ResourceDictPositionType
+    config: Dict[str, Any]
+    data: Dict[str, Any]
+    extra: Dict[str, Any]
+
+
 # 统一的资源字典模型，parent 自动序列化为 parent_uuid，children 不序列化
 class ResourceDict(BaseModel):
     id: str = Field(description="Resource ID")
@@ -826,16 +844,6 @@ class ResourceTreeSet(object):
             所有根节点的资源实例列表
         """
         return [tree.root_node for tree in self.trees]
-
-    @property
-    def root_nodes_uuid(self) -> List[ResourceDictInstance]:
-        """
-        获取所有树的根节点
-
-        Returns:
-            所有根节点的资源实例列表
-        """
-        return [tree.root_node.res_content.uuid for tree in self.trees]
 
     @property
     def all_nodes(self) -> List[ResourceDictInstance]:

@@ -277,9 +277,6 @@ class ImportManager:
                     method_info = self._analyze_method_signature(method)
                     result["status_methods"][actual_name] = method_info
                 elif not name.startswith("_"):
-                    # 检查是否被 @not_action 装饰器标记
-                    if is_not_action(method):
-                        continue
                     # 其他非_开头的方法归类为action
                     method_info = self._analyze_method_signature(method)
                     # 检查是否被 @always_free 装饰器标记
@@ -338,9 +335,6 @@ class ImportManager:
                     if actual_name not in result["status_methods"]:
                         result["status_methods"][actual_name] = method_info
                 else:
-                    # 检查是否被 @not_action 装饰器标记
-                    if self._is_not_action_method(node):
-                        continue
                     # 其他非_开头的方法归类为action
                     # 检查是否被 @always_free 装饰器标记
                     if self._is_always_free_method(node):

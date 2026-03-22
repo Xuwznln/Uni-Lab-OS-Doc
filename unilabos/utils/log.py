@@ -217,7 +217,6 @@ def configure_logger(loglevel=None, working_dir=None):
     return log_filepath
 
 
-
 # 配置日志系统
 configure_logger()
 
