@@ -76,7 +76,7 @@ def canonicalize_nodes_data(
             if sample_id:
                 logger.error(f"{node}的sample_id参数已弃用，sample_id: {sample_id}")
         for k in list(node.keys()):
-            if k not in ["id", "uuid", "name", "description", "schema", "model", "icon", "parent_uuid", "parent", "type", "class", "position", "config", "data", "children", "pose", "extra"]:
+            if k not in ["id", "uuid", "name", "description", "schema", "model", "icon", "parent_uuid", "parent", "type", "class", "position", "config", "data", "children", "pose", "extra", "machine_name"]:
                 v = node.pop(k)
                 node["config"][k] = v
     if outer_host_node_id is not None:
@@ -288,6 +288,15 @@ def read_node_link_json(
     physical_setup_graph = nx.node_link_graph(graph_data, edges="links", multigraph=False)
     handle_communications(physical_setup_graph)
 
+    # Stamp machine_name on device trees only (resources are cloud-managed)
+    local_machine = BasicConfig.machine_name or "本地"
+    for tree in resource_tree_set.trees:
+        if tree.root_node.res_content.type != "device":
+            continue
+        for node in tree.get_all_nodes():
+            if not node.res_content.machine_name:
+                node.res_content.machine_name = local_machine
+
     return physical_setup_graph, resource_tree_set, standardized_links
 
 
@@ -371,6 +380,15 @@ def read_graphml(graphml_file: str) -> tuple[nx.Graph, ResourceTreeSet, List[Dic
         print_status(f"GraphML converted to JSON and saved to {dump_json_path}", "info")
     physical_setup_graph = nx.node_link_graph(graph_data, link="links", multigraph=False)
     handle_communications(physical_setup_graph)
+
+    # Stamp machine_name on device trees only (resources are cloud-managed)
+    local_machine = BasicConfig.machine_name or "本地"
+    for tree in resource_tree_set.trees:
+        if tree.root_node.res_content.type != "device":
+            continue
+        for node in tree.get_all_nodes():
+            if not node.res_content.machine_name:
+                node.res_content.machine_name = local_machine
 
     return physical_setup_graph, resource_tree_set, standardized_links
 

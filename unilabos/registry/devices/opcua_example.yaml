@@ -142,8 +142,7 @@ opcua_example:
           type: object
         type: UniLabJsonCommand
     module: unilabos.device_comms.opcua_client.client:OpcUaClient
-    status_types:
-      node_value: String
+    status_types: {}
     type: python
   config_info: []
   description: null
@@ -167,10 +166,7 @@ opcua_example:
       - url
       type: object
     data:
-      properties:
-        node_value:
-          type: string
-      required:
-      - node_value
+      properties: {}
+      required: []
       type: object
   version: 1.0.0

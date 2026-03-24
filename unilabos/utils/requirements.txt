@@ -1,7 +1,8 @@
 networkx
 typing_extensions
 websockets
-msgcenterpy>=0.1.5
+msgcenterpy>=0.1.8
+orjson>=3.11
 opentrons_shared_data
 pint
 fastapi

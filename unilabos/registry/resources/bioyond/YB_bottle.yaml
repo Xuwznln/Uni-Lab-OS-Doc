@@ -8,7 +8,6 @@ YB_Vial_20mL:
   handles: []
   icon: ''
   init_param_schema: {}
-  registry_type: resource
   version: 1.0.0
 YB_Vial_5mL:
   category:
@@ -20,7 +19,6 @@ YB_Vial_5mL:
   handles: []
   icon: ''
   init_param_schema: {}
-  registry_type: resource
   version: 1.0.0
 YB_DosingHead_L:
   category:
@@ -32,7 +30,6 @@ YB_DosingHead_L:
   handles: []
   icon: ''
   init_param_schema: {}
-  registry_type: resource
   version: 1.0.0
 YB_PrepBottle_60mL:
   category:
@@ -44,7 +41,6 @@ YB_PrepBottle_60mL:
   handles: []
   icon: ''
   init_param_schema: {}
-  registry_type: resource
   version: 1.0.0
 YB_PrepBottle_15mL:
   category:
@@ -56,7 +52,6 @@ YB_PrepBottle_15mL:
   handles: []
   icon: ''
   init_param_schema: {}
-  registry_type: resource
   version: 1.0.0
 YB_Tip_5000uL:
   category:
@@ -68,7 +63,6 @@ YB_Tip_5000uL:
   handles: []
   icon: ''
   init_param_schema: {}
-  registry_type: resource
   version: 1.0.0
 YB_Tip_1000uL:
   category:
@@ -144,5 +138,4 @@ YB_HighVis_100mL_Bottle:
   handles: []
   icon: ''
   init_param_schema: {}
-  registry_type: resource
   version: 1.0.0
