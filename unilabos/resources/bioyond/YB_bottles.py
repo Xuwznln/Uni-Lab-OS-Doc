@@ -1,7 +1,7 @@
 from unilabos.resources.itemized_carrier import Bottle, BottleCarrier
 # 工厂函数
 """加样头（大）"""
-def YB_jia_yang_tou_da(
+def YB_DosingHead_L(
     name: str,
     diameter: float = 20.0,
     height: float = 100.0,
@@ -15,11 +15,11 @@ def YB_jia_yang_tou_da(
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_jia_yang_tou_da",
+        model="YB_DosingHead_L",
     )
 
-"""液1x1"""
-def YB_ye_Bottle(
+"""250mL普通液"""
+def YB_NormalLiq_250mL_Bottle(
     name: str,
     diameter: float = 40.0,
     height: float = 70.0,
@@ -33,83 +33,101 @@ def YB_ye_Bottle(
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_ye_Bottle",
+        model="YB_NormalLiq_250mL_Bottle",
     )
 
-"""100ml液体"""
-def YB_ye_100ml_Bottle(
+"""100mL普通液"""
+def YB_NormalLiq_100mL_Bottle(
     name: str,
     diameter: float = 50.0,
     height: float = 90.0,
     max_volume: float = 100000.0,  # 100mL
     barcode: str = None,
 ) -> Bottle:
-    """创建100ml液体瓶"""
+    """创建100mL普通液瓶"""
     return Bottle(
         name=name,
         diameter=diameter,
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_100ml_yeti",
+        model="YB_NormalLiq_100mL_Bottle",
     )
 
-"""高粘液"""
-def YB_gao_nian_ye_Bottle(
+"""100mL高粘液"""
+def YB_HighVis_100mL_Bottle(
+    name: str,
+    diameter: float = 50.0,
+    height: float = 90.0,
+    max_volume: float = 100000.0,  # 100mL
+    barcode: str = None,
+) -> Bottle:
+    """创建100mL高粘液瓶"""
+    return Bottle(
+        name=name,
+        diameter=diameter,
+        height=height,
+        max_volume=max_volume,
+        barcode=barcode,
+        model="YB_HighVis_100mL_Bottle",
+    )
+
+"""250mL高粘液"""
+def YB_HighVis_250mL_Bottle(
     name: str,
     diameter: float = 40.0,
     height: float = 70.0,
     max_volume: float = 50000.0,  # 50mL
     barcode: str = None,
 ) -> Bottle:
-    """创建高粘液瓶"""
+    """创建250mL高粘液瓶"""
     return Bottle(
         name=name,
         diameter=diameter,
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="High_Viscosity_Liquid",
+        model="YB_HighVis_250mL_Bottle",
     )
 
-"""5ml分液瓶"""
-def YB_5ml_fenyeping(
+"""5mL分液瓶"""
+def YB_Vial_5mL(
     name: str,
     diameter: float = 20.0,
     height: float = 50.0,
     max_volume: float = 5000.0,  # 5mL
     barcode: str = None,
 ) -> Bottle:
-    """创建5ml分液瓶"""
+    """创建5mL分液瓶"""
     return Bottle(
         name=name,
         diameter=diameter,
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_5ml_fenyeping",
+        model="YB_Vial_5mL",
     )
 
-"""20ml分液瓶"""
-def YB_20ml_fenyeping(
+"""20mL分液瓶"""
+def YB_Vial_20mL(
     name: str,
     diameter: float = 30.0,
     height: float = 65.0,
     max_volume: float = 20000.0,  # 20mL
     barcode: str = None,
 ) -> Bottle:
-    """创建20ml分液瓶"""
+    """创建20mL分液瓶"""
     return Bottle(
         name=name,
         diameter=diameter,
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_20ml_fenyeping",
+        model="YB_Vial_20mL",
     )
 
 """配液瓶(小)"""
-def YB_pei_ye_xiao_Bottle(
+def YB_PrepBottle_15mL(
     name: str,
     diameter: float = 35.0,
     height: float = 60.0,
@@ -123,11 +141,11 @@ def YB_pei_ye_xiao_Bottle(
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_pei_ye_xiao_Bottle",
+        model="YB_PrepBottle_15mL",
     )
 
 """配液瓶(大)"""
-def YB_pei_ye_da_Bottle(
+def YB_PrepBottle_60mL(
     name: str,
     diameter: float = 55.0,
     height: float = 100.0,
@@ -141,11 +159,29 @@ def YB_pei_ye_da_Bottle(
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_pei_ye_da_Bottle",
+        model="YB_PrepBottle_60mL",
     )
 
-"""枪头"""
-def YB_qiang_tou(
+"""5000uL枪头"""
+def YB_Tip_5000uL(
+    name: str,
+    diameter: float = 10.0,
+    height: float = 50.0,
+    max_volume: float = 5000.0,  # 5mL
+    barcode: str = None,
+) -> Bottle:
+    """创建枪头"""
+    return Bottle(
+        name=name,
+        diameter=diameter,
+        height=height,
+        max_volume=max_volume,
+        barcode=barcode,
+        model="YB_Tip_5000uL",
+    ) 
+
+"""1000uL枪头"""
+def YB_Tip_1000uL(
     name: str,
     diameter: float = 10.0,
     height: float = 50.0,
@@ -159,5 +195,23 @@ def YB_qiang_tou(
         height=height,
         max_volume=max_volume,
         barcode=barcode,
-        model="YB_qiang_tou",
+        model="YB_Tip_1000uL",
     )    
+
+"""50uL枪头"""
+def YB_Tip_50uL(
+    name: str,
+    diameter: float = 10.0,
+    height: float = 50.0,
+    max_volume: float = 50.0,  # 50uL
+    barcode: str = None,
+) -> Bottle:
+    """创建枪头"""
+    return Bottle(
+        name=name,
+        diameter=diameter,
+        height=height,
+        max_volume=max_volume,
+        barcode=barcode,
+        model="YB_Tip_50uL",
+    ) 

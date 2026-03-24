@@ -2,15 +2,18 @@ from pylabrobot.resources import create_homogeneous_resources, Coordinate, Resou
 
 from unilabos.resources.itemized_carrier import Bottle, BottleCarrier
 from unilabos.resources.bioyond.YB_bottles import (
-    YB_jia_yang_tou_da,
-    YB_ye_Bottle,
-    YB_ye_100ml_Bottle,
-    YB_gao_nian_ye_Bottle,
-    YB_5ml_fenyeping,
-    YB_20ml_fenyeping,
-    YB_pei_ye_xiao_Bottle,
-    YB_pei_ye_da_Bottle,
-    YB_qiang_tou,
+    YB_DosingHead_L,
+    YB_NormalLiq_250mL_Bottle,
+    YB_NormalLiq_100mL_Bottle,
+    YB_HighVis_250mL_Bottle,
+    YB_HighVis_100mL_Bottle,
+    YB_Vial_5mL,
+    YB_Vial_20mL,
+    YB_PrepBottle_15mL,
+    YB_PrepBottle_60mL,
+    YB_Tip_5000uL,
+    YB_Tip_1000uL,
+    YB_Tip_50uL,
 )
 # 命名约定：试剂瓶-Bottle，烧杯-Beaker，烧瓶-Flask，小瓶-Vial
 
@@ -206,7 +209,7 @@ def YB_6VialCarrier(name: str) -> BottleCarrier:
     return carrier
 
 # 1瓶载架 - 单个中央位置
-def YB_ye(name: str) -> BottleCarrier:
+def YB_NormalLiq_250mL_Carrier(name: str) -> BottleCarrier:
     
     # 载架尺寸 (mm)
     carrier_size_x = 127.8
@@ -233,17 +236,17 @@ def YB_ye(name: str) -> BottleCarrier:
             resource_size_y=beaker_diameter,
             name_prefix=name,
         ),
-        model="YB_ye",
+        model="YB_NormalLiq_250mL_Carrier",
     )
     carrier.num_items_x = 1
     carrier.num_items_y = 1
     carrier.num_items_z = 1
-    carrier[0] = YB_ye_Bottle(f"{name}_flask_1")
+    carrier[0] = YB_NormalLiq_250mL_Bottle(f"{name}_flask_1")
     return carrier
 
 
 # 高粘液瓶载架 - 单个中央位置
-def YB_gaonianye(name: str) -> BottleCarrier:
+def YB_HighVis_250mL_Carrier(name: str) -> BottleCarrier:
     
     # 载架尺寸 (mm)
     carrier_size_x = 127.8
@@ -270,17 +273,17 @@ def YB_gaonianye(name: str) -> BottleCarrier:
             resource_size_y=beaker_diameter,
             name_prefix=name,
         ),
-        model="YB_gaonianye",
+        model="YB_HighVis_250mL_Carrier",
     )
     carrier.num_items_x = 1
     carrier.num_items_y = 1
     carrier.num_items_z = 1
-    carrier[0] = YB_gao_nian_ye_Bottle(f"{name}_flask_1")
+    carrier[0] = YB_HighVis_250mL_Bottle(f"{name}_flask_1")
     return carrier
 
 
-# 100ml液体瓶载架 - 单个中央位置
-def YB_100ml_yeti(name: str) -> BottleCarrier:
+# 100mL普通液瓶载架 - 单个中央位置
+def YB_NormalLiq_100mL_Carrier(name: str) -> BottleCarrier:
     
     # 载架尺寸 (mm)
     carrier_size_x = 127.8
@@ -307,16 +310,52 @@ def YB_100ml_yeti(name: str) -> BottleCarrier:
             resource_size_y=beaker_diameter,
             name_prefix=name,
         ),
-        model="YB_100ml_yeti",
+        model="YB_NormalLiq_100mL_Carrier",
     )
     carrier.num_items_x = 1
     carrier.num_items_y = 1
     carrier.num_items_z = 1
-    carrier[0] = YB_ye_100ml_Bottle(f"{name}_flask_1")
+    carrier[0] = YB_NormalLiq_100mL_Bottle(f"{name}_flask_1")
     return carrier
 
-# 5ml分液瓶板 - 4x2布局，8个位置
-def YB_5ml_fenyepingban(name: str) -> BottleCarrier:
+# 100mL高粘液瓶载架 - 单个中央位置
+def YB_HighVis_100mL_Carrier(name: str) -> BottleCarrier:
+    
+    # 载架尺寸 (mm)
+    carrier_size_x = 127.8
+    carrier_size_y = 85.5
+    carrier_size_z = 20.0
+
+    # 烧杯尺寸
+    beaker_diameter = 60.0
+
+    # 计算中央位置
+    center_x = (carrier_size_x - beaker_diameter) / 2
+    center_y = (carrier_size_y - beaker_diameter) / 2
+    center_z = 5.0
+
+    carrier = BottleCarrier(
+        name=name,
+        size_x=carrier_size_x,
+        size_y=carrier_size_y,
+        size_z=carrier_size_z,
+        sites=create_homogeneous_resources(
+            klass=ResourceHolder,
+            locations=[Coordinate(center_x, center_y, center_z)],
+            resource_size_x=beaker_diameter,
+            resource_size_y=beaker_diameter,
+            name_prefix=name,
+        ),
+        model="YB_HighVis_100mL_Carrier",
+    )
+    carrier.num_items_x = 1
+    carrier.num_items_y = 1
+    carrier.num_items_z = 1
+    carrier[0] = YB_HighVis_100mL_Bottle(f"{name}_flask_1")
+    return carrier
+
+# 5mL分液瓶板 - 4x2布局，8个位置
+def YB_Vial_5mL_Carrier(name: str) -> BottleCarrier:
     
 
     # 载架尺寸 (mm)
@@ -355,18 +394,18 @@ def YB_5ml_fenyepingban(name: str) -> BottleCarrier:
         size_y=carrier_size_y,
         size_z=carrier_size_z,
         sites=sites,
-        model="YB_5ml_fenyepingban",
+        model="YB_Vial_5mL_Carrier",
     )
     carrier.num_items_x = 4
     carrier.num_items_y = 2
     carrier.num_items_z = 1
     ordering = ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"]
     for i in range(8):
-        carrier[i] = YB_5ml_fenyeping(f"{name}_vial_{ordering[i]}")
+        carrier[i] = YB_Vial_5mL(f"{name}_vial_{ordering[i]}")
     return carrier
 
-# 20ml分液瓶板 - 4x2布局，8个位置
-def YB_20ml_fenyepingban(name: str) -> BottleCarrier:
+# 20mL分液瓶板 - 4x2布局，8个位置
+def YB_Vial_20mL_Carrier(name: str) -> BottleCarrier:
 
 
     # 载架尺寸 (mm)
@@ -405,18 +444,18 @@ def YB_20ml_fenyepingban(name: str) -> BottleCarrier:
         size_y=carrier_size_y,
         size_z=carrier_size_z,
         sites=sites,
-        model="YB_20ml_fenyepingban",
+        model="YB_Vial_20mL_Carrier",
     )
     carrier.num_items_x = 4
     carrier.num_items_y = 2
     carrier.num_items_z = 1
     ordering = ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"]
     for i in range(8):
-        carrier[i] = YB_20ml_fenyeping(f"{name}_vial_{ordering[i]}")
+        carrier[i] = YB_Vial_20mL(f"{name}_vial_{ordering[i]}")
     return carrier
 
 # 配液瓶(小)板 - 4x2布局，8个位置
-def YB_peiyepingxiaoban(name: str) -> BottleCarrier:
+def YB_PrepBottle_15mL_Carrier(name: str) -> BottleCarrier:
     
 
     # 载架尺寸 (mm)
@@ -455,19 +494,19 @@ def YB_peiyepingxiaoban(name: str) -> BottleCarrier:
         size_y=carrier_size_y,
         size_z=carrier_size_z,
         sites=sites,
-        model="YB_peiyepingxiaoban",
+        model="YB_PrepBottle_15mL_Carrier",
     )
     carrier.num_items_x = 4
     carrier.num_items_y = 2
     carrier.num_items_z = 1
     ordering = ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"]
     for i in range(8):
-        carrier[i] = YB_pei_ye_xiao_Bottle(f"{name}_bottle_{ordering[i]}")
+        carrier[i] = YB_PrepBottle_15mL(f"{name}_bottle_{ordering[i]}")
     return carrier
 
 
 # 配液瓶(大)板 - 2x2布局，4个位置
-def YB_peiyepingdaban(name: str) -> BottleCarrier:
+def YB_PrepBottle_60mL_Carrier(name: str) -> BottleCarrier:
 
     # 载架尺寸 (mm)
     carrier_size_x = 127.8
@@ -505,18 +544,18 @@ def YB_peiyepingdaban(name: str) -> BottleCarrier:
         size_y=carrier_size_y,
         size_z=carrier_size_z,
         sites=sites,
-        model="YB_peiyepingdaban",
+        model="YB_PrepBottle_60mL_Carrier",
     )
     carrier.num_items_x = 2
     carrier.num_items_y = 2
     carrier.num_items_z = 1
     ordering = ["A1", "A2", "B1", "B2"]
     for i in range(4):
-        carrier[i] = YB_pei_ye_da_Bottle(f"{name}_bottle_{ordering[i]}")
+        carrier[i] = YB_PrepBottle_60mL(f"{name}_bottle_{ordering[i]}")
     return carrier
 
 # 加样头(大)板 - 1x1布局，1个位置
-def YB_jia_yang_tou_da_Carrier(name: str) -> BottleCarrier:
+def YB_DosingHead_L_Carrier(name: str) -> BottleCarrier:
     
     # 载架尺寸 (mm)
     carrier_size_x = 127.8
@@ -554,16 +593,16 @@ def YB_jia_yang_tou_da_Carrier(name: str) -> BottleCarrier:
         size_y=carrier_size_y,
         size_z=carrier_size_z,
         sites=sites,
-        model="YB_jia_yang_tou_da_Carrier",
+        model="YB_DosingHead_L_Carrier",
     )
     carrier.num_items_x = 1
     carrier.num_items_y = 1
     carrier.num_items_z = 1
-    carrier[0] = YB_jia_yang_tou_da(f"{name}_head_1")
+    carrier[0] = YB_DosingHead_L(f"{name}_head_1")
     return carrier
 
 
-def YB_shi_pei_qi_kuai(name: str) -> BottleCarrier:
+def YB_Adapter_60mL(name: str) -> BottleCarrier:
     """适配器块 - 单个中央位置"""
 
     # 载架尺寸 (mm)
@@ -591,7 +630,7 @@ def YB_shi_pei_qi_kuai(name: str) -> BottleCarrier:
             resource_size_y=adapter_diameter,
             name_prefix=name,
         ),
-        model="YB_shi_pei_qi_kuai",
+        model="YB_Adapter_60mL",
     )
     carrier.num_items_x = 1
     carrier.num_items_y = 1
@@ -600,7 +639,7 @@ def YB_shi_pei_qi_kuai(name: str) -> BottleCarrier:
     return carrier
 
 
-def YB_qiang_tou_he(name: str) -> BottleCarrier:
+def YB_TipRack_50uL(name: str) -> BottleCarrier:
     """枪头盒 - 8x12布局，96个位置"""
 
     # 载架尺寸 (mm)
@@ -609,9 +648,9 @@ def YB_qiang_tou_he(name: str) -> BottleCarrier:
     carrier_size_z = 55.0
 
     # 枪头尺寸
-    tip_diameter = 10.0
-    tip_spacing_x = 9.0  # X方向间距
-    tip_spacing_y = 9.0  # Y方向间距
+    tip_diameter = 7.0
+    tip_spacing_x = 7.5  # X方向间距
+    tip_spacing_y = 7.5  # Y方向间距
 
     # 计算起始位置 (居中排列)
     start_x = (carrier_size_x - (12 - 1) * tip_spacing_x - tip_diameter) / 2
@@ -639,7 +678,7 @@ def YB_qiang_tou_he(name: str) -> BottleCarrier:
         size_y=carrier_size_y,
         size_z=carrier_size_z,
         sites=sites,
-        model="YB_qiang_tou_he",
+        model="YB_TipRack_50uL",
     )
     carrier.num_items_x = 12
     carrier.num_items_y = 8
@@ -648,6 +687,182 @@ def YB_qiang_tou_he(name: str) -> BottleCarrier:
     for i in range(96):
         row = chr(65 + i // 12)  # A-H
         col = (i % 12) + 1  # 1-12
-        carrier[i] = YB_qiang_tou(f"{name}_tip_{row}{col}")
+        carrier[i] = YB_Tip_50uL(f"{name}_tip_{row}{col}")
+    return carrier
+
+
+def YB_TipRack_5000uL(name: str) -> BottleCarrier:
+    """枪头盒 - 4x6布局，24个位置"""
+
+    # 载架尺寸 (mm)
+    carrier_size_x = 127.8
+    carrier_size_y = 85.5
+    carrier_size_z = 95.0
+
+    # 枪头尺寸
+    tip_diameter = 16.0
+    tip_spacing_x = 16.5  # X方向间距
+    tip_spacing_y = 16.5  # Y方向间距
+
+    # 计算起始位置 (居中排列)
+    start_x = (carrier_size_x - (6 - 1) * tip_spacing_x - tip_diameter) / 2
+    start_y = (carrier_size_y - (4 - 1) * tip_spacing_y - tip_diameter) / 2
+
+    sites = create_ordered_items_2d(
+        klass=ResourceHolder,
+        num_items_x=6,
+        num_items_y=4,
+        dx=start_x,
+        dy=start_y,
+        dz=5.0,
+        item_dx=tip_spacing_x,
+        item_dy=tip_spacing_y,
+        size_x=tip_diameter,
+        size_y=tip_diameter,
+        size_z=carrier_size_z,
+    )
+    for k, v in sites.items():
+        v.name = f"{name}_{v.name}"
+
+    carrier = BottleCarrier(
+        name=name,
+        size_x=carrier_size_x,
+        size_y=carrier_size_y,
+        size_z=carrier_size_z,
+        sites=sites,
+        model="YB_TipRack_5000uL",
+    )
+    carrier.num_items_x = 6
+    carrier.num_items_y = 4
+    carrier.num_items_z = 1
+    # 创建24个枪头
+    for i in range(24):
+        row = chr(65 + i // 6)  # A-D
+        col = (i % 6) + 1  # 1-6
+        carrier[i] = YB_Tip_5000uL(f"{name}_tip_{row}{col}")
+    return carrier
+
+
+
+def YB_TipRack_Mixed(name: str) -> BottleCarrier:
+    """混合枪头盒 - 复杂布局
+    上层: 2x8空位（原50uL枪头位置，现空余）
+    中层: 4x4布局，放5000uL枪头
+    下层: 2x8布局，放1000uL枪头
+    """
+
+    # 载架尺寸 (mm)
+    carrier_size_x = 127.8
+    carrier_size_y = 85.5
+    carrier_size_z = 95.0
+
+    # 各类枪头的尺寸参数
+    tip_5000_diameter = 16.0
+    tip_5000_spacing_x = 16.5
+    tip_5000_spacing_y = 16.5
+    
+    tip_1000_diameter = 7.0
+    tip_1000_spacing_x = 7.5
+    tip_1000_spacing_y = 7.5
+
+    # 空位尺寸（上层2x8，原50uL位置）
+    empty_diameter = 7.0
+    empty_spacing_x = 7.5
+    empty_spacing_y = 7.5
+
+    # 计算各层的起始位置
+    # 上层空位 (2x8)
+    empty_top_start_x = (carrier_size_x - (8 - 1) * empty_spacing_x - empty_diameter) / 2
+    empty_top_start_y = 5.0
+    
+    # 中层5000uL (4x4)
+    tip_5000_start_x = (carrier_size_x - (4 - 1) * tip_5000_spacing_x - tip_5000_diameter) / 2
+    tip_5000_start_y = empty_top_start_y + 2 * empty_spacing_y + 5.0
+    
+    # 下层1000uL (2x8)
+    tip_1000_start_x = (carrier_size_x - (8 - 1) * tip_1000_spacing_x - tip_1000_diameter) / 2
+    tip_1000_start_y = tip_5000_start_y + 4 * tip_5000_spacing_y + 5.0
+
+    sites = {}
+    
+    # 创建上层空位 (2x8) - 不创建实际的枪头对象
+    empty_top_sites = create_ordered_items_2d(
+        klass=ResourceHolder,
+        num_items_x=8,
+        num_items_y=2,
+        dx=empty_top_start_x,
+        dy=empty_top_start_y,
+        dz=5.0,
+        item_dx=empty_spacing_x,
+        item_dy=empty_spacing_y,
+        size_x=empty_diameter,
+        size_y=empty_diameter,
+        size_z=carrier_size_z,
+    )
+    # 添加空位，索引 0-15
+    for k, v in empty_top_sites.items():
+        v.name = f"{name}_empty_top_{v.name}"
+        sites[k] = v
+    
+    # 创建中层5000uL枪头位 (4x4)，索引 16-31
+    tip_5000_sites = create_ordered_items_2d(
+        klass=ResourceHolder,
+        num_items_x=4,
+        num_items_y=4,
+        dx=tip_5000_start_x,
+        dy=tip_5000_start_y,
+        dz=15.0,
+        item_dx=tip_5000_spacing_x,
+        item_dy=tip_5000_spacing_y,
+        size_x=tip_5000_diameter,
+        size_y=tip_5000_diameter,
+        size_z=carrier_size_z,
+    )
+    for i, (k, v) in enumerate(tip_5000_sites.items()):
+        v.name = f"{name}_5000_{v.name}"
+        sites[16 + i] = v
+    
+    # 创建下层1000uL枪头位 (2x8)，索引 32-47
+    tip_1000_sites = create_ordered_items_2d(
+        klass=ResourceHolder,
+        num_items_x=8,
+        num_items_y=2,
+        dx=tip_1000_start_x,
+        dy=tip_1000_start_y,
+        dz=25.0,
+        item_dx=tip_1000_spacing_x,
+        item_dy=tip_1000_spacing_y,
+        size_x=tip_1000_diameter,
+        size_y=tip_1000_diameter,
+        size_z=carrier_size_z,
+    )
+    for i, (k, v) in enumerate(tip_1000_sites.items()):
+        v.name = f"{name}_1000_{v.name}"
+        sites[32 + i] = v
+
+    carrier = BottleCarrier(
+        name=name,
+        size_x=carrier_size_x,
+        size_y=carrier_size_y,
+        size_z=carrier_size_z,
+        sites=sites,
+        model="YB_TipRack_Mixed",
+    )
+    carrier.num_items_x = 8  # 最大宽度
+    carrier.num_items_y = 8  # 总行数 (2+4+2)
+    carrier.num_items_z = 1
+    
+    # 为5000uL枪头创建实例 (16个)，对应索引 16-31
+    for i in range(16):
+        row = chr(65 + i // 4)  # A-D
+        col = (i % 4) + 1  # 1-4
+        carrier[16 + i] = YB_Tip_5000uL(f"{name}_tip5000_{row}{col}")
+    
+    # 为1000uL枪头创建实例 (16个)，对应索引 32-47
+    for i in range(16):
+        row = chr(65 + i // 8)  # A-B
+        col = (i % 8) + 1  # 1-8
+        carrier[32 + i] = YB_Tip_1000uL(f"{name}_tip1000_{row}{col}")
+    
     return carrier
 
