@@ -4,6 +4,8 @@ temp/
 output/
 unilabos_data/
 pyrightconfig.json
+.cursorignore
+device_package*/
 ## Python
 
 # Byte-compiled / optimized / DLL files
@@ -250,3 +252,9 @@ ros-humble-unilabos-msgs-0.9.13-h6403a04_5.tar.bz2
 test_config.py
 
 
+/.claude
+/.conda
+/.cursor
+/.github
+/.conda/base
+.conda/base/recipe.yaml
