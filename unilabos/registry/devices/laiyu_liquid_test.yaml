@@ -22,7 +22,8 @@ xyz_stepper_controller:
               required:
               - degrees
               type: object
-            result: {}
+            result:
+              type: integer
           required:
           - goal
           title: degrees_to_steps参数
@@ -47,7 +48,8 @@ xyz_stepper_controller:
               required:
               - axis
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: emergency_stop参数
@@ -72,7 +74,10 @@ xyz_stepper_controller:
                   type: boolean
               required: []
               type: object
-            result: {}
+            result:
+              additionalProperties:
+                type: boolean
+              type: object
           required:
           - goal
           title: enable_all_axes参数
@@ -101,7 +106,8 @@ xyz_stepper_controller:
               required:
               - axis
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: enable_motor参数
@@ -122,7 +128,10 @@ xyz_stepper_controller:
               properties: {}
               required: []
               type: object
-            result: {}
+            result:
+              additionalProperties:
+                type: boolean
+              type: object
           required:
           - goal
           title: home_all_axes参数
@@ -147,7 +156,8 @@ xyz_stepper_controller:
               required:
               - axis
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: home_axis参数
@@ -188,7 +198,8 @@ xyz_stepper_controller:
               - axis
               - position
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: move_to_position参数
@@ -229,7 +240,8 @@ xyz_stepper_controller:
               - axis
               - degrees
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: move_to_position_degrees参数
@@ -270,7 +282,8 @@ xyz_stepper_controller:
               - axis
               - revolutions
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: move_to_position_revolutions参数
@@ -301,14 +314,17 @@ xyz_stepper_controller:
                   default: 5000
                   type: integer
                 x:
-                  type: string
+                  type: integer
                 y:
-                  type: string
+                  type: integer
                 z:
-                  type: string
+                  type: integer
               required: []
               type: object
-            result: {}
+            result:
+              additionalProperties:
+                type: boolean
+              type: object
           required:
           - goal
           title: move_xyz参数
@@ -339,14 +355,17 @@ xyz_stepper_controller:
                   default: 5000
                   type: integer
                 x_deg:
-                  type: string
+                  type: number
                 y_deg:
-                  type: string
+                  type: number
                 z_deg:
-                  type: string
+                  type: number
               required: []
               type: object
-            result: {}
+            result:
+              additionalProperties:
+                type: boolean
+              type: object
           required:
           - goal
           title: move_xyz_degrees参数
@@ -377,14 +396,17 @@ xyz_stepper_controller:
                   default: 5000
                   type: integer
                 x_rev:
-                  type: string
+                  type: number
                 y_rev:
-                  type: string
+                  type: number
                 z_rev:
-                  type: string
+                  type: number
               required: []
               type: object
-            result: {}
+            result:
+              additionalProperties:
+                type: boolean
+              type: object
           required:
           - goal
           title: move_xyz_revolutions参数
@@ -409,7 +431,8 @@ xyz_stepper_controller:
               required:
               - revolutions
               type: object
-            result: {}
+            result:
+              type: integer
           required:
           - goal
           title: revolutions_to_steps参数
@@ -442,7 +465,8 @@ xyz_stepper_controller:
               - axis
               - speed
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: set_speed_mode参数
@@ -467,7 +491,8 @@ xyz_stepper_controller:
               required:
               - steps
               type: object
-            result: {}
+            result:
+              type: number
           required:
           - goal
           title: steps_to_degrees参数
@@ -492,7 +517,8 @@ xyz_stepper_controller:
               required:
               - steps
               type: object
-            result: {}
+            result:
+              type: number
           required:
           - goal
           title: steps_to_revolutions参数
@@ -513,7 +539,10 @@ xyz_stepper_controller:
               properties: {}
               required: []
               type: object
-            result: {}
+            result:
+              additionalProperties:
+                type: boolean
+              type: object
           required:
           - goal
           title: stop_all_axes参数
@@ -542,7 +571,8 @@ xyz_stepper_controller:
               required:
               - axis
               type: object
-            result: {}
+            result:
+              type: boolean
           required:
           - goal
           title: wait_for_completion参数
@@ -550,8 +580,7 @@ xyz_stepper_controller:
         type: UniLabJsonCommand
     module: unilabos.devices.liquid_handling.laiyu.drivers.xyz_stepper_driver:XYZStepperController
     status_types:
-      all_positions: dict
-      motor_status: unilabos.devices.liquid_handling.laiyu.drivers.xyz_stepper_driver:MotorPosition
+      all_positions: Dict[MotorAxis, MotorPosition]
     type: python
   config_info: []
   description: 新XYZ控制器
@@ -574,12 +603,10 @@ xyz_stepper_controller:
     data:
       properties:
         all_positions:
-          type: object
-        motor_status:
+          additionalProperties:
+            type: object
           type: object
       required:
-      - motor_status
       - all_positions
       type: object
-  registry_type: device
   version: 1.0.0

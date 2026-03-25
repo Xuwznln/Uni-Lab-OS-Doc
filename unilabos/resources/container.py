@@ -12,9 +12,11 @@ class RegularContainer(Container):
             kwargs["size_y"] = 0
         if "size_z" not in kwargs:
             kwargs["size_z"] = 0
+        if "category" not in kwargs:
+            kwargs["category"] = "container"
 
         self.kwargs = kwargs
-        super().__init__(*args, category="container", **kwargs)
+        super().__init__(*args, **kwargs)
 
     def load_state(self, state: Dict[str, Any]):
         super().load_state(state)
