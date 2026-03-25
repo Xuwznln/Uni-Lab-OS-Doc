@@ -1,4 +1,4 @@
-"""model_upload.py 单元测试（upload_device_model / download_model_from_oss）"""
+"""model_upload.py 单元测试（upload_device_model / download_model_from_oss / XOR 加解密）"""
 
 import unittest
 import tempfile
@@ -13,6 +13,8 @@ from unilabos.app.model_upload import (
     upload_device_model,
     download_model_from_oss,
     _MODEL_EXTENSIONS,
+    _MESH_ENCRYPT_EXTENSIONS,
+    _xor_transform,
 )
 
 
@@ -215,6 +217,279 @@ class TestModelExtensions(unittest.TestCase):
         excluded = {".txt", ".json", ".py", ".png", ".jpg"}
         for ext in excluded:
             self.assertNotIn(ext, _MODEL_EXTENSIONS, f"{ext} should not be supported")
+
+
+class TestXorTransform(unittest.TestCase):
+    """XOR 加密/解密核心函数测试。"""
+
+    def test_roundtrip_symmetry(self):
+        """XOR 加密后再解密恢复原始数据（对称性）。"""
+        original = b"Hello, this is a test model file content."
+        encrypted = _xor_transform(original)
+        self.assertNotEqual(encrypted, original)
+        decrypted = _xor_transform(encrypted)
+        self.assertEqual(decrypted, original)
+
+    def test_empty_data(self):
+        """空数据加密后仍为空。"""
+        result = _xor_transform(b"")
+        self.assertEqual(result, b"")
+
+    def test_single_byte(self):
+        """单字节数据正确加解密。"""
+        original = b"\xff"
+        encrypted = _xor_transform(original)
+        decrypted = _xor_transform(encrypted)
+        self.assertEqual(decrypted, original)
+
+    def test_data_longer_than_key(self):
+        """超过密钥长度（32 字节）的数据正确循环 XOR。"""
+        original = bytes(range(256)) * 2  # 512 字节
+        encrypted = _xor_transform(original)
+        self.assertNotEqual(encrypted, original)
+        decrypted = _xor_transform(encrypted)
+        self.assertEqual(decrypted, original)
+
+    def test_data_exactly_key_length(self):
+        """恰好 32 字节（密钥长度）的数据正确处理。"""
+        original = bytes(range(32))
+        encrypted = _xor_transform(original)
+        decrypted = _xor_transform(encrypted)
+        self.assertEqual(decrypted, original)
+
+    def test_all_zeros_produces_key(self):
+        """全零数据 XOR 后结果应为密钥本身。"""
+        zeros = b"\x00" * 32
+        result = _xor_transform(zeros)
+        key = os.environ.get(
+            "UNILAB_MESH_XOR_KEY", "unilab3d-model-protection-key-v1"
+        ).encode()
+        self.assertEqual(result, key)
+
+    def test_custom_key(self):
+        """自定义密钥正确加解密。"""
+        custom_key = b"custom-key-12345"
+        original = b"test data for custom key"
+        encrypted = _xor_transform(original, key=custom_key)
+        decrypted = _xor_transform(encrypted, key=custom_key)
+        self.assertEqual(decrypted, original)
+
+    def test_different_keys_produce_different_results(self):
+        """不同密钥产生不同加密结果。"""
+        data = b"same data"
+        key1 = b"key-one-is-here!"
+        key2 = b"key-two-is-here!"
+        self.assertNotEqual(_xor_transform(data, key1), _xor_transform(data, key2))
+
+    def test_binary_stl_header(self):
+        """二进制内容（模拟 STL 文件头）正确加解密。"""
+        stl_header = b"\x00" * 80 + b"\x03\x00\x00\x00"
+        encrypted = _xor_transform(stl_header)
+        decrypted = _xor_transform(encrypted)
+        self.assertEqual(decrypted, stl_header)
+
+    def test_large_data_roundtrip(self):
+        """大数据（1MB）加解密正确性。"""
+        original = os.urandom(1024 * 1024)
+        encrypted = _xor_transform(original)
+        decrypted = _xor_transform(encrypted)
+        self.assertEqual(decrypted, original)
+
+    def test_consistency_with_frontend_key(self):
+        """验证 Python 端与前端使用相同的默认密钥。"""
+        frontend_key = b"unilab3d-model-protection-key-v1"
+        data = b"cross-platform test data"
+        encrypted = _xor_transform(data, key=frontend_key)
+        # 用默认密钥解密（应一致）
+        decrypted = _xor_transform(encrypted)
+        self.assertEqual(decrypted, data)
+
+
+class TestEncryptExtensions(unittest.TestCase):
+    """加密文件扩展名配置测试。"""
+
+    def test_all_mesh_formats_in_encrypt_set(self):
+        """所有 mesh 格式都在加密扩展名集合中。"""
+        expected = {".stl", ".dae", ".obj", ".fbx", ".gltf", ".glb"}
+        self.assertEqual(_MESH_ENCRYPT_EXTENSIONS, expected)
+
+    def test_xml_formats_not_encrypted(self):
+        """XACRO/URDF/YAML 文件不加密。"""
+        for ext in {".xacro", ".urdf", ".yaml", ".yml"}:
+            self.assertNotIn(ext, _MESH_ENCRYPT_EXTENSIONS)
+
+    def test_encrypt_is_subset_of_model_extensions(self):
+        """加密扩展名是模型扩展名的子集。"""
+        self.assertTrue(_MESH_ENCRYPT_EXTENSIONS.issubset(_MODEL_EXTENSIONS))
+
+
+class TestPutUploadEncryption(unittest.TestCase):
+    """_put_upload 中的条件加密测试。"""
+
+    @patch("unilabos.app.model_upload.requests.put")
+    def test_stl_file_encrypted_before_upload(self, mock_put):
+        """STL 文件上传前自动 XOR 加密。"""
+        from unilabos.app.model_upload import _put_upload
+
+        original_data = b"solid test\nfacet normal 0 0 1\n"
+        with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as f:
+            f.write(original_data)
+            f.flush()
+            tmp_path = Path(f.name)
+
+        try:
+            mock_put.return_value = MagicMock(status_code=200)
+            mock_put.return_value.raise_for_status = MagicMock()
+            _put_upload(tmp_path, "https://oss.example.com/upload")
+
+            uploaded_data = mock_put.call_args.kwargs.get("data")
+            self.assertIsNotNone(uploaded_data)
+            self.assertNotEqual(uploaded_data, original_data)
+            # 解密后应恢复原始数据
+            self.assertEqual(_xor_transform(uploaded_data), original_data)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @patch("unilabos.app.model_upload.requests.put")
+    def test_xacro_file_not_encrypted(self, mock_put):
+        """XACRO 文件上传时不加密。"""
+        from unilabos.app.model_upload import _put_upload
+
+        original_data = b'<?xml version="1.0"?><robot></robot>'
+        with tempfile.NamedTemporaryFile(suffix=".xacro", delete=False) as f:
+            f.write(original_data)
+            f.flush()
+            tmp_path = Path(f.name)
+
+        try:
+            mock_put.return_value = MagicMock(status_code=200)
+            mock_put.return_value.raise_for_status = MagicMock()
+            _put_upload(tmp_path, "https://oss.example.com/upload")
+
+            uploaded_data = mock_put.call_args.kwargs.get("data")
+            self.assertEqual(uploaded_data, original_data)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    @patch("unilabos.app.model_upload.requests.put")
+    def test_all_mesh_formats_encrypted(self, mock_put):
+        """所有 mesh 格式上传前都加密。"""
+        from unilabos.app.model_upload import _put_upload
+
+        original_data = b"test mesh binary data content"
+        for ext in [".stl", ".dae", ".obj", ".fbx", ".gltf", ".glb"]:
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+                f.write(original_data)
+                f.flush()
+                tmp_path = Path(f.name)
+            try:
+                mock_put.reset_mock()
+                mock_put.return_value = MagicMock(status_code=200)
+                mock_put.return_value.raise_for_status = MagicMock()
+                _put_upload(tmp_path, "https://oss.example.com/upload")
+
+                uploaded_data = mock_put.call_args.kwargs.get("data")
+                self.assertNotEqual(uploaded_data, original_data, f"{ext} 文件应被加密")
+            finally:
+                tmp_path.unlink(missing_ok=True)
+
+    @patch("unilabos.app.model_upload.requests.put")
+    def test_uppercase_extension_encrypted(self, mock_put):
+        """大写扩展名 .STL 也被加密（大小写不敏感）。"""
+        from unilabos.app.model_upload import _put_upload
+
+        original_data = b"uppercase ext test"
+        with tempfile.NamedTemporaryFile(suffix=".STL", delete=False) as f:
+            f.write(original_data)
+            f.flush()
+            tmp_path = Path(f.name)
+        try:
+            mock_put.return_value = MagicMock(status_code=200)
+            mock_put.return_value.raise_for_status = MagicMock()
+            _put_upload(tmp_path, "https://oss.example.com/upload")
+
+            uploaded_data = mock_put.call_args.kwargs.get("data")
+            self.assertNotEqual(uploaded_data, original_data)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+
+class TestDownloadFileDecryption(unittest.TestCase):
+    """_download_file 中的条件解密测试。"""
+
+    @patch("unilabos.app.model_upload.requests.get")
+    def test_mesh_file_decrypted_on_download(self, mock_get):
+        """下载的 mesh 文件自动 XOR 解密后存本地。"""
+        from unilabos.app.model_upload import _download_file
+
+        original_data = b"original stl content here"
+        encrypted_data = _xor_transform(original_data)
+
+        mock_response = MagicMock()
+        mock_response.content = encrypted_data
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = Path(tmpdir) / "model.stl"
+            _download_file("https://oss.example.com/model.stl", local_path)
+            self.assertEqual(local_path.read_bytes(), original_data)
+
+    @patch("unilabos.app.model_upload.requests.get")
+    def test_xacro_file_not_decrypted(self, mock_get):
+        """下载的 XACRO 文件不做解密处理。"""
+        from unilabos.app.model_upload import _download_file
+
+        xml_data = b'<?xml version="1.0"?><robot></robot>'
+
+        mock_response = MagicMock()
+        mock_response.content = xml_data
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = Path(tmpdir) / "macro.xacro"
+            _download_file("https://oss.example.com/macro.xacro", local_path)
+            self.assertEqual(local_path.read_bytes(), xml_data)
+
+    @patch("unilabos.app.model_upload.requests.get")
+    def test_upload_download_roundtrip(self, mock_get):
+        """上传加密 → 下载解密的完整 round-trip。"""
+        from unilabos.app.model_upload import _download_file
+
+        original_data = b"binary stl mesh \x00\xff\x80 special bytes"
+        encrypted_data = _xor_transform(original_data)
+
+        mock_response = MagicMock()
+        mock_response.content = encrypted_data
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = Path(tmpdir) / "mesh.stl"
+            _download_file("https://oss.example.com/mesh.stl", local_path)
+            self.assertEqual(local_path.read_bytes(), original_data)
+
+    @patch("unilabos.app.model_upload.requests.get")
+    def test_all_mesh_formats_decrypted(self, mock_get):
+        """所有 mesh 格式下载后都解密。"""
+        from unilabos.app.model_upload import _download_file
+
+        original_data = b"mesh content for roundtrip"
+        encrypted_data = _xor_transform(original_data)
+
+        for ext in [".stl", ".dae", ".obj", ".fbx", ".gltf", ".glb"]:
+            mock_response = MagicMock()
+            mock_response.content = encrypted_data
+            mock_response.raise_for_status = MagicMock()
+            mock_get.return_value = mock_response
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_path = Path(tmpdir) / f"model{ext}"
+                _download_file(f"https://oss.example.com/model{ext}", local_path)
+                self.assertEqual(
+                    local_path.read_bytes(), original_data, f"{ext} 文件应被解密"
+                )
 
 
 if __name__ == "__main__":
