@@ -24,8 +24,22 @@ _MESH_BASE_DIR = Path(__file__).parent.parent / "device_mesh"
 # 支持的模型文件后缀
 _MODEL_EXTENSIONS = frozenset({
     ".xacro", ".urdf", ".stl", ".dae", ".obj",
-    ".gltf", ".glb", ".yaml", ".yml",
+    ".gltf", ".glb", ".fbx", ".yaml", ".yml",
 })
+
+# 需要 XOR 加密/解密的 mesh 文件后缀（反爬保护 — 方案 C）
+_MESH_ENCRYPT_EXTENSIONS = frozenset({
+    ".stl", ".dae", ".obj", ".fbx", ".gltf", ".glb",
+})
+
+# XOR 密钥 — 从环境变量读取，与前端 mesh-decrypt.ts 一致
+_XOR_KEY = os.environ.get("UNILAB_MESH_XOR_KEY", "unilab3d-model-protection-key-v1").encode()
+
+
+def _xor_transform(data: bytes, key: bytes = _XOR_KEY) -> bytes:
+    """XOR 加密/解密（对称操作）。"""
+    key_len = len(key)
+    return bytes(b ^ key[i % key_len] for i, b in enumerate(data))
 
 
 def upload_device_model(
@@ -170,17 +184,27 @@ def download_model_from_oss(
 
 
 def _put_upload(local_path: Path, upload_url: str) -> None:
-    """通过预签名 URL 上传文件到 OSS。"""
+    """通过预签名 URL 上传文件到 OSS。对 mesh 文件自动 XOR 加密。"""
     with open(local_path, "rb") as f:
-        resp = requests.put(upload_url, data=f, timeout=120)
-        resp.raise_for_status()
+        data = f.read()
+    # 对 mesh 文件 XOR 加密后上传（反爬保护 — 方案 C）
+    if local_path.suffix.lower() in _MESH_ENCRYPT_EXTENSIONS:
+        data = _xor_transform(data)
+        logger.debug(f"[模型上传] XOR 加密: {local_path.name}")
+    resp = requests.put(upload_url, data=data, timeout=120)
+    resp.raise_for_status()
     logger.debug(f"[模型上传] 已上传: {local_path.name}")
 
 
 def _download_file(url: str, local_path: Path) -> None:
-    """下载单个文件到本地路径。"""
+    """下载单个文件到本地路径。对 mesh 文件自动 XOR 解密。"""
     local_path.parent.mkdir(parents=True, exist_ok=True)
     resp = requests.get(url, timeout=60)
     resp.raise_for_status()
-    local_path.write_bytes(resp.content)
+    data = resp.content
+    # 从 OSS 下载的 mesh 文件是加密的，需要 XOR 解密后再存本地
+    if local_path.suffix.lower() in _MESH_ENCRYPT_EXTENSIONS:
+        data = _xor_transform(data)
+        logger.debug(f"[模型下载] XOR 解密: {local_path.name}")
+    local_path.write_bytes(data)
     logger.debug(f"[模型下载] 已下载: {local_path}")
