@@ -11,30 +11,21 @@ logger = logging.getLogger(__name__)
 
 def validate_and_fix_params(stir_time: float, stir_speed: float, settling_time: float) -> tuple:
     """验证和修正参数"""
-    # ⏰ 搅拌时间验证
     if stir_time < 0:
-        debug_print(f"⚠️ 搅拌时间 {stir_time}s 无效，修正为 100s 🕐")
+        debug_print(f"搅拌时间 {stir_time}s 无效，修正为 100s")
         stir_time = 100.0
     elif stir_time > 100:  # 限制为100s
-        debug_print(f"⚠️ 搅拌时间 {stir_time}s 过长，仿真运行时，修正为 100s 🕐")
+        debug_print(f"搅拌时间 {stir_time}s 过长，仿真运行时修正为 100s")
         stir_time = 100.0
-    else:
-        debug_print(f"✅ 搅拌时间 {stir_time}s ({stir_time/60:.1f}分钟) 有效 ⏰")
-    
-    # 🌪️ 搅拌速度验证
+
     if stir_speed < 10.0 or stir_speed > 1500.0:
-        debug_print(f"⚠️ 搅拌速度 {stir_speed} RPM 超出范围，修正为 300 RPM 🌪️")
+        debug_print(f"搅拌速度 {stir_speed} RPM 超出范围，修正为 300 RPM")
         stir_speed = 300.0
-    else:
-        debug_print(f"✅ 搅拌速度 {stir_speed} RPM 在正常范围内 🌪️")
-    
-    # ⏱️ 沉降时间验证
+
     if settling_time < 0 or settling_time > 600:  # 限制为10分钟
-        debug_print(f"⚠️ 沉降时间 {settling_time}s 超出范围，修正为 60s ⏱️")
+        debug_print(f"沉降时间 {settling_time}s 超出范围，修正为 60s")
         settling_time = 60.0
-    else:
-        debug_print(f"✅ 沉降时间 {settling_time}s 在正常范围内 ⏱️")
-    
+
     return stir_time, stir_speed, settling_time
 
 def extract_vessel_id(vessel) -> str:
@@ -58,16 +49,13 @@ def generate_stir_protocol(
 ) -> List[Dict[str, Any]]:
     """生成搅拌操作的协议序列 - 修复vessel参数传递"""
     
-    # 🔧 核心修改：正确处理vessel参数
     vessel_id = extract_vessel_id(vessel)
     vessel_display = get_vessel_display_info(vessel)
-    
-    # 🔧 关键修复：确保vessel_resource是完整的Resource对象
+
+    # 确保vessel_resource是完整的Resource对象
     if isinstance(vessel, dict):
-        vessel_resource = vessel  # 已经是完整的Resource字典
-        debug_print(f"✅ 使用传入的vessel Resource对象")
+        vessel_resource = vessel
     else:
-        # 如果只是字符串，构建一个基本的Resource对象
         vessel_resource = {
             "id": vessel,
             "name": "",
@@ -83,10 +71,6 @@ def generate_stir_protocol(
             "sample_id": "",
             "type": ""
         }
-        debug_print(f"🔧 构建了基本的vessel Resource对象: {vessel}")
-    
-    debug_print(f"开始生成搅拌协议: vessel={vessel_id}, time={time}, "
-                f"stir_time={stir_time}, stir_speed={stir_speed}RPM, settling={settling_time}")
 
     # 参数验证
     if not vessel_id:
@@ -140,8 +124,7 @@ def generate_stir_protocol(
         "device_id": stirrer_id,
         "action_name": "stir",
         "action_kwargs": {
-            # 🔧 关键修复：传递vessel_id字符串，而不是完整的Resource对象
-            "vessel": {"id": vessel_id},  # 传递字符串ID，不是Resource对象
+            "vessel": {"id": vessel_id},
             "time": str(time),
             "event": event,
             "time_spec": time_spec,
@@ -171,16 +154,13 @@ def generate_start_stir_protocol(
 ) -> List[Dict[str, Any]]:
     """生成开始搅拌操作的协议序列 - 修复vessel参数传递"""
     
-    # 🔧 核心修改：正确处理vessel参数
     vessel_id = extract_vessel_id(vessel)
     vessel_display = get_vessel_display_info(vessel)
-    
-    # 🔧 关键修复：确保vessel_resource是完整的Resource对象
+
+    # 确保vessel_resource是完整的Resource对象
     if isinstance(vessel, dict):
-        vessel_resource = vessel  # 已经是完整的Resource字典
-        debug_print(f"✅ 使用传入的vessel Resource对象")
+        vessel_resource = vessel
     else:
-        # 如果只是字符串，构建一个基本的Resource对象
         vessel_resource = {
             "id": vessel,
             "name": "",
@@ -196,10 +176,7 @@ def generate_start_stir_protocol(
             "sample_id": "",
             "type": ""
         }
-        debug_print(f"构建了基本的vessel Resource对象: {vessel}")
 
-    debug_print(f"启动搅拌协议: vessel={vessel_id}, speed={stir_speed}RPM, purpose='{purpose}'")
-    
     # 基础验证
     if not vessel_id or vessel_id not in G.nodes():
         raise ValueError("vessel 参数无效")
@@ -207,23 +184,21 @@ def generate_start_stir_protocol(
     # 参数修正
     if stir_speed < 10.0 or stir_speed > 1500.0:
         stir_speed = 300.0
-    
+
     # 查找设备
     stirrer_id = find_connected_stirrer(G, vessel_id)
-    
-    # 🔧 关键修复：传递vessel_id字符串
+
     action_sequence = [{
         "device_id": stirrer_id,
         "action_name": "start_stir",
         "action_kwargs": {
-            # 🔧 关键修复：传递vessel_id字符串，而不是完整的Resource对象
-            "vessel": {"id": vessel_id},  # 传递字符串ID，不是Resource对象
+            "vessel": {"id": vessel_id},
             "stir_speed": stir_speed,
             "purpose": purpose or f"启动搅拌 {stir_speed} RPM"
         }
     }]
-    
-    debug_print(f"启动搅拌协议生成完成: {stirrer_id}")
+
+    debug_print(f"启动搅拌协议: {vessel_display}, {stir_speed}RPM, device={stirrer_id}")
     return action_sequence
 
 def generate_stop_stir_protocol(
@@ -233,16 +208,13 @@ def generate_stop_stir_protocol(
 ) -> List[Dict[str, Any]]:
     """生成停止搅拌操作的协议序列 - 修复vessel参数传递"""
     
-    # 🔧 核心修改：正确处理vessel参数
     vessel_id = extract_vessel_id(vessel)
     vessel_display = get_vessel_display_info(vessel)
-    
-    # 🔧 关键修复：确保vessel_resource是完整的Resource对象
+
+    # 确保vessel_resource是完整的Resource对象
     if isinstance(vessel, dict):
-        vessel_resource = vessel  # 已经是完整的Resource字典
-        debug_print(f"✅ 使用传入的vessel Resource对象")
+        vessel_resource = vessel
     else:
-        # 如果只是字符串，构建一个基本的Resource对象
         vessel_resource = {
             "id": vessel,
             "name": "",
@@ -258,28 +230,23 @@ def generate_stop_stir_protocol(
             "sample_id": "",
             "type": ""
         }
-        debug_print(f"构建了基本的vessel Resource对象: {vessel}")
-
-    debug_print(f"停止搅拌协议: vessel={vessel_id}")
 
     # 基础验证
     if not vessel_id or vessel_id not in G.nodes():
         raise ValueError("vessel 参数无效")
-    
+
     # 查找设备
     stirrer_id = find_connected_stirrer(G, vessel_id)
-    
-    # 🔧 关键修复：传递vessel_id字符串
+
     action_sequence = [{
         "device_id": stirrer_id,
         "action_name": "stop_stir",
         "action_kwargs": {
-            # 🔧 关键修复：传递vessel_id字符串，而不是完整的Resource对象
-            "vessel": {"id": vessel_id},  # 传递字符串ID，不是Resource对象
+            "vessel": {"id": vessel_id},
         }
     }]
-    
-    debug_print(f"停止搅拌协议生成完成: {stirrer_id}")
+
+    debug_print(f"停止搅拌协议: {vessel_display}, device={stirrer_id}")
     return action_sequence
 
 # 便捷函数
@@ -287,84 +254,79 @@ def stir_briefly(G: nx.DiGraph, vessel: Union[str, dict],
                 speed: float = 300.0) -> List[Dict[str, Any]]:
     """短时间搅拌（30秒）"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"⚡ 短时间搅拌: {vessel_display} @ {speed}RPM (30s)")
+    debug_print(f"短时间搅拌: {vessel_display} @ {speed}RPM (30s)")
     return generate_stir_protocol(G, vessel, time="30", stir_speed=speed)
 
 def stir_slowly(G: nx.DiGraph, vessel: Union[str, dict], 
                time: Union[str, float] = "10 min") -> List[Dict[str, Any]]:
     """慢速搅拌"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🐌 慢速搅拌: {vessel_display} @ 150RPM")
+    debug_print(f"慢速搅拌: {vessel_display} @ 150RPM")
     return generate_stir_protocol(G, vessel, time=time, stir_speed=150.0)
 
 def stir_vigorously(G: nx.DiGraph, vessel: Union[str, dict], 
                    time: Union[str, float] = "5 min") -> List[Dict[str, Any]]:
     """剧烈搅拌"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"💨 剧烈搅拌: {vessel_display} @ 800RPM")
+    debug_print(f"剧烈搅拌: {vessel_display} @ 800RPM")
     return generate_stir_protocol(G, vessel, time=time, stir_speed=800.0)
 
 def stir_for_reaction(G: nx.DiGraph, vessel: Union[str, dict], 
                      time: Union[str, float] = "1 h") -> List[Dict[str, Any]]:
     """反应搅拌（标准速度，长时间）"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🧪 反应搅拌: {vessel_display} @ 400RPM")
+    debug_print(f"反应搅拌: {vessel_display} @ 400RPM")
     return generate_stir_protocol(G, vessel, time=time, stir_speed=400.0)
 
 def stir_for_dissolution(G: nx.DiGraph, vessel: Union[str, dict], 
                         time: Union[str, float] = "15 min") -> List[Dict[str, Any]]:
     """溶解搅拌（中等速度）"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"💧 溶解搅拌: {vessel_display} @ 500RPM")
+    debug_print(f"溶解搅拌: {vessel_display} @ 500RPM")
     return generate_stir_protocol(G, vessel, time=time, stir_speed=500.0)
 
 def stir_gently(G: nx.DiGraph, vessel: Union[str, dict], 
                time: Union[str, float] = "30 min") -> List[Dict[str, Any]]:
     """温和搅拌"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🍃 温和搅拌: {vessel_display} @ 200RPM")
+    debug_print(f"温和搅拌: {vessel_display} @ 200RPM")
     return generate_stir_protocol(G, vessel, time=time, stir_speed=200.0)
 
 def stir_overnight(G: nx.DiGraph, vessel: Union[str, dict]) -> List[Dict[str, Any]]:
     """过夜搅拌（模拟时缩短为2小时）"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🌙 过夜搅拌（模拟2小时）: {vessel_display} @ 300RPM")
+    debug_print(f"过夜搅拌（模拟2小时）: {vessel_display} @ 300RPM")
     return generate_stir_protocol(G, vessel, time="2 h", stir_speed=300.0)
 
 def start_continuous_stirring(G: nx.DiGraph, vessel: Union[str, dict], 
                              speed: float = 300.0, purpose: str = "continuous stirring") -> List[Dict[str, Any]]:
     """开始连续搅拌"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🔄 开始连续搅拌: {vessel_display} @ {speed}RPM")
+    debug_print(f"开始连续搅拌: {vessel_display} @ {speed}RPM")
     return generate_start_stir_protocol(G, vessel, stir_speed=speed, purpose=purpose)
 
 def stop_all_stirring(G: nx.DiGraph, vessel: Union[str, dict]) -> List[Dict[str, Any]]:
     """停止所有搅拌"""
     vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🛑 停止搅拌: {vessel_display}")
+    debug_print(f"停止搅拌: {vessel_display}")
     return generate_stop_stir_protocol(G, vessel)
 
 # 测试函数
 def test_stir_protocol():
     """测试搅拌协议"""
-    debug_print("🧪 === STIR PROTOCOL 测试 === ✨")
-    
-    # 测试vessel参数处理
-    debug_print("🔧 测试vessel参数处理...")
-    
     # 测试字典格式
     vessel_dict = {"id": "flask_1", "name": "反应瓶1"}
     vessel_id = extract_vessel_id(vessel_dict)
     vessel_display = get_vessel_display_info(vessel_dict)
-    debug_print(f"  字典格式: {vessel_dict} → ID: {vessel_id}, 显示: {vessel_display}")
-    
+    debug_print(f"字典格式: {vessel_dict} -> ID: {vessel_id}, 显示: {vessel_display}")
+
     # 测试字符串格式
     vessel_str = "flask_2"
     vessel_id = extract_vessel_id(vessel_str)
     vessel_display = get_vessel_display_info(vessel_str)
-    debug_print(f"  字符串格式: {vessel_str} → ID: {vessel_id}, 显示: {vessel_display}")
-    
-    debug_print("✅ 测试完成 🎉")
+    debug_print(f"字符串格式: {vessel_str} -> ID: {vessel_id}, 显示: {vessel_display}")
+
+    debug_print("测试完成")
 
 if __name__ == "__main__":
     test_stir_protocol()

@@ -41,89 +41,61 @@ def is_integrated_pump(node_class: str, node_name: str = "") -> bool:
 
 def find_connected_pump(G, valve_node):
     """
-    查找与阀门相连的泵节点 - 修复版本
-    🔧 修复：区分电磁阀和多通阀，电磁阀不参与泵查找
+    查找与阀门相连的泵节点
+    区分电磁阀和多通阀，电磁阀不参与泵查找
     """
-    debug_print(f"🔍 查找与阀门 {valve_node} 相连的泵...")
-
-    # 🔧 关键修复：检查节点类型，电磁阀不应该查找泵
+    # 检查节点类型，电磁阀不应该查找泵
     node_data = G.nodes.get(valve_node, {})
     node_class = node_data.get("class", "") or ""
 
-    debug_print(f"  - 阀门类型: {node_class}")
-
     # 如果是电磁阀，不应该查找泵（电磁阀只是开关）
     if ("solenoid" in node_class.lower() or "solenoid_valve" in valve_node.lower()):
-        debug_print(f"  ⚠️ {valve_node} 是电磁阀，不应该查找泵节点")
         raise ValueError(f"电磁阀 {valve_node} 不应该参与泵查找逻辑")
 
     # 只有多通阀等复杂阀门才需要查找连接的泵
     if ("multiway" in node_class.lower() or "valve" in node_class.lower()):
-        debug_print(f"  - {valve_node} 是多通阀，查找连接的泵...")
         # 方法1：直接相邻的泵
         for neighbor in G.neighbors(valve_node):
             neighbor_class = G.nodes[neighbor].get("class", "") or ""
-            # 排除非 电磁阀 和 泵 的邻居
-            debug_print(f"    - 检查邻居 {neighbor}, class: {neighbor_class}")
             if "pump" in neighbor_class.lower():
-                debug_print(f"    ✅ 找到直接相连的泵: {neighbor}")
                 return neighbor
 
         # 方法2：通过路径查找泵（最多2跳）
-        debug_print(f"    - 未找到直接相连的泵，尝试路径查找...")
+        pump_nodes = [
+            node_id for node_id in G.nodes()
+            if "pump" in (G.nodes[node_id].get("class", "") or "").lower()
+        ]
 
-        # 获取所有泵节点
-        pump_nodes = []
-        for node_id in G.nodes():
-            node_class = G.nodes[node_id].get("class", "") or ""
-            if "pump" in node_class.lower():
-                pump_nodes.append(node_id)
-
-        debug_print(f"    - 系统中的泵节点: {pump_nodes}")
-
-        # 查找到泵的最短路径
         for pump_node in pump_nodes:
             try:
                 if nx.has_path(G, valve_node, pump_node):
                     path = nx.shortest_path(G, valve_node, pump_node)
-                    path_length = len(path) - 1
-                    debug_print(f"    - 到泵 {pump_node} 的路径: {path}, 距离: {path_length}")
-
-                    if path_length <= 2:  # 最多允许2跳
-                        debug_print(f"    ✅ 通过路径找到泵: {pump_node}")
+                    if len(path) - 1 <= 2:  # 最多允许2跳
                         return pump_node
             except nx.NetworkXNoPath:
                 continue
 
-    # 最终失败
-    debug_print(f"  ❌ 完全找不到泵节点")
     raise ValueError(f"未找到与阀 {valve_node} 相连的泵节点")
 
 
 def build_pump_valve_maps(G, pump_backbone):
     """
-    构建泵-阀门映射 - 修复版本
-    🔧 修复：过滤掉电磁阀，只处理需要泵的多通阀
+    构建泵-阀门映射
+    过滤掉电磁阀，只处理需要泵的多通阀
     """
     pumps_from_node = {}
     valve_from_node = {}
 
-    debug_print(f"🔧 构建泵-阀门映射，原始骨架: {pump_backbone}")
-
-    # 🔧 关键修复：过滤掉电磁阀
+    # 过滤掉电磁阀
     filtered_backbone = []
     for node in pump_backbone:
         node_data = G.nodes.get(node, {})
         node_class = node_data.get("class", "") or ""
 
-        # 跳过电磁阀
         if ("solenoid" in node_class.lower() or "solenoid_valve" in node.lower()):
-            debug_print(f"  - 跳过电磁阀: {node}")
             continue
 
         filtered_backbone.append(node)
-
-    debug_print(f"🔧 过滤后的骨架: {filtered_backbone}")
 
     for node in filtered_backbone:
         node_data = G.nodes.get(node, {})
@@ -131,18 +103,15 @@ def build_pump_valve_maps(G, pump_backbone):
         if is_integrated_pump(node_class, node):
             pumps_from_node[node] = node
             valve_from_node[node] = node
-            debug_print(f"  - 集成泵-阀: {node}")
         else:
             try:
                 pump_node = find_connected_pump(G, node)
                 pumps_from_node[node] = pump_node
                 valve_from_node[node] = node
-                debug_print(f"  - 阀门 {node} -> 泵 {pump_node}")
-            except ValueError as e:
-                debug_print(f"  - 跳过节点 {node}: {str(e)}")
+            except ValueError:
                 continue
 
-    debug_print(f"🔧 最终映射: pumps={pumps_from_node}, valves={valve_from_node}")
+    debug_print(f"泵-阀映射: pumps={pumps_from_node}, valves={valve_from_node}")
     return pumps_from_node, valve_from_node
 
 
@@ -155,8 +124,8 @@ def generate_pump_protocol(
         transfer_flowrate: float = 0.5,
 ) -> List[Dict[str, Any]]:
     """
-    生成泵操作的动作序列 - 修复版本
-    🔧 修复：正确处理包含电磁阀的路径
+    生成泵操作的动作序列
+    正确处理包含电磁阀的路径
     """
     pump_action_sequence = []
     nodes = G.nodes(data=True)
@@ -175,7 +144,6 @@ def generate_pump_protocol(
         logger.warning(f"transfer_flowrate <= 0，使用默认值 {transfer_flowrate}mL/s")
 
     # 验证容器存在
-    debug_print(f"🔍 验证源容器 '{from_vessel_id}' 和目标容器 '{to_vessel_id}' 是否存在...")
     if from_vessel_id not in G.nodes():
         logger.error(f"源容器 '{from_vessel_id}' 不存在")
         return pump_action_sequence
@@ -191,28 +159,24 @@ def generate_pump_protocol(
         logger.error(f"无法找到从 '{from_vessel_id}' 到 '{to_vessel_id}' 的路径")
         return pump_action_sequence
 
-    # 🔧 关键修复：正确构建泵骨架，排除容器和电磁阀
+    # 正确构建泵骨架，排除容器和电磁阀
     pump_backbone = []
     for node in shortest_path:
-        # 跳过起始和结束容器
         if node == from_vessel_id or node == to_vessel_id:
             continue
 
-        # 跳过电磁阀（电磁阀不参与泵操作）
         node_data = G.nodes.get(node, {})
         node_class = node_data.get("class", "") or ""
         if ("solenoid" in node_class.lower() or "solenoid_valve" in node.lower()):
-            debug_print(f"PUMP_TRANSFER: 跳过电磁阀 {node}")
             continue
 
-        # 只包含多通阀和泵
         if ("multiway" in node_class.lower() or "valve" in node_class.lower() or "pump" in node_class.lower()):
             pump_backbone.append(node)
 
-    debug_print(f"PUMP_TRANSFER: 过滤后的泵骨架: {pump_backbone}")
+    debug_print(f"PUMP_TRANSFER: 泵骨架: {pump_backbone}")
 
     if not pump_backbone:
-        debug_print("PUMP_TRANSFER: 没有泵骨架节点，可能是直接容器连接或只有电磁阀")
+        debug_print("PUMP_TRANSFER: 没有泵骨架节点")
         return pump_action_sequence
 
     if transfer_flowrate == 0:
@@ -228,7 +192,7 @@ def generate_pump_protocol(
         debug_print("PUMP_TRANSFER: 没有可用的泵映射")
         return pump_action_sequence
 
-    # 🔧 修复：安全地获取最小转移体积
+    # 安全地获取最小转移体积
     try:
         min_transfer_volumes = []
         for node in pump_backbone:
@@ -258,19 +222,19 @@ def generate_pump_protocol(
     volume_left = volume
     debug_print(f"PUMP_TRANSFER: 需要 {repeats} 次转移，单次最大体积 {min_transfer_volume} mL")
 
-    # 🆕 只在开头打印总体概览
+    # 只在开头打印总体概览
     if repeats > 1:
-        debug_print(f"🔄 分批转移概览: 总体积 {volume:.2f}mL，需要 {repeats} 次转移")
-        logger.info(f"🔄 分批转移概览: 总体积 {volume:.2f}mL，需要 {repeats} 次转移")
+        debug_print(f"分批转移: 总体积 {volume:.2f}mL, {repeats} 次, 单次最大 {min_transfer_volume} mL")
+        logger.info(f"分批转移: 总体积 {volume:.2f}mL, {repeats} 次转移")
 
-    # 🔧 创建一个自定义的wait动作，用于在执行时打印日志
+    # 创建一个自定义的wait动作，用于在执行时打印日志
     def create_progress_log_action(message: str) -> Dict[str, Any]:
         """创建一个特殊的等待动作，在执行时打印进度日志"""
         return {
             "action_name": "wait",
             "action_kwargs": {
-                "time": 0.1,  # 很短的等待时间
-                "progress_message": message  # 自定义字段，用于进度日志
+                "time": 0.1,
+                "progress_message": message
             }
         }
 
@@ -278,12 +242,12 @@ def generate_pump_protocol(
     for i in range(repeats):
         current_volume = min(volume_left, min_transfer_volume)
 
-        # 🆕 在每次循环开始时添加进度日志
         if repeats > 1:
-            start_message = f"🚀 准备开始第 {i + 1}/{repeats} 次转移: {current_volume:.2f}mL ({from_vessel_id} → {to_vessel_id}) 🚰"
-            pump_action_sequence.append(create_progress_log_action(start_message))
+            pump_action_sequence.append(create_progress_log_action(
+                f"第 {i + 1}/{repeats} 次转移: {current_volume:.2f}mL ({from_vessel_id} -> {to_vessel_id})"
+            ))
 
-        # 🔧 修复：安全地获取边数据
+        # 安全地获取边数据
         def get_safe_edge_data(node_a, node_b, key):
             try:
                 edge_data = G.get_edge_data(node_a, node_b)
@@ -386,13 +350,13 @@ def generate_pump_protocol(
                 ])
                 pump_action_sequence.append({"action_name": "wait", "action_kwargs": {"time": 3}})
 
-        # 🆕 在每次循环结束时添加完成日志
+        # 在每次循环结束时添加完成日志
         if repeats > 1:
             remaining_volume = volume_left - current_volume
             if remaining_volume > 0:
-                end_message = f"✅ 第 {i + 1}/{repeats} 次转移完成! 剩余 {remaining_volume:.2f}mL 待转移 ⏳"
+                end_message = f"第 {i + 1}/{repeats} 次完成, 剩余 {remaining_volume:.2f}mL"
             else:
-                end_message = f"🎉 第 {i + 1}/{repeats} 次转移完成! 全部 {volume:.2f}mL 转移完毕 ✨"
+                end_message = f"第 {i + 1}/{repeats} 次完成, 全部 {volume:.2f}mL 转移完毕"
 
             pump_action_sequence.append(create_progress_log_action(end_message))
 
@@ -441,7 +405,6 @@ def generate_pump_protocol_with_rinsing(
 
         # 1. 处理体积参数
         final_volume = volume
-        debug_print(f"初始体积: {final_volume}")
 
         # 如果volume为0，从容器读取实际体积
         if volume == 0.0:
@@ -450,13 +413,9 @@ def generate_pump_protocol_with_rinsing(
 
             if actual_volume > 0:
                 final_volume = actual_volume
-                debug_print(f"从容器读取体积: {final_volume}mL")
             else:
                 final_volume = 10.0
                 logger.warning(f"无法从容器读取体积，使用默认值: {final_volume}mL")
-        else:
-            debug_print(f"使用指定体积: {final_volume}mL")
-
         # 处理 amount 参数
         if amount and amount.strip():
             parsed_volume = _parse_amount_to_volume(amount)
@@ -477,7 +436,6 @@ def generate_pump_protocol_with_rinsing(
         debug_print(f"最终体积: {final_volume}mL")
 
         # 2. 处理流速参数
-
         final_flowrate = flowrate if flowrate > 0 else 2.5
         final_transfer_flowrate = transfer_flowrate if transfer_flowrate > 0 else 0.5
 
@@ -506,7 +464,7 @@ def generate_pump_protocol_with_rinsing(
             elif rate_spec == "quickly":
                 final_flowrate = max(final_flowrate, 5.0)
                 final_transfer_flowrate = max(final_transfer_flowrate, 2.0)
-            debug_print(f"速度规格 '{rate_spec}' 应用后: flowrate={final_flowrate}, transfer={final_transfer_flowrate}")
+            debug_print(f"速度规格 '{rate_spec}': flowrate={final_flowrate}, transfer={final_transfer_flowrate}")
 
     # 5. 处理冲洗参数
     final_rinsing_solvent = rinsing_solvent
@@ -528,7 +486,7 @@ def generate_pump_protocol_with_rinsing(
                 f"transfer_flowrate={final_transfer_flowrate}mL/s, "
                 f"rinsing={final_rinsing_solvent}/{final_rinsing_volume}mL/{final_rinsing_repeats}次")
 
-    # ========== 执行基础转移 ==========
+    # 执行基础转移
     try:
 
         pump_action_sequence = generate_pump_protocol(
@@ -539,14 +497,14 @@ def generate_pump_protocol_with_rinsing(
         debug_print(f"基础转移生成了 {len(pump_action_sequence)} 个动作")
 
         if not pump_action_sequence:
-            debug_print("基础转移协议生成为空，可能是路径问题")
+            debug_print("基础转移协议为空")
 
             if from_vessel_id in G.nodes() and to_vessel_id in G.nodes():
                 try:
                     path = nx.shortest_path(G, source=from_vessel_id, target=to_vessel_id)
                     debug_print(f"路径存在: {path}")
-                except Exception as path_error:
-                    debug_print(f"无法找到路径: {str(path_error)}")
+                except Exception:
+                    pass
 
             return [
                 {
@@ -559,9 +517,7 @@ def generate_pump_protocol_with_rinsing(
             ]
 
     except Exception as e:
-        debug_print(f"基础转移失败: {str(e)}")
-        import traceback
-        debug_print(f"详细错误: {traceback.format_exc()}")
+        debug_print(f"基础转移失败: {str(e)}\n{traceback.format_exc()}")
         return [
             {
                 "device_id": "system",
@@ -572,9 +528,8 @@ def generate_pump_protocol_with_rinsing(
             }
         ]
 
-    # ========== 执行冲洗操作 ==========
+    # 执行冲洗操作
     if final_rinsing_solvent and final_rinsing_solvent.strip() and final_rinsing_repeats > 0:
-        debug_print(f"开始冲洗操作，溶剂: '{final_rinsing_solvent}'")
 
         try:
             if final_rinsing_solvent.strip() != "air":
@@ -591,17 +546,16 @@ def generate_pump_protocol_with_rinsing(
                 )
                 pump_action_sequence.extend(air_rinsing_actions)
         except Exception as e:
-            debug_print(f"冲洗操作失败: {str(e)}，跳过冲洗")
+            debug_print(f"冲洗操作失败: {str(e)}")
     else:
-        debug_print(f"跳过冲洗操作 (solvent='{final_rinsing_solvent}', repeats={final_rinsing_repeats})")
+        debug_print(f"跳过冲洗 (solvent='{final_rinsing_solvent}', repeats={final_rinsing_repeats})")
 
-    # ========== 最终结果 ==========
+    # 最终结果
     debug_print(f"PUMP_TRANSFER 完成: {from_vessel_id} -> {to_vessel_id}, "
                 f"volume={final_volume}mL, 动作数={len(pump_action_sequence)}")
 
     # 最终验证
     if len(pump_action_sequence) == 0:
-        debug_print("协议生成结果为空！")
         return [
             {
                 "device_id": "system",

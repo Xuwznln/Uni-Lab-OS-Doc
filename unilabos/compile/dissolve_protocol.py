@@ -56,23 +56,16 @@ def generate_dissolve_protocol(
     # 从字典中提取容器ID
     vessel_id, vessel_data = get_vessel(vessel)
 
-    debug_print(f"开始生成溶解协议: vessel={vessel_id}, solvent='{solvent}', "
-                f"volume={volume}, mass={mass}, temp={temp}, time={time}, "
-                f"reagent='{reagent}', mol='{mol}', event='{event}'")
-    
+    debug_print(f"溶解协议: vessel={vessel_id}, solvent='{solvent}', volume={volume}, "
+                f"mass={mass}, temp={temp}, time={time}")
+
     action_sequence = []
-    
-    # === 参数验证 ===
-    action_sequence.append(create_action_log(f"开始溶解操作 - 容器: {vessel_id}", "🎬"))
-    
+
     if not vessel_id:
-        debug_print("❌ vessel 参数不能为空")
         raise ValueError("vessel 参数不能为空")
     
     if vessel_id not in G.nodes():
         raise ValueError(f"容器 '{vessel_id}' 不存在于系统中")
-
-    action_sequence.append(create_action_log("参数验证通过", "✅"))
 
     # 记录溶解前的容器状态
     original_liquid_volume = 0.0
@@ -84,19 +77,14 @@ def generate_dissolve_protocol(
             original_liquid_volume = current_volume
 
     # === 参数解析 ===
-    action_sequence.append(create_action_log("正在解析溶解参数...", "🔍"))
-    
-    # 解析各种参数为数值
     final_volume = parse_volume_input(volume)
     final_mass = parse_mass_input(mass)
     final_temp = parse_temperature_input(temp)
     final_time = parse_time_input(time)
 
-    debug_print(f"解析结果: volume={final_volume}mL, mass={final_mass}g, "
-                f"temp={final_temp}°C, time={final_time}s")
+    debug_print(f"参数解析: vol={final_volume}mL, mass={final_mass}g, temp={final_temp}°C, time={final_time}s")
 
     # === 判断溶解类型 ===
-    action_sequence.append(create_action_log("正在判断溶解类型...", "🔍"))
     
     # 判断是固体溶解还是液体溶解
     is_solid_dissolve = (final_mass > 0 or (mol and mol.strip() != "") or (reagent and reagent.strip() != ""))
@@ -108,41 +96,31 @@ def generate_dissolve_protocol(
         final_volume = 50.0
         if not solvent:
             solvent = "water"  # 默认溶剂
-        debug_print("⚠️ 未明确指定溶解参数，默认为50mL水溶解")
+        debug_print("未明确指定溶解参数，默认为50mL水溶解")
     
     dissolve_type = "固体溶解" if is_solid_dissolve else "液体溶解"
-    dissolve_emoji = "🧂" if is_solid_dissolve else "💧"
     debug_print(f"溶解类型: {dissolve_type}")
 
-    action_sequence.append(create_action_log(f"确定溶解类型: {dissolve_type} {dissolve_emoji}", "📋"))
+    action_sequence.append(create_action_log(f"溶解类型: {dissolve_type}", "📋"))
 
     # === 查找设备 ===
-    action_sequence.append(create_action_log("正在查找相关设备...", "🔍"))
-    
-    # 查找加热搅拌器
     heatchill_id = find_connected_heatchill(G, vessel_id)
     stirrer_id = find_connected_stirrer(G, vessel_id)
     
     # 优先使用加热搅拌器，否则使用独立搅拌器
     stir_device_id = heatchill_id or stirrer_id
-    debug_print(f"设备映射: heatchill='{heatchill_id}', stirrer='{stirrer_id}', 使用='{stir_device_id}'")
-    
-    if heatchill_id:
-        action_sequence.append(create_action_log(f"找到加热搅拌器: {heatchill_id}", "🔥"))
-    elif stirrer_id:
-        action_sequence.append(create_action_log(f"找到搅拌器: {stirrer_id}", "🌪️"))
-    else:
+    debug_print(f"设备: heatchill='{heatchill_id}', stirrer='{stirrer_id}'")
+
+    if not stir_device_id:
         action_sequence.append(create_action_log("未找到搅拌设备，将跳过搅拌", "⚠️"))
     
     # === 执行溶解流程 ===
     try:
-        # 步骤5.1: 启动加热搅拌（如果需要）
+        # 启动加热搅拌（如果需要）
         if stir_device_id and (final_temp > 25.0 or final_time > 0 or stir_speed > 0):
-            action_sequence.append(create_action_log(f"准备加热搅拌 (目标温度: {final_temp}°C)", "🔥"))
-            
+
             if heatchill_id and (final_temp > 25.0 or final_time > 0):
                 # 使用加热搅拌器
-                action_sequence.append(create_action_log(f"启动加热搅拌器 {heatchill_id}", "🔥"))
                 
                 heatchill_action = {
                     "device_id": heatchill_id,
@@ -158,7 +136,6 @@ def generate_dissolve_protocol(
                 # 等待温度稳定
                 if final_temp > 25.0:
                     wait_time = min(60, abs(final_temp - 25.0) * 1.5)
-                    action_sequence.append(create_action_log(f"等待温度稳定 ({wait_time:.0f}秒)", "⏳"))
                     action_sequence.append({
                         "action_name": "wait",
                         "action_kwargs": {"time": wait_time}
@@ -166,7 +143,6 @@ def generate_dissolve_protocol(
             
             elif stirrer_id:
                 # 使用独立搅拌器
-                action_sequence.append(create_action_log(f"启动搅拌器 {stirrer_id} (速度: {stir_speed}rpm)", "🌪️"))
                 
                 stir_action = {
                     "device_id": stirrer_id,
@@ -178,9 +154,8 @@ def generate_dissolve_protocol(
                     }
                 }
                 action_sequence.append(stir_action)
-                
+
                 # 等待搅拌稳定
-                action_sequence.append(create_action_log("等待搅拌稳定...", "⏳"))
                 action_sequence.append({
                     "action_name": "wait",
                     "action_kwargs": {"time": 5}
@@ -188,11 +163,8 @@ def generate_dissolve_protocol(
         
         if is_solid_dissolve:
             # === 固体溶解路径 ===
-            action_sequence.append(create_action_log("开始固体溶解流程", "🧂"))
-            
             solid_dispenser = find_solid_dispenser(G)
             if solid_dispenser:
-                action_sequence.append(create_action_log(f"找到固体加样器: {solid_dispenser}", "🥄"))
                 
                 # 固体加样
                 add_kwargs = {
@@ -204,38 +176,27 @@ def generate_dissolve_protocol(
                 
                 if final_mass > 0:
                     add_kwargs["mass"] = str(final_mass)
-                    action_sequence.append(create_action_log(f"准备添加固体: {final_mass}g", "⚖️"))
                 if mol and mol.strip():
                     add_kwargs["mol"] = mol
-                    action_sequence.append(create_action_log(f"按摩尔数添加: {mol}", "🧬"))
-                
-                action_sequence.append(create_action_log("开始固体加样操作", "🥄"))
+
                 action_sequence.append({
                     "device_id": solid_dispenser,
                     "action_name": "add_solid",
                     "action_kwargs": add_kwargs
                 })
-                
-                action_sequence.append(create_action_log("固体加样完成", "✅"))
 
                 # 固体溶解体积运算 - 固体本身不会显著增加体积
-                action_sequence.append(create_action_log(f"固体已添加: {final_mass}g", "📊"))
                 
             else:
-                debug_print("⚠️ 未找到固体加样器，跳过固体添加")
+                debug_print("未找到固体加样器，跳过固体添加")
                 action_sequence.append(create_action_log("未找到固体加样器，无法添加固体", "❌"))
         
         elif is_liquid_dissolve:
             # === 液体溶解路径 ===
-            action_sequence.append(create_action_log("开始液体溶解流程", "💧"))
-            
-            # 查找溶剂容器
-            action_sequence.append(create_action_log("正在查找溶剂容器...", "🔍"))
             try:
                 solvent_vessel = find_solvent_vessel(G, solvent)
-                action_sequence.append(create_action_log(f"找到溶剂容器: {solvent_vessel}", "🧪"))
             except ValueError as e:
-                debug_print(f"⚠️ {str(e)}，跳过溶剂添加")
+                debug_print(f"溶剂容器查找失败: {str(e)}，跳过溶剂添加")
                 action_sequence.append(create_action_log(f"溶剂容器查找失败: {str(e)}", "❌"))
                 solvent_vessel = None
             
@@ -243,10 +204,7 @@ def generate_dissolve_protocol(
                 # 计算流速 - 溶解时通常用较慢的速度，避免飞溅
                 flowrate = 1.0  # 较慢的注入速度
                 transfer_flowrate = 0.5  # 较慢的转移速度
-                
-                action_sequence.append(create_action_log(f"设置流速: {flowrate}mL/min (缓慢注入)", "⚡"))
-                action_sequence.append(create_action_log(f"开始转移 {final_volume}mL {solvent}", "🚰"))
-                
+
                 # 调用pump protocol
                 pump_actions = generate_pump_protocol_with_rinsing(
                     G=G,
@@ -268,10 +226,9 @@ def generate_dissolve_protocol(
                     **kwargs
                 )
                 action_sequence.extend(pump_actions)
-                action_sequence.append(create_action_log(f"溶剂转移完成 ({len(pump_actions)} 个操作)", "✅"))
 
                 # 液体溶解体积运算 - 添加溶剂后更新容器体积
-                
+
                 # 确保vessel有data字段
                 if "data" not in vessel:
                     vessel["data"] = {}
@@ -305,24 +262,19 @@ def generate_dissolve_protocol(
                             G.nodes[vessel_id]['data']['liquid_volume'] = [final_volume]
                     else:
                         G.nodes[vessel_id]['data']['liquid_volume'] = current_node_volume + final_volume
-                
-                action_sequence.append(create_action_log(f"容器体积已更新 (+{final_volume:.2f}mL)", "📊"))
-                
+
                 # 溶剂添加后等待
-                action_sequence.append(create_action_log("溶剂添加后短暂等待...", "⏳"))
                 action_sequence.append({
                     "action_name": "wait",
                     "action_kwargs": {"time": 5}
                 })
         
-        # 步骤5.4: 等待溶解完成
+        # 等待溶解完成
         if final_time > 0:
             wait_minutes = final_time / 60
-            action_sequence.append(create_action_log(f"开始溶解等待 ({wait_minutes:.1f}分钟)", "⏰"))
-            
+
             if heatchill_id:
                 # 使用定时加热搅拌
-                action_sequence.append(create_action_log(f"使用加热搅拌器进行定时溶解", "🔥"))
                 
                 dissolve_action = {
                     "device_id": heatchill_id,
@@ -340,7 +292,6 @@ def generate_dissolve_protocol(
             
             elif stirrer_id:
                 # 使用定时搅拌
-                action_sequence.append(create_action_log(f"使用搅拌器进行定时溶解", "🌪️"))
                 
                 stir_action = {
                     "device_id": stirrer_id,
@@ -357,7 +308,6 @@ def generate_dissolve_protocol(
             
             else:
                 # 简单等待
-                action_sequence.append(create_action_log(f"简单等待溶解完成", "⏳"))
                 action_sequence.append({
                     "action_name": "wait",
                     "action_kwargs": {"time": final_time}
@@ -365,8 +315,7 @@ def generate_dissolve_protocol(
         
         # 步骤5.5: 停止加热搅拌（如果需要）
         if heatchill_id and final_time == 0 and final_temp > 25.0:
-            action_sequence.append(create_action_log("停止加热搅拌器", "🛑"))
-            
+
             stop_action = {
                 "device_id": heatchill_id,
                 "action_name": "heat_chill_stop",
@@ -377,7 +326,7 @@ def generate_dissolve_protocol(
             action_sequence.append(stop_action)
         
     except Exception as e:
-        debug_print(f"❌ 溶解流程执行失败: {str(e)}")
+        debug_print(f"溶解流程执行失败: {str(e)}")
         action_sequence.append(create_action_log(f"溶解流程失败: {str(e)}", "❌"))
         # 添加错误日志
         action_sequence.append({
@@ -398,8 +347,8 @@ def generate_dissolve_protocol(
             final_liquid_volume = current_volume
     
     # === 最终结果 ===
-    debug_print(f"溶解协议生成完成: {vessel_id}, 类型={dissolve_type}, "
-                f"动作数={len(action_sequence)}, 前后体积={original_liquid_volume:.2f}→{final_liquid_volume:.2f}mL")
+    debug_print(f"溶解协议完成: {vessel_id}, 类型={dissolve_type}, "
+                f"动作数={len(action_sequence)}, 体积={original_liquid_volume:.2f}→{final_liquid_volume:.2f}mL")
     
     # 添加完成日志
     summary_msg = f"溶解协议完成: {vessel_id}"
@@ -408,7 +357,7 @@ def generate_dissolve_protocol(
     if is_solid_dissolve:
         summary_msg += f" (溶解 {final_mass}g {reagent})"
     
-    action_sequence.append(create_action_log(summary_msg, "🎉"))
+    action_sequence.append(create_action_log(summary_msg, "✅"))
     
     return action_sequence
 
@@ -420,7 +369,7 @@ def dissolve_solid_by_mass(G: nx.DiGraph, vessel: dict, reagent: str, mass: Unio
                           temp: Union[str, float] = 25.0, time: Union[str, float] = "10 min") -> List[Dict[str, Any]]:
     """按质量溶解固体"""
     vessel_id = vessel["id"]
-    debug_print(f"🧂 快速固体溶解: {reagent} ({mass}) → {vessel_id}")
+    debug_print(f"快速固体溶解: {reagent} ({mass}) → {vessel_id}")
     return generate_dissolve_protocol(
         G, vessel, 
         mass=mass, 
@@ -433,7 +382,7 @@ def dissolve_solid_by_moles(G: nx.DiGraph, vessel: dict, reagent: str, mol: str,
                            temp: Union[str, float] = 25.0, time: Union[str, float] = "10 min") -> List[Dict[str, Any]]:
     """按摩尔数溶解固体"""
     vessel_id = vessel["id"]
-    debug_print(f"🧬 按摩尔数溶解固体: {reagent} ({mol}) → {vessel_id}")
+    debug_print(f"按摩尔数溶解固体: {reagent} ({mol}) → {vessel_id}")
     return generate_dissolve_protocol(
         G, vessel, 
         mol=mol, 
@@ -446,7 +395,7 @@ def dissolve_with_solvent(G: nx.DiGraph, vessel: dict, solvent: str, volume: Uni
                          temp: Union[str, float] = 25.0, time: Union[str, float] = "5 min") -> List[Dict[str, Any]]:
     """用溶剂溶解"""
     vessel_id = vessel["id"]
-    debug_print(f"💧 溶剂溶解: {solvent} ({volume}) → {vessel_id}")
+    debug_print(f"溶剂溶解: {solvent} ({volume}) → {vessel_id}")
     return generate_dissolve_protocol(
         G, vessel, 
         solvent=solvent, 
@@ -458,7 +407,7 @@ def dissolve_with_solvent(G: nx.DiGraph, vessel: dict, solvent: str, volume: Uni
 def dissolve_at_room_temp(G: nx.DiGraph, vessel: dict, solvent: str, volume: Union[str, float]) -> List[Dict[str, Any]]:
     """室温溶解"""
     vessel_id = vessel["id"]
-    debug_print(f"🌡️ 室温溶解: {solvent} ({volume}) → {vessel_id}")
+    debug_print(f"室温溶解: {solvent} ({volume}) → {vessel_id}")
     return generate_dissolve_protocol(
         G, vessel, 
         solvent=solvent, 
@@ -471,7 +420,7 @@ def dissolve_with_heating(G: nx.DiGraph, vessel: dict, solvent: str, volume: Uni
                          temp: Union[str, float] = "60 °C", time: Union[str, float] = "15 min") -> List[Dict[str, Any]]:
     """加热溶解"""
     vessel_id = vessel["id"]
-    debug_print(f"🔥 加热溶解: {solvent} ({volume}) → {vessel_id} @ {temp}")
+    debug_print(f"加热溶解: {solvent} ({volume}) → {vessel_id} @ {temp}")
     return generate_dissolve_protocol(
         G, vessel, 
         solvent=solvent, 
@@ -483,37 +432,31 @@ def dissolve_with_heating(G: nx.DiGraph, vessel: dict, solvent: str, volume: Uni
 # 测试函数
 def test_dissolve_protocol():
     """测试溶解协议的各种参数解析"""
-    debug_print("=== DISSOLVE PROTOCOL 增强版测试 ===")
-    
     # 测试体积解析
-    debug_print("💧 测试体积解析...")
     volumes = ["10 mL", "?", 10.0, "1 L", "500 μL"]
     for vol in volumes:
         result = parse_volume_input(vol)
-        debug_print(f"📏 体积解析: {vol} → {result}mL")
-    
+        debug_print(f"体积解析: {vol} → {result}mL")
+
     # 测试质量解析
-    debug_print("⚖️ 测试质量解析...")
     masses = ["2.9 g", "?", 2.5, "500 mg"]
     for mass in masses:
         result = parse_mass_input(mass)
-        debug_print(f"⚖️ 质量解析: {mass} → {result}g")
-    
+        debug_print(f"质量解析: {mass} → {result}g")
+
     # 测试温度解析
-    debug_print("🌡️ 测试温度解析...")
     temps = ["60 °C", "room temperature", "?", 25.0, "reflux"]
     for temp in temps:
         result = parse_temperature_input(temp)
-        debug_print(f"🌡️ 温度解析: {temp} → {result}°C")
-    
+        debug_print(f"温度解析: {temp} → {result}°C")
+
     # 测试时间解析
-    debug_print("⏱️ 测试时间解析...")
     times = ["30 min", "1 h", "?", 60.0]
     for time in times:
         result = parse_time_input(time)
-        debug_print(f"⏱️ 时间解析: {time} → {result}s")
-    
-    debug_print("✅ 测试完成")
+        debug_print(f"时间解析: {time} → {result}s")
+
+    debug_print("测试完成")
 
 if __name__ == "__main__":
     test_dissolve_protocol()
