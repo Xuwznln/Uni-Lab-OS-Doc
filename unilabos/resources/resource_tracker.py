@@ -774,7 +774,13 @@ class ResourceTreeSet(object):
             ValueError: 当建立关系时发现不一致
         """
         # 第一步：将字典列表转换为 ResourceDictInstance 列表
-        instances = [ResourceDictInstance.get_resource_instance_from_dict(node_dict) for node_dict in raw_list]
+        parsed_list = []
+        for node_dict in raw_list:
+            if isinstance(node_dict, str):
+                import json
+                node_dict = json.loads(node_dict)
+            parsed_list.append(node_dict)
+        instances = [ResourceDictInstance.get_resource_instance_from_dict(node_dict) for node_dict in parsed_list]
 
         # 第二步：建立映射关系
         uuid_to_instance: Dict[str, ResourceDictInstance] = {}

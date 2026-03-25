@@ -142,6 +142,16 @@ PARAM_RENAME_MAPPING = {
 }
 
 
+def _map_deck_slot(raw_slot: str, object_type: str = "") -> str:
+    """协议槽位 -> 实际 deck：4→13，8→14，12+trash→16，其余不变。"""
+    s = "" if raw_slot is None else str(raw_slot).strip()
+    if not s:
+        return ""
+    if s == "12" and (object_type or "").strip().lower() == "trash":
+        return "16"
+    return {"4": "13", "8": "14"}.get(s, s)
+
+
 # ---------------- Graph ----------------
 
 
@@ -386,7 +396,8 @@ def build_protocol_graph(
     # 收集所有唯一的 slot
     slots_info = {}  # slot -> {labware, res_id}
     for labware_id, item in labware_info.items():
-        slot = str(item.get("slot", ""))
+        object_type = item.get("object", "") or ""
+        slot = _map_deck_slot(str(item.get("slot", "")), object_type)
         labware = item.get("labware", "")
         if slot and slot not in slots_info:
             res_id = f"{labware}_slot_{slot}"
@@ -394,7 +405,7 @@ def build_protocol_graph(
                 "labware": labware,
                 "res_id": res_id,
                 "labware_id": labware_id,
-                "object": item.get("object", ""),
+                "object": object_type,
             }
 
     # 创建 Group 节点，包含所有 create_resource 节点
@@ -476,7 +487,8 @@ def build_protocol_graph(
         if item.get("type") == "hardware":
             continue
 
-        slot = str(item.get("slot", ""))
+        object_type = item.get("object", "") or ""
+        slot = _map_deck_slot(str(item.get("slot", "")), object_type)
         wells = item.get("well", [])
         if not wells or not slot:
             continue
@@ -484,7 +496,6 @@ def build_protocol_graph(
         # res_id 不能有空格
         res_id = str(labware_id).replace(" ", "_")
         well_count = len(wells)
-        object_type = item.get("object", "")
         liquid_volume = DEFAULT_LIQUID_VOLUME if object_type == "source" else 0
 
         node_id = str(uuid.uuid4())
@@ -520,8 +531,12 @@ def build_protocol_graph(
         # set_liquid_from_plate 的输出 output_wells 用于连接 transfer_liquid
         resource_last_writer[labware_id] = f"{node_id}:output_wells"
 
-    # transfer_liquid 之间通过 ready 串联；若存在 trash 节点，第一个 transfer_liquid 从 trash 的 ready 开始
+    # 收集所有 create_resource 节点 ID，用于让第一个 transfer_liquid 等待所有资源创建完成
+    all_create_resource_node_ids = list(slot_to_create_resource.values())
+
+    # transfer_liquid 之间通过 ready 串联；第一个 transfer_liquid 需要等待所有 create_resource 完成
     last_control_node_id = trash_create_node_id
+    is_first_action_node = True
 
     # 端口名称映射：JSON 字段名 -> 实际 handle key
     INPUT_PORT_MAPPING = {
@@ -689,7 +704,12 @@ def build_protocol_graph(
         G.add_node(node_id, **step_copy)
 
         # 控制流
-        if last_control_node_id is not None:
+        if is_first_action_node:
+            # 第一个 transfer_liquid 需要等待所有 create_resource 完成
+            for cr_node_id in all_create_resource_node_ids:
+                G.add_edge(cr_node_id, node_id, source_port="ready", target_port="ready")
+            is_first_action_node = False
+        elif last_control_node_id is not None:
             G.add_edge(last_control_node_id, node_id, source_port="ready", target_port="ready")
         last_control_node_id = node_id
 
