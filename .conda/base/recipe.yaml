@@ -3,7 +3,7 @@
 
 package:
   name: unilabos
-  version: 0.10.17
+  version: 0.10.19
 
 source:
   path: ../../unilabos
@@ -46,13 +46,15 @@ requirements:
   - jinja2
   - requests
   - uvicorn
-  - opcua # [not osx]
+  - if: not osx
+    then:
+    - opcua
   - pyserial
   - pandas
   - pymodbus
   - matplotlib
   - pylibftdi
-  - uni-lab::unilabos-env ==0.10.17
+  - uni-lab::unilabos-env ==0.10.19
 
 about:
   repository: https://github.com/deepmodeling/Uni-Lab-OS

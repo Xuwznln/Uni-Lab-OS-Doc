@@ -4,6 +4,8 @@ temp/
 output/
 unilabos_data/
 pyrightconfig.json
+.cursorignore
+device_package*/
 ## Python
 
 # Byte-compiled / optimized / DLL files
@@ -251,3 +253,8 @@ test_config.py
 
 
 /.claude
+/.conda
+/.cursor
+/.github
+/.conda/base
+.conda/base/recipe.yaml
