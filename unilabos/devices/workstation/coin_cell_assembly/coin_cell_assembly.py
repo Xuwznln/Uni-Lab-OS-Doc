@@ -193,7 +193,12 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
 
     def post_init(self, ros_node: ROS2WorkstationNode):
         self._ros_node = ros_node
-        #self.deck = create_a_coin_cell_deck()
+
+        # Deck 为空时（反序列化未恢复子节点），主动调用 setup() 初始化子物料
+        if self.deck and not self.deck.children and hasattr(self.deck, "setup") and callable(self.deck.setup):
+            logger.info("YihuaCoinCellDeck 无子节点，调用 setup() 初始化")
+            self.deck.setup()
+
         ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{
             "resources": [self.deck]
         })

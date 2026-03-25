@@ -169,23 +169,28 @@ class MaterialPlate(ItemizedResource[MaterialHole]):
         model: Optional[str] = None,
     ) -> "MaterialPlate":
         """工厂方法：创建带 4x4 洞位的料板（仅用于初始 setup，不在反序列化路径调用）"""
-        plate = cls(name=name, size_x=size_x, size_y=size_y, size_z=size_z, category=category, model=model)
+        # 默认洞位间距（与 _unilabos_state 默认值保持一致）
+        hole_spacing_x = 24.0
+        hole_spacing_y = 24.0
+        # 先建洞位，再作为 ordered_items 传入构造函数
+        # （ItemizedResource.__init__ 要求 ordered_items 或 ordering 二选一必须有值）
         holes = create_ordered_items_2d(
             klass=MaterialHole,
             num_items_x=4,
             num_items_y=4,
-            dx=(size_x - 4 * plate._unilabos_state["hole_spacing_x"]) / 2,
-            dy=(size_y - 4 * plate._unilabos_state["hole_spacing_y"]) / 2,
+            dx=(size_x - 4 * hole_spacing_x) / 2,
+            dy=(size_y - 4 * hole_spacing_y) / 2,
             dz=size_z,
-            item_dx=plate._unilabos_state["hole_spacing_x"],
-            item_dy=plate._unilabos_state["hole_spacing_y"],
+            item_dx=hole_spacing_x,
+            item_dy=hole_spacing_y,
             size_x=16,
             size_y=16,
             size_z=16,
         )
-        for hole_name, hole in holes.items():
-            plate.assign_child_resource(hole, location=hole.location)
-        return plate
+        return cls(
+            name=name, size_x=size_x, size_y=size_y, size_z=size_z,
+            ordered_items=holes, category=category, model=model,
+        )
 
     def update_locations(self):
         # TODO:调多次相加
@@ -542,6 +547,7 @@ class YihuaCoinCellDeck(Deck):
         size_z: float = 100.0,
         origin: Coordinate = Coordinate(-2200, 0, 0),
         category: str = "coin_cell_deck",
+        setup: bool = False,
     ):
         super().__init__(
             name=name,
@@ -550,6 +556,8 @@ class YihuaCoinCellDeck(Deck):
             size_z=100.0,
             origin=origin,
         )
+        if setup:
+            self.setup()
 
     def setup(self) -> None:
         """设置工作站的标准布局 - 包含子弹夹、料盘、瓶架等完整配置"""

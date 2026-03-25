@@ -979,10 +979,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
         formulation: List[Dict[str, Any]],
         batch_id: str = "",
         bottle_type: str = "配液小瓶",
-        mix_time: int = 0,
-        load_shedding_info: float = 0.0,
-        pouch_cell_info: float = 0.0,
-        conductivity_info: float = 0.0,
+        mix_time: List[int] = [],
+        coin_cell_volume: float = 0.0,
+        pouch_cell_volume: float = 0.0,
+        conductivity_volume: float = 0.0,
         conductivity_bottle_count: int = 0,
     ) -> Dict[str, Any]:
         """
@@ -1003,10 +1003,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 ]
             batch_id: 批次ID，若为空则用当前时间戳
             bottle_type: 配液瓶类型，默认 "配液小瓶"
-            mix_time: 混匀时间(秒)
-            load_shedding_info: 扣电组装分液体积
-            pouch_cell_info: 软包组装分液体积
-            conductivity_info: 电导测试分液体积
+            mix_time: 混匀时间列表(秒)，与 formulation 一一对应，不足则补 0
+            coin_cell_volume: 纽扣电池组装分液体积
+            pouch_cell_volume: 软包电池注液组装分液体积
+            conductivity_volume: 电导率测试分液体积
             conductivity_bottle_count: 电导测试分液瓶数
 
         Returns:
@@ -1039,9 +1039,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.warning(f"[create_orders_formulation] 第 {idx + 1} 个配方无有效物料，跳过")
                 continue
 
+            item_mix_time = mix_time[idx] if idx < len(mix_time) else 0
             logger.info(f"[create_orders_formulation] 第 {idx + 1} 个配方: orderName={order_name}, "
-                        f"loadShedding={load_shedding_info}, pouchCell={pouch_cell_info}, "
-                        f"conductivity={conductivity_info}, totalMass={total_mass}, "
+                        f"coinCellVolume={coin_cell_volume}, pouchCellVolume={pouch_cell_volume}, "
+                        f"conductivityVolume={conductivity_volume}, totalMass={total_mass}, "
                         f"material_count={len(mats)}")
 
             orders.append({
@@ -1049,10 +1050,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "orderName": order_name,
                 "createTime": create_time,
                 "bottleType": bottle_type,
-                "mixTime": mix_time,
-                "loadSheddingInfo": load_shedding_info,
-                "pouchCellInfo": pouch_cell_info,
-                "conductivityInfo": conductivity_info,
+                "mixTime": item_mix_time,
+                "loadSheddingInfo": coin_cell_volume,
+                "pouchCellInfo": pouch_cell_volume,
+                "conductivityInfo": conductivity_volume,
                 "conductivityBottleCount": conductivity_bottle_count,
                 "materialInfos": mats,
                 "totalMass": round(total_mass, 4),
@@ -1650,18 +1651,31 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         Args:
             device_id: 目标设备 ID（如 "BatteryStation"）
-            resource_name: 资源名称（如 "electrolyte_buffer"）
+            resource_name: 资源名称（如 "bottle_rack_6x2"）
 
         Returns:
             找到的 PLR Resource 对象，未找到则返回 None
         """
+        # 优先：通过全局设备注册表直接访问目标设备的 deck
+        # DeviceInfoType 是 TypedDict（即普通 dict），必须用 dict.get() 而非 getattr()
         try:
-            from unilabos.app.ros2_app import get_device_plr_resource_by_name
-            return get_device_plr_resource_by_name(device_id, resource_name)
+            from unilabos.ros.nodes.base_device_node import registered_devices
+            device_info = registered_devices.get(device_id)
+            if device_info is not None:
+                driver = device_info.get("driver_instance")
+                if driver is not None:
+                    deck = getattr(driver, "deck", None)
+                    if deck is not None and hasattr(deck, "get_resource"):
+                        try:
+                            res = deck.get_resource(resource_name)
+                            if res is not None:
+                                return res
+                        except Exception:
+                            pass
         except Exception:
             pass
 
-        # 降级：遍历 workstation 已注册的 plr_resources 列表
+        # 降级：遍历 workstation 已注册的 plr_resources 列表（仅当前设备）
         try:
             for res in getattr(self, "_plr_resources", []):
                 if res.name == resource_name:

@@ -104,8 +104,11 @@ class BioyondElectrolyteDeck(Deck):
         size_y: float = 1400.0,
         size_z: float = 2670.0,
         category: str = "deck",
+        setup: bool = False,
     ) -> None:
         super().__init__(name=name, size_x=4150.0, size_y=1400.0, size_z=2670.0)
+        if setup:
+            self.setup()
 
     def setup(self) -> None:
         # 添加仓库

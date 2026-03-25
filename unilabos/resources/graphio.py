@@ -797,9 +797,10 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                     bottle = plr_material[number] = initialize_resource(
                         {"name": f'{detail["name"]}_{number}', "class": reverse_type_mapping[typeName][0]}, resource_type=ResourcePLR
                     )
-                    bottle.tracker.liquids = [
-                        (detail["name"], float(detail.get("quantity", 0)) if detail.get("quantity") else 0)
-                    ]
+                    if hasattr(bottle, 'tracker') and bottle.tracker is not None:
+                        bottle.tracker.liquids = [
+                            (detail["name"], float(detail.get("quantity", 0)) if detail.get("quantity") else 0)
+                        ]
                     bottle.code = detail.get("code", "")
                     logger.debug(f"  └─ [子物料] {detail['name']} → {plr_material.name}[{number}] (类型:{typeName})")
                 else:
@@ -808,9 +809,10 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
             # 只对有 capacity 属性的容器（液体容器）处理液体追踪
             if hasattr(plr_material, 'capacity'):
                 bottle = plr_material[0] if plr_material.capacity > 0 else plr_material
-                bottle.tracker.liquids = [
-                    (material["name"], float(material.get("quantity", 0)) if material.get("quantity") else 0)
-                ]
+                if hasattr(bottle, 'tracker') and bottle.tracker is not None:
+                    bottle.tracker.liquids = [
+                        (material["name"], float(material.get("quantity", 0)) if material.get("quantity") else 0)
+                    ]
 
         plr_materials.append(plr_material)
 

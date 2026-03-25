@@ -196,11 +196,11 @@ bioyond_cell:
           batch_id: ''
           bottle_type: 配液小瓶
           conductivity_bottle_count: 0
-          conductivity_info: 0.0
+          conductivity_volume: 0.0
           formulation: null
-          load_shedding_info: 0.0
-          mix_time: 0
-          pouch_cell_info: 0.0
+          coin_cell_volume: 0.0
+          mix_time: []
+          pouch_cell_volume: 0.0
         handles:
           output:
           - data_key: total_orders
@@ -239,9 +239,9 @@ bioyond_cell:
                   default: 0
                   description: 电导测试分液瓶数
                   type: integer
-                conductivity_info:
+                conductivity_volume:
                   default: 0.0
-                  description: 电导测试分液体积
+                  description: 电导率测试分液体积
                   type: number
                 formulation:
                   description: 配方列表，每个元素代表一个订单（一瓶）
@@ -269,17 +269,19 @@ bioyond_cell:
                     - materials
                     type: object
                   type: array
-                load_shedding_info:
+                coin_cell_volume:
                   default: 0.0
-                  description: 扣电组装分液体积
+                  description: 纽扣电池组装分液体积
                   type: number
                 mix_time:
-                  default: 0
-                  description: 混匀时间(秒)
-                  type: integer
-                pouch_cell_info:
+                  default: []
+                  description: 混匀时间列表(秒)，与 formulation 一一对应
+                  items:
+                    type: integer
+                  type: array
+                pouch_cell_volume:
                   default: 0.0
-                  description: 软包组装分液体积
+                  description: 软包电池注液组装分液体积
                   type: number
               required:
               - formulation

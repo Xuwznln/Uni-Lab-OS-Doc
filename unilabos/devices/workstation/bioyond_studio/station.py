@@ -760,10 +760,9 @@ class BioyondWorkstation(WorkstationBase):
                         except:
                             pass
 
-        # 创建通信模块
+        # 创建通信模块；同步器将在 post_init 中初始化并执行首次同步
         self._create_communication_module(bioyond_config)
-        self.resource_synchronizer = BioyondResourceSynchronizer(self)
-        self.resource_synchronizer.sync_from_external()
+        self.resource_synchronizer = None
 
         # TODO: self._ros_node里面拿属性
 
@@ -801,6 +800,15 @@ class BioyondWorkstation(WorkstationBase):
 
     def post_init(self, ros_node: ROS2WorkstationNode):
         self._ros_node = ros_node
+
+        # Deck 为空时（反序列化未恢复子节点），主动调用 setup() 初始化仓库
+        if self.deck and not self.deck.children and hasattr(self.deck, "setup") and callable(self.deck.setup):
+            logger.info("Deck 无仓库子节点，调用 setup() 初始化仓库")
+            self.deck.setup()
+
+        # 初始化同步器并执行首次同步（需在仓库初始化之后）
+        self.resource_synchronizer = BioyondResourceSynchronizer(self)
+        self.resource_synchronizer.sync_from_external()
 
         # 启动连接监控
         try:

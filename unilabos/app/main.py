@@ -621,6 +621,8 @@ def main():
             continue
 
     # 如果从远端获取了物料信息，则与本地物料进行同步
+    # 仅在本地文件模式下有意义：本地文件只含设备结构，远端有已保存的物料，需要 merge
+    # 远端模式下 resource_tree_set 与 request_startup_json 来自同一份数据，merge 为空操作
     if file_path is not None and request_startup_json and "nodes" in request_startup_json:
         print_status("开始同步远端物料到本地...", "info")
         remote_tree_set = ResourceTreeSet.from_raw_dict_list(request_startup_json["nodes"])
