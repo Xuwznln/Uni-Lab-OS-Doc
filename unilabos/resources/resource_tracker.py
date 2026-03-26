@@ -459,6 +459,8 @@ class ResourceTreeSet(object):
                 "reagent_bottle": "reagent_bottle",
                 "flask": "flask",
                 "beaker": "beaker",
+                "module": "module",
+                "carrier": "carrier",
             }
             if source in replace_info:
                 return replace_info[source]
@@ -596,6 +598,8 @@ class ResourceTreeSet(object):
             "deck": "Deck",
             "container": "RegularContainer",
             "tip_spot": "TipSpot",
+            "module": "PRCXI9300ModuleSite",
+            "carrier": "ItemizedCarrier",
         }
 
         def collect_node_data(node: ResourceDictInstance, name_to_uuid: dict, all_states: dict, name_to_extra: dict):
@@ -958,6 +962,17 @@ class ResourceTreeSet(object):
                                 f"从远端同步了 {added_count} 个物料子树"
                             )
                     else:
+                        # 二级是物料
+                        if remote_child_name not in local_children_map:
+                            # 本地不存在该物料，直接引入
+                            remote_child.res_content.parent = local_device.res_content
+                            local_device.children.append(remote_child)
+                            local_children_map[remote_child_name] = remote_child
+                            logger.info(
+                                f"物料 '{remote_root_id}/{remote_child_name}': "
+                                f"从远端同步了整个子树"
+                            )
+                            continue
                         # 二级物料已存在，比较三级子节点是否缺失
                         local_material = local_children_map[remote_child_name]
                         local_material_children_map = {child.res_content.name: child for child in

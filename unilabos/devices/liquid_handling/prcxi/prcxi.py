@@ -45,6 +45,7 @@ from pylabrobot.resources import (
     Trash,
     PlateAdapter,
     TubeRack,
+    create_homogeneous_resources,
 )
 
 from unilabos.devices.liquid_handling.liquid_handler_abstract import (
@@ -55,6 +56,7 @@ from unilabos.devices.liquid_handling.liquid_handler_abstract import (
     TransferLiquidReturn,
 )
 from unilabos.registry.placeholder_type import ResourceSlot
+from unilabos.resources.itemized_carrier import ItemizedCarrier
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
 
@@ -91,15 +93,15 @@ class PRCXI9300Deck(Deck):
     该类定义了 PRCXI 9300 的工作台布局和槽位信息。
     """
 
-    # T1-T16 默认位置 (4列×4行)
+    # T1-T16 默认位置 (4列×4行, Y轴从上往下递减, T1在左上角)
     _DEFAULT_SITE_POSITIONS = [
-        (0, 0, 0), (138, 0, 0), (276, 0, 0), (414, 0, 0),         # T1-T4
-        (0, 96, 0), (138, 96, 0), (276, 96, 0), (414, 96, 0),     # T5-T8
-        (0, 192, 0), (138, 192, 0), (276, 192, 0), (414, 192, 0), # T9-T12
-        (0, 288, 0), (138, 288, 0), (276, 288, 0), (414, 288, 0), # T13-T16
+        (0, 288, 0), (138, 288, 0), (276, 288, 0), (414, 288, 0),   # T1-T4   (第1行, 最上)
+        (0, 192, 0), (138, 192, 0), (276, 192, 0), (414, 192, 0),   # T5-T8   (第2行)
+        (0, 96, 0),  (138, 96, 0),  (276, 96, 0),  (414, 96, 0),    # T9-T12  (第3行)
+        (0, 0, 0),   (138, 0, 0),   (276, 0, 0),   (414, 0, 0),     # T13-T16 (第4行, 最下)
     ]
     _DEFAULT_SITE_SIZE = {"width": 128.0, "height": 86, "depth": 0}
-    _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor"]
+    _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor", "plateadapter", "module"]
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
                  sites: Optional[List[Dict[str, Any]]] = None, **kwargs):
@@ -542,6 +544,108 @@ class PRCXI9300TubeRack(TubeRack):
 
             data.update(safe_state)
         return data
+
+
+class PRCXI9300ModuleSite(ItemizedCarrier):
+    """
+    PRCXI 功能模块的基础站点类（加热/冷却/震荡/磁吸等）。
+
+    - 继承 ItemizedCarrier，可被拖放到 Deck 槽位上
+    - 顶面有一个 ResourceHolder 站点，可吸附板类资源（叠放）
+    - content_type 包含 "plateadapter" 以支持适配器叠放
+    - 支持 material_info 注入
+    """
+
+    def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
+                 material_info: Optional[Dict[str, Any]] = None, **kwargs):
+        sites = create_homogeneous_resources(
+            klass=ResourceHolder,
+            locations=[Coordinate(0, 0, 0)],
+            resource_size_x=size_x,
+            resource_size_y=size_y,
+            resource_size_z=size_z,
+            name_prefix=name,
+        )[0]
+
+        kwargs.pop('layout', None)
+        sites_in = kwargs.pop('sites', None)
+
+        sites_dict = {name: sites}
+
+        content_type = [
+            "plate",
+            "tip_rack",
+            "plates",
+            "tip_racks",
+            "tube_rack",
+            "plateadapter",
+        ]
+
+        if sites_in is not None and isinstance(sites_in, dict):
+            for site_key, site_value in sites_in.items():
+                if site_key in sites_dict:
+                    sites_dict[site_key] = site_value
+
+        super().__init__(
+            name, size_x, size_y, size_z,
+            sites=sites_dict,
+            num_items_x=kwargs.pop('num_items_x', 1),
+            num_items_y=kwargs.pop('num_items_y', 1),
+            num_items_z=kwargs.pop('num_items_z', 1),
+            content_type=content_type,
+            **kwargs,
+        )
+        self._unilabos_state = {}
+        if material_info:
+            self._unilabos_state["Material"] = material_info
+
+    def assign_child_resource(self, resource, location=Coordinate(0, 0, 0), reassign=True, spot=None):
+        from pylabrobot.resources.resource import Resource
+        Resource.assign_child_resource(self, resource, location=location, reassign=reassign)
+
+    def unassign_child_resource(self, resource):
+        from pylabrobot.resources.resource import Resource
+        Resource.unassign_child_resource(self, resource)
+
+    def serialize_state(self) -> Dict[str, Dict[str, Any]]:
+        try:
+            data = super().serialize_state()
+        except AttributeError:
+            data = {}
+
+        if hasattr(self, 'sites') and self.sites:
+            sites_info = []
+            for site in self.sites:
+                if hasattr(site, '__class__') and 'pylabrobot' in str(site.__class__.__module__):
+                    sites_info.append({
+                        "__pylabrobot_object__": True,
+                        "class": site.__class__.__name__,
+                        "module": site.__class__.__module__,
+                        "name": getattr(site, 'name', str(site))
+                    })
+                else:
+                    sites_info.append(site)
+            data['sites'] = sites_info
+
+        if hasattr(self, "_unilabos_state") and self._unilabos_state:
+            safe_state: Dict[str, Any] = {}
+            for k, v in self._unilabos_state.items():
+                if k == "Material" and isinstance(v, dict):
+                    safe_material: Dict[str, Any] = {}
+                    for mk, mv in v.items():
+                        if isinstance(mv, (str, int, float, bool, list, dict, type(None))):
+                            safe_material[mk] = mv
+                    safe_state[k] = safe_material
+                elif isinstance(v, (str, int, float, bool, list, dict, type(None))):
+                    safe_state[k] = v
+            data.update(safe_state)
+
+        return data
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        super().load_state(state)
+        if 'sites' in state:
+            self.sites = [state['sites']]
 
 
 class PRCXI9300PlateAdapter(PlateAdapter):
