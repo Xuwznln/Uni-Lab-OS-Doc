@@ -1,0 +1,7 @@
+[
+  {"id": "arm_1", "name": "Elite CS66 Arm", "size": [0.20, 0.20], "device_type": "articulation"},
+  {"id": "liquid_handler", "name": "Agilent Bravo", "size": [0.80, 0.65], "device_type": "static"},
+  {"id": "centrifuge", "name": "Centrifuge", "size": [0.50, 0.50], "device_type": "static"},
+  {"id": "plate_hotel", "name": "Thermo Orbitor RS2", "size": [0.45, 0.55], "device_type": "static"},
+  {"id": "hplc", "name": "HPLC Station", "size": [0.60, 0.50], "device_type": "static"}
+]

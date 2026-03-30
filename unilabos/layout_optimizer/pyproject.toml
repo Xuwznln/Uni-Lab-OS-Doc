@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "layout-optimizer"
+version = "0.1.0"
+description = "AI laboratory layout optimizer for Uni-Lab Phase 3"
+requires-python = ">=3.10"
+dependencies = [
+    "scipy>=1.10",
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "httpx>=0.24",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["layout_optimizer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

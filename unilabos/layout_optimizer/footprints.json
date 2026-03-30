@@ -1,0 +1,10274 @@
+{
+  "1_3m_hamilton_table": {
+    "bbox": [
+      1.5938,
+      1.143
+    ],
+    "height": 1.03,
+    "origin_offset": [
+      0.0369,
+      -0.5715
+    ],
+    "model_file": "meshes/1_3m_hamilton_table.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "1_3m_hamilton_table.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "abgene_22_deepwell": {
+    "bbox": [
+      0.0855,
+      0.0425
+    ],
+    "height": 0.1278,
+    "origin_offset": [
+      -0.0,
+      -0.0213
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "abgene_8_deepwell": {
+    "bbox": [
+      0.0855,
+      0.024
+    ],
+    "height": 0.1276,
+    "origin_offset": [
+      -0.0,
+      -0.012
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "agilent_barcode_labeler": {
+    "bbox": [
+      0.6412,
+      0.3509
+    ],
+    "height": 0.4152,
+    "origin_offset": [
+      0.0143,
+      -0.1734
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_bravo": {
+    "bbox": [
+      0.6477,
+      0.7016
+    ],
+    "height": 0.5852,
+    "origin_offset": [
+      -0.0,
+      -0.3453
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_plate_slot"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_bravo_magnetic_bead_plate": {
+    "bbox": [
+      0.1346,
+      0.0347
+    ],
+    "height": 0.0982,
+    "origin_offset": [
+      -0.0,
+      -0.0173
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_bravo_peltier_thermal": {
+    "bbox": [
+      0.1627,
+      0.0801
+    ],
+    "height": 0.1129,
+    "origin_offset": [
+      0.0003,
+      -0.0401
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_bravo_plate_pad": {
+    "bbox": [
+      0.1332,
+      0.0351
+    ],
+    "height": 0.0909,
+    "origin_offset": [
+      0.0,
+      -0.0176
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_bravo_thermal_station": {
+    "bbox": [
+      0.1523,
+      0.0354
+    ],
+    "height": 0.0912,
+    "origin_offset": [
+      0.0077,
+      -0.0175
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_centrifuge_loader": {
+    "bbox": [
+      0.7847,
+      0.256
+    ],
+    "height": 0.3276,
+    "origin_offset": [
+      -0.0683,
+      -0.1282
+    ],
+    "model_file": "meshes/0_body.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_body.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_fragment_analyzer": {
+    "bbox": [
+      0.5204,
+      0.605
+    ],
+    "height": 0.4379,
+    "origin_offset": [
+      -0.0181,
+      -0.3025
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "agilent_plateloc": {
+    "bbox": [
+      0.2165,
+      0.5806
+    ],
+    "height": 0.4588,
+    "origin_offset": [
+      0.0002,
+      -0.2903
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "agilent_tapestation_4150": {
+    "bbox": [
+      0.254,
+      0.4171
+    ],
+    "height": 0.5099,
+    "origin_offset": [
+      -0.0044,
+      -0.211
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "agilent_tapestation_4200": {
+    "bbox": [
+      0.4348,
+      0.677
+    ],
+    "height": 0.5194,
+    "origin_offset": [
+      -0.001,
+      -0.3321
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "alpaqua_96_well_magnet_plate": {
+    "bbox": [
+      0.0168,
+      0.1278
+    ],
+    "height": 0.0856,
+    "origin_offset": [
+      -0.0084,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "alpaqua_magnum_flx": {
+    "bbox": [
+      0.092,
+      0.0352
+    ],
+    "height": 0.1342,
+    "origin_offset": [
+      0.0,
+      -0.0176
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "alpaqua_pogo_chiller_box_24": {
+    "bbox": [
+      0.0856,
+      0.0423
+    ],
+    "height": 0.1278,
+    "origin_offset": [
+      0.0,
+      -0.0211
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "analytik_jena_trobot": {
+    "bbox": [
+      0.2074,
+      0.4126
+    ],
+    "height": 0.3827,
+    "origin_offset": [
+      -0.0,
+      0.0039
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "appliedbiosystems_quantstudio7_flex": {
+    "bbox": [
+      0.5045,
+      0.734
+    ],
+    "height": 0.6638,
+    "origin_offset": [
+      0.0066,
+      -0.367
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "appliedbiosystems_quantstudio7_pro": {
+    "bbox": [
+      0.4479,
+      0.5466
+    ],
+    "height": 0.7368,
+    "origin_offset": [
+      0.0555,
+      -0.2729
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "arm_slider": {
+    "bbox": [
+      2.14,
+      0.3538
+    ],
+    "height": 0.805,
+    "origin_offset": [
+      0.912,
+      0.0781
+    ],
+    "model_file": "",
+    "model_type": "",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "artificial_nuvo": {
+    "bbox": [
+      0.24,
+      0.2307
+    ],
+    "height": 0.1104,
+    "origin_offset": [
+      -0.0,
+      -0.0005
+    ],
+    "model_file": "meshes/nuvo.stl",
+    "model_type": "stl",
+    "thumbnail_file": "nuvo.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "artificial_platehotel4": {
+    "bbox": [
+      0.2499,
+      0.1495
+    ],
+    "height": 0.1568,
+    "origin_offset": [
+      -0.0001,
+      -0.0003
+    ],
+    "model_file": "meshes/platehotel4.stl",
+    "model_type": "stl",
+    "thumbnail_file": "platehotel4.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "axygen_300ml_reservoir": {
+    "bbox": [
+      0.127,
+      0.044
+    ],
+    "height": 0.085,
+    "origin_offset": [
+      -0.0,
+      -0.022
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_114_pipette": {
+    "bbox": [
+      0.0854,
+      0.1142
+    ],
+    "height": 0.1279,
+    "origin_offset": [
+      0.0,
+      -0.0571
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_190_pipette": {
+    "bbox": [
+      0.0854,
+      0.056
+    ],
+    "height": 0.1279,
+    "origin_offset": [
+      0.0,
+      -0.028
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_8_channel_tip_wash_alp": {
+    "bbox": [
+      0.0635,
+      0.2184
+    ],
+    "height": 0.0952,
+    "origin_offset": [
+      -0.0331,
+      -0.1092
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_96_channel_tip_wash_station": {
+    "bbox": [
+      0.1588,
+      0.108
+    ],
+    "height": 0.1461,
+    "origin_offset": [
+      0.0794,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_biomek_i5": {
+    "bbox": [
+      1.1186,
+      1.0387
+    ],
+    "height": 0.8355,
+    "origin_offset": [
+      -0.0,
+      -0.5193
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_biomek_i7": {
+    "bbox": [
+      1.7021,
+      1.3949
+    ],
+    "height": 0.8354,
+    "origin_offset": [
+      -0.0,
+      -0.3235
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_echo_525": {
+    "bbox": [
+      0.5385,
+      0.9252
+    ],
+    "height": 0.8441,
+    "origin_offset": [
+      0.0394,
+      -0.4626
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "beckman_coulter_echo_650": {
+    "bbox": [
+      0.5385,
+      0.7417
+    ],
+    "height": 1.0838,
+    "origin_offset": [
+      -0.0,
+      -0.3709
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "beckman_coulter_echo_655": {
+    "bbox": [
+      0.5385,
+      0.7417
+    ],
+    "height": 1.0838,
+    "origin_offset": [
+      -0.0,
+      -0.3709
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "beckman_coulter_echo_65X": {
+    "bbox": [
+      0.5385,
+      0.9149
+    ],
+    "height": 0.938,
+    "origin_offset": [
+      -0.0,
+      -0.4575
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_liquid_handler_trash_module": {
+    "bbox": [
+      0.2731,
+      0.2128
+    ],
+    "height": 0.3302,
+    "origin_offset": [
+      0.1374,
+      0.031
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "beckman_coulter_orbital_shaker_alp": {
+    "bbox": [
+      0.1417,
+      0.1143
+    ],
+    "height": 0.1397,
+    "origin_offset": [
+      -0.0709,
+      0.0064
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "beckman_coulter_plate_alp": {
+    "bbox": [
+      0.1653,
+      0.1302
+    ],
+    "height": 0.1366,
+    "origin_offset": [
+      0.0826,
+      0.0177
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "beckman_coulter_shaker_alp": {
+    "bbox": [
+      0.1961,
+      0.1673
+    ],
+    "height": 0.1457,
+    "origin_offset": [
+      0.0476,
+      -0.0836
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "beckman_coulter_tip_loader_alp": {
+    "bbox": [
+      0.1376,
+      0.0957
+    ],
+    "height": 0.166,
+    "origin_offset": [
+      0.0027,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "benchmark_scientific_benchmixer_v2_vortexer": {
+    "bbox": [
+      0.1412,
+      0.1885
+    ],
+    "height": 0.1658,
+    "origin_offset": [
+      -0.0,
+      -0.0942
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "benchmark_scientific_myfuge_12_mini_centrifuge": {
+    "bbox": [
+      0.2082,
+      0.0971
+    ],
+    "height": 0.146,
+    "origin_offset": [
+      0.0025,
+      -0.0486
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "benchmark_scientific_platefuge_microplate_microcentrifuge": {
+    "bbox": [
+      0.2725,
+      0.1974
+    ],
+    "height": 0.2242,
+    "origin_offset": [
+      0.0124,
+      -0.0987
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "bigbear_HT91000": {
+    "bbox": [
+      0.1346,
+      0.0359
+    ],
+    "height": 0.0927,
+    "origin_offset": [
+      0.0041,
+      -0.018
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "bigbear_HT91002": {
+    "bbox": [
+      0.2017,
+      0.0517
+    ],
+    "height": 0.0965,
+    "origin_offset": [
+      0.0117,
+      -0.0259
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "bigbear_HT91100": {
+    "bbox": [
+      0.149,
+      0.0888
+    ],
+    "height": 0.0965,
+    "origin_offset": [
+      -0.0001,
+      -0.0018
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "bigbear_HT91108": {
+    "bbox": [
+      0.1384,
+      0.0828
+    ],
+    "height": 0.0965,
+    "origin_offset": [
+      0.0017,
+      0.001
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "bionex_hig3_centrifuge": {
+    "bbox": [
+      0.4221,
+      0.4687
+    ],
+    "height": 0.5497,
+    "origin_offset": [
+      0.011,
+      -0.1573
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biorad_plate_384": {
+    "bbox": [
+      0.024,
+      0.128
+    ],
+    "height": 0.0854,
+    "origin_offset": [
+      -0.002,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "biorad_plate_96": {
+    "bbox": [
+      0.0854,
+      0.0161
+    ],
+    "height": 0.1275,
+    "origin_offset": [
+      -0.0,
+      -0.008
+    ],
+    "model_file": "meshes/plate.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "plate.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "biotek_405_ls": {
+    "bbox": [
+      0.4163,
+      0.2424
+    ],
+    "height": 0.3606,
+    "origin_offset": [
+      0.0514,
+      -0.1212
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_405_ts": {
+    "bbox": [
+      0.4163,
+      0.2423
+    ],
+    "height": 0.3606,
+    "origin_offset": [
+      0.0514,
+      -0.1211
+    ],
+    "model_file": "meshes/405ts.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "405ts.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_biospa": {
+    "bbox": [
+      0.8692,
+      0.488
+    ],
+    "height": 0.6449,
+    "origin_offset": [
+      -0.2843,
+      -0.244
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_cytation": {
+    "bbox": [
+      0.5119,
+      0.4482
+    ],
+    "height": 0.501,
+    "origin_offset": [
+      0.0553,
+      -0.22
+    ],
+    "model_file": "meshes/0_chassis.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_chassis.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_el311": {
+    "bbox": [
+      0.457,
+      0.4
+    ],
+    "height": 0.1961,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "meshes/el311-0.stl",
+    "model_type": "stl",
+    "thumbnail_file": "el311-0.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_el406": {
+    "bbox": [
+      0.3546,
+      0.2787
+    ],
+    "height": 0.3762,
+    "origin_offset": [
+      0.0091,
+      -0.1393
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_elx405": {
+    "bbox": [
+      0.3556,
+      0.2422
+    ],
+    "height": 0.4117,
+    "origin_offset": [
+      0.0157,
+      -0.1211
+    ],
+    "model_file": "meshes/0_chassis.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_chassis.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_epoch2": {
+    "bbox": [
+      0.324,
+      0.5248
+    ],
+    "height": 0.2366,
+    "origin_offset": [
+      -0.0045,
+      -0.0699
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_multiflo_fx": {
+    "bbox": [
+      0.4726,
+      0.52
+    ],
+    "height": 0.4577,
+    "origin_offset": [
+      0.0098,
+      0.007
+    ],
+    "model_file": "meshes/multiflo_fx.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "multiflo_fx.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_multiflo_fx_mfxp1": {
+    "bbox": [
+      0.4726,
+      0.2013
+    ],
+    "height": 0.4259,
+    "origin_offset": [
+      -0.0098,
+      -0.1035
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_multiflo_fx_secondary_pump": {
+    "bbox": [
+      0.2207,
+      0.0975
+    ],
+    "height": 0.2827,
+    "origin_offset": [
+      -0.0021,
+      -0.0278
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "biotek_multiflo_fx_syringe_module": {
+    "bbox": [
+      0.2101,
+      0.0902
+    ],
+    "height": 0.142,
+    "origin_offset": [
+      -0.0226,
+      -0.0379
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "biotek_multiflo_fx_washer_module": {
+    "bbox": [
+      0.211,
+      0.1225
+    ],
+    "height": 0.15,
+    "origin_offset": [
+      -0.0218,
+      -0.0612
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "biotek_synergy_h1": {
+    "bbox": [
+      0.3824,
+      0.544
+    ],
+    "height": 0.6006,
+    "origin_offset": [
+      -0.0034,
+      -0.0567
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "biotek_synergy_neo2": {
+    "bbox": [
+      0.3899,
+      0.3943
+    ],
+    "height": 0.6731,
+    "origin_offset": [
+      0.0097,
+      -0.1885
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "bluecatbio_bluewasher": {
+    "bbox": [
+      0.3621,
+      0.2011
+    ],
+    "height": 0.691,
+    "origin_offset": [
+      -0.0045,
+      -0.1005
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "bmg_labtech_clariostar_plus": {
+    "bbox": [
+      0.444,
+      0.3945
+    ],
+    "height": 0.6065,
+    "origin_offset": [
+      -0.0,
+      -0.1978
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "bmg_labtech_fluostar_omega": {
+    "bbox": [
+      0.44,
+      0.306
+    ],
+    "height": 0.5938,
+    "origin_offset": [
+      0.0028,
+      -0.153
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "bmg_labtech_pherastar_fsx": {
+    "bbox": [
+      0.4594,
+      0.7175
+    ],
+    "height": 0.6126,
+    "origin_offset": [
+      -0.0003,
+      0.1034
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "brandel_rs_3000": {
+    "bbox": [
+      0.5744,
+      0.7594
+    ],
+    "height": 0.5397,
+    "origin_offset": [
+      -0.0078,
+      0.0627
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "brooks_a4ssealer": {
+    "bbox": [
+      0.6625,
+      0.263
+    ],
+    "height": 0.222,
+    "origin_offset": [
+      -0.1107,
+      -0.1315
+    ],
+    "model_file": "meshes/brooks_a4s_sealer.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "brooks_a4s_sealer.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "brooks_fluidx_capperdecapper": {
+    "bbox": [
+      0.5885,
+      0.3193
+    ],
+    "height": 0.256,
+    "origin_offset": [
+      0.1252,
+      -0.1597
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "brooks_fluidx_perception": {
+    "bbox": [
+      0.139,
+      0.1686
+    ],
+    "height": 0.098,
+    "origin_offset": [
+      -0.0,
+      -0.0843
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "brooks_fluidx_xdc_96_capper": {
+    "bbox": [
+      0.681,
+      0.3514
+    ],
+    "height": 0.2778,
+    "origin_offset": [
+      0.1005,
+      -0.1758
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "brooks_xpeel": {
+    "bbox": [
+      0.374,
+      0.3732
+    ],
+    "height": 0.6375,
+    "origin_offset": [
+      -0.0057,
+      -0.1866
+    ],
+    "model_file": "meshes/brooks_xpeel.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "brooks_xpeel.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "corning_falcon_15ml_tube": {
+    "bbox": [
+      0.0175,
+      0.1186
+    ],
+    "height": 0.0681,
+    "origin_offset": [
+      -0.0,
+      -0.0593
+    ],
+    "model_file": "meshes/corning_falcon_15ml_tube.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "corning_falcon_15ml_tube.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "corning_falcon_50ml_tube": {
+    "bbox": [
+      0.028,
+      0.1147
+    ],
+    "height": 0.0713,
+    "origin_offset": [
+      -0.0,
+      -0.0573
+    ],
+    "model_file": "meshes/corning_falcon_50ml_tube.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "corning_falcon_50ml_tube.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "corning_plate_384": {
+    "bbox": [
+      0.1278,
+      0.0146
+    ],
+    "height": 0.0855,
+    "origin_offset": [
+      -0.0001,
+      -0.0073
+    ],
+    "model_file": "meshes/plate.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "plate.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "custom_chiller_plate_nest": {
+    "bbox": [
+      0.0949,
+      0.0433
+    ],
+    "height": 0.141,
+    "origin_offset": [
+      0.0,
+      -0.0217
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "custom_hamilton_2ml_tube_adapter": {
+    "bbox": [
+      0.0512,
+      0.0342
+    ],
+    "height": 0.0152,
+    "origin_offset": [
+      0.0256,
+      0.0106
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "custom_hamilton_5ml_tube_adapter": {
+    "bbox": [
+      0.0294,
+      0.0292
+    ],
+    "height": 0.0297,
+    "origin_offset": [
+      0.0019,
+      -0.0146
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "custom_handoff_nest": {
+    "bbox": [
+      0.1338,
+      0.1502
+    ],
+    "height": 0.1854,
+    "origin_offset": [
+      0.0,
+      -0.0751
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "custom_tube_rack_adapter_5ml": {
+    "bbox": [
+      0.127,
+      0.0606
+    ],
+    "height": 0.085,
+    "origin_offset": [
+      0.0,
+      -0.0303
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "cytena_cwash": {
+    "bbox": [
+      0.385,
+      0.2076
+    ],
+    "height": 0.6043,
+    "origin_offset": [
+      0.0,
+      -0.1038
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "dispendix_idot_liquid_handler": {
+    "bbox": [
+      0.4721,
+      0.4327
+    ],
+    "height": 0.678,
+    "origin_offset": [
+      -0.0004,
+      -0.2163
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "dynamic_devices_lynx_1200": {
+    "bbox": [
+      0.8515,
+      1.0615
+    ],
+    "height": 1.3261,
+    "origin_offset": [
+      0.0643,
+      -0.5308
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "dynamic_devices_lynx_1800": {
+    "bbox": [
+      0.8515,
+      1.0255
+    ],
+    "height": 1.8,
+    "origin_offset": [
+      0.0582,
+      -0.5093
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "dynamic_devices_lynx_900": {
+    "bbox": [
+      0.8515,
+      1.0255
+    ],
+    "height": 1.0261,
+    "origin_offset": [
+      0.0582,
+      -0.5093
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "elite_cs612_arm": {
+    "bbox": [
+      0.2,
+      0.2
+    ],
+    "height": 0.1,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "",
+    "model_type": "",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "manual"
+  },
+  "elite_cs66_arm": {
+    "bbox": [
+      0.2,
+      0.2
+    ],
+    "height": 0.1,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "",
+    "model_type": "",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "manual"
+  },
+  "elite_robot": {
+    "bbox": [
+      0.2,
+      0.2
+    ],
+    "height": 0.1,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "",
+    "model_type": "",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "manual"
+  },
+  "eppendorf_0.5ml_tube": {
+    "bbox": [
+      0.0094,
+      0.0306
+    ],
+    "height": 0.0323,
+    "origin_offset": [
+      -0.0,
+      -0.0153
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "eppendorf_1.5ml_tube": {
+    "bbox": [
+      0.0107,
+      0.0418
+    ],
+    "height": 0.043,
+    "origin_offset": [
+      -0.0001,
+      -0.0209
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "eppendorf_centrifuge_5920r": {
+    "bbox": [
+      1.1093,
+      0.4973
+    ],
+    "height": 0.71,
+    "origin_offset": [
+      0.1847,
+      -0.184
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "eppendorf_high_speed_centrifuge_5430r": {
+    "bbox": [
+      0.4348,
+      0.2504
+    ],
+    "height": 0.34,
+    "origin_offset": [
+      0.0074,
+      -0.1252
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "fluidx_96_1ml_tube_rack": {
+    "bbox": [
+      0.0854,
+      0.0495
+    ],
+    "height": 0.1273,
+    "origin_offset": [
+      -0.0,
+      -0.0247
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "fluidx_capped_tube_rack": {
+    "bbox": [
+      0.0854,
+      0.0238
+    ],
+    "height": 0.1273,
+    "origin_offset": [
+      -0.0,
+      -0.0119
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "formulatrix_fast": {
+    "bbox": [
+      0.5315,
+      0.396
+    ],
+    "height": 0.6028,
+    "origin_offset": [
+      0.0015,
+      -0.198
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "formulatrix_mantis": {
+    "bbox": [
+      0.4841,
+      0.2054
+    ],
+    "height": 0.24,
+    "origin_offset": [
+      0.0135,
+      -0.1027
+    ],
+    "model_file": "meshes/mantis-base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "mantis-base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "formulatrix_mantis_base_unit": {
+    "bbox": [
+      0.3512,
+      0.1914
+    ],
+    "height": 0.2151,
+    "origin_offset": [
+      -0.013,
+      -0.0967
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "formulatrix_mantis_left": {
+    "bbox": [
+      0.467,
+      0.3187
+    ],
+    "height": 0.24,
+    "origin_offset": [
+      -0.0316,
+      -0.0447
+    ],
+    "model_file": "meshes/mantis-base-left.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "mantis-base-left.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "formulatrix_tempest": {
+    "bbox": [
+      0.6282,
+      0.2884
+    ],
+    "height": 0.3778,
+    "origin_offset": [
+      -0.0376,
+      -0.128
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "fritz_gyger_certus_flex": {
+    "bbox": [
+      0.3125,
+      0.4244
+    ],
+    "height": 0.5563,
+    "origin_offset": [
+      0.1592,
+      0.0011
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "generic_labware_0.5ml_screw_cap_tube": {
+    "bbox": [
+      0.0096,
+      0.0415
+    ],
+    "height": 0.0297,
+    "origin_offset": [
+      -0.0,
+      -0.0207
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_0.5ml_tube_rack": {
+    "bbox": [
+      0.0854,
+      0.0396
+    ],
+    "height": 0.1273,
+    "origin_offset": [
+      -0.0,
+      -0.0198
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_12_well_plate": {
+    "bbox": [
+      0.0865,
+      0.0179
+    ],
+    "height": 0.131,
+    "origin_offset": [
+      0.0,
+      -0.0089
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_1ml_tube_rack": {
+    "bbox": [
+      0.0854,
+      0.0495
+    ],
+    "height": 0.1273,
+    "origin_offset": [
+      -0.0,
+      -0.0247
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_24_well_plate": {
+    "bbox": [
+      0.0855,
+      0.0166
+    ],
+    "height": 0.1279,
+    "origin_offset": [
+      -0.0,
+      -0.0082
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_250ml_conical_tube": {
+    "bbox": [
+      0.059,
+      0.1716
+    ],
+    "height": 0.1259,
+    "origin_offset": [
+      -0.0,
+      -0.0858
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_250ml_erlenmeyer_flask": {
+    "bbox": [
+      0.082,
+      0.1321
+    ],
+    "height": 0.1099,
+    "origin_offset": [
+      0.0,
+      -0.0661
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_2l_bottle": {
+    "bbox": [
+      0.127,
+      0.2805
+    ],
+    "height": 0.324,
+    "origin_offset": [
+      -0.0,
+      -0.1339
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_2ml_screw_cap_tube": {
+    "bbox": [
+      0.0133,
+      0.044
+    ],
+    "height": 0.0329,
+    "origin_offset": [
+      -0.0,
+      -0.022
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_5ml_screw_cap_tube": {
+    "bbox": [
+      0.02,
+      0.061
+    ],
+    "height": 0.0461,
+    "origin_offset": [
+      0.0,
+      -0.0305
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_6_well_plate": {
+    "bbox": [
+      0.0854,
+      0.0208
+    ],
+    "height": 0.1273,
+    "origin_offset": [
+      -0.0,
+      -0.0104
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_96_well_pcr_plate_round": {
+    "bbox": [
+      0.0854,
+      0.0161
+    ],
+    "height": 0.1275,
+    "origin_offset": [
+      -0.0,
+      -0.008
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_96_well_square": {
+    "bbox": [
+      0.0854,
+      0.0155
+    ],
+    "height": 0.1273,
+    "origin_offset": [
+      -0.0,
+      -0.0078
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_carboy": {
+    "bbox": [
+      0.29,
+      0.5336
+    ],
+    "height": 0.2896,
+    "origin_offset": [
+      0.0,
+      -0.2668
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_emergency_stop": {
+    "bbox": [
+      0.0681,
+      0.055
+    ],
+    "height": 0.0995,
+    "origin_offset": [
+      -0.001,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_framedtiprack": {
+    "bbox": [
+      0.0886,
+      0.0581
+    ],
+    "height": 0.1306,
+    "origin_offset": [
+      0.0,
+      -0.029
+    ],
+    "model_file": "meshes/framedtiprack.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "framedtiprack.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_nestedtiprack": {
+    "bbox": [
+      0.0853,
+      0.0581
+    ],
+    "height": 0.1272,
+    "origin_offset": [
+      -0.0,
+      -0.029
+    ],
+    "model_file": "meshes/nestedtiprack.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "nestedtiprack.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_petri_dish": {
+    "bbox": [
+      0.153,
+      0.0201
+    ],
+    "height": 0.153,
+    "origin_offset": [
+      0.0,
+      -0.01
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_plate_hotel_10": {
+    "bbox": [
+      0.109,
+      0.4001
+    ],
+    "height": 0.134,
+    "origin_offset": [
+      -0.0085,
+      -0.2
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "generic_labware_plate_lid": {
+    "bbox": [
+      0.0854,
+      0.0091
+    ],
+    "height": 0.1272,
+    "origin_offset": [
+      0.0,
+      -0.0045
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_reagent_bottle": {
+    "bbox": [
+      0.1524,
+      0.2439
+    ],
+    "height": 0.2036,
+    "origin_offset": [
+      0.0023,
+      -0.1203
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base (1).png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_reservoir": {
+    "bbox": [
+      0.0471,
+      0.127
+    ],
+    "height": 0.085,
+    "origin_offset": [
+      0.0236,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_tip_box": {
+    "bbox": [
+      0.0886,
+      0.0581
+    ],
+    "height": 0.1306,
+    "origin_offset": [
+      0.0,
+      -0.029
+    ],
+    "model_file": "meshes/framedtiprack.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "framedtiprack.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_tube_10_75": {
+    "bbox": [
+      0.01,
+      0.075
+    ],
+    "height": 0.05,
+    "origin_offset": [
+      -0.0,
+      -0.0375
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_tube_13_100": {
+    "bbox": [
+      0.013,
+      0.1
+    ],
+    "height": 0.0665,
+    "origin_offset": [
+      -0.0,
+      -0.0499
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "generic_labware_tube_16_125": {
+    "bbox": [
+      0.016,
+      0.1251
+    ],
+    "height": 0.0832,
+    "origin_offset": [
+      -0.0,
+      -0.0625
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_0.5ml_tube_carrier": {
+    "bbox": [
+      0.0225,
+      0.1401
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.0701
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_0.5ml_tube_carrier_v2": {
+    "bbox": [
+      0.0225,
+      0.1401
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.0701
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_1.5ml_tube_carrier": {
+    "bbox": [
+      0.0225,
+      0.1401
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.0701
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_1.5ml_tube_carrier_v2": {
+    "bbox": [
+      0.0225,
+      0.1401
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.0701
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_200ml_trough": {
+    "bbox": [
+      0.0375,
+      0.1175
+    ],
+    "height": 0.11,
+    "origin_offset": [
+      -0.0,
+      -0.0037
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_4x_200ml_trough_carrier": {
+    "bbox": [
+      0.045,
+      0.0601
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0113,
+      -0.0301
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_4x_200ml_trough_carrier_v2": {
+    "bbox": [
+      0.045,
+      0.0601
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0113,
+      -0.0301
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_5x_50ml_reagent_carrier": {
+    "bbox": [
+      0.0924,
+      0.5195
+    ],
+    "height": 0.0211,
+    "origin_offset": [
+      0.0462,
+      -0.0051
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_5x_50ml_reagent_carrier_v2": {
+    "bbox": [
+      0.0924,
+      0.5195
+    ],
+    "height": 0.0211,
+    "origin_offset": [
+      0.0462,
+      -0.0051
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_5x_50ml_reagent_trough": {
+    "bbox": [
+      0.0654,
+      0.0898
+    ],
+    "height": 0.0199,
+    "origin_offset": [
+      0.0327,
+      -0.0013
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_5x_60ml_trough_carrier": {
+    "bbox": [
+      0.0236,
+      0.093
+    ],
+    "height": 0.4871,
+    "origin_offset": [
+      -0.0006,
+      -0.0467
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_5x_60ml_trough_carrier_v2": {
+    "bbox": [
+      0.0236,
+      0.093
+    ],
+    "height": 0.4871,
+    "origin_offset": [
+      -0.0006,
+      -0.0467
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_60ml_trough": {
+    "bbox": [
+      0.02,
+      0.065
+    ],
+    "height": 0.0899,
+    "origin_offset": [
+      0.0,
+      -0.0325
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_96_well_low_magnet_module": {
+    "bbox": [
+      0.134,
+      0.0367
+    ],
+    "height": 0.1342,
+    "origin_offset": [
+      0.0,
+      -0.0183
+    ],
+    "model_file": "meshes/alpaqua_magnum_flx.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "alpaqua_magnum_flx.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_deepwell_reagent_reservoir": {
+    "bbox": [
+      0.0471,
+      0.127
+    ],
+    "height": 0.085,
+    "origin_offset": [
+      0.0236,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_easypick_ii_carrier": {
+    "bbox": [
+      0.1565,
+      0.0526
+    ],
+    "height": 0.5256,
+    "origin_offset": [
+      -0.0,
+      -0.0263
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_entry_exit_chute": {
+    "bbox": [
+      0.1154,
+      0.1954
+    ],
+    "height": 0.4962,
+    "origin_offset": [
+      0.0577,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_entry_exit_door": {
+    "bbox": [
+      0.0422,
+      0.5118
+    ],
+    "height": 0.5575,
+    "origin_offset": [
+      0.0563,
+      -0.2565
+    ],
+    "model_file": "meshes/1_door.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "1_door.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_entry_exit_stacker": {
+    "bbox": [
+      0.135,
+      0.5076
+    ],
+    "height": 0.1164,
+    "origin_offset": [
+      0.0005,
+      -0.2539
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_heater_shaker_adapter": {
+    "bbox": [
+      0.123,
+      0.032
+    ],
+    "height": 0.088,
+    "origin_offset": [
+      0.0,
+      -0.016
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_heater_shaker_carrier_base": {
+    "bbox": [
+      0.1545,
+      0.008
+    ],
+    "height": 0.499,
+    "origin_offset": [
+      0.0704,
+      -0.004
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_heater_shaker_carrier_base_v2": {
+    "bbox": [
+      0.1545,
+      0.008
+    ],
+    "height": 0.499,
+    "origin_offset": [
+      0.0704,
+      -0.004
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_lab_elite_id_capper": {
+    "bbox": [
+      0.3937,
+      0.4781
+    ],
+    "height": 0.6113,
+    "origin_offset": [
+      0.0149,
+      -0.239
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_logistics_cabinet_13m": {
+    "bbox": [
+      1.3,
+      1.3046
+    ],
+    "height": 0.9864,
+    "origin_offset": [
+      0.0042,
+      -0.218
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_logistics_cabinet_2m": {
+    "bbox": [
+      2.0,
+      1.3046
+    ],
+    "height": 0.9864,
+    "origin_offset": [
+      0.0042,
+      -0.218
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_low_profile_plate_carrier": {
+    "bbox": [
+      0.5,
+      0.06
+    ],
+    "height": 0.135,
+    "origin_offset": [
+      -0.0022,
+      -0.03
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_low_profile_plate_carrier_v2": {
+    "bbox": [
+      0.5,
+      0.06
+    ],
+    "height": 0.135,
+    "origin_offset": [
+      -0.0022,
+      -0.03
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mfx_carrier_heater_shaker": {
+    "bbox": [
+      0.1545,
+      0.0939
+    ],
+    "height": 0.5265,
+    "origin_offset": [
+      0.0,
+      -0.047
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mfx_carrier_ntr_flat": {
+    "bbox": [
+      0.135,
+      0.0204
+    ],
+    "height": 0.094,
+    "origin_offset": [
+      0.0,
+      -0.0102
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mfx_carrier_ntr_flat_preconfigured": {
+    "bbox": [
+      0.1352,
+      0.0352
+    ],
+    "height": 0.497,
+    "origin_offset": [
+      0.0556,
+      -0.0176
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mfx_low_magnet_module": {
+    "bbox": [
+      0.0367,
+      0.094
+    ],
+    "height": 0.134,
+    "origin_offset": [
+      0.0183,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mfx_plate_locator_module": {
+    "bbox": [
+      0.0185,
+      0.0917
+    ],
+    "height": 0.1336,
+    "origin_offset": [
+      0.0093,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mfx_stacker_heater": {
+    "bbox": [
+      0.1575,
+      0.497
+    ],
+    "height": 0.2097,
+    "origin_offset": [
+      -0.0709,
+      -0.0168
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mpe2": {
+    "bbox": [
+      0.159,
+      0.4212
+    ],
+    "height": 0.1814,
+    "origin_offset": [
+      -0.0,
+      -0.0786
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mpe2_base": {
+    "bbox": [
+      0.0294,
+      0.51
+    ],
+    "height": 0.452,
+    "origin_offset": [
+      0.0061,
+      -0.0078
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_mtp_carrier_locators": {
+    "bbox": [
+      0.135,
+      0.1193
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0562,
+      -0.0597
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiFlex_carrier_5_dwp": {
+    "bbox": [
+      0.134,
+      0.0847
+    ],
+    "height": 0.5003,
+    "origin_offset": [
+      0.0559,
+      -0.0423
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiFlex_carrier_5_dwp_v2": {
+    "bbox": [
+      0.134,
+      0.0847
+    ],
+    "height": 0.5003,
+    "origin_offset": [
+      0.0559,
+      -0.0423
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_base": {
+    "bbox": [
+      0.134,
+      0.0085
+    ],
+    "height": 0.499,
+    "origin_offset": [
+      0.0583,
+      -0.0042
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_base_v2": {
+    "bbox": [
+      0.134,
+      0.0085
+    ],
+    "height": 0.499,
+    "origin_offset": [
+      0.0583,
+      -0.0042
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_dwp": {
+    "bbox": [
+      0.134,
+      0.0666
+    ],
+    "height": 0.094,
+    "origin_offset": [
+      0.0,
+      -0.0333
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_flat_high_profile_plate": {
+    "bbox": [
+      0.135,
+      0.0145
+    ],
+    "height": 0.0942,
+    "origin_offset": [
+      -0.0,
+      -0.0072
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_heater_shaker": {
+    "bbox": [
+      0.1471,
+      0.0861
+    ],
+    "height": 0.1047,
+    "origin_offset": [
+      -0.0019,
+      -0.0431
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_hhsf30dwp_3empty": {
+    "bbox": [
+      0.1545,
+      0.0941
+    ],
+    "height": 0.5265,
+    "origin_offset": [
+      0.0675,
+      -0.047
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_magnet": {
+    "bbox": [
+      0.1355,
+      0.1049
+    ],
+    "height": 0.4969,
+    "origin_offset": [
+      0.0559,
+      -0.0525
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_magnet_module": {
+    "bbox": [
+      0.1349,
+      0.0901
+    ],
+    "height": 0.0941,
+    "origin_offset": [
+      -0.0,
+      -0.0451
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_carrier_nunc_heater_shaker": {
+    "bbox": [
+      0.1469,
+      0.1031
+    ],
+    "height": 0.1017,
+    "origin_offset": [
+      0.0003,
+      -0.0515
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_multiflex_flat_sloped_high_profile_module": {
+    "bbox": [
+      0.132,
+      0.0842
+    ],
+    "height": 0.092,
+    "origin_offset": [
+      -0.0,
+      -0.0421
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_quad_core_gripper": {
+    "bbox": [
+      0.1263,
+      0.0518
+    ],
+    "height": 0.1342,
+    "origin_offset": [
+      0.0632,
+      0.0014
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_sample_tube_carrier_24": {
+    "bbox": [
+      0.06,
+      0.5215
+    ],
+    "height": 0.0214,
+    "origin_offset": [
+      0.03,
+      -0.008
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_sample_tube_carrier_24_v2": {
+    "bbox": [
+      0.06,
+      0.5215
+    ],
+    "height": 0.0214,
+    "origin_offset": [
+      0.03,
+      -0.008
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_sample_tube_carrier_32": {
+    "bbox": [
+      0.06,
+      0.5215
+    ],
+    "height": 0.0212,
+    "origin_offset": [
+      0.03,
+      -0.008
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_sample_tube_carrier_32_v2": {
+    "bbox": [
+      0.06,
+      0.5215
+    ],
+    "height": 0.0212,
+    "origin_offset": [
+      0.03,
+      -0.008
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_sample_tube_carrier_with_0.5ml_adapter_32": {
+    "bbox": [
+      0.0888,
+      0.5215
+    ],
+    "height": 0.0212,
+    "origin_offset": [
+      0.0444,
+      -0.008
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_sample_tube_carrier_with_2ml_adapter_32": {
+    "bbox": [
+      0.2296,
+      0.5215
+    ],
+    "height": 0.0212,
+    "origin_offset": [
+      0.1148,
+      -0.008
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_sample_tube_carrier_with_5ml_adapter_24": {
+    "bbox": [
+      0.0214,
+      0.2271
+    ],
+    "height": 0.5215,
+    "origin_offset": [
+      0.0007,
+      -0.1136
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_star": {
+    "bbox": [
+      1.664,
+      0.9032
+    ],
+    "height": 0.7952,
+    "origin_offset": [
+      -0.0,
+      -0.1256
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_deck"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_star_integration_bay": {
+    "bbox": [
+      0.2595,
+      0.761
+    ],
+    "height": 0.8783,
+    "origin_offset": [
+      0.0033,
+      -0.382
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_star_waste_module": {
+    "bbox": [
+      0.1933,
+      0.1223
+    ],
+    "height": 0.4786,
+    "origin_offset": [
+      0.0846,
+      -0.0614
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_starlet_liquid_handler": {
+    "bbox": [
+      1.124,
+      0.9018
+    ],
+    "height": 0.7917,
+    "origin_offset": [
+      -0.0,
+      -0.1254
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_starplus": {
+    "bbox": [
+      2.16,
+      0.9032
+    ],
+    "height": 0.7952,
+    "origin_offset": [
+      -0.0,
+      -0.1256
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_teaching_needle_block": {
+    "bbox": [
+      0.02,
+      0.095
+    ],
+    "height": 0.0728,
+    "origin_offset": [
+      0.0,
+      -0.0475
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_tip_adapter_96_channel_head": {
+    "bbox": [
+      0.1344,
+      0.0594
+    ],
+    "height": 0.0866,
+    "origin_offset": [
+      0.0,
+      -0.0297
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hamilton_tip_box_carrier_4": {
+    "bbox": [
+      0.134,
+      0.0372
+    ],
+    "height": 0.4975,
+    "origin_offset": [
+      0.0,
+      -0.0186
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_tip_box_carrier_4_v2": {
+    "bbox": [
+      0.134,
+      0.0372
+    ],
+    "height": 0.4975,
+    "origin_offset": [
+      0.0,
+      -0.0186
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "hamilton_tube_insert_0.5ml": {
+    "bbox": [
+      0.0211,
+      0.0148
+    ],
+    "height": 0.0791,
+    "origin_offset": [
+      0.0031,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "hettich_rotanta_460_centrifuge": {
+    "bbox": [
+      0.6945,
+      0.6516
+    ],
+    "height": 0.5475,
+    "origin_offset": [
+      0.0706,
+      -0.3263
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "highres_bio_ambistore_d": {
+    "bbox": [
+      1.0762,
+      1.1986
+    ],
+    "height": 1.091,
+    "origin_offset": [
+      0.1478,
+      -0.4316
+    ],
+    "model_file": "meshes/ambistoredarm.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "ambistoredarm.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_ambistore_d_cassette_24": {
+    "bbox": [
+      0.1736,
+      0.5745
+    ],
+    "height": 0.1464,
+    "origin_offset": [
+      0.0388,
+      -0.2872
+    ],
+    "model_file": "meshes/ambistoredcassette.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "ambistoredcassette.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_ambistore_d_cassette_8": {
+    "bbox": [
+      0.1736,
+      0.5745
+    ],
+    "height": 0.1464,
+    "origin_offset": [
+      0.0388,
+      -0.2872
+    ],
+    "model_file": "meshes/ambistoredcassette.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "ambistoredcassette.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_ambistore_m": {
+    "bbox": [
+      1.0544,
+      1.6337
+    ],
+    "height": 0.7296,
+    "origin_offset": [
+      0.0851,
+      -0.8105
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_ambistore_table": {
+    "bbox": [
+      1.2846,
+      1.3211
+    ],
+    "height": 1.0668,
+    "origin_offset": [
+      0.03,
+      -0.6605
+    ],
+    "model_file": "meshes/ambistore_table.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "ambistore_table.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "highres_bio_barcode_scanner": {
+    "bbox": [
+      0.0498,
+      0.1972
+    ],
+    "height": 0.0445,
+    "origin_offset": [
+      0.0038,
+      -0.0986
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "highres_bio_eq_hotel_4": {
+    "bbox": [
+      0.1125,
+      0.5742
+    ],
+    "height": 0.1465,
+    "origin_offset": [
+      -0.0,
+      -0.2846
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_hotel_10": {
+    "bbox": [
+      0.1125,
+      0.5742
+    ],
+    "height": 0.1565,
+    "origin_offset": [
+      -0.0,
+      -0.2846
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_hotel_14": {
+    "bbox": [
+      0.3183,
+      0.5742
+    ],
+    "height": 0.1554,
+    "origin_offset": [
+      0.1029,
+      -0.2846
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_hotel_19": {
+    "bbox": [
+      0.1491,
+      0.5743
+    ],
+    "height": 0.1126,
+    "origin_offset": [
+      -0.0494,
+      -0.2846
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_hotel_5": {
+    "bbox": [
+      0.1125,
+      0.5743
+    ],
+    "height": 0.1575,
+    "origin_offset": [
+      -0.0,
+      -0.2846
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_hotel_6": {
+    "bbox": [
+      0.1125,
+      0.5743
+    ],
+    "height": 0.1574,
+    "origin_offset": [
+      -0.0,
+      -0.2846
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_lidvalet": {
+    "bbox": [
+      0.3027,
+      0.213
+    ],
+    "height": 0.1511,
+    "origin_offset": [
+      0.0145,
+      -0.1065
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_microcart": {
+    "bbox": [
+      0.8381,
+      1.1623
+    ],
+    "height": 1.096,
+    "origin_offset": [
+      -0.0,
+      -0.5812
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_microdock": {
+    "bbox": [
+      0.901,
+      0.1538
+    ],
+    "height": 0.6604,
+    "origin_offset": [
+      0.4251,
+      -0.0755
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_microspin": {
+    "bbox": [
+      0.4012,
+      0.3938
+    ],
+    "height": 0.4012,
+    "origin_offset": [
+      -0.0,
+      -0.1969
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_nucleus_pod": {
+    "bbox": [
+      1.025,
+      0.4547
+    ],
+    "height": 1.025,
+    "origin_offset": [
+      0.0037,
+      -0.2274
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_picoserve": {
+    "bbox": [
+      0.5024,
+      0.5652
+    ],
+    "height": 0.4432,
+    "origin_offset": [
+      -0.2511,
+      0.0615
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_plate_hotel_12": {
+    "bbox": [
+      0.1016,
+      0.7613
+    ],
+    "height": 0.1185,
+    "origin_offset": [
+      -0.0,
+      -0.3807
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_shelf"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_plate_hotel_4": {
+    "bbox": [
+      0.257,
+      0.3167
+    ],
+    "height": 0.1697,
+    "origin_offset": [
+      0.0533,
+      -0.1584
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_plate_hotel_8": {
+    "bbox": [
+      0.4092,
+      0.6485
+    ],
+    "height": 0.1681,
+    "origin_offset": [
+      0.13,
+      -0.3243
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_plate_hotel_nest": {
+    "bbox": [
+      0.1509,
+      0.0314
+    ],
+    "height": 0.1609,
+    "origin_offset": [
+      0.0,
+      -0.0178
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_plateorient": {
+    "bbox": [
+      0.1499,
+      0.0726
+    ],
+    "height": 0.1567,
+    "origin_offset": [
+      -0.0,
+      -0.0363
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_plateweigh": {
+    "bbox": [
+      0.2561,
+      0.2782
+    ],
+    "height": 0.2844,
+    "origin_offset": [
+      0.0001,
+      -0.1391
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_random_access_stacker_12": {
+    "bbox": [
+      0.6728,
+      0.378
+    ],
+    "height": 0.19,
+    "origin_offset": [
+      -0.3364,
+      0.1138
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_steristore_d": {
+    "bbox": [
+      0.8558,
+      1.3294
+    ],
+    "height": 1.2814,
+    "origin_offset": [
+      -0.0088,
+      -0.6255
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_steristore_m": {
+    "bbox": [
+      0.8703,
+      2.3914
+    ],
+    "height": 1.8749,
+    "origin_offset": [
+      -0.0101,
+      -0.688
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_transfer_nest": {
+    "bbox": [
+      0.1514,
+      0.0127
+    ],
+    "height": 0.1517,
+    "origin_offset": [
+      -0.0003,
+      -0.0064
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_tundrastore_d": {
+    "bbox": [
+      0.8558,
+      1.3294
+    ],
+    "height": 1.2814,
+    "origin_offset": [
+      -0.0088,
+      -0.6255
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_bio_tundrastore_m": {
+    "bbox": [
+      0.8703,
+      2.3914
+    ],
+    "height": 1.8749,
+    "origin_offset": [
+      -0.0101,
+      -0.688
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_microserve": {
+    "bbox": [
+      0.8139,
+      0.8777
+    ],
+    "height": 0.8922,
+    "origin_offset": [
+      -0.019,
+      -0.4389
+    ],
+    "model_file": "meshes/microserve_carousel.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "microserve_carousel.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "highres_microserve_hotel": {
+    "bbox": [
+      0.1404,
+      0.8436
+    ],
+    "height": 0.6524,
+    "origin_offset": [
+      -0.0,
+      0.3779
+    ],
+    "model_file": "meshes/microserve_hotel.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "microserve_hotel.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "illumia_miseq_sequencer": {
+    "bbox": [
+      0.5639,
+      0.5372
+    ],
+    "height": 0.6858,
+    "origin_offset": [
+      -0.0,
+      -0.2561
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "inheco_cpac_ultraflat_ht_2_tec": {
+    "bbox": [
+      0.1288,
+      0.0802
+    ],
+    "height": 0.0889,
+    "origin_offset": [
+      -0.0001,
+      -0.0401
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "inheco_odtc_384": {
+    "bbox": [
+      0.248,
+      0.1248
+    ],
+    "height": 0.1621,
+    "origin_offset": [
+      -0.0657,
+      -0.0624
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "inheco_odtc_96lc": {
+    "bbox": [
+      0.248,
+      0.1248
+    ],
+    "height": 0.1621,
+    "origin_offset": [
+      -0.0657,
+      -0.0624
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "inheco_odtc_96xl": {
+    "bbox": [
+      0.2852,
+      0.13
+    ],
+    "height": 0.1567,
+    "origin_offset": [
+      -0.0097,
+      -0.065
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "inheco_shakeac": {
+    "bbox": [
+      0.1589,
+      0.104
+    ],
+    "height": 0.1152,
+    "origin_offset": [
+      -0.006,
+      0.0
+    ],
+    "model_file": "meshes/thermoshakeac.stl",
+    "model_type": "stl",
+    "thumbnail_file": "thermoshakeac.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "inheco_shaker_mp": {
+    "bbox": [
+      0.149,
+      0.1635
+    ],
+    "height": 0.4713,
+    "origin_offset": [
+      -0.0,
+      -0.0043
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "inheco_teleshake": {
+    "bbox": [
+      0.103,
+      0.0394
+    ],
+    "height": 0.1456,
+    "origin_offset": [
+      -0.0,
+      -0.0197
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "integra_assist_plus": {
+    "bbox": [
+      0.7484,
+      0.6006
+    ],
+    "height": 0.3832,
+    "origin_offset": [
+      -0.0261,
+      -0.3003
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "integra_mini96": {
+    "bbox": [
+      0.31,
+      0.4511
+    ],
+    "height": 0.3075,
+    "origin_offset": [
+      0.0218,
+      -0.2256
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "julabo_cooling_hotel": {
+    "bbox": [
+      0.3774,
+      0.176
+    ],
+    "height": 0.2345,
+    "origin_offset": [
+      0.1117,
+      0.0771
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "lab_companion_microwave_oven": {
+    "bbox": [
+      0.478,
+      0.6226
+    ],
+    "height": 0.7912,
+    "origin_offset": [
+      0.0,
+      -0.3113
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_str44_incubator": {
+    "bbox": [
+      0.485,
+      0.8768
+    ],
+    "height": 0.7662,
+    "origin_offset": [
+      0.0005,
+      -0.4384
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_door"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx110": {
+    "bbox": [
+      0.4914,
+      1.225
+    ],
+    "height": 0.9313,
+    "origin_offset": [
+      -0.0018,
+      -0.6125
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx220": {
+    "bbox": [
+      0.744,
+      1.3239
+    ],
+    "height": 1.5278,
+    "origin_offset": [
+      -0.004,
+      -0.148
+    ],
+    "model_file": "meshes/stx220-2.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "stx220-2.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx220_cassettedeep": {
+    "bbox": [
+      0.112,
+      0.542
+    ],
+    "height": 0.1385,
+    "origin_offset": [
+      0.0,
+      -0.2707
+    ],
+    "model_file": "meshes/cassettedeep.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "cassettedeep.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx220_cassettedeep12": {
+    "bbox": [
+      0.112,
+      0.542
+    ],
+    "height": 0.1385,
+    "origin_offset": [
+      0.0,
+      -0.2707
+    ],
+    "model_file": "meshes/cassettedeep.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "cassettedeep.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx220_cassettedeep7": {
+    "bbox": [
+      0.112,
+      0.542
+    ],
+    "height": 0.1385,
+    "origin_offset": [
+      0.0,
+      -0.2707
+    ],
+    "model_file": "meshes/cassettedeep.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "cassettedeep.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx220_cassettestandard": {
+    "bbox": [
+      0.1116,
+      0.542
+    ],
+    "height": 0.1385,
+    "origin_offset": [
+      -0.0,
+      -0.2708
+    ],
+    "model_file": "meshes/cassettestandard.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "cassettestandard.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx220_cassettestandard19": {
+    "bbox": [
+      0.1118,
+      0.542
+    ],
+    "height": 0.1385,
+    "origin_offset": [
+      -0.0,
+      -0.2708
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_stx44": {
+    "bbox": [
+      0.8645,
+      1.224
+    ],
+    "height": 0.5838,
+    "origin_offset": [
+      0.1945,
+      -0.612
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_table_low_top": {
+    "bbox": [
+      0.8891,
+      1.8838
+    ],
+    "height": 1.0668,
+    "origin_offset": [
+      0.0006,
+      -0.3789
+    ],
+    "model_file": "meshes/liconic_table_low_top.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "liconic_table_low_top (1).png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_table_tall_no_sliders": {
+    "bbox": [
+      0.8898,
+      2.0107
+    ],
+    "height": 1.0668,
+    "origin_offset": [
+      0.0037,
+      -0.3932
+    ],
+    "model_file": "meshes/liconic_table_tall_no_sliders.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "liconic_table_tall_no_sliders.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "liconic_table_tall_with_sliders": {
+    "bbox": [
+      0.8898,
+      2.0457
+    ],
+    "height": 1.8282,
+    "origin_offset": [
+      0.0037,
+      -0.4107
+    ],
+    "model_file": "meshes/liconic_table_tall_with_sliders.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "liconic_table_tall_with_sliders.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "logitech_c920": {
+    "bbox": [
+      0.0999,
+      0.023
+    ],
+    "height": 0.03,
+    "origin_offset": [
+      -0.0,
+      0.0115
+    ],
+    "model_file": "meshes/c920.stl",
+    "model_type": "stl",
+    "thumbnail_file": "c920.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "luminex_flexmap_3d_system": {
+    "bbox": [
+      0.5849,
+      0.478
+    ],
+    "height": 0.8022,
+    "origin_offset": [
+      -0.008,
+      -0.239
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "luminex_flexmap_3d_system_base": {
+    "bbox": [
+      0.5842,
+      0.1065
+    ],
+    "height": 0.602,
+    "origin_offset": [
+      -0.0009,
+      -0.0532
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "memmert_forced_air_incubator": {
+    "bbox": [
+      0.625,
+      0.7779
+    ],
+    "height": 0.8636,
+    "origin_offset": [
+      0.0204,
+      -0.3889
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "mettler_toledo_analytical_balance": {
+    "bbox": [
+      0.3439,
+      0.3431
+    ],
+    "height": 0.289,
+    "origin_offset": [
+      0.0351,
+      -0.1715
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "microhawk_barcode_reader": {
+    "bbox": [
+      0.0623,
+      0.3005
+    ],
+    "height": 0.2168,
+    "origin_offset": [
+      0.0073,
+      -0.0903
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "micronic_rack_reader_dr505": {
+    "bbox": [
+      0.2847,
+      0.1346
+    ],
+    "height": 0.19,
+    "origin_offset": [
+      -0.0073,
+      -0.0673
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "microscan_ms3": {
+    "bbox": [
+      0.0497,
+      0.033
+    ],
+    "height": 0.0497,
+    "origin_offset": [
+      0.0033,
+      -0.0051
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "microsoft_hololens": {
+    "bbox": [
+      0.1554,
+      0.0453
+    ],
+    "height": 0.1913,
+    "origin_offset": [
+      -0.0,
+      0.0129
+    ],
+    "model_file": "meshes/hololens.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "hololens.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "mobile_cart_1_wheel": {
+    "bbox": [
+      0.7875,
+      1.5195
+    ],
+    "height": 1.0709,
+    "origin_offset": [
+      -0.004,
+      -0.386
+    ],
+    "model_file": "meshes/mobile_cart_1_wheel.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "mobile_cart_1_wheel.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "molecular_devices_flipr_penta_high_throughput_cellular_screening_system": {
+    "bbox": [
+      0.777,
+      1.8952
+    ],
+    "height": 1.7571,
+    "origin_offset": [
+      0.0247,
+      -0.9476
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "molecular_devices_spectramax_abs": {
+    "bbox": [
+      0.4788,
+      0.2153
+    ],
+    "height": 0.306,
+    "origin_offset": [
+      0.0324,
+      -0.1078
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "molecular_devices_spectramax_i3x": {
+    "bbox": [
+      0.392,
+      0.4475
+    ],
+    "height": 0.6995,
+    "origin_offset": [
+      0.0,
+      -0.2237
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "molecular_devices_spectramax_id3": {
+    "bbox": [
+      0.4646,
+      0.5544
+    ],
+    "height": 0.6379,
+    "origin_offset": [
+      0.0271,
+      -0.2772
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "molecular_devices_spectramax_id5": {
+    "bbox": [
+      0.4646,
+      0.5537
+    ],
+    "height": 0.7251,
+    "origin_offset": [
+      0.0271,
+      -0.2771
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "nexelcom_celigo": {
+    "bbox": [
+      0.4952,
+      0.4085
+    ],
+    "height": 0.7458,
+    "origin_offset": [
+      -0.0001,
+      -0.2043
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "nunc_deepplate": {
+    "bbox": [
+      0.0854,
+      0.0322
+    ],
+    "height": 0.1275,
+    "origin_offset": [
+      -0.0,
+      -0.0161
+    ],
+    "model_file": "meshes/deepplate.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "deepplate.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "omron_ld_90": {
+    "bbox": [
+      0.6977,
+      0.4946
+    ],
+    "height": 0.4953,
+    "origin_offset": [
+      -0.0034,
+      0.0005
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_1.5+2ml_tube_holder_top": {
+    "bbox": [
+      0.121,
+      0.0103
+    ],
+    "height": 0.0787,
+    "origin_offset": [
+      -0.0,
+      -0.0052
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_15+50ml_tube_holder_top": {
+    "bbox": [
+      0.121,
+      0.0101
+    ],
+    "height": 0.0787,
+    "origin_offset": [
+      0.0012,
+      -0.005
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_15ml_tube_holder_top": {
+    "bbox": [
+      0.121,
+      0.0101
+    ],
+    "height": 0.0787,
+    "origin_offset": [
+      -0.0,
+      -0.005
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_4in1_tube_rack_set_base": {
+    "bbox": [
+      0.1277,
+      0.0738
+    ],
+    "height": 0.0855,
+    "origin_offset": [
+      0.0,
+      -0.0369
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "opentrons_50ml_tube_holder_top": {
+    "bbox": [
+      0.121,
+      0.0102
+    ],
+    "height": 0.0787,
+    "origin_offset": [
+      0.0008,
+      -0.0051
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_aluminum_thermal_block_24": {
+    "bbox": [
+      0.1277,
+      0.042
+    ],
+    "height": 0.0855,
+    "origin_offset": [
+      0.0,
+      -0.021
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_aluminum_thermal_block_96": {
+    "bbox": [
+      0.0185,
+      0.1277
+    ],
+    "height": 0.0855,
+    "origin_offset": [
+      0.0092,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_deep_well_adapter": {
+    "bbox": [
+      0.0782,
+      0.1142
+    ],
+    "height": 0.0177,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_flat_bottom_adapter": {
+    "bbox": [
+      0.075,
+      0.008
+    ],
+    "height": 0.1129,
+    "origin_offset": [
+      0.0,
+      -0.004
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "opentrons_flex": {
+    "bbox": [
+      1.0114,
+      0.8307
+    ],
+    "height": 0.6919,
+    "origin_offset": [
+      0.0814,
+      -0.4089
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_deck"
+      }
+    ],
+    "source": "assets"
+  },
+  "opentrons_heater_shaker_module": {
+    "bbox": [
+      0.1504,
+      0.0825
+    ],
+    "height": 0.091,
+    "origin_offset": [
+      0.0018,
+      -0.0412
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "opentrons_hepa_module": {
+    "bbox": [
+      0.6243,
+      0.2932
+    ],
+    "height": 0.599,
+    "origin_offset": [
+      0.0002,
+      -0.1466
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_liquid_handler": {
+    "bbox": [
+      0.6243,
+      0.5672
+    ],
+    "height": 0.662,
+    "origin_offset": [
+      0.3122,
+      -0.2836
+    ],
+    "model_file": "meshes/ot2-0.stl",
+    "model_type": "stl",
+    "thumbnail_file": "ot2-0.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_deck"
+      }
+    ],
+    "source": "assets"
+  },
+  "opentrons_magnetic_module": {
+    "bbox": [
+      0.0897,
+      0.1
+    ],
+    "height": 0.1457,
+    "origin_offset": [
+      0.0001,
+      -0.05
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "opentrons_pcr_adapter": {
+    "bbox": [
+      0.0748,
+      0.1107
+    ],
+    "height": 0.0139,
+    "origin_offset": [
+      -0.0,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_temperature_module": {
+    "bbox": [
+      0.1938,
+      0.0837
+    ],
+    "height": 0.0897,
+    "origin_offset": [
+      -0.004,
+      -0.0418
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base (1).png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "opentrons_thermocycler_module": {
+    "bbox": [
+      0.172,
+      0.1803
+    ],
+    "height": 0.3154,
+    "origin_offset": [
+      0.0005,
+      -0.0637
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "opentrons_universal_flat_adapter": {
+    "bbox": [
+      0.012,
+      0.1211
+    ],
+    "height": 0.075,
+    "origin_offset": [
+      0.0058,
+      -0.0037
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "osmotech_ht_automated_micro_osmometer": {
+    "bbox": [
+      0.489,
+      0.692
+    ],
+    "height": 0.6583,
+    "origin_offset": [
+      0.022,
+      -0.346
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "paa_cs10_carousel_stacker": {
+    "bbox": [
+      0.755,
+      0.138
+    ],
+    "height": 0.7278,
+    "origin_offset": [
+      0.0,
+      -0.069
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "paa_docking_station_unit": {
+    "bbox": [
+      0.1956,
+      0.0542
+    ],
+    "height": 0.2445,
+    "origin_offset": [
+      -0.0,
+      -0.0271
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "paa_kx_2_750_robot": {
+    "bbox": [
+      0.4442,
+      1.2036
+    ],
+    "height": 0.3629,
+    "origin_offset": [
+      0.0616,
+      -0.5726
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "paa_kx_2_rail_1000m": {
+    "bbox": [
+      0.265,
+      0.0958
+    ],
+    "height": 1.56,
+    "origin_offset": [
+      0.0255,
+      -0.0479
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "paa_kx_2_rail_2000m": {
+    "bbox": [
+      0.265,
+      0.5566
+    ],
+    "height": 2.5435,
+    "origin_offset": [
+      0.0255,
+      -0.2791
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "paa_kx_2_rail_500m": {
+    "bbox": [
+      0.265,
+      0.0958
+    ],
+    "height": 1.0463,
+    "origin_offset": [
+      0.0255,
+      -0.0479
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "paa_kx_660": {
+    "bbox": [
+      0.3097,
+      0.8646
+    ],
+    "height": 0.2816,
+    "origin_offset": [
+      0.0352,
+      -0.4053
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "paa_sequential_stack_ss30sp": {
+    "bbox": [
+      0.166,
+      0.4394
+    ],
+    "height": 0.1707,
+    "origin_offset": [
+      -0.0,
+      -0.2197
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "perkinelmer_opera_phenix": {
+    "bbox": [
+      1.2916,
+      0.472
+    ],
+    "height": 0.4923,
+    "origin_offset": [
+      -0.0001,
+      -0.236
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "pf_15_rail": {
+    "bbox": [
+      1.8789,
+      0.2018
+    ],
+    "height": 0.2341,
+    "origin_offset": [
+      -0.004,
+      -0.0126
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "pf_1m_rail": {
+    "bbox": [
+      1.2185,
+      0.1175
+    ],
+    "height": 0.2341,
+    "origin_offset": [
+      -0.004,
+      -0.0548
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "pf_2m_rail": {
+    "bbox": [
+      2.379,
+      0.1175
+    ],
+    "height": 0.2341,
+    "origin_offset": [
+      -0.004,
+      -0.0548
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "pf_400": {
+    "bbox": [
+      0.2351,
+      0.5276
+    ],
+    "height": 0.7432,
+    "origin_offset": [
+      0.0,
+      -0.0178
+    ],
+    "model_file": "meshes/pf400-0.stl",
+    "model_type": "stl",
+    "thumbnail_file": "pf400-0.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "pf_400_rail": {
+    "bbox": [
+      2.4815,
+      0.5276
+    ],
+    "height": 0.7432,
+    "origin_offset": [
+      1.1232,
+      -0.0178
+    ],
+    "model_file": "meshes/pf400-0.stl",
+    "model_type": "stl",
+    "thumbnail_file": "pf400-0.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "pf_400_table": {
+    "bbox": [
+      2.667,
+      0.4699
+    ],
+    "height": 0.635,
+    "origin_offset": [
+      0.0026,
+      -0.235
+    ],
+    "model_file": "meshes/pf400_table.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "pf400_table.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "pf_750": {
+    "bbox": [
+      0.6841,
+      1.5095
+    ],
+    "height": 0.4351,
+    "origin_offset": [
+      0.0174,
+      -0.6842
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "promega_glomax_discover_microplate_reader": {
+    "bbox": [
+      0.4637,
+      0.2726
+    ],
+    "height": 0.6182,
+    "origin_offset": [
+      -0.001,
+      -0.1363
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "prometheous_panta": {
+    "bbox": [
+      0.4116,
+      0.5307
+    ],
+    "height": 0.6005,
+    "origin_offset": [
+      0.0311,
+      -0.265
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "protein_simple_maurice": {
+    "bbox": [
+      0.6176,
+      0.4388
+    ],
+    "height": 0.4822,
+    "origin_offset": [
+      -0.0412,
+      -0.2194
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "qinstruments_bioshake_3000t": {
+    "bbox": [
+      0.142,
+      0.0619
+    ],
+    "height": 0.099,
+    "origin_offset": [
+      0.0,
+      -0.0309
+    ],
+    "model_file": "meshes/bioshake_3000t.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "bioshake_3000t.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "qinstruments_bioshake_5000": {
+    "bbox": [
+      0.142,
+      0.0553
+    ],
+    "height": 0.099,
+    "origin_offset": [
+      -0.0,
+      0.0277
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "qinstruments_bioshake_q1": {
+    "bbox": [
+      0.0972,
+      0.142
+    ],
+    "height": 0.099,
+    "origin_offset": [
+      0.0486,
+      -0.0003
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "retisoft_platehotel8": {
+    "bbox": [
+      0.2499,
+      0.1495
+    ],
+    "height": 0.3349,
+    "origin_offset": [
+      -0.0001,
+      -0.0003
+    ],
+    "model_file": "meshes/platehotel8.stl",
+    "model_type": "stl",
+    "thumbnail_file": "platehotel8.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "sarstedt_14x200mm_tube": {
+    "bbox": [
+      0.014,
+      0.12
+    ],
+    "height": 0.0653,
+    "origin_offset": [
+      -0.0,
+      -0.06
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "sarstedt_18x200mm_tube": {
+    "bbox": [
+      0.018,
+      0.12
+    ],
+    "height": 0.0673,
+    "origin_offset": [
+      -0.0,
+      -0.06
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "sartorius_2l_bioreactor_vessel": {
+    "bbox": [
+      0.281,
+      0.8805
+    ],
+    "height": 0.5528,
+    "origin_offset": [
+      -0.0,
+      -0.4403
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "sartorius_biostat_benchtop_controller": {
+    "bbox": [
+      0.4906,
+      0.8628
+    ],
+    "height": 0.5867,
+    "origin_offset": [
+      0.0303,
+      -0.4314
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "sartorius_intelicyt_ique3": {
+    "bbox": [
+      0.9863,
+      0.7128
+    ],
+    "height": 0.6313,
+    "origin_offset": [
+      -0.0959,
+      -0.2719
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "scinomix_sciprint_mp2": {
+    "bbox": [
+      0.2408,
+      0.8939
+    ],
+    "height": 0.7574,
+    "origin_offset": [
+      0.0023,
+      0.0997
+    ],
+    "model_file": "meshes/scinomix_sciprint_mp2.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "scinomix_sciprint_mp2.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "southern_labware_benchtop_incubator_shaker": {
+    "bbox": [
+      0.44,
+      0.573
+    ],
+    "height": 0.5655,
+    "origin_offset": [
+      0.0288,
+      -0.2865
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_cabinet_extension_freedom_evo_carousel": {
+    "bbox": [
+      0.7784,
+      0.7663
+    ],
+    "height": 0.8169,
+    "origin_offset": [
+      -0.0069,
+      -0.3832
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_cabinet_fluent_1080": {
+    "bbox": [
+      0.78,
+      0.7992
+    ],
+    "height": 2.1499,
+    "origin_offset": [
+      -0.0143,
+      -0.3996
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_cabinet_fluent_480": {
+    "bbox": [
+      0.78,
+      0.7992
+    ],
+    "height": 1.15,
+    "origin_offset": [
+      -0.0143,
+      -0.3996
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_cabinet_fluent_780": {
+    "bbox": [
+      0.78,
+      0.806
+    ],
+    "height": 1.6498,
+    "origin_offset": [
+      -0.0142,
+      -0.3981
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_cabinet_freedom_evo_100": {
+    "bbox": [
+      0.8037,
+      0.7666
+    ],
+    "height": 0.9598,
+    "origin_offset": [
+      -0.0007,
+      -0.3833
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_carousel": {
+    "bbox": [
+      0.8544,
+      0.8312
+    ],
+    "height": 0.792,
+    "origin_offset": [
+      -0.0807,
+      -0.4104
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_carousel_stacker_10": {
+    "bbox": [
+      0.111,
+      0.5415
+    ],
+    "height": 0.1425,
+    "origin_offset": [
+      -0.0,
+      -0.2702
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_carousel_stacker_25": {
+    "bbox": [
+      0.111,
+      0.5415
+    ],
+    "height": 0.3292,
+    "origin_offset": [
+      -0.0,
+      -0.2702
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_carousel_stacker_6": {
+    "bbox": [
+      0.111,
+      0.5415
+    ],
+    "height": 0.3321,
+    "origin_offset": [
+      -0.0,
+      -0.2702
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_carrier_384_well_mp_3_pos_accessible_roma": {
+    "bbox": [
+      0.3425,
+      0.11
+    ],
+    "height": 0.149,
+    "origin_offset": [
+      0.0187,
+      -0.055
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_carrier_additive_trough_3_pce_max_100ml": {
+    "bbox": [
+      0.351,
+      0.1099
+    ],
+    "height": 0.0396,
+    "origin_offset": [
+      -0.1186,
+      -0.0549
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_carrier_rack_3_diti_width_6": {
+    "bbox": [
+      0.306,
+      0.1232
+    ],
+    "height": 0.149,
+    "origin_offset": [
+      0.0017,
+      -0.0616
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_d300_shell_holder": {
+    "bbox": [
+      0.4712,
+      0.229
+    ],
+    "height": 0.4584,
+    "origin_offset": [
+      0.006,
+      -0.1145
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_evo100": {
+    "bbox": [
+      0.8121,
+      1.0717
+    ],
+    "height": 0.8574,
+    "origin_offset": [
+      -0.0461,
+      0.0013
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_evo150": {
+    "bbox": [
+      0.8121,
+      1.4109
+    ],
+    "height": 0.8559,
+    "origin_offset": [
+      -0.0461,
+      -0.0206
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_evo200": {
+    "bbox": [
+      0.8121,
+      2.0497
+    ],
+    "height": 0.8566,
+    "origin_offset": [
+      -0.0461,
+      0.0095
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_evo75": {
+    "bbox": [
+      0.6996,
+      0.7409
+    ],
+    "height": 0.8743,
+    "origin_offset": [
+      0.0507,
+      -0.3705
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_evolyzer_100": {
+    "bbox": [
+      1.4975,
+      0.8785
+    ],
+    "height": 0.7715,
+    "origin_offset": [
+      0.0458,
+      -0.4393
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_evolyzer_150": {
+    "bbox": [
+      1.8703,
+      0.8661
+    ],
+    "height": 0.7715,
+    "origin_offset": [
+      0.043,
+      -0.4331
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_evolyzer_200": {
+    "bbox": [
+      2.4787,
+      0.8653
+    ],
+    "height": 0.7715,
+    "origin_offset": [
+      0.043,
+      -0.4327
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_1.5ml_tube_runner": {
+    "bbox": [
+      0.0703,
+      0.0225
+    ],
+    "height": 0.4257,
+    "origin_offset": [
+      0.0351,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_1.5ml_tube_runner_v2": {
+    "bbox": [
+      0.0703,
+      0.0225
+    ],
+    "height": 0.4257,
+    "origin_offset": [
+      0.0351,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_1080_extended": {
+    "bbox": [
+      0.0058,
+      0.9985
+    ],
+    "height": 0.0255,
+    "origin_offset": [
+      0.1998,
+      -0.4992
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_15ml_tube_runner_16": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_15ml_tube_runner_16_v2": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_1_16_16_tube_runner": {
+    "bbox": [
+      0.3923,
+      0.07
+    ],
+    "height": 0.0362,
+    "origin_offset": [
+      -0.1513,
+      -0.0339
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_1_1_1000_trough": {
+    "bbox": [
+      0.1145,
+      0.0579
+    ],
+    "height": 0.3914,
+    "origin_offset": [
+      0.0447,
+      0.0166
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_1_24_10_tube_runner": {
+    "bbox": [
+      0.3923,
+      0.0705
+    ],
+    "height": 0.0365,
+    "origin_offset": [
+      -0.1519,
+      -0.0353
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_1_24_13_tube_runner": {
+    "bbox": [
+      0.3923,
+      0.0705
+    ],
+    "height": 0.0365,
+    "origin_offset": [
+      -0.1519,
+      -0.0353
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_1_4_100_trough": {
+    "bbox": [
+      0.0634,
+      0.109
+    ],
+    "height": 0.3914,
+    "origin_offset": [
+      0.0195,
+      -0.0545
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_2_4_100_trough_waste": {
+    "bbox": [
+      0.05,
+      0.075
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0152,
+      -0.0216
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_2_grid_segment": {
+    "bbox": [
+      0.05,
+      0.0133
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0138,
+      -0.0042
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_320ml_reagent_trough": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0,
+      0.0427
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_32_tube_runner": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0017,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_32_tube_runner_v2": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0017,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_3_grid_segment": {
+    "bbox": [
+      0.075,
+      0.0115
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0258,
+      -0.003
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_3x320_reagent_trough": {
+    "bbox": [
+      0.4201,
+      0.055
+    ],
+    "height": 0.0526,
+    "origin_offset": [
+      0.0038,
+      -0.0002
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_3x320_reagent_trough_v2": {
+    "bbox": [
+      0.4201,
+      0.055
+    ],
+    "height": 0.0526,
+    "origin_offset": [
+      0.0038,
+      -0.0002
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_480_extended": {
+    "bbox": [
+      0.0001,
+      0.3442
+    ],
+    "height": 0.0784,
+    "origin_offset": [
+      -0.0261,
+      0.3733
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_4_landscape_61mm_nest_segment": {
+    "bbox": [
+      0.15,
+      0.0838
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0645,
+      -0.0262
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_4_landscape_61mm_nest_segment_waste": {
+    "bbox": [
+      0.1501,
+      0.2661
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0645,
+      0.0467
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_4_landscape_7mm_nest_segment": {
+    "bbox": [
+      0.15,
+      0.0313
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0645,
+      0.0009
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_4_landscape_7mm_nest_segment_waste": {
+    "bbox": [
+      0.1501,
+      0.2661
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0645,
+      0.0461
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_4x100_reagent_trough": {
+    "bbox": [
+      0.3892,
+      0.1078
+    ],
+    "height": 0.0566,
+    "origin_offset": [
+      -0.1448,
+      0.0416
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_4x100_reagent_trough_v2": {
+    "bbox": [
+      0.3892,
+      0.1078
+    ],
+    "height": 0.0566,
+    "origin_offset": [
+      -0.1448,
+      0.0416
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_4x100_trough": {
+    "bbox": [
+      0.0893,
+      0.0825
+    ],
+    "height": 0.0191,
+    "origin_offset": [
+      0.0448,
+      -0.0002
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_50ml_tube_runner_10": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      -0.0133,
+      0.0275
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_50ml_tube_runner_10_v2": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      -0.0133,
+      0.0275
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_5_landscape_61mm_nest_segment": {
+    "bbox": [
+      0.15,
+      0.0838
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0645,
+      -0.0262
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_5_landscape_7mm_nest_segment": {
+    "bbox": [
+      0.15,
+      0.0313
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0645,
+      0.0009
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_6_grid_segment": {
+    "bbox": [
+      0.5835,
+      0.025
+    ],
+    "height": 0.15,
+    "origin_offset": [
+      -0.0044,
+      0.0037
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_6_landscape_7mm_nest_segment": {
+    "bbox": [
+      0.15,
+      0.0313
+    ],
+    "height": 0.6122,
+    "origin_offset": [
+      0.0645,
+      0.0009
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_6_nest_incubator": {
+    "bbox": [
+      0.2434,
+      0.3079
+    ],
+    "height": 0.1235,
+    "origin_offset": [
+      -0.0724,
+      -0.1067
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_780_extended": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.1975,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_8_grid_segment": {
+    "bbox": [
+      0.2,
+      0.0254
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0902,
+      0.0031
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_8_grid_segment_evo": {
+    "bbox": [
+      0.2,
+      0.0937
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0898,
+      -0.0302
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_9_grid_segment_cutout": {
+    "bbox": [
+      0.2262,
+      0.0094
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.1015,
+      -0.0047
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_centric_gripper": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_coolheat_microplate_segment": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0651,
+      -0.0504
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_coolheat_microplate_segment_v2": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0651,
+      -0.0504
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_deck_segment_4": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      -0.1117,
+      0.0814
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_deck_segment_4_v2": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      -0.1117,
+      0.0814
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_deck_segment_6": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      -0.1117,
+      0.0814
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_deck_segment_6_v2": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      -0.1117,
+      0.0814
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_eccentric_gripper": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_fca_diti_segment": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0673,
+      0.0199
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_fca_diti_segment_v2": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      0.0673,
+      0.0199
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_fca_diti_tray": {
+    "bbox": [
+      0.0,
+      0.0
+    ],
+    "height": 0.0,
+    "origin_offset": [
+      -0.0053,
+      0.0334
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_hotel_deck_4": {
+    "bbox": [
+      0.12,
+      0.3102
+    ],
+    "height": 0.15,
+    "origin_offset": [
+      0.0454,
+      -0.1097
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_hotel_deck_5": {
+    "bbox": [
+      0.12,
+      0.3102
+    ],
+    "height": 0.15,
+    "origin_offset": [
+      0.0454,
+      -0.1097
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_hotel_deck_9": {
+    "bbox": [
+      0.12,
+      0.3127
+    ],
+    "height": 0.15,
+    "origin_offset": [
+      -0.0486,
+      -0.1077
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_id_left": {
+    "bbox": [
+      0.5835,
+      0.1418
+    ],
+    "height": 0.318,
+    "origin_offset": [
+      -0.0146,
+      -0.0636
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_id_middle": {
+    "bbox": [
+      0.3,
+      0.1631
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      -0.075,
+      -0.0815
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_id_tube_runner_1_26_16": {
+    "bbox": [
+      0.6037,
+      0.1526
+    ],
+    "height": 0.0238,
+    "origin_offset": [
+      -0.0686,
+      -0.0763
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_id_tube_runner_1_32_10": {
+    "bbox": [
+      0.6037,
+      0.1526
+    ],
+    "height": 0.0604,
+    "origin_offset": [
+      -0.0704,
+      -0.0763
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_id_tube_runner_1_32_13": {
+    "bbox": [
+      0.6037,
+      0.1526
+    ],
+    "height": 0.0238,
+    "origin_offset": [
+      -0.0686,
+      -0.0763
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_id_tube_runner_eppendorf_1_32_2": {
+    "bbox": [
+      0.6037,
+      0.1526
+    ],
+    "height": 0.0238,
+    "origin_offset": [
+      -0.0686,
+      -0.0763
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_lower_6_grid": {
+    "bbox": [
+      0.0358,
+      0.463
+    ],
+    "height": 0.15,
+    "origin_offset": [
+      -0.0033,
+      -0.0243
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_lower_6_grid_v2": {
+    "bbox": [
+      0.0358,
+      0.463
+    ],
+    "height": 0.15,
+    "origin_offset": [
+      -0.0033,
+      -0.0243
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_mc384_nest": {
+    "bbox": [
+      0.14,
+      0.0713
+    ],
+    "height": 0.12,
+    "origin_offset": [
+      -0.0,
+      -0.0356
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_mca_44mm_nest": {
+    "bbox": [
+      0.1418,
+      0.0496
+    ],
+    "height": 0.1211,
+    "origin_offset": [
+      0.0,
+      -0.0248
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_mca_base_segment_384": {
+    "bbox": [
+      0.15,
+      0.167
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0667,
+      -0.0697
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_mca_base_segment_384_v2": {
+    "bbox": [
+      0.15,
+      0.167
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0667,
+      -0.0697
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_mp_diti_nest_segment": {
+    "bbox": [
+      0.15,
+      0.0302
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0624,
+      -0.0006
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_nest_landscape_segment": {
+    "bbox": [
+      0.15,
+      0.086
+    ],
+    "height": 0.613,
+    "origin_offset": [
+      0.0631,
+      -0.0261
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_nest_landscape_segment_v2": {
+    "bbox": [
+      0.15,
+      0.086
+    ],
+    "height": 0.613,
+    "origin_offset": [
+      0.0631,
+      -0.0261
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_nest_waste_segment": {
+    "bbox": [
+      0.15,
+      0.5834
+    ],
+    "height": 0.266,
+    "origin_offset": [
+      0.0625,
+      -0.0016
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_nest_waste_segment_v2": {
+    "bbox": [
+      0.15,
+      0.5834
+    ],
+    "height": 0.266,
+    "origin_offset": [
+      0.0625,
+      -0.0016
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_plate_holder": {
+    "bbox": [
+      0.1441,
+      0.1499
+    ],
+    "height": 0.0147,
+    "origin_offset": [
+      -0.0228,
+      0.0049
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_plate_nest": {
+    "bbox": [
+      0.1375,
+      0.068
+    ],
+    "height": 0.2549,
+    "origin_offset": [
+      -0.0011,
+      -0.0343
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_reagent_block": {
+    "bbox": [
+      0.1278,
+      0.061
+    ],
+    "height": 0.0855,
+    "origin_offset": [
+      0.0,
+      -0.0305
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_shelf_large": {
+    "bbox": [
+      0.59,
+      0.035
+    ],
+    "height": 0.975,
+    "origin_offset": [
+      -0.0071,
+      -0.0175
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_shelf_small": {
+    "bbox": [
+      0.59,
+      0.0348
+    ],
+    "height": 0.4748,
+    "origin_offset": [
+      -0.0024,
+      -0.0179
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_trough_waste": {
+    "bbox": [
+      0.034,
+      0.336
+    ],
+    "height": 0.082,
+    "origin_offset": [
+      -0.001,
+      0.0104
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_tube_grippers": {
+    "bbox": [
+      0.1735,
+      0.1282
+    ],
+    "height": 0.08,
+    "origin_offset": [
+      0.0268,
+      -0.0641
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_fluent_washstation_waste": {
+    "bbox": [
+      0.05,
+      0.0735
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0134,
+      -0.0224
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_washstation_waste_v2": {
+    "bbox": [
+      0.05,
+      0.0735
+    ],
+    "height": 0.5835,
+    "origin_offset": [
+      0.0134,
+      -0.0224
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_fluent_waste_module": {
+    "bbox": [
+      0.0932,
+      0.1487
+    ],
+    "height": 0.2661,
+    "origin_offset": [
+      0.0034,
+      0.0071
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_holder_transfer_tool": {
+    "bbox": [
+      0.0192,
+      0.0797
+    ],
+    "height": 0.079,
+    "origin_offset": [
+      0.0,
+      -0.0398
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_hydroflex_washer": {
+    "bbox": [
+      0.2752,
+      0.1884
+    ],
+    "height": 0.3669,
+    "origin_offset": [
+      0.0074,
+      -0.0942
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_infinite_f50": {
+    "bbox": [
+      0.1928,
+      0.31
+    ],
+    "height": 0.3516,
+    "origin_offset": [
+      0.0,
+      -0.155
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_infinite_lumi": {
+    "bbox": [
+      0.5226,
+      0.402
+    ],
+    "height": 0.457,
+    "origin_offset": [
+      0.0488,
+      -0.201
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_infinite_m200": {
+    "bbox": [
+      0.5553,
+      0.2542
+    ],
+    "height": 0.457,
+    "origin_offset": [
+      0.0652,
+      -0.1271
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_magicprep_ngs": {
+    "bbox": [
+      0.2776,
+      0.3133
+    ],
+    "height": 0.6034,
+    "origin_offset": [
+      0.0138,
+      -0.1566
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_magicprep_ngs_sample_deck": {
+    "bbox": [
+      0.1791,
+      0.0626
+    ],
+    "height": 0.1137,
+    "origin_offset": [
+      -0.0092,
+      -0.0313
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_nested_tip_rack": {
+    "bbox": [
+      0.0854,
+      0.0161
+    ],
+    "height": 0.1275,
+    "origin_offset": [
+      -0.0,
+      -0.008
+    ],
+    "model_file": "meshes/plate.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "plate.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_nested_tip_rack_base": {
+    "bbox": [
+      0.0418,
+      0.1223
+    ],
+    "height": 0.0859,
+    "origin_offset": [
+      0.0211,
+      -0.0001
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_resolvex_a200": {
+    "bbox": [
+      0.6029,
+      0.4919
+    ],
+    "height": 0.549,
+    "origin_offset": [
+      0.3014,
+      0.0569
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_spacer_29_9_te_chrom": {
+    "bbox": [
+      0.1345,
+      0.0301
+    ],
+    "height": 0.092,
+    "origin_offset": [
+      -0.0,
+      -0.015
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_spark_cyto": {
+    "bbox": [
+      0.494,
+      0.6967
+    ],
+    "height": 0.5059,
+    "origin_offset": [
+      -0.0001,
+      -0.0756
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_spark_plate_reader": {
+    "bbox": [
+      0.494,
+      0.6967
+    ],
+    "height": 0.4109,
+    "origin_offset": [
+      -0.0001,
+      -0.0756
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_slot"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_spark_standard": {
+    "bbox": [
+      0.5898,
+      0.8332
+    ],
+    "height": 0.4775,
+    "origin_offset": [
+      -0.0,
+      -0.0909
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_sunrise_plate_reader": {
+    "bbox": [
+      0.285,
+      0.1412
+    ],
+    "height": 0.4489,
+    "origin_offset": [
+      0.0003,
+      -0.0706
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base (1).png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_techrom": {
+    "bbox": [
+      0.4668,
+      0.2166
+    ],
+    "height": 0.6173,
+    "origin_offset": [
+      0.2259,
+      -0.0378
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_teshake_adapter_2": {
+    "bbox": [
+      0.2468,
+      0.008
+    ],
+    "height": 0.1565,
+    "origin_offset": [
+      0.004,
+      -0.004
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_teshake_base": {
+    "bbox": [
+      0.1536,
+      0.1366
+    ],
+    "height": 0.1389,
+    "origin_offset": [
+      -0.0523,
+      -0.012
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_tevacs_base": {
+    "bbox": [
+      0.114,
+      0.155
+    ],
+    "height": 0.261,
+    "origin_offset": [
+      -0.0069,
+      0.0633
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_tevacs_plate_park": {
+    "bbox": [
+      0.0459,
+      0.1551
+    ],
+    "height": 0.1101,
+    "origin_offset": [
+      -0.0022,
+      0.0001
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_tevacs_spacer": {
+    "bbox": [
+      0.0323,
+      0.1372
+    ],
+    "height": 0.0958,
+    "origin_offset": [
+      0.0158,
+      -0.0001
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "tecan_tevacs_vacuum": {
+    "bbox": [
+      0.0678,
+      0.155
+    ],
+    "height": 0.1045,
+    "origin_offset": [
+      0.035,
+      -0.0011
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_tip_box": {
+    "bbox": [
+      0.0886,
+      0.0581
+    ],
+    "height": 0.1306,
+    "origin_offset": [
+      0.0,
+      -0.029
+    ],
+    "model_file": "meshes/framedtiprack.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "framedtiprack.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_transport_box_diti_tray_1000ul": {
+    "bbox": [
+      0.0855,
+      0.1033
+    ],
+    "height": 0.1278,
+    "origin_offset": [
+      -0.0377,
+      -0.0517
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_transport_box_diti_tray_200ul": {
+    "bbox": [
+      0.0855,
+      0.0652
+    ],
+    "height": 0.1278,
+    "origin_offset": [
+      -0.0256,
+      -0.0326
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "tecan_uno_single_cell_dispenser": {
+    "bbox": [
+      0.2364,
+      0.47
+    ],
+    "height": 0.381,
+    "origin_offset": [
+      0.1182,
+      0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_alps_3000": {
+    "bbox": [
+      0.19,
+      0.4508
+    ],
+    "height": 0.6347,
+    "origin_offset": [
+      0.0035,
+      -0.216
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_arctic_a25": {
+    "bbox": [
+      0.5072,
+      0.746
+    ],
+    "height": 0.2726,
+    "origin_offset": [
+      0.0116,
+      -0.3556
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_atc": {
+    "bbox": [
+      0.1882,
+      0.1471
+    ],
+    "height": 0.2742,
+    "origin_offset": [
+      -0.001,
+      -0.0731
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_benchtrak": {
+    "bbox": [
+      0.4572,
+      0.2364
+    ],
+    "height": 3.177,
+    "origin_offset": [
+      0.0,
+      -0.1182
+    ],
+    "model_file": "meshes/0_chassis.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_chassis.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_cytomat2c": {
+    "bbox": [
+      0.571,
+      0.9072
+    ],
+    "height": 0.6362,
+    "origin_offset": [
+      0.0389,
+      -0.4536
+    ],
+    "model_file": "meshes/0_body.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_body.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_cytomat2c_stacker_15": {
+    "bbox": [
+      0.109,
+      0.5415
+    ],
+    "height": 0.1425,
+    "origin_offset": [
+      -0.0001,
+      -0.2707
+    ],
+    "model_file": "meshes/stack.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "stack.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_cytomat2c_stacker_21": {
+    "bbox": [
+      0.109,
+      0.5415
+    ],
+    "height": 0.1425,
+    "origin_offset": [
+      -0.0001,
+      -0.2707
+    ],
+    "model_file": "meshes/stack.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "stack.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_cytomat_10c": {
+    "bbox": [
+      0.764,
+      0.9158
+    ],
+    "height": 0.9695,
+    "origin_offset": [
+      -0.0,
+      -0.4579
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_cytomat_skyline": {
+    "bbox": [
+      0.9275,
+      0.7994
+    ],
+    "height": 0.7994,
+    "origin_offset": [
+      -0.4637,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_fisher_cytomat_stacker_16": {
+    "bbox": [
+      0.1164,
+      0.5647
+    ],
+    "height": 0.142,
+    "origin_offset": [
+      -0.0,
+      -0.2824
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_fisher_incucyte_s3": {
+    "bbox": [
+      0.3566,
+      0.4488
+    ],
+    "height": 0.874,
+    "origin_offset": [
+      0.1783,
+      -0.0005
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_fisher_nanodrop_one": {
+    "bbox": [
+      0.3023,
+      0.305
+    ],
+    "height": 0.3253,
+    "origin_offset": [
+      -0.0052,
+      0.0107
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_fisher_plate_hotel_15": {
+    "bbox": [
+      0.1493,
+      0.6606
+    ],
+    "height": 0.1416,
+    "origin_offset": [
+      0.0001,
+      -0.3302
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_fisher_qubit_flex_fluorometer": {
+    "bbox": [
+      0.0765,
+      0.186
+    ],
+    "height": 0.292,
+    "origin_offset": [
+      0.0382,
+      -0.0
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_fisher_sorvall_legend_micro_17_microcentrifuge": {
+    "bbox": [
+      0.381,
+      0.4641
+    ],
+    "height": 0.2367,
+    "origin_offset": [
+      -0.0145,
+      -0.232
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_fisher_sorvall_legend_micro_17r_microcentrifuge": {
+    "bbox": [
+      0.4878,
+      0.6201
+    ],
+    "height": 0.3149,
+    "origin_offset": [
+      -0.0214,
+      -0.31
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_fisher_vanquish_hplc": {
+    "bbox": [
+      0.4638,
+      0.7542
+    ],
+    "height": 0.6423,
+    "origin_offset": [
+      0.0161,
+      -0.3771
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_hotel_8": {
+    "bbox": [
+      0.1871,
+      0.6604
+    ],
+    "height": 0.3948,
+    "origin_offset": [
+      0.0001,
+      -0.3302
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_kingfisher_96dwp": {
+    "bbox": [
+      0.0855,
+      0.0423
+    ],
+    "height": 0.1276,
+    "origin_offset": [
+      -0.0,
+      -0.0211
+    ],
+    "model_file": "meshes/kingfisher96dwp.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "kingfisher96dwp.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_kingfisher_cart": {
+    "bbox": [
+      1.0963,
+      1.123
+    ],
+    "height": 0.8128,
+    "origin_offset": [
+      0.0124,
+      -0.5615
+    ],
+    "model_file": "meshes/kingfisher_cart.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "kingfisher_cart.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_kingfisher_flex": {
+    "bbox": [
+      0.628,
+      0.3612
+    ],
+    "height": 0.6817,
+    "origin_offset": [
+      0.0218,
+      -0.1805
+    ],
+    "model_file": "meshes/flex_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "flex_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_kingfisher_presto": {
+    "bbox": [
+      0.3644,
+      0.4336
+    ],
+    "height": 0.3875,
+    "origin_offset": [
+      -0.0079,
+      -0.1851
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_multidrop_combi": {
+    "bbox": [
+      0.3552,
+      0.218
+    ],
+    "height": 0.4364,
+    "origin_offset": [
+      0.0055,
+      -0.101
+    ],
+    "model_file": "meshes/thermo_multidrop_combi.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "thermo_multidrop_combi.png",
+    "openings": [
+      {
+        "direction": [
+          -1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_orbitor_rs2": {
+    "bbox": [
+      0.3556,
+      0.7244
+    ],
+    "height": 0.383,
+    "origin_offset": [
+      0.0,
+      -0.3622
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_orbitor_rs2_hotel": {
+    "bbox": [
+      0.149,
+      0.6913
+    ],
+    "height": 0.333,
+    "origin_offset": [
+      -0.002,
+      -0.3148
+    ],
+    "model_file": "meshes/hotel.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "hotel.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "front_door"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_orbitor_rs2_hotel_base": {
+    "bbox": [
+      0.5513,
+      0.2791
+    ],
+    "height": 0.4041,
+    "origin_offset": [
+      0.0001,
+      -0.1396
+    ],
+    "model_file": "meshes/hotelBase.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "hotelBase.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_orbitor_rs2_stack": {
+    "bbox": [
+      0.1584,
+      0.6916
+    ],
+    "height": 0.3344,
+    "origin_offset": [
+      -0.0019,
+      -0.3147
+    ],
+    "model_file": "meshes/stack.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "stack.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_skyline_stacker": {
+    "bbox": [
+      0.6876,
+      0.212
+    ],
+    "height": 0.1226,
+    "origin_offset": [
+      0.344,
+      -0.01
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_spinnaker": {
+    "bbox": [
+      0.4889,
+      0.8687
+    ],
+    "height": 0.3743,
+    "origin_offset": [
+      0.0085,
+      -0.3644
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_stacker": {
+    "bbox": [
+      0.1368,
+      0.6608
+    ],
+    "height": 0.1479,
+    "origin_offset": [
+      -0.0017,
+      -0.3305
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "thermo_stacker_carousel": {
+    "bbox": [
+      0.5839,
+      0.133
+    ],
+    "height": 0.5839,
+    "origin_offset": [
+      -0.0007,
+      -0.0665
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_varioskan_lux": {
+    "bbox": [
+      0.526,
+      0.686
+    ],
+    "height": 0.8727,
+    "origin_offset": [
+      0.0,
+      -0.1432
+    ],
+    "model_file": "meshes/thermo_varioskan_lux.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "thermo_varioskan_lux.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "torrey_pines_ric20": {
+    "bbox": [
+      0.1655,
+      0.1001
+    ],
+    "height": 0.1509,
+    "origin_offset": [
+      0.0,
+      -0.05
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "unchainedlabs_big_lunatic": {
+    "bbox": [
+      0.3736,
+      0.3176
+    ],
+    "height": 0.6235,
+    "origin_offset": [
+      -0.0017,
+      -0.1699
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "unchainedlabs_lunatic_plate": {
+    "bbox": [
+      0.0855,
+      0.0118
+    ],
+    "height": 0.1278,
+    "origin_offset": [
+      0.0001,
+      -0.0059
+    ],
+    "model_file": "meshes/lunatic.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "lunatic.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "unchainedlabs_stunner": {
+    "bbox": [
+      0.4739,
+      0.4029
+    ],
+    "height": 0.8846,
+    "origin_offset": [
+      -0.0,
+      -0.2014
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "universal_robots_ur5e": {
+    "bbox": [
+      0.1505,
+      0.4377
+    ],
+    "height": 0.2538,
+    "origin_offset": [
+      0.0,
+      -0.1207
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage13m": {
+    "bbox": [
+      1.2985,
+      0.9263
+    ],
+    "height": 0.9422,
+    "origin_offset": [
+      -0.0,
+      -0.1499
+    ],
+    "model_file": "meshes/vantage13m.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "vantage13m.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage2m": {
+    "bbox": [
+      1.9985,
+      0.9263
+    ],
+    "height": 0.9422,
+    "origin_offset": [
+      -0.0,
+      -0.1498
+    ],
+    "model_file": "meshes/vantage2m.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "vantage2m.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage_2track_waste": {
+    "bbox": [
+      0.045,
+      0.1401
+    ],
+    "height": 0.319,
+    "origin_offset": [
+      0.0112,
+      -0.0701
+    ],
+    "model_file": "meshes/2track_waste.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "2track_waste.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_dwp_carrier": {
+    "bbox": [
+      0.135,
+      0.0921
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0562,
+      -0.0461
+    ],
+    "model_file": "meshes/DWP_Carrier.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "DWP_Carrier.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_easycode_carrier": {
+    "bbox": [
+      0.135,
+      0.0934
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0562,
+      -0.0467
+    ],
+    "model_file": "meshes/easycode_carrier.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "easycode_carrier.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_ftr_carrier": {
+    "bbox": [
+      0.135,
+      0.1149
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0562,
+      -0.0575
+    ],
+    "model_file": "meshes/ftr_carrier.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "ftr_carrier.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_mtp_holder": {
+    "bbox": [
+      0.1037,
+      0.52
+    ],
+    "height": 0.135,
+    "origin_offset": [
+      0.0519,
+      0.0
+    ],
+    "model_file": "meshes/MTP_Holder.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "MTP_Holder.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage_ntr_carrier": {
+    "bbox": [
+      0.135,
+      0.0087
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0562,
+      -0.0044
+    ],
+    "model_file": "meshes/NTR_Carrier.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "NTR_Carrier.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage_reagent_trough_120": {
+    "bbox": [
+      0.018,
+      0.0795
+    ],
+    "height": 0.16,
+    "origin_offset": [
+      0.0,
+      -0.0397
+    ],
+    "model_file": "meshes/reagent_trough_120.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "reagent_trough_120.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage_reagent_trough_200": {
+    "bbox": [
+      0.03,
+      0.0795
+    ],
+    "height": 0.16,
+    "origin_offset": [
+      0.0,
+      -0.0397
+    ],
+    "model_file": "meshes/reagent_trough_200.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "reagent_trough_200.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage_reagent_trough_carrier_120": {
+    "bbox": [
+      0.0225,
+      0.0735
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.0368
+    ],
+    "model_file": "meshes/reagent_trough_carrier_120.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "reagent_trough_carrier_120.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_reagent_trough_carrier_120_v2": {
+    "bbox": [
+      0.0225,
+      0.0735
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.0368
+    ],
+    "model_file": "meshes/reagent_trough_carrier_120.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "reagent_trough_carrier_120.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_reagent_trough_carrier_200": {
+    "bbox": [
+      0.045,
+      0.0735
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0113,
+      -0.0368
+    ],
+    "model_file": "meshes/reagent_trough_carrier_200.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "reagent_trough_carrier_200.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_reagent_trough_carrier_200_v2": {
+    "bbox": [
+      0.045,
+      0.0735
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0113,
+      -0.0368
+    ],
+    "model_file": "meshes/reagent_trough_carrier_200.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "reagent_trough_carrier_200.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "vantage_tube_carrier_15": {
+    "bbox": [
+      0.0225,
+      0.0601
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.03
+    ],
+    "model_file": "meshes/tube_carrier_15.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "tube_carrier_15.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage_tube_carrier_15_v2": {
+    "bbox": [
+      0.0225,
+      0.0601
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0,
+      -0.03
+    ],
+    "model_file": "meshes/tube_carrier_15.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "tube_carrier_15.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vantage_tube_carrier_50": {
+    "bbox": [
+      0.045,
+      0.0921
+    ],
+    "height": 0.52,
+    "origin_offset": [
+      0.0113,
+      -0.046
+    ],
+    "model_file": "meshes/tube_carrier_50.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "tube_carrier_50.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vp_scientific_spinvessel_50_ml": {
+    "bbox": [
+      0.1278,
+      0.0739
+    ],
+    "height": 0.0832,
+    "origin_offset": [
+      0.0003,
+      -0.0369
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "vwr_microplate_shaker": {
+    "bbox": [
+      0.4813,
+      0.1297
+    ],
+    "height": 0.2794,
+    "origin_offset": [
+      0.0475,
+      -0.0648
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          1,
+          0
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "waters_premier_uplc": {
+    "bbox": [
+      0.6257,
+      0.9234
+    ],
+    "height": 0.7024,
+    "origin_offset": [
+      -0.0927,
+      -0.4437
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  },
+  "wyatt_dynapro": {
+    "bbox": [
+      0.3608,
+      0.2516
+    ],
+    "height": 0.5895,
+    "origin_offset": [
+      -0.0017,
+      -0.1258
+    ],
+    "model_file": "meshes/0_base.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "0_base.png",
+    "openings": [
+      {
+        "direction": [
+          0,
+          -1
+        ],
+        "label": "auto_xacro"
+      }
+    ],
+    "source": "assets"
+  }
+}
