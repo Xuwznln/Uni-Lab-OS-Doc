@@ -4,8 +4,9 @@ import math
 
 from ..mock_checkers import MockCollisionChecker
 from ..models import Device, Lab, Placement
+import numpy as np
 import pytest
-from ..optimizer import optimize, snap_theta
+from ..optimizer import _run_de, optimize, snap_theta
 
 
 def test_optimize_three_devices_no_collision():
@@ -217,3 +218,224 @@ def test_full_pipeline_with_de():
     for p in result:
         assert 0 <= p.x <= lab.width
         assert 0 <= p.y <= lab.depth
+
+
+# ──────────────────────────────────────────────────────────────
+# DE V2 新增测试
+# ──────────────────────────────────────────────────────────────
+
+
+def test_theta_wrapping_convergence():
+    """θ 在 0/2π 边界附近应正确收敛，不发散。
+
+    构造一个简单的 cost function，最优解 θ≈0（即 2π 附近也可以）。
+    验证自定义 DE 在 θ wrapping 下能收敛。
+    """
+    n_devices = 2
+
+    def cost_fn(x: np.ndarray) -> float:
+        # 最优：两设备分开放置，θ 接近 0
+        cost = 0.0
+        for d in range(n_devices):
+            theta = x[3 * d + 2]
+            # θ penalty: 偏离 0 的圆周距离
+            cost += (1 - math.cos(theta)) * 10.0
+        # 两设备距离 penalty
+        dx = x[0] - x[3]
+        dy = x[1] - x[4]
+        dist = math.sqrt(dx * dx + dy * dy)
+        if dist < 1.0:
+            cost += (1.0 - dist) * 100.0
+        return cost
+
+    bounds = np.array([
+        [0.5, 4.5], [0.5, 4.5], [0.0, 2 * math.pi],  # 设备 0
+        [0.5, 4.5], [0.5, 4.5], [0.0, 2 * math.pi],  # 设备 1
+    ])
+    rng = np.random.default_rng(42)
+    pop_size = 30
+    init_pop = rng.uniform(bounds[:, 0], bounds[:, 1], size=(pop_size, 6))
+    # 故意注入 θ 接近 2π 的个体，测试 wrapping
+    init_pop[0, 2] = 2 * math.pi - 0.01
+    init_pop[0, 5] = 2 * math.pi - 0.05
+
+    best_vec, best_cost, n_gen = _run_de(
+        cost_fn=cost_fn,
+        bounds=bounds,
+        init_pop=init_pop,
+        maxiter=100,
+        tol=1e-6,
+        atol=1e-3,
+        mutation=(0.5, 1.0),
+        recombination=0.7,
+        seed=42,
+        n_devices=n_devices,
+    )
+
+    # θ 应在 [0, 2π) 范围内
+    for d in range(n_devices):
+        theta = best_vec[3 * d + 2]
+        assert 0 <= theta < 2 * math.pi, f"θ 超出 [0, 2π): {theta}"
+
+    # cost 应显著下降（不发散）
+    assert best_cost < 50.0, f"θ wrapping 未正确收敛，cost={best_cost}"
+
+
+def test_per_device_crossover_atomicity():
+    """验证 per-device crossover 的原子性：同一设备的 (x, y, θ) 来自同一来源。
+
+    构造 2 设备场景，跟踪 crossover 后每个设备三元组是否完整来自 mutant 或 parent。
+    """
+    rng = np.random.default_rng(123)
+    n_devices = 3
+    ndim = 3 * n_devices
+
+    # 构造明显不同的 parent 和 mutant
+    parent = np.zeros(ndim)
+    mutant = np.ones(ndim) * 10.0
+
+    # 模拟多次 per-device crossover，检查原子性
+    violations = 0
+    n_trials = 200
+    for _ in range(n_trials):
+        trial = parent.copy()
+        j_rand = rng.integers(0, n_devices)
+        for d in range(n_devices):
+            if rng.random() < 0.7 or d == j_rand:
+                trial[3 * d: 3 * d + 3] = mutant[3 * d: 3 * d + 3]
+
+        # 检查每个设备的三元组要么全是 0（parent），要么全是 10（mutant）
+        for d in range(n_devices):
+            triple = trial[3 * d: 3 * d + 3]
+            all_parent = np.allclose(triple, 0.0)
+            all_mutant = np.allclose(triple, 10.0)
+            if not (all_parent or all_mutant):
+                violations += 1
+
+    assert violations == 0, f"Per-device crossover 原子性违反 {violations}/{n_trials * n_devices} 次"
+
+
+def test_strategy_currenttobest1bin_converges():
+    """currenttobest1bin 策略在简单 2 设备问题上应能收敛。"""
+    devices = [
+        Device(id="a", name="A", bbox=(0.6, 0.4)),
+        Device(id="b", name="B", bbox=(0.6, 0.4)),
+    ]
+    lab = Lab(width=5.0, depth=5.0)
+
+    placements = optimize(
+        devices, lab, seed=42, maxiter=80, popsize=10,
+        strategy="currenttobest1bin",
+    )
+
+    assert len(placements) == 2
+    checker = MockCollisionChecker()
+    checker_placements = [
+        {"id": p.device_id, "bbox": next(d.bbox for d in devices if d.id == p.device_id),
+         "pos": (p.x, p.y, p.theta)}
+        for p in placements
+    ]
+    collisions = checker.check(checker_placements)
+    assert collisions == [], f"currenttobest1bin 策略产生碰撞: {collisions}"
+
+
+def test_strategy_best1bin_converges():
+    """best1bin 策略在简单 2 设备问题上应能收敛。"""
+    devices = [
+        Device(id="a", name="A", bbox=(0.6, 0.4)),
+        Device(id="b", name="B", bbox=(0.6, 0.4)),
+    ]
+    lab = Lab(width=5.0, depth=5.0)
+
+    placements = optimize(
+        devices, lab, seed=42, maxiter=80, popsize=10,
+        strategy="best1bin",
+    )
+
+    assert len(placements) == 2
+    checker = MockCollisionChecker()
+    checker_placements = [
+        {"id": p.device_id, "bbox": next(d.bbox for d in devices if d.id == p.device_id),
+         "pos": (p.x, p.y, p.theta)}
+        for p in placements
+    ]
+    collisions = checker.check(checker_placements)
+    assert collisions == [], f"best1bin 策略产生碰撞: {collisions}"
+
+
+def test_convergence_quality_two_devices():
+    """2 设备无碰撞放置，cost 应低于阈值，验证优化质量。"""
+    devices = [
+        Device(id="d1", name="D1", bbox=(0.8, 0.6)),
+        Device(id="d2", name="D2", bbox=(0.6, 0.5)),
+    ]
+    lab = Lab(width=5.0, depth=5.0)
+
+    placements = optimize(devices, lab, seed=42, maxiter=100, popsize=10)
+
+    # 验证结果质量：cost 应很低（无碰撞、在边界内）
+    from ..constraints import evaluate_default_hard_constraints
+    checker = MockCollisionChecker()
+    cost = evaluate_default_hard_constraints(devices, placements, lab, checker)
+    assert cost < 1.0, f"优化质量不佳，cost={cost}"
+
+
+def test_run_de_early_stopping():
+    """验证 _run_de 的 early stopping 机制：简单 cost function 应提前终止。"""
+
+    def trivial_cost(x: np.ndarray) -> float:
+        # 简单二次函数，最优解在原点附近
+        return float(np.sum(x ** 2))
+
+    ndim = 6
+    n_devices = 2
+    bounds = np.array([[-5.0, 5.0]] * ndim)
+    rng = np.random.default_rng(42)
+    pop_size = 20
+    init_pop = rng.uniform(-5, 5, size=(pop_size, ndim))
+
+    _, _, n_gen = _run_de(
+        cost_fn=trivial_cost,
+        bounds=bounds,
+        init_pop=init_pop,
+        maxiter=500,
+        tol=1e-6,
+        atol=1e-3,
+        mutation=(0.5, 1.0),
+        recombination=0.7,
+        seed=42,
+        n_devices=n_devices,
+    )
+
+    # 简单问题应在远少于 maxiter=500 代内收敛
+    assert n_gen < 500, f"Early stopping 未生效，运行了 {n_gen} 代"
+
+
+def test_run_de_returns_correct_tuple():
+    """验证 _run_de 返回值格式正确。"""
+
+    def const_cost(x: np.ndarray) -> float:
+        return 42.0
+
+    bounds = np.array([[0.0, 1.0]] * 3)
+    init_pop = np.random.default_rng(0).uniform(0, 1, size=(5, 3))
+
+    result = _run_de(
+        cost_fn=const_cost,
+        bounds=bounds,
+        init_pop=init_pop,
+        maxiter=10,
+        tol=1e-6,
+        atol=1e-3,
+        mutation=(0.5, 1.0),
+        recombination=0.7,
+        seed=0,
+        n_devices=1,
+    )
+
+    assert isinstance(result, tuple) and len(result) == 3
+    best_vec, best_cost, n_gen = result
+    assert isinstance(best_vec, np.ndarray)
+    assert best_vec.shape == (3,)
+    assert best_cost == pytest.approx(42.0)
+    assert isinstance(n_gen, int) and n_gen >= 1

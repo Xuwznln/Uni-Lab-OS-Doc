@@ -1,7 +1,7 @@
 """差分进化布局优化器。
 
 编码：N 个设备 → 3N 维向量 [x0, y0, θ0, x1, y1, θ1, ...]
-使用 scipy.optimize.differential_evolution 进行全局优化。
+使用自定义差分进化循环（per-device crossover + θ wrapping）进行全局优化。
 初始布局（Pencil/回退）注入为种群种子个体加速收敛。
 """
 
@@ -9,17 +9,185 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
-from scipy.optimize import differential_evolution
 
 from .constraints import evaluate_constraints, evaluate_default_hard_constraints
 from .mock_checkers import MockCollisionChecker, MockReachabilityChecker
 from .models import Constraint, Device, Lab, Placement
 from .pencil_integration import generate_initial_layout
+from .seeders import resolve_seeder_params, seed_layout
 
 logger = logging.getLogger(__name__)
+
+
+def _run_de(
+    cost_fn: Callable[[np.ndarray], float],
+    bounds: np.ndarray,
+    init_pop: np.ndarray,
+    maxiter: int,
+    tol: float,
+    atol: float,
+    mutation: tuple[float, float],
+    recombination: float,
+    seed: int | None,
+    n_devices: int,
+    strategy: str = "currenttobest1bin",
+) -> tuple[np.ndarray, float, int]:
+    """自定义差分进化循环。
+
+    特性：
+    - 支持 currenttobest1bin / best1bin 两种策略
+    - Per-device crossover：以设备 (x, y, θ) 三元组为原子单元进行交叉
+    - θ wrapping：交叉后对角度取模 [0, 2π)
+    - Early stopping：最近 20 代改善 < 0.1% 时提前终止
+    - scipy 风格收敛判断：std(costs) <= atol + tol * |best_cost|
+
+    Args:
+        cost_fn: 目标函数 f(x) → float
+        bounds: 边界数组 shape=(ndim, 2)，每行 [low, high]
+        init_pop: 初始种群 shape=(pop_size, ndim)
+        maxiter: 最大迭代代数
+        tol: 相对收敛容差
+        atol: 绝对收敛容差
+        mutation: 变异因子范围 (F_min, F_max)
+        recombination: 交叉概率 CR
+        seed: 随机种子
+        n_devices: 设备数量（用于 per-device crossover）
+        strategy: 变异策略，"currenttobest1bin" 或 "best1bin"
+
+    Returns:
+        (best_vector, best_cost, n_generations)
+    """
+    rng = np.random.default_rng(seed)
+    pop_size, ndim = init_pop.shape
+    lower = bounds[:, 0]
+    upper = bounds[:, 1]
+    f_min, f_max = mutation
+
+    # 评估初始种群适应度
+    costs = np.array([cost_fn(ind) for ind in init_pop])
+    best_idx = int(np.argmin(costs))
+    best_cost = costs[best_idx]
+    best_vector = init_pop[best_idx].copy()
+
+    # Early stopping 跟踪
+    patience = 20
+    best_cost_history: list[float] = [best_cost]
+
+    for gen in range(1, maxiter + 1):
+        for i in range(pop_size):
+            # 选择变异因子 F（每个个体独立采样）
+            f_val = rng.uniform(f_min, f_max)
+
+            # 选择两个不同于 i 和 best_idx 的个体索引
+            candidates = list(range(pop_size))
+            candidates.remove(i)
+            chosen = rng.choice(candidates, size=2, replace=False)
+            r1, r2 = int(chosen[0]), int(chosen[1])
+
+            # 变异向量
+            if strategy == "best1bin":
+                # Turbo 模式：mutant = best + F*(r1 - r2)
+                mutant = best_vector + f_val * (init_pop[r1] - init_pop[r2])
+            else:
+                # 默认 currenttobest1bin：mutant = target + F*(best - target) + F*(r1 - r2)
+                mutant = (
+                    init_pop[i]
+                    + f_val * (best_vector - init_pop[i])
+                    + f_val * (init_pop[r1] - init_pop[r2])
+                )
+
+            # Per-device crossover：以 (x, y, θ) 三元组为原子单元
+            trial = init_pop[i].copy()
+            j_rand = rng.integers(0, n_devices)  # 保证至少一个设备来自 mutant
+            for d in range(n_devices):
+                if rng.random() < recombination or d == j_rand:
+                    trial[3 * d: 3 * d + 3] = mutant[3 * d: 3 * d + 3]
+
+            # θ wrapping：角度取模 [0, 2π)
+            for d in range(n_devices):
+                trial[3 * d + 2] %= 2 * math.pi
+
+            # 钳位到边界内
+            trial = np.clip(trial, lower, upper)
+
+            # 贪心选择：trial 不比当前差则替换
+            trial_cost = cost_fn(trial)
+            if trial_cost <= costs[i]:
+                init_pop[i] = trial
+                costs[i] = trial_cost
+                if trial_cost < best_cost:
+                    best_cost = trial_cost
+                    best_vector = trial.copy()
+
+        # 更新 best_idx（种群可能整体更新）
+        best_idx = int(np.argmin(costs))
+
+        # Early stopping：最近 patience 代改善 < 0.1%
+        best_cost_history.append(best_cost)
+        if len(best_cost_history) >= patience:
+            old_cost = best_cost_history[-patience]
+            if old_cost > 0:
+                improvement = (old_cost - best_cost) / old_cost
+            else:
+                improvement = 0.0
+            if improvement < 0.001:
+                logger.info(
+                    "Early stop: cost 在 %d 代内稳定在 %.4f（改善 < 0.1%%）",
+                    patience, best_cost,
+                )
+                return best_vector, best_cost, gen
+
+        # scipy 风格收敛判断
+        if np.std(costs) <= atol + tol * abs(best_cost):
+            logger.info(
+                "收敛终止：std(costs)=%.6f <= atol+tol*|best|=%.6f，第 %d 代",
+                np.std(costs), atol + tol * abs(best_cost), gen,
+            )
+            return best_vector, best_cost, gen
+
+    return best_vector, best_cost, maxiter
+
+
+def _generate_seeds(
+    devices: list[Device],
+    lab: Lab,
+    rng: np.random.Generator,
+    workflow_edges: list[list[str]] | None = None,
+    n_variants: int = 3,
+    sigma_pos_frac: float = 0.05,
+    sigma_theta: float = math.pi / 6,
+) -> list[np.ndarray]:
+    """从多个 seeder preset 生成多样性种子个体 + 变异版本。"""
+    seeds: list[np.ndarray] = []
+    presets = ["compact_outward", "spread_inward"]
+    if workflow_edges:
+        presets.append("workflow_cluster")
+
+    for preset_name in presets:
+        try:
+            params = resolve_seeder_params(preset_name)
+        except ValueError:
+            continue
+        if params is None:
+            continue
+        base_placements = seed_layout(devices, lab, params, workflow_edges)
+        base_vec = _placements_to_vector(base_placements, devices)
+        seeds.append(base_vec)
+
+        # 变异版本：对 (x,y) 加高斯噪声 σ=5% lab 尺寸，θ 加 σ=π/6
+        for _ in range(n_variants):
+            variant = base_vec.copy()
+            for d in range(len(devices)):
+                variant[3 * d] += rng.normal(0, sigma_pos_frac * lab.width)
+                variant[3 * d + 1] += rng.normal(0, sigma_pos_frac * lab.depth)
+                variant[3 * d + 2] += rng.normal(0, sigma_theta)
+                variant[3 * d + 2] %= 2 * math.pi
+            seeds.append(variant)
+
+    return seeds
 
 
 def optimize(
@@ -33,6 +201,8 @@ def optimize(
     popsize: int = 15,
     tol: float = 1e-6,
     seed: int | None = None,
+    strategy: str = "currenttobest1bin",
+    workflow_edges: list[list[str]] | None = None,
 ) -> list[Placement]:
     """运行差分进化优化，返回最优布局。
 
@@ -47,6 +217,7 @@ def optimize(
         popsize: 种群大小倍数
         tol: 收敛容差
         seed: 随机种子（用于可复现性）
+        strategy: DE 变异策略（"currenttobest1bin" 或 "best1bin"）
 
     Returns:
         最优布局 Placement 列表
@@ -105,57 +276,49 @@ def optimize(
 
         return hard_cost
 
-    # 构建初始种群：种子个体 + 随机个体
+    # 构建初始种群：种子个体 + 多样性种子 + 随机个体
     rng = np.random.default_rng(seed)
     pop_count = popsize * 3 * n  # scipy 默认 popsize * dim
     init_pop = rng.uniform(
         bounds_array[:, 0], bounds_array[:, 1], size=(pop_count, 3 * n)
     )
-    init_pop[0] = seed_vector  # 注入种子
+    init_pop[0] = seed_vector  # 注入原始种子
+
+    # 多样性种子注入（多 preset + 变异版本）
+    extra_seeds = _generate_seeds(devices, lab, rng, workflow_edges)
+    for i, s in enumerate(extra_seeds):
+        idx = i + 1  # 原始种子占 [0]
+        if idx < pop_count:
+            init_pop[idx] = np.clip(s, bounds_array[:, 0], bounds_array[:, 1])
 
     logger.info(
-        "Starting DE optimization: %d devices, %d-dim, popsize=%d, maxiter=%d",
-        n, 3 * n, pop_count, maxiter,
+        "Starting DE optimization: %d devices, %d-dim, popsize=%d, maxiter=%d, strategy=%s",
+        n, 3 * n, pop_count, maxiter, strategy,
     )
 
-    # Early stopping: stop when cost hasn't improved by >0.1% for 20 generations
-    _best_costs: list[float] = []
-    _patience = 20
-
-    def _early_stop_callback(xk, convergence=0):
-        cost = cost_function(xk)
-        _best_costs.append(cost)
-        if len(_best_costs) >= _patience:
-            recent = _best_costs[-_patience:]
-            if recent[0] > 0:
-                improvement = (recent[0] - recent[-1]) / recent[0]
-            else:
-                improvement = 0.0
-            if improvement < 0.001:  # < 0.1% improvement over last 20 gens
-                logger.info("Early stop: cost stable at %.4f for %d generations", cost, _patience)
-                return True
-        return False
-
-    result = differential_evolution(
-        cost_function,
-        bounds=list(bounds),
-        init=init_pop,
+    best_vector, best_cost, n_generations = _run_de(
+        cost_fn=cost_function,
+        bounds=bounds_array,
+        init_pop=init_pop,
         maxiter=maxiter,
         tol=tol,
         atol=1e-3,
         mutation=(0.5, 1.0),
         recombination=0.7,
         seed=seed,
-        disp=False,
-        callback=_early_stop_callback,
+        n_devices=n,
+        strategy=strategy,
     )
+
+    # 评估次数估算：每代 pop_count 次（初始 + 每代 trial）
+    n_evaluations = pop_count + n_generations * pop_count
 
     logger.info(
         "DE optimization complete: success=%s, cost=%.4f, iterations=%d, evaluations=%d",
-        result.success, result.fun, result.nit, result.nfev,
+        best_cost < 1e17, best_cost, n_generations, n_evaluations,
     )
 
-    return _vector_to_placements(result.x, devices)
+    return _vector_to_placements(best_vector, devices)
 
 
 def snap_theta(placements: list[Placement], threshold_deg: float = 15.0) -> list[Placement]:
@@ -176,6 +339,38 @@ def snap_theta(placements: list[Placement], threshold_deg: float = 15.0) -> list
         result.append(Placement(
             device_id=p.device_id, x=p.x, y=p.y, theta=snapped, uuid=p.uuid,
         ))
+    return result
+
+
+def snap_theta_safe(
+    placements: list[Placement],
+    devices: list[Device],
+    lab: Lab,
+    collision_checker: Any,
+    threshold_deg: float = 15.0,
+) -> list[Placement]:
+    """Snap theta 到基数方向，但碰撞时回退到原始角度。
+
+    逐设备检查：snap 后如果产生碰撞或越界，则该设备保留原始 theta。
+    """
+    snapped = snap_theta(placements, threshold_deg)
+
+    result = list(snapped)
+    for idx, (orig, snap) in enumerate(zip(placements, snapped)):
+        if abs(orig.theta - snap.theta) < 1e-9:
+            continue  # 未 snap，跳过
+        # 检查 snap 版本是否导致新碰撞
+        test_placements = result.copy()
+        test_placements[idx] = snap
+        cost = evaluate_default_hard_constraints(
+            devices, test_placements, lab, collision_checker, graduated=False,
+        )
+        if math.isinf(cost):
+            result[idx] = orig  # 回退到未 snap 的角度
+            logger.info(
+                "snap_theta_safe: 设备 %s snap θ=%.2f→%.2f 导致碰撞，已回退",
+                snap.device_id, orig.theta, snap.theta,
+            )
     return result
 
 
@@ -208,7 +403,7 @@ def _vector_to_placements(
                 device_id=dev.id,
                 x=float(x[3 * i]),
                 y=float(x[3 * i + 1]),
-                theta=float(x[3 * i + 2]),
+                theta=float(x[3 * i + 2] % (2 * math.pi)),
             )
         )
     return placements

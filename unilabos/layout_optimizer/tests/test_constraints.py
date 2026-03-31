@@ -123,7 +123,7 @@ class TestUserConstraints:
         assert cost == 0.0
 
     def test_distance_less_than_violated_hard(self):
-        """硬距离约束违反返回 inf。"""
+        """硬距离约束违反：graduated模式返回有限惩罚，binary模式返回inf。"""
         devices = _make_devices()
         placements = [
             Placement("a", 1.0, 1.0, 0.0),
@@ -134,10 +134,18 @@ class TestUserConstraints:
                        params={"device_a": "a", "device_b": "b", "distance": 1.0})
         ]
         checker = MockCollisionChecker()
+        # graduated=True (default): 有限惩罚
         cost = evaluate_constraints(
             devices, placements, _make_lab(), constraints, checker
         )
-        assert math.isinf(cost)
+        assert cost > 0
+        assert not math.isinf(cost)
+        # graduated=False: binary inf
+        cost_binary = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker,
+            graduated=False,
+        )
+        assert math.isinf(cost_binary)
 
     def test_minimize_distance_cost(self):
         """minimize_distance 约束应返回正比于距离的 cost。"""
@@ -184,7 +192,7 @@ class TestUserConstraints:
         assert not math.isinf(cost)  # reachable → no hard failure
 
     def test_reachability_constraint_violated(self):
-        """可达性约束：目标超出臂展应返回 inf。"""
+        """可达性约束：目标超出臂展 — graduated返回有限惩罚，binary返回inf。"""
         devices = [
             Device(id="arm", name="Arm", bbox=(0.2, 0.2), device_type="articulation"),
             Device(id="target", name="Target", bbox=(0.5, 0.5)),
@@ -199,10 +207,18 @@ class TestUserConstraints:
         ]
         checker = MockCollisionChecker()
         reachability = MockReachabilityChecker(arm_reach={"arm": 1.0})
+        # graduated=True (default): 有限惩罚
         cost = evaluate_constraints(
             devices, placements, _make_lab(), constraints, checker, reachability
         )
-        assert math.isinf(cost)
+        assert cost > 0
+        assert not math.isinf(cost)
+        # graduated=False: binary inf
+        cost_binary = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker, reachability,
+            graduated=False,
+        )
+        assert math.isinf(cost_binary)
 
 
 def test_distance_less_than_uses_edge_to_edge():
@@ -272,3 +288,136 @@ def test_prefer_aligned_sums_over_devices():
     cost = evaluate_constraints(devices, placements, lab, [constraint], checker)
     # 2 devices × 1.0 × weight 2.0 = 4.0
     assert cost == pytest.approx(4.0)
+
+
+class TestGraduatedHardConstraints:
+    """graduated 模式下硬约束返回比例惩罚而非 inf。"""
+
+    def test_hard_reachability_graduated_finite(self):
+        """graduated=True: 硬可达性返回有限惩罚。"""
+        devices = [
+            Device(id="arm", name="Arm", bbox=(0.2, 0.2), device_type="articulation"),
+            Device(id="t", name="Target", bbox=(0.5, 0.5)),
+        ]
+        placements = [
+            Placement("arm", 1.0, 1.0, 0.0),
+            Placement("t", 4.0, 3.0, 0.0),
+        ]
+        constraints = [
+            Constraint(type="hard", rule_name="reachability",
+                       params={"arm_id": "arm", "target_device_id": "t"}, weight=1.0)
+        ]
+        checker = MockCollisionChecker()
+        reach = MockReachabilityChecker(arm_reach={"arm": 1.0})
+        cost = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker, reach,
+            graduated=True,
+        )
+        assert cost > 0
+        assert not math.isinf(cost)
+
+    def test_hard_reachability_binary_inf(self):
+        """graduated=False: 硬可达性返回 inf。"""
+        devices = [
+            Device(id="arm", name="Arm", bbox=(0.2, 0.2), device_type="articulation"),
+            Device(id="t", name="Target", bbox=(0.5, 0.5)),
+        ]
+        placements = [
+            Placement("arm", 1.0, 1.0, 0.0),
+            Placement("t", 4.0, 3.0, 0.0),
+        ]
+        constraints = [
+            Constraint(type="hard", rule_name="reachability",
+                       params={"arm_id": "arm", "target_device_id": "t"}, weight=1.0)
+        ]
+        checker = MockCollisionChecker()
+        reach = MockReachabilityChecker(arm_reach={"arm": 1.0})
+        cost = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker, reach,
+            graduated=False,
+        )
+        assert math.isinf(cost)
+
+    def test_hard_min_spacing_graduated_sums_all_pairs(self):
+        """graduated模式：min_spacing 对所有违规对求和（不只第一对）。"""
+        devices = [
+            Device(id="a", name="A", bbox=(0.5, 0.5)),
+            Device(id="b", name="B", bbox=(0.5, 0.5)),
+            Device(id="c", name="C", bbox=(0.5, 0.5)),
+        ]
+        # 三个设备间距都小于 min_gap=1.0
+        placements = [
+            Placement("a", 1.0, 2.0, 0.0),
+            Placement("b", 1.3, 2.0, 0.0),  # OBB 边缘距 a 约 0.3
+            Placement("c", 1.6, 2.0, 0.0),  # OBB 边缘距 b 约 0.3, 距 a 约 0.6
+        ]
+        constraints = [
+            Constraint(type="hard", rule_name="min_spacing",
+                       params={"min_gap": 1.0}, weight=1.0)
+        ]
+        checker = MockCollisionChecker()
+        cost = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker,
+            graduated=True,
+        )
+        # 应大于 0 且有限（累加多对违规）
+        assert cost > 0
+        assert not math.isinf(cost)
+
+    def test_hard_min_spacing_binary_inf(self):
+        """graduated=False: min_spacing 违规返回 inf。"""
+        devices = _make_devices()
+        placements = [
+            Placement("a", 1.0, 2.0, 0.0),
+            Placement("b", 1.3, 2.0, 0.0),
+        ]
+        constraints = [
+            Constraint(type="hard", rule_name="min_spacing",
+                       params={"min_gap": 1.0}, weight=1.0)
+        ]
+        checker = MockCollisionChecker()
+        cost = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker,
+            graduated=False,
+        )
+        assert math.isinf(cost)
+
+    def test_hard_distance_less_than_graduated(self):
+        """graduated模式：distance_less_than 硬约束返回比例惩罚。"""
+        devices = _make_devices()
+        placements = [
+            Placement("a", 1.0, 2.0, 0.0),
+            Placement("b", 4.0, 2.0, 0.0),
+        ]
+        constraints = [
+            Constraint(type="hard", rule_name="distance_less_than",
+                       params={"device_a": "a", "device_b": "b", "distance": 0.5},
+                       weight=2.0)
+        ]
+        checker = MockCollisionChecker()
+        cost = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker,
+            graduated=True,
+        )
+        # HARD_MULTIPLIER(5) × weight(2) × overshoot > 0
+        assert cost > 0
+        assert not math.isinf(cost)
+
+    def test_graduated_default_is_true(self):
+        """不传 graduated 参数时默认使用 graduated 模式。"""
+        devices = _make_devices()
+        placements = [
+            Placement("a", 1.0, 2.0, 0.0),
+            Placement("b", 4.0, 2.0, 0.0),
+        ]
+        constraints = [
+            Constraint(type="hard", rule_name="distance_less_than",
+                       params={"device_a": "a", "device_b": "b", "distance": 0.5},
+                       weight=1.0)
+        ]
+        checker = MockCollisionChecker()
+        # 不指定 graduated — 默认应为 True → 有限惩罚
+        cost = evaluate_constraints(
+            devices, placements, _make_lab(), constraints, checker,
+        )
+        assert not math.isinf(cost)

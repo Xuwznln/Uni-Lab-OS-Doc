@@ -185,9 +185,9 @@ class TestStage3VerifyPlacements:
     def test_no_hard_constraint_violation(self):
         """Full pipeline with all intents including reachability converges cleanly.
 
-        MockReachabilityChecker uses large fallback reach for unknown arms,
-        so arm_slider reachability constraints are satisfied in mock mode.
-        When real ROS checkers replace mock, this test validates the same pipeline.
+        MockReachabilityChecker now includes arm_slider in the default reach table
+        (1.07m). Binary final evaluation checks all hard constraints including
+        user-defined reachability.
         """
         interpret_data = client.post("/interpret", json={"intents": LLM_INTENTS}).json()
 
@@ -197,7 +197,7 @@ class TestStage3VerifyPlacements:
             "constraints": interpret_data["constraints"],
             "workflow_edges": interpret_data["workflow_edges"],
             "run_de": True,
-            "maxiter": 50,
+            "maxiter": 100,
             "seed": 42,
         })
         data = optimize_resp.json()

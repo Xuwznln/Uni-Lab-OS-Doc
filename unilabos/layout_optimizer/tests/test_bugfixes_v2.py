@@ -90,9 +90,16 @@ class TestDuplicateDeviceIDs:
         lab = Lab(width=5, depth=5)
         constraints = [Constraint(type="hard", rule_name="min_spacing",
                                   params={"min_gap": 0.05})]
+        # graduated=True (default): 返回有限惩罚
         cost = evaluate_constraints(devices, stacked, lab, constraints,
                                     MockCollisionChecker())
-        assert math.isinf(cost)
+        assert cost > 0
+        assert not math.isinf(cost)
+        # graduated=False: binary inf
+        cost_binary = evaluate_constraints(devices, stacked, lab, constraints,
+                                           MockCollisionChecker(),
+                                           graduated=False)
+        assert math.isinf(cost_binary)
 
     def test_create_devices_uses_uuid(self):
         """create_devices_from_list should use uuid as Device.id."""

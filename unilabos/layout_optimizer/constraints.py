@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+from .broad_phase import sweep_and_prune_pairs
 from .models import Constraint, Device, Lab, Placement
 from .obb import (
     nearest_point_on_obb,
@@ -21,6 +22,21 @@ from .obb import (
 if TYPE_CHECKING:
     from .interfaces import CollisionChecker, ReachabilityChecker
 
+# 归一化默认权重 — 1cm距离违规 ≈ 5°角度违规 的惩罚量级
+DEFAULT_WEIGHT_DISTANCE: float = 100.0   # 1cm → penalty 1.0
+DEFAULT_WEIGHT_ANGLE: float = 60.0       # 5° → penalty ~1.0
+
+# 硬约束graduated模式下的惩罚倍数
+HARD_MULTIPLIER: float = 5.0
+
+# 优先级等级对应的权重乘数
+PRIORITY_MULTIPLIERS: dict[str, float] = {
+    "critical": 5.0,
+    "high": 2.0,
+    "normal": 1.0,
+    "low": 0.5,
+}
+
 
 def evaluate_constraints(
     devices: list[Device],
@@ -29,6 +45,8 @@ def evaluate_constraints(
     constraints: list[Constraint],
     collision_checker: CollisionChecker,
     reachability_checker: ReachabilityChecker | None = None,
+    *,
+    graduated: bool = True,
 ) -> float:
     """统一评估所有约束，返回总 cost。
 
@@ -39,9 +57,10 @@ def evaluate_constraints(
         constraints: 约束规则列表
         collision_checker: 碰撞检测实例
         reachability_checker: 可达性检测实例（可选）
+        graduated: True=比例惩罚（DE优化用），False=二值inf（最终pass/fail用）
 
     Returns:
-        总 cost。硬约束违反返回 inf，否则为软约束 penalty 之和。
+        总 cost。硬约束违反在非graduated模式返回 inf，否则为加权 penalty 之和。
     """
     device_map = {d.id: d for d in devices}
     placement_map = {p.device_id: p for p in placements}
@@ -50,7 +69,8 @@ def evaluate_constraints(
 
     for c in constraints:
         cost = _evaluate_single(
-            c, device_map, placement_map, lab, collision_checker, reachability_checker
+            c, device_map, placement_map, lab, collision_checker, reachability_checker,
+            graduated=graduated,
         )
         if math.isinf(cost):
             return math.inf
@@ -66,8 +86,8 @@ def evaluate_default_hard_constraints(
     collision_checker: CollisionChecker,
     *,
     graduated: bool = True,
-    collision_weight: float = 1000.0,
-    boundary_weight: float = 1000.0,
+    collision_weight: float = DEFAULT_WEIGHT_DISTANCE * HARD_MULTIPLIER,   # 500
+    boundary_weight: float = DEFAULT_WEIGHT_DISTANCE * HARD_MULTIPLIER,    # 500
 ) -> float:
     """评估默认硬约束（碰撞 + 边界），无需显式声明约束列表。
 
@@ -86,18 +106,17 @@ def evaluate_default_hard_constraints(
     device_map = {d.id: d for d in devices}
     cost = 0.0
 
-    # Graduated collision penalty: sum of penetration depths
-    n = len(placements)
-    for i in range(n):
-        for j in range(i + 1, n):
-            di, dj = device_map[placements[i].device_id], device_map[placements[j].device_id]
-            ci = obb_corners(placements[i].x, placements[i].y,
-                             di.bbox[0], di.bbox[1], placements[i].theta)
-            cj = obb_corners(placements[j].x, placements[j].y,
-                             dj.bbox[0], dj.bbox[1], placements[j].theta)
-            depth = obb_penetration_depth(ci, cj)
-            if depth > 0:
-                cost += collision_weight * depth
+    # Graduated collision penalty: 2 轴 sweep-and-prune 宽相 + OBB SAT 精确检测
+    candidate_pairs = sweep_and_prune_pairs(devices, placements)
+    for i, j in candidate_pairs:
+        di, dj = device_map[placements[i].device_id], device_map[placements[j].device_id]
+        ci = obb_corners(placements[i].x, placements[i].y,
+                         di.bbox[0], di.bbox[1], placements[i].theta)
+        cj = obb_corners(placements[j].x, placements[j].y,
+                         dj.bbox[0], dj.bbox[1], placements[j].theta)
+        depth = obb_penetration_depth(ci, cj)
+        if depth > 0:
+            cost += collision_weight * depth
 
     # Graduated boundary penalty: sum of overshoot distances (rotation-aware)
     for p in placements:
@@ -142,17 +161,31 @@ def _evaluate_single(
     lab: Lab,
     collision_checker: CollisionChecker,
     reachability_checker: ReachabilityChecker | None,
+    *,
+    graduated: bool = True,
 ) -> float:
-    """评估单条约束规则。"""
+    """评估单条约束规则。
+
+    graduated=True 时硬约束返回比例惩罚（DE用），
+    graduated=False 时硬约束返回 inf（最终 pass/fail）。
+    """
     rule = constraint.rule_name
     params = constraint.params
     is_hard = constraint.type == "hard"
+
+    # 根据优先级等级计算有效权重
+    effective_weight = constraint.weight
+    if constraint.priority and constraint.priority in PRIORITY_MULTIPLIERS:
+        effective_weight *= PRIORITY_MULTIPLIERS[constraint.priority]
 
     if rule == "no_collision":
         checker_placements = _to_checker_format_from_maps(device_map, placement_map)
         collisions = collision_checker.check(checker_placements)
         if collisions:
-            return math.inf if is_hard else constraint.weight * len(collisions)
+            if is_hard and not graduated:
+                return math.inf
+            w = effective_weight * (HARD_MULTIPLIER if is_hard else 1.0)
+            return w * len(collisions)
         return 0.0
 
     if rule == "within_bounds":
@@ -162,7 +195,10 @@ def _evaluate_single(
                 checker_placements, lab.width, lab.depth
             )
             if oob:
-                return math.inf if is_hard else constraint.weight * len(oob)
+                if is_hard and not graduated:
+                    return math.inf
+                w = effective_weight * (HARD_MULTIPLIER if is_hard else 1.0)
+                return w * len(oob)
         return 0.0
 
     if rule == "distance_less_than":
@@ -177,7 +213,10 @@ def _evaluate_single(
         else:
             dist = _device_distance_center(pa, pb) or 0.0
         if dist > max_dist:
-            return math.inf if is_hard else constraint.weight * (dist - max_dist)
+            if is_hard and not graduated:
+                return math.inf
+            w = effective_weight * (HARD_MULTIPLIER if is_hard else 1.0)
+            return w * (dist - max_dist)
         return 0.0
 
     if rule == "distance_greater_than":
@@ -192,7 +231,10 @@ def _evaluate_single(
         else:
             dist = _device_distance_center(pa, pb) or 0.0
         if dist < min_dist:
-            return math.inf if is_hard else constraint.weight * (min_dist - dist)
+            if is_hard and not graduated:
+                return math.inf
+            w = effective_weight * (HARD_MULTIPLIER if is_hard else 1.0)
+            return w * (min_dist - dist)
         return 0.0
 
     if rule == "minimize_distance":
@@ -205,7 +247,7 @@ def _evaluate_single(
             dist = _device_distance_obb(da, pa, db, pb)
         else:
             dist = _device_distance_center(pa, pb) or 0.0
-        return constraint.weight * dist
+        return effective_weight * dist
 
     if rule == "maximize_distance":
         a_id, b_id = params["device_a"], params["device_b"]
@@ -218,11 +260,12 @@ def _evaluate_single(
         else:
             dist = _device_distance_center(pa, pb) or 0.0
         max_possible = math.sqrt(lab.width**2 + lab.depth**2)
-        return constraint.weight * (max_possible - dist)
+        return effective_weight * (max_possible - dist)
 
     if rule == "min_spacing":
         min_gap = params.get("min_gap", 0.0)
         all_placements = list(placement_map.values())
+        total_penalty = 0.0
         for i in range(len(all_placements)):
             for j in range(i + 1, len(all_placements)):
                 pi, pj = all_placements[i], all_placements[j]
@@ -233,9 +276,12 @@ def _evaluate_single(
                 else:
                     dist = _device_distance_center(pi, pj) or 0.0
                 if dist < min_gap:
-                    if is_hard:
-                        return math.inf
-                    return constraint.weight * (min_gap - dist)
+                    total_penalty += (min_gap - dist)
+        if total_penalty > 0:
+            if is_hard and not graduated:
+                return math.inf
+            w = effective_weight * (HARD_MULTIPLIER if is_hard else 1.0)
+            return w * total_penalty
         return 0.0
 
     if rule == "reachability":
@@ -268,18 +314,19 @@ def _evaluate_single(
         target_point = {"x": target_p.x, "y": target_p.y, "z": 0.0}
         target_point["_obb_dist"] = dist
         if not reachability_checker.is_reachable(arm_id, arm_pose, target_point):
-            if is_hard:
+            if is_hard and not graduated:
                 return math.inf
             # Graduated: penalty proportional to overshoot
             max_reach = reachability_checker.arm_reach.get(arm_id, 2.0)
             overshoot = max(0.0, dist - max_reach)
-            return constraint.weight * overshoot * 10.0
+            w = effective_weight * (HARD_MULTIPLIER if is_hard else 1.0)
+            return w * overshoot * 10.0
 
         # Line-of-sight penalty: penalize if any other device OBB blocks
         # the path from opening to arm
         los_cost = _line_of_sight_penalty(
             arm_id, arm_p, target_device_id, target_p,
-            device_map, placement_map, constraint.weight,
+            device_map, placement_map, effective_weight,
         )
         return los_cost
 
@@ -288,8 +335,10 @@ def _evaluate_single(
             (1 - math.cos(4 * p.theta)) / 2 for p in placement_map.values()
         )
         if is_hard:
-            return math.inf if alignment_cost > 1e-6 else 0.0
-        return constraint.weight * alignment_cost
+            if not graduated:
+                return math.inf if alignment_cost > 1e-6 else 0.0
+            return HARD_MULTIPLIER * effective_weight * alignment_cost
+        return effective_weight * alignment_cost
 
     if rule == "prefer_seeder_orientation":
         target_thetas = params.get("target_thetas", {})
@@ -301,7 +350,7 @@ def _evaluate_single(
             # Circular distance: (1 - cos(diff)) / 2 gives 0..1 range
             diff = p.theta - target
             cost += (1 - math.cos(diff)) / 2
-        return constraint.weight * cost
+        return effective_weight * cost
 
     if rule == "prefer_orientation_mode":
         mode = params.get("mode", "outward")
@@ -319,7 +368,7 @@ def _evaluate_single(
                 continue
             diff = p.theta - target
             cost += (1 - math.cos(diff)) / 2
-        return constraint.weight * cost
+        return effective_weight * cost
 
     # 未知约束类型，忽略
     return 0.0

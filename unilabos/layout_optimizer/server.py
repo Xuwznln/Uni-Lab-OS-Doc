@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .constraints import DEFAULT_WEIGHT_ANGLE
 from .device_catalog import (
     create_devices_from_list,
     load_devices_from_assets,
@@ -395,9 +396,9 @@ async def run_optimize(request: OptimizeRequest):
     """接收设备列表+约束，返回最优布局方案。"""
     from fastapi import HTTPException
 
-    from .constraints import evaluate_default_hard_constraints
+    from .constraints import evaluate_default_hard_constraints, evaluate_constraints
     from .mock_checkers import MockCollisionChecker
-    from .optimizer import optimize, snap_theta
+    from .optimizer import optimize, snap_theta, snap_theta_safe
     from .seeders import resolve_seeder_params, seed_layout
 
     logger.info(
@@ -456,10 +457,10 @@ async def run_optimize(request: OptimizeRequest):
                 type="soft",
                 rule_name="prefer_orientation_mode",
                 params={"mode": orientation_mode},
-                weight=request.seeder_overrides.get("orientation_weight", 5.0),
+                weight=request.seeder_overrides.get("orientation_weight", DEFAULT_WEIGHT_ANGLE),
             ))
         # prefer_aligned: penalize non-cardinal angles
-        align_weight = request.seeder_overrides.get("align_weight", 2.0)
+        align_weight = request.seeder_overrides.get("align_weight", DEFAULT_WEIGHT_ANGLE)
         if align_weight > 0:
             constraints.append(Constraint(
                 type="soft",
@@ -479,18 +480,27 @@ async def run_optimize(request: OptimizeRequest):
             seed_placements=seed_placements,
             maxiter=request.maxiter,
             seed=request.seed,
+            workflow_edges=request.workflow_edges or None,
         )
         de_ran = True
     else:
         result_placements = seed_placements
 
-    # 5. θ snap post-processing
-    result_placements = snap_theta(result_placements)
+    # 5. θ snap post-processing（碰撞安全：snap 后验证，失败则回退）
+    result_placements = snap_theta_safe(result_placements, devices, lab, checker)
 
     # 6. Evaluate final cost (binary mode for pass/fail reporting)
     final_cost = evaluate_default_hard_constraints(
         devices, result_placements, lab, checker, graduated=False,
     )
+    # 也检查用户硬约束（binary 模式）
+    if constraints and not math.isinf(final_cost):
+        user_hard_cost = evaluate_constraints(
+            devices, result_placements, lab, constraints, checker,
+            graduated=False,
+        )
+        if math.isinf(user_hard_cost):
+            final_cost = math.inf
 
     return OptimizeResponse(
         placements=[
