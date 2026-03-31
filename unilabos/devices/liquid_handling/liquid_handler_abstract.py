@@ -215,17 +215,38 @@ class LiquidHandlerMiddleware(LiquidHandler):
         if spread == "":
             spread = "custom"
 
-        for res in resources:
+        for i, res in enumerate(resources):
             tracker = getattr(res, "tracker", None)
             if tracker is None or getattr(tracker, "is_disabled", False):
                 continue
-            history = getattr(tracker, "liquid_history", None)
-            if tracker.get_used_volume() <= 0 and isinstance(history, list) and len(history) == 0:
-                fill_vol = tracker.max_volume if tracker.max_volume > 0 else 50000
+            need = float(vols[i]) if i < len(vols) else 0.0
+            if blow_out_air_volume and i < len(blow_out_air_volume) and blow_out_air_volume[i] is not None:
+                need += float(blow_out_air_volume[i] or 0.0)
+            if need <= 0:
+                continue
+            try:
+                used = float(tracker.get_used_volume())
+            except Exception:
+                used = 0.0
+            if used >= need:
+                continue
+            mv = float(getattr(tracker, "max_volume", 0) or 0)
+            if used <= 0:
+                # 与旧逻辑一致：空孔优先加满（或极大默认），避免仅有 history 记录但 used=0 时不补液
+                fill_vol = mv if mv > 0 else max(need, 50000.0)
+            else:
+                fill_vol = need - used
+                if mv > 0:
+                    fill_vol = min(fill_vol, max(0.0, mv - used))
+            try:
+                tracker.add_liquid(fill_vol)
+            except Exception:
                 try:
-                    tracker.add_liquid(fill_vol)
+                    tracker.add_liquid(max(need - used, 1.0))
                 except Exception:
-                    tracker.liquid_history.append(("auto_init", fill_vol))
+                    history = getattr(tracker, "liquid_history", None)
+                    if isinstance(history, list):
+                        history.append(("auto_init", max(fill_vol, need, 1.0)))
 
         if self._simulator:
             try:
@@ -277,6 +298,37 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 spread,
                 **backend_kwargs,
             )
+        except (TooLittleLiquidError, TooLittleVolumeError) as e:
+            tracker_info = []
+            for r in resources:
+                t = getattr(r, "tracker", None)
+                if t is None:
+                    tracker_info.append(f"{r.name}(no_tracker)")
+                else:
+                    try:
+                        tracker_info.append(
+                            f"{r.name}(used={t.get_used_volume():.1f}, "
+                            f"free={t.get_free_volume():.1f}, max={getattr(r, 'max_volume', '?')})"
+                        )
+                    except Exception:
+                        tracker_info.append(f"{r.name}(tracker_err)")
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                self._ros_node.lab_logger().warning(
+                    f"[aspirate] hardware tracker shortfall, retry without volume tracking. "
+                    f"error={e}, vols={vols}, trackers={tracker_info}"
+                )
+            with no_volume_tracking():
+                await super().aspirate(
+                    resources,
+                    vols,
+                    use_channels,
+                    flow_rates,
+                    offsets,
+                    liquid_height,
+                    blow_out_air_volume,
+                    spread,
+                    **backend_kwargs,
+                )
         except ValueError as e:
             if "Resource is too small to space channels" in str(e) and spread != "custom":
                 await super().aspirate(
@@ -1620,25 +1672,25 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 use_channels=use_channels,
             )
 
-        if blow_out_air_volume_before_vol > 0:
-            source_tracker = getattr(sources[0], "tracker", None)
-            source_tracker_was_disabled = bool(getattr(source_tracker, "is_disabled", False))
-            try:
-                if source_tracker is not None and hasattr(source_tracker, "disable"):
-                    source_tracker.disable()
-                await self.aspirate(
-                    resources=[sources[0]],
-                    vols=[blow_out_air_volume_before_vol],
-                    use_channels=use_channels,
-                    flow_rates=None,
-                    offsets=[Coordinate(x=0, y=0, z=sources[0].get_size_z())],
-                    liquid_height=None,
-                    blow_out_air_volume=None,
-                    spread="custom",
-                )
-            finally:
-                if source_tracker is not None:
-                    source_tracker.enable()
+        # if blow_out_air_volume_before_vol > 0:
+        #     source_tracker = getattr(sources[0], "tracker", None)
+        #     source_tracker_was_disabled = bool(getattr(source_tracker, "is_disabled", False))
+        #     try:
+        #         if source_tracker is not None and hasattr(source_tracker, "disable"):
+        #             source_tracker.disable()
+        #         await self.aspirate(
+        #             resources=[sources[0]],
+        #             vols=[blow_out_air_volume_before_vol],
+        #             use_channels=use_channels,
+        #             flow_rates=None,
+        #             offsets=[Coordinate(x=0, y=0, z=sources[0].get_size_z())],
+        #             liquid_height=None,
+        #             blow_out_air_volume=None,
+        #             spread="custom",
+        #         )
+        #     finally:
+        #         if source_tracker is not None:
+        #             source_tracker.enable()
 
         await self.aspirate(
             resources=[sources[0]],
