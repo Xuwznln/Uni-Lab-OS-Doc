@@ -1064,8 +1064,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
     ):
         self._unilabos_backend.create_protocol(protocol_name)
 
-    async def run_protocol(self):
-        return self._unilabos_backend.run_protocol()
+    async def run_protocol(self, protocol_id: str = None):
+        return self._unilabos_backend.run_protocol(protocol_id)
 
     async def remove_liquid(
         self,
@@ -1559,12 +1559,15 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                 raise AssertionError(f"Failed to create matrix: {res.get('Message', 'Unknown error')}")
             print(f"PRCXI9300Backend created matrix with ID: {self.matrix_info['MatrixId']}, result: {res}")
 
-    def run_protocol(self):
+    def run_protocol(self, protocol_id: str = None):
         assert self.is_reset_ok, "PRCXI9300Backend is not reset successfully. Please call setup() first."
         run_time = time.time()
-        solution_id = self.api_client.add_solution(
-            f"protocol_{run_time}", self.matrix_id, self.steps_todo_list
-        )
+        if protocol_id == "" or protocol_id is None:
+            solution_id = self.api_client.add_solution(
+                f"protocol_{run_time}", self.matrix_id, self.steps_todo_list
+            )
+        else:
+            solution_id = protocol_id
         print(f"PRCXI9300Backend created solution with ID: {solution_id}")
         self.api_client.load_solution(solution_id)
         print(json.dumps(self.steps_todo_list, indent=2))
