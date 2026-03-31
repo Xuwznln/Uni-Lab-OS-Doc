@@ -110,7 +110,7 @@ class PRCXI9300Deck(Deck):
     # 向后兼容别名
     _DEFAULT_SITE_POSITIONS = _9320_SITE_POSITIONS
     _DEFAULT_SITE_SIZE = {"width": 128.0, "height": 86, "depth": 0}
-    _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor", "plateadapter", "module"]
+    _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor", "plateadapter", "module", "trash"]
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
                  sites: Optional[List[Dict[str, Any]]] = None, model: str = "9320", **kwargs):

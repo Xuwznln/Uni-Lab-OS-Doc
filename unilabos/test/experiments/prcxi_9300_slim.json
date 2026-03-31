@@ -19,7 +19,7 @@
                     "_resource_type": "unilabos.devices.liquid_handling.prcxi.prcxi:PRCXI9300Deck",
                     "_resource_child_name": "PRCXI_Deck"
                 },
-                "host": "10.20.30.167",
+                "host": "10.20.31.167",
                 "port": 9999,
                 "debug": false,
                 "setup": true,
@@ -89,7 +89,8 @@
                             "tube_rack",
                             "adaptor",
                             "plateadapter",
-                            "module"
+                            "module",
+                            "trash"
                         ]
                     },
                     {
@@ -114,7 +115,8 @@
                             "tube_rack",
                             "adaptor",
                             "plateadapter",
-                            "module"
+                            "module",
+                            "trash"
                         ]
                     },
                     {
@@ -139,7 +141,8 @@
                             "tube_rack",
                             "adaptor",
                             "plateadapter",
-                            "module"
+                            "module",
+                            "trash"
                         ]
                     },
                     {
@@ -164,7 +167,8 @@
                             "tube_rack",
                             "adaptor",
                             "plateadapter",
-                            "module"
+                            "module",
+                            "trash"
                         ]
                     },
                     {
@@ -189,7 +193,8 @@
                             "tube_rack",
                             "adaptor",
                             "plateadapter",
-                            "module"
+                            "module",
+                            "trash"
                         ]
                     },
                     {
@@ -214,7 +219,8 @@
                             "tube_rack",
                             "adaptor",
                             "plateadapter",
-                            "module"
+                            "module",
+                            "trash"
                         ]
                     }
                 ]
