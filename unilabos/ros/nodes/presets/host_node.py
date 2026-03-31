@@ -22,6 +22,7 @@ from unilabos_msgs.srv import (
     SerialCommand,
 )  # type: ignore
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
+from unilabos_msgs.action import SendCmd
 from unique_identifier_msgs.msg import UUID
 
 from unilabos.registry.decorators import device, action, NodeType
@@ -313,9 +314,15 @@ class HostNode(BaseROS2DeviceNode):
                 callback_group=self.callback_group,
             ),
         }  # 用来存储多个ActionClient实例
-        self._action_value_mappings: Dict[str, Dict] = {
-            device_id: self._action_value_mappings
-        }  # device_id -> action_value_mappings(本地+远程设备统一存储)
+        self._add_resource_mesh_client = ActionClient(
+            self,
+            SendCmd,
+            "/devices/resource_mesh_manager/add_resource_mesh",
+            callback_group=self.callback_group,
+        )
+        self._action_value_mappings: Dict[str, Dict] = (
+            {}
+        )  # device_id -> action_value_mappings(本地+远程设备统一存储)
         self._slave_registry_configs: Dict[str, Dict] = {}  # registry_name -> registry_config(含action_value_mappings)
         self._goals: Dict[str, Any] = {}  # 用来存储多个目标的状态
         self._online_devices: Set[str] = {f"{self.namespace}/{device_id}"}  # 用于跟踪在线设备
@@ -1131,6 +1138,27 @@ class HostNode(BaseROS2DeviceNode):
             ),
         }
 
+    def _notify_resource_mesh_add(self, resource_tree_set: ResourceTreeSet):
+        """通知 ResourceMeshManager 添加资源的 mesh 可视化"""
+        if not self._add_resource_mesh_client.server_is_ready():
+            self.lab_logger().debug("[Host Node] ResourceMeshManager 未就绪，跳过 mesh 添加通知")
+            return
+
+        resource_configs = []
+        for node in resource_tree_set.all_nodes:
+            res_dict = node.res_content.model_dump(by_alias=True)
+            if res_dict.get("type") == "device":
+                continue
+            resource_configs.append(res_dict)
+
+        if not resource_configs:
+            return
+
+        goal_msg = SendCmd.Goal()
+        goal_msg.command = json.dumps({"resources": resource_configs})
+        self._add_resource_mesh_client.send_goal_async(goal_msg)
+        self.lab_logger().info(f"[Host Node] 已发送 {len(resource_configs)} 个资源 mesh 添加请求")
+
     async def _resource_tree_action_add_callback(self, data: dict, response: SerialCommand_Response):  # OK
         resource_tree_set = ResourceTreeSet.load(data["data"])
         mount_uuid = data["mount_uuid"]
@@ -1170,6 +1198,12 @@ class HostNode(BaseROS2DeviceNode):
 
         response.response = json.dumps(uuid_mapping) if success else "FAILED"
         self.lab_logger().info(f"[Host Node-Resource] Resource tree add completed, success: {success}")
+
+        if success:
+            try:
+                self._notify_resource_mesh_add(resource_tree_set)
+            except Exception as e:
+                self.lab_logger().error(f"[Host Node] 通知 ResourceMeshManager 添加 mesh 失败: {e}")
 
     async def _resource_tree_action_get_callback(self, data: dict, response: SerialCommand_Response):  # OK
         uuid_list: List[str] = data["data"]
@@ -1221,6 +1255,12 @@ class HostNode(BaseROS2DeviceNode):
             # 还需要加入到资源图中，暂不实现，考虑资源图新的获取方式
             response.response = json.dumps(uuid_mapping)
             self.lab_logger().info(f"[Host Node-Resource] Resource tree update completed, success: {success}")
+
+            if success:
+                try:
+                    self._notify_resource_mesh_add(new_tree_set)
+                except Exception as e:
+                    self.lab_logger().error(f"[Host Node] 通知 ResourceMeshManager 更新 mesh 失败: {e}")
 
     async def _resource_tree_update_callback(self, request: SerialCommand_Request, response: SerialCommand_Response):
         """
