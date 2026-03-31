@@ -93,24 +93,35 @@ class PRCXI9300Deck(Deck):
     该类定义了 PRCXI 9300 的工作台布局和槽位信息。
     """
 
-    # T1-T16 默认位置 (4列×4行, Y轴从上往下递减, T1在左上角)
-    _DEFAULT_SITE_POSITIONS = [
+    # 9320: 4列×4行 = 16 slots（Y轴从上往下递减, T1在左上角）
+    _9320_SITE_POSITIONS = [
         (0, 288, 0), (138, 288, 0), (276, 288, 0), (414, 288, 0),   # T1-T4   (第1行, 最上)
         (0, 192, 0), (138, 192, 0), (276, 192, 0), (414, 192, 0),   # T5-T8   (第2行)
         (0, 96, 0),  (138, 96, 0),  (276, 96, 0),  (414, 96, 0),    # T9-T12  (第3行)
         (0, 0, 0),   (138, 0, 0),   (276, 0, 0),   (414, 0, 0),     # T13-T16 (第4行, 最下)
     ]
+
+    # 9300: 3列×2行 = 6 slots，间距与9320相同（X: 138mm, Y: 96mm）
+    _9300_SITE_POSITIONS = [
+        (0, 96, 0),  (138, 96, 0),  (276, 96, 0),   # T1-T3 (第1行, 上)
+        (0, 0, 0),   (138, 0, 0),   (276, 0, 0),     # T4-T6 (第2行, 下)
+    ]
+
+    # 向后兼容别名
+    _DEFAULT_SITE_POSITIONS = _9320_SITE_POSITIONS
     _DEFAULT_SITE_SIZE = {"width": 128.0, "height": 86, "depth": 0}
     _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor", "plateadapter", "module"]
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
-                 sites: Optional[List[Dict[str, Any]]] = None, **kwargs):
+                 sites: Optional[List[Dict[str, Any]]] = None, model: str = "9320", **kwargs):
         super().__init__(size_x, size_y, size_z, name)
+        self.model = model
         if sites is not None:
             self.sites: List[Dict[str, Any]] = [dict(s) for s in sites]
         else:
+            positions = self._9300_SITE_POSITIONS if model == "9300" else self._9320_SITE_POSITIONS
             self.sites = []
-            for i, (x, y, z) in enumerate(self._DEFAULT_SITE_POSITIONS):
+            for i, (x, y, z) in enumerate(positions):
                 self.sites.append({
                     "label": f"T{i + 1}",
                     "visible": True,
@@ -174,6 +185,7 @@ class PRCXI9300Deck(Deck):
 
     def serialize(self) -> dict:
         data = super().serialize()
+        data["model"] = self.model
         sites_out = []
         for i, site in enumerate(self.sites):
             occupied = self._get_site_resource(i)
@@ -749,7 +761,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         simulator=False,
         step_mode=False,
         matrix_id="",
-        is_9320=False,
+        is_9320=None,
     ):
         tablets_info = []
         for site_id in range(len(deck.sites)):
@@ -762,6 +774,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                         Number=number, Code=f"T{number}", Material=child._unilabos_state["Material"]
                     )
                 )
+        if is_9320 is None:
+            is_9320 = getattr(deck, 'model', '9300') == '9320'
         if is_9320:
             print("当前设备是9320")
         # 始终初始化 step_mode 属性
@@ -1983,8 +1997,20 @@ class DefaultLayout:
             self.rows = 2
             self.columns = 3
             self.layout = [1, 2, 3, 4, 5, 6]
-            self.trash_slot = 3
-            self.waste_liquid_slot = 6
+            self.trash_slot = 6
+            self.default_layout = {
+                "MatrixId": f"{time.time()}",
+                "MatrixName": f"{time.time()}",
+                "MatrixCount": 6,
+                "WorkTablets": [
+                    {"Number": 1, "Code": "T1", "Material": {"uuid": "57b1e4711e9e4a32b529f3132fc5931f", "materialEnum": 0}},
+                    {"Number": 2, "Code": "T2", "Material": {"uuid": "57b1e4711e9e4a32b529f3132fc5931f", "materialEnum": 0}},
+                    {"Number": 3, "Code": "T3", "Material": {"uuid": "57b1e4711e9e4a32b529f3132fc5931f", "materialEnum": 0}},
+                    {"Number": 4, "Code": "T4", "Material": {"uuid": "57b1e4711e9e4a32b529f3132fc5931f", "materialEnum": 0}},
+                    {"Number": 5, "Code": "T5", "Material": {"uuid": "57b1e4711e9e4a32b529f3132fc5931f", "materialEnum": 0}},
+                    {"Number": 6, "Code": "T6", "Material": {"uuid": "730067cf07ae43849ddf4034299030e9", "materialEnum": 0}},  # trash
+                ],
+            }
 
         elif product_name == "PRCXI9320":
             self.rows = 4
@@ -2081,13 +2107,15 @@ class DefaultLayout:
             }
 
     def get_layout(self) -> Dict[str, Any]:
-        return {
+        result = {
             "rows": self.rows,
             "columns": self.columns,
             "layout": self.layout,
             "trash_slot": self.trash_slot,
-            "waste_liquid_slot": self.waste_liquid_slot,
         }
+        if hasattr(self, 'waste_liquid_slot'):
+            result["waste_liquid_slot"] = self.waste_liquid_slot
+        return result
 
     def get_trash_slot(self) -> int:
         return self.trash_slot
@@ -2105,15 +2133,18 @@ class DefaultLayout:
             if material_name not in self.labresource:
                 raise ValueError(f"Material {reagent_name} not found in lab resources.")
 
-            # 预留位置12和16不动
-        reserved_positions = {12, 16}
-        available_positions = [i for i in range(1, 17) if i not in reserved_positions]
+            # 预留位置动态计算
+        reserved_positions = {self.trash_slot}
+        if hasattr(self, 'waste_liquid_slot'):
+            reserved_positions.add(self.waste_liquid_slot)
+        total_slots = self.rows * self.columns
+        available_positions = [i for i in range(1, total_slots + 1) if i not in reserved_positions]
 
         # 计算总需求
         total_needed = sum(count for _, _, count in needs)
         if total_needed > len(available_positions):
             raise ValueError(
-                f"需要 {total_needed} 个位置，但只有 {len(available_positions)} 个可用位置（排除位置12和16）"
+                f"需要 {total_needed} 个位置，但只有 {len(available_positions)} 个可用位置（排除预留位置 {reserved_positions}）"
             )
 
             # 依次分配位置
