@@ -253,8 +253,4 @@ test_config.py
 
 
 /.claude
-/.conda
 /.cursor
-/.github
-/.conda/base
-.conda/base/recipe.yaml

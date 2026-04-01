@@ -8,8 +8,8 @@
             "parent": "",
             "pose": {
                 "size": {
-                    "width": 562,
-                    "height": 394,
+                    "width": 550,
+                    "height": 400,
                     "depth": 0
                 }
             },
@@ -55,9 +55,9 @@
             },
             "config": {
                 "type": "PRCXI9300Deck",
-                "size_x": 542,
-                "size_y": 374,
-                "size_z": 0,
+                "size_x": 550,
+                "size_y": 400,
+                "size_z": 17,
                 "rotation": {
                     "x": 0,
                     "y": 0,

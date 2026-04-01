@@ -210,6 +210,7 @@ def convert_from_json(
     data: Union[str, PathLike, Dict[str, Any]],
     workstation_name: str = DEFAULT_WORKSTATION,
     validate: bool = True,
+    preserve_tip_rack_incoming_class: bool = True,
 ) -> WorkflowGraph:
     """
     从 JSON 数据或文件转换为 WorkflowGraph
@@ -221,6 +222,8 @@ def convert_from_json(
         data: JSON 文件路径、字典数据、或 JSON 字符串
         workstation_name: 工作站名称，默认 "PRCXi"
         validate: 是否校验句柄配置，默认 True
+        preserve_tip_rack_incoming_class: True（默认）时仅 tip_rack 不跑模板、按传入类名/labware；其它载体仍自动匹配。
+            False 时全部走模板。JSON 根 ``preserve_tip_rack_incoming_class`` 可覆盖此参数。
 
     Returns:
         WorkflowGraph: 构建好的工作流图
@@ -263,6 +266,10 @@ def convert_from_json(
     # reagent 已经是字典格式，用于 set_liquid 和 well 数量查找
     labware_info = reagent
 
+    preserve = preserve_tip_rack_incoming_class
+    if "preserve_tip_rack_incoming_class" in json_data:
+        preserve = bool(json_data["preserve_tip_rack_incoming_class"])
+
     # 构建工作流图
     graph = build_protocol_graph(
         labware_info=labware_info,
@@ -270,6 +277,7 @@ def convert_from_json(
         workstation_name=workstation_name,
         action_resource_mapping=ACTION_RESOURCE_MAPPING,
         labware_defs=labware_defs,
+        preserve_tip_rack_incoming_class=preserve,
     )
 
     # 校验句柄配置
@@ -287,6 +295,7 @@ def convert_from_json(
 def convert_json_to_node_link(
     data: Union[str, PathLike, Dict[str, Any]],
     workstation_name: str = DEFAULT_WORKSTATION,
+    preserve_tip_rack_incoming_class: bool = True,
 ) -> Dict[str, Any]:
     """
     将 JSON 数据转换为 node-link 格式的字典
@@ -298,13 +307,18 @@ def convert_json_to_node_link(
     Returns:
         Dict: node-link 格式的工作流数据
     """
-    graph = convert_from_json(data, workstation_name)
+    graph = convert_from_json(
+        data,
+        workstation_name,
+        preserve_tip_rack_incoming_class=preserve_tip_rack_incoming_class,
+    )
     return graph.to_node_link_dict()
 
 
 def convert_json_to_workflow_list(
     data: Union[str, PathLike, Dict[str, Any]],
     workstation_name: str = DEFAULT_WORKSTATION,
+    preserve_tip_rack_incoming_class: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     将 JSON 数据转换为工作流列表格式
@@ -316,5 +330,9 @@ def convert_json_to_workflow_list(
     Returns:
         List: 工作流节点列表
     """
-    graph = convert_from_json(data, workstation_name)
+    graph = convert_from_json(
+        data,
+        workstation_name,
+        preserve_tip_rack_incoming_class=preserve_tip_rack_incoming_class,
+    )
     return graph.to_dict()

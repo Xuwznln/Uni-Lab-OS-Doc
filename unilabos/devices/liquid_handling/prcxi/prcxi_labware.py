@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pylabrobot.resources import Tube, Coordinate
 from pylabrobot.resources.well import Well, WellBottomType, CrossSectionType
 from pylabrobot.resources.tip import Tip, TipCreator
@@ -839,3 +839,101 @@ def PRCXI_30mm_Adapter(name: str) -> PRCXI9300PlateAdapter:
             "SupplyType": 2
             }
     )
+
+
+# ---------------------------------------------------------------------------
+# 协议上传 / workflow 用：与设备端耗材字典字段对齐的模板描述（供 common 自动匹配）
+# ---------------------------------------------------------------------------
+
+_PRCXI_TEMPLATE_SPECS_CACHE: Optional[List[Dict[str, Any]]] = None
+
+
+def _probe_prcxi_resource(factory: Callable[..., Any]) -> Any:
+    probe = "__unilab_template_probe__"
+    if factory.__name__ == "PRCXI_trash":
+        return factory()
+    return factory(probe)
+
+
+def _first_child_capacity_for_match(resource: Any) -> float:
+    """Well max_volume 或 Tip 的 maximal_volume，用于与设备端 Volume 类似的打分。"""
+    ch = getattr(resource, "children", None) or []
+    if not ch:
+        return 0.0
+    c0 = ch[0]
+    mv = getattr(c0, "max_volume", None)
+    if mv is not None:
+        return float(mv)
+    tip = getattr(c0, "tip", None)
+    if tip is not None:
+        mv2 = getattr(tip, "maximal_volume", None)
+        if mv2 is not None:
+            return float(mv2)
+    return 0.0
+
+
+# (factory, kind) — 不含各类 Adapter，避免与真实板子误匹配
+PRCXI_TEMPLATE_FACTORY_KINDS: List[Tuple[Callable[..., Any], str]] = [
+    (PRCXI_BioER_96_wellplate, "plate"),
+    (PRCXI_nest_1_troughplate, "plate"),
+    (PRCXI_BioRad_384_wellplate, "plate"),
+    (PRCXI_AGenBio_4_troughplate, "plate"),
+    (PRCXI_nest_12_troughplate, "plate"),
+    (PRCXI_CellTreat_96_wellplate, "plate"),
+    (PRCXI_10ul_eTips, "tip_rack"),
+    (PRCXI_300ul_Tips, "tip_rack"),
+    (PRCXI_PCR_Plate_200uL_nonskirted, "plate"),
+    (PRCXI_PCR_Plate_200uL_semiskirted, "plate"),
+    (PRCXI_PCR_Plate_200uL_skirted, "plate"),
+    (PRCXI_trash, "trash"),
+    (PRCXI_96_DeepWell, "plate"),
+    (PRCXI_EP_Adapter, "tube_rack"),
+    (PRCXI_1250uL_Tips, "tip_rack"),
+    (PRCXI_10uL_Tips, "tip_rack"),
+    (PRCXI_1000uL_Tips, "tip_rack"),
+    (PRCXI_200uL_Tips, "tip_rack"),
+    (PRCXI_48_DeepWell, "plate"),
+]
+
+
+def get_prcxi_labware_template_specs() -> List[Dict[str, Any]]:
+    """返回与 ``prcxi._match_and_create_matrix`` 中耗材字段兼容的模板列表，用于按孔数+容量打分。"""
+    global _PRCXI_TEMPLATE_SPECS_CACHE
+    if _PRCXI_TEMPLATE_SPECS_CACHE is not None:
+        return _PRCXI_TEMPLATE_SPECS_CACHE
+
+    out: List[Dict[str, Any]] = []
+    for factory, kind in PRCXI_TEMPLATE_FACTORY_KINDS:
+        try:
+            r = _probe_prcxi_resource(factory)
+        except Exception:
+            continue
+        nx = int(getattr(r, "num_items_x", None) or 0)
+        ny = int(getattr(r, "num_items_y", None) or 0)
+        nchild = len(getattr(r, "children", []) or [])
+        hole_count = nx * ny if nx > 0 and ny > 0 else nchild
+        hole_row = ny if nx > 0 and ny > 0 else 0
+        hole_col = nx if nx > 0 and ny > 0 else 0
+        mi = getattr(r, "material_info", None) or {}
+        vol = _first_child_capacity_for_match(r)
+        menum = mi.get("materialEnum")
+        if menum is None and kind == "tip_rack":
+            menum = 1
+        elif menum is None and kind == "trash":
+            menum = 6
+        out.append(
+            {
+                "class_name": factory.__name__,
+                "kind": kind,
+                "materialEnum": menum,
+                "HoleRow": hole_row,
+                "HoleColum": hole_col,
+                "Volume": vol,
+                "hole_count": hole_count,
+                "material_uuid": mi.get("uuid"),
+                "material_code": mi.get("Code"),
+            }
+        )
+
+    _PRCXI_TEMPLATE_SPECS_CACHE = out
+    return out

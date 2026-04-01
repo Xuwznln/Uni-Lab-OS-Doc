@@ -87,19 +87,31 @@ class MatrixInfo(TypedDict):
     WorkTablets: list[WorkTablets]
 
 
+def _get_slot_number(resource) -> Optional[int]:
+    """从 resource 的 unilabos_extra["update_resource_site"]（如 "T13"）或位置反算槽位号。"""
+    extra = getattr(resource, "unilabos_extra", {}) or {}
+    site = extra.get("update_resource_site", "")
+    if site:
+        digits = "".join(c for c in str(site) if c.isdigit())
+        return int(digits) if digits else None
+    loc = getattr(resource, "location", None)
+    if loc is not None and loc.x is not None and loc.y is not None:
+        col = round((loc.x - 5) / 137.5)
+        row = round(3 - (loc.y - 13) / 96)
+        idx = row * 4 + col
+        if 0 <= idx < 16:
+            return idx + 1
+    return None
+
+
 class PRCXI9300Deck(Deck):
     """PRCXI 9300 的专用 Deck 类，继承自 Deck。
 
     该类定义了 PRCXI 9300 的工作台布局和槽位信息。
     """
 
-    # 9320: 4列×4行 = 16 slots（Y轴从上往下递减, T1在左上角）
-    _9320_SITE_POSITIONS = [
-        (0, 288, 0), (138, 288, 0), (276, 288, 0), (414, 288, 0),   # T1-T4   (第1行, 最上)
-        (0, 192, 0), (138, 192, 0), (276, 192, 0), (414, 192, 0),   # T5-T8   (第2行)
-        (0, 96, 0),  (138, 96, 0),  (276, 96, 0),  (414, 96, 0),    # T9-T12  (第3行)
-        (0, 0, 0),   (138, 0, 0),   (276, 0, 0),   (414, 0, 0),     # T13-T16 (第4行, 最下)
-    ]
+    _9320_SITE_POSITIONS = [((i%4)*137.5+5, (3-int(i/4))*96+13, 0) for i in range(0, 16)]
+
 
     # 9300: 3列×2行 = 6 slots，间距与9320相同（X: 138mm, Y: 96mm）
     _9300_SITE_POSITIONS = [
@@ -113,15 +125,13 @@ class PRCXI9300Deck(Deck):
     _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor", "plateadapter", "module", "trash"]
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
-                 sites: Optional[List[Dict[str, Any]]] = None, model: str = "9320", **kwargs):
-        super().__init__(size_x, size_y, size_z, name)
-        self.model = model
+                 sites: Optional[List[Dict[str, Any]]] = None, **kwargs):
+        super().__init__( size_x, size_y, size_z, name=name)
         if sites is not None:
             self.sites: List[Dict[str, Any]] = [dict(s) for s in sites]
         else:
-            positions = self._9300_SITE_POSITIONS if model == "9300" else self._9320_SITE_POSITIONS
             self.sites = []
-            for i, (x, y, z) in enumerate(positions):
+            for i, (x, y, z) in enumerate(self._DEFAULT_SITE_POSITIONS):
                 self.sites.append({
                     "label": f"T{i + 1}",
                     "visible": True,
@@ -133,6 +143,7 @@ class PRCXI9300Deck(Deck):
         self._ordering = collections.OrderedDict(
             (site["label"], None) for site in self.sites
         )
+        self.root = self.get_root()
 
     def _get_site_location(self, idx: int) -> Coordinate:
         pos = self.sites[idx]["position"]
@@ -175,7 +186,10 @@ class PRCXI9300Deck(Deck):
             raise ValueError(f"No available site on deck '{self.name}' for resource '{resource.name}'")
 
         if not reassign and self._get_site_resource(idx) is not None:
-            raise ValueError(f"Site {idx} ('{self.sites[idx]['label']}') is already occupied")
+            existing = self.root.get_resource(resource.name)
+            if existing is not resource and existing.parent is not None:
+                existing.parent.unassign_child_resource(existing)
+
 
         loc = self._get_site_location(idx)
         super().assign_child_resource(resource, location=loc, reassign=reassign)
@@ -761,23 +775,49 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         simulator=False,
         step_mode=False,
         matrix_id="",
-        is_9320=None,
+        is_9320=False,
+        start_rail=2,
+        rail_nums=4,
+        rail_interval=0,
+        x_increase = -0.003636,
+        y_increase = -0.003636,
+        x_offset = 9.2,
+        y_offset = -27.98,
+        deck_z = 300,
+        deck_y = 400,
+        rail_width=27.5,
+        xy_coupling = -0.0045,
     ):
+
+        self.deck_x = (start_rail + rail_nums*5 + (rail_nums-1)*rail_interval) * rail_width
+        self.deck_y = deck_y
+        self.deck_z = deck_z
+        self.x_increase = x_increase
+        self.y_increase = y_increase
+        self.x_offset = x_offset
+        self.y_offset = y_offset
+        self.xy_coupling = xy_coupling
+        self.left_2_claw = Coordinate(-130.2, 34, -134)
+        self.right_2_left = Coordinate(22,-1, 8)
+        plate_positions = []
+
         tablets_info = []
-        for site_id in range(len(deck.sites)):
-            child = deck._get_site_resource(site_id)
-            # 如果放其他类型的物料，是不可以的
-            if hasattr(child, "_unilabos_state") and "Material" in child._unilabos_state:
-                number = site_id + 1
-                tablets_info.append(
-                    WorkTablets(
-                        Number=number, Code=f"T{number}", Material=child._unilabos_state["Material"]
-                    )
-                )
+
         if is_9320 is None:
             is_9320 = getattr(deck, 'model', '9300') == '9320'
         if is_9320:
             print("当前设备是9320")
+        else:
+            for site_id in range(len(deck.sites)):
+                child = deck._get_site_resource(site_id)
+                # 如果放其他类型的物料，是不可以的
+                if hasattr(child, "_unilabos_state") and "Material" in child._unilabos_state:
+                    number = site_id + 1
+                    tablets_info.append(
+                        WorkTablets(
+                            Number=number, Code=f"T{number}", Material=child._unilabos_state["Material"]
+                        )
+                    )
         # 始终初始化 step_mode 属性
         self.step_mode = False
         if step_mode:
@@ -789,6 +829,190 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             tablets_info, host, port, timeout, channel_num, axis, setup, debug, matrix_id, is_9320
         )
         super().__init__(backend=self._unilabos_backend, deck=deck, simulator=simulator, channel_num=channel_num)
+        self._first_transfer_done = False
+
+    @staticmethod
+    def _get_slot_number(resource) -> Optional[int]:
+        """从 resource 的 unilabos_extra["update_resource_site"]（如 "T13"）或位置反算槽位号。"""
+        return _get_slot_number(resource)
+
+    def _match_and_create_matrix(self):
+        """首次 transfer_liquid 时，根据 deck 上的 resource 自动匹配耗材并创建 WorkTabletMatrix。"""
+        backend = self._unilabos_backend
+        api = backend.api_client
+
+        if backend.matrix_id:
+            return
+
+        material_list = api.get_all_materials()
+        if not material_list:
+            return
+
+        # 按 materialEnum 分组: {enum_value: [material, ...]}
+        material_dict = {}
+        material_uuid_map = {}
+        for m in material_list:
+            enum_key = m.get("materialEnum")
+            material_dict.setdefault(enum_key, []).append(m)
+            if "uuid" in m:
+                material_uuid_map[m["uuid"]] = m
+
+        work_tablets = []
+        slot_none = [i for i in range(1, 17)]
+
+        for child in self.deck.children:
+
+            resource = child
+            number = self._get_slot_number(resource)
+            if number is None:
+                continue
+
+            # 如果 resource 已有 Material UUID，直接使用
+            if hasattr(resource, "_unilabos_state") and "Material" in getattr(resource, "_unilabos_state", {}):
+                mat_uuid = resource._unilabos_state["Material"].get("uuid")
+                if mat_uuid and mat_uuid in material_uuid_map:
+                    work_tablets.append({"Number": number, "Material": material_uuid_map[mat_uuid]})
+                    continue
+
+            # 根据 resource 类型推断 materialEnum
+            # MaterialEnum: Other=0, Tips=1, DeepWellPlate=2, PCRPlate=3, ELISAPlate=4, Reservoir=5, WasteBox=6
+            expected_enum = None
+            if isinstance(resource, PRCXI9300TipRack) or isinstance(resource, TipRack):
+                expected_enum = 1  # Tips
+            elif isinstance(resource, PRCXI9300Trash) or isinstance(resource, Trash):
+                expected_enum = 6  # WasteBox
+            elif isinstance(resource, (PRCXI9300Plate, Plate)):
+                expected_enum = None  # Plate 可能是 DeepWellPlate/PCRPlate/ELISAPlate，不限定
+
+
+            # 根据 expected_enum 筛选候选耗材列表
+            if expected_enum is not None:
+                candidates = material_dict.get(expected_enum, [])
+            else:
+                # expected_enum 未确定时，搜索所有耗材
+                candidates = material_list
+
+            # 根据 children 个数和容量匹配最相似的耗材
+            num_children = len(resource.children)
+            child_max_volume = None
+            if resource.children:
+                first_child = resource.children[0]
+                if hasattr(first_child, "max_volume") and first_child.max_volume is not None:
+                    child_max_volume = first_child.max_volume
+
+            best_material = None
+            best_score = float("inf")
+
+            for material in candidates:
+                hole_count = (material.get("HoleRow", 0) or 0) * (material.get("HoleColum", 0) or 0)
+                material_volume = material.get("Volume", 0) or 0
+
+                # 孔数差异（高权重优先匹配孔数）
+                hole_diff = abs(num_children - hole_count)
+                # 容量差异（归一化）
+                if child_max_volume is not None and material_volume > 0:
+                    vol_diff = abs(child_max_volume - material_volume) / material_volume
+                else:
+                    vol_diff = 0
+
+                score = hole_diff * 1000 + vol_diff
+                if score < best_score:
+                    best_score = score
+                    best_material = material
+
+            if best_material:
+                work_tablets.append({"Number": number, "Material": best_material})
+                slot_none.remove(number)
+
+        if not work_tablets:
+            return
+
+        matrix_id = str(uuid.uuid4())
+        matrix_info = {
+            "MatrixId": matrix_id,
+            "MatrixName": matrix_id,
+            "WorkTablets": work_tablets + 
+                            [{"Number": number, "Material": {"uuid": "730067cf07ae43849ddf4034299030e9"}} for number in slot_none],
+        }
+        res = api.add_WorkTablet_Matrix(matrix_info)
+        if res.get("Success"):
+            backend.matrix_id = matrix_id
+            backend.matrix_info = matrix_info
+
+            # 重新计算所有槽位的位置（初始化时 deck 可能为空，此时才有资源）
+            pipetting_positions = []
+            plate_positions = []
+            for child in self.deck.children:
+                number = self._get_slot_number(child)
+
+                if number is None:
+                    continue
+
+                pos = self.plr_pos_to_prcxi(child)
+                plate_positions.append({"Number": number, "XPos": pos.x, "YPos": pos.y, "ZPos": pos.z})
+
+                if child.children:
+                    pip_pos = self.plr_pos_to_prcxi(child.children[0], self.left_2_claw)
+                else:
+                    pip_pos = self.plr_pos_to_prcxi(child, Coordinate(-100, self.left_2_claw.y, self.left_2_claw.z))
+                half_x = child.get_size_x() / 2 * abs(1 + self.x_increase)
+                z_wall = child.get_size_z()
+
+                pipetting_positions.append({
+                    "Number": number,
+                    "XPos": pip_pos.x,
+                    "YPos": pip_pos.y,
+                    "ZPos": pip_pos.z, 
+                    "X_Left": half_x,
+                    "X_Right": half_x,
+                    "ZAgainstTheWall": pip_pos.z - z_wall,
+                    "X2Pos": pip_pos.x + self.right_2_left.x,
+                    "Y2Pos": pip_pos.y + self.right_2_left.y,
+                    "Z2Pos": pip_pos.z + self.right_2_left.z,
+                    "X2_Left": half_x,
+                    "X2_Right": half_x,
+                    "ZAgainstTheWall2": pip_pos.z - z_wall,
+                })
+
+            if pipetting_positions:
+                api.update_pipetting_position(matrix_id, pipetting_positions)
+            # 更新 backend 中的 plate_positions
+            backend.plate_positions = plate_positions
+
+            if plate_positions:
+                api.update_clamp_jaw_position(matrix_id, plate_positions)
+
+
+            print(f"Auto-matched materials and created matrix: {matrix_id}")
+        else:
+            raise PRCXIError(f"Failed to create auto-matched matrix: {res.get('Message', 'Unknown error')}")
+
+    def plr_pos_to_prcxi(self, resource: Resource, offset: Coordinate = Coordinate(0, 0, 0)):
+        z_pos = 'c'
+        if isinstance(resource, Tip):
+            z_pos = 'b'
+        resource_pos = resource.get_absolute_location(x="c",y="c",z=z_pos)
+        x = resource_pos.x 
+        y = resource_pos.y 
+        z = resource_pos.z
+        # 如果z等于0，则递归resource.parent的高度并向z加，使用get_size_z方法
+
+        parent = resource.parent
+        res_z = resource.location.z
+        while not isinstance(parent, LiquidHandlerAbstract) and (res_z == 0) and parent is not None:
+            z += parent.get_size_z()
+            res_z = parent.location.z
+            parent = getattr(parent, "parent", None)
+        
+        prcxi_x = (self.deck_x - x)*(1+self.x_increase) + self.x_offset + self.xy_coupling * (self.deck_y - y)
+        prcxi_y = (self.deck_y - y)*(1+self.y_increase) + self.y_offset
+        prcxi_z = self.deck_z - z
+
+        prcxi_x = min(max(0, prcxi_x+offset.x),self.deck_x)
+        prcxi_y = min(max(0, prcxi_y+offset.y),self.deck_y)
+        prcxi_z = min(max(0, prcxi_z+offset.z),self.deck_z)
+
+        return Coordinate(prcxi_x, prcxi_y, prcxi_z)
 
     def post_init(self, ros_node: BaseROS2DeviceNode):
         super().post_init(ros_node)
@@ -820,8 +1044,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
     ):
         self._unilabos_backend.create_protocol(protocol_name)
 
-    async def run_protocol(self):
-        return self._unilabos_backend.run_protocol()
+    async def run_protocol(self, protocol_id: str = None):
+        return self._unilabos_backend.run_protocol(protocol_id)
 
     async def remove_liquid(
         self,
@@ -912,6 +1136,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         touch_tip: bool = False,
         liquid_height: Optional[List[Optional[float]]] = None,
         blow_out_air_volume: Optional[List[Optional[float]]] = None,
+        blow_out_air_volume_before: Optional[List[Optional[float]]] = None,
         spread: Literal["wide", "tight", "custom"] = "wide",
         is_96_well: bool = False,
         mix_stage: Optional[Literal["none", "before", "after", "both"]] = "none",
@@ -922,7 +1147,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         delays: Optional[List[int]] = None,
         none_keys: List[str] = [],
     ) -> TransferLiquidReturn:
-        return await super().transfer_liquid(
+        if not self._first_transfer_done:
+            self._match_and_create_matrix()
+            self._first_transfer_done = True
+        if self.step_mode:
+            await self.create_protocol(f"transfer_liquid{time.time()}")
+        res =  await super().transfer_liquid(
             sources,
             targets,
             tip_racks,
@@ -935,6 +1165,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             touch_tip=touch_tip,
             liquid_height=liquid_height,
             blow_out_air_volume=blow_out_air_volume,
+            blow_out_air_volume_before=blow_out_air_volume_before,
             spread=spread,
             is_96_well=is_96_well,
             mix_stage=mix_stage,
@@ -945,6 +1176,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             delays=delays,
             none_keys=none_keys,
         )
+        if self.step_mode:
+            await self.run_protocol()
+        return res
 
     async def custom_delay(self, seconds=0, msg=None):
         return await super().custom_delay(seconds, msg)
@@ -961,9 +1195,10 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         offsets: Optional[Coordinate] = None,
         mix_rate: Optional[float] = None,
         none_keys: List[str] = [],
+        use_channels: Optional[List[int]] = [0],
     ):
         return await self._unilabos_backend.mix(
-            targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys
+            targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys, use_channels
         )
 
     def iter_tips(self, tip_racks: Sequence[TipRack]) -> Iterator[Resource]:
@@ -976,10 +1211,6 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         offsets: Optional[List[Coordinate]] = None,
         **backend_kwargs,
     ):
-        if self.step_mode:
-            await self.create_protocol(f"单点动作{time.time()}")
-            await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
-            await self.run_protocol()
         return await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
 
     async def aspirate(
@@ -1131,6 +1362,24 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.debug = debug
         self.axis = "Left"
 
+    @staticmethod
+    def _deck_plate_slot_no(plate, deck) -> int:
+        """台面板位槽号（1–16）：与 PRCXI9300Handler._get_slot_number 一致；无法解析时退回 deck 子项顺序 +1。"""
+        sn = PRCXI9300Handler._get_slot_number(plate)
+        if sn is not None:
+            return sn
+        return deck.children.index(plate) + 1
+
+    @staticmethod
+    def _resource_num_items_y(resource) -> int:
+        """板/TipRack 等在 Y 向孔位数；无 ``num_items_y`` 或非正数时返回 1。"""
+        ny = getattr(resource, "num_items_y", None)
+        try:
+            n = int(ny) if ny is not None else 1
+        except (TypeError, ValueError):
+            n = 1
+        return n if n >= 1 else 1
+
     async def shaker_action(self, time: int, module_no: int, amplitude: int, is_wait: bool):
         step = self.api_client.shaker_action(
             time=time,
@@ -1182,26 +1431,40 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.protocol_name = protocol_name
         self.steps_todo_list = []
 
-    def run_protocol(self):
+        if not len(self.matrix_id):
+            self.matrix_id = str(uuid.uuid4())
+            
+            material_list = self.api_client.get_all_materials()
+            material_dict = {material["uuid"]: material for material in material_list}
+            
+            work_tablets = []
+            for num, material_id in self.tablets_info.items():
+                work_tablets.append({
+                    "Number": num,
+                    "Material": material_dict[material_id]
+                })
+
+            self.matrix_info = {
+                "MatrixId": self.matrix_id,
+                "MatrixName": self.matrix_id,
+                "WorkTablets": work_tablets,
+                }
+            # print(json.dumps(self.matrix_info, indent=2))
+            res = self.api_client.add_WorkTablet_Matrix(self.matrix_info)
+            if not res["Success"]:
+                self.matrix_id = ""
+                raise AssertionError(f"Failed to create matrix: {res.get('Message', 'Unknown error')}")
+            print(f"PRCXI9300Backend created matrix with ID: {self.matrix_info['MatrixId']}, result: {res}")
+
+    def run_protocol(self, protocol_id: str = None):
         assert self.is_reset_ok, "PRCXI9300Backend is not reset successfully. Please call setup() first."
         run_time = time.time()
-        self.matrix_info = MatrixInfo(
-            MatrixId=f"{int(run_time)}",
-            MatrixName=f"protocol_{run_time}",
-            MatrixCount=len(self.tablets_info),
-            WorkTablets=self.tablets_info,
-        )
-        # print(json.dumps(self.matrix_info, indent=2))
-        if not len(self.matrix_id):
-            res = self.api_client.add_WorkTablet_Matrix(self.matrix_info)
-            assert res["Success"], f"Failed to create matrix: {res.get('Message', 'Unknown error')}"
-            print(f"PRCXI9300Backend created matrix with ID: {self.matrix_info['MatrixId']}, result: {res}")
+        if protocol_id == "" or protocol_id is None:
             solution_id = self.api_client.add_solution(
-                f"protocol_{run_time}", self.matrix_info["MatrixId"], self.steps_todo_list
+                f"protocol_{run_time}", self.matrix_id, self.steps_todo_list
             )
         else:
-            print(f"PRCXI9300Backend using predefined worktable {self.matrix_id}, skipping matrix creation.")
-            solution_id = self.api_client.add_solution(f"protocol_{run_time}", self.matrix_id, self.steps_todo_list)
+            solution_id = protocol_id
         print(f"PRCXI9300Backend created solution with ID: {solution_id}")
         self.api_client.load_solution(solution_id)
         print(json.dumps(self.steps_todo_list, indent=2))
@@ -1244,6 +1507,9 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                     else:
                         await asyncio.sleep(1)
                 print("PRCXI9300 reset successfully.")
+                
+                # self.api_client.update_clamp_jaw_position(self.matrix_id, self.plate_positions)
+
         except ConnectionRefusedError as e:
             raise RuntimeError(
                 f"Failed to connect to PRCXI9300 API at {self.host}:{self.port}. "
@@ -1267,33 +1533,33 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             axis = "Right"
         else:
             raise ValueError("Invalid use channels: " + str(_use_channels))
-        plate_indexes = []
+        plate_slots = []
         for op in ops:
             plate = op.resource.parent
-            deck = plate.parent.parent
-            plate_index = deck.children.index(plate.parent)
-            # print(f"Plate index: {plate_index}, Plate name: {plate.name}")
-            # print(f"Number of children in deck: {len(deck.children)}")
+            deck = plate.parent
+            plate_slots.append(self._deck_plate_slot_no(plate, deck))
 
-            plate_indexes.append(plate_index)
+        if len(set(plate_slots)) != 1:
+            raise ValueError("All pickups must be from the same plate (slot). Found different slots: " + str(plate_slots))
 
-        if len(set(plate_indexes)) != 1:
-            raise ValueError("All pickups must be from the same plate. Found different plates: " + str(plate_indexes))
-
+        _rack = ops[0].resource.parent
+        ny = self._resource_num_items_y(_rack)
         tip_columns = []
         for op in ops:
             tipspot = op.resource
+            if self._resource_num_items_y(tipspot.parent) != ny:
+                raise ValueError("All pickups must use tip racks with the same num_items_y")
             tipspot_index = tipspot.parent.children.index(tipspot)
-            tip_columns.append(tipspot_index // 8)
+            tip_columns.append(tipspot_index // ny)
         if len(set(tip_columns)) != 1:
             raise ValueError(
                 "All pickups must be from the same tip column. Found different columns: " + str(tip_columns)
             )
-        PlateNo = plate_indexes[0] + 1
+        PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
         hole_row = 1
-        if self._num_channels == 1:
-            hole_row = tipspot_index % 8 + 1
+        if self.num_channels != 8:
+            hole_row = tipspot_index % ny + 1
 
         step = self.api_client.Load(
             axis=axis,
@@ -1304,8 +1570,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             hole_col=hole_col,
             blending_times=0,
             balance_height=0,
-            plate_or_hole=f"H{hole_col}-8,T{PlateNo}",
-            hole_numbers=f"{(hole_col - 1) * 8 + hole_row}" if self._num_channels == 1 else "1,2,3,4,5",
+            plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
+            hole_numbers=f"{(hole_col - 1) * ny + hole_row}" if self._num_channels != 8 else "1,2,3,4,5",
         )
         self.steps_todo_list.append(step)
 
@@ -1323,8 +1589,9 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             raise ValueError("Invalid use channels: " + str(_use_channels))
         # 检查trash #
         if ops[0].resource.name == "trash":
-
-            PlateNo = ops[0].resource.parent.parent.children.index(ops[0].resource.parent) + 1
+            _plate = ops[0].resource
+            _deck = _plate.parent
+            PlateNo = self._deck_plate_slot_no(_plate, _deck)
 
             step = self.api_client.UnLoad(
                 axis=axis,
@@ -1342,32 +1609,35 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             return
         # print(ops[0].resource.parent.children.index(ops[0].resource))
 
-        plate_indexes = []
+        plate_slots = []
         for op in ops:
             plate = op.resource.parent
-            deck = plate.parent.parent
-            plate_index = deck.children.index(plate.parent)
-            plate_indexes.append(plate_index)
-        if len(set(plate_indexes)) != 1:
+            deck = plate.parent
+            plate_slots.append(self._deck_plate_slot_no(plate, deck))
+        if len(set(plate_slots)) != 1:
             raise ValueError(
-                "All drop_tips must be from the same plate. Found different plates: " + str(plate_indexes)
+                "All drop_tips must be from the same plate (slot). Found different slots: " + str(plate_slots)
             )
 
+        _rack = ops[0].resource.parent
+        ny = self._resource_num_items_y(_rack)
         tip_columns = []
         for op in ops:
             tipspot = op.resource
+            if self._resource_num_items_y(tipspot.parent) != ny:
+                raise ValueError("All drop_tips must use tip racks with the same num_items_y")
             tipspot_index = tipspot.parent.children.index(tipspot)
-            tip_columns.append(tipspot_index // 8)
+            tip_columns.append(tipspot_index // ny)
         if len(set(tip_columns)) != 1:
             raise ValueError(
                 "All drop_tips must be from the same tip column. Found different columns: " + str(tip_columns)
             )
 
-        PlateNo = plate_indexes[0] + 1
+        PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
-
-        if self.channel_num == 1:
-            hole_row = tipspot_index % 8 + 1
+        hole_row = 1
+        if self.num_channels != 8:
+            hole_row = tipspot_index % ny + 1
 
         step = self.api_client.UnLoad(
             axis=axis,
@@ -1378,7 +1648,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             hole_col=hole_col,
             blending_times=0,
             balance_height=0,
-            plate_or_hole=f"H{hole_col}-8,T{PlateNo}",
+            plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
             hole_numbers="1,2,3,4,5,6,7,8",
         )
         self.steps_todo_list.append(step)
@@ -1392,34 +1662,43 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         offsets: Optional[Coordinate] = None,
         mix_rate: Optional[float] = None,
         none_keys: List[str] = [],
+        use_channels: Optional[List[int]] = [0],
     ):
         """Mix liquid in the specified resources."""
-
-        plate_indexes = []
+        if use_channels == [0]:
+            axis = "Left"
+        elif use_channels == [1]:
+            axis = "Right"
+        else:
+            raise ValueError("Invalid use channels: " + str(use_channels))
+        plate_slots = []
         for op in targets:
             deck = op.parent.parent.parent
             plate = op.parent
-            plate_index = deck.children.index(plate.parent)
-            plate_indexes.append(plate_index)
+            plate_slots.append(self._deck_plate_slot_no(plate, deck))
 
-        if len(set(plate_indexes)) != 1:
-            raise ValueError("All pickups must be from the same plate. Found different plates: " + str(plate_indexes))
+        if len(set(plate_slots)) != 1:
+            raise ValueError("All mix targets must be from the same plate (slot). Found different slots: " + str(plate_slots))
 
+        _plate0 = targets[0].parent
+        ny = self._resource_num_items_y(_plate0)
         tip_columns = []
         for op in targets:
+            if self._resource_num_items_y(op.parent) != ny:
+                raise ValueError("All mix targets must be on plates with the same num_items_y")
             tipspot_index = op.parent.children.index(op)
-            tip_columns.append(tipspot_index // 8)
+            tip_columns.append(tipspot_index // ny)
 
         if len(set(tip_columns)) != 1:
             raise ValueError(
-                "All pickups must be from the same tip column. Found different columns: " + str(tip_columns)
+                "All mix targets must be in the same column group. Found different columns: " + str(tip_columns)
             )
 
-        PlateNo = plate_indexes[0] + 1
+        PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
         hole_row = 1
-        if self.num_channels == 1:
-            hole_row = tipspot_index % 8 + 1
+        if self.num_channels != 8:
+            hole_row = tipspot_index % ny + 1
 
         assert mix_time > 0
         step = self.api_client.Blending(
@@ -1430,13 +1709,15 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             hole_col=hole_col,
             blending_times=mix_time,
             balance_height=0,
-            plate_or_hole=f"H{hole_col}-8,T{PlateNo}",
+            plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
             hole_numbers="1,2,3,4,5,6,7,8",
         )
         self.steps_todo_list.append(step)
 
     async def aspirate(self, ops: List[SingleChannelAspiration], use_channels: List[int] = None):
         """Aspirate liquid from the specified resources."""
+        if ops[0].blow_out_air_volume and ops[0].volume == 0:
+            return
         if hasattr(use_channels, "tolist"):
             _use_channels = use_channels.tolist()
         else:
@@ -1447,36 +1728,39 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             axis = "Right"
         else:
             raise ValueError("Invalid use channels: " + str(_use_channels))
-        plate_indexes = []
+        plate_slots = []
         for op in ops:
             plate = op.resource.parent
-            deck = plate.parent.parent
-            plate_index = deck.children.index(plate.parent)
-            plate_indexes.append(plate_index)
+            deck = plate.parent
+            plate_slots.append(self._deck_plate_slot_no(plate, deck))
 
-        if len(set(plate_indexes)) != 1:
-            raise ValueError("All pickups must be from the same plate. Found different plates: " + str(plate_indexes))
+        if len(set(plate_slots)) != 1:
+            raise ValueError("All aspirate must be from the same plate (slot). Found different slots: " + str(plate_slots))
 
+        _plate0 = ops[0].resource.parent
+        ny = self._resource_num_items_y(_plate0)
         tip_columns = []
         for op in ops:
             tipspot = op.resource
+            if self._resource_num_items_y(tipspot.parent) != ny:
+                raise ValueError("All aspirate wells must be on plates with the same num_items_y")
             tipspot_index = tipspot.parent.children.index(tipspot)
-            tip_columns.append(tipspot_index // 8)
+            tip_columns.append(tipspot_index // ny)
 
         if len(set(tip_columns)) != 1:
             raise ValueError(
-                "All pickups must be from the same tip column. Found different columns: " + str(tip_columns)
+                "All aspirate must be from the same tip column. Found different columns: " + str(tip_columns)
             )
 
         volumes = [op.volume for op in ops]
         if len(set(volumes)) != 1:
             raise ValueError("All aspirate volumes must be the same. Found different volumes: " + str(volumes))
 
-        PlateNo = plate_indexes[0] + 1
+        PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
         hole_row = 1
-        if self.num_channels == 1:
-            hole_row = tipspot_index % 8 + 1
+        if self.num_channels != 8:
+            hole_row = tipspot_index % ny + 1
 
         step = self.api_client.Imbibing(
             axis=axis,
@@ -1487,7 +1771,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             hole_col=hole_col,
             blending_times=0,
             balance_height=0,
-            plate_or_hole=f"H{hole_col}-8,T{PlateNo}",
+            plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
             hole_numbers="1,2,3,4,5,6,7,8",
         )
         self.steps_todo_list.append(step)
@@ -1504,21 +1788,24 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             axis = "Right"
         else:
             raise ValueError("Invalid use channels: " + str(_use_channels))
-        plate_indexes = []
+        plate_slots = []
         for op in ops:
             plate = op.resource.parent
-            deck = plate.parent.parent
-            plate_index = deck.children.index(plate.parent)
-            plate_indexes.append(plate_index)
+            deck = plate.parent
+            plate_slots.append(self._deck_plate_slot_no(plate, deck))
 
-        if len(set(plate_indexes)) != 1:
-            raise ValueError("All dispense must be from the same plate. Found different plates: " + str(plate_indexes))
+        if len(set(plate_slots)) != 1:
+            raise ValueError("All dispense must be from the same plate (slot). Found different slots: " + str(plate_slots))
 
+        _plate0 = ops[0].resource.parent
+        ny = self._resource_num_items_y(_plate0)
         tip_columns = []
         for op in ops:
             tipspot = op.resource
+            if self._resource_num_items_y(tipspot.parent) != ny:
+                raise ValueError("All dispense wells must be on plates with the same num_items_y")
             tipspot_index = tipspot.parent.children.index(tipspot)
-            tip_columns.append(tipspot_index // 8)
+            tip_columns.append(tipspot_index // ny)
 
         if len(set(tip_columns)) != 1:
             raise ValueError(
@@ -1529,12 +1816,12 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         if len(set(volumes)) != 1:
             raise ValueError("All dispense volumes must be the same. Found different volumes: " + str(volumes))
 
-        PlateNo = plate_indexes[0] + 1
+        PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
 
         hole_row = 1
-        if self.num_channels == 1:
-            hole_row = tipspot_index % 8 + 1
+        if self.num_channels != 8:
+            hole_row = tipspot_index % ny + 1
 
         step = self.api_client.Tapping(
             axis=axis,
@@ -1545,7 +1832,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             hole_col=hole_col,
             blending_times=0,
             balance_height=0,
-            plate_or_hole=f"H{hole_col}-8,T{PlateNo}",
+            plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
             hole_numbers="1,2,3,4,5,6,7,8",
         )
         self.steps_todo_list.append(step)
@@ -1740,6 +2027,21 @@ class PRCXI9300Api:
     def matrix_by_id(self, matrix_id: str) -> Dict[str, Any]:
         """GetWorkTabletMatrixById"""
         return self.call("IMatrix", "GetWorkTabletMatrixById", [matrix_id])
+
+    def update_clamp_jaw_position(self, target_matrix_id: str, plate_positions: List[Dict[str, Any]]):
+        position_params = {
+            "MatrixId": target_matrix_id,
+            "WorkTablets": plate_positions
+        }
+        return self.call("IMatrix", "UpdateClampJawPosition", [position_params])
+
+    def update_pipetting_position(self, target_matrix_id: str, pipetting_positions: List[Dict[str, Any]]):
+        """UpdatePipettingPosition - 更新移液位置"""
+        position_params = {
+            "MatrixId": target_matrix_id,
+            "WorkTablets": pipetting_positions
+        }
+        return self.call("IMatrix", "UpdatePipettingPosition", [position_params])
 
     def add_WorkTablet_Matrix(self, matrix: MatrixInfo):
         return self.call("IMatrix", "AddWorkTabletMatrix2" if self.is_9320 else "AddWorkTabletMatrix", [matrix])

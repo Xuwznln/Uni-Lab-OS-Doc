@@ -51,6 +51,7 @@
 --------------------------------------------------------------------------------
 - 遍历 workflow 数组，为每个动作创建步骤节点
 - 参数重命名: asp_vol -> asp_vols, dis_vol -> dis_vols, asp_flow_rate -> asp_flow_rates, dis_flow_rate -> dis_flow_rates
+- 参数输入转换: liquid_height（按 wells 扩展）；mix_stage/mix_times/mix_vol/mix_rate/mix_liquid_height 保持标量
 - 参数扩展: 根据 targets 的 wells 数量，将单值扩展为数组
     例: asp_vol=100.0, targets 有 3 个 wells -> asp_vols=[100.0, 100.0, 100.0]
 - 连接处理: 如果 sources/targets 已通过 set_liquid_from_plate 连接，参数值改为 []
@@ -119,11 +120,14 @@ DEVICE_NAME_DEFAULT = "PRCXI"  # transfer_liquid, set_liquid_from_plate 等动�
 # 节点类型
 NODE_TYPE_DEFAULT = "ILab"  # 所有节点的默认类型
 
+CLASS_NAMES_MAPPING = {
+    "plate": "PRCXI_BioER_96_wellplate",
+    "tip_rack": "PRCXI_300ul_Tips",
+}
 # create_resource 节点默认参数
 CREATE_RESOURCE_DEFAULTS = {
     "device_id": "/PRCXI",
     "parent_template": "/PRCXI/PRCXI_Deck",
-    "class_name": "PRCXI_BioER_96_wellplate",
 }
 
 # 默认液体体积 (uL)
@@ -136,6 +140,263 @@ PARAM_RENAME_MAPPING = {
     "asp_flow_rate": "asp_flow_rates",
     "dis_flow_rate": "dis_flow_rates",
 }
+
+
+def _map_deck_slot(raw_slot: str, object_type: str = "") -> str:
+    """协议槽位 -> 实际 deck：4→13，8→14，12+trash→16，其余不变。"""
+    s = "" if raw_slot is None else str(raw_slot).strip()
+    if not s:
+        return ""
+    if s == "12" and (object_type or "").strip().lower() == "trash":
+        return "16"
+    return {"4": "13", "8": "14"}.get(s, s)
+
+
+def _labware_def_index(labware_defs: Optional[List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    m: Dict[str, Dict[str, Any]] = {}
+    for d in labware_defs or []:
+        for k in ("id", "name", "reagent_id", "reagent"):
+            key = d.get(k)
+            if key is not None and str(key):
+                m[str(key)] = d
+    return m
+
+
+def _labware_hint_text(labware_id: str, item: Dict[str, Any]) -> str:
+    """合并 id 与协议里的 labware 描述（OpenTrons 全名常在 labware 字段）。"""
+    parts = [str(labware_id), str(item.get("labware", "") or "")]
+    return " ".join(parts).lower()
+
+
+def _infer_reagent_kind(labware_id: str, item: Dict[str, Any]) -> str:
+    ot = (item.get("object") or "").strip().lower()
+    if ot == "trash":
+        return "trash"
+    if ot == "tiprack":
+        return "tip_rack"
+    lid = _labware_hint_text(labware_id, item)
+    if "trash" in lid:
+        return "trash"
+    # tiprack / tip + rack（顺序在 tuberack 之前）
+    if "tiprack" in lid or ("tip" in lid and "rack" in lid):
+        return "tip_rack"
+    # 离心管架 / OpenTrons tuberack（勿与 96 tiprack 混淆）
+    if "tuberack" in lid or "tube_rack" in lid:
+        return "tube_rack"
+    if "eppendorf" in lid and "rack" in lid:
+        return "tube_rack"
+    if "safelock" in lid and "rack" in lid:
+        return "tube_rack"
+    if "rack" in lid and "tip" not in lid:
+        return "tube_rack"
+    return "plate"
+
+
+def _infer_tube_rack_num_positions(labware_id: str, item: Dict[str, Any]) -> int:
+    """从 ``24_tuberack`` 等命名中解析孔位数；解析不到则默认 24（与 PRCXI_EP_Adapter 4×6 一致）。"""
+    hint = _labware_hint_text(labware_id, item)
+    m = re.search(r"(\d+)_tuberack", hint)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"tuberack[_\s]*(\d+)", hint)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(\d+)\s*[-_]?\s*pos(?:ition)?s?", hint)
+    if m:
+        return int(m.group(1))
+    return 96
+
+
+def _tip_volume_hint(item: Dict[str, Any], labware_id: str) -> Optional[float]:
+    s = _labware_hint_text(labware_id, item)
+    for v in (1250, 1000, 300, 200, 10):
+        if f"{v}ul" in s or f"{v}μl" in s or f"{v}u" in s:
+            return float(v)
+        if f" {v} " in f" {s} ":
+            return float(v)
+    return None
+
+
+def _volume_template_covers_requirement(template: Dict[str, Any], req: Optional[float], kind: str) -> bool:
+    """有明确需求体积时，模板标称 Volume 必须 >= 需求；无 Volume 的模板不参与（trash 除外）。"""
+    if kind == "trash":
+        return True
+    if req is None or req <= 0:
+        return True
+    mv = float(template.get("Volume") or 0)
+    if mv <= 0:
+        return False
+    return mv >= req
+
+
+def _direct_labware_class_name(item: Dict[str, Any]) -> str:
+    """仅用于 tip_rack 且 ``preserve_tip_rack_incoming_class=True``：``class_name``/``class`` 原样；否则 ``labware`` → ``lab_*``。"""
+    explicit = item.get("class_name") or item.get("class")
+    if explicit is not None and str(explicit).strip() != "":
+        return str(explicit).strip()
+    lw = str(item.get("labware", "") or "").strip()
+    if lw:
+        return f"lab_{lw.lower().replace('.', 'point').replace(' ', '_')}"
+    return ""
+
+
+def _match_score_prcxi_template(
+    template: Dict[str, Any],
+    num_children: int,
+    child_max_volume: Optional[float],
+) -> float:
+    """孔数差主导；有需求体积且模板已满足 >= 时，余量比例 (模板-需求)/需求 越小越好（优先选刚好够的）。"""
+    hole_count = int(template.get("hole_count") or 0)
+    hole_diff = abs(num_children - hole_count)
+    material_volume = float(template.get("Volume") or 0)
+    req = child_max_volume
+    if req is not None and req > 0 and material_volume > 0:
+        vol_diff = (material_volume - req) / max(req, 1e-9)
+    elif material_volume > 0 and req is not None:
+        vol_diff = abs(float(req) - material_volume) / material_volume
+    else:
+        vol_diff = 0.0
+    return hole_diff * 1000 + vol_diff
+
+
+def _apply_prcxi_labware_auto_match(
+    labware_info: Dict[str, Dict[str, Any]],
+    labware_defs: Optional[List[Dict[str, Any]]] = None,
+    *,
+    preserve_tip_rack_incoming_class: bool = True,
+) -> None:
+    """上传构建图前：按孔数+容量将 reagent 条目匹配到 ``prcxi_labware`` 注册类名，写入 ``prcxi_class_name``。
+    若给出需求体积，仅选用模板标称 Volume >= 该值的物料，并在满足条件的模板中选余量最小者。
+
+    ``preserve_tip_rack_incoming_class=True``（默认）时：**仅 tip_rack** 不做模板匹配，类名由 ``class_name``/``class`` 或
+    ``labware``（``lab_*``）直接给出；**plate / tube_rack / trash 等**仍按注册模板匹配。
+    ``False`` 时 **全部**（含 tip_rack）走模板匹配。"""
+    if not labware_info:
+        return
+
+    default_prcxi_tip_class = CLASS_NAMES_MAPPING.get("tip_rack", "PRCXI_300ul_Tips")
+
+    try:
+        from unilabos.devices.liquid_handling.prcxi.prcxi_labware import get_prcxi_labware_template_specs
+    except Exception:
+        return
+
+    templates = get_prcxi_labware_template_specs()
+    if not templates:
+        return
+
+    def_map = _labware_def_index(labware_defs)
+
+    for labware_id, item in labware_info.items():
+        if item.get("prcxi_class_name"):
+            continue
+
+        kind = _infer_reagent_kind(labware_id, item)
+
+        if preserve_tip_rack_incoming_class and kind == "tip_rack":
+            inc_s = _direct_labware_class_name(item)
+            if inc_s == default_prcxi_tip_class:
+                inc_s = ""
+            if inc_s:
+                item["prcxi_class_name"] = inc_s
+            continue
+
+        explicit = item.get("class_name") or item.get("class")
+        if explicit and str(explicit).startswith("PRCXI_"):
+            item["prcxi_class_name"] = str(explicit)
+            continue
+
+        extra = def_map.get(str(labware_id), {})
+
+        wells = item.get("well") or []
+        well_n = len(wells) if isinstance(wells, list) else 0
+        num_from_def = int(extra.get("num_wells") or extra.get("well_count") or item.get("num_wells") or 0)
+
+        if kind == "trash":
+            num_children = 0
+        elif kind == "tip_rack":
+            num_children = num_from_def if num_from_def > 0 else 96
+        elif kind == "tube_rack":
+            if num_from_def > 0:
+                num_children = num_from_def
+            elif well_n > 0:
+                num_children = well_n
+            else:
+                num_children = _infer_tube_rack_num_positions(labware_id, item)
+        else:
+            num_children = num_from_def if num_from_def > 0 else 96
+
+        child_max_volume = item.get("max_volume")
+        if child_max_volume is None:
+            child_max_volume = extra.get("max_volume")
+        try:
+            child_max_volume_f = float(child_max_volume) if child_max_volume is not None else None
+        except (TypeError, ValueError):
+            child_max_volume_f = None
+
+        if kind == "tip_rack" and child_max_volume_f is None:
+            child_max_volume_f = _tip_volume_hint(item, labware_id) or 300.0
+
+        candidates = [t for t in templates if t["kind"] == kind]
+        if not candidates:
+            continue
+
+        best = None
+        best_score = float("inf")
+        for t in candidates:
+            if kind != "trash" and int(t.get("hole_count") or 0) <= 0:
+                continue
+            if not _volume_template_covers_requirement(t, child_max_volume_f, kind):
+                continue
+            sc = _match_score_prcxi_template(t, num_children, child_max_volume_f)
+            if sc < best_score:
+                best_score = sc
+                best = t
+
+        if best:
+            item["prcxi_class_name"] = best["class_name"]
+
+
+def _reconcile_slot_carrier_prcxi_class(
+    labware_info: Dict[str, Dict[str, Any]],
+    *,
+    preserve_tip_rack_incoming_class: bool = False,
+) -> None:
+    """同一 deck 槽位上多条 reagent 时，按载体类型优先级统一 ``prcxi_class_name``，避免先遍历到 96 板后槽位被错误绑定。
+
+    ``preserve_tip_rack_incoming_class=True`` 时：tip_rack 条目不参与同槽类名合并（不被覆盖、也不把 tip 类名扩散到同槽其它条目）。"""
+    by_slot: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+    for lid, item in labware_info.items():
+        ot = item.get("object", "") or ""
+        slot = _map_deck_slot(str(item.get("slot", "")), ot)
+        if not slot:
+            continue
+        by_slot.setdefault(str(slot), []).append((lid, item))
+
+    priority = {"trash": 0, "tube_rack": 1, "tip_rack": 2, "plate": 3}
+
+    for _slot, pairs in by_slot.items():
+        if len(pairs) < 2:
+            continue
+
+        def _rank(p: Tuple[str, Dict[str, Any]]) -> int:
+            return priority.get(_infer_reagent_kind(p[0], p[1]), 9)
+
+        pairs_sorted = sorted(pairs, key=_rank)
+        best_cls = None
+        for lid, it in pairs_sorted:
+            if preserve_tip_rack_incoming_class and _infer_reagent_kind(lid, it) == "tip_rack":
+                continue
+            c = it.get("prcxi_class_name")
+            if c:
+                best_cls = c
+                break
+        if not best_cls:
+            continue
+        for lid, it in pairs:
+            if preserve_tip_rack_incoming_class and _infer_reagent_kind(lid, it) == "tip_rack":
+                continue
+            it["prcxi_class_name"] = best_cls
 
 
 # ---------------- Graph ----------------
@@ -363,23 +624,77 @@ def build_protocol_graph(
     workstation_name: str,
     action_resource_mapping: Optional[Dict[str, str]] = None,
     labware_defs: Optional[List[Dict[str, Any]]] = None,
+    preserve_tip_rack_incoming_class: bool = True,
 ) -> WorkflowGraph:
     """统一的协议图构建函数，根据设备类型自动选择构建逻辑
 
     Args:
-        labware_info: reagent 信息字典，格式为 {name: {slot, well}, ...}，用于 set_liquid 和 well 查找
+        labware_info: labware 信息字典，格式为 {name: {slot, well, labware, ...}, ...}
         protocol_steps: 协议步骤列表
         workstation_name: 工作站名称
         action_resource_mapping: action 到 resource_name 的映射字典，可选
-        labware_defs: labware 定义列表，格式为 [{"name": "...", "slot": "1", "type": "lab_xxx"}, ...]
+        labware_defs: 可选，``[{"id": "...", "num_wells": 96, "max_volume": 2200}, ...]`` 等，辅助 PRCXI 模板匹配
+        preserve_tip_rack_incoming_class: 默认 True 时**仅 tip_rack** 不跑模板匹配（类名由传入的 class/labware 决定）；
+            **其它载体**仍按 PRCXI 模板匹配。False 时 **全部**（含 tip_rack）都走模板匹配。
     """
     G = WorkflowGraph()
     resource_last_writer = {}  # reagent_name -> "node_id:port"
     slot_to_create_resource = {}  # slot -> create_resource node_id
 
+    _apply_prcxi_labware_auto_match(
+        labware_info,
+        labware_defs,
+        preserve_tip_rack_incoming_class=preserve_tip_rack_incoming_class,
+    )
+    _reconcile_slot_carrier_prcxi_class(
+        labware_info,
+        preserve_tip_rack_incoming_class=preserve_tip_rack_incoming_class,
+    )
+
     protocol_steps = refactor_data(protocol_steps, action_resource_mapping)
 
-    # ==================== 第一步：按 slot 创建 create_resource 节点 ====================
+    # ==================== 第一步：按 slot 去重创建 create_resource 节点 ====================
+    # 按槽聚合：同一 slot 多条 reagent 时不能只取遍历顺序第一条，否则 tip 的 prcxi_class_name / object 会被其它条目盖住
+    by_slot: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+    for labware_id, item in labware_info.items():
+        object_type = item.get("object", "") or ""
+        slot = _map_deck_slot(str(item.get("slot", "")), object_type)
+        if not slot:
+            continue
+        by_slot.setdefault(slot, []).append((labware_id, item))
+
+    slots_info: Dict[str, Dict[str, Any]] = {}
+    for slot, pairs in by_slot.items():
+        def _ot_tip(it: Dict[str, Any]) -> bool:
+            return str(it.get("object", "") or "").strip().lower() == "tiprack"
+
+        tip_pairs = [(lid, it) for lid, it in pairs if _ot_tip(it)]
+        chosen_lid = ""
+        chosen_item: Dict[str, Any] = {}
+        prcxi_val: Optional[str] = None
+
+        scan = tip_pairs if tip_pairs else pairs
+        for lid, it in scan:
+            c = it.get("prcxi_class_name")
+            if c:
+                chosen_lid, chosen_item, prcxi_val = lid, it, str(c)
+                break
+        if not chosen_lid and scan:
+            chosen_lid, chosen_item = scan[0]
+            pv = chosen_item.get("prcxi_class_name")
+            prcxi_val = str(pv) if pv else None
+
+        labware = str(chosen_item.get("labware", "") or "")
+        res_id = f"{labware}_slot_{slot}" if labware.strip() else f"{chosen_lid}_slot_{slot}"
+        res_id = res_id.replace(" ", "_")
+        slots_info[slot] = {
+            "labware": labware,
+            "res_id": res_id,
+            "labware_id": chosen_lid,
+            "object": chosen_item.get("object", "") or "",
+            "prcxi_class_name": prcxi_val,
+        }
+
     # 创建 Group 节点，包含所有 create_resource 节点
     group_node_id = str(uuid.uuid4())
     G.add_node(
@@ -395,41 +710,54 @@ def build_protocol_graph(
         param=None,
     )
 
-    # 直接使用 JSON 中的 labware 定义，每个 slot 一条记录，type 即 class_name
-    res_index = 0
-    for lw in (labware_defs or []):
-        slot = str(lw.get("slot", ""))
-        if not slot or slot in slot_to_create_resource:
-            continue  # 跳过空 slot 或已处理的 slot
+    trash_create_node_id = None  # 记录 trash 的 create_resource 节点
 
-        lw_name = lw.get("name", f"slot {slot}")
-        lw_type = lw.get("type", CREATE_RESOURCE_DEFAULTS["class_name"])
-        res_id = f"plate_slot_{slot}"
-
-        res_index += 1
+    # 为每个唯一的 slot 创建 create_resource 节点
+    for slot, info in slots_info.items():
         node_id = str(uuid.uuid4())
+        res_id = info["res_id"]
+        object_type = info.get("object", "") or ""
+        ot_lo = str(object_type).strip().lower()
+        matched = info.get("prcxi_class_name")
+        if ot_lo == "trash":
+            res_type_name = "PRCXI_trash"
+        elif matched:
+            res_type_name = matched
+        elif ot_lo == "tiprack":
+            if preserve_tip_rack_incoming_class:
+                lid = str(info.get("labware_id") or "").strip() or "tip_rack"
+                res_type_name = f"lab_{lid.lower().replace('.', 'point').replace(' ', '_')}"
+            else:
+                res_type_name = CLASS_NAMES_MAPPING.get("tip_rack", "PRCXI_300ul_Tips")
+        else:
+            res_type_name = f"lab_{info['labware'].lower().replace('.', 'point')}"
         G.add_node(
             node_id,
             template_name="create_resource",
             resource_name="host_node",
-            name=lw_name,
-            description=f"Create {lw_name}",
+            name=f"{res_type_name}_slot{slot}",
+            description=f"Create plate on slot {slot}",
             lab_node_type="Labware",
             footer="create_resource-host_node",
             device_name=DEVICE_NAME_HOST,
             type=NODE_TYPE_DEFAULT,
-            parent_uuid=group_node_id,
-            minimized=True,
+            parent_uuid=group_node_id,  # 指向 Group 节点
+            minimized=True,  # 折叠显示
             param={
                 "res_id": res_id,
                 "device_id": CREATE_RESOURCE_DEFAULTS["device_id"],
-                "class_name": lw_type,
-                "parent": CREATE_RESOURCE_DEFAULTS["parent_template"],
+                "class_name": res_type_name,
+                "parent": CREATE_RESOURCE_DEFAULTS["parent_template"].format(slot=slot),
                 "bind_locations": {"x": 0.0, "y": 0.0, "z": 0.0},
                 "slot_on_deck": slot,
             },
         )
         slot_to_create_resource[slot] = node_id
+        if ot_lo == "tiprack":
+            resource_last_writer[info["labware_id"]] = f"{node_id}:labware"
+        if ot_lo == "trash":
+            trash_create_node_id = node_id
+        # create_resource 之间不需要 ready 连接
 
     # ==================== 第二步：为每个 reagent 创建 set_liquid_from_plate 节点 ====================
     # 创建 Group 节点，包含所有 set_liquid_from_plate 节点
@@ -456,7 +784,8 @@ def build_protocol_graph(
         if item.get("type") == "hardware":
             continue
 
-        slot = str(item.get("slot", ""))
+        object_type = item.get("object", "") or ""
+        slot = _map_deck_slot(str(item.get("slot", "")), object_type)
         wells = item.get("well", [])
         if not wells or not slot:
             continue
@@ -464,6 +793,7 @@ def build_protocol_graph(
         # res_id 不能有空格
         res_id = str(labware_id).replace(" ", "_")
         well_count = len(wells)
+        liquid_volume = DEFAULT_LIQUID_VOLUME if object_type == "source" else 0
 
         node_id = str(uuid.uuid4())
         set_liquid_index += 1
@@ -484,7 +814,7 @@ def build_protocol_graph(
                 "plate": [],  # 通过连接传递
                 "well_names": wells,  # 孔位名数组，如 ["A1", "A3", "A5"]
                 "liquid_names": [res_id] * well_count,
-                "volumes": [DEFAULT_LIQUID_VOLUME] * well_count,
+                "volumes": [liquid_volume] * well_count,
             },
         )
 
@@ -498,8 +828,12 @@ def build_protocol_graph(
         # set_liquid_from_plate 的输出 output_wells 用于连接 transfer_liquid
         resource_last_writer[labware_id] = f"{node_id}:output_wells"
 
-    # transfer_liquid 之间通过 ready 串联，从 None 开始
-    last_control_node_id = None
+    # 收集所有 create_resource 节点 ID，用于让第一个 transfer_liquid 等待所有资源创建完成
+    all_create_resource_node_ids = list(slot_to_create_resource.values())
+
+    # transfer_liquid 之间通过 ready 串联；第一个 transfer_liquid 需要等待所有 create_resource 完成
+    last_control_node_id = trash_create_node_id
+    is_first_action_node = True
 
     # 端口名称映射：JSON 字段名 -> 实际 handle key
     INPUT_PORT_MAPPING = {
@@ -511,6 +845,7 @@ def build_protocol_graph(
         "reagent": "reagent",
         "solvent": "solvent",
         "compound": "compound",
+        "tip_racks": "tip_rack_identifier",
     }
 
     OUTPUT_PORT_MAPPING = {
@@ -525,8 +860,17 @@ def build_protocol_graph(
         "compound": "compound",
     }
 
-    # 需要根据 wells 数量扩展的参数列表（复数形式）
-    EXPAND_BY_WELLS_PARAMS = ["asp_vols", "dis_vols", "asp_flow_rates", "dis_flow_rates"]
+    # 需要根据 wells 数量扩展的参数列表：
+    # - 复数参数（asp_vols 等）支持单值自动扩展
+    # - liquid_height 按 wells 扩展为数组
+    # - mix_* 参数保持标量，避免被转换为 list
+    EXPAND_BY_WELLS_PARAMS = [
+        "asp_vols",
+        "dis_vols",
+        "asp_flow_rates",
+        "dis_flow_rates",
+        "liquid_height",
+    ]
 
     # 处理协议步骤
     for step in protocol_steps:
@@ -539,6 +883,57 @@ def build_protocol_graph(
         for old_name, new_name in PARAM_RENAME_MAPPING.items():
             if old_name in params:
                 params[new_name] = params.pop(old_name)
+
+        # touch_tip 输入归一化：
+        # - 支持 bool / 0/1 / "true"/"false" / 单元素 list
+        # - 最终统一为 bool 标量，避免被下游误当作序列处理
+        if "touch_tip" in params:
+            touch_tip_value = params.get("touch_tip")
+            if isinstance(touch_tip_value, list):
+                if len(touch_tip_value) == 1:
+                    touch_tip_value = touch_tip_value[0]
+                elif len(touch_tip_value) == 0:
+                    touch_tip_value = False
+                else:
+                    warnings.append(f"touch_tip 期望标量，但收到长度为 {len(touch_tip_value)} 的列表，使用首个值")
+                    touch_tip_value = touch_tip_value[0]
+            if isinstance(touch_tip_value, str):
+                norm = touch_tip_value.strip().lower()
+                if norm in {"true", "1", "yes", "y", "on"}:
+                    touch_tip_value = True
+                elif norm in {"false", "0", "no", "n", "off", ""}:
+                    touch_tip_value = False
+                else:
+                    warnings.append(f"touch_tip 字符串值无法识别: {touch_tip_value}，按 True 处理")
+                    touch_tip_value = True
+            elif isinstance(touch_tip_value, (int, float)):
+                touch_tip_value = bool(touch_tip_value)
+            elif touch_tip_value is None:
+                touch_tip_value = False
+            else:
+                touch_tip_value = bool(touch_tip_value)
+            params["touch_tip"] = touch_tip_value
+
+        # delays 输入归一化：
+        # - 支持标量（int/float/字符串数字）与 list
+        # - 最终统一为数字列表，供下游按 delays[0]/delays[1] 使用
+        if "delays" in params:
+            delays_value = params.get("delays")
+            if delays_value is None or delays_value == "":
+                params["delays"] = []
+            else:
+                raw_list = delays_value if isinstance(delays_value, list) else [delays_value]
+                normalized_delays = []
+                for delay_item in raw_list:
+                    if isinstance(delay_item, str):
+                        delay_item = delay_item.strip()
+                        if delay_item == "":
+                            continue
+                    try:
+                        normalized_delays.append(float(delay_item))
+                    except (TypeError, ValueError):
+                        warnings.append(f"delays 包含无法转换为数字的值: {delay_item}，已忽略")
+                params["delays"] = normalized_delays
 
         # 处理输入连接
         for param_key, target_port in INPUT_PORT_MAPPING.items():
@@ -606,7 +1001,12 @@ def build_protocol_graph(
         G.add_node(node_id, **step_copy)
 
         # 控制流
-        if last_control_node_id is not None:
+        if is_first_action_node:
+            # 第一个 transfer_liquid 需要等待所有 create_resource 完成
+            for cr_node_id in all_create_resource_node_ids:
+                G.add_edge(cr_node_id, node_id, source_port="ready", target_port="ready")
+            is_first_action_node = False
+        elif last_control_node_id is not None:
             G.add_edge(last_control_node_id, node_id, source_port="ready", target_port="ready")
         last_control_node_id = node_id
 
