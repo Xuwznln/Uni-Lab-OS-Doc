@@ -7779,7 +7779,8 @@ liquid_handler.prcxi:
       auto-run_protocol:
         feedback: {}
         goal: {}
-        goal_default: {}
+        goal_default:
+          protocol_id: null
         handles: {}
         placeholder_keys: {}
         result: {}
@@ -7788,7 +7789,9 @@ liquid_handler.prcxi:
           properties:
             feedback: {}
             goal:
-              properties: {}
+              properties:
+                protocol_id:
+                  type: string
               required: []
               type: object
             result: {}
