@@ -147,8 +147,15 @@
                 </div>
                 <div class="form-row-3">
                     <div><label>tip_volume <span class="label-cn">枪头容量 (uL)</span></label><input type="number" step="any" name="tip_vol" id="f-tip_vol" value="{{ item.tip.tip_volume if item and item.tip else 300 }}"></div>
-                    <div><label>tip_length <span class="label-cn">枪头长度 (mm)</span></label><input type="number" step="any" name="tip_len" id="f-tip_len" value="{{ item.tip.tip_length if item and item.tip else 60 }}"></div>
-                    <div><label>fitting_depth <span class="label-cn">配合深度</span></label><input type="number" step="any" name="tip_dep" id="f-tip_dep" value="{{ item.tip.tip_fitting_depth if item and item.tip else 51 }}"></div>
+                    <div><label>tip_length <span class="label-cn">枪头总长度 (mm)</span></label><input type="number" step="any" name="tip_len" id="f-tip_len" value="{{ item.tip.tip_length if item and item.tip else 60 }}"></div>
+                    <div><label>fitting_depth <span class="label-cn">取枪头时插入的长度 (mm)</span></label><input type="number" step="any" name="tip_dep" id="f-tip_dep" value="{{ item.tip.tip_fitting_depth if item and item.tip else 51 }}"></div>
+                </div>
+                <div class="form-row">
+                    <label>tip_above_rack_length <span class="label-cn">枪头在枪头盒上方的部分的长度 (mm)</span></label>
+                    <input type="number" step="any" name="tip_above" id="f-tip_above"
+                           value="{{ item.tip.tip_above_rack_length if item and item.tip and item.tip.tip_above_rack_length is not none else '' }}"
+                           placeholder="tip_length - (size_z - dz)">
+                    <small style="color:#888;margin-top:2px;">公式: tip_length = tip_above + size_z - dz；填 tip_above 自动算 dz，填 dz 自动算 tip_above</small>
                 </div>
                 <div class="form-row">
                     <label><input type="checkbox" name="tip_filter" id="f-tip_filter" {% if item and item.tip and item.tip.has_filter %}checked{% endif %}> has_filter</label>
@@ -219,11 +226,17 @@
     <!-- 右侧: 实时预览 -->
     <div class="edit-preview">
         <div class="viz-card">
-            <h3>预览: 俯视图</h3>
+            <h3 style="display:flex;align-items:center;justify-content:space-between;">
+                预览: 俯视图
+                <button type="button" class="btn btn-sm btn-outline" onclick="resetSvgView('svg-topdown')">回中</button>
+            </h3>
             <div id="svg-topdown"></div>
         </div>
         <div class="viz-card">
-            <h3>预览: 侧面截面图</h3>
+            <h3 style="display:flex;align-items:center;justify-content:space-between;">
+                预览: 侧面截面图
+                <button type="button" class="btn btn-sm btn-outline" onclick="resetSvgView('svg-side')">回中</button>
+            </h3>
             <div id="svg-side"></div>
         </div>
     </div>

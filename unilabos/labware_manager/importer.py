@@ -399,6 +399,11 @@ def import_from_code() -> LabwareDB:
                 tip_fitting_depth=tip_depth,
                 has_filter=tip_filter,
             )
+            # 计算 tip_above_rack_length = tip_length - (size_z - dz)
+            if grid_data:
+                _dz = grid_data.get("dz", 0.0)
+                _above = tip_length - (item.size_z - _dz)
+                item.tip.tip_above_rack_length = round(_above, 4) if _above > 0 else None
 
         elif type_name == "tube_rack" and children:
             if grid_data:

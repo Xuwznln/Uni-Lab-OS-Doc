@@ -85,7 +85,10 @@
                 <tr><td class="label">Spot 尺寸</td><td>{{ item.tip.spot_size_x }} x {{ item.tip.spot_size_y }} x {{ item.tip.spot_size_z }}</td></tr>
                 <tr><td class="label">容量</td><td>{{ item.tip.tip_volume }} uL</td></tr>
                 <tr><td class="label">长度</td><td>{{ item.tip.tip_length }} mm</td></tr>
-                <tr><td class="label">配合深度</td><td>{{ item.tip.tip_fitting_depth }} mm</td></tr>
+                <tr><td class="label">取枪头插入深度</td><td>{{ item.tip.tip_fitting_depth }} mm</td></tr>
+                {% if item.tip.tip_above_rack_length is not none %}
+                <tr><td class="label">枪头露出枪头盒长度</td><td>{{ item.tip.tip_above_rack_length }} mm</td></tr>
+                {% endif %}
                 <tr><td class="label">有滤芯</td><td>{{ item.tip.has_filter }}</td></tr>
             </table>
         </div>
@@ -127,11 +130,17 @@
     <!-- 右侧: 可视化 -->
     <div class="detail-viz">
         <div class="viz-card">
-            <h3>俯视图 (Top-Down)</h3>
+            <h3 style="display:flex;align-items:center;justify-content:space-between;">
+                俯视图 (Top-Down)
+                <button type="button" class="btn btn-sm btn-outline" onclick="resetSvgView('svg-topdown')">回中</button>
+            </h3>
             <div id="svg-topdown"></div>
         </div>
         <div class="viz-card">
-            <h3>侧面截面图 (Side Profile)</h3>
+            <h3 style="display:flex;align-items:center;justify-content:space-between;">
+                侧面截面图 (Side Profile)
+                <button type="button" class="btn btn-sm btn-outline" onclick="resetSvgView('svg-side')">回中</button>
+            </h3>
             <div id="svg-side"></div>
         </div>
     </div>

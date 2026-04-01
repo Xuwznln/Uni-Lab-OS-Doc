@@ -3,7 +3,7 @@ PRCXI_trash:
   - prcxi
   - trash
   class:
-    module: unilabos.devices.liquid_handling.prcxi.prcxi_labware:PRCXI_trash
+    module: 'unilabos.devices.liquid_handling.prcxi.prcxi_labware:PRCXI_trash'
     type: pylabrobot
   description: '废弃槽 (Code: q1)'
   handles: []

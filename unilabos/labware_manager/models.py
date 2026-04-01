@@ -53,6 +53,7 @@ class TipInfo(BaseModel):
     tip_volume: float = 300.0
     tip_length: float = 60.0
     tip_fitting_depth: float = 51.0
+    tip_above_rack_length: Optional[float] = None
     has_filter: bool = False
 
 
