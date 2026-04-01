@@ -107,6 +107,7 @@ function collectFormData() {
             tip_volume: g('f-tip_vol') || 300,
             tip_length: g('f-tip_len') || 60,
             tip_fitting_depth: g('f-tip_dep') || 51,
+            tip_above_rack_length: g('f-tip_above'),
             has_filter: g('f-tip_filter') || false,
         };
     }
@@ -155,6 +156,60 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!form) return;
     form.addEventListener('input', updatePreview);
     form.addEventListener('change', updatePreview);
+
+    // tip_above_rack_length 与 dz 互算
+    // 公式: tip_length = tip_above_rack_length + size_z - dz
+    // 规则: 填 tip_above → 自动算 dz；填 dz → 自动算 tip_above
+    //       改 size_z / tip_length → 优先重算 tip_above（若有值），否则算 dz
+
+    function _getVal(id) {
+        const el = document.getElementById(id);
+        return (el && el.value !== '') ? parseFloat(el.value) : null;
+    }
+    function _setVal(id, v) {
+        const el = document.getElementById(id);
+        if (el) el.value = Math.round(v * 1000) / 1000;
+    }
+
+    function autoCalcTipAbove(changedId) {
+        const typeEl = document.getElementById('f-type');
+        if (!typeEl || typeEl.value !== 'tip_rack') return;
+
+        const tipLen = _getVal('f-tip_len');
+        const sizeZ  = _getVal('f-size_z');
+        const dz     = _getVal('f-grid_dz');
+        const above  = _getVal('f-tip_above');
+
+        // 需要 tip_length 和 size_z 才能计算
+        if (tipLen == null || sizeZ == null) return;
+
+        if (changedId === 'f-tip_above') {
+            // 用户填了 tip_above → 算 dz
+            if (above != null) _setVal('f-grid_dz', above + sizeZ - tipLen);
+        } else if (changedId === 'f-grid_dz') {
+            // 用户填了 dz → 算 tip_above
+            if (dz != null) _setVal('f-tip_above', tipLen - sizeZ + dz);
+        } else {
+            // size_z 或 tip_length 变了 → 优先重算 tip_above（若已有值或 dz 已有值）
+            if (dz != null) {
+                _setVal('f-tip_above', tipLen - sizeZ + dz);
+            } else if (above != null) {
+                _setVal('f-grid_dz', above + sizeZ - tipLen);
+            }
+        }
+    }
+
+    // 绑定 input 事件
+    for (const id of ['f-tip_len', 'f-size_z', 'f-grid_dz', 'f-tip_above']) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', () => autoCalcTipAbove(id));
+    }
+
+    // 编辑已有 tip_rack 条目时自动补算 tip_above_rack_length
+    const typeEl = document.getElementById('f-type');
+    if (typeEl && typeEl.value === 'tip_rack') {
+        autoCalcTipAbove('f-grid_dz');
+    }
 });
 
 // 自动居中：根据板尺寸和孔阵列参数计算 dx/dy
