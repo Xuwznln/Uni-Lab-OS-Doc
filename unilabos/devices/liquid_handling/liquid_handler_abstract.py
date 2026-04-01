@@ -1672,25 +1672,25 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 use_channels=use_channels,
             )
 
-        # if blow_out_air_volume_before_vol > 0:
-        #     source_tracker = getattr(sources[0], "tracker", None)
-        #     source_tracker_was_disabled = bool(getattr(source_tracker, "is_disabled", False))
-        #     try:
-        #         if source_tracker is not None and hasattr(source_tracker, "disable"):
-        #             source_tracker.disable()
-        #         await self.aspirate(
-        #             resources=[sources[0]],
-        #             vols=[blow_out_air_volume_before_vol],
-        #             use_channels=use_channels,
-        #             flow_rates=None,
-        #             offsets=[Coordinate(x=0, y=0, z=sources[0].get_size_z())],
-        #             liquid_height=None,
-        #             blow_out_air_volume=None,
-        #             spread="custom",
-        #         )
-        #     finally:
-        #         if source_tracker is not None:
-        #             source_tracker.enable()
+        if blow_out_air_volume_before_vol > 0:
+            source_tracker = getattr(sources[0], "tracker", None)
+            source_tracker_was_disabled = bool(getattr(source_tracker, "is_disabled", False))
+            try:
+                if source_tracker is not None and hasattr(source_tracker, "disable"):
+                    source_tracker.disable()
+                await self.aspirate(
+                    resources=[sources[0]],
+                    vols=[0],
+                    use_channels=use_channels,
+                    flow_rates=None,
+                    offsets=[Coordinate(x=0, y=0, z=sources[0].get_size_z())],
+                    liquid_height=None,
+                    blow_out_air_volume=[blow_out_air_volume_before_vol],
+                    spread="custom",
+                )
+            finally:
+                if source_tracker is not None:
+                    source_tracker.enable()
 
         await self.aspirate(
             resources=[sources[0]],
@@ -1712,9 +1712,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             use_channels=use_channels,
             flow_rates=[dis_flow_rates[0]] if dis_flow_rates and len(dis_flow_rates) > 0 else None,
             offsets=[offsets[0]] if offsets and len(offsets) > 0 else None,
-            blow_out_air_volume=(
-                [blow_out_air_volume_vol] if blow_out_air_volume_vol > 0 else None
-            ),
+            blow_out_air_volume=[blow_out_air_volume_vol+blow_out_air_volume_before_vol],
             liquid_height=[liquid_height[0]] if liquid_height and len(liquid_height) > 0 else None,
             spread=spread,
         )

@@ -1816,6 +1816,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     async def aspirate(self, ops: List[SingleChannelAspiration], use_channels: List[int] = None):
         """Aspirate liquid from the specified resources."""
+        if ops[0].blow_out_air_volume and ops[0].volume == 0:
+            return
         if hasattr(use_channels, "tolist"):
             _use_channels = use_channels.tolist()
         else:
