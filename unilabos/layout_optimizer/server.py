@@ -42,18 +42,18 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 # 可配置路径
-# LeapLab 仓库根目录（layout_optimizer 的父目录）
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+# __file__ -> Uni-Lab-OS/unilabos/layout_optimizer/server.py
+_UNILABOS_DIR = Path(__file__).resolve().parent.parent   # .../Uni-Lab-OS/unilabos/
 
 UNI_LAB_ASSETS_DIR = Path(
-    os.getenv("UNI_LAB_ASSETS_DIR", str(_REPO_ROOT.parent / "uni-lab-assets"))
+    os.getenv("UNI_LAB_ASSETS_DIR", str(_UNILABOS_DIR.parent.parent.parent / "uni-lab-assets"))
 )
 UNI_LAB_ASSETS_MODELS_DIR = UNI_LAB_ASSETS_DIR / "device_models"
 UNI_LAB_ASSETS_DATA_JSON = UNI_LAB_ASSETS_DIR / "data.json"
 UNI_LAB_OS_DEVICE_MESH_DIR = Path(
     os.getenv(
         "UNI_LAB_OS_DEVICE_MESH_DIR",
-        str(_REPO_ROOT / "Uni-Lab-OS" / "unilabos" / "device_mesh" / "devices"),
+        str(_UNILABOS_DIR / "device_mesh" / "devices"),
     )
 )
 
