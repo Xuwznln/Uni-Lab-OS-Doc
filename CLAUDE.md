@@ -24,9 +24,14 @@ unilab --skip_env_check                   # skip auto-install of dependencies
 unilab --visual rviz|web|disable          # visualization mode
 unilab --is_slave                         # run as slave node
 unilab --restart_mode                     # auto-restart on config changes (supervisor/child process)
+unilab --external_devices_only            # only load external device packages
+unilab --extra_resource                   # load extra lab_ prefixed labware resources
 
 # Workflow upload subcommand
 unilab workflow_upload -f <workflow.json> -n <name> --tags tag1 tag2
+
+# Labware Manager (standalone web UI for PRCXI labware CRUD, port 8010)
+python -m unilabos.labware_manager
 
 # Tests
 pytest tests/                              # all tests
@@ -35,6 +40,12 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 # CI check (matches .github/workflows/ci-check.yml)
 python -m unilabos --check_mode --skip_env_check
+
+# If registry YAML/Python files changed, regenerate before committing:
+python -m unilabos --complete_registry
+
+# Documentation build
+cd docs && python -m sphinx -b html . _build/html -v
 ```
 
 ## Architecture
@@ -45,7 +56,22 @@ python -m unilabos --check_mode --skip_env_check
 
 ### Core Layers
 
-**Registry** (`unilabos/registry/`): Singleton `Registry` class discovers and catalogs all device types, resource types, and communication devices. Two registration mechanisms: YAML definitions in `registry/devices/*.yaml` and Python decorators (`@device`, `@action`, `@resource` in `registry/decorators.py`). AST scanning discovers decorated classes without importing them. Class paths resolved to Python classes via `utils/import_manager.py`.
+**Registry** (`unilabos/registry/`): Singleton `Registry` class discovers and catalogs all device types, resource types, and communication devices. Two registration mechanisms:
+1. **YAML definitions** in `registry/devices/*.yaml` and `registry/resources/` (backward-compatible)
+2. **Python decorators** (`@device`, `@action`, `@resource` in `registry/decorators.py`) — preferred for new code
+
+AST scanning (`ast_registry_scanner.py`) discovers decorated classes without importing them, so `--check_mode` works without hardware dependencies. Class paths resolved to Python classes at runtime via `utils/import_manager.py`.
+
+Decorator usage pattern:
+```python
+from unilabos.registry.decorators import device, action, resource
+from unilabos.registry.decorators import InputHandle, OutputHandle, HardwareInterface
+
+@device(id="my_device.v1", category=["category_name"], handles=[...])
+class MyDevice:
+    @action(action_type=SomeActionType)
+    def do_something(self): ...
+```
 
 **Resource Tracking** (`unilabos/resources/resource_tracker.py`): Pydantic-based `ResourceDict` → `ResourceDictInstance` → `ResourceTreeSet` hierarchy. `ResourceTreeSet` is the canonical in-memory representation of all devices and resources. Graph I/O in `resources/graphio.py` reads JSON/GraphML device topology files into `nx.Graph` + `ResourceTreeSet`.
 
@@ -60,6 +86,8 @@ python -m unilabos --check_mode --skip_env_check
 **Communication** (`unilabos/device_comms/`): Hardware adapters — OPC-UA, Modbus PLC, RPC, universal driver. `app/communication.py` provides factory pattern for WebSocket connections.
 
 **Web/API** (`unilabos/app/web/`): FastAPI server with REST API (`api.py`), Jinja2 templates (`pages.py`), HTTP client (`client.py`). Default port 8002.
+
+**Labware Manager** (`unilabos/labware_manager/`): Standalone FastAPI web app (port 8010) for PRCXI labware CRUD. Pydantic models in `models.py`, JSON database in `labware_db.json`. Supports importing from existing Python/YAML (`importer.py`), code generation (`codegen.py`), and YAML generation (`yaml_gen.py`). Web UI with SVG visualization (`static/labware_viz.js`), dynamic form handling (`static/form_handler.js`), and Jinja2 templates.
 
 ### Configuration System
 
@@ -88,6 +116,7 @@ Example device graphs and experiment configs are in `unilabos/test/experiments/`
 - CLI argument dashes auto-converted to underscores for consistency
 - No linter/formatter configuration enforced (no ruff, black, flake8, mypy configs)
 - Documentation built with Sphinx (Chinese language, `sphinx_rtd_theme`, `myst_parser`)
+- CI runs on Windows (`windows-latest`); if registry files change, run `python -m unilabos --complete_registry` locally before committing
 
 ## Licensing
 
