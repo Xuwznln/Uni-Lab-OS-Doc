@@ -86,7 +86,8 @@ Build the optimize request using:
 - `constraints`: from Step 3 interpret response
 - `workflow_edges`: from Step 3 interpret response
 - `seeder`: `"compact_outward"` (default)
-- `seeder_overrides`: `{"align_weight": W}` — if user explicitly says "align cardinal", "lock to horizontal/vertical", or "angle locked", use `align_weight: 15.0` instead of default 2.0
+- `seeder_overrides`: generally not needed. Cardinal alignment is handled by the `align_cardinal` intent (generates `prefer_aligned` constraint). Do NOT use `align_weight` in seeder_overrides — it is deprecated.
+- `snap_cardinal`: `false` (default). Set `true` only if user explicitly requests snapping to 0/90/180/270.
 - `run_de`: `true`
 - `maxiter`: `200`
 - `seed`: `42`

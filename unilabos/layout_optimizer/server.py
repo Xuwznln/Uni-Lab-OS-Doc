@@ -4,7 +4,14 @@
 集成阶段合并到 Uni-Lab-OS 的 FastAPI 服务中。
 
 运行方式：
-    uvicorn layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
+    uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
+
+调试模式（启用 DEBUG 日志，含优化器逐代 cost 明细）：
+    LAYOUT_DEBUG=1 uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
+
+日志文件：
+    自动写入 layout_optimizer/logs/{YYYYMMDD_HHMMSS}.log（始终 DEBUG 级别）。
+    前端 1s 轮询的 GET /scene/placements 200 行不写入日志文件。
 
 前端访问：
     http://localhost:8000/
@@ -13,8 +20,10 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import math
 import os
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -36,8 +45,39 @@ from .intent_interpreter import InterpretResult, interpret_intents
 from .models import Constraint, Intent
 from .optimizer import optimize
 
-logging.basicConfig(level=logging.INFO)
+_console_level = logging.DEBUG if os.getenv("LAYOUT_DEBUG") else logging.INFO
+# root logger must be DEBUG so the file handler receives all records;
+# console output level is controlled separately via its handler.
+logging.basicConfig(level=logging.DEBUG)
+# basicConfig creates a default StreamHandler — set its level to the console level
+for _h in logging.getLogger().handlers:
+    if isinstance(_h, logging.StreamHandler):
+        _h.setLevel(_console_level)
 logger = logging.getLogger(__name__)
+
+# --- 文件日志：实时写入 logs/ 目录，按启动时间命名 ---
+_LOG_DIR = Path(__file__).parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+_log_file = _LOG_DIR / f"{datetime.now():%Y%m%d_%H%M%S}.log"
+
+
+class _PollingFilter(logging.Filter):
+    """过滤掉前端 1s 轮询产生的 GET /scene/placements 日志行。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "GET /scene/placements" in msg and "200" in msg:
+            return False
+        return True
+
+
+_file_handler = logging.FileHandler(_log_file, encoding="utf-8")
+_file_handler.setLevel(logging.DEBUG)
+_file_handler.setFormatter(
+    logging.Formatter("%(asctime)s %(levelname)-5s [%(name)s] %(message)s")
+)
+_file_handler.addFilter(_PollingFilter())
+logging.getLogger().addHandler(_file_handler)
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -368,6 +408,7 @@ class OptimizeRequest(BaseModel):
     workflow_edges: list[list[str]] = []
     maxiter: int = 200
     seed: int | None = None
+    snap_cardinal: bool = False
 
 
 class PositionXYZ(BaseModel):
@@ -459,8 +500,8 @@ async def run_optimize(request: OptimizeRequest):
                 params={"mode": orientation_mode},
                 weight=request.seeder_overrides.get("orientation_weight", DEFAULT_WEIGHT_ANGLE),
             ))
-        # prefer_aligned: penalize non-cardinal angles
-        align_weight = request.seeder_overrides.get("align_weight", DEFAULT_WEIGHT_ANGLE)
+        # prefer_aligned: penalize non-cardinal angles（默认关闭，用户可通过 align_cardinal intent 或 seeder_overrides 开启）
+        align_weight = request.seeder_overrides.get("align_weight", 0)
         if align_weight > 0:
             constraints.append(Constraint(
                 type="soft",
@@ -486,8 +527,9 @@ async def run_optimize(request: OptimizeRequest):
     else:
         result_placements = seed_placements
 
-    # 5. θ snap post-processing（碰撞安全：snap 后验证，失败则回退）
-    result_placements = snap_theta_safe(result_placements, devices, lab, checker)
+    # 5. θ snap post-processing（opt-in，默认关闭）
+    if request.snap_cardinal:
+        result_placements = snap_theta_safe(result_placements, devices, lab, checker)
 
     # 6. Evaluate final cost (binary mode for pass/fail reporting)
     final_cost = evaluate_default_hard_constraints(

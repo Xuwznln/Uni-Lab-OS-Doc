@@ -5,11 +5,15 @@ import math
 import pytest
 
 from ..constraints import (
+    _crossing_penalty,
+    _opening_surface_center,
+    DEFAULT_WEIGHT_DISTANCE,
     evaluate_constraints,
     evaluate_default_hard_constraints,
 )
 from ..mock_checkers import MockCollisionChecker, MockReachabilityChecker
-from ..models import Constraint, Device, Lab, Placement
+from ..models import Constraint, Device, Opening, Placement, Lab
+from ..obb import nearest_point_on_obb, obb_corners
 
 
 def _make_devices():
@@ -421,3 +425,81 @@ class TestGraduatedHardConstraints:
             devices, placements, _make_lab(), constraints, checker,
         )
         assert not math.isinf(cost)
+
+
+class TestCrossingPenalty:
+    """_crossing_penalty: 交叉长度加权的 soft penalty。"""
+
+    def _make_device(self, dev_id, bbox=(0.5, 0.5), direction=(0.0, -1.0)):
+        return Device(
+            id=dev_id, name=dev_id, device_type="static",
+            bbox=bbox, height=0.3,
+            openings=[Opening(direction=direction, label="front")],
+        )
+
+    def test_no_blockers_returns_zero(self):
+        """arm 与 target 之间无遮挡设备 → 交叉代价为 0。"""
+        arm = self._make_device("arm", bbox=(2.14, 0.35))
+        target = self._make_device("target")
+        arm_p = Placement(device_id="arm", x=2.0, y=1.0, theta=0.0)
+        target_p = Placement(device_id="target", x=0.5, y=1.0, theta=3.14159)
+        device_map = {"arm": arm, "target": target}
+        placement_map = {"arm": arm_p, "target": target_p}
+
+        opening_pt = _opening_surface_center(target, target_p)
+        arm_corners = obb_corners(arm_p.x, arm_p.y, arm.bbox[0], arm.bbox[1], arm_p.theta)
+        nearest = nearest_point_on_obb(opening_pt[0], opening_pt[1], arm_corners)
+
+        cost = _crossing_penalty(
+            opening_pt, nearest,
+            "arm", "target",
+            device_map, placement_map,
+        )
+        assert cost == 0.0
+
+    def test_one_blocker_proportional_to_length(self):
+        """一个遮挡设备 → cost = DEFAULT_WEIGHT_DISTANCE * 穿过长度。"""
+        arm = self._make_device("arm", bbox=(2.14, 0.35))
+        target = self._make_device("target")
+        blocker = self._make_device("blocker", bbox=(0.5, 0.5))
+        arm_p = Placement(device_id="arm", x=3.0, y=1.0, theta=0.0)
+        target_p = Placement(device_id="target", x=0.0, y=1.0, theta=0.0)
+        blocker_p = Placement(device_id="blocker", x=1.5, y=1.0, theta=0.0)
+        device_map = {"arm": arm, "target": target, "blocker": blocker}
+        placement_map = {"arm": arm_p, "target": target_p, "blocker": blocker_p}
+
+        opening_pt = _opening_surface_center(target, target_p)
+        arm_corners = obb_corners(arm_p.x, arm_p.y, arm.bbox[0], arm.bbox[1], arm_p.theta)
+        nearest = nearest_point_on_obb(opening_pt[0], opening_pt[1], arm_corners)
+
+        cost = _crossing_penalty(
+            opening_pt, nearest,
+            "arm", "target",
+            device_map, placement_map,
+        )
+        # blocker 宽 0.5m，theta=0，路径水平 → 穿过长度 ≈ 0.5m
+        # cost = DEFAULT_WEIGHT_DISTANCE * 0.5 = 100 * 0.5 = 50
+        assert cost > 0
+        assert abs(cost - DEFAULT_WEIGHT_DISTANCE * 0.5) < DEFAULT_WEIGHT_DISTANCE * 0.1
+
+    def test_blocker_off_path_returns_zero(self):
+        """不在路径上的设备 → 交叉代价为 0。"""
+        arm = self._make_device("arm", bbox=(2.14, 0.35))
+        target = self._make_device("target")
+        bystander = self._make_device("bystander", bbox=(0.5, 0.5))
+        arm_p = Placement(device_id="arm", x=3.0, y=1.0, theta=0.0)
+        target_p = Placement(device_id="target", x=0.0, y=1.0, theta=0.0)
+        bystander_p = Placement(device_id="bystander", x=1.5, y=3.0, theta=0.0)
+        device_map = {"arm": arm, "target": target, "bystander": bystander}
+        placement_map = {"arm": arm_p, "target": target_p, "bystander": bystander_p}
+
+        opening_pt = _opening_surface_center(target, target_p)
+        arm_corners = obb_corners(arm_p.x, arm_p.y, arm.bbox[0], arm.bbox[1], arm_p.theta)
+        nearest = nearest_point_on_obb(opening_pt[0], opening_pt[1], arm_corners)
+
+        cost = _crossing_penalty(
+            opening_pt, nearest,
+            "arm", "target",
+            device_map, placement_map,
+        )
+        assert cost == 0.0

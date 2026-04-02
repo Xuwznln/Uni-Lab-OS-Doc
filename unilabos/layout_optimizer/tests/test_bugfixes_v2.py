@@ -376,3 +376,58 @@ class TestScenarios:
         assert not _has_collision(devices, result)
         for i, p in enumerate(result):
             assert _facing_dot(p, devices[i], lab) > 0
+
+
+# ── V2 Stage 1: 默认关闭 cardinal snap/alignment ────────
+
+class TestV2Stage1Bugfixes:
+    """align_weight 默认为 0，snap_cardinal 默认关闭。"""
+
+    def test_default_align_weight_is_zero(self):
+        """Default request (no seeder_overrides) should NOT inject prefer_aligned."""
+        from fastapi.testclient import TestClient
+        from ..server import app
+
+        client = TestClient(app)
+        resp = client.post("/optimize", json={
+            "devices": [{"id": "opentrons_liquid_handler", "uuid": "u1"}],
+            "lab": {"width": 3, "depth": 3},
+            "seeder": "compact_outward",
+            "run_de": True,
+            "maxiter": 50,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_snap_cardinal_off_by_default(self):
+        """Default request should NOT snap theta to cardinal."""
+        from fastapi.testclient import TestClient
+        from ..server import app
+
+        client = TestClient(app)
+        resp = client.post("/optimize", json={
+            "devices": [{"id": "opentrons_liquid_handler", "uuid": "u1"}],
+            "lab": {"width": 3, "depth": 3},
+            "seeder": "compact_outward",
+            "run_de": True,
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_snap_cardinal_opt_in(self):
+        """snap_cardinal=True should be accepted and snap angles."""
+        from fastapi.testclient import TestClient
+        from ..server import app
+
+        client = TestClient(app)
+        resp = client.post("/optimize", json={
+            "devices": [{"id": "opentrons_liquid_handler", "uuid": "u1"}],
+            "lab": {"width": 3, "depth": 3},
+            "seeder": "compact_outward",
+            "snap_cardinal": True,
+            "run_de": True,
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200

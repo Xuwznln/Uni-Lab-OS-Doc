@@ -1,7 +1,7 @@
 """Tests for OBB (Oriented Bounding Box) geometry utilities."""
 import math
 import pytest
-from ..obb import obb_corners, obb_overlap, obb_min_distance
+from ..obb import obb_corners, obb_overlap, obb_min_distance, segment_obb_intersection_length
 
 
 class TestObbCorners:
@@ -115,3 +115,42 @@ class TestObbMinDistance:
         a = obb_corners(0, 0, 2.0, 2.0, 0.0)
         b = obb_corners(2.0, 0, 2.0, 2.0, 0.0)
         assert obb_min_distance(a, b) == pytest.approx(0.0)
+
+
+class TestSegmentOBBIntersectionLength:
+    """segment_obb_intersection_length: Cyrus-Beck clipping."""
+
+    def test_segment_fully_outside(self):
+        corners = obb_corners(0, 0, 2, 2, 0)
+        length = segment_obb_intersection_length((-5, 3), (5, 3), corners)
+        assert length == 0.0
+
+    def test_segment_fully_inside(self):
+        corners = obb_corners(0, 0, 4, 4, 0)
+        length = segment_obb_intersection_length((-0.5, 0), (0.5, 0), corners)
+        assert abs(length - 1.0) < 1e-6
+
+    def test_segment_crosses_through(self):
+        corners = obb_corners(0, 0, 2, 2, 0)
+        length = segment_obb_intersection_length((-5, 0), (5, 0), corners)
+        assert abs(length - 2.0) < 1e-6
+
+    def test_segment_partial_overlap(self):
+        corners = obb_corners(0, 0, 2, 2, 0)
+        length = segment_obb_intersection_length((0, 0), (5, 0), corners)
+        assert abs(length - 1.0) < 1e-6
+
+    def test_rotated_obb(self):
+        corners = obb_corners(0, 0, 2, 2, math.pi / 4)
+        length = segment_obb_intersection_length((-3, 0), (3, 0), corners)
+        expected = 2 * math.sqrt(2)
+        assert abs(length - expected) < 1e-4
+
+    def test_zero_length_segment(self):
+        corners = obb_corners(0, 0, 2, 2, 0)
+        assert segment_obb_intersection_length((0, 0), (0, 0), corners) == 0.0
+
+    def test_parallel_outside(self):
+        corners = obb_corners(0, 0, 2, 2, 0)
+        length = segment_obb_intersection_length((-5, 2), (5, 2), corners)
+        assert length == 0.0
