@@ -1200,13 +1200,13 @@ loadDeviceCatalog().then(() => {
 });
 
 /* ── Scene Poller (demo agent) ─────────────── */
-let _scenePollVersion = -1;  // -1 = uninitialized, first poll sets baseline
+let _scenePollVersion = 0;
 setInterval(async () => {
   try {
     const res = await fetch('/scene/placements');
     if (!res.ok) return;
     const data = await res.json();
-    if (_scenePollVersion === -1) { _scenePollVersion = data.version; return; }  // baseline on first poll
+    if (data.version < _scenePollVersion) _scenePollVersion = 0;  // server restart
     if (data.version <= _scenePollVersion) return;
     _scenePollVersion = data.version;
     const labW = parseFloat(document.getElementById('lab-w').value) || 4;

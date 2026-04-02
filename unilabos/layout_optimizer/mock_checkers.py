@@ -78,7 +78,7 @@ class MockReachabilityChecker:
         "elite_cs66": 0.914,
         "elite_cs612": 1.304,
         "elite_cs620": 1.800,
-        "arm_slider": 1.07,   # 线性导轨臂：body 2.14m × 0.35m，reach ≈ half length
+        "arm_slider": 0.3,   # 线性导轨臂：1.07 body 2.14m × 0.35m，reach ≈ half length
     }
 
     # 未知型号回退臂展：realistic default for lab-scale arms

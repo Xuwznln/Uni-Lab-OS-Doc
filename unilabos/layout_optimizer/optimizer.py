@@ -80,7 +80,7 @@ def _run_de(
     best_vector = init_pop[best_idx].copy()
 
     # Early stopping 跟踪
-    patience = 20
+    patience = 200
     best_cost_history: list[float] = [best_cost]
 
     for gen in range(1, maxiter + 1):
@@ -102,6 +102,8 @@ def _run_de(
                 # 默认 currenttobest1bin：mutant = target + F*(best - target) + F*(r1 - r2)
                 mutant = (
                     init_pop[i]
+                    # add a scaled minimum to encourage exploration
+                    + f_val * 0.1 * (upper - lower) * rng.uniform(-1, 1, size=ndim)
                     + f_val * (best_vector - init_pop[i])
                     + f_val * (init_pop[r1] - init_pop[r2])
                 )
