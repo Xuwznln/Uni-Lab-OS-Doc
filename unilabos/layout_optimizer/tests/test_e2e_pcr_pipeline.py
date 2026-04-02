@@ -199,6 +199,8 @@ class TestStage3VerifyPlacements:
             "run_de": True,
             "maxiter": 100,
             "seed": 42,
+            "snap_cardinal": True,
+            "seeder_overrides": {"align_weight": 60},
         })
         data = optimize_resp.json()
         assert data["success"] is True

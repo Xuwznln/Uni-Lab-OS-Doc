@@ -368,6 +368,7 @@ class OptimizeRequest(BaseModel):
     workflow_edges: list[list[str]] = []
     maxiter: int = 200
     seed: int | None = None
+    snap_cardinal: bool = False
 
 
 class PositionXYZ(BaseModel):
@@ -459,8 +460,8 @@ async def run_optimize(request: OptimizeRequest):
                 params={"mode": orientation_mode},
                 weight=request.seeder_overrides.get("orientation_weight", DEFAULT_WEIGHT_ANGLE),
             ))
-        # prefer_aligned: penalize non-cardinal angles
-        align_weight = request.seeder_overrides.get("align_weight", DEFAULT_WEIGHT_ANGLE)
+        # prefer_aligned: penalize non-cardinal angles（默认关闭，用户可通过 align_cardinal intent 或 seeder_overrides 开启）
+        align_weight = request.seeder_overrides.get("align_weight", 0)
         if align_weight > 0:
             constraints.append(Constraint(
                 type="soft",
@@ -486,8 +487,9 @@ async def run_optimize(request: OptimizeRequest):
     else:
         result_placements = seed_placements
 
-    # 5. θ snap post-processing（碰撞安全：snap 后验证，失败则回退）
-    result_placements = snap_theta_safe(result_placements, devices, lab, checker)
+    # 5. θ snap post-processing（opt-in，默认关闭）
+    if request.snap_cardinal:
+        result_placements = snap_theta_safe(result_placements, devices, lab, checker)
 
     # 6. Evaluate final cost (binary mode for pass/fail reporting)
     final_cost = evaluate_default_hard_constraints(
