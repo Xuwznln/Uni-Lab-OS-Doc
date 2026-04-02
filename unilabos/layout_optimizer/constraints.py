@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import TYPE_CHECKING
 
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
     from typing import Any
 
     from .interfaces import CollisionChecker, ReachabilityChecker
+
+logger = logging.getLogger(__name__)
 
 # 归一化默认权重 — 1cm距离违规 ≈ 5°角度违规 的惩罚量级
 DEFAULT_WEIGHT_DISTANCE: float = 100.0   # 1cm → penalty 1.0
@@ -175,10 +178,7 @@ def _evaluate_single(
     params = constraint.params
     is_hard = constraint.type == "hard"
 
-    # 根据优先级等级计算有效权重
     effective_weight = constraint.weight
-    if constraint.priority and constraint.priority in PRIORITY_MULTIPLIERS:
-        effective_weight *= PRIORITY_MULTIPLIERS[constraint.priority]
 
     if rule == "no_collision":
         checker_placements = _to_checker_format_from_maps(device_map, placement_map)
@@ -208,8 +208,9 @@ def _evaluate_single(
         max_dist = params["distance"]
         da, db = device_map.get(a_id), device_map.get(b_id)
         pa, pb = placement_map.get(a_id), placement_map.get(b_id)
-        if pa is None or pb is None:
-            return 0.0
+        missing_cost = _missing_reference_cost(constraint, placement_map, a_id, b_id)
+        if missing_cost is not None:
+            return missing_cost
         if da and db:
             dist = _device_distance_obb(da, pa, db, pb)
         else:
@@ -226,8 +227,9 @@ def _evaluate_single(
         min_dist = params["distance"]
         da, db = device_map.get(a_id), device_map.get(b_id)
         pa, pb = placement_map.get(a_id), placement_map.get(b_id)
-        if pa is None or pb is None:
-            return 0.0
+        missing_cost = _missing_reference_cost(constraint, placement_map, a_id, b_id)
+        if missing_cost is not None:
+            return missing_cost
         if da and db:
             dist = _device_distance_obb(da, pa, db, pb)
         else:
@@ -243,8 +245,9 @@ def _evaluate_single(
         a_id, b_id = params["device_a"], params["device_b"]
         da, db = device_map.get(a_id), device_map.get(b_id)
         pa, pb = placement_map.get(a_id), placement_map.get(b_id)
-        if pa is None or pb is None:
-            return 0.0
+        missing_cost = _missing_reference_cost(constraint, placement_map, a_id, b_id)
+        if missing_cost is not None:
+            return missing_cost
         if da and db:
             dist = _device_distance_obb(da, pa, db, pb)
         else:
@@ -255,8 +258,9 @@ def _evaluate_single(
         a_id, b_id = params["device_a"], params["device_b"]
         da, db = device_map.get(a_id), device_map.get(b_id)
         pa, pb = placement_map.get(a_id), placement_map.get(b_id)
-        if pa is None or pb is None:
-            return 0.0
+        missing_cost = _missing_reference_cost(constraint, placement_map, a_id, b_id)
+        if missing_cost is not None:
+            return missing_cost
         if da and db:
             dist = _device_distance_obb(da, pa, db, pb)
         else:
@@ -293,8 +297,11 @@ def _evaluate_single(
         target_device_id = params["target_device_id"]
         arm_p = placement_map.get(arm_id)
         target_p = placement_map.get(target_device_id)
-        if arm_p is None or target_p is None:
-            return 0.0
+        missing_cost = _missing_reference_cost(
+            constraint, placement_map, arm_id, target_device_id,
+        )
+        if missing_cost is not None:
+            return missing_cost
         arm_dev = device_map.get(arm_id)
         target_dev = device_map.get(target_device_id)
 
@@ -546,17 +553,34 @@ def evaluate_constraints_breakdown(
             c, device_map, placement_map, lab, collision_checker, reachability_checker,
             graduated=True,
         )
-        ew = c.weight
-        if c.priority and c.priority in PRIORITY_MULTIPLIERS:
-            ew *= PRIORITY_MULTIPLIERS[c.priority]
         results.append({
             "name": _constraint_display_name(c),
             "rule": c.rule_name,
             "type": c.type,
             "cost": cost,
-            "weight": ew,
+            "weight": c.weight,
         })
     return results
+
+
+def _missing_reference_cost(
+    constraint: Constraint,
+    placement_map: dict[str, Placement],
+    *device_ids: str,
+) -> float | None:
+    """当约束引用不存在的设备时返回对应 cost。"""
+    missing = sorted({device_id for device_id in device_ids if device_id not in placement_map})
+    if not missing:
+        return None
+
+    logger.warning(
+        "Constraint %s references missing device IDs: %s",
+        constraint.rule_name,
+        ", ".join(missing),
+    )
+    if constraint.type == "hard":
+        return math.inf
+    return 0.0
 
 
 def _constraint_display_name(c: Constraint) -> str:

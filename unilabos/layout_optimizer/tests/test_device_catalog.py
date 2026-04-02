@@ -181,6 +181,18 @@ class TestCreateDevicesFromList:
         devs = create_devices_from_list(specs)
         assert devs[0].bbox != (0.6, 0.4)  # 使用 footprints 中的真实尺寸
 
+    def test_duplicate_catalog_ids_use_suffixes_and_store_uuid(self):
+        specs = [
+            {"id": "opentrons_liquid_handler", "uuid": "u1"},
+            {"id": "opentrons_liquid_handler", "uuid": "u2"},
+        ]
+        devs = create_devices_from_list(specs)
+        assert [dev.id for dev in devs] == [
+            "opentrons_liquid_handler",
+            "opentrons_liquid_handler#2",
+        ]
+        assert [dev.uuid for dev in devs] == ["u1", "u2"]
+
 
 # ---------- server endpoint (需要 httpx) ----------
 

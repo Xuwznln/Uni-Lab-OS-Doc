@@ -9,6 +9,7 @@ footprints.json 由 extract_footprints.py 生成，包含碰撞包围盒、开�
 
 from __future__ import annotations
 
+from collections import Counter
 import json
 import logging
 from pathlib import Path
@@ -262,11 +263,17 @@ def create_devices_from_list(
     """
     footprints = load_footprints()
     devices = []
+    catalog_counts = Counter(spec["id"] for spec in device_specs)
+    catalog_seen: Counter[str] = Counter()
+
     for spec in device_specs:
         catalog_id = spec["id"]
-        # Use uuid as internal ID when available to ensure uniqueness
-        # (multiple instances of the same catalog device get different IDs)
-        dev_id = spec.get("uuid") or catalog_id
+        catalog_seen[catalog_id] += 1
+        instance_idx = catalog_seen[catalog_id]
+        if catalog_counts[catalog_id] > 1 and instance_idx > 1:
+            dev_id = f"{catalog_id}#{instance_idx}"
+        else:
+            dev_id = catalog_id
         size = spec.get("size")
         if size:
             bbox = (float(size[0]), float(size[1]))
@@ -289,6 +296,7 @@ def create_devices_from_list(
                 bbox=bbox,
                 device_type=spec.get("device_type", "static"),
                 openings=openings,
+                uuid=spec.get("uuid", ""),
             )
         )
     return devices

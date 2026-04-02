@@ -53,6 +53,7 @@ You MUST output a JSON object with an `intents` array. Each intent has:
 }
 ```
 **Priority:** `"low"` (nice-to-have), `"medium"` (default), `"high"` (critical for workflow speed)
+Priority is only part of the intent input. The interpreter automatically bakes it into the emitted constraint `weight`; there is no separate constraint-level `priority` field in `/interpret` output or `/optimize` input.
 
 ### `far_apart` — Devices should be separated
 ```json
@@ -65,6 +66,18 @@ You MUST output a JSON object with an `intents` array. Each intent has:
 }
 ```
 **When to use:** Thermal interference, contamination risk, safety separation.
+
+### `keep_adjacent` — Devices should stay adjacent
+```json
+{
+  "intent": "keep_adjacent",
+  "params": {
+    "devices": ["device_a", "device_b"],
+    "priority": "high"
+  }
+}
+```
+**When to use:** User explicitly asks for a pair or group to stay side-by-side / adjacent. This currently maps to the same optimizer behavior as `close_together`, but is semantically more precise.
 
 ### `max_distance` — Hard limit on maximum distance
 ```json
@@ -146,6 +159,20 @@ Devices in scene:
 4. **Type match**: "robot arm" / "the arm" → look for `device_type: articulation`
 5. **Ambiguous**: If multiple devices could match, list candidates in the `description` field and pick the most likely one. If truly ambiguous, return an error intent asking the user to clarify.
 
+### Duplicate Device Convention
+
+When the same catalog device appears multiple times in the scene:
+
+- first instance keeps the bare catalog ID, e.g. `plate_reader`
+- second and later instances use `#N`, e.g. `plate_reader#2`, `plate_reader#3`
+- a bare ID in an intent fans out to all instances
+- a suffixed ID applies only to that specific instance
+
+Examples:
+
+- `{"devices": ["plate_reader", "storage_hotel"]}` applies to every `plate_reader` instance
+- `{"devices": ["plate_reader#2", "storage_hotel"]}` applies only to the second instance
+
 ### Example Resolution
 
 User says: "the robot should reach the PCR machine and the liquid handler"
@@ -167,6 +194,7 @@ When a user describes a process (e.g., "prepare samples, then run PCR, then seal
 
 ### 3. Implicit Constraints
 - If devices frequently exchange items → `close_together` (high priority)
+- If user explicitly says "keep these adjacent", "side by side", or "next to each other" → `keep_adjacent`
 - If a robot arm is mentioned "in between" → `reachable_by` for all involved devices
 - If user says "short transit" or "fast transfer" → `close_together` with `"priority": "high"`
 - If user says "keep X away from Y" → `far_apart` or `min_distance`

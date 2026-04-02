@@ -1,7 +1,7 @@
 """Regression tests for V2 Stage 1 bugfixes.
 
 Covers:
-- Duplicate device ID stacking (uuid-based internal IDs)
+- Duplicate device ID stacking (catalog ID + #N internal IDs)
 - DE orientation preservation (prefer_orientation_mode constraint)
 - prefer_aligned auto-injection and adjustability
 - Preset switch reorientation
@@ -101,16 +101,18 @@ class TestDuplicateDeviceIDs:
                                            graduated=False)
         assert math.isinf(cost_binary)
 
-    def test_create_devices_uses_uuid(self):
-        """create_devices_from_list should use uuid as Device.id."""
+    def test_create_devices_uses_catalog_id_with_suffixes(self):
+        """create_devices_from_list should keep catalog IDs and suffix duplicates."""
         from ..device_catalog import create_devices_from_list
         specs = [
             {"id": "opentrons_liquid_handler", "uuid": "abc-123"},
             {"id": "opentrons_liquid_handler", "uuid": "def-456"},
         ]
         devices = create_devices_from_list(specs)
-        assert devices[0].id == "abc-123"
-        assert devices[1].id == "def-456"
+        assert devices[0].id == "opentrons_liquid_handler"
+        assert devices[1].id == "opentrons_liquid_handler#2"
+        assert devices[0].uuid == "abc-123"
+        assert devices[1].uuid == "def-456"
         # Both should have the same bbox from footprints
         assert devices[0].bbox == devices[1].bbox
 

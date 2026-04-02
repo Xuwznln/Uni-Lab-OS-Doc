@@ -6,11 +6,22 @@ import itertools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from .constraints import PRIORITY_MULTIPLIERS
 from .models import Constraint, Intent
 
 # 优先级权重映射
 _PRIORITY_WEIGHTS: dict[str, float] = {"low": 1.0, "medium": 3.0, "high": 8.0}
 _DEFAULT_WEIGHT = _PRIORITY_WEIGHTS["medium"]
+
+
+def _priority_key(priority: str) -> str:
+    """将 intent priority 映射到 constraint 权重等级。"""
+    return "normal" if priority == "medium" else priority
+
+
+def _final_weight(base_weight: float, priority: str) -> float:
+    """在解释阶段直接烘焙优先级乘数。"""
+    return base_weight * PRIORITY_MULTIPLIERS.get(priority, 1.0)
 
 
 @dataclass
@@ -41,7 +52,7 @@ def _handle_reachable_by(intent: Intent, result: InterpretResult) -> None:
             type="hard",
             rule_name="reachability",
             params={"arm_id": arm, "target_device_id": target},
-            priority="critical",
+            weight=_final_weight(1.0, "critical"),
         )
         result.constraints.append(c)
         generated.append({"type": c.type, "rule_name": c.rule_name, "params": c.params, "weight": c.weight})
@@ -64,9 +75,10 @@ def _handle_close_together(intent: Intent, result: InterpretResult) -> None:
         result.errors.append(f"close_together: 参数 'devices' 至少需要 2 个设备，当前 {len(devices)} 个")
         return
 
-    weight = _PRIORITY_WEIGHTS.get(priority, _DEFAULT_WEIGHT)
-    # 映射 intent priority 到 constraint priority 等级
-    constraint_priority = "high" if priority == "high" else "normal"
+    weight = _final_weight(
+        _PRIORITY_WEIGHTS.get(priority, _DEFAULT_WEIGHT),
+        _priority_key(priority),
+    )
     generated: list[dict] = []
     for dev_a, dev_b in itertools.combinations(devices, 2):
         c = Constraint(
@@ -74,7 +86,6 @@ def _handle_close_together(intent: Intent, result: InterpretResult) -> None:
             rule_name="minimize_distance",
             params={"device_a": dev_a, "device_b": dev_b},
             weight=weight,
-            priority=constraint_priority,
         )
         result.constraints.append(c)
         generated.append({"type": c.type, "rule_name": c.rule_name, "params": c.params, "weight": c.weight})
@@ -97,9 +108,10 @@ def _handle_far_apart(intent: Intent, result: InterpretResult) -> None:
         result.errors.append(f"far_apart: 参数 'devices' 至少需要 2 个设备，当前 {len(devices)} 个")
         return
 
-    weight = _PRIORITY_WEIGHTS.get(priority, _DEFAULT_WEIGHT)
-    # 映射 intent priority 到 constraint priority 等级
-    constraint_priority = "high" if priority == "high" else "normal"
+    weight = _final_weight(
+        _PRIORITY_WEIGHTS.get(priority, _DEFAULT_WEIGHT),
+        _priority_key(priority),
+    )
     generated: list[dict] = []
     for dev_a, dev_b in itertools.combinations(devices, 2):
         c = Constraint(
@@ -107,7 +119,6 @@ def _handle_far_apart(intent: Intent, result: InterpretResult) -> None:
             rule_name="maximize_distance",
             params={"device_a": dev_a, "device_b": dev_b},
             weight=weight,
-            priority=constraint_priority,
         )
         result.constraints.append(c)
         generated.append({"type": c.type, "rule_name": c.rule_name, "params": c.params, "weight": c.weight})
@@ -138,7 +149,7 @@ def _handle_max_distance(intent: Intent, result: InterpretResult) -> None:
         type="hard",
         rule_name="distance_less_than",
         params={"device_a": device_a, "device_b": device_b, "distance": distance},
-        priority="normal",
+        weight=_final_weight(1.0, "normal"),
     )
     result.constraints.append(c)
 
@@ -168,7 +179,7 @@ def _handle_min_distance(intent: Intent, result: InterpretResult) -> None:
         type="hard",
         rule_name="distance_greater_than",
         params={"device_a": device_a, "device_b": device_b, "distance": distance},
-        priority="normal",
+        weight=_final_weight(1.0, "normal"),
     )
     result.constraints.append(c)
 
@@ -189,7 +200,7 @@ def _handle_min_spacing(intent: Intent, result: InterpretResult) -> None:
         type="hard",
         rule_name="min_spacing",
         params={"min_gap": min_gap},
-        priority="high",
+        weight=_final_weight(1.0, "high"),
     )
     result.constraints.append(c)
 
@@ -208,7 +219,7 @@ def _handle_face_outward(intent: Intent, result: InterpretResult) -> None:
         type="soft",
         rule_name="prefer_orientation_mode",
         params={"mode": "outward"},
-        priority="low",
+        weight=_final_weight(1.0, "low"),
     )
     result.constraints.append(c)
 
@@ -227,7 +238,7 @@ def _handle_face_inward(intent: Intent, result: InterpretResult) -> None:
         type="soft",
         rule_name="prefer_orientation_mode",
         params={"mode": "inward"},
-        priority="low",
+        weight=_final_weight(1.0, "low"),
     )
     result.constraints.append(c)
 
@@ -246,7 +257,7 @@ def _handle_align_cardinal(intent: Intent, result: InterpretResult) -> None:
         type="soft",
         rule_name="prefer_aligned",
         params={},
-        priority="low",
+        weight=_final_weight(1.0, "low"),
     )
     result.constraints.append(c)
 
@@ -268,9 +279,10 @@ def _handle_keep_adjacent(intent: Intent, result: InterpretResult) -> None:
         result.errors.append(f"keep_adjacent: 参数 'devices' 至少需要 2 个设备，当前 {len(devices)} 个")
         return
 
-    weight = _PRIORITY_WEIGHTS.get(priority, _DEFAULT_WEIGHT)
-    # 映射 intent priority 到 constraint priority 等级
-    constraint_priority = "high" if priority == "high" else "normal"
+    weight = _final_weight(
+        _PRIORITY_WEIGHTS.get(priority, _DEFAULT_WEIGHT),
+        _priority_key(priority),
+    )
     generated: list[dict] = []
     for dev_a, dev_b in itertools.combinations(devices, 2):
         c = Constraint(
@@ -278,7 +290,6 @@ def _handle_keep_adjacent(intent: Intent, result: InterpretResult) -> None:
             rule_name="minimize_distance",
             params={"device_a": dev_a, "device_b": dev_b},
             weight=weight,
-            priority=constraint_priority,
         )
         result.constraints.append(c)
         generated.append({"type": c.type, "rule_name": c.rule_name, "params": c.params, "weight": c.weight})
@@ -309,7 +320,7 @@ def _handle_workflow_hint(intent: Intent, result: InterpretResult) -> None:
             type="soft",
             rule_name="minimize_distance",
             params={"device_a": dev_a, "device_b": dev_b},
-            priority="normal",
+            weight=_final_weight(1.0, "normal"),
         )
         result.constraints.append(c)
         generated.append({"type": c.type, "rule_name": c.rule_name, "params": c.params, "weight": c.weight})
@@ -336,6 +347,7 @@ _HANDLERS: dict[str, Callable[[Intent, InterpretResult], None]] = {
     "face_outward": _handle_face_outward,
     "face_inward": _handle_face_inward,
     "align_cardinal": _handle_align_cardinal,
+    "keep_adjacent": _handle_keep_adjacent,
     "workflow_hint": _handle_workflow_hint,
 }
 

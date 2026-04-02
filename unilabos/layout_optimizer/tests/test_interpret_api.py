@@ -103,7 +103,7 @@ def test_interpret_schema_returns_all_intents():
     data = resp.json()
     intents = data["intents"]
     expected = {
-        "reachable_by", "close_together", "far_apart",
+        "reachable_by", "close_together", "far_apart", "keep_adjacent",
         "max_distance", "min_distance", "min_spacing",
         "workflow_hint", "face_outward", "face_inward", "align_cardinal",
     }

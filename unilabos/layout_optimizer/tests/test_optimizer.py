@@ -313,6 +313,96 @@ def test_optimize_endpoint_accepts_angle_granularity_with_pcr_fixture():
         )
 
 
+def test_optimize_endpoint_binary_reachability_uses_checker():
+    """Final binary evaluation should fail when hard reachability is impossible."""
+    resp = _post_app("/optimize", {
+        "devices": [
+            {"id": "arm_slider", "name": "Arm", "device_type": "articulation", "size": [1.0, 0.2]},
+            {"id": "opentrons_liquid_handler", "name": "Target", "size": [0.6, 0.5]},
+        ],
+        "lab": {"width": 8.0, "depth": 4.0},
+        "constraints": [
+            {
+                "type": "hard",
+                "rule_name": "reachability",
+                "params": {
+                    "arm_id": "arm_slider",
+                    "target_device_id": "opentrons_liquid_handler",
+                },
+                "weight": 1.0,
+            }
+        ],
+        "seeder": "row_fallback",
+        "run_de": False,
+        "arm_reach": {"arm_slider": 0.0},
+    })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is False
+    assert data["cost"] is None or not math.isfinite(data["cost"])
+
+
+def test_expand_constraints_for_duplicates_fans_out_bare_catalog_ids():
+    """Bare catalog IDs should expand to all duplicate instances."""
+    from ..device_catalog import create_devices_from_list
+    from ..server import _expand_constraints_for_duplicates
+
+    devices = create_devices_from_list([
+        {"id": "opentrons_liquid_handler", "uuid": "u1"},
+        {"id": "opentrons_liquid_handler", "uuid": "u2"},
+        {"id": "arm_slider", "uuid": "arm-u1"},
+    ])
+    constraints = [
+        Constraint(
+            type="hard",
+            rule_name="reachability",
+            params={"arm_id": "arm_slider", "target_device_id": "opentrons_liquid_handler"},
+        )
+    ]
+
+    expanded = _expand_constraints_for_duplicates(constraints, devices)
+
+    assert len(expanded) == 2
+    assert {c.params["target_device_id"] for c in expanded} == {
+        "opentrons_liquid_handler",
+        "opentrons_liquid_handler#2",
+    }
+    assert all(c.params["arm_id"] == "arm_slider" for c in expanded)
+
+
+def test_maybe_add_prefer_aligned_constraint_skips_existing():
+    """Explicit prefer_aligned should win over server auto-injection."""
+    from ..server import _maybe_add_prefer_aligned_constraint
+
+    constraints = [Constraint(type="soft", rule_name="prefer_aligned", weight=0.5)]
+    result = _maybe_add_prefer_aligned_constraint(constraints, 3.0)
+
+    assert result is constraints
+    assert [c.weight for c in result if c.rule_name == "prefer_aligned"] == [0.5]
+
+
+def test_optimize_endpoint_duplicate_instances_return_catalog_id_and_unique_uuid():
+    """Duplicate catalog devices should round-trip with shared catalog ID and distinct UUIDs."""
+    resp = _post_app("/optimize", {
+        "devices": [
+            {"id": "opentrons_liquid_handler", "uuid": "u1"},
+            {"id": "opentrons_liquid_handler", "uuid": "u2"},
+        ],
+        "lab": {"width": 3.0, "depth": 3.0},
+        "seeder": "row_fallback",
+        "run_de": False,
+    })
+
+    assert resp.status_code == 200
+    placements = resp.json()["placements"]
+    assert [p["device_id"] for p in placements] == [
+        "opentrons_liquid_handler",
+        "opentrons_liquid_handler",
+    ]
+    assert {p["uuid"] for p in placements} == {"u1", "u2"}
+
+
 def test_full_pipeline_seed_only():
     """Full pipeline: seeder → snap_theta → correct count and bounds.
 

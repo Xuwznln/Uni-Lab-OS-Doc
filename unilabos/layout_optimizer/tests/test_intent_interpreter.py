@@ -53,6 +53,8 @@ def test_close_together_priority_scales_weight():
     low = interpret_intents([Intent(intent="close_together", params={"devices": ["a", "b"], "priority": "low"})])
     high = interpret_intents([Intent(intent="close_together", params={"devices": ["a", "b"], "priority": "high"})])
     assert high.constraints[0].weight > low.constraints[0].weight
+    assert high.constraints[0].weight == pytest.approx(16.0)
+    assert low.constraints[0].weight == pytest.approx(0.5)
 
 
 def test_close_together_single_device_error():
@@ -124,6 +126,17 @@ def test_face_inward():
 def test_align_cardinal():
     result = interpret_intents([Intent(intent="align_cardinal")])
     assert result.constraints[0].rule_name == "prefer_aligned"
+    assert result.constraints[0].weight == pytest.approx(0.5)
+
+
+def test_keep_adjacent_generates_minimize_distance():
+    result = interpret_intents([Intent(intent="keep_adjacent", params={
+        "devices": ["opentrons_liquid_handler", "agilent_plateloc"],
+        "priority": "high",
+    })])
+    assert len(result.constraints) == 1
+    assert result.constraints[0].rule_name == "minimize_distance"
+    assert result.constraints[0].weight == pytest.approx(16.0)
 
 
 # --- min_spacing ---

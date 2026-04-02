@@ -33,6 +33,7 @@ class Device:
     model_path: str = ""
     model_type: str = ""
     thumbnail_url: str = ""
+    uuid: str = ""
 
 
 @dataclass
@@ -84,8 +85,6 @@ class Constraint:
     params: dict = field(default_factory=dict)
     # 仅 soft 约束使用
     weight: float = 1.0
-    # 优先级等级，影响有效权重的乘数
-    priority: str | None = None  # "critical" | "high" | "normal" | "low"
 
 
 @dataclass

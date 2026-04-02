@@ -167,13 +167,14 @@ Returns `{"status": "ok"}`.
 
 ---
 
-## 3. Intent Types (10 total)
+## 3. Intent Types (11 total)
 
 | Intent | Params | Generates | Type |
 |--------|--------|-----------|------|
 | `reachable_by` | `arm` (str), `targets` (list[str]) | `reachability` per target | hard |
 | `close_together` | `devices` (list[str]), `priority` (low/medium/high) | `minimize_distance` per pair | soft |
 | `far_apart` | `devices` (list[str]), `priority` | `maximize_distance` per pair | soft |
+| `keep_adjacent` | `devices` (list[str]), `priority` | `minimize_distance` per pair | soft |
 | `max_distance` | `device_a`, `device_b`, `distance` (float m) | `distance_less_than` | hard |
 | `min_distance` | `device_a`, `device_b`, `distance` (float m) | `distance_greater_than` | hard |
 | `min_spacing` | `min_gap` (float m, default 0.3) | `min_spacing` | hard |
@@ -182,7 +183,7 @@ Returns `{"status": "ok"}`.
 | `face_inward` | (none) | `prefer_orientation_mode` inward | soft |
 | `align_cardinal` | (none) | `prefer_aligned` | soft |
 
-Priority weights: `low=1.0`, `medium=3.0`, `high=8.0`.
+Intent priorities are baked into the final emitted constraint `weight` during interpretation. The caller only sees the resulting weight, not a separate constraint-level priority field.
 
 ---
 
