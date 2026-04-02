@@ -16,7 +16,7 @@ from .obb import (
     obb_corners,
     obb_min_distance,
     obb_penetration_depth,
-    segment_intersects_obb,
+    segment_obb_intersection_length,
 )
 
 if TYPE_CHECKING:
@@ -298,10 +298,7 @@ def _evaluate_single(
         arm_dev = device_map.get(arm_id)
         target_dev = device_map.get(target_device_id)
 
-        # Distance from target's opening surface center to nearest point on arm OBB.
-        # This naturally enforces orientation: a device facing away has its opening
-        # far from the arm, so it fails reachability without needing a separate
-        # facing penalty.
+        # opening surface center → nearest point on arm OBB
         if arm_dev and target_dev:
             opening_pt = _opening_surface_center(target_dev, target_p)
             arm_corners = obb_corners(
@@ -310,7 +307,16 @@ def _evaluate_single(
             nearest = nearest_point_on_obb(opening_pt[0], opening_pt[1], arm_corners)
             dist = math.sqrt((opening_pt[0] - nearest[0])**2 + (opening_pt[1] - nearest[1])**2)
         else:
+            opening_pt = (target_p.x, target_p.y)
+            nearest = (arm_p.x, arm_p.y)
             dist = _device_distance_center(arm_p, target_p) or 0.0
+
+        # 交叉惩罚始终计算（soft, 不依赖可达性结果）
+        crossing_cost = _crossing_penalty(
+            opening_pt, nearest,
+            arm_id, target_device_id,
+            device_map, placement_map,
+        )
 
         arm_pose = {"x": arm_p.x, "y": arm_p.y, "theta": arm_p.theta}
         target_point = {"x": target_p.x, "y": target_p.y, "z": 0.0}
@@ -318,19 +324,13 @@ def _evaluate_single(
         if not reachability_checker.is_reachable(arm_id, arm_pose, target_point):
             if is_hard and not graduated:
                 return math.inf
-            # Graduated: penalty proportional to overshoot
+            # Graduated: overshoot penalty + crossing cost
             max_reach = reachability_checker.arm_reach.get(arm_id, 2.0)
             overshoot = max(0.0, dist - max_reach)
             w = effective_weight * (HARD_MULTIPLIER if is_hard else 1.0)
-            return w * overshoot * 10.0
+            return w * overshoot * 10.0 + crossing_cost
 
-        # Line-of-sight penalty: penalize if any other device OBB blocks
-        # the path from opening to arm
-        los_cost = _line_of_sight_penalty(
-            arm_id, arm_p, target_device_id, target_p,
-            device_map, placement_map, effective_weight,
-        )
-        return los_cost
+        return crossing_cost
 
     if rule == "prefer_aligned":
         alignment_cost = sum(
@@ -576,23 +576,19 @@ def _constraint_display_name(c: Constraint) -> str:
     return c.rule_name
 
 
-def _line_of_sight_penalty(
+def _crossing_penalty(
+    opening_pt: tuple[float, float],
+    arm_nearest_pt: tuple[float, float],
     arm_id: str,
-    arm_p: Placement,
     target_id: str,
-    target_p: Placement,
     device_map: dict[str, Device],
     placement_map: dict[str, Placement],
-    weight: float,
 ) -> float:
-    """Penalty for other devices blocking the line from target to arm center.
+    """交叉惩罚：其他设备 OBB 遮挡 opening→arm 路径的长度加权 penalty。
 
-    For each other device whose OBB intersects the segment (target_center → arm_center),
-    adds a penalty proportional to the weight. This encourages layouts where
-    the arm has a clear path to each target.
+    Soft penalty，权重 = DEFAULT_WEIGHT_DISTANCE * 穿过各遮挡设备 OBB 的线段长度之和。
+    始终生效（不论可达性是否通过），为 DE 提供清晰的梯度信号。
     """
-    p1 = (target_p.x, target_p.y)
-    p2 = (arm_p.x, arm_p.y)
     cost = 0.0
     for dev_id, p in placement_map.items():
         if dev_id == arm_id or dev_id == target_id:
@@ -601,6 +597,6 @@ def _line_of_sight_penalty(
         if dev is None:
             continue
         corners = obb_corners(p.x, p.y, dev.bbox[0], dev.bbox[1], p.theta)
-        if segment_intersects_obb(p1, p2, corners):
-            cost += weight * 2.0  # penalty per blocking device
+        crossing_len = segment_obb_intersection_length(opening_pt, arm_nearest_pt, corners)
+        cost += DEFAULT_WEIGHT_DISTANCE * crossing_len
     return cost
