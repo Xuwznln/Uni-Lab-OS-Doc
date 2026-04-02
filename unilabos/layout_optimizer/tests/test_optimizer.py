@@ -1,12 +1,45 @@
 """差分进化优化器端到端测试。"""
 
+import asyncio
 import math
 
+import httpx
 from ..mock_checkers import MockCollisionChecker
-from ..models import Device, Lab, Placement
+from ..models import Constraint, Device, Lab, Placement
 import numpy as np
 import pytest
-from ..optimizer import _run_de, optimize, snap_theta
+from ..optimizer import _angle_sweep_once, _run_de, optimize, snap_theta
+
+
+def _is_on_angle_lattice(theta: float, granularity: int) -> bool:
+    """检查 theta 是否落在离散角度格点上。"""
+    step = 2 * math.pi / granularity
+    theta_mod = theta % (2 * math.pi)
+    quotient = theta_mod / step
+    return abs(quotient - round(quotient)) < 1e-6
+
+
+PCR_DEVICES = [
+    {"id": "thermo_orbitor_rs2_hotel", "name": "Plate Hotel", "device_type": "static"},
+    {"id": "arm_slider", "name": "Robot Arm", "device_type": "articulation"},
+    {"id": "opentrons_liquid_handler", "name": "Liquid Handler", "device_type": "static"},
+    {"id": "agilent_plateloc", "name": "Plate Sealer", "device_type": "static"},
+    {"id": "inheco_odtc_96xl", "name": "Thermal Cycler", "device_type": "static"},
+]
+
+PCR_LAB = {"width": 6.0, "depth": 4.0}
+
+
+def _post_app(path: str, payload: dict) -> httpx.Response:
+    """通过 ASGITransport 调用应用，避免 TestClient 在沙箱中卡住。"""
+    from ..server import app
+
+    async def _run() -> httpx.Response:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.post(path, json=payload)
+
+    return asyncio.run(_run())
 
 
 def test_optimize_three_devices_no_collision():
@@ -150,6 +183,18 @@ def test_optimize_endpoint_unknown_seeder_returns_400():
     assert resp.status_code == 400
 
 
+def test_optimize_endpoint_invalid_angle_granularity_returns_400():
+    """Unsupported angle_granularity should be rejected."""
+    resp = _post_app("/optimize", {
+        "devices": [{"id": "test_device", "name": "Test"}],
+        "lab": {"width": 5, "depth": 4},
+        "run_de": True,
+        "angle_granularity": 6,
+    })
+    assert resp.status_code == 400
+    assert "angle_granularity" in resp.json()["detail"]
+
+
 def test_optimize_endpoint_backward_compatible():
     """Existing calls without seeder/run_de fields still work."""
     from fastapi.testclient import TestClient
@@ -164,6 +209,108 @@ def test_optimize_endpoint_backward_compatible():
     data = resp.json()
     assert "seeder_used" in data
     assert "de_ran" in data
+
+
+def test_optimize_none_angle_granularity_matches_default():
+    """Explicit None should keep the continuous-theta path unchanged."""
+    devices = [
+        Device(id="a", name="A", bbox=(0.8, 0.6)),
+        Device(id="b", name="B", bbox=(0.6, 0.5)),
+        Device(id="c", name="C", bbox=(0.5, 0.5)),
+    ]
+    lab = Lab(width=5.0, depth=5.0)
+    seed_placements = [
+        Placement(device_id="a", x=1.0, y=1.0, theta=0.13),
+        Placement(device_id="b", x=2.2, y=1.5, theta=1.21),
+        Placement(device_id="c", x=3.4, y=3.2, theta=2.42),
+    ]
+
+    baseline = optimize(
+        devices, lab, seed_placements=seed_placements,
+        seed=42, maxiter=40, popsize=8,
+    )
+    explicit_none = optimize(
+        devices, lab, seed_placements=seed_placements,
+        seed=42, maxiter=40, popsize=8, angle_granularity=None,
+    )
+
+    assert len(baseline) == len(explicit_none)
+    for p_base, p_none in zip(baseline, explicit_none):
+        assert p_base.device_id == p_none.device_id
+        assert p_base.x == pytest.approx(p_none.x)
+        assert p_base.y == pytest.approx(p_none.y)
+        assert p_base.theta == pytest.approx(p_none.theta)
+
+
+def test_angle_sweep_picks_lowest_cost_lattice_angle():
+    """逐设备离散扫描应选出当前最优格点角度。"""
+    devices = [Device(id="a", name="A", bbox=(0.8, 0.6))]
+    lab = Lab(width=4.0, depth=4.0)
+    placements = [Placement(device_id="a", x=2.0, y=2.0, theta=math.pi / 4)]
+    constraints = [Constraint(type="soft", rule_name="prefer_aligned", weight=10.0)]
+    angles = [0.0, math.pi / 2, math.pi, 3 * math.pi / 2]
+
+    swept, cost, changed = _angle_sweep_once(
+        devices=devices,
+        placements=placements,
+        angles=angles,
+        lab=lab,
+        constraints=constraints,
+        collision_checker=MockCollisionChecker(),
+        reachability_checker=None,
+    )
+
+    assert changed is True
+    assert swept[0].theta == pytest.approx(0.0)
+    assert cost == pytest.approx(0.0, abs=1e-6)
+
+
+def test_optimize_angle_granularity_returns_lattice_thetas():
+    """Hybrid mode should keep all returned thetas on the chosen lattice."""
+    devices = [
+        Device(id="a", name="A", bbox=(0.8, 0.6)),
+        Device(id="b", name="B", bbox=(0.6, 0.5)),
+        Device(id="c", name="C", bbox=(0.5, 0.5)),
+    ]
+    lab = Lab(width=5.0, depth=5.0)
+    seed_placements = [
+        Placement(device_id="a", x=1.0, y=1.0, theta=0.13),
+        Placement(device_id="b", x=2.3, y=1.5, theta=1.21),
+        Placement(device_id="c", x=3.6, y=3.2, theta=2.42),
+    ]
+
+    placements = optimize(
+        devices, lab, seed_placements=seed_placements,
+        seed=42, maxiter=45, popsize=8, angle_granularity=4,
+    )
+
+    assert len(placements) == 3
+    for placement in placements:
+        assert _is_on_angle_lattice(placement.theta, 4), (
+            f"{placement.device_id} theta={placement.theta} not on 4-angle lattice"
+        )
+
+
+def test_optimize_endpoint_accepts_angle_granularity_with_pcr_fixture():
+    """POST /optimize should accept angle_granularity on the 5-device PCR fixture."""
+    resp = _post_app("/optimize", {
+        "devices": PCR_DEVICES,
+        "lab": PCR_LAB,
+        "seeder": "row_fallback",
+        "run_de": True,
+        "maxiter": 20,
+        "seed": 42,
+        "angle_granularity": 4,
+    })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["placements"]) == 5
+    assert data["de_ran"] is True
+    for placement in data["placements"]:
+        assert _is_on_angle_lattice(placement["rotation"]["z"], 4), (
+            f"{placement['device_id']} rotation.z={placement['rotation']['z']} not on lattice"
+        )
 
 
 def test_full_pipeline_seed_only():

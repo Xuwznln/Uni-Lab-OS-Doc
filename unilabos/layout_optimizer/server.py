@@ -409,6 +409,7 @@ class OptimizeRequest(BaseModel):
     maxiter: int = 200
     seed: int | None = None
     snap_cardinal: bool = False
+    angle_granularity: int | None = None
 
 
 class PositionXYZ(BaseModel):
@@ -443,14 +444,21 @@ async def run_optimize(request: OptimizeRequest):
     from .seeders import resolve_seeder_params, seed_layout
 
     logger.info(
-        "Optimize request: %d devices, lab %.1f×%.1f, %d constraints, seeder=%s, run_de=%s",
+        "Optimize request: %d devices, lab %.1f×%.1f, %d constraints, seeder=%s, run_de=%s, angle_granularity=%s",
         len(request.devices),
         request.lab.width,
         request.lab.depth,
         len(request.constraints),
         request.seeder,
         request.run_de,
+        request.angle_granularity,
     )
+
+    if request.angle_granularity not in (None, 4, 8, 12, 24):
+        raise HTTPException(
+            status_code=400,
+            detail="angle_granularity must be one of: 4, 8, 12, 24",
+        )
 
     # Build mapping: internal uuid-based id → (catalog_id, uuid)
     # create_devices_from_list uses uuid as Device.id when available
@@ -522,14 +530,20 @@ async def run_optimize(request: OptimizeRequest):
             maxiter=request.maxiter,
             seed=request.seed,
             workflow_edges=request.workflow_edges or None,
+            angle_granularity=request.angle_granularity,
         )
         de_ran = True
     else:
         result_placements = seed_placements
 
     # 5. θ snap post-processing（opt-in，默认关闭）
-    if request.snap_cardinal:
+    if request.snap_cardinal and request.angle_granularity is None:
         result_placements = snap_theta_safe(result_placements, devices, lab, checker)
+    elif request.snap_cardinal and request.angle_granularity is not None:
+        logger.info(
+            "snap_cardinal ignored because angle_granularity=%s already constrains theta",
+            request.angle_granularity,
+        )
 
     # 6. Evaluate final cost (binary mode for pass/fail reporting)
     final_cost = evaluate_default_hard_constraints(

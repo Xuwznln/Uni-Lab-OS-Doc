@@ -129,6 +129,7 @@ Returns all 10 intent types with parameter specs. LLM agent should call this bef
   "workflow_edges": [["device_a", "device_b"]],
   "seeder": "compact_outward",
   "run_de": true,
+  "angle_granularity": 4,
   "maxiter": 200,
   "seed": 42
 }
@@ -154,6 +155,7 @@ Returns all 10 intent types with parameter specs. LLM agent should call this bef
 ```
 
 `position`/`rotation` format matches Cloud's `CommonPositionType`. `rotation.z` is θ in radians.
+`angle_granularity` is optional and opt-in. Supported values are `4`, `8`, `12`, `24`. When set, the optimizer uses an angle-first hybrid mode: snap all device angles onto the global lattice, greedily sweep angles, then run DE on `x/y` only. `4` is the practical axis-aligned mode for tidy lab layouts.
 
 ### `GET /devices` — Device catalog
 
@@ -438,6 +440,7 @@ curl -X POST http://localhost:8000/optimize \
       ["agilent_plateloc", "inheco_odtc_96xl"]
     ],
     "run_de": true,
+    "angle_granularity": 4,
     "maxiter": 100,
     "seed": 42
   }' | python3 -m json.tool
