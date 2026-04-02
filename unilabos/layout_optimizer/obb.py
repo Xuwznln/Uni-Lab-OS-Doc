@@ -183,6 +183,56 @@ def _point_in_convex(
     return True
 
 
+def segment_obb_intersection_length(
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    corners: list[tuple[float, float]],
+) -> float:
+    """线段 p1-p2 与 OBB（凸多边形）的交集长度。
+
+    Cyrus-Beck 线段裁剪算法。corners 假定为 CCW 顺序（obb_corners 生成）。
+    无交集返回 0.0。
+    """
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    seg_len_sq = dx * dx + dy * dy
+    if seg_len_sq < 1e-24:
+        return 0.0
+
+    t_enter = 0.0
+    t_exit = 1.0
+    n = len(corners)
+
+    for i in range(n):
+        ax, ay = corners[i]
+        bx, by = corners[(i + 1) % n]
+        # CCW 多边形边的外法线: (ey, -ex), e = b - a
+        ex, ey = bx - ax, by - ay
+        nx, ny = ey, -ex
+
+        denom = nx * dx + ny * dy
+        numer = nx * (p1[0] - ax) + ny * (p1[1] - ay)
+
+        if abs(denom) < 1e-12:
+            if numer > 0:
+                return 0.0  # 在此边外侧且平行
+            continue
+
+        t = -numer / denom
+        if denom < 0:
+            t_enter = max(t_enter, t)   # 进入
+        else:
+            t_exit = min(t_exit, t)     # 退出
+
+        if t_enter > t_exit:
+            return 0.0
+
+    if t_enter >= t_exit:
+        return 0.0
+
+    return (t_exit - t_enter) * math.sqrt(seg_len_sq)
+
+
 def obb_min_distance(
     corners_a: list[tuple[float, float]],
     corners_b: list[tuple[float, float]],
