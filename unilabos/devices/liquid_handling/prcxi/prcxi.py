@@ -781,9 +781,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         rail_interval=0,
         x_increase = -0.003636,
         y_increase = -0.003636,
-        x_offset = 9.2,
-        y_offset = -27.98,
-        deck_z = 300,
+        x_offset = -1.8,
+        y_offset = -37.48,
+        deck_z = 309.5,
         deck_y = 400,
         rail_width=27.5,
         xy_coupling = -0.0045,
@@ -798,7 +798,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self.y_offset = y_offset
         self.xy_coupling = xy_coupling
         self.left_2_claw = Coordinate(-130.2, 34, -134)
-        self.right_2_left = Coordinate(22,-1, 8)
+        self.right_2_left = Coordinate(22,-1, 11)
         plate_positions = []
 
         tablets_info = []
@@ -930,7 +930,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         matrix_id = str(uuid.uuid4())
         matrix_info = {
             "MatrixId": matrix_id,
-            "MatrixName": matrix_id,
+            "MatrixName": "matrix_" + str(time.time()),
             "WorkTablets": work_tablets + 
                             [{"Number": number, "Material": {"uuid": "730067cf07ae43849ddf4034299030e9"}} for number in slot_none],
         }
@@ -1152,6 +1152,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             self._first_transfer_done = True
         if self.step_mode:
             await self.create_protocol(f"transfer_liquid{time.time()}")
+
+        _asp_list = asp_vols if isinstance(asp_vols, list) else [asp_vols]
+        _dis_list = dis_vols if isinstance(dis_vols, list) else [dis_vols]
+        if all(v <= 10.0 for v in _asp_list) and all(v <= 10.0 for v in _dis_list):
+            use_channels = [1]
+
         res =  await super().transfer_liquid(
             sources,
             targets,

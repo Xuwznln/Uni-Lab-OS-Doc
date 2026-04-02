@@ -23,6 +23,7 @@
                 "port": 9999,
                 "debug": false,
                 "setup": true,
+                "matrix_id": "1ecb1b45-6aef-456b-bd68-8f538c4e5826",
                 "timeout": 10,
                 "simulator": false,
                 "channel_num": 8

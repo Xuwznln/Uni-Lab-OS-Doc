@@ -489,7 +489,18 @@ class ResourceTreeSet(object):
         def resource_plr_inner(
             d: dict, parent_resource: Optional[ResourceDict], states: dict, uuids: list
         ) -> ResourceDictInstance:
-            current_uuid, parent_uuid, extra = uuids.pop(0)
+            if uuids:
+                current_uuid, parent_uuid, extra = uuids.pop(0)
+            else:
+                # serialize() 树比 res.children 树多出了节点（虚拟子节点等），兜底生成 UUID
+                current_uuid = str(uuid.uuid4())
+                parent_uuid = parent_resource.get("uuid") if isinstance(parent_resource, dict) else (
+                    getattr(parent_resource, "uuid", None) if parent_resource is not None else None
+                )
+                extra = {}
+                logger.warning(
+                    f"from_plr_resources: UUID 列表耗尽，为节点 '{d.get('name', '?')}' 生成临时 UUID {current_uuid}"
+                )
 
             raw_pos = (
                 {"x": d["location"]["x"], "y": d["location"]["y"], "z": d["location"]["z"]}

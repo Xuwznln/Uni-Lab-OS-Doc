@@ -1651,7 +1651,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         tip = []
         if pick_up:
             tip.append(self._get_next_tip())
-            await self.pick_up_tips(tip)
+            await self.pick_up_tips(tip,use_channels=use_channels)
         blow_out_air_volume_before_vol = 0.0
         if blow_out_air_volume_before is not None and len(blow_out_air_volume_before) > 0:
             blow_out_air_volume_before_vol = float(blow_out_air_volume_before[0] or 0.0)

@@ -210,7 +210,7 @@ def convert_from_json(
     data: Union[str, PathLike, Dict[str, Any]],
     workstation_name: str = DEFAULT_WORKSTATION,
     validate: bool = True,
-    preserve_tip_rack_incoming_class: bool = True,
+    preserve_tip_rack_incoming_class: bool = False,
 ) -> WorkflowGraph:
     """
     从 JSON 数据或文件转换为 WorkflowGraph
@@ -295,7 +295,7 @@ def convert_from_json(
 def convert_json_to_node_link(
     data: Union[str, PathLike, Dict[str, Any]],
     workstation_name: str = DEFAULT_WORKSTATION,
-    preserve_tip_rack_incoming_class: bool = True,
+    preserve_tip_rack_incoming_class: bool = False,
 ) -> Dict[str, Any]:
     """
     将 JSON 数据转换为 node-link 格式的字典

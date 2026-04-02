@@ -234,7 +234,7 @@ def convert_from_json(
     data: Union[str, PathLike, Dict[str, Any]],
     workstation_name: str = "PRCXi",
     validate: bool = True,
-    preserve_tip_rack_incoming_class: bool = True,
+    preserve_tip_rack_incoming_class: bool = False,
 ) -> WorkflowGraph:
     """
     从 JSON 数据或文件转换为 WorkflowGraph

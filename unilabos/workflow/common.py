@@ -624,7 +624,7 @@ def build_protocol_graph(
     workstation_name: str,
     action_resource_mapping: Optional[Dict[str, str]] = None,
     labware_defs: Optional[List[Dict[str, Any]]] = None,
-    preserve_tip_rack_incoming_class: bool = True,
+    preserve_tip_rack_incoming_class: bool = False,
 ) -> WorkflowGraph:
     """统一的协议图构建函数，根据设备类型自动选择构建逻辑
 

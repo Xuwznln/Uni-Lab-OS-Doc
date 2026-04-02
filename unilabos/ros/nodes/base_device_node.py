@@ -1739,13 +1739,19 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 if arg_type == "unilabos.registry.placeholder_type:ResourceSlot":
                     resource_data = function_args[arg_name]
                     if isinstance(resource_data, dict) and "id" in resource_data:
-                        try:
-                            function_args[arg_name] = self._convert_resources_sync(resource_data["uuid"])[0]
-                        except Exception as e:
-                            self.lab_logger().error(
-                                f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
-                            )
-                            raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
+                        uid = resource_data.get("uuid", "")
+                        # 优先从本地追踪器直接取（避免服务端未同步导致的空返回）
+                        local_fast = self.resource_tracker.uuid_to_resources.get(uid) if uid else None
+                        if local_fast is not None:
+                            function_args[arg_name] = local_fast
+                        else:
+                            try:
+                                function_args[arg_name] = self._convert_resources_sync(uid)[0]
+                            except Exception as e:
+                                self.lab_logger().error(
+                                    f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
+                                )
+                                raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
 
                 # 处理 ResourceSlot 列表
                 elif isinstance(arg_type, tuple) and len(arg_type) == 2:
@@ -1753,14 +1759,23 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     if arg_type[0] == "list" and arg_type[1] == resource_slot_type:
                         resource_list = function_args[arg_name]
                         if isinstance(resource_list, list):
-                            try:
-                                uuids = [r["uuid"] for r in resource_list if isinstance(r, dict) and "id" in r]
-                                function_args[arg_name] = self._convert_resources_sync(*uuids) if uuids else []
-                            except Exception as e:
-                                self.lab_logger().error(
-                                    f"转换ResourceSlot列表参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
-                                )
-                                raise JsonCommandInitError(f"ResourceSlot列表参数转换失败: {arg_name}")
+                            uuids = [r["uuid"] for r in resource_list if isinstance(r, dict) and "id" in r]
+                            # 先尝试本地追踪器批量取
+                            local_hits = [
+                                self.resource_tracker.uuid_to_resources[u]
+                                for u in uuids
+                                if u in self.resource_tracker.uuid_to_resources
+                            ]
+                            if len(local_hits) == len(uuids):
+                                function_args[arg_name] = local_hits
+                            else:
+                                try:
+                                    function_args[arg_name] = self._convert_resources_sync(*uuids) if uuids else []
+                                except Exception as e:
+                                    self.lab_logger().error(
+                                        f"转换ResourceSlot列表参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
+                                    )
+                                    raise JsonCommandInitError(f"ResourceSlot列表参数转换失败: {arg_name}")
 
             # todo: 默认反报送
             return function(**function_args)
@@ -1812,6 +1827,18 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         # 转换为 PLR 资源
         tree_set = ResourceTreeSet.from_raw_dict_list(raw_data)
         if not len(tree_set.trees):
+            # 服务端未找到时，尝试从本地追踪器兜底（create_resource 刚完成但服务端未及时同步）
+            local_hits = [
+                self.resource_tracker.uuid_to_resources[uid]
+                for uid in uuids_list
+                if uid in self.resource_tracker.uuid_to_resources
+            ]
+            if local_hits:
+                self.lab_logger().warning(
+                    f"资源查询服务端返回空树，已从本地追踪器找到 "
+                    f"{len(local_hits)}/{len(uuids_list)} 个资源: {uuids_list}"
+                )
+                return local_hits
             raise Exception(f"资源查询返回空树: {raw_data}")
         plr_resources = tree_set.to_plr_resources()
 
