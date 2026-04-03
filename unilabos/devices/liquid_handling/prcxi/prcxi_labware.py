@@ -418,7 +418,7 @@ def PRCXI_10ul_eTips(name: str) -> PRCXI9300TipRack:
             item_dy=9.0,
             size_x=7.5,
             size_y=7.5,
-            size_z=0.0,
+            size_z=52.0,
             make_tip=lambda: _make_tip_helper(volume=10.0, length=52.0, depth=8.2)
         )
     )
@@ -445,7 +445,7 @@ def PRCXI_300ul_Tips(name: str) -> PRCXI9300TipRack:
             item_dy=9.0,
             size_x=7.5,
             size_y=7.5,
-            size_z=0.0,
+            size_z=60.0,
             make_tip=lambda: _make_tip_helper(volume=300.0, length=60.0, depth=8.2)
         )
     )
@@ -497,7 +497,7 @@ def PRCXI_10uL_Tips(name: str) -> PRCXI9300TipRack:
             item_dy=9.0,
             size_x=7.5,
             size_y=7.5,
-            size_z=0.0,
+            size_z=52.0,
             make_tip=lambda: _make_tip_helper(volume=10.0, length=52.0, depth=8.2)
         )
     )
@@ -549,7 +549,7 @@ def PRCXI_200uL_Tips(name: str) -> PRCXI9300TipRack:
             item_dy=9.0,
             size_x=7.0,
             size_y=7.0,
-            size_z=0.0,
+            size_z=60.0,
             make_tip=lambda: _make_tip_helper(volume=300.0, length=60.0, depth=51.0)
         )
     )
@@ -575,7 +575,7 @@ def PRCXI_50uL_tips(name: str) -> PRCXI9300TipRack:
             item_dy=9.0,
             size_x=7.5,
             size_y=7.5,
-            size_z=0.0,
+            size_z=53.0,
             make_tip=lambda: _make_tip_helper(volume=50.0, length=53.0, depth=8.2)
         )
     )

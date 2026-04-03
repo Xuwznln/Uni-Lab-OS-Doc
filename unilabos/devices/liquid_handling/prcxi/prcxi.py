@@ -797,10 +797,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self.x_offset = x_offset
         self.y_offset = y_offset
         self.xy_coupling = xy_coupling
-        self.left_2_claw = Coordinate(-130.2, 34, -134)
+        self.left_2_claw = Coordinate(-130.2, 34, -74)
         self.right_2_left = Coordinate(22,-1, 11)
-        plate_positions = []
-
+        self.tip_height = 0
         tablets_info = []
 
         if is_9320 is None:
@@ -989,12 +988,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
     def plr_pos_to_prcxi(self, resource: Resource, offset: Coordinate = Coordinate(0, 0, 0)):
         z_pos = 'c'
-        if isinstance(resource, Tip):
-            z_pos = 'b'
+        tip_height = self.tip_height
+        if isinstance(resource, TipSpot):
+            z_pos = 't'
+            tip_height = 0
         resource_pos = resource.get_absolute_location(x="c",y="c",z=z_pos)
         x = resource_pos.x 
         y = resource_pos.y 
-        z = resource_pos.z
+        z = resource_pos.z + tip_height
         # 如果z等于0，则递归resource.parent的高度并向z加，使用get_size_z方法
 
         parent = resource.parent
@@ -1157,6 +1158,49 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         _dis_list = dis_vols if isinstance(dis_vols, list) else [dis_vols]
         if all(v <= 10.0 for v in _asp_list) and all(v <= 10.0 for v in _dis_list):
             use_channels = [1]
+            mix_vol = max(min(mix_vol,10),0)
+        sources = await self._resolve_to_plr_resources(sources)
+        targets = await self._resolve_to_plr_resources(targets)
+        tip_racks = list(await self._resolve_to_plr_resources(tip_racks))
+        change_slots = []
+        change_slots.append(sources[0].parent)
+        change_slots.append(targets[0].parent)
+        if isinstance(tip_racks[0], TipRack):
+            tip_rack = tip_racks[0]
+        else:
+            tip_rack = tip_racks[0].parent
+
+        change_slots.append(tip_rack)
+        
+        self.tip_height = tip_rack.children[0].get_size_z()
+
+        change_slots_positions = []
+        for slot in change_slots:
+        
+            number = self._get_slot_number(slot)
+            
+            pip_pos = self.plr_pos_to_prcxi(slot.children[0], self.left_2_claw)
+            half_x = slot.children[0].get_size_x() / 2 * abs(1 + self.x_increase)
+            z_wall = slot.children[0].get_size_z()
+
+            change_slots_positions.append({
+                "Number": number,
+                "XPos": pip_pos.x,
+                "YPos": pip_pos.y,
+                "ZPos": pip_pos.z, 
+                "X_Left": half_x,
+                "X_Right": half_x,
+                "ZAgainstTheWall": pip_pos.z - z_wall,
+                "X2Pos": pip_pos.x + self.right_2_left.x,
+                "Y2Pos": pip_pos.y + self.right_2_left.y,
+                "Z2Pos": pip_pos.z + self.right_2_left.z,
+                "X2_Left": half_x,
+                "X2_Right": half_x,
+                "ZAgainstTheWall2": pip_pos.z - z_wall,
+            })
+        if change_slots_positions:
+            self._unilabos_backend.api_client.update_pipetting_position(self._unilabos_backend.matrix_id, change_slots_positions)
+
 
         res =  await super().transfer_liquid(
             sources,
@@ -1708,6 +1752,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
         assert mix_time > 0
         step = self.api_client.Blending(
+            axis=axis,
             dosage=mix_vol,
             plate_no=PlateNo,
             is_whole_plate=False,
