@@ -217,6 +217,68 @@ def _tip_volume_hint(item: Dict[str, Any], labware_id: str) -> Optional[float]:
     return None
 
 
+def _flatten_transfer_vols(value: Any) -> List[float]:
+    """将 asp_vols/dis_vols 标量或列表展平为 float 列表，无法转换的项跳过。"""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        out: List[float] = []
+        for v in value:
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                continue
+        return out
+    try:
+        return [float(value)]
+    except (TypeError, ValueError):
+        return []
+
+
+def _tip_prcxi_class_for_max_ul(max_ul: float) -> str:
+    """按移液最大体积分档推介 PRCXI tip 类名：≤10 µL → 10µL；<300 → 300µL；否则 1000µL。"""
+    if max_ul <= 10:
+        return "PRCXI_10uL_Tips"
+    if max_ul < 300:
+        return "PRCXI_300ul_Tips"
+    return "PRCXI_1000uL_Tips"
+
+
+def _apply_tip_rack_class_from_transfer_volumes(
+    labware_info: Dict[str, Dict[str, Any]],
+    protocol_steps_refactored: List[Dict[str, Any]],
+) -> None:
+    """根据各 ``transfer_liquid`` 的 asp_vols/dis_vols 为对应 ``tip_racks`` 写入 ``prcxi_class_name``。"""
+    tip_to_max_ul: Dict[str, float] = {}
+
+    for step in protocol_steps_refactored:
+        if step.get("template_name") != "transfer_liquid":
+            continue
+        p = step.get("param") or {}
+        tip_key_raw = p.get("tip_racks")
+        if tip_key_raw is None or str(tip_key_raw).strip() == "":
+            continue
+        tip_key = str(tip_key_raw).strip()
+        if tip_key not in labware_info:
+            continue
+
+        nums = _flatten_transfer_vols(p.get("asp_vols", p.get("asp_vol"))) + _flatten_transfer_vols(
+            p.get("dis_vols", p.get("dis_vol"))
+        )
+        if not nums:
+            continue
+        step_max = max(nums)
+        tip_to_max_ul[tip_key] = max(tip_to_max_ul.get(tip_key, 0.0), step_max)
+
+    for tip_key, max_ul in tip_to_max_ul.items():
+        item = labware_info.get(tip_key)
+        if item is None:
+            continue
+        if _infer_reagent_kind(tip_key, item) != "tip_rack":
+            continue
+        item["prcxi_class_name"] = _tip_prcxi_class_for_max_ul(max_ul)
+
+
 def _volume_template_covers_requirement(template: Dict[str, Any], req: Optional[float], kind: str) -> bool:
     """有明确需求体积时，模板标称 Volume 必须 >= 需求；无 Volume 的模板不参与（trash 除外）。"""
     if kind == "trash":
@@ -636,10 +698,17 @@ def build_protocol_graph(
         labware_defs: 可选，``[{"id": "...", "num_wells": 96, "max_volume": 2200}, ...]`` 等，辅助 PRCXI 模板匹配
         preserve_tip_rack_incoming_class: 默认 True 时**仅 tip_rack** 不跑模板匹配（类名由传入的 class/labware 决定）；
             **其它载体**仍按 PRCXI 模板匹配。False 时 **全部**（含 tip_rack）都走模板匹配。
+
+    会先 ``refactor_data`` 规范化步骤，再根据 ``transfer_liquid`` 的 ``asp_vols``/``dis_vols`` 为对应
+    ``tip_racks`` 写入 ``prcxi_class_name``（最大体积 ``≤10`` → ``PRCXI_10uL_Tips``，``<300`` → ``PRCXI_300ul_Tips``，
+    否则 ``PRCXI_1000uL_Tips``）；无有效体积的步骤不覆盖。
     """
     G = WorkflowGraph()
     resource_last_writer = {}  # reagent_name -> "node_id:port"
     slot_to_create_resource = {}  # slot -> create_resource node_id
+
+    protocol_steps = refactor_data(protocol_steps, action_resource_mapping)
+    _apply_tip_rack_class_from_transfer_volumes(labware_info, protocol_steps)
 
     _apply_prcxi_labware_auto_match(
         labware_info,
@@ -650,8 +719,6 @@ def build_protocol_graph(
         labware_info,
         preserve_tip_rack_incoming_class=preserve_tip_rack_incoming_class,
     )
-
-    protocol_steps = refactor_data(protocol_steps, action_resource_mapping)
 
     # ==================== 第一步：按 slot 去重创建 create_resource 节点 ====================
     # 按槽聚合：同一 slot 多条 reagent 时不能只取遍历顺序第一条，否则 tip 的 prcxi_class_name / object 会被其它条目盖住
