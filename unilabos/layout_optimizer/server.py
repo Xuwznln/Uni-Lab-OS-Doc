@@ -34,7 +34,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .constraints import DEFAULT_WEIGHT_ANGLE
+from .constraints import DEFAULT_WEIGHT_ANGLE  # noqa: F401 — kept for external use
 from .device_catalog import (
     create_devices_from_list,
     load_devices_from_assets,
@@ -496,6 +496,13 @@ class OptimizeRequest(BaseModel):
     snap_cardinal: bool = False
     angle_granularity: int | None = None
     arm_reach: dict[str, float] = {}
+    # DE 超参数
+    strategy: str = "currenttobest1bin"
+    angle_mode: str = "joint"
+    mutation: list[float] = [0.5, 1.0]
+    theta_mutation: list[float] | None = None
+    recombination: float = 0.7
+    crossover_mode: str = "device"
 
 
 class PositionXYZ(BaseModel):
@@ -576,25 +583,43 @@ async def run_optimize(request: OptimizeRequest):
         request.workflow_edges or None,
     )
 
-    # 3. Auto-inject orientation soft constraints for DE
-    if request.run_de and request.seeder != "row_fallback" and seed_placements:
-        # Resolve orientation mode from seeder preset
-        orientation_mode = params.orientation_mode if params else "none"
-        if orientation_mode != "none":
-            # prefer_orientation_mode: position-aware outward/inward facing penalty
-            constraints.append(Constraint(
-                type="soft",
-                rule_name="prefer_orientation_mode",
-                params={"mode": orientation_mode},
-                weight=request.seeder_overrides.get("orientation_weight", DEFAULT_WEIGHT_ANGLE),
-            ))
+    # 3. Auto-inject alignment soft constraint (opt-in via seeder_overrides)
+    if request.run_de and seed_placements:
         # prefer_aligned: penalize non-cardinal angles（默认关闭，用户可通过 align_cardinal intent 或 seeder_overrides 开启）
         constraints = _maybe_add_prefer_aligned_constraint(
             constraints,
             request.seeder_overrides.get("align_weight", 0),
         )
 
-    # 4. Conditional Differential Evolution
+    # 4. Validate DE hyperparameters
+    if request.strategy not in {"currenttobest1bin", "best1bin", "rand1bin"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"strategy must be one of: currenttobest1bin, best1bin, rand1bin (got {request.strategy!r})",
+        )
+    if request.angle_mode not in {"joint", "hybrid"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"angle_mode must be one of: joint, hybrid (got {request.angle_mode!r})",
+        )
+    if request.crossover_mode not in {"device", "dimension"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"crossover_mode must be one of: device, dimension (got {request.crossover_mode!r})",
+        )
+    if len(request.mutation) != 2 or request.mutation[0] > request.mutation[1]:
+        raise HTTPException(status_code=400, detail="mutation must be [F_min, F_max] with F_min <= F_max")
+    if request.mutation[0] < 0 or request.mutation[1] > 2.0:
+        raise HTTPException(status_code=400, detail="mutation values must be in [0, 2.0]")
+    if request.theta_mutation is not None:
+        if len(request.theta_mutation) != 2 or request.theta_mutation[0] > request.theta_mutation[1]:
+            raise HTTPException(status_code=400, detail="theta_mutation must be [F_min, F_max] with F_min <= F_max")
+        if request.theta_mutation[0] < 0 or request.theta_mutation[1] > 2.0:
+            raise HTTPException(status_code=400, detail="theta_mutation values must be in [0, 2.0]")
+    if not (0 <= request.recombination <= 1.0):
+        raise HTTPException(status_code=400, detail="recombination must be in [0, 1.0]")
+
+    # 5. Conditional Differential Evolution
     de_ran = False
     checker = MockCollisionChecker()
     reachability_checker = MockReachabilityChecker(request.arm_reach or None)
@@ -608,8 +633,14 @@ async def run_optimize(request: OptimizeRequest):
             seed_placements=seed_placements,
             maxiter=request.maxiter,
             seed=request.seed,
+            strategy=request.strategy,
             workflow_edges=request.workflow_edges or None,
             angle_granularity=request.angle_granularity,
+            angle_mode=request.angle_mode,
+            mutation=tuple(request.mutation),
+            theta_mutation=tuple(request.theta_mutation) if request.theta_mutation else None,
+            recombination=request.recombination,
+            crossover_mode=request.crossover_mode,
         )
         de_ran = True
     else:

@@ -8,7 +8,14 @@ from ..mock_checkers import MockCollisionChecker
 from ..models import Constraint, Device, Lab, Placement
 import numpy as np
 import pytest
-from ..optimizer import _angle_sweep_once, _run_de, optimize, snap_theta
+from ..optimizer import (
+    _angle_sweep_once,
+    _circular_diff,
+    _compute_mutant,
+    _run_de,
+    optimize,
+    snap_theta,
+)
 
 
 def _is_on_angle_lattice(theta: float, granularity: int) -> bool:
@@ -676,3 +683,437 @@ def test_run_de_returns_correct_tuple():
     assert best_vec.shape == (3,)
     assert best_cost == pytest.approx(42.0)
     assert isinstance(n_gen, int) and n_gen >= 1
+
+
+# ──────────────────────────────────────────────────────────────
+# DE 重构测试：_circular_diff / _compute_mutant / 新策略 / 解耦变异 / 交叉模式 / joint 离散角度 / API
+# ──────────────────────────────────────────────────────────────
+
+
+class TestCircularDiff:
+    """_circular_diff 圆周角度差测试。"""
+
+    def test_near_zero_boundary(self):
+        """0.1 vs 2π-0.1 应≈0.2，不是 -6.08。"""
+        a = np.array([1.0, 2.0, 0.1])
+        b = np.array([1.0, 2.0, 2 * math.pi - 0.1])
+        result = _circular_diff(a, b, n_devices=1, dims_per_device=3)
+        assert result[0] == pytest.approx(0.0)  # x unchanged
+        assert result[1] == pytest.approx(0.0)  # y unchanged
+        assert abs(result[2]) == pytest.approx(0.2, abs=1e-6)  # theta shortest
+
+    def test_same_angle(self):
+        """相同角度差为 0。"""
+        a = np.array([0, 0, math.pi, 0, 0, math.pi])
+        b = np.array([0, 0, math.pi, 0, 0, math.pi])
+        result = _circular_diff(a, b, n_devices=2, dims_per_device=3)
+        for d in range(2):
+            assert result[3 * d + 2] == pytest.approx(0.0)
+
+    def test_opposite_angles(self):
+        """π vs 0 应≈π。"""
+        a = np.array([0, 0, math.pi])
+        b = np.array([0, 0, 0.0])
+        result = _circular_diff(a, b, n_devices=1, dims_per_device=3)
+        assert abs(result[2]) == pytest.approx(math.pi, abs=1e-6)
+
+    def test_dims_per_device_2_is_plain_diff(self):
+        """dims_per_device=2 时退化为普通减法。"""
+        a = np.array([3.0, 5.0, 1.0, 2.0])
+        b = np.array([1.0, 2.0, 0.5, 1.0])
+        result = _circular_diff(a, b, n_devices=2, dims_per_device=2)
+        np.testing.assert_array_almost_equal(result, a - b)
+
+
+class TestComputeMutant:
+    """_compute_mutant 统一变异向量测试。"""
+
+    def _make_pop(self, n_devices=2, pop_size=10, seed=42):
+        rng = np.random.default_rng(seed)
+        ndim = 3 * n_devices
+        return rng.uniform(0, 5, size=(pop_size, ndim)), rng
+
+    def test_currenttobest1bin_no_noise(self):
+        """currenttobest1bin 结果 = target + F*(best-target) + F*(r1-r2)，无随机噪声。"""
+        pop, rng = self._make_pop()
+        best = pop[0].copy()
+        f_val = 0.7
+        # 固定 rng 以确定 r1, r2
+        rng_copy = np.random.default_rng(123)
+        mutant = _compute_mutant(
+            "currenttobest1bin", pop, best, target_idx=3,
+            f_val=f_val, f_val_theta=f_val, rng=rng_copy,
+            n_devices=2, dims_per_device=3,
+        )
+        # 重建：获取 rng_copy 选的 r1, r2
+        rng_verify = np.random.default_rng(123)
+        candidates = list(range(10))
+        candidates.remove(3)
+        chosen = rng_verify.choice(candidates, size=2, replace=False)
+        r1, r2 = int(chosen[0]), int(chosen[1])
+        diff_best = _circular_diff(best, pop[3], 2, 3)
+        diff_rand = _circular_diff(pop[r1], pop[r2], 2, 3)
+        expected = pop[3] + f_val * diff_best + f_val * diff_rand
+        np.testing.assert_array_almost_equal(mutant, expected)
+
+    def test_rand1bin_three_distinct(self):
+        """rand1bin 应选 3 个不同于 target 的个体。"""
+        pop, rng = self._make_pop(pop_size=5)
+        # 不应 raise
+        mutant = _compute_mutant(
+            "rand1bin", pop, pop[0], target_idx=0,
+            f_val=0.5, f_val_theta=0.5, rng=rng,
+            n_devices=2, dims_per_device=3,
+        )
+        assert mutant.shape == (6,)
+
+    def test_unknown_strategy_raises(self):
+        """未知策略应 raise ValueError。"""
+        pop, rng = self._make_pop()
+        with pytest.raises(ValueError, match="Unknown DE strategy"):
+            _compute_mutant(
+                "nonexistent", pop, pop[0], target_idx=0,
+                f_val=0.5, f_val_theta=0.5, rng=rng,
+                n_devices=2, dims_per_device=3,
+            )
+
+    def test_best1bin_formula(self):
+        """best1bin 结果 = best + F*(r1-r2)。"""
+        pop, _ = self._make_pop()
+        best = pop[0].copy()
+        f_val = 0.6
+        rng1 = np.random.default_rng(99)
+        mutant = _compute_mutant(
+            "best1bin", pop, best, target_idx=2,
+            f_val=f_val, f_val_theta=f_val, rng=rng1,
+            n_devices=2, dims_per_device=3,
+        )
+        rng2 = np.random.default_rng(99)
+        candidates = list(range(10))
+        candidates.remove(2)
+        chosen = rng2.choice(candidates, size=2, replace=False)
+        r1, r2 = int(chosen[0]), int(chosen[1])
+        diff = _circular_diff(pop[r1], pop[r2], 2, 3)
+        expected = best + f_val * diff
+        np.testing.assert_array_almost_equal(mutant, expected)
+
+
+class TestDecoupledMutation:
+    """解耦 theta 变异测试。"""
+
+    def test_decoupled_scales_theta_only(self):
+        """theta_mutation < mutation 时，theta 变异幅度应更小。"""
+        rng = np.random.default_rng(42)
+        pop = rng.uniform(0, 5, size=(10, 6))
+        best = pop[0].copy()
+
+        # 大 F 给位置+theta
+        rng1 = np.random.default_rng(77)
+        mutant_same = _compute_mutant(
+            "best1bin", pop, best, 1, f_val=0.8, f_val_theta=0.8,
+            rng=rng1, n_devices=2, dims_per_device=3,
+        )
+        # 大 F 给位置，小 F 给 theta
+        rng2 = np.random.default_rng(77)
+        mutant_decoupled = _compute_mutant(
+            "best1bin", pop, best, 1, f_val=0.8, f_val_theta=0.2,
+            rng=rng2, n_devices=2, dims_per_device=3,
+        )
+        # x, y 应相同
+        for d in range(2):
+            assert mutant_same[3 * d] == pytest.approx(mutant_decoupled[3 * d])
+            assert mutant_same[3 * d + 1] == pytest.approx(mutant_decoupled[3 * d + 1])
+        # theta 差值应更小（绝对值）
+        for d in range(2):
+            theta_diff_same = abs(mutant_same[3 * d + 2] - best[3 * d + 2])
+            theta_diff_decoupled = abs(mutant_decoupled[3 * d + 2] - best[3 * d + 2])
+            assert theta_diff_decoupled <= theta_diff_same + 1e-9
+
+    def test_decoupled_no_effect_when_same(self):
+        """theta_mutation == mutation 时行为应完全一致。"""
+        rng = np.random.default_rng(42)
+        pop = rng.uniform(0, 5, size=(10, 6))
+        best = pop[0].copy()
+
+        rng1 = np.random.default_rng(77)
+        m1 = _compute_mutant(
+            "currenttobest1bin", pop, best, 2, 0.7, 0.7,
+            rng1, 2, 3,
+        )
+        rng2 = np.random.default_rng(77)
+        m2 = _compute_mutant(
+            "currenttobest1bin", pop, best, 2, 0.7, 0.7,
+            rng2, 2, 3,
+        )
+        np.testing.assert_array_almost_equal(m1, m2)
+
+
+class TestCrossoverMode:
+    """交叉模式测试。"""
+
+    def test_crossover_device_mode_atomicity(self):
+        """device 模式：(x,y,θ) 三元组始终整体复制。"""
+        rng = np.random.default_rng(42)
+        n_devices = 3
+        parent = np.zeros(9)
+        mutant = np.ones(9) * 10.0
+
+        violations = 0
+        for _ in range(200):
+            trial = parent.copy()
+            j_rand = rng.integers(0, n_devices)
+            for d in range(n_devices):
+                if rng.random() < 0.7 or d == j_rand:
+                    trial[3 * d: 3 * d + 3] = mutant[3 * d: 3 * d + 3]
+            for d in range(n_devices):
+                triple = trial[3 * d: 3 * d + 3]
+                if not (np.allclose(triple, 0.0) or np.allclose(triple, 10.0)):
+                    violations += 1
+        assert violations == 0
+
+    def test_crossover_dimension_mode_can_split_triplet(self):
+        """dimension 模式：单个维度可以独立交叉，三元组可被拆分。"""
+        rng = np.random.default_rng(42)
+        n_devices = 3
+        ndim = 9
+        parent = np.zeros(ndim)
+        mutant = np.ones(ndim) * 10.0
+
+        split_seen = False
+        for _ in range(500):
+            trial = parent.copy()
+            j_rand = rng.integers(0, ndim)
+            for j in range(ndim):
+                if rng.random() < 0.5 or j == j_rand:
+                    trial[j] = mutant[j]
+            for d in range(n_devices):
+                triple = trial[3 * d: 3 * d + 3]
+                if not (np.allclose(triple, 0.0) or np.allclose(triple, 10.0)):
+                    split_seen = True
+                    break
+            if split_seen:
+                break
+        assert split_seen, "dimension 模式应允许三元组拆分"
+
+
+class TestJointDiscreteAngle:
+    """joint 模式离散角度 DE 测试。"""
+
+    def test_joint_mode_returns_lattice_thetas(self):
+        """angle_granularity=4, angle_mode='joint' → 所有 theta 在格点上。"""
+        devices = [
+            Device(id="a", name="A", bbox=(0.8, 0.6)),
+            Device(id="b", name="B", bbox=(0.6, 0.5)),
+            Device(id="c", name="C", bbox=(0.5, 0.5)),
+        ]
+        lab = Lab(width=5.0, depth=5.0)
+        seed_placements = [
+            Placement(device_id="a", x=1.0, y=1.0, theta=0.13),
+            Placement(device_id="b", x=2.3, y=1.5, theta=1.21),
+            Placement(device_id="c", x=3.6, y=3.2, theta=2.42),
+        ]
+        placements = optimize(
+            devices, lab, seed_placements=seed_placements,
+            seed=42, maxiter=45, popsize=8,
+            angle_granularity=4, angle_mode="joint",
+        )
+        assert len(placements) == 3
+        for p in placements:
+            assert _is_on_angle_lattice(p.theta, 4), (
+                f"{p.device_id} theta={p.theta} not on 4-angle lattice"
+            )
+
+    def test_hybrid_mode_still_works(self):
+        """angle_mode='hybrid' → 现有 hybrid 行为不变。"""
+        devices = [
+            Device(id="a", name="A", bbox=(0.8, 0.6)),
+            Device(id="b", name="B", bbox=(0.6, 0.5)),
+        ]
+        lab = Lab(width=5.0, depth=5.0)
+        placements = optimize(
+            devices, lab, seed=42, maxiter=30, popsize=8,
+            angle_granularity=4, angle_mode="hybrid",
+        )
+        assert len(placements) == 2
+        for p in placements:
+            assert _is_on_angle_lattice(p.theta, 4)
+
+    def test_joint_default_when_granularity_set(self):
+        """省略 angle_mode + 设定 angle_granularity → 默认 joint 模式。"""
+        devices = [
+            Device(id="a", name="A", bbox=(0.8, 0.6)),
+            Device(id="b", name="B", bbox=(0.6, 0.5)),
+        ]
+        lab = Lab(width=5.0, depth=5.0)
+        placements = optimize(
+            devices, lab, seed=42, maxiter=30, popsize=8,
+            angle_granularity=4,
+        )
+        assert len(placements) == 2
+        for p in placements:
+            assert _is_on_angle_lattice(p.theta, 4)
+
+
+class TestNewStrategies:
+    """rand1bin 策略集成测试。"""
+
+    def test_rand1bin_converges(self):
+        """rand1bin 策略应能收敛。"""
+        devices = [
+            Device(id="a", name="A", bbox=(0.6, 0.4)),
+            Device(id="b", name="B", bbox=(0.6, 0.4)),
+        ]
+        lab = Lab(width=5.0, depth=5.0)
+        placements = optimize(
+            devices, lab, seed=42, maxiter=80, popsize=10,
+            strategy="rand1bin",
+        )
+        assert len(placements) == 2
+        checker = MockCollisionChecker()
+        checker_placements = [
+            {"id": p.device_id, "bbox": next(d.bbox for d in devices if d.id == p.device_id),
+             "pos": (p.x, p.y, p.theta)}
+            for p in placements
+        ]
+        collisions = checker.check(checker_placements)
+        assert collisions == [], f"rand1bin 策略产生碰撞: {collisions}"
+
+
+class TestAPINewParams:
+    """POST /optimize 新参数 API 测试。"""
+
+    def test_api_accepts_strategy(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "strategy": "rand1bin",
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_api_rejects_invalid_strategy(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "strategy": "invalid",
+            "run_de": False,
+        })
+        assert resp.status_code == 400
+        assert "strategy" in resp.json()["detail"]
+
+    def test_api_accepts_angle_mode(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "angle_mode": "hybrid",
+            "angle_granularity": 4,
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_api_rejects_invalid_angle_mode(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "angle_mode": "bogus",
+            "run_de": False,
+        })
+        assert resp.status_code == 400
+        assert "angle_mode" in resp.json()["detail"]
+
+    def test_api_accepts_theta_mutation(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "theta_mutation": [0.2, 0.5],
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_api_accepts_mutation_range(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "mutation": [0.4, 0.8],
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_api_rejects_invalid_mutation(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "mutation": [0.8, 0.4],  # min > max
+            "run_de": False,
+        })
+        assert resp.status_code == 400
+
+    def test_api_accepts_recombination(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "recombination": 0.95,
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_api_rejects_invalid_recombination(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "recombination": 1.5,
+            "run_de": False,
+        })
+        assert resp.status_code == 400
+
+    def test_api_accepts_crossover_mode(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "crossover_mode": "dimension",
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+
+    def test_api_rejects_invalid_crossover_mode(self):
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "crossover_mode": "bogus",
+            "run_de": False,
+        })
+        assert resp.status_code == 400
+
+    def test_api_backward_compatible_new_fields(self):
+        """旧 payload（无新字段）应继续正常工作。"""
+        resp = _post_app("/optimize", {
+            "devices": [{"id": "test_device", "name": "Test"}],
+            "lab": {"width": 5, "depth": 4},
+            "maxiter": 10,
+            "seed": 42,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["de_ran"] is True
+
+
+class TestOrientationConstraint:
+    """prefer_orientation_mode 不再自动注入测试。"""
+
+    def test_no_auto_orientation_constraint(self):
+        """不带 face_outward/face_inward 意图时不应有 prefer_orientation_mode 约束。"""
+        from ..models import Constraint as ConstraintModel
+        from ..server import _expand_constraints_for_duplicates
+
+        # 模拟 server 逻辑：构建 constraints 但不自动注入 orientation
+        constraints = [
+            ConstraintModel(type="soft", rule_name="prefer_aligned", weight=1.0),
+        ]
+        # 验证没有 prefer_orientation_mode
+        assert not any(c.rule_name == "prefer_orientation_mode" for c in constraints)

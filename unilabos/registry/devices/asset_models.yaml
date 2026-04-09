@@ -13,8 +13,14 @@ asset_model.1_3m_hamilton_table:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -40,8 +46,14 @@ asset_model.abgene_22_deepwell:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -67,8 +79,14 @@ asset_model.abgene_8_deepwell:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -94,8 +112,14 @@ asset_model.agilent_barcode_labeler:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -121,8 +145,14 @@ asset_model.agilent_bravo:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -148,8 +178,14 @@ asset_model.agilent_bravo_magnetic_bead_plate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -175,8 +211,14 @@ asset_model.agilent_bravo_peltier_thermal:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -202,8 +244,14 @@ asset_model.agilent_bravo_plate_pad:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -229,8 +277,14 @@ asset_model.agilent_bravo_thermal_station:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -256,8 +310,14 @@ asset_model.agilent_centrifuge_loader:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -283,8 +343,14 @@ asset_model.agilent_fragment_analyzer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -310,8 +376,14 @@ asset_model.agilent_plateloc:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -337,8 +409,14 @@ asset_model.agilent_tapestation_4150:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -364,8 +442,14 @@ asset_model.agilent_tapestation_4200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -391,8 +475,14 @@ asset_model.alpaqua_96_well_magnet_plate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -418,8 +508,14 @@ asset_model.alpaqua_magnum_flx:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -445,8 +541,14 @@ asset_model.alpaqua_pogo_chiller_box_24:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -472,8 +574,14 @@ asset_model.analytik_jena_trobot:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -499,8 +607,14 @@ asset_model.appliedbiosystems_quantstudio7_flex:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -526,8 +640,14 @@ asset_model.appliedbiosystems_quantstudio7_pro:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -553,8 +673,14 @@ asset_model.artificial_nuvo:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -580,8 +706,14 @@ asset_model.artificial_platehotel4:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -607,8 +739,14 @@ asset_model.axygen_300ml_reservoir:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -634,8 +772,14 @@ asset_model.beckman_coulter_114_pipette:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -661,8 +805,14 @@ asset_model.beckman_coulter_190_pipette:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -688,8 +838,14 @@ asset_model.beckman_coulter_8_channel_tip_wash_alp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -715,8 +871,14 @@ asset_model.beckman_coulter_96_channel_tip_wash_station:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -742,8 +904,14 @@ asset_model.beckman_coulter_biomek_i5:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -769,8 +937,14 @@ asset_model.beckman_coulter_biomek_i7:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -796,8 +970,14 @@ asset_model.beckman_coulter_echo_525:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -823,8 +1003,14 @@ asset_model.beckman_coulter_echo_650:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -850,8 +1036,14 @@ asset_model.beckman_coulter_echo_655:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -877,8 +1069,14 @@ asset_model.beckman_coulter_echo_65X:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -904,8 +1102,14 @@ asset_model.beckman_coulter_liquid_handler_trash_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -931,8 +1135,14 @@ asset_model.beckman_coulter_orbital_shaker_alp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -958,8 +1168,14 @@ asset_model.beckman_coulter_plate_alp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -985,8 +1201,14 @@ asset_model.beckman_coulter_shaker_alp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1012,8 +1234,14 @@ asset_model.beckman_coulter_tip_loader_alp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1039,8 +1267,14 @@ asset_model.benchmark_scientific_benchmixer_v2_vortexer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1066,8 +1300,14 @@ asset_model.benchmark_scientific_myfuge_12_mini_centrifuge:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1093,8 +1333,14 @@ asset_model.benchmark_scientific_platefuge_microplate_microcentrifuge:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1120,8 +1366,14 @@ asset_model.bigbear_HT91000:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1147,8 +1399,14 @@ asset_model.bigbear_HT91002:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1174,8 +1432,14 @@ asset_model.bigbear_HT91100:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1201,8 +1465,14 @@ asset_model.bigbear_HT91108:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1228,8 +1498,14 @@ asset_model.bionex_hig3_centrifuge:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1255,8 +1531,14 @@ asset_model.biorad_plate_384:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1282,8 +1564,14 @@ asset_model.biorad_plate_96:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1309,8 +1597,14 @@ asset_model.biotek_405_ls:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1336,8 +1630,14 @@ asset_model.biotek_405_ts:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1363,8 +1663,14 @@ asset_model.biotek_biospa:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1390,8 +1696,14 @@ asset_model.biotek_cytation:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1417,8 +1729,14 @@ asset_model.biotek_el311:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1444,8 +1762,14 @@ asset_model.biotek_el406:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1471,8 +1795,14 @@ asset_model.biotek_elx405:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1498,8 +1828,14 @@ asset_model.biotek_epoch2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1525,8 +1861,14 @@ asset_model.biotek_multiflo_fx:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1552,8 +1894,14 @@ asset_model.biotek_multiflo_fx_mfxp1:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1579,8 +1927,14 @@ asset_model.biotek_multiflo_fx_secondary_pump:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1606,8 +1960,14 @@ asset_model.biotek_multiflo_fx_syringe_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1633,8 +1993,14 @@ asset_model.biotek_multiflo_fx_washer_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1660,8 +2026,14 @@ asset_model.biotek_synergy_h1:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1687,8 +2059,14 @@ asset_model.biotek_synergy_neo2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1714,8 +2092,14 @@ asset_model.bluecatbio_bluewasher:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1741,8 +2125,14 @@ asset_model.bmg_labtech_clariostar_plus:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1768,8 +2158,14 @@ asset_model.bmg_labtech_fluostar_omega:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1795,8 +2191,14 @@ asset_model.bmg_labtech_pherastar_fsx:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1822,8 +2224,14 @@ asset_model.brandel_rs_3000:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1849,8 +2257,14 @@ asset_model.brooks_a4ssealer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1876,8 +2290,14 @@ asset_model.brooks_fluidx_capperdecapper:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1903,8 +2323,14 @@ asset_model.brooks_fluidx_perception:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1930,8 +2356,14 @@ asset_model.brooks_fluidx_xdc_96_capper:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1957,8 +2389,14 @@ asset_model.brooks_xpeel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -1984,8 +2422,14 @@ asset_model.corning_falcon_15ml_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2011,8 +2455,14 @@ asset_model.corning_falcon_50ml_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2038,8 +2488,14 @@ asset_model.corning_plate_384:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2065,8 +2521,14 @@ asset_model.custom_chiller_plate_nest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2092,8 +2554,14 @@ asset_model.custom_hamilton_2ml_tube_adapter:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2119,8 +2587,14 @@ asset_model.custom_hamilton_5ml_tube_adapter:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2146,8 +2620,14 @@ asset_model.custom_handoff_nest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2173,8 +2653,14 @@ asset_model.custom_tube_rack_adapter_5ml:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2200,8 +2686,14 @@ asset_model.cytena_cwash:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2227,8 +2719,14 @@ asset_model.dispendix_idot_liquid_handler:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2254,8 +2752,14 @@ asset_model.dynamic_devices_lynx_1200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2281,8 +2785,14 @@ asset_model.dynamic_devices_lynx_1800:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2308,8 +2818,14 @@ asset_model.dynamic_devices_lynx_900:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2335,8 +2851,14 @@ asset_model.eppendorf_0.5ml_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2362,8 +2884,14 @@ asset_model.eppendorf_1.5ml_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2389,8 +2917,14 @@ asset_model.eppendorf_centrifuge_5920r:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2416,8 +2950,14 @@ asset_model.eppendorf_high_speed_centrifuge_5430r:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2443,8 +2983,14 @@ asset_model.fluidx_96_1ml_tube_rack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2470,8 +3016,14 @@ asset_model.fluidx_capped_tube_rack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2497,8 +3049,14 @@ asset_model.formulatrix_fast:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2524,8 +3082,14 @@ asset_model.formulatrix_mantis:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2551,8 +3115,14 @@ asset_model.formulatrix_mantis_base_unit:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2578,8 +3148,14 @@ asset_model.formulatrix_mantis_left:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2605,8 +3181,14 @@ asset_model.formulatrix_tempest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2632,8 +3214,14 @@ asset_model.fritz_gyger_certus_flex:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2659,8 +3247,14 @@ asset_model.generic_labware_0.5ml_screw_cap_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2686,8 +3280,14 @@ asset_model.generic_labware_0.5ml_tube_rack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2713,8 +3313,14 @@ asset_model.generic_labware_12_well_plate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2740,8 +3346,14 @@ asset_model.generic_labware_1ml_tube_rack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2767,8 +3379,14 @@ asset_model.generic_labware_24_well_plate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2794,8 +3412,14 @@ asset_model.generic_labware_250ml_conical_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2821,8 +3445,14 @@ asset_model.generic_labware_250ml_erlenmeyer_flask:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2848,8 +3478,14 @@ asset_model.generic_labware_2l_bottle:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2875,8 +3511,14 @@ asset_model.generic_labware_2ml_screw_cap_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2902,8 +3544,14 @@ asset_model.generic_labware_5ml_screw_cap_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2929,8 +3577,14 @@ asset_model.generic_labware_6_well_plate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2956,8 +3610,14 @@ asset_model.generic_labware_96_well_pcr_plate_round:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -2983,8 +3643,14 @@ asset_model.generic_labware_96_well_square:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3010,8 +3676,14 @@ asset_model.generic_labware_carboy:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3037,8 +3709,14 @@ asset_model.generic_labware_emergency_stop:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3064,8 +3742,14 @@ asset_model.generic_labware_framedtiprack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3091,8 +3775,14 @@ asset_model.generic_labware_nestedtiprack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3118,8 +3808,14 @@ asset_model.generic_labware_petri_dish:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3145,8 +3841,14 @@ asset_model.generic_labware_plate_hotel_10:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3172,8 +3874,14 @@ asset_model.generic_labware_plate_lid:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3199,8 +3907,14 @@ asset_model.generic_labware_reagent_bottle:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3226,8 +3940,14 @@ asset_model.generic_labware_reservoir:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3253,8 +3973,14 @@ asset_model.generic_labware_tip_box:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3280,8 +4006,14 @@ asset_model.generic_labware_tube_10_75:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3307,8 +4039,14 @@ asset_model.generic_labware_tube_13_100:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3334,8 +4072,14 @@ asset_model.generic_labware_tube_16_125:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3361,8 +4105,14 @@ asset_model.hamilton_0.5ml_tube_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3388,8 +4138,14 @@ asset_model.hamilton_0.5ml_tube_carrier_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3415,8 +4171,14 @@ asset_model.hamilton_1.5ml_tube_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3442,8 +4204,14 @@ asset_model.hamilton_1.5ml_tube_carrier_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3469,8 +4237,14 @@ asset_model.hamilton_200ml_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3496,8 +4270,14 @@ asset_model.hamilton_4x_200ml_trough_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3523,8 +4303,14 @@ asset_model.hamilton_4x_200ml_trough_carrier_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3550,8 +4336,14 @@ asset_model.hamilton_5x_50ml_reagent_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3577,8 +4369,14 @@ asset_model.hamilton_5x_50ml_reagent_carrier_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3604,8 +4402,14 @@ asset_model.hamilton_5x_50ml_reagent_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3631,8 +4435,14 @@ asset_model.hamilton_5x_60ml_trough_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3658,8 +4468,14 @@ asset_model.hamilton_5x_60ml_trough_carrier_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3685,8 +4501,14 @@ asset_model.hamilton_60ml_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3712,8 +4534,14 @@ asset_model.hamilton_96_well_low_magnet_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3739,8 +4567,14 @@ asset_model.hamilton_deepwell_reagent_reservoir:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3766,8 +4600,14 @@ asset_model.hamilton_easypick_ii_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3793,8 +4633,14 @@ asset_model.hamilton_entry_exit_chute:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3820,8 +4666,14 @@ asset_model.hamilton_entry_exit_door:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3847,8 +4699,14 @@ asset_model.hamilton_entry_exit_stacker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3874,8 +4732,14 @@ asset_model.hamilton_heater_shaker_adapter:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3901,8 +4765,14 @@ asset_model.hamilton_heater_shaker_carrier_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3928,8 +4798,14 @@ asset_model.hamilton_heater_shaker_carrier_base_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3955,8 +4831,14 @@ asset_model.hamilton_lab_elite_id_capper:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -3982,8 +4864,14 @@ asset_model.hamilton_logistics_cabinet_13m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4009,8 +4897,14 @@ asset_model.hamilton_logistics_cabinet_2m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4036,8 +4930,14 @@ asset_model.hamilton_low_profile_plate_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4063,8 +4963,14 @@ asset_model.hamilton_low_profile_plate_carrier_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4090,8 +4996,14 @@ asset_model.hamilton_mfx_carrier_heater_shaker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4117,8 +5029,14 @@ asset_model.hamilton_mfx_carrier_ntr_flat:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4144,8 +5062,14 @@ asset_model.hamilton_mfx_carrier_ntr_flat_preconfigured:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4171,8 +5095,14 @@ asset_model.hamilton_mfx_low_magnet_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4198,8 +5128,14 @@ asset_model.hamilton_mfx_plate_locator_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4225,8 +5161,14 @@ asset_model.hamilton_mfx_stacker_heater:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4252,8 +5194,14 @@ asset_model.hamilton_mpe2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4279,8 +5227,14 @@ asset_model.hamilton_mpe2_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4306,8 +5260,14 @@ asset_model.hamilton_mtp_carrier_locators:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4333,8 +5293,14 @@ asset_model.hamilton_multiFlex_carrier_5_dwp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4360,8 +5326,14 @@ asset_model.hamilton_multiFlex_carrier_5_dwp_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4387,8 +5359,14 @@ asset_model.hamilton_multiflex_carrier_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4414,8 +5392,14 @@ asset_model.hamilton_multiflex_carrier_base_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4441,8 +5425,14 @@ asset_model.hamilton_multiflex_carrier_dwp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4468,8 +5458,14 @@ asset_model.hamilton_multiflex_carrier_flat_high_profile_plate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4495,8 +5491,14 @@ asset_model.hamilton_multiflex_carrier_heater_shaker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4522,8 +5524,14 @@ asset_model.hamilton_multiflex_carrier_hhsf30dwp_3empty:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4549,8 +5557,14 @@ asset_model.hamilton_multiflex_carrier_magnet:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4576,8 +5590,14 @@ asset_model.hamilton_multiflex_carrier_magnet_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4603,8 +5623,14 @@ asset_model.hamilton_multiflex_carrier_nunc_heater_shaker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4630,8 +5656,14 @@ asset_model.hamilton_multiflex_flat_sloped_high_profile_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4657,8 +5689,14 @@ asset_model.hamilton_quad_core_gripper:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4684,8 +5722,14 @@ asset_model.hamilton_sample_tube_carrier_24:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4711,8 +5755,14 @@ asset_model.hamilton_sample_tube_carrier_24_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4738,8 +5788,14 @@ asset_model.hamilton_sample_tube_carrier_32:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4765,8 +5821,14 @@ asset_model.hamilton_sample_tube_carrier_32_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4792,8 +5854,14 @@ asset_model.hamilton_sample_tube_carrier_with_0.5ml_adapter_32:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4819,8 +5887,14 @@ asset_model.hamilton_sample_tube_carrier_with_2ml_adapter_32:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4846,8 +5920,14 @@ asset_model.hamilton_sample_tube_carrier_with_5ml_adapter_24:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4873,8 +5953,14 @@ asset_model.hamilton_star:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4900,8 +5986,14 @@ asset_model.hamilton_star_integration_bay:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4927,8 +6019,14 @@ asset_model.hamilton_star_waste_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4954,8 +6052,14 @@ asset_model.hamilton_starlet_liquid_handler:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -4981,8 +6085,14 @@ asset_model.hamilton_starplus:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5008,8 +6118,14 @@ asset_model.hamilton_teaching_needle_block:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5035,8 +6151,14 @@ asset_model.hamilton_tip_adapter_96_channel_head:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5062,8 +6184,14 @@ asset_model.hamilton_tip_box_carrier_4:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5089,8 +6217,14 @@ asset_model.hamilton_tip_box_carrier_4_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5116,8 +6250,14 @@ asset_model.hamilton_tube_insert_0.5ml:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5143,8 +6283,14 @@ asset_model.hettich_rotanta_460_centrifuge:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5170,8 +6316,14 @@ asset_model.highres_bio_ambistore_d:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5197,8 +6349,14 @@ asset_model.highres_bio_ambistore_d_cassette_24:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5224,8 +6382,14 @@ asset_model.highres_bio_ambistore_d_cassette_8:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5251,8 +6415,14 @@ asset_model.highres_bio_ambistore_m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5278,8 +6448,14 @@ asset_model.highres_bio_ambistore_table:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5305,8 +6481,14 @@ asset_model.highres_bio_barcode_scanner:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5332,8 +6514,14 @@ asset_model.highres_bio_eq_hotel_4:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5359,8 +6547,14 @@ asset_model.highres_bio_hotel_10:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5386,8 +6580,14 @@ asset_model.highres_bio_hotel_14:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5413,8 +6613,14 @@ asset_model.highres_bio_hotel_19:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5440,8 +6646,14 @@ asset_model.highres_bio_hotel_5:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5467,8 +6679,14 @@ asset_model.highres_bio_hotel_6:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5494,8 +6712,14 @@ asset_model.highres_bio_lidvalet:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5521,8 +6745,14 @@ asset_model.highres_bio_microcart:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5548,8 +6778,14 @@ asset_model.highres_bio_microdock:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5575,8 +6811,14 @@ asset_model.highres_bio_microspin:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5602,8 +6844,14 @@ asset_model.highres_bio_nucleus_pod:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5629,8 +6877,14 @@ asset_model.highres_bio_picoserve:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5656,8 +6910,14 @@ asset_model.highres_bio_plate_hotel_12:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5683,8 +6943,14 @@ asset_model.highres_bio_plate_hotel_4:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5710,8 +6976,14 @@ asset_model.highres_bio_plate_hotel_8:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5737,8 +7009,14 @@ asset_model.highres_bio_plate_hotel_nest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5764,8 +7042,14 @@ asset_model.highres_bio_plateorient:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5791,8 +7075,14 @@ asset_model.highres_bio_plateweigh:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5818,8 +7108,14 @@ asset_model.highres_bio_random_access_stacker_12:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5845,8 +7141,14 @@ asset_model.highres_bio_steristore_d:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5872,8 +7174,14 @@ asset_model.highres_bio_steristore_m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5899,8 +7207,14 @@ asset_model.highres_bio_transfer_nest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5926,8 +7240,14 @@ asset_model.highres_bio_tundrastore_d:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5953,8 +7273,14 @@ asset_model.highres_bio_tundrastore_m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -5980,8 +7306,14 @@ asset_model.highres_microserve:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6007,8 +7339,14 @@ asset_model.highres_microserve_hotel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6034,8 +7372,14 @@ asset_model.illumia_miseq_sequencer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6061,8 +7405,14 @@ asset_model.inheco_cpac_ultraflat_ht_2_tec:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6088,8 +7438,14 @@ asset_model.inheco_odtc_384:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6115,8 +7471,14 @@ asset_model.inheco_odtc_96lc:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6142,8 +7504,14 @@ asset_model.inheco_odtc_96xl:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6169,8 +7537,14 @@ asset_model.inheco_shakeac:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6196,8 +7570,14 @@ asset_model.inheco_shaker_mp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6223,8 +7603,14 @@ asset_model.inheco_teleshake:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6250,8 +7636,14 @@ asset_model.integra_assist_plus:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6277,8 +7669,14 @@ asset_model.integra_mini96:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6304,8 +7702,14 @@ asset_model.julabo_cooling_hotel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6331,8 +7735,14 @@ asset_model.lab_companion_microwave_oven:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6358,8 +7768,14 @@ asset_model.liconic_str44_incubator:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6385,8 +7801,14 @@ asset_model.liconic_stx110:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6412,8 +7834,14 @@ asset_model.liconic_stx220:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6439,8 +7867,14 @@ asset_model.liconic_stx220_cassettedeep:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6466,8 +7900,14 @@ asset_model.liconic_stx220_cassettedeep12:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6493,8 +7933,14 @@ asset_model.liconic_stx220_cassettedeep7:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6520,8 +7966,14 @@ asset_model.liconic_stx220_cassettestandard:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6547,8 +7999,14 @@ asset_model.liconic_stx220_cassettestandard19:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6574,8 +8032,14 @@ asset_model.liconic_stx44:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6601,8 +8065,14 @@ asset_model.liconic_table_low_top:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6628,8 +8098,14 @@ asset_model.liconic_table_tall_no_sliders:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6655,8 +8131,14 @@ asset_model.liconic_table_tall_with_sliders:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6682,8 +8164,14 @@ asset_model.logitech_c920:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6709,8 +8197,14 @@ asset_model.luminex_flexmap_3d_system:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6736,8 +8230,14 @@ asset_model.luminex_flexmap_3d_system_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6763,8 +8263,14 @@ asset_model.memmert_forced_air_incubator:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6790,8 +8296,14 @@ asset_model.mettler_toledo_analytical_balance:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6817,8 +8329,14 @@ asset_model.microhawk_barcode_reader:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6844,8 +8362,14 @@ asset_model.micronic_rack_reader_dr505:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6871,8 +8395,14 @@ asset_model.microscan_ms3:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6898,8 +8428,14 @@ asset_model.microsoft_hololens:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6925,8 +8461,14 @@ asset_model.mobile_cart_1_wheel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6952,8 +8494,14 @@ asset_model.molecular_devices_flipr_penta_high_throughput_cellular_screening_sys
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -6979,8 +8527,14 @@ asset_model.molecular_devices_spectramax_abs:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7006,8 +8560,14 @@ asset_model.molecular_devices_spectramax_i3x:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7033,8 +8593,14 @@ asset_model.molecular_devices_spectramax_id3:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7060,8 +8626,14 @@ asset_model.molecular_devices_spectramax_id5:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7087,8 +8659,14 @@ asset_model.nexelcom_celigo:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7114,8 +8692,14 @@ asset_model.nunc_deepplate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7141,8 +8725,14 @@ asset_model.omron_ld_90:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7168,8 +8758,14 @@ asset_model.opentrons_1.5+2ml_tube_holder_top:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7195,8 +8791,14 @@ asset_model.opentrons_15+50ml_tube_holder_top:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7222,8 +8824,14 @@ asset_model.opentrons_15ml_tube_holder_top:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7249,8 +8857,14 @@ asset_model.opentrons_4in1_tube_rack_set_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7276,8 +8890,14 @@ asset_model.opentrons_50ml_tube_holder_top:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7303,8 +8923,14 @@ asset_model.opentrons_aluminum_thermal_block_24:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7330,8 +8956,14 @@ asset_model.opentrons_aluminum_thermal_block_96:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7357,8 +8989,14 @@ asset_model.opentrons_deep_well_adapter:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7384,8 +9022,14 @@ asset_model.opentrons_flat_bottom_adapter:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7411,8 +9055,14 @@ asset_model.opentrons_flex:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7438,8 +9088,14 @@ asset_model.opentrons_heater_shaker_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7465,8 +9121,14 @@ asset_model.opentrons_hepa_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7492,8 +9154,14 @@ asset_model.opentrons_liquid_handler:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7519,8 +9187,14 @@ asset_model.opentrons_magnetic_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7546,8 +9220,14 @@ asset_model.opentrons_pcr_adapter:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7573,8 +9253,14 @@ asset_model.opentrons_temperature_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7600,8 +9286,14 @@ asset_model.opentrons_thermocycler_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7627,8 +9319,14 @@ asset_model.opentrons_universal_flat_adapter:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7654,8 +9352,14 @@ asset_model.osmotech_ht_automated_micro_osmometer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7681,8 +9385,14 @@ asset_model.paa_cs10_carousel_stacker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7708,8 +9418,14 @@ asset_model.paa_docking_station_unit:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7735,8 +9451,14 @@ asset_model.paa_kx_2_750_robot:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7762,8 +9484,14 @@ asset_model.paa_kx_2_rail_1000m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7789,8 +9517,14 @@ asset_model.paa_kx_2_rail_2000m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7816,8 +9550,14 @@ asset_model.paa_kx_2_rail_500m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7843,8 +9583,14 @@ asset_model.paa_kx_660:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7870,8 +9616,14 @@ asset_model.paa_sequential_stack_ss30sp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7897,8 +9649,14 @@ asset_model.perkinelmer_opera_phenix:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7924,8 +9682,14 @@ asset_model.pf_15_rail:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7951,8 +9715,14 @@ asset_model.pf_1m_rail:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -7978,8 +9748,14 @@ asset_model.pf_2m_rail:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8005,8 +9781,14 @@ asset_model.pf_400:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8032,8 +9814,14 @@ asset_model.pf_400_rail:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8059,8 +9847,14 @@ asset_model.pf_400_table:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8086,8 +9880,14 @@ asset_model.pf_750:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8113,8 +9913,14 @@ asset_model.promega_glomax_discover_microplate_reader:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8140,8 +9946,14 @@ asset_model.prometheous_panta:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8167,8 +9979,14 @@ asset_model.protein_simple_maurice:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8194,8 +10012,14 @@ asset_model.qinstruments_bioshake_3000t:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8221,8 +10045,14 @@ asset_model.qinstruments_bioshake_5000:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8248,8 +10078,14 @@ asset_model.qinstruments_bioshake_q1:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8275,8 +10111,14 @@ asset_model.retisoft_platehotel8:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8302,8 +10144,14 @@ asset_model.sarstedt_14x200mm_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8329,8 +10177,14 @@ asset_model.sarstedt_18x200mm_tube:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8356,8 +10210,14 @@ asset_model.sartorius_2l_bioreactor_vessel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8383,8 +10243,14 @@ asset_model.sartorius_biostat_benchtop_controller:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8410,8 +10276,14 @@ asset_model.sartorius_intelicyt_ique3:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8437,8 +10309,14 @@ asset_model.scinomix_sciprint_mp2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8464,8 +10342,14 @@ asset_model.southern_labware_benchtop_incubator_shaker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8491,8 +10375,14 @@ asset_model.tecan_cabinet_extension_freedom_evo_carousel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8518,8 +10408,14 @@ asset_model.tecan_cabinet_fluent_1080:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8545,8 +10441,14 @@ asset_model.tecan_cabinet_fluent_480:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8572,8 +10474,14 @@ asset_model.tecan_cabinet_fluent_780:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8599,8 +10507,14 @@ asset_model.tecan_cabinet_freedom_evo_100:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8626,8 +10540,14 @@ asset_model.tecan_carousel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8653,8 +10573,14 @@ asset_model.tecan_carousel_stacker_10:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8680,8 +10606,14 @@ asset_model.tecan_carousel_stacker_25:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8707,8 +10639,14 @@ asset_model.tecan_carousel_stacker_6:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8734,8 +10672,14 @@ asset_model.tecan_carrier_384_well_mp_3_pos_accessible_roma:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8761,8 +10705,14 @@ asset_model.tecan_carrier_additive_trough_3_pce_max_100ml:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8788,8 +10738,14 @@ asset_model.tecan_carrier_rack_3_diti_width_6:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8815,8 +10771,14 @@ asset_model.tecan_d300_shell_holder:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8842,8 +10804,14 @@ asset_model.tecan_evo100:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8869,8 +10837,14 @@ asset_model.tecan_evo150:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8896,8 +10870,14 @@ asset_model.tecan_evo200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8923,8 +10903,14 @@ asset_model.tecan_evo75:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8950,8 +10936,14 @@ asset_model.tecan_evolyzer_100:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -8977,8 +10969,14 @@ asset_model.tecan_evolyzer_150:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9004,8 +11002,14 @@ asset_model.tecan_evolyzer_200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9031,8 +11035,14 @@ asset_model.tecan_fluent_1.5ml_tube_runner:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9058,8 +11068,14 @@ asset_model.tecan_fluent_1.5ml_tube_runner_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9085,8 +11101,14 @@ asset_model.tecan_fluent_1080_extended:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9112,8 +11134,14 @@ asset_model.tecan_fluent_15ml_tube_runner_16:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9139,8 +11167,14 @@ asset_model.tecan_fluent_15ml_tube_runner_16_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9166,8 +11200,14 @@ asset_model.tecan_fluent_1_16_16_tube_runner:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9193,8 +11233,14 @@ asset_model.tecan_fluent_1_1_1000_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9220,8 +11266,14 @@ asset_model.tecan_fluent_1_24_10_tube_runner:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9247,8 +11299,14 @@ asset_model.tecan_fluent_1_24_13_tube_runner:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9274,8 +11332,14 @@ asset_model.tecan_fluent_1_4_100_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9301,8 +11365,14 @@ asset_model.tecan_fluent_2_4_100_trough_waste:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9328,8 +11398,14 @@ asset_model.tecan_fluent_2_grid_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9355,8 +11431,14 @@ asset_model.tecan_fluent_320ml_reagent_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9382,8 +11464,14 @@ asset_model.tecan_fluent_32_tube_runner:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9409,8 +11497,14 @@ asset_model.tecan_fluent_32_tube_runner_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9436,8 +11530,14 @@ asset_model.tecan_fluent_3_grid_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9463,8 +11563,14 @@ asset_model.tecan_fluent_3x320_reagent_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9490,8 +11596,14 @@ asset_model.tecan_fluent_3x320_reagent_trough_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9517,8 +11629,14 @@ asset_model.tecan_fluent_480_extended:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9544,8 +11662,14 @@ asset_model.tecan_fluent_4_landscape_61mm_nest_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9571,8 +11695,14 @@ asset_model.tecan_fluent_4_landscape_61mm_nest_segment_waste:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9598,8 +11728,14 @@ asset_model.tecan_fluent_4_landscape_7mm_nest_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9625,8 +11761,14 @@ asset_model.tecan_fluent_4_landscape_7mm_nest_segment_waste:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9652,8 +11794,14 @@ asset_model.tecan_fluent_4x100_reagent_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9679,8 +11827,14 @@ asset_model.tecan_fluent_4x100_reagent_trough_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9706,8 +11860,14 @@ asset_model.tecan_fluent_4x100_trough:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9733,8 +11893,14 @@ asset_model.tecan_fluent_50ml_tube_runner_10:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9760,8 +11926,14 @@ asset_model.tecan_fluent_50ml_tube_runner_10_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9787,8 +11959,14 @@ asset_model.tecan_fluent_5_landscape_61mm_nest_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9814,8 +11992,14 @@ asset_model.tecan_fluent_5_landscape_7mm_nest_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9841,8 +12025,14 @@ asset_model.tecan_fluent_6_grid_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9868,8 +12058,14 @@ asset_model.tecan_fluent_6_landscape_7mm_nest_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9895,8 +12091,14 @@ asset_model.tecan_fluent_6_nest_incubator:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9922,8 +12124,14 @@ asset_model.tecan_fluent_780_extended:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9949,8 +12157,14 @@ asset_model.tecan_fluent_8_grid_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -9976,8 +12190,14 @@ asset_model.tecan_fluent_8_grid_segment_evo:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10003,8 +12223,14 @@ asset_model.tecan_fluent_9_grid_segment_cutout:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10030,8 +12256,14 @@ asset_model.tecan_fluent_centric_gripper:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10057,8 +12289,14 @@ asset_model.tecan_fluent_coolheat_microplate_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10084,8 +12322,14 @@ asset_model.tecan_fluent_coolheat_microplate_segment_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10111,8 +12355,14 @@ asset_model.tecan_fluent_deck_segment_4:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10138,8 +12388,14 @@ asset_model.tecan_fluent_deck_segment_4_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10165,8 +12421,14 @@ asset_model.tecan_fluent_deck_segment_6:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10192,8 +12454,14 @@ asset_model.tecan_fluent_deck_segment_6_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10219,8 +12487,14 @@ asset_model.tecan_fluent_eccentric_gripper:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10246,8 +12520,14 @@ asset_model.tecan_fluent_fca_diti_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10273,8 +12553,14 @@ asset_model.tecan_fluent_fca_diti_segment_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10300,8 +12586,14 @@ asset_model.tecan_fluent_fca_diti_tray:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10327,8 +12619,14 @@ asset_model.tecan_fluent_hotel_deck_4:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10354,8 +12652,14 @@ asset_model.tecan_fluent_hotel_deck_5:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10381,8 +12685,14 @@ asset_model.tecan_fluent_hotel_deck_9:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10408,8 +12718,14 @@ asset_model.tecan_fluent_id_left:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10435,8 +12751,14 @@ asset_model.tecan_fluent_id_middle:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10462,8 +12784,14 @@ asset_model.tecan_fluent_id_tube_runner_1_26_16:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10489,8 +12817,14 @@ asset_model.tecan_fluent_id_tube_runner_1_32_10:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10516,8 +12850,14 @@ asset_model.tecan_fluent_id_tube_runner_1_32_13:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10543,8 +12883,14 @@ asset_model.tecan_fluent_id_tube_runner_eppendorf_1_32_2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10570,8 +12916,14 @@ asset_model.tecan_fluent_lower_6_grid:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10597,8 +12949,14 @@ asset_model.tecan_fluent_lower_6_grid_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10624,8 +12982,14 @@ asset_model.tecan_fluent_mc384_nest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10651,8 +13015,14 @@ asset_model.tecan_fluent_mca_44mm_nest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10678,8 +13048,14 @@ asset_model.tecan_fluent_mca_base_segment_384:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10705,8 +13081,14 @@ asset_model.tecan_fluent_mca_base_segment_384_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10732,8 +13114,14 @@ asset_model.tecan_fluent_mp_diti_nest_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10759,8 +13147,14 @@ asset_model.tecan_fluent_nest_landscape_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10786,8 +13180,14 @@ asset_model.tecan_fluent_nest_landscape_segment_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10813,8 +13213,14 @@ asset_model.tecan_fluent_nest_waste_segment:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10840,8 +13246,14 @@ asset_model.tecan_fluent_nest_waste_segment_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10867,8 +13279,14 @@ asset_model.tecan_fluent_plate_holder:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10894,8 +13312,14 @@ asset_model.tecan_fluent_plate_nest:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10921,8 +13345,14 @@ asset_model.tecan_fluent_reagent_block:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10948,8 +13378,14 @@ asset_model.tecan_fluent_shelf_large:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -10975,8 +13411,14 @@ asset_model.tecan_fluent_shelf_small:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11002,8 +13444,14 @@ asset_model.tecan_fluent_trough_waste:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11029,8 +13477,14 @@ asset_model.tecan_fluent_tube_grippers:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11056,8 +13510,14 @@ asset_model.tecan_fluent_washstation_waste:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11083,8 +13543,14 @@ asset_model.tecan_fluent_washstation_waste_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11110,8 +13576,14 @@ asset_model.tecan_fluent_waste_module:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11137,8 +13609,14 @@ asset_model.tecan_holder_transfer_tool:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11164,8 +13642,14 @@ asset_model.tecan_hydroflex_washer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11191,8 +13675,14 @@ asset_model.tecan_infinite_f50:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11218,8 +13708,14 @@ asset_model.tecan_infinite_lumi:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11245,8 +13741,14 @@ asset_model.tecan_infinite_m200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11272,8 +13774,14 @@ asset_model.tecan_magicprep_ngs:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11299,8 +13807,14 @@ asset_model.tecan_magicprep_ngs_sample_deck:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11326,8 +13840,14 @@ asset_model.tecan_nested_tip_rack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11353,8 +13873,14 @@ asset_model.tecan_nested_tip_rack_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11380,8 +13906,14 @@ asset_model.tecan_resolvex_a200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11407,8 +13939,14 @@ asset_model.tecan_spacer_29_9_te_chrom:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11434,8 +13972,14 @@ asset_model.tecan_spark_cyto:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11461,8 +14005,14 @@ asset_model.tecan_spark_plate_reader:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11488,8 +14038,14 @@ asset_model.tecan_spark_standard:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11515,8 +14071,14 @@ asset_model.tecan_sunrise_plate_reader:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11542,8 +14104,14 @@ asset_model.tecan_techrom:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11569,8 +14137,14 @@ asset_model.tecan_teshake_adapter_2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11596,8 +14170,14 @@ asset_model.tecan_teshake_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11623,8 +14203,14 @@ asset_model.tecan_tevacs_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11650,8 +14236,14 @@ asset_model.tecan_tevacs_plate_park:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11677,8 +14269,14 @@ asset_model.tecan_tevacs_spacer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11704,8 +14302,14 @@ asset_model.tecan_tevacs_vacuum:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11731,8 +14335,14 @@ asset_model.tecan_tip_box:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11758,8 +14368,14 @@ asset_model.tecan_transport_box_diti_tray_1000ul:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11785,8 +14401,14 @@ asset_model.tecan_transport_box_diti_tray_200ul:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11812,8 +14434,14 @@ asset_model.tecan_uno_single_cell_dispenser:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11839,8 +14467,14 @@ asset_model.thermo_alps_3000:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11866,8 +14500,14 @@ asset_model.thermo_arctic_a25:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11893,8 +14533,14 @@ asset_model.thermo_atc:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11920,8 +14566,14 @@ asset_model.thermo_benchtrak:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11947,8 +14599,14 @@ asset_model.thermo_cytomat2c:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -11974,8 +14632,14 @@ asset_model.thermo_cytomat2c_stacker_15:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12001,8 +14665,14 @@ asset_model.thermo_cytomat2c_stacker_21:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12028,8 +14698,14 @@ asset_model.thermo_cytomat_10c:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12055,8 +14731,14 @@ asset_model.thermo_cytomat_skyline:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12082,8 +14764,14 @@ asset_model.thermo_fisher_cytomat_stacker_16:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12109,8 +14797,14 @@ asset_model.thermo_fisher_incucyte_s3:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12136,8 +14830,14 @@ asset_model.thermo_fisher_nanodrop_one:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12163,8 +14863,14 @@ asset_model.thermo_fisher_plate_hotel_15:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12190,8 +14896,14 @@ asset_model.thermo_fisher_qubit_flex_fluorometer:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12217,8 +14929,14 @@ asset_model.thermo_fisher_sorvall_legend_micro_17_microcentrifuge:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12244,8 +14962,14 @@ asset_model.thermo_fisher_sorvall_legend_micro_17r_microcentrifuge:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12271,8 +14995,14 @@ asset_model.thermo_fisher_vanquish_hplc:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12298,8 +15028,14 @@ asset_model.thermo_hotel_8:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12325,8 +15061,14 @@ asset_model.thermo_kingfisher_96dwp:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12352,8 +15094,14 @@ asset_model.thermo_kingfisher_cart:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12379,8 +15127,14 @@ asset_model.thermo_kingfisher_flex:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12406,8 +15160,14 @@ asset_model.thermo_kingfisher_presto:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12433,8 +15193,14 @@ asset_model.thermo_multidrop_combi:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12460,8 +15226,14 @@ asset_model.thermo_orbitor_rs2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12487,8 +15259,14 @@ asset_model.thermo_orbitor_rs2_hotel_base:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12514,8 +15292,14 @@ asset_model.thermo_orbitor_rs2_stack:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12541,8 +15325,14 @@ asset_model.thermo_skyline_stacker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12568,8 +15358,14 @@ asset_model.thermo_spinnaker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12595,8 +15391,14 @@ asset_model.thermo_stacker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12622,8 +15424,14 @@ asset_model.thermo_stacker_carousel:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12649,8 +15457,14 @@ asset_model.thermo_varioskan_lux:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12676,8 +15490,14 @@ asset_model.torrey_pines_ric20:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12703,8 +15523,14 @@ asset_model.unchainedlabs_big_lunatic:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12730,8 +15556,14 @@ asset_model.unchainedlabs_lunatic_plate:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12757,8 +15589,14 @@ asset_model.unchainedlabs_stunner:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12784,8 +15622,14 @@ asset_model.universal_robots_ur5e:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12811,8 +15655,14 @@ asset_model.vantage13m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12838,8 +15688,14 @@ asset_model.vantage2m:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12865,8 +15721,14 @@ asset_model.vantage_2track_waste:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12892,8 +15754,14 @@ asset_model.vantage_dwp_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12919,8 +15787,14 @@ asset_model.vantage_easycode_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12946,8 +15820,14 @@ asset_model.vantage_ftr_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -12973,8 +15853,14 @@ asset_model.vantage_mtp_holder:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13000,8 +15886,14 @@ asset_model.vantage_ntr_carrier:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13027,8 +15919,14 @@ asset_model.vantage_reagent_trough_120:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13054,8 +15952,14 @@ asset_model.vantage_reagent_trough_200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13081,8 +15985,14 @@ asset_model.vantage_reagent_trough_carrier_120:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13108,8 +16018,14 @@ asset_model.vantage_reagent_trough_carrier_120_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13135,8 +16051,14 @@ asset_model.vantage_reagent_trough_carrier_200:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13162,8 +16084,14 @@ asset_model.vantage_reagent_trough_carrier_200_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13189,8 +16117,14 @@ asset_model.vantage_tube_carrier_15:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13216,8 +16150,14 @@ asset_model.vantage_tube_carrier_15_v2:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13243,8 +16183,14 @@ asset_model.vantage_tube_carrier_50:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13270,8 +16216,14 @@ asset_model.vp_scientific_spinvessel_50_ml:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13297,8 +16249,14 @@ asset_model.vwr_microplate_shaker:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13324,8 +16282,14 @@ asset_model.waters_premier_uplc:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}
@@ -13351,8 +16315,14 @@ asset_model.wyatt_dynapro:
   icon: ''
   init_param_schema:
     config:
-      properties: {}
-      required: []
+      properties:
+        device_config:
+          type: object
+        rotation:
+          type: object
+      required:
+      - rotation
+      - device_config
       type: object
     data:
       properties: {}

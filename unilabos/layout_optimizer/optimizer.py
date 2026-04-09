@@ -27,6 +27,86 @@ from .seeders import resolve_seeder_params, seed_layout
 logger = logging.getLogger(__name__)
 
 
+def _circular_diff(
+    a: np.ndarray, b: np.ndarray, n_devices: int, dims_per_device: int = 3,
+) -> np.ndarray:
+    """计算 a - b，对 theta 分量使用最短圆周距离。
+
+    对于 dims_per_device=3，每个设备的第 3 个分量（theta）使用
+    (delta + π) % (2π) - π 计算最短角度差，避免 0/2π 边界跳变。
+    对于 dims_per_device=2（纯位置），等价于普通减法。
+    """
+    result = a - b
+    if dims_per_device == 3:
+        two_pi = 2 * math.pi
+        for d in range(n_devices):
+            idx = 3 * d + 2
+            result[idx] = (result[idx] + math.pi) % two_pi - math.pi
+    return result
+
+
+def _compute_mutant(
+    strategy: str,
+    pop: np.ndarray,
+    best_vector: np.ndarray,
+    target_idx: int,
+    f_val: float,
+    f_val_theta: float,
+    rng: np.random.Generator,
+    n_devices: int,
+    dims_per_device: int = 3,
+) -> np.ndarray:
+    """计算 DE 变异向量（统一所有策略）。
+
+    支持策略：
+    - "best1bin": mutant = best + F*(r1 - r2)
+    - "currenttobest1bin": mutant = target + F*(best - target) + F*(r1 - r2)
+    - "rand1bin": mutant = r0 + F*(r1 - r2)
+
+    使用 _circular_diff 处理角度差，避免 0/2π 边界问题。
+    当 f_val_theta != f_val 且 dims_per_device == 3 时，对 theta 分量
+    使用独立的变异因子 f_val_theta 进行缩放。
+    """
+    pop_size = pop.shape[0]
+    candidates = list(range(pop_size))
+    candidates.remove(target_idx)
+
+    if strategy == "rand1bin":
+        chosen = rng.choice(candidates, size=3, replace=False)
+        r0, r1, r2 = int(chosen[0]), int(chosen[1]), int(chosen[2])
+        diff = _circular_diff(pop[r1], pop[r2], n_devices, dims_per_device)
+        mutant = pop[r0] + f_val * diff
+    elif strategy == "best1bin":
+        chosen = rng.choice(candidates, size=2, replace=False)
+        r1, r2 = int(chosen[0]), int(chosen[1])
+        diff = _circular_diff(pop[r1], pop[r2], n_devices, dims_per_device)
+        mutant = best_vector + f_val * diff
+    elif strategy == "currenttobest1bin":
+        chosen = rng.choice(candidates, size=2, replace=False)
+        r1, r2 = int(chosen[0]), int(chosen[1])
+        diff_best = _circular_diff(best_vector, pop[target_idx], n_devices, dims_per_device)
+        diff_rand = _circular_diff(pop[r1], pop[r2], n_devices, dims_per_device)
+        mutant = pop[target_idx] + f_val * diff_best + f_val * diff_rand
+    else:
+        raise ValueError(f"Unknown DE strategy: {strategy!r}")
+
+    # 解耦 theta 变异：当 f_val_theta != f_val 时重新缩放 theta 分量
+    if dims_per_device == 3 and f_val_theta != f_val:
+        for d_idx in range(n_devices):
+            theta_idx = 3 * d_idx + 2
+            # 确定该策略的 base theta（变异前的参考点）
+            if strategy == "best1bin":
+                base_theta = best_vector[theta_idx]
+            elif strategy == "currenttobest1bin":
+                base_theta = pop[target_idx, theta_idx]
+            else:  # rand1bin
+                base_theta = pop[int(chosen[0]), theta_idx]
+            diff_theta = mutant[theta_idx] - base_theta
+            mutant[theta_idx] = base_theta + (f_val_theta / f_val) * diff_theta
+
+    return mutant
+
+
 def _run_de(
     cost_fn: Callable[[np.ndarray], float],
     bounds: np.ndarray,
@@ -40,14 +120,20 @@ def _run_de(
     n_devices: int,
     strategy: str = "currenttobest1bin",
     progress_callback: Callable[[int, np.ndarray, float], None] | None = None,
+    theta_mutation: tuple[float, float] | None = None,
+    crossover_mode: str = "device",
+    allowed_angles: list[float] | None = None,
 ) -> tuple[np.ndarray, float, int]:
     """自定义差分进化循环。
 
     特性：
-    - 支持 currenttobest1bin / best1bin 两种策略
-    - Per-device crossover：以设备 (x, y, θ) 三元组为原子单元进行交叉
+    - 支持 currenttobest1bin / best1bin / rand1bin 三种策略
+    - Per-device crossover（默认）：以设备 (x, y, θ) 三元组为原子单元进行交叉
+    - Per-dimension crossover（可选）：每个标量维度独立交叉
     - θ wrapping：交叉后对角度取模 [0, 2π)
-    - Early stopping：最近 20 代改善 < 0.1% 时提前终止
+    - 离散角度吸附：可选将 θ 吸附到指定格点
+    - 解耦变异：position 和 theta 可使用不同 F 范围
+    - Early stopping：最近 200 代改善 < 0.1% 时提前终止
     - scipy 风格收敛判断：std(costs) <= atol + tol * |best_cost|
 
     Args:
@@ -57,12 +143,15 @@ def _run_de(
         maxiter: 最大迭代代数
         tol: 相对收敛容差
         atol: 绝对收敛容差
-        mutation: 变异因子范围 (F_min, F_max)
+        mutation: 变异因子范围 (F_min, F_max)，用于位置分量
         recombination: 交叉概率 CR
         seed: 随机种子
         n_devices: 设备数量（用于 per-device crossover）
-        strategy: 变异策略，"currenttobest1bin" 或 "best1bin"
+        strategy: 变异策略，"currenttobest1bin"、"best1bin" 或 "rand1bin"
         progress_callback: 每 10 代调用一次 (gen, best_vector, best_cost)
+        theta_mutation: theta 变异因子范围，None 时使用 mutation
+        crossover_mode: "device"（per-device 三元组原子交叉）或 "dimension"（逐维独立交叉）
+        allowed_angles: 离散角度格点列表，非 None 时将 θ 吸附到最近格点
 
     Returns:
         (best_vector, best_cost, n_generations)
@@ -71,7 +160,16 @@ def _run_de(
     pop_size, ndim = init_pop.shape
     lower = bounds[:, 0]
     upper = bounds[:, 1]
-    f_min, f_max = mutation
+    if theta_mutation is None:
+        theta_mutation = mutation
+
+    # 离散角度：吸附初始种群 θ 到格点
+    if allowed_angles is not None:
+        for ind_idx in range(pop_size):
+            for d in range(n_devices):
+                init_pop[ind_idx, 3 * d + 2] = _nearest_lattice_theta(
+                    init_pop[ind_idx, 3 * d + 2], allowed_angles,
+                )
 
     # 评估初始种群适应度
     costs = np.array([cost_fn(ind) for ind in init_pop])
@@ -85,42 +183,46 @@ def _run_de(
 
     for gen in range(1, maxiter + 1):
         for i in range(pop_size):
-            # 选择变异因子 F（每个个体独立采样）
-            f_val = rng.uniform(f_min, f_max)
+            # 采样变异因子 F（位置和 theta 各自独立）
+            f_val = rng.uniform(mutation[0], mutation[1])
+            f_val_theta = rng.uniform(theta_mutation[0], theta_mutation[1])
 
-            # 选择两个不同于 i 和 best_idx 的个体索引
-            candidates = list(range(pop_size))
-            candidates.remove(i)
-            chosen = rng.choice(candidates, size=2, replace=False)
-            r1, r2 = int(chosen[0]), int(chosen[1])
+            # 变异向量（使用统一 helper）
+            mutant = _compute_mutant(
+                strategy, init_pop, best_vector, i,
+                f_val, f_val_theta, rng, n_devices, dims_per_device=3,
+            )
 
-            # 变异向量
-            if strategy == "best1bin":
-                # Turbo 模式：mutant = best + F*(r1 - r2)
-                mutant = best_vector + f_val * (init_pop[r1] - init_pop[r2])
-            else:
-                # 默认 currenttobest1bin：mutant = target + F*(best - target) + F*(r1 - r2)
-                mutant = (
-                    init_pop[i]
-                    # add a scaled minimum to encourage exploration
-                    + f_val * 0.1 * (upper - lower) * rng.uniform(-1, 1, size=ndim)
-                    + f_val * (best_vector - init_pop[i])
-                    + f_val * (init_pop[r1] - init_pop[r2])
-                )
-
-            # Per-device crossover：以 (x, y, θ) 三元组为原子单元
+            # 交叉
             trial = init_pop[i].copy()
-            j_rand = rng.integers(0, n_devices)  # 保证至少一个设备来自 mutant
-            for d in range(n_devices):
-                if rng.random() < recombination or d == j_rand:
-                    trial[3 * d: 3 * d + 3] = mutant[3 * d: 3 * d + 3]
+            if crossover_mode == "dimension":
+                # 逐维独立交叉
+                j_rand = rng.integers(0, ndim)
+                for j in range(ndim):
+                    if rng.random() < recombination or j == j_rand:
+                        trial[j] = mutant[j]
+            else:
+                # Per-device crossover：以 (x, y, θ) 三元组为原子单元
+                j_rand = rng.integers(0, n_devices)
+                for d in range(n_devices):
+                    if rng.random() < recombination or d == j_rand:
+                        trial[3 * d: 3 * d + 3] = mutant[3 * d: 3 * d + 3]
 
             # θ wrapping：角度取模 [0, 2π)
             for d in range(n_devices):
                 trial[3 * d + 2] %= 2 * math.pi
 
-            # 钳位到边界内
+            # 离散角度吸附
+            if allowed_angles is not None:
+                for d in range(n_devices):
+                    trial[3 * d + 2] = _nearest_lattice_theta(
+                        trial[3 * d + 2], allowed_angles,
+                    )
+
+            # 钳位到边界内，然后重新 normalize θ（避免 clip 破坏 modulo）
             trial = np.clip(trial, lower, upper)
+            for d in range(n_devices):
+                trial[3 * d + 2] %= 2 * math.pi
 
             # 贪心选择：trial 不比当前差则替换
             trial_cost = cost_fn(trial)
@@ -172,6 +274,7 @@ def _generate_seeds(
     n_variants: int = 3,
     sigma_pos_frac: float = 0.05,
     sigma_theta: float = math.pi / 6,
+    allowed_angles: list[float] | None = None,
 ) -> list[np.ndarray]:
     """从多个 seeder preset 生成多样性种子个体 + 变异版本。"""
     seeds: list[np.ndarray] = []
@@ -188,6 +291,12 @@ def _generate_seeds(
             continue
         base_placements = seed_layout(devices, lab, params, workflow_edges)
         base_vec = _placements_to_vector(base_placements, devices)
+        # 离散角度吸附
+        if allowed_angles is not None:
+            for d in range(len(devices)):
+                base_vec[3 * d + 2] = _nearest_lattice_theta(
+                    base_vec[3 * d + 2], allowed_angles,
+                )
         seeds.append(base_vec)
 
         # 变异版本：对 (x,y) 加高斯噪声 σ=5% lab 尺寸，θ 加 σ=π/6
@@ -198,6 +307,10 @@ def _generate_seeds(
                 variant[3 * d + 1] += rng.normal(0, sigma_pos_frac * lab.depth)
                 variant[3 * d + 2] += rng.normal(0, sigma_theta)
                 variant[3 * d + 2] %= 2 * math.pi
+                if allowed_angles is not None:
+                    variant[3 * d + 2] = _nearest_lattice_theta(
+                        variant[3 * d + 2], allowed_angles,
+                    )
             seeds.append(variant)
 
     return seeds
@@ -419,45 +532,44 @@ def _run_de_xy(
     n_devices: int,
     strategy: str = "currenttobest1bin",
     progress_callback: Callable[[int, np.ndarray, float], None] | None = None,
+    crossover_mode: str = "device",
 ) -> tuple[np.ndarray, float, int]:
     """固定 theta 的 2N 维位置 DE。"""
     rng = np.random.default_rng(seed)
     pop_size, ndim = init_pop.shape
     lower = bounds[:, 0]
     upper = bounds[:, 1]
-    f_min, f_max = mutation
 
     costs = np.array([cost_fn(ind) for ind in init_pop])
     best_idx = int(np.argmin(costs))
     best_cost = costs[best_idx]
     best_vector = init_pop[best_idx].copy()
 
-    patience = 200
+    patience = 60
     best_cost_history: list[float] = [best_cost]
 
     for gen in range(1, maxiter + 1):
         for i in range(pop_size):
-            f_val = rng.uniform(f_min, f_max)
-            candidates = list(range(pop_size))
-            candidates.remove(i)
-            chosen = rng.choice(candidates, size=2, replace=False)
-            r1, r2 = int(chosen[0]), int(chosen[1])
+            f_val = rng.uniform(mutation[0], mutation[1])
 
-            if strategy == "best1bin":
-                mutant = best_vector + f_val * (init_pop[r1] - init_pop[r2])
-            else:
-                mutant = (
-                    init_pop[i]
-                    + f_val * 0.1 * (upper - lower) * rng.uniform(-1, 1, size=ndim)
-                    + f_val * (best_vector - init_pop[i])
-                    + f_val * (init_pop[r1] - init_pop[r2])
-                )
+            # 变异向量（dims_per_device=2，无 theta）
+            mutant = _compute_mutant(
+                strategy, init_pop, best_vector, i,
+                f_val, f_val, rng, n_devices, dims_per_device=2,
+            )
 
+            # 交叉
             trial = init_pop[i].copy()
-            j_rand = rng.integers(0, n_devices)
-            for d in range(n_devices):
-                if rng.random() < recombination or d == j_rand:
-                    trial[2 * d: 2 * d + 2] = mutant[2 * d: 2 * d + 2]
+            if crossover_mode == "dimension":
+                j_rand = rng.integers(0, ndim)
+                for j in range(ndim):
+                    if rng.random() < recombination or j == j_rand:
+                        trial[j] = mutant[j]
+            else:
+                j_rand = rng.integers(0, n_devices)
+                for d in range(n_devices):
+                    if rng.random() < recombination or d == j_rand:
+                        trial[2 * d: 2 * d + 2] = mutant[2 * d: 2 * d + 2]
 
             trial = np.clip(trial, lower, upper)
             trial_cost = cost_fn(trial)
@@ -560,6 +672,10 @@ def _optimize_positions_fixed_theta(
     tol: float,
     seed: int | None,
     strategy: str,
+    mutation: tuple[float, float] = (0.5, 1.0),
+    recombination: float = 0.7,
+    atol: float = 1e-3,
+    crossover_mode: str = "device",
 ) -> tuple[list[Placement], float, int, int]:
     """在固定离散 theta 下，只优化位置。"""
     n = len(devices)
@@ -598,13 +714,14 @@ def _optimize_positions_fixed_theta(
         init_pop=init_pop,
         maxiter=maxiter,
         tol=tol,
-        atol=1e-3,
-        mutation=(0.5, 1.0),
-        recombination=0.7,
+        atol=atol,
+        mutation=mutation,
+        recombination=recombination,
         seed=seed,
         n_devices=n,
         strategy=strategy,
         progress_callback=progress_cb,
+        crossover_mode=crossover_mode,
     )
     return (
         _position_vector_to_placements(best_vector, devices, seed_placements),
@@ -628,6 +745,12 @@ def optimize(
     strategy: str = "currenttobest1bin",
     workflow_edges: list[list[str]] | None = None,
     angle_granularity: int | None = None,
+    angle_mode: str = "joint",
+    mutation: tuple[float, float] = (0.5, 1.0),
+    theta_mutation: tuple[float, float] | None = None,
+    recombination: float = 0.7,
+    atol: float = 1e-3,
+    crossover_mode: str = "device",
 ) -> list[Placement]:
     """运行差分进化优化，返回最优布局。
 
@@ -642,7 +765,15 @@ def optimize(
         popsize: 种群大小倍数
         tol: 收敛容差
         seed: 随机种子（用于可复现性）
-        strategy: DE 变异策略（"currenttobest1bin" 或 "best1bin"）
+        strategy: DE 变异策略（"currenttobest1bin"、"best1bin" 或 "rand1bin"）
+        workflow_edges: 工作流边列表
+        angle_granularity: 离散角度粒度（4/8/12/24），None 为连续
+        angle_mode: 离散角度模式，"joint"（3N DE + 格点吸附）或 "hybrid"（角度扫描 + 位置 DE）
+        mutation: 位置变异因子范围 (F_min, F_max)
+        theta_mutation: theta 变异因子范围，None 时使用 mutation
+        recombination: 交叉概率 CR
+        atol: 绝对收敛容差
+        crossover_mode: "device"（per-device 三元组原子交叉）或 "dimension"（逐维独立交叉）
 
     Returns:
         最优布局 Placement 列表
@@ -656,6 +787,8 @@ def optimize(
         reachability_checker = MockReachabilityChecker()
     if constraints is None:
         constraints = []
+    if theta_mutation is None:
+        theta_mutation = mutation
 
     n = len(devices)
     bounds_array = _build_bounds(devices, lab, include_theta=True)
@@ -675,7 +808,8 @@ def optimize(
             devices, placements, lab, collision_checker, reachability_checker, constraints,
         )
 
-    if angle_granularity is not None:
+    # === 离散角度 hybrid 模式（角度扫描 + 位置 DE）===
+    if angle_granularity is not None and angle_mode == "hybrid":
         angles = _angle_lattice(angle_granularity)
         current_placements = _snap_placements_to_lattice(seed_placements, angles)
         best_placements = current_placements
@@ -716,6 +850,10 @@ def optimize(
                     tol=tol,
                     seed=round_seed,
                     strategy=strategy,
+                    mutation=mutation,
+                    recombination=recombination,
+                    atol=atol,
+                    crossover_mode=crossover_mode,
                 )
             )
             total_generations += n_generations
@@ -752,6 +890,15 @@ def optimize(
         )
         return best_placements
 
+    # === 标准 3N DE 路径（连续 theta 或 joint 离散 theta）===
+    allowed_angles: list[float] | None = None
+    if angle_granularity is not None:
+        # joint 模式：在 3N DE 中吸附 theta 到离散格点
+        allowed_angles = _angle_lattice(angle_granularity)
+        seed_placements = _snap_placements_to_lattice(seed_placements, allowed_angles)
+        seed_vector = _placements_to_vector(seed_placements, devices)
+        seed_vector = np.clip(seed_vector, bounds_array[:, 0], bounds_array[:, 1])
+
     # 构建初始种群：种子个体 + 多样性种子 + 随机个体
     rng = np.random.default_rng(seed)
     pop_count = popsize * 3 * n  # scipy 默认 popsize * dim
@@ -761,15 +908,18 @@ def optimize(
     init_pop[0] = seed_vector  # 注入原始种子
 
     # 多样性种子注入（多 preset + 变异版本）
-    extra_seeds = _generate_seeds(devices, lab, rng, workflow_edges)
+    extra_seeds = _generate_seeds(
+        devices, lab, rng, workflow_edges, allowed_angles=allowed_angles,
+    )
     for i, s in enumerate(extra_seeds):
         idx = i + 1  # 原始种子占 [0]
         if idx < pop_count:
             init_pop[idx] = np.clip(s, bounds_array[:, 0], bounds_array[:, 1])
 
     logger.info(
-        "Starting DE optimization: %d devices, %d-dim, popsize=%d, maxiter=%d, strategy=%s",
+        "Starting DE optimization: %d devices, %d-dim, popsize=%d, maxiter=%d, strategy=%s, angle_mode=%s",
         n, 3 * n, pop_count, maxiter, strategy,
+        "joint-discrete" if allowed_angles else "continuous",
     )
 
     progress_cb = _make_progress_callback(
@@ -787,13 +937,16 @@ def optimize(
         init_pop=init_pop,
         maxiter=maxiter,
         tol=tol,
-        atol=1e-3,
-        mutation=(0.5, 1.0),
-        recombination=0.7,
+        atol=atol,
+        mutation=mutation,
+        recombination=recombination,
         seed=seed,
         n_devices=n,
         strategy=strategy,
         progress_callback=progress_cb,
+        theta_mutation=theta_mutation,
+        crossover_mode=crossover_mode,
+        allowed_angles=allowed_angles,
     )
 
     # 评估次数估算：每代 pop_count 次（初始 + 每代 trial）
