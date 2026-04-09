@@ -726,7 +726,7 @@ def refactor_data(
             "template_name": template_name,
             "resource_name": resource_name,
             "description": step.get("description", step.get("purpose", f"{operation} operation")),
-            "lab_node_type": "Device",
+            "lab_node_type": "ILab",
             "param": step.get("parameters", step.get("action_args", {})),
             "footer": f"{template_name}-{resource_name}",
         }

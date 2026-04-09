@@ -80,19 +80,20 @@ class HTTPClient:
             f.write(json.dumps(payload, indent=4))
         # 从序列化数据中提取所有节点的UUID（保存旧UUID）
         old_uuids = {n.res_content.uuid: n for n in resources.all_nodes}
+        nodes_info = [x for xs in resources.dump() for x in xs]
         if not self.initialized or first_add:
             self.initialized = True
             info(f"首次添加资源，当前远程地址: {self.remote_addr}")
             response = requests.post(
                 f"{self.remote_addr}/edge/material",
-                json={"nodes": [x for xs in resources.dump() for x in xs], "mount_uuid": mount_uuid},
+                json={"nodes": nodes_info, "mount_uuid": mount_uuid},
                 headers={"Authorization": f"Lab {self.auth}"},
                 timeout=60,
             )
         else:
             response = requests.put(
                 f"{self.remote_addr}/edge/material",
-                json={"nodes": [x for xs in resources.dump() for x in xs], "mount_uuid": mount_uuid},
+                json={"nodes": nodes_info, "mount_uuid": mount_uuid},
                 headers={"Authorization": f"Lab {self.auth}"},
                 timeout=10,
             )
@@ -111,6 +112,7 @@ class HTTPClient:
                     uuid_mapping[i["uuid"]] = i["cloud_uuid"]
         else:
             logger.error(f"添加物料失败: {response.text}")
+            logger.trace(f"添加物料失败: {nodes_info}")
         for u, n in old_uuids.items():
             if u in uuid_mapping:
                 n.res_content.uuid = uuid_mapping[u]

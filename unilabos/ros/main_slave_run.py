@@ -1,4 +1,5 @@
 import json
+import os
 
 # from nt import device_encoding
 import threading
@@ -62,7 +63,7 @@ def main(
         rclpy.init(args=rclpy_init_args)
     else:
         logger.info("[ROS] rclpy already initialized, reusing context")
-    executor = rclpy.__executor = MultiThreadedExecutor()
+    executor = rclpy.__executor = MultiThreadedExecutor(num_threads=max(os.cpu_count() * 4, 48))
     # 创建主机节点
     host_node = HostNode(
         "host_node",
@@ -124,7 +125,7 @@ def slave(
         rclpy.init(args=rclpy_init_args)
     executor = rclpy.__executor
     if not executor:
-        executor = rclpy.__executor = MultiThreadedExecutor()
+        executor = rclpy.__executor = MultiThreadedExecutor(num_threads=max(os.cpu_count() * 4, 48))
 
     # 1.5 启动 executor 线程
     thread = threading.Thread(target=executor.spin, daemon=True, name="slave_executor_thread")

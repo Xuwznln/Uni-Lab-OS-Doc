@@ -1113,7 +1113,7 @@ class MessageProcessor:
                 "task_id": task_id,
                 "job_id": job_id,
                 "free": free,
-                "need_more": need_more,
+                "need_more": need_more + 1,
             },
         }
 
@@ -1253,7 +1253,7 @@ class QueueProcessor:
                     "task_id": job_info.task_id,
                     "job_id": job_info.job_id,
                     "free": False,
-                    "need_more": 10,
+                    "need_more": 10 + 1,
                 },
             }
             self.message_processor.send_message(message)
@@ -1286,7 +1286,7 @@ class QueueProcessor:
                     "task_id": job_info.task_id,
                     "job_id": job_info.job_id,
                     "free": False,
-                    "need_more": 10,
+                    "need_more": 10 + 1,
                 },
             }
             success = self.message_processor.send_message(message)
