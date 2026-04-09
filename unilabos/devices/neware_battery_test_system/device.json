@@ -14,7 +14,7 @@
             "config": {
                 "ip": "127.0.0.1",
                 "port": 502,
-                "machine_id": 1,
+                "machine_ids": [1, 2, 3, 4, 5, 6, 86],
                 "devtype": "27",
                 "timeout": 20,
                 "size_x": 500.0,

@@ -161,7 +161,9 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             logger.info("没有传入依华deck，检查启动json文件")
         super().__init__(deck=deck, *args, **kwargs,)
         self.debug_mode = debug_mode
- 
+        self._modbus_address = address
+        self._modbus_port = port
+
         """ 连接初始化 """
         modbus_client = TCPClient(addr=address, port=port)
         logger.debug(f"创建 Modbus 客户端: {modbus_client}")
@@ -178,9 +180,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                 raise ValueError('modbus tcp connection failed')
             self.nodes = BaseClient.load_csv(os.path.join(os.path.dirname(__file__), 'coin_cell_assembly_b.csv'))                            
             self.client = modbus_client.register_node_list(self.nodes)
+            self._modbus_client_raw = modbus_client
         else:
             print("测试模式，跳过连接")
             self.nodes, self.client = None, None
+            self._modbus_client_raw = None
 
         """ 工站的配置 """
 
@@ -190,6 +194,32 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self.csv_export_running = False
         self.csv_export_file = None
         self.coin_num_N = 0  #已组装电池数量
+
+    def _ensure_modbus_connected(self) -> None:
+        """检查 Modbus TCP 连接是否存活，若已断开则自动重连（防止长时间空闲后连接超时）"""
+        if self.debug_mode or self._modbus_client_raw is None:
+            return
+        raw_client = self._modbus_client_raw.client
+        if raw_client.is_socket_open():
+            return
+        logger.warning("[Modbus] 检测到连接已断开，尝试重连...")
+        try:
+            raw_client.close()
+        except Exception:
+            pass
+        count = 10
+        while count > 0:
+            count -= 1
+            try:
+                raw_client.connect()
+            except Exception:
+                pass
+            if raw_client.is_socket_open():
+                break
+            time.sleep(2)
+        if not raw_client.is_socket_open():
+            raise RuntimeError(f"Modbus TCP 重连失败（{self._modbus_address}:{self._modbus_port}），请检查设备连接")
+        logger.info("[Modbus] 重连成功")
 
     def post_init(self, ros_node: ROS2WorkstationNode):
         self._ros_node = ros_node
@@ -1056,6 +1086,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         
         # 步骤0: 前置条件检查
         logger.info("\n【步骤 0/4】前置条件检查...")
+        self._ensure_modbus_connected()
         try:
             # 检查 REG_UNILAB_INTERACT (应该为False，表示使用Unilab交互)
             unilab_interact_node = self.client.use_node('REG_UNILAB_INTERACT')

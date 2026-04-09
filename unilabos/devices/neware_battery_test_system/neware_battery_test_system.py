@@ -305,11 +305,12 @@ class NewareBatteryTestSystem:
     ascii_lowercase = 'abcdefghijklmnopqrstuvwxyz'
     ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
     LETTERS = ascii_uppercase + ascii_lowercase
+    DEFAULT_MACHINE_IDS = [1, 2, 3, 4, 5, 6, 86]
 
     def __init__(self, 
         ip: str = None, 
         port: int = None, 
-        machine_id: int = 1,
+        machine_ids: Optional[List[int]] = None,
         devtype: str = None, 
         timeout: int = None,
         
@@ -326,16 +327,18 @@ class NewareBatteryTestSystem:
         Args:
             ip: TCP服务器IP地址
             port: TCP端口
+            machine_ids: 设备ID列表
             devtype: 设备类型标识
             timeout: 通信超时时间（秒）
-            machine_id: 机器ID
             size_x, size_y, size_z: 设备物理尺寸
             oss_upload_enabled: 是否启用OSS上传功能，默认False
             oss_prefix: OSS对象路径前缀，默认"neware_backup"
         """
         self.ip = ip or self.BTS_IP
         self.port = port or self.BTS_PORT
-        self.machine_id = machine_id
+        self.machine_ids = machine_ids
+        self.display_device_ids = self._resolve_display_device_ids()
+        self.primary_device_id = self.display_device_ids[0]
         self.devtype = devtype or self.DEVTYPE
         self.timeout = timeout or self.TIMEOUT
         
@@ -352,6 +355,12 @@ class NewareBatteryTestSystem:
         self._cached_status = {}
         self._last_backup_dir = None  # 记录最近一次的 backup_dir，供上传使用
         self._ros_node: Optional[ROS2WorkstationNode] = None  # ROS节点引用，由框架设置
+        self._channels = self._build_channel_map()
+
+    def _resolve_display_device_ids(self) -> List[int]:
+        if self.machine_ids:
+            return [int(devid) for devid in self.machine_ids]
+        return self.DEFAULT_MACHINE_IDS.copy()
 
 
     def post_init(self, ros_node):
@@ -376,27 +385,72 @@ class NewareBatteryTestSystem:
             ros_node.lab_logger().error(f"新威电池测试系统初始化失败: {e}")
             # 不抛出异常，允许节点继续运行，后续可以重试连接
 
+    def _plate_name(self, devid: int, plate_num: int) -> str:
+        return f"{devid}_P{plate_num}"
+
+    def _plate_resource_key(self, devid: int, plate_num: int, row_idx: int, col_idx: int) -> str:
+        return f"{self._plate_name(devid, plate_num)}_{self.LETTERS[row_idx]}{col_idx + 1}"
+
+    def _get_plate_resource(self, devid: int, plate_num: int, row_idx: int, col_idx: int):
+        possible_names = [
+            f"{self._plate_name(devid, plate_num)}_batterytestposition_{col_idx}_{row_idx}",
+            f"{self._plate_name(devid, plate_num)}_{self.LETTERS[row_idx]}{col_idx + 1}",
+            f"{self._plate_name(devid, plate_num)}_{self.LETTERS[row_idx].lower()}{col_idx + 1}",
+            f"P{plate_num}_batterytestposition_{col_idx}_{row_idx}",
+            f"P{plate_num}_{self.LETTERS[row_idx]}{col_idx + 1}",
+            f"P{plate_num}_{self.LETTERS[row_idx].lower()}{col_idx + 1}",
+        ]
+        for name in possible_names:
+            if name in self.station_resources:
+                return self.station_resources[name], name, possible_names
+        return None, None, possible_names
+
     def _setup_material_management(self):
         """设置物料管理系统"""
-        # 第1盘：5行8列网格 (A1-E8) - 5行对应subdevid 1-5，8列对应chlid 1-8
-        # 先给物料设置一个最大的Deck，并设置其在空间中的位置
-        
-        deck_main = Deck("ADeckName", 2000, 1800, 100, origin=Coordinate(2000,2000,0))
-
-        plate1_resources: Dict[str, BatteryTestPosition] = create_ordered_items_2d(
-            BatteryTestPosition,
-            num_items_x=8,  # 8列（对应chlid 1-8）
-            num_items_y=5,  # 5行（对应subdevid 1-5，即A-E）
-            dx=10,
-            dy=10,
-            dz=0,
-            item_dx=65,
-            item_dy=65
+        deck_main = Deck(
+            name="ADeckName",
+            size_x=2200,
+            size_y=2800,
+            size_z=100,
+            origin=Coordinate(2000, 2000, 0)
         )
-        plate1 = Plate("P1", 400, 300, 50, ordered_items=plate1_resources)
-        deck_main.assign_child_resource(plate1, location=Coordinate(0, 0, 0))
-        
-        # 只有在真实ROS环境下才调用update_resource
+        self.station_resources = {}
+        self.station_resources_by_plate = {}
+
+        for row_idx, devid in enumerate(self.display_device_ids):
+            for plate_num in (1, 2):
+                plate_resources: Dict[str, BatteryTestPosition] = create_ordered_items_2d(
+                    BatteryTestPosition,
+                    num_items_x=8,
+                    num_items_y=5,
+                    dx=10,
+                    dy=10,
+                    dz=0,
+                    item_dx=65,
+                    item_dy=65
+                )
+                plate_name = self._plate_name(devid, plate_num)
+                plate = Plate(
+                    name=plate_name,
+                    size_x=400,
+                    size_y=300,
+                    size_z=50,
+                    ordered_items=plate_resources
+                )
+                location_x = 0 if plate_num == 1 else 450
+                location_y = row_idx * 350
+                deck_main.assign_child_resource(plate, location=Coordinate(location_x, location_y, 0))
+
+                plate_key = (devid, plate_num)
+                self.station_resources_by_plate[plate_key] = {}
+                for name, resource in plate_resources.items():
+                    new_name = f"{plate_name}_{name}"
+                    self.station_resources_by_plate[plate_key][new_name] = resource
+                    self.station_resources[new_name] = resource
+
+        self.station_resources_plate1 = self.station_resources_by_plate.get((self.primary_device_id, 1), {})
+        self.station_resources_plate2 = self.station_resources_by_plate.get((self.primary_device_id, 2), {})
+
         if hasattr(self._ros_node, 'update_resource') and callable(getattr(self._ros_node, 'update_resource')):
             try:
                 ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{
@@ -405,40 +459,6 @@ class NewareBatteryTestSystem:
             except Exception as e:
                 if hasattr(self._ros_node, 'lab_logger'):
                     self._ros_node.lab_logger().warning(f"更新资源失败: {e}")
-                # 在非ROS环境下忽略此错误
-        
-        # 为第1盘资源添加P1_前缀
-        self.station_resources_plate1 = {}
-        for name, resource in plate1_resources.items():
-            new_name = f"P1_{name}"
-            self.station_resources_plate1[new_name] = resource
-
-        # 第2盘：5行8列网格 (A1-E8)，在Z轴上偏移 - 5行对应subdevid 6-10，8列对应chlid 1-8
-        plate2_resources = create_ordered_items_2d(
-            BatteryTestPosition,
-            num_items_x=8,  # 8列（对应chlid 1-8）
-            num_items_y=5,  # 5行（对应subdevid 6-10，即A-E）
-            dx=10,
-            dy=10,
-            dz=0,  
-            item_dx=65,
-            item_dy=65
-        )
-
-        plate2 = Plate("P2", 400, 300, 50, ordered_items=plate2_resources)
-        deck_main.assign_child_resource(plate2, location=Coordinate(0, 350, 0))
-
-
-        # 为第2盘资源添加P2_前缀
-        self.station_resources_plate2 = {}
-        for name, resource in plate2_resources.items():
-            new_name = f"P2_{name}"
-            self.station_resources_plate2[new_name] = resource
-
-        # 合并两盘资源为统一的station_resources
-        self.station_resources = {}
-        self.station_resources.update(self.station_resources_plate1)
-        self.station_resources.update(self.station_resources_plate2)
 
     # ========================
     # 核心属性（Uni-Lab标准）
@@ -469,16 +489,16 @@ class NewareBatteryTestSystem:
         status_map = self._query_all_channels()
         status_processed = {} if not status_map else self._group_by_devid(status_map)
         
-        # 修复数据过滤逻辑：如果machine_id对应的数据不存在，尝试使用第一个可用的设备数据
-        status_current_machine = status_processed.get(self.machine_id, {})
+        # 返回主设备数据，如果主设备没有匹配数据则回退到首个可用设备
+        status_current_machine = status_processed.get(self.primary_device_id, {})
         
         if not status_current_machine and status_processed:
-            # 如果machine_id没有匹配到数据，使用第一个可用的设备数据
+            # 如果主设备没有匹配到数据，使用第一个可用的设备数据
             first_devid = next(iter(status_processed.keys()))
             status_current_machine = status_processed[first_devid]
             if self._ros_node:
                 self._ros_node.lab_logger().warning(
-                    f"machine_id {self.machine_id} 没有匹配到数据，使用设备ID {first_devid} 的数据"
+                    f"主设备ID {self.primary_device_id} 没有匹配到数据，使用设备ID {first_devid} 的数据"
                 )
         
         # 确保有默认的数据结构
@@ -488,139 +508,57 @@ class NewareBatteryTestSystem:
                 "subunits": {}
             }
         
-        # 确保subunits存在
-        subunits = status_current_machine.get("subunits", {})
-        
-        # 处理2盘电池的状态映射
-        self._update_plate_resources(subunits)
+        self._update_plate_resources(status_processed)
         
         return status_current_machine
 
-    def _update_plate_resources(self, subunits: Dict):
-        """更新两盘电池资源的状态"""
-        # 第1盘：subdevid 1-5 映射到 8列5行网格 (列0-7, 行0-4)
-        for subdev_id in range(1, 6):  # subdevid 1-5
-            status_row = subunits.get(subdev_id, {})
-            
-            for chl_id in range(1, 9):  # chlid 1-8
-                try:
-                    # 根据用户描述：第一个是(0,0)，最后一个是(7,4)
-                    # 说明是8列5行，列从0开始，行从0开始
-                    col_idx = (chl_id - 1)      # 0-7 (chlid 1-8 -> 列0-7)
-                    row_idx = (subdev_id - 1)   # 0-4 (subdevid 1-5 -> 行0-4)
-                    
-                    # 尝试多种可能的资源命名格式
-                    possible_names = [
-                        f"P1_batterytestposition_{col_idx}_{row_idx}",  # 用户提到的格式
-                        f"P1_{self.LETTERS[row_idx]}{col_idx + 1}",     # 原有的A1-E8格式
-                        f"P1_{self.LETTERS[row_idx].lower()}{col_idx + 1}",  # 小写字母格式
-                    ]
-                    
-                    r = None
-                    resource_name = None
-                    for name in possible_names:
-                        if name in self.station_resources:
-                            r = self.station_resources[name]
-                            resource_name = name
-                            break
-                    
-                    if r:
-                        status_channel = status_row.get(chl_id, {})
-                        metrics = status_channel.get("metrics", {})
-                        # 构建BatteryTestPosition状态数据（移除capacity和energy）
-                        channel_state = {
-                            # 基本测量数据
-                            "voltage": metrics.get("voltage_V", 0.0),
-                            "current": metrics.get("current_A", 0.0),
-                            "time": metrics.get("totaltime_s", 0.0),
-                            
-                            # 状态信息
-                            "status": status_channel.get("state", "unknown"),
-                            "color": status_channel.get("color", self.STATUS_COLOR["unknown"]),
-                            
-                            # 通道名称标识
-                            "Channel_Name": f"{self.machine_id}-{subdev_id}-{chl_id}",
-
-                        }
-                        r.load_state(channel_state)
-                  
-                        # 调试信息
-                        if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
-                            self._ros_node.lab_logger().debug(
-                                f"更新P1资源状态: {resource_name} <- subdev{subdev_id}/chl{chl_id} "
-                                f"状态:{channel_state['status']}"
+    def _update_plate_resources(self, status_processed: Dict[int, Dict]):
+        """更新7台设备共14盘电池资源的状态"""
+        for devid in self.display_device_ids:
+            machine_data = status_processed.get(devid, {})
+            subunits = machine_data.get("subunits", {})
+            for plate_num, subdev_start, subdev_end in ((1, 1, 5), (2, 6, 10)):
+                for subdev_id in range(subdev_start, subdev_end + 1):
+                    status_row = subunits.get(subdev_id, {})
+                    for chl_id in range(1, 9):
+                        try:
+                            col_idx = chl_id - 1
+                            row_idx = subdev_id - subdev_start
+                            r, resource_name, possible_names = self._get_plate_resource(
+                                devid=devid,
+                                plate_num=plate_num,
+                                row_idx=row_idx,
+                                col_idx=col_idx
                             )
-                    else:
-                        # 如果找不到资源，记录调试信息
-                        if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
-                            self._ros_node.lab_logger().debug(
-                                f"P1未找到资源: subdev{subdev_id}/chl{chl_id} -> 尝试的名称: {possible_names}"
-                            )
-                except (KeyError, IndexError) as e:
-                    if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
-                        self._ros_node.lab_logger().debug(f"P1映射错误: subdev{subdev_id}/chl{chl_id} - {e}")
-                    continue
-        
-        # 第2盘：subdevid 6-10 映射到 8列5行网格 (列0-7, 行0-4)
-        for subdev_id in range(6, 11):  # subdevid 6-10
-            status_row = subunits.get(subdev_id, {})
-            
-            for chl_id in range(1, 9):  # chlid 1-8
-                try:
-                    col_idx = (chl_id - 1)          # 0-7 (chlid 1-8 -> 列0-7)
-                    row_idx = (subdev_id - 6)       # 0-4 (subdevid 6-10 -> 行0-4)
-                    
-                    # 尝试多种可能的资源命名格式
-                    possible_names = [
-                        f"P2_batterytestposition_{col_idx}_{row_idx}",  # 用户提到的格式
-                        f"P2_{self.LETTERS[row_idx]}{col_idx + 1}",     # 原有的A1-E8格式
-                        f"P2_{self.LETTERS[row_idx].lower()}{col_idx + 1}",  # 小写字母格式
-                    ]
-                    
-                    r = None
-                    resource_name = None
-                    for name in possible_names:
-                        if name in self.station_resources:
-                            r = self.station_resources[name]
-                            resource_name = name
-                            break
-                    
-                    if r:
-                        status_channel = status_row.get(chl_id, {})
-                        metrics = status_channel.get("metrics", {})
-                        # 构建BatteryTestPosition状态数据（移除capacity和energy）
-                        channel_state = {
-                            # 基本测量数据
-                            "voltage": metrics.get("voltage_V", 0.0),
-                            "current": metrics.get("current_A", 0.0),
-                            "time": metrics.get("totaltime_s", 0.0),
-                            
-                            # 状态信息
-                            "status": status_channel.get("state", "unknown"),
-                            "color": status_channel.get("color", self.STATUS_COLOR["unknown"]),
-                            
-                            # 通道名称标识
-                            "Channel_Name": f"{self.machine_id}-{subdev_id}-{chl_id}",
-                            
-                        }
-                        r.load_state(channel_state)
-                        
-                        # 调试信息
-                        if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
-                            self._ros_node.lab_logger().debug(
-                                f"更新P2资源状态: {resource_name} <- subdev{subdev_id}/chl{chl_id} "
-                                f"状态:{channel_state['status']}"
-                            )
-                    else:
-                        # 如果找不到资源，记录调试信息
-                        if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
-                            self._ros_node.lab_logger().debug(
-                                f"P2未找到资源: subdev{subdev_id}/chl{chl_id} -> 尝试的名称: {possible_names}"
-                            )
-                except (KeyError, IndexError) as e:
-                    if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
-                        self._ros_node.lab_logger().debug(f"P2映射错误: subdev{subdev_id}/chl{chl_id} - {e}")
-                    continue
+                            if r is None:
+                                if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
+                                    self._ros_node.lab_logger().debug(
+                                        f"{devid}_P{plate_num}未找到资源: subdev{subdev_id}/chl{chl_id} -> "
+                                        f"尝试的名称: {possible_names}"
+                                    )
+                                continue
+                            status_channel = status_row.get(chl_id, {})
+                            metrics = status_channel.get("metrics", {})
+                            channel_state = {
+                                "voltage": metrics.get("voltage_V", 0.0),
+                                "current": metrics.get("current_A", 0.0),
+                                "time": metrics.get("totaltime_s", 0.0),
+                                "status": status_channel.get("state", "unknown"),
+                                "color": status_channel.get("color", self.STATUS_COLOR["unknown"]),
+                                "Channel_Name": f"{devid}-{subdev_id}-{chl_id}",
+                            }
+                            r.load_state(channel_state)
+                            if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
+                                self._ros_node.lab_logger().debug(
+                                    f"更新{devid}_P{plate_num}资源状态: {resource_name} <- "
+                                    f"subdev{subdev_id}/chl{chl_id} 状态:{channel_state['status']}"
+                                )
+                        except (KeyError, IndexError) as e:
+                            if self._ros_node and hasattr(self._ros_node, 'lab_logger'):
+                                self._ros_node.lab_logger().debug(
+                                    f"{devid}_P{plate_num}映射错误: subdev{subdev_id}/chl{chl_id} - {e}"
+                                )
+                            continue
         ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{
                     "resources": list(self.station_resources.values())
                 })
@@ -639,6 +577,22 @@ class NewareBatteryTestSystem:
     def total_channels(self) -> int:
         """获取总通道数"""
         return len(self._channels)
+
+    def _build_device_summary_dict(self) -> dict:
+        if not hasattr(self, '_channels') or not self._channels:
+            self._channels = self._build_channel_map()
+        channel_count_by_devid = {}
+        for channel in self._channels:
+            devid = channel.devid
+            channel_count_by_devid[devid] = channel_count_by_devid.get(devid, 0) + 1
+        return {
+            "channel_count_by_devid": channel_count_by_devid,
+            "display_device_ids": self.display_device_ids,
+            "total_channels": len(self._channels)
+        }
+
+    def device_summary(self) -> str:
+        return json.dumps(self._build_device_summary_dict(), ensure_ascii=False)
 
     # ========================
     # 设备动作方法（Uni-Lab标准）
@@ -964,6 +918,7 @@ class NewareBatteryTestSystem:
             'SIGR_LI': gen_mod.xml_SiGr_Li_Step,
             '811_SIGR': gen_mod.xml_811_SiGr,
             '811_CU_AGING': gen_mod.xml_811_Cu_aging,
+            'ZQXNLRMO':gen_mod.xml_ZQXNLRMO,
         }
         if key not in fmap:
             raise ValueError(f"未定义电池体系映射: {key}")
@@ -1141,16 +1096,7 @@ class NewareBatteryTestSystem:
             dict: ROS2动作结果格式 {"return_info": str, "success": bool}
         """
         try:
-            # 确保_channels已初始化
-            if not hasattr(self, '_channels') or not self._channels:
-                self._channels = self._build_channel_map()
-            
-            summary = {}
-            for channel in self._channels:
-                devid = channel.devid
-                summary[devid] = summary.get(devid, 0) + 1
-            
-            result_info = json.dumps(summary, ensure_ascii=False)
+            result_info = self.device_summary()
             success_msg = f"设备摘要统计: {result_info}"
             if self._ros_node:
                 self._ros_node.lab_logger().info(success_msg)

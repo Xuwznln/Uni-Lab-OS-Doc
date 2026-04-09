@@ -1039,7 +1039,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.warning(f"[create_orders_formulation] 第 {idx + 1} 个配方无有效物料，跳过")
                 continue
 
-            item_mix_time = mix_time[idx] if idx < len(mix_time) else 0
+            raw_mix_time = mix_time[idx] if idx < len(mix_time) else None
+            try:
+                item_mix_time = int(raw_mix_time) if raw_mix_time not in (None, "", "null") else 0
+            except (ValueError, TypeError):
+                item_mix_time = 0
             logger.info(f"[create_orders_formulation] 第 {idx + 1} 个配方: orderName={order_name}, "
                         f"coinCellVolume={coin_cell_volume}, pouchCellVolume={pouch_cell_volume}, "
                         f"conductivityVolume={conductivity_volume}, totalMass={total_mass}, "

@@ -102,7 +102,7 @@ coincellassemblyworkstation_device:
             goal:
               properties:
                 assembly_pressure:
-                  default: 4200
+                  default: 3200
                   description: 电池压制力(N)
                   type: integer
                 assembly_type:
@@ -118,7 +118,7 @@ coincellassemblyworkstation_device:
                   description: 是否启用压力模式
                   type: boolean
                 dual_drop_first_volume:
-                  default: 25
+                  default: 0
                   description: 二次滴液第一次排液体积(μL)
                   type: integer
                 dual_drop_mode:
@@ -137,6 +137,7 @@ coincellassemblyworkstation_device:
                   description: 电解液瓶数
                   type: string
                 elec_use_num:
+                  default: 5
                   description: 每瓶电解液组装电池数
                   type: string
                 elec_vol:
@@ -144,7 +145,7 @@ coincellassemblyworkstation_device:
                   description: 电解液吸液量(μL)
                   type: integer
                 file_path:
-                  default: /Users/sml/work
+                  default: D:\UniLabdev\Uni-Lab-OS\unilabos\devices\workstation\coin_cell_assembly
                   description: 实验记录保存路径
                   type: string
                 fujipian_juzhendianwei:

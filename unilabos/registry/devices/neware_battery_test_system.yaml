@@ -324,7 +324,7 @@ neware_battery_test_system:
     status_types:
       channel_status: Dict[int, Dict]
       connection_info: Dict[str, str]
-      device_summary: dict
+      device_summary: str
       status: str
       total_channels: int
     type: python
@@ -339,9 +339,18 @@ neware_battery_test_system:
           type: string
         ip:
           type: string
-        machine_id:
-          default: 1
-          type: integer
+        machine_ids:
+          default:
+          - 1
+          - 2
+          - 3
+          - 4
+          - 5
+          - 6
+          - 86
+          items:
+            type: integer
+          type: array
         oss_prefix:
           default: neware_backup
           type: string
@@ -374,7 +383,7 @@ neware_battery_test_system:
             type: string
           type: object
         device_summary:
-          type: object
+          type: string
         status:
           type: string
         total_channels:
