@@ -679,14 +679,17 @@ def _resolve_name(name: str, import_map: Dict[str, str]) -> str:
     return name
 
 
+_DECORATOR_ENUM_CLASSES = frozenset({"Side", "DataSource", "NodeType"})
+
+
 def _resolve_attribute(node: ast.Attribute, import_map: Dict[str, str]) -> str:
     """
     Resolve an attribute access like Side.NORTH or DataSource.HANDLE.
 
-    Returns a string like "NORTH" for enum values, or
-    "module.path:Class.attr" for imported references.
+    对于来自 ``unilabos.registry.decorators`` 的枚举类 (Side / DataSource / NodeType)，
+    直接返回枚举成员名 (如 ``"NORTH"`` / ``"HANDLE"`` / ``"MANUAL_CONFIRM"``)，
+    省去消费端二次 rsplit 解析。其它 import 仍返回完整模块路径。
     """
-    # Get the full dotted path
     parts = []
     current = node
     while isinstance(current, ast.Attribute):
@@ -696,20 +699,19 @@ def _resolve_attribute(node: ast.Attribute, import_map: Dict[str, str]) -> str:
         parts.append(current.id)
 
     parts.reverse()
-    # parts = ["Side", "NORTH"] or ["DataSource", "HANDLE"]
+    # parts = ["Side", "NORTH"] or ["DataSource", "HANDLE"] or ["NodeType", "MANUAL_CONFIRM"]
 
     if len(parts) >= 2:
         base = parts[0]
         attr = ".".join(parts[1:])
 
-        # If the base is an imported name, resolve it
+        if base in _DECORATOR_ENUM_CLASSES:
+            source = import_map.get(base, "")
+            if not source or _REGISTRY_DECORATOR_MODULE in source:
+                return parts[-1]
+
         if base in import_map:
             return f"{import_map[base]}.{attr}"
-
-        # For known enum-like patterns, return just the value
-        # e.g. Side.NORTH -> "NORTH"
-        if base in ("Side", "DataSource"):
-            return parts[-1]
 
     return ".".join(parts)
 

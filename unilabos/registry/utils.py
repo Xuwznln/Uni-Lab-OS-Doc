@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from msgcenterpy.instances.typed_dict_instance import TypedDictMessageInstance
 
 from unilabos.utils.cls_creator import import_class
+from unilabos.registry.decorators import Side, DataSource, normalize_enum_value
 
 _logger = logging.getLogger(__name__)
 
@@ -487,10 +488,7 @@ def normalize_ast_handles(handles_raw: Any) -> List[Dict[str, Any]]:
             }
             side = h.get("side")
             if side:
-                if isinstance(side, str) and "." in side:
-                    val = side.rsplit(".", 1)[-1]
-                    side = val.lower() if val in ("LEFT", "RIGHT", "TOP", "BOTTOM") else val
-                entry["side"] = side
+                entry["side"] = normalize_enum_value(side, Side) or side
             label = h.get("label")
             if label:
                 entry["label"] = label
@@ -499,10 +497,7 @@ def normalize_ast_handles(handles_raw: Any) -> List[Dict[str, Any]]:
                 entry["data_key"] = data_key
             data_source = h.get("data_source")
             if data_source:
-                if isinstance(data_source, str) and "." in data_source:
-                    val = data_source.rsplit(".", 1)[-1]
-                    data_source = val.lower() if val in ("HANDLE", "EXECUTOR") else val
-                entry["data_source"] = data_source
+                entry["data_source"] = normalize_enum_value(data_source, DataSource) or data_source
             description = h.get("description")
             if description:
                 entry["description"] = description
@@ -537,17 +532,12 @@ def normalize_ast_action_handles(handles_raw: Any) -> Dict[str, Any]:
             "data_type": h.get("data_type", ""),
             "label": h.get("label", ""),
         }
+        _FIELD_ENUM_MAP = {"side": Side, "data_source": DataSource}
         for opt_key in ("side", "data_key", "data_source", "description", "io_type"):
             val = h.get(opt_key)
             if val is not None:
-                # Only resolve enum-style refs (e.g. DataSource.HANDLE -> handle) for data_source/side
-                # data_key values like "wells.@flatten", "@this.0@@@plate" must be preserved as-is
-                if (
-                    isinstance(val, str)
-                    and "." in val
-                    and opt_key not in ("io_type", "data_key")
-                ):
-                    val = val.rsplit(".", 1)[-1].lower()
+                if opt_key in _FIELD_ENUM_MAP:
+                    val = normalize_enum_value(val, _FIELD_ENUM_MAP[opt_key]) or val
                 entry[opt_key] = val
 
         # io_type: only add when explicitly set; do not default output to "sink" (YAML convention omits it)

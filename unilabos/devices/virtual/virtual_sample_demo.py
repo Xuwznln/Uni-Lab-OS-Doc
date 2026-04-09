@@ -57,7 +57,7 @@ class VirtualSampleDemo:
                 readings.append(round(random.uniform(0.1, 1.0), 4))
                 samples.append(idx)
 
-        return {"volumes": out_volumes, "readings": readings, "samples": samples}
+        return {"volumes": out_volumes, "readings": readings, "unilabos_samples": samples}
 
     # ------------------------------------------------------------------
     # Action 3: 入参和出参都带 samples 列（不等长）
@@ -78,7 +78,7 @@ class VirtualSampleDemo:
             scores.append(score)
             passed.append(r >= threshold)
 
-        return {"scores": scores, "passed": passed, "samples": samples}
+        return {"scores": scores, "passed": passed, "unilabos_samples": samples}
 
     # ------------------------------------------------------------------
     # 状态属性

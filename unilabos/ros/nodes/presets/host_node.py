@@ -24,7 +24,7 @@ from unilabos_msgs.srv import (
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
 from unique_identifier_msgs.msg import UUID
 
-from unilabos.registry.decorators import device
+from unilabos.registry.decorators import device, action, NodeType
 from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.registry.registry import lab_registry
 from unilabos.resources.container import RegularContainer
@@ -313,7 +313,9 @@ class HostNode(BaseROS2DeviceNode):
                 callback_group=self.callback_group,
             ),
         }  # 用来存储多个ActionClient实例
-        self._action_value_mappings: Dict[str, Dict] = {}  # device_id -> action_value_mappings(本地+远程设备统一存储)
+        self._action_value_mappings: Dict[str, Dict] = {
+            device_id: self._action_value_mappings
+        }  # device_id -> action_value_mappings(本地+远程设备统一存储)
         self._slave_registry_configs: Dict[str, Dict] = {}  # registry_name -> registry_config(含action_value_mappings)
         self._goals: Dict[str, Any] = {}  # 用来存储多个目标的状态
         self._online_devices: Set[str] = {f"{self.namespace}/{device_id}"}  # 用于跟踪在线设备
@@ -1620,6 +1622,19 @@ class HostNode(BaseROS2DeviceNode):
             "status": "success",
         }
         return res
+
+    @action(always_free=True, node_type=NodeType.MANUAL_CONFIRM, placeholder_keys={
+        "assignee_user_ids": "unilabos_manual_confirm"
+    }, goal_default={
+        "timeout_seconds": 3600,
+        "assignee_user_ids": []
+    })
+    def manual_confirm(self, timeout_seconds: int, assignee_user_ids: list[str], **kwargs) -> dict:
+        """
+        timeout_seconds: 超时时间（秒），默认3600秒
+        修改的结果无效，是只读的
+        """
+        return kwargs
 
     def test_resource(
         self,

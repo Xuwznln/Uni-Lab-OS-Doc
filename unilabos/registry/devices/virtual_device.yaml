@@ -2815,8 +2815,8 @@ virtual_sample_demo:
           readings: readings
           samples: samples
         goal_default:
-          readings: []
-          samples: []
+          readings: null
+          samples: null
         handles:
           input:
           - data_key: readings
@@ -2846,18 +2846,12 @@ virtual_sample_demo:
             handler_key: samples_result_out
             label: 样品索引
         placeholder_keys: {}
-        result:
-          passed: passed
-          samples: samples
-          scores: scores
+        result: {}
         schema:
           description: 对 split_and_measure 输出做二次分析，入参和出参都带 samples 列
           properties:
             feedback:
-              properties: {}
-              required: []
               title: AnalyzeReadings_Feedback
-              type: object
             goal:
               properties:
                 readings:
@@ -2876,52 +2870,11 @@ virtual_sample_demo:
               title: AnalyzeReadings_Goal
               type: object
             result:
-              properties:
-                passed:
-                  description: 是否通过阈值
-                  items:
-                    type: boolean
-                  type: array
-                samples:
-                  description: 每行归属的输入样品 index (0-based)
-                  items:
-                    type: integer
-                  type: array
-                scores:
-                  description: 分析得分
-                  items:
-                    type: number
-                  type: array
-              required:
-              - scores
-              - passed
-              - samples
               title: AnalyzeReadings_Result
               type: object
           required:
           - goal
-          title: AnalyzeReadings
-          type: object
-        type: UniLabJsonCommandAsync
-      auto-cleanup:
-        feedback: {}
-        goal: {}
-        goal_default: {}
-        handles: {}
-        placeholder_keys: {}
-        result: {}
-        schema:
-          description: cleanup的参数schema
-          properties:
-            feedback: {}
-            goal:
-              properties: {}
-              required: []
-              type: object
-            result: {}
-          required:
-          - goal
-          title: cleanup参数
+          title: analyze_readings参数
           type: object
         type: UniLabJsonCommandAsync
       measure_samples:
@@ -2929,7 +2882,7 @@ virtual_sample_demo:
         goal:
           concentrations: concentrations
         goal_default:
-          concentrations: []
+          concentrations: null
         handles:
           output:
           - data_key: concentrations
@@ -2943,17 +2896,12 @@ virtual_sample_demo:
             handler_key: absorbance_out
             label: 吸光度列表
         placeholder_keys: {}
-        result:
-          absorbance: absorbance
-          concentrations: concentrations
+        result: {}
         schema:
           description: 模拟光度测量，入参出参等长
           properties:
             feedback:
-              properties: {}
-              required: []
               title: MeasureSamples_Feedback
-              type: object
             goal:
               properties:
                 concentrations:
@@ -2966,25 +2914,11 @@ virtual_sample_demo:
               title: MeasureSamples_Goal
               type: object
             result:
-              properties:
-                absorbance:
-                  description: 吸光度列表（与浓度等长）
-                  items:
-                    type: number
-                  type: array
-                concentrations:
-                  description: 原始浓度列表
-                  items:
-                    type: number
-                  type: array
-              required:
-              - concentrations
-              - absorbance
               title: MeasureSamples_Result
               type: object
           required:
           - goal
-          title: MeasureSamples
+          title: measure_samples参数
           type: object
         type: UniLabJsonCommandAsync
       split_and_measure:
@@ -2994,7 +2928,7 @@ virtual_sample_demo:
           volumes: volumes
         goal_default:
           split_count: 3
-          volumes: []
+          volumes: null
         handles:
           output:
           - data_key: readings
@@ -3013,21 +2947,16 @@ virtual_sample_demo:
             handler_key: volumes_out
             label: 均分体积
         placeholder_keys: {}
-        result:
-          readings: readings
-          samples: samples
-          volumes: volumes
+        result: {}
         schema:
           description: 均分样品后逐份测量，输出带 samples 列标注归属
           properties:
             feedback:
-              properties: {}
-              required: []
               title: SplitAndMeasure_Feedback
-              type: object
             goal:
               properties:
                 split_count:
+                  default: 3
                   description: 每个样品均分的份数
                   type: integer
                 volumes:
@@ -3040,31 +2969,11 @@ virtual_sample_demo:
               title: SplitAndMeasure_Goal
               type: object
             result:
-              properties:
-                readings:
-                  description: 测量读数
-                  items:
-                    type: number
-                  type: array
-                samples:
-                  description: 每行归属的输入样品 index (0-based)
-                  items:
-                    type: integer
-                  type: array
-                volumes:
-                  description: 均分后的体积列表
-                  items:
-                    type: number
-                  type: array
-              required:
-              - volumes
-              - readings
-              - samples
               title: SplitAndMeasure_Result
               type: object
           required:
           - goal
-          title: SplitAndMeasure
+          title: split_and_measure参数
           type: object
         type: UniLabJsonCommandAsync
     module: unilabos.devices.virtual.virtual_sample_demo:VirtualSampleDemo
@@ -3079,7 +2988,7 @@ virtual_sample_demo:
     config:
       properties:
         config:
-          type: string
+          type: object
         device_id:
           type: string
       required: []

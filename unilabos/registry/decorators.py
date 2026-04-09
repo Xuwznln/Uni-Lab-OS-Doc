@@ -8,7 +8,7 @@ Usage:
         device, action, resource,
         InputHandle, OutputHandle,
         ActionInputHandle, ActionOutputHandle,
-        HardwareInterface, Side, DataSource,
+        HardwareInterface, Side, DataSource, NodeType,
     )
 
     @device(
@@ -71,6 +71,13 @@ class DataSource(str, Enum):
 
     HANDLE = "handle"  # 从上游 handle 获取数据 (用于 InputHandle)
     EXECUTOR = "executor"  # 从执行器输出数据 (用于 OutputHandle)
+
+
+class NodeType(str, Enum):
+    """动作的节点类型（用于区分 ILab 节点和人工确认节点等）"""
+
+    ILAB = "ILab"
+    MANUAL_CONFIRM = "manual_confirm"
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +342,7 @@ def action(
     description: str = "",
     auto_prefix: bool = False,
     parent: bool = False,
+    node_type: Optional["NodeType"] = None,
 ):
     """
     动作方法装饰器
@@ -365,6 +373,8 @@ def action(
         description: 动作描述
         auto_prefix: 若为 True，动作名使用 auto-{method_name} 形式（与无 @action 时一致）
         parent: 若为 True，当方法参数为空 (*args, **kwargs) 时，通过 MRO 从父类获取真实方法参数
+        node_type: 动作的节点类型 (NodeType.ILAB / NodeType.MANUAL_CONFIRM)。
+                   不填写时不写入注册表。
     """
 
     def decorator(func: F) -> F:
@@ -389,6 +399,8 @@ def action(
             "auto_prefix": auto_prefix,
             "parent": parent,
         }
+        if node_type is not None:
+            meta["node_type"] = node_type.value if isinstance(node_type, NodeType) else str(node_type)
         wrapper._action_registry_meta = meta  # type: ignore[attr-defined]
 
         # 设置 _is_always_free 保持与旧 @always_free 装饰器兼容
@@ -513,6 +525,38 @@ def clear_registry():
     """清空全局注册表 (用于测试)"""
     _registered_devices.clear()
     _registered_resources.clear()
+
+
+# ---------------------------------------------------------------------------
+# 枚举值归一化
+# ---------------------------------------------------------------------------
+
+
+def normalize_enum_value(raw: Any, enum_cls) -> Optional[str]:
+    """将 AST 提取的枚举成员名 / YAML 值字符串 / 旧格式长路径统一归一化为枚举值。
+
+    适用于 Side、DataSource、NodeType 等继承自 ``str, Enum`` 的装饰器枚举。
+
+    处理以下格式:
+      - "MANUAL_CONFIRM"  →  NodeType["MANUAL_CONFIRM"].value = "manual_confirm"
+      - "manual_confirm"  →  NodeType("manual_confirm").value = "manual_confirm"
+      - "HANDLE"          →  DataSource["HANDLE"].value = "handle"
+      - "NORTH"           →  Side["NORTH"].value = "NORTH"
+      - 旧缓存长路径 "unilabos...NodeType.MANUAL_CONFIRM" → 先 rsplit 再查找
+    """
+    if not raw:
+        return None
+    raw_str = str(raw)
+    if "." in raw_str:
+        raw_str = raw_str.rsplit(".", 1)[-1]
+    try:
+        return enum_cls[raw_str].value
+    except KeyError:
+        pass
+    try:
+        return enum_cls(raw_str).value
+    except ValueError:
+        return raw_str
 
 
 # ---------------------------------------------------------------------------

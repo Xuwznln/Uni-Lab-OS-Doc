@@ -158,12 +158,13 @@ python ./scripts/extract_device_actions.py [--registry <path>] <device_id> ./ski
   - `unilabos_devices` → **DeviceSlot**，填入路径字符串如 `"/host_node"`（从资源树筛选 type=device）
   - `unilabos_nodes` → **NodeSlot**，填入路径字符串如 `"/PRCXI/PRCXI_Deck"`（资源树中任意节点）
   - `unilabos_class` → **ClassSlot**，填入类名字符串如 `"container"`（从注册表查找）
+  - `unilabos_formulation` → **FormulationSlot**，填入配方数组 `[{well_name, liquids: [{name, volume}]}]`（well_name 为目标物料的 name）
 - array 类型字段 → `[{id, name, uuid}, ...]`
 - 特殊：`create_resource` 的 `res_id`（ResourceSlot）可填不存在的路径
 
 ### Step 4 — 写 SKILL.md
 
-直接复用 `unilab-device-api` 的 API 模板（10 个 endpoint），修改：
+直接复用 `unilab-device-api` 的 API 模板，修改：
 - 设备名称
 - Action 数量
 - 目录列表
@@ -181,21 +182,37 @@ API 模板结构：
 ## 前置条件（缺一不可）
 - ak/sk → AUTH, --addr → BASE URL
 
-## Session State
-- lab_uuid（通过 API #1 自动匹配，不要问用户）, device_name
+## 请求约定
+- Windows 平台必须用 curl.exe（非 PowerShell 的 curl 别名）
 
-## API Endpoints (10 个)
-# 注意：
-# - #1 获取 lab 列表 + 自动匹配 lab_uuid（遍历 is_admin 的 lab，
-#   调用 /lab/info/{uuid} 比对 access_key == ak）
-# - #2 创建工作流用 POST /lab/workflow
-# - #10 获取资源树路径含 lab_uuid: /lab/material/download/{lab_uuid}
+## Session State
+- lab_uuid（通过 GET /edge/lab/info 直接获取，不要问用户）, device_name
+
+## API Endpoints
+# - #1  GET /edge/lab/info → 直接拿到 lab_uuid
+# - #2  创建工作流 POST /lab/workflow/owner → 拼 URL 告知用户
+# - #3  创建节点 POST /edge/workflow/node
+#       body: {workflow_uuid, resource_template_name: "<device_id>", node_template_name: "<action_name>"}
+# - #4  删除节点 DELETE /lab/workflow/nodes
+# - #5  更新节点参数 PATCH /lab/workflow/node
+# - #6  查询节点 handles POST /lab/workflow/node-handles
+#       body: {node_uuids: ["uuid1","uuid2"]} → 返回各节点的 handle_uuid
+# - #7  批量创建边 POST /lab/workflow/edges
+#       body: {edges: [{source_node_uuid, target_node_uuid, source_handle_uuid, target_handle_uuid}]}
+# - #8  启动工作流 POST /lab/workflow/{uuid}/run
+# - #9  运行设备单动作 POST /lab/mcp/run/action
+# - #10 查询任务状态 GET /lab/mcp/task/{task_uuid}
+# - #11 运行工作流单节点 POST /lab/mcp/run/workflow/action
+# - #12 获取资源树 GET /lab/material/download/{lab_uuid}
+# - #13 获取工作流模板详情 GET /lab/workflow/template/detail/{workflow_uuid}
+#       返回 workflow 完整结构：data.nodes[] 含每个节点的 uuid、name、param、device_name、handles
 
 ## Placeholder Slot 填写规则
 - unilabos_resources → ResourceSlot → {"id":"/path/name","name":"name","uuid":"xxx"}
 - unilabos_devices → DeviceSlot → "/parent/device" 路径字符串
 - unilabos_nodes → NodeSlot → "/parent/node" 路径字符串
 - unilabos_class → ClassSlot → "class_name" 字符串
+- unilabos_formulation → FormulationSlot → [{well_name, liquids: [{name, volume}]}] 配方数组
 - 特例：create_resource 的 res_id 允许填不存在的路径
 - 列出本设备所有 Slot 字段、类型及含义
 
@@ -206,8 +223,8 @@ API 模板结构：
 ### Step 5 — 验证
 
 检查文件完整性：
-- [ ] `SKILL.md` 包含 10 个 API endpoint
-- [ ] `SKILL.md` 包含 Placeholder Slot 填写规则（ResourceSlot / DeviceSlot / NodeSlot / ClassSlot + create_resource 特例）和本设备的 Slot 字段表
+- [ ] `SKILL.md` 包含 API endpoint（#1 获取 lab_uuid、#2-#7 工作流/节点/边、#8-#11 运行/查询、#12 资源树、#13 工作流模板详情）
+- [ ] `SKILL.md` 包含 Placeholder Slot 填写规则（ResourceSlot / DeviceSlot / NodeSlot / ClassSlot / FormulationSlot + create_resource 特例）和本设备的 Slot 字段表
 - [ ] `action-index.md` 列出所有 action 并有描述
 - [ ] `actions/` 目录中每个 action 有对应 JSON 文件
 - [ ] JSON 文件包含 `type`, `schema`（已提升为 goal 内容）, `goal`, `goal_default`, `placeholder_keys` 字段
@@ -249,11 +266,11 @@ API 模板结构：
 ```
 
 > **注意**：`schema` 已由脚本从原始 `schema.properties.goal` 提升为顶层，直接包含参数定义。
-> `schema.properties` 中的字段即为 API 请求 `param.goal` 中的字段。
+> `schema.properties` 中的字段即为 API 创建节点返回的 `data.param` 中的字段，PATCH 更新时直接修改 `param` 即可。
 
 ## Placeholder Slot 类型体系
 
-`placeholder_keys` / `_unilabos_placeholder_info` 中有 4 种值，对应不同的填写方式：
+`placeholder_keys` / `_unilabos_placeholder_info` 中有 5 种值，对应不同的填写方式：
 
 | placeholder 值 | Slot 类型 | 填写格式 | 选取范围 |
 |---------------|-----------|---------|---------|
@@ -261,6 +278,7 @@ API 模板结构：
 | `unilabos_devices` | DeviceSlot | `"/parent/device_name"` | 仅**设备**节点（type=device），路径字符串 |
 | `unilabos_nodes` | NodeSlot | `"/parent/node_name"` | **设备 + 物料**，即所有节点，路径字符串 |
 | `unilabos_class` | ClassSlot | `"class_name"` | 注册表中已上报的资源类 name |
+| `unilabos_formulation` | FormulationSlot | `[{well_name, liquids: [{name, volume}]}]` | 资源树中物料节点的 **name**，配合液体配方 |
 
 ### ResourceSlot（`unilabos_resources`）
 
@@ -307,7 +325,41 @@ API 模板结构：
 "container"
 ```
 
-### 通过 API #10 获取资源树
+### FormulationSlot（`unilabos_formulation`）
+
+描述**液体配方**：向哪些物料容器中加入哪些液体及体积。填写为**对象数组**：
+
+```json
+[
+  {
+    "sample_uuid": "",
+    "well_name": "YB_PrepBottle_15mL_Carrier_bottle_A1",
+    "liquids": [
+      { "name": "LiPF6", "volume": 0.6 },
+      { "name": "DMC", "volume": 1.2 }
+    ]
+  }
+]
+```
+
+#### 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `sample_uuid` | string | 样品 UUID，无样品时传空字符串 `""` |
+| `well_name` | string | 目标物料容器的 **name**（从资源树中取物料节点的 `name` 字段，如瓶子、孔位名称） |
+| `liquids` | array | 要加入的液体列表 |
+| `liquids[].name` | string | 液体名称（如试剂名、溶剂名） |
+| `liquids[].volume` | number | 液体体积（单位由设备决定，通常为 mL） |
+
+#### 填写规则
+
+- `well_name` 必须是资源树中已存在的物料节点 `name`（不是 `id` 路径），通过 API #12 获取资源树后筛选
+- 每个数组元素代表一个目标容器的配方
+- 一个容器可以加入多种液体（`liquids` 数组多条记录）
+- 与 ResourceSlot 的区别：ResourceSlot 填 `{id, name, uuid}` 指向物料本身；FormulationSlot 用 `well_name` 引用物料，并附带液体配方信息
+
+### 通过 API #12 获取资源树
 
 ```bash
 curl -s -X GET "$BASE/api/v1/lab/material/download/$lab_uuid" -H "$AUTH"

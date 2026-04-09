@@ -486,18 +486,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 if len(rts.root_nodes) == 1 and parent_resource is not None:
                     plr_instance = plr_instances[0]
                     if isinstance(plr_instance, Plate):
-                        empty_liquid_info_in: List[Tuple[Optional[str], float]] = [(None, 0)] * plr_instance.num_items
                         if len(ADD_LIQUID_TYPE) == 1 and len(LIQUID_VOLUME) == 1 and len(LIQUID_INPUT_SLOT) > 1:
                             ADD_LIQUID_TYPE = ADD_LIQUID_TYPE * len(LIQUID_INPUT_SLOT)
                             LIQUID_VOLUME = LIQUID_VOLUME * len(LIQUID_INPUT_SLOT)
                             self.lab_logger().warning(
                                 f"增加液体资源时，数量为1，自动补全为 {len(LIQUID_INPUT_SLOT)} 个"
                             )
-                        for liquid_type, liquid_volume, liquid_input_slot in zip(
-                            ADD_LIQUID_TYPE, LIQUID_VOLUME, LIQUID_INPUT_SLOT
-                        ):
-                            empty_liquid_info_in[liquid_input_slot] = (liquid_type, liquid_volume)
-                        plr_instance.set_well_liquids(empty_liquid_info_in)
                         try:
                             # noinspection PyProtectedMember
                             keys = list(plr_instance._ordering.keys())
@@ -511,6 +505,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             input_wells = []
                             for r in LIQUID_INPUT_SLOT:
                                 input_wells.append(plr_instance.children[r])
+                        for input_well, liquid_type, liquid_volume, liquid_input_slot in zip(
+                            input_wells, ADD_LIQUID_TYPE, LIQUID_VOLUME, LIQUID_INPUT_SLOT
+                        ):
+                            input_well.set_liquids([(liquid_type, liquid_volume, "uL")])
                         final_response["liquid_input_resource_tree"] = ResourceTreeSet.from_plr_resources(
                             input_wells
                         ).dump()
@@ -1256,9 +1254,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         return self._lab_logger
 
     def create_ros_publisher(self, attr_name, msg_type, initial_period=5.0):
-        """创建ROS发布者，仅当方法/属性有 @topic_config 装饰器时才创建。"""
-        # 检测 @topic_config 装饰器配置
-        topic_config = {}
+        """创建ROS发布者。已在 status_types 中声明的属性直接创建；@topic_config 用于覆盖默认参数。"""
+        topic_cfg = {}
         driver_class = type(self.driver_instance)
 
         # 区分 @property 和普通方法两种情况
@@ -1267,23 +1264,17 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         )
 
         if is_prop:
-            # @property: 检测 fget 上的 @topic_config
             class_attr = getattr(driver_class, attr_name)
             if class_attr.fget is not None:
-                topic_config = get_topic_config(class_attr.fget)
+                topic_cfg = get_topic_config(class_attr.fget)
         else:
-            # 普通方法: 直接检测 attr_name 方法上的 @topic_config
             if hasattr(self.driver_instance, attr_name):
                 method = getattr(self.driver_instance, attr_name)
                 if callable(method):
-                    topic_config = get_topic_config(method)
-
-        # 没有 @topic_config 装饰器则跳过发布
-        if not topic_config:
-            return
+                    topic_cfg = get_topic_config(method)
 
         # 发布名称优先级: @topic_config(name=...) > get_ 前缀去除 > attr_name
-        cfg_name = topic_config.get("name")
+        cfg_name = topic_cfg.get("name")
         if cfg_name:
             publish_name = cfg_name
         elif attr_name.startswith("get_"):
@@ -1291,10 +1282,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         else:
             publish_name = attr_name
 
-        # 使用装饰器配置或默认值
-        cfg_period = topic_config.get("period")
-        cfg_print = topic_config.get("print_publish")
-        cfg_qos = topic_config.get("qos")
+        # @topic_config 参数覆盖默认值
+        cfg_period = topic_cfg.get("period")
+        cfg_print = topic_cfg.get("print_publish")
+        cfg_qos = topic_cfg.get("qos")
         period: float = cfg_period if cfg_period is not None else initial_period
         print_publish: bool = cfg_print if cfg_print is not None else self._print_publish
         qos: int = cfg_qos if cfg_qos is not None else 10

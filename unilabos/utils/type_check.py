@@ -80,11 +80,12 @@ def get_result_info_str(error: str, suc: bool, return_value=None) -> str:
     Returns:
         JSON字符串格式的结果信息
     """
-    samples = None
-    if isinstance(return_value, dict):
-        if "samples" in return_value and type(return_value["samples"]) in [list, tuple] and type(return_value["samples"][0]) == dict:
-            samples = return_value.pop("samples")
-    result_info = {"error": error, "suc": suc, "return_value": return_value, "samples": samples}
+    # 请在返回的字典中使用 unilabos_samples进行返回
+    # samples = None
+    # if isinstance(return_value, dict):
+    #     if "samples" in return_value and type(return_value["samples"]) in [list, tuple] and type(return_value["samples"][0]) == dict:
+    #         samples = return_value.pop("samples")
+    result_info = {"error": error, "suc": suc, "return_value": return_value}
 
     return json.dumps(result_info, ensure_ascii=False, cls=ResultInfoEncoder)
 
