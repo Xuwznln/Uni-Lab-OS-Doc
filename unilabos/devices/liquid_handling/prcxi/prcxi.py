@@ -881,6 +881,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 mat_uuid = resource._unilabos_state["Material"].get("uuid")
                 if mat_uuid and mat_uuid in material_uuid_map:
                     work_tablets.append({"Number": number, "Material": material_uuid_map[mat_uuid]})
+                    slot_none.remove(number)
                     continue
 
             # 根据 resource 类型推断 materialEnum

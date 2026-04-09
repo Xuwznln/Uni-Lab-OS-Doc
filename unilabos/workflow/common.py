@@ -23,9 +23,9 @@
 - 遍历所有 reagent，按 slot 去重，为每个唯一的 slot 创建一个板子
 - 所有 create_resource 节点的 parent_uuid 指向 Group 节点，minimized=true
 - 生成参数:
-    res_id: plate_slot_{slot}
+    res_id / 节点 name / display_name: {匹配后的 prcxi 类名}_slot_{槽位}
     device_id: /PRCXI
-    class_name: PRCXI_BioER_96_wellplate
+    class_name: 与 res_id 中类型一致（如 PRCXI 384/96 孔板注册类）
     parent: /PRCXI/PRCXI_Deck
     slot_on_deck: "{slot}"
 - 输出端口: labware（用于连接 set_liquid_from_plate）
@@ -204,6 +204,62 @@ def _infer_tube_rack_num_positions(labware_id: str, item: Dict[str, Any]) -> int
     m = re.search(r"(\d+)\s*[-_]?\s*pos(?:ition)?s?", hint)
     if m:
         return int(m.group(1))
+    return 96
+
+
+def _infer_plate_num_children_from_wells(wells: Any) -> Optional[int]:
+    """根据 well 名推断孔板总孔数档位：列>12 或 行>H(8) 视为 384，否则 96。"""
+    if not isinstance(wells, list) or not wells:
+        return None
+    max_row = 0
+    max_col = 0
+    for w in wells:
+        m = re.match(r"^([A-Za-z]+)(\d+)$", str(w).strip())
+        if not m:
+            continue
+        row_s, col_s = m.group(1).upper(), m.group(2)
+        ri = 0
+        for ch in row_s:
+            ri = ri * 26 + (ord(ch) - ord("A") + 1)
+        max_row = max(max_row, ri)
+        max_col = max(max_col, int(col_s))
+    if max_col <= 0:
+        return None
+    if max_col > 12 or max_row > 8:
+        return 384
+    return 96
+
+
+def _infer_plate_num_children_from_labware_hint(labware_id: str, item: Dict[str, Any]) -> Optional[int]:
+    """从 labware 命名（如 custom_384_wellplate、nest_96_wellplate）解析孔数，供模板匹配。"""
+    hint = _labware_hint_text(labware_id, item)
+    m = re.search(
+        r"\b(1536|384|96|48|24|12|6)(\s*[-_]?\s*well|wellplate|_well_)",
+        hint,
+    )
+    if m:
+        return int(m.group(1))
+    m = re.search(r"[_\s](1536|384|96|48|24|12|6)[_\s]", hint)
+    if m and ("well" in hint or "plate" in hint):
+        return int(m.group(1))
+    return None
+
+
+def _infer_plate_num_children(
+    labware_id: str,
+    item: Dict[str, Any],
+    wells: Any,
+    num_from_def: int,
+) -> int:
+    """孔板用于 PRCXI 匹配的孔数：优先定义表，其次命名，再 well 地址，最后默认 96。"""
+    if num_from_def > 0:
+        return num_from_def
+    hinted = _infer_plate_num_children_from_labware_hint(labware_id, item)
+    if hinted is not None:
+        return hinted
+    from_wells = _infer_plate_num_children_from_wells(wells)
+    if from_wells is not None:
+        return from_wells
     return 96
 
 
@@ -386,7 +442,8 @@ def _apply_prcxi_labware_auto_match(
             else:
                 num_children = _infer_tube_rack_num_positions(labware_id, item)
         else:
-            num_children = num_from_def if num_from_def > 0 else 96
+            # plate：勿在无 labware_defs 时默认 96，否则 384 板会被错配成 96 模板
+            num_children = _infer_plate_num_children(labware_id, item, wells, num_from_def)
 
         child_max_volume = item.get("max_volume")
         if child_max_volume is None:
@@ -752,11 +809,8 @@ def build_protocol_graph(
             prcxi_val = str(pv) if pv else None
 
         labware = str(chosen_item.get("labware", "") or "")
-        res_id = f"{labware}_slot_{slot}" if labware.strip() else f"{chosen_lid}_slot_{slot}"
-        res_id = res_id.replace(" ", "_")
         slots_info[slot] = {
             "labware": labware,
-            "res_id": res_id,
             "labware_id": chosen_lid,
             "object": chosen_item.get("object", "") or "",
             "prcxi_class_name": prcxi_val,
@@ -782,7 +836,6 @@ def build_protocol_graph(
     # 为每个唯一的 slot 创建 create_resource 节点
     for slot, info in slots_info.items():
         node_id = str(uuid.uuid4())
-        res_id = info["res_id"]
         object_type = info.get("object", "") or ""
         ot_lo = str(object_type).strip().lower()
         matched = info.get("prcxi_class_name")
@@ -798,11 +851,14 @@ def build_protocol_graph(
                 res_type_name = CLASS_NAMES_MAPPING.get("tip_rack", "PRCXI_300ul_Tips")
         else:
             res_type_name = f"lab_{info['labware'].lower().replace('.', 'point')}"
+        # 上传物料：匹配后的类型名 + _slot_ + 槽位（name / display_name / res_id 一致）
+        res_id = f"{res_type_name}_slot_{slot}".replace(" ", "_")
         G.add_node(
             node_id,
             template_name="create_resource",
             resource_name="host_node",
-            name=f"{res_type_name}_slot{slot}",
+            name=res_id,
+            display_name=res_id,
             description=f"Create plate on slot {slot}",
             lab_node_type="Labware",
             footer="create_resource-host_node",
@@ -857,19 +913,25 @@ def build_protocol_graph(
         if not wells or not slot:
             continue
 
-        # res_id 不能有空格
+        # res_id 不能有空格（液体名仍用协议中的 reagent key）
         res_id = str(labware_id).replace(" ", "_")
         well_count = len(wells)
         liquid_volume = DEFAULT_LIQUID_VOLUME if object_type == "source" else 0
 
         node_id = str(uuid.uuid4())
         set_liquid_index += 1
+        prcxi_mat = item.get("prcxi_class_name")
+        if prcxi_mat:
+            sl_node_title = f"{prcxi_mat}_slot_{slot}_{res_id}"
+        else:
+            sl_node_title = f"lab_{res_id.lower()}_slot_{slot}_{set_liquid_index}"
 
         G.add_node(
             node_id,
             template_name="set_liquid_from_plate",
             resource_name="liquid_handler.prcxi",
-            name=f"SetLiquid {set_liquid_index}",
+            name=sl_node_title,
+            display_name=sl_node_title,
             description=f"Set liquid: {labware_id}",
             lab_node_type="Reagent",
             footer="set_liquid_from_plate-liquid_handler.prcxi",

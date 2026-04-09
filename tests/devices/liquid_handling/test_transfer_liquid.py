@@ -39,6 +39,11 @@ class FakeLiquidHandler(LiquidHandlerAbstract):
         self.current_tip = iter(make_tip_iter())
         self.calls: List[Tuple[str, Any]] = []
 
+    def set_tiprack(self, tip_racks):
+        if not tip_racks:
+            return
+        super().set_tiprack(tip_racks)
+
     async def pick_up_tips(self, tip_spots, use_channels=None, offsets=None, **backend_kwargs):
         self.calls.append(("pick_up_tips", {"tips": list(tip_spots), "use_channels": use_channels}))
 

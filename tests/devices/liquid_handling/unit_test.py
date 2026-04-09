@@ -39,6 +39,12 @@ class FakeLiquidHandler(LiquidHandlerAbstract):
         self.current_tip = iter(make_tip_iter())
         self.calls: List[Tuple[str, Any]] = []
 
+    def set_tiprack(self, tip_racks):
+        # transfer_liquid 总会调用 set_tiprack；测试用 Dummy 枪头时 tip_racks 为空，需保留自种子的 current_tip
+        if not tip_racks:
+            return
+        super().set_tiprack(tip_racks)
+
     async def pick_up_tips(self, tip_spots, use_channels=None, offsets=None, **backend_kwargs):
         self.calls.append(("pick_up_tips", {"tips": list(tip_spots), "use_channels": use_channels}))
 
@@ -543,5 +549,60 @@ def test_mix_multiple_targets_supports_per_target_offsets():
   assert aspirates[1]["offsets"] == [offsets[1]]
   assert aspirates[1]["liquid_height"] == [heights[1]]
   assert aspirates[1]["flow_rates"] == [rates[1]]
+
+
+def test_set_tiprack_per_type_resumes_first_physical_rack():
+    """同型号多次 set_tiprack 时接续第一盒剩余孔位，而非从新盒 A1 开始。"""
+    from pylabrobot.liquid_handling import LiquidHandlerChatterboxBackend
+    from pylabrobot.resources import Deck, Tip, TipRack, TipSpot, create_equally_spaced
+
+    mk = lambda: Tip(
+        has_filter=False, total_tip_length=10.0, maximal_volume=300.0, fitting_depth=2.0
+    )
+
+    class TipTypeAlpha(TipRack):
+        pass
+
+    class TipTypeBeta(TipRack):
+        pass
+
+    def make_rack(cls: type, name: str) -> TipRack:
+        items = create_equally_spaced(
+            TipSpot,
+            num_items_x=12,
+            num_items_y=2,
+            dx=0,
+            dy=0,
+            dz=0,
+            item_dx=9,
+            item_dy=9,
+            size_x=1,
+            size_y=1,
+            make_tip=mk,
+        )
+        return cls(name, 120, 40, 10, items=items)
+
+    rack1 = make_rack(TipTypeAlpha, "rack_phys_1")
+    rack2 = make_rack(TipTypeBeta, "rack_phys_2")
+    rack3 = make_rack(TipTypeAlpha, "rack_phys_3")
+
+    lh = LiquidHandlerAbstract(
+        LiquidHandlerChatterboxBackend(1), Deck(), channel_num=1, simulator=False
+    )
+    flat1 = lh._flatten_tips_from_one(rack1)
+    assert len(flat1) == 24
+
+    lh.set_tiprack([rack1])
+    for i in range(12):
+        assert lh._get_next_tip() is flat1[i]
+
+    lh.set_tiprack([rack2])
+    spot_b = lh._get_next_tip()
+    assert "rack_phys_2" in spot_b.name
+
+    lh.set_tiprack([rack3])
+    spot_resume = lh._get_next_tip()
+    assert spot_resume is flat1[12], "第三次同型号应接续 rack1 第二行首孔，而非 rack3 首孔"
+    assert spot_resume is not lh._flatten_tips_from_one(rack3)[0]
 
 
