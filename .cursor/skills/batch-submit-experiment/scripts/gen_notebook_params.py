@@ -265,6 +265,7 @@ def generate_template(nodes, registry_index, rounds):
 
     return {
         "lab_uuid": "$TODO_LAB_UUID",
+        "project_uuid": "$TODO_PROJECT_UUID",
         "workflow_uuid": "$TODO_WORKFLOW_UUID",
         "name": "$TODO_EXPERIMENT_NAME",
         "node_params": node_params,

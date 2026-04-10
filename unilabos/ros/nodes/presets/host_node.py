@@ -1632,6 +1632,7 @@ class HostNode(BaseROS2DeviceNode):
     def manual_confirm(self, timeout_seconds: int, assignee_user_ids: list[str], **kwargs) -> dict:
         """
         timeout_seconds: 超时时间（秒），默认3600秒
+        修改的结果无效，是只读的
         """
         return kwargs
 

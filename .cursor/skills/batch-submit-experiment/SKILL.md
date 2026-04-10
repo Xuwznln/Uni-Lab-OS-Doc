@@ -1,6 +1,6 @@
 ---
 name: batch-submit-experiment
-description: Batch submit experiments (notebooks) to Uni-Lab platform — list workflows, generate node_params from registry schemas, submit multiple rounds. Use when the user wants to submit experiments, create notebooks, batch run workflows, or mentions 提交实验/批量实验/notebook/实验轮次.
+description: Batch submit experiments (notebooks) to Uni-Lab platform — list workflows, generate node_params from registry schemas, submit multiple rounds, check notebook status. Use when the user wants to submit experiments, create notebooks, batch run workflows, check experiment status, or mentions 提交实验/批量实验/notebook/实验轮次/实验状态.
 ---
 
 # 批量提交实验指南
@@ -59,7 +59,7 @@ AUTH="Authorization: Lab <上面命令输出的 token>"
 
 ### 4. workflow_uuid（目标工作流）
 
-用户需要提供要提交的 workflow UUID。如果用户不确定，通过 API #2 列出可用 workflow 供选择。
+用户需要提供要提交的 workflow UUID。如果用户不确定，通过 API #3 列出可用 workflow 供选择。
 
 **四项全部就绪后才可开始。**
 
@@ -68,8 +68,9 @@ AUTH="Authorization: Lab <上面命令输出的 token>"
 在整个对话过程中，agent 需要记住以下状态，避免重复询问用户：
 
 - `lab_uuid` — 实验室 UUID（首次通过 API #1 自动获取，**不需要问用户**）
+- `project_uuid` — 项目 UUID（通过 API #2 列出项目列表，**让用户选择**）
 - `workflow_uuid` — 工作流 UUID（用户提供或从列表选择）
-- `workflow_nodes` — workflow 中各 action 节点的 uuid、设备 ID、动作名（从 API #3 获取）
+- `workflow_nodes` — workflow 中各 action 节点的 uuid、设备 ID、动作名（从 API #4 获取）
 
 ## 请求约定
 
@@ -97,7 +98,17 @@ curl -s -X GET "$BASE/api/v1/edge/lab/info" -H "$AUTH"
 
 记住 `data.uuid` 为 `lab_uuid`。
 
-### 2. 列出可用 workflow
+### 2. 列出实验室项目（让用户选择项目）
+
+```bash
+curl -s -X GET "$BASE/api/v1/lab/project/list?lab_uuid=$lab_uuid" -H "$AUTH"
+```
+
+返回项目列表，展示给用户选择。列出每个项目的 `uuid` 和 `name`。
+
+用户**必须**选择一个项目，记住 `project_uuid`，后续创建 notebook 时需要提供。
+
+### 3. 列出可用 workflow
 
 ```bash
 curl -s -X GET "$BASE/api/v1/lab/workflow/workflows?page=1&page_size=20&lab_uuid=$lab_uuid" -H "$AUTH"
@@ -105,7 +116,7 @@ curl -s -X GET "$BASE/api/v1/lab/workflow/workflows?page=1&page_size=20&lab_uuid
 
 返回 workflow 列表，展示给用户选择。列出每个 workflow 的 `uuid` 和 `name`。
 
-### 3. 获取 workflow 模板详情
+### 4. 获取 workflow 模板详情
 
 ```bash
 curl -s -X GET "$BASE/api/v1/lab/workflow/template/detail/$workflow_uuid" -H "$AUTH"
@@ -119,7 +130,7 @@ curl -s -X GET "$BASE/api/v1/lab/workflow/template/detail/$workflow_uuid" -H "$A
 
 > **注意**：此 API 返回格式可能因版本不同而有差异。首次调用时，先打印完整响应分析结构，再提取节点信息。常见的节点字段路径为 `data.nodes[]` 或 `data.workflow_nodes[]`。
 
-### 4. 提交实验（创建 notebook）
+### 5. 提交实验（创建 notebook）
 
 ```bash
 curl -s -X POST "$BASE/api/v1/lab/notebook" \
@@ -132,6 +143,7 @@ curl -s -X POST "$BASE/api/v1/lab/notebook" \
 ```json
 {
     "lab_uuid": "<lab_uuid>",
+    "project_uuid": "<project_uuid>",
     "workflow_uuid": "<workflow_uuid>",
     "name": "<实验名称>",
     "node_params": [
@@ -159,6 +171,16 @@ curl -s -X POST "$BASE/api/v1/lab/notebook" \
 
 > **注意**：`sample_uuids` 必须是 **UUID 数组**（`[]uuid.UUID`），不是字符串。无样品时传空数组 `[]`。
 
+### 6. 查询 notebook 状态
+
+提交成功后，使用返回的 notebook UUID 查询执行状态：
+
+```bash
+curl -s -X GET "$BASE/api/v1/lab/notebook/status?uuid=$notebook_uuid" -H "$AUTH"
+```
+
+提交后应**立即查询一次**状态，确认 notebook 已被正确接收并开始调度。
+
 ---
 
 ## Notebook 请求体详解
@@ -181,7 +203,7 @@ curl -s -X POST "$BASE/api/v1/lab/notebook" \
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `node_uuid` | string | workflow 模板中的节点 UUID（从 API #3 获取） |
+| `node_uuid` | string | workflow 模板中的节点 UUID（从 API #4 获取） |
 | `param` | object | 动作参数（根据本地注册表 schema 填写） |
 | `sample_params` | array | 样品相关参数（液体名、体积等） |
 
@@ -222,7 +244,7 @@ python scripts/gen_notebook_params.py \
 
 如果脚本不可用或注册表不存在：
 
-1. 调用 API #3 获取 workflow 详情
+1. 调用 API #4 获取 workflow 详情
 2. 找到每个 action 节点的 `node_uuid`
 3. 在本地注册表中查找对应设备的 `action_value_mappings`：
    ```
@@ -275,13 +297,15 @@ Task Progress:
 - [ ] Step 1: 确认 ak/sk → 生成 AUTH token
 - [ ] Step 2: 确认 --addr → 设置 BASE URL
 - [ ] Step 3: GET /edge/lab/info → 获取 lab_uuid
-- [ ] Step 4: 确认 workflow_uuid（用户提供或从 GET #2 列表选择）
-- [ ] Step 5: GET workflow detail (#3) → 提取各节点 uuid、设备ID、动作名
-- [ ] Step 6: 定位本地注册表 req_device_registry_upload.json
-- [ ] Step 7: 运行 gen_notebook_params.py 或手动匹配 → 生成 node_params 模板
-- [ ] Step 8: 引导用户填写每轮的参数（sample_uuids、param、sample_params）
-- [ ] Step 9: 构建完整请求体 → POST /lab/notebook 提交
-- [ ] Step 10: 检查返回结果，确认提交成功
+- [ ] Step 4: GET /lab/project/list → 列出项目，让用户选择 → 获取 project_uuid
+- [ ] Step 5: 确认 workflow_uuid（用户提供或从 GET #3 列表选择）
+- [ ] Step 6: GET workflow detail (#4) → 提取各节点 uuid、设备ID、动作名
+- [ ] Step 7: 定位本地注册表 req_device_registry_upload.json
+- [ ] Step 8: 运行 gen_notebook_params.py 或手动匹配 → 生成 node_params 模板
+- [ ] Step 9: 引导用户填写每轮的参数（sample_uuids、param、sample_params）
+- [ ] Step 10: 构建完整请求体（含 project_uuid）→ POST /lab/notebook 提交
+- [ ] Step 11: 检查返回结果，记录 notebook UUID
+- [ ] Step 12: GET /lab/notebook/status → 查询 notebook 状态，确认已调度
 ```
 
 ---
