@@ -54,8 +54,9 @@
   "access_points": [
     {
       "name": "socketTypeGenericSbsFootprint",
-      "description": "Representative SBS microplate handoff position on the exposed tray, using the left-output orientation shown in official imagery.",
+      "description": "Representative SBS microplate handoff position on the fixed, fully extended output tray, using the left-output orientation shown in official imagery.",
       "face": "front_left",
+      "collision_strategy": "fixed_extended_tray",
       "center_m": {
         "x": -0.117,
         "y": 0.111,
@@ -71,6 +72,7 @@
       "name": "front_loading_slot_access",
       "description": "Estimated center of the robot-facing front loading slot where the plate transitions into the peeling chamber.",
       "face": "front",
+      "collision_strategy": "opening_cutout",
       "center_m": {
         "x": -0.102,
         "y": 0.069,
@@ -86,9 +88,10 @@
       "name": "operator_panel_access",
       "description": "Approximate center of the front operator panel for maintenance and manual interaction clearance.",
       "face": "front",
+      "collision_strategy": "opening_cutout",
       "center_m": {
         "x": 0.015,
-        "y": 0.112,
+        "y": 0.159,
         "z": 0.052
       },
       "size_m": {
@@ -101,7 +104,9 @@
   "notes": [
     "No usable public CAD, STL, OBJ, GLB, STEP, or similar 3D asset for the XPeel was found during web search, so this package uses a generated fallback STL assembly.",
     "The mesh intentionally keeps the upper chamber open at the front and adds a dedicated tray pedestal plus feed bridge so the desealer reads as a front-loading instrument rather than a generic cuboid.",
+    "For collision-safe access planning, the tray is modeled as fixed in its fully extended pose and the main cabinet collision leaves the front-left tray corridor open.",
     "Because the upstream Uni-Lab-OS driver is generic, the left-side tray and slot placement should be treated as a representative automation-friendly pose, not mechanical metrology for every possible plate desealer.",
+    "The operator-panel access frame is intentionally placed just outside the front face so it remains reachable without intersecting the simplified cabinet collision.",
     "The 349 x 278 x 349 mm envelope is modeled as a representative overall footprint from Azenta product materials; if a site uses another desealer variant or the alternate right-output orientation, the access frames may need refinement."
   ]
 }

@@ -57,6 +57,7 @@
       "face": "front",
       "xyz_m": [0.0, 0.15025, 0.041],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Estimated center of the lower unit front access face / door area."
     },
     {
@@ -64,6 +65,7 @@
       "face": "front",
       "xyz_m": [0.0, 0.15025, 0.1295],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Estimated center of the middle unit front access face / door area."
     },
     {
@@ -71,6 +73,7 @@
       "face": "front",
       "xyz_m": [0.0, 0.15025, 0.218],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Estimated center of the upper unit front access face / door area."
     },
     {
@@ -78,6 +81,7 @@
       "face": "front",
       "xyz_m": [0.0, 0.16425, 0.0512],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "fixed_extended_tray",
       "description": "Representative plate handoff point above the lower unit loading tray."
     },
     {
@@ -85,6 +89,7 @@
       "face": "front",
       "xyz_m": [0.0, 0.16425, 0.1397],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "fixed_extended_tray",
       "description": "Representative plate handoff point above the middle unit loading tray."
     },
     {
@@ -92,6 +97,7 @@
       "face": "front",
       "xyz_m": [0.0, 0.16425, 0.2282],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "fixed_extended_tray",
       "description": "Representative plate handoff point above the upper unit loading tray."
     },
     {
@@ -99,6 +105,7 @@
       "face": "rear",
       "xyz_m": [0.0, -0.18425, 0.13275],
       "rpy_rad": [0.0, 0.0, 3.141592653589793],
+      "collision_strategy": "opening_cutout",
       "description": "Approximate rear-side service reference for power and communications cabling."
     }
   ],

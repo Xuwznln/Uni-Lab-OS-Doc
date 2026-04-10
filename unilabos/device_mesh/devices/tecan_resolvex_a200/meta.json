@@ -54,6 +54,7 @@
       "name": "front_loading_access_link",
       "description": "Approximate center of the open front loading face used to place or remove racks, plates, and columns beneath the pressure manifold.",
       "face": "front",
+      "collision_strategy": "opening_cutout",
       "center_m": [0.0, -0.356, 0.355],
       "size_m": [0.286, 0.001, 0.206],
       "rpy_rad": [0.0, 0.0, 0.0]
@@ -62,14 +63,25 @@
       "name": "rack_access_link",
       "description": "Approximate center of the internal rack / plate work position visible in official front-view images.",
       "face": "internal_front",
+      "collision_strategy": "exposed_work_surface",
       "center_m": [0.0, -0.015, 0.292],
       "size_m": [0.188, 0.136, 0.001],
+      "rpy_rad": [0.0, 0.0, 0.0]
+    },
+    {
+      "name": "socketTypeGenericSbsFootprint",
+      "description": "Representative SBS footprint reference centered on the exposed rack work surface for plate pickup and placement.",
+      "face": "internal_front",
+      "collision_strategy": "exposed_work_surface",
+      "center_m": [0.0, -0.015, 0.296],
+      "size_m": [0.12776, 0.08548, 0.001],
       "rpy_rad": [0.0, 0.0, 0.0]
     },
     {
       "name": "screen_access_link",
       "description": "Approximate center of the front touchscreen interaction area.",
       "face": "front",
+      "collision_strategy": "opening_cutout",
       "center_m": [-0.038, -0.301, 0.167],
       "size_m": [0.125, 0.001, 0.22],
       "rpy_rad": [0.0, 0.0, 0.0]
@@ -78,6 +90,7 @@
       "name": "rear_service_access_link",
       "description": "Approximate center of the rear utility region that includes gas inlet, USB, Ethernet, and 24 VDC power input per the manual rear-view diagram.",
       "face": "rear_right",
+      "collision_strategy": "opening_cutout",
       "center_m": [0.105, 0.251, 0.455],
       "size_m": [0.12, 0.001, 0.19],
       "rpy_rad": [0.0, 0.0, 3.141592653589793]

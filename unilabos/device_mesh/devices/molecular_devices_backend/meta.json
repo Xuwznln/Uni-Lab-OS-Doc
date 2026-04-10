@@ -32,6 +32,7 @@
       "name": "drawer-loading-front",
       "linkSuffix": "drawer_loading_access_link",
       "description": "Estimated front-of-drawer loading position for an SBS plate just outside the lower plate carrier opening.",
+      "collision_strategy": "fixed_extended_tray",
       "face": "front",
       "centerMeters": {
         "x": 0.112,
@@ -48,6 +49,7 @@
       "name": "drawer-closed-carrier",
       "linkSuffix": "drawer_internal_access_link",
       "description": "Estimated closed carrier position for the internal microplate stage.",
+      "collision_strategy": "fixed_extended_tray",
       "face": "interior",
       "centerMeters": {
         "x": 0.112,
@@ -64,6 +66,7 @@
       "name": "touchscreen-console",
       "linkSuffix": "touchscreen_access_link",
       "description": "Approximate operator interaction plane centered on the slanted touchscreen.",
+      "collision_strategy": "opening_cutout",
       "face": "front-left",
       "centerMeters": {
         "x": -0.144,
@@ -80,6 +83,7 @@
       "name": "rear-service-zone",
       "linkSuffix": "rear_service_access_link",
       "description": "Estimated rear service clearance reference for utilities and preventive maintenance.",
+      "collision_strategy": "opening_cutout",
       "face": "rear",
       "centerMeters": {
         "x": 0.0,

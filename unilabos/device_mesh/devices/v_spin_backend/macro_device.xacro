@@ -27,13 +27,20 @@
     <xacro:property name="bridge_bottom_z" value="0.022" />
     <xacro:property name="stage_bottom_z" value="0.040" />
     <xacro:property name="gripper_bottom_z" value="0.022" />
+    <xacro:property name="body_front_y" value="${loader_depth - (depth / 2.0)}" />
+    <xacro:property name="front_cutout_depth" value="0.110" />
+    <xacro:property name="front_cutout_width" value="0.186" />
+    <xacro:property name="front_cutout_bottom_z" value="0.040" />
+    <xacro:property name="front_cutout_height" value="0.135" />
+    <xacro:property name="front_side_wall_width" value="${(width - front_cutout_width) / 2.0}" />
+    <xacro:property name="front_upper_wall_height" value="${height - front_cutout_bottom_z - front_cutout_height}" />
     <xacro:property name="door_access_y" value="${door_center_y - 0.060}" />
     <xacro:property name="door_access_z" value="${door_bottom_z + (door_height / 2.0)}" />
     <xacro:property name="loading_access_y" value="${stage_center_y}" />
     <xacro:property name="loading_access_z" value="0.105" />
     <xacro:property name="hover_access_y" value="${door_center_y - 0.010}" />
     <xacro:property name="hover_access_z" value="0.120" />
-    <xacro:property name="rear_service_y" value="${(depth / 2.0) - 0.025}" />
+    <xacro:property name="rear_service_y" value="${(depth / 2.0) + 0.030}" />
 
     <joint name="${station_name}${device_name}base_link_joint" type="fixed">
       <origin xyz="${x} ${y} ${z}" rpy="${rx} ${ry} ${r}" />
@@ -124,9 +131,33 @@
         </material>
       </visual>
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 ${body_front_y + front_cutout_depth + ((centrifuge_depth - front_cutout_depth) / 2.0)} ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width} ${centrifuge_depth - front_cutout_depth} ${height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 ${body_front_y + (front_cutout_depth / 2.0)} ${front_cutout_bottom_z / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width} ${front_cutout_depth} ${front_cutout_bottom_z}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 ${body_front_y + (front_cutout_depth / 2.0)} ${front_cutout_bottom_z + front_cutout_height + (front_upper_wall_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width} ${front_cutout_depth} ${front_upper_wall_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${(-width / 2.0) + (front_side_wall_width / 2.0)} ${body_front_y + (front_cutout_depth / 2.0)} ${front_cutout_bottom_z + (front_cutout_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${front_side_wall_width} ${front_cutout_depth} ${front_cutout_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${(width / 2.0) - (front_side_wall_width / 2.0)} ${body_front_y + (front_cutout_depth / 2.0)} ${front_cutout_bottom_z + (front_cutout_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${front_side_wall_width} ${front_cutout_depth} ${front_cutout_height}"/>
         </geometry>
       </collision>
     </link>

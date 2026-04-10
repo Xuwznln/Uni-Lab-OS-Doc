@@ -36,6 +36,8 @@
       "name": "front-user-door",
       "linkSuffix": "front_user_access_link",
       "description": "Estimated manual front access point centered on the full-sized user door for plate loading and service access.",
+      "collision_strategy": "opening_cutout",
+      "collision_notes": "The simplified cabinet collision leaves a front body cutout through the main door region so approach to this body-mounted access frame is not blocked by a solid front wall.",
       "poseMeters": {
         "x": 0.0,
         "y": 0.398,
@@ -49,6 +51,8 @@
       "name": "loading-tray",
       "linkSuffix": "loading_tray_access_link",
       "description": "Estimated robotic tray handoff point aligned with the representative upper flush gate and 1000 mm transfer height.",
+      "collision_strategy": "fixed_extended_tray",
+      "collision_notes": "This access frame is mounted on a dedicated loading tray link, with the tray collision modeled in a fixed fully extended pose outside the body shell.",
       "poseMeters": {
         "x": 0.0,
         "y": 0.513,
@@ -62,6 +66,8 @@
       "name": "lower-control-panel",
       "linkSuffix": "control_panel_access_link",
       "description": "Estimated operator access point for the lower-right display and control cluster visible in the representative STX220-SA front image.",
+      "collision_strategy": "opening_cutout",
+      "collision_notes": "The front cutout used for body access keeps this main-body service/control approach reachable without routing through the simplified cabinet shell.",
       "poseMeters": {
         "x": 0.275,
         "y": 0.393,

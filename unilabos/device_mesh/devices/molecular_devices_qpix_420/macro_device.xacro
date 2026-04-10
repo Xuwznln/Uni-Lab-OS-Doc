@@ -12,6 +12,44 @@
             control_access_x:=0.61 control_access_y:=-0.23 control_access_z:=0.55
             rear_service_access_x:=0.00 rear_service_access_y:=0.44 rear_service_access_z:=0.38">
 
+    <xacro:property name="plinth_height" value="0.16"/>
+    <xacro:property name="rear_shell_width" value="1.18"/>
+    <xacro:property name="rear_shell_depth" value="0.37"/>
+    <xacro:property name="rear_shell_height" value="0.44"/>
+    <xacro:property name="rear_shell_center_x" value="-0.03"/>
+    <xacro:property name="rear_shell_center_y" value="${depth / 2.0 - rear_shell_depth / 2.0}"/>
+    <xacro:property name="rear_shell_center_z" value="${plinth_height + rear_shell_height / 2.0}"/>
+    <xacro:property name="left_shell_width" value="0.08"/>
+    <xacro:property name="left_shell_depth" value="0.62"/>
+    <xacro:property name="left_shell_height" value="${height - plinth_height}"/>
+    <xacro:property name="left_shell_center_x" value="${-width / 2.0 + left_shell_width / 2.0}"/>
+    <xacro:property name="left_shell_center_y" value="-0.06"/>
+    <xacro:property name="left_shell_center_z" value="${plinth_height + left_shell_height / 2.0}"/>
+    <xacro:property name="right_shell_width" value="0.08"/>
+    <xacro:property name="right_shell_depth" value="0.48"/>
+    <xacro:property name="right_shell_height" value="${height - plinth_height}"/>
+    <xacro:property name="right_shell_center_x" value="${width / 2.0 - right_shell_width / 2.0}"/>
+    <xacro:property name="right_shell_center_y" value="0.05"/>
+    <xacro:property name="right_shell_center_z" value="${plinth_height + right_shell_height / 2.0}"/>
+    <xacro:property name="canopy_width" value="1.08"/>
+    <xacro:property name="canopy_depth" value="0.46"/>
+    <xacro:property name="canopy_height" value="0.10"/>
+    <xacro:property name="canopy_center_x" value="-0.02"/>
+    <xacro:property name="canopy_center_y" value="0.05"/>
+    <xacro:property name="canopy_center_z" value="${height - canopy_height / 2.0}"/>
+    <xacro:property name="front_header_width" value="0.92"/>
+    <xacro:property name="front_header_depth" value="0.08"/>
+    <xacro:property name="front_header_height" value="0.12"/>
+    <xacro:property name="front_header_center_x" value="-0.05"/>
+    <xacro:property name="front_header_center_y" value="${-depth / 2.0 + front_header_depth / 2.0}"/>
+    <xacro:property name="front_header_center_z" value="${height - front_header_height / 2.0 - 0.02}"/>
+    <xacro:property name="control_console_width" value="0.20"/>
+    <xacro:property name="control_console_depth" value="0.10"/>
+    <xacro:property name="control_console_height" value="0.22"/>
+    <xacro:property name="control_console_center_x" value="0.60"/>
+    <xacro:property name="control_console_center_y" value="-0.17"/>
+    <xacro:property name="control_console_center_z" value="0.42"/>
+
     <!-- 基于 Molecular Devices 官方尺寸与预安装指南图示构建的近似复合外形：
          QPix 420 本体 1440 x 790 x 780 mm；前侧为亚克力上翻门，右前方为触控/急停控制仓。 -->
     <joint name="${station_name}${device_name}base_link_joint" type="fixed">
@@ -137,10 +175,47 @@
           <color rgba="0.16 0.17 0.19 1"/>
         </material>
       </visual>
+      <!-- 碰撞几何只保留真实阻挡外壳：开放前工位、deck/worktable 与 SBS 取放区域不再被整机包络盒吞没。 -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 0 ${plinth_height / 2.0}" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width} ${depth} ${plinth_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${rear_shell_center_x} ${rear_shell_center_y} ${rear_shell_center_z}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${rear_shell_width} ${rear_shell_depth} ${rear_shell_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${left_shell_center_x} ${left_shell_center_y} ${left_shell_center_z}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${left_shell_width} ${left_shell_depth} ${left_shell_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${right_shell_center_x} ${right_shell_center_y} ${right_shell_center_z}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${right_shell_width} ${right_shell_depth} ${right_shell_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${canopy_center_x} ${canopy_center_y} ${canopy_center_z}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${canopy_width} ${canopy_depth} ${canopy_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${front_header_center_x} ${front_header_center_y} ${front_header_center_z}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${front_header_width} ${front_header_depth} ${front_header_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${control_console_center_x} ${control_console_center_y} ${control_console_center_z}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${control_console_width} ${control_console_depth} ${control_console_height}"/>
         </geometry>
       </collision>
     </link>

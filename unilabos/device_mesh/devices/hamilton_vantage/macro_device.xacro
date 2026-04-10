@@ -6,7 +6,8 @@
     params="parent_link:='' station_name:='' device_name:='' x:=0 y:=0 z:=0 rx:=0 ry:=0 r:=0
             mesh_path:='' width:=1.33 depth:=0.98 height:=1.82 mesh_file:='vantage_1_3.stl'
             body_depth:=0.42 lower_body_height:=0.78 upper_body_height:=0.82
-            deck_surface_z:=0.965 front_access_y:=-0.245 rear_service_access_y:=0.390">
+            deck_surface_z:=0.965 front_access_y:=-0.245 rear_service_access_y:=0.390
+            loading_tray_x_factor:=0.34 loading_tray_y:=-0.295 loading_tray_z:=0.250">
 
     <!-- 基于 Hamilton 官方规格和产品渲染图构建的分段近似外形。
          1.3 m 与 2.0 m 共用同一套比例，宽度由 width 参数驱动。
@@ -140,12 +141,55 @@
         <material name="hamilton_vantage_internal_dark"/>
       </visual>
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 0.080 ${lower_body_height / 2.0}" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width * 0.97} 0.260 ${lower_body_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${-(width * 0.34)} 0.000 ${lower_body_height + (upper_body_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width * 0.24} ${body_depth} ${upper_body_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${width * 0.34} 0.000 ${lower_body_height + (upper_body_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width * 0.24} ${body_depth} ${upper_body_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 ${(body_depth / 2.0) - 0.060} ${lower_body_height + (upper_body_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width * 0.72} 0.120 ${upper_body_height}"/>
         </geometry>
       </collision>
     </link>
+
+    <link name="${station_name}${device_name}loading_tray_link">
+      <visual>
+        <origin xyz="0 0 0.015" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="file://${mesh_path}/devices/hamilton_vantage/meshes/unit_box.stl"
+                scale="0.18 0.14 0.030"/>
+        </geometry>
+        <material name="hamilton_vantage_tray_silver">
+          <color rgba="0.84 0.85 0.87 1"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0.015" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.18 0.14 0.030"/>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="${station_name}${device_name}loading_tray_joint" type="fixed">
+      <origin xyz="${width * loading_tray_x_factor} ${loading_tray_y} ${loading_tray_z}" rpy="0 0 0"/>
+      <parent link="${station_name}${device_name}base_link"/>
+      <child link="${station_name}${device_name}loading_tray_link"/>
+      <axis xyz="0 0 0"/>
+    </joint>
 
     <link name="${station_name}${device_name}deck_access_link"/>
     <joint name="${station_name}${device_name}deck_access_joint" type="fixed">
@@ -165,8 +209,8 @@
 
     <link name="${station_name}${device_name}loading_tray_access_link"/>
     <joint name="${station_name}${device_name}loading_tray_access_joint" type="fixed">
-      <origin xyz="${width * 0.34} ${front_access_y} 0.265" rpy="0 0 0"/>
-      <parent link="${station_name}${device_name}base_link"/>
+      <origin xyz="0 ${front_access_y - loading_tray_y} ${0.265 - loading_tray_z}" rpy="0 0 0"/>
+      <parent link="${station_name}${device_name}loading_tray_link"/>
       <child link="${station_name}${device_name}loading_tray_access_link"/>
       <axis xyz="0 0 0"/>
     </joint>
@@ -206,9 +250,9 @@
 
     <!-- 右下 Entry/Exit / autoload 区域的近似手off参考位。 -->
     <joint name="${station_name}${device_name}socketTypeGenericSbsFootprint_2_60_1" type="fixed">
-      <parent link="${station_name}${device_name}base_link"/>
+      <parent link="${station_name}${device_name}loading_tray_link"/>
       <child link="${station_name}${device_name}socketTypeGenericSbsFootprint"/>
-      <origin rpy="0 0 0" xyz="${width * 0.34} ${front_access_y} 0.265"/>
+      <origin rpy="0 0 0" xyz="0 ${front_access_y - loading_tray_y} ${0.265 - loading_tray_z}"/>
     </joint>
 
   </xacro:macro>

@@ -70,6 +70,17 @@
       }
     }
   },
+  "collision_model": {
+    "strategy": "segmented_hybrid_open_deck_with_fixed_extended_loading_tray",
+    "blocked_parts": [
+      "lower_rear_body_shell",
+      "upper_left_body_shell",
+      "upper_right_body_shell",
+      "upper_rear_body_shell",
+      "fixed_extended_loading_tray"
+    ],
+    "notes": "The simplified collision intentionally removes the single full-body envelope. The upper deck remains reachable from above and from the front, while the lower loading tray is modeled as a separate fixed, extended collision outside the body shell."
+  },
   "mesh_assets": {
     "visual_stl_parts": [
       "meshes/unit_box.stl"
@@ -83,6 +94,8 @@
     {
       "name": "deck_access_link",
       "description": "Approximate center of the primary pipetting deck / work surface inside the upper enclosure.",
+      "collision_strategy": "exposed_work_surface",
+      "collision_notes": "This access frame is intentionally positioned over the collision-free main work surface so vertical approach and front approach onto the deck remain valid.",
       "variants": {
         "vantage_1_3": {
           "face": "internal_top_deck",
@@ -101,6 +114,8 @@
     {
       "name": "front_loading_access_link",
       "description": "Approximate robot-facing access point immediately outside the upper front enclosure where manual front service or front-facing loading interactions would occur.",
+      "collision_strategy": "opening_cutout",
+      "collision_notes": "This access face sits in front of the open front cutout of the upper enclosure rather than inside the segmented shell collision.",
       "variants": {
         "vantage_1_3": {
           "face": "front_upper",
@@ -119,6 +134,8 @@
     {
       "name": "loading_tray_access_link",
       "description": "Estimated right-front handoff point for the lower Entry/Exit / autoload region visible in official front and exploded renders.",
+      "collision_strategy": "fixed_extended_tray",
+      "collision_notes": "This access frame is tray-backed by the fixed, extended lower loading tray and is intentionally kept outside the body-shell collision volumes.",
       "variants": {
         "vantage_1_3": {
           "face": "front_lower_right",
@@ -137,6 +154,8 @@
     {
       "name": "front_service_access_link",
       "description": "Approximate center of the upper front service face aligned with the dual handle bars and service window.",
+      "collision_strategy": "opening_cutout",
+      "collision_notes": "This service face is aligned to the segmented front opening and remains forward of the upper shell collision.",
       "variants": {
         "vantage_1_3": {
           "face": "front_upper_service",
@@ -155,6 +174,8 @@
     {
       "name": "logistics_cabinet_access_link",
       "description": "Approximate center of the lower logistics-cabinet front glazing used for under-deck consumable access.",
+      "collision_strategy": "opening_cutout",
+      "collision_notes": "This lower-front access face is kept in the front glazing cutout zone so it is not embedded in the lower body shell collision.",
       "variants": {
         "vantage_1_3": {
           "face": "front_lower",
@@ -173,6 +194,8 @@
     {
       "name": "rear_service_access_link",
       "description": "Approximate rear utility and maintenance region for cables, services, and rear-side integrations.",
+      "collision_strategy": "opening_cutout",
+      "collision_notes": "This rear service frame is placed behind the shortened rear shell collision so back-side utility access remains reachable.",
       "variants": {
         "vantage_1_3": {
           "face": "rear",
@@ -185,6 +208,46 @@
           "center_m": [0.0, 0.39, 0.92],
           "size_m": [0.40, 0.001, 0.25],
           "rpy_rad": [0.0, 0.0, 3.141592653589793]
+        }
+      }
+    },
+    {
+      "name": "socketTypeGenericSbsFootprint_1_60_1",
+      "description": "Representative SBS work reference on the exposed upper pipetting deck.",
+      "collision_strategy": "exposed_work_surface",
+      "collision_notes": "This SBS work reference stays on the collision-free upper deck opening and is not embedded in the segmented shell.",
+      "variants": {
+        "vantage_1_3": {
+          "face": "internal_top_deck",
+          "center_m": [0.0, 0.0, 0.98],
+          "size_m": [0.12776, 0.08548, 0.015],
+          "rpy_rad": [0.0, 0.0, 0.0]
+        },
+        "vantage_2_0": {
+          "face": "internal_top_deck",
+          "center_m": [0.0, 0.0, 0.98],
+          "size_m": [0.12776, 0.08548, 0.015],
+          "rpy_rad": [0.0, 0.0, 0.0]
+        }
+      }
+    },
+    {
+      "name": "socketTypeGenericSbsFootprint_2_60_1",
+      "description": "Representative SBS handoff reference on the fixed, extended lower loading tray.",
+      "collision_strategy": "fixed_extended_tray",
+      "collision_notes": "This SBS handoff reference is anchored to the tray-backed loading region rather than the body shell, keeping the loading zone reachable.",
+      "variants": {
+        "vantage_1_3": {
+          "face": "front_lower_right_tray",
+          "center_m": [0.4522, -0.245, 0.265],
+          "size_m": [0.12776, 0.08548, 0.015],
+          "rpy_rad": [0.0, 0.0, 0.0]
+        },
+        "vantage_2_0": {
+          "face": "front_lower_right_tray",
+          "center_m": [0.6834, -0.245, 0.265],
+          "size_m": [0.12776, 0.08548, 0.015],
+          "rpy_rad": [0.0, 0.0, 0.0]
         }
       }
     }

@@ -50,6 +50,7 @@
       "face": "front",
       "xyz_m": [0.0, 0.47, 0.255],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Estimated primary consumable-loading access point centered on the front door opening shown in the user-guide hardware overview."
     },
     {
@@ -57,6 +58,7 @@
       "face": "front-right",
       "xyz_m": [0.19, 0.445, 0.115],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Estimated operator touchscreen center on the smaller front-right control bay."
     }
   ],

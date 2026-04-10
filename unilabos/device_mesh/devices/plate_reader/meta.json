@@ -29,6 +29,7 @@
       "name": "drawer-loading-zone",
       "linkSuffix": "drawer_access_link",
       "description": "Estimated center of the extended front tray used to load or retrieve an SBS microplate.",
+      "collision_strategy": "fixed_extended_tray",
       "poseMeters": {
         "x": 0.03,
         "y": 0.282,
@@ -42,6 +43,7 @@
       "name": "front-drawer-face",
       "linkSuffix": "front_panel_access_link",
       "description": "Estimated operator approach point centered on the plate drawer opening in the front fascia.",
+      "collision_strategy": "opening_cutout",
       "poseMeters": {
         "x": 0.03,
         "y": 0.242,
@@ -55,6 +57,7 @@
       "name": "upper-service-panel",
       "linkSuffix": "service_access_link",
       "description": "Estimated front access point for the upper optics or service panel above the drawer.",
+      "collision_strategy": "opening_cutout",
       "poseMeters": {
         "x": 0.055,
         "y": 0.242,

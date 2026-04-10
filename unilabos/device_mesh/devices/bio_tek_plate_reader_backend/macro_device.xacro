@@ -7,6 +7,17 @@
             mesh_path:='' width:=0.375 depth:=0.464 height:=0.33
             tray_center_x:=0.03 tray_center_y:=0.282 tray_center_z:=0.06">
 
+    <xacro:property name="front_opening_depth" value="0.150" />
+    <xacro:property name="front_opening_height" value="0.140" />
+    <xacro:property name="front_shell_depth" value="${front_opening_depth}" />
+    <xacro:property name="rear_shell_depth" value="${depth - front_opening_depth}" />
+    <xacro:property name="rear_shell_center_y" value="${-front_opening_depth / 2.0}" />
+    <xacro:property name="front_shell_center_y" value="${depth / 2.0 - front_opening_depth / 2.0}" />
+    <xacro:property name="front_upper_height" value="${height - front_opening_height}" />
+    <xacro:property name="front_upper_center_z" value="${front_opening_height + front_upper_height / 2.0}" />
+    <xacro:property name="front_side_shell_width" value="0.118" />
+    <xacro:property name="front_side_shell_center_x" value="${(width / 2.0) - (front_side_shell_width / 2.0)}" />
+
     <!-- 近似 Agilent BioTek Synergy H1:
          官方技术参数给出整机尺寸 375 mm(W) x 464 mm(D) x 330 mm(H)，
          IFU 外观图显示前部为微孔板抽屉门和上部服务门。 -->
@@ -34,10 +45,29 @@
           <color rgba="0.95 0.96 0.97 1"/>
         </material>
       </visual>
+      <!-- 主体碰撞拆成后壳、前上壳和左右前侧立柱，避免前部抽屉通道被整块实体封死。 -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 ${rear_shell_center_y} ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width} ${rear_shell_depth} ${height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 ${front_shell_center_y} ${front_upper_center_z}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width} ${front_shell_depth} ${front_upper_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${front_side_shell_center_x} ${front_shell_center_y} ${front_opening_height / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${front_side_shell_width} ${front_shell_depth} ${front_opening_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${-front_side_shell_center_x} ${front_shell_center_y} ${front_opening_height / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${front_side_shell_width} ${front_shell_depth} ${front_opening_height}"/>
         </geometry>
       </collision>
     </link>
@@ -56,6 +86,14 @@
       <origin xyz="0.055 ${depth / 2.0 + 0.002} 0.16" rpy="${pi / 2.0} 0 0"/>
       <parent link="${station_name}${device_name}base_link"/>
       <child link="${station_name}${device_name}service_door_link"/>
+      <axis xyz="0 0 0"/>
+    </joint>
+
+    <link name="${station_name}${device_name}service_access_point"/>
+    <joint name="${station_name}${device_name}service_access_point_joint" type="fixed">
+      <origin xyz="0.055 ${depth / 2.0 + 0.04} 0.16" rpy="0 0 0"/>
+      <parent link="${station_name}${device_name}base_link"/>
+      <child link="${station_name}${device_name}service_access_point"/>
       <axis xyz="0 0 0"/>
     </joint>
 

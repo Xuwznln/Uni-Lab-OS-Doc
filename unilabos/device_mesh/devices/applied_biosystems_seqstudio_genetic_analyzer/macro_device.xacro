@@ -10,6 +10,14 @@
             front_loading_x:=-0.1755 front_loading_y:=-0.3182 front_loading_z:=0.0947
             screen_access_x:=0.0439 screen_access_y:=-0.2423 screen_access_z:=0.3033">
 
+    <xacro:property name="front_corridor_width" value="0.405" />
+    <xacro:property name="front_corridor_depth" value="0.220" />
+    <xacro:property name="front_corridor_height" value="0.340" />
+    <xacro:property name="front_side_wall_width" value="${(width - front_corridor_width) / 2.0}" />
+    <xacro:property name="front_side_wall_center_x" value="${(width + front_corridor_width) / 4.0}" />
+    <xacro:property name="front_opening_center_y" value="${(-depth / 2.0) + (front_corridor_depth / 2.0)}" />
+    <xacro:property name="rear_body_center_y" value="${front_corridor_depth / 2.0}" />
+
     <!-- 可视网格来自 Thermo Fisher 官方 SeqStudio 3D Tour 的公开 AR GLB，
          已重采样为 STL，并按规格书外形尺寸（49.5 x 64.8 x 44.2 cm）缩放到 Uni-Lab-OS 设备坐标系。
          采样板位、卡匣位和前舱访问点根据官方 3D Tour 热点估算，适合作为集成参考而非工厂标定值。 -->
@@ -37,10 +45,29 @@
           <color rgba="0.90 0.91 0.92 1"/>
         </material>
       </visual>
+      <!-- 将机身碰撞拆分为后壳、前侧壁和前上罩，保持前向 sample/cartridge 装载走廊敞开。 -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 ${rear_body_center_y} ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width} ${depth - front_corridor_depth} ${height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${-front_side_wall_center_x} ${front_opening_center_y} ${front_corridor_height / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${front_side_wall_width} ${front_corridor_depth} ${front_corridor_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${front_side_wall_center_x} ${front_opening_center_y} ${front_corridor_height / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${front_side_wall_width} ${front_corridor_depth} ${front_corridor_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 ${front_opening_center_y} ${(front_corridor_height + height) / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width} ${front_corridor_depth} ${height - front_corridor_height}"/>
         </geometry>
       </collision>
     </link>

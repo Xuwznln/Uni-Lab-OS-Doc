@@ -53,24 +53,28 @@
       "name": "sample_plate_access_link",
       "xyz_m": [-0.0568, -0.1888, 0.1794],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Approximate center of the internal sample plate position inferred from the official 3D tour Plate hotspot."
     },
     {
       "name": "cartridge_access_link",
       "xyz_m": [-0.1321, -0.1493, 0.2896],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Approximate center of the all-in-one cartridge click-in location inferred from the official 3D tour Cartridge hotspot."
     },
     {
       "name": "front_loading_access_link",
       "xyz_m": [-0.1755, -0.3182, 0.0947],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Approximate reference point near the front compartment opening, based on the official 3D tour Internal Compartment hotspot."
     },
     {
       "name": "screen_access_link",
       "xyz_m": [0.0439, -0.2423, 0.3033],
       "rpy_rad": [0.0, 0.0, 0.0],
+      "collision_strategy": "opening_cutout",
       "description": "Approximate touchscreen / on-board computer reference point based on the official 3D tour On-board Computer hotspot."
     }
   ],

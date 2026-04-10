@@ -21,7 +21,12 @@
     <xacro:property name="lid_handle_y" value="${-(depth / 2.0) - 0.030}" />
     <xacro:property name="lid_handle_z" value="${height - 0.015}" />
     <xacro:property name="loading_access_z" value="${height + ((open_height - height) * 0.45)}" />
-    <xacro:property name="rear_service_y" value="${(depth / 2.0) - 0.040}" />
+    <xacro:property name="lower_body_collision_height" value="${lid_bottom_z}" />
+    <xacro:property name="upper_shell_height" value="${height - lower_body_collision_height}" />
+    <xacro:property name="top_opening_width" value="${width - 0.240}" />
+    <xacro:property name="upper_side_wall_width" value="${(width - top_opening_width) / 2.0}" />
+    <xacro:property name="upper_rear_wall_depth" value="0.180" />
+    <xacro:property name="rear_service_y" value="${(depth / 2.0) + 0.040}" />
 
     <joint name="${station_name}${device_name}base_link_joint" type="fixed">
       <origin xyz="${x} ${y} ${z}" rpy="${rx} ${ry} ${r}" />
@@ -84,10 +89,30 @@
           <color rgba="0.54 0.58 0.61 1"/>
         </material>
       </visual>
+      <!-- Collision shell leaves the open lid corridor and front-center handle approach
+           reachable without embedding those access frames inside solid body geometry. -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 0 ${lower_body_collision_height / 2.0}" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width} ${depth} ${lower_body_collision_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${(-width / 2.0) + (upper_side_wall_width / 2.0)} 0 ${lower_body_collision_height + (upper_shell_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${upper_side_wall_width} ${depth} ${upper_shell_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${(width / 2.0) - (upper_side_wall_width / 2.0)} 0 ${lower_body_collision_height + (upper_shell_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${upper_side_wall_width} ${depth} ${upper_shell_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 ${(depth / 2.0) - (upper_rear_wall_depth / 2.0)} ${lower_body_collision_height + (upper_shell_height / 2.0)}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${top_opening_width} ${upper_rear_wall_depth} ${upper_shell_height}"/>
         </geometry>
       </collision>
     </link>

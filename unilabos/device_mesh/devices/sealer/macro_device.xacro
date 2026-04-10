@@ -76,10 +76,35 @@
         </geometry>
         <material name="sealer_shell_white"/>
       </visual>
+      <!-- 将机身碰撞拆分为后壳、前侧壁与上罩，保持前部 tray/slot 进板走廊敞开。 -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 -0.0865 0.090" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width} 0.334 0.180"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="-0.0925 0.132 0.090" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.045 0.200 0.180"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0.0925 0.132 0.090" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.045 0.200 0.180"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 -0.060 0.223" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width} 0.300 0.106"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 0.176 0.168" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.210 0.120 0.088"/>
         </geometry>
       </collision>
     </link>
@@ -155,20 +180,20 @@
       <axis xyz="0 0 0"/>
     </joint>
 
-    <!-- 前部装载点，对应抽屉完全拉出后的人/机器人进板路径。 -->
+    <!-- 前部装载点，对应固定为伸出状态的托盘取放路径。 -->
     <link name="${station_name}${device_name}front_loading_access_link"/>
     <joint name="${station_name}${device_name}front_loading_access_joint" type="fixed">
-      <origin xyz="0 ${depth / 2.0 + 0.094} ${tray_center_z + 0.012}" rpy="0 0 0"/>
-      <parent link="${station_name}${device_name}base_link"/>
+      <origin xyz="0 ${(depth / 2.0 + 0.094) - tray_center_y} 0.012" rpy="0 0 0"/>
+      <parent link="${station_name}${device_name}tray_link"/>
       <child link="${station_name}${device_name}front_loading_access_link"/>
       <axis xyz="0 0 0"/>
     </joint>
 
-    <!-- 封膜工位中心，估计位于前部 slot 进入后的加热压合区。 -->
+    <!-- 封膜工位中心，沿固定伸出托盘的送板轴线表达 slot 内部 handoff 位置。 -->
     <link name="${station_name}${device_name}sealing_slot_access_link"/>
     <joint name="${station_name}${device_name}sealing_slot_access_joint" type="fixed">
-      <origin xyz="0 0.188 0.104" rpy="0 0 0"/>
-      <parent link="${station_name}${device_name}base_link"/>
+      <origin xyz="0 ${0.188 - tray_center_y} ${0.104 - tray_center_z}" rpy="0 0 0"/>
+      <parent link="${station_name}${device_name}tray_link"/>
       <child link="${station_name}${device_name}sealing_slot_access_link"/>
       <axis xyz="0 0 0"/>
     </joint>

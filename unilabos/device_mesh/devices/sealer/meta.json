@@ -47,6 +47,7 @@
     {
       "name": "front_loading_access_link",
       "face": "front",
+      "collision_strategy": "fixed_extended_tray",
       "xyz_m": [0.0, 0.3475, 0.103],
       "rpy_rad": [0.0, 0.0, 0.0],
       "description": "Approximate approach point for loading or unloading an SBS-format microplate on the extended front tray."
@@ -54,6 +55,7 @@
     {
       "name": "sealing_slot_access_link",
       "face": "front_internal",
+      "collision_strategy": "fixed_extended_tray",
       "xyz_m": [0.0, 0.188, 0.104],
       "rpy_rad": [0.0, 0.0, 0.0],
       "description": "Estimated center of the sealing slot / heated platen region after the tray enters the instrument."
@@ -61,6 +63,7 @@
     {
       "name": "touchscreen_access_link",
       "face": "front_upper",
+      "collision_strategy": "opening_cutout",
       "xyz_m": [0.0, 0.2815, 0.194],
       "rpy_rad": [-0.349066, 0.0, 0.0],
       "description": "Approximate front operator control location on the sloped touchscreen console."
@@ -68,6 +71,7 @@
     {
       "name": "top_roll_access_link",
       "face": "top",
+      "collision_strategy": "opening_cutout",
       "xyz_m": [0.0, -0.094, 0.276],
       "rpy_rad": [0.0, 0.0, 0.0],
       "description": "Estimated top-side service position for loading or replacing the sealing film roll."
@@ -75,6 +79,7 @@
     {
       "name": "rear_service_access_link",
       "face": "rear",
+      "collision_strategy": "opening_cutout",
       "xyz_m": [0.0, -0.3035, 0.16],
       "rpy_rad": [0.0, 0.0, 3.141592653589793],
       "description": "Approximate rear service point for power and cable access."

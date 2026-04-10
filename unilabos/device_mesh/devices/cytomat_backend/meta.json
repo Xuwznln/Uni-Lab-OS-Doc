@@ -25,6 +25,7 @@
       "name": "transfer-opening",
       "linkSuffix": "transfer_opening_access_link",
       "description": "Front automatic gate / transfer opening aligned to the nominal SBS plate center.",
+      "collision_strategy": "opening_cutout",
       "poseMeters": {
         "x": 0.0,
         "y": 0.3105,
@@ -38,6 +39,7 @@
       "name": "loading-tray",
       "linkSuffix": "loading_tray_access_link",
       "description": "Front loading tray handoff point aligned to the nominal SBS plate center.",
+      "collision_strategy": "fixed_extended_tray",
       "poseMeters": {
         "x": 0.0,
         "y": 0.3905,

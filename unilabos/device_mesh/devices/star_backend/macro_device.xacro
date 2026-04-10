@@ -103,10 +103,41 @@
           <color rgba="0.20 0.21 0.23 1"/>
         </material>
       </visual>
+      <!-- 碰撞仅保留真实阻挡的外壳/框架，保持 deck 上方与前侧装载开口可达。 -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="${-width / 2.0 + 0.075} -0.334 0.452" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="0.110 0.110 0.904"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="${width / 2.0 - 0.075} -0.334 0.452" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.110 0.110 0.904"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 0.120 0.240" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width - 0.100} 0.250 0.480"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 -0.334 0.500" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width - 0.180} 0.050 0.090"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 -0.334 0.715" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width - 0.120} 0.080 0.120"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 0.020 0.060" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width - 0.120} 0.180 0.120"/>
         </geometry>
       </collision>
     </link>
@@ -136,8 +167,8 @@
 
     <link name="${station_name}${device_name}loading_tray_access_link"/>
     <joint name="${station_name}${device_name}loading_tray_access_joint" type="fixed">
-      <origin xyz="0 ${loading_tray_access_y} ${deck_surface_z + 0.015}" rpy="0 0 0"/>
-      <parent link="${station_name}${device_name}base_link"/>
+      <origin xyz="0 ${loading_tray_access_y - loading_tray_y} ${deck_surface_z + 0.015 - 0.085}" rpy="0 0 0"/>
+      <parent link="${station_name}${device_name}loading_tray_link"/>
       <child link="${station_name}${device_name}loading_tray_access_link"/>
       <axis xyz="0 0 0"/>
     </joint>

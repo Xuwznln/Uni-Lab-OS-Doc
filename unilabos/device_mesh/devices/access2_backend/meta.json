@@ -44,25 +44,29 @@
       "name": "front_door_access_link",
       "xyz_m": [0.0, -0.1155, 0.1255],
       "rpy_rad": [0.0, 0.0, 0.0],
-      "description": "Approximate center of the front door opening on the centrifuge body."
+      "collision_strategy": "opening_cutout",
+      "description": "Approximate center of the front door opening on the centrifuge body, approached through the front opening corridor."
     },
     {
       "name": "loader_stage_access_link",
       "xyz_m": [0.0, -0.2555, 0.095],
       "rpy_rad": [0.0, 0.0, 0.0],
-      "description": "Approximate robotic handoff point above the loader stage."
+      "collision_strategy": "fixed_extended_tray",
+      "description": "Approximate robotic handoff point above the fixed extended loader stage."
     },
     {
       "name": "hover_access_link",
       "xyz_m": [0.0, -0.1755, 0.12],
       "rpy_rad": [0.0, 0.0, 0.0],
-      "description": "Approximate hover point just outside the centrifuge door, based on loader teachpoint documentation."
+      "collision_strategy": "opening_cutout",
+      "description": "Approximate hover point just outside the centrifuge door, aligned with the open front-door approach corridor."
     },
     {
       "name": "rear_service_access_link",
-      "xyz_m": [0.0, 0.3255, 0.12048],
+      "xyz_m": [0.0, 0.3855, 0.12048],
       "rpy_rad": [0.0, 0.0, 3.141592653589793],
-      "description": "Rear-side service reference for power, serial, and compressed-air connections."
+      "collision_strategy": "opening_cutout",
+      "description": "Rear-side service reference for power, serial, and compressed-air connections on the exposed rear service face, positioned just outside the simplified body shell."
     }
   ],
   "notes": [

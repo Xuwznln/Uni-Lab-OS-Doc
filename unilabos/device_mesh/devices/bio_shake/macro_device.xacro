@@ -6,6 +6,14 @@
     params="parent_link:='' station_name:='' device_name:='' x:=0 y:=0 z:=0 rx:=0 ry:=0 r:=0
             mesh_path:='' width:=0.104 depth:=0.147 height:=0.1159 contact_surface_height:=0.1099">
 
+    <xacro:property name="plate_opening_width" value="0.09"/>
+    <xacro:property name="plate_opening_depth" value="0.132"/>
+    <xacro:property name="plate_recess_depth" value="0.008"/>
+    <xacro:property name="plate_recess_floor_height" value="${height - plate_recess_depth}"/>
+    <xacro:property name="plate_side_wall_width" value="${(width - plate_opening_width) / 2.0}"/>
+    <xacro:property name="plate_front_back_wall_depth" value="${(depth - plate_opening_depth) / 2.0}"/>
+    <xacro:property name="plate_top_edge_height" value="${height - plate_recess_floor_height}"/>
+
     <!-- Representative fallback envelope for a single-plate INHECO-style thermoshaker.
          Dimensions follow official Thermoshake AC specs: 104 mm W x 147 mm D x 115.9 mm H.
          The SBS plate pickup/drop-off frame is placed at the documented zero-position contact surface. -->
@@ -33,10 +41,43 @@
           <color rgba="0.83 0.84 0.86 1"/>
         </material>
       </visual>
+      <!-- Split the simplified collision so the top-contact plate zone is a genuine open recess. -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 0 ${plate_recess_floor_height / 2.0}" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width} ${depth} ${plate_recess_floor_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin
+          xyz="${-(plate_opening_width / 2.0 + plate_side_wall_width / 2.0)} 0 ${plate_recess_floor_height + plate_top_edge_height / 2.0}"
+          rpy="0 0 0"/>
+        <geometry>
+          <box size="${plate_side_wall_width} ${depth} ${plate_top_edge_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin
+          xyz="${plate_opening_width / 2.0 + plate_side_wall_width / 2.0} 0 ${plate_recess_floor_height + plate_top_edge_height / 2.0}"
+          rpy="0 0 0"/>
+        <geometry>
+          <box size="${plate_side_wall_width} ${depth} ${plate_top_edge_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin
+          xyz="0 ${plate_opening_depth / 2.0 + plate_front_back_wall_depth / 2.0} ${plate_recess_floor_height + plate_top_edge_height / 2.0}"
+          rpy="0 0 0"/>
+        <geometry>
+          <box size="${plate_opening_width} ${plate_front_back_wall_depth} ${plate_top_edge_height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin
+          xyz="0 ${-(plate_opening_depth / 2.0 + plate_front_back_wall_depth / 2.0)} ${plate_recess_floor_height + plate_top_edge_height / 2.0}"
+          rpy="0 0 0"/>
+        <geometry>
+          <box size="${plate_opening_width} ${plate_front_back_wall_depth} ${plate_top_edge_height}"/>
         </geometry>
       </collision>
     </link>

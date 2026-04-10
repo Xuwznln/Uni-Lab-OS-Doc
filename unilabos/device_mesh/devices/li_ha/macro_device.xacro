@@ -115,10 +115,41 @@
           <color rgba="0.20 0.34 0.52 0.85"/>
         </material>
       </visual>
+      <!-- 碰撞仅覆盖真实阻挡的结构件，保持开放式 deck 的上方和前方可达。 -->
       <collision>
-        <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
+        <origin xyz="0 0.305 0.405" rpy="0 0 0"/>
         <geometry>
-          <box size="${width} ${depth} ${height}"/>
+          <box size="${width - 0.040} 0.330 0.730"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="-0.685 0.000 ${height / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.080 0.200 ${height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0.685 0.000 ${height / 2.0}" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.080 0.200 ${height}"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 0.050 1.020" rpy="0 0 0"/>
+        <geometry>
+          <box size="${width - 0.080} 0.130 0.100"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0 -0.445 0.745" rpy="0 0 0"/>
+        <geometry>
+          <box size="1.130 0.050 0.060"/>
+        </geometry>
+      </collision>
+      <collision>
+        <origin xyz="0.580 -0.320 0.385" rpy="0 0 0"/>
+        <geometry>
+          <box size="0.180 0.180 0.770"/>
         </geometry>
       </collision>
     </link>
