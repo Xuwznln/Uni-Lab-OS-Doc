@@ -1228,6 +1228,10 @@ class Head96Information:
   id="star_backend",
   category=["Liquid Handling Workstation"],
   description="Hamilton STAR 自动化液体处理平台，用于实验室吸液、分液、装卸吸头、液位探测、板与载架搬运，并可控制 iSWAP、CoRe 96 头、autoload 载架装载及部分连接的加热冷却模块。",
+  model={
+    "type": "device",
+    "mesh": "star_backend",
+  },
 )
 class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):
   """Interface for the Hamilton STARBackend."""

@@ -1,0 +1,86 @@
+solid hettich_rotanta_460_robotic_body_core
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.000000
+      vertex 0.261000 0.310000 0.000000
+      vertex 0.261000 -0.310000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.000000
+      vertex -0.261000 0.310000 0.000000
+      vertex 0.261000 0.310000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.300000
+      vertex 0.261000 -0.310000 0.300000
+      vertex 0.261000 0.310000 0.300000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.300000
+      vertex 0.261000 0.310000 0.300000
+      vertex -0.261000 0.310000 0.300000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.000000
+      vertex 0.261000 -0.310000 0.000000
+      vertex 0.261000 -0.310000 0.300000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.000000
+      vertex 0.261000 -0.310000 0.300000
+      vertex -0.261000 -0.310000 0.300000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.261000 0.310000 0.000000
+      vertex -0.261000 0.310000 0.300000
+      vertex 0.261000 0.310000 0.300000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.261000 0.310000 0.000000
+      vertex 0.261000 0.310000 0.300000
+      vertex 0.261000 0.310000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.000000
+      vertex -0.261000 -0.310000 0.300000
+      vertex -0.261000 0.310000 0.300000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.261000 -0.310000 0.000000
+      vertex -0.261000 0.310000 0.300000
+      vertex -0.261000 0.310000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.261000 -0.310000 0.000000
+      vertex 0.261000 0.310000 0.000000
+      vertex 0.261000 0.310000 0.300000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.261000 -0.310000 0.000000
+      vertex 0.261000 0.310000 0.300000
+      vertex 0.261000 -0.310000 0.300000
+    endloop
+  endfacet
+endsolid hettich_rotanta_460_robotic_body_core

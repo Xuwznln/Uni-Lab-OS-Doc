@@ -1,0 +1,86 @@
+solid hamilton_vantage_1_3
+  facet normal 0 0 -1
+    outer loop
+      vertex -0.665 -0.49 0
+      vertex 0.665 0.49 0
+      vertex 0.665 -0.49 0
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex -0.665 -0.49 0
+      vertex -0.665 0.49 0
+      vertex 0.665 0.49 0
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex -0.665 -0.49 1.82
+      vertex 0.665 -0.49 1.82
+      vertex 0.665 0.49 1.82
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex -0.665 -0.49 1.82
+      vertex 0.665 0.49 1.82
+      vertex -0.665 0.49 1.82
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex -0.665 -0.49 0
+      vertex 0.665 -0.49 0
+      vertex 0.665 -0.49 1.82
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex -0.665 -0.49 0
+      vertex 0.665 -0.49 1.82
+      vertex -0.665 -0.49 1.82
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex -0.665 0.49 0
+      vertex 0.665 0.49 1.82
+      vertex 0.665 0.49 0
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex -0.665 0.49 0
+      vertex -0.665 0.49 1.82
+      vertex 0.665 0.49 1.82
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex -0.665 -0.49 0
+      vertex -0.665 -0.49 1.82
+      vertex -0.665 0.49 1.82
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex -0.665 -0.49 0
+      vertex -0.665 0.49 1.82
+      vertex -0.665 0.49 0
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 0.665 -0.49 0
+      vertex 0.665 0.49 0
+      vertex 0.665 0.49 1.82
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 0.665 -0.49 0
+      vertex 0.665 0.49 1.82
+      vertex 0.665 -0.49 1.82
+    endloop
+  endfacet
+endsolid hamilton_vantage_1_3

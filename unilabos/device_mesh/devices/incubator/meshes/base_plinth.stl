@@ -1,0 +1,86 @@
+solid incubator_base_plinth
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.000000
+      vertex 0.372000 0.358000 0.000000
+      vertex 0.372000 -0.358000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.000000
+      vertex -0.372000 0.358000 0.000000
+      vertex 0.372000 0.358000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.085000
+      vertex 0.372000 -0.358000 0.085000
+      vertex 0.372000 0.358000 0.085000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.085000
+      vertex 0.372000 0.358000 0.085000
+      vertex -0.372000 0.358000 0.085000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.000000
+      vertex 0.372000 -0.358000 0.000000
+      vertex 0.372000 -0.358000 0.085000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.000000
+      vertex 0.372000 -0.358000 0.085000
+      vertex -0.372000 -0.358000 0.085000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.372000 0.358000 0.000000
+      vertex -0.372000 0.358000 0.085000
+      vertex 0.372000 0.358000 0.085000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.372000 0.358000 0.000000
+      vertex 0.372000 0.358000 0.085000
+      vertex 0.372000 0.358000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.000000
+      vertex -0.372000 -0.358000 0.085000
+      vertex -0.372000 0.358000 0.085000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.372000 -0.358000 0.000000
+      vertex -0.372000 0.358000 0.085000
+      vertex -0.372000 0.358000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.372000 -0.358000 0.000000
+      vertex 0.372000 0.358000 0.000000
+      vertex 0.372000 0.358000 0.085000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.372000 -0.358000 0.000000
+      vertex 0.372000 0.358000 0.085000
+      vertex 0.372000 -0.358000 0.085000
+    endloop
+  endfacet
+endsolid incubator_base_plinth

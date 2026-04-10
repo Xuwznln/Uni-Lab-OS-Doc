@@ -9,6 +9,7 @@ from unilabos.registry.decorators import device, action
     id="telesis_bio_bioxp_3250",
     category=["synthetic_biology_workstation"],
     description="自动化合成生物学工作站，可执行DNA构建流程装载、片段组装、转化相关步骤衔接以及构建结果导出。",
+    model={"type": "device", "mesh": "telesis_bio_bioxp_3250"},
 )
 class TelesisBioBioXp3250:
     def __init__(self, device_id=None, config=None, **kwargs):

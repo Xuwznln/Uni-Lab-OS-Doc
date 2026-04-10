@@ -1,0 +1,86 @@
+solid tecan_resolvex_a200_lower_body
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.000000
+      vertex 0.183000 0.260000 0.000000
+      vertex 0.183000 -0.260000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.000000
+      vertex -0.183000 0.260000 0.000000
+      vertex 0.183000 0.260000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.290000
+      vertex 0.183000 -0.260000 0.290000
+      vertex 0.183000 0.260000 0.290000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.290000
+      vertex 0.183000 0.260000 0.290000
+      vertex -0.183000 0.260000 0.290000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.000000
+      vertex 0.183000 -0.260000 0.000000
+      vertex 0.183000 -0.260000 0.290000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.000000
+      vertex 0.183000 -0.260000 0.290000
+      vertex -0.183000 -0.260000 0.290000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.183000 0.260000 0.000000
+      vertex -0.183000 0.260000 0.290000
+      vertex 0.183000 0.260000 0.290000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.183000 0.260000 0.000000
+      vertex 0.183000 0.260000 0.290000
+      vertex 0.183000 0.260000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.000000
+      vertex -0.183000 -0.260000 0.290000
+      vertex -0.183000 0.260000 0.290000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.183000 -0.260000 0.000000
+      vertex -0.183000 0.260000 0.290000
+      vertex -0.183000 0.260000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.183000 -0.260000 0.000000
+      vertex 0.183000 0.260000 0.000000
+      vertex 0.183000 0.260000 0.290000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.183000 -0.260000 0.000000
+      vertex 0.183000 0.260000 0.290000
+      vertex 0.183000 -0.260000 0.290000
+    endloop
+  endfacet
+endsolid tecan_resolvex_a200_lower_body

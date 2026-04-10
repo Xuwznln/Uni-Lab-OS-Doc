@@ -244,6 +244,7 @@ bucket_1_not_set_error = RuntimeError(
   id="v_spin_backend",
   category=["Centrifuge"],
   description="用于实验室样品离心处理的自动化离心机，可进行转子位置控制、开关门、门锁与桶锁控制，并按设定的相对离心力或转速执行离心程序。",
+  model={"type": "device", "mesh": "v_spin_backend"},
 )
 class VSpinBackend(CentrifugeBackend):
   """Backend for the Agilent Centrifuge.

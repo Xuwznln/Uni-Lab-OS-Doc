@@ -1,0 +1,86 @@
+solid v_spin_body_core
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.000000
+      vertex 0.152500 0.218000 0.000000
+      vertex 0.152500 -0.218000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.000000
+      vertex -0.152500 0.218000 0.000000
+      vertex 0.152500 0.218000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.192000
+      vertex 0.152500 -0.218000 0.192000
+      vertex 0.152500 0.218000 0.192000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.192000
+      vertex 0.152500 0.218000 0.192000
+      vertex -0.152500 0.218000 0.192000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.000000
+      vertex 0.152500 -0.218000 0.000000
+      vertex 0.152500 -0.218000 0.192000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.000000
+      vertex 0.152500 -0.218000 0.192000
+      vertex -0.152500 -0.218000 0.192000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.152500 0.218000 0.000000
+      vertex -0.152500 0.218000 0.192000
+      vertex 0.152500 0.218000 0.192000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.152500 0.218000 0.000000
+      vertex 0.152500 0.218000 0.192000
+      vertex 0.152500 0.218000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.000000
+      vertex -0.152500 -0.218000 0.192000
+      vertex -0.152500 0.218000 0.192000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.152500 -0.218000 0.000000
+      vertex -0.152500 0.218000 0.192000
+      vertex -0.152500 0.218000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.152500 -0.218000 0.000000
+      vertex 0.152500 0.218000 0.000000
+      vertex 0.152500 0.218000 0.192000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.152500 -0.218000 0.000000
+      vertex 0.152500 0.218000 0.192000
+      vertex 0.152500 -0.218000 0.192000
+    endloop
+  endfacet
+endsolid v_spin_body_core

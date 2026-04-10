@@ -9,6 +9,7 @@ from unilabos.registry.decorators import action, device
     id="eppendorf_centrifuge_5910_ri",
     category=["refrigerated_high_speed_centrifuge"],
     description="冷冻台式离心机，可在受控温度下执行样本离心、转子与适配器配置确认、运行结束解锁以及运行记录导出。",
+    model={"type": "device", "mesh": "eppendorf_centrifuge_5910_ri"},
 )
 class EppendorfCentrifuge5910Ri:
     def __init__(self, device_id=None, config=None, **kwargs):

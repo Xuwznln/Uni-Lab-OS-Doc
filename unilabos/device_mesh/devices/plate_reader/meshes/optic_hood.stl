@@ -1,0 +1,86 @@
+solid plate_reader_optic_hood
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.000000
+      vertex 0.142500 0.107500 0.000000
+      vertex 0.142500 -0.107500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.000000
+      vertex -0.142500 0.107500 0.000000
+      vertex 0.142500 0.107500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.075000
+      vertex 0.142500 -0.107500 0.075000
+      vertex 0.142500 0.107500 0.075000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.075000
+      vertex 0.142500 0.107500 0.075000
+      vertex -0.142500 0.107500 0.075000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.000000
+      vertex 0.142500 -0.107500 0.000000
+      vertex 0.142500 -0.107500 0.075000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.000000
+      vertex 0.142500 -0.107500 0.075000
+      vertex -0.142500 -0.107500 0.075000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.142500 0.107500 0.000000
+      vertex -0.142500 0.107500 0.075000
+      vertex 0.142500 0.107500 0.075000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.142500 0.107500 0.000000
+      vertex 0.142500 0.107500 0.075000
+      vertex 0.142500 0.107500 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.000000
+      vertex -0.142500 -0.107500 0.075000
+      vertex -0.142500 0.107500 0.075000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.142500 -0.107500 0.000000
+      vertex -0.142500 0.107500 0.075000
+      vertex -0.142500 0.107500 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.142500 -0.107500 0.000000
+      vertex 0.142500 0.107500 0.000000
+      vertex 0.142500 0.107500 0.075000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.142500 -0.107500 0.000000
+      vertex 0.142500 0.107500 0.075000
+      vertex 0.142500 -0.107500 0.075000
+    endloop
+  endfacet
+endsolid plate_reader_optic_hood

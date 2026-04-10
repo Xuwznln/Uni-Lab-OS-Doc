@@ -1,0 +1,86 @@
+solid access2_backend_box
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.000000
+      vertex 0.163500 0.355500 0.000000
+      vertex 0.163500 -0.355500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.000000
+      vertex -0.163500 0.355500 0.000000
+      vertex 0.163500 0.355500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.251000
+      vertex 0.163500 -0.355500 0.251000
+      vertex 0.163500 0.355500 0.251000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.251000
+      vertex 0.163500 0.355500 0.251000
+      vertex -0.163500 0.355500 0.251000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.000000
+      vertex 0.163500 -0.355500 0.000000
+      vertex 0.163500 -0.355500 0.251000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.000000
+      vertex 0.163500 -0.355500 0.251000
+      vertex -0.163500 -0.355500 0.251000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.163500 0.355500 0.000000
+      vertex -0.163500 0.355500 0.251000
+      vertex 0.163500 0.355500 0.251000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.163500 0.355500 0.000000
+      vertex 0.163500 0.355500 0.251000
+      vertex 0.163500 0.355500 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.000000
+      vertex -0.163500 -0.355500 0.251000
+      vertex -0.163500 0.355500 0.251000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.355500 0.000000
+      vertex -0.163500 0.355500 0.251000
+      vertex -0.163500 0.355500 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.163500 -0.355500 0.000000
+      vertex 0.163500 0.355500 0.000000
+      vertex 0.163500 0.355500 0.251000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.163500 -0.355500 0.000000
+      vertex 0.163500 0.355500 0.251000
+      vertex 0.163500 -0.355500 0.251000
+    endloop
+  endfacet
+endsolid access2_backend_box

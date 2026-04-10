@@ -11,6 +11,10 @@ from unilabos.registry.decorators import action, device
     id="tecan_resolvex_a200",
     category=["filtration_workstation", "positive_pressure_workstation"],
     description="正压式过滤处理工作站，可执行滤板装载、压力程序设置、样本过滤以及处理后板件释放等自动化过滤流程。",
+    model={
+        "type": "device",
+        "mesh": "tecan_resolvex_a200",
+    },
 )
 class TecanResolvexA200Guessed:
     def __init__(self, device_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs):

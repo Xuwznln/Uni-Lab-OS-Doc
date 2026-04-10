@@ -9,6 +9,10 @@ from unilabos.registry.decorators import action, device
     id="agilent_biotek_406_fx",
     category=["plate_washer_dispenser"],
     description="一体式微孔板洗涤与批量加液工作站，可用于细胞板、ELISA板等微孔板的洗涤、缓冲液或试剂分配，以及自动化流程中的方法调用与运行状态管理。",
+    model={
+        "type": "device",
+        "mesh": "agilent_biotek_406_fx",
+    },
 )
 class AgilentBioTek406FX:
     def __init__(self, device_id=None, config=None, **kwargs):

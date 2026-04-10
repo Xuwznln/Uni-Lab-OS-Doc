@@ -1,0 +1,86 @@
+solid bd_facsmelody_lower_window_panel
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.000000
+      vertex 0.062500 0.005000 0.000000
+      vertex 0.062500 -0.005000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.000000
+      vertex -0.062500 0.005000 0.000000
+      vertex 0.062500 0.005000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.180000
+      vertex 0.062500 -0.005000 0.180000
+      vertex 0.062500 0.005000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.180000
+      vertex 0.062500 0.005000 0.180000
+      vertex -0.062500 0.005000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.000000
+      vertex 0.062500 -0.005000 0.000000
+      vertex 0.062500 -0.005000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.000000
+      vertex 0.062500 -0.005000 0.180000
+      vertex -0.062500 -0.005000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.062500 0.005000 0.000000
+      vertex -0.062500 0.005000 0.180000
+      vertex 0.062500 0.005000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.062500 0.005000 0.000000
+      vertex 0.062500 0.005000 0.180000
+      vertex 0.062500 0.005000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.000000
+      vertex -0.062500 -0.005000 0.180000
+      vertex -0.062500 0.005000 0.180000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.062500 -0.005000 0.000000
+      vertex -0.062500 0.005000 0.180000
+      vertex -0.062500 0.005000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.062500 -0.005000 0.000000
+      vertex 0.062500 0.005000 0.000000
+      vertex 0.062500 0.005000 0.180000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.062500 -0.005000 0.000000
+      vertex 0.062500 0.005000 0.180000
+      vertex 0.062500 -0.005000 0.180000
+    endloop
+  endfacet
+endsolid bd_facsmelody_lower_window_panel

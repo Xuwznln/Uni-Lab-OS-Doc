@@ -1,0 +1,86 @@
+solid bioxp3250_body_shell
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.000000
+      vertex 0.345000 0.385000 0.000000
+      vertex 0.345000 -0.385000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.000000
+      vertex -0.345000 0.385000 0.000000
+      vertex 0.345000 0.385000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.530000
+      vertex 0.345000 -0.385000 0.530000
+      vertex 0.345000 0.385000 0.530000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.530000
+      vertex 0.345000 0.385000 0.530000
+      vertex -0.345000 0.385000 0.530000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.000000
+      vertex 0.345000 -0.385000 0.000000
+      vertex 0.345000 -0.385000 0.530000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.000000
+      vertex 0.345000 -0.385000 0.530000
+      vertex -0.345000 -0.385000 0.530000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.345000 0.385000 0.000000
+      vertex -0.345000 0.385000 0.530000
+      vertex 0.345000 0.385000 0.530000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.345000 0.385000 0.000000
+      vertex 0.345000 0.385000 0.530000
+      vertex 0.345000 0.385000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.000000
+      vertex -0.345000 -0.385000 0.530000
+      vertex -0.345000 0.385000 0.530000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.345000 -0.385000 0.000000
+      vertex -0.345000 0.385000 0.530000
+      vertex -0.345000 0.385000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.345000 -0.385000 0.000000
+      vertex 0.345000 0.385000 0.000000
+      vertex 0.345000 0.385000 0.530000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.345000 -0.385000 0.000000
+      vertex 0.345000 0.385000 0.530000
+      vertex 0.345000 -0.385000 0.530000
+    endloop
+  endfacet
+endsolid bioxp3250_body_shell

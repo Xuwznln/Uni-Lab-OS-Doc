@@ -11,6 +11,7 @@ from unilabos.registry.decorators import action, device
     id="qiagen_qiacube_connect",
     category=["nucleic_acid_preparation", "plasmid_prep"],
     description="核酸样本制备工作站，可执行预置提取流程、裂解/结合/洗涤/洗脱等步骤，并提供运行状态查询与报告导出。",
+    model={"type": "device", "mesh": "qiagen_qiacube_connect"},
 )
 class QIAGENQIAcubeConnectGuessed:
     def __init__(self, device_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs):

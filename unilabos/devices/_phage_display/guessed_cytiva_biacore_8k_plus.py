@@ -9,6 +9,7 @@ from unilabos.registry.decorators import device, action
     id="cytiva_biacore_8k_plus",
     category=["spr_affinity_analyzer"],
     description="高通量表面等离子共振分析仪，可执行流路预处理、配体固定、样本结合测定、特异性比较以及传感图与动力学结果导出。",
+    model={"type": "device", "mesh": "cytiva_biacore_8k_plus"},
 )
 class CytivaBiacore8KPlus:
     def __init__(self, device_id=None, config=None, **kwargs):

@@ -1,0 +1,86 @@
+solid syringe_tower
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.000000
+      vertex 0.067500 0.082500 0.000000
+      vertex 0.067500 -0.082500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.000000
+      vertex -0.067500 0.082500 0.000000
+      vertex 0.067500 0.082500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.180000
+      vertex 0.067500 -0.082500 0.180000
+      vertex 0.067500 0.082500 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.180000
+      vertex 0.067500 0.082500 0.180000
+      vertex -0.067500 0.082500 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.000000
+      vertex 0.067500 -0.082500 0.000000
+      vertex 0.067500 -0.082500 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.000000
+      vertex 0.067500 -0.082500 0.180000
+      vertex -0.067500 -0.082500 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.067500 0.082500 0.000000
+      vertex -0.067500 0.082500 0.180000
+      vertex 0.067500 0.082500 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.067500 0.082500 0.000000
+      vertex 0.067500 0.082500 0.180000
+      vertex 0.067500 0.082500 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.000000
+      vertex -0.067500 -0.082500 0.180000
+      vertex -0.067500 0.082500 0.180000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.067500 -0.082500 0.000000
+      vertex -0.067500 0.082500 0.180000
+      vertex -0.067500 0.082500 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.067500 -0.082500 0.000000
+      vertex 0.067500 0.082500 0.000000
+      vertex 0.067500 0.082500 0.180000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.067500 -0.082500 0.000000
+      vertex 0.067500 0.082500 0.180000
+      vertex 0.067500 -0.082500 0.180000
+    endloop
+  endfacet
+endsolid syringe_tower

@@ -88,6 +88,10 @@ from pylabrobot.serializer import deserialize
   id="centrifuge",
   category=["Centrifuge"],
   description="实验室离心机利用离心力分离液体样品中的不同组分，常用于样品沉降、相分离和前处理。该设备具备舱门控制、转篮/吊篮位置切换，以及按设定离心力和时间执行离心循环的能力，可用于自动化样品处理流程。",
+  model={
+    "type": "device",
+    "mesh": "centrifuge",
+  },
 )
 class Centrifuge(Machine, Resource):
   """The front end for centrifuges."""

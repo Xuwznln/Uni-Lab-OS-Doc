@@ -1,0 +1,86 @@
+solid clariostar_plus_body_shell
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.000000
+      vertex 0.225000 0.255000 0.000000
+      vertex 0.225000 -0.255000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.000000
+      vertex -0.225000 0.255000 0.000000
+      vertex 0.225000 0.255000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.295000
+      vertex 0.225000 -0.255000 0.295000
+      vertex 0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.295000
+      vertex 0.225000 0.255000 0.295000
+      vertex -0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.000000
+      vertex 0.225000 -0.255000 0.000000
+      vertex 0.225000 -0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.000000
+      vertex 0.225000 -0.255000 0.295000
+      vertex -0.225000 -0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.225000 0.255000 0.000000
+      vertex -0.225000 0.255000 0.295000
+      vertex 0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.225000 0.255000 0.000000
+      vertex 0.225000 0.255000 0.295000
+      vertex 0.225000 0.255000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.000000
+      vertex -0.225000 -0.255000 0.295000
+      vertex -0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.255000 0.000000
+      vertex -0.225000 0.255000 0.295000
+      vertex -0.225000 0.255000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.225000 -0.255000 0.000000
+      vertex 0.225000 0.255000 0.000000
+      vertex 0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.225000 -0.255000 0.000000
+      vertex 0.225000 0.255000 0.295000
+      vertex 0.225000 -0.255000 0.295000
+    endloop
+  endfacet
+endsolid clariostar_plus_body_shell

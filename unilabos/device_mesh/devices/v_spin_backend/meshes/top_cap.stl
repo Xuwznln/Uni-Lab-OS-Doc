@@ -1,0 +1,86 @@
+solid v_spin_top_cap
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.000000
+      vertex 0.160500 0.226000 0.000000
+      vertex 0.160500 -0.226000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.000000
+      vertex -0.160500 0.226000 0.000000
+      vertex 0.160500 0.226000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.049000
+      vertex 0.160500 -0.226000 0.049000
+      vertex 0.160500 0.226000 0.049000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.049000
+      vertex 0.160500 0.226000 0.049000
+      vertex -0.160500 0.226000 0.049000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.000000
+      vertex 0.160500 -0.226000 0.000000
+      vertex 0.160500 -0.226000 0.049000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.000000
+      vertex 0.160500 -0.226000 0.049000
+      vertex -0.160500 -0.226000 0.049000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.160500 0.226000 0.000000
+      vertex -0.160500 0.226000 0.049000
+      vertex 0.160500 0.226000 0.049000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.160500 0.226000 0.000000
+      vertex 0.160500 0.226000 0.049000
+      vertex 0.160500 0.226000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.000000
+      vertex -0.160500 -0.226000 0.049000
+      vertex -0.160500 0.226000 0.049000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.160500 -0.226000 0.000000
+      vertex -0.160500 0.226000 0.049000
+      vertex -0.160500 0.226000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.160500 -0.226000 0.000000
+      vertex 0.160500 0.226000 0.000000
+      vertex 0.160500 0.226000 0.049000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.160500 -0.226000 0.000000
+      vertex 0.160500 0.226000 0.049000
+      vertex 0.160500 -0.226000 0.049000
+    endloop
+  endfacet
+endsolid v_spin_top_cap

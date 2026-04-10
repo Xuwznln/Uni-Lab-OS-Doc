@@ -1,0 +1,86 @@
+solid centrifuge_door_panel
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.000000
+      vertex 0.072000 0.006000 0.000000
+      vertex 0.072000 -0.006000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.000000
+      vertex -0.072000 0.006000 0.000000
+      vertex 0.072000 0.006000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.068600
+      vertex 0.072000 -0.006000 0.068600
+      vertex 0.072000 0.006000 0.068600
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.068600
+      vertex 0.072000 0.006000 0.068600
+      vertex -0.072000 0.006000 0.068600
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.000000
+      vertex 0.072000 -0.006000 0.000000
+      vertex 0.072000 -0.006000 0.068600
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.000000
+      vertex 0.072000 -0.006000 0.068600
+      vertex -0.072000 -0.006000 0.068600
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.072000 0.006000 0.000000
+      vertex -0.072000 0.006000 0.068600
+      vertex 0.072000 0.006000 0.068600
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.072000 0.006000 0.000000
+      vertex 0.072000 0.006000 0.068600
+      vertex 0.072000 0.006000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.000000
+      vertex -0.072000 -0.006000 0.068600
+      vertex -0.072000 0.006000 0.068600
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.072000 -0.006000 0.000000
+      vertex -0.072000 0.006000 0.068600
+      vertex -0.072000 0.006000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.072000 -0.006000 0.000000
+      vertex 0.072000 0.006000 0.000000
+      vertex 0.072000 0.006000 0.068600
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.072000 -0.006000 0.000000
+      vertex 0.072000 0.006000 0.068600
+      vertex 0.072000 -0.006000 0.068600
+    endloop
+  endfacet
+endsolid centrifuge_door_panel

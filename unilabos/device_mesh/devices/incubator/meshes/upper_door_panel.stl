@@ -1,0 +1,86 @@
+solid incubator_upper_door_panel
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.000000
+      vertex 0.332000 0.017500 0.000000
+      vertex 0.332000 -0.017500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.000000
+      vertex -0.332000 0.017500 0.000000
+      vertex 0.332000 0.017500 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.785000
+      vertex 0.332000 -0.017500 0.785000
+      vertex 0.332000 0.017500 0.785000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.785000
+      vertex 0.332000 0.017500 0.785000
+      vertex -0.332000 0.017500 0.785000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.000000
+      vertex 0.332000 -0.017500 0.000000
+      vertex 0.332000 -0.017500 0.785000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.000000
+      vertex 0.332000 -0.017500 0.785000
+      vertex -0.332000 -0.017500 0.785000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.332000 0.017500 0.000000
+      vertex -0.332000 0.017500 0.785000
+      vertex 0.332000 0.017500 0.785000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.332000 0.017500 0.000000
+      vertex 0.332000 0.017500 0.785000
+      vertex 0.332000 0.017500 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.000000
+      vertex -0.332000 -0.017500 0.785000
+      vertex -0.332000 0.017500 0.785000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.332000 -0.017500 0.000000
+      vertex -0.332000 0.017500 0.785000
+      vertex -0.332000 0.017500 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.332000 -0.017500 0.000000
+      vertex 0.332000 0.017500 0.000000
+      vertex 0.332000 0.017500 0.785000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.332000 -0.017500 0.000000
+      vertex 0.332000 0.017500 0.785000
+      vertex 0.332000 -0.017500 0.785000
+    endloop
+  endfacet
+endsolid incubator_upper_door_panel

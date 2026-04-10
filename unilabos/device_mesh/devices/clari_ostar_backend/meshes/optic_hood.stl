@@ -1,0 +1,170 @@
+solid clariostar_plus_optic_hood
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.225000 -0.205000 0.295000
+      vertex 0.225000 0.255000 0.295000
+      vertex 0.225000 -0.205000 0.295000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.225000 -0.205000 0.295000
+      vertex 0.225000 -0.205000 0.295000
+      vertex -0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 0.000000 -0.133575 0.991039
+    outer loop
+      vertex -0.225000 -0.205000 0.338000
+      vertex 0.225000 -0.205000 0.338000
+      vertex 0.225000 0.255000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 -0.133575 0.991039
+    outer loop
+      vertex -0.225000 -0.205000 0.338000
+      vertex 0.225000 0.255000 0.400000
+      vertex -0.225000 0.255000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.205000 0.295000
+      vertex 0.225000 -0.205000 0.295000
+      vertex 0.225000 -0.205000 0.338000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.205000 0.295000
+      vertex 0.225000 -0.205000 0.338000
+      vertex -0.225000 -0.205000 0.338000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.225000 0.255000 0.295000
+      vertex -0.225000 0.255000 0.400000
+      vertex 0.225000 0.255000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.225000 0.255000 0.295000
+      vertex 0.225000 0.255000 0.400000
+      vertex 0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.205000 0.295000
+      vertex -0.225000 -0.205000 0.338000
+      vertex -0.225000 0.255000 0.400000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.225000 -0.205000 0.295000
+      vertex -0.225000 0.255000 0.400000
+      vertex -0.225000 0.255000 0.295000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.225000 -0.205000 0.295000
+      vertex 0.225000 0.255000 0.295000
+      vertex 0.225000 0.255000 0.400000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.225000 -0.205000 0.295000
+      vertex 0.225000 0.255000 0.400000
+      vertex 0.225000 -0.205000 0.338000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.115000 -0.255000 0.235000
+      vertex 0.115000 -0.185000 0.235000
+      vertex 0.115000 -0.255000 0.235000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.115000 -0.255000 0.235000
+      vertex 0.115000 -0.255000 0.235000
+      vertex -0.115000 -0.185000 0.235000
+    endloop
+  endfacet
+  facet normal 0.000000 -0.581238 0.813733
+    outer loop
+      vertex -0.115000 -0.255000 0.272000
+      vertex 0.115000 -0.255000 0.272000
+      vertex 0.115000 -0.185000 0.322000
+    endloop
+  endfacet
+  facet normal 0.000000 -0.581238 0.813733
+    outer loop
+      vertex -0.115000 -0.255000 0.272000
+      vertex 0.115000 -0.185000 0.322000
+      vertex -0.115000 -0.185000 0.322000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.115000 -0.255000 0.235000
+      vertex 0.115000 -0.255000 0.235000
+      vertex 0.115000 -0.255000 0.272000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.115000 -0.255000 0.235000
+      vertex 0.115000 -0.255000 0.272000
+      vertex -0.115000 -0.255000 0.272000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.115000 -0.185000 0.235000
+      vertex -0.115000 -0.185000 0.322000
+      vertex 0.115000 -0.185000 0.322000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.115000 -0.185000 0.235000
+      vertex 0.115000 -0.185000 0.322000
+      vertex 0.115000 -0.185000 0.235000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.115000 -0.255000 0.235000
+      vertex -0.115000 -0.255000 0.272000
+      vertex -0.115000 -0.185000 0.322000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.115000 -0.255000 0.235000
+      vertex -0.115000 -0.185000 0.322000
+      vertex -0.115000 -0.185000 0.235000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.115000 -0.255000 0.235000
+      vertex 0.115000 -0.185000 0.235000
+      vertex 0.115000 -0.185000 0.322000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.115000 -0.255000 0.235000
+      vertex 0.115000 -0.185000 0.322000
+      vertex 0.115000 -0.255000 0.272000
+    endloop
+  endfacet
+endsolid clariostar_plus_optic_hood

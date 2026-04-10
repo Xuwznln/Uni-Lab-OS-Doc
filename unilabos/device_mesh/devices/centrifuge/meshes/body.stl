@@ -1,0 +1,86 @@
+solid centrifuge_body
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.000000
+      vertex 0.163500 0.229000 0.000000
+      vertex 0.163500 -0.229000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.000000
+      vertex -0.163500 0.229000 0.000000
+      vertex 0.163500 0.229000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.138000
+      vertex 0.163500 -0.229000 0.138000
+      vertex 0.163500 0.229000 0.138000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.138000
+      vertex 0.163500 0.229000 0.138000
+      vertex -0.163500 0.229000 0.138000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.000000
+      vertex 0.163500 -0.229000 0.000000
+      vertex 0.163500 -0.229000 0.138000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.000000
+      vertex 0.163500 -0.229000 0.138000
+      vertex -0.163500 -0.229000 0.138000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.163500 0.229000 0.000000
+      vertex -0.163500 0.229000 0.138000
+      vertex 0.163500 0.229000 0.138000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.163500 0.229000 0.000000
+      vertex 0.163500 0.229000 0.138000
+      vertex 0.163500 0.229000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.000000
+      vertex -0.163500 -0.229000 0.138000
+      vertex -0.163500 0.229000 0.138000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.163500 -0.229000 0.000000
+      vertex -0.163500 0.229000 0.138000
+      vertex -0.163500 0.229000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.163500 -0.229000 0.000000
+      vertex 0.163500 0.229000 0.000000
+      vertex 0.163500 0.229000 0.138000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.163500 -0.229000 0.000000
+      vertex 0.163500 0.229000 0.138000
+      vertex 0.163500 -0.229000 0.138000
+    endloop
+  endfacet
+endsolid centrifuge_body

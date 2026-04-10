@@ -79,6 +79,10 @@ from pylabrobot.storage.inheco.incubator_shaker_backend import InhecoIncubatorSh
   id="incubator_shaker_stack",
   category=["Microplate Thermoshaker"],
   description="由多个可堆叠孵育振荡单元组成的实验室自动化设备，带有装载托盘，可对样品或微孔板进行温度控制孵育与振荡混匀，常用于自动化培养、反应孵育和样品处理流程。",
+  model={
+    "type": "device",
+    "mesh": "incubator_shaker_stack",
+  },
 )
 class IncubatorShakerStack(Resource, Machine):
   """Frontend for a stack of INHECO Incubator/Shaker units.

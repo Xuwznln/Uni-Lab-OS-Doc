@@ -1,0 +1,86 @@
+solid biacore_sample_compartment
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.000000
+      vertex 0.280000 0.200000 0.000000
+      vertex 0.280000 -0.200000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.000000
+      vertex -0.280000 0.200000 0.000000
+      vertex 0.280000 0.200000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.280000
+      vertex 0.280000 -0.200000 0.280000
+      vertex 0.280000 0.200000 0.280000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.280000
+      vertex 0.280000 0.200000 0.280000
+      vertex -0.280000 0.200000 0.280000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.000000
+      vertex 0.280000 -0.200000 0.000000
+      vertex 0.280000 -0.200000 0.280000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.000000
+      vertex 0.280000 -0.200000 0.280000
+      vertex -0.280000 -0.200000 0.280000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.280000 0.200000 0.000000
+      vertex -0.280000 0.200000 0.280000
+      vertex 0.280000 0.200000 0.280000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.280000 0.200000 0.000000
+      vertex 0.280000 0.200000 0.280000
+      vertex 0.280000 0.200000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.000000
+      vertex -0.280000 -0.200000 0.280000
+      vertex -0.280000 0.200000 0.280000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.280000 -0.200000 0.000000
+      vertex -0.280000 0.200000 0.280000
+      vertex -0.280000 0.200000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.280000 -0.200000 0.000000
+      vertex 0.280000 0.200000 0.000000
+      vertex 0.280000 0.200000 0.280000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.280000 -0.200000 0.000000
+      vertex 0.280000 0.200000 0.280000
+      vertex 0.280000 -0.200000 0.280000
+    endloop
+  endfacet
+endsolid biacore_sample_compartment

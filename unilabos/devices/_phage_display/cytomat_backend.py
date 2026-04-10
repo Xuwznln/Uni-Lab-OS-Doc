@@ -117,6 +117,10 @@ logger = logging.getLogger(__name__)
   id="cytomat_backend",
   category=["Tissue Culture Chamber", "Automated Microplate Incubator Storage System"],
   description="这是一种用于微孔板自动存取、培养和转运的实验室培养存储设备，带有内部存储位、传送位和外部暴露位，可控制温度、CO2、湿度和O2，并支持振荡和条码读取。常用于细胞培养、高通量筛选和自动化工作站中的板管理。",
+  model={
+    "type": "device",
+    "mesh": "cytomat_backend",
+  },
 )
 class CytomatBackend(IncubatorBackend):
   def __init__(self, *args, **kwargs):

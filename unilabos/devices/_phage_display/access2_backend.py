@@ -89,6 +89,7 @@ logger = logging.getLogger(__name__)
   id="access2_backend",
   category=["Centrifuge"],
   description="一款用于实验室自动化系统的微孔板离心机，可对样品板进行装载、卸载、开关门、锁定转篮并执行离心运行。常用于微孔板样品的短时离心、收集液滴和自动化流程中的板级前处理。",
+  model={"type": "device", "mesh": "access2_backend"},
 )
 class Access2Backend(LoaderBackend):
   def __init__(

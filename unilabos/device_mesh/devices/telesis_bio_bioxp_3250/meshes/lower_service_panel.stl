@@ -1,0 +1,86 @@
+solid bioxp3250_lower_service_panel
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.000000
+      vertex 0.175000 0.010000 0.000000
+      vertex 0.175000 -0.010000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.000000
+      vertex -0.175000 0.010000 0.000000
+      vertex 0.175000 0.010000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.135000
+      vertex 0.175000 -0.010000 0.135000
+      vertex 0.175000 0.010000 0.135000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.135000
+      vertex 0.175000 0.010000 0.135000
+      vertex -0.175000 0.010000 0.135000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.000000
+      vertex 0.175000 -0.010000 0.000000
+      vertex 0.175000 -0.010000 0.135000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.000000
+      vertex 0.175000 -0.010000 0.135000
+      vertex -0.175000 -0.010000 0.135000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.175000 0.010000 0.000000
+      vertex -0.175000 0.010000 0.135000
+      vertex 0.175000 0.010000 0.135000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.175000 0.010000 0.000000
+      vertex 0.175000 0.010000 0.135000
+      vertex 0.175000 0.010000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.000000
+      vertex -0.175000 -0.010000 0.135000
+      vertex -0.175000 0.010000 0.135000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.175000 -0.010000 0.000000
+      vertex -0.175000 0.010000 0.135000
+      vertex -0.175000 0.010000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.175000 -0.010000 0.000000
+      vertex 0.175000 0.010000 0.000000
+      vertex 0.175000 0.010000 0.135000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.175000 -0.010000 0.000000
+      vertex 0.175000 0.010000 0.135000
+      vertex 0.175000 -0.010000 0.135000
+    endloop
+  endfacet
+endsolid bioxp3250_lower_service_panel

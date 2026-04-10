@@ -84,6 +84,10 @@ logger = logging.getLogger(__name__)
   id="bio_tek_plate_reader_backend",
   category=["Microplate Reader"],
   description="这是一种台式微孔板读板仪，用于对微孔板中的样品进行吸光度、荧光和发光检测。设备通常带有载板抽屉、温度控制和振荡功能，适用于生化分析、细胞实验和高通量筛选等实验室检测工作。",
+  model={
+    "type": "device",
+    "mesh": "bio_tek_plate_reader_backend",
+  },
 )
 class BioTekPlateReaderBackend(PlateReaderBackend):
   """Backend for Agilent BioTek plate readers."""

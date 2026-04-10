@@ -415,6 +415,11 @@ def _get_dispense_mode(jet: bool, empty: bool, blow_out: bool) -> Literal[0, 1, 
   id="vantage_backend",
   category=["Liquid Handling Workstation"],
   description="Hamilton Vantage 自动化移液工作站，用于实验室自动移液、吸头装卸、液体吸取与分配、96通道板级处理、液面探测，以及通过集成夹爪搬运微孔板等实验耗材。",
+  # 复用 hamilton_vantage 分段近似网格，兼容 1.3 m / 2.0 m VANTAGE 外形。
+  model={
+    "type": "device",
+    "mesh": "hamilton_vantage",
+  },
 )
 class VantageBackend(HamiltonLiquidHandler):
   """A Hamilton Vantage liquid handler."""

@@ -11,6 +11,7 @@ from unilabos.registry.decorators import action, device
     id="applied_biosystems_seqstudio_genetic_analyzer",
     category=["dna_sequencer", "sanger_sequencer"],
     description="毛细管电泳型遗传分析仪，可执行样本载具装载、Sanger测序运行、运行状态查询以及序列数据与分析结果导出。",
+    model={"type": "device", "mesh": "applied_biosystems_seqstudio_genetic_analyzer"},
 )
 class AppliedBiosystemsSeqStudioGuessed:
     def __init__(self, device_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs):

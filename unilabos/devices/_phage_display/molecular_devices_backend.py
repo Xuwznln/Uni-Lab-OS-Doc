@@ -319,6 +319,10 @@ class MolecularDevicesSettings:
   id="molecular_devices_backend",
   category=["Microplate Reader"],
   description="这是一种用于读取微孔板样品信号的多功能酶标仪，可进行吸光度、荧光、化学发光、荧光偏振和时间分辨荧光检测。设备通常用于生化分析、细胞实验、免疫检测、酶活性测定和高通量筛选，并支持控温与振荡等板上实验条件控制。",
+  model={
+    "type": "device",
+    "mesh": "molecular_devices_backend",
+  },
 )
 class MolecularDevicesBackend(PlateReaderBackend, metaclass=ABCMeta):
   """Backend for Molecular Devices plate readers."""

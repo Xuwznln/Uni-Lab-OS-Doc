@@ -1,0 +1,8 @@
+{
+  "fileName": "bio_tek_plate_reader_backend",
+  "related": [
+    "bio_tek_plate_reader_backend",
+    "agilent_biotek_synergy_h1",
+    "synergy_h1_backend"
+  ]
+}

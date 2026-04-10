@@ -1,0 +1,86 @@
+solid qpix420_picker_head
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.000000
+      vertex 0.120000 0.090000 0.000000
+      vertex 0.120000 -0.090000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.000000
+      vertex -0.120000 0.090000 0.000000
+      vertex 0.120000 0.090000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.180000
+      vertex 0.120000 -0.090000 0.180000
+      vertex 0.120000 0.090000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.180000
+      vertex 0.120000 0.090000 0.180000
+      vertex -0.120000 0.090000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.000000
+      vertex 0.120000 -0.090000 0.000000
+      vertex 0.120000 -0.090000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.000000
+      vertex 0.120000 -0.090000 0.180000
+      vertex -0.120000 -0.090000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.120000 0.090000 0.000000
+      vertex -0.120000 0.090000 0.180000
+      vertex 0.120000 0.090000 0.180000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.120000 0.090000 0.000000
+      vertex 0.120000 0.090000 0.180000
+      vertex 0.120000 0.090000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.000000
+      vertex -0.120000 -0.090000 0.180000
+      vertex -0.120000 0.090000 0.180000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.120000 -0.090000 0.000000
+      vertex -0.120000 0.090000 0.180000
+      vertex -0.120000 0.090000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.120000 -0.090000 0.000000
+      vertex 0.120000 0.090000 0.000000
+      vertex 0.120000 0.090000 0.180000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.120000 -0.090000 0.000000
+      vertex 0.120000 0.090000 0.180000
+      vertex 0.120000 -0.090000 0.180000
+    endloop
+  endfacet
+endsolid qpix420_picker_head

@@ -1,0 +1,86 @@
+solid synergy_h1_body
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.000000
+      vertex 0.187500 0.232000 0.000000
+      vertex 0.187500 -0.232000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.000000
+      vertex -0.187500 0.232000 0.000000
+      vertex 0.187500 0.232000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.330000
+      vertex 0.187500 -0.232000 0.330000
+      vertex 0.187500 0.232000 0.330000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.330000
+      vertex 0.187500 0.232000 0.330000
+      vertex -0.187500 0.232000 0.330000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.000000
+      vertex 0.187500 -0.232000 0.000000
+      vertex 0.187500 -0.232000 0.330000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.000000
+      vertex 0.187500 -0.232000 0.330000
+      vertex -0.187500 -0.232000 0.330000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.187500 0.232000 0.000000
+      vertex -0.187500 0.232000 0.330000
+      vertex 0.187500 0.232000 0.330000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.187500 0.232000 0.000000
+      vertex 0.187500 0.232000 0.330000
+      vertex 0.187500 0.232000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.000000
+      vertex -0.187500 -0.232000 0.330000
+      vertex -0.187500 0.232000 0.330000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.187500 -0.232000 0.000000
+      vertex -0.187500 0.232000 0.330000
+      vertex -0.187500 0.232000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.187500 -0.232000 0.000000
+      vertex 0.187500 0.232000 0.000000
+      vertex 0.187500 0.232000 0.330000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.187500 -0.232000 0.000000
+      vertex 0.187500 0.232000 0.330000
+      vertex 0.187500 -0.232000 0.330000
+    endloop
+  endfacet
+endsolid synergy_h1_body

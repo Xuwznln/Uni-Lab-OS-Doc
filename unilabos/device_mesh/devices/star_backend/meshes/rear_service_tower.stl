@@ -1,0 +1,86 @@
+solid rear_service_tower
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.000000
+      vertex 0.160000 0.070000 0.000000
+      vertex 0.160000 -0.070000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.000000
+      vertex -0.160000 0.070000 0.000000
+      vertex 0.160000 0.070000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.620000
+      vertex 0.160000 -0.070000 0.620000
+      vertex 0.160000 0.070000 0.620000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.620000
+      vertex 0.160000 0.070000 0.620000
+      vertex -0.160000 0.070000 0.620000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.000000
+      vertex 0.160000 -0.070000 0.000000
+      vertex 0.160000 -0.070000 0.620000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.000000
+      vertex 0.160000 -0.070000 0.620000
+      vertex -0.160000 -0.070000 0.620000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.160000 0.070000 0.000000
+      vertex -0.160000 0.070000 0.620000
+      vertex 0.160000 0.070000 0.620000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.160000 0.070000 0.000000
+      vertex 0.160000 0.070000 0.620000
+      vertex 0.160000 0.070000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.000000
+      vertex -0.160000 -0.070000 0.620000
+      vertex -0.160000 0.070000 0.620000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.160000 -0.070000 0.000000
+      vertex -0.160000 0.070000 0.620000
+      vertex -0.160000 0.070000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.160000 -0.070000 0.000000
+      vertex 0.160000 0.070000 0.000000
+      vertex 0.160000 0.070000 0.620000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.160000 -0.070000 0.000000
+      vertex 0.160000 0.070000 0.620000
+      vertex 0.160000 -0.070000 0.620000
+    endloop
+  endfacet
+endsolid rear_service_tower

@@ -76,6 +76,7 @@ from pylabrobot.sealing.backend import SealerBackend
   id="sealer",
   category=["Plate Sealer"],
   description="用于实验室自动化中对微孔板进行封膜的设备，可执行封膜、开合机构控制，以及温度设置与读取。",
+  model={"type": "device", "mesh": "sealer"},
 )
 class Sealer(Machine):
   """A microplate sealer"""

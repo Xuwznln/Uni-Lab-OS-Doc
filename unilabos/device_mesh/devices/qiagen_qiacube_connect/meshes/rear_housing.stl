@@ -1,0 +1,86 @@
+solid rear_housing
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.000000
+      vertex 0.325000 0.180000 0.000000
+      vertex 0.325000 -0.180000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.000000
+      vertex -0.325000 0.180000 0.000000
+      vertex 0.325000 0.180000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.400000
+      vertex 0.325000 -0.180000 0.400000
+      vertex 0.325000 0.180000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.400000
+      vertex 0.325000 0.180000 0.400000
+      vertex -0.325000 0.180000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.000000
+      vertex 0.325000 -0.180000 0.000000
+      vertex 0.325000 -0.180000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.000000
+      vertex 0.325000 -0.180000 0.400000
+      vertex -0.325000 -0.180000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.325000 0.180000 0.000000
+      vertex -0.325000 0.180000 0.400000
+      vertex 0.325000 0.180000 0.400000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.325000 0.180000 0.000000
+      vertex 0.325000 0.180000 0.400000
+      vertex 0.325000 0.180000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.000000
+      vertex -0.325000 -0.180000 0.400000
+      vertex -0.325000 0.180000 0.400000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.325000 -0.180000 0.000000
+      vertex -0.325000 0.180000 0.400000
+      vertex -0.325000 0.180000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.325000 -0.180000 0.000000
+      vertex 0.325000 0.180000 0.000000
+      vertex 0.325000 0.180000 0.400000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.325000 -0.180000 0.000000
+      vertex 0.325000 0.180000 0.400000
+      vertex 0.325000 -0.180000 0.400000
+    endloop
+  endfacet
+endsolid rear_housing

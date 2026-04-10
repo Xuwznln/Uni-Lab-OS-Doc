@@ -86,6 +86,7 @@ except ImportError as e:
   id="bio_shake",
   category=["Thermomixer", "Microplate Thermoshaker"],
   description="这是一种实验室微孔板加热振荡器，可对板式样品进行控温并同时振荡混匀。它常用于样品孵育、反应混合、酶反应、核酸与蛋白相关实验等需要稳定温度和持续摇匀的流程，部分机型还支持锁板与主动冷却功能。",
+  model={"type": "device", "mesh": "bio_shake"},
 )
 class BioShake(HeaterShakerBackend):
   def __init__(self, port: str, timeout: int = 60):

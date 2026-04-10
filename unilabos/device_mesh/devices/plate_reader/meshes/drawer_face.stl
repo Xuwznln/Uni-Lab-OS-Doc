@@ -1,0 +1,86 @@
+solid plate_reader_drawer_face
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.000000
+      vertex 0.084000 0.004000 0.000000
+      vertex 0.084000 -0.004000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 -1.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.000000
+      vertex -0.084000 0.004000 0.000000
+      vertex 0.084000 0.004000 0.000000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.054000
+      vertex 0.084000 -0.004000 0.054000
+      vertex 0.084000 0.004000 0.054000
+    endloop
+  endfacet
+  facet normal 0.000000 0.000000 1.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.054000
+      vertex 0.084000 0.004000 0.054000
+      vertex -0.084000 0.004000 0.054000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.000000
+      vertex 0.084000 -0.004000 0.000000
+      vertex 0.084000 -0.004000 0.054000
+    endloop
+  endfacet
+  facet normal 0.000000 -1.000000 0.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.000000
+      vertex 0.084000 -0.004000 0.054000
+      vertex -0.084000 -0.004000 0.054000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.084000 0.004000 0.000000
+      vertex -0.084000 0.004000 0.054000
+      vertex 0.084000 0.004000 0.054000
+    endloop
+  endfacet
+  facet normal 0.000000 1.000000 0.000000
+    outer loop
+      vertex -0.084000 0.004000 0.000000
+      vertex 0.084000 0.004000 0.054000
+      vertex 0.084000 0.004000 0.000000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.000000
+      vertex -0.084000 -0.004000 0.054000
+      vertex -0.084000 0.004000 0.054000
+    endloop
+  endfacet
+  facet normal -1.000000 0.000000 0.000000
+    outer loop
+      vertex -0.084000 -0.004000 0.000000
+      vertex -0.084000 0.004000 0.054000
+      vertex -0.084000 0.004000 0.000000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.084000 -0.004000 0.000000
+      vertex 0.084000 0.004000 0.000000
+      vertex 0.084000 0.004000 0.054000
+    endloop
+  endfacet
+  facet normal 1.000000 0.000000 0.000000
+    outer loop
+      vertex 0.084000 -0.004000 0.000000
+      vertex 0.084000 0.004000 0.054000
+      vertex 0.084000 -0.004000 0.054000
+    endloop
+  endfacet
+endsolid plate_reader_drawer_face

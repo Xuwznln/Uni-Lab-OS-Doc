@@ -1,0 +1,42 @@
+{
+  "fileName": "bio_shake",
+  "related": [
+    "bio_shake",
+    "bioshake",
+    "inheco_thermoshake_ac"
+  ],
+  "model_strategy": "fallback_box",
+  "sources": [
+    "https://www.inheco.com/thermoshake-ac.html",
+    "https://www.inheco.com/data/pdf/manual-thermoshake-ac-1019-0731-02.pdf",
+    "https://www.inheco.com/data/images/uploads/slider/1005-1254_d_thermoshake-ac-2.jpg",
+    "https://www.inheco.com/data/images/uploads/slider/1005-1255_d_thermoshake-ac-3.jpg"
+  ],
+  "dimensions_m": {
+    "width": 0.104,
+    "depth": 0.147,
+    "height": 0.1159
+  },
+  "access_points": [
+    {
+      "name": "plate_slot_access",
+      "description": "Top SBS microplate pickup/drop-off position on the shaker table in the documented zero position for robotic gripping.",
+      "face": "top",
+      "center_m": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.1099
+      },
+      "size_m": {
+        "x": 0.12776,
+        "y": 0.08548,
+        "z": 0.012
+      }
+    }
+  ],
+  "notes": [
+    "No openly accessible vendor CAD/STL/GLB for the BioShake or an INHECO Thermoshake AC was found during web search, so the mesh uses a generated fallback box based on official dimensions.",
+    "The bio_shake backend appears generic/QInstruments-derived; per task guidance this package uses an INHECO-style single-plate thermoshaker as the closest representative physical model.",
+    "The access frame is centered on the top contact surface height from the official spec; clamp pins, vents, and side panel details are not modeled in the STL."
+  ]
+}

@@ -1002,6 +1002,7 @@ class EVOArm:
   id="li_ha",
   category=["Liquid Handling Workstation"],
   description="一款用于实验室自动移液与板件搬运的台式自动化工作站，通常配备多通道 LiHa 液体处理臂，可完成吸液、分液、液面探测、一次性吸头装卸及多轴定位，并可结合 96 通道或板搬运模块执行样品制备、微孔板加样和高通量实验流程。",
+  model={"type": "device", "mesh": "li_ha"},
 )
 class LiHa(EVOArm):
   """

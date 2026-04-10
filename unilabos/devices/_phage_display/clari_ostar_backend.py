@@ -94,6 +94,10 @@ logger = logging.getLogger("pylabrobot")
   id="clari_ostar_backend",
   category=["Microplate Reader"],
   description="CLARIOstar 是一款多功能微孔板读板仪，可对微孔板样品进行吸光度、荧光和发光检测，常用于生化分析、细胞实验、药物筛选和其他高通量实验。",
+  model={
+    "type": "device",
+    "mesh": "clari_ostar_backend",
+  },
 )
 class CLARIOstarBackend(PlateReaderBackend):
   """A plate reader backend for the Clario star. Note that this is not a complete implementation
