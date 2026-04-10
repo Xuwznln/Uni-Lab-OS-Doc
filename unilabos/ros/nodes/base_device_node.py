@@ -4,6 +4,8 @@ import json
 import threading
 import time
 import traceback
+
+from unilabos.utils.tools import fast_dumps_str as _fast_dumps_str, fast_loads as _fast_loads
 from typing import (
     get_type_hints,
     TypeVar,
@@ -76,6 +78,67 @@ if TYPE_CHECKING:
     from pylabrobot.resources import Resource as ResourcePLR
 
 T = TypeVar("T")
+
+
+class RclpyAsyncMutex:
+    """rclpy executor 兼容的异步互斥锁
+
+    通过 executor.create_task 唤醒等待者，避免 timer 的 InvalidHandle 问题。
+    """
+
+    def __init__(self, name: str = ""):
+        self._lock = threading.Lock()
+        self._acquired = False
+        self._queue: List[Future] = []
+        self._name = name
+        self._holder: Optional[str] = None
+
+    async def acquire(self, node: "BaseROS2DeviceNode", tag: str = ""):
+        """获取锁。如果已被占用，则异步等待直到锁释放。"""
+        # t0 = time.time()
+        with self._lock:
+            # qlen = len(self._queue)
+            if not self._acquired:
+                self._acquired = True
+                self._holder = tag
+                # node.lab_logger().debug(
+                #     f"[Mutex:{self._name}] 获取锁 tag={tag} (无等待, queue=0)"
+                # )
+                return
+            waiter = Future()
+            self._queue.append(waiter)
+            # node.lab_logger().info(
+            #     f"[Mutex:{self._name}] 等待锁 tag={tag} "
+            #     f"(holder={self._holder}, queue={qlen + 1})"
+            # )
+        await waiter
+        # wait_ms = (time.time() - t0) * 1000
+        self._holder = tag
+        # node.lab_logger().info(
+        #     f"[Mutex:{self._name}] 获取锁 tag={tag} (等了 {wait_ms:.0f}ms)"
+        # )
+
+    def release(self, node: "BaseROS2DeviceNode"):
+        """释放锁，通过 executor task 唤醒下一个等待者。"""
+        with self._lock:
+            # old_holder = self._holder
+            if self._queue:
+                next_waiter = self._queue.pop(0)
+                # node.lab_logger().debug(
+                #     f"[Mutex:{self._name}] 释放锁 holder={old_holder} → 唤醒下一个 (剩余 queue={len(self._queue)})"
+                # )
+
+                async def _wake():
+                    if not next_waiter.done():
+                        next_waiter.set_result(None)
+
+                rclpy.get_global_executor().create_task(_wake())
+            else:
+                self._acquired = False
+                self._holder = None
+                # node.lab_logger().debug(
+                #     f"[Mutex:{self._name}] 释放锁 holder={old_holder} → 空闲"
+                # )
 
 
 # 在线设备注册表
@@ -355,6 +418,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             max_workers=max(len(action_value_mappings), 1), thread_name_prefix=f"ROSDevice{self.device_id}"
         )
 
+        self._append_resource_lock = RclpyAsyncMutex(name=f"AR:{device_id}")
+
         # 创建资源管理客户端
         self._resource_clients: Dict[str, Client] = {
             "resource_add": self.create_client(ResourceAdd, "/resources/add", callback_group=self.callback_group),
@@ -378,15 +443,40 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             return res
 
         async def append_resource(req: SerialCommand_Request, res: SerialCommand_Response):
+            _cmd = _fast_loads(req.command)
+            _res_name = _cmd.get("resource", [{}])
+            _res_name = (_res_name[0].get("id", "?") if isinstance(_res_name, list) and _res_name
+                         else _res_name.get("id", "?") if isinstance(_res_name, dict) else "?")
+            _ar_tag = f"{_res_name}"
+            # _t_enter = time.time()
+            # self.lab_logger().info(f"[AR:{_ar_tag}] 进入 append_resource")
+            await self._append_resource_lock.acquire(self, tag=_ar_tag)
+            # _t_locked = time.time()
+            try:
+                return await _append_resource_inner(req, res, _ar_tag)
+                # _t_done = time.time()
+                # self.lab_logger().info(
+                #     f"[AR:{_ar_tag}] 完成 "
+                #     f"等锁={(_t_locked - _t_enter) * 1000:.0f}ms "
+                #     f"执行={(_t_done - _t_locked) * 1000:.0f}ms "
+                #     f"总计={(_t_done - _t_enter) * 1000:.0f}ms"
+                # )
+            except Exception as _ex:
+                self.lab_logger().error(f"[AR:{_ar_tag}] 异常: {_ex}")
+                raise
+            finally:
+                self._append_resource_lock.release(self)
+
+        async def _append_resource_inner(req: SerialCommand_Request, res: SerialCommand_Response, _ar_tag: str = ""):
             from pylabrobot.resources.deck import Deck
             from pylabrobot.resources import Coordinate
             from pylabrobot.resources import Plate
 
-            # 物料传输到对应的node节点
+            # _t0 = time.time()
             client = self._resource_clients["c2s_update_resource_tree"]
             request = SerialCommand.Request()
             request2 = SerialCommand.Request()
-            command_json = json.loads(req.command)
+            command_json = _fast_loads(req.command)
             namespace = command_json["namespace"]
             bind_parent_id = command_json["bind_parent_id"]
             edge_device_id = command_json["edge_device_id"]
@@ -439,7 +529,11 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             f"更新物料{container_instance.name}出现不支持的数据类型{type(found_resource)} {found_resource}"
                         )
             # noinspection PyUnresolvedReferences
-            request.command = json.dumps(
+            # _t1 = time.time()
+            # self.lab_logger().debug(
+            #     f"[AR:{_ar_tag}] 准备完成 PLR转换+序列化 {((_t1 - _t0) * 1000):.0f}ms, 发送首次上传..."
+            # )
+            request.command = _fast_dumps_str(
                 {
                     "action": "add",
                     "data": {
@@ -450,7 +544,11 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 }
             )
             tree_response: SerialCommand.Response = await client.call_async(request)
-            uuid_maps = json.loads(tree_response.response)
+            # _t2 = time.time()
+            # self.lab_logger().debug(
+            #     f"[AR:{_ar_tag}] 首次上传完成 {((_t2 - _t1) * 1000):.0f}ms"
+            # )
+            uuid_maps = _fast_loads(tree_response.response)
             plr_instances = rts.to_plr_resources()
             for plr_instance in plr_instances:
                 self.resource_tracker.loop_update_uuid(plr_instance, uuid_maps)
@@ -527,12 +625,13 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             Coordinate(location["x"], location["y"], location["z"]),
                             **other_calling_param,
                         )
-                    # 调整了液体以及Deck之后要重新Assign
                     # noinspection PyUnresolvedReferences
+                    # _t3 = time.time()
                     rts_with_parent = ResourceTreeSet.from_plr_resources([parent_resource])
+                    # _n_parent = len(rts_with_parent.all_nodes)
                     if rts_with_parent.root_nodes[0].res_content.uuid_parent is None:
                         rts_with_parent.root_nodes[0].res_content.parent_uuid = self.uuid
-                    request.command = json.dumps(
+                    request.command = _fast_dumps_str(
                         {
                             "action": "add",
                             "data": {
@@ -542,11 +641,18 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             },
                         }
                     )
+                    # _t4 = time.time()
+                    # self.lab_logger().debug(
+                    #     f"[AR:{_ar_tag}] 二次上传序列化 {_n_parent}节点 {((_t4 - _t3) * 1000):.0f}ms, 发送中..."
+                    # )
                     tree_response: SerialCommand.Response = await client.call_async(request)
-                    uuid_maps = json.loads(tree_response.response)
+                    # _t5 = time.time()
+                    uuid_maps = _fast_loads(tree_response.response)
                     self.resource_tracker.loop_update_uuid(input_resources, uuid_maps)
-                    self._lab_logger.info(f"Resource tree added. UUID mapping: {len(uuid_maps)} nodes")
-                    # 这里created_resources不包含parent_resource
+                    # self._lab_logger.info(
+                    #     f"[AR:{_ar_tag}] 二次上传完成 HTTP={(_t5 - _t4) * 1000:.0f}ms "
+                    #     f"UUID映射={len(uuid_maps)}节点 总执行={(_t5 - _t0) * 1000:.0f}ms"
+                    # )
                 # 发送给ResourceMeshManager
                 action_client = ActionClient(
                     self,
@@ -1567,37 +1673,69 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             feedback_msg_types = action_type.Feedback.get_fields_and_field_types()
             result_msg_types = action_type.Result.get_fields_and_field_types()
 
-            while future is not None and not future.done():
-                if goal_handle.is_cancel_requested:
-                    self.lab_logger().info(f"取消动作: {action_name}")
-                    future.cancel()  # 尝试取消线程池中的任务
-                    goal_handle.canceled()
-                    return action_type.Result()
+            # 低频 feedback timer（10s），不阻塞完成检测
+            _feedback_timer = None
 
-                self._time_spent = time.time() - time_start
-                self._time_remaining = time_overall - self._time_spent
+            def _publish_feedback():
+                if future is not None and not future.done():
+                    self._time_spent = time.time() - time_start
+                    self._time_remaining = time_overall - self._time_spent
+                    feedback_values = {}
+                    for msg_name, attr_name in action_value_mapping["feedback"].items():
+                        if hasattr(self.driver_instance, f"get_{attr_name}"):
+                            method = getattr(self.driver_instance, f"get_{attr_name}")
+                            if not asyncio.iscoroutinefunction(method):
+                                feedback_values[msg_name] = method()
+                        elif hasattr(self.driver_instance, attr_name):
+                            feedback_values[msg_name] = getattr(self.driver_instance, attr_name)
+                    if self._print_publish:
+                        self.lab_logger().info(f"反馈: {feedback_values}")
+                    feedback_msg = convert_to_ros_msg_with_mapping(
+                        ros_msg_type=action_type.Feedback(),
+                        obj=feedback_values,
+                        value_mapping=action_value_mapping["feedback"],
+                    )
+                    goal_handle.publish_feedback(feedback_msg)
 
-                # 发布反馈
-                feedback_values = {}
-                for msg_name, attr_name in action_value_mapping["feedback"].items():
-                    if hasattr(self.driver_instance, f"get_{attr_name}"):
-                        method = getattr(self.driver_instance, f"get_{attr_name}")
-                        if not asyncio.iscoroutinefunction(method):
-                            feedback_values[msg_name] = method()
-                    elif hasattr(self.driver_instance, attr_name):
-                        feedback_values[msg_name] = getattr(self.driver_instance, attr_name)
-
-                if self._print_publish:
-                    self.lab_logger().info(f"反馈: {feedback_values}")
-
-                feedback_msg = convert_to_ros_msg_with_mapping(
-                    ros_msg_type=action_type.Feedback(),
-                    obj=feedback_values,
-                    value_mapping=action_value_mapping["feedback"],
+            if action_value_mapping.get("feedback"):
+                _fb_interval = action_value_mapping.get("feedback_interval", 0.5)
+                _feedback_timer = self.create_timer(
+                    _fb_interval, _publish_feedback, callback_group=self.callback_group
                 )
 
-                goal_handle.publish_feedback(feedback_msg)
-                time.sleep(0.5)
+            # 等待 action 完成
+            if future is not None:
+                if isinstance(future, Task):
+                    # rclpy Task：直接 await，完成瞬间唤醒
+                    _raw_result = await future
+                else:
+                    # concurrent.futures.Future（同步 action）：用 rclpy 兼容的轮询
+                    _poll_future = Future()
+
+                    def _on_sync_done(fut):
+                        if not _poll_future.done():
+                            _poll_future.set_result(None)
+
+                    future.add_done_callback(_on_sync_done)
+                    await _poll_future
+                    _raw_result = future.result()
+
+                # 确保 execution_error/success 被正确设置（不依赖 done callback 时序）
+                if isinstance(_raw_result, BaseException):
+                    if not execution_error:
+                        execution_error = traceback.format_exception(
+                            type(_raw_result), _raw_result, _raw_result.__traceback__
+                        )
+                        execution_error = "".join(execution_error)
+                    execution_success = False
+                    action_return_value = _raw_result
+                elif not execution_error:
+                    execution_success = True
+                    action_return_value = _raw_result
+
+            # 清理 feedback timer
+            if _feedback_timer is not None:
+                _feedback_timer.cancel()
 
             if future is not None and future.cancelled():
                 self.lab_logger().info(f"动作 {action_name} 已取消")

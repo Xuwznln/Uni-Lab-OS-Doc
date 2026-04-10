@@ -233,7 +233,7 @@ def parse_args():
     parser.add_argument(
         "--addr",
         type=str,
-        default="https://uni-lab.bohrium.com/api/v1",
+        default="https://leap-lab.bohrium.com/api/v1",
         help="Laboratory backend address",
     )
     parser.add_argument(
@@ -438,10 +438,10 @@ def main():
     if args.addr != parser.get_default("addr"):
         if args.addr == "test":
             print_status("使用测试环境地址", "info")
-            HTTPConfig.remote_addr = "https://uni-lab.test.bohrium.com/api/v1"
+            HTTPConfig.remote_addr = "https://leap-lab.test.bohrium.com/api/v1"
         elif args.addr == "uat":
             print_status("使用uat环境地址", "info")
-            HTTPConfig.remote_addr = "https://uni-lab.uat.bohrium.com/api/v1"
+            HTTPConfig.remote_addr = "https://leap-lab.uat.bohrium.com/api/v1"
         elif args.addr == "local":
             print_status("使用本地环境地址", "info")
             HTTPConfig.remote_addr = "http://127.0.0.1:48197/api/v1"
@@ -553,7 +553,7 @@ def main():
         os._exit(0)
 
     if not BasicConfig.ak or not BasicConfig.sk:
-        print_status("后续运行必须拥有一个实验室，请前往 https://uni-lab.bohrium.com 注册实验室！", "warning")
+        print_status("后续运行必须拥有一个实验室，请前往 https://leap-lab.bohrium.com 注册实验室！", "warning")
         os._exit(1)
     graph: nx.Graph
     resource_tree_set: ResourceTreeSet

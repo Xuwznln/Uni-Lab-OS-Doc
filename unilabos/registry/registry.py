@@ -238,6 +238,7 @@ class Registry:
                             "class_name": "unilabos_class",
                         },
                         "always_free": True,
+                        "feedback_interval": 300.0,
                     },
                     "test_latency": test_latency_action,
                     "auto-test_resource": test_resource_action,
@@ -852,6 +853,8 @@ class Registry:
             }
             if (action_args or {}).get("always_free") or method_info.get("always_free"):
                 entry["always_free"] = True
+            _fb_iv = (action_args or {}).get("feedback_interval", method_info.get("feedback_interval", 1.0))
+            entry["feedback_interval"] = _fb_iv
             nt = normalize_enum_value((action_args or {}).get("node_type"), NodeType)
             if nt:
                 entry["node_type"] = nt
@@ -979,6 +982,8 @@ class Registry:
             }
             if action_args.get("always_free") or method_info.get("always_free"):
                 action_entry["always_free"] = True
+            _fb_iv = action_args.get("feedback_interval", method_info.get("feedback_interval", 1.0))
+            action_entry["feedback_interval"] = _fb_iv
             nt = normalize_enum_value(action_args.get("node_type"), NodeType)
             if nt:
                 action_entry["node_type"] = nt

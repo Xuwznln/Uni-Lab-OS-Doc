@@ -343,6 +343,7 @@ def action(
     auto_prefix: bool = False,
     parent: bool = False,
     node_type: Optional["NodeType"] = None,
+    feedback_interval: Optional[float] = None,
 ):
     """
     动作方法装饰器
@@ -399,6 +400,8 @@ def action(
             "auto_prefix": auto_prefix,
             "parent": parent,
         }
+        if feedback_interval is not None:
+            meta["feedback_interval"] = feedback_interval
         if node_type is not None:
             meta["node_type"] = node_type.value if isinstance(node_type, NodeType) else str(node_type)
         wrapper._action_registry_meta = meta  # type: ignore[attr-defined]

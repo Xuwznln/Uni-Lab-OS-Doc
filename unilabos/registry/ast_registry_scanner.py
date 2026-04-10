@@ -825,6 +825,7 @@ def _extract_class_body(
             action_args.setdefault("placeholder_keys", {})
             action_args.setdefault("always_free", False)
             action_args.setdefault("is_protocol", False)
+            action_args.setdefault("feedback_interval", 1.0)
             action_args.setdefault("description", "")
             action_args.setdefault("auto_prefix", False)
             action_args.setdefault("parent", False)
