@@ -379,9 +379,16 @@ def action(
     """
 
     def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+        import asyncio as _asyncio
+
+        if _asyncio.iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                return await func(*args, **kwargs)
+        else:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
 
         # action_type 为哨兵值 => 用户没传, 视为 None (UniLabJsonCommand)
         resolved_type = None if action_type is _ACTION_TYPE_UNSET else action_type

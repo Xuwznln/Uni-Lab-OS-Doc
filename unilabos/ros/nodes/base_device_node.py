@@ -789,7 +789,11 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         )
         # 发送请求并等待响应
         response: SerialCommand_Response = await self._resource_clients["resource_get"].call_async(r)
+        if not response.response:
+            raise ValueError(f"查询资源 {resource_id} 失败：服务端返回空响应")
         raw_data = json.loads(response.response)
+        if not raw_data:
+            raise ValueError(f"查询资源 {resource_id} 失败：返回数据为空")
 
         # 转换为 PLR 资源
         tree_set = ResourceTreeSet.from_raw_dict_list(raw_data)
@@ -1238,7 +1242,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             if uid is None:
                 raise ValueError(f"目标物料{target_resource}没有unilabos_uuid属性，无法转运")
             target_uids.append(uid)
-        srv_address = f"/srv{target_device_id}/s2c_resource_tree"
+        _ns = target_device_id if target_device_id.startswith("/devices/") else f"/devices/{target_device_id.lstrip('/')}"
+        srv_address = f"/srv{_ns}/s2c_resource_tree"
         sclient = self.create_client(SerialCommand, srv_address)
         # 等待服务可用（设置超时）
         if not sclient.wait_for_service(timeout_sec=5.0):
@@ -1288,7 +1293,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     return False
                 time.sleep(0.05)
             self.lab_logger().info(f"资源本地增加到{target_device_id}结果: {response.response}")
-        return None
+        return "转运完成"
 
     def register_device(self):
         """向注册表中注册设备信息"""
@@ -2050,16 +2055,27 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 f"执行动作时JSON缺少function_name或function_args: {ex}\n原JSON: {string}\n{traceback.format_exc()}"
             )
 
-    async def _convert_resource_async(self, resource_data: Dict[str, Any]):
-        """异步转换资源数据为实例"""
-        # 使用封装的get_resource_with_dir方法获取PLR资源
-        plr_resource = await self.get_resource_with_dir(resource_ids=resource_data["id"], with_children=True)
+    async def _convert_resource_async(self, resource_data: "ResourceDictType"):
+        """异步转换 ResourceDictType 为 PLR 实例，优先用 uuid 查询"""
+        unilabos_uuid = resource_data.get("uuid")
+
+        if unilabos_uuid:
+            resource_tree = await self.get_resource([unilabos_uuid], with_children=True)
+            plr_resources = resource_tree.to_plr_resources()
+            if plr_resources:
+                plr_resource = plr_resources[0]
+            else:
+                raise ValueError(f"通过 uuid={unilabos_uuid} 查询资源为空")
+        else:
+            res_id = resource_data.get("id") or resource_data.get("name", "")
+            if not res_id:
+                raise ValueError(f"资源数据缺少 uuid 和 id: {list(resource_data.keys())}")
+            plr_resource = await self.get_resource_with_dir(resource_id=res_id, with_children=True)
 
         # 通过资源跟踪器获取本地实例
         res = self.resource_tracker.figure_resource(plr_resource, try_mode=True)
         if len(res) == 0:
-            # todo: 后续通过decoration来区分，减少warning
-            self.lab_logger().warning(f"资源转换未能索引到实例: {resource_data}，返回新建实例")
+            self.lab_logger().warning(f"资源转换未能索引到实例: {resource_data.get('id', '?')}，返回新建实例")
             return plr_resource
         elif len(res) == 1:
             return res[0]

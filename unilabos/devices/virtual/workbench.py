@@ -22,10 +22,11 @@ from threading import Lock, RLock
 from typing_extensions import TypedDict
 
 from unilabos.registry.decorators import (
-    device, action, ActionInputHandle, ActionOutputHandle, DataSource, topic_config, not_action
+    device, action, ActionInputHandle, ActionOutputHandle, DataSource, topic_config, not_action, NodeType
 )
-from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
-from unilabos.resources.resource_tracker import SampleUUIDsType, LabSample
+from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
+from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode, ROS2DeviceNode
+from unilabos.resources.resource_tracker import SampleUUIDsType, LabSample, ResourceTreeSet
 
 
 # ============ TypedDict 返回类型定义 ============
@@ -289,6 +290,63 @@ class VirtualWorkbench:
         self._arm_lock.release()
         self._update_data_status(f"机械臂已释放 (完成: {task})")
         self.logger.info(f"机械臂已释放 (完成: {task})")
+
+    @action(
+        always_free=True, node_type=NodeType.MANUAL_CONFIRM, placeholder_keys={
+            "assignee_user_ids": "unilabos_manual_confirm"
+        }, goal_default={
+            "timeout_seconds": 3600,
+            "assignee_user_ids": []
+        }, feedback_interval=300,
+        handles=[
+            ActionInputHandle(key="target_device", data_type="device_id",
+                              label="目标设备", data_key="target_device", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="resource", data_type="resource",
+                              label="待转移资源", data_key="resource", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="mount_resource", data_type="resource",
+                              label="目标孔位", data_key="mount_resource", data_source=DataSource.HANDLE),
+
+            ActionOutputHandle(key="target_device", data_type="device_id",
+                               label="目标设备", data_key="target_device", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resource", data_type="resource",
+                              label="待转移资源", data_key="resource.@flatten", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="mount_resource", data_type="resource",
+                              label="目标孔位", data_key="mount_resource.@flatten", data_source=DataSource.EXECUTOR),
+        ]
+    )
+    def manual_confirm(self, resource: List[ResourceSlot], target_device: DeviceSlot, mount_resource: List[ResourceSlot], timeout_seconds: int, assignee_user_ids: list[str], **kwargs) -> dict:
+        """
+        timeout_seconds: 超时时间（秒），默认3600秒
+        修改的结果无效，是只读的
+        """
+        resource = ResourceTreeSet.from_plr_resources(resource).dump()
+        mount_resource = ResourceTreeSet.from_plr_resources(mount_resource).dump()
+        kwargs.update(locals())
+        kwargs.pop("kwargs")
+        kwargs.pop("self")
+        return kwargs
+
+    @action(
+        description="转移物料",
+        handles=[
+            ActionInputHandle(key="target_device", data_type="device_id",
+                              label="目标设备", data_key="target_device", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="resource", data_type="resource",
+                               label="待转移资源", data_key="resource", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="mount_resource", data_type="resource",
+                               label="目标孔位", data_key="mount_resource", data_source=DataSource.HANDLE),
+        ]
+    )
+    async def transfer(self, resource: List[ResourceSlot], target_device: DeviceSlot, mount_resource: List[ResourceSlot]):
+        future = ROS2DeviceNode.run_async_func(self._ros_node.transfer_resource_to_another, True,
+            **{
+                "plr_resources": resource,
+                "target_device_id": target_device,
+                "target_resources": mount_resource,
+                "sites": [None] * len(mount_resource),
+            })
+        result = await future
+        return result
 
     @action(
         auto_prefix=True,
