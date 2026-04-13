@@ -10,6 +10,7 @@
 
 批量准备物料（虚拟起始节点），生成 A1-A5 物料编号，输出 5 个 handle 供后续节点使用
 
+- **action_type**: `UniLabJsonCommand`
 - **Schema**: [`actions/prepare_materials.json`](actions/prepare_materials.json)
 - **可选参数**: `count`（物料数量，默认 5）
 
@@ -21,6 +22,7 @@
 
 将物料从 An 位置移动到空闲加热台（竞争机械臂，自动查找空闲加热台）
 
+- **action_type**: `UniLabJsonCommand`
 - **Schema**: [`actions/move_to_heating_station.json`](actions/move_to_heating_station.json)
 - **核心参数**: `material_number`（物料编号，integer）
 
@@ -28,6 +30,7 @@
 
 启动指定加热台的加热程序（可并行，3 个加热台同时工作）
 
+- **action_type**: `UniLabJsonCommand`
 - **Schema**: [`actions/start_heating.json`](actions/start_heating.json)
 - **核心参数**: `station_id`（加热台 ID），`material_number`（物料编号）
 
@@ -35,6 +38,7 @@
 
 将加热完成的物料从加热台移动到输出位置 Cn
 
+- **action_type**: `UniLabJsonCommand`
 - **Schema**: [`actions/move_to_output.json`](actions/move_to_output.json)
 - **核心参数**: `station_id`（加热台 ID），`material_number`（物料编号）
 
@@ -46,6 +50,7 @@
 
 异步转移物料到目标设备（通过 ROS 资源转移）
 
+- **action_type**: `UniLabJsonCommandAsync`
 - **Schema**: [`actions/transfer.json`](actions/transfer.json)
 - **核心参数**: `resource`, `target_device`, `mount_resource`
 - **占位符字段**:
@@ -61,6 +66,7 @@
 
 创建人工确认节点，等待用户手动确认后继续（含物料转移上下文）
 
+- **action_type**: `UniLabJsonCommand`
 - **Schema**: [`actions/manual_confirm.json`](actions/manual_confirm.json)
 - **核心参数**: `resource`, `target_device`, `mount_resource`, `timeout_seconds`, `assignee_user_ids`
 - **占位符字段**:
