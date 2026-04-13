@@ -1712,7 +1712,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             if future is not None:
                 if isinstance(future, Task):
                     # rclpy Task：直接 await，完成瞬间唤醒
-                    _raw_result = await future
+                    try:
+                        _raw_result = await future
+                    except Exception as e:
+                        _raw_result = e
                 else:
                     # concurrent.futures.Future（同步 action）：用 rclpy 兼容的轮询
                     _poll_future = Future()
@@ -1723,7 +1726,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
                     future.add_done_callback(_on_sync_done)
                     await _poll_future
-                    _raw_result = future.result()
+                    try:
+                        _raw_result = future.result()
+                    except Exception as e:
+                        _raw_result = e
 
                 # 确保 execution_error/success 被正确设置（不依赖 done callback 时序）
                 if isinstance(_raw_result, BaseException):
@@ -1749,8 +1755,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             # self.lab_logger().info(f"动作执行完成: {action_name}")
             del future
 
+            # 执行失败时跳过物料状态更新
+            if execution_error:
+                execution_success = False
+
             # 向Host更新物料当前状态
-            if action_name not in ["create_resource_detailed", "create_resource"]:
+            if not execution_error and action_name not in ["create_resource_detailed", "create_resource"]:
                 for k, v in goal.get_fields_and_field_types().items():
                     if v not in ["unilabos_msgs/Resource", "sequence<unilabos_msgs/Resource>"]:
                         continue
@@ -1806,7 +1816,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
             for attr_name in result_msg_types.keys():
                 if attr_name in ["success", "reached_goal"]:
-                    setattr(result_msg, attr_name, True)
+                    setattr(result_msg, attr_name, execution_success)
                 elif attr_name == "return_info":
                     setattr(
                         result_msg,

@@ -152,6 +152,7 @@ class HTTPClient:
                 logger.error(f"查询物料失败: {response.text}")
             else:
                 data = res["data"]["nodes"]
+                logger.trace(f"resource_tree_get查询到物料: {data}")
                 return data
         else:
             logger.error(f"查询物料失败: {response.text}")

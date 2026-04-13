@@ -1175,6 +1175,7 @@ class HostNode(BaseROS2DeviceNode):
 
         resource_response = http_client.resource_tree_get(uuid_list, with_children)
         response.response = json.dumps(resource_response)
+        self.lab_logger().trace(f"[Host Node-Resource] Resource tree get request callback {response.response}")
 
     async def _resource_tree_action_remove_callback(self, data: dict, response: SerialCommand_Response):
         """
