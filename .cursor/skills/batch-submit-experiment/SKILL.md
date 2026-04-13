@@ -27,14 +27,15 @@ python -c "import base64,sys; print('Authorization: Lab ' + base64.b64encode(f'{
 
 ### 2. --addr → BASE URL
 
-| `--addr` 值 | BASE |
-|-------------|------|
-| `test` | `https://uni-lab.test.bohrium.com` |
-| `uat` | `https://uni-lab.uat.bohrium.com` |
-| `local` | `http://127.0.0.1:48197` |
-| 不传（默认） | `https://uni-lab.bohrium.com` |
+| `--addr` 值  | BASE                                |
+| ------------ | ----------------------------------- |
+| `test`       | `https://leap-lab.test.bohrium.com` |
+| `uat`        | `https://leap-lab.uat.bohrium.com`  |
+| `local`      | `http://127.0.0.1:48197`            |
+| 不传（默认） | `https://leap-lab.bohrium.com`      |
 
 确认后设置：
+
 ```bash
 BASE="<根据 addr 确定的 URL>"
 AUTH="Authorization: Lab <上面命令输出的 token>"
@@ -93,7 +94,7 @@ curl -s -X GET "$BASE/api/v1/edge/lab/info" -H "$AUTH"
 返回：
 
 ```json
-{"code": 0, "data": {"uuid": "xxx", "name": "实验室名称"}}
+{ "code": 0, "data": { "uuid": "xxx", "name": "实验室名称" } }
 ```
 
 记住 `data.uuid` 为 `lab_uuid`。
@@ -104,9 +105,33 @@ curl -s -X GET "$BASE/api/v1/edge/lab/info" -H "$AUTH"
 curl -s -X GET "$BASE/api/v1/lab/project/list?lab_uuid=$lab_uuid" -H "$AUTH"
 ```
 
-返回项目列表，展示给用户选择。列出每个项目的 `uuid` 和 `name`。
+返回：
 
-用户**必须**选择一个项目，记住 `project_uuid`，后续创建 notebook 时需要提供。
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "uuid": "1b3f249a-...",
+        "name": "bt",
+        "description": null,
+        "status": "active",
+        "created_at": "2026-04-09T14:31:28+08:00"
+      },
+      {
+        "uuid": "b6366243-...",
+        "name": "default",
+        "description": "默认项目",
+        "status": "active",
+        "created_at": "2026-03-26T11:13:36+08:00"
+      }
+    ]
+  }
+}
+```
+
+展示 `data.items[]` 中每个项目的 `name` 和 `uuid`，让用户选择。用户**必须**选择一个项目，记住 `project_uuid`（即选中项目的 `uuid`），后续创建 notebook 时需要提供。
 
 ### 3. 列出可用 workflow
 
@@ -123,6 +148,7 @@ curl -s -X GET "$BASE/api/v1/lab/workflow/template/detail/$workflow_uuid" -H "$A
 ```
 
 返回 workflow 的完整结构，包含所有 action 节点信息。需要从响应中提取：
+
 - 每个 action 节点的 `node_uuid`
 - 每个节点对应的设备 ID（`resource_template_name`）
 - 每个节点的动作名（`node_template_name`）
@@ -142,30 +168,30 @@ curl -s -X POST "$BASE/api/v1/lab/notebook" \
 
 ```json
 {
-    "lab_uuid": "<lab_uuid>",
-    "project_uuid": "<project_uuid>",
-    "workflow_uuid": "<workflow_uuid>",
-    "name": "<实验名称>",
-    "node_params": [
+  "lab_uuid": "<lab_uuid>",
+  "project_uuid": "<project_uuid>",
+  "workflow_uuid": "<workflow_uuid>",
+  "name": "<实验名称>",
+  "node_params": [
+    {
+      "sample_uuids": ["<样品UUID1>", "<样品UUID2>"],
+      "datas": [
         {
-            "sample_uuids": ["<样品UUID1>", "<样品UUID2>"],
-            "datas": [
-                {
-                    "node_uuid": "<workflow中的节点UUID>",
-                    "param": {},
-                    "sample_params": [
-                        {
-                            "container_uuid": "<容器UUID>",
-                            "sample_value": {
-                                "liquid_names": "<液体名称>",
-                                "volumes": 1000
-                            }
-                        }
-                    ]
-                }
-            ]
+          "node_uuid": "<workflow中的节点UUID>",
+          "param": {},
+          "sample_params": [
+            {
+              "container_uuid": "<容器UUID>",
+              "sample_value": {
+                "liquid_names": "<液体名称>",
+                "volumes": 1000
+              }
+            }
+          ]
         }
-    ]
+      ]
+    }
+  ]
 }
 ```
 
@@ -194,25 +220,25 @@ curl -s -X GET "$BASE/api/v1/lab/notebook/status?uuid=$notebook_uuid" -H "$AUTH"
 
 ### 每轮的字段
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
+| 字段           | 类型          | 说明                                      |
+| -------------- | ------------- | ----------------------------------------- |
 | `sample_uuids` | array\<uuid\> | 该轮实验的样品 UUID 数组，无样品时传 `[]` |
-| `datas` | array | 该轮中每个 workflow 节点的参数配置 |
+| `datas`        | array         | 该轮中每个 workflow 节点的参数配置        |
 
 ### datas 中每个节点
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `node_uuid` | string | workflow 模板中的节点 UUID（从 API #4 获取） |
-| `param` | object | 动作参数（根据本地注册表 schema 填写） |
-| `sample_params` | array | 样品相关参数（液体名、体积等） |
+| 字段            | 类型   | 说明                                         |
+| --------------- | ------ | -------------------------------------------- |
+| `node_uuid`     | string | workflow 模板中的节点 UUID（从 API #4 获取） |
+| `param`         | object | 动作参数（根据本地注册表 schema 填写）       |
+| `sample_params` | array  | 样品相关参数（液体名、体积等）               |
 
 ### sample_params 中每条
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `container_uuid` | string | 容器 UUID |
-| `sample_value` | object | 样品值，如 `{"liquid_names": "水", "volumes": 1000}` |
+| 字段             | 类型   | 说明                                                 |
+| ---------------- | ------ | ---------------------------------------------------- |
+| `container_uuid` | string | 容器 UUID                                            |
+| `sample_value`   | object | 样品值，如 `{"liquid_names": "水", "volumes": 1000}` |
 
 ---
 
@@ -233,6 +259,7 @@ python scripts/gen_notebook_params.py \
 > 脚本位于本文档同级目录下的 `scripts/gen_notebook_params.py`。
 
 脚本会：
+
 1. 调用 workflow detail API 获取所有 action 节点
 2. 读取本地注册表，为每个节点查找对应的 action schema
 3. 生成 `notebook_template.json`，包含：
@@ -270,8 +297,11 @@ python scripts/gen_notebook_params.py \
               "properties": {
                 "goal": {
                   "properties": {
-                    "asp_vols": {"type": "array", "items": {"type": "number"}},
-                    "sources": {"type": "array"}
+                    "asp_vols": {
+                      "type": "array",
+                      "items": { "type": "number" }
+                    },
+                    "sources": { "type": "array" }
                   },
                   "required": ["asp_vols", "sources"]
                 }

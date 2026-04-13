@@ -606,7 +606,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         for input_well, liquid_type, liquid_volume, liquid_input_slot in zip(
                             input_wells, ADD_LIQUID_TYPE, LIQUID_VOLUME, LIQUID_INPUT_SLOT
                         ):
-                            input_well.set_liquids([(liquid_type, liquid_volume, "uL")])
+                            input_well.set_liquids([(liquid_type, liquid_volume, "ul")])
                         final_response["liquid_input_resource_tree"] = ResourceTreeSet.from_plr_resources(
                             input_wells
                         ).dump()

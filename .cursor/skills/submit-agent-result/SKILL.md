@@ -25,14 +25,15 @@ python -c "import base64,sys; print(base64.b64encode(f'{sys.argv[1]}:{sys.argv[2
 
 ### 2. --addr → BASE URL
 
-| `--addr` 值 | BASE |
-|-------------|------|
-| `test` | `https://uni-lab.test.bohrium.com` |
-| `uat` | `https://uni-lab.uat.bohrium.com` |
-| `local` | `http://127.0.0.1:48197` |
-| 不传（默认） | `https://uni-lab.bohrium.com` |
+| `--addr` 值  | BASE                                |
+| ------------ | ----------------------------------- |
+| `test`       | `https://leap-lab.test.bohrium.com` |
+| `uat`        | `https://leap-lab.uat.bohrium.com`  |
+| `local`      | `http://127.0.0.1:48197`            |
+| 不传（默认） | `https://leap-lab.bohrium.com`      |
 
 确认后设置：
+
 ```bash
 BASE="<根据 addr 确定的 URL>"
 AUTH="Authorization: Lab <上面命令输出的 token>"
@@ -45,6 +46,7 @@ AUTH="Authorization: Lab <上面命令输出的 token>"
 notebook_uuid 来自之前通过「批量提交实验」创建的实验批次，即 `POST /api/v1/lab/notebook` 返回的 `data.uuid`。
 
 如果用户不记得，可提示：
+
 - 查看之前的对话记录中创建 notebook 时返回的 UUID
 - 或通过平台页面查找对应的 notebook
 
@@ -54,11 +56,11 @@ notebook_uuid 来自之前通过「批量提交实验」创建的实验批次，
 
 用户需要提供实验结果数据，支持以下方式：
 
-| 方式 | 说明 |
-|------|------|
-| JSON 文件 | 直接作为 `agent_result` 的内容合并 |
-| CSV 文件 | 转为 `{"文件名": [行数据...]}` 格式 |
-| 手动指定 | 用户直接告知 key-value 数据，由 agent 构建 JSON |
+| 方式      | 说明                                            |
+| --------- | ----------------------------------------------- |
+| JSON 文件 | 直接作为 `agent_result` 的内容合并              |
+| CSV 文件  | 转为 `{"文件名": [行数据...]}` 格式             |
+| 手动指定  | 用户直接告知 key-value 数据，由 agent 构建 JSON |
 
 **四项全部就绪后才可开始。**
 
@@ -90,7 +92,7 @@ curl -s -X GET "$BASE/api/v1/edge/lab/info" -H "$AUTH"
 返回：
 
 ```json
-{"code": 0, "data": {"uuid": "xxx", "name": "实验室名称"}}
+{ "code": 0, "data": { "uuid": "xxx", "name": "实验室名称" } }
 ```
 
 记住 `data.uuid` 为 `lab_uuid`。
@@ -121,42 +123,45 @@ curl -s -X PUT "$BASE/api/v1/lab/notebook/agent-result" \
 
 #### 必要字段
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
+| 字段            | 类型          | 说明                                        |
+| --------------- | ------------- | ------------------------------------------- |
 | `notebook_uuid` | string (UUID) | 目标 notebook 的 UUID，从批量提交实验时获取 |
-| `agent_result` | object | 实验结果数据，任意 JSON 对象 |
+| `agent_result`  | object        | 实验结果数据，任意 JSON 对象                |
 
 #### agent_result 内容格式
 
 `agent_result` 接受**任意 JSON 对象**，常见格式：
 
 **简单键值对**：
+
 ```json
 {
-    "avg_rtt_ms": 12.5,
-    "status": "success",
-    "test_count": 5
+  "avg_rtt_ms": 12.5,
+  "status": "success",
+  "test_count": 5
 }
 ```
 
 **包含嵌套结构**：
+
 ```json
 {
-    "summary": {"total": 100, "passed": 98, "failed": 2},
-    "measurements": [
-        {"sample_id": "S001", "value": 3.14, "unit": "mg/mL"},
-        {"sample_id": "S002", "value": 2.71, "unit": "mg/mL"}
-    ]
+  "summary": { "total": 100, "passed": 98, "failed": 2 },
+  "measurements": [
+    { "sample_id": "S001", "value": 3.14, "unit": "mg/mL" },
+    { "sample_id": "S002", "value": 2.71, "unit": "mg/mL" }
+  ]
 }
 ```
 
 **从 CSV 文件导入**（脚本自动转换）：
+
 ```json
 {
-    "experiment_data": [
-        {"温度": 25, "压力": 101.3, "产率": 0.85},
-        {"温度": 30, "压力": 101.3, "产率": 0.91}
-    ]
+  "experiment_data": [
+    { "温度": 25, "压力": 101.3, "产率": 0.85 },
+    { "温度": 30, "压力": 101.3, "产率": 0.91 }
+  ]
 }
 ```
 
@@ -178,22 +183,22 @@ python scripts/prepare_agent_result.py \
     [--output <output.json>]
 ```
 
-| 参数 | 必选 | 说明 |
-|------|------|------|
-| `--notebook-uuid` | 是 | 目标 notebook UUID |
-| `--files` | 是 | 输入文件路径（支持多个，JSON / CSV） |
-| `--auth` | 提交时必选 | Lab token（base64(ak:sk)） |
-| `--base` | 提交时必选 | API base URL |
-| `--submit` | 否 | 加上此标志则直接提交到云端 |
-| `--output` | 否 | 输出 JSON 路径（默认 `agent_result_body.json`） |
+| 参数              | 必选       | 说明                                            |
+| ----------------- | ---------- | ----------------------------------------------- |
+| `--notebook-uuid` | 是         | 目标 notebook UUID                              |
+| `--files`         | 是         | 输入文件路径（支持多个，JSON / CSV）            |
+| `--auth`          | 提交时必选 | Lab token（base64(ak:sk)）                      |
+| `--base`          | 提交时必选 | API base URL                                    |
+| `--submit`        | 否         | 加上此标志则直接提交到云端                      |
+| `--output`        | 否         | 输出 JSON 路径（默认 `agent_result_body.json`） |
 
 ### 文件合并规则
 
-| 文件类型 | 合并方式 |
-|----------|----------|
-| `.json`（dict） | 字段直接合并到 `agent_result` 顶层 |
-| `.json`（list/other） | 以文件名为 key 放入 `agent_result` |
-| `.csv` | 以文件名（不含扩展名）为 key，值为行对象数组 |
+| 文件类型              | 合并方式                                     |
+| --------------------- | -------------------------------------------- |
+| `.json`（dict）       | 字段直接合并到 `agent_result` 顶层           |
+| `.json`（list/other） | 以文件名为 key 放入 `agent_result`           |
+| `.csv`                | 以文件名（不含扩展名）为 key，值为行对象数组 |
 
 多个文件的字段会合并。JSON dict 中的重复 key 后者覆盖前者。
 
@@ -210,7 +215,7 @@ python scripts/prepare_agent_result.py \
     --notebook-uuid 73c67dca-c8cc-4936-85a0-329106aa7cca \
     --files results.json \
     --auth YTFmZDlkNGUt... \
-    --base https://uni-lab.test.bohrium.com \
+    --base https://leap-lab.test.bohrium.com \
     --submit
 ```
 
