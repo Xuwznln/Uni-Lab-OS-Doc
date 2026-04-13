@@ -1922,7 +1922,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             raise ValueError("至少需要提供一个 UUID")
 
         uuids_list = list(uuids)
-        future = self._resource_clients["c2s_update_resource_tree"].call_async(
+        future: Future = self._resource_clients["c2s_update_resource_tree"].call_async(
             SerialCommand.Request(
                 command=json.dumps(
                     {
@@ -1948,6 +1948,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             raise Exception(f"资源查询返回空结果: {uuids_list}")
 
         raw_data = json.loads(response.response)
+        if not raw_data:
+            raise Exception(f"资源原始查询返回空结果: {raw_data}")
 
         # 转换为 PLR 资源
         tree_set = ResourceTreeSet.from_raw_dict_list(raw_data)
