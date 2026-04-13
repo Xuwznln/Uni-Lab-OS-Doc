@@ -132,7 +132,18 @@ curl -s -X POST "$BASE/api/v1/lab/mcp/run/action" \
   -d '{"lab_uuid":"<lab_uuid>","device_id":"host_node","action":"<action_name>","action_type":"<type>","param":{...}}'
 ```
 
-`param` 直接放 goal 里的属性，**不要**再包一层 `{"goal": {...}}`。`action_type` 从 `actions/<name>.json` 的 `type` 字段获取。
+`param` 直接放 goal 里的属性，**不要**再包一层 `{"goal": {...}}`。
+
+> **WARNING: `action_type` 必须正确，传错会导致任务永远卡住无法完成。** 从下表或 `actions/<name>.json` 的 `type` 字段获取。
+
+#### action_type 速查表
+
+| action | action_type |
+|--------|-------------|
+| `test_latency` | `UniLabJsonCommand` |
+| `create_resource` | `ResourceCreateFromOuterEasy` |
+| `auto-test_resource` | `UniLabJsonCommand` |
+| `manual_confirm` | `UniLabJsonCommand` |
 
 ### 10. 查询任务状态
 
