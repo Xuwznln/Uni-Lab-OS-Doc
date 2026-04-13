@@ -119,14 +119,13 @@ python ./scripts/extract_device_actions.py [--registry <path>] <device_id> ./ski
 
 ### Step 3 — 写 action-index.md
 
-按模板为每个 action 写条目（**必须包含 `action_type`**）：
+按模板为每个 action 写条目：
 
 ```markdown
 ### `<action_name>`
 
 <用途描述（一句话）>
 
-- **action_type**: `<从 actions/<name>.json 的 type 字段获取>`
 - **Schema**: [`actions/<filename>.json`](actions/<filename>.json)
 - **核心参数**: `param1`, `param2`（从 schema.required 获取）
 - **可选参数**: `param3`, `param4`
@@ -135,7 +134,6 @@ python ./scripts/extract_device_actions.py [--registry <path>] <device_id> ./ski
 
 描述规则：
 
-- **每个 action 必须标注 `action_type`**（从 JSON 的 `type` 字段读取），这是 API #9 调用时的必填参数，传错会导致任务永远卡住
 - 从 `schema.properties` 读参数列表（schema 已提升为 goal 内容）
 - 从 `schema.required` 区分核心/可选参数
 - 按功能分类（移液、枪头、外设等）
@@ -159,7 +157,6 @@ python ./scripts/extract_device_actions.py [--registry <path>] <device_id> ./ski
 - **AUTH 头** — 使用 Step 0 中 `gen_auth.py` 生成的 `Authorization: Lab <token>`（不要硬编码 `Api` 类型的 key）
 - **Python 源码路径** — 在 SKILL.md 开头注明设备对应的源码文件，方便参考参数含义
 - **Slot 字段表** — 列出本设备哪些 action 的哪些字段需要填入 Slot（物料/设备/节点/类名）
-- **action_type 速查表** — 在 API #9 说明后面紧跟一个表格，列出每个 action 对应的 `action_type` 值（从 JSON `type` 字段提取），方便 agent 快速查找而无需打开 JSON 文件
 
 API 模板结构：
 
@@ -204,7 +201,7 @@ API 模板结构：
 
 # - #8 启动工作流 POST /lab/workflow/{uuid}/run
 
-# - #9 运行设备单动作 POST /lab/mcp/run/action（⚠️ action_type 必须从 action-index.md 或 actions/<name>.json 的 type 字段获取，传错会导致任务永远卡住）
+# - #9 运行设备单动作 POST /lab/mcp/run/action
 
 # - #10 查询任务状态 GET /lab/mcp/task/{task_uuid}
 
