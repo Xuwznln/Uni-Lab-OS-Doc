@@ -176,6 +176,16 @@ cas,name,molecular_formula,smiles,stock_in_quantity,unit,supplier,production_dat
 7732-18-3,水,H2O,O,10,mL,农夫山泉,2025-11-18T00:00:00Z,2026-11-18T00:00:00Z
 ```
 
+### 日期格式规则（重要）
+
+所有日期字段（`production_date`、`expiry_date`）**必须**使用 ISO 8601 完整格式：`YYYY-MM-DDTHH:MM:SSZ`。
+
+- 用户输入 `2025-03-01` → 转换为 `"2025-03-01T00:00:00Z"`
+- 用户输入 `2025/9/1` → 转换为 `"2025-09-01T00:00:00Z"`
+- 用户未提供日期 → 使用当天日期 + `T00:00:00Z`，有效期默认 +1 年
+
+**禁止**发送不带时间部分的日期字符串（如 `"2025-03-01"`），API 会拒绝。
+
 ### 执行与汇报
 
 每次 API 调用后：
@@ -193,6 +203,7 @@ cas,name,molecular_formula,smiles,stock_in_quantity,unit,supplier,production_dat
 | --------------------- | --------- | ---------- | ------------------------------------ |
 | 水                    | 7732-18-3 | H2O        | O                                    |
 | 乙醇                  | 64-17-5   | C2H6O      | CCO                                  |
+| 乙酸                  | 64-19-7   | C2H4O2     | CC(O)=O                              |
 | 甲醇                  | 67-56-1   | CH4O       | CO                                   |
 | 丙酮                  | 67-64-1   | C3H6O      | CC(C)=O                              |
 | 二甲基亚砜(DMSO)      | 67-68-5   | C2H6OS     | CS(C)=O                              |
