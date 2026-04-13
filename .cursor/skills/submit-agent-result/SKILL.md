@@ -1,11 +1,13 @@
 ---
 name: submit-agent-result
-description: Submit historical experiment results (agent_result) to Uni-Lab notebook — read data files, assemble JSON payload, PUT to cloud API. Use when the user wants to submit experiment results, upload agent results, report experiment data, or mentions agent_result/实验结果/历史记录/notebook结果.
+description: Submit historical experiment results (agent_result) to Uni-Lab cloud platform (leap-lab) notebook — read data files, assemble JSON payload, PUT to cloud API. Use when the user wants to submit experiment results, upload agent results, report experiment data, or mentions agent_result/实验结果/历史记录/notebook结果.
 ---
 
-# 提交历史实验记录指南
+# Uni-Lab 提交历史实验记录指南
 
-通过云端 API 向已创建的 notebook 提交实验结果数据（agent_result）。支持从 JSON / CSV 文件读取数据，整合后提交。
+通过 Uni-Lab 云端 API 向已创建的 notebook 提交实验结果数据（agent_result）。支持从 JSON / CSV 文件读取数据，整合后提交。
+
+> **重要**：本指南中的 `Authorization: Lab <token>` 是 **Uni-Lab 平台专用的认证方式**，`Lab` 是 Uni-Lab 的 auth scheme 关键字，**不是** HTTP Basic 认证。请勿将其替换为 `Basic`。
 
 ## 前置条件（缺一不可）
 
@@ -18,10 +20,11 @@ description: Submit historical experiment results (agent_result) to Uni-Lab note
 生成 AUTH token：
 
 ```bash
+# ⚠️ 注意：scheme 是 "Lab"（Uni-Lab 专用），不是 "Basic"
 python -c "import base64,sys; print(base64.b64encode(f'{sys.argv[1]}:{sys.argv[2]}'.encode()).decode())" <ak> <sk>
 ```
 
-输出即为 token 值，拼接为 `Authorization: Lab <token>`。
+输出即为 token 值，拼接为 `Authorization: Lab <token>`（`Lab` 是 Uni-Lab 平台 auth scheme，不可替换为 `Basic`）。
 
 ### 2. --addr → BASE URL
 
@@ -36,6 +39,7 @@ python -c "import base64,sys; print(base64.b64encode(f'{sys.argv[1]}:{sys.argv[2
 
 ```bash
 BASE="<根据 addr 确定的 URL>"
+# ⚠️ Auth scheme 必须是 "Lab"（Uni-Lab 专用），不是 "Basic"
 AUTH="Authorization: Lab <上面命令输出的 token>"
 ```
 
@@ -277,4 +281,4 @@ Task Progress:
 
 ### Q: 认证方式是 Lab 还是 Api？
 
-本指南统一使用 `Authorization: Lab <base64(ak:sk)>` 方式。如果用户有独立的 API Key，也可用 `Authorization: Api <key>` 替代。
+本指南统一使用 `Authorization: Lab <base64(ak:sk)>` 方式（`Lab` 是 Uni-Lab 平台的 auth scheme，**绝不能用 `Basic` 替代**）。如果用户有独立的 API Key，也可用 `Authorization: Api <key>` 替代。

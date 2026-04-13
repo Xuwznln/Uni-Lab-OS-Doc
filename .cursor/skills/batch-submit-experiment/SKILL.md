@@ -1,11 +1,13 @@
 ---
 name: batch-submit-experiment
-description: Batch submit experiments (notebooks) to Uni-Lab platform — list workflows, generate node_params from registry schemas, submit multiple rounds, check notebook status. Use when the user wants to submit experiments, create notebooks, batch run workflows, check experiment status, or mentions 提交实验/批量实验/notebook/实验轮次/实验状态.
+description: Batch submit experiments (notebooks) to the Uni-Lab cloud platform (leap-lab) — list workflows, generate node_params from registry schemas, submit multiple rounds, check notebook status. Use when the user wants to submit experiments, create notebooks, batch run workflows, check experiment status, or mentions 提交实验/批量实验/notebook/实验轮次/实验状态.
 ---
 
-# 批量提交实验指南
+# Uni-Lab 批量提交实验指南
 
-通过云端 API 批量提交实验（notebook），支持多轮实验参数配置。根据 workflow 模板详情和本地设备注册表自动生成 `node_params` 模板。
+通过 Uni-Lab 云端 API 批量提交实验（notebook），支持多轮实验参数配置。根据 workflow 模板详情和本地设备注册表自动生成 `node_params` 模板。
+
+> **重要**：本指南中的 `Authorization: Lab <token>` 是 **Uni-Lab 平台专用的认证方式**，`Lab` 是 Uni-Lab 的 auth scheme 关键字，**不是** HTTP Basic 认证。请勿将其替换为 `Basic`。
 
 ## 前置条件（缺一不可）
 
@@ -18,11 +20,12 @@ description: Batch submit experiments (notebooks) to Uni-Lab platform — list w
 生成 AUTH token（任选一种方式）：
 
 ```bash
-# 方式一：Python 一行生成
+# 方式一：Python 一行生成（注意：scheme 是 "Lab" 不是 "Basic"）
 python -c "import base64,sys; print('Authorization: Lab ' + base64.b64encode(f'{sys.argv[1]}:{sys.argv[2]}'.encode()).decode())" <ak> <sk>
 
 # 方式二：手动计算
 # base64(ak:sk) → Authorization: Lab <token>
+# ⚠️ 这里的 "Lab" 是 Uni-Lab 平台的 auth scheme，绝对不能用 "Basic" 替代
 ```
 
 ### 2. --addr → BASE URL
@@ -38,6 +41,7 @@ python -c "import base64,sys; print('Authorization: Lab ' + base64.b64encode(f'{
 
 ```bash
 BASE="<根据 addr 确定的 URL>"
+# ⚠️ Auth scheme 必须是 "Lab"（Uni-Lab 专用），不是 "Basic"
 AUTH="Authorization: Lab <上面命令输出的 token>"
 ```
 
@@ -45,18 +49,19 @@ AUTH="Authorization: Lab <上面命令输出的 token>"
 
 **批量提交实验时需要本地注册表来解析 workflow 节点的参数 schema。**
 
-按优先级搜索：
+**必须先用 Glob 工具搜索文件**，不要直接猜测路径：
 
 ```
-<workspace 根目录>/unilabos_data/req_device_registry_upload.json
-<workspace 根目录>/req_device_registry_upload.json
+Glob: **/req_device_registry_upload.json
 ```
 
-也可直接 Glob 搜索：`**/req_device_registry_upload.json`
+常见位置（仅供参考，以 Glob 实际结果为准）：
+- `<workspace>/unilabos_data/req_device_registry_upload.json`
+- `<workspace>/req_device_registry_upload.json`
 
 找到后**检查文件修改时间**并告知用户。超过 1 天提醒用户是否需要重新启动 `unilab`。
 
-**如果文件不存在** → 告知用户先运行 `unilab` 启动命令，等注册表生成后再执行。可跳过此步，但将无法自动生成参数模板，需要用户手动填写 `param`。
+**如果 Glob 搜索无结果** → 告知用户先运行 `unilab` 启动命令，等注册表生成后再执行。可跳过此步，但将无法自动生成参数模板，需要用户手动填写 `param`。
 
 ### 4. workflow_uuid（目标工作流）
 
