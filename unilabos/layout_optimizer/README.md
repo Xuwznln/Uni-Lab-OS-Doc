@@ -1,6 +1,6 @@
 # Layout Optimizer Handover
 
-**Date**: 2026-03-25 | **Branch**: `feat/layout_optimize_end2end_test` | **Commit**: `1c811ff` | **Tests**: 193 (183 pass + 10 LLM skip w/o API key)
+**Date**: 2026-04-10 | **Branch**: `feat/3d_layout_and_visualize` | **Commit**: `99dc821a` | **Tests**: 270 (260 pass + 10 LLM skip w/o API key)
 
 This package is a standalone lab layout optimizer. It takes a device list + constraints and returns optimized placements. Your integration points are the HTTP API and the LLM skill document.
 
@@ -39,13 +39,17 @@ User NL request
     │     Accounts for openings, workflow edges      │
     │                                               │
     │  3. DE Optimizer      (optimizer.py)          │
-    │     scipy differential_evolution              │
+    │     Custom DE loop (best1bin/currenttobest1bin│
+    │       /rand1bin strategies)                    │
     │     3N-dim: [x0, y0, θ0, x1, y1, θ1, ...]   │
+    │     Broad-phase AABB sweep (broad_phase.py)   │
+    │     θ lattice snap in joint discrete mode     │
     │     Cost = hard_penalties + soft_penalties      │
     │     Graduated collision penalties (not binary) │
     │                                               │
     │  4. θ snap            (optimizer.snap_theta)  │
     │     Snap near-cardinal angles to 0/90/180/270 │
+    │     (opt-in via snap_cardinal=True)           │
     │                                               │
     │  5. Final eval        (constraints.py)        │
     │     Binary pass/fail for response.success     │
@@ -112,7 +116,7 @@ The `constraints` and `workflow_edges` arrays pass directly to `/optimize` — n
 
 ### `GET /interpret/schema` — LLM discovery
 
-Returns all 10 intent types with parameter specs. LLM agent should call this before translating.
+Returns all 11 intent types with parameter specs. LLM agent should call this before translating.
 
 ### `POST /optimize` — Run layout optimization
 
@@ -129,9 +133,15 @@ Returns all 10 intent types with parameter specs. LLM agent should call this bef
   "workflow_edges": [["device_a", "device_b"]],
   "seeder": "compact_outward",
   "run_de": true,
-  "angle_granularity": 4,
   "maxiter": 200,
-  "seed": 42
+  "seed": 42,
+  "angle_granularity": 4,
+  "snap_cardinal": false,
+  "strategy": "currenttobest1bin",
+  "mutation": [0.5, 1.0],
+  "theta_mutation": null,
+  "recombination": 0.7,
+  "crossover_mode": "device"
 }
 ```
 
@@ -155,7 +165,41 @@ Returns all 10 intent types with parameter specs. LLM agent should call this bef
 ```
 
 `position`/`rotation` format matches Cloud's `CommonPositionType`. `rotation.z` is θ in radians.
-`angle_granularity` is optional and opt-in. Supported values are `4`, `8`, `12`, `24`. When set, the optimizer uses an angle-first hybrid mode: snap all device angles onto the global lattice, greedily sweep angles, then run DE on `x/y` only. `4` is the practical axis-aligned mode for tidy lab layouts.
+
+**DE hyperparameters:**
+| Param | Default | Description |
+|-------|---------|-------------|
+| `strategy` | `"currenttobest1bin"` | DE mutation strategy (`best1bin`, `currenttobest1bin`, `rand1bin`) |
+| `mutation` | `[0.5, 1.0]` | Dithered F range for position dimensions |
+| `theta_mutation` | `null` (same as `mutation`) | Separate F range for θ dimensions (decoupled mutation) |
+| `recombination` | `0.7` | Crossover probability |
+| `crossover_mode` | `"device"` | `"device"` = per-device CR, `"dimension"` = per-dimension CR |
+| `angle_granularity` | `null` | `4`/`8`/`12`/`24` — snaps θ to a discrete lattice during DE (joint mode). `4` = axis-aligned (0/90/180/270). `null` = continuous θ |
+| `snap_cardinal` | `false` | Post-DE snap to nearest cardinal angle with collision rollback |
+
+### Scene State API
+
+Shared scene state between the LLM agent and the frontend. The agent pushes layout results here; the frontend polls for updates.
+
+#### `GET /scene/lab` / `POST /scene/lab` — Lab dimensions
+
+**GET** returns current lab dimensions. **POST** sets them (frontend sends this when user changes lab size).
+
+```json
+{"width": 6.0, "depth": 4.0}
+```
+
+#### `GET /scene/placements` / `POST /scene/placements` / `DELETE /scene/placements`
+
+**GET** returns current placements + a version counter. Frontend polls this every 1s and re-renders when version changes.
+
+```json
+{"version": 3, "placements": [...]}
+```
+
+**POST** pushes new placements (from `/optimize` result or agent). Bumps version.
+
+**DELETE** clears all placements (resets scene).
 
 ### `GET /devices` — Device catalog
 
@@ -264,6 +308,17 @@ All outputs pass through `/interpret` → `/optimize` successfully.
 | `prefer_orientation_mode` | `mode` (outward/inward) | Angle between opening direction and ideal direction |
 | `prefer_aligned` | (none) | Deviation from nearest 90° angle |
 | `prefer_seeder_orientation` | (none) | Deviation from seeder-assigned θ |
+| `crossing_penalty` | (auto, part of `reachability` eval) | Segment-OBB intersection length of opening-to-arm path blocked by other devices (Cyrus-Beck clipping via `obb.segment_obb_intersection_length`) |
+
+### Weight Normalization
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `DEFAULT_WEIGHT_DISTANCE` | 100.0 | 1 cm → penalty 1.0 |
+| `DEFAULT_WEIGHT_ANGLE` | 60.0 | 5° → penalty ~1.0 |
+| `HARD_MULTIPLIER` | 5.0 | Hard constraint penalty multiplier during graduated DE |
+
+Constraints support a `priority` field (`critical` / `high` / `normal` / `low`) with multipliers 5× / 2× / 1× / 0.5×.
 
 ### Graduated Penalties (DE internals)
 
@@ -298,22 +353,23 @@ To switch to real checkers: `LAYOUT_CHECKER_MODE=moveit` + pass MoveIt2 instance
 ### Core Pipeline
 | File | Lines | Purpose |
 |------|-------|---------|
-| `models.py` | 96 | Dataclasses: Device, Lab, Placement, Constraint, Intent, Opening |
-| `device_catalog.py` | — | Loads devices from footprints.json + uni-lab-assets + registry |
+| `models.py` | 97 | Dataclasses: Device, Lab, Placement, Constraint, Intent, Opening |
+| `device_catalog.py` | 303 | Loads devices from footprints.json + uni-lab-assets + registry |
 | `footprints.json` | 183KB | 499 device bounding boxes, heights, openings (offline extracted) |
-| `seeders.py` | — | Force-directed initial layout with presets |
-| `optimizer.py` | 196 | scipy DE optimizer, 3N encoding, seed injection, θ snap |
-| `constraints.py` | — | Unified constraint evaluation (hard + soft + graduated) |
-| `intent_interpreter.py` | 315 | 10 intent handlers, pure translation, no side effects |
-| `obb.py` | — | OBB geometry: corners, overlap SAT, min_distance, penetration_depth |
-| `server.py` | 510 | FastAPI: /interpret, /interpret/schema, /optimize, /devices |
+| `seeders.py` | 331 | Force-directed initial layout with presets |
+| `optimizer.py` | 1056 | Custom DE loop: per-device crossover, θ wrapping, discrete angle lattice, multi-strategy |
+| `broad_phase.py` | 66 | 2-axis sweep-and-prune AABB broad phase for collision pair pruning |
+| `constraints.py` | 627 | Unified constraint evaluation (hard + soft + graduated + crossing penalty) |
+| `obb.py` | 257 | OBB geometry: corners, overlap SAT, min_distance, penetration_depth, segment intersection |
+| `intent_interpreter.py` | 366 | 11 intent handlers, pure translation, no side effects |
+| `server.py` | 743 | FastAPI: /interpret, /optimize, /devices, /scene/* endpoints |
+| `lab_parser.py` | 50 | Parse lab floor plan JSON to Lab dataclass |
 
 ### Reference / Utilities
 | File | Purpose |
 |------|---------|
 | `extract_footprints.py` | How footprints.json was generated (offline STL/GLB → 2D bbox extraction via trimesh) |
-
-> **Note**: `optimizer.py` and `seeders.py` import `pencil_integration` for fallback initial layout. This module is removed from the handover (not part of the pipeline — see D2). Replace with your own initial layout or simply rely on the seeder (`seeders.py`), which is the primary code path.
+| `generate_asset_registry.py` | Generate YAML registry entries for uni-lab-assets devices not already registered |
 
 ### Integration Layer
 | File | Purpose |
@@ -326,27 +382,34 @@ To switch to real checkers: `LAYOUT_CHECKER_MODE=moveit` + pass MoveIt2 instance
 | File | Purpose |
 |------|---------|
 | `llm_skill/layout_intent_translator.md` | System prompt for LLM: intent schema, device resolution, translation rules, examples |
+| `llm_skill/demo_agent.md` | LLM agent orchestration instructions for demo (GET /devices → intents → /interpret → /optimize → /scene/placements) |
+
+### Demo / Frontend
+| File | Purpose |
+|------|---------|
+| `static/lab3d.html` | Three.js 3D visualization frontend (1227 lines): device library, drag-to-add, auto layout, scene polling |
 
 ### Configuration
 | File | Purpose |
 |------|---------|
 | `pyproject.toml` | Package deps: scipy, numpy, fastapi, uvicorn, pydantic |
 
-### Tests (193 total: 183 pass + 10 skip without API key)
+### Tests (270 total: 260 pass + 10 skip without API key)
 | File | Tests | Coverage |
 |------|-------|----------|
-| `test_intent_interpreter.py` | 19 | All 10 handlers, validation, priority, multi-intent |
+| `test_intent_interpreter.py` | 19 | All 11 handlers, validation, priority, multi-intent |
 | `test_interpret_api.py` | 6 | /interpret and /interpret/schema endpoints |
 | `test_e2e_pcr_pipeline.py` | 12 | Full pipeline: interpret → optimize → verify placements |
 | `test_llm_skill.py` | 10 | Real LLM fuzzy input → structured output (needs ANTHROPIC_API_KEY) |
-| `test_constraints.py` | — | Constraint evaluation, hard/soft, graduated penalties |
-| `test_optimizer.py` | — | DE optimizer, vector encoding, bounds |
-| `test_mock_checkers.py` | — | MockCollisionChecker, MockReachabilityChecker |
-| `test_ros_checkers.py` | — | MoveIt2/IKFast adapter tests |
-| `test_seeders.py` | — | Force-directed seeder presets |
-| `test_device_catalog.py` | — | Device loading, footprint merging |
-| `test_obb.py` | — | OBB geometry functions |
-| `test_bugfixes_v2.py` | — | Regression: duplicate IDs, orientation, min_spacing |
+| `test_constraints.py` | 30 | Constraint evaluation, hard/soft, graduated penalties, crossing penalty |
+| `test_optimizer.py` | 50 | DE optimizer, vector encoding, bounds, discrete angles, strategies |
+| `test_mock_checkers.py` | 15 | MockCollisionChecker, MockReachabilityChecker |
+| `test_ros_checkers.py` | 40 | MoveIt2/IKFast adapter tests |
+| `test_seeders.py` | 12 | Force-directed seeder presets |
+| `test_device_catalog.py` | 25 | Device loading, footprint merging |
+| `test_obb.py` | 18 | OBB geometry functions, segment intersection |
+| `test_bugfixes_v2.py` | 28 | Regression: duplicate IDs, orientation, min_spacing, cardinal snap defaults |
+| `test_broad_phase.py` | 5 | Sweep-and-prune AABB broad phase |
 
 ---
 
@@ -358,14 +421,19 @@ To switch to real checkers: `LAYOUT_CHECKER_MODE=moveit` + pass MoveIt2 instance
 pip install -e ".[dev]"
 
 # Run server
-uvicorn layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
+uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
+
+# Run server with debug logging (shows DE cost breakdown per generation)
+LAYOUT_DEBUG=1 uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
 
 # Run tests
-pytest layout_optimizer/tests/ -v
+pytest unilabos/layout_optimizer/tests/ -v
 
 # Run LLM skill tests (needs API key)
-ANTHROPIC_API_KEY=sk-... pytest layout_optimizer/tests/test_llm_skill.py -v
+ANTHROPIC_API_KEY=sk-... pytest unilabos/layout_optimizer/tests/test_llm_skill.py -v
 ```
+
+**Log files**: All requests are logged to `unilabos/layout_optimizer/logs/{YYYYMMDD_HHMMSS}.log` at DEBUG level (frontend polling GET /scene/placements excluded).
 
 ### Dependencies
 - Python ≥ 3.10
@@ -379,6 +447,7 @@ ANTHROPIC_API_KEY=sk-... pytest layout_optimizer/tests/test_llm_skill.py -v
 | `UNI_LAB_ASSETS_DIR` | `../uni-lab-assets` | Path to device 3D models |
 | `UNI_LAB_OS_DEVICE_MESH_DIR` | `Uni-Lab-OS/unilabos/device_mesh/devices` | Registry device meshes |
 | `LAYOUT_CHECKER_MODE` | `mock` | `mock` or `moveit` for checker selection |
+| `LAYOUT_DEBUG` | (unset) | Set to `1` for DEBUG-level console logging (DE cost breakdown per generation) |
 | `ANTHROPIC_API_KEY` | (none) | For LLM skill tests |
 
 ---
@@ -394,6 +463,10 @@ ANTHROPIC_API_KEY=sk-... pytest layout_optimizer/tests/test_llm_skill.py -v
 4. **Single lab room**: No multi-room or corridor support yet. Lab is a single rectangle with optional rectangular obstacles.
 
 5. **Intent interpreter is stateless**: It translates intents one-by-one with no cross-referencing between them. Duplicate/conflicting constraints are the LLM's responsibility to avoid.
+
+6. **`align_weight` and `snap_cardinal` default to off**: `prefer_aligned` weight defaults to 0 (was `DEFAULT_WEIGHT_ANGLE=60`) and `snap_theta_safe` is opt-in via `snap_cardinal=True`. Both remain available when explicitly requested via `align_cardinal` intent or API param.
+
+7. **Hybrid angle mode deprecated**: The angle-first hybrid mode (separate angle sweep + position-only DE) has been replaced by joint discrete mode as the default when `angle_granularity` is set. Joint mode snaps θ to the discrete lattice within the normal 3N DE loop.
 
 ---
 
@@ -446,3 +519,116 @@ curl -X POST http://localhost:8000/optimize \
     "seed": 42
   }' | python3 -m json.tool
 ```
+
+---
+
+## 11. Demo Setup
+
+This section documents the device processing pipeline, test frontend, and LLM agent demo for the layout optimizer.
+
+### 11.1 Device Processing Pipeline
+
+How devices go from 3D meshes to collision footprints:
+
+1. **Source data**:
+   - `uni-lab-assets/` repository: GLB/STL 3D models + XACRO robot descriptions
+   - `Uni-Lab-OS/device_mesh/devices/` registry: device metadata directories
+
+2. **Extraction** (`extract_footprints.py`):
+   - Load meshes via `trimesh` (STL for geometry, GLB for display)
+   - Compute oriented bounding box (OBB): width, depth, height
+   - Apply GLB root node rotation to align with world frame
+   - Detect openings from XACRO `<joint type="fixed">` elements containing "socket" in name
+   - Compute opening direction: centroid of socket origins → cardinal direction mapping
+   - Manual overrides for devices with non-standard opening patterns (`MANUAL_OPENINGS` dict)
+   - Write results to `footprints.json` (499 devices, 183KB)
+
+3. **Catalog merging** (`device_catalog.py`):
+   - Load `footprints.json` (OBB + openings)
+   - Load `uni-lab-assets/data.json` (asset tree structure)
+   - Load `Uni-Lab-OS/device_mesh/devices/` (registry devices)
+   - Merge: registry devices get priority for metadata, but assets' 3D model paths preferred
+   - Fallback sizes: `KNOWN_SIZES` dict provides manual dimensions when trimesh extraction fails
+
+4. **Standalone filtering** (`server.py:_is_standalone_device`):
+   - Bbox >30cm = device (standalone equipment)
+   - Bbox <5cm = consumable (plates, tubes, tips)
+   - 5-30cm = keyword heuristic (check name for "plate", "tube", "tip", "rack")
+
+### 11.2 Test Frontend (`static/lab3d.html`)
+
+Interactive 3D lab layout visualization and design tool (1227 lines).
+
+**Technology stack**:
+- Three.js v0.169.0 (ES modules from esm.sh CDN)
+- WebGL renderer with PCF soft shadow maps, ACES filmic tone mapping
+- OrbitControls for camera interaction
+
+**Features**:
+- **Device library**: Left sidebar with search/filter, toggle between devices and consumables
+- **Drag-to-add**: Click device in library → adds to scene with random position
+- **Selected devices panel**: Right panel lists all placed devices, click to remove
+- **Lab dimensions**: Width × Depth inputs (meters), collision margin slider
+- **View modes**: 3D perspective (default) and top-down orthographic
+- **Grid system**: 0.5m grid with lab boundary highlighting
+- **Device visualization**: Box geometry with emissive materials, edge highlights, CSS2D labels
+- **Opening markers**: Orange arrows and semi-transparent strips showing device access directions
+- **Auto Layout button**: Calls `POST /optimize` with current devices + constraints
+- **Scene polling**: 1-second polling of `GET /scene/placements` for agent-pushed updates (version-based change detection)
+- **Smooth animation**: Lerp interpolation for device placement changes
+
+**Backend integration**:
+- `GET /devices` — Load device catalog on startup
+- `POST /optimize` — Send devices + constraints, receive placements
+- `POST /scene/lab` — Push lab dimensions when changed
+- `GET /scene/placements` — Poll every 1s for agent-pushed updates
+
+**Key JavaScript functions**:
+- `loadDeviceCatalog()` — Fetch device list, build catalog with color pool
+- `createDeviceMesh(deviceId, uuid)` — Create Three.js Group with body, edges, opening markers
+- `addDevice(deviceId)` / `removeDevice(uuid)` — Manage selected devices
+- `runLayout()` — Call backend `/optimize` or local bin packing fallback
+- `animatePlacement(uuid, tx, tz, theta)` — Smooth lerp to target position
+- `setView('3d' | 'top')` — Switch camera perspective
+
+### 11.3 LLM Agent Demo (`llm_skill/demo_agent.md`)
+
+LLM agent orchestration instructions for natural language lab layout design.
+
+**Agent workflow**:
+1. `GET /devices` — Fetch device catalog for context
+2. Parse user natural language request
+3. Build structured intents JSON (using `layout_intent_translator.md` skill)
+4. `POST /interpret` — Translate intents to constraints
+5. `POST /optimize` — Run layout optimization
+6. `POST /scene/placements` — Push results to shared scene state
+7. Frontend auto-updates via polling (no manual refresh needed)
+
+**Example user requests**:
+- "Design a PCR lab with robot arm automation, keep it compact"
+- "Place liquid handler, thermal cycler, and plate sealer. Arm must reach all devices."
+- "Add a plate hotel, make sure it's close to the liquid handler"
+
+### 11.4 Running the Demo
+
+```bash
+# Start the server
+uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
+
+# Open in browser
+# http://localhost:8000/
+
+# Use Claude Code with demo_agent.md skill to orchestrate via natural language
+# The agent will call the API endpoints and push results to /scene/placements
+# The frontend will automatically update via polling
+```
+
+**Demo flow**:
+1. Open `http://localhost:8000/` in browser
+2. Frontend loads device catalog and displays 3D scene
+3. Use Claude Code with `demo_agent.md` skill to send natural language requests
+4. Agent translates request → intents → constraints → optimization → scene update
+5. Frontend polls `/scene/placements` every 1s and animates changes
+6. User can manually add/remove devices or adjust lab size in the UI
+7. Click "Auto Layout" to re-optimize with current devices
+
