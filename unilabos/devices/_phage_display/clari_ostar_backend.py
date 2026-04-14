@@ -97,6 +97,7 @@ logger = logging.getLogger("pylabrobot")
   model={
     "type": "device",
     "mesh": "clari_ostar_backend",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/clari_ostar_backend/macro_device.xacro",
   },
 )
 class CLARIOstarBackend(PlateReaderBackend):

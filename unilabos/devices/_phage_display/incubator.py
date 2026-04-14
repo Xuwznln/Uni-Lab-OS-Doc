@@ -93,7 +93,11 @@ class NoFreeSiteError(Exception):
   id="incubator",
   category=["Automated Microplate Incubator Storage System"],
   description="一种用于存放并温控培养微孔板或培养板的自动化实验室培养箱，通常具有多个板位、装载托盘和可开闭门机构，可在设定温度下进行样品孵育，并支持板件取放与振荡混匀。常用于细胞培养、酶反应、样品保温和自动化流程中的板式孵育步骤。",
-  model={"type": "device", "mesh": "incubator"},
+  model={
+    "type": "device",
+    "mesh": "incubator",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/incubator/macro_device.xacro",
+  },
 )
 class Incubator(Machine, Resource):
   def __init__(

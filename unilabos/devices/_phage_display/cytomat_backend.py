@@ -120,16 +120,14 @@ logger = logging.getLogger(__name__)
   model={
     "type": "device",
     "mesh": "cytomat_backend",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytomat_backend/macro_device.xacro",
   },
 )
 class CytomatBackend(IncubatorBackend):
-  def __init__(self, *args, **kwargs):
-    print("[UNILAB] CytomatBackend.__init__() called", flush=True)
-    super().__init__(*args, **kwargs)
   default_baud = 9600
   serial_message_encoding = "utf-8"
 
-  def __init__(self, model: Union[CytomatType, str], port: str):
+  def __init__(self, model: Union[CytomatType, str] = "C2C_425", port: str = ""):
     print("[UNILAB] CytomatBackend.__init__() called", flush=True)
     super().__init__()
 
@@ -152,15 +150,18 @@ class CytomatBackend(IncubatorBackend):
     self.model = model
     self._racks: List[PlateCarrier] = []
 
-    self.io = Serial(
-      port=port,
-      baudrate=self.default_baud,
-      bytesize=serial.EIGHTBITS,
-      parity=serial.PARITY_NONE,
-      stopbits=serial.STOPBITS_ONE,
-      write_timeout=1,
-      timeout=1,
-    )
+    if port:
+      self.io = Serial(
+        port=port,
+        baudrate=self.default_baud,
+        bytesize=serial.EIGHTBITS,
+        parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE,
+        write_timeout=1,
+        timeout=1,
+      )
+    else:
+      self.io = None
 
   @action(auto_prefix=True, description="准备设备以供运行。")
   async def setup(self):

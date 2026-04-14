@@ -419,6 +419,7 @@ def _get_dispense_mode(jet: bool, empty: bool, blow_out: bool) -> Literal[0, 1, 
   model={
     "type": "device",
     "mesh": "hamilton_vantage",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/hamilton_vantage/macro_device.xacro",
   },
 )
 class VantageBackend(HamiltonLiquidHandler):

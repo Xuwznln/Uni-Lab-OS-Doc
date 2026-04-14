@@ -11,7 +11,11 @@ from unilabos.registry.decorators import action, device
     id="bd_facsmelody",
     category=["flow_cytometer", "cell_sorter"],
     description="流式细胞分析与分选仪，可执行仪器初始化、门控设置、样本事件采集、目标群体分选以及实验数据导出。",
-    model={"type": "device", "mesh": "bd_facsmelody"},
+    model={
+        "type": "device",
+        "mesh": "bd_facsmelody",
+        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/bd_facsmelody/macro_device.xacro",
+    },
 )
 class BDFACSMelodyGuessed:
     def __init__(self, device_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs):

@@ -1,0 +1,236 @@
+{
+  "attempt": 2,
+  "lab": {
+    "width": 7.85,
+    "depth": 4.85
+  },
+  "cost": 491.9577185170887,
+  "success": true,
+  "selected_layout_source": "seed_fallback",
+  "seed_feasible": true,
+  "optimizer_feasible": false,
+  "placements": [
+    {
+      "device_id": "robotic_arm.SCARA_with_slider.moveit.virtual",
+      "position": {
+        "x": 3.925,
+        "y": 2.425,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "cytiva_biacore_8k_plus",
+      "position": {
+        "x": 3.2089,
+        "y": 1.9061,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "applied_biosystems_seqstudio_genetic_analyzer",
+      "position": {
+        "x": 4.1075,
+        "y": 1.82,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 3.1416
+      }
+    },
+    {
+      "device_id": "cytiva_akta_pure",
+      "position": {
+        "x": 4.8236,
+        "y": 1.9781,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "agilent_biotek_406_fx",
+      "position": {
+        "x": 2.3715,
+        "y": 0.8292,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.5708
+      }
+    },
+    {
+      "device_id": "cytomat_backend",
+      "position": {
+        "x": 3.0605,
+        "y": 0.814,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "bd_facsmelody",
+      "position": {
+        "x": 3.794,
+        "y": 0.8675,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "molecular_devices_qpix_420",
+      "position": {
+        "x": 4.9615,
+        "y": 0.752,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "qiagen_qiacube_connect",
+      "position": {
+        "x": 3.259,
+        "y": 2.9994,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "hettich_rotanta_460_robotic",
+      "position": {
+        "x": 4.061,
+        "y": 2.9854,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "tecan_resolvex_a200",
+      "position": {
+        "x": 4.727,
+        "y": 2.9079,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "vantage_backend",
+      "position": {
+        "x": 3.48,
+        "y": 4.1319,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "device_id": "telesis_bio_bioxp_3250",
+      "position": {
+        "x": 4.69,
+        "y": 4.0269,
+        "z": 0.0
+      },
+      "rotation": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 3.1416
+      }
+    }
+  ],
+  "optimizer": {
+    "seeder": "workflow_cluster",
+    "run_de": true,
+    "maxiter": 400,
+    "popsize": 1,
+    "seed": 42,
+    "angle_granularity": 4,
+    "strategy": "currenttobest1bin",
+    "mutation": [
+      0.5,
+      1.0
+    ],
+    "recombination": 0.7,
+    "crossover_mode": "device"
+  },
+  "attempts": [
+    {
+      "attempt": 0,
+      "lab": {
+        "width": 6.85,
+        "depth": 3.85
+      },
+      "cost": Infinity,
+      "success": false,
+      "selected_layout_source": "optimized",
+      "seed_feasible": false,
+      "optimizer_feasible": false
+    },
+    {
+      "attempt": 1,
+      "lab": {
+        "width": 7.35,
+        "depth": 4.35
+      },
+      "cost": Infinity,
+      "success": false,
+      "selected_layout_source": "optimized",
+      "seed_feasible": false,
+      "optimizer_feasible": false
+    },
+    {
+      "attempt": 2,
+      "lab": {
+        "width": 7.85,
+        "depth": 4.85
+      },
+      "cost": 491.9577185170887,
+      "success": true,
+      "selected_layout_source": "seed_fallback",
+      "seed_feasible": true,
+      "optimizer_feasible": false
+    }
+  ]
+}

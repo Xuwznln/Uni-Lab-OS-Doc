@@ -91,6 +91,7 @@ from pylabrobot.serializer import deserialize
   model={
     "type": "device",
     "mesh": "centrifuge",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/centrifuge/macro_device.xacro",
   },
 )
 class Centrifuge(Machine, Resource):

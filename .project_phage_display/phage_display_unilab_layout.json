@@ -1,0 +1,691 @@
+{
+  "nodes": [
+    {
+      "uuid": "529a95a8-7192-5262-9bc5-c1761a6e103c",
+      "parent_uuid": "",
+      "id": "host_node",
+      "name": "host_node",
+      "type": "device",
+      "class": "host_node",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "874e6a13-2caf-5a18-80ae-0752f82472f9",
+      "parent_uuid": "",
+      "id": "agilent_biotek_406_fx",
+      "name": "agilent_biotek_406_fx",
+      "type": "device",
+      "class": "agilent_biotek_406_fx",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 2.3715,
+          "y": 0.8292,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 2.3715,
+          "y": 0.8292,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 1.5708
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 2.3715,
+        "y": 0.8292,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "bc57ceb5-0357-557d-aa4f-f7cea611c8e2",
+      "parent_uuid": "",
+      "id": "applied_biosystems_seqstudio_genetic_analyzer",
+      "name": "applied_biosystems_seqstudio_genetic_analyzer",
+      "type": "device",
+      "class": "applied_biosystems_seqstudio_genetic_analyzer",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 4.1075,
+          "y": 1.82,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 4.1075,
+          "y": 1.82,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 3.1416
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 4.1075,
+        "y": 1.82,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "23ffcf69-77e0-5730-b82c-2f6b0d4dde05",
+      "parent_uuid": "",
+      "id": "bd_facsmelody",
+      "name": "bd_facsmelody",
+      "type": "device",
+      "class": "bd_facsmelody",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 3.794,
+          "y": 0.8675,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 3.794,
+          "y": 0.8675,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 3.794,
+        "y": 0.8675,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "419e1ad2-ef35-5769-bbc8-ab57631c307e",
+      "parent_uuid": "",
+      "id": "cytiva_akta_pure",
+      "name": "cytiva_akta_pure",
+      "type": "device",
+      "class": "cytiva_akta_pure",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 4.8236,
+          "y": 1.9781,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 4.8236,
+          "y": 1.9781,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 4.8236,
+        "y": 1.9781,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "5c7f7588-0988-5dfe-b56e-637755cb9b04",
+      "parent_uuid": "",
+      "id": "cytiva_biacore_8k_plus",
+      "name": "cytiva_biacore_8k_plus",
+      "type": "device",
+      "class": "cytiva_biacore_8k_plus",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 3.2089,
+          "y": 1.9061,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 3.2089,
+          "y": 1.9061,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 3.2089,
+        "y": 1.9061,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "75c8e2cc-e50c-5ba2-8dd0-7c410efa0044",
+      "parent_uuid": "",
+      "id": "cytomat_backend",
+      "name": "cytomat_backend",
+      "type": "device",
+      "class": "cytomat_backend",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 3.0605,
+          "y": 0.814,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 3.0605,
+          "y": 0.814,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 3.0605,
+        "y": 0.814,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "50778aa1-a45f-5f9b-91e2-c817ce10a124",
+      "parent_uuid": "",
+      "id": "hettich_rotanta_460_robotic",
+      "name": "hettich_rotanta_460_robotic",
+      "type": "device",
+      "class": "hettich_rotanta_460_robotic",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 4.061,
+          "y": 2.9854,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 4.061,
+          "y": 2.9854,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 4.061,
+        "y": 2.9854,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "8c6482bc-7b81-563b-b785-6946d2028517",
+      "parent_uuid": "",
+      "id": "molecular_devices_qpix_420",
+      "name": "molecular_devices_qpix_420",
+      "type": "device",
+      "class": "molecular_devices_qpix_420",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 4.9615,
+          "y": 0.752,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 4.9615,
+          "y": 0.752,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 4.9615,
+        "y": 0.752,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "2c418447-78fb-5cb3-a073-fed02387e427",
+      "parent_uuid": "",
+      "id": "qiagen_qiacube_connect",
+      "name": "qiagen_qiacube_connect",
+      "type": "device",
+      "class": "qiagen_qiacube_connect",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 3.259,
+          "y": 2.9994,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 3.259,
+          "y": 2.9994,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 3.259,
+        "y": 2.9994,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "3c86a12d-f6fa-55d1-84fa-a5ac022006aa",
+      "parent_uuid": "",
+      "id": "robotic_arm.SCARA_with_slider.moveit.virtual",
+      "name": "robotic_arm.SCARA_with_slider.moveit.virtual",
+      "type": "device",
+      "class": "robotic_arm.SCARA_with_slider.moveit.virtual",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 3.925,
+          "y": 2.425,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 3.925,
+          "y": 2.425,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 3.925,
+        "y": 2.425,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "6150f49a-d0d3-548c-8f8e-3f1b186af4fd",
+      "parent_uuid": "",
+      "id": "tecan_resolvex_a200",
+      "name": "tecan_resolvex_a200",
+      "type": "device",
+      "class": "tecan_resolvex_a200",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 4.727,
+          "y": 2.9079,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 4.727,
+          "y": 2.9079,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 4.727,
+        "y": 2.9079,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "597ed674-88b0-5fde-a4b7-798c0814abbf",
+      "parent_uuid": "",
+      "id": "telesis_bio_bioxp_3250",
+      "name": "telesis_bio_bioxp_3250",
+      "type": "device",
+      "class": "telesis_bio_bioxp_3250",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 4.69,
+          "y": 4.0269,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 4.69,
+          "y": 4.0269,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 3.1416
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 4.69,
+        "y": 4.0269,
+        "z": 0.0
+      }
+    },
+    {
+      "uuid": "577e5234-9298-569f-922d-b55e2bb1f170",
+      "parent_uuid": "",
+      "id": "vantage_backend",
+      "name": "vantage_backend",
+      "type": "device",
+      "class": "vantage_backend",
+      "parent": "",
+      "pose": {
+        "layout": "x-y",
+        "position": {
+          "x": 3.48,
+          "y": 4.1319,
+          "z": 0.0
+        },
+        "position_3d": {
+          "x": 3.48,
+          "y": 4.1319,
+          "z": 0.0
+        },
+        "size": {
+          "width": 0.0,
+          "height": 0.0,
+          "depth": 0.0
+        },
+        "scale": {
+          "x": 1.0,
+          "y": 1.0,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extra": null,
+        "cross_section_type": "rectangle"
+      },
+      "config": {},
+      "data": {},
+      "schema": {},
+      "description": "",
+      "model": null,
+      "position": {
+        "x": 3.48,
+        "y": 4.1319,
+        "z": 0.0
+      }
+    }
+  ],
+  "edges": []
+}

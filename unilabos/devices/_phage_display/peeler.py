@@ -76,7 +76,11 @@ from pylabrobot.peeling.backend import PeelerBackend
   id="peeler",
   category=["Plate Desealer"],
   description="用于自动剥离微孔板顶部封膜或粘性封板膜的实验室设备，常用于样品处理和自动化工作流中，在后续移液、读板或分析前打开微孔板。",
-  model={"type": "device", "mesh": "peeler"},
+  model={
+    "type": "device",
+    "mesh": "peeler",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/peeler/macro_device.xacro",
+  },
 )
 class Peeler(Machine):
   """A microplate peeler"""

@@ -11,7 +11,11 @@ from unilabos.registry.decorators import action, device
     id="hettich_rotanta_460_robotic",
     category=["robotic_centrifuge", "refrigerated_centrifuge"],
     description="面向自动化系统的冷冻机器人离心机，具备机器人取放接口、载具装载、受控温度离心和设备状态反馈能力。",
-    model={"type": "device", "mesh": "hettich_rotanta_460_robotic"},
+    model={
+        "type": "device",
+        "mesh": "hettich_rotanta_460_robotic",
+        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/hettich_rotanta_460_robotic/macro_device.xacro",
+    },
 )
 class HettichRotanta460RoboticGuessed:
     MAX_RCF = 6446.0

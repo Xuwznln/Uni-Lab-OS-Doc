@@ -82,7 +82,11 @@ logger = logging.getLogger(__name__)
   id="plate_reader",
   category=["Microplate Reader"],
   description="用于读取微孔板中各孔的吸光度、荧光和发光信号的实验仪器，常用于生化分析、细胞实验和板式检测流程。",
-  model={"type": "device", "mesh": "plate_reader"},
+  model={
+    "type": "device",
+    "mesh": "plate_reader",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/plate_reader/macro_device.xacro",
+  },
 )
 class PlateReader(ResourceHolder, Machine):
   """The front end for plate readers. Plate readers are devices that can read luminescence,

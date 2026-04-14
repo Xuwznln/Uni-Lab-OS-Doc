@@ -11,7 +11,11 @@ from unilabos.registry.decorators import action, device
     id="molecular_devices_qpix_420",
     category=["colony_picker", "microbial_screening"],
     description="微生物菌落挑选系统，可执行培养平板成像、菌落识别与筛选、自动挑取接种以及挑菌结果导出。",
-    model={"type": "device", "mesh": "molecular_devices_qpix_420"},
+    model={
+        "type": "device",
+        "mesh": "molecular_devices_qpix_420",
+        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/molecular_devices_qpix_420/macro_device.xacro",
+    },
 )
 class MolecularDevicesQPix420Guessed:
     def __init__(self, device_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs):

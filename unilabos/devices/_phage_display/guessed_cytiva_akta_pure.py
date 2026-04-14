@@ -9,7 +9,11 @@ from unilabos.registry.decorators import device, action
     id="cytiva_akta_pure",
     category=["protein_purification_system"],
     description="自动蛋白纯化系统，可执行色谱柱平衡、样品上样、洗柱、洗脱、分段收集以及纯化结果导出等液相色谱纯化流程。",
-    model={"type": "device", "mesh": "cytiva_akta_pure"},
+    model={
+        "type": "device",
+        "mesh": "cytiva_akta_pure",
+        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytiva_akta_pure/macro_device.xacro",
+    },
 )
 class CytivaAKTAPure:
     def __init__(self, device_id=None, config=None, **kwargs):

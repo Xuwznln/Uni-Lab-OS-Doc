@@ -82,6 +82,7 @@ from pylabrobot.storage.inheco.incubator_shaker_backend import InhecoIncubatorSh
   model={
     "type": "device",
     "mesh": "incubator_shaker_stack",
+    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/incubator_shaker_stack/macro_device.xacro",
   },
 )
 class IncubatorShakerStack(Resource, Machine):
