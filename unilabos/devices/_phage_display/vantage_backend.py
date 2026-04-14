@@ -456,7 +456,7 @@ class VantageBackend(HamiltonLiquidHandler):
     )
 
     self._iswap_parked: Optional[bool] = None
-    self._num_channels: Optional[int] = None
+    self._num_channels: Optional[int] = 8
     self._traversal_height: float = 245.0
 
   @property
