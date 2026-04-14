@@ -881,6 +881,9 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
     def post_init(self, ros_node: BaseROS2DeviceNode):
         self._ros_node = ros_node
+        ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{
+            "resources": [self.deck]
+        })
 
     async def _resolve_to_plr_resources(
         self,
