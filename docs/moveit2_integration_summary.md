@@ -467,43 +467,58 @@ set_status(command_json)
 #### 2.1.9 核心方法详解：`pick_and_place`
 
 ```python
-def pick_and_place(self, command: str)
+def pick_and_place(
+    self,
+    option: str,
+    move_group: str,
+    status: str,
+    resource: Optional[str] = None,
+    x_distance: Optional[float] = None,
+    y_distance: Optional[float] = None,
+    lift_height: Optional[float] = None,
+    retry: Optional[int] = None,
+    speed: Optional[float] = None,
+    target: Optional[str] = None,
+    constraints: Optional[Sequence[float]] = None,
+) -> None:
 ```
 
 这是 `MoveitInterface` 最复杂的方法，实现了完整的抓取-放置工作流。它动态构建一个**有序函数列表** (`function_list`)，然后顺序执行。
 
-**JSON 指令格式（完整参数）：**
+**破坏性变更（注册表 / 客户端）**：`pick_and_place` 在注册表中由 **SendCmd**（单字段 `command` JSON 字符串）改为 **UniLabJsonCommand**，goal 为与上表同名的**结构化字段**。云端与其它调用方需按 schema 提交 goal，而不再把整段 JSON 塞进 `command`。
+
+**动作 goal 示例（字段与旧版 JSON 一致，现为结构化 goal）：**
 
 ```json
 {
-    "option": "pick",                         // *必须: pick/place/side_pick/side_place
-    "move_group": "arm",                      // *必须: MoveIt2 规划组名
-    "status": "pick_station_A",               // *必须: 在 joint_poses 中的目标状态名
-    "resource": "beaker_1",                   //  要操作的资源名称
-    "target": "custom_link",                  //  pick 时资源附着的目标 link (默认末端执行器)
-    "lift_height": 0.05,                      //  抬升高度 (米)
-    "x_distance": 0.1,                        //  X 方向水平移动距离 (米)
-    "y_distance": 0.0,                        //  Y 方向水平移动距离 (米)
-    "speed": 0.5,                             //  运动速度因子 (0.1~1.0)
-    "retry": 10,                              //  规划失败重试次数
-    "constraints": [0, 0, 0, 0.5, 0, 0]       //  各关节约束容差 (>0 时生效)
+    "option": "pick",
+    "move_group": "arm",
+    "status": "pick_station_A",
+    "resource": "beaker_1",
+    "target": "custom_link",
+    "lift_height": 0.05,
+    "x_distance": 0.1,
+    "y_distance": 0.0,
+    "speed": 0.5,
+    "retry": 10,
+    "constraints": [0, 0, 0, 0.5, 0, 0]
 }
 ```
 
-##### 阶段 1：指令解析与动作类型判定
+##### 阶段 1：参数与动作类型判定
 
 ```
-pick_and_place(command_json)
+pick_and_place(option, move_group, status, ...)
     │
-    ├── JSON 解析
+    ├── 校验 option ∈ move_option，否则直接 return
     ├── 动作类型判定:
     │   move_option = ["pick", "place", "side_pick", "side_place"]
     │                    0        1         2            3
-    │   option_index = move_option.index(cmd["option"])
+    │   option_index = move_option.index(option)
     │   place_flag   = option_index % 2    ← 0=pick类, 1=place类
     │
     ├── 提取运动参数:
-    │   config = {speed, retry, move_group}  ← 从 cmd_dict 中按需提取
+    │   config = { move_group }；若 speed/retry 非 None 则写入 config
     │
     └── 获取目标关节位姿:
         joint_positions_ = joint_poses[move_group][status]
@@ -515,7 +530,7 @@ pick_and_place(command_json)
 根据 place_flag 决定资源 TF 操作:
 
     if pick 类 (place_flag == 0):
-        if "target" 已指定:
+        if target is not None:
             function_list += [resource_manager(resource, target)]       ← 挂到自定义 link
         else:
             function_list += [resource_manager(resource, end_effector)] ← 挂到末端执行器
@@ -527,7 +542,7 @@ pick_and_place(command_json)
 ##### 阶段 3：构建关节约束
 
 ```
-if "constraints" 存在于指令中:
+if constraints is not None:
     for i, tolerance in enumerate(constraints):
         if tolerance > 0:
             JointConstraint(
@@ -546,7 +561,7 @@ if "constraints" 存在于指令中:
 这是最复杂的场景，涉及 FK/IK 计算和多段运动拼接：
 
 ```
-if "lift_height" 存在:
+if lift_height is not None:
     │
     ├── Step 1: FK 计算 → 获取目标关节配置对应的末端位姿
     │   retval = compute_fk(joint_positions_)   ← 可能需要重试
@@ -562,12 +577,12 @@ if "lift_height" 存在:
     │   function_list += [moveit_task(position=pose_lifted, ...)]
     │
     ├── Step 4 (可选): 水平移动
-    │   if "x_distance":
+    │   if x_distance is not None:
     │       deep_pose = copy(pose_lifted)
     │       deep_pose[0] += x_distance
     │       function_list = [moveit_task(pose_lifted)] + function_list
     │       function_list += [moveit_task(deep_pose)]
-    │   elif "y_distance":
+    │   elif y_distance is not None:
     │       类似处理 Y 方向
     │
     ├── Step 5: IK 预计算 → 将末端位姿转换为安全的关节配置
@@ -585,7 +600,7 @@ if "lift_height" 存在:
 ##### 阶段 4B：无 `lift_height` 的简单流程
 
 ```
-else (无 lift_height):
+else (lift_height is None):
     │
     └── 直接关节运动到目标位姿
         function_list = [moveit_joint_task(joint_positions_)] + function_list
@@ -600,10 +615,10 @@ for i, func in enumerate(function_list):
     │   i == 0: cartesian_flag = False    ← 第一步用自由空间规划（大范围移动）
     │   i >  0: cartesian_flag = True     ← 后续用笛卡尔直线规划（精确控制）
     │
-    ├── result = func()                   ← 执行动作
+    ├── re = func()                       ← 执行动作
     │
-    └── if not result:
-        return failure                    ← 任一步骤失败即中止
+    └── if not re:
+        return（无返回值，不构造 SendCmd.Result）← 任一步骤失败即中止
 ```
 
 ##### 完整 pick 流程示例（含 lift_height + x_distance）
@@ -657,10 +672,10 @@ for i, func in enumerate(function_list):
 | `.move_to_pose(...)` | `moveit_task` L129-137 | 笛卡尔空间运动规划与执行 |
 | `.wait_until_executed()` | `moveit_task` L138, `moveit_joint_task` L157 | 阻塞等待运动完成 |
 | `.move_to_configuration(...)` | `moveit_joint_task` L156 | 关节空间运动规划与执行 |
-| `.compute_fk(...)` | `pick_and_place` L244, `moveit_joint_task` L160 | 正运动学：关节角 → 末端位姿 |
-| `.compute_ik(...)` | `pick_and_place` L298-300 | 逆运动学：末端位姿 → 关节角（含约束） |
-| `.end_effector_name` | `pick_and_place` L218 | 获取末端执行器 link 名 |
-| `.joint_names` | `pick_and_place` L232, L308, L313 | 获取关节名列表 |
+| `.compute_fk(...)` | `pick_and_place`, `moveit_joint_task` | 正运动学：关节角 → 末端位姿 |
+| `.compute_ik(...)` | `pick_and_place` | 逆运动学：末端位姿 → 关节角（含约束） |
+| `.end_effector_name` | `pick_and_place` | 获取末端执行器 link 名 |
+| `.joint_names` | `pick_and_place` | 获取关节名列表 |
 
 ---
 
@@ -668,11 +683,11 @@ for i, func in enumerate(function_list):
 
 | 场景 | 处理方式 |
 |------|---------|
-| FK 计算失败 | 最多重试 `retry` 次（每次间隔 0.1s），超时返回 `result.success = False` |
+| FK 计算失败 | 最多重试 `retry` 次（每次间隔 0.1s），超时则提前 `return`（无返回值） |
 | IK 计算失败 | 同上 |
 | 运动规划失败 | 在 `moveit_task` / `moveit_joint_task` 中最多重试 `retry+1` 次 |
-| 动作序列中任一步失败 | `pick_and_place` 立即中止并返回 `result.success = False` |
-| 未知异常 | `pick_and_place` 和 `set_status` 捕获 Exception，重置 `cartesian_flag`，返回失败 |
+| 动作序列中任一步失败 | `pick_and_place` 立即中止并 `return`（不返回 `SendCmd.Result`） |
+| 未知异常 | `pick_and_place` 捕获 Exception，打印并重置 `cartesian_flag`（`set_status` 仍返回 SendCmd.Result） |
 
 ---
 
@@ -702,7 +717,8 @@ for i, func in enumerate(function_list):
 ```
 外部系统 (base_device_node)
     │
-    │  JSON 指令字符串
+    │  set_position/set_status: JSON 指令字符串（SendCmd.command）
+    │  pick_and_place: UniLabJsonCommand 结构化 goal → Python 关键字参数
     ▼
 ┌── MoveitInterface ──────────────────────────────────────────────────┐
 │                                                                     │
@@ -710,7 +726,7 @@ for i, func in enumerate(function_list):
 │                                                                     │
 │  set_status(cmd) ──→ moveit_joint_task() ──→ MoveIt2.move_to_config│
 │                                                                     │
-│  pick_and_place(cmd)                                                │
+│  pick_and_place(option, move_group, status, ...)                    │
 │    │                                                                │
 │    ├─ MoveIt2.compute_fk() ─── /compute_fk service ──→ move_group  │
 │    ├─ MoveIt2.compute_ik() ─── /compute_ik service ──→ move_group  │
@@ -963,7 +979,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
     module: unilabos.devices.ros_dev.moveit_interface:MoveitInterface
     type: python
     action_value_mappings:
-      pick_and_place: ...    # SendCmd Action（JSON 指令）
+      pick_and_place: ...    # UniLabJsonCommand（结构化 goal，与 Python 签名一致）
       set_position: ...      # SendCmd Action
       set_status: ...        # SendCmd Action
       auto-moveit_task: ...  # 自动发现的方法（UniLabJsonCommand）

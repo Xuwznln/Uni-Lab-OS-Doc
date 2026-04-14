@@ -1196,6 +1196,27 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             none_keys=none_keys,
         )
 
+    @staticmethod
+    def _tip_rack_is_10ul_range(rack: TipRack) -> bool:
+        """判断 tip 盒是否为 10µL 量程（对应右头）；优先用孔位上 prototype tip 的 maximal_volume。"""
+        children = getattr(rack, "children", None) or []
+        if children:
+            spot = children[0]
+            tr = getattr(spot, "tracker", None)
+            tip = None
+            if tr is not None:
+                tip = getattr(tr, "_tip", None) or getattr(tr, "tip", None)
+            if tip is None:
+                tip = getattr(spot, "tip", None)
+            mv = getattr(tip, "maximal_volume", None) if tip is not None else None
+            if mv is not None:
+                try:
+                    return float(mv) <= 10.0
+                except (TypeError, ValueError):
+                    pass
+        ident = f"{getattr(rack, 'model', '') or ''} {type(rack).__name__}".lower()
+        return "10ul" in ident
+
     async def transfer_liquid(
         self,
         sources: Sequence[Container],
@@ -1230,19 +1251,20 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
         _asp_list = asp_vols if isinstance(asp_vols, list) else [asp_vols]
         _dis_list = dis_vols if isinstance(dis_vols, list) else [dis_vols]
-        if all(v <= 10.0 for v in _asp_list) and all(v <= 10.0 for v in _dis_list):
-            use_channels = [1]
-            mix_vol = max(min(mix_vol,10),0) if mix_vol is not None else None
         sources = await self._resolve_to_plr_resources(sources)
         targets = await self._resolve_to_plr_resources(targets)
         tip_racks = list(await self._resolve_to_plr_resources(tip_racks))
-        change_slots = []
-        change_slots.append(sources[0].parent)
-        change_slots.append(targets[0].parent)
         if isinstance(tip_racks[0], TipRack):
             tip_rack = tip_racks[0]
         else:
             tip_rack = tip_racks[0].parent
+        small_vols = all(v <= 10.0 for v in _asp_list) and all(v <= 10.0 for v in _dis_list)
+        if small_vols and self._tip_rack_is_10ul_range(tip_rack):
+            use_channels = [1]
+            mix_vol = max(min(mix_vol, 10), 0) if mix_vol is not None else None
+        change_slots = []
+        change_slots.append(sources[0].parent)
+        change_slots.append(targets[0].parent)
 
         change_slots.append(tip_rack)
         
