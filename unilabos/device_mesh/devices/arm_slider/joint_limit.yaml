@@ -4,7 +4,7 @@ joint_limits:
     effort: 50
     velocity: 1.0
     lower: 0
-    upper: 1.5
+    upper: 4.8
 
   arm_link_1_joint:
     effort: 50
