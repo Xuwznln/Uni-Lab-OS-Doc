@@ -306,17 +306,51 @@ class VirtualWorkbench:
             ActionInputHandle(key="mount_resource", data_type="resource",
                               label="目标孔位", data_key="mount_resource", data_source=DataSource.HANDLE),
 
+            ActionInputHandle(key="collector_mass", data_type="collector_mass",
+                              label="极流体质量", data_key="collector_mass", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="active_material", data_type="active_material",
+                              label="活性物质含量", data_key="active_material", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="capacity", data_type="capacity",
+                              label="克容量", data_key="capacity", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="battery_system", data_type="battery_system",
+                              label="电池体系", data_key="battery_system", data_source=DataSource.HANDLE),
+            # transfer使用
             ActionOutputHandle(key="target_device", data_type="device_id",
                                label="目标设备", data_key="target_device", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="resource", data_type="resource",
                               label="待转移资源", data_key="resource.@flatten", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="mount_resource", data_type="resource",
                               label="目标孔位", data_key="mount_resource.@flatten", data_source=DataSource.EXECUTOR),
+            # test使用
+            ActionOutputHandle(key="collector_mass", data_type="collector_mass",
+                              label="极流体质量", data_key="collector_mass", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="active_material", data_type="active_material",
+                              label="活性物质含量", data_key="active_material", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="capacity", data_type="capacity",
+                              label="克容量", data_key="capacity", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="battery_system", data_type="battery_system",
+                              label="电池体系", data_key="battery_system", data_source=DataSource.EXECUTOR),
         ]
     )
-    def manual_confirm(self, resource: List[ResourceSlot], target_device: DeviceSlot, mount_resource: List[ResourceSlot], timeout_seconds: int, assignee_user_ids: list[str], **kwargs) -> dict:
+    def manual_confirm(
+        self,
+        resource: List[ResourceSlot],
+        target_device: DeviceSlot,
+        mount_resource: List[ResourceSlot],
+        collector_mass: List[float],
+        active_material: List[float],
+        capacity: List[float],
+        battery_system: List[str],
+        timeout_seconds: int,
+        assignee_user_ids: list[str],
+        **kwargs
+    ) -> dict:
         """
         timeout_seconds: 超时时间（秒），默认3600秒
+        collector_mass: 极流体质量
+        active_material: 活性物质含量
+        capacity: 克容量（mAh/g）
+        battery_system: 电池体系
         修改的结果无效，是只读的
         """
         resource = ResourceTreeSet.from_plr_resources(resource).dump()
@@ -347,6 +381,35 @@ class VirtualWorkbench:
             })
         result = await future
         return result
+
+
+    @action(
+        description="扣电测试启动",
+        handles=[
+            ActionInputHandle(key="resource", data_type="resource",
+                              label="待转移资源", data_key="resource", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="mount_resource", data_type="resource",
+                              label="目标孔位", data_key="mount_resource", data_source=DataSource.HANDLE),
+
+            ActionInputHandle(key="collector_mass", data_type="collector_mass",
+                              label="极流体质量", data_key="collector_mass", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="active_material", data_type="active_material",
+                              label="活性物质含量", data_key="active_material", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="capacity", data_type="capacity",
+                              label="克容量", data_key="capacity", data_source=DataSource.HANDLE),
+            ActionInputHandle(key="battery_system", data_type="battery_system",
+                              label="电池体系", data_key="battery_system", data_source=DataSource.HANDLE),
+        ]
+    )
+    async def test(
+        self, resource: List[ResourceSlot], mount_resource: List[ResourceSlot],  collector_mass: List[float], active_material: List[float], capacity: List[float], battery_system: list[str]
+    ):
+        print(resource)
+        print(mount_resource)
+        print(collector_mass)
+        print(active_material)
+        print(capacity)
+        print(battery_system)
 
     @action(
         auto_prefix=True,
