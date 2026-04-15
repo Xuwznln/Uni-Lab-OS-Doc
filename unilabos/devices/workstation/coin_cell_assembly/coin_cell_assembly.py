@@ -1661,7 +1661,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                     'Time', 'open_circuit_voltage', 'pole_weight', 
                     'assembly_time', 'assembly_pressure', 'electrolyte_volume', 
                     'coin_num', 'electrolyte_code', 'coin_cell_code',
-                    'formulation_order_code', 'formulation_ratio'  # ← 新增配方列
+                    'orderName', 'prep_bottle_barcode', 'vial_bottle_barcodes',
+                    'target_mass_ratio', 'real_mass_ratio'
                 ])
                 #立刻写入磁盘
                 csvfile.flush()
@@ -1670,8 +1671,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             writer = csv.writer(csvfile)
             
             # ========== 提取配方信息 ==========
-            formulation_order_code = ""
-            formulation_ratio_str = ""
+            formulation_order_name = ""
+            prep_bottle_barcode = ""
+            vial_bottle_barcodes = ""
+            target_ratio_str = ""
+            real_ratio_str = ""
             
             # 从 self._formulations_list 获取配方信息
             if hasattr(self, '_formulations_list') and self._formulations_list:
@@ -1699,19 +1703,21 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                 # 从配方列表中获取对应配方
                 if 0 <= current_bottle_index < len(self._formulations_list):
                     formulation = self._formulations_list[current_bottle_index]
-                    formulation_order_code = formulation.get("orderCode", "")
-                    # ✅ 优先使用实际质量比（real_mass_ratio），如果不存在则使用目标质量比
+                    formulation_order_name = formulation.get("orderName", "")
+                    prep_bottle_barcode = formulation.get("prep_bottle_barcode", "")
+                    vial_bottle_barcodes = formulation.get("vial_bottle_barcodes", "")
+                    
                     real_ratio = formulation.get("real_mass_ratio", {})
                     target_ratio = formulation.get("target_mass_ratio", {})
-                    mass_ratio = real_ratio if real_ratio else target_ratio
                     
                     # 将配方比例转为JSON字符串
                     import json
-                    formulation_ratio_str = json.dumps(mass_ratio, ensure_ascii=False) if mass_ratio else ""
+                    target_ratio_str = json.dumps(target_ratio, ensure_ascii=False) if target_ratio else ""
+                    real_ratio_str = json.dumps(real_ratio, ensure_ascii=False) if real_ratio else ""
                     
                     logger.info(
                         f"[CSV写入] 电池 {data_battery_number}: 使用配方[{current_bottle_index}] "
-                        f"orderCode={formulation_order_code}, 比例={formulation_ratio_str}"
+                        f"orderName={formulation_order_name}, 配液瓶={prep_bottle_barcode}, 分液瓶={vial_bottle_barcodes}"
                     )
                 else:
                     logger.warning(
@@ -1725,7 +1731,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                 timestamp, data_open_circuit_voltage, data_pole_weight,
                 data_assembly_time, data_assembly_pressure, data_electrolyte_volume,
                 data_coin_type, data_electrolyte_code, data_coin_cell_code,
-                formulation_order_code, formulation_ratio_str  # ← 新增配方数据
+                formulation_order_name, prep_bottle_barcode, vial_bottle_barcodes,
+                target_ratio_str, real_ratio_str
             ])
             #立刻写入磁盘
             csvfile.flush()

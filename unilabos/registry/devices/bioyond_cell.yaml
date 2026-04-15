@@ -152,6 +152,7 @@ bioyond_cell:
         goal: {}
         goal_default:
           xlsx_path: null
+          csv_export_path: ''
         handles:
           output:
           - data_key: total_orders
@@ -179,6 +180,10 @@ bioyond_cell:
               properties:
                 xlsx_path:
                   type: string
+                csv_export_path:
+                  default: ''
+                  description: CSV导出目录路径，为空则不导出
+                  type: string
               required:
               - xlsx_path
               type: object
@@ -194,6 +199,7 @@ bioyond_cell:
         goal: {}
         goal_default:
           batch_id: ''
+          order_names: []
           bottle_type: 配液小瓶
           conductivity_bottle_count: 0
           conductivity_volume: 0.0
@@ -201,6 +207,7 @@ bioyond_cell:
           coin_cell_volume: 0.0
           mix_time: []
           pouch_cell_volume: 0.0
+          csv_export_path: ''
         handles:
           output:
           - data_key: total_orders
@@ -231,6 +238,12 @@ bioyond_cell:
                   default: ''
                   description: 批次ID，为空则自动生成时间戳
                   type: string
+                order_names:
+                  default: []
+                  description: 配方ID/订单编号列表，与formulation一一对应，用于填写DoE撒点编号等自定义标识，便于后续追溯。未填则自动生成。
+                  items:
+                    type: string
+                  type: array
                 bottle_type:
                   default: 配液小瓶
                   description: 配液瓶类型
@@ -283,6 +296,10 @@ bioyond_cell:
                   default: 0.0
                   description: 软包电池注液组装分液体积
                   type: number
+                csv_export_path:
+                  default: ''
+                  description: CSV导出目录路径，为空则不导出
+                  type: string
               required:
               - formulation
               type: object

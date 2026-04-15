@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import re
 import threading
 import json
+import csv
+import os
 from copy import deepcopy
 from urllib3 import response
 from unilabos.devices.workstation.bioyond_studio.station import BioyondWorkstation, BioyondResourceSynchronizer
@@ -803,6 +805,49 @@ class BioyondCellWorkstation(BioyondWorkstation):
             f"(对应 {len(processed_material_ids)} 个物理瓶板)"
         )
 
+        # ========== 提取配液瓶 + 分液瓶信息（用于 CSV 导出）==========
+        all_prep_bottles = []
+        all_vial_bottles = []
+        for report in all_reports:
+            # 提取配液瓶（每个订单最多一个）
+            try:
+                prep_info = self._extract_prep_bottle_from_report(report)
+                all_prep_bottles.append(prep_info)
+            except Exception as e:
+                logger.error(f"[提取配液瓶] 异常: orderCode={report.get('orderCode')}, 错误={e}")
+                all_prep_bottles.append(None)
+
+            # 提取分液瓶（每个订单可能多个）
+            try:
+                vial_list = self._extract_vial_bottles_from_report(report)
+                all_vial_bottles.append(vial_list)
+            except Exception as e:
+                logger.error(f"[提取分液瓶] 异常: orderCode={report.get('orderCode')}, 错误={e}")
+                all_vial_bottles.append([])
+
+        logger.info(
+            f"[{tag}] 配液瓶提取完成: {sum(1 for p in all_prep_bottles if p)} 个, "
+            f"分液瓶提取完成: {sum(len(v) for v in all_vial_bottles if isinstance(v, list))} 个"
+        )
+
+        # ========== 将条码附加到 mass_ratios 中（给扣电组装站使用）==========
+        for idx in range(len(all_mass_ratios)):
+            if idx < len(all_prep_bottles) and all_prep_bottles[idx]:
+                all_mass_ratios[idx]["prep_bottle_barcode"] = all_prep_bottles[idx].get("barCode", "")
+            else:
+                all_mass_ratios[idx]["prep_bottle_barcode"] = ""
+                
+            if idx < len(all_vial_bottles):
+                vials = all_vial_bottles[idx]
+                if len(vials) == 0:
+                    all_mass_ratios[idx]["vial_bottle_barcodes"] = ""
+                elif len(vials) == 1:
+                    all_mass_ratios[idx]["vial_bottle_barcodes"] = vials[0].get("barCode", "")
+                else:
+                    all_mass_ratios[idx]["vial_bottle_barcodes"] = json.dumps([v.get("barCode", "") for v in vials], ensure_ascii=False)
+            else:
+                all_mass_ratios[idx]["vial_bottle_barcodes"] = ""
+
         # ========== 构造最终结果 ==========
         final_result = {
             "status": "all_completed",
@@ -811,6 +856,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "reports": all_reports,
             "mass_ratios": all_mass_ratios,
             "vial_plates": all_vial_plates,
+            "prep_bottles": all_prep_bottles,
+            "vial_bottles": all_vial_bottles,
             "original_response": response,
         }
 
@@ -828,7 +875,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         return final_result
 
     # -------------------- 2.14 新建实验（Excel 入口） --------------------
-    def create_orders(self, xlsx_path: str) -> Dict[str, Any]:
+    def create_orders(self, xlsx_path: str, csv_export_path: str = "") -> Dict[str, Any]:
         """
         从 Excel 解析并创建实验（2.14）- V2版本
         约定：
@@ -972,18 +1019,30 @@ class BioyondCellWorkstation(BioyondWorkstation):
             logger.error("[create_orders] 没有有效的订单可提交")
             return {"status": "error", "message": "没有有效订单数据"}
 
-        return self._submit_and_wait_orders(orders, tag="create_orders")
+        result = self._submit_and_wait_orders(orders, tag="create_orders")
+
+        # ========== CSV 导出 ==========
+        if csv_export_path:
+            try:
+                csv_file = self._export_order_csv(result, csv_export_path)
+                result["csv_file"] = csv_file
+            except Exception as e:
+                logger.error(f"[create_orders] CSV 导出失败: {e}")
+
+        return result
     
     def create_orders_formulation(
         self,
         formulation: List[Dict[str, Any]],
         batch_id: str = "",
+        order_names: List[str] = [],
         bottle_type: str = "配液小瓶",
         mix_time: List[int] = [],
         coin_cell_volume: float = 0.0,
         pouch_cell_volume: float = 0.0,
         conductivity_volume: float = 0.0,
         conductivity_bottle_count: int = 0,
+        csv_export_path: str = "",
     ) -> Dict[str, Any]:
         """
         配方批量输入版本的 create_orders —— 等价于 create_orders，
@@ -1002,6 +1061,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     ...
                 ]
             batch_id: 批次ID，若为空则用当前时间戳
+            order_names: 配方ID/订单编号列表，与 formulation 一一对应。
+                用于填写 DoE 撒点编号等自定义标识，便于后续扣电组装、测试环节追溯。
+                优先级：order_names > formulation 内的 order_name > 自动生成({batch_id}_order_{序号})
             bottle_type: 配液瓶类型，默认 "配液小瓶"
             mix_time: 混匀时间列表(秒)，与 formulation 一一对应，不足则补 0
             coin_cell_volume: 纽扣电池组装分液体积
@@ -1024,7 +1086,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
         orders: List[Dict[str, Any]] = []
         for idx, item in enumerate(formulation):
             materials = item.get("materials", []) + item.get("liquids", [])  # 兼容两种物料列表命名
-            order_name = item.get("order_name", f"{batch_id}_order_{idx + 1}")
+            if idx < len(order_names) and order_names[idx]:
+                order_name = order_names[idx]
+            else:
+                order_name = item.get("order_name", f"{batch_id}_order_{idx + 1}")
 
             mats: List[Dict[str, Any]] = []
             total_mass = 0.0
@@ -1067,7 +1132,17 @@ class BioyondCellWorkstation(BioyondWorkstation):
             logger.error("[create_orders_formulation] 没有有效的订单可提交")
             return {"status": "error", "message": "没有有效配方数据"}
 
-        return self._submit_and_wait_orders(orders, tag="create_orders_formulation")
+        result = self._submit_and_wait_orders(orders, tag="create_orders_formulation")
+
+        # ========== CSV 导出 ==========
+        if csv_export_path:
+            try:
+                csv_file = self._export_order_csv(result, csv_export_path)
+                result["csv_file"] = csv_file
+            except Exception as e:
+                logger.error(f"[create_orders_formulation] CSV 导出失败: {e}")
+
+        return result
 
     def _extract_vial_plate_from_report(self, report: Dict) -> Optional[Dict]:
         """
@@ -1154,7 +1229,312 @@ class BioyondCellWorkstation(BioyondWorkstation):
         
         logger.warning(f"[提取分液瓶板] ❌ 未找到分液瓶板: orderCode={order_code}")
         return None
-    
+
+    def _extract_prep_bottle_from_report(self, report: Dict) -> Optional[Dict]:
+        """
+        从 order_finish 报文中提取配液瓶信息
+
+        筛选条件：
+        - typemode == "1" 且 realQuantity == 1 且 usedQuantity == 1
+        - locationId 以 "3a19deae-2c7a-" 开头（手动传递窗右或手动传递窗左）
+        二次确认：
+        - 调用 LIMS API 2.4，typeName 包含 "配液瓶(小)" 或 "配液瓶(大)"
+
+        Args:
+            report: LIMS order_finish 报文
+
+        Returns:
+            {
+                "materialId": "...",
+                "locationId": "...",
+                "orderCode": "...",
+                "typeName": "配液瓶(小)" or "配液瓶(大)",
+                "barCode": "..."
+            }
+            未找到时返回 None
+        """
+        order_code = report.get("orderCode", "N/A")
+        used_materials = report.get("usedMaterials", [])
+
+        logger.info(
+            f"[提取配液瓶] 开始处理订单 orderCode={order_code}, "
+            f"物料数量={len(used_materials)}"
+        )
+
+        # 手动传递窗右/左的 locationId 前缀
+        MANUAL_WINDOW_PREFIX = "3a19deae-2c7a-"
+
+        for idx, material in enumerate(used_materials):
+            location_id = material.get("locationId", "")
+            typemode = material.get("typemode", "")
+            material_id = material.get("materialId", "")
+            real_qty = material.get("realQuantity")
+            used_qty = material.get("usedQuantity")
+
+            # 筛选条件：typemode=1, realQuantity=1, usedQuantity=1, 手动传递窗位置
+            if (
+                typemode == "1"
+                and real_qty == 1
+                and used_qty == 1
+                and location_id
+                and location_id.startswith(MANUAL_WINDOW_PREFIX)
+            ):
+                logger.debug(
+                    f"[提取配液瓶] 候选物料 #{idx+1}: materialId={material_id[:20]}..."
+                )
+
+                # 调用 LIMS API 2.4 确认类型
+                try:
+                    material_info = self._query_material_info(material_id)
+                    type_name = material_info.get("typeName", "")
+
+                    if "配液瓶(小)" in type_name or "配液瓶(大)" in type_name:
+                        logger.info(
+                            f"[提取配液瓶] ✅ 确认为配液瓶: orderCode={order_code}, "
+                            f"typeName={type_name}, barCode={material_info.get('barCode')}"
+                        )
+                        return {
+                            "materialId": material_id,
+                            "locationId": location_id,
+                            "orderCode": order_code,
+                            "typeName": type_name,
+                            "barCode": material_info.get("barCode"),
+                        }
+                    else:
+                        logger.debug(
+                            f"[提取配液瓶] 候选物料不是配液瓶: typeName={type_name}, 跳过"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[提取配液瓶] ⚠️ 查询物料详情失败: materialId={material_id}, 错误={e}"
+                    )
+
+        logger.warning(f"[提取配液瓶] ❌ 未找到配液瓶: orderCode={order_code}")
+        return None
+
+    def _extract_vial_bottles_from_report(self, report: Dict) -> List[Dict]:
+        """
+        从 order_finish 报文中提取分液瓶信息（注意不是分液瓶板）
+
+        一个 orderCode 可能对应多个分液瓶：
+        - 1 × 5ml分液瓶
+        - n × 20ml分液瓶 (n=1~4)
+        - 1 × 5ml分液瓶 + n × 20ml分液瓶 (n=1~4)
+
+        筛选条件：
+        - typemode == "1" 且 realQuantity == 1 且 usedQuantity == 1
+        - locationId 以 "3a19debc-84b5-" 或 "3a19debe-5200" 开头
+          （自动堆栈-左 或 自动堆栈-右）
+        二次确认：
+        - typeName 为 "5ml分液瓶" 或 "20ml分液瓶"
+
+        Args:
+            report: LIMS order_finish 报文
+
+        Returns:
+            分液瓶信息列表，每个元素：
+            {
+                "materialId": "...",
+                "locationId": "...",
+                "orderCode": "...",
+                "typeName": "5ml分液瓶" or "20ml分液瓶",
+                "barCode": "..."
+            }
+        """
+        order_code = report.get("orderCode", "N/A")
+        used_materials = report.get("usedMaterials", [])
+
+        logger.info(
+            f"[提取分液瓶] 开始处理订单 orderCode={order_code}, "
+            f"物料数量={len(used_materials)}"
+        )
+
+        # 自动堆栈-左 和 自动堆栈-右 的 locationId 前缀
+        AUTO_STACK_PREFIXES = ("3a19debc-84b5-", "3a19debe-5200")
+
+        vial_bottles: List[Dict] = []
+
+        for idx, material in enumerate(used_materials):
+            location_id = material.get("locationId", "")
+            typemode = material.get("typemode", "")
+            material_id = material.get("materialId", "")
+            real_qty = material.get("realQuantity")
+            used_qty = material.get("usedQuantity")
+
+            # 筛选条件
+            if (
+                typemode == "1"
+                and real_qty == 1
+                and used_qty == 1
+                and location_id
+                and any(location_id.startswith(p) for p in AUTO_STACK_PREFIXES)
+            ):
+                logger.debug(
+                    f"[提取分液瓶] 候选物料 #{idx+1}: materialId={material_id[:20]}..."
+                )
+
+                # 调用 LIMS API 2.4 确认类型
+                try:
+                    material_info = self._query_material_info(material_id)
+                    type_name = material_info.get("typeName", "")
+
+                    if type_name in ("5ml分液瓶", "20ml分液瓶"):
+                        bar_code = material_info.get("barCode")
+                        logger.info(
+                            f"[提取分液瓶] ✅ 确认为分液瓶: orderCode={order_code}, "
+                            f"typeName={type_name}, barCode={bar_code}"
+                        )
+                        vial_bottles.append({
+                            "materialId": material_id,
+                            "locationId": location_id,
+                            "orderCode": order_code,
+                            "typeName": type_name,
+                            "barCode": bar_code,
+                        })
+                    else:
+                        logger.debug(
+                            f"[提取分液瓶] 候选物料不是分液瓶: typeName={type_name}, 跳过"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[提取分液瓶] ⚠️ 查询物料详情失败: materialId={material_id}, 错误={e}"
+                    )
+
+        if vial_bottles:
+            logger.info(
+                f"[提取分液瓶] 订单 {order_code} 共找到 {len(vial_bottles)} 个分液瓶: "
+                f"{[v['typeName'] for v in vial_bottles]}"
+            )
+        else:
+            logger.warning(f"[提取分液瓶] ❌ 未找到分液瓶: orderCode={order_code}")
+
+        return vial_bottles
+
+    def _export_order_csv(self, final_result: Dict, csv_export_path: str) -> str:
+        """
+        将配液分液结果导出为 CSV 文件
+
+        CSV 表头:
+        orderCode, orderName, 配液瓶类型, 配液瓶二维码, 分液瓶类型, 分液瓶二维码,
+        目标配液质量比, 真实配液质量比, 时间
+
+        Args:
+            final_result: _submit_and_wait_orders 返回的完整结果
+            csv_export_path: CSV 文件保存目录路径
+
+        Returns:
+            生成的 CSV 文件完整路径
+        """
+        # 确保目录存在
+        os.makedirs(csv_export_path, exist_ok=True)
+
+        # 生成文件名
+        time_date = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_file = os.path.join(csv_export_path, f"electrolyte_orders_{time_date}.csv")
+
+        # 从 final_result 提取数据
+        reports = final_result.get("reports", [])
+        mass_ratios = final_result.get("mass_ratios", [])
+        prep_bottles = final_result.get("prep_bottles", [])
+        vial_bottles_all = final_result.get("vial_bottles", [])
+
+        # 建立 orderCode → mass_ratio 的索引
+        ratio_map = {}
+        for ratio_item in mass_ratios:
+            oc = ratio_item.get("orderCode")
+            if oc:
+                ratio_map[oc] = ratio_item
+
+        # 建立 orderCode → prep_bottle 的索引
+        prep_map = {}
+        for pb in prep_bottles:
+            if pb:
+                oc = pb.get("orderCode")
+                if oc:
+                    prep_map[oc] = pb
+
+        # 建立 orderCode → vial_bottles 的索引
+        vial_map: Dict[str, List[Dict]] = {}
+        for vb_list in vial_bottles_all:
+            if isinstance(vb_list, list):
+                for vb in vb_list:
+                    oc = vb.get("orderCode")
+                    if oc:
+                        vial_map.setdefault(oc, []).append(vb)
+            elif isinstance(vb_list, dict):
+                oc = vb_list.get("orderCode")
+                if oc:
+                    vial_map.setdefault(oc, []).append(vb_list)
+
+        export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        logger.info(f"[CSV导出] 开始导出, 订单数={len(reports)}, 路径={csv_file}")
+
+        with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            # 写表头
+            writer.writerow([
+                "orderCode", "orderName",
+                "配液瓶类型", "配液瓶二维码",
+                "分液瓶类型", "分液瓶二维码",
+                "目标配液质量比", "真实配液质量比",
+                "时间",
+            ])
+
+            for report in reports:
+                order_code = report.get("orderCode", "N/A")
+                order_name = report.get("orderName", "N/A")
+
+                # 配液瓶信息
+                prep_info = prep_map.get(order_code, {})
+                prep_type = prep_info.get("typeName", "")
+                prep_barcode = prep_info.get("barCode", "")
+
+                # 分液瓶信息（可能多个）
+                vial_list = vial_map.get(order_code, [])
+                if len(vial_list) == 0:
+                    vial_type_str = ""
+                    vial_barcode_str = ""
+                elif len(vial_list) == 1:
+                    vial_type_str = vial_list[0].get("typeName", "")
+                    vial_barcode_str = vial_list[0].get("barCode", "")
+                else:
+                    # 多个分液瓶用JSON数组表示
+                    vial_type_str = json.dumps(
+                        [v.get("typeName", "") for v in vial_list],
+                        ensure_ascii=False,
+                    )
+                    vial_barcode_str = json.dumps(
+                        [v.get("barCode", "") for v in vial_list],
+                        ensure_ascii=False,
+                    )
+
+                # 质量比信息
+                ratio_info = ratio_map.get(order_code, {})
+                target_ratio = ratio_info.get("target_mass_ratio", {})
+                real_ratio = ratio_info.get("real_mass_ratio", {})
+                target_ratio_str = json.dumps(target_ratio, ensure_ascii=False) if target_ratio else ""
+                real_ratio_str = json.dumps(real_ratio, ensure_ascii=False) if real_ratio else ""
+
+                writer.writerow([
+                    order_code, order_name,
+                    prep_type, prep_barcode,
+                    vial_type_str, vial_barcode_str,
+                    target_ratio_str, real_ratio_str,
+                    export_time,
+                ])
+
+                logger.info(
+                    f"[CSV导出] 写入: orderCode={order_code}, "
+                    f"配液瓶={prep_type}({prep_barcode}), "
+                    f"分液瓶数={len(vial_list)}"
+                )
+
+            f.flush()
+
+        logger.info(f"[CSV导出] ✅ 导出完成: {csv_file}")
+        return csv_file
+
     def _query_material_info(self, material_id: str) -> Dict:
         """
         调用 LIMS API 2.4 查询物料详情
