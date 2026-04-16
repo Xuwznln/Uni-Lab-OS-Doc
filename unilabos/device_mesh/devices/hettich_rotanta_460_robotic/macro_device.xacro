@@ -98,7 +98,7 @@
           <color rgba="0.18 0.19 0.20 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${top_opening_floor_z / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${top_opening_floor_z}"/>
@@ -127,7 +127,7 @@
         <geometry>
           <box size="${top_side_rim_width} ${top_opening_depth} ${top_opening_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- Access frames are estimated from official datasheet wording and product imagery:

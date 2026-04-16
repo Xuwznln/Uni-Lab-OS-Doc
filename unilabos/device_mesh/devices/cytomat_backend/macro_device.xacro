@@ -70,7 +70,7 @@
           <color rgba="0.15 0.18 0.22 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 ${rear_collision_y} ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${rear_collision_depth} ${height}"/>
@@ -99,7 +99,7 @@
         <geometry>
           <box size="${transfer_opening_side_width} ${front_collision_depth} ${transfer_opening_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <link name="${station_name}${device_name}loading_tray_link">
@@ -112,12 +112,12 @@
           <color rgba="0.58 0.61 0.66 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 ${loading_tray_collision_y} ${loading_tray_collision_z}" rpy="0 0 0"/>
         <geometry>
           <box size="${loading_tray_collision_width} ${loading_tray_collision_depth} ${loading_tray_collision_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
     <joint name="${station_name}${device_name}loading_tray_link_joint" type="fixed">
       <origin xyz="0 ${depth / 2.0 + loading_tray_y_offset} ${plate_center_z}" rpy="0 0 0" />

@@ -83,7 +83,7 @@ class JobInfo:
         """更新最后更新时间"""
         self.last_update_time = time.time()
 
-    def set_ready_timeout(self, timeout_seconds: int = 10):
+    def set_ready_timeout(self, timeout_seconds: int = 30):
         """设置READY状态超时时间"""
         self.ready_timeout = time.time() + timeout_seconds
 
@@ -133,7 +133,7 @@ class DeviceActionManager:
             if job_info.always_free:
                 job_info.status = JobStatus.READY
                 job_info.update_timestamp()
-                job_info.set_ready_timeout(10)
+                job_info.set_ready_timeout(30)
                 job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
                 logger.trace(f"[DeviceActionManager] Job {job_log} always_free, start immediately")
                 return True
@@ -162,7 +162,7 @@ class DeviceActionManager:
             # 将其状态设为READY并占位，防止后续job也被判断为free
             job_info.status = JobStatus.READY
             job_info.update_timestamp()
-            job_info.set_ready_timeout(10)  # 设置10秒超时
+            job_info.set_ready_timeout(30)  # 设置30秒超时
             self.active_jobs[device_key] = job_info
             job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
             logger.trace(f"[DeviceActionManager] Job {job_log} can start immediately for {device_key}")
@@ -245,7 +245,7 @@ class DeviceActionManager:
                 # 将下一个job设置为READY状态并放入active_jobs
                 next_job.status = JobStatus.READY
                 next_job.update_timestamp()
-                next_job.set_ready_timeout(10)  # 设置10秒超时
+                next_job.set_ready_timeout(30)  # 设置30秒超时
                 self.active_jobs[device_key] = next_job
                 next_job_log = format_job_log(
                     next_job.job_id, next_job.task_id, next_job.device_id, next_job.action_name
@@ -312,7 +312,7 @@ class DeviceActionManager:
                     # 将下一个job设置为READY状态并放入active_jobs
                     next_job.status = JobStatus.READY
                     next_job.update_timestamp()
-                    next_job.set_ready_timeout(10)
+                    next_job.set_ready_timeout(30)
                     self.active_jobs[device_key] = next_job
                     next_job_log = format_job_log(
                         next_job.job_id, next_job.task_id, next_job.device_id, next_job.action_name

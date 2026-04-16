@@ -61,12 +61,12 @@
           <color rgba="0.16 0.19 0.23 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- 前侧为主要人工/机械操作面：柱位、阀组件、样品泵、触控面板均位于此侧。 -->

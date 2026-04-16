@@ -48,12 +48,12 @@
           <color rgba="0.12 0.12 0.13 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <link name="${station_name}${device_name}socketTypeGenericSbsFootprint"/>

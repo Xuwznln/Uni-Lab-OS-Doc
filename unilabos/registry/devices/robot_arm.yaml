@@ -176,17 +176,17 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
         feedback: {}
         goal: {}
         goal_default:
-          constraints: null
-          lift_height: null
-          move_group: null
-          option: null
-          resource: null
-          retry: null
-          speed: null
-          status: null
-          target: null
-          x_distance: null
-          y_distance: null
+          constraints: []
+          lift_height: 0
+          move_group: ""
+          option: ""
+          resource: ""
+          retry: 0
+          speed: 0
+          status: ""
+          target: ""
+          x_distance: 0
+          y_distance: 0
         handles: {}
         placeholder_keys: {}
         result: {}
@@ -201,7 +201,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
                     type: number
                   type: array
                 lift_height:
-                  type: string
+                  type: number
                 move_group:
                   type: string
                 option:
@@ -209,17 +209,17 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
                 resource:
                   type: string
                 retry:
-                  type: string
+                  type: number
                 speed:
-                  type: string
+                  type: number
                 status:
                   type: string
                 target:
                   type: string
                 x_distance:
-                  type: string
+                  type: number
                 y_distance:
-                  type: string
+                  type: number
               required:
               - option
               - move_group

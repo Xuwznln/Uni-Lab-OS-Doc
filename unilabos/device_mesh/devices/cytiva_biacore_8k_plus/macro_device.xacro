@@ -98,12 +98,12 @@
           <color rgba="0.28 0.40 0.46 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <link name="${station_name}${device_name}sample_hotel_access_link"/>

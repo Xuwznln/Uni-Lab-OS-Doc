@@ -89,7 +89,7 @@
         </material>
       </visual>
       <!-- Keep the sorter shell conservative while leaving the front chamber and rear service hatch open. -->
-      <collision>
+      <!-- <collision>
         <origin xyz="0 ${middle_body_center_y} ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${middle_body_depth} ${height}"/>
@@ -136,7 +136,7 @@
         <geometry>
           <box size="${rear_corridor_width} ${rear_corridor_depth} ${height - rear_corridor_bottom_z - rear_corridor_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- Estimated front-left sample loading region for 5 mL tubes. -->

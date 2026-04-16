@@ -177,7 +177,7 @@
         <material name="tecan_resolvex_a200_light_curtain"/>
       </visual>
       <!-- 将碰撞拆为下部柜体、上部侧框、后上壳体和前上横梁，保留前部开口与工作平面。 -->
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${lower_body_height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${lower_body_height}"/>
@@ -206,7 +206,7 @@
         <geometry>
           <box size="${front_lintel_width} ${front_lintel_depth} ${front_lintel_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- 前部主开口，用于装卸 SPE 板 / 柱架。 -->

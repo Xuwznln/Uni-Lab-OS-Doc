@@ -176,7 +176,7 @@
         </material>
       </visual>
       <!-- 碰撞几何只保留真实阻挡外壳：开放前工位、deck/worktable 与 SBS 取放区域不再被整机包络盒吞没。 -->
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${plinth_height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${plinth_height}"/>
@@ -217,7 +217,7 @@
         <geometry>
           <box size="${control_console_width} ${control_console_depth} ${control_console_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- 前门对应主要人工开盖访问区域。 -->

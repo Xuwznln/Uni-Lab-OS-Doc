@@ -177,20 +177,21 @@ class MoveitInterface:
         option: str,
         move_group: str,
         status: str,
-        resource: Optional[str] = None,
-        x_distance: Optional[float] = None,
-        y_distance: Optional[float] = None,
-        lift_height: Optional[float] = None,
-        retry: Optional[int] = None,
-        speed: Optional[float] = None,
-        target: Optional[str] = None,
-        constraints: Optional[Sequence[float]] = None,
+        resource: Optional[str] = "",
+        x_distance: Optional[float] = 0,
+        y_distance: Optional[float] = 0,
+        lift_height: Optional[float] = 0,
+        retry: Optional[int] = 0,
+        speed: Optional[float] = 0,
+        target: Optional[str] = "",
+        constraints: Optional[Sequence[float]] = [],
     ) -> None:
         """
         使用 MoveIt 完成抓取/放置等序列（pick/place/side_pick/side_place）。
 
         必选：option, move_group, status。
         可选：resource, x_distance, y_distance, lift_height, retry, speed, target, constraints。
+        其中 resource/target 为空字符串表示不传；数值 0 表示不启用 lift/侧向偏移；retry/speed 为 0 时使用 MoveIt 任务默认重试与速度。
         无返回值；失败时提前 return 或打印异常。
         """
         try:
@@ -200,27 +201,37 @@ class MoveitInterface:
             option_index = self.move_option.index(option)
             place_flag = option_index % 2
 
+            # 与默认参数对齐：None 与 0 / 空串 均表示「未启用」
+            _lift = 0.0 if lift_height is None else float(lift_height)
+            use_lift_path = abs(_lift) > 1e-9
+            _xd = 0.0 if x_distance is None else float(x_distance)
+            _yd = 0.0 if y_distance is None else float(y_distance)
+            has_lateral_offset = abs(_xd) > 1e-9 or abs(_yd) > 1e-9
+            _res = (resource or "").strip()
+            _target = (target or "").strip()
+
             config: dict = {"move_group": move_group}
-            if speed is not None:
-                config["speed"] = speed
-            if retry is not None:
-                config["retry"] = retry
+            if speed is not None and float(speed) > 0:
+                config["speed"] = float(speed)
+            if retry is not None and int(retry) > 0:
+                config["retry"] = int(retry)
 
             function_list = []
-            joint_positions_ = self.joint_poses[move_group][status]
+            joint_positions_ = [float(x) for x in self.joint_poses[move_group][status]]
 
-            # 夹取 / 放置：绑定 resource 与 parent
-            if not place_flag:
-                if target is not None:
-                    function_list.append(lambda r=resource, t=target: self.resource_manager(r, t))
+            # 夹取 / 放置：绑定 resource 与 parent（无 resource 则跳过 TF 绑定步骤）
+            if _res:
+                if not place_flag:
+                    if _target:
+                        function_list.append(lambda r=_res, t=_target: self.resource_manager(r, t))
+                    else:
+                        ee = self.moveit2[move_group].end_effector_name
+                        function_list.append(lambda r=_res: self.resource_manager(r, ee))
                 else:
-                    ee = self.moveit2[move_group].end_effector_name
-                    function_list.append(lambda r=resource: self.resource_manager(r, ee))
-            else:
-                function_list.append(lambda r=resource: self.resource_manager(r, "world"))
+                    function_list.append(lambda r=_res: self.resource_manager(r, "world"))
 
             joint_constraint_msgs: list = []
-            if constraints is not None:
+            if constraints:
                 for i, c in enumerate(constraints):
                     v = float(c)
                     if v > 0:
@@ -234,7 +245,7 @@ class MoveitInterface:
                             )
                         )
 
-            if lift_height is not None:
+            if use_lift_path:
                 retval = None
                 attempts = config.get("retry", 10)
                 while retval is None and attempts > 0:
@@ -260,7 +271,7 @@ class MoveitInterface:
                     )
                 ] + function_list
 
-                pose[2] += float(lift_height)
+                pose[2] += _lift
                 function_list.append(
                     lambda p=pose.copy(), q=quaternion, cfg=config: self.moveit_task(
                         position=p, quaternion=q, **cfg, cartesian=self.cartesian_flag
@@ -268,13 +279,13 @@ class MoveitInterface:
                 )
                 end_pose = list(pose)
 
-                if x_distance is not None or y_distance is not None:
-                    if x_distance is not None:
+                if has_lateral_offset:
+                    if abs(_xd) > 1e-9:
                         deep_pose = deepcopy(pose)
-                        deep_pose[0] += float(x_distance)
-                    elif y_distance is not None:
+                        deep_pose[0] += _xd
+                    else:
                         deep_pose = deepcopy(pose)
-                        deep_pose[1] += float(y_distance)
+                        deep_pose[1] += _yd
 
                     function_list = [
                         lambda p=pose.copy(), q=quaternion, cfg=config: self.moveit_task(

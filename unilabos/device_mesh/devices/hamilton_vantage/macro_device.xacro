@@ -140,7 +140,7 @@
         </geometry>
         <material name="hamilton_vantage_internal_dark"/>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0.080 ${lower_body_height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width * 0.97} 0.260 ${lower_body_height}"/>
@@ -163,7 +163,7 @@
         <geometry>
           <box size="${width * 0.72} 0.120 ${upper_body_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <link name="${station_name}${device_name}loading_tray_link">
@@ -177,12 +177,12 @@
           <color rgba="0.84 0.85 0.87 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 0.015" rpy="0 0 0"/>
         <geometry>
           <box size="0.18 0.14 0.030"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
     <joint name="${station_name}${device_name}loading_tray_joint" type="fixed">
       <origin xyz="${width * loading_tray_x_factor} ${loading_tray_y} ${loading_tray_z}" rpy="0 0 0"/>

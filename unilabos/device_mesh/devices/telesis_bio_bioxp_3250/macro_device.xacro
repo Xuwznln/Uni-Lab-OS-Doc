@@ -71,12 +71,12 @@
           <color rgba="0.88 0.22 0.49 1"/>
         </material>
       </visual>
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- 前门中央附近的主要装载开口参考点。 -->

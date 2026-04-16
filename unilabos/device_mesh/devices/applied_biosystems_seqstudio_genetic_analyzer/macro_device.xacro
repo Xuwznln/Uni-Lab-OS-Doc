@@ -46,7 +46,7 @@
         </material>
       </visual>
       <!-- 将机身碰撞拆分为后壳、前侧壁和前上罩，保持前向 sample/cartridge 装载走廊敞开。 -->
-      <collision>
+      <!-- <collision>
         <origin xyz="0 ${rear_body_center_y} ${height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth - front_corridor_depth} ${height}"/>
@@ -69,7 +69,7 @@
         <geometry>
           <box size="${width} ${front_corridor_depth} ${height - front_corridor_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- 内部样本板中心位；SeqStudio 支持 96 孔板和 8 联管。 -->

@@ -42,7 +42,7 @@
         </material>
       </visual>
       <!-- Split the simplified collision so the top-contact plate zone is a genuine open recess. -->
-      <collision>
+      <!-- <collision>
         <origin xyz="0 0 ${plate_recess_floor_height / 2.0}" rpy="0 0 0"/>
         <geometry>
           <box size="${width} ${depth} ${plate_recess_floor_height}"/>
@@ -79,7 +79,7 @@
         <geometry>
           <box size="${plate_opening_width} ${plate_front_back_wall_depth} ${plate_top_edge_height}"/>
         </geometry>
-      </collision>
+      </collision> -->
     </link>
 
     <!-- Primary robotic access frame for an ANSI/SLAS microplate on the shaker table. -->
