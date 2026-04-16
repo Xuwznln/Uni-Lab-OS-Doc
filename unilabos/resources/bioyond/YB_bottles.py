@@ -131,7 +131,7 @@ def YB_PrepBottle_15mL(
     name: str,
     diameter: float = 35.0,
     height: float = 60.0,
-    max_volume: float = 30000.0,  # 30mL
+    max_volume: float = 15000.0,  # 15mL
     barcode: str = None,
 ) -> Bottle:
     """创建配液瓶(小)"""
@@ -149,7 +149,7 @@ def YB_PrepBottle_60mL(
     name: str,
     diameter: float = 55.0,
     height: float = 100.0,
-    max_volume: float = 150000.0,  # 150mL
+    max_volume: float = 60000.0,  # 60mL
     barcode: str = None,
 ) -> Bottle:
     """创建配液瓶(大)"""

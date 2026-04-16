@@ -1087,9 +1087,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
         for idx, item in enumerate(formulation):
             materials = item.get("materials", []) + item.get("liquids", [])  # 兼容两种物料列表命名
             if idx < len(order_names) and order_names[idx]:
-                order_name = order_names[idx]
+                order_name = str(order_names[idx])
             else:
-                order_name = item.get("order_name", f"{batch_id}_order_{idx + 1}")
+                order_name = str(item.get("order_name", f"{batch_id}_order_{idx + 1}"))
 
             mats: List[Dict[str, Any]] = []
             total_mass = 0.0
@@ -1104,7 +1104,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.warning(f"[create_orders_formulation] 第 {idx + 1} 个配方无有效物料，跳过")
                 continue
 
-            raw_mix_time = mix_time[idx] if idx < len(mix_time) else None
+            if isinstance(mix_time, (int, float)):
+                raw_mix_time = mix_time
+            else:
+                raw_mix_time = mix_time[idx] if idx < len(mix_time) else None
             try:
                 item_mix_time = int(raw_mix_time) if raw_mix_time not in (None, "", "null") else 0
             except (ValueError, TypeError):
