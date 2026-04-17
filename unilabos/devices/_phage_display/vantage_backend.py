@@ -98,6 +98,7 @@ from pylabrobot.liquid_handling.standard import (
 )
 from pylabrobot.resources import (
   Coordinate,
+  Deck,
   Liquid,
   Plate,
   Resource,
@@ -411,6 +412,59 @@ def _get_dispense_mode(jet: bool, empty: bool, blow_out: bool) -> Literal[0, 1, 
     return 3 if blow_out else 2
 
 
+class _MockVantageDeck(Deck):
+  """虚拟 Deck 占位，未配置真实 Deck 时使用。
+
+  继承自 ``pylabrobot.resources.Deck``，提供合法的尺寸与名称，使得
+  ``VantageBackend.deck`` 属性的断言不会直接崩溃；但该 Deck 不包含任何板位与
+  资源，所以真正的移液 / 夹爪动作仍会在 ``get_location_wrt`` 等处抛错。
+  """
+
+  def __init__(self):
+    super().__init__(
+      size_x=1280.0,
+      size_y=700.0,
+      size_z=200.0,
+      name="mock_vantage_deck",
+    )
+
+
+class _MockVantageIO:
+  """虚拟 USB IO 占位，模拟 ``pylabrobot.io.usb.USB`` 的最小接口。
+
+  ``setup`` / ``stop`` / ``write`` 为空操作，``read`` 返回空字节串，
+  ``serialize`` 返回占位配置。用于真实 USB 设备不可达时让 ``VantageBackend``
+  能继续完成 Node 级别的初始化流程。
+  """
+
+  def __init__(self):
+    self.port = "<mock>"
+    self.serial_number = "<mock>"
+    self.id_vendor = 0
+    self.id_product = 0
+
+  async def setup(self):
+    return None
+
+  async def stop(self):
+    return None
+
+  async def write(self, data):
+    return None
+
+  async def read(self, *args, **kwargs):
+    return b""
+
+  def serialize(self) -> dict:
+    return {
+      "port": self.port,
+      "serial_number": self.serial_number,
+      "id_vendor": self.id_vendor,
+      "id_product": self.id_product,
+      "human_readable_device_name": "Mock Hamilton Liquid Handler",
+    }
+
+
 @device(
   id="vantage_backend",
   category=["Liquid Handling Workstation"],
@@ -459,6 +513,30 @@ class VantageBackend(HamiltonLiquidHandler):
     self._num_channels: Optional[int] = 8
     self._traversal_height: float = 245.0
 
+    # —— Deck 兜底：_deck 由 LiquidHandlerBackend.__init__ 初始化为 None，
+    # 通常由外层 LiquidHandler.setup() 通过 set_deck() 挂载；若一直未被设置，
+    # 后续访问 self.deck 会直接 assert 失败。为避免 Node 初始化阶段崩溃，
+    # 在此装配一个 MockVantageDeck 占位，并发出 Warning 提示用户。
+    if getattr(self, "_deck", None) is None:
+      warnings.warn(
+        "[UNILAB] VantageBackend 未配置 Deck (_deck is None)，使用 MockVantageDeck 占位。"
+        "请在 setup() 前通过 set_deck(deck) 挂载真实 Deck，否则移液/夹爪动作将无法获得正确坐标。",
+        RuntimeWarning,
+        stacklevel=2,
+      )
+      self._deck = _MockVantageDeck()
+
+    # —— IO 兜底：若 super().__init__ 未能建立 self.io（异常情况），
+    # 或后续 setup 阶段 USB 连接失败，均以 MockVantageIO 占位。
+    if getattr(self, "io", None) is None:
+      warnings.warn(
+        "[UNILAB] VantageBackend 未建立 USB IO (self.io is None)，使用 MockVantageIO 占位，"
+        "不会与真实 Vantage 硬件通信。",
+        RuntimeWarning,
+        stacklevel=2,
+      )
+      self.io = _MockVantageIO()
+
   @property
   @action(auto_prefix=True, description="获取模块 ID 长度")
   def module_id_length(self) -> int:
@@ -498,7 +576,29 @@ class VantageBackend(HamiltonLiquidHandler):
     _unilab_logger.debug("[UNILAB] VantageBackend.setup() called")
     """Creates a USB connection and finds read/write interfaces."""
 
-    await super().setup()
+    # 若已经是 Mock IO，直接跳过所有硬件初始化步骤。
+    if isinstance(self.io, _MockVantageIO):
+      warnings.warn(
+        "[UNILAB] VantageBackend.setup(): 当前运行在 Mock IO 模式，跳过硬件初始化，返回虚拟成功。",
+        RuntimeWarning,
+        stacklevel=2,
+      )
+      await self.io.setup()
+      return
+
+    try:
+      await super().setup()
+    except Exception as exc:
+      # USB 连接失败：切换到 Mock IO，跳过后续硬件初始化。
+      warnings.warn(
+        f"[UNILAB] VantageBackend.setup() 连接真实 USB 设备失败 ({exc!r})，"
+        "切换至 MockVantageIO 并跳过硬件初始化。真实动作调用仍会失败。",
+        RuntimeWarning,
+        stacklevel=2,
+      )
+      self.io = _MockVantageIO()
+      await self.io.setup()
+      return
 
     tip_presences = await self.query_tip_presence()
     self._num_channels = len(tip_presences)

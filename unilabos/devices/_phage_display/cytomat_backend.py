@@ -162,10 +162,27 @@ class CytomatBackend(IncubatorBackend):
       )
     else:
       self.io = None
+      warnings.warn(
+        "[UNILAB] CytomatBackend 未配置串口 (port 为空)，未连接真实设备，"
+        "将以虚拟模式运行，所有 IO 操作均返回虚拟成功响应。",
+        RuntimeWarning,
+        stacklevel=2,
+      )
+
+  def _warn_virtual_io(self, method: str) -> None:
+    """统一提示：未连接真实设备，当前调用走虚拟成功分支。"""
+    warnings.warn(
+      f"[UNILAB] CytomatBackend.{method}: 未连接真实设备 (self.io is None)，返回虚拟成功。",
+      RuntimeWarning,
+      stacklevel=3,
+    )
 
   @action(auto_prefix=True, description="准备设备以供运行。")
   async def setup(self):
     _unilab_logger.debug("[UNILAB] CytomatBackend.setup() called")
+    if self.io is None:
+      self._warn_virtual_io("setup()")
+      return
     await self.io.setup()
     await self.initialize()
     await self.wait_for_task_completion()
@@ -179,6 +196,9 @@ class CytomatBackend(IncubatorBackend):
   @action(auto_prefix=True, description="停止设备运行。")
   async def stop(self):
     _unilab_logger.debug("[UNILAB] CytomatBackend.stop() called")
+    if self.io is None:
+      self._warn_virtual_io("stop()")
+      return
     await self.io.stop()
 
   def _assemble_command(self, command_type: str, command: str, params: str):
@@ -190,6 +210,15 @@ class CytomatBackend(IncubatorBackend):
   @action(auto_prefix=True, description="向设备发送底层命令。")
   async def send_command(self, command_type: str, command: str, params: str) -> str:
     _unilab_logger.debug("[UNILAB] CytomatBackend.send_command() called")
+    if self.io is None:
+      self._warn_virtual_io(
+        f"send_command(command_type={command_type!r}, command={command!r}, params={params!r})"
+      )
+      # 虚拟成功响应：十六进制 '00' 经 hex_to_binary 解析为全零，对应
+      # OverviewRegisterState 的 busy_bit_set / error_register_set 等全部为 False，
+      # 可让 wait_for_task_completion 等上层逻辑直接通过。
+      return "00"
+
     async def _send_command(command_str) -> str:
       _unilab_logger.debug("[UNILAB] CytomatBackend._send_command() called")
       logger.debug(command_str.encode(self.serial_message_encoding))
@@ -578,7 +607,7 @@ class CytomatBackend(IncubatorBackend):
     return {
       **IncubatorBackend.serialize(self),
       "model": self.model.value,
-      "port": self.io.port,
+      "port": self.io.port if self.io is not None else "",
     }
 
 

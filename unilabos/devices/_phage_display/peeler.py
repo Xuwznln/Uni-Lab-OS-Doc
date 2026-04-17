@@ -72,6 +72,28 @@ from pylabrobot.machines import Machine
 from pylabrobot.peeling.backend import PeelerBackend
 
 
+class MockPeelerBackend(PeelerBackend):
+  """揭膜机模拟后端，用于无真实硬件时的测试。"""
+
+  def __init__(self):
+    super().__init__()
+    self._peel_count: int = 0
+
+  async def setup(self):
+    _unilab_logger.debug("[UNILAB] MockPeelerBackend.setup() called")
+
+  async def stop(self):
+    _unilab_logger.debug("[UNILAB] MockPeelerBackend.stop() called")
+
+  async def peel(self):
+    _unilab_logger.debug("[UNILAB] MockPeelerBackend.peel() called")
+    self._peel_count += 1
+
+  async def restart(self):
+    _unilab_logger.debug("[UNILAB] MockPeelerBackend.restart() called")
+    self._peel_count = 0
+
+
 @device(
   id="peeler",
   category=["Plate Desealer"],
@@ -88,7 +110,10 @@ class Peeler(Machine):
   def __init__(self, backend: PeelerBackend):
     print("[UNILAB] Peeler.__init__() called", flush=True)
     super().__init__(backend=backend)
-    self.backend: PeelerBackend = backend
+    if isinstance(backend, PeelerBackend):
+      self.backend: PeelerBackend = backend
+    else:
+      self.backend = MockPeelerBackend()
 
   @action(auto_prefix=True, description="自动剥离微孔板封膜。")
   async def peel(self, **backend_kwargs):

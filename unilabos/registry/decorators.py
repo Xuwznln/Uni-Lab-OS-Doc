@@ -44,6 +44,7 @@ Usage:
             ...
 """
 
+import asyncio
 from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, TypeVar
@@ -378,9 +379,15 @@ def action(
     """
 
     def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+        # 保留原函数的协程特性，避免 asyncio.iscoroutinefunction 误判
+        if asyncio.iscoroutinefunction(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                return await func(*args, **kwargs)
+        else:
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
 
         # action_type 为哨兵值 => 用户没传, 视为 None (UniLabJsonCommand)
         resolved_type = None if action_type is _ACTION_TYPE_UNSET else action_type
