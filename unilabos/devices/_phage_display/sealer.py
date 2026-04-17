@@ -71,47 +71,87 @@ from pylabrobot.machines import Machine
 
 from pylabrobot.sealing.backend import SealerBackend
 
+class MockSealerBackend(SealerBackend):
+  """封膜机模拟后端，用于无真实硬件时的测试。"""
 
-@device(
-  id="sealer",
-  category=["Plate Sealer"],
-  description="用于实验室自动化中对微孔板进行封膜的设备，可执行封膜、开合机构控制，以及温度设置与读取。",
-  model={
-    "type": "device",
-    "mesh": "sealer",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/sealer/macro_device.xacro",
-  },
-)
+  def __init__(self):
+    super().__init__()
+    self._temperature: float = 25.0
+    self._is_open: bool = True
+
+  async def setup(self):
+    _unilab_logger.debug("[UNILAB] MockSealerBackend.setup() called")
+
+  async def stop(self):
+    _unilab_logger.debug("[UNILAB] MockSealerBackend.stop() called")
+
+  async def seal(self, temperature: int, duration: float):
+    _unilab_logger.debug(
+      f"[UNILAB] MockSealerBackend.seal(temperature={temperature}, duration={duration}) called"
+    )
+    self._temperature = float(temperature)
+
+  async def open(self):
+    _unilab_logger.debug("[UNILAB] MockSealerBackend.open() called")
+    self._is_open = True
+
+  async def close(self):
+    _unilab_logger.debug("[UNILAB] MockSealerBackend.close() called")
+    self._is_open = False
+
+  async def set_temperature(self, temperature: float):
+    _unilab_logger.debug(
+      f"[UNILAB] MockSealerBackend.set_temperature(temperature={temperature}) called"
+    )
+    self._temperature = float(temperature)
+
+  async def get_temperature(self) -> float:
+    _unilab_logger.debug("[UNILAB] MockSealerBackend.get_temperature() called")
+    return self._temperature
+
+# @device(
+#   id="sealer",
+#   category=["Plate Sealer"],
+#   description="用于实验室自动化中对微孔板进行封膜的设备，可执行封膜、开合机构控制，以及温度设置与读取。",
+#   model={
+#     "type": "device",
+#     "mesh": "sealer",
+#     "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/sealer/macro_device.xacro",
+#   },
+# )
 class Sealer(Machine):
   """A microplate sealer"""
 
   def __init__(self, backend: SealerBackend):
     print("[UNILAB] Sealer.__init__() called", flush=True)
     super().__init__(backend=backend)
-    self.backend: SealerBackend = backend  # fix type
+    if isinstance(backend, SealerBackend):
+      self.backend: SealerBackend = backend  # fix type
+    else:
+      self.backend = MockSealerBackend()
 
-  @action(auto_prefix=True, description="按设定温度和持续时间执行微孔板封膜。")
+  # @action(auto_prefix=True, description="按设定温度和持续时间执行微孔板封膜。")
   async def seal(self, temperature: int, duration: float):
     _unilab_logger.debug("[UNILAB] Sealer.seal() called")
     return await self.backend.seal(temperature=temperature, duration=duration)
 
-  @action(auto_prefix=True, description="打开封膜机机构。")
+  # @action(auto_prefix=True, description="打开封膜机机构。")
   async def open(self):
     _unilab_logger.debug("[UNILAB] Sealer.open() called")
     return await self.backend.open()
 
-  @action(auto_prefix=True, description="关闭封膜机机构。")
+  # @action(auto_prefix=True, description="关闭封膜机机构。")
   async def close(self):
     _unilab_logger.debug("[UNILAB] Sealer.close() called")
     return await self.backend.close()
 
-  @action(auto_prefix=True, description="设置封膜机温度。")
+  # @action(auto_prefix=True, description="设置封膜机温度。")
   async def set_temperature(self, temperature: float):
     _unilab_logger.debug("[UNILAB] Sealer.set_temperature() called")
     """Set the temperature of the sealer in degrees Celsius."""
     return await self.backend.set_temperature(temperature=temperature)
 
-  @action(auto_prefix=True, description="获取封膜机温度。")
+  # @action(auto_prefix=True, description="获取封膜机温度。")
   async def get_temperature(self) -> float:
     _unilab_logger.debug("[UNILAB] Sealer.get_temperature() called")
     """Get the current temperature of the sealer in degrees Celsius."""
