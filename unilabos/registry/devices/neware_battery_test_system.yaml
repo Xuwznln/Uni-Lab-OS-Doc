@@ -219,7 +219,7 @@ neware_battery_test_system:
           title: StrSingleInput
           type: object
         type: StrSingleInput
-      submit_from_csv:
+      submit_from_csv_export_ndax:
         feedback: {}
         goal:
           csv_path: string
@@ -231,7 +231,7 @@ neware_battery_test_system:
         placeholder_keys: {}
         result: {}
         schema:
-          description: 从CSV文件批量提交Neware测试任务
+          description: 从CSV文件批量提交Neware测试任务（备份格式为NDA）
           properties:
             feedback: {}
             goal:
@@ -250,7 +250,41 @@ neware_battery_test_system:
               type: object
           required:
           - goal
-          title: submit_from_csv参数
+          title: submit_from_csv_export_ndax参数
+          type: object
+        type: UniLabJsonCommand
+      submit_from_csv_export_excel:
+        feedback: {}
+        goal:
+          csv_path: string
+          output_dir: string
+        goal_default:
+          csv_path: null
+          output_dir: .
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 从CSV文件批量提交Neware测试任务（备份格式为Excel）
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                csv_path:
+                  description: 输入CSV文件的绝对路径
+                  type: string
+                output_dir:
+                  default: .
+                  description: 输出目录（用于存储XML和备份文件），默认当前目录
+                  type: string
+              required:
+              - csv_path
+              type: object
+            result:
+              type: object
+          required:
+          - goal
+          title: submit_from_csv_export_excel参数
           type: object
         type: UniLabJsonCommand
       test_connection_action:
@@ -302,7 +336,7 @@ neware_battery_test_system:
             goal:
               properties:
                 backup_dir:
-                  description: 备份目录路径（默认使用最近一次submit_from_csv的backup_dir）
+                  description: 备份目录路径（默认使用最近一次提交任务的backup_dir）
                   type: string
                 file_pattern:
                   default: '*'
@@ -320,6 +354,847 @@ neware_battery_test_system:
           title: upload_backup_to_oss参数
           type: object
         type: UniLabJsonCommand
+      manual_confirm:
+        type: UniLabJsonCommand
+        goal:
+          resource: resource
+          target_device: target_device
+          mount_resource: mount_resource
+          collector_mass: collector_mass
+          active_material: active_material
+          capacity: capacity
+          battery_system: battery_system
+          timeout_seconds: timeout_seconds
+          assignee_user_ids: assignee_user_ids
+        feedback: {}
+        result:
+          resource: resource
+          target_device: target_device
+          mount_resource: mount_resource
+          collector_mass: collector_mass
+          active_material: active_material
+          capacity: capacity
+          battery_system: battery_system
+        schema:
+          title: manual_confirm参数
+          description: manual_confirm的参数schema
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                unilabos_device_id:
+                  type: string
+                  default: ''
+                  description: UniLabOS设备ID，用于指定执行动作的具体设备实例
+                resource:
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      sample_id:
+                        type: string
+                      children:
+                        type: array
+                        items:
+                          type: string
+                      parent:
+                        type: string
+                      type:
+                        type: string
+                      category:
+                        type: string
+                      pose:
+                        type: object
+                        properties:
+                          position:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            additionalProperties: false
+                          orientation:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              w:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            additionalProperties: false
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        additionalProperties: false
+                      config:
+                        type: string
+                      data:
+                        type: string
+                    title: resource
+                  type: array
+                target_device:
+                  type: string
+                  description: device reference
+                mount_resource:
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      sample_id:
+                        type: string
+                      children:
+                        type: array
+                        items:
+                          type: string
+                      parent:
+                        type: string
+                      type:
+                        type: string
+                      category:
+                        type: string
+                      pose:
+                        type: object
+                        properties:
+                          position:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            additionalProperties: false
+                          orientation:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              w:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            additionalProperties: false
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        additionalProperties: false
+                      config:
+                        type: string
+                      data:
+                        type: string
+                    title: mount_resource
+                  type: array
+                collector_mass:
+                  type: array
+                  items:
+                    type: number
+                active_material:
+                  type: array
+                  items:
+                    type: number
+                capacity:
+                  type: array
+                  items:
+                    type: number
+                battery_system:
+                  type: array
+                  items:
+                    type: string
+                timeout_seconds:
+                  type: integer
+                assignee_user_ids:
+                  type: array
+                  items:
+                    type: string
+              required:
+              - resource
+              - target_device
+              - mount_resource
+              - collector_mass
+              - active_material
+              - capacity
+              - battery_system
+              - timeout_seconds
+              - assignee_user_ids
+              _unilabos_placeholder_info:
+                resource: unilabos_resources
+                target_device: unilabos_devices
+                mount_resource: unilabos_resources
+                assignee_user_ids: unilabos_manual_confirm
+            feedback: {}
+            result:
+              type: object
+          required:
+          - goal
+        goal_default:
+          resource: []
+          target_device: ''
+          mount_resource: []
+          collector_mass: []
+          active_material: []
+          capacity: []
+          battery_system: []
+          timeout_seconds: 3600
+          assignee_user_ids: []
+        handles:
+          input:
+          - handler_key: target_device
+            data_type: device_id
+            label: 目标设备
+            data_key: target_device
+            data_source: handle
+            io_type: source
+          - handler_key: resource
+            data_type: resource
+            label: 待转移资源
+            data_key: resource
+            data_source: handle
+            io_type: source
+          - handler_key: mount_resource
+            data_type: resource
+            label: 目标孔位
+            data_key: mount_resource
+            data_source: handle
+            io_type: source
+          - handler_key: collector_mass
+            data_type: collector_mass
+            label: 极流体质量
+            data_key: collector_mass
+            data_source: handle
+            io_type: source
+          - handler_key: active_material
+            data_type: active_material
+            label: 活性物质含量
+            data_key: active_material
+            data_source: handle
+            io_type: source
+          - handler_key: capacity
+            data_type: capacity
+            label: 克容量
+            data_key: capacity
+            data_source: handle
+            io_type: source
+          - handler_key: battery_system
+            data_type: battery_system
+            label: 电池体系
+            data_key: battery_system
+            data_source: handle
+            io_type: source
+          output:
+          - handler_key: target_device
+            data_type: device_id
+            label: 目标设备
+            data_key: target_device
+            data_source: executor
+          - handler_key: resource
+            data_type: resource
+            label: 待转移资源
+            data_key: resource.@flatten
+            data_source: executor
+          - handler_key: mount_resource
+            data_type: resource
+            label: 目标孔位
+            data_key: mount_resource.@flatten
+            data_source: executor
+          - handler_key: collector_mass
+            data_type: collector_mass
+            label: 极流体质量
+            data_key: collector_mass
+            data_source: executor
+          - handler_key: active_material
+            data_type: active_material
+            label: 活性物质含量
+            data_key: active_material
+            data_source: executor
+          - handler_key: capacity
+            data_type: capacity
+            label: 克容量
+            data_key: capacity
+            data_source: executor
+          - handler_key: battery_system
+            data_type: battery_system
+            label: 电池体系
+            data_key: battery_system
+            data_source: executor
+        placeholder_keys:
+          resource: unilabos_resources
+          target_device: unilabos_devices
+          mount_resource: unilabos_resources
+          assignee_user_ids: unilabos_manual_confirm
+        always_free: true
+        feedback_interval: 300
+        node_type: manual_confirm
+      test:
+        type: UniLabJsonCommandAsync
+        goal:
+          resource: resource
+          mount_resource: mount_resource
+          collector_mass: collector_mass
+          active_material: active_material
+          capacity: capacity
+          battery_system: battery_system
+        feedback: {}
+        result:
+          return_info: return_info
+          success: success
+          submitted_count: submitted_count
+          total_count: total_count
+          results: results
+        schema:
+          title: test参数
+          description: test的参数schema
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                unilabos_device_id:
+                  type: string
+                  default: ''
+                  description: UniLabOS设备ID，用于指定执行动作的具体设备实例
+                resource:
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      sample_id:
+                        type: string
+                      children:
+                        type: array
+                        items:
+                          type: string
+                      parent:
+                        type: string
+                      type:
+                        type: string
+                      category:
+                        type: string
+                      pose:
+                        type: object
+                        properties:
+                          position:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            additionalProperties: false
+                          orientation:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              w:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            additionalProperties: false
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        additionalProperties: false
+                      config:
+                        type: string
+                      data:
+                        type: string
+                    title: resource
+                  type: array
+                mount_resource:
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      sample_id:
+                        type: string
+                      children:
+                        type: array
+                        items:
+                          type: string
+                      parent:
+                        type: string
+                      type:
+                        type: string
+                      category:
+                        type: string
+                      pose:
+                        type: object
+                        properties:
+                          position:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            additionalProperties: false
+                          orientation:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              w:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            additionalProperties: false
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        additionalProperties: false
+                      config:
+                        type: string
+                      data:
+                        type: string
+                    title: mount_resource
+                  type: array
+                collector_mass:
+                  type: array
+                  items:
+                    type: number
+                active_material:
+                  type: array
+                  items:
+                    type: number
+                capacity:
+                  type: array
+                  items:
+                    type: number
+                battery_system:
+                  type: array
+                  items:
+                    type: string
+              required:
+              - resource
+              - mount_resource
+              - collector_mass
+              - active_material
+              - capacity
+              - battery_system
+              _unilabos_placeholder_info:
+                resource: unilabos_resources
+                mount_resource: unilabos_resources
+            feedback: {}
+            result: {}
+          required:
+          - goal
+        goal_default:
+          resource: []
+          mount_resource: []
+          collector_mass: []
+          active_material: []
+          capacity: []
+          battery_system: []
+        handles:
+          input:
+          - handler_key: resource
+            data_type: resource
+            label: 待转移资源
+            data_key: resource
+            data_source: handle
+            io_type: source
+          - handler_key: mount_resource
+            data_type: resource
+            label: 目标孔位
+            data_key: mount_resource
+            data_source: handle
+            io_type: source
+          - handler_key: collector_mass
+            data_type: collector_mass
+            label: 极流体质量
+            data_key: collector_mass
+            data_source: handle
+            io_type: source
+          - handler_key: active_material
+            data_type: active_material
+            label: 活性物质含量
+            data_key: active_material
+            data_source: handle
+            io_type: source
+          - handler_key: capacity
+            data_type: capacity
+            label: 克容量
+            data_key: capacity
+            data_source: handle
+            io_type: source
+          - handler_key: battery_system
+            data_type: battery_system
+            label: 电池体系
+            data_key: battery_system
+            data_source: handle
+            io_type: source
+          output: []
+        placeholder_keys:
+          resource: unilabos_resources
+          mount_resource: unilabos_resources
+        feedback_interval: 1.0
+      transfer:
+        type: UniLabJsonCommandAsync
+        goal:
+          resource: resource
+          target_device: target_device
+          mount_resource: mount_resource
+        feedback: {}
+        result: {}
+        schema:
+          title: transfer参数
+          description: transfer的参数schema
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                unilabos_device_id:
+                  type: string
+                  default: ''
+                  description: UniLabOS设备ID，用于指定执行动作的具体设备实例
+                resource:
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      sample_id:
+                        type: string
+                      children:
+                        type: array
+                        items:
+                          type: string
+                      parent:
+                        type: string
+                      type:
+                        type: string
+                      category:
+                        type: string
+                      pose:
+                        type: object
+                        properties:
+                          position:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            additionalProperties: false
+                          orientation:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              w:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            additionalProperties: false
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        additionalProperties: false
+                      config:
+                        type: string
+                      data:
+                        type: string
+                    title: resource
+                  type: array
+                target_device:
+                  type: string
+                  description: device reference
+                mount_resource:
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      sample_id:
+                        type: string
+                      children:
+                        type: array
+                        items:
+                          type: string
+                      parent:
+                        type: string
+                      type:
+                        type: string
+                      category:
+                        type: string
+                      pose:
+                        type: object
+                        properties:
+                          position:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            additionalProperties: false
+                          orientation:
+                            type: object
+                            properties:
+                              x:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              y:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              z:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                              w:
+                                type: number
+                                minimum: -1.7976931348623157e+308
+                                maximum: 1.7976931348623157e+308
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            additionalProperties: false
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        additionalProperties: false
+                      config:
+                        type: string
+                      data:
+                        type: string
+                    title: mount_resource
+                  type: array
+              required:
+              - resource
+              - target_device
+              - mount_resource
+              _unilabos_placeholder_info:
+                resource: unilabos_resources
+                target_device: unilabos_devices
+                mount_resource: unilabos_resources
+            feedback: {}
+            result: {}
+          required:
+          - goal
+        goal_default:
+          resource: []
+          target_device: ''
+          mount_resource: []
+        handles:
+          input:
+          - handler_key: target_device
+            data_type: device_id
+            label: 目标设备
+            data_key: target_device
+            data_source: handle
+            io_type: source
+          - handler_key: resource
+            data_type: resource
+            label: 待转移资源
+            data_key: resource
+            data_source: handle
+            io_type: source
+          - handler_key: mount_resource
+            data_type: resource
+            label: 目标孔位
+            data_key: mount_resource
+            data_source: handle
+            io_type: source
+          output: []
+        placeholder_keys:
+          resource: unilabos_resources
+          target_device: unilabos_devices
+          mount_resource: unilabos_resources
+        feedback_interval: 1.0
     module: unilabos.devices.neware_battery_test_system.neware_battery_test_system:NewareBatteryTestSystem
     status_types:
       channel_status: Dict[int, Dict]

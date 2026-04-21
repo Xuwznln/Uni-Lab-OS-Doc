@@ -230,10 +230,10 @@ device = NewareBatteryTestSystem(
 
 #### Step 2: Submit Test Tasks
 
-Use `submit_from_csv` to submit test tasks:
+Use `submit_from_csv_export_ndax` to submit test tasks:
 
 ```python
-result = device.submit_from_csv(
+result = device.submit_from_csv_export_ndax(
     csv_path="test_data.csv",
     output_dir="D:/neware_output"
 )
@@ -500,7 +500,7 @@ A: Obtain a new API Key and update the `UNI_LAB_AUTH_TOKEN` environment variable
 **Q: Can I customize upload paths?**  
 A: Current version has paths automatically assigned by unified API. `oss_prefix` parameter is currently unused (retained for interface compatibility).
 
-**Q: Why not auto-upload in `submit_from_csv`?**  
+**Q: Why not auto-upload in `submit_from_csv_export_ndax`?**  
 A: Because backup files are generated progressively during testing, they may not be fully generated when the method returns. A separate upload method provides more flexibility.
 
 **Q: How to access files after upload?**  

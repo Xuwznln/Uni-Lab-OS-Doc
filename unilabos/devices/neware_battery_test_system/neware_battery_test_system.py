@@ -19,10 +19,13 @@ import socket
 import xml.etree.ElementTree as ET
 import json
 import time
+import inspect
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TypedDict
 
 from pylabrobot.resources import ResourceHolder, Coordinate, create_ordered_items_2d, Deck, Plate
+from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
+from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.ros.nodes.base_device_node import ROS2DeviceNode
 from unilabos.ros.nodes.presets.workstation import ROS2WorkstationNode
 
@@ -256,11 +259,26 @@ class BatteryTestPosition(ResourceHolder):
         super().load_state(state)
         self._unilabos_state = state
 
+    def serialize(self) -> dict:
+        d = super().serialize()
+        channel_name = self._unilabos_state.get("Channel_Name")
+        if channel_name:
+            d["name"] = channel_name
+        return d
+
     def serialize_state(self) -> Dict[str, Dict[str, Any]]:
         """格式不变"""
         data = super().serialize_state()
         data.update(self._unilabos_state)
         return data
+
+    def serialize_all_state(self) -> Dict[str, Dict[str, Any]]:
+        states = {}
+        channel_name = self._unilabos_state.get("Channel_Name", self.name)
+        states[channel_name] = self.serialize_state()
+        for child in self.children:
+            states.update(child.serialize_all_state())
+        return states
 
 
 class NewareBatteryTestSystem:
@@ -292,13 +310,13 @@ class NewareBatteryTestSystem:
     # ========================
     STATUS_SET = {"working", "stop", "finish", "protect", "pause", "false"}
     STATUS_COLOR = {
-        "working": "#22c55e",  # 绿
-        "stop":    "#6b7280",  # 灰
-        "finish":  "#3b82f6",  # 蓝
-        "protect": "#ef4444",  # 红
-        "pause":   "#f59e0b",  # 橙
-        "false":   "#9ca3af",  # 不存在/无效
-        "unknown": "#a855f7",  # 未知
+        "working": "#15803d",  # 深绿
+        "stop":    "#4b5563",  # 深灰
+        "finish":  "#1d4ed8",  # 深蓝
+        "protect": "#b91c1c",  # 深红
+        "pause":   "#b45309",  # 深橙
+        "false":   "#6b7280",  # 灰
+        "unknown": "#7c3aed",  # 深紫
     }
     
     # 字母常量
@@ -409,10 +427,10 @@ class NewareBatteryTestSystem:
         """设置物料管理系统"""
         deck_main = Deck(
             name="ADeckName",
-            size_x=2200,
+            size_x=1200,
             size_y=2800,
             size_z=100,
-            origin=Coordinate(2000, 2000, 0)
+            origin=Coordinate(-5500, 0, 0)
         )
         self.station_resources = {}
         self.station_resources_by_plate = {}
@@ -432,19 +450,34 @@ class NewareBatteryTestSystem:
                 plate_name = self._plate_name(devid, plate_num)
                 plate = Plate(
                     name=plate_name,
-                    size_x=400,
-                    size_y=300,
+                    size_x=540,
+                    size_y=350,
                     size_z=50,
                     ordered_items=plate_resources
                 )
-                location_x = 0 if plate_num == 1 else 450
-                location_y = row_idx * 350
+                location_x = 0 if plate_num == 1 else 590
+                location_y = row_idx * 400
                 deck_main.assign_child_resource(plate, location=Coordinate(location_x, location_y, 0))
 
                 plate_key = (devid, plate_num)
+                subdev_start = 1 if plate_num == 1 else 6
                 self.station_resources_by_plate[plate_key] = {}
                 for name, resource in plate_resources.items():
                     new_name = f"{plate_name}_{name}"
+                    # 从名称解析 col/row 索引，设置初始 Channel_Name
+                    parts = name.rsplit("_", 2)
+                    if len(parts) >= 3:
+                        col_idx, row_idx = int(parts[-2]), int(parts[-1])
+                        chl_id = col_idx + 1
+                        subdev_id = subdev_start + row_idx
+                        resource.load_state({
+                            "status": "unknown",
+                            "color": self.STATUS_COLOR["unknown"],
+                            "voltage": 0.0,
+                            "current": 0.0,
+                            "time": 0.0,
+                            "Channel_Name": f"{devid}-{subdev_id}-{chl_id}",
+                        })
                     self.station_resources_by_plate[plate_key][new_name] = resource
                     self.station_resources[new_name] = resource
 
@@ -873,6 +906,28 @@ class NewareBatteryTestSystem:
     def _canon(self, bs: str) -> str:
         """规范化电池体系名称"""
         return str(bs).strip().replace('-', '_').upper()
+
+    def _get_builder_required_positional_count(self, builder) -> int:
+        """返回XML生成函数必填位置参数个数（仅统计无默认值的positional参数）"""
+        sig = inspect.signature(builder)
+        required = 0
+        for p in sig.parameters.values():
+            if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD):
+                if p.default is inspect.Parameter.empty:
+                    required += 1
+        return required
+
+    def _is_csv_value_empty(self, value) -> bool:
+        """判断CSV单元格是否为空（兼容NaN/None/空串/null）"""
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip().lower() in ("", "nan", "none", "null")
+        try:
+            # NaN 与自身不相等
+            return value != value
+        except Exception:
+            return False
     
     def _compute_values(self, row):
         """
@@ -884,7 +939,7 @@ class NewareBatteryTestSystem:
         Returns:
             tuple: (活性物质质量mg, 容量mAh)
         """
-        pw = float(row['Pole_Weight'])
+        pw = float(row['pole_weight'])
         cm = float(row['集流体质量'])
         am = row['活性物质含量']
         if isinstance(am, str) and am.endswith('%'):
@@ -918,6 +973,7 @@ class NewareBatteryTestSystem:
             'SIGR_LI': gen_mod.xml_SiGr_Li_Step,
             '811_SIGR': gen_mod.xml_811_SiGr,
             '811_CU_AGING': gen_mod.xml_811_Cu_aging,
+            '811_LI_JY': gen_mod.xml_811_Li_JY,
             'ZQXNLRMO':gen_mod.xml_ZQXNLRMO,
         }
         if key not in fmap:
@@ -935,7 +991,7 @@ class NewareBatteryTestSystem:
         with open(path, 'w', encoding='utf-8') as f:
             f.write(xml)
     
-    def submit_from_csv(self, csv_path: str, output_dir: str = ".") -> dict:
+    def submit_from_csv_export_ndax(self, csv_path: str, output_dir: str = ".") -> dict:
         """
         从CSV文件批量提交Neware测试任务（设备动作）
         
@@ -967,8 +1023,7 @@ class NewareBatteryTestSystem:
             
             # 验证必需列
             required = [
-                'Battery_Code', 'Electrolyte_Code', 'Pole_Weight', '集流体质量', '活性物质含量', 
-                '克容量mah/g', '电池体系', '设备号', '排号', '通道号'
+                'coin_cell_code', 'electrolyte_code', '电池体系', '设备号', '排号', '通道号'
             ]
             missing = [c for c in required if c not in df.columns]
             if missing:
@@ -997,27 +1052,47 @@ class NewareBatteryTestSystem:
             
             for idx, row in df.iterrows():
                 try:
-                    coin_id = f"{row['Battery_Code']}-{row['Electrolyte_Code']}"
-                    
-                    # 计算活性物质质量和容量
-                    act_mass, cap_mAh = self._compute_values(row)
-                    
-                    if cap_mAh < 0:
-                        error_msg = (
-                            f"容量为负数: Battery_Code={coin_id}, "
-                            f"活性物质质量mg={act_mass}, 容量mah={cap_mAh}"
-                        )
-                        if self._ros_node:
-                            self._ros_node.lab_logger().warning(error_msg)
-                        results.append(f"行{idx+1} 失败: {error_msg}")
-                        continue
-                    
+                    coin_id = f"{row['coin_cell_code']}-{row['electrolyte_code']}"
+
                     # 获取电池体系对应的XML生成函数
                     key = self._canon(row['电池体系'])
                     builder = self._get_xml_builder(gen_mod, key)
-                    
-                    # 生成XML内容
-                    xml_content = builder(act_mass, cap_mAh)
+                    builder_required_args = self._get_builder_required_positional_count(builder)
+
+                    # 生成XML内容：仅当工步模板需要时才校验并计算 act_mass/cap_mAh
+                    if builder_required_args == 0:
+                        xml_content = builder()
+                    elif builder_required_args == 2:
+                        calc_cols = ['pole_weight', '集流体质量', '活性物质含量', '克容量mah/g']
+                        missing_calc = [
+                            c for c in calc_cols
+                            if c not in df.columns or self._is_csv_value_empty(row[c])
+                        ]
+                        if missing_calc:
+                            error_msg = (
+                                f"电池体系 {key} 需要 act_mass/Cap_mAh，以下列缺失或为空: {missing_calc}, "
+                                f"CoinID={coin_id}"
+                            )
+                            if self._ros_node:
+                                self._ros_node.lab_logger().warning(error_msg)
+                            results.append(f"行{idx+1} 失败: {error_msg}")
+                            continue
+
+                        act_mass, cap_mAh = self._compute_values(row)
+                        if cap_mAh < 0:
+                            error_msg = (
+                                f"容量为负数: Battery_Code={coin_id}, "
+                                f"活性物质质量mg={act_mass}, 容量mah={cap_mAh}"
+                            )
+                            if self._ros_node:
+                                self._ros_node.lab_logger().warning(error_msg)
+                            results.append(f"行{idx+1} 失败: {error_msg}")
+                            continue
+                        xml_content = builder(act_mass, cap_mAh)
+                    else:
+                        raise ValueError(
+                            f"XML生成函数参数不支持: {builder.__name__} 需要 {builder_required_args} 个必填位置参数"
+                        )
                     
                     # 获取设备信息
                     devid = int(row['设备号'])
@@ -1040,7 +1115,8 @@ class NewareBatteryTestSystem:
                         chlid=chlid, 
                         CoinID=coin_id, 
                         recipe_path=recipe_path, 
-                        backup_dir=backup_dir
+                        backup_dir=backup_dir,
+                        filetype=0
                     )
                     
                     submitted_count += 1
@@ -1048,7 +1124,7 @@ class NewareBatteryTestSystem:
                     
                     if self._ros_node:
                         self._ros_node.lab_logger().info(
-                            f"已提交 {coin_id} (设备{devid}-{subdevid}-{chlid}): {resp}"
+                            f"已提交 {coin_id} (设备{devid}-{subdevid}-{chlid}, NDAX备份): {resp}"
                         )
                 
                 except Exception as e:
@@ -1087,6 +1163,168 @@ class NewareBatteryTestSystem:
                 "total_count": 0
             }
 
+
+    def submit_from_csv_export_excel(self, csv_path: str, output_dir: str = ".") -> dict:
+        """
+        从CSV文件批量提交Neware测试任务，备份格式为Excel（设备动作）
+        
+        与 submit_from_csv_export_ndax 逻辑一致，唯一区别是 BTS 备份文件格式为 Excel 而非 NDA。
+        
+        Args:
+            csv_path (str): 输入CSV文件路径
+            output_dir (str): 输出目录，用于存储XML文件和备份，默认当前目录
+            
+        Returns:
+            dict: 执行结果 {"return_info": str, "success": bool, "submitted_count": int}
+        """
+        try:
+            self._ensure_local_import_path()
+            import pandas as pd
+            import generate_xml_content as gen_mod
+            from neware_driver import start_test
+            
+            if self._ros_node:
+                self._ros_node.lab_logger().info(f"开始从CSV文件提交任务(Excel备份): {csv_path}")
+            
+            if not os.path.exists(csv_path):
+                error_msg = f"CSV文件不存在: {csv_path}"
+                if self._ros_node:
+                    self._ros_node.lab_logger().error(error_msg)
+                return {"return_info": error_msg, "success": False, "submitted_count": 0, "total_count": 0}
+            
+            df = pd.read_csv(csv_path, encoding='gbk')
+            
+            required = [
+                'coin_cell_code', 'electrolyte_code', '电池体系', '设备号', '排号', '通道号'
+            ]
+            missing = [c for c in required if c not in df.columns]
+            if missing:
+                error_msg = f"CSV缺少必需列: {missing}"
+                if self._ros_node:
+                    self._ros_node.lab_logger().error(error_msg)
+                return {"return_info": error_msg, "success": False, "submitted_count": 0, "total_count": 0}
+            
+            xml_dir = os.path.join(output_dir, 'xml_dir')
+            backup_dir = os.path.join(output_dir, 'backup_dir')
+            os.makedirs(xml_dir, exist_ok=True)
+            os.makedirs(backup_dir, exist_ok=True)
+            
+            self._last_backup_dir = backup_dir
+            
+            if self._ros_node:
+                self._ros_node.lab_logger().info(
+                    f"输出目录: XML={xml_dir}, 备份(Excel)={backup_dir}"
+                )
+            
+            submitted_count = 0
+            results = []
+            
+            for idx, row in df.iterrows():
+                try:
+                    coin_id = f"{row['coin_cell_code']}-{row['electrolyte_code']}"
+
+                    key = self._canon(row['电池体系'])
+                    builder = self._get_xml_builder(gen_mod, key)
+                    builder_required_args = self._get_builder_required_positional_count(builder)
+
+                    if builder_required_args == 0:
+                        xml_content = builder()
+                    elif builder_required_args == 2:
+                        calc_cols = ['pole_weight', '集流体质量', '活性物质含量', '克容量mah/g']
+                        missing_calc = [
+                            c for c in calc_cols
+                            if c not in df.columns or self._is_csv_value_empty(row[c])
+                        ]
+                        if missing_calc:
+                            error_msg = (
+                                f"电池体系 {key} 需要 act_mass/Cap_mAh，以下列缺失或为空: {missing_calc}, "
+                                f"CoinID={coin_id}"
+                            )
+                            if self._ros_node:
+                                self._ros_node.lab_logger().warning(error_msg)
+                            results.append(f"行{idx+1} 失败: {error_msg}")
+                            continue
+
+                        act_mass, cap_mAh = self._compute_values(row)
+                        if cap_mAh < 0:
+                            error_msg = (
+                                f"容量为负数: Battery_Code={coin_id}, "
+                                f"活性物质质量mg={act_mass}, 容量mah={cap_mAh}"
+                            )
+                            if self._ros_node:
+                                self._ros_node.lab_logger().warning(error_msg)
+                            results.append(f"行{idx+1} 失败: {error_msg}")
+                            continue
+                        xml_content = builder(act_mass, cap_mAh)
+                    else:
+                        raise ValueError(
+                            f"XML生成函数参数不支持: {builder.__name__} 需要 {builder_required_args} 个必填位置参数"
+                        )
+                    
+                    devid = int(row['设备号'])
+                    subdevid = int(row['排号'])
+                    chlid = int(row['通道号'])
+                    
+                    recipe_path = os.path.join(
+                        xml_dir, 
+                        f"{coin_id}_{devid}_{subdevid}_{chlid}.xml"
+                    )
+                    self._save_xml(xml_content, recipe_path)
+                    
+                    resp = start_test(
+                        ip=self.ip, 
+                        port=self.port, 
+                        devid=devid, 
+                        subdevid=subdevid, 
+                        chlid=chlid, 
+                        CoinID=coin_id, 
+                        recipe_path=recipe_path, 
+                        backup_dir=backup_dir,
+                        filetype=1
+                    )
+                    
+                    submitted_count += 1
+                    results.append(f"行{idx+1} {coin_id}: {resp}")
+                    
+                    if self._ros_node:
+                        self._ros_node.lab_logger().info(
+                            f"已提交 {coin_id} (设备{devid}-{subdevid}-{chlid}, Excel备份): {resp}"
+                        )
+                
+                except Exception as e:
+                    error_msg = f"行{idx+1} 处理失败: {str(e)}"
+                    results.append(error_msg)
+                    if self._ros_node:
+                        self._ros_node.lab_logger().error(error_msg)
+            
+            success_msg = (
+                f"批量提交完成(Excel备份): 成功{submitted_count}个，共{len(df)}行。"
+                f"\n详细结果:\n" + "\n".join(results)
+            )
+            
+            if self._ros_node:
+                self._ros_node.lab_logger().info(
+                    f"批量提交完成(Excel备份): 成功{submitted_count}/{len(df)}"
+                )
+            
+            return {
+                "return_info": success_msg,
+                "success": True,
+                "submitted_count": submitted_count,
+                "total_count": len(df),
+                "results": results
+            }
+        
+        except Exception as e:
+            error_msg = f"批量提交失败(Excel备份): {str(e)}"
+            if self._ros_node:
+                self._ros_node.lab_logger().error(error_msg)
+            return {
+                "return_info": error_msg, 
+                "success": False, 
+                "submitted_count": 0,
+                "total_count": 0
+            }
 
     def get_device_summary(self) -> dict:
         """
@@ -1164,7 +1402,7 @@ class NewareBatteryTestSystem:
         上传备份目录中的文件到 OSS（ROS2 动作）
         
         Args:
-            backup_dir: 备份目录路径，默认使用最近一次 submit_from_csv 的 backup_dir
+            backup_dir: 备份目录路径，默认使用最近一次提交任务的 backup_dir
             file_pattern: 文件通配符模式，默认 "*" 上传所有文件（例如 "*.csv" 仅上传 CSV 文件）
             oss_prefix: OSS 对象前缀，默认使用类初始化时的配置
             
@@ -1694,6 +1932,235 @@ class NewareBatteryTestSystem:
             
         return result
 
+    def manual_confirm(
+        self,
+        resource: List[ResourceSlot],
+        target_device: DeviceSlot,
+        mount_resource: List[ResourceSlot],
+        collector_mass: List[float],
+        active_material: List[float],
+        capacity: List[float],
+        battery_system: List[str],
+        timeout_seconds: int,
+        assignee_user_ids: list[str],
+        **kwargs
+    ) -> dict:
+        """
+        timeout_seconds: 超时时间（秒），默认3600秒
+        collector_mass: 极流体质量
+        active_material: 活性物质含量
+        capacity: 克容量（mAh/g）
+        battery_system: 电池体系
+        修改的结果无效，是只读的
+        """
+        resource = ResourceTreeSet.from_plr_resources(resource).dump()
+        mount_resource = ResourceTreeSet.from_plr_resources(mount_resource).dump()
+        kwargs.update(locals())
+        kwargs.pop("kwargs")
+        kwargs.pop("self")
+        return kwargs
+        
+
+    async def transfer(self, resource: List[ResourceSlot], target_device: DeviceSlot, mount_resource: List[ResourceSlot]):
+        future = ROS2DeviceNode.run_async_func(self._ros_node.transfer_resource_to_another, True,
+            **{
+                "plr_resources": resource,
+                "target_device_id": target_device,
+                "target_resources": mount_resource,
+                "sites": [None] * len(mount_resource),
+            })
+        result = await future
+        return result
+    # ──────────────────────────────────────────────
+    # test() 辅助方法
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_channel_name(res) -> Optional[str]:
+        """从 BatteryTestPosition 或通用 Resource 中提取 Channel_Name (devid-subdevid-chlid)"""
+        # 情况1: ResourceSlot 对象 —— 直接读 _unilabos_state
+        state = getattr(res, "_unilabos_state", None)
+        if isinstance(state, dict):
+            ch = state.get("Channel_Name")
+            if ch:
+                return str(ch)
+        # 情况2: serialize_state()
+        if hasattr(res, "serialize_state"):
+            try:
+                ss = res.serialize_state()
+                if isinstance(ss, dict):
+                    ch = ss.get("Channel_Name")
+                    if ch:
+                        return str(ch)
+            except Exception:
+                pass
+        # 情况3: 来自 ResourceTreeSet.dump() 的 dict
+        if isinstance(res, dict):
+            data = res.get("data", {})
+            if isinstance(data, dict):
+                ch = data.get("Channel_Name")
+                if ch:
+                    return str(ch)
+            ch = res.get("name") or res.get("id")
+            if ch and len(str(ch).split("-")) == 3:
+                return str(ch)
+        # 情况4: name 本身就是 "devid-subdevid-chlid"
+        name = getattr(res, "name", "")
+        if name and len(name.split("-")) == 3:
+            return name
+        return None
+
+    @staticmethod
+    def _extract_pole_weight(res) -> float:
+        """从电池资源 state 中提取极片称重 (mg)"""
+        state = getattr(res, "_unilabos_state", None)
+        if isinstance(state, dict) and "pole_weight" in state:
+            return float(state["pole_weight"])
+        if hasattr(res, "serialize_state"):
+            try:
+                ss = res.serialize_state()
+                if isinstance(ss, dict) and "pole_weight" in ss:
+                    return float(ss["pole_weight"])
+            except Exception:
+                pass
+        if isinstance(res, dict):
+            data = res.get("data", {})
+            if isinstance(data, dict) and "pole_weight" in data:
+                return float(data["pole_weight"])
+        return 0.0
+
+    @staticmethod
+    def _parse_active_material(val) -> float:
+        """解析活性物质含量，支持 0.97 或 '97%' 两种格式"""
+        if isinstance(val, str):
+            val = val.strip()
+            if val.endswith("%"):
+                return float(val[:-1]) / 100.0
+            return float(val)
+        return float(val)
+
+    # ──────────────────────────────────────────────
+    # test 动作：下发测试
+    # ──────────────────────────────────────────────
+
+    async def test(
+        self,
+        resource: List[ResourceSlot],
+        mount_resource: List[ResourceSlot],
+        collector_mass: List[float],
+        active_material: List[float],
+        capacity: List[float],
+        battery_system: List[str],
+    ) -> dict:
+        """
+        对每颗电池计算测试参数、生成 XML 工步文件并通过 TCP 下发给新威测试仪。
+
+        Args:
+            resource:        成品电池资源列表（含 pole_weight 状态）
+            mount_resource:  目标通道资源列表（含 Channel_Name = devid-subdevid-chlid）
+            collector_mass:  各电池集流体质量 (mg)
+            active_material: 各电池活性物质比例（0.97 或 "97%"）
+            capacity:        各电池克容量 (mAh/g)
+            battery_system:  各电池体系名称（如 "811_LI_002"）
+        """
+        import importlib
+        gen_mod = importlib.import_module(
+            "unilabos.devices.neware_battery_test_system.generate_xml_content"
+        )
+        from .neware_driver import start_test as _start_test
+
+        n = len(resource)
+        results = []
+        submitted = 0
+
+        xml_dir = os.path.join(os.path.dirname(__file__), "xml_recipes")
+        os.makedirs(xml_dir, exist_ok=True)
+        backup_dir = self._last_backup_dir or os.path.join(os.path.dirname(__file__), "backup")
+        os.makedirs(backup_dir, exist_ok=True)
+
+        for i in range(n):
+            try:
+                # 1. 解析通道地址
+                ch_name = self._extract_channel_name(mount_resource[i])
+                if not ch_name:
+                    raise ValueError(f"无法从 mount_resource[{i}] 提取 Channel_Name")
+                parts = ch_name.split("-")
+                if len(parts) != 3:
+                    raise ValueError(f"Channel_Name 格式错误，期望 devid-subdevid-chlid，实际: {ch_name}")
+                devid, subdevid, chlid = int(parts[0]), int(parts[1]), int(parts[2])
+
+                # 2. 获取电池标识与极片重量
+                res = resource[i]
+                coin_id = (
+                    getattr(res, "name", None)
+                    or (res.get("name") if isinstance(res, dict) else None)
+                    or f"battery_{i}"
+                )
+                pw = self._extract_pole_weight(res)
+
+                # 3. 计算活性物质质量与容量
+                cm = float(collector_mass[i])
+                amv = self._parse_active_material(active_material[i])
+                sc = float(capacity[i])
+                act_mass = round((pw - cm) * amv, 4)
+                if act_mass <= 0:
+                    raise ValueError(
+                        f"活性物质质量异常: pole_weight={pw}mg, collector_mass={cm}mg, "
+                        f"active_material={amv}, act_mass={act_mass}"
+                    )
+                cap_mAh = round(act_mass * sc / 1000.0, 4)
+                if cap_mAh <= 0:
+                    raise ValueError(f"容量计算异常: act_mass={act_mass}mg, capacity={sc}mAh/g, cap_mAh={cap_mAh}")
+
+                # 4. 生成 XML 工步文件
+                key = self._canon(battery_system[i])
+                builder = self._get_xml_builder(gen_mod, key)
+                req_args = self._get_builder_required_positional_count(builder)
+                xml_content = builder(act_mass, cap_mAh) if req_args >= 2 else builder()
+                recipe_path = os.path.join(xml_dir, f"{coin_id}_{devid}_{subdevid}_{chlid}.xml")
+                self._save_xml(xml_content, recipe_path)
+
+                # 5. TCP 下发测试
+                resp = _start_test(
+                    ip=self.ip,
+                    port=int(self.port),
+                    devid=devid,
+                    subdevid=subdevid,
+                    chlid=chlid,
+                    CoinID=coin_id,
+                    recipe_path=recipe_path,
+                    backup_dir=backup_dir,
+                    filetype=0,
+                )
+                submitted += 1
+                results.append({
+                    "index": i,
+                    "coin_id": coin_id,
+                    "channel": ch_name,
+                    "act_mass_mg": act_mass,
+                    "cap_mAh": cap_mAh,
+                    "success": True,
+                    "response": str(resp)[:300],
+                })
+                if self._ros_node:
+                    self._ros_node.lab_logger().info(
+                        f"[test] 已下发 {coin_id} → {ch_name}  "
+                        f"act_mass={act_mass}mg  cap={cap_mAh}mAh"
+                    )
+
+            except Exception as e:
+                if self._ros_node:
+                    self._ros_node.lab_logger().error(f"[test] 电池[{i}] 下发失败: {e}")
+                results.append({"index": i, "success": False, "error": str(e)})
+
+        summary = f"共 {n} 颗电池，成功下发 {submitted} 颗"
+        return {
+            "return_info": summary,
+            "success": submitted > 0,
+            "submitted_count": submitted,
+            "total_count": n,
+            "results": results,
+        }
 
 # ========================
 # 示例和测试代码

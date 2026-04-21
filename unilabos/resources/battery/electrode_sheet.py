@@ -135,6 +135,7 @@ class BatteryState(TypedDict):
     open_circuit_voltage: float
     assembly_pressure: float
     electrolyte_volume: float
+    pole_weight: float  # 极片称重 (mg)
 
     info: Optional[str]  # 附加信息
 
@@ -179,6 +180,7 @@ class Battery(Container):
             open_circuit_voltage=0.0,
             assembly_pressure=0.0,
             electrolyte_volume=0.0,
+            pole_weight=0.0,
             info=None
         )
 

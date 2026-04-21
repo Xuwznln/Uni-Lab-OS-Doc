@@ -219,10 +219,10 @@ device = NewareBatteryTestSystem(
 
 #### 步骤 2：提交测试任务
 
-使用 `submit_from_csv` 提交测试任务：
+使用 `submit_from_csv_export_ndax` 提交测试任务：
 
 ```python
-result = device.submit_from_csv(
+result = device.submit_from_csv_export_ndax(
     csv_path="test_data.csv",
     output_dir="D:/neware_output"
 )
@@ -489,7 +489,7 @@ A: 重新获取新的 Token 并更新环境变量 `UNI_LAB_AUTH_TOKEN`。
 **Q: 可以自定义上传路径吗？**  
 A: 当前版本路径由统一 API 自动分配，`oss_prefix` 参数暂不使用（保留接口兼容性）。
 
-**Q: 为什么不在 `submit_from_csv` 中自动上传？**  
+**Q: 为什么不在 `submit_from_csv_export_ndax` 中自动上传？**  
 A: 因为备份文件在测试进行中逐步生成，方法返回时可能文件尚未完全生成，因此提供独立的上传方法更灵活。
 
 **Q: 上传后如何访问文件？**  
