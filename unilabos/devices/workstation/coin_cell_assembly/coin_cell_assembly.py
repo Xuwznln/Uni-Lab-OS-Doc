@@ -1650,6 +1650,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         time_date = datetime.now().strftime("%Y%m%d")
             #秒级时间戳用于标记每一行电池数据
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._last_assembly_timestamp = timestamp
             #生成输出文件的变量
         self.csv_export_file = os.path.join(file_path, f"date_{time_date}.csv")   
         #将数据存入csv文件
@@ -1660,7 +1661,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                 writer.writerow([
                     'Time', 'open_circuit_voltage', 'pole_weight', 
                     'assembly_time', 'assembly_pressure', 'electrolyte_volume', 
-                    'coin_num', 'electrolyte_code', 'coin_cell_code',
+                    'data_coin_type', 'electrolyte_code', 'coin_cell_code',
                     'orderName', 'prep_bottle_barcode', 'vial_bottle_barcodes',
                     'target_mass_ratio', 'real_mass_ratio'
                 ])
@@ -1877,17 +1878,18 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                     pole_weight = 0.0
                 
                 battery_info = {
-                    "battery_index": coin_num_N + 1,
-                    "battery_barcode": battery_qr_code,
-                    "electrolyte_barcode": electrolyte_qr_code,
+                    "Time": getattr(self, "_last_assembly_timestamp", datetime.now().strftime("%Y%m%d_%H%M%S")),
                     "open_circuit_voltage": open_circuit_voltage,
                     "pole_weight": pole_weight,
                     "assembly_time": self.data_assembly_time,
                     "assembly_pressure": self.data_assembly_pressure,
-                    "electrolyte_volume": self.data_electrolyte_volume
+                    "electrolyte_volume": self.data_electrolyte_volume,
+                    "data_coin_type": getattr(self, "data_coin_type", 0),
+                    "electrolyte_code": electrolyte_qr_code,
+                    "coin_cell_code": battery_qr_code,
                 }
                 battery_data_list.append(battery_info)
-                print(f"已收集第 {coin_num_N + 1} 个电池数据: 电池码={battery_info['battery_barcode']}, 电解液码={battery_info['electrolyte_barcode']}")
+                print(f"已收集第 {coin_num_N + 1} 个电池数据: 电池码={battery_info['coin_cell_code']}, 电解液码={battery_info['electrolyte_code']}")
                 
                 time.sleep(1)
                 # TODO:读完再将电池数加一还是进入循环就将电池数加一需要考虑
@@ -1916,6 +1918,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             "success": True,
             "total_batteries": len(battery_data_list),
             "batteries": battery_data_list,
+            "assembly_data": battery_data_list,
             "summary": {
                 "electrolyte_bottles_used": elec_num,
                 "batteries_per_bottle": elec_use_num,
@@ -2130,17 +2133,18 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                     pole_weight = 0.0
                 
                 battery_info = {
-                    "battery_index": coin_num_N + 1,
-                    "battery_barcode": battery_qr_code,
-                    "electrolyte_barcode": electrolyte_qr_code,
+                    "Time": getattr(self, "_last_assembly_timestamp", datetime.now().strftime("%Y%m%d_%H%M%S")),
                     "open_circuit_voltage": open_circuit_voltage,
                     "pole_weight": pole_weight,
                     "assembly_time": self.data_assembly_time,
                     "assembly_pressure": self.data_assembly_pressure,
-                    "electrolyte_volume": self.data_electrolyte_volume
+                    "electrolyte_volume": self.data_electrolyte_volume,
+                    "data_coin_type": getattr(self, "data_coin_type", 0),
+                    "electrolyte_code": electrolyte_qr_code,
+                    "coin_cell_code": battery_qr_code,
                 }
                 battery_data_list.append(battery_info)
-                print(f"已收集第 {coin_num_N + 1} 个电池数据: 电池码={battery_info['battery_barcode']}, 电解液码={battery_info['electrolyte_barcode']}")
+                print(f"已收集第 {coin_num_N + 1} 个电池数据: 电池码={battery_info['coin_cell_code']}, 电解液码={battery_info['electrolyte_code']}")
                 
                 time.sleep(1)
 
@@ -2167,6 +2171,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             "success": True,
             "total_batteries": len(battery_data_list),
             "batteries": battery_data_list,
+            "assembly_data": battery_data_list,
             "summary": {
                 "electrolyte_bottles_used": elec_num,
                 "batteries_per_bottle": elec_use_num,

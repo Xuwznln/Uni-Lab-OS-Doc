@@ -364,6 +364,9 @@ neware_battery_test_system:
           active_material: active_material
           capacity: capacity
           battery_system: battery_system
+          formulations: formulations
+          assembly_data: assembly_data
+          csv_export_dir: csv_export_dir
           timeout_seconds: timeout_seconds
           assignee_user_ids: assignee_user_ids
         feedback: {}
@@ -375,6 +378,9 @@ neware_battery_test_system:
           active_material: active_material
           capacity: capacity
           battery_system: battery_system
+          formulations: formulations
+          assembly_data: assembly_data
+          pole_weight: pole_weight
         schema:
           title: manual_confirm参数
           description: manual_confirm的参数schema
@@ -570,6 +576,20 @@ neware_battery_test_system:
                   type: array
                   items:
                     type: string
+                formulations:
+                  type: array
+                  description: 配方信息列表（来自 bioyond create_orders_formulation 的 mass_ratios 输出）
+                  items:
+                    type: object
+                assembly_data:
+                  type: array
+                  description: 扣电组装数据列表（每颗电池一个对象，含 Time/open_circuit_voltage/pole_weight 等 9 字段）
+                  items:
+                    type: object
+                csv_export_dir:
+                  type: string
+                  default: 'D:\2604Agentic_test'
+                  description: 整合 CSV 导出根目录（按日期子目录分组）
                 timeout_seconds:
                   type: integer
                 assignee_user_ids:
@@ -577,13 +597,6 @@ neware_battery_test_system:
                   items:
                     type: string
               required:
-              - resource
-              - target_device
-              - mount_resource
-              - collector_mass
-              - active_material
-              - capacity
-              - battery_system
               - timeout_seconds
               - assignee_user_ids
               _unilabos_placeholder_info:
@@ -604,50 +617,23 @@ neware_battery_test_system:
           active_material: []
           capacity: []
           battery_system: []
+          formulations: []
+          assembly_data: []
+          csv_export_dir: 'D:\2604Agentic_test'
           timeout_seconds: 3600
           assignee_user_ids: []
         handles:
           input:
-          - handler_key: target_device
-            data_type: device_id
-            label: 目标设备
-            data_key: target_device
+          - handler_key: formulations
+            data_type: array
+            label: 配方信息列表
+            data_key: formulations
             data_source: handle
             io_type: source
-          - handler_key: resource
-            data_type: resource
-            label: 待转移资源
-            data_key: resource
-            data_source: handle
-            io_type: source
-          - handler_key: mount_resource
-            data_type: resource
-            label: 目标孔位
-            data_key: mount_resource
-            data_source: handle
-            io_type: source
-          - handler_key: collector_mass
-            data_type: collector_mass
-            label: 极流体质量
-            data_key: collector_mass
-            data_source: handle
-            io_type: source
-          - handler_key: active_material
-            data_type: active_material
-            label: 活性物质含量
-            data_key: active_material
-            data_source: handle
-            io_type: source
-          - handler_key: capacity
-            data_type: capacity
-            label: 克容量
-            data_key: capacity
-            data_source: handle
-            io_type: source
-          - handler_key: battery_system
-            data_type: battery_system
-            label: 电池体系
-            data_key: battery_system
+          - handler_key: assembly_data
+            data_type: array
+            label: 扣电组装数据列表
+            data_key: assembly_data
             data_source: handle
             io_type: source
           output:
@@ -683,8 +669,23 @@ neware_battery_test_system:
             data_source: executor
           - handler_key: battery_system
             data_type: battery_system
-            label: 电池体系
+            label: xml工步
             data_key: battery_system
+            data_source: executor
+          - handler_key: pole_weight
+            data_type: array
+            label: 极片质量
+            data_key: pole_weight
+            data_source: executor
+          - handler_key: formulations
+            data_type: array
+            label: 配方信息列表
+            data_key: formulations
+            data_source: executor
+          - handler_key: assembly_data
+            data_type: array
+            label: 扣电组装数据列表
+            data_key: assembly_data
             data_source: executor
         placeholder_keys:
           resource: unilabos_resources
@@ -694,7 +695,7 @@ neware_battery_test_system:
         always_free: true
         feedback_interval: 300
         node_type: manual_confirm
-      test:
+      submit_auto_export_excel:
         type: UniLabJsonCommandAsync
         goal:
           resource: resource
@@ -703,6 +704,7 @@ neware_battery_test_system:
           active_material: active_material
           capacity: capacity
           battery_system: battery_system
+          pole_weight: pole_weight
         feedback: {}
         result:
           return_info: return_info
@@ -711,8 +713,8 @@ neware_battery_test_system:
           total_count: total_count
           results: results
         schema:
-          title: test参数
-          description: test的参数schema
+          title: submit_auto_export_excel参数
+          description: submit_auto_export_excel的参数schema
           type: object
           properties:
             goal:
@@ -902,6 +904,10 @@ neware_battery_test_system:
                   type: array
                   items:
                     type: string
+                pole_weight:
+                  type: array
+                  items:
+                    type: number
               required:
               - resource
               - mount_resource
@@ -923,6 +929,7 @@ neware_battery_test_system:
           active_material: []
           capacity: []
           battery_system: []
+          pole_weight: []
         handles:
           input:
           - handler_key: resource
@@ -957,8 +964,14 @@ neware_battery_test_system:
             io_type: source
           - handler_key: battery_system
             data_type: battery_system
-            label: 电池体系
+            label: xml工步
             data_key: battery_system
+            data_source: handle
+            io_type: source
+          - handler_key: pole_weight
+            data_type: array
+            label: 极片质量
+            data_key: pole_weight
             data_source: handle
             io_type: source
           output: []
@@ -966,17 +979,19 @@ neware_battery_test_system:
           resource: unilabos_resources
           mount_resource: unilabos_resources
         feedback_interval: 1.0
-      transfer:
+      battery_transfer_confirm:
         type: UniLabJsonCommandAsync
         goal:
           resource: resource
           target_device: target_device
           mount_resource: mount_resource
+          timeout_seconds: timeout_seconds
+          assignee_user_ids: assignee_user_ids
         feedback: {}
         result: {}
         schema:
-          title: transfer参数
-          description: transfer的参数schema
+          title: battery_transfer_confirm参数
+          description: battery_transfer_confirm的参数schema
           type: object
           properties:
             goal:
@@ -1153,14 +1168,23 @@ neware_battery_test_system:
                         type: string
                     title: mount_resource
                   type: array
+                timeout_seconds:
+                  type: integer
+                assignee_user_ids:
+                  type: array
+                  items:
+                    type: string
               required:
               - resource
               - target_device
               - mount_resource
+              - timeout_seconds
+              - assignee_user_ids
               _unilabos_placeholder_info:
                 resource: unilabos_resources
                 target_device: unilabos_devices
                 mount_resource: unilabos_resources
+                assignee_user_ids: unilabos_manual_confirm
             feedback: {}
             result: {}
           required:
@@ -1169,6 +1193,8 @@ neware_battery_test_system:
           resource: []
           target_device: ''
           mount_resource: []
+          timeout_seconds: 3600
+          assignee_user_ids: []
         handles:
           input:
           - handler_key: target_device
@@ -1189,12 +1215,30 @@ neware_battery_test_system:
             data_key: mount_resource
             data_source: handle
             io_type: source
-          output: []
+          output:
+          - handler_key: target_device
+            data_type: device_id
+            label: 目标设备
+            data_key: target_device
+            data_source: executor
+          - handler_key: resource
+            data_type: resource
+            label: 待转移资源
+            data_key: resource.@flatten
+            data_source: executor
+          - handler_key: mount_resource
+            data_type: resource
+            label: 目标孔位
+            data_key: mount_resource.@flatten
+            data_source: executor
         placeholder_keys:
           resource: unilabos_resources
           target_device: unilabos_devices
           mount_resource: unilabos_resources
-        feedback_interval: 1.0
+          assignee_user_ids: unilabos_manual_confirm
+        always_free: true
+        feedback_interval: 300
+        node_type: manual_confirm
     module: unilabos.devices.neware_battery_test_system.neware_battery_test_system:NewareBatteryTestSystem
     status_types:
       channel_status: Dict[int, Dict]

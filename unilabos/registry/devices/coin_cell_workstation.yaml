@@ -486,6 +486,12 @@ coincellassemblyworkstation_device:
             data_type: array
             handler_key: formulations_input
             label: 配方信息列表
+          output:
+          - data_key: assembly_data
+            data_source: executor
+            data_type: array
+            handler_key: assembly_data_output
+            label: 扣电组装数据列表
         placeholder_keys: {}
         result: {}
         schema:
