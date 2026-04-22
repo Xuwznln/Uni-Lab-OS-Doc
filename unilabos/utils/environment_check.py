@@ -188,7 +188,13 @@ class EnvironmentChecker:
             "crcmod": "crcmod-plus",
         }
 
-        self.special_packages = {"pylabrobot": "git+https://github.com/Xuwznln/pylabrobot.git"}
+        # 中文 locale 下走 Gitee 镜像，规避 GitHub 拉取失败
+        pylabrobot_url = (
+            "git+https://gitee.com/xuwznln/pylabrobot.git"
+            if _is_chinese_locale()
+            else "git+https://github.com/Xuwznln/pylabrobot.git"
+        )
+        self.special_packages = {"pylabrobot": pylabrobot_url}
 
         self.version_requirements = {
             "msgcenterpy": "0.1.8",

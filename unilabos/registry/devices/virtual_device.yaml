@@ -3960,6 +3960,14 @@ virtual_separator:
     io_type: source
     label: bottom_phase_out
     side: SOUTH
+  - data_key: top_outlet
+    data_source: executor
+    data_type: fluid
+    description: 上相（轻相）液体输出口
+    handler_key: topphaseout
+    io_type: source
+    label: top_phase_out
+    side: NORTH
   - data_key: mechanical_port
     data_source: handle
     data_type: mechanical
