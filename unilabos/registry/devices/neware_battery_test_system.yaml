@@ -1315,6 +1315,12 @@ neware_battery_test_system:
             data_key: mount_resource
             data_source: handle
             io_type: source
+          - handler_key: coin_cell_code
+            data_type: array
+            label: 电池条码列表
+            data_key: coin_cell_code
+            data_source: handle
+            io_type: source
           output: []
         placeholder_keys:
           resource: unilabos_resources
