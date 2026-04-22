@@ -1074,12 +1074,6 @@ neware_battery_test_system:
             data_key: electrolyte_code
             data_source: handle
             io_type: source
-          - handler_key: output_dir
-            data_type: string
-            label: 备份输出目录
-            data_key: output_dir
-            data_source: handle
-            io_type: source
           output: []
         placeholder_keys:
           resource: unilabos_resources
