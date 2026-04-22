@@ -354,6 +354,42 @@ neware_battery_test_system:
           title: upload_backup_to_oss参数
           type: object
         type: UniLabJsonCommand
+      mock_assembly_data:
+        type: UniLabJsonCommand
+        goal: {}
+        feedback: {}
+        result:
+          assembly_data: assembly_data
+          success: success
+          return_info: return_info
+        schema:
+          title: mock_assembly_data参数
+          description: 模拟扣电组装站 auto-func_sendbottle_allpack_multi 输出固定的 assembly_data（用于测试 neware 完整链路）
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                unilabos_device_id:
+                  type: string
+                  default: ''
+                  description: UniLabOS设备ID，用于指定执行动作的具体设备实例
+              required: []
+            feedback: {}
+            result:
+              type: object
+          required:
+          - goal
+        goal_default: {}
+        handles:
+          input: []
+          output:
+          - handler_key: assembly_data_output
+            data_type: array
+            label: 扣电组装数据列表（模拟）
+            data_key: assembly_data
+            data_source: executor
+        placeholder_keys: {}
       manual_confirm:
         type: UniLabJsonCommand
         goal:
@@ -372,6 +408,7 @@ neware_battery_test_system:
         feedback: {}
         result:
           resource: resource
+          coin_cell_code: coin_cell_code
           target_device: target_device
           mount_resource: mount_resource
           collector_mass: collector_mass
@@ -711,6 +748,11 @@ neware_battery_test_system:
             label: 极片质量
             data_key: pole_weight
             data_source: executor
+          - handler_key: coin_cell_code
+            data_type: array
+            label: 电池条码列表
+            data_key: coin_cell_code
+            data_source: executor
         placeholder_keys:
           resource: unilabos_resources
           target_device: unilabos_devices
@@ -729,6 +771,7 @@ neware_battery_test_system:
           capacity: capacity
           battery_system: battery_system
           pole_weight: pole_weight
+          coin_cell_code: coin_cell_code
         feedback: {}
         result:
           return_info: return_info
@@ -932,8 +975,11 @@ neware_battery_test_system:
                   type: array
                   items:
                     type: number
+                coin_cell_code:
+                  type: array
+                  items:
+                    type: string
               required:
-              - resource
               - mount_resource
               - collector_mass
               - active_material
@@ -954,6 +1000,7 @@ neware_battery_test_system:
           capacity: []
           battery_system: []
           pole_weight: []
+          coin_cell_code: []
         handles:
           input:
           - handler_key: resource
@@ -996,6 +1043,12 @@ neware_battery_test_system:
             data_type: array
             label: 极片质量
             data_key: pole_weight
+            data_source: handle
+            io_type: source
+          - handler_key: coin_cell_code
+            data_type: array
+            label: 电池条码列表
+            data_key: coin_cell_code
             data_source: handle
             io_type: source
           output: []

@@ -5,14 +5,18 @@ def build_start_command(devid, subdevid, chlid, CoinID,
                         ip_in_xml="127.0.0.1",
                         devtype:int=27,
                         recipe_path:str=f"D:\\HHM_test\\A001.xml",
-                        backup_dir:str=f"D:\\HHM_test\\backup") -> str:
+                        backup_dir:str=f"D:\\HHM_test\\backup",
+                        filetype:int=1) -> str:
+    """
+    filetype: 备份文件类型。0=NDA（新威原生），1=Excel。默认 1。
+    """
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<bts version="1.0">',
         '  <cmd>start</cmd>',
         '  <list count="1">',
         f'    <start ip="{ip_in_xml}" devtype="{devtype}" devid="{devid}" subdevid="{subdevid}" chlid="{chlid}" barcode="{CoinID}">{recipe_path}</start>',
-        f'    <backup backupdir="{backup_dir}" remotedir="" filenametype="1" customfilename="" createdirbydate="0" filetype="1" backupontime="1" backupontimeinterval="1" backupfree="0" />',
+        f'    <backup backupdir="{backup_dir}" remotedir="" filenametype="1" customfilename="" createdirbydate="0" filetype="{int(filetype)}" backupontime="1" backupontimeinterval="1" backupfree="0" />',
         '  </list>',
         '</bts>',
     ]
@@ -36,8 +40,11 @@ def recv_until_marks(sock: socket.socket, timeout=60):
             return bytes(buf)
     return bytes(buf)
 
-def start_test(ip="127.0.0.1", port=502, devid=3, subdevid=2, chlid=1, CoinID="A001", recipe_path=f"D:\\HHM_test\\A001.xml", backup_dir=f"D:\\HHM_test\\backup"):
-    xml_cmd = build_start_command(devid=devid, subdevid=subdevid, chlid=chlid, CoinID=CoinID, recipe_path=recipe_path, backup_dir=backup_dir)
+def start_test(ip="127.0.0.1", port=502, devid=3, subdevid=2, chlid=1, CoinID="A001", recipe_path=f"D:\\HHM_test\\A001.xml", backup_dir=f"D:\\HHM_test\\backup", filetype:int=1):
+    """
+    filetype: 备份文件类型，0=NDA，1=Excel。默认 1。
+    """
+    xml_cmd = build_start_command(devid=devid, subdevid=subdevid, chlid=chlid, CoinID=CoinID, recipe_path=recipe_path, backup_dir=backup_dir, filetype=filetype)
     #print(xml_cmd)
     with socket.create_connection((ip, port), timeout=60) as s:
         s.sendall(xml_cmd.encode("utf-8"))
