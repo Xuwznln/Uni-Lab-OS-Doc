@@ -2019,8 +2019,6 @@ class NewareBatteryTestSystem:
             "active_material": active_material,
             "capacity": capacity,
             "battery_system": battery_system,
-            "formulations": formulations,
-            "assembly_data": assembly_data,
             "pole_weight": pole_weight,
         }
 

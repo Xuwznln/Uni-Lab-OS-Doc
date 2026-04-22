@@ -1971,10 +1971,15 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
         mapped_plr_resources = []
         for uuid in uuids_list:
+            found = None
             for plr_resource in figured_resources:
                 r = self.resource_tracker.loop_find_with_uuid(plr_resource, uuid)
-                mapped_plr_resources.append(r)
-                break
+                if r is not None:
+                    found = r
+                    break
+            if found is None:
+                raise Exception(f"未能在已解析的资源树中找到 uuid={uuid} 对应的资源")
+            mapped_plr_resources.append(found)
 
         return mapped_plr_resources
 

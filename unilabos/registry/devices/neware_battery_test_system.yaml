@@ -378,8 +378,6 @@ neware_battery_test_system:
           active_material: active_material
           capacity: capacity
           battery_system: battery_system
-          formulations: formulations
-          assembly_data: assembly_data
           pole_weight: pole_weight
         schema:
           title: manual_confirm参数
@@ -676,16 +674,6 @@ neware_battery_test_system:
             data_type: array
             label: 极片质量
             data_key: pole_weight
-            data_source: executor
-          - handler_key: formulations
-            data_type: array
-            label: 配方信息列表
-            data_key: formulations
-            data_source: executor
-          - handler_key: assembly_data
-            data_type: array
-            label: 扣电组装数据列表
-            data_key: assembly_data
             data_source: executor
         placeholder_keys:
           resource: unilabos_resources
