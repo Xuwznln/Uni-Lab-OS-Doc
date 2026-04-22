@@ -2063,6 +2063,7 @@ class NewareBatteryTestSystem:
         return {
             "resource": resource_dump,
             "coin_cell_code": coin_cell_code,
+            "electrolyte_code": electrolyte_code,
             "target_device": target_device,
             "mount_resource": mount_resource_dump,
             "collector_mass": collector_mass,
@@ -2259,7 +2260,9 @@ class NewareBatteryTestSystem:
         battery_system: List[str],
         pole_weight: List[float] = None,
         coin_cell_code: List[str] = None,
+        electrolyte_code: List[str] = None,
         resource: List[ResourceSlot] = None,
+        output_dir: str = "D:\\2604Agentic_test",
     ) -> dict:
         """
         对每颗电池计算测试参数、生成 XML 工步文件并通过 TCP 下发给新威测试仪。
@@ -2285,6 +2288,7 @@ class NewareBatteryTestSystem:
         resource = resource or []
         pole_weight = pole_weight or []
         coin_cell_code = coin_cell_code or []
+        electrolyte_code = electrolyte_code or []
 
         n = len(mount_resource) if mount_resource else 0
         results = []
@@ -2302,9 +2306,9 @@ class NewareBatteryTestSystem:
                 "results": [],
             }
 
-        xml_dir = os.path.join(os.path.dirname(__file__), "xml_recipes")
+        xml_dir = os.path.join(output_dir, "xml_dir")
         os.makedirs(xml_dir, exist_ok=True)
-        backup_dir = self._last_backup_dir or os.path.join(os.path.dirname(__file__), "backup")
+        backup_dir = os.path.join(output_dir, "backup_dir")
         os.makedirs(backup_dir, exist_ok=True)
 
         for i in range(n):
@@ -2320,12 +2324,14 @@ class NewareBatteryTestSystem:
 
                 # 2. 获取电池标识与极片重量（按优先级 coin_cell_code > resource > 兜底）
                 res = resource[i] if i < len(resource) else None
-                coin_id = (
+                base_coin = (
                     (coin_cell_code[i] if i < len(coin_cell_code) and coin_cell_code[i] else None)
                     or (getattr(res, "name", None) if res is not None else None)
                     or (res.get("name") if isinstance(res, dict) else None)
                     or f"battery_{i}"
                 )
+                elec_code = electrolyte_code[i] if i < len(electrolyte_code) and electrolyte_code[i] else ""
+                coin_id = f"{base_coin}-{elec_code}-{devid}-{subdevid}-{chlid}"
                 if pole_weight and i < len(pole_weight):
                     pw = float(pole_weight[i])
                 elif res is not None:

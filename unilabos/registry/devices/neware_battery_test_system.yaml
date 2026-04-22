@@ -753,6 +753,11 @@ neware_battery_test_system:
             label: 电池条码列表
             data_key: coin_cell_code
             data_source: executor
+          - handler_key: electrolyte_code
+            data_type: array
+            label: 电解液二维码列表
+            data_key: electrolyte_code
+            data_source: executor
         placeholder_keys:
           resource: unilabos_resources
           target_device: unilabos_devices
@@ -772,6 +777,8 @@ neware_battery_test_system:
           battery_system: battery_system
           pole_weight: pole_weight
           coin_cell_code: coin_cell_code
+          electrolyte_code: electrolyte_code
+          output_dir: output_dir
         feedback: {}
         result:
           return_info: return_info
@@ -979,6 +986,14 @@ neware_battery_test_system:
                   type: array
                   items:
                     type: string
+                electrolyte_code:
+                  type: array
+                  items:
+                    type: string
+                output_dir:
+                  type: string
+                  default: 'D:\2604Agentic_test'
+                  description: 备份输出根目录，子目录 xml_dir/backup_dir 将自动创建
               required:
               - mount_resource
               - collector_mass
@@ -1001,6 +1016,8 @@ neware_battery_test_system:
           battery_system: []
           pole_weight: []
           coin_cell_code: []
+          electrolyte_code: []
+          output_dir: 'D:\2604Agentic_test'
         handles:
           input:
           - handler_key: resource
@@ -1049,6 +1066,18 @@ neware_battery_test_system:
             data_type: array
             label: 电池条码列表
             data_key: coin_cell_code
+            data_source: handle
+            io_type: source
+          - handler_key: electrolyte_code
+            data_type: array
+            label: 电解液二维码列表
+            data_key: electrolyte_code
+            data_source: handle
+            io_type: source
+          - handler_key: output_dir
+            data_type: string
+            label: 备份输出目录
+            data_key: output_dir
             data_source: handle
             io_type: source
           output: []
@@ -1292,22 +1321,7 @@ neware_battery_test_system:
             data_key: mount_resource
             data_source: handle
             io_type: source
-          output:
-          - handler_key: target_device
-            data_type: device_id
-            label: 目标设备
-            data_key: target_device
-            data_source: executor
-          - handler_key: resource
-            data_type: resource
-            label: 待转移资源
-            data_key: resource.@flatten
-            data_source: executor
-          - handler_key: mount_resource
-            data_type: resource
-            label: 目标孔位
-            data_key: mount_resource.@flatten
-            data_source: executor
+          output: []
         placeholder_keys:
           resource: unilabos_resources
           target_device: unilabos_devices
