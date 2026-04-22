@@ -12,7 +12,7 @@ def build_start_command(devid, subdevid, chlid, CoinID,
         '  <cmd>start</cmd>',
         '  <list count="1">',
         f'    <start ip="{ip_in_xml}" devtype="{devtype}" devid="{devid}" subdevid="{subdevid}" chlid="{chlid}" barcode="{CoinID}">{recipe_path}</start>',
-        f'    <backup backupdir="{backup_dir}" remotedir="" filenametype="1" customfilename="" createdirbydate="0" filetype="0" backupontime="1" backupontimeinterval="1" backupfree="0" />',
+        f'    <backup backupdir="{backup_dir}" remotedir="" filenametype="1" customfilename="" createdirbydate="0" filetype="1" backupontime="1" backupontimeinterval="1" backupfree="0" />',
         '  </list>',
         '</bts>',
     ]

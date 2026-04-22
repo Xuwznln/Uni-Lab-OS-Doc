@@ -2093,7 +2093,7 @@ class NewareBatteryTestSystem:
                     safe_get(active_material, i, ""),
                     safe_get(capacity, i, ""),
                     safe_get(battery_system, i, ""),
-                    ch_name or "",
+                    (f"'{ch_name}" if ch_name else ""),
                 ])
             f.flush()
 
@@ -2292,7 +2292,7 @@ class NewareBatteryTestSystem:
                     CoinID=coin_id,
                     recipe_path=recipe_path,
                     backup_dir=backup_dir,
-                    filetype=0,
+                    filetype=1,
                 )
                 submitted += 1
                 results.append({

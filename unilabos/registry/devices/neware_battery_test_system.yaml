@@ -579,11 +579,47 @@ neware_battery_test_system:
                   description: 配方信息列表（来自 bioyond create_orders_formulation 的 mass_ratios 输出）
                   items:
                     type: object
+                    additionalProperties: false
+                    properties:
+                      orderCode:
+                        type: string
+                      orderName:
+                        type: string
+                      real_mass_ratio:
+                        type: object
+                      target_mass_ratio:
+                        type: object
+                      prep_bottle_barcode:
+                        type: string
+                      vial_bottle_barcodes:
+                        type: string
+                      error:
+                        type: string
                 assembly_data:
                   type: array
                   description: 扣电组装数据列表（每颗电池一个对象，含 Time/open_circuit_voltage/pole_weight 等 9 字段）
                   items:
                     type: object
+                    additionalProperties: false
+                    properties:
+                      Time:
+                        type: string
+                      open_circuit_voltage:
+                        type: number
+                      pole_weight:
+                        type: number
+                      assembly_time:
+                        type: number
+                      assembly_pressure:
+                        type: number
+                      electrolyte_volume:
+                        type: number
+                      data_coin_type:
+                        type: integer
+                      electrolyte_code:
+                        type: string
+                      coin_cell_code:
+                        type: string
                 csv_export_dir:
                   type: string
                   default: 'D:\2604Agentic_test'
