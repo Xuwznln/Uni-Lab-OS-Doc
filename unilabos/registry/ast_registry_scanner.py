@@ -32,7 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 1       # 缓存格式版本号，格式变更时递增
+_CACHE_VERSION = 2       # 缓存格式版本号，格式变更时递增
 
 # 合法的装饰器来源模块
 _REGISTRY_DECORATOR_MODULE = "unilabos.registry.decorators"
@@ -258,8 +258,6 @@ def scan_directory(
     }
 
 
-
-
 # ---------------------------------------------------------------------------
 # File-level parsing
 # ---------------------------------------------------------------------------
@@ -361,6 +359,7 @@ def _parse_file(
                     "actions": class_body.get("actions", {}),
                     "status_properties": class_body.get("status_properties", {}),
                     "init_params": class_body.get("init_params", []),
+                    "init_docstring": class_body.get("init_docstring"),
                     "auto_methods": class_body.get("auto_methods", {}),
                     "import_map": import_map,
                 }
@@ -495,7 +494,6 @@ def _collect_imports(tree: ast.Module, module_path: str = "") -> Dict[str, str]:
                         import_map.setdefault(target.id, f"{module_path}:{target.id}")
 
     return import_map
-
 
 
 # ---------------------------------------------------------------------------
@@ -768,6 +766,7 @@ def _extract_class_body(
         "actions": {},          # method_name -> action_info
         "status_properties": {},  # prop_name -> status_info
         "init_params": [],      # [{"name": ..., "type": ..., "default": ...}, ...]
+        "init_docstring": None,
         "auto_methods": {},     # method_name -> method_info (no @action decorator)
     }
 
@@ -780,6 +779,7 @@ def _extract_class_body(
         # --- __init__ ---
         if method_name == "__init__":
             result["init_params"] = _extract_method_params(item, import_map)
+            result["init_docstring"] = ast.get_docstring(item)
             continue
 
         # --- Skip private/dunder ---

@@ -14,20 +14,30 @@ Virtual Workbench Device - 模拟工作台设备
 
 import logging
 import time
-from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 from threading import Lock, RLock
+from typing import Any, Dict, List, Optional, cast
 
 from typing_extensions import TypedDict
 
 from unilabos.registry.decorators import (
-    device, action, ActionInputHandle, ActionOutputHandle, DataSource, topic_config, not_action, NodeType
+    ActionInputHandle,
+    ActionOutputHandle,
+    DataSource,
+    NodeType,
+    action,
+    device,
+    not_action,
+    topic_config,
 )
 from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode, ROS2DeviceNode
-from unilabos.resources.resource_tracker import SampleUUIDsType, LabSample, ResourceTreeSet
-
+from unilabos.resources.resource_tracker import (
+    SampleUUIDsType,
+    LabSample,
+    ResourceTreeSet,
+)
 
 # ============ TypedDict 返回类型定义 ============
 
@@ -112,6 +122,7 @@ class HeatingStation:
 
 @device(
     id="virtual_workbench",
+    display_name="虚拟工作台",
     category=["virtual_device"],
     description="Virtual Workbench with 1 robotic arm and 3 heating stations for concurrent material processing",
 )
@@ -137,7 +148,19 @@ class VirtualWorkbench:
     HEATING_TIME: float = 60.0  # 加热时间(秒)
     NUM_HEATING_STATIONS: int = 3  # 加热台数量
 
-    def __init__(self, device_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs):
+    def __init__(
+        self,
+        device_id: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ):
+        """
+        初始化虚拟工作台。
+
+        Args:
+            device_id[设备ID]: 工作台设备实例 ID，默认使用 virtual_workbench。
+            config[设备配置]: 可包含 arm_operation_time、heating_time、num_heating_stations。
+        """
         # 处理可能的不同调用方式
         if device_id is None and "id" in kwargs:
             device_id = kwargs.pop("id")
@@ -151,9 +174,13 @@ class VirtualWorkbench:
         self.data: Dict[str, Any] = {}
 
         # 从config中获取可配置参数
-        self.ARM_OPERATION_TIME = float(self.config.get("arm_operation_time", self.ARM_OPERATION_TIME))
+        self.ARM_OPERATION_TIME = float(
+            self.config.get("arm_operation_time", self.ARM_OPERATION_TIME)
+        )
         self.HEATING_TIME = float(self.config.get("heating_time", self.HEATING_TIME))
-        self.NUM_HEATING_STATIONS = int(self.config.get("num_heating_stations", self.NUM_HEATING_STATIONS))
+        self.NUM_HEATING_STATIONS = int(
+            self.config.get("num_heating_stations", self.NUM_HEATING_STATIONS)
+        )
 
         # 机械臂状态和锁
         self._arm_lock = Lock()
@@ -162,7 +189,8 @@ class VirtualWorkbench:
 
         # 加热台状态
         self._heating_stations: Dict[int, HeatingStation] = {
-            i: HeatingStation(station_id=i) for i in range(1, self.NUM_HEATING_STATIONS + 1)
+            i: HeatingStation(station_id=i)
+            for i in range(1, self.NUM_HEATING_STATIONS + 1)
         }
         self._stations_lock = RLock()
 
@@ -292,45 +320,113 @@ class VirtualWorkbench:
         self.logger.info(f"机械臂已释放 (完成: {task})")
 
     @action(
-        always_free=True, node_type=NodeType.MANUAL_CONFIRM, placeholder_keys={
-            "assignee_user_ids": "unilabos_manual_confirm"
-        }, goal_default={
-            "timeout_seconds": 3600,
-            "assignee_user_ids": []
-        }, feedback_interval=300,
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
+        goal_default={"timeout_seconds": 3600, "assignee_user_ids": []},
+        feedback_interval=300,
         handles=[
-            ActionInputHandle(key="target_device", data_type="device_id",
-                              label="目标设备", data_key="target_device", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="resource", data_type="resource",
-                              label="待转移资源", data_key="resource", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="mount_resource", data_type="resource",
-                              label="目标孔位", data_key="mount_resource", data_source=DataSource.HANDLE),
-
-            ActionInputHandle(key="collector_mass", data_type="collector_mass",
-                              label="极流体质量", data_key="collector_mass", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="active_material", data_type="active_material",
-                              label="活性物质含量", data_key="active_material", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="capacity", data_type="capacity",
-                              label="克容量", data_key="capacity", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="battery_system", data_type="battery_system",
-                              label="电池体系", data_key="battery_system", data_source=DataSource.HANDLE),
+            ActionInputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="collector_mass",
+                data_type="collector_mass",
+                label="极流体质量",
+                data_key="collector_mass",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="active_material",
+                data_type="active_material",
+                label="活性物质含量",
+                data_key="active_material",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="capacity",
+                data_type="capacity",
+                label="克容量",
+                data_key="capacity",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="battery_system",
+                data_type="battery_system",
+                label="电池体系",
+                data_key="battery_system",
+                data_source=DataSource.HANDLE,
+            ),
             # transfer使用
-            ActionOutputHandle(key="target_device", data_type="device_id",
-                               label="目标设备", data_key="target_device", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="resource", data_type="resource",
-                              label="待转移资源", data_key="resource.@flatten", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="mount_resource", data_type="resource",
-                              label="目标孔位", data_key="mount_resource.@flatten", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
             # test使用
-            ActionOutputHandle(key="collector_mass", data_type="collector_mass",
-                              label="极流体质量", data_key="collector_mass", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="active_material", data_type="active_material",
-                              label="活性物质含量", data_key="active_material", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="capacity", data_type="capacity",
-                              label="克容量", data_key="capacity", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="battery_system", data_type="battery_system",
-                              label="电池体系", data_key="battery_system", data_source=DataSource.EXECUTOR),
-        ]
+            ActionOutputHandle(
+                key="collector_mass",
+                data_type="collector_mass",
+                label="极流体质量",
+                data_key="collector_mass",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="active_material",
+                data_type="active_material",
+                label="活性物质含量",
+                data_key="active_material",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="capacity",
+                data_type="capacity",
+                label="克容量",
+                data_key="capacity",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="battery_system",
+                data_type="battery_system",
+                label="电池体系",
+                data_key="battery_system",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
     )
     def manual_confirm(
         self,
@@ -343,67 +439,156 @@ class VirtualWorkbench:
         battery_system: List[str],
         timeout_seconds: int,
         assignee_user_ids: list[str],
-        **kwargs
+        **kwargs,
     ) -> dict:
         """
-        timeout_seconds: 超时时间（秒），默认3600秒
-        collector_mass: 极流体质量
-        active_material: 活性物质含量
-        capacity: 克容量（mAh/g）
-        battery_system: 电池体系
-        修改的结果无效，是只读的
+        人工确认资源转移和扣电测试参数。
+
+        Args:
+            resource[待转移资源]: 需要人工确认的资源列表。
+            target_device[目标设备]: 资源要转移到的目标设备 ID。
+            mount_resource[目标孔位]: 资源要挂载到的目标孔位列表。
+            collector_mass[极流体质量]: 每个样品对应的极流体质量。
+            active_material[活性物质含量]: 每个样品对应的活性物质含量。
+            capacity[克容量]: 每个样品对应的克容量，单位 mAh/g。
+            battery_system[电池体系]: 每个样品对应的电池体系名称。
+            timeout_seconds[超时时间]: 人工确认超时时间，单位秒。
+            assignee_user_ids[确认人]: 指定处理人工确认任务的用户 ID 列表。
+
+        Note:
+            修改的结果无效，是只读的。
         """
-        resource = ResourceTreeSet.from_plr_resources(resource).dump()
-        mount_resource = ResourceTreeSet.from_plr_resources(mount_resource).dump()
+        resource_tree = ResourceTreeSet.from_plr_resources(cast(Any, resource)).dump()
+        mount_resource_tree = ResourceTreeSet.from_plr_resources(cast(Any, mount_resource)).dump()
         kwargs.update(locals())
         kwargs.pop("kwargs")
         kwargs.pop("self")
+        kwargs["resource"] = resource_tree
+        kwargs["mount_resource"] = mount_resource_tree
+        kwargs.pop("resource_tree")
+        kwargs.pop("mount_resource_tree")
         return kwargs
 
     @action(
         description="转移物料",
         handles=[
-            ActionInputHandle(key="target_device", data_type="device_id",
-                              label="目标设备", data_key="target_device", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="resource", data_type="resource",
-                               label="待转移资源", data_key="resource", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="mount_resource", data_type="resource",
-                               label="目标孔位", data_key="mount_resource", data_source=DataSource.HANDLE),
-        ]
+            ActionInputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+        ],
     )
-    async def transfer(self, resource: List[ResourceSlot], target_device: DeviceSlot, mount_resource: List[ResourceSlot]):
-        future = ROS2DeviceNode.run_async_func(self._ros_node.transfer_resource_to_another, True,
+    async def transfer(
+        self,
+        resource: List[ResourceSlot],
+        target_device: DeviceSlot,
+        mount_resource: List[ResourceSlot],
+    ):
+        """
+        转移资源到目标设备。
+
+        Args:
+            resource[待转移资源]: 待转移的资源列表。
+            target_device[目标设备]: 接收资源的目标设备 ID。
+            mount_resource[目标孔位]: 目标设备上的挂载孔位列表。
+        """
+        future = ROS2DeviceNode.run_async_func(
+            self._ros_node.transfer_resource_to_another,
+            True,
             **{
                 "plr_resources": resource,
                 "target_device_id": target_device,
                 "target_resources": mount_resource,
                 "sites": [None] * len(mount_resource),
-            })
+            },
+        )
         result = await future
         return result
-
 
     @action(
         description="扣电测试启动",
         handles=[
-            ActionInputHandle(key="resource", data_type="resource",
-                              label="待转移资源", data_key="resource", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="mount_resource", data_type="resource",
-                              label="目标孔位", data_key="mount_resource", data_source=DataSource.HANDLE),
-
-            ActionInputHandle(key="collector_mass", data_type="collector_mass",
-                              label="极流体质量", data_key="collector_mass", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="active_material", data_type="active_material",
-                              label="活性物质含量", data_key="active_material", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="capacity", data_type="capacity",
-                              label="克容量", data_key="capacity", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="battery_system", data_type="battery_system",
-                              label="电池体系", data_key="battery_system", data_source=DataSource.HANDLE),
-        ]
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="collector_mass",
+                data_type="collector_mass",
+                label="极流体质量",
+                data_key="collector_mass",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="active_material",
+                data_type="active_material",
+                label="活性物质含量",
+                data_key="active_material",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="capacity",
+                data_type="capacity",
+                label="克容量",
+                data_key="capacity",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="battery_system",
+                data_type="battery_system",
+                label="电池体系",
+                data_key="battery_system",
+                data_source=DataSource.HANDLE,
+            ),
+        ],
     )
     async def test(
-        self, resource: List[ResourceSlot], mount_resource: List[ResourceSlot],  collector_mass: List[float], active_material: List[float], capacity: List[float], battery_system: list[str]
+        self,
+        resource: List[ResourceSlot],
+        mount_resource: List[ResourceSlot],
+        collector_mass: List[float],
+        active_material: List[float],
+        capacity: List[float],
+        battery_system: list[str],
     ):
+        """
+        启动扣电测试。
+
+        Args:
+            resource[待测试资源]: 需要进行扣电测试的资源列表。
+            mount_resource[测试孔位]: 扣电测试使用的目标孔位列表。
+            collector_mass[极流体质量]: 每个样品对应的极流体质量。
+            active_material[活性物质含量]: 每个样品对应的活性物质含量。
+            capacity[克容量]: 每个样品对应的克容量，单位 mAh/g。
+            battery_system[电池体系]: 每个样品对应的电池体系名称。
+        """
         print(resource)
         print(mount_resource)
         print(collector_mass)
@@ -415,16 +600,11 @@ class VirtualWorkbench:
         auto_prefix=True,
         description="批量准备物料 - 虚拟起始节点, 生成A1-A5物料, 输出5个handle供后续节点使用",
         handles=[
-            ActionOutputHandle(key="channel_1", data_type="workbench_material",
-                         label="实验1", data_key="material_1", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="channel_2", data_type="workbench_material",
-                         label="实验2", data_key="material_2", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="channel_3", data_type="workbench_material",
-                         label="实验3", data_key="material_3", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="channel_4", data_type="workbench_material",
-                         label="实验4", data_key="material_4", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="channel_5", data_type="workbench_material",
-                         label="实验5", data_key="material_5", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="channel_1", data_type="workbench_material", label="实验1", data_key="material_1", data_source=DataSource.EXECUTOR),  # noqa: E501
+            ActionOutputHandle(key="channel_2", data_type="workbench_material", label="实验2", data_key="material_2", data_source=DataSource.EXECUTOR),  # noqa: E501
+            ActionOutputHandle(key="channel_3", data_type="workbench_material", label="实验3", data_key="material_3", data_source=DataSource.EXECUTOR),  # noqa: E501
+            ActionOutputHandle(key="channel_4", data_type="workbench_material", label="实验4", data_key="material_4", data_source=DataSource.EXECUTOR),  # noqa: E501
+            ActionOutputHandle(key="channel_5", data_type="workbench_material", label="实验5", data_key="material_5", data_source=DataSource.EXECUTOR),  # noqa: E501
         ],
     )
     def prepare_materials(
@@ -437,6 +617,9 @@ class VirtualWorkbench:
 
         作为工作流的起始节点, 生成指定数量的物料编号供后续节点使用。
         输出5个handle (material_1 ~ material_5), 分别对应实验1~5。
+
+        Args:
+            count[物料数量]: 要生成的物料数量，默认生成 5 个。
         """
         materials = [i for i in range(1, count + 1)]
 
@@ -457,7 +640,11 @@ class VirtualWorkbench:
                 LabSample(
                     sample_uuid=sample_uuid,
                     oss_path="",
-                    extra={"material_uuid": content} if isinstance(content, str) else (content.serialize() if content else {}),
+                    extra=(
+                        {"material_uuid": content}
+                        if isinstance(content, str)
+                        else (content.serialize() if content else {})
+                    ),
                 )
                 for sample_uuid, content in sample_uuids.items()
             ],
@@ -467,12 +654,27 @@ class VirtualWorkbench:
         auto_prefix=True,
         description="将物料从An位置移动到空闲加热台, 返回分配的加热台ID",
         handles=[
-            ActionInputHandle(key="material_input", data_type="workbench_material",
-                        label="物料编号", data_key="material_number", data_source=DataSource.HANDLE),
-            ActionOutputHandle(key="heating_station_output", data_type="workbench_station",
-                         label="加热台ID", data_key="station_id", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="material_number_output", data_type="workbench_material",
-                         label="物料编号", data_key="material_number", data_source=DataSource.EXECUTOR),
+            ActionInputHandle(
+                key="material_input",
+                data_type="workbench_material",
+                label="物料编号",
+                data_key="material_number",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="heating_station_output",
+                data_type="workbench_station",
+                label="加热台ID",
+                data_key="station_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="material_number_output",
+                data_type="workbench_material",
+                label="物料编号",
+                data_key="material_number",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def move_to_heating_station(
@@ -484,6 +686,9 @@ class VirtualWorkbench:
         将物料从An位置移动到加热台
 
         多线程并发调用时, 会竞争机械臂使用权, 并自动查找空闲加热台
+
+        Args:
+            material_number[物料编号]: 要移动的物料编号，对应 A1、A2 等起始位置。
         """
         material_id = f"A{material_number}"
         task_desc = f"移动{material_id}到加热台"
@@ -546,7 +751,8 @@ class VirtualWorkbench:
                         oss_path="",
                         extra=(
                             {"material_uuid": content}
-                            if isinstance(content, str) else (content.serialize() if content else {})
+                            if isinstance(content, str)
+                            else (content.serialize() if content else {})
                         ),
                     )
                     for sample_uuid, content in sample_uuids.items()
@@ -569,7 +775,8 @@ class VirtualWorkbench:
                         oss_path="",
                         extra=(
                             {"material_uuid": content}
-                            if isinstance(content, str) else (content.serialize() if content else {})
+                            if isinstance(content, str)
+                            else (content.serialize() if content else {})
                         ),
                     )
                     for sample_uuid, content in sample_uuids.items()
@@ -581,14 +788,34 @@ class VirtualWorkbench:
         always_free=True,
         description="启动指定加热台的加热程序",
         handles=[
-            ActionInputHandle(key="station_id_input", data_type="workbench_station",
-                        label="加热台ID", data_key="station_id", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="material_number_input", data_type="workbench_material",
-                        label="物料编号", data_key="material_number", data_source=DataSource.HANDLE),
-            ActionOutputHandle(key="heating_done_station", data_type="workbench_station",
-                         label="加热完成-加热台ID", data_key="station_id", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="heating_done_material", data_type="workbench_material",
-                         label="加热完成-物料编号", data_key="material_number", data_source=DataSource.EXECUTOR),
+            ActionInputHandle(
+                key="station_id_input",
+                data_type="workbench_station",
+                label="加热台ID",
+                data_key="station_id",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="material_number_input",
+                data_type="workbench_material",
+                label="物料编号",
+                data_key="material_number",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="heating_done_station",
+                data_type="workbench_station",
+                label="加热完成-加热台ID",
+                data_key="station_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="heating_done_material",
+                data_type="workbench_material",
+                label="加热完成-物料编号",
+                data_key="material_number",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def start_heating(
@@ -599,6 +826,10 @@ class VirtualWorkbench:
     ) -> StartHeatingResult:
         """
         启动指定加热台的加热程序
+
+        Args:
+            station_id[加热台ID]: 要启动加热的加热台编号。
+            material_number[物料编号]: 当前加热台上的物料编号。
         """
         self.logger.info(f"[加热台{station_id}] 开始加热")
 
@@ -615,7 +846,8 @@ class VirtualWorkbench:
                         oss_path="",
                         extra=(
                             {"material_uuid": content}
-                            if isinstance(content, str) else (content.serialize() if content else {})
+                            if isinstance(content, str)
+                            else (content.serialize() if content else {})
                         ),
                     )
                     for sample_uuid, content in sample_uuids.items()
@@ -638,7 +870,8 @@ class VirtualWorkbench:
                             oss_path="",
                             extra=(
                                 {"material_uuid": content}
-                                if isinstance(content, str) else (content.serialize() if content else {})
+                                if isinstance(content, str)
+                                else (content.serialize() if content else {})
                             ),
                         )
                         for sample_uuid, content in sample_uuids.items()
@@ -658,7 +891,8 @@ class VirtualWorkbench:
                             oss_path="",
                             extra=(
                                 {"material_uuid": content}
-                                if isinstance(content, str) else (content.serialize() if content else {})
+                                if isinstance(content, str)
+                                else (content.serialize() if content else {})
                             ),
                         )
                         for sample_uuid, content in sample_uuids.items()
@@ -698,7 +932,9 @@ class VirtualWorkbench:
             self._update_data_status(f"加热台{station_id}加热中: {progress:.1f}%")
 
             if time.time() - last_countdown_log >= 5.0:
-                self.logger.info(f"[加热台{station_id}] {material_id} 剩余 {remaining:.1f}s")
+                self.logger.info(
+                    f"[加热台{station_id}] {material_id} 剩余 {remaining:.1f}s"
+                )
                 last_countdown_log = time.time()
 
             if elapsed >= self.HEATING_TIME:
@@ -715,7 +951,9 @@ class VirtualWorkbench:
                 self._active_tasks[material_id]["status"] = "heating_completed"
 
         self._update_data_status(f"加热台{station_id}加热完成")
-        self.logger.info(f"[加热台{station_id}] {material_id}加热完成 (用时{self.HEATING_TIME}s)")
+        self.logger.info(
+            f"[加热台{station_id}] {material_id}加热完成 (用时{self.HEATING_TIME}s)"
+        )
 
         return {
             "success": True,
@@ -729,7 +967,8 @@ class VirtualWorkbench:
                     oss_path="",
                     extra=(
                         {"material_uuid": content}
-                        if isinstance(content, str) else (content.serialize() if content else {})
+                        if isinstance(content, str)
+                        else (content.serialize() if content else {})
                     ),
                 )
                 for sample_uuid, content in sample_uuids.items()
@@ -740,10 +979,20 @@ class VirtualWorkbench:
         auto_prefix=True,
         description="将物料从加热台移动到输出位置Cn",
         handles=[
-            ActionInputHandle(key="output_station_input", data_type="workbench_station",
-                        label="加热台ID", data_key="station_id", data_source=DataSource.HANDLE),
-            ActionInputHandle(key="output_material_input", data_type="workbench_material",
-                        label="物料编号", data_key="material_number", data_source=DataSource.HANDLE),
+            ActionInputHandle(
+                key="output_station_input",
+                data_type="workbench_station",
+                label="加热台ID",
+                data_key="station_id",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="output_material_input",
+                data_type="workbench_material",
+                label="物料编号",
+                data_key="material_number",
+                data_source=DataSource.HANDLE,
+            ),
         ],
     )
     def move_to_output(
@@ -754,6 +1003,10 @@ class VirtualWorkbench:
     ) -> MoveToOutputResult:
         """
         将物料从加热台移动到输出位置Cn
+
+        Args:
+            station_id[加热台ID]: 已完成加热的加热台编号。
+            material_number[物料编号]: 要移动到输出位置的物料编号，对应 Cn。
         """
         output_number = material_number
 
@@ -770,7 +1023,8 @@ class VirtualWorkbench:
                         oss_path="",
                         extra=(
                             {"material_uuid": content}
-                            if isinstance(content, str) else (content.serialize() if content else {})
+                            if isinstance(content, str)
+                            else (content.serialize() if content else {})
                         ),
                     )
                     for sample_uuid, content in sample_uuids.items()
@@ -794,7 +1048,8 @@ class VirtualWorkbench:
                             oss_path="",
                             extra=(
                                 {"material_uuid": content}
-                                if isinstance(content, str) else (content.serialize() if content else {})
+                                if isinstance(content, str)
+                                else (content.serialize() if content else {})
                             ),
                         )
                         for sample_uuid, content in sample_uuids.items()
@@ -814,7 +1069,8 @@ class VirtualWorkbench:
                             oss_path="",
                             extra=(
                                 {"material_uuid": content}
-                                if isinstance(content, str) else (content.serialize() if content else {})
+                                if isinstance(content, str)
+                                else (content.serialize() if content else {})
                             ),
                         )
                         for sample_uuid, content in sample_uuids.items()
@@ -896,7 +1152,8 @@ class VirtualWorkbench:
                         oss_path="",
                         extra=(
                             {"material_uuid": content}
-                            if isinstance(content, str) else (content.serialize() if content else {})
+                            if isinstance(content, str)
+                            else (content.serialize() if content else {})
                         ),
                     )
                     for sample_uuid, content in sample_uuids.items()

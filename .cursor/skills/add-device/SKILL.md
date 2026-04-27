@@ -71,6 +71,22 @@ from unilabos.registry.decorators import action
 - `_` 开头的方法 → 不扫描
 - `@not_action` 标记的方法 → 排除
 
+### 参数文档 → JSON Schema 元数据
+
+在 `__init__` 和 action 方法 docstring 的 `Args:` 小节里，使用以下格式生成入参 schema 的显示信息：
+
+```python
+"""
+Args:
+    param[显示名称]: 参数说明，会写入 JSON Schema 的 description。
+"""
+```
+
+- `param[显示名称]` 的显示名称会写入 goal property 的 `title`。
+- `:` 后面的说明会写入 goal property 的 `description`。
+- 如果只写 `param: 参数说明`，`title` 会兜底为字段名，`description` 使用参数说明。
+- 如果没有写参数文档，生成器也会兜底补齐 `title=<字段名>` 和 `description=""`，但新设备应优先写清楚显示名和说明。
+
 ### @topic_config — 状态属性配置
 
 ```python
@@ -105,13 +121,27 @@ import logging
 from typing import Any, Dict, Optional
 
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
-from unilabos.registry.decorators import device, action, topic_config, not_action
+from unilabos.registry.decorators import action, device, not_action, topic_config
 
-@device(id="my_device", category=["my_category"], description="设备描述")
+@device(
+    id="my_device",
+    category=["my_category"],
+    description="设备描述",
+    display_name="设备显示名",
+)
 class MyDevice:
+    """设备类说明。"""
+
     _ros_node: BaseROS2DeviceNode
 
     def __init__(self, device_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, **kwargs):
+        """
+        初始化设备。
+
+        Args:
+            device_id[设备ID]: 设备实例 ID，默认使用 my_device。
+            config[设备配置]: 设备启动配置。
+        """
         self.device_id = device_id or "my_device"
         self.config = config or {}
         self.logger = logging.getLogger(f"MyDevice.{self.device_id}")
@@ -133,7 +163,13 @@ class MyDevice:
 
     @action(description="执行操作")
     def my_action(self, param: float = 0.0, name: str = "") -> Dict[str, Any]:
-        """带 @action 装饰器 → 注册为 'my_action' 动作"""
+        """
+        带 @action 装饰器 → 注册为 'my_action' 动作。
+
+        Args:
+            param[操作数值]: 操作使用的数值参数。
+            name[操作名称]: 操作名称或备注。
+        """
         return {"success": True}
 
     def get_info(self) -> Dict[str, Any]:
