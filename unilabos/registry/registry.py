@@ -571,6 +571,7 @@ class Registry:
         schema: Dict[str, Any],
         doc_info: Dict[str, Any],
         field_to_param: Optional[Dict[str, str]] = None,
+        apply_defaults: bool = False,
     ) -> None:
         """Apply parsed docstring display names and descriptions to schema properties."""
         if not schema or not doc_info:
@@ -589,12 +590,20 @@ class Registry:
             if not isinstance(param_name, str):
                 continue
             param_name = param_name.removesuffix("[]")
-            prop_schema["title"] = param_display_names.get(param_name, prop_schema.get("title") or field_name)
-            prop_schema["description"] = param_descs.get(param_name, prop_schema.get("description") or "")
+            if param_name in param_display_names:
+                prop_schema["title"] = param_display_names[param_name]
+            elif apply_defaults and not prop_schema.get("title"):
+                prop_schema["title"] = field_name
+
+            if param_name in param_descs:
+                prop_schema["description"] = param_descs[param_name]
+            elif apply_defaults and "description" not in prop_schema:
+                prop_schema["description"] = ""
 
     def _generate_unilab_json_command_schema(
         self, method_args: list, docstring: Optional[str] = None,
         import_map: Optional[Dict[str, str]] = None,
+        apply_doc_defaults: bool = False,
     ) -> Dict[str, Any]:
         """根据方法参数和 docstring 生成 UniLabJsonCommand schema"""
         doc_info = parse_docstring(docstring)
@@ -631,7 +640,7 @@ class Registry:
             if param_required:
                 schema["required"].append(param_name)
 
-        self._apply_docstring_param_metadata(schema, doc_info)
+        self._apply_docstring_param_metadata(schema, doc_info, apply_defaults=apply_doc_defaults)
         return schema
 
     def _generate_status_types_schema(self, status_methods: Dict[str, Any]) -> Dict[str, Any]:
@@ -1038,6 +1047,7 @@ class Registry:
                 goal_schema_for_docs,
                 parse_docstring(method_info.get("docstring")),
                 goal,
+                apply_defaults=True,
             )
             action_value_mappings[action_name] = action_entry
 
@@ -1127,7 +1137,7 @@ class Registry:
             if prequired:
                 schema["required"].append(pname)
 
-        self._apply_docstring_param_metadata(schema, doc_info)
+        self._apply_docstring_param_metadata(schema, doc_info, apply_defaults=True)
         return schema
 
     def _generate_status_schema_from_ast(
@@ -2211,10 +2221,6 @@ class Registry:
                                 },
                                 **schema["properties"]["goal"]["properties"],
                             }
-                            for field_name, field_schema in schema["properties"]["goal"]["properties"].items():
-                                if isinstance(field_schema, dict):
-                                    field_schema.setdefault("title", field_name)
-                                    field_schema.setdefault("description", "")
                     # 将 placeholder_keys 信息添加到 schema 中
                     if "placeholder_keys" in action_config and action_config.get("schema", {}).get(
                         "properties", {}

@@ -18,6 +18,7 @@ xyz_stepper_controller:
             goal:
               properties:
                 degrees:
+                  description: 角度值
                   type: number
               required:
               - degrees
@@ -44,6 +45,7 @@ xyz_stepper_controller:
             goal:
               properties:
                 axis:
+                  description: 电机轴
                   type: object
               required:
               - axis
@@ -71,6 +73,7 @@ xyz_stepper_controller:
               properties:
                 enable:
                   default: true
+                  description: True为使能，False为失能
                   type: boolean
               required: []
               type: object
@@ -99,9 +102,11 @@ xyz_stepper_controller:
             goal:
               properties:
                 axis:
+                  description: 电机轴
                   type: object
                 enable:
                   default: true
+                  description: True为使能，False为失能
                   type: boolean
               required:
               - axis
@@ -152,6 +157,7 @@ xyz_stepper_controller:
             goal:
               properties:
                 axis:
+                  description: 电机轴
                   type: object
               required:
               - axis
@@ -183,16 +189,21 @@ xyz_stepper_controller:
               properties:
                 acceleration:
                   default: 1000
+                  description: 加速度(rpm/s)
                   type: integer
                 axis:
+                  description: 电机轴
                   type: object
                 position:
+                  description: 目标位置(步数)
                   type: integer
                 precision:
                   default: 100
+                  description: 到位精度
                   type: integer
                 speed:
                   default: 5000
+                  description: 运行速度(rpm)
                   type: integer
               required:
               - axis
@@ -225,16 +236,21 @@ xyz_stepper_controller:
               properties:
                 acceleration:
                   default: 1000
+                  description: 加速度
                   type: integer
                 axis:
+                  description: 电机轴
                   type: object
                 degrees:
+                  description: 目标角度（度）
                   type: number
                 precision:
                   default: 100
+                  description: 精度
                   type: integer
                 speed:
                   default: 5000
+                  description: 移动速度
                   type: integer
               required:
               - axis
@@ -267,16 +283,21 @@ xyz_stepper_controller:
               properties:
                 acceleration:
                   default: 1000
+                  description: 加速度
                   type: integer
                 axis:
+                  description: 电机轴
                   type: object
                 precision:
                   default: 100
+                  description: 精度
                   type: integer
                 revolutions:
+                  description: 目标圈数
                   type: number
                 speed:
                   default: 5000
+                  description: 移动速度
                   type: integer
               required:
               - axis
@@ -309,15 +330,20 @@ xyz_stepper_controller:
               properties:
                 acceleration:
                   default: 1000
+                  description: 加速度
                   type: integer
                 speed:
                   default: 5000
+                  description: 运行速度
                   type: integer
                 x:
+                  description: X轴目标位置
                   type: integer
                 y:
+                  description: Y轴目标位置
                   type: integer
                 z:
+                  description: Z轴目标位置
                   type: integer
               required: []
               type: object
@@ -350,15 +376,20 @@ xyz_stepper_controller:
               properties:
                 acceleration:
                   default: 1000
+                  description: 加速度
                   type: integer
                 speed:
                   default: 5000
+                  description: 移动速度
                   type: integer
                 x_deg:
+                  description: X轴目标角度（度）
                   type: number
                 y_deg:
+                  description: Y轴目标角度（度）
                   type: number
                 z_deg:
+                  description: Z轴目标角度（度）
                   type: number
               required: []
               type: object
@@ -391,15 +422,20 @@ xyz_stepper_controller:
               properties:
                 acceleration:
                   default: 1000
+                  description: 加速度
                   type: integer
                 speed:
                   default: 5000
+                  description: 移动速度
                   type: integer
                 x_rev:
+                  description: X轴目标圈数
                   type: number
                 y_rev:
+                  description: Y轴目标圈数
                   type: number
                 z_rev:
+                  description: Z轴目标圈数
                   type: number
               required: []
               type: object
@@ -427,6 +463,7 @@ xyz_stepper_controller:
             goal:
               properties:
                 revolutions:
+                  description: 圈数
                   type: number
               required:
               - revolutions
@@ -456,10 +493,13 @@ xyz_stepper_controller:
               properties:
                 acceleration:
                   default: 1000
+                  description: 加速度(rpm/s)
                   type: integer
                 axis:
+                  description: 电机轴
                   type: object
                 speed:
+                  description: 运行速度(rpm)，正值正转，负值反转
                   type: integer
               required:
               - axis
@@ -487,6 +527,7 @@ xyz_stepper_controller:
             goal:
               properties:
                 steps:
+                  description: 步数
                   type: integer
               required:
               - steps
@@ -513,6 +554,7 @@ xyz_stepper_controller:
             goal:
               properties:
                 steps:
+                  description: 步数
                   type: integer
               required:
               - steps
@@ -564,9 +606,11 @@ xyz_stepper_controller:
             goal:
               properties:
                 axis:
+                  description: 电机轴
                   type: object
                 timeout:
                   default: 30.0
+                  description: 超时时间(秒)
                   type: number
               required:
               - axis
@@ -591,11 +635,14 @@ xyz_stepper_controller:
       properties:
         baudrate:
           default: 115200
+          description: 波特率
           type: integer
         port:
+          description: 串口端口名
           type: string
         timeout:
           default: 1.0
+          description: 通信超时时间
           type: number
       required:
       - port

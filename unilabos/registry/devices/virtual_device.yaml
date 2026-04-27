@@ -2179,6 +2179,7 @@ virtual_multiway_valve:
             goal:
               properties:
                 port_number:
+                  description: 端口号 (1-8)
                   type: integer
               required:
               - port_number
@@ -2225,6 +2226,7 @@ virtual_multiway_valve:
             goal:
               properties:
                 port_number:
+                  description: 目标端口号 (1-8)
                   type: integer
               required:
               - port_number
@@ -2261,6 +2263,7 @@ virtual_multiway_valve:
               additionalProperties: false
               properties:
                 command:
+                  description: 目标位置 (0-8) 或位置字符串
                   type: string
               title: SendCmd_Goal
               type: object
@@ -2304,6 +2307,7 @@ virtual_multiway_valve:
               additionalProperties: false
               properties:
                 command:
+                  description: 目标位置 (0-8) 或位置字符串
                   type: string
               title: SendCmd_Goal
               type: object
@@ -4215,6 +4219,7 @@ virtual_solenoid_valve:
               additionalProperties: false
               properties:
                 string:
+                  description: '"ON"/"OFF" 或 "OPEN"/"CLOSED"'
                   type: string
               title: StrSingleInput_Goal
               type: object
@@ -4258,6 +4263,7 @@ virtual_solenoid_valve:
               additionalProperties: false
               properties:
                 command:
+                  description: '"OPEN"/"CLOSED" 或其他控制命令'
                   type: string
               title: SendCmd_Goal
               type: object
@@ -4418,16 +4424,20 @@ virtual_solid_dispenser:
                 event:
                   type: string
                 mass:
+                  description: 质量字符串 (如 "2.9 g")
                   type: string
                 mol:
+                  description: 摩尔数字符串 (如 "0.12 mol")
                   type: string
                 purpose:
+                  description: 添加目的
                   type: string
                 rate_spec:
                   type: string
                 ratio:
                   type: string
                 reagent:
+                  description: 试剂名称
                   type: string
                 stir:
                   type: boolean
@@ -4439,6 +4449,7 @@ virtual_solid_dispenser:
                   type: string
                 vessel:
                   additionalProperties: false
+                  description: 目标容器
                   properties:
                     category:
                       type: string
@@ -5568,8 +5579,10 @@ virtual_transfer_pump:
             goal:
               properties:
                 velocity:
+                  description: 拉取速度 (ml/s)
                   type: number
                 volume:
+                  description: 要拉取的体积 (ml)
                   type: number
               required:
               - volume
@@ -5596,8 +5609,10 @@ virtual_transfer_pump:
             goal:
               properties:
                 velocity:
+                  description: 推出速度 (ml/s)
                   type: number
                 volume:
+                  description: 要推出的体积 (ml)
                   type: number
               required:
               - volume
@@ -5693,10 +5708,12 @@ virtual_transfer_pump:
               additionalProperties: false
               properties:
                 max_velocity:
+                  description: 移动速度 (ml/s)
                   maximum: 1.7976931348623157e+308
                   minimum: -1.7976931348623157e+308
                   type: number
                 position:
+                  description: 目标位置 (ml)
                   maximum: 1.7976931348623157e+308
                   minimum: -1.7976931348623157e+308
                   type: number
@@ -5845,8 +5862,10 @@ virtual_transfer_pump:
     config:
       properties:
         config:
+          description: 配置字典，包含max_volume, port等参数
           type: object
         device_id:
+          description: 设备ID
           type: string
       required: []
       type: object

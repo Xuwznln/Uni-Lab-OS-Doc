@@ -47,8 +47,10 @@ bioyond_dispensing_station:
             goal:
               properties:
                 report_request:
+                  description: WorkstationReportRequest 对象，包含任务完成信息
                   type: string
                 used_materials:
+                  description: 物料使用记录列表
                   type: string
               required:
               - report_request
@@ -102,6 +104,7 @@ bioyond_dispensing_station:
             goal:
               properties:
                 material_name:
+                  description: 物料名称
                   type: string
               required:
               - material_name
@@ -611,10 +614,10 @@ bioyond_dispensing_station:
             goal:
               properties:
                 target_device_id:
-                  description: 目标反应站设备ID（从设备列表中选择，所有转移组都使用同一个目标设备）
+                  description: 目标反应站设备ID(所有转移组使用同一个设备)
                   type: string
                 transfer_groups:
-                  description: 转移任务组列表，每组包含物料名称、目标堆栈和目标库位，可以添加多组
+                  description: '转移任务组列表,每组包含:'
                   type: array
               required:
               - target_device_id
@@ -694,10 +697,13 @@ bioyond_dispensing_station:
     config:
       properties:
         config:
+          description: 配置字典,应包含material_type_mappings等配置
           type: object
         deck:
+          description: Deck对象
           type: string
         protocol_type:
+          description: 协议类型(由ROS系统传递,此处忽略)
           type: string
       required: []
       type: object

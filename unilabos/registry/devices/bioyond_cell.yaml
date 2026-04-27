@@ -70,12 +70,17 @@ bioyond_cell:
             goal:
               properties:
                 material_names:
-                  type: string
+                  description: 物料名称列表；默认使用 [LiPF6, LiDFOB, DTD, LiFSI, LiPO2F2]
+                  items:
+                    type: string
+                  type: array
                 type_id:
                   default: 3a190ca0-b2f6-9aeb-8067-547e72c11469
+                  description: 物料类型ID
                   type: string
                 warehouse_name:
                   default: 粉末加样头堆栈
+                  description: 目标仓库名（用于取位置信息）
                   type: string
               required: []
               type: object
@@ -103,12 +108,16 @@ bioyond_cell:
             goal:
               properties:
                 location_name_or_id:
+                  description: 具体库位名称（如 A01）或库位 UUID，由用户指定。
                   type: string
                 material_name:
+                  description: 物料名称（会优先匹配配置模板）。
                   type: string
                 type_id:
+                  description: 物料类型 ID（若为空则尝试从配置推断）。
                   type: string
                 warehouse_name:
+                  description: 需要入库的仓库名称；若为空则仅创建不入库。
                   type: string
               required:
               - material_name
@@ -328,15 +337,20 @@ bioyond_cell:
             goal:
               properties:
                 board_type:
+                  description: 板类型，如 "5ml分液瓶板"、"配液瓶(小)板"
                   type: string
                 bottle_type:
+                  description: 瓶类型，如 "5ml分液瓶"、"配液瓶(小)"
                   type: string
                 location_code:
+                  description: 库位编号，例如 "A01"
                   type: string
                 name:
+                  description: 物料名称
                   type: string
                 warehouse_name:
                   default: 手动堆栈
+                  description: 仓库名称，默认为 "手动堆栈"，支持 "自动堆栈-左"、"自动堆栈-右" 等
                   type: string
               required:
               - name
@@ -744,19 +758,19 @@ bioyond_cell:
               properties:
                 source_wh_id:
                   default: 3a19debc-84b4-0359-e2d4-b3beea49348b
-                  description: 来源仓库ID
+                  description: 来源仓库 Id (默认为3号仓库)
                   type: string
                 source_x:
                   default: 1
-                  description: 来源位置X坐标
+                  description: 来源位置 X 坐标
                   type: integer
                 source_y:
                   default: 1
-                  description: 来源位置Y坐标
+                  description: 来源位置 Y 坐标
                   type: integer
                 source_z:
                   default: 1
-                  description: 来源位置Z坐标
+                  description: 来源位置 Z 坐标
                   type: integer
               required: []
               type: object
@@ -967,9 +981,11 @@ bioyond_cell:
             goal:
               properties:
                 order_code:
+                  description: 任务编号
                   type: string
                 timeout:
                   default: 36000
+                  description: 超时时间（秒）
                   type: integer
               required:
               - order_code
@@ -997,12 +1013,15 @@ bioyond_cell:
             goal:
               properties:
                 order_code:
+                  description: 任务编号
                   type: string
                 poll_interval:
                   default: 0.5
+                  description: 轮询间隔（秒），默认 0.5 秒
                   type: number
                 timeout:
                   default: 36000
+                  description: 超时时间（秒）
                   type: integer
               required:
               - order_code
@@ -1057,10 +1076,15 @@ bioyond_cell:
     config:
       properties:
         bioyond_config:
+          description: '从 JSON 文件加载的 bioyond 配置字典
+
+            包含 api_host, api_key, HTTP_host, HTTP_port 等配置'
           type: object
         deck:
+          description: Deck 配置（可选，会从 JSON 中自动处理）
           type: string
         protocol_type:
+          description: 协议类型（可选）
           type: string
       required: []
       type: object
