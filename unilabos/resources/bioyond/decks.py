@@ -1,6 +1,7 @@
 from os import name
 from pylabrobot.resources import Deck, Coordinate, Rotation
 
+from unilabos.registry.decorators import resource
 from unilabos.resources.bioyond.YB_warehouses import (
     bioyond_warehouse_1x4x4,
     bioyond_warehouse_1x4x4_right,  # 新增：右侧仓库 (A05～D08)
@@ -23,6 +24,9 @@ from unilabos.resources.bioyond.YB_warehouses import (
 from unilabos.resources.bioyond.warehouses import (
     bioyond_warehouse_tipbox_storage_left,   # 新增：Tip盒堆栈(左)
     bioyond_warehouse_tipbox_storage_right,  # 新增：Tip盒堆栈(右)
+    bioyond_warehouse_sirna_automation_stack,
+    bioyond_warehouse_sirna_centrifuge_balance_plate_stack,
+    bioyond_warehouse_sirna_g3_liquid_handler,
 )
 
 
@@ -101,6 +105,50 @@ class BIOYOND_PolymerPreparationStation_Deck(Deck):
         for warehouse_name, warehouse in self.warehouses.items():
             self.assign_child_resource(warehouse, location=self.warehouse_locations[warehouse_name])
 
+@resource(
+    id="BIOYOND_SirnaStation_Deck",
+    category=["deck"],
+    description="BIOYOND 小核酸工作站 Deck",
+    icon="配液站.webp",
+)
+class BIOYOND_SirnaStation_Deck(Deck):
+    def __init__(
+        self,
+        name: str = "SirnaStation_Deck",
+        size_x: float = 2700.0,
+        size_y: float = 1080.0,
+        size_z: float = 1500.0,
+        category: str = "deck",
+        setup: bool = False
+    ) -> None:
+        super().__init__(name=name, size_x=size_x, size_y=size_y, size_z=size_z)
+        if setup:
+            self.setup()
+
+    @classmethod
+    def deserialize(cls, data: dict, allow_marshal: bool = False):
+        if data.get("children") and data.get("setup") is True:
+            data = data.copy()
+            data["setup"] = False
+        return super().deserialize(data, allow_marshal=allow_marshal)
+
+    def setup(self) -> None:
+        # Sirna 读接口 /api/storage/location/locations-by-type 返回完整固定堆栈清单。
+        # LIMS 在库物料接口仍使用相同的 自动化堆栈 名称和数字库位编码。
+        self.warehouses = {
+            "G3移液站": bioyond_warehouse_sirna_g3_liquid_handler(),
+            "自动化堆栈": bioyond_warehouse_sirna_automation_stack(),
+            "离心机配平板堆栈": bioyond_warehouse_sirna_centrifuge_balance_plate_stack(),
+        }
+        self.warehouse_locations = {
+            "G3移液站": Coordinate(0.0, 0.0, 0.0),
+            "自动化堆栈": Coordinate(0.0, 180.0, 0.0),
+            "离心机配平板堆栈": Coordinate(0.0, 1300.0, 0.0),
+        }
+
+        for warehouse_name, warehouse in self.warehouses.items():
+            self.assign_child_resource(warehouse, location=self.warehouse_locations[warehouse_name])
+
 class BIOYOND_YB_Deck(Deck):
     def __init__(
         self,
@@ -154,8 +202,3 @@ def YB_Deck(name: str) -> Deck:
     by=BIOYOND_YB_Deck(name=name)
     by.setup()
     return by
-
-
-
-
-

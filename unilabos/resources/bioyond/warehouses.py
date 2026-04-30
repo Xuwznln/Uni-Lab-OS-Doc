@@ -1,4 +1,68 @@
+from pylabrobot.resources import Coordinate
+from pylabrobot.resources.carrier import ResourceHolder, create_homogeneous_resources
+
 from unilabos.resources.warehouse import WareHouse, warehouse_factory
+
+
+def bioyond_warehouse_numeric_stack(name: str, rows: int = 10, columns: int = 17) -> WareHouse:
+    """创建 Bioyond 数字库位堆栈，库位名使用服务端返回的 行-列 格式。"""
+    num_items_x = columns
+    num_items_y = rows
+    num_items_z = 1
+    dx = 10.0
+    dy = 10.0
+    dz = 10.0
+    item_dx = 147.0
+    item_dy = 106.0
+    item_dz = 130.0
+    locations = [
+        Coordinate(dx + col * item_dx, dy + row * item_dy, dz)
+        for row in range(num_items_y)
+        for col in range(num_items_x)
+    ]
+    holders = create_homogeneous_resources(
+        klass=ResourceHolder,
+        locations=locations,
+        resource_size_x=127.0,
+        resource_size_y=86.0,
+        resource_size_z=25.0,
+        name_prefix=name,
+    )
+    keys = [
+        f"{row + 1}-{col + 1}"
+        for row in range(num_items_y)
+        for col in range(num_items_x)
+    ]
+    return WareHouse(
+        name=name,
+        size_x=dx + item_dx * num_items_x,
+        size_y=dy + item_dy * num_items_y,
+        size_z=dz + item_dz * num_items_z,
+        num_items_x=num_items_x,
+        num_items_y=num_items_y,
+        num_items_z=num_items_z,
+        ordering_layout="row-major",
+        sites={key: holder for key, holder in zip(keys, holders.values())},
+        category="warehouse",
+    )
+
+
+# ================ 小核酸工作站相关堆栈 ================
+
+def bioyond_warehouse_sirna_g3_liquid_handler(name: str = "G3移液站") -> WareHouse:
+    """创建小核酸 G3 移液站库位堆栈：1 行 x 14 列。"""
+    return bioyond_warehouse_numeric_stack(name, rows=1, columns=14)
+
+
+def bioyond_warehouse_sirna_automation_stack(name: str = "自动化堆栈") -> WareHouse:
+    """创建小核酸自动化堆栈：10 行 x 17 列。"""
+    return bioyond_warehouse_numeric_stack(name, rows=10, columns=17)
+
+
+def bioyond_warehouse_sirna_centrifuge_balance_plate_stack(name: str = "离心机配平板堆栈") -> WareHouse:
+    """创建小核酸离心机配平板堆栈：2 行 x 1 列。"""
+    return bioyond_warehouse_numeric_stack(name, rows=2, columns=1)
+
 
 # ================ 反应站相关堆栈 ================
 
