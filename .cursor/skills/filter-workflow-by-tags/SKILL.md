@@ -15,7 +15,7 @@ description: Query backend workflow list, aggregate all tags, and filter workflo
 1. **识别场景关键词** → 映射到可能的 tags（如 synthesis、organic、chromatography、purification）
 2. **直接执行完整流程**（获取 ak/sk/addr → 拉取所有工作流 → 汇总 tags → 按场景筛选）
 3. **展示筛选结果** → 引导用户从候选 workflow 中**选择明确的实验 protocol**
-4. **如果用户确认某个 workflow** → 记录 `workflow_uuid`，准备对接“与其他 Skill 的协作”
+4. **如果用户确认某个 workflow** → 记录 `workflow_uuid`，准备对接 `batch-submit-experiment` skill
 
 **如果用户未给场景目标**，则按标准 checklist 询问筛选条件。
 
@@ -248,7 +248,7 @@ Task Progress:
        - 若结果 2–10 条 → 让用户按编号选择
        - 若结果过多 → 提示收紧条件（加 tag、切换 all 模式、仅 published）
        - 若结果为空 → 放宽条件（去掉最稀有 tag）或提示用户换关键词
-- [ ] Step 10: 记录用户选中的 workflow_uuid，并提示提交实验或查看详情
+- [ ] Step 10: 记录用户选中的 workflow_uuid，并提示可交给 `batch-submit-experiment` skill 提交实验
 ```
 
 ---
@@ -387,7 +387,7 @@ agent 拿到用户的「领域 + 场景」自然语言描述时，按如下顺�
 
 1. 将 `workflow_uuid` 写入 session state
 2. 提示用户下一步可用的 skill：
-   - 提交实验 → 引导到“与其他 Skill 的协作”
+   - 提交实验 → `batch-submit-experiment`
    - 查看 workflow 详细节点 → `GET /api/v1/lab/workflow/template/detail/<workflow_uuid>`
 3. 若用户想换一个，回到筛选步骤。
 
@@ -410,7 +410,7 @@ agent 拿到用户的「领域 + 场景」自然语言描述时，按如下顺�
   synthesis (12), organic (8), analysis (5), purification (4), ...
 ```
 
-如果用户下一步想执行某工作流 → 引导到“与其他 Skill 的协作”。
+如果用户下一步想执行某工作流 → 引导到 **batch-submit-experiment** skill。
 
 ---
 
