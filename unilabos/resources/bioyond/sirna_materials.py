@@ -4,8 +4,8 @@ Defines PyLabRobot resource classes for Bioyond Sirna station materials.
 Each class is decorated with @resource for AST-based registry discovery.
 """
 
-from typing import Optional
 from collections import OrderedDict
+
 from pylabrobot.resources import Plate, TipRack, Container
 
 from unilabos.registry.decorators import resource
@@ -19,20 +19,15 @@ from unilabos.registry.decorators import resource
 class BioyondSirna_G3_200ul_TipRack(TipRack):
     """G3-200ul tip rack for Sirna liquid handling."""
 
-    def __init__(
-        self,
-        name: str,
-        with_tips: bool = True,
-    ):
-        super().__init__(
-            name=name,
-            size_x=127.76,
-            size_y=85.48,
-            size_z=64.0,
-            model="bioyond_sirna_g3_200ul_tip_rack",
-            with_tips=with_tips,
-            ordering=OrderedDict(),  # Empty ordering to satisfy PyLabRobot requirement
-        )
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("size_x", 127.76)
+        kwargs.setdefault("size_y", 85.48)
+        kwargs.setdefault("size_z", 64.0)
+        kwargs.setdefault("model", "bioyond_sirna_g3_200ul_tip_rack")
+        kwargs.setdefault("with_tips", True)
+        if kwargs.get("ordering") is None and kwargs.get("ordered_items") is None:
+            kwargs["ordering"] = OrderedDict()
+        super().__init__(*args, **kwargs)
 
 
 @resource(
@@ -43,20 +38,15 @@ class BioyondSirna_G3_200ul_TipRack(TipRack):
 class BioyondSirna_G3_50ul_TipRack(TipRack):
     """G3-50ul tip rack for Sirna liquid handling."""
 
-    def __init__(
-        self,
-        name: str,
-        with_tips: bool = True,
-    ):
-        super().__init__(
-            name=name,
-            size_x=127.76,
-            size_y=85.48,
-            size_z=64.0,
-            model="bioyond_sirna_g3_50ul_tip_rack",
-            with_tips=with_tips,
-            ordering=OrderedDict(),  # Empty ordering to satisfy PyLabRobot requirement
-        )
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("size_x", 127.76)
+        kwargs.setdefault("size_y", 85.48)
+        kwargs.setdefault("size_z", 64.0)
+        kwargs.setdefault("model", "bioyond_sirna_g3_50ul_tip_rack")
+        kwargs.setdefault("with_tips", True)
+        if kwargs.get("ordering") is None and kwargs.get("ordered_items") is None:
+            kwargs["ordering"] = OrderedDict()
+        super().__init__(*args, **kwargs)
 
 
 @resource(
@@ -67,20 +57,15 @@ class BioyondSirna_G3_50ul_TipRack(TipRack):
 class BioyondSirna_384WellPlate(Plate):
     """384-well plate for Sirna reporter gene detection."""
 
-    def __init__(
-        self,
-        name: str,
-        lid: Optional[object] = None,
-    ):
-        super().__init__(
-            name=name,
-            size_x=127.76,
-            size_y=85.48,
-            size_z=14.35,
-            lid=lid,
-            model="bioyond_sirna_384_well_plate",
-            plate_type="skirted",
-        )
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("size_x", 127.76)
+        kwargs.setdefault("size_y", 85.48)
+        kwargs.setdefault("size_z", 14.35)
+        kwargs.setdefault("model", "bioyond_sirna_384_well_plate")
+        kwargs.setdefault("plate_type", "skirted")
+        if kwargs.get("ordering") is None and kwargs.get("ordered_items") is None:
+            kwargs["ordering"] = OrderedDict()
+        super().__init__(*args, **kwargs)
 
 
 @resource(
@@ -91,20 +76,15 @@ class BioyondSirna_384WellPlate(Plate):
 class BioyondSirna_CellCulturePlate(Plate):
     """Cell culture plate for Sirna experiments."""
 
-    def __init__(
-        self,
-        name: str,
-        lid: Optional[object] = None,
-    ):
-        super().__init__(
-            name=name,
-            size_x=127.76,
-            size_y=85.48,
-            size_z=14.35,
-            lid=lid,
-            model="bioyond_sirna_cell_culture_plate",
-            plate_type="skirted",
-        )
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("size_x", 127.76)
+        kwargs.setdefault("size_y", 85.48)
+        kwargs.setdefault("size_z", 14.35)
+        kwargs.setdefault("model", "bioyond_sirna_cell_culture_plate")
+        kwargs.setdefault("plate_type", "skirted")
+        if kwargs.get("ordering") is None and kwargs.get("ordered_items") is None:
+            kwargs["ordering"] = OrderedDict()
+        super().__init__(*args, **kwargs)
 
 
 @resource(
@@ -115,19 +95,13 @@ class BioyondSirna_CellCulturePlate(Plate):
 class BioyondSirna_ReagentTrough(Container):
     """Reagent trough for Sirna station reagents (RiboGreen, etc.)."""
 
-    def __init__(
-        self,
-        name: str,
-        max_volume: float = 300000.0,  # 300mL default
-    ):
-        super().__init__(
-            name=name,
-            size_x=127.76,
-            size_y=85.48,
-            size_z=44.0,
-            max_volume=max_volume,
-            model="bioyond_sirna_reagent_trough",
-        )
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("size_x", 127.76)
+        kwargs.setdefault("size_y", 85.48)
+        kwargs.setdefault("size_z", 44.0)
+        kwargs.setdefault("max_volume", 300000.0)
+        kwargs.setdefault("model", "bioyond_sirna_reagent_trough")
+        super().__init__(*args, **kwargs)
 
 
 # Material type code mapping for dynamic instantiation

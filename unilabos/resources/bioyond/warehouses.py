@@ -4,8 +4,19 @@ from pylabrobot.resources.carrier import ResourceHolder, create_homogeneous_reso
 from unilabos.resources.warehouse import WareHouse, warehouse_factory
 
 
-def bioyond_warehouse_numeric_stack(name: str, rows: int = 10, columns: int = 17) -> WareHouse:
-    """创建 Bioyond 数字库位堆栈，库位名使用服务端返回的 行-列 格式。"""
+def bioyond_warehouse_numeric_stack(
+    name: str,
+    rows: int = 10,
+    columns: int = 17,
+    bioyond_axis: str = "xy_row_col",
+) -> WareHouse:
+    """创建 Bioyond 数字库位堆栈，库位名使用服务端返回的 行-列 格式。
+
+    bioyond_axis: 仓库级别的 Bioyond 坐标轴约定，供 graphio 的坐标映射使用。
+        - "xy_row_col" (default): Bioyond x→row, y→col (reaction/peptide 历史约定).
+        - "xy_col_row": Bioyond x→col, y→row (Sirna live API 实测约定).
+    未设置时 graphio 回退到默认 "xy_row_col"，其他调用方保持原行为。
+    """
     num_items_x = columns
     num_items_y = rows
     num_items_z = 1
@@ -33,7 +44,7 @@ def bioyond_warehouse_numeric_stack(name: str, rows: int = 10, columns: int = 17
         for row in range(num_items_y)
         for col in range(num_items_x)
     ]
-    return WareHouse(
+    warehouse = WareHouse(
         name=name,
         size_x=dx + item_dx * num_items_x,
         size_y=dy + item_dy * num_items_y,
@@ -45,23 +56,25 @@ def bioyond_warehouse_numeric_stack(name: str, rows: int = 10, columns: int = 17
         sites={key: holder for key, holder in zip(keys, holders.values())},
         category="warehouse",
     )
+    warehouse.bioyond_axis = bioyond_axis
+    return warehouse
 
 
 # ================ 小核酸工作站相关堆栈 ================
 
 def bioyond_warehouse_sirna_g3_liquid_handler(name: str = "G3移液站") -> WareHouse:
     """创建小核酸 G3 移液站库位堆栈：1 行 x 14 列。"""
-    return bioyond_warehouse_numeric_stack(name, rows=1, columns=14)
+    return bioyond_warehouse_numeric_stack(name, rows=1, columns=14, bioyond_axis="xy_col_row")
 
 
 def bioyond_warehouse_sirna_automation_stack(name: str = "自动化堆栈") -> WareHouse:
     """创建小核酸自动化堆栈：10 行 x 17 列。"""
-    return bioyond_warehouse_numeric_stack(name, rows=10, columns=17)
+    return bioyond_warehouse_numeric_stack(name, rows=10, columns=17, bioyond_axis="xy_col_row")
 
 
 def bioyond_warehouse_sirna_centrifuge_balance_plate_stack(name: str = "离心机配平板堆栈") -> WareHouse:
     """创建小核酸离心机配平板堆栈：2 行 x 1 列。"""
-    return bioyond_warehouse_numeric_stack(name, rows=2, columns=1)
+    return bioyond_warehouse_numeric_stack(name, rows=2, columns=1, bioyond_axis="xy_col_row")
 
 
 # ================ 反应站相关堆栈 ================

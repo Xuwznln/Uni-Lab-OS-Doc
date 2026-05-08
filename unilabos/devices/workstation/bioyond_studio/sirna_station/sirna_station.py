@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
 from urllib import error, request
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 try:
     from typing_extensions import TypedDict
@@ -38,13 +38,38 @@ except Exception:  # pragma: no cover - 允许无 pylabrobot 依赖时导入轻�
     _SIRNA_DECK_CLASS = None
 
 try:
-    from unilabos.registry.decorators import NodeType, action, device, not_action
+    from unilabos.registry.decorators import (
+        ActionInputHandle,
+        ActionOutputHandle,
+        DataSource,
+        NodeType,
+        action,
+        device,
+        not_action,
+    )
     _REGISTRY_IMPORT_ERROR: Optional[Exception] = None
 except Exception as exc:  # pragma: no cover - 允许无完整依赖时导入轻量 helper
     _REGISTRY_IMPORT_ERROR = exc
 
     class NodeType:  # type: ignore[no-redef]
         MANUAL_CONFIRM = "manual_confirm"
+
+    class DataSource:  # type: ignore[no-redef]
+        HANDLE = "handle"
+        EXECUTOR = "executor"
+
+    class _FallbackActionHandle:  # pragma: no cover - lightweight import-only fallback
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+        def to_registry_dict(self) -> Dict[str, Any]:
+            return dict(self.__dict__)
+
+    class ActionInputHandle(_FallbackActionHandle):  # type: ignore[no-redef]
+        pass
+
+    class ActionOutputHandle(_FallbackActionHandle):  # type: ignore[no-redef]
+        pass
 
     def device(*args: Any, **kwargs: Any):
         def decorator(cls):
@@ -63,6 +88,15 @@ except Exception as exc:  # pragma: no cover - 允许无完整依赖时导入轻
 
     def not_action(func):
         return func
+
+try:
+    from unilabos.registry.placeholder_type import DeviceSlot, ResourceSlot
+except Exception:  # pragma: no cover - 允许无 pylabrobot 依赖时导入轻量 helper
+    class ResourceSlot:  # type: ignore[no-redef]
+        pass
+
+    class DeviceSlot(str):  # type: ignore[no-redef]
+        pass
 
 try:
     from unilabos.devices.workstation.workstation_base import WorkstationBase
@@ -244,7 +278,18 @@ class BioyondSirnaStation(BioyondWorkstation):
         logger.info(f"  - API Host: {self.bioyond_config.get('api_host', '')}")
         logger.info(f"  - Workflow 映射数量: {len(self.bioyond_config.get('workflow_mappings', {}))}")
 
-        self._lazy_frontend_init = deck is None or not self._has_required_api_config(self.bioyond_config)
+        missing_api_keys = self._missing_api_config_keys(self.bioyond_config)
+        if missing_api_keys:
+            logger.warning(
+                "BioyondSirnaStation 缺少 Bioyond API 配置 %s，进入延迟初始化模式。"
+                "动作可在调用前通过 config 重新配置或在 goal 中传入 api_host/api_key 后再使用。"
+                "缺失项可来自 graph 节点 config，或环境变量 "
+                "BIOYOND_SIRNA_API_HOST / BIOYOND_SIRNA_EXP1_API_HOST 与 "
+                "BIOYOND_SIRNA_API_KEY / BIOYOND_SIRNA_EXP1_API_KEY。",
+                missing_api_keys,
+            )
+
+        self._lazy_frontend_init = deck is None or bool(missing_api_keys)
         if self._lazy_frontend_init:
             WorkstationBase.__init__(self, deck=deck)
             self.is_running = False
@@ -256,10 +301,11 @@ class BioyondSirnaStation(BioyondWorkstation):
             self._http_service_config = self.bioyond_config.get("http_service_config", {})
             if "workflow_mappings" in self.bioyond_config:
                 self.workflow_mappings = dict(self.bioyond_config.get("workflow_mappings") or {})
-            logger.warning(
-                "BioyondSirnaStation 以延迟模式初始化：缺少 deck 或 api_host/api_key，"
-                "设备会先注册动作，首次调用动作时再检查 Bioyond API 配置。"
-            )
+            if deck is None:
+                logger.warning(
+                    "BioyondSirnaStation deck 未提供（graph 节点缺少 config.deck），"
+                    "Bioyond 后台同步与 HTTP 服务暂不启动；动作将在补齐 deck 后才能完成 RPC 调用。"
+                )
         else:
             super().__init__(bioyond_config=self.bioyond_config, deck=deck)
 
@@ -269,9 +315,29 @@ class BioyondSirnaStation(BioyondWorkstation):
     def post_init(self, ros_node: Any) -> None:
         if getattr(self, "_lazy_frontend_init", False):
             WorkstationBase.post_init(self, ros_node)
-            logger.warning("BioyondSirnaStation 延迟模式跳过 Bioyond 后台同步和 HTTP 服务启动")
+            logger.warning(
+                "BioyondSirnaStation 处于延迟模式：跳过 Bioyond 后台同步和 HTTP 服务启动。"
+                "首次调用动作时会重新检查 api_host/api_key 与环境变量。"
+            )
             return
         super().post_init(ros_node)
+
+    @staticmethod
+    def _missing_api_config_keys(config: Dict[str, Any]) -> List[str]:
+        missing: List[str] = []
+        if BioyondSirnaStation._is_blank_value(config.get("api_host")):
+            missing.append("api_host")
+        if BioyondSirnaStation._is_blank_value(config.get("api_key")):
+            missing.append("api_key")
+        return missing
+
+    @staticmethod
+    def _is_blank_value(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ""
+        return False
 
     def fetch_workflow_list(
         self,
@@ -339,6 +405,58 @@ class BioyondSirnaStation(BioyondWorkstation):
         },
         feedback_interval=300,
         description="提交小核酸实验1（报告基因检测）",
+        handles=[
+            ActionOutputHandle(
+                key="order_ids",
+                data_type="bioyond_order_ids",
+                label="实验ID",
+                data_key="order_ids",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_code",
+                data_type="bioyond_order_code",
+                label="订单编号",
+                data_key="order_code",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_name",
+                data_type="bioyond_order_name",
+                label="订单名称",
+                data_key="order_name",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                # TEMP frontend-compat key: material/resource name.
+                key="resource",
+                data_type="resource",
+                label="待装载物料",
+                data_key="resource",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                # TEMP frontend-compat key: display as material/resource name.
+                key="coin_cell_code", data_type="array",
+                label="物料名称",
+                data_key="coin_cell_code",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                # TEMP frontend-compat key: display as mount/position.
+                key="mount_resource", data_type="resource",
+                label="库位",
+                data_key="mount_resource",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
     )
     def submit_experiment_1(
         self,
@@ -385,6 +503,11 @@ class BioyondSirnaStation(BioyondWorkstation):
         order_name = optional_params.get("order_name", "")
         parameter_overrides = optional_params.get("parameter_overrides", "")
         auto_register_materials = optional_params.get("auto_register_materials", True)
+        target_device = (
+            self._kwarg_text(kwargs, "unilabos_device_id")
+            or self._kwarg_text(kwargs, "device_id")
+            or "bioyond_sirna_station"
+        )
 
         del timeout_seconds, assignee_user_ids, kwargs
         rpc = self._require_hardware_interface("create_order")
@@ -454,6 +577,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             "order_code": resolved_order_code,
             "order_name": resolved_order_name,
             "order_ids": order_ids,
+            "target_device": target_device,
             "workflow": workflow,
             "sample_throughput": int(sample_throughput),
             "payload": order_payload,
@@ -461,11 +585,18 @@ class BioyondSirnaStation(BioyondWorkstation):
             "create_order_result": parsed_result,
             "materials": material_records,
             "materials_by_type": confirmation_data.get("materials_by_type", {}),
+            "manual_load_tables": self._build_manual_load_tables(
+                confirmation_data.get("materials_by_type", {})
+            ),
+            "manual_load_probe": self._build_manual_load_probe(
+                confirmation_data.get("materials_by_type", {})
+            ),
             "suggested_locations": suggested_locations,
             "start_experiment": start_experiment_info,
             "confirmation_message": confirmation_data.get("confirmation_message", ""),
             "registration_result": registration_result,
         }
+        result.update(result["manual_load_probe"])
         return result
 
     def _parse_parameter_overrides_text(self, text: str) -> Dict[str, Any]:
@@ -508,16 +639,73 @@ class BioyondSirnaStation(BioyondWorkstation):
     @action(
         always_free=True,
         node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
-        goal_default={"timeout_seconds": 3600, "assignee_user_ids": []},
+        placeholder_keys={
+            "resource": "unilabos_resources",
+            "target_device": "unilabos_devices",
+            "mount_resource": "unilabos_resources",
+            "assignee_user_ids": "unilabos_manual_confirm",
+        },
+        goal_default={
+            "materials_loaded": False,
+            "timeout_seconds": 3600,
+            "assignee_user_ids": [],
+        },
         feedback_interval=300,
-        description="启动小核酸实验调度",
+        description="请核对并装载实验物料；勾选装载确认后方可启动调度",
+        handles=[
+            ActionInputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待装载物料",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                # TEMP frontend-compat key: material/resource name.
+                key="coin_cell_code",
+                data_type="array",
+                label="物料名称",
+                data_key="coin_cell_code",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                # TEMP frontend-compat key: mount/position.
+                key="mount_resource",
+                data_type="resource",
+                label="库位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            # Order metadata for scheduler start.
+            ActionInputHandle(
+                key="order_ids", data_type="bioyond_order_ids",
+                label="实验ID", data_key="order_ids",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+        ],
     )
     def start_experiment(
         self,
+        target_device: DeviceSlot = "",
+        resource: Optional[List[ResourceSlot]] = None,
+        coin_cell_code: Optional[List[str]] = None,
+        mount_resource: Optional[List[ResourceSlot]] = None,
         submit_experiment_result: Optional[Dict[str, Any]] = None,
         order_id: str = "",
         order_ids: Optional[List[str]] = None,
+        materials_loaded: bool = False,
         api_host: str = "",
         api_key: str = "",
         ready_signal: str = "READY",
@@ -525,11 +713,33 @@ class BioyondSirnaStation(BioyondWorkstation):
         assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """启动 Bioyond 调度器。"""
-        del timeout_seconds, assignee_user_ids, kwargs
+        """Guided manual-load checkpoint that gates ``rpc.scheduler_start()``."""
+        del target_device, timeout_seconds, assignee_user_ids, kwargs
         self._update_runtime_api_config(api_host=api_host, api_key=api_key)
         self._require_ready_signal(ready_signal)
-        start_info = self._resolve_start_experiment_info(submit_experiment_result, order_id, order_ids)
+
+        category_arrays = {
+            "materials_loaded": (
+                "物料",
+                self._as_manual_gate(materials_loaded),
+                [resource, coin_cell_code, mount_resource],
+            ),
+        }
+        gates: Dict[str, Dict[str, Any]] = {}
+        missing_labels: List[str] = []
+        for gate_key, (label, ticked, arrays) in category_arrays.items():
+            required = any(bool(arr) for arr in arrays)
+            gates[gate_key] = {"label": label, "required": required, "ticked": bool(ticked)}
+            if required and not ticked:
+                missing_labels.append(label)
+        if missing_labels:
+            raise RuntimeError(
+                f"以下分类装载尚未确认，无法启动调度: {', '.join(missing_labels)}"
+            )
+
+        start_info = self._resolve_start_experiment_info(
+            submit_experiment_result, order_id, order_ids
+        )
         rpc = self._require_hardware_interface("scheduler_start")
         logger.info("正在启动小核酸调度器")
         result = rpc.scheduler_start()
@@ -538,6 +748,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             "return_info": result,
             "scheduler_start_result": result,
             "start_experiment": start_info,
+            "gates": gates,
             "confirmation_message": "调度器启动成功" if result == 1 else "调度器启动失败，请检查 LIMS 状态",
         })
 
@@ -557,18 +768,29 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     def _initialize_hardware_interface_from_config(self) -> Any:
         self._apply_env_api_config(self.bioyond_config)
-        if not self._has_required_api_config(self.bioyond_config):
-            raise RuntimeError(
-                "Bioyond RPC 客户端未初始化，且缺少 api_host/api_key。"
-                "请在前端节点 config 中配置 api_host、api_key，或在动作参数中传入 api_host、api_key。"
-            )
+        missing = self._missing_api_config_keys(self.bioyond_config)
+        if missing:
+            api_host_present = "api_host" not in missing
+            api_key_present = "api_key" not in missing
+            lines = [
+                f"无法调用 Bioyond RPC：缺少 {missing}（站点处于延迟初始化模式，构造时未提供完整 API 配置）。",
+                f"  - 当前 api_host: {'已配置' if api_host_present else '<缺失>'}",
+                f"  - 当前 api_key:  {'已配置' if api_key_present else '<缺失>'}",
+                "请按以下任一方式补齐后重试：",
+                "  1) 在前端节点 config 中填入 api_host / api_key 并重新下发 graph；",
+                "  2) 在动作 goal 参数中直接传入 api_host / api_key（reset / start_experiment 已支持）；",
+                "  3) 设置环境变量后重启 edge：",
+                "       BIOYOND_SIRNA_API_HOST 或 BIOYOND_SIRNA_EXP1_API_HOST",
+                "       BIOYOND_SIRNA_API_KEY  或 BIOYOND_SIRNA_EXP1_API_KEY",
+            ]
+            raise RuntimeError("\n".join(lines))
         from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondV1RPC
 
         self.hardware_interface = BioyondV1RPC(self.bioyond_config)
         return self.hardware_interface
 
     def _has_required_api_config(self, config: Dict[str, Any]) -> bool:
-        return not self._is_blank(config.get("api_host")) and not self._is_blank(config.get("api_key"))
+        return not self._missing_api_config_keys(config)
 
     def _apply_env_api_config(self, config: Dict[str, Any]) -> None:
         env_pairs = {
@@ -1051,6 +1273,18 @@ class BioyondSirnaStation(BioyondWorkstation):
         payload["received_ready_signal"] = DEFAULT_READY_SIGNAL
         return payload
 
+    @staticmethod
+    def _as_manual_gate(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y", "on", "checked"}:
+                return True
+            if normalized in {"false", "0", "no", "n", "off", "unchecked", ""}:
+                return False
+        return bool(value)
+
     def _resolve_start_experiment_info(
         self,
         submit_experiment_result: Optional[Dict[str, Any]],
@@ -1326,6 +1560,108 @@ class BioyondSirnaStation(BioyondWorkstation):
                 grouped[mode] = []
             grouped[mode].append(mat)
         return grouped
+
+    def _build_manual_load_tables(
+        self,
+        materials_by_type: Dict[str, List[Dict[str, Any]]],
+    ) -> Dict[str, Dict[str, List[str]]]:
+        """Derive sibling-array tables per Bioyond material category.
+
+        Output shape matches the production sibling-array handles on
+        ``submit_experiment_1``: ``manual_load_tables.<Mode>.<column>`` where
+        ``<column>`` is ``material_name | material_code | location | quantity``
+        and each value is a row-aligned ``List[str]``.
+        """
+        tables: Dict[str, Dict[str, List[str]]] = {}
+        for mode in ("Sample", "Consumables", "Reagent"):
+            rows = (materials_by_type or {}).get(mode, []) or []
+            tables[mode] = {
+                "material_name": [str(row.get("materialName") or "") for row in rows],
+                "material_code": [str(row.get("materialCode") or "") for row in rows],
+                "location": [
+                    str(row.get("locationShowName") or row.get("locationCode") or "")
+                    for row in rows
+                ],
+                "quantity": [str(row.get("quantity") or "") for row in rows],
+            }
+        return tables
+
+    @staticmethod
+    def _manual_load_resource_stub(
+        row: Dict[str, Any],
+        *,
+        name: str,
+        kind: str,
+        index: int,
+    ) -> Dict[str, Any]:
+        location_label = str(row.get("locationShowName") or row.get("locationCode") or "")
+        display_name = name or location_label or f"{kind}_{index + 1}"
+        stable_key = f"bioyond-sirna-manual-load:{kind}:{index}:{display_name}"
+        return {
+            "id": display_name,
+            "uuid": str(uuid5(NAMESPACE_URL, stable_key)),
+            "name": display_name,
+            "description": "Bioyond 手动装载临时资源",
+            "schema": {},
+            "model": {},
+            "icon": "",
+            "parent_uuid": None,
+            "type": "resource",
+            "class": "",
+            "config": {
+                "materialId": str(row.get("materialId") or ""),
+                "materialCode": str(row.get("materialCode") or ""),
+                "materialName": str(row.get("materialName") or ""),
+                "locationId": str(row.get("locationId") or ""),
+                "locationCode": str(row.get("locationCode") or ""),
+                "locationShowName": str(row.get("locationShowName") or ""),
+            },
+            "data": {
+                "display_name": display_name,
+                "locationShowName": str(row.get("locationShowName") or ""),
+                "locationCode": str(row.get("locationCode") or ""),
+            },
+            "extra": {
+                "bioyond_manual_load_kind": kind,
+                "bioyond_location_display": location_label,
+            },
+            "machine_name": "",
+        }
+
+    def _build_manual_load_probe(
+        self,
+        materials_by_type: Dict[str, List[Dict[str, Any]]],
+    ) -> Dict[str, List[Any]]:
+        """构造临时前端兼容的手动装载表格值。
+
+        当前临时使用 ``coin_cell_code`` 表示物料名称，``mount_resource`` 表示库位。
+        因为 ``mount_resource`` 声明为 ``data_type="resource"``，这里要把
+        ``locationShowName/locationCode`` 放到资源形状的 ``name`` 字段上，而不是
+        直接返回字符串列表。前端支持通用 action-input 表格后应替换为 Sirna 自有 key。
+        """
+        rows: List[Dict[str, Any]] = []
+        for mode in ("Sample", "Consumables", "Reagent"):
+            rows.extend((materials_by_type or {}).get(mode, []) or [])
+        material_names = [
+            str(row.get("materialName") or row.get("materialCode") or "") for row in rows
+        ]
+        location_names = [
+            str(row.get("locationShowName") or row.get("locationCode") or "") for row in rows
+        ]
+        return {
+            "resource": material_names,
+            "coin_cell_code": material_names,
+            "mount_resource": [
+                self._manual_load_resource_stub(
+                    row,
+                    name=location_names[index],
+                    kind="location",
+                    index=index,
+                )
+                for index, row in enumerate(rows)
+            ],
+            "mount_resource_label": location_names,
+        }
 
     def _register_materials_to_tree(self, material_records: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Register Bioyond materials to UniLabOS resource tree after user confirmation."""
