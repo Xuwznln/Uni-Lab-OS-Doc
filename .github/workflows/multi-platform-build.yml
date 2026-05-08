@@ -10,6 +10,9 @@ on:
   # 支持 tag 推送（不依赖 CI Check）
   push:
     tags: ['v*']
+  # GitHub Release 发布时自动构建并上传
+  release:
+    types: [published]
   # 手动触发
   workflow_dispatch:
     inputs:
@@ -80,7 +83,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           # 如果是 workflow_run 触发，使用触发 CI Check 的 commit
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.event.release.tag_name || github.ref }}
           fetch-depth: 0
 
       - name: Check if platform should be built
@@ -96,12 +99,13 @@ jobs:
             echo "should_build=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Setup Miniconda
+      - name: Setup Miniforge
         if: steps.should_build.outputs.should_build == 'true'
         uses: conda-incubator/setup-miniconda@v3
         with:
-          miniconda-version: 'latest'
-          channels: conda-forge,robostack-staging,defaults
+          miniforge-version: latest
+          use-mamba: true
+          channels: conda-forge,robostack-staging
           channel-priority: strict
           activate-environment: build-env
           auto-update-conda: false
@@ -110,7 +114,7 @@ jobs:
       - name: Install rattler-build and anaconda-client
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          conda install -c conda-forge rattler-build anaconda-client
+          mamba install --override-channels -c conda-forge rattler-build anaconda-client -y
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
@@ -157,7 +161,13 @@ jobs:
           retention-days: 30
 
       - name: Upload to Anaconda.org (unilab organization)
-        if: steps.should_build.outputs.should_build == 'true' && github.event.inputs.upload_to_anaconda == 'true'
+        if: |
+          steps.should_build.outputs.should_build == 'true' &&
+          (
+            github.event_name == 'release' ||
+            startsWith(github.ref, 'refs/tags/') ||
+            github.event.inputs.upload_to_anaconda == 'true'
+          )
         run: |
           for package in $(find ./output -name "*.conda"); do
             echo "Uploading $package to unilab organization..."
