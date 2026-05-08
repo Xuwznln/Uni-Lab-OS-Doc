@@ -4,6 +4,19 @@ from pylabrobot.resources.carrier import ResourceHolder, create_homogeneous_reso
 from unilabos.resources.warehouse import WareHouse, warehouse_factory
 
 
+class BioyondWareHouse(WareHouse):
+    """Bioyond 仓库，额外保存服务端 x/y 坐标语义。"""
+
+    def __init__(self, *args, bioyond_axis: str = "xy_row_col", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bioyond_axis = bioyond_axis
+
+    def serialize(self) -> dict:
+        data = super().serialize()
+        data["bioyond_axis"] = self.bioyond_axis
+        return data
+
+
 def bioyond_warehouse_numeric_stack(
     name: str,
     rows: int = 10,
@@ -44,7 +57,7 @@ def bioyond_warehouse_numeric_stack(
         for row in range(num_items_y)
         for col in range(num_items_x)
     ]
-    warehouse = WareHouse(
+    warehouse = BioyondWareHouse(
         name=name,
         size_x=dx + item_dx * num_items_x,
         size_y=dy + item_dy * num_items_y,
@@ -55,8 +68,8 @@ def bioyond_warehouse_numeric_stack(
         ordering_layout="row-major",
         sites={key: holder for key, holder in zip(keys, holders.values())},
         category="warehouse",
+        bioyond_axis=bioyond_axis,
     )
-    warehouse.bioyond_axis = bioyond_axis
     return warehouse
 
 

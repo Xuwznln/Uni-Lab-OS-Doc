@@ -1,4 +1,5 @@
 from os import name
+
 from pylabrobot.resources import Deck, Coordinate, Rotation
 
 from unilabos.registry.decorators import resource
@@ -112,6 +113,16 @@ class BIOYOND_PolymerPreparationStation_Deck(Deck):
     icon="配液站.webp",
 )
 class BIOYOND_SirnaStation_Deck(Deck):
+    WAREHOUSE_BIOYOND_AXIS = {
+        "G3移液站": "xy_col_row",
+        "自动化堆栈": "xy_col_row",
+        "离心机配平板堆栈": "xy_col_row",
+    }
+    # Bioyond warehouse UUID -> 本地仓库名称 映射。
+    # 留空时由配置（station config 的 ``warehouse_bioyond_ids``）注入。
+    # graph 节点也可在 deck.config.warehouse_bioyond_ids 覆盖。
+    WAREHOUSE_BIOYOND_IDS: dict = {}
+
     def __init__(
         self,
         name: str = "SirnaStation_Deck",
@@ -119,9 +130,15 @@ class BIOYOND_SirnaStation_Deck(Deck):
         size_y: float = 1080.0,
         size_z: float = 1500.0,
         category: str = "deck",
-        setup: bool = False
+        setup: bool = False,
+        warehouse_bioyond_ids: dict | None = None,
+        **kwargs,
     ) -> None:
         super().__init__(name=name, size_x=size_x, size_y=size_y, size_z=size_z)
+        # 按需写入实例级覆盖；保留默认空 mapping，避免改动模型常量。
+        self.warehouse_bioyond_ids: dict = dict(self.WAREHOUSE_BIOYOND_IDS)
+        if warehouse_bioyond_ids:
+            self.warehouse_bioyond_ids.update(warehouse_bioyond_ids)
         if setup:
             self.setup()
 
@@ -130,7 +147,15 @@ class BIOYOND_SirnaStation_Deck(Deck):
         if data.get("children") and data.get("setup") is True:
             data = data.copy()
             data["setup"] = False
-        return super().deserialize(data, allow_marshal=allow_marshal)
+        result = super().deserialize(data, allow_marshal=allow_marshal)
+        result._ensure_sirna_warehouse_axis()
+        return result
+
+    def _ensure_sirna_warehouse_axis(self) -> None:
+        for child in getattr(self, "children", []):
+            axis = self.WAREHOUSE_BIOYOND_AXIS.get(getattr(child, "name", ""))
+            if axis and not hasattr(child, "bioyond_axis"):
+                child.bioyond_axis = axis
 
     def setup(self) -> None:
         # Sirna 读接口 /api/storage/location/locations-by-type 返回完整固定堆栈清单。
