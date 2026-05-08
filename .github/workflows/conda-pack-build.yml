@@ -89,10 +89,10 @@ jobs:
           echo Build full: ${{ github.event.inputs.build_full }}
           if "${{ github.event.inputs.build_full }}"=="true" (
             echo Installing unilabos-full ^(complete package^)...
-            mamba install -n unilab uni-lab::unilabos-full conda-pack -c uni-lab -c robostack-staging -c conda-forge -y
+            mamba install -n unilab uni-lab::unilabos-full conda-pack zstandard -c uni-lab -c robostack-staging -c conda-forge -y
           ) else (
             echo Installing unilabos ^(minimal package^)...
-            mamba install -n unilab uni-lab::unilabos conda-pack -c uni-lab -c robostack-staging -c conda-forge -y
+            mamba install -n unilab uni-lab::unilabos conda-pack zstandard -c uni-lab -c robostack-staging -c conda-forge -y
           )
 
       - name: Install conda-pack, unilabos and dependencies (Unix)
@@ -104,10 +104,10 @@ jobs:
           echo "Build full: ${{ github.event.inputs.build_full }}"
           if [[ "${{ github.event.inputs.build_full }}" == "true" ]]; then
             echo "Installing unilabos-full (complete package)..."
-            mamba install -n unilab uni-lab::unilabos-full conda-pack -c uni-lab -c robostack-staging -c conda-forge -y
+            mamba install -n unilab uni-lab::unilabos-full conda-pack zstandard -c uni-lab -c robostack-staging -c conda-forge -y
           else
             echo "Installing unilabos (minimal package)..."
-            mamba install -n unilab uni-lab::unilabos conda-pack -c uni-lab -c robostack-staging -c conda-forge -y
+            mamba install -n unilab uni-lab::unilabos conda-pack zstandard -c uni-lab -c robostack-staging -c conda-forge -y
           fi
 
       - name: Get latest ros-humble-unilabos-msgs version (Windows)
@@ -226,7 +226,9 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true' && matrix.platform == 'win-64'
         run: |
           echo Packing unilab environment with conda-pack...
-          mamba activate unilab && conda pack -n unilab -o unilab-env-${{ matrix.platform }}.tar.gz --ignore-missing-files
+          for /f "delims=" %%i in ('mamba run -n unilab python -c "import os; print(os.environ['CONDA_PREFIX'])"') do set "UNILAB_PREFIX=%%i"
+          echo Packing environment at: %UNILAB_PREFIX%
+          mamba run -n unilab conda-pack -p "%UNILAB_PREFIX%" -o unilab-env-${{ matrix.platform }}.tar.gz --ignore-missing-files
           echo Pack file created:
           dir unilab-env-${{ matrix.platform }}.tar.gz
 
@@ -235,8 +237,9 @@ jobs:
         shell: bash
         run: |
           echo "Packing unilab environment with conda-pack..."
-          mamba install conda-pack -c conda-forge -y
-          conda pack -n unilab -o unilab-env-${{ matrix.platform }}.tar.gz --ignore-missing-files
+          UNILAB_PREFIX="$(mamba run -n unilab python -c 'import os; print(os.environ["CONDA_PREFIX"])')"
+          echo "Packing environment at: $UNILAB_PREFIX"
+          mamba run -n unilab conda-pack -p "$UNILAB_PREFIX" -o unilab-env-${{ matrix.platform }}.tar.gz --ignore-missing-files
           echo "Pack file created:"
           ls -lh unilab-env-${{ matrix.platform }}.tar.gz
 
