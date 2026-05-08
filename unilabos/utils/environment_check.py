@@ -33,8 +33,74 @@ _USE_UV: Optional[bool] = None
 def _has_uv() -> bool:
     global _USE_UV
     if _USE_UV is None:
-        _USE_UV = shutil.which("uv") is not None
+        uv_path = shutil.which("uv")
+        if not uv_path:
+            _USE_UV = False
+        else:
+            try:
+                result = subprocess.run([uv_path, "--version"], capture_output=True, text=True, timeout=10)
+                _USE_UV = result.returncode == 0
+            except Exception:
+                _USE_UV = False
     return _USE_UV
+
+
+def _install_command(installer: str, package: str, upgrade: bool, is_chinese: bool) -> List[str]:
+    if installer == "uv":
+        cmd = ["uv", "pip", "install"]
+        if upgrade:
+            cmd.append("--upgrade")
+        cmd.append(package)
+        if is_chinese:
+            cmd.extend(["--index-url", "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"])
+        return cmd
+
+    cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check"]
+    if upgrade:
+        cmd.append("--upgrade")
+    cmd.append(package)
+    if is_chinese:
+        cmd.extend(["-i", "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"])
+    return cmd
+
+
+def _installer_candidates() -> List[str]:
+    installers: List[str] = []
+    if _has_uv():
+        installers.append("uv")
+    installers.append("pip")
+    return installers
+
+
+def _git_url_from_requirement(requirement: str) -> Optional[str]:
+    if not requirement.startswith("git+"):
+        return None
+    return requirement[4:].split("#", 1)[0]
+
+
+def _repo_dir_name(git_url: str) -> str:
+    repo_name = git_url.rstrip("/").rsplit("/", 1)[-1]
+    return repo_name[:-4] if repo_name.endswith(".git") else repo_name
+
+
+def _print_manual_git_install_hint(requirement: str) -> None:
+    git_url = _git_url_from_requirement(requirement)
+    if not git_url:
+        return
+
+    repo_dir = _repo_dir_name(git_url)
+    install_cmd = "uv pip install -e ." if _has_uv() else f"{sys.executable} -m pip install -e ."
+    if _is_chinese_locale() and not _has_uv():
+        install_cmd += " -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+
+    print_status("Git 依赖自动安装失败，通常是网络连接被重置或代码托管站点暂时不可达。", "warning")
+    print_status("可以手动拉取代码后在本地安装:", "warning")
+    print_status(f"  git clone {git_url}", "warning")
+    print_status(f"  cd {repo_dir}", "warning")
+    print_status("  git pull", "warning")
+    print_status(f"  {install_cmd}", "warning")
+    print_status(f"如果目录 {repo_dir} 已存在，直接进入该目录执行 git pull 后再安装。", "warning")
+    print_status("如果 git clone 仍失败，请切换网络/代理，或从浏览器下载源码后进入源码目录执行本地安装命令。", "warning")
 
 
 def _install_packages(
@@ -53,7 +119,7 @@ def _install_packages(
         return True
 
     is_chinese = _is_chinese_locale()
-    use_uv = _has_uv()
+    installers = _installer_candidates()
     failed: List[str] = []
 
     for pkg in packages:
@@ -63,35 +129,30 @@ def _install_packages(
         else:
             print_status(f"正在{action_word} {pkg}...", "info")
 
-        if use_uv:
-            cmd = ["uv", "pip", "install"]
-            if upgrade:
-                cmd.append("--upgrade")
-            cmd.append(pkg)
-            if is_chinese:
-                cmd.extend(["--index-url", "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"])
-        else:
-            cmd = [sys.executable, "-m", "pip", "install"]
-            if upgrade:
-                cmd.append("--upgrade")
-            cmd.append(pkg)
-            if is_chinese:
-                cmd.extend(["-i", "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"])
+        pkg_installed = False
+        last_error = "unknown error"
 
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode == 0:
-                installer = "uv" if use_uv else "pip"
-                print_status(f"✓ {pkg} {action_word}成功 (via {installer})", "success")
-            else:
-                stderr_short = result.stderr.strip().split("\n")[-1] if result.stderr else "unknown error"
-                print_status(f"× {pkg} {action_word}失败: {stderr_short}", "error")
-                failed.append(pkg)
-        except subprocess.TimeoutExpired:
-            print_status(f"× {pkg} {action_word}超时 (300s)", "error")
-            failed.append(pkg)
-        except Exception as e:
-            print_status(f"× {pkg} {action_word}异常: {e}", "error")
+        for installer in installers:
+            cmd = _install_command(installer, pkg, upgrade, is_chinese)
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                if result.returncode == 0:
+                    print_status(f"✓ {pkg} {action_word}成功 (via {installer})", "success")
+                    pkg_installed = True
+                    break
+
+                last_error = result.stderr.strip().split("\n")[-1] if result.stderr else "unknown error"
+                print_status(f"× {pkg} {action_word}失败 (via {installer}): {last_error}", "warning")
+            except subprocess.TimeoutExpired:
+                last_error = "timeout after 300s"
+                print_status(f"× {pkg} {action_word}超时 (via {installer}, 300s)", "warning")
+            except Exception as e:
+                last_error = str(e)
+                print_status(f"× {pkg} {action_word}异常 (via {installer}): {e}", "warning")
+
+        if not pkg_installed:
+            print_status(f"× {pkg} {action_word}失败: {last_error}", "error")
+            _print_manual_git_install_hint(pkg)
             failed.append(pkg)
 
     if failed:
