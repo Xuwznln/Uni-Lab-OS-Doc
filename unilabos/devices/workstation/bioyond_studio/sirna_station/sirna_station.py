@@ -14,6 +14,8 @@ from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tupl
 from urllib import error, request
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+DEBUG_CLI_ENABLED = False
+
 try:
     from typing_extensions import TypedDict
 except ImportError:  # pragma: no cover - 仅用于轻量环境导入
@@ -179,6 +181,8 @@ def fetch_workflow_list(
 
     该 helper 只使用 OpenAPI 已确认的 LIMS workflow-list schema，不包含站点业务逻辑。
     """
+    assert DEBUG_CLI_ENABLED == True, "fetch_workflow_list 是调试/CLI 快捷入口，运行时请使用 BioyondSirnaStation.fetch_workflow_list()"
+
     resolved_config: Dict[str, Any] = {}
     if config_path is not None:
         resolved_config.update(load_sirna_config(config_path))
@@ -1869,6 +1873,8 @@ class BioyondSirnaStation(BioyondWorkstation):
 
 def main() -> int:
     """命令行入口：读取配置并拉取工作流列表。"""
+    assert DEBUG_CLI_ENABLED == True, "main 是调试/CLI 快捷入口，运行时不应调用 sirna_station.py 的 CLI 路径"
+
     parser = argparse.ArgumentParser(description="Sirna Station 工作流列表拉取")
     parser.add_argument("config_path", help="JSON 配置文件路径")
     parser.add_argument("--workflow-type", type=int, default=0, help="工作流类型，默认 0")
