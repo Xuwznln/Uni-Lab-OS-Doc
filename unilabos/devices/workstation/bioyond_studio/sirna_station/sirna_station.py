@@ -377,7 +377,11 @@ class BioyondSirnaStation(BioyondWorkstation):
         always_free=True,
         node_type=NodeType.MANUAL_CONFIRM,
         placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
-        goal_default={"timeout_seconds": 3600, "assignee_user_ids": []},
+        goal_default={
+            "reset_operations": ["scheduler_reset", "reset_order_status", "reset_location"],
+            "timeout_seconds": 3600,
+            "assignee_user_ids": [],
+        },
         feedback_interval=300,
         description="复位小核酸实验前状态",
     )
@@ -423,35 +427,14 @@ class BioyondSirnaStation(BioyondWorkstation):
         description="提交小核酸实验1（报告基因检测）",
         handles=[
             ActionOutputHandle(
-                key="order_ids",
-                data_type="bioyond_order_ids",
+                key="order_id",
+                data_type="bioyond_order_id",
                 label="实验ID",
-                data_key="order_ids",
+                data_key="order_id",
                 data_source=DataSource.EXECUTOR,
             ),
             ActionOutputHandle(
-                key="order_code",
-                data_type="bioyond_order_code",
-                label="订单编号",
-                data_key="order_code",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="order_name",
-                data_type="bioyond_order_name",
-                label="订单名称",
-                data_key="order_name",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="target_device",
-                data_type="device_id",
-                label="目标设备",
-                data_key="target_device",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                # TEMP frontend-compat key: material/resource name.
+                # TEMP frontend-compat key: material/resource name display (renderer compat).
                 key="resource",
                 data_type="resource",
                 label="待装载物料",
@@ -592,6 +575,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             "success": self._create_result_success(parsed_result, order_ids, material_records),
             "order_code": resolved_order_code,
             "order_name": resolved_order_name,
+            "order_id": order_ids[0] if order_ids else "",
             "order_ids": order_ids,
             "target_device": target_device,
             "workflow": workflow,
@@ -657,7 +641,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         node_type=NodeType.MANUAL_CONFIRM,
         placeholder_keys={
             "resource": "unilabos_resources",
-            "target_device": "unilabos_devices",
             "mount_resource": "unilabos_resources",
             "assignee_user_ids": "unilabos_manual_confirm",
         },
@@ -670,14 +653,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         description="请核对并装载实验物料；勾选装载确认后方可启动调度",
         handles=[
             ActionInputHandle(
-                key="target_device",
-                data_type="device_id",
-                label="目标设备",
-                data_key="target_device",
-                data_source=DataSource.HANDLE,
-                io_type="source",
-            ),
-            ActionInputHandle(
+                # TEMP frontend-compat key: material/resource name (renderer compat).
                 key="resource",
                 data_type="resource",
                 label="待装载物料",
@@ -705,8 +681,8 @@ class BioyondSirnaStation(BioyondWorkstation):
             ),
             # Order metadata for scheduler start.
             ActionInputHandle(
-                key="order_ids", data_type="bioyond_order_ids",
-                label="实验ID", data_key="order_ids",
+                key="order_id", data_type="bioyond_order_id",
+                label="实验ID", data_key="order_id",
                 data_source=DataSource.HANDLE,
                 io_type="source",
             ),
@@ -714,23 +690,29 @@ class BioyondSirnaStation(BioyondWorkstation):
     )
     def start_experiment(
         self,
-        target_device: DeviceSlot = "",
-        resource: Optional[List[ResourceSlot]] = None,
-        coin_cell_code: Optional[List[str]] = None,
-        mount_resource: Optional[List[ResourceSlot]] = None,
-        submit_experiment_result: Optional[Dict[str, Any]] = None,
         order_id: str = "",
-        order_ids: Optional[List[str]] = None,
         materials_loaded: bool = False,
-        api_host: str = "",
-        api_key: str = "",
-        ready_signal: str = "READY",
         timeout_seconds: int = 3600,
         assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Guided manual-load checkpoint that gates ``rpc.scheduler_start()``."""
-        del target_device, timeout_seconds, assignee_user_ids, kwargs
+        """Guided manual-load checkpoint that gates ``rpc.scheduler_start()``.
+
+        Args:
+            order_id: 上游 ``submit_experiment_1`` 创建的订单 ID（可选；若上游连接则自动传入）。
+            materials_loaded: 操作员勾选确认物料已装载。未勾选且存在物料显示则阻断启动。
+            timeout_seconds: 超时时间（秒，框架参数）。
+            assignee_user_ids: 分配用户 ID 列表（框架参数）。
+        """
+        resource = kwargs.get("resource")
+        coin_cell_code = kwargs.get("coin_cell_code")
+        mount_resource = kwargs.get("mount_resource")
+        order_ids = kwargs.get("order_ids")
+        submit_experiment_result = kwargs.get("submit_experiment_result")
+        api_host = self._kwarg_text(kwargs, "api_host")
+        api_key = self._kwarg_text(kwargs, "api_key")
+        ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
+        del timeout_seconds, assignee_user_ids
         self._update_runtime_api_config(api_host=api_host, api_key=api_key)
         self._require_ready_signal(ready_signal)
 
@@ -767,6 +749,120 @@ class BioyondSirnaStation(BioyondWorkstation):
             "gates": gates,
             "confirmation_message": "调度器启动成功" if result == 1 else "调度器启动失败，请检查 LIMS 状态",
         })
+
+    @action(
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
+        goal_default={
+            "filter_text": "",
+            "status": "",
+            "latest_only": True,
+            "max_results": 20,
+            "timeout_seconds": 3600,
+            "assignee_user_ids": [],
+        },
+        feedback_interval=300,
+        description="只读查询 Bioyond LIMS 订单列表，可作为下游节点的 order_id 来源",
+        handles=[
+            ActionOutputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_ids",
+                data_type="bioyond_order_ids",
+                label="实验ID列表",
+                data_key="order_ids",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    def get_order_list(
+        self,
+        filter_text: str = "",
+        status: str = "",
+        latest_only: bool = True,
+        max_results: int = 20,
+        timeout_seconds: int = 3600,
+        assignee_user_ids: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """只读查询 Bioyond LIMS 订单列表。
+
+        ``api_host`` / ``api_key`` 隐藏不再作为前端可见参数；缺失会沿用现有 RPC 配置错误。
+
+        Args:
+            filter_text: 订单编号 / 名称模糊匹配字符串，对应 LIMS ``order_query.filter``。
+            status: 订单状态字段过滤值（透传给 ``order_query.status``，留空表示不过滤）。
+            latest_only: 默认 ``True``，仅返回最新（创建时间最大）的一条订单作为 ``order_id``。
+            max_results: 一次返回的最大订单条数（透传给 ``pageCount``，默认 20）。
+            timeout_seconds: 超时时间（秒，框架参数）。
+            assignee_user_ids: 分配用户 ID 列表（框架参数）。
+
+        Returns:
+            ``{"success": bool, "orders": [...], "order_id": str, "order_ids": [...], "query": {...}}``。
+        """
+        del timeout_seconds, assignee_user_ids, kwargs
+        try:
+            normalized_max = int(max_results)
+        except (TypeError, ValueError):
+            normalized_max = 20
+        if normalized_max <= 0:
+            normalized_max = 20
+        rpc = self._require_hardware_interface("order_query")
+        query_payload = {
+            "timeType": "",
+            "beginTime": None,
+            "endTime": None,
+            "status": str(status or ""),
+            "filter": str(filter_text or ""),
+            "skipCount": 0,
+            "pageCount": normalized_max,
+            "sorting": "creationTime desc",
+        }
+        logger.info(
+            "正在查询 Bioyond LIMS 订单列表 filter=%r status=%r latest_only=%s",
+            filter_text,
+            status,
+            latest_only,
+        )
+        raw_result = rpc.order_query(json.dumps(query_payload, ensure_ascii=False))
+        items = self._order_items(raw_result)
+
+        orders: List[Dict[str, Any]] = []
+        for item in items:
+            order_id = str(item.get("id") or "")
+            if not order_id:
+                continue
+            orders.append({
+                "order_id": order_id,
+                "order_code": str(item.get("orderCode") or ""),
+                "order_name": str(item.get("name") or item.get("orderName") or ""),
+                "status": str(item.get("status") or item.get("statusName") or ""),
+                "created_at": str(item.get("creationTime") or item.get("createTime") or ""),
+                "raw": item,
+            })
+
+        order_ids = [order["order_id"] for order in orders]
+        if latest_only and orders:
+            chosen = orders[0]
+            order_id_value = chosen["order_id"]
+        elif len(order_ids) == 1:
+            order_id_value = order_ids[0]
+        else:
+            order_id_value = ""
+
+        return {
+            "success": bool(orders),
+            "orders": orders,
+            "order_id": order_id_value,
+            "order_ids": order_ids,
+            "query": query_payload,
+        }
 
     def _require_hardware_interface(self, method_name: str) -> Any:
         rpc = getattr(self, "hardware_interface", None)
