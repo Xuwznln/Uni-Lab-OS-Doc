@@ -250,6 +250,8 @@ def fetch_workflow_list(
 class BioyondSirnaStation(BioyondWorkstation):
     """小核酸工作站最小运行时实现。"""
 
+    _DEBUG_LOG_DEFAULT_DIR = "temp_benyao/sirna/_logs"
+
     def __init__(
         self,
         bioyond_config: Optional[Dict[str, Any]] = None,
@@ -395,24 +397,25 @@ class BioyondSirnaStation(BioyondWorkstation):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """复位调度器、订单状态和库位，并按清理读回结果决定是否 take-out。"""
-        reset_order_id = self._kwarg_text(kwargs, "reset_order_id")
-        reset_location_id = self._kwarg_text(kwargs, "reset_location_id")
-        cleanup_order_code = self._kwarg_text(kwargs, "cleanup_order_code")
-        api_host = self._kwarg_text(kwargs, "api_host")
-        api_key = self._kwarg_text(kwargs, "api_key")
-        ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
-        del timeout_seconds, assignee_user_ids
-        self._update_runtime_api_config(api_host=api_host, api_key=api_key)
-        self._require_ready_signal(ready_signal)
-        rpc = self._require_hardware_interface_for_reset()
-        result = self._run_reset_operations(
-            rpc,
-            reset_operations=reset_operations,
-            reset_order_id=reset_order_id,
-            reset_location_id=reset_location_id,
-            cleanup_order_code=cleanup_order_code,
-        )
-        return self._with_ready_signal(result)
+        with self._debug_call_session("reset"):
+            reset_order_id = self._kwarg_text(kwargs, "reset_order_id")
+            reset_location_id = self._kwarg_text(kwargs, "reset_location_id")
+            cleanup_order_code = self._kwarg_text(kwargs, "cleanup_order_code")
+            api_host = self._kwarg_text(kwargs, "api_host")
+            api_key = self._kwarg_text(kwargs, "api_key")
+            ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
+            del timeout_seconds, assignee_user_ids
+            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
+            self._require_ready_signal(ready_signal)
+            rpc = self._require_hardware_interface_for_reset()
+            result = self._run_reset_operations(
+                rpc,
+                reset_operations=reset_operations,
+                reset_order_id=reset_order_id,
+                reset_location_id=reset_location_id,
+                cleanup_order_code=cleanup_order_code,
+            )
+            return self._with_ready_signal(result)
 
     @action(
         always_free=True,
@@ -491,113 +494,114 @@ class BioyondSirnaStation(BioyondWorkstation):
             - confirmation_message (str): 确认消息
             - registration_result (Dict): 物料注册结果
         """
-        if isinstance(required_params, dict):
-            sample_throughput = required_params.get("sample_throughput")
-        else:
-            sample_throughput = required_params
-        sample_throughput = int(sample_throughput)
+        with self._debug_call_session("submit_experiment_1"):
+            if isinstance(required_params, dict):
+                sample_throughput = required_params.get("sample_throughput")
+            else:
+                sample_throughput = required_params
+            sample_throughput = int(sample_throughput)
 
-        if optional_params is None:
-            optional_params = {}
-        order_name = optional_params.get("order_name", "")
-        parameter_overrides = optional_params.get("parameter_overrides", "")
-        auto_register_materials = optional_params.get("auto_register_materials", True)
-        target_device = (
-            self._kwarg_text(kwargs, "unilabos_device_id")
-            or self._kwarg_text(kwargs, "device_id")
-            or "bioyond_sirna_station"
-        )
+            if optional_params is None:
+                optional_params = {}
+            order_name = optional_params.get("order_name", "")
+            parameter_overrides = optional_params.get("parameter_overrides", "")
+            auto_register_materials = optional_params.get("auto_register_materials", True)
+            target_device = (
+                self._kwarg_text(kwargs, "unilabos_device_id")
+                or self._kwarg_text(kwargs, "device_id")
+                or "bioyond_sirna_station"
+            )
 
-        del timeout_seconds, assignee_user_ids, kwargs
-        rpc = self._require_hardware_interface("create_order")
+            del timeout_seconds, assignee_user_ids, kwargs
+            rpc = self._require_hardware_interface("create_order")
 
-        # 自动解析实验1工作流（无需用户指定workflow_name）
-        workflow = self._resolve_experiment_1_workflow(rpc)
+            # 自动解析实验1工作流（无需用户指定workflow_name）
+            workflow = self._resolve_experiment_1_workflow(rpc)
 
-        step_data = rpc.workflow_step_query(workflow["sub_workflow_id"])
+            step_data = rpc.workflow_step_query(workflow["sub_workflow_id"])
 
-        # Parse parameter_overrides from text format
-        parsed_overrides = self._parse_parameter_overrides_text(parameter_overrides)
+            # Parse parameter_overrides from text format
+            parsed_overrides = self._parse_parameter_overrides_text(parameter_overrides)
 
-        param_values, parameter_template = self._build_param_values_from_step_data(
-            step_data,
-            parameter_overrides=parsed_overrides,
-            include_all_task_displayable=True,
-        )
-        if not param_values:
-            raise RuntimeError("未从 LIMS 子工作流参数中提取到 create_order paramValues")
+            param_values, parameter_template = self._build_param_values_from_step_data(
+                step_data,
+                parameter_overrides=parsed_overrides,
+                include_all_task_displayable=True,
+            )
+            if not param_values:
+                raise RuntimeError("未从 LIMS 子工作流参数中提取到 create_order paramValues")
 
-        resolved_order_code, resolved_order_name = self._build_bioyond_order_identity("", order_name)
-        order_payload = [
-            {
-                "orderCode": resolved_order_code,
-                "orderName": resolved_order_name,
-                "borderNumber": int(sample_throughput),
-                "workFlowId": workflow["sub_workflow_id"],
-                "paramValues": param_values,
-                "extendProperties": "",
+            resolved_order_code, resolved_order_name = self._build_bioyond_order_identity("", order_name)
+            order_payload = [
+                {
+                    "orderCode": resolved_order_code,
+                    "orderName": resolved_order_name,
+                    "borderNumber": int(sample_throughput),
+                    "workFlowId": workflow["sub_workflow_id"],
+                    "paramValues": param_values,
+                    "extendProperties": "",
+                }
+            ]
+
+            logger.info(f"正在提交小核酸实验1: {resolved_order_name} ({resolved_order_code})")
+            raw_result = rpc.create_order(json.dumps(copy.deepcopy(order_payload), ensure_ascii=False))
+            parsed_result = self._parse_lims_result(raw_result)
+            material_records = self._extract_create_order_materials(parsed_result)
+            suggested_locations = self._extract_suggested_locations(material_records)
+            order_ids = self._extract_created_order_ids(parsed_result)
+            self._last_submitted_order_ids = list(order_ids)
+            self._last_submitted_order_code = resolved_order_code
+            start_experiment_info = {
+                "order_ids": order_ids,
+                "order_code": resolved_order_code,
+                "order_name": resolved_order_name,
+                "workflow": workflow,
             }
-        ]
+            confirmation_data = self._format_create_order_confirmation(
+                order_code=resolved_order_code,
+                order_name=resolved_order_name,
+                workflow=workflow,
+                order_ids=order_ids,
+                material_records=material_records,
+                suggested_locations=suggested_locations,
+            )
 
-        logger.info(f"正在提交小核酸实验1: {resolved_order_name} ({resolved_order_code})")
-        raw_result = rpc.create_order(json.dumps(copy.deepcopy(order_payload), ensure_ascii=False))
-        parsed_result = self._parse_lims_result(raw_result)
-        material_records = self._extract_create_order_materials(parsed_result)
-        suggested_locations = self._extract_suggested_locations(material_records)
-        order_ids = self._extract_created_order_ids(parsed_result)
-        self._last_submitted_order_ids = list(order_ids)
-        self._last_submitted_order_code = resolved_order_code
-        start_experiment_info = {
-            "order_ids": order_ids,
-            "order_code": resolved_order_code,
-            "order_name": resolved_order_name,
-            "workflow": workflow,
-        }
-        confirmation_data = self._format_create_order_confirmation(
-            order_code=resolved_order_code,
-            order_name=resolved_order_name,
-            workflow=workflow,
-            order_ids=order_ids,
-            material_records=material_records,
-            suggested_locations=suggested_locations,
-        )
+            registration_result = None
+            if auto_register_materials and material_records:
+                try:
+                    registration_result = self._register_materials_to_tree(material_records)
+                    logger.info(f"物料注册完成: {len(registration_result.get('registered', []))} 个物料已添加到资源树")
+                except Exception as e:
+                    logger.error(f"物料注册失败: {e}")
+                    registration_result = {"error": str(e)}
 
-        registration_result = None
-        if auto_register_materials and material_records:
-            try:
-                registration_result = self._register_materials_to_tree(material_records)
-                logger.info(f"物料注册完成: {len(registration_result.get('registered', []))} 个物料已添加到资源树")
-            except Exception as e:
-                logger.error(f"物料注册失败: {e}")
-                registration_result = {"error": str(e)}
-
-        result = {
-            "success": self._create_result_success(parsed_result, order_ids, material_records),
-            "order_code": resolved_order_code,
-            "order_name": resolved_order_name,
-            "order_id": order_ids[0] if order_ids else "",
-            "order_ids": order_ids,
-            "target_device": target_device,
-            "workflow": workflow,
-            "sample_throughput": int(sample_throughput),
-            "payload": order_payload,
-            "parameter_template": parameter_template,
-            "create_order_result": parsed_result,
-            "materials": material_records,
-            "materials_by_type": confirmation_data.get("materials_by_type", {}),
-            "manual_load_tables": self._build_manual_load_tables(
-                confirmation_data.get("materials_by_type", {})
-            ),
-            "manual_load_probe": self._build_manual_load_probe(
-                confirmation_data.get("materials_by_type", {})
-            ),
-            "suggested_locations": suggested_locations,
-            "start_experiment": start_experiment_info,
-            "confirmation_message": confirmation_data.get("confirmation_message", ""),
-            "registration_result": registration_result,
-        }
-        result.update(result["manual_load_probe"])
-        return result
+            result = {
+                "success": self._create_result_success(parsed_result, order_ids, material_records),
+                "order_code": resolved_order_code,
+                "order_name": resolved_order_name,
+                "order_id": order_ids[0] if order_ids else "",
+                "order_ids": order_ids,
+                "target_device": target_device,
+                "workflow": workflow,
+                "sample_throughput": int(sample_throughput),
+                "payload": order_payload,
+                "parameter_template": parameter_template,
+                "create_order_result": parsed_result,
+                "materials": material_records,
+                "materials_by_type": confirmation_data.get("materials_by_type", {}),
+                "manual_load_tables": self._build_manual_load_tables(
+                    confirmation_data.get("materials_by_type", {})
+                ),
+                "manual_load_probe": self._build_manual_load_probe(
+                    confirmation_data.get("materials_by_type", {})
+                ),
+                "suggested_locations": suggested_locations,
+                "start_experiment": start_experiment_info,
+                "confirmation_message": confirmation_data.get("confirmation_message", ""),
+                "registration_result": registration_result,
+            }
+            result.update(result["manual_load_probe"])
+            return result
 
     def _parse_parameter_overrides_text(self, text: str) -> Dict[str, Any]:
         """Parse parameter overrides from text format.
@@ -704,51 +708,52 @@ class BioyondSirnaStation(BioyondWorkstation):
             timeout_seconds: 超时时间（秒，框架参数）。
             assignee_user_ids: 分配用户 ID 列表（框架参数）。
         """
-        resource = kwargs.get("resource")
-        coin_cell_code = kwargs.get("coin_cell_code")
-        mount_resource = kwargs.get("mount_resource")
-        order_ids = kwargs.get("order_ids")
-        submit_experiment_result = kwargs.get("submit_experiment_result")
-        api_host = self._kwarg_text(kwargs, "api_host")
-        api_key = self._kwarg_text(kwargs, "api_key")
-        ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
-        del timeout_seconds, assignee_user_ids
-        self._update_runtime_api_config(api_host=api_host, api_key=api_key)
-        self._require_ready_signal(ready_signal)
+        with self._debug_call_session("start_experiment"):
+            resource = kwargs.get("resource")
+            coin_cell_code = kwargs.get("coin_cell_code")
+            mount_resource = kwargs.get("mount_resource")
+            order_ids = kwargs.get("order_ids")
+            submit_experiment_result = kwargs.get("submit_experiment_result")
+            api_host = self._kwarg_text(kwargs, "api_host")
+            api_key = self._kwarg_text(kwargs, "api_key")
+            ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
+            del timeout_seconds, assignee_user_ids
+            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
+            self._require_ready_signal(ready_signal)
 
-        category_arrays = {
-            "materials_loaded": (
-                "物料",
-                self._as_manual_gate(materials_loaded),
-                [resource, coin_cell_code, mount_resource],
-            ),
-        }
-        gates: Dict[str, Dict[str, Any]] = {}
-        missing_labels: List[str] = []
-        for gate_key, (label, ticked, arrays) in category_arrays.items():
-            required = any(bool(arr) for arr in arrays)
-            gates[gate_key] = {"label": label, "required": required, "ticked": bool(ticked)}
-            if required and not ticked:
-                missing_labels.append(label)
-        if missing_labels:
-            raise RuntimeError(
-                f"以下分类装载尚未确认，无法启动调度: {', '.join(missing_labels)}"
+            category_arrays = {
+                "materials_loaded": (
+                    "物料",
+                    self._as_manual_gate(materials_loaded),
+                    [resource, coin_cell_code, mount_resource],
+                ),
+            }
+            gates: Dict[str, Dict[str, Any]] = {}
+            missing_labels: List[str] = []
+            for gate_key, (label, ticked, arrays) in category_arrays.items():
+                required = any(bool(arr) for arr in arrays)
+                gates[gate_key] = {"label": label, "required": required, "ticked": bool(ticked)}
+                if required and not ticked:
+                    missing_labels.append(label)
+            if missing_labels:
+                raise RuntimeError(
+                    f"以下分类装载尚未确认，无法启动调度: {', '.join(missing_labels)}"
+                )
+
+            start_info = self._resolve_start_experiment_info(
+                submit_experiment_result, order_id, order_ids
             )
-
-        start_info = self._resolve_start_experiment_info(
-            submit_experiment_result, order_id, order_ids
-        )
-        rpc = self._require_hardware_interface("scheduler_start")
-        logger.info("正在启动小核酸调度器")
-        result = rpc.scheduler_start()
-        return self._with_ready_signal({
-            "success": result == 1,
-            "return_info": result,
-            "scheduler_start_result": result,
-            "start_experiment": start_info,
-            "gates": gates,
-            "confirmation_message": "调度器启动成功" if result == 1 else "调度器启动失败，请检查 LIMS 状态",
-        })
+            rpc = self._require_hardware_interface("scheduler_start")
+            logger.info("正在启动小核酸调度器")
+            result = rpc.scheduler_start()
+            return self._with_ready_signal({
+                "success": result == 1,
+                "return_info": result,
+                "scheduler_start_result": result,
+                "start_experiment": start_info,
+                "gates": gates,
+                "confirmation_message": "调度器启动成功" if result == 1 else "调度器启动失败，请检查 LIMS 状态",
+            })
 
     @action(
         always_free=True,
@@ -806,63 +811,64 @@ class BioyondSirnaStation(BioyondWorkstation):
         Returns:
             ``{"success": bool, "orders": [...], "order_id": str, "order_ids": [...], "query": {...}}``。
         """
-        del timeout_seconds, assignee_user_ids, kwargs
-        try:
-            normalized_max = int(max_results)
-        except (TypeError, ValueError):
-            normalized_max = 20
-        if normalized_max <= 0:
-            normalized_max = 20
-        rpc = self._require_hardware_interface("order_query")
-        query_payload = {
-            "timeType": "",
-            "beginTime": None,
-            "endTime": None,
-            "status": str(status or ""),
-            "filter": str(filter_text or ""),
-            "skipCount": 0,
-            "pageCount": normalized_max,
-            "sorting": "creationTime desc",
-        }
-        logger.info(
-            "正在查询 Bioyond LIMS 订单列表 filter=%r status=%r latest_only=%s",
-            filter_text,
-            status,
-            latest_only,
-        )
-        raw_result = rpc.order_query(json.dumps(query_payload, ensure_ascii=False))
-        items = self._order_items(raw_result)
+        with self._debug_call_session("get_order_list"):
+            del timeout_seconds, assignee_user_ids, kwargs
+            try:
+                normalized_max = int(max_results)
+            except (TypeError, ValueError):
+                normalized_max = 20
+            if normalized_max <= 0:
+                normalized_max = 20
+            rpc = self._require_hardware_interface("order_query")
+            query_payload = {
+                "timeType": "",
+                "beginTime": None,
+                "endTime": None,
+                "status": str(status or ""),
+                "filter": str(filter_text or ""),
+                "skipCount": 0,
+                "pageCount": normalized_max,
+                "sorting": "creationTime desc",
+            }
+            logger.info(
+                "正在查询 Bioyond LIMS 订单列表 filter=%r status=%r latest_only=%s",
+                filter_text,
+                status,
+                latest_only,
+            )
+            raw_result = rpc.order_query(json.dumps(query_payload, ensure_ascii=False))
+            items = self._order_items(raw_result)
 
-        orders: List[Dict[str, Any]] = []
-        for item in items:
-            order_id = str(item.get("id") or "")
-            if not order_id:
-                continue
-            orders.append({
-                "order_id": order_id,
-                "order_code": str(item.get("orderCode") or ""),
-                "order_name": str(item.get("name") or item.get("orderName") or ""),
-                "status": str(item.get("status") or item.get("statusName") or ""),
-                "created_at": str(item.get("creationTime") or item.get("createTime") or ""),
-                "raw": item,
-            })
+            orders: List[Dict[str, Any]] = []
+            for item in items:
+                order_id = str(item.get("id") or "")
+                if not order_id:
+                    continue
+                orders.append({
+                    "order_id": order_id,
+                    "order_code": str(item.get("orderCode") or ""),
+                    "order_name": str(item.get("name") or item.get("orderName") or ""),
+                    "status": str(item.get("status") or item.get("statusName") or ""),
+                    "created_at": str(item.get("creationTime") or item.get("createTime") or ""),
+                    "raw": item,
+                })
 
-        order_ids = [order["order_id"] for order in orders]
-        if latest_only and orders:
-            chosen = orders[0]
-            order_id_value = chosen["order_id"]
-        elif len(order_ids) == 1:
-            order_id_value = order_ids[0]
-        else:
-            order_id_value = ""
+            order_ids = [order["order_id"] for order in orders]
+            if latest_only and orders:
+                chosen = orders[0]
+                order_id_value = chosen["order_id"]
+            elif len(order_ids) == 1:
+                order_id_value = order_ids[0]
+            else:
+                order_id_value = ""
 
-        return {
-            "success": bool(orders),
-            "orders": orders,
-            "order_id": order_id_value,
-            "order_ids": order_ids,
-            "query": query_payload,
-        }
+            return {
+                "success": bool(orders),
+                "orders": orders,
+                "order_id": order_id_value,
+                "order_ids": order_ids,
+                "query": query_payload,
+            }
 
     def _require_hardware_interface(self, method_name: str) -> Any:
         rpc = getattr(self, "hardware_interface", None)
@@ -898,7 +904,8 @@ class BioyondSirnaStation(BioyondWorkstation):
             raise RuntimeError("\n".join(lines))
         from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondV1RPC
 
-        self.hardware_interface = BioyondV1RPC(self.bioyond_config)
+        rpc = BioyondV1RPC(self.bioyond_config)
+        self._set_hardware_interface(rpc)
         return self.hardware_interface
 
     def _has_required_api_config(self, config: Dict[str, Any]) -> bool:

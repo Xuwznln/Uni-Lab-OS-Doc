@@ -7,6 +7,7 @@ Bioyond Workstation Implementation
 import time
 import traceback
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
 import json
@@ -14,6 +15,7 @@ from pathlib import Path
 
 from unilabos.devices.workstation.workstation_base import WorkstationBase, ResourceSynchronizer
 from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondV1RPC
+from unilabos.devices.workstation.bioyond_studio import debug_call_log
 from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.resources.warehouse import WareHouse
 from unilabos.utils.log import logger
@@ -678,6 +680,70 @@ class BioyondWorkstation(WorkstationBase):
     集成Bioyond物料管理的工作站实现
     """
 
+    # 子类（如 sirna / peptide）覆写以指定默认 raw-call 日志目录。
+    # 路径相对仓库根；为 None 时若 debug_log=True 仍会写入临时位置。
+    _DEBUG_LOG_DEFAULT_DIR: Optional[str] = None
+
+    def _create_bioyond_rpc(self, config: Dict[str, Any]) -> BioyondV1RPC:
+        """创建 Bioyond RPC 客户端并应用调试包装。
+
+        所有创建 ``BioyondV1RPC`` 的路径（饿汉初始化、Sirna 延迟初始化、
+        以及未来的前端重新配置路径）都应通过该 helper，
+        以确保 debug_log 包装与命名/日志策略保持一致。
+        """
+        rpc = BioyondV1RPC(config)
+        debug_call_log.wrap_rpc_http(rpc)
+        return rpc
+
+    def _set_hardware_interface(self, rpc: BioyondV1RPC) -> BioyondV1RPC:
+        """将已构造的 RPC 客户端设置到 ``self.hardware_interface``，并应用调试包装。"""
+        debug_call_log.wrap_rpc_http(rpc)
+        self.hardware_interface = rpc
+        return rpc
+
+    def _debug_log_resolved_dir(self) -> Path:
+        """解析 ``debug_log_dir`` 为绝对路径。"""
+        configured = (getattr(self, "bioyond_config", {}) or {}).get("debug_log_dir")
+        default_dir = getattr(self, "_DEBUG_LOG_DEFAULT_DIR", None)
+        candidate = configured or default_dir or "temp_benyao/_logs/bioyond_debug"
+        path = Path(candidate)
+        if not path.is_absolute():
+            repo_root = Path(__file__).resolve().parents[4]
+            path = repo_root / path
+        return path
+
+    def _ensure_debug_log_state(self) -> None:
+        """从 ``self.bioyond_config`` 派生 ``_debug_log_enabled`` / ``_debug_log_dir``。
+
+        每次进入 ``_debug_call_session`` 时都重新解析，以兼容前端在运行时
+        修改 ``bioyond_config['debug_log']`` 或目录的场景；同时也容忍
+        子类（如 Sirna 延迟初始化）在 ``__init__`` 早期未触发本方法。
+        """
+        cfg = getattr(self, "bioyond_config", {}) or {}
+        self._debug_log_enabled = bool(cfg.get("debug_log"))
+        self._debug_log_dir = self._debug_log_resolved_dir()
+
+    @contextmanager
+    def _debug_call_session(self, action_name: str):
+        """在 action 体外加一层 debug 会话上下文。
+
+        - ``debug_log`` 关闭时是空上下文，开销为 0。
+        - ``debug_log`` 开启时进入 :func:`debug_call_log.session`，所有
+          已被 ``wrap_rpc_http`` 包装过的 RPC 客户端都会捕获本次 action
+          产生的 HTTP 调用并写入 Markdown 文件。
+
+        子类（如 ``end_experiment``、``manual_unload`` 等）可以直接在
+        action 体里以 ``with self._debug_call_session("action_name"):`` 包裹。
+        """
+        cfg = getattr(self, "bioyond_config", {}) or {}
+        enabled = bool(cfg.get("debug_log"))
+        if not enabled:
+            yield None
+            return
+        out_dir = BioyondWorkstation._debug_log_resolved_dir(self)
+        with debug_call_log.session(action_name, out_dir) as ctx:
+            yield ctx
+
     def _publish_task_status(
         self,
         task_id: str,
@@ -862,7 +928,7 @@ class BioyondWorkstation(WorkstationBase):
             self.bioyond_config = {}
             print("警告: 未提供 bioyond_config，请确保在 JSON 配置文件中提供完整配置")
 
-        self.hardware_interface = BioyondV1RPC(self.bioyond_config)
+        self.hardware_interface = self._create_bioyond_rpc(self.bioyond_config)
 
     def resource_tree_add(self, resources: List[ResourcePLR]) -> None:
         """添加资源到资源树并更新ROS节点
