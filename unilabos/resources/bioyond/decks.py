@@ -28,6 +28,8 @@ from unilabos.resources.bioyond.warehouses import (
     bioyond_warehouse_sirna_automation_stack,
     bioyond_warehouse_sirna_centrifuge_balance_plate_stack,
     bioyond_warehouse_sirna_g3_liquid_handler,
+    bioyond_warehouse_numeric_stack,  # 新增：数字编码堆栈 (用于多肽站)
+    bioyond_warehouse_live_grid,
 )
 
 
@@ -118,6 +120,11 @@ class BIOYOND_SirnaStation_Deck(Deck):
         "自动化堆栈": "xy_col_row",
         "离心机配平板堆栈": "xy_col_row",
     }
+    WAREHOUSE_BIOYOND_KEY_AXIS = {
+        "G3移液站": "col_row",
+        "自动化堆栈": "col_row",
+        "离心机配平板堆栈": "col_row",
+    }
     # Bioyond warehouse UUID -> 本地仓库名称 映射。
     # 留空时由配置（station config 的 ``warehouse_bioyond_ids``）注入。
     # graph 节点也可在 deck.config.warehouse_bioyond_ids 覆盖。
@@ -148,14 +155,18 @@ class BIOYOND_SirnaStation_Deck(Deck):
             data = data.copy()
             data["setup"] = False
         result = super().deserialize(data, allow_marshal=allow_marshal)
-        result._ensure_sirna_warehouse_axis()
+        result._ensure_sirna_warehouse_metadata()
         return result
 
-    def _ensure_sirna_warehouse_axis(self) -> None:
+    def _ensure_sirna_warehouse_metadata(self) -> None:
         for child in getattr(self, "children", []):
-            axis = self.WAREHOUSE_BIOYOND_AXIS.get(getattr(child, "name", ""))
+            name = getattr(child, "name", "")
+            axis = self.WAREHOUSE_BIOYOND_AXIS.get(name)
             if axis and not hasattr(child, "bioyond_axis"):
                 child.bioyond_axis = axis
+            key_axis = self.WAREHOUSE_BIOYOND_KEY_AXIS.get(name)
+            if key_axis and not hasattr(child, "bioyond_key_axis"):
+                child.bioyond_key_axis = key_axis
 
     def setup(self) -> None:
         # Sirna 读接口 /api/storage/location/locations-by-type 返回完整固定堆栈清单。
@@ -167,8 +178,8 @@ class BIOYOND_SirnaStation_Deck(Deck):
         }
         self.warehouse_locations = {
             "G3移液站": Coordinate(0.0, 0.0, 0.0),
-            "自动化堆栈": Coordinate(0.0, 180.0, 0.0),
-            "离心机配平板堆栈": Coordinate(0.0, 1300.0, 0.0),
+            "自动化堆栈": Coordinate(220.0, 0.0, 0.0),
+            "离心机配平板堆栈": Coordinate(1740.0, 0.0, 0.0),
         }
 
         for warehouse_name, warehouse in self.warehouses.items():
@@ -218,6 +229,145 @@ class BIOYOND_YB_Deck(Deck):
             "大瓶母液堆栈左": Coordinate(1164.0, 676.0, 0.0),
             "大瓶母液堆栈右": Coordinate(2717.0, 676.0, 0.0),
             "2号手套箱内部堆栈": Coordinate(-800, -500.0, 0.0),  # 新增：位置需根据实际硬件调整
+        }
+
+        for warehouse_name, warehouse in self.warehouses.items():
+            self.assign_child_resource(warehouse, location=self.warehouse_locations[warehouse_name])
+
+@resource(
+    id="BIOYOND_PeptideStation_Deck",
+    category=["deck"],
+    description="BIOYOND 多肽工作站 Deck",
+    icon="preparation_station.webp",
+)
+class BIOYOND_PeptideStation_Deck(Deck):
+    WAREHOUSE_BIOYOND_AXIS = dict.fromkeys(
+        [
+            "自动化堆栈",
+            "低温冰箱仓库",
+            "Tecan移液站库",
+            "G3移液站库",
+            "IDOT移液站库",
+            "G3缓冲库",
+            "盖板缓冲库",
+            "配平板缓冲库",
+            "IDOT缓冲库",
+            "固相合成板底座缓冲位",
+            "离心机库位",
+            "热封膜机位",
+        ],
+        "xy_col_row",
+    )
+    WAREHOUSE_BIOYOND_KEY_AXIS = dict.fromkeys(WAREHOUSE_BIOYOND_AXIS, "row_col")
+
+    def __init__(
+        self,
+        name: str = "PeptideStation_Deck",
+        size_x: float = 3500.0,
+        size_y: float = 1800.0,
+        size_z: float = 1500.0,
+        category: str = "deck",
+        setup: bool = False
+    ) -> None:
+        super().__init__(name=name, size_x=size_x, size_y=size_y, size_z=size_z)
+        if setup:
+            self.setup()
+
+    @classmethod
+    def deserialize(cls, data: dict, allow_marshal: bool = False):
+        if data.get("children") and data.get("setup") is True:
+            # 已有序列化子资源，跳过 setup 避免重复创建
+            result = super(BIOYOND_PeptideStation_Deck, cls).deserialize(data, allow_marshal=allow_marshal)
+        else:
+            result = super(BIOYOND_PeptideStation_Deck, cls).deserialize(data, allow_marshal=allow_marshal)
+        result._ensure_peptide_warehouse_metadata()
+        return result
+
+    def _ensure_peptide_warehouse_metadata(self) -> None:
+        for child in getattr(self, "children", []):
+            name = getattr(child, "name", "")
+            axis = self.WAREHOUSE_BIOYOND_AXIS.get(name)
+            if axis and not hasattr(child, "bioyond_axis"):
+                child.bioyond_axis = axis
+            key_axis = self.WAREHOUSE_BIOYOND_KEY_AXIS.get(name)
+            if key_axis and not hasattr(child, "bioyond_key_axis"):
+                child.bioyond_key_axis = key_axis
+
+    def setup(self) -> None:
+        # 多肽工作站仓库配置
+        # 基于 2026-05-09 live API probe 发现的实际仓库拓扑 (12个仓库)
+        # 数据来源: temp_benyao/peptide/_logs/warehouse_discovery_raw_live_2026-05-09.json
+        self.warehouses = {
+            # 主自动化堆栈 - live API: code 10-17 -> x=17, y=10，显示为 10 行×17 列
+            "自动化堆栈": bioyond_warehouse_numeric_stack(
+                "自动化堆栈", rows=10, columns=17, bioyond_axis="xy_col_row", bioyond_key_axis="row_col"
+            ),
+
+            # 低温存储
+            "低温冰箱仓库": bioyond_warehouse_live_grid(
+                "低温冰箱仓库", rows=2, columns=3, slot_keys=["1", "2", "3", "4", "5", "6"]
+            ),
+
+            # 移液站库位
+            "Tecan移液站库": bioyond_warehouse_live_grid(
+                "Tecan移液站库", rows=1, columns=18, slot_keys=[str(index) for index in range(1, 19)]
+            ),
+            "G3移液站库": bioyond_warehouse_live_grid(
+                "G3移液站库",
+                rows=1,
+                columns=18,
+                slot_keys=["1", "2", "3", "4", "垃圾桶", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18"],
+            ),
+            "IDOT移液站库": bioyond_warehouse_live_grid(
+                "IDOT移液站库",
+                rows=1,
+                columns=12,
+                slot_keys=[f"0009-{index:04d}" for index in range(1, 13)],
+            ),
+
+            # 缓冲库位
+            "G3缓冲库": bioyond_warehouse_live_grid(
+                "G3缓冲库", rows=1, columns=5, slot_keys=[str(index) for index in range(1, 6)]
+            ),
+            "盖板缓冲库": bioyond_warehouse_live_grid(
+                "盖板缓冲库", rows=1, columns=7, slot_keys=[str(index) for index in range(1, 8)]
+            ),
+            "配平板缓冲库": bioyond_warehouse_live_grid(
+                "配平板缓冲库", rows=1, columns=3, slot_keys=[str(index) for index in range(1, 4)]
+            ),
+            "IDOT缓冲库": bioyond_warehouse_live_grid(
+                "IDOT缓冲库", rows=1, columns=2, slot_keys=["1", "1"]
+            ),
+            "固相合成板底座缓冲位": bioyond_warehouse_live_grid(
+                "固相合成板底座缓冲位",
+                rows=1,
+                columns=4,
+                slot_keys=[f"0015-{index:04d}" for index in range(1, 5)],
+            ),
+
+            # 设备库位
+            "离心机库位": bioyond_warehouse_live_grid(
+                "离心机库位", rows=1, columns=4, slot_keys=[f"0017-{index:04d}" for index in range(1, 5)]
+            ),
+            "热封膜机位": bioyond_warehouse_live_grid(
+                "热封膜机位", rows=1, columns=2, slot_keys=[f"0016-{index:04d}" for index in range(1, 3)]
+            ),
+        }
+
+        # 仓库位置布局 (需根据实际硬件布局调整)
+        self.warehouse_locations = {
+            "自动化堆栈": Coordinate(0.0, 0.0, 0.0),
+            "Tecan移液站库": Coordinate(0.0, 1150.0, 0.0),
+            "G3移液站库": Coordinate(0.0, 1300.0, 0.0),
+            "IDOT移液站库": Coordinate(0.0, 1450.0, 0.0),
+            "G3缓冲库": Coordinate(0.0, 1600.0, 0.0),
+            "盖板缓冲库": Coordinate(850.0, 1600.0, 0.0),
+            "低温冰箱仓库": Coordinate(2700.0, 0.0, 0.0),
+            "配平板缓冲库": Coordinate(2700.0, 300.0, 0.0),
+            "IDOT缓冲库": Coordinate(2700.0, 450.0, 0.0),
+            "固相合成板底座缓冲位": Coordinate(2700.0, 600.0, 0.0),
+            "离心机库位": Coordinate(2700.0, 750.0, 0.0),
+            "热封膜机位": Coordinate(2700.0, 900.0, 0.0),
         }
 
         for warehouse_name, warehouse in self.warehouses.items():

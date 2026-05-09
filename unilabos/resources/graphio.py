@@ -869,10 +869,12 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                     y = loc.get("y", 1)  # 列号 (1-based: 1=01, 2=02, 3=03...)
                     z = loc.get("z", 1)  # 层号 (1-based, 通常为1)
 
-                    # 仓库级别的轴约定覆盖：部分工作站 (Sirna 实测) 的 Bioyond 返回 x=列/y=行，
-                    # 与上面的默认 "xy_row_col" 相反。warehouse.bioyond_axis="xy_col_row" 时交换 x/y。
+                    # 仓库级别的轴约定覆盖。
+                    # 对旧的 row-col 视觉标签，bioyond_axis="xy_col_row" 需要交换 x/y。
+                    # 对 Sirna 的 col-row 视觉标签，原始 x 已是视觉行、y 已是视觉列，不再交换。
                     bioyond_axis = getattr(warehouse, "bioyond_axis", "xy_row_col")
-                    if bioyond_axis == "xy_col_row":
+                    bioyond_key_axis = getattr(warehouse, "bioyond_key_axis", "row_col")
+                    if bioyond_axis == "xy_col_row" and bioyond_key_axis != "col_row":
                         x, y = y, x
 
                     # 如果是右侧堆栈，需要调整列号 (5→1, 6→2, 7→3, 8→4)
