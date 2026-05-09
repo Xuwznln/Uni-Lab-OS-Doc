@@ -422,7 +422,30 @@ class BioyondSirnaStation(BioyondWorkstation):
                 reset_location_id=reset_location_id,
                 cleanup_order_code=cleanup_order_code,
             )
+            result["external_material_sync"] = self._run_shared_external_material_sync(rpc=rpc)
             return self._with_ready_signal(result)
+
+    @action(
+        always_free=True,
+        description="使用 BioyondWorkstation 共享物料同步路径，从 Bioyond 重新同步外部物料。",
+    )
+    def resync_external_materials(
+        self,
+        refresh_material_cache: bool = True,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """手动触发共享 Bioyond 外部物料同步。
+
+        Args:
+            refresh_material_cache: 同步前是否调用 Bioyond 物料缓存刷新（若 RPC 支持）。
+        """
+        with self._debug_call_session("resync_external_materials"):
+            api_host = self._kwarg_text(kwargs, "api_host")
+            api_key = self._kwarg_text(kwargs, "api_key")
+            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
+            return self._run_shared_external_material_sync(
+                refresh_material_cache=refresh_material_cache,
+            )
 
     @action(
         always_free=True,
@@ -589,14 +612,19 @@ class BioyondSirnaStation(BioyondWorkstation):
                 suggested_locations=suggested_locations,
             )
 
-            registration_result = None
-            if auto_register_materials and material_records:
-                try:
-                    registration_result = self._register_materials_to_tree(material_records)
-                    logger.info(f"物料注册完成: {len(registration_result.get('registered', []))} 个物料已添加到资源树")
-                except Exception as e:
-                    logger.error(f"物料注册失败: {e}")
-                    registration_result = {"error": str(e)}
+            registration_result = {
+                "registered": [],
+                "skipped": material_records,
+                "reason": "submit_experiment_1_resource_sync_disabled",
+                "auto_register_materials": bool(auto_register_materials),
+            }
+            # if auto_register_materials and material_records:
+            #     try:
+            #         registration_result = self._register_materials_to_tree(material_records)
+            #         logger.info(f"物料注册完成: {len(registration_result.get('registered', []))} 个物料已添加到资源树")
+            #     except Exception as e:
+            #         logger.error(f"物料注册失败: {e}")
+            #         registration_result = {"error": str(e)}
 
             result = {
                 "success": self._create_result_success(parsed_result, order_ids, material_records),
@@ -1330,6 +1358,39 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     def _reset_before_experiment_create(self, rpc: Any) -> Dict[str, Any]:
         return self._run_reset_operations(rpc)
+
+    def _run_shared_external_material_sync(
+        self,
+        rpc: Optional[Any] = None,
+        refresh_material_cache: bool = True,
+    ) -> Dict[str, Any]:
+        """为 reset / 手动 resync 运行共享 Bioyond 外部物料同步路径。"""
+        if rpc is None:
+            rpc = self._require_hardware_interface_for_reset()
+
+        result: Dict[str, Any] = {
+            "success": False,
+            "sync_mode": "shared_bioyond",
+            "synchronizer": "BioyondResourceSynchronizer",
+            "refresh_material_cache": {"skipped": True, "reason": "disabled"},
+        }
+
+        if refresh_material_cache:
+            if hasattr(rpc, "refresh_material_cache"):
+                result["refresh_material_cache"] = rpc.refresh_material_cache()
+            else:
+                result["refresh_material_cache"] = {
+                    "skipped": True,
+                    "reason": "rpc_method_unavailable",
+                }
+
+        try:
+            synchronizer = BioyondResourceSynchronizer(self)
+            result["success"] = bool(synchronizer.sync_from_external())
+        except Exception as exc:
+            logger.error(f"共享 Bioyond 外部物料同步失败: {exc}")
+            result["error"] = str(exc)
+        return result
 
     def _run_reset_operations(
         self,
