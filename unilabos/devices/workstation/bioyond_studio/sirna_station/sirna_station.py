@@ -8,6 +8,7 @@ import copy
 import json
 import os
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
@@ -340,6 +341,12 @@ class BioyondSirnaStation(BioyondWorkstation):
         except Exception as exc:  # pragma: no cover - 防御性
             logger.warning(f"SirnaResourceSynchronizer 安装失败: {exc}")
 
+    def _debug_call_session(self, action_name: str):
+        parent_debug_session = getattr(super(), "_debug_call_session", None)
+        if parent_debug_session is not None:
+            return parent_debug_session(action_name)
+        return nullcontext()
+
     @staticmethod
     def _missing_api_config_keys(config: Dict[str, Any]) -> List[str]:
         missing: List[str] = []
@@ -434,6 +441,22 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_type="bioyond_order_id",
                 label="实验ID",
                 data_key="order_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                # 兼容旧工作流：历史节点连接使用 order_ids。
+                key="order_ids",
+                data_type="bioyond_order_ids",
+                label="实验ID列表",
+                data_key="order_ids",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                # TEMP frontend-compat key: current cloud manual-confirm table path.
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
                 data_source=DataSource.EXECUTOR,
             ),
             ActionOutputHandle(
@@ -644,6 +667,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         always_free=True,
         node_type=NodeType.MANUAL_CONFIRM,
         placeholder_keys={
+            "target_device": "unilabos_devices",
             "resource": "unilabos_resources",
             "mount_resource": "unilabos_resources",
             "assignee_user_ids": "unilabos_manual_confirm",
@@ -656,6 +680,15 @@ class BioyondSirnaStation(BioyondWorkstation):
         feedback_interval=300,
         description="请核对并装载实验物料；勾选装载确认后方可启动调度",
         handles=[
+            ActionInputHandle(
+                # TEMP frontend-compat key: current cloud manual-confirm table path.
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
             ActionInputHandle(
                 # TEMP frontend-compat key: material/resource name (renderer compat).
                 key="resource",
@@ -690,10 +723,23 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_source=DataSource.HANDLE,
                 io_type="source",
             ),
+            ActionInputHandle(
+                # 兼容旧工作流：历史节点连接使用 order_ids。
+                key="order_ids",
+                data_type="bioyond_order_ids",
+                label="实验ID列表",
+                data_key="order_ids",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
         ],
     )
     def start_experiment(
         self,
+        target_device: DeviceSlot = "bioyond_sirna_station",
+        resource: Optional[List[ResourceSlot]] = None,
+        coin_cell_code: Optional[List[str]] = None,
+        mount_resource: Optional[List[ResourceSlot]] = None,
         order_id: str = "",
         materials_loaded: bool = False,
         timeout_seconds: int = 3600,
@@ -703,21 +749,33 @@ class BioyondSirnaStation(BioyondWorkstation):
         """Guided manual-load checkpoint that gates ``rpc.scheduler_start()``.
 
         Args:
+            target_device: 目标设备，保留用于当前云端手动确认表格兼容路径。
+            resource: 上游句柄提供的待装载物料显示值。
+            coin_cell_code: 上游句柄提供的临时物料名称列。
+            mount_resource: 上游句柄提供的临时库位列。
             order_id: 上游 ``submit_experiment_1`` 创建的订单 ID（可选；若上游连接则自动传入）。
             materials_loaded: 操作员勾选确认物料已装载。未勾选且存在物料显示则阻断启动。
             timeout_seconds: 超时时间（秒，框架参数）。
             assignee_user_ids: 分配用户 ID 列表（框架参数）。
         """
         with self._debug_call_session("start_experiment"):
-            resource = kwargs.get("resource")
-            coin_cell_code = kwargs.get("coin_cell_code")
-            mount_resource = kwargs.get("mount_resource")
+            target_device = (
+                target_device
+                or self._kwarg_text(kwargs, "target_device")
+                or "bioyond_sirna_station"
+            )
+            if resource is None:
+                resource = kwargs.get("resource")
+            if coin_cell_code is None:
+                coin_cell_code = kwargs.get("coin_cell_code")
+            if mount_resource is None:
+                mount_resource = kwargs.get("mount_resource")
             order_ids = kwargs.get("order_ids")
             submit_experiment_result = kwargs.get("submit_experiment_result")
             api_host = self._kwarg_text(kwargs, "api_host")
             api_key = self._kwarg_text(kwargs, "api_key")
             ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
-            del timeout_seconds, assignee_user_ids
+            del target_device, timeout_seconds, assignee_user_ids
             self._update_runtime_api_config(api_host=api_host, api_key=api_key)
             self._require_ready_signal(ready_signal)
 
