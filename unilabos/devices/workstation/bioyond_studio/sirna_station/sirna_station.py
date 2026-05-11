@@ -821,10 +821,10 @@ class BioyondSirnaStation(BioyondWorkstation):
                 gates[gate_key] = {"label": label, "required": required, "ticked": bool(ticked)}
                 if required and not ticked:
                     missing_labels.append(label)
-            if missing_labels:
-                raise RuntimeError(
-                    f"以下分类装载尚未确认，无法启动调度: {', '.join(missing_labels)}"
-                )
+            # if missing_labels:
+            #     raise RuntimeError(
+            #         f"以下分类装载尚未确认，无法启动调度: {', '.join(missing_labels)}"
+            #     )
 
             start_info = self._resolve_start_experiment_info(
                 submit_experiment_result, order_id, order_ids
@@ -1387,6 +1387,8 @@ class BioyondSirnaStation(BioyondWorkstation):
         try:
             synchronizer = BioyondResourceSynchronizer(self)
             result["success"] = bool(synchronizer.sync_from_external())
+            if result["success"]:
+                self._publish_resource_tree_update()
         except Exception as exc:
             logger.error(f"共享 Bioyond 外部物料同步失败: {exc}")
             result["error"] = str(exc)

@@ -736,7 +736,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
             logger.warning(f"物料 {unique_name} 不是有效的 ResourcePLR 实例，类型: {type(plr_material)}")
             continue
 
-        plr_material.code = material.get("code", "") and material.get("barCode", "") or ""
+        plr_material.code = material.get("barCode") or material.get("code") or ""
         plr_material.unilabos_uuid = str(uuid.uuid4())
 
         # ⭐ 保存 Bioyond 原始信息到 unilabos_extra（用于出库时查询）
@@ -864,14 +864,17 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                     warehouse = deck.warehouses[wh_name]
                     logger.debug(f"[Warehouse匹配] 找到warehouse: {wh_name} (容量: {warehouse.capacity}, 行×列: {warehouse.num_items_x}×{warehouse.num_items_y})")
 
-                    # Bioyond坐标映射 (重要！): x→行(1=A,2=B...), y→列(1=01,2=02...), z→层(通常=1)
-                    x = loc.get("x", 1)  # 行号 (1-based: 1=A, 2=B, 3=C, 4=D)
-                    y = loc.get("y", 1)  # 列号 (1-based: 1=01, 2=02, 3=03...)
+                    # Bioyond坐标映射:
+                    # - 历史 row_col 仓库中 x/y 直接按行/列参与索引。
+                    # - Sirna 的库位标签为 col-row，stock-material 返回 x=标签第二段、y=标签第一段。
+                    #   因此 x=13,y=4 应落到 key=4-13，而不是交换后落到 3-5。
+                    x = loc.get("x", 1)
+                    y = loc.get("y", 1)
                     z = loc.get("z", 1)  # 层号 (1-based, 通常为1)
 
                     # 仓库级别的轴约定覆盖。
                     # 对旧的 row-col 视觉标签，bioyond_axis="xy_col_row" 需要交换 x/y。
-                    # 对 Sirna 的 col-row 视觉标签，原始 x 已是视觉行、y 已是视觉列，不再交换。
+                    # 对 Sirna 的 col-row 库位标签，原始 x/y 已能直接索引到 code 对应位置，不再交换。
                     bioyond_axis = getattr(warehouse, "bioyond_axis", "xy_row_col")
                     bioyond_key_axis = getattr(warehouse, "bioyond_key_axis", "row_col")
                     if bioyond_axis == "xy_col_row" and bioyond_key_axis != "col_row":
@@ -920,10 +923,38 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                             logger.debug(f"列优先warehouse {wh_name}: x={x}(行),y={y}(列) → row={row_idx},col={col_idx} → idx={idx}")
 
                     if 0 <= idx < warehouse.capacity:
-                        if warehouse[idx] is None or isinstance(warehouse[idx], ResourceHolder):
+                        slot_key = None
+                        ordering = getattr(warehouse, "_ordering", {})
+                        sites = getattr(warehouse, "sites", [])
+                        if isinstance(ordering, dict) and idx < len(sites):
+                            site_at_idx = sites[idx]
+                            slot_key = next(
+                                (key for key, site in ordering.items() if site is site_at_idx),
+                                None,
+                            )
+
+                        current_resource = warehouse[idx]
+                        if current_resource is None or isinstance(current_resource, ResourceHolder):
                             # 物料尺寸已在放入warehouse前根据需要进行了交换
                             warehouse[idx] = plr_material
-                            logger.debug(f"✅ 物料 {unique_name} 放置到 {wh_name}[{idx}] (Bioyond坐标: x={loc.get('x')}, y={loc.get('y')})")
+                            logger.debug(
+                                f"✅ 物料 {unique_name} 放置到 {wh_name}[{idx}]"
+                                f"{f'({slot_key})' if slot_key else ''} "
+                                f"(Bioyond坐标: x={loc.get('x')}, y={loc.get('y')})"
+                            )
+                        else:
+                            parent = getattr(current_resource, "parent", None)
+                            current_repr = repr(current_resource)
+                            current_len = len(current_resource) if isinstance(current_resource, str) else None
+                            logger.warning(
+                                f"⚠️ 物料 {unique_name} 跳过放置到 {wh_name}[{idx}]"
+                                f"{f'({slot_key})' if slot_key else ''}：目标库位已有 "
+                                f"{type(current_resource).__name__}"
+                                f"(value={current_repr}, len={current_len})"
+                                f"(name={getattr(current_resource, 'name', None)}, "
+                                f"parent={getattr(parent, 'name', None)}, "
+                                f"uuid={getattr(current_resource, 'unilabos_uuid', None)})"
+                            )
                     else:
                         logger.warning(f"❌ 物料 {unique_name} 的索引 {idx} 超出仓库 {wh_name} 容量 {warehouse.capacity}")
                 else:
