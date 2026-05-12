@@ -431,13 +431,14 @@ class BioyondSirnaStation(BioyondWorkstation):
     )
     def resync_external_materials(
         self,
-        refresh_material_cache: bool = True,
+        refresh_material_cache: bool = False,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """手动触发共享 Bioyond 外部物料同步。
 
         Args:
-            refresh_material_cache: 同步前是否调用 Bioyond 物料缓存刷新（若 RPC 支持）。
+            refresh_material_cache: 是否在同步前额外刷新 Bioyond 物料缓存。通常保持 False，
+                共享同步路径会用同一次库存查询结果更新缓存。
         """
         with self._debug_call_session("resync_external_materials"):
             api_host = self._kwarg_text(kwargs, "api_host")
@@ -1813,7 +1814,7 @@ class BioyondSirnaStation(BioyondWorkstation):
     def _run_shared_external_material_sync(
         self,
         rpc: Optional[Any] = None,
-        refresh_material_cache: bool = True,
+        refresh_material_cache: bool = False,
     ) -> Dict[str, Any]:
         """为 reset / 手动 resync 运行共享 Bioyond 外部物料同步路径。"""
         if rpc is None:
@@ -3865,6 +3866,8 @@ class BioyondSirnaStation(BioyondWorkstation):
         return False
 
 
+# TODO: Refactor this into a small BioyondResourceSynchronizer classification hook
+# before re-enabling long-term; keep only the Sirna reagent-as-liquid rule here.
 class SirnaResourceSynchronizer(BioyondResourceSynchronizer):
     """Sirna-specific resource synchronizer.
 

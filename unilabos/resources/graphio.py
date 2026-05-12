@@ -934,7 +934,12 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                             )
 
                         current_resource = warehouse[idx]
-                        if current_resource is None or isinstance(current_resource, ResourceHolder):
+                        if current_resource is None or isinstance(current_resource, (ResourceHolder, str)):
+                            if isinstance(current_resource, str):
+                                logger.warning(
+                                    f"⚠️ 物料 {unique_name} 覆盖 {wh_name}[{idx}]"
+                                    f"{f'({slot_key})' if slot_key else ''} 的旧占位 occupied_by={current_resource!r}"
+                                )
                             # 物料尺寸已在放入warehouse前根据需要进行了交换
                             warehouse[idx] = plr_material
                             logger.debug(

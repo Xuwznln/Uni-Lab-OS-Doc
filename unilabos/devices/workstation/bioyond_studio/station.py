@@ -176,6 +176,8 @@ class BioyondResourceSynchronizer(ResourceSynchronizer):
                 logger.warning("从Bioyond获取的物料数据为空")
                 return False
 
+            self._update_material_cache_from_stock(all_bioyond_data)
+
             # 转换为UniLab格式
             unilab_resources = resource_bioyond_to_plr(
                 all_bioyond_data,
@@ -188,6 +190,29 @@ class BioyondResourceSynchronizer(ResourceSynchronizer):
         except Exception as e:
             logger.error(f"从Bioyond同步物料数据失败: {e}")
             return False
+
+    def _update_material_cache_from_stock(self, materials: List[Dict[str, Any]]) -> None:
+        """用本次库存查询结果同步 RPC 的 name -> material id 缓存。"""
+        material_cache = getattr(self.bioyond_api_client, "material_cache", None)
+        if not isinstance(material_cache, dict):
+            return
+
+        before_count = len(material_cache)
+        for material in materials:
+            material_name = material.get("name")
+            material_id = material.get("id")
+            if material_name and material_id:
+                material_cache[material_name] = material_id
+
+            for detail_material in material.get("detail", []) or []:
+                detail_name = detail_material.get("name")
+                detail_id = detail_material.get("detailMaterialId") or detail_material.get("id")
+                if detail_name and detail_id:
+                    material_cache[detail_name] = detail_id
+
+        logger.debug(
+            f"已用Bioyond库存同步物料缓存: {before_count} -> {len(material_cache)}"
+        )
 
     def sync_to_external(self, resource: Any) -> bool:
         """将本地物料数据变更同步到Bioyond系统"""
@@ -1404,11 +1429,7 @@ class BioyondWorkstation(WorkstationBase):
             if self.hardware_interface:
                 self.hardware_interface.scheduler_reset()
 
-            # 刷新物料缓存
-            if self.hardware_interface:
-                self.hardware_interface.refresh_material_cache()
-
-            # 重新同步资源
+            # 重新同步资源，并用同一次库存查询结果更新物料缓存
             if self.resource_synchronizer:
                 self.resource_synchronizer.sync_from_external()
 
