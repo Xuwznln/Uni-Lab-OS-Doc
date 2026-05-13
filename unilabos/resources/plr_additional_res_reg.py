@@ -18,3 +18,7 @@ def register():
     from unilabos.devices.liquid_handling.rviz_backend import UniLiquidHandlerRvizBackend
     from unilabos.devices.liquid_handling.laiyu.backend.laiyu_v_backend import UniLiquidHandlerLaiyuBackend
 
+    # noinspection PyUnresolvedReferences
+    from unilabos.resources.bioyond.decks import BIOYOND_SirnaStation_Deck
+    # noinspection PyUnresolvedReferences
+    from unilabos.resources.bioyond.decks import BIOYOND_PeptideStation_Deck

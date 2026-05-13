@@ -1,4 +1,191 @@
+from pylabrobot.resources import Coordinate
+from pylabrobot.resources.carrier import ResourceHolder, create_homogeneous_resources
+
 from unilabos.resources.warehouse import WareHouse, warehouse_factory
+
+
+class BioyondWareHouse(WareHouse):
+    """Bioyond 仓库，额外保存服务端 x/y 坐标和库位标签语义。"""
+
+    def __init__(self, *args, bioyond_axis: str = "xy_row_col", bioyond_key_axis: str = "row_col", **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bioyond_axis = bioyond_axis
+        self.bioyond_key_axis = bioyond_key_axis
+
+    def serialize(self) -> dict:
+        data = super().serialize()
+        data["bioyond_axis"] = self.bioyond_axis
+        data["bioyond_key_axis"] = self.bioyond_key_axis
+        return data
+
+
+def bioyond_warehouse_numeric_stack(
+    name: str,
+    rows: int = 10,
+    columns: int = 17,
+    bioyond_axis: str = "xy_row_col",
+    bioyond_key_axis: str = "row_col",
+    frontend_y_flip: bool = False,
+) -> WareHouse:
+    """创建 Bioyond 数字库位堆栈，库位名使用服务端返回的 行-列 格式。
+
+    bioyond_axis: 仓库级别的 Bioyond 坐标轴约定，供 graphio 的坐标映射使用。
+        - "xy_row_col" (default): Bioyond x→row, y→col (reaction/peptide 历史约定).
+        - "xy_col_row": Bioyond x→col, y→row (Sirna live API 实测约定).
+    bioyond_key_axis: 库位标签生成约定。
+        - "row_col" (default): 视觉行列和标签行列一致，例如 10 行 x 17 列 → 1-1..10-17。
+        - "col_row": 视觉行列转置，但标签仍保持 Bioyond row-col，例如
+          17 行 x 10 列 → 1-1..10-17。
+    未设置时 graphio 回退到默认 "xy_row_col"，其他调用方保持原行为。
+    """
+    num_items_x = columns
+    num_items_y = rows
+    num_items_z = 1
+    dx = 10.0
+    dy = 10.0
+    dz = 10.0
+    item_dx = 147.0
+    item_dy = 106.0
+    item_dz = 130.0
+    resource_size_x = 127.0
+    resource_size_y = 86.0
+    resource_size_z = 25.0
+    size_y = dy + item_dy * num_items_y
+    locations = []
+    for row in range(num_items_y):
+        display_y = dy + row * item_dy
+        y = size_y - display_y - resource_size_y if frontend_y_flip else display_y
+        for col in range(num_items_x):
+            locations.append(Coordinate(dx + col * item_dx, y, dz))
+    holders = create_homogeneous_resources(
+        klass=ResourceHolder,
+        locations=locations,
+        resource_size_x=resource_size_x,
+        resource_size_y=resource_size_y,
+        resource_size_z=resource_size_z,
+        name_prefix=name,
+    )
+    if bioyond_key_axis == "row_col":
+        keys = [
+            f"{row + 1}-{col + 1}"
+            for row in range(num_items_y)
+            for col in range(num_items_x)
+        ]
+    elif bioyond_key_axis == "col_row":
+        keys = [
+            f"{col + 1}-{row + 1}"
+            for row in range(num_items_y)
+            for col in range(num_items_x)
+        ]
+    else:
+        raise ValueError(f"未知 Bioyond 库位标签约定: {bioyond_key_axis!r}")
+    warehouse = BioyondWareHouse(
+        name=name,
+        size_x=dx + item_dx * num_items_x,
+        size_y=size_y,
+        size_z=dz + item_dz * num_items_z,
+        num_items_x=num_items_x,
+        num_items_y=num_items_y,
+        num_items_z=num_items_z,
+        ordering_layout="row-major",
+        sites={key: holder for key, holder in zip(keys, holders.values())},
+        category="warehouse",
+        bioyond_axis=bioyond_axis,
+        bioyond_key_axis=bioyond_key_axis,
+    )
+    return warehouse
+
+
+def bioyond_warehouse_live_grid(
+    name: str,
+    rows: int,
+    columns: int,
+    slot_keys: list[str] | None = None,
+    bioyond_axis: str = "xy_col_row",
+    bioyond_key_axis: str = "row_col",
+    frontend_y_flip: bool = False,
+) -> WareHouse:
+    """创建 Bioyond 实测库位网格，按服务端 code 保存位点标签。
+
+    默认用于 Peptide live API 返回的坐标：x 是视觉列，y 是视觉行。
+    当服务端 code 重复时，为保持 PLR ordering 唯一性，会给后续重复项追加 ``#N``。
+    """
+    num_items_x = columns
+    num_items_y = rows
+    num_items_z = 1
+    dx = 10.0
+    dy = 10.0
+    dz = 10.0
+    item_dx = 147.0
+    item_dy = 106.0
+    item_dz = 130.0
+    resource_size_x = 127.0
+    resource_size_y = 86.0
+    resource_size_z = 25.0
+    size_y = dy + item_dy * num_items_y
+    locations = []
+    for row in range(num_items_y):
+        display_y = dy + row * item_dy
+        y = size_y - display_y - resource_size_y if frontend_y_flip else display_y
+        for col in range(num_items_x):
+            locations.append(Coordinate(dx + col * item_dx, y, dz))
+    holders = create_homogeneous_resources(
+        klass=ResourceHolder,
+        locations=locations,
+        resource_size_x=resource_size_x,
+        resource_size_y=resource_size_y,
+        resource_size_z=resource_size_z,
+        name_prefix=name,
+    )
+    keys = slot_keys or [str(index + 1) for index in range(num_items_x * num_items_y)]
+    if len(keys) != len(holders):
+        raise ValueError(f"{name} 库位数量不匹配: keys={len(keys)}, holders={len(holders)}")
+
+    seen: dict[str, int] = {}
+    unique_keys: list[str] = []
+    for key in keys:
+        count = seen.get(key, 0) + 1
+        seen[key] = count
+        unique_keys.append(key if count == 1 else f"{key}#{count}")
+
+    return BioyondWareHouse(
+        name=name,
+        size_x=dx + item_dx * num_items_x,
+        size_y=size_y,
+        size_z=dz + item_dz * num_items_z,
+        num_items_x=num_items_x,
+        num_items_y=num_items_y,
+        num_items_z=num_items_z,
+        ordering_layout="row-major",
+        sites={key: holder for key, holder in zip(unique_keys, holders.values())},
+        category="warehouse",
+        bioyond_axis=bioyond_axis,
+        bioyond_key_axis=bioyond_key_axis,
+    )
+
+
+# ================ 小核酸工作站相关堆栈 ================
+
+def bioyond_warehouse_sirna_g3_liquid_handler(name: str = "G3移液站") -> WareHouse:
+    """创建小核酸 G3 移液站库位堆栈：显示为 14 行 x 1 列，标签保持 1-1..1-14。"""
+    return bioyond_warehouse_numeric_stack(
+        name, rows=14, columns=1, bioyond_axis="xy_col_row", bioyond_key_axis="col_row"
+    )
+
+
+def bioyond_warehouse_sirna_automation_stack(name: str = "自动化堆栈") -> WareHouse:
+    """创建小核酸自动化堆栈：显示为 17 行 x 10 列，标签保持 1-1..10-17。"""
+    return bioyond_warehouse_numeric_stack(
+        name, rows=17, columns=10, bioyond_axis="xy_col_row", bioyond_key_axis="col_row"
+    )
+
+
+def bioyond_warehouse_sirna_centrifuge_balance_plate_stack(name: str = "离心机配平板堆栈") -> WareHouse:
+    """创建小核酸离心机配平板堆栈：显示为 1 行 x 2 列，标签保持 1-1、2-1。"""
+    return bioyond_warehouse_numeric_stack(
+        name, rows=1, columns=2, bioyond_axis="xy_col_row", bioyond_key_axis="col_row"
+    )
+
 
 # ================ 反应站相关堆栈 ================
 
