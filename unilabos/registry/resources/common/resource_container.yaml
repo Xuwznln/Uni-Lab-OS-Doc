@@ -17,7 +17,7 @@ hplc_plate:
     - 0
     - 0
     - 3.1416
-    path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/hplc_plate/modal.xacro
+    path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/hplc_plate/modal.xacro
     type: resource
   version: 1.0.0
 plate_96:
@@ -39,7 +39,7 @@ plate_96:
     - 0
     - 0
     - 0
-    path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/plate_96/modal.xacro
+    path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/plate_96/modal.xacro
     type: resource
   version: 1.0.0
 plate_96_high:
@@ -61,7 +61,7 @@ plate_96_high:
     - 1.5708
     - 0
     - 1.5708
-    path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/plate_96_high/modal.xacro
+    path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/plate_96_high/modal.xacro
     type: resource
   version: 1.0.0
 tiprack_96_high:
@@ -76,7 +76,7 @@ tiprack_96_high:
   init_param_schema: {}
   model:
     children_mesh: generic_labware_tube_10_75/meshes/0_base.stl
-    children_mesh_path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/generic_labware_tube_10_75/modal.xacro
+    children_mesh_path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/generic_labware_tube_10_75/modal.xacro
     children_mesh_tf:
     - 0.0018
     - 0.0018
@@ -92,7 +92,7 @@ tiprack_96_high:
     - 1.5708
     - 0
     - 1.5708
-    path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/tiprack_96_high/modal.xacro
+    path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/tiprack_96_high/modal.xacro
     type: resource
   version: 1.0.0
 tiprack_box:
@@ -107,7 +107,7 @@ tiprack_box:
   init_param_schema: {}
   model:
     children_mesh: tip/meshes/tip.stl
-    children_mesh_path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/tip/modal.xacro
+    children_mesh_path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/tip/modal.xacro
     children_mesh_tf:
     - 0.0045
     - 0.0045
@@ -123,6 +123,6 @@ tiprack_box:
     - 0
     - 0
     - 0
-    path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/tiprack_box/modal.xacro
+    path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/resources/tiprack_box/modal.xacro
     type: resource
   version: 1.0.0

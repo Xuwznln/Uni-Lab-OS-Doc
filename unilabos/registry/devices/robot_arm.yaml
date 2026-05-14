@@ -257,6 +257,8 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes quaternion, speed,
+                    position
                   type: string
               title: SendCmd_Goal
               type: object
@@ -300,6 +302,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes speed
                   type: string
               title: SendCmd_Goal
               type: object
@@ -345,7 +348,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
       type: object
   model:
     mesh: arm_slider
-    path: https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/arm_slider/macro_device.xacro
+    path: https://leap-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/arm_slider/macro_device.xacro
     type: device
   version: 1.0.0
 robotic_arm.UR:

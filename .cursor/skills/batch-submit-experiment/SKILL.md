@@ -1,11 +1,13 @@
 ---
 name: batch-submit-experiment
-description: Batch submit experiments (notebooks) to Uni-Lab platform — list workflows, generate node_params from registry schemas, submit multiple rounds, check notebook status. Use when the user wants to submit experiments, create notebooks, batch run workflows, check experiment status, or mentions 提交实验/批量实验/notebook/实验轮次/实验状态.
+description: Batch submit experiments (notebooks) to the Uni-Lab cloud platform (leap-lab) — list workflows, generate node_params from registry schemas, submit multiple rounds, check notebook status. Use when the user wants to submit experiments, create notebooks, batch run workflows, check experiment status, or mentions 提交实验/批量实验/notebook/实验轮次/实验状态.
 ---
 
-# 批量提交实验指南
+# Uni-Lab 批量提交实验指南
 
-通过云端 API 批量提交实验（notebook），支持多轮实验参数配置。根据 workflow 模板详情和本地设备注册表自动生成 `node_params` 模板。
+通过 Uni-Lab 云端 API 批量提交实验（notebook），支持多轮实验参数配置。根据 workflow 模板详情和本地设备注册表自动生成 `node_params` 模板。
+
+> **重要**：本指南中的 `Authorization: Lab <token>` 是 **Uni-Lab 平台专用的认证方式**，`Lab` 是 Uni-Lab 的 auth scheme 关键字，**不是** HTTP Basic 认证。请勿将其替换为 `Basic`。
 
 ## 前置条件（缺一不可）
 
@@ -18,25 +20,28 @@ description: Batch submit experiments (notebooks) to Uni-Lab platform — list w
 生成 AUTH token（任选一种方式）：
 
 ```bash
-# 方式一：Python 一行生成
+# 方式一：Python 一行生成（注意：scheme 是 "Lab" 不是 "Basic"）
 python -c "import base64,sys; print('Authorization: Lab ' + base64.b64encode(f'{sys.argv[1]}:{sys.argv[2]}'.encode()).decode())" <ak> <sk>
 
 # 方式二：手动计算
 # base64(ak:sk) → Authorization: Lab <token>
+# ⚠️ 这里的 "Lab" 是 Uni-Lab 平台的 auth scheme，绝对不能用 "Basic" 替代
 ```
 
 ### 2. --addr → BASE URL
 
-| `--addr` 值 | BASE |
-|-------------|------|
-| `test` | `https://uni-lab.test.bohrium.com` |
-| `uat` | `https://uni-lab.uat.bohrium.com` |
-| `local` | `http://127.0.0.1:48197` |
-| 不传（默认） | `https://uni-lab.bohrium.com` |
+| `--addr` 值  | BASE                                |
+| ------------ | ----------------------------------- |
+| `test`       | `https://leap-lab.test.bohrium.com` |
+| `uat`        | `https://leap-lab.uat.bohrium.com`  |
+| `local`      | `http://127.0.0.1:48197`            |
+| 不传（默认） | `https://leap-lab.bohrium.com`      |
 
 确认后设置：
+
 ```bash
 BASE="<根据 addr 确定的 URL>"
+# ⚠️ Auth scheme 必须是 "Lab"（Uni-Lab 专用），不是 "Basic"
 AUTH="Authorization: Lab <上面命令输出的 token>"
 ```
 
@@ -44,18 +49,19 @@ AUTH="Authorization: Lab <上面命令输出的 token>"
 
 **批量提交实验时需要本地注册表来解析 workflow 节点的参数 schema。**
 
-按优先级搜索：
+**必须先用 Glob 工具搜索文件**，不要直接猜测路径：
 
 ```
-<workspace 根目录>/unilabos_data/req_device_registry_upload.json
-<workspace 根目录>/req_device_registry_upload.json
+Glob: **/req_device_registry_upload.json
 ```
 
-也可直接 Glob 搜索：`**/req_device_registry_upload.json`
+常见位置（仅供参考，以 Glob 实际结果为准）：
+- `<workspace>/unilabos_data/req_device_registry_upload.json`
+- `<workspace>/req_device_registry_upload.json`
 
 找到后**检查文件修改时间**并告知用户。超过 1 天提醒用户是否需要重新启动 `unilab`。
 
-**如果文件不存在** → 告知用户先运行 `unilab` 启动命令，等注册表生成后再执行。可跳过此步，但将无法自动生成参数模板，需要用户手动填写 `param`。
+**如果 Glob 搜索无结果** → 告知用户先运行 `unilab` 启动命令，等注册表生成后再执行。可跳过此步，但将无法自动生成参数模板，需要用户手动填写 `param`。
 
 ### 4. workflow_uuid（目标工作流）
 
@@ -93,7 +99,7 @@ curl -s -X GET "$BASE/api/v1/edge/lab/info" -H "$AUTH"
 返回：
 
 ```json
-{"code": 0, "data": {"uuid": "xxx", "name": "实验室名称"}}
+{ "code": 0, "data": { "uuid": "xxx", "name": "实验室名称" } }
 ```
 
 记住 `data.uuid` 为 `lab_uuid`。
@@ -104,9 +110,33 @@ curl -s -X GET "$BASE/api/v1/edge/lab/info" -H "$AUTH"
 curl -s -X GET "$BASE/api/v1/lab/project/list?lab_uuid=$lab_uuid" -H "$AUTH"
 ```
 
-返回项目列表，展示给用户选择。列出每个项目的 `uuid` 和 `name`。
+返回：
 
-用户**必须**选择一个项目，记住 `project_uuid`，后续创建 notebook 时需要提供。
+```json
+{
+  "code": 0,
+  "data": {
+    "items": [
+      {
+        "uuid": "1b3f249a-...",
+        "name": "bt",
+        "description": null,
+        "status": "active",
+        "created_at": "2026-04-09T14:31:28+08:00"
+      },
+      {
+        "uuid": "b6366243-...",
+        "name": "default",
+        "description": "默认项目",
+        "status": "active",
+        "created_at": "2026-03-26T11:13:36+08:00"
+      }
+    ]
+  }
+}
+```
+
+展示 `data.items[]` 中每个项目的 `name` 和 `uuid`，让用户选择。用户**必须**选择一个项目，记住 `project_uuid`（即选中项目的 `uuid`），后续创建 notebook 时需要提供。
 
 ### 3. 列出可用 workflow
 
@@ -123,6 +153,7 @@ curl -s -X GET "$BASE/api/v1/lab/workflow/template/detail/$workflow_uuid" -H "$A
 ```
 
 返回 workflow 的完整结构，包含所有 action 节点信息。需要从响应中提取：
+
 - 每个 action 节点的 `node_uuid`
 - 每个节点对应的设备 ID（`resource_template_name`）
 - 每个节点的动作名（`node_template_name`）
@@ -142,30 +173,30 @@ curl -s -X POST "$BASE/api/v1/lab/notebook" \
 
 ```json
 {
-    "lab_uuid": "<lab_uuid>",
-    "project_uuid": "<project_uuid>",
-    "workflow_uuid": "<workflow_uuid>",
-    "name": "<实验名称>",
-    "node_params": [
+  "lab_uuid": "<lab_uuid>",
+  "project_uuid": "<project_uuid>",
+  "workflow_uuid": "<workflow_uuid>",
+  "name": "<实验名称>",
+  "node_params": [
+    {
+      "sample_uuids": ["<样品UUID1>", "<样品UUID2>"],
+      "datas": [
         {
-            "sample_uuids": ["<样品UUID1>", "<样品UUID2>"],
-            "datas": [
-                {
-                    "node_uuid": "<workflow中的节点UUID>",
-                    "param": {},
-                    "sample_params": [
-                        {
-                            "container_uuid": "<容器UUID>",
-                            "sample_value": {
-                                "liquid_names": "<液体名称>",
-                                "volumes": 1000
-                            }
-                        }
-                    ]
-                }
-            ]
+          "node_uuid": "<workflow中的节点UUID>",
+          "param": {},
+          "sample_params": [
+            {
+              "container_uuid": "<容器UUID>",
+              "sample_value": {
+                "liquid_names": "<液体名称>",
+                "volumes": 1000
+              }
+            }
+          ]
         }
-    ]
+      ]
+    }
+  ]
 }
 ```
 
@@ -194,25 +225,25 @@ curl -s -X GET "$BASE/api/v1/lab/notebook/status?uuid=$notebook_uuid" -H "$AUTH"
 
 ### 每轮的字段
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
+| 字段           | 类型          | 说明                                      |
+| -------------- | ------------- | ----------------------------------------- |
 | `sample_uuids` | array\<uuid\> | 该轮实验的样品 UUID 数组，无样品时传 `[]` |
-| `datas` | array | 该轮中每个 workflow 节点的参数配置 |
+| `datas`        | array         | 该轮中每个 workflow 节点的参数配置        |
 
 ### datas 中每个节点
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `node_uuid` | string | workflow 模板中的节点 UUID（从 API #4 获取） |
-| `param` | object | 动作参数（根据本地注册表 schema 填写） |
-| `sample_params` | array | 样品相关参数（液体名、体积等） |
+| 字段            | 类型   | 说明                                         |
+| --------------- | ------ | -------------------------------------------- |
+| `node_uuid`     | string | workflow 模板中的节点 UUID（从 API #4 获取） |
+| `param`         | object | 动作参数（根据本地注册表 schema 填写）       |
+| `sample_params` | array  | 样品相关参数（液体名、体积等）               |
 
 ### sample_params 中每条
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `container_uuid` | string | 容器 UUID |
-| `sample_value` | object | 样品值，如 `{"liquid_names": "水", "volumes": 1000}` |
+| 字段             | 类型   | 说明                                                 |
+| ---------------- | ------ | ---------------------------------------------------- |
+| `container_uuid` | string | 容器 UUID                                            |
+| `sample_value`   | object | 样品值，如 `{"liquid_names": "水", "volumes": 1000}` |
 
 ---
 
@@ -233,6 +264,7 @@ python scripts/gen_notebook_params.py \
 > 脚本位于本文档同级目录下的 `scripts/gen_notebook_params.py`。
 
 脚本会：
+
 1. 调用 workflow detail API 获取所有 action 节点
 2. 读取本地注册表，为每个节点查找对应的 action schema
 3. 生成 `notebook_template.json`，包含：
@@ -270,8 +302,11 @@ python scripts/gen_notebook_params.py \
               "properties": {
                 "goal": {
                   "properties": {
-                    "asp_vols": {"type": "array", "items": {"type": "number"}},
-                    "sources": {"type": "array"}
+                    "asp_vols": {
+                      "type": "array",
+                      "items": { "type": "number" }
+                    },
+                    "sources": { "type": "array" }
                   },
                   "required": ["asp_vols", "sources"]
                 }

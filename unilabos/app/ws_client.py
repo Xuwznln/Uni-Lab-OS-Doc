@@ -1269,7 +1269,13 @@ class QueueProcessor:
         if not queued_jobs:
             return
 
-        logger.debug(f"[QueueProcessor] Sending busy status for {len(queued_jobs)} queued jobs")
+        queue_summary = {}
+        for j in queued_jobs:
+            key = f"{j.device_id}/{j.action_name}"
+            queue_summary[key] = queue_summary.get(key, 0) + 1
+        logger.debug(
+            f"[QueueProcessor] Sending busy status for {len(queued_jobs)} queued jobs: {queue_summary}"
+        )
 
         for job_info in queued_jobs:
             # 快照可能已过期：在遍历过程中 end_job() 可能已将此 job 移至 READY，

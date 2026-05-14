@@ -217,6 +217,7 @@ zhida_gcms:
               additionalProperties: false
               properties:
                 string:
+                  description: Base64编码的CSV数据（ROS2参数名）
                   type: string
               title: StrSingleInput_Goal
               type: object
@@ -257,6 +258,7 @@ zhida_gcms:
               additionalProperties: false
               properties:
                 string:
+                  description: CSV文件路径（ROS2参数名）
                   type: string
               title: StrSingleInput_Goal
               type: object
@@ -289,12 +291,15 @@ zhida_gcms:
       properties:
         host:
           default: 192.168.3.184
+          description: 设备IP地址，本地部署时可使用'127.0.0.1'
           type: string
         port:
           default: 5792
+          description: 通信端口，默认5792
           type: string
         timeout:
           default: 10.0
+          description: 超时时间，单位秒
           type: string
       required: []
       type: object

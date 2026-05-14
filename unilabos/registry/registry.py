@@ -238,6 +238,7 @@ class Registry:
                             "class_name": "unilabos_class",
                         },
                         "always_free": True,
+                        "feedback_interval": 300.0,
                     },
                     "test_latency": test_latency_action,
                     "auto-test_resource": test_resource_action,
@@ -270,6 +271,7 @@ class Registry:
         registry_cache.pkl 一个文件中，删除即可完全重置。
         """
         import time as _time
+        from unilabos.registry.ast_registry_scanner import _CACHE_VERSION as AST_SCAN_CACHE_VERSION
         from unilabos.registry.ast_registry_scanner import scan_directory
 
         scan_t0 = _time.perf_counter()
@@ -285,6 +287,10 @@ class Registry:
         # ---- 统一缓存：一个 pkl 包含所有数据 ----
         unified_cache = self._load_config_cache()
         ast_cache = unified_cache.setdefault("_ast_scan", {"files": {}})
+        if ast_cache.get("version") != AST_SCAN_CACHE_VERSION:
+            ast_cache = {"version": AST_SCAN_CACHE_VERSION, "files": {}}
+            unified_cache["_ast_scan"] = ast_cache
+            unified_cache.pop("_build_results", None)
 
         # 默认：扫描 unilabos 包所在的父目录
         pkg_root = Path(__file__).resolve().parent.parent          # .../unilabos
@@ -560,13 +566,47 @@ class Registry:
 
         return prop_schema
 
+    @staticmethod
+    def _apply_docstring_param_metadata(
+        schema: Dict[str, Any],
+        doc_info: Dict[str, Any],
+        field_to_param: Optional[Dict[str, str]] = None,
+        apply_defaults: bool = False,
+    ) -> None:
+        """Apply parsed docstring display names and descriptions to schema properties."""
+        if not schema or not doc_info:
+            return
+
+        props = schema.get("properties", {})
+        if not isinstance(props, dict):
+            return
+
+        param_descs = doc_info.get("params", {}) or {}
+        param_display_names = doc_info.get("param_display_names", {}) or {}
+        for field_name, prop_schema in props.items():
+            if not isinstance(prop_schema, dict):
+                continue
+            param_name = field_to_param.get(field_name, field_name) if field_to_param else field_name
+            if not isinstance(param_name, str):
+                continue
+            param_name = param_name.removesuffix("[]")
+            if param_name in param_display_names:
+                prop_schema["title"] = param_display_names[param_name]
+            elif apply_defaults and not prop_schema.get("title"):
+                prop_schema["title"] = field_name
+
+            if param_name in param_descs:
+                prop_schema["description"] = param_descs[param_name]
+            elif apply_defaults and "description" not in prop_schema:
+                prop_schema["description"] = ""
+
     def _generate_unilab_json_command_schema(
         self, method_args: list, docstring: Optional[str] = None,
         import_map: Optional[Dict[str, str]] = None,
+        apply_doc_defaults: bool = False,
     ) -> Dict[str, Any]:
         """根据方法参数和 docstring 生成 UniLabJsonCommand schema"""
         doc_info = parse_docstring(docstring)
-        param_descs = doc_info.get("params", {})
 
         schema = {
             "type": "object",
@@ -597,12 +637,10 @@ class Registry:
                     param_name, param_type, param_default, import_map=import_map
                 )
 
-            if param_name in param_descs:
-                schema["properties"][param_name]["description"] = param_descs[param_name]
-
             if param_required:
                 schema["required"].append(param_name)
 
+        self._apply_docstring_param_metadata(schema, doc_info, apply_defaults=apply_doc_defaults)
         return schema
 
     def _generate_status_types_schema(self, status_methods: Dict[str, Any]) -> Dict[str, Any]:
@@ -798,6 +836,7 @@ class Registry:
             type_str = "UniLabJsonCommandAsync" if is_async else "UniLabJsonCommand"
             params = method_info.get("params", [])
             method_doc = method_info.get("docstring")
+            method_doc_info = parse_docstring(method_doc)
             goal_schema = self._generate_schema_from_ast_params(params, method_name, method_doc, imap)
 
             if action_args is not None:
@@ -827,10 +866,15 @@ class Registry:
 
             # action handles: 从 @action(handles=[...]) 提取并转换为标准格式
             raw_handles = (action_args or {}).get("handles")
-            handles = normalize_ast_action_handles(raw_handles) if isinstance(raw_handles, list) else (raw_handles or {})
+            handles = (
+                normalize_ast_action_handles(raw_handles)
+                if isinstance(raw_handles, list)
+                else (raw_handles or {})
+            )
 
-            # placeholder_keys: 优先用装饰器显式配置，否则从参数类型检测
-            pk = (action_args or {}).get("placeholder_keys") or detect_placeholder_keys(params)
+            # placeholder_keys: 先从参数类型自动检测，再用装饰器显式配置覆盖/补充
+            pk = detect_placeholder_keys(params)
+            pk.update((action_args or {}).get("placeholder_keys") or {})
 
             # 从方法返回值类型生成 result schema
             result_schema = None
@@ -845,13 +889,20 @@ class Registry:
                 "goal": goal,
                 "feedback": (action_args or {}).get("feedback") or {},
                 "result": (action_args or {}).get("result") or {},
-                "schema": wrap_action_schema(goal_schema, action_name, result_schema=result_schema),
+                "schema": wrap_action_schema(
+                    goal_schema,
+                    action_name,
+                    description=(action_args or {}).get("description") or method_doc_info.get("description", ""),
+                    result_schema=result_schema,
+                ),
                 "goal_default": goal_default,
                 "handles": handles,
                 "placeholder_keys": pk,
             }
             if (action_args or {}).get("always_free") or method_info.get("always_free"):
                 entry["always_free"] = True
+            _fb_iv = (action_args or {}).get("feedback_interval", method_info.get("feedback_interval", 1.0))
+            entry["feedback_interval"] = _fb_iv
             nt = normalize_enum_value((action_args or {}).get("node_type"), NodeType)
             if nt:
                 entry["node_type"] = nt
@@ -882,7 +933,11 @@ class Registry:
                 action_name = f"auto-{action_name}"
 
             raw_handles = action_args.get("handles")
-            handles = normalize_ast_action_handles(raw_handles) if isinstance(raw_handles, list) else (raw_handles or {})
+            handles = (
+                normalize_ast_action_handles(raw_handles)
+                if isinstance(raw_handles, list)
+                else (raw_handles or {})
+            )
 
             method_params = method_info.get("params", [])
 
@@ -975,20 +1030,34 @@ class Registry:
                 "schema": schema,
                 "goal_default": goal_default,
                 "handles": handles,
-                "placeholder_keys": action_args.get("placeholder_keys") or detect_placeholder_keys(method_params),
+                "placeholder_keys": {
+                    **detect_placeholder_keys(method_params),
+                    **(action_args.get("placeholder_keys") or {}),
+                },
             }
             if action_args.get("always_free") or method_info.get("always_free"):
                 action_entry["always_free"] = True
+            _fb_iv = action_args.get("feedback_interval", method_info.get("feedback_interval", 1.0))
+            action_entry["feedback_interval"] = _fb_iv
             nt = normalize_enum_value(action_args.get("node_type"), NodeType)
             if nt:
                 action_entry["node_type"] = nt
+            goal_schema_for_docs = action_entry.get("schema", {}).get("properties", {}).get("goal", {})
+            self._apply_docstring_param_metadata(
+                goal_schema_for_docs,
+                parse_docstring(method_info.get("docstring")),
+                goal,
+                apply_defaults=True,
+            )
             action_value_mappings[action_name] = action_entry
 
         action_value_mappings = dict(sorted(action_value_mappings.items()))
 
         # --- init_param_schema = { config: <init_params>, data: <status_types> } ---
         init_params = ast_meta.get("init_params", [])
-        config_schema = self._generate_schema_from_ast_params(init_params, "__init__", import_map=imap)
+        config_schema = self._generate_schema_from_ast_params(
+            init_params, "__init__", ast_meta.get("init_docstring"), import_map=imap
+        )
         data_schema = self._generate_status_schema_from_ast(
             ast_meta.get("status_properties", {}), imap
         )
@@ -1036,7 +1105,6 @@ class Registry:
     ) -> Dict[str, Any]:
         """Generate JSON Schema from AST-extracted parameter list."""
         doc_info = parse_docstring(docstring)
-        param_descs = doc_info.get("params", {})
 
         schema: Dict[str, Any] = {
             "type": "object",
@@ -1066,12 +1134,10 @@ class Registry:
                     pname, ptype, pdefault, import_map
                 )
 
-            if pname in param_descs:
-                schema["properties"][pname]["description"] = param_descs[pname]
-
             if prequired:
                 schema["required"].append(pname)
 
+        self._apply_docstring_param_metadata(schema, doc_info, apply_defaults=True)
         return schema
 
     def _generate_status_schema_from_ast(
@@ -1801,7 +1867,7 @@ class Registry:
                         else:
                             action_key = f"auto-{k}"
                         goal_schema = self._generate_unilab_json_command_schema(
-                            v["args"], import_map=enhanced_import_map
+                            v["args"], docstring=v.get("docstring"), import_map=enhanced_import_map
                         )
                         ret_type = v.get("return_type", "")
                         result_schema = None
@@ -1810,7 +1876,13 @@ class Registry:
                                 "result", ret_type, None, import_map=enhanced_import_map
                             )
                         old_cfg = old_action_configs.get(action_key) or old_action_configs.get(f"auto-{k}", {})
-                        new_schema = wrap_action_schema(goal_schema, action_key, result_schema=result_schema)
+                        doc_info = parse_docstring(v.get("docstring"))
+                        new_schema = wrap_action_schema(
+                            goal_schema,
+                            action_key,
+                            description=doc_info.get("description", ""),
+                            result_schema=result_schema,
+                        )
                         old_schema = old_cfg.get("schema", {})
                         if old_schema:
                             preserve_field_descriptions(new_schema, old_schema)
@@ -1876,6 +1948,12 @@ class Registry:
 
                         merged_pk = dict(old_cfg.get("placeholder_keys", {}))
                         merged_pk.update(detect_placeholder_keys(v["args"]))
+                        goal_schema_for_docs = (
+                            entry_schema.get("properties", {}).get("goal", {})
+                            if isinstance(entry_schema, dict)
+                            else {}
+                        )
+                        self._apply_docstring_param_metadata(goal_schema_for_docs, doc_info, entry_goal)
 
                         entry = {
                             "type": entry_type,
@@ -1896,7 +1974,8 @@ class Registry:
 
                     device_config["init_param_schema"] = {}
                     init_schema = self._generate_unilab_json_command_schema(
-                        enhanced_info["init_params"], "__init__",
+                        enhanced_info["init_params"],
+                        docstring=enhanced_info.get("init_docstring"),
                         import_map=enhanced_import_map,
                     )
                     device_config["init_param_schema"]["config"] = init_schema
@@ -1943,7 +2022,9 @@ class Registry:
                             action_str_type_mapping[action_type_str] = target_type
                             if target_type is not None:
                                 try:
-                                    action_config["goal_default"] = ROS2MessageInstance(target_type.Goal()).get_python_dict()
+                                    action_config["goal_default"] = ROS2MessageInstance(
+                                        target_type.Goal()
+                                    ).get_python_dict()
                                 except Exception:
                                     action_config["goal_default"] = {}
                                 prev_schema = action_config.get("schema", {})
@@ -2135,6 +2216,7 @@ class Registry:
                                 "unilabos_device_id": {
                                     "type": "string",
                                     "default": "",
+                                    "title": "设备ID",
                                     "description": "UniLabOS设备ID，用于指定执行动作的具体设备实例",
                                 },
                                 **schema["properties"]["goal"]["properties"],
@@ -2206,7 +2288,14 @@ class Registry:
 lab_registry = Registry()
 
 
-def build_registry(registry_paths=None, devices_dirs=None, upload_registry=False, check_mode=False, complete_registry=False, external_only=False):
+def build_registry(
+    registry_paths=None,
+    devices_dirs=None,
+    upload_registry=False,
+    check_mode=False,
+    complete_registry=False,
+    external_only=False,
+):
     """
     构建或获取Registry单例实例
     """
@@ -2220,7 +2309,12 @@ def build_registry(registry_paths=None, devices_dirs=None, upload_registry=False
             if path not in current_paths:
                 lab_registry.registry_paths.append(path)
 
-    lab_registry.setup(devices_dirs=devices_dirs, upload_registry=upload_registry, complete_registry=complete_registry, external_only=external_only)
+    lab_registry.setup(
+        devices_dirs=devices_dirs,
+        upload_registry=upload_registry,
+        complete_registry=complete_registry,
+        external_only=external_only,
+    )
 
     # 将 AST 扫描的字符串类型替换为实际 ROS2 消息类（仅查找 ROS2 类型，不 import 设备模块）
     lab_registry.resolve_all_types()

@@ -54,7 +54,6 @@ Uni-Lab 的启动过程分为以下几个阶段：
 您可以直接跟随 unilabos 的提示进行，无需查阅本节
 
 - **工作目录设置**：
-
   - 如果当前目录以 `unilabos_data` 结尾，则使用当前目录
   - 否则使用 `当前目录/unilabos_data` 作为工作目录
   - 可通过 `--working_dir` 指定自定义工作目录
@@ -68,8 +67,8 @@ Uni-Lab 的启动过程分为以下几个阶段：
 
 支持多种后端环境：
 
-- `--addr test`：测试环境 (`https://uni-lab.test.bohrium.com/api/v1`)
-- `--addr uat`：UAT 环境 (`https://uni-lab.uat.bohrium.com/api/v1`)
+- `--addr test`：测试环境 (`https://leap-lab.test.bohrium.com/api/v1`)
+- `--addr uat`：UAT 环境 (`https://leap-lab.uat.bohrium.com/api/v1`)
 - `--addr local`：本地环境 (`http://127.0.0.1:48197/api/v1`)
 - 自定义地址：直接指定完整 URL
 
@@ -176,7 +175,7 @@ unilab --config path/to/your/config.py
 
 如果是首次使用，系统会：
 
-1. 提示前往 https://uni-lab.bohrium.com 注册实验室
+1. 提示前往 https://leap-lab.bohrium.com 注册实验室
 2. 引导创建配置文件
 3. 设置工作目录
 
@@ -216,7 +215,7 @@ unilab --ak your_ak --sk your_sk --port 8080 --disable_browser
 
 如果提示 "后续运行必须拥有一个实验室"，请确保：
 
-- 已在 https://uni-lab.bohrium.com 注册实验室
+- 已在 https://leap-lab.bohrium.com 注册实验室
 - 正确设置了 `--ak` 和 `--sk` 参数
 - 配置文件中包含正确的认证信息
 

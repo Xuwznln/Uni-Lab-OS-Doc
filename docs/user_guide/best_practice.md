@@ -33,11 +33,11 @@
 
 **选择合适的安装包：**
 
-| 安装包 | 适用场景 | 包含组件 |
-|--------|----------|----------|
-| `unilabos` | **推荐大多数用户**，生产部署 | 完整安装包，开箱即用 |
-| `unilabos-env` | 开发者（可编辑安装） | 仅环境依赖，通过 pip 安装 unilabos |
-| `unilabos-full` | 仿真/可视化 | unilabos + 完整 ROS2 桌面版 + Gazebo + MoveIt |
+| 安装包          | 适用场景                     | 包含组件                                      |
+| --------------- | ---------------------------- | --------------------------------------------- |
+| `unilabos`      | **推荐大多数用户**，生产部署 | 完整安装包，开箱即用                          |
+| `unilabos-env`  | 开发者（可编辑安装）         | 仅环境依赖，通过 pip 安装 unilabos            |
+| `unilabos-full` | 仿真/可视化                  | unilabos + 完整 ROS2 桌面版 + Gazebo + MoveIt |
 
 **关键步骤：**
 
@@ -66,6 +66,7 @@ mamba install uni-lab::unilabos-full -c robostack-staging -c conda-forge
 ```
 
 **选择建议：**
+
 - **日常使用/生产部署**：使用 `unilabos`（推荐），完整功能，开箱即用
 - **开发者**：使用 `unilabos-env` + `pip install -e .` + `uv pip install -r unilabos/utils/requirements.txt`，代码修改立即生效
 - **仿真/可视化**：使用 `unilabos-full`，含 Gazebo、rviz2、MoveIt
@@ -88,7 +89,7 @@ python -c "from unilabos_msgs.msg import Resource; print('ROS msgs OK')"
 
 #### 2.1 注册实验室账号
 
-1. 访问 [https://uni-lab.bohrium.com](https://uni-lab.bohrium.com)
+1. 访问 [https://leap-lab.bohrium.com](https://leap-lab.bohrium.com)
 2. 注册账号并登录
 3. 创建新实验室
 
@@ -297,7 +298,7 @@ unilab --ak your_ak --sk your_sk -g test/experiments/mock_devices/mock_all.json
 
 #### 5.2 访问 Web 界面
 
-启动系统后，访问[https://uni-lab.bohrium.com](https://uni-lab.bohrium.com)
+启动系统后，访问[https://leap-lab.bohrium.com](https://leap-lab.bohrium.com)
 
 #### 5.3 添加设备和物料
 
@@ -306,12 +307,10 @@ unilab --ak your_ak --sk your_sk -g test/experiments/mock_devices/mock_all.json
 **示例场景：** 创建一个简单的液体转移实验
 
 1. **添加工作站（必需）：**
-
    - 在"仪器设备"中找到 `work_station`
    - 添加 `workstation` x1
 
 2. **添加虚拟转移泵：**
-
    - 在"仪器设备"中找到 `virtual_device`
    - 添加 `virtual_transfer_pump` x1
 
@@ -818,6 +817,7 @@ uv pip install -r unilabos/utils/requirements.txt
 ```
 
 **为什么使用这种方式？**
+
 - `unilabos-env` 提供 ROS2 核心组件和 uv（通过 conda 安装，避免编译）
 - `unilabos/utils/requirements.txt` 包含所有运行时需要的 pip 依赖
 - `dev_install.py` 自动检测中文环境，中文系统自动使用清华镜像
@@ -1796,32 +1796,27 @@ unilab --ak your_ak --sk your_sk -g graph.json \
 **详细步骤：**
 
 1. **需求分析**：
-
    - 明确实验流程
    - 列出所需设备和物料
    - 设计工作流程图
 
 2. **环境搭建**：
-
    - 安装 Uni-Lab-OS
    - 创建实验室账号
    - 准备开发工具（IDE、Git）
 
 3. **原型验证**：
-
    - 使用虚拟设备测试流程
    - 验证工作流逻辑
    - 调整参数
 
 4. **迭代开发**：
-
    - 实现自定义设备驱动（同时撰写单点函数测试）
    - 编写注册表
    - 单元测试
    - 集成测试
 
 5. **测试部署**：
-
    - 连接真实硬件
    - 空跑测试
    - 小规模试验
@@ -1871,7 +1866,7 @@ unilab --ak your_ak --sk your_sk -g graph.json \
 #### 14.5 社区支持
 
 - **GitHub Issues**：[https://github.com/deepmodeling/Uni-Lab-OS/issues](https://github.com/deepmodeling/Uni-Lab-OS/issues)
-- **官方网站**：[https://uni-lab.bohrium.com](https://uni-lab.bohrium.com)
+- **官方网站**：[https://leap-lab.bohrium.com](https://leap-lab.bohrium.com)
 
 ---
 
