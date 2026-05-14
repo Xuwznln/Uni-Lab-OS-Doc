@@ -632,7 +632,7 @@
       "size_y": 85.8,
       "size_z": 42.66,
       "model": "PRCXI_EP_Adapter",
-      "category": null,
+      "category": "tube_rack",
       "plate_type": null,
       "material_info": {
         "uuid": "e146697c395e4eabb3d6b74f0dd6aaf7",

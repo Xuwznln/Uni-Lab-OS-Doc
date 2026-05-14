@@ -61,6 +61,7 @@ class TransferLiquidReturn(TypedDict):
 
 
 class LiquidHandlerMiddleware(LiquidHandler):
+    _ros_node: ROS2DeviceNode
     def __init__(
         self, backend: LiquidHandlerBackend, deck: Deck, simulator: bool = False, channel_num: int = 8, **kwargs
     ):
@@ -78,6 +79,11 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 self._simulate_backend = LiquidHandlerChatterboxBackend(channel_num)
             self._simulate_handler = LiquidHandlerAbstract(self._simulate_backend, deck, False)
         super().__init__(backend, deck)
+
+    def post_init(self, ros_node: BaseROS2DeviceNode):
+        self._ros_node = ros_node
+        if getattr(self, "_simulator", False) and getattr(self, "_simulate_handler", None) is not None:
+            self._simulate_handler._ros_node = ros_node
 
     async def setup(self, **backend_kwargs):
         if self._simulator:
@@ -152,6 +158,14 @@ class LiquidHandlerMiddleware(LiquidHandler):
 
         if self._simulator:
             return await self._simulate_handler.pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": tip_spots})
+            submit_time = time.time()
+            while not task.done():
+                if time.time() - submit_time > 10:
+                    self._ros_node.lab_logger().info(f"pick_up_tips {tip_spots} 超时")
+                    break
+                time.sleep(0.01)
         return await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
 
     async def drop_tips(
@@ -360,6 +374,16 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 EXTRA_SAMPLE_UUID: sample_uuid_value,
                 "volume": volume,
             }
+
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
+            submit_time = time.time()
+            while not task.done():
+                if time.time() - submit_time > 10:
+                    self._ros_node.lab_logger().info(f"aspirate {resources} 超时")
+                    break
+                time.sleep(0.01)
+
         return SimpleReturn(samples=res_samples, volumes=res_volumes)
 
     async def dispense(
@@ -494,6 +518,15 @@ class LiquidHandlerMiddleware(LiquidHandler):
             resource.unilabos_extra[EXTRA_SAMPLE_UUID] = res_uuid
             res_samples.append({"name": resource.name, EXTRA_SAMPLE_UUID: res_uuid})
             res_volumes.append(volume)
+
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
+            submit_time = time.time()
+            while not task.done():
+                if time.time() - submit_time > 10:
+                    self._ros_node.lab_logger().info(f"dispense {resources} 超时")
+                    break
+                time.sleep(0.01)
 
         return SimpleReturn(samples=res_samples, volumes=res_volumes)
 
@@ -880,7 +913,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         super().__init__(backend_type, deck, simulator, channel_num, total_height=total_height, **kwargs)
 
     def post_init(self, ros_node: BaseROS2DeviceNode):
-        self._ros_node = ros_node
+        super().post_init(ros_node)
         ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{
             "resources": [self.deck]
         })
@@ -1036,13 +1069,14 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             well.set_liquids([(liquid_name, safe_volume)])  # type: ignore
             res_volumes.append(safe_volume)
 
-        task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": wells})
-        submit_time = time.time()
-        while not task.done():
-            if time.time() - submit_time > 10:
-                self._ros_node.lab_logger().info(f"set_liquid_from_plate {plate} 超时")
-                break
-            time.sleep(0.01)
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": wells})
+            submit_time = time.time()
+            while not task.done():
+                if time.time() - submit_time > 10:
+                    self._ros_node.lab_logger().info(f"set_liquid_from_plate {plate} 超时")
+                    break
+                time.sleep(0.01)
 
         return SetLiquidFromPlateReturn(
             plate=ResourceTreeSet.from_plr_resources([plate], known_newly_created=False).dump(),  # type: ignore
@@ -1449,6 +1483,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         mix_rate: Optional[int] = None,
         mix_liquid_height: Optional[float] = None,
         delays: Optional[List[int]] = None,
+        pre_aspirate_from_target: Optional[float] = None,
         none_keys: List[str] = [],
     ) -> TransferLiquidReturn:
         """Transfer liquid with automatic mode detection.
@@ -1600,6 +1635,8 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     kwargs['mix_liquid_height'] = safe_get(mix_liquid_height, i, wrap=False)
                 if delays is not None:
                     kwargs['delays'] = safe_get(delays, i)
+                if pre_aspirate_from_target is not None:
+                    kwargs['pre_aspirate_from_target'] = safe_get(pre_aspirate_from_target, i)
 
                 cur_source = sources[i % num_sources]
                 cur_target = targets[i % num_targets]
@@ -1659,6 +1696,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         mix_rate = kwargs.get('mix_rate')
         mix_liquid_height = kwargs.get('mix_liquid_height')
         delays = kwargs.get('delays')
+        pre_aspirate_from_target = kwargs.get('pre_aspirate_from_target')
 
         tip = []
         if pick_up:

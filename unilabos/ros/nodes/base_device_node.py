@@ -529,7 +529,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         )
                     # 调整了液体以及Deck之后要重新Assign
                     # noinspection PyUnresolvedReferences
-                    rts_with_parent = ResourceTreeSet.from_plr_resources([parent_resource])
+                    rts_with_parent = ResourceTreeSet.from_plr_resources([plr_instance])
                     if rts_with_parent.root_nodes[0].res_content.uuid_parent is None:
                         rts_with_parent.root_nodes[0].res_content.parent_uuid = self.uuid
                     request.command = json.dumps(

@@ -570,6 +570,102 @@ class HostNode(BaseROS2DeviceNode):
             responses.append(response.response)
         return responses
 
+    def _lookup_deck_for_slot(self, device_id: str, deck_id: str):
+        """根据 device_id / deck_id 查找 deck PLR 实例，找不到返回 None。
+
+        优先级：
+        1. ``devices_instances[device_id]`` 上对应 driver 的 ``deck`` 属性（PLR LiquidHandler 的标准属性）
+        2. driver / wrapper / _ros_node 各级 resource_tracker.figure_resource({"id": deck_id})
+        3. host 自己的 ``_resource_tracker``
+        """
+        log = self.lab_logger()
+
+        def _try_tracker(tracker, src_desc: str):
+            if tracker is None:
+                log.debug(f"[Host Node] _lookup_deck: {src_desc} tracker 为 None，跳过")
+                return None
+            try:
+                matches = tracker.figure_resource({"id": deck_id}, try_mode=True)
+            except Exception as e:
+                log.warning(f"[Host Node] _lookup_deck: {src_desc}.figure_resource({deck_id}) 失败: {e}")
+                return None
+            if isinstance(matches, list) and matches:
+                obj = next((m for m in matches if not isinstance(m, dict)), matches[0])
+                if obj is not None and not isinstance(obj, dict):
+                    log.debug(f"[Host Node] _lookup_deck: 命中 via {src_desc} -> {type(obj).__name__}")
+                    return obj
+            log.debug(f"[Host Node] _lookup_deck: {src_desc} figure_resource 未命中 (matches={matches!r})")
+            return None
+
+        # 1) 先按 device_id 拿 driver 上的 deck
+        candidate_ids = []
+        if device_id:
+            candidate_ids.append(device_id)
+            stripped = device_id.lstrip("/")
+            if stripped and stripped != device_id:
+                candidate_ids.append(stripped)
+            tail = device_id.split("/")[-1]
+            if tail and tail not in candidate_ids:
+                candidate_ids.append(tail)
+
+        d = None
+        for did in candidate_ids:
+            d = self.devices_instances.get(did)
+            if d is not None:
+                break
+        if d is None:
+            log.warning(
+                f"[Host Node] _lookup_deck: devices_instances 找不到 device_id={device_id!r} "
+                f"(尝试过 {candidate_ids}); 当前已知: {list(self.devices_instances.keys())}"
+            )
+        else:
+            # 真正的 driver 在 wrapper 的 _driver_instance / _ros_node.driver_instance 上
+            driver_candidates = []
+            for attr_path in ("_driver_instance", "_ros_node.driver_instance", "driver_instance"):
+                obj = d
+                for part in attr_path.split("."):
+                    obj = getattr(obj, part, None)
+                    if obj is None:
+                        break
+                if obj is not None and obj not in driver_candidates:
+                    driver_candidates.append(obj)
+
+            for drv in driver_candidates:
+                deck = getattr(drv, "deck", None)
+                if deck is not None:
+                    deck_name = getattr(deck, "name", None)
+                    if deck_name == deck_id:
+                        log.debug(
+                            f"[Host Node] _lookup_deck: 命中 via {type(drv).__name__}.deck (name={deck_name})"
+                        )
+                        return deck
+                    log.debug(
+                        f"[Host Node] _lookup_deck: {type(drv).__name__}.deck.name={deck_name!r} 与 {deck_id!r} 不一致"
+                    )
+
+            # 退化：从 wrapper / _ros_node 的 resource_tracker 找
+            tracker_paths = (
+                "resource_tracker",
+                "_ros_node.resource_tracker",
+            )
+            for attr_path in tracker_paths:
+                tracker = d
+                for part in attr_path.split("."):
+                    tracker = getattr(tracker, part, None)
+                    if tracker is None:
+                        break
+                obj = _try_tracker(tracker, f"device({device_id}).{attr_path}")
+                if obj is not None:
+                    return obj
+
+        # 2) host 自己的 tracker（一般为空，因为 init 时 device 树被 continue 了）
+        host_tracker = getattr(self, "resource_tracker", None) or getattr(self, "_resource_tracker", None)
+        obj = _try_tracker(host_tracker, "host._resource_tracker")
+        if obj is not None:
+            return obj
+
+        return None
+
     async def create_resource(
         self,
         device_id: DeviceSlot,
@@ -583,6 +679,30 @@ class HostNode(BaseROS2DeviceNode):
         slot_on_deck: str = "",
     ) -> CreateResourceReturn:
         # 暂不支持多对同名父子同时存在
+        # 如果 slot_on_deck 不是空，并且 bind_locations 全为 0，则尝试通过 deck 的 slot 信息推算真实坐标
+        if slot_on_deck and (
+            (not hasattr(bind_locations, "x") or bind_locations.x == 0)
+            and (not hasattr(bind_locations, "y") or bind_locations.y == 0)
+            and (not hasattr(bind_locations, "z") or bind_locations.z == 0)
+        ):
+            # 尝试通过 parent (deck) 查找 slot 坐标，parent 应是deck的id
+            deck_id = parent.split("/")[-1]
+            deck_obj = self._lookup_deck_for_slot(device_id, deck_id)
+            if deck_obj is not None and hasattr(deck_obj, "get_slot_location"):
+                try:
+                    slot_location = deck_obj.get_slot_location(slot_on_deck)
+                    bind_locations.x = slot_location.x
+                    bind_locations.y = slot_location.y
+                    bind_locations.z = slot_location.z
+                except Exception as e:
+                    self.lab_logger().warning(
+                        f"[Host Node] 无法通过deck({deck_id})获取slot({slot_on_deck})位置: {e}"
+                    )
+            else:
+                self.lab_logger().warning(
+                    f"[Host Node] 找不到deck对象({deck_id})或其不支持get_slot_location, 无法修正bind_locations"
+                )
+
         res_creation_input = {
             "id": res_id.split("/")[-1],
             "name": res_id.split("/")[-1],
@@ -608,6 +728,45 @@ class HostNode(BaseROS2DeviceNode):
                 }
             )
         init_new_res = initialize_resource(res_creation_input)  # flatten的格式
+
+        # 若 init_new_res 中节点的 pose.position 与 pose.position3d 同时全为 0，
+        # 用上面通过 deck slot 反查得到的 bind_locations 覆盖（位置仍可能是默认 0）
+        bind_xyz = {
+            "x": float(getattr(bind_locations, "x", 0) or 0),
+            "y": float(getattr(bind_locations, "y", 0) or 0),
+            "z": float(getattr(bind_locations, "z", 0) or 0),
+        }
+        if any(v != 0.0 for v in bind_xyz.values()):
+            def _is_zero_xyz(p):
+                if not isinstance(p, dict):
+                    return False
+                return (
+                    float(p.get("x", 0) or 0) == 0.0
+                    and float(p.get("y", 0) or 0) == 0.0
+                    and float(p.get("z", 0) or 0) == 0.0
+                )
+
+            def _patch_node(node):
+                if not isinstance(node, dict):
+                    return
+                pose = node.get("pose")
+                if not isinstance(pose, dict):
+                    return
+                pos = pose.get("position")
+                pos3d = pose.get("position3d")
+                if _is_zero_xyz(pos) and _is_zero_xyz(pos3d):
+                    pose["position"] = dict(bind_xyz)
+                    pose["position3d"] = dict(bind_xyz)
+
+            def _walk(obj):
+                if isinstance(obj, dict):
+                    _patch_node(obj)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        _walk(item)
+
+            _walk(init_new_res)
+
         if len(init_new_res) > 1:  # 一个物料，多个子节点
             init_new_res = [init_new_res]
         resources: List[Resource] | List[List[Resource]] = init_new_res  # initialize_resource已经返回list[dict]
