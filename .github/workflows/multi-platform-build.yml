@@ -105,6 +105,7 @@ jobs:
         with:
           miniforge-version: latest
           use-mamba: true
+          python-version: '3.11.14'
           channels: conda-forge,robostack-staging
           channel-priority: strict
           activate-environment: build-env
@@ -114,13 +115,15 @@ jobs:
       - name: Install rattler-build and anaconda-client
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          mamba install --override-channels -c conda-forge rattler-build anaconda-client -y
+          mamba install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
         run: |
           conda info
-          conda list | grep -E "(rattler-build|anaconda-client)"
+          conda list -n build-env | grep -E "(rattler-build|anaconda-client)"
+          conda run -n build-env rattler-build --version
+          conda run -n build-env anaconda --version
           echo "Platform: ${{ matrix.platform }}"
           echo "OS: ${{ matrix.os }}"
 
@@ -128,9 +131,9 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true'
         run: |
           if [[ "${{ matrix.platform }}" == "osx-arm64" ]]; then
-            rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
+            conda run -n build-env rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
           else
-            rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
+            conda run -n build-env rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
           fi
 
       - name: List built packages
@@ -171,5 +174,5 @@ jobs:
         run: |
           for package in $(find ./output -name "*.conda"); do
             echo "Uploading $package to unilab organization..."
-            anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
+            conda run -n build-env anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
           done
