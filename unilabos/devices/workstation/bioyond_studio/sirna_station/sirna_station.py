@@ -424,14 +424,9 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
         goal_default={
             "reset_operations": ["scheduler_reset", "reset_order_status", "reset_location"],
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
         },
-        feedback_interval=300,
         description="复位小核酸实验前状态",
     )
     def reset(
@@ -439,8 +434,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         reset_operations: Optional[
             List[Literal["scheduler_reset", "reset_order_status", "reset_location"]]
         ] = None,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """复位调度器、订单状态和库位，并按清理读回结果决定是否 take-out。"""
@@ -451,7 +444,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             api_host = self._kwarg_text(kwargs, "api_host")
             api_key = self._kwarg_text(kwargs, "api_key")
             ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
-            del timeout_seconds, assignee_user_ids
             self._update_runtime_api_config(api_host=api_host, api_key=api_key)
             self._require_ready_signal(ready_signal)
             rpc = self._require_hardware_interface_for_reset()
@@ -616,14 +608,6 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
-        goal_default={
-            "optional_params": {"auto_register_materials": True},
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
-        },
-        feedback_interval=300,
         description="提交小核酸实验1（报告基因检测）",
         handles=[
             ActionOutputHandle(
@@ -685,8 +669,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         self,
         required_params: Experiment1RequiredParams,
         optional_params: Optional[Experiment1OptionalParams] = None,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """提交小核酸实验1（报告基因检测）到 Bioyond LIMS。
@@ -730,8 +712,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             order_name=str(optional_params.get("order_name", "") or ""),
             parameter_overrides=optional_params.get("parameter_overrides", ""),
             auto_register_materials=bool(optional_params.get("auto_register_materials", True)),
-            timeout_seconds=timeout_seconds,
-            assignee_user_ids=assignee_user_ids,
             **kwargs,
         )
 
@@ -773,14 +753,6 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
-        goal_default={
-            "optional_params": {"auto_register_materials": True},
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
-        },
-        feedback_interval=300,
         description="提交小核酸实验2（基因表达检测）",
         handles=[
             ActionOutputHandle(
@@ -837,8 +809,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         self,
         required_params: Experiment2RequiredParams,
         optional_params: Optional[Experiment2OptionalParams] = None,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """提交小核酸实验2（基因表达检测）到 Bioyond LIMS。"""
@@ -857,8 +827,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             order_name=str(optional_params.get("order_name", "") or ""),
             parameter_overrides=optional_params.get("parameter_overrides", ""),
             auto_register_materials=bool(optional_params.get("auto_register_materials", True)),
-            timeout_seconds=timeout_seconds,
-            assignee_user_ids=assignee_user_ids,
             **kwargs,
         )
 
@@ -873,8 +841,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         order_name: str,
         parameter_overrides: Any,
         auto_register_materials: bool,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         with self._debug_call_session(action_name):
@@ -898,7 +864,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 bool(parameter_overrides),
             )
 
-            del timeout_seconds, assignee_user_ids, kwargs
             rpc = self._require_hardware_interface("create_order")
             workflow = self._resolve_experiment_workflow(
                 rpc,
