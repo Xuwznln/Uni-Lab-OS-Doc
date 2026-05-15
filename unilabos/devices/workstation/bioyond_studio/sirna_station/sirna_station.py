@@ -671,6 +671,14 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_key="mount_resource",
                 data_source=DataSource.EXECUTOR,
             ),
+            ActionOutputHandle(
+                key="resultTable",
+                data_type="object",
+                label="物料装载结果表",
+                data_key="resultTable",
+                data_source=DataSource.EXECUTOR,
+                io_type="target",
+            ),
         ],
     )
     def submit_experiment_1(
@@ -814,6 +822,14 @@ class BioyondSirnaStation(BioyondWorkstation):
                 label="库位",
                 data_key="mount_resource",
                 data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="resultTable",
+                data_type="object",
+                label="物料装载结果表",
+                data_key="resultTable",
+                data_source=DataSource.EXECUTOR,
+                io_type="target",
             ),
         ],
     )
@@ -1004,6 +1020,10 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "manual_load_tables": self._build_manual_load_tables(
                     confirmation_data.get("materials_by_type", {})
                 ),
+                "resultTable": self._build_result_table(
+                    confirmation_data.get("materials_by_type", {}),
+                    table_name="物料放置指引",
+                ),
                 "manual_load_probe": self._build_manual_load_probe(
                     confirmation_data.get("materials_by_type", {})
                 ),
@@ -1069,6 +1089,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             "target_device": "unilabos_devices",
             "resource": "unilabos_resources",
             "mount_resource": "unilabos_resources",
+            "resultTable": "unilabos_manual_confirm",
             "assignee_user_ids": "unilabos_manual_confirm",
         },
         goal_default={
@@ -1115,6 +1136,14 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_source=DataSource.HANDLE,
                 io_type="source",
             ),
+            ActionInputHandle(
+                key="resultTable",
+                data_type="object",
+                label="物料装载结果表",
+                data_key="resultTable",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
             # Order metadata for scheduler start.
             ActionInputHandle(
                 key="order_id", data_type="bioyond_order_id",
@@ -1139,6 +1168,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         resource: Optional[List[ResourceSlot]] = None,
         coin_cell_code: Optional[List[str]] = None,
         mount_resource: Optional[List[ResourceSlot]] = None,
+        resultTable: Optional[Dict[str, Any]] = None,
         order_id: str = "",
         materials_loaded: bool = False,
         timeout_seconds: int = 3600,
@@ -1152,6 +1182,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             resource: 上游句柄提供的待装载物料显示值。
             coin_cell_code: 上游句柄提供的临时物料名称列。
             mount_resource: 上游句柄提供的临时库位列。
+            resultTable: 上游句柄提供的新格式结果表（data/columns/tableName）。
             order_id: 上游 ``submit_experiment_1`` 创建的订单 ID（可选；若上游连接则自动传入）。
             materials_loaded: 操作员勾选确认物料已装载。未勾选且存在物料显示则阻断启动。
             timeout_seconds: 超时时间（秒，框架参数）。
@@ -3258,6 +3289,75 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "quantity": [str(row.get("quantity") or "") for row in rows],
             }
         return tables
+
+    def _build_result_table(
+        self,
+        materials_by_type: Dict[str, List[Dict[str, Any]]],
+        table_name: str = "resultTable",
+    ) -> Dict[str, Any]:
+        """构建新的前端结果表格 schema（data/columns/tableName 结构）。
+
+        Args:
+            materials_by_type: 按模式分组的物料（Sample/Consumables/Reagent）
+            table_name: 前端表格标识符
+
+        Returns:
+            包含以下键的字典: data（行对象列表）、columns（列规格列表）、tableName
+        """
+        # 展平所有类型的物料
+        all_materials = []
+        for mode in ("Sample", "Consumables", "Reagent"):
+            all_materials.extend(materials_by_type.get(mode, []))
+
+        # 为每个物料解析仓库名称
+        warehouse_inventory_cache: Dict[str, List[Dict[str, Any]]] = {}
+        material_info_cache: Dict[str, Dict[str, Any]] = {}
+
+        data_rows = []
+        for mat in all_materials:
+            # 从 materialId 解析仓库名称
+            try:
+                resolved = self._resolve_material_record_to_warehouse(
+                    mat,
+                    warehouse_inventory_cache=warehouse_inventory_cache,
+                    material_info_cache=material_info_cache,
+                )
+                wh_name = resolved.get("warehouse_name", "")
+            except Exception as exc:
+                logger.warning(
+                    "无法解析仓库名称: materialId=%s, error=%s",
+                    mat.get("materialId"),
+                    exc,
+                )
+                wh_name = ""
+
+            data_rows.append({
+                "whName": wh_name,
+                "locationCode": str(mat.get("locationShowName") or mat.get("locationCode") or ""),
+                "materialName": str(mat.get("materialName") or ""),
+                "quantity": str(mat.get("quantity") or ""),
+            })
+
+        # 定义列 schema
+        columns = [
+            {"name": "设备", "key": "whName"},
+            {"name": "位置", "key": "locationCode"},
+            {"name": "物料名称", "key": "materialName"},
+            {"name": "数量", "key": "quantity"},
+        ]
+
+        logger.debug(
+            "构建结果表格: tableName=%s, columns=%s, dataRows=%s",
+            table_name,
+            columns,
+            data_rows,
+        )
+
+        return {
+            "data": data_rows,
+            "columns": columns,
+            "tableName": table_name,
+        }
 
     @staticmethod
     def _manual_load_resource_stub(
