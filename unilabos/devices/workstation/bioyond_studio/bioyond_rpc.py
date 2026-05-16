@@ -779,6 +779,49 @@ class BioyondV1RPC(BaseRequest):
 
         return response.get("data", {})
 
+    def take_out(
+        self,
+        order_id: str,
+        preintake_ids: list[str] | None = None,
+        material_ids: list[str] | None = None,
+    ) -> dict:
+        """取出订单关联通量/物料
+
+        参数:
+            order_id: 订单ID
+            preintake_ids: 通量ID列表，可为空
+            material_ids: 物料ID列表，可为空
+
+        返回值:
+            dict: 服务端响应包，失败返回空字典
+        """
+        if not order_id:
+            self._logger.error("取出订单关联通量/物料错误: 缺少订单ID")
+            return {}
+
+        params = {
+            "orderId": order_id,
+            "preintakeIds": list(preintake_ids or []),
+            "materialIds": list(material_ids or []),
+        }
+
+        response = self.post(
+            url=f'{self.host}/api/lims/order/take-out',
+            params={
+                "apiKey": self.api_key,
+                "requestTime": self.get_current_time_iso8601(),
+                "data": params,
+            })
+
+        if not response:
+            return {}
+
+        if response['code'] != 1:
+            self._logger.error(f"取出订单关联通量/物料错误: {response.get('message', '')}")
+            return response
+
+        return response
+
     def cancel_order(self, json_str: str) -> bool:
         """取消指定任务
 
