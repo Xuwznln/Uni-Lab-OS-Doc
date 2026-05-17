@@ -1078,7 +1078,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "ZAgainstTheWall": pip_pos.z - z_wall,
                     "X2Pos": pip_pos.x + self.right_2_left.x,
                     "Y2Pos": pip_pos.y + self.right_2_left.y,
-                    "Z2Pos": max(min(pip_pos.z + self.right_2_left.z, self.max_z_pipetting),0),
+                    "Z2Pos": max(min((pip_pos.z + self.right_2_left.z), self.max_z_pipetting),0),
                     "X2_Left": half_x,
                     "X2_Right": half_x,
                     "ZAgainstTheWall2": pip_pos.z - z_wall,
@@ -2053,7 +2053,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
         step = self.api_client.Imbibing(
             axis=axis,
-            dosage=int(volumes[0]),
+            dosage=float(volumes[0]),
             plate_no=PlateNo,
             is_whole_plate=False,
             hole_row=hole_row,

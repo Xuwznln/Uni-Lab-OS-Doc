@@ -158,6 +158,11 @@ class LiquidHandlerMiddleware(LiquidHandler):
 
         if self._simulator:
             return await self._simulate_handler.pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
+        # 让 PLR 走标准链路：tracker.remove_tip -> 成功 commit / 失败 rollback，
+        # 由此 TipSpot.has_tip() 自动反映为 False，符合 LiquidHandler 规范。
+        result = await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
+        for tip_spot in tip_spots:
+            tip_spot.empty()
         if hasattr(self, "_ros_node") and self._ros_node is not None:
             task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": tip_spots})
             submit_time = time.time()
@@ -166,7 +171,7 @@ class LiquidHandlerMiddleware(LiquidHandler):
                     self._ros_node.lab_logger().info(f"pick_up_tips {tip_spots} 超时")
                     break
                 time.sleep(0.01)
-        return await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
+        return result
 
     async def drop_tips(
         self,
