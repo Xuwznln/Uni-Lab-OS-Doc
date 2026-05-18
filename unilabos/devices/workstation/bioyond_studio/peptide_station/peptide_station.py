@@ -11,7 +11,7 @@ import sys
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
 from uuid import UUID
 
 import requests
@@ -743,40 +743,58 @@ class BioyondPeptideStation(BioyondWorkstation):
             result["resultTable"] = resultTable or {}
             return result
 
-    @action(always_free=True, description="复位调度器/订单/库位")
+    @action(
+        always_free=True,
+        goal_default={
+            "reset_operations": ["scheduler_reset", "reset_order_status", "reset_location"],
+        },
+        description="复位调度器/订单/库位",
+    )
     def reset(
         self,
-        reset_operations: Optional[List[str]] = None,
-        dry_run: bool = False,
-        order_id: str = "",
-        location_id: str = "",
+        reset_operations: Optional[
+            List[Literal["scheduler_reset", "reset_order_status", "reset_location"]]
+        ] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         with self._debug_call_session("reset"):
             operations = self._normalize_reset_operations(reset_operations)
-            planned = [{"operation": op, "endpoint": self._reset_operation_endpoint(op)} for op in operations]
-            result: Dict[str, Any] = {"dry_run": bool(dry_run), "planned_calls": planned, "executed_calls": [], "skipped_operations": []}
-            if dry_run:
-                return result
+            result: Dict[str, Any] = {
+                "selected_operations": operations,
+                "executed_calls": [],
+                "skipped_operations": [],
+            }
             rpc = self._require_hardware_interface()
             for operation in operations:
                 if operation == "scheduler_reset":
                     code = rpc.scheduler_reset()
                     result["executed_calls"].append({"operation": operation, "result": {"code": code}})
                 elif operation == "reset_order_status":
-                    resolved = str(kwargs.get("reset_order_id") or order_id or kwargs.get("order_id") or "").strip()
+                    resolved = str(
+                        kwargs.get("reset_order_id") or kwargs.get("order_id") or ""
+                    ).strip()
                     if not resolved:
-                        result["skipped_operations"].append({"operation": operation, "reason": "缺少 order_id/reset_order_id"})
+                        result["skipped_operations"].append(
+                            {"operation": operation, "reason": "缺少 order_id/reset_order_id"}
+                        )
                         continue
                     code = rpc.reset_order_status(resolved)
-                    result["executed_calls"].append({"operation": operation, "order_id": resolved, "result": {"code": code}})
+                    result["executed_calls"].append(
+                        {"operation": operation, "order_id": resolved, "result": {"code": code}}
+                    )
                 elif operation == "reset_location":
-                    resolved = str(kwargs.get("reset_location_id") or location_id or kwargs.get("location_id") or "").strip()
+                    resolved = str(
+                        kwargs.get("reset_location_id") or kwargs.get("location_id") or ""
+                    ).strip()
                     if not resolved:
-                        result["skipped_operations"].append({"operation": operation, "reason": "缺少 location_id/reset_location_id"})
+                        result["skipped_operations"].append(
+                            {"operation": operation, "reason": "缺少 location_id/reset_location_id"}
+                        )
                         continue
                     code = rpc.reset_location(resolved)
-                    result["executed_calls"].append({"operation": operation, "location_id": resolved, "result": {"code": code}})
+                    result["executed_calls"].append(
+                        {"operation": operation, "location_id": resolved, "result": {"code": code}}
+                    )
                 else:
                     raise ValueError(f"未知 reset operation: {operation}")
             return result

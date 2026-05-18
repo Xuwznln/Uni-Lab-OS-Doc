@@ -616,13 +616,33 @@ def test_start_experiment_starts_when_table_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_reset_dry_run_default_false_and_planned_calls() -> None:
-    station = _make_station()
-    sig = inspect.signature(station.reset)
-    assert sig.parameters["dry_run"].default is False
-    out = station.reset(reset_operations=["scheduler_reset"], dry_run=True)
-    assert out["dry_run"] is True
-    assert out["planned_calls"][0]["endpoint"] == "/api/lims/scheduler/reset"
+def test_reset_signature_drops_legacy_params_and_uses_literal() -> None:
+    """plan 调整：删除 dry_run/order_id/location_id；reset_operations 用 Literal 注解。"""
+    cls = getattr(_import_module(), CLASS_NAME)
+    sig = inspect.signature(cls.reset)
+    params = sig.parameters
+    for legacy in ("dry_run", "order_id", "location_id"):
+        assert legacy not in params, f"reset 不应再有 {legacy} 入参"
+    assert "reset_operations" in params
+    assert any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()), \
+        "reset 必须保留 **kwargs 以兜底 reset_order_id/reset_location_id"
+
+    annotation = params["reset_operations"].annotation
+    rendered = annotation if isinstance(annotation, str) else repr(annotation)
+    for op in ("scheduler_reset", "reset_order_status", "reset_location"):
+        assert op in rendered, f"reset_operations 的 Literal 必须包含 {op}"
+
+
+def test_reset_goal_default_contains_all_operations() -> None:
+    """像 sirna 一样，goal_default 默认勾选全部三个 reset 操作。"""
+    cls = getattr(_import_module(), CLASS_NAME)
+    meta = getattr(cls.reset, "_action_registry_meta", {})
+    goal_default = meta.get("goal_default") or {}
+    assert goal_default.get("reset_operations") == [
+        "scheduler_reset",
+        "reset_order_status",
+        "reset_location",
+    ]
 
 
 def test_reset_executes_typed_rpc_calls() -> None:
@@ -632,11 +652,30 @@ def test_reset_executes_typed_rpc_calls() -> None:
     station.hardware_interface.reset_location.return_value = 1
     out = station.reset(
         reset_operations=["scheduler_reset", "reset_order_status", "reset_location"],
-        dry_run=False,
-        order_id=ORDER_GUID,
-        location_id="loc-1",
+        reset_order_id=ORDER_GUID,
+        reset_location_id="loc-1",
     )
     station.hardware_interface.scheduler_reset.assert_called_once_with()
     station.hardware_interface.reset_order_status.assert_called_once_with(ORDER_GUID)
     station.hardware_interface.reset_location.assert_called_once_with("loc-1")
+    assert out["selected_operations"] == [
+        "scheduler_reset",
+        "reset_order_status",
+        "reset_location",
+    ]
     assert len(out["executed_calls"]) == 3
+    assert out["skipped_operations"] == []
+
+
+def test_reset_skips_when_ids_missing() -> None:
+    """没有 order_id / location_id 时应该 skip 而不是抛错。"""
+    station = _make_station()
+    station.hardware_interface.scheduler_reset.return_value = 1
+    out = station.reset(
+        reset_operations=["scheduler_reset", "reset_order_status", "reset_location"],
+    )
+    station.hardware_interface.scheduler_reset.assert_called_once_with()
+    station.hardware_interface.reset_order_status.assert_not_called()
+    station.hardware_interface.reset_location.assert_not_called()
+    skipped_ops = {item["operation"] for item in out["skipped_operations"]}
+    assert skipped_ops == {"reset_order_status", "reset_location"}
