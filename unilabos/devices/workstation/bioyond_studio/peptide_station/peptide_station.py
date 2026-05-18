@@ -194,24 +194,6 @@ class PeptideDay4LCMSOptionalParams(PeptideCommonSubmitOptionalParams, total=Fal
     pass
 
 
-_SUBMIT_INPUT_HANDLES = [
-    ActionInputHandle(
-        key="sample_excel_relative_path",
-        data_type="bioyond_sample_file",
-        label="样品 Excel 相对路径",
-        data_key="sample_excel_relative_path",
-        data_source=DataSource.HANDLE,
-        io_type="source",
-    ),
-]
-_SUBMIT_OUTPUT_HANDLES = [
-    ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
-    ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
-    ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
-    ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
-]
-
-
 def _apply_default_peptide_material_type_mappings(config: Dict[str, Any]) -> None:
     configured = config.get("material_type_mappings")
     if not isinstance(configured, dict):
@@ -456,7 +438,24 @@ class BioyondPeptideStation(BioyondWorkstation):
             }
             return {"step_parameters_raw_json": augmented, "filtered_subworkflows": bindings}
 
-    @action(always_free=True, description="按工作流名称提交多肽实验（非 Day1）", handles=_SUBMIT_INPUT_HANDLES + _SUBMIT_OUTPUT_HANDLES)
+    @action(
+        always_free=True,
+        description="按工作流名称提交多肽实验（非 Day1）",
+        handles=[
+            ActionInputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+        ],
+    )
     def submit_experiment(
         self,
         required_params: PeptideGenericSubmitRequiredParams,
@@ -471,7 +470,24 @@ class BioyondPeptideStation(BioyondWorkstation):
             generic=True,
         )
 
-    @action(always_free=True, description="提交 Day2 多肽定量实验", handles=_SUBMIT_INPUT_HANDLES + _SUBMIT_OUTPUT_HANDLES)
+    @action(
+        always_free=True,
+        description="提交 Day2 多肽定量实验",
+        handles=[
+            ActionInputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+        ],
+    )
     def submit_experiment_day2(
         self,
         required_params: PeptideDay2RequiredParams,
@@ -480,7 +496,24 @@ class BioyondPeptideStation(BioyondWorkstation):
     ) -> Dict[str, Any]:
         return self._submit_experiment_core("day2", required_params, optional_params, sample_excel_relative_path)
 
-    @action(always_free=True, description="提交 Day3 线肽环化实验", handles=_SUBMIT_INPUT_HANDLES + _SUBMIT_OUTPUT_HANDLES)
+    @action(
+        always_free=True,
+        description="提交 Day3 线肽环化实验",
+        handles=[
+            ActionInputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+        ],
+    )
     def submit_experiment_day3(
         self,
         required_params: PeptideDay3RequiredParams,
@@ -489,7 +522,24 @@ class BioyondPeptideStation(BioyondWorkstation):
     ) -> Dict[str, Any]:
         return self._submit_experiment_core("day3", required_params, optional_params, sample_excel_relative_path)
 
-    @action(always_free=True, description="提交 Day4 环肽酰化（酶标）实验", handles=_SUBMIT_INPUT_HANDLES + _SUBMIT_OUTPUT_HANDLES)
+    @action(
+        always_free=True,
+        description="提交 Day4 环肽酰化（酶标）实验",
+        handles=[
+            ActionInputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+        ],
+    )
     def submit_experiment_day4(
         self,
         required_params: PeptideDay4RequiredParams,
@@ -498,7 +548,24 @@ class BioyondPeptideStation(BioyondWorkstation):
     ) -> Dict[str, Any]:
         return self._submit_experiment_core("day4", required_params, optional_params, sample_excel_relative_path)
 
-    @action(always_free=True, description="提交 Day4 环肽酰化 LCMS 实验", handles=_SUBMIT_INPUT_HANDLES + _SUBMIT_OUTPUT_HANDLES)
+    @action(
+        always_free=True,
+        description="提交 Day4 环肽酰化 LCMS 实验",
+        handles=[
+            ActionInputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+        ],
+    )
     def submit_experiment_day4_LCMS(
         self,
         required_params: PeptideDay4LCMSRequiredParams,
