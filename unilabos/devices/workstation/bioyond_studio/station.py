@@ -56,13 +56,17 @@ class ConnectionMonitor:
     def _monitor_loop(self):
         while self._running:
             try:
-                # 使用 lightweight API 检查连接
-                # query_matial_type_list 是比较快的查询
-                start_time = time.time()
-                result = self.workstation.hardware_interface.material_type_list()
+                # 使用轻量级调度状态接口检查连接，避免启动时打印完整物料类型列表。
+                result = self.workstation.hardware_interface.scheduler_status()
 
                 status = "online" if result else "offline"
-                msg = "Connection established" if status == "online" else "Failed to get material type list"
+                if status == "online":
+                    msg = (
+                        f"Scheduler status={result.get('status')}, "
+                        f"hasTask={result.get('hasTask')}"
+                    )
+                else:
+                    msg = "Failed to get scheduler status"
 
                 if status != self._last_status:
                     logger.info(f"Bioyond连接状态变更: {self._last_status} -> {status}")
