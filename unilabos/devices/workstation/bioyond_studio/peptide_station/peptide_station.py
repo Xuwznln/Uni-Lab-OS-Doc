@@ -799,6 +799,23 @@ class BioyondPeptideStation(BioyondWorkstation):
                     raise ValueError(f"未知 reset operation: {operation}")
             return result
 
+    @action(always_free=True, description="从 Bioyond 同步库存物料到本地资源树")
+    def sync_from_external(self, **kwargs: Any) -> Dict[str, Any]:
+        del kwargs
+        with self._debug_call_session("sync_from_external"):
+            self._require_hardware_interface()
+            if not getattr(self, "resource_synchronizer", None):
+                raise RuntimeError("BioyondPeptideStation 未初始化 resource_synchronizer")
+
+            success = bool(self.resource_synchronizer.sync_from_external())
+            resource_tree_update_requested = self._publish_resource_tree_update() if success else False
+            return {
+                "success": success,
+                "action": "sync_from_external",
+                "resource_tree_update_requested": resource_tree_update_requested,
+                "message": "Bioyond 资源同步成功" if success else "Bioyond 资源同步失败或无库存数据",
+            }
+
     @action(always_free=True, description="启动 Bioyond 调度器")
     def scheduler_start(self, **kwargs: Any) -> Dict[str, Any]:
         del kwargs
@@ -1353,6 +1370,43 @@ class BioyondPeptideStation(BioyondWorkstation):
         }
 
     # ---------- 基础设施 ----------
+
+    def _publish_resource_tree_update(self) -> bool:
+        """触发当前 deck 的资源树更新，让前端看到最新同步结果。"""
+        ros_node = getattr(self, "_ros_node", None)
+        if ros_node is None:
+            logger.warning("资源树更新跳过: 未绑定 _ros_node")
+            return False
+
+        deck = getattr(self, "deck", None)
+        if deck is None:
+            logger.warning("资源树更新跳过: 未绑定 deck")
+            return False
+
+        update_resource = getattr(ros_node, "update_resource", None)
+        if update_resource is None:
+            logger.warning("资源树更新跳过: _ros_node 缺少 update_resource")
+            return False
+
+        try:
+            try:
+                from unilabos.ros.nodes.base_device_node import ROS2DeviceNode  # type: ignore
+            except Exception:  # pragma: no cover
+                ROS2DeviceNode = None  # type: ignore[assignment]
+
+            if ROS2DeviceNode is not None and hasattr(ROS2DeviceNode, "run_async_func"):
+                ROS2DeviceNode.run_async_func(update_resource, True, **{"resources": [deck]})
+            else:
+                update_resource(resources=[deck])
+
+            logger.info("已调度多肽 deck '%s' 的资源树更新", getattr(deck, "name", ""))
+            return True
+        except TypeError as exc:
+            logger.error("资源树更新失败: update_resource 调用签名错误: %s", exc)
+            raise
+        except Exception as exc:
+            logger.warning("资源树更新失败: %s", exc)
+            return False
 
     def _run_scheduler_action(self, method_name: str, label: str) -> Dict[str, Any]:
         rpc = self._require_hardware_interface()
