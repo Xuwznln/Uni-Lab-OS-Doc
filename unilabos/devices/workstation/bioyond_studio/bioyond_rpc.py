@@ -415,21 +415,25 @@ class BioyondV1RPC(BaseRequest):
             return {}
         return response.get("data", {})
 
-    def reset_location(self, location_id: str) -> int:
+    def reset_location(self, location_id: Optional[str] = None) -> int:
         """复位库位
 
+        现场实测 ``POST /api/lims/storage/reset-location`` 不传 ``data`` 即可成功
+        （见 ``temp_benyao/peptide/_findings/2026-05-21_1615_remaining_resets_no_data_live.md``），
+        因此默认无 ``data`` 字段；保留 ``location_id`` 仅为兼容旧调用，传入会被忽略。
+
         参数:
-            location_id: 库位ID
+            location_id: 兼容入参，已被忽略；新逻辑不再以 location 为粒度复位。
 
         返回值:
             int: 成功返回1，失败返回0
         """
+        del location_id
         response = self.post(
             url=f'{self.host}/api/lims/storage/reset-location',
             params={
                 "apiKey": self.api_key,
                 "requestTime": self.get_current_time_iso8601(),
-                "data": location_id,
             })
         if not response or response['code'] != 1:
             return 0
@@ -929,21 +933,25 @@ class BioyondV1RPC(BaseRequest):
             return {}
         return response.get("data", {})
 
-    def reset_order_status(self, order_id: str) -> int:
+    def reset_order_status(self, order_id: Optional[str] = None) -> int:
         """复位订单状态
 
+        现场实测 ``POST /api/lims/order/reset-order-status`` 不传 ``data`` 即可成功
+        （见 ``temp_benyao/peptide/_findings/2026-05-21_1613_reset_order_status_no_data_live.md``），
+        因此默认无 ``data`` 字段；保留 ``order_id`` 仅为兼容旧调用，传入会被忽略。
+
         参数:
-            order_id: 订单ID
+            order_id: 兼容入参，已被忽略；新逻辑不再以单订单为粒度复位。
 
         返回值:
             int: 成功返回1，失败返回0
         """
+        del order_id
         response = self.post(
             url=f'{self.host}/api/lims/order/reset-order-status',
             params={
                 "apiKey": self.api_key,
                 "requestTime": self.get_current_time_iso8601(),
-                "data": order_id,
             })
         if not response or response['code'] != 1:
             return 0

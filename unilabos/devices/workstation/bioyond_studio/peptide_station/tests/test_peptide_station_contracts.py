@@ -95,7 +95,8 @@ def test_required_actions_exposed() -> None:
         "submit_experiment_day4",
         "submit_experiment_day4_LCMS",
         "start_experiment",
-        "reset",
+        "reset_auto",
+        "reset_manual",
         "scheduler_start",
         "scheduler_stop",
         "scheduler_pause",
@@ -112,14 +113,14 @@ def test_required_actions_exposed() -> None:
 def test_manual_confirm_node_types() -> None:
     module = _import_module()
     cls = getattr(module, CLASS_NAME)
-    manual = {"submit_experiment_day1", "start_experiment"}
+    manual = {"submit_experiment_day1", "start_experiment", "reset_manual"}
     normal = {
         "submit_experiment",
         "submit_experiment_day2",
         "submit_experiment_day3",
         "submit_experiment_day4",
         "submit_experiment_day4_LCMS",
-        "reset",
+        "reset_auto",
         "scheduler_start",
         "list_sample_excels",
         "get_step_parameters",
@@ -142,7 +143,7 @@ def test_submit_and_reset_signatures_exclude_legacy_manual_confirm() -> None:
         "submit_experiment_day3",
         "submit_experiment_day4",
         "submit_experiment_day4_LCMS",
-        "reset",
+        "reset_auto",
     ):
         params = inspect.signature(getattr(cls, name)).parameters
         assert "timeout_seconds" not in params, name
@@ -612,70 +613,579 @@ def test_start_experiment_starts_when_table_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 10. Reset
+# 10. Reset (plan 2026-05-21: reset_auto + reset_manual 四勾选)
 # ---------------------------------------------------------------------------
 
 
-def test_reset_signature_drops_legacy_params_and_uses_literal() -> None:
-    """plan 调整：删除 dry_run/order_id/location_id；reset_operations 用 Literal 注解。"""
+RESET_BOOL_PARAMS = (
+    "reset_scheduler",
+    "reset_order_status",
+    "reset_location",
+    "reset_devices",
+)
+
+
+def _reset_meta(name: str) -> Dict[str, Any]:
     cls = getattr(_import_module(), CLASS_NAME)
-    sig = inspect.signature(cls.reset)
-    params = sig.parameters
-    for legacy in ("dry_run", "order_id", "location_id"):
-        assert legacy not in params, f"reset 不应再有 {legacy} 入参"
-    assert "reset_operations" in params
-    assert any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()), \
-        "reset 必须保留 **kwargs 以兜底 reset_order_id/reset_location_id"
-
-    annotation = params["reset_operations"].annotation
-    rendered = annotation if isinstance(annotation, str) else repr(annotation)
-    for op in ("scheduler_reset", "reset_order_status", "reset_location"):
-        assert op in rendered, f"reset_operations 的 Literal 必须包含 {op}"
+    return dict(getattr(getattr(cls, name), "_action_registry_meta", {}))
 
 
-def test_reset_goal_default_contains_all_operations() -> None:
-    """像 sirna 一样，goal_default 默认勾选全部三个 reset 操作。"""
-    cls = getattr(_import_module(), CLASS_NAME)
-    meta = getattr(cls.reset, "_action_registry_meta", {})
+# --- plan §Tests 1: reset_auto 不是 MANUAL_CONFIRM ---
+
+
+def test_reset_auto_is_not_manual_confirm() -> None:
+    module = _import_module()
+    meta = _reset_meta("reset_auto")
+    assert meta.get("node_type") != module.NodeType.MANUAL_CONFIRM
+
+
+# --- plan §Tests 2: reset_manual 是 MANUAL_CONFIRM ---
+
+
+def test_reset_manual_is_manual_confirm() -> None:
+    module = _import_module()
+    meta = _reset_meta("reset_manual")
+    assert meta.get("node_type") == module.NodeType.MANUAL_CONFIRM
+
+
+# --- plan §Tests 3: reset_manual 关键 metadata ---
+
+
+def test_reset_manual_metadata_shape() -> None:
+    meta = _reset_meta("reset_manual")
+    assert meta.get("always_free") is True
+    assert meta.get("placeholder_keys") == {
+        "assignee_user_ids": "unilabos_manual_confirm",
+    }
     goal_default = meta.get("goal_default") or {}
-    assert goal_default.get("reset_operations") == [
-        "scheduler_reset",
-        "reset_order_status",
-        "reset_location",
-    ]
+    assert goal_default.get("timeout_seconds") == 3600
+    assert goal_default.get("assignee_user_ids") == []
+    assert goal_default.get("physical_cleanup_confirmed") is False
 
 
-def test_reset_executes_typed_rpc_calls() -> None:
+# --- plan §Tests 4: 两个 action 都暴露 4 个真实 bool 参数 ---
+
+
+def _resolved_bool_annotation(param: inspect.Parameter) -> Any:
+    """`from __future__ import annotations` 下注解是字符串；统一解析回真实类型。"""
+    annotation = param.annotation
+    if annotation is bool:
+        return bool
+    if isinstance(annotation, str):
+        # 既不是 Annotated[...] 也不是 Optional[...] 的纯 "bool" 字符串
+        return bool if annotation.strip() == "bool" else annotation
+    return annotation
+
+
+def test_reset_actions_expose_four_real_bool_params() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    for action_name in ("reset_auto", "reset_manual"):
+        params = inspect.signature(getattr(cls, action_name)).parameters
+        for flag in RESET_BOOL_PARAMS:
+            assert flag in params, f"{action_name} 缺少 {flag}"
+            resolved = _resolved_bool_annotation(params[flag])
+            assert resolved is bool, (
+                f"{action_name}.{flag} 必须是裸 bool（不能用 Annotated[bool, Field(...)] 包裹），实际: {params[flag].annotation!r}"
+            )
+            assert params[flag].kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            ), f"{action_name}.{flag} 必须是真实参数，不能藏在 **kwargs"
+
+
+# --- plan §Tests 5: registry 生成的 schema 标记 reset 字段为 boolean ---
+
+
+def test_reset_action_param_annotations_are_bool_for_schema() -> None:
+    """plan: 当前 AST registry 不 unwrap Annotated；裸 bool 才能映射成 type: boolean。
+
+    这里直接检查 type_to_schema 在 Python 类型 ``bool`` 上返回 ``{"type": "boolean"}``，
+    再校验 reset_auto/reset_manual 的真实参数注解就是 ``bool``（裸字符串 "bool" 也算），
+    从而保证生成的 JSON Schema 一定是 boolean，不会被前端当成 object/string。
+    """
+    from unilabos.registry.utils import type_to_schema
+
+    assert type_to_schema(bool) == {"type": "boolean"}
+
+    cls = getattr(_import_module(), CLASS_NAME)
+    for action_name in ("reset_auto", "reset_manual"):
+        params = inspect.signature(getattr(cls, action_name)).parameters
+        for flag in RESET_BOOL_PARAMS:
+            resolved = _resolved_bool_annotation(params[flag])
+            assert type_to_schema(resolved) == {"type": "boolean"}, (
+                f"{action_name}.{flag} schema 必须是 boolean，实际注解: {params[flag].annotation!r}"
+            )
+
+
+# --- plan §Tests 6: reset_auto 替换旧 reset，未保留旧 id-shaped reset 别名 ---
+
+
+def test_legacy_reset_action_removed() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    have = {name for name, _ in inspect.getmembers(cls, inspect.isfunction)}
+    assert "reset" not in have, "旧 reset 应被 reset_auto 完全替换，不保留同名别名"
+    assert "reset_auto" in have
+
+
+# --- plan §Tests 7: goal_default 中前三项 True，reset_devices=False ---
+
+
+def test_reset_goal_defaults_first_three_true_devices_false() -> None:
+    for action_name in ("reset_auto", "reset_manual"):
+        meta = _reset_meta(action_name)
+        goal_default = meta.get("goal_default") or {}
+        assert goal_default.get("reset_scheduler") is True, action_name
+        assert goal_default.get("reset_order_status") is True, action_name
+        assert goal_default.get("reset_location") is True, action_name
+        assert goal_default.get("reset_devices") is False, action_name
+
+
+# --- plan §Tests 8: reset_manual(physical_cleanup_confirmed=False) 不调任何 RPC ---
+
+
+def test_reset_manual_blocks_when_not_confirmed() -> None:
     station = _make_station()
-    station.hardware_interface.scheduler_reset.return_value = 1
-    station.hardware_interface.reset_order_status.return_value = 1
-    station.hardware_interface.reset_location.return_value = 1
-    out = station.reset(
-        reset_operations=["scheduler_reset", "reset_order_status", "reset_location"],
-        reset_order_id=ORDER_GUID,
-        reset_location_id="loc-1",
+    out = station.reset_manual(
+        reset_scheduler=True,
+        reset_order_status=True,
+        reset_location=True,
+        reset_devices=True,
+        physical_cleanup_confirmed=False,
     )
-    station.hardware_interface.scheduler_reset.assert_called_once_with()
-    station.hardware_interface.reset_order_status.assert_called_once_with(ORDER_GUID)
-    station.hardware_interface.reset_location.assert_called_once_with("loc-1")
-    assert out["selected_operations"] == [
-        "scheduler_reset",
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.assert_not_called()
+    rpc.reset_order_status.assert_not_called()
+    rpc.reset_location.assert_not_called()
+    rpc.reset_devices.assert_not_called()
+    assert out["status"] == "blocked"
+    assert out["physical_cleanup_confirmed"] is False
+    assert "请确认" in out["confirmation_message"]
+
+
+# --- plan §Tests 9: reset_auto() 默认调三件、不调 reset_devices ---
+
+
+def test_reset_auto_defaults_call_three_and_skip_devices() -> None:
+    station = _make_station()
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.return_value = 1
+    rpc.reset_order_status.return_value = 1
+    rpc.reset_location.return_value = 1
+    out = station.reset_auto()
+    rpc.scheduler_reset.assert_called_once_with()
+    rpc.reset_order_status.assert_called_once_with()
+    rpc.reset_location.assert_called_once_with()
+    rpc.reset_devices.assert_not_called()
+
+    executed_ops = [item["operation"] for item in out["executed_calls"]]
+    assert executed_ops == ["reset_scheduler", "reset_order_status", "reset_location"]
+    skipped_ops = {item["operation"] for item in out["skipped_operations"]}
+    assert skipped_ops == {"reset_devices"}
+    selected = {item["key"]: item["selected"] for item in out["selected_operations"]}
+    assert selected == {
+        "reset_scheduler": True,
+        "reset_order_status": True,
+        "reset_location": True,
+        "reset_devices": False,
+    }
+
+
+# --- plan §Tests 10: reset_auto(reset_devices=True) 也会调 reset_devices ---
+
+
+def test_reset_auto_with_devices_true_calls_reset_devices() -> None:
+    station = _make_station()
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.return_value = 1
+    rpc.reset_order_status.return_value = 1
+    rpc.reset_location.return_value = 1
+    rpc.reset_devices.return_value = 1
+    out = station.reset_auto(reset_devices=True)
+    rpc.reset_devices.assert_called_once_with()
+    executed_ops = [item["operation"] for item in out["executed_calls"]]
+    assert executed_ops == [
+        "reset_scheduler",
         "reset_order_status",
         "reset_location",
+        "reset_devices",
     ]
-    assert len(out["executed_calls"]) == 3
     assert out["skipped_operations"] == []
 
 
-def test_reset_skips_when_ids_missing() -> None:
-    """没有 order_id / location_id 时应该 skip 而不是抛错。"""
+def test_reset_auto_individual_checkboxes_drive_calls() -> None:
+    """更细粒度：单独勾 reset_scheduler 时只调 scheduler_reset。"""
     station = _make_station()
-    station.hardware_interface.scheduler_reset.return_value = 1
-    out = station.reset(
-        reset_operations=["scheduler_reset", "reset_order_status", "reset_location"],
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.return_value = 1
+    out = station.reset_auto(
+        reset_scheduler=True,
+        reset_order_status=False,
+        reset_location=False,
+        reset_devices=False,
     )
-    station.hardware_interface.scheduler_reset.assert_called_once_with()
-    station.hardware_interface.reset_order_status.assert_not_called()
-    station.hardware_interface.reset_location.assert_not_called()
-    skipped_ops = {item["operation"] for item in out["skipped_operations"]}
-    assert skipped_ops == {"reset_order_status", "reset_location"}
+    rpc.scheduler_reset.assert_called_once_with()
+    rpc.reset_order_status.assert_not_called()
+    rpc.reset_location.assert_not_called()
+    rpc.reset_devices.assert_not_called()
+    skipped = {item["operation"] for item in out["skipped_operations"]}
+    assert skipped == {"reset_order_status", "reset_location", "reset_devices"}
+
+
+def test_reset_manual_after_confirmation_calls_same_helper() -> None:
+    """plan §reset_manual 执行规则：勾选确认后等价于 reset_auto。"""
+    station = _make_station()
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.return_value = 1
+    rpc.reset_order_status.return_value = 1
+    rpc.reset_location.return_value = 1
+    rpc.reset_devices.return_value = 1
+    out = station.reset_manual(
+        reset_scheduler=True,
+        reset_order_status=True,
+        reset_location=True,
+        reset_devices=True,
+        physical_cleanup_confirmed=True,
+    )
+    rpc.scheduler_reset.assert_called_once_with()
+    rpc.reset_order_status.assert_called_once_with()
+    rpc.reset_location.assert_called_once_with()
+    rpc.reset_devices.assert_called_once_with()
+    assert out["physical_cleanup_confirmed"] is True
+    assert out["confirmation_message"]
+    assert [item["operation"] for item in out["executed_calls"]] == [
+        "reset_scheduler",
+        "reset_order_status",
+        "reset_location",
+        "reset_devices",
+    ]
+
+
+# --- plan §Tests 11: RPC 包装层 reset_order_status / reset_location 不发送 data 键 ---
+
+
+def test_rpc_reset_order_status_sends_no_data_key() -> None:
+    from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondV1RPC
+
+    rpc = object.__new__(BioyondV1RPC)
+    rpc.host = "http://test"
+    rpc.api_key = "k"
+    rpc._logger = MagicMock()
+    rpc.post = MagicMock(return_value={"code": 1})  # type: ignore[method-assign]
+    rpc.get_current_time_iso8601 = MagicMock(return_value="2026-05-21T08:00:00.000Z")  # type: ignore[method-assign]
+
+    rpc.reset_order_status("ignored-uuid")
+    args, kwargs = rpc.post.call_args
+    sent_params = kwargs.get("params") or (args[1] if len(args) > 1 else {})
+    assert "data" not in sent_params, "reset_order_status 不应再发送 data 字段"
+    assert set(sent_params.keys()) == {"apiKey", "requestTime"}
+
+
+def test_rpc_reset_location_sends_no_data_key() -> None:
+    from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondV1RPC
+
+    rpc = object.__new__(BioyondV1RPC)
+    rpc.host = "http://test"
+    rpc.api_key = "k"
+    rpc._logger = MagicMock()
+    rpc.post = MagicMock(return_value={"code": 1})  # type: ignore[method-assign]
+    rpc.get_current_time_iso8601 = MagicMock(return_value="2026-05-21T08:00:00.000Z")  # type: ignore[method-assign]
+
+    rpc.reset_location("ignored-loc-id")
+    args, kwargs = rpc.post.call_args
+    sent_params = kwargs.get("params") or (args[1] if len(args) > 1 else {})
+    assert "data" not in sent_params, "reset_location 不应再发送 data 字段"
+    assert set(sent_params.keys()) == {"apiKey", "requestTime"}
+
+
+# --- plan §Tests 12 + 13: 任何 reset 路径都不调用 take_out / refresh_material_cache ---
+
+
+def test_reset_paths_do_not_call_take_out_or_material_cache() -> None:
+    station = _make_station()
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.return_value = 1
+    rpc.reset_order_status.return_value = 1
+    rpc.reset_location.return_value = 1
+    rpc.reset_devices.return_value = 1
+
+    station.reset_auto(reset_devices=True)
+    station.reset_manual(physical_cleanup_confirmed=True, reset_devices=True)
+    station.reset_manual(physical_cleanup_confirmed=False)
+
+    rpc.take_out.assert_not_called()
+    refresh = getattr(rpc, "refresh_material_cache", None)
+    if refresh is not None and hasattr(refresh, "assert_not_called"):
+        refresh.assert_not_called()
+
+
+# --- 失败/兜底用例：不 fail-fast，单步异常或 code!=1 仅记 warning ---
+
+
+def test_reset_auto_records_warning_when_rpc_returns_non_one() -> None:
+    station = _make_station()
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.return_value = 0  # 业务失败
+    rpc.reset_order_status.return_value = 1
+    rpc.reset_location.return_value = 1
+    out = station.reset_auto()
+    rpc.scheduler_reset.assert_called_once_with()
+    rpc.reset_order_status.assert_called_once_with()
+    rpc.reset_location.assert_called_once_with()
+    assert any("reset_scheduler" in w for w in out.get("warnings", []))
+
+
+def test_reset_auto_continues_after_rpc_exception() -> None:
+    station = _make_station()
+    rpc = station.hardware_interface
+    rpc.scheduler_reset.side_effect = RuntimeError("HTTP 500")
+    rpc.reset_order_status.return_value = 1
+    rpc.reset_location.return_value = 1
+    out = station.reset_auto()
+    rpc.reset_order_status.assert_called_once_with()
+    rpc.reset_location.assert_called_once_with()
+    error_entries = [item for item in out["executed_calls"] if "error" in item]
+    assert any(item["operation"] == "reset_scheduler" for item in error_entries)
+
+
+def test_reset_manual_confirmation_message_constant() -> None:
+    module = _import_module()
+    msg = module.RESET_MANUAL_CONFIRM_MESSAGE
+    for keyword in ("G3", "CEM", "Tecan", "撕膜机", "封膜机", "打标机", "旋转堆栈", "转台", "冰箱", "IDOT", "酶标仪", "离心机", "LCMS"):
+        assert keyword in msg, f"reset_manual 提示文案缺关键字: {keyword}"
+    meta = _reset_meta("reset_manual")
+    assert meta.get("description") == msg, "reset_manual 装饰器 description 应等于常量本身"
+
+
+# ---------------------------------------------------------------------------
+# 11. wait_for_order_finish + unload_materials（plan 2026-05-20 新增节点）
+# ---------------------------------------------------------------------------
+
+
+def _make_station_with_finish_state() -> Any:
+    """带订单完成事件状态的 station 实例（process_order_finish_report 用）。"""
+    import threading as _threading
+
+    station = _make_station()
+    station.order_finish_event = _threading.Event()
+    station.last_order_code = None
+    station.last_order_report = None
+    return station
+
+
+def _make_report_request(order_code: str, status: str = "30", used_materials: List[Dict[str, Any]] | None = None) -> Any:
+    request = MagicMock()
+    request.data = {
+        "orderCode": order_code,
+        "orderName": f"实验{order_code}",
+        "startTime": "2026-05-20T10:00:00.000Z",
+        "endTime": "2026-05-20T11:00:00.000Z",
+        "status": status,
+        "usedMaterials": used_materials or [],
+    }
+    return request
+
+
+def test_process_order_finish_report_triggers_event_on_match() -> None:
+    station = _make_station_with_finish_state()
+    station.last_order_code = "EXP260520-100000"
+    request = _make_report_request("EXP260520-100000", status="30")
+    station.process_order_finish_report(request, [])
+    assert station.order_finish_event.is_set() is True
+    assert station.last_order_report["orderCode"] == "EXP260520-100000"
+
+
+def test_process_order_finish_report_ignores_mismatched_order_code() -> None:
+    station = _make_station_with_finish_state()
+    station.last_order_code = "EXP260520-100000"
+    request = _make_report_request("EXP260520-OTHER", status="30")
+    station.process_order_finish_report(request, [])
+    assert station.order_finish_event.is_set() is False
+    assert station.last_order_report["orderCode"] == "EXP260520-OTHER"
+
+
+def test_wait_for_order_finish_returns_immediately_when_event_set() -> None:
+    """事件预先 set + last_order_report 命中时，wait 立即返回 success。"""
+    station = _make_station_with_finish_state()
+    used_materials = [
+        {"materialId": "mat-1", "locationId": "loc-1", "typeMode": "1", "usedQuantity": 1.0},
+    ]
+    station.hardware_interface.order_report.return_value = {"code": "EXP260520-101010"}
+    station.hardware_interface.material_info.return_value = {
+        "name": "样品A",
+        "unit": "mg",
+        "locations": [{"whName": "自动化堆栈", "posX": 1, "posY": 2, "posZ": 3, "code": "1-01"}],
+    }
+
+    pending: Dict[str, Any] = {}
+
+    def _fake_wait(timeout: float = 0.0) -> bool:
+        pending["report"] = {
+            "orderCode": station.last_order_code,
+            "status": "30",
+            "usedMaterials": used_materials,
+        }
+        station.last_order_report = pending["report"]
+        return True
+
+    station.order_finish_event = MagicMock()
+    station.order_finish_event.wait = MagicMock(side_effect=_fake_wait)
+    station.order_finish_event.clear = MagicMock()
+    station.order_finish_event.set = MagicMock()
+    station.order_finish_event.is_set = MagicMock(return_value=True)
+
+    out = station.wait_for_order_finish(
+        order_id="11111111-1111-1111-1111-111111111111",
+        timeout_seconds=5,
+    )
+    assert out["order_finish_status"] == "success"
+    assert out["material_ids"] == ["mat-1"]
+    assert out["preintake_ids"] == []
+
+    table = out["unloadTable"]
+    assert table["tableName"] == "unloadTable"
+    column_keys = [c["key"] for c in table["columns"]]
+    assert column_keys == ["whName", "posX", "posY", "posZ", "unit", "materialName"]
+    row = table["data"][0]
+    assert row["whName"] == "自动化堆栈"
+    assert row["posX"] == "1"
+    assert row["posY"] == "2"
+    assert row["posZ"] == "3"
+    assert row["unit"] == "mg"
+    assert row["materialName"] == "样品A"
+
+
+def test_wait_for_order_finish_returns_timeout_status() -> None:
+    station = _make_station_with_finish_state()
+    station.hardware_interface.order_report.return_value = {"code": "EXP260520-TIMEOUT"}
+    station.order_finish_event = MagicMock()
+    station.order_finish_event.wait = MagicMock(return_value=False)
+    station.order_finish_event.clear = MagicMock()
+    station.order_finish_event.is_set = MagicMock(return_value=False)
+    out = station.wait_for_order_finish(
+        order_id="22222222-2222-2222-2222-222222222222",
+        timeout_seconds=1,
+    )
+    assert out["order_finish_status"] == "timeout"
+    assert out["unloadTable"]["data"] == []
+    assert out["unload_summary"]["missing_material_info"] == []
+
+
+def test_wait_for_order_finish_records_missing_material_info() -> None:
+    """material-info 失败的物料行字段为空串，并被列入 missing_material_info。"""
+    station = _make_station_with_finish_state()
+    used_materials = [
+        {"materialId": "mat-good", "typeMode": "1"},
+        {"materialId": "mat-bad", "typeMode": "1"},
+    ]
+
+    def _material_info(material_id: str) -> Dict[str, Any]:
+        if material_id == "mat-good":
+            return {
+                "name": "好物料",
+                "unit": "mg",
+                "locations": [{"whName": "WH-A", "posX": 4, "posY": 5, "posZ": 6}],
+            }
+        raise RuntimeError("HTTP 500")
+
+    station.hardware_interface.order_report.return_value = {"code": "EXP260520-MIX"}
+    station.hardware_interface.material_info.side_effect = _material_info
+
+    def _fake_wait(timeout: float = 0.0) -> bool:
+        station.last_order_report = {
+            "orderCode": station.last_order_code,
+            "status": "30",
+            "usedMaterials": used_materials,
+        }
+        return True
+
+    station.order_finish_event = MagicMock()
+    station.order_finish_event.wait = MagicMock(side_effect=_fake_wait)
+    station.order_finish_event.clear = MagicMock()
+    station.order_finish_event.set = MagicMock()
+    station.order_finish_event.is_set = MagicMock(return_value=True)
+
+    out = station.wait_for_order_finish(
+        order_id="33333333-3333-3333-3333-333333333333",
+        timeout_seconds=1,
+    )
+    rows = out["unloadTable"]["data"]
+    assert [row["materialId"] for row in rows] == ["mat-good", "mat-bad"]
+    bad_row = rows[1]
+    assert bad_row["whName"] == ""
+    assert bad_row["posX"] == ""
+    assert bad_row["posY"] == ""
+    assert bad_row["posZ"] == ""
+    assert bad_row["unit"] == ""
+    assert bad_row["materialName"] == ""
+    assert "mat-bad" in out["unload_summary"]["missing_material_info"]
+    assert "mat-good" not in out["unload_summary"]["missing_material_info"]
+
+
+def test_unload_materials_blocks_when_not_confirmed() -> None:
+    station = _make_station()
+    with pytest.raises(RuntimeError):
+        station.unload_materials(
+            order_id=ORDER_GUID,
+            material_ids=["mat-1"],
+            preintake_ids=[],
+            unloadTable={"data": []},
+            materials_unloaded=False,
+        )
+
+
+def test_unload_materials_calls_take_out_with_resolved_lists() -> None:
+    station = _make_station()
+    station.hardware_interface.take_out.return_value = {"code": 1, "message": "ok", "data": {}}
+    out = station.unload_materials(
+        order_id=ORDER_GUID,
+        material_ids=["mat-1", "mat-2"],
+        preintake_ids=[],
+        unloadTable={"data": [{"materialId": "mat-1"}, {"materialId": "mat-2"}]},
+        materials_unloaded=True,
+    )
+    station.hardware_interface.take_out.assert_called_once_with(
+        ORDER_GUID,
+        preintake_ids=[],
+        material_ids=["mat-1", "mat-2"],
+    )
+    assert out["success"] is True
+    assert out["unloaded_count"] == 2
+    assert out["take_out_result"] == {"code": 1, "message": "ok", "data": {}}
+
+
+def test_unload_materials_does_not_raise_when_take_out_fails() -> None:
+    """take_out 业务失败时仅 warn 不抛异常（已物理下料，避免阻塞工作流）。"""
+    station = _make_station()
+    station.hardware_interface.take_out.return_value = {"code": 0, "message": "已下过线"}
+    out = station.unload_materials(
+        order_id=ORDER_GUID,
+        material_ids=["mat-1"],
+        preintake_ids=[],
+        unloadTable={"data": []},
+        materials_unloaded=True,
+    )
+    assert out["success"] is False
+    assert out["take_out_result"] == {"code": 0, "message": "已下过线"}
+
+
+def test_new_actions_registered_on_class() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    have = {name for name, _ in inspect.getmembers(cls, inspect.isfunction)}
+    assert "wait_for_order_finish" in have
+    assert "unload_materials" in have
+
+    module = _import_module()
+    unload_meta = getattr(cls.unload_materials, "_action_registry_meta", {})
+    assert unload_meta.get("node_type") == module.NodeType.MANUAL_CONFIRM
+    wait_meta = getattr(cls.wait_for_order_finish, "_action_registry_meta", {})
+    assert wait_meta.get("node_type") != module.NodeType.MANUAL_CONFIRM
+    assert wait_meta.get("always_free") is True
+
+
+def test_unload_table_columns_constant_layout() -> None:
+    module = _import_module()
+    keys = [c["key"] for c in module.UNLOAD_TABLE_COLUMNS]
+    assert keys == ["whName", "posX", "posY", "posZ", "unit", "materialName"]
+    multi_keys = [c["key"] for c in module.UNLOAD_TABLE_COLUMNS_MULTI_ORDER]
+    assert multi_keys[0] == "orderCode"
+    assert multi_keys[1:] == keys
