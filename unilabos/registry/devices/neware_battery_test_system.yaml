@@ -87,7 +87,7 @@ neware_battery_test_system:
               properties:
                 filepath:
                   default: bts_status.json
-                  description: 输出JSON文件路径
+                  description: 输出文件路径
                   type: string
               required: []
               type: object
@@ -146,7 +146,7 @@ neware_battery_test_system:
             goal:
               properties:
                 plate_num:
-                  description: 盘号 (1 或 2)，如果为null则返回所有盘的状态
+                  description: 盘号 (1 或 2)，如果为None则返回所有盘的状态
                   type: integer
               required: []
               type: object
@@ -237,11 +237,11 @@ neware_battery_test_system:
             goal:
               properties:
                 csv_path:
-                  description: 输入CSV文件的绝对路径
+                  description: 输入CSV文件路径
                   type: string
                 output_dir:
                   default: .
-                  description: 输出目录（用于存储XML和备份文件），默认当前目录
+                  description: 输出目录，用于存储XML文件和备份，默认当前目录
                   type: string
               required:
               - csv_path
@@ -336,14 +336,14 @@ neware_battery_test_system:
             goal:
               properties:
                 backup_dir:
-                  description: 备份目录路径（默认使用最近一次提交任务的backup_dir）
+                  description: 备份目录路径，默认使用最近一次 submit_from_csv 的 backup_dir
                   type: string
                 file_pattern:
                   default: '*'
-                  description: 文件通配符模式，例如 *.csv 或 Battery_*.nda
+                  description: 文件通配符模式，默认 "*" 上传所有文件（例如 "*.csv" 仅上传 CSV 文件）
                   type: string
                 oss_prefix:
-                  description: OSS对象路径前缀（默认使用self.oss_prefix）
+                  description: OSS 对象前缀，默认使用类初始化时的配置
                   type: string
               required: []
               type: object
@@ -1346,8 +1346,10 @@ neware_battery_test_system:
     config:
       properties:
         devtype:
+          description: 设备类型标识
           type: string
         ip:
+          description: TCP服务器IP地址
           type: string
         machine_ids:
           default:
@@ -1363,11 +1365,14 @@ neware_battery_test_system:
           type: array
         oss_prefix:
           default: neware_backup
+          description: OSS对象路径前缀，默认"neware_backup"
           type: string
         oss_upload_enabled:
           default: false
+          description: 是否启用OSS上传功能，默认False
           type: boolean
         port:
+          description: TCP端口
           type: integer
         size_x:
           default: 50
@@ -1379,6 +1384,7 @@ neware_battery_test_system:
           default: 20
           type: number
         timeout:
+          description: 通信超时时间（秒）
           type: integer
       required: []
       type: object

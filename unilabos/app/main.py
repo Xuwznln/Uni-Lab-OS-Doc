@@ -12,6 +12,15 @@ from typing import Dict, Any, List
 import networkx as nx
 import yaml
 
+# Windows 中文系统 stdout 默认 GBK，无法编码 banner / emoji 日志中的 Unicode 字符
+# 强制 stdout/stderr 用 UTF-8，避免 print 触发 UnicodeEncodeError 导致进程崩溃
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
+
 # 首先添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 unilabos_dir = os.path.dirname(os.path.dirname(current_dir))

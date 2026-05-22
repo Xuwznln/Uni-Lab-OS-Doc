@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Union, Optional
 import logging
 
+from unilabos.registry.decorators import topic_config
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
 
 
@@ -385,8 +386,10 @@ class VirtualTransferPump:
         """获取当前体积"""
         return self._current_volume
 
-    def get_remaining_capacity(self) -> float:
-        """获取剩余容量"""
+    @property
+    @topic_config()
+    def remaining_capacity(self) -> float:
+        """剩余容量 (ml)"""
         return self.max_volume - self._current_volume
 
     def is_empty(self) -> bool:

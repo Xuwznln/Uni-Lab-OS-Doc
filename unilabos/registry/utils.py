@@ -36,16 +36,40 @@ class ROSMsgNotFound(Exception):
 # ---------------------------------------------------------------------------
 
 _SECTION_RE = re.compile(r"^(\w[\w\s]*):\s*$")
+_PARAM_HEADER_RE = re.compile(
+    r"^\s*(?P<name>\w[\w]*)\s*(?:\[(?P<display_name>[^\]]+)\])?(?:\s*\([^)]*\))?\s*$"
+)
+
+
+def _parse_docstring_param_header(param_part: str) -> Tuple[str, Optional[str]]:
+    """Parse ``name[display_name]`` or Google-style ``name (type)``."""
+    match = _PARAM_HEADER_RE.match(param_part.strip())
+    if not match:
+        return param_part.strip().split("(")[0].strip(), None
+
+    display_name = match.group("display_name")
+    if display_name is not None:
+        display_name = display_name.strip() or None
+    return match.group("name").strip(), display_name
 
 
 def parse_docstring(docstring: Optional[str]) -> Dict[str, Any]:
     """
-    解析 Google-style docstring，提取描述和参数说明。
+    解析 docstring，提取描述和参数说明。
+
+    支持:
+      - Google-style ``Args:`` / ``Parameters:`` 小节
+      - 直接参数行 ``field: desc``
+      - 带显示名参数行 ``field[Display Name]: desc``
 
     Returns:
-        {"description": "短描述", "params": {"param1": "参数1描述", ...}}
+        {
+            "description": "短描述",
+            "params": {"param1": "参数1描述", ...},
+            "param_display_names": {"param1": "显示名", ...},
+        }
     """
-    result: Dict[str, Any] = {"description": "", "params": {}}
+    result: Dict[str, Any] = {"description": "", "params": {}, "param_display_names": {}}
     if not docstring:
         return result
 
@@ -53,33 +77,53 @@ def parse_docstring(docstring: Optional[str]) -> Dict[str, Any]:
     if not lines:
         return result
 
-    result["description"] = lines[0].strip()
-
     in_args = False
+    current_section: Optional[str] = None
     current_param: Optional[str] = None
+    current_display_name: Optional[str] = None
     current_desc_parts: list = []
 
-    for line in lines[1:]:
+    def flush_current_param() -> None:
+        nonlocal current_param, current_display_name, current_desc_parts
+        if current_param is None:
+            return
+        result["params"][current_param] = "\n".join(current_desc_parts).strip()
+        if current_display_name:
+            result["param_display_names"][current_param] = current_display_name
+        current_param = None
+        current_display_name = None
+        current_desc_parts = []
+
+    first_line = lines[0].strip()
+    start_index = 0
+    if not _SECTION_RE.match(first_line) and ":" not in first_line:
+        result["description"] = first_line
+        start_index = 1
+
+    for line in lines[start_index:]:
         stripped = line.strip()
+        if not stripped:
+            if current_param is not None:
+                current_desc_parts.append("")
+            continue
+
         section_match = _SECTION_RE.match(stripped)
         if section_match:
-            if current_param is not None:
-                result["params"][current_param] = "\n".join(current_desc_parts).strip()
-                current_param = None
-                current_desc_parts = []
-            section_name = section_match.group(1).lower()
-            in_args = section_name in ("args", "arguments", "parameters", "params")
+            flush_current_param()
+            current_section = section_match.group(1).lower()
+            in_args = current_section in ("args", "arguments", "parameters", "params")
             continue
 
-        if not in_args:
+        parse_as_param = in_args or current_section is None
+        if not parse_as_param:
             continue
 
-        if ":" in stripped and not stripped.startswith(" "):
-            if current_param is not None:
-                result["params"][current_param] = "\n".join(current_desc_parts).strip()
+        if ":" in stripped:
+            flush_current_param()
             param_part, _, desc_part = stripped.partition(":")
-            param_name = param_part.strip().split("(")[0].strip()
+            param_name, display_name = _parse_docstring_param_header(param_part)
             current_param = param_name
+            current_display_name = display_name
             current_desc_parts = [desc_part.strip()]
         elif current_param is not None:
             aline = line
@@ -89,8 +133,7 @@ def parse_docstring(docstring: Optional[str]) -> Dict[str, Any]:
                 aline = aline[1:]
             current_desc_parts.append(aline.strip())
 
-    if current_param is not None:
-        result["params"][current_param] = "\n".join(current_desc_parts).strip()
+    flush_current_param()
 
     return result
 

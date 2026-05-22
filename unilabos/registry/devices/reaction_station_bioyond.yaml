@@ -32,7 +32,7 @@ reaction_station.bioyond:
                   type: integer
                 end_point:
                   default: 0
-                  description: 终点计时点 (Start=开始前, End=结束后)
+                  description: 终点计时点 (Start=0, End=1)
                   type: integer
                 end_step_key:
                   default: ''
@@ -40,11 +40,11 @@ reaction_station.bioyond:
                   type: string
                 start_point:
                   default: 0
-                  description: 起点计时点 (Start=开始前, End=结束后)
+                  description: 起点计时点 (Start=0, End=1)
                   type: integer
                 start_step_key:
                   default: ''
-                  description: 起点步骤Key (例如 "feeding", "liquid", 可选, 默认为空则自动选择)
+                  description: 起点步骤Key (可选, 默认为空则自动选择)
                   type: string
               required:
               - duration
@@ -91,6 +91,7 @@ reaction_station.bioyond:
             goal:
               properties:
                 json_str:
+                  description: 订单参数的JSON字符串
                   type: string
               required:
               - json_str
@@ -117,6 +118,7 @@ reaction_station.bioyond:
             goal:
               properties:
                 workflow_ids:
+                  description: 要删除的工作流ID数组
                   items:
                     type: string
                   type: array
@@ -145,6 +147,7 @@ reaction_station.bioyond:
             goal:
               properties:
                 json_str:
+                  description: 'JSON格式的字符串,包含:'
                   type: string
               required:
               - json_str
@@ -197,6 +200,7 @@ reaction_station.bioyond:
             goal:
               properties:
                 web_workflow_json:
+                  description: JSON 格式的网页工作流列表
                   type: string
               required:
               - web_workflow_json
@@ -228,8 +232,10 @@ reaction_station.bioyond:
             goal:
               properties:
                 reactor_id:
+                  description: 反应器编号 (1-5)
                   type: integer
                 temperature:
+                  description: 目标温度 (°C)
                   type: number
               required:
               - reactor_id
@@ -257,6 +263,7 @@ reaction_station.bioyond:
             goal:
               properties:
                 preintake_id:
+                  description: 通量ID
                   type: string
               required:
               - preintake_id
@@ -338,6 +345,7 @@ reaction_station.bioyond:
             goal:
               properties:
                 value:
+                  description: 工作流 ID 列表
                   items:
                     type: string
                   type: array
@@ -365,6 +373,7 @@ reaction_station.bioyond:
             goal:
               properties:
                 workflow_id:
+                  description: 工作流ID
                   type: string
               required:
               - workflow_id
@@ -424,11 +433,11 @@ reaction_station.bioyond:
             goal:
               properties:
                 assign_material_name:
-                  description: 物料名称（不能为空）
+                  description: 物料名称(液体种类)
                   type: string
                 temperature:
                   default: 25.0
-                  description: 温度设定(°C)
+                  description: 温度(C)
                   type: number
                 time:
                   default: '90'
@@ -436,14 +445,14 @@ reaction_station.bioyond:
                   type: string
                 titration_type:
                   default: '1'
-                  description: 是否滴定(NO=否, YES=是)
+                  description: 是否滴定(NO=1, YES=2)
                   type: string
                 torque_variation:
                   default: 2
-                  description: 是否观察 (NO=否, YES=是)
+                  description: 是否观察(NO=1, YES=2)
                   type: integer
                 volume:
-                  description: 分液公式(mL)
+                  description: 分液量(μL)
                   type: string
               required:
               - assign_material_name
@@ -525,11 +534,11 @@ reaction_station.bioyond:
               properties:
                 assign_material_name:
                   default: BAPP
-                  description: 物料名称
+                  description: 物料名称(试剂瓶位)
                   type: string
                 temperature:
                   default: 25.0
-                  description: 温度设定(°C)
+                  description: 温度设定(C)
                   type: number
                 time:
                   default: '0'
@@ -537,15 +546,15 @@ reaction_station.bioyond:
                   type: string
                 titration_type:
                   default: '1'
-                  description: 是否滴定(NO=否, YES=是)
+                  description: 是否滴定(NO=1, YES=2)
                   type: string
                 torque_variation:
                   default: 1
-                  description: 是否观察 (NO=否, YES=是)
+                  description: 是否观察(int类型, 1=否, 2=是)
                   type: integer
                 volume:
                   default: '350'
-                  description: 分液公式(mL)
+                  description: 分液质量(g)
                   type: string
               required: []
               type: object
@@ -593,26 +602,28 @@ reaction_station.bioyond:
                   description: 物料名称
                   type: string
                 solvents:
-                  description: '溶剂信息对象(可选),包含: additional_solvent(溶剂体积mL), total_liquid_volume(总液体体积mL)。如果提供,将自动计算volume'
+                  description: '溶剂信息的字典或JSON字符串(可选),格式如下:
+
+                    {'
                   type: string
                 temperature:
                   default: 25.0
-                  description: 温度设定(°C),默认25.00
+                  description: 温度设定(C)
                   type: number
                 time:
                   default: '360'
-                  description: 观察时间(分钟),默认360
+                  description: 观察时间(分钟)
                   type: string
                 titration_type:
                   default: '1'
-                  description: 是否滴定(NO=否, YES=是),默认NO
+                  description: 是否滴定(NO=1, YES=2)
                   type: string
                 torque_variation:
                   default: 2
-                  description: 是否观察 (NO=否, YES=是),默认YES
+                  description: 是否观察(NO=1, YES=2)
                   type: integer
                 volume:
-                  description: 分液量(mL)。可直接提供,或通过solvents参数自动计算
+                  description: 分液量(μL),直接指定体积(可选,如果提供solvents则自动计算)
                   type: string
               required:
               - assign_material_name
@@ -671,33 +682,32 @@ reaction_station.bioyond:
                   description: 物料名称
                   type: string
                 extracted_actuals:
-                  description: 从报告提取的实际加料量JSON字符串,包含actualTargetWeigh(m二酐滴定)和actualVolume(V二酐滴定)
+                  description: 从报告提取的实际加料量JSON字符串,包含actualTargetWeigh和actualVolume
                   type: string
                 feeding_order_data:
-                  description: 'feeding_order JSON对象,用于获取m二酐值(type为main_anhydride的amount)。示例:
-                    {"feeding_order": [{"type": "main_anhydride", "amount": 1.915}]}'
+                  description: feeding_order JSON字符串或对象,用于获取m二酐值
                   type: string
                 temperature:
                   default: 25.0
-                  description: 温度设定(°C),默认25.00
+                  description: 温度(C)
                   type: number
                 time:
                   default: '90'
-                  description: 观察时间(分钟),默认90
+                  description: 观察时间(分钟)
                   type: string
                 titration_type:
                   default: '2'
-                  description: 是否滴定(NO=否, YES=是),默认YES
+                  description: 是否滴定(NO=1, YES=2),默认2
                   type: string
                 torque_variation:
                   default: 2
-                  description: 是否观察 (NO=否, YES=是),默认YES
+                  description: 是否观察(NO=1, YES=2)
                   type: integer
                 volume_formula:
-                  description: 分液公式(mL)。可直接提供固定公式,或留空由系统根据x_value、feeding_order_data、extracted_actuals自动生成
+                  description: 分液公式(μL),如果提供则直接使用,否则自动计算
                   type: string
                 x_value:
-                  description: 公式中的x值,手工输入,格式为"{{1-2-3}}"(包含双花括号)。用于自动公式计算
+                  description: 手工输入的x值,格式如 "1-2-3"
                   type: string
               required:
               - assign_material_name
@@ -738,7 +748,7 @@ reaction_station.bioyond:
                   type: string
                 temperature:
                   default: 25.0
-                  description: 温度设定(°C)
+                  description: 温度(C)
                   type: number
                 time:
                   default: '0'
@@ -746,14 +756,14 @@ reaction_station.bioyond:
                   type: string
                 titration_type:
                   default: '1'
-                  description: 是否滴定(NO=否, YES=是)
+                  description: 是否滴定(NO=1, YES=2)
                   type: string
                 torque_variation:
                   default: 1
-                  description: 是否观察 (NO=否, YES=是)
+                  description: 是否观察(NO=1, YES=2)
                   type: integer
                 volume_formula:
-                  description: 分液公式(mL)
+                  description: 分液公式(μL)
                   type: string
               required:
               - volume_formula
@@ -786,7 +796,7 @@ reaction_station.bioyond:
                   description: 任务名称
                   type: string
                 workflow_name:
-                  description: 工作流名称
+                  description: 合并后的工作流名称
                   type: string
               required:
               - workflow_name
@@ -819,15 +829,15 @@ reaction_station.bioyond:
             goal:
               properties:
                 assign_material_name:
-                  description: 物料名称
+                  description: 物料名称(不能为空)
                   type: string
                 cutoff:
                   default: '900000'
-                  description: 粘度上限
+                  description: 粘度上限(需为有效数字字符串,默认 "900000")
                   type: string
                 temperature:
                   default: -10.0
-                  description: 温度设定(°C)
+                  description: 温度设定(C,范围:-50.00 至 100.00)
                   type: number
               required:
               - assign_material_name
@@ -909,11 +919,11 @@ reaction_station.bioyond:
                   description: 物料名称(用于获取试剂瓶位ID)
                   type: string
                 material_id:
-                  description: 粉末类型ID，Salt=盐（21分钟），Flour=面粉（27分钟），BTDA=BTDA（38分钟）
+                  description: 粉末类型ID, Salt=1, Flour=2, BTDA=3
                   type: string
                 temperature:
                   default: 25.0
-                  description: 温度设定(°C)
+                  description: 温度设定(C)
                   type: number
                 time:
                   default: '0'
@@ -921,7 +931,7 @@ reaction_station.bioyond:
                   type: string
                 torque_variation:
                   default: 1
-                  description: 是否观察 (NO=否, YES=是)
+                  description: 是否观察(NO=1, YES=2)
                   type: integer
               required:
               - material_id
@@ -945,10 +955,13 @@ reaction_station.bioyond:
     config:
       properties:
         config:
+          description: 配置字典,应包含workflow_mappings等配置
           type: object
         deck:
+          description: Deck对象
           type: string
         protocol_type:
+          description: 协议类型(由ROS系统传递,此处忽略)
           type: string
       required: []
       type: object

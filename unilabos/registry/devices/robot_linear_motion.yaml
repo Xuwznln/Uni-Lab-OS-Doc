@@ -709,6 +709,8 @@ linear_motion.toyo_xyz.sim:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes option, target,
+                    speed, lift_height, mt_height
                   type: string
               title: SendCmd_Goal
               type: object
@@ -752,6 +754,8 @@ linear_motion.toyo_xyz.sim:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes quaternion, speed,
+                    position
                   type: string
               title: SendCmd_Goal
               type: object
@@ -795,6 +799,7 @@ linear_motion.toyo_xyz.sim:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes speed
                   type: string
               title: SendCmd_Goal
               type: object

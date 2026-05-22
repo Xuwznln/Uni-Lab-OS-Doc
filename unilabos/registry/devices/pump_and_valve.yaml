@@ -456,6 +456,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
             goal:
               properties:
                 volume:
+                  description: 'absolute position of the plunger, unit: mL'
                   type: number
               required:
               - volume
@@ -481,6 +482,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
             goal:
               properties:
                 volume:
+                  description: 'absolute position of the plunger, unit: mL'
                   type: number
               required:
               - volume
@@ -687,8 +689,10 @@ syringe_pump_with_valve.runze.SY03B-T06:
             goal:
               properties:
                 max_velocity:
+                  description: 'maximum velocity of the plunger, unit: ml/s'
                   type: number
                 position:
+                  description: 'absolute position of the plunger, unit: ml'
                   type: number
               required:
               - position
@@ -1003,6 +1007,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
             goal:
               properties:
                 volume:
+                  description: 'absolute position of the plunger, unit: mL'
                   type: number
               required:
               - volume
@@ -1028,6 +1033,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
             goal:
               properties:
                 volume:
+                  description: 'absolute position of the plunger, unit: mL'
                   type: number
               required:
               - volume
@@ -1234,8 +1240,10 @@ syringe_pump_with_valve.runze.SY03B-T08:
             goal:
               properties:
                 max_velocity:
+                  description: 'maximum velocity of the plunger, unit: ml/s'
                   type: number
                 position:
+                  description: 'absolute position of the plunger, unit: ml'
                   type: number
               required:
               - position

@@ -59,6 +59,7 @@ class JobAddReq(BaseModel):
     task_id: str = Field(examples=["task_id"], description="task uuid (auto-generated if empty)", default="")
     job_id: str = Field(examples=["job_id"], description="goal uuid (auto-generated if empty)", default="")
     node_id: str = Field(examples=["node_id"], description="node uuid", default="")
+    notebook_id: str = Field(examples=["notebook_id"], description="notebook uuid", default="")
     server_info: dict = Field(
         examples=[{"send_timestamp": 1717000000.0}],
         description="server info (auto-generated if empty)",

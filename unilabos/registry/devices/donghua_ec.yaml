@@ -1,0 +1,2047 @@
+donghua_ec:
+  category:
+  - donghua_ec
+  class:
+    action_value_mappings:
+      auto-cleanup:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 关闭 Donghua_EC 驱动，释放资源。
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result: {}
+          required:
+          - goal
+          title: cleanup参数
+          type: object
+        type: UniLabJsonCommandAsync
+      auto-initialize:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 初始化 Donghua_EC 驱动（加载 ECCore.dll 并调用 Init）。
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result: {}
+          required:
+          - goal
+          title: initialize参数
+          type: object
+        type: UniLabJsonCommandAsync
+      auto-post_init:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 调用 post_init 以完成设备初始化后的注入（可为空）。
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result: {}
+          required:
+          - goal
+          title: post_init参数
+          type: object
+        type: UniLabJsonCommand
+      export_chronopotentiometry_data:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+          output_dir: dest_dir
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          dest: dest
+          files: files
+          success: success
+        schema:
+          description: 从 SourceData 复制计时电位法数据到目标目录。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 输出目录(绝对路径或有效相对路径)
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                dest:
+                  type: string
+                files:
+                  items:
+                    type: string
+                  type: array
+                success:
+                  type: boolean
+              required:
+              - success
+              - files
+              type: object
+          required:
+          - goal
+          title: export_chronopotentiometry_data参数
+          type: object
+        type: UniLabJsonCommand
+      export_cyclic_voltammetry_data:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+          output_dir: dest_dir
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          dest: dest
+          files: files
+          success: success
+        schema:
+          description: 从 SourceData 复制循环伏安数据到目标目录。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 输出目录(绝对路径或有效相对路径)
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                dest:
+                  type: string
+                files:
+                  items:
+                    type: string
+                  type: array
+                success:
+                  type: boolean
+              required:
+              - success
+              - files
+              type: object
+          required:
+          - goal
+          title: export_cyclic_voltammetry_data参数
+          type: object
+        type: UniLabJsonCommand
+      export_eis_data:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+          output_dir: dest_dir
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          dest: dest
+          files: files
+          success: success
+        schema:
+          description: 从 SourceData 复制阻抗(EIS)数据到目标目录。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 输出目录(绝对路径或有效相对路径)
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                dest:
+                  type: string
+                files:
+                  items:
+                    type: string
+                  type: array
+                success:
+                  type: boolean
+              required:
+              - success
+              - files
+              type: object
+          required:
+          - goal
+          title: export_eis_data参数
+          type: object
+        type: UniLabJsonCommand
+      export_gitt_data:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+          output_dir: dest_dir
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          dest: dest
+          files: files
+          success: success
+        schema:
+          description: 从 SourceData 复制恒电流间歇滴定法(GITT)数据到目标目录。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 输出目录(绝对路径或有效相对路径)
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                dest:
+                  type: string
+                files:
+                  items:
+                    type: string
+                  type: array
+                success:
+                  type: boolean
+              required:
+              - success
+              - files
+              type: object
+          required:
+          - goal
+          title: export_gitt_data参数
+          type: object
+        type: UniLabJsonCommand
+      export_linear_scan_data:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+          output_dir: dest_dir
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          dest: dest
+          files: files
+          success: success
+        schema:
+          description: 从 SourceData 复制线性扫描(LSV)数据到目标目录。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 输出目录(绝对路径或有效相对路径)
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                dest:
+                  type: string
+                files:
+                  items:
+                    type: string
+                  type: array
+                success:
+                  type: boolean
+              required:
+              - success
+              - files
+              type: object
+          required:
+          - goal
+          title: export_linear_scan_data参数
+          type: object
+        type: UniLabJsonCommand
+      export_open_circuit_data:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+          output_dir: dest_dir
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          dest: dest
+          files: files
+          success: success
+        schema:
+          description: 从 SourceData 复制开路电位数据到目标目录。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 输出目录(绝对路径或有效相对路径)
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                dest:
+                  type: string
+                files:
+                  items:
+                    type: string
+                  type: array
+                success:
+                  type: boolean
+              required:
+              - success
+              - files
+              type: object
+          required:
+          - goal
+          title: export_open_circuit_data参数
+          type: object
+        type: UniLabJsonCommand
+      get_machine_ids:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        result:
+          machine_ids: machine_ids
+          success: success
+        schema:
+          description: 获取当前连接的仪器 ID 列表。
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result:
+              properties:
+                machine_ids:
+                  items:
+                    type: integer
+                  type: array
+                success:
+                  type: boolean
+              required:
+              - machine_ids
+              - success
+              type: object
+          required:
+          - goal
+          title: get_machine_ids参数
+          type: object
+        type: UniLabJsonCommand
+      start_chronopotentiometry_param:
+        feedback: {}
+        goal:
+          continue_time: continue_time
+          current: current
+          current_filter: current_filter
+          current_rand: current_rand
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_voltage_filter_auto: is_voltage_filter_auto
+          machine_id: machine_id
+          time_per_point: time_per_point
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+        goal_default:
+          continue_time: 10.0
+          current: 0.1
+          current_filter: 10Hz
+          current_rand: '1000'
+          is_current_filter_auto: 1
+          is_current_rand_auto: 0
+          is_voltage_filter_auto: 1
+          machine_id: 0
+          time_per_point: 0.1
+          voltage_filter: 10Hz
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          machine_id: machine_id
+          return_info: return_info
+          success: success
+        schema:
+          description: 调用 ECCore.Start_ChronopotentiometryParam 启动计时电位法实验。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                continue_time:
+                  type: number
+                current:
+                  type: number
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_voltage_filter_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                time_per_point:
+                  type: number
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+              required:
+              - time_per_point
+              - continue_time
+              type: object
+            result:
+              properties:
+                machine_id:
+                  type: integer
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              - return_info
+              type: object
+          required:
+          - goal
+          title: start_chronopotentiometry_param参数
+          type: object
+        type: UniLabJsonCommand
+      start_cyclic_voltammetry_multi:
+        feedback: {}
+        goal:
+          current_filter: current_filter
+          current_rand: current_rand
+          cycle_count: cycle_count
+          delay_time: delay_time
+          finally_potential: finally_potential
+          finally_potential_vs_type: finally_potential_vs_type
+          initial_potential: initial_potential
+          initial_potential_vs_type: initial_potential_vs_type
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_use_finally_potential: is_use_finally_potential
+          is_use_initial_potential: is_use_initial_potential
+          is_voltage_filter_auto: is_voltage_filter_auto
+          is_voltage_rand_auto: is_voltage_rand_auto
+          machine_id: machine_id
+          scan_rate: scan_rate
+          top_potential1: top_potential1
+          top_potential1_vs_type: top_potential1_vs_type
+          top_potential2: top_potential2
+          top_potential2_vs_type: top_potential2_vs_type
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+        goal_default:
+          current_filter: 10Hz
+          current_rand: '1000'
+          cycle_count: 2
+          delay_time: 0.0
+          finally_potential: -1.0
+          finally_potential_vs_type: 0
+          initial_potential: -1.0
+          initial_potential_vs_type: 0
+          is_current_filter_auto: 1
+          is_current_rand_auto: 1
+          is_use_finally_potential: true
+          is_use_initial_potential: true
+          is_voltage_filter_auto: 1
+          is_voltage_rand_auto: 1
+          machine_id: 0
+          scan_rate: 0.2
+          top_potential1: 1.0
+          top_potential1_vs_type: 0
+          top_potential2: -2.0
+          top_potential2_vs_type: 0
+          voltage_filter: 10Hz
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          machine_id: machine_id
+          return_info: return_info
+          success: success
+        schema:
+          description: 调用 ECCore.Start_Circle_Voltammetry_Multi 启动循环伏安(多循环)实验。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                cycle_count:
+                  type: integer
+                delay_time:
+                  type: number
+                finally_potential:
+                  type: number
+                finally_potential_vs_type:
+                  type: integer
+                initial_potential:
+                  type: number
+                initial_potential_vs_type:
+                  type: integer
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_use_finally_potential:
+                  type: boolean
+                is_use_initial_potential:
+                  type: boolean
+                is_voltage_filter_auto:
+                  type: integer
+                is_voltage_rand_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                scan_rate:
+                  type: number
+                top_potential1:
+                  type: number
+                top_potential1_vs_type:
+                  type: integer
+                top_potential2:
+                  type: number
+                top_potential2_vs_type:
+                  type: integer
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+              required:
+              - scan_rate
+              - cycle_count
+              type: object
+            result:
+              properties:
+                machine_id:
+                  type: integer
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              - return_info
+              type: object
+          required:
+          - goal
+          title: start_cyclic_voltammetry_multi参数
+          type: object
+        type: UniLabJsonCommand
+      start_eis:
+        feedback: {}
+        goal:
+          amplitude: amplitude
+          current_filter: current_filter
+          current_rand: current_rand
+          data_quality: data_quality
+          delay_time: delay_time
+          end_freq: end_freq
+          interval_type: interval_type
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_sync_start: is_sync_start
+          is_voltage_filter_auto: is_voltage_filter_auto
+          is_voltage_rand_auto: is_voltage_rand_auto
+          machine_id: machine_id
+          point_count: point_count
+          start_freq: start_freq
+          voltage: voltage
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+          voltage_vs_type: voltage_vs_type
+        goal_default:
+          amplitude: 0.01
+          current_filter: 10Hz
+          current_rand: '1000'
+          data_quality: 1
+          delay_time: 0.0
+          end_freq: 0.1
+          interval_type: 1
+          is_current_filter_auto: 1
+          is_current_rand_auto: 1
+          is_sync_start: true
+          is_voltage_filter_auto: 1
+          is_voltage_rand_auto: 0
+          machine_id: 0
+          point_count: 10
+          start_freq: 10000.0
+          voltage: 0.0
+          voltage_filter: 10Hz
+          voltage_rand: '10000'
+          voltage_vs_type: 0
+        handles: {}
+        result:
+          machine_id: machine_id
+          return_info: return_info
+          success: success
+        schema:
+          description: 调用 ECCore.Start_EIS 或 Start_EIS_All 启动阻抗实验。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                amplitude:
+                  type: number
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                data_quality:
+                  type: integer
+                delay_time:
+                  type: number
+                end_freq:
+                  type: number
+                interval_type:
+                  type: integer
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_sync_start:
+                  type: boolean
+                is_voltage_filter_auto:
+                  type: integer
+                is_voltage_rand_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                point_count:
+                  type: integer
+                start_freq:
+                  type: number
+                voltage:
+                  type: number
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+                voltage_vs_type:
+                  type: integer
+              required:
+              - start_freq
+              - end_freq
+              type: object
+            result:
+              properties:
+                machine_id:
+                  type: integer
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              - return_info
+              type: object
+          required:
+          - goal
+          title: start_eis参数
+          type: object
+        type: UniLabJsonCommand
+      start_gitt:
+        feedback: {}
+        goal:
+          capacity_trig_direction: capacity_trig_direction
+          capacity_trig_value: capacity_trig_value
+          continue_time_cc: continue_time_cc
+          continue_time_oc: continue_time_oc
+          current: current
+          current_rand_cc: current_rand_cc
+          current_rand_oc: current_rand_oc
+          delta_i: delta_i
+          delta_q: delta_q
+          excursion_rate: excursion_rate
+          is_current_rand_auto_cc: is_current_rand_auto_cc
+          is_current_rand_auto_oc: is_current_rand_auto_oc
+          is_use_delta_i: is_use_delta_i
+          is_use_delta_q: is_use_delta_q
+          is_use_excursion_rate: is_use_excursion_rate
+          is_use_resolution: is_use_resolution
+          is_voltage_rand_auto_cc: is_voltage_rand_auto_cc
+          is_voltage_rand_auto_oc: is_voltage_rand_auto_oc
+          is_voltage_trig: is_voltage_trig
+          machine_id: machine_id
+          resolution: resolution
+          time_per_point_cc: time_per_point_cc
+          time_per_point_oc: time_per_point_oc
+          voltage_or_current_trig_direction: voltage_or_current_trig_direction
+          voltage_or_current_trig_value: voltage_or_current_trig_value
+          voltage_rand_cc: voltage_rand_cc
+          voltage_rand_oc: voltage_rand_oc
+        goal_default:
+          capacity_trig_direction: 0
+          capacity_trig_value: 0.0
+          continue_time_cc: 60.0
+          continue_time_oc: 60.0
+          current: 1.0
+          current_rand_cc: '1000'
+          current_rand_oc: '1000'
+          delta_i: 0.0
+          delta_q: 0.0
+          excursion_rate: 0.0
+          is_current_rand_auto_cc: 1
+          is_current_rand_auto_oc: 0
+          is_use_delta_i: false
+          is_use_delta_q: false
+          is_use_excursion_rate: false
+          is_use_resolution: false
+          is_voltage_rand_auto_cc: 0
+          is_voltage_rand_auto_oc: 0
+          is_voltage_trig: true
+          machine_id: 0
+          resolution: 10.0
+          time_per_point_cc: 0.1
+          time_per_point_oc: 0.1
+          voltage_or_current_trig_direction: 0
+          voltage_or_current_trig_value: 0.0
+          voltage_rand_cc: '10000'
+          voltage_rand_oc: '1000'
+        handles: {}
+        result:
+          machine_id: machine_id
+          return_info: return_info
+          success: success
+        schema:
+          description: 配置回路并启动恒电流间歇滴定法(GITT)实验。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                capacity_trig_direction:
+                  type: integer
+                capacity_trig_value:
+                  type: number
+                continue_time_cc:
+                  type: number
+                continue_time_oc:
+                  type: number
+                current:
+                  type: number
+                current_rand_cc:
+                  type: string
+                current_rand_oc:
+                  type: string
+                delta_i:
+                  type: number
+                delta_q:
+                  type: number
+                excursion_rate:
+                  type: number
+                is_current_rand_auto_cc:
+                  type: integer
+                is_current_rand_auto_oc:
+                  type: integer
+                is_use_delta_i:
+                  type: boolean
+                is_use_delta_q:
+                  type: boolean
+                is_use_excursion_rate:
+                  type: boolean
+                is_use_resolution:
+                  type: boolean
+                is_voltage_rand_auto_cc:
+                  type: integer
+                is_voltage_rand_auto_oc:
+                  type: integer
+                is_voltage_trig:
+                  type: boolean
+                machine_id:
+                  type: integer
+                resolution:
+                  type: number
+                time_per_point_cc:
+                  type: number
+                time_per_point_oc:
+                  type: number
+                voltage_or_current_trig_direction:
+                  type: integer
+                voltage_or_current_trig_value:
+                  type: number
+                voltage_rand_cc:
+                  type: string
+                voltage_rand_oc:
+                  type: string
+              required:
+              - current
+              type: object
+            result:
+              properties:
+                machine_id:
+                  type: integer
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              - return_info
+              type: object
+          required:
+          - goal
+          title: start_gitt参数
+          type: object
+        type: UniLabJsonCommand
+      start_linear_scan_voltammetry:
+        feedback: {}
+        goal:
+          current_filter: current_filter
+          current_rand: current_rand
+          delay_time: delay_time
+          end_voltage: end_voltage
+          end_voltage_vs_type: end_voltage_vs_type
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_voltage_filter_auto: is_voltage_filter_auto
+          is_voltage_rand_auto: is_voltage_rand_auto
+          machine_id: machine_id
+          point_count: point_count
+          scan_rate: scan_rate
+          start_voltage: start_voltage
+          start_voltage_vs_type: start_voltage_vs_type
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+        goal_default:
+          current_filter: 10Hz
+          current_rand: '1000'
+          delay_time: 0.0
+          end_voltage: 1.0
+          end_voltage_vs_type: 0
+          is_current_filter_auto: 1
+          is_current_rand_auto: 1
+          is_voltage_filter_auto: 1
+          is_voltage_rand_auto: 0
+          machine_id: 0
+          point_count: 100
+          scan_rate: 0.01
+          start_voltage: 0.0
+          start_voltage_vs_type: 0
+          voltage_filter: 10Hz
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          machine_id: machine_id
+          return_info: return_info
+          success: success
+        schema:
+          description: 调用 ECCore.Start_Linear_Scan_Voltammetry 启动线性扫描实验。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                delay_time:
+                  type: number
+                end_voltage:
+                  type: number
+                end_voltage_vs_type:
+                  type: integer
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_voltage_filter_auto:
+                  type: integer
+                is_voltage_rand_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                point_count:
+                  type: integer
+                scan_rate:
+                  type: number
+                start_voltage:
+                  type: number
+                start_voltage_vs_type:
+                  type: integer
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+              required:
+              - start_voltage
+              - end_voltage
+              - scan_rate
+              type: object
+            result:
+              properties:
+                machine_id:
+                  type: integer
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              - return_info
+              type: object
+          required:
+          - goal
+          title: start_linear_scan_voltammetry参数
+          type: object
+        type: UniLabJsonCommand
+      start_open_circuit_energy:
+        feedback: {}
+        goal:
+          capacity_trig_direction: capacity_trig_direction
+          capacity_trig_value: capacity_trig_value
+          continue_time: continue_time
+          current_rand: current_rand
+          delta_i: delta_i
+          delta_q: delta_q
+          excursion_rate: excursion_rate
+          is_current_rand_auto: is_current_rand_auto
+          is_use_delta_i: is_use_delta_i
+          is_use_delta_q: is_use_delta_q
+          is_use_excursion_rate: is_use_excursion_rate
+          is_use_resolution: is_use_resolution
+          is_voltage_rand_auto: is_voltage_rand_auto
+          is_voltage_trig: is_voltage_trig
+          machine_id: machine_id
+          resolution: resolution
+          time_per_point: time_per_point
+          voltage_or_current_trig_direction: voltage_or_current_trig_direction
+          voltage_or_current_trig_value: voltage_or_current_trig_value
+          voltage_rand: voltage_rand
+        goal_default:
+          capacity_trig_direction: 0
+          capacity_trig_value: 0.0
+          continue_time: 120.0
+          current_rand: '1000'
+          delta_i: 0.0
+          delta_q: 0.0
+          excursion_rate: 0.0
+          is_current_rand_auto: 1
+          is_use_delta_i: false
+          is_use_delta_q: false
+          is_use_excursion_rate: false
+          is_use_resolution: false
+          is_voltage_rand_auto: 0
+          is_voltage_trig: true
+          machine_id: 0
+          resolution: 10.0
+          time_per_point: 0.1
+          voltage_or_current_trig_direction: 0
+          voltage_or_current_trig_value: 0.0
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          machine_id: machine_id
+          return_info: return_info
+          success: success
+        schema:
+          description: 调用 ECCore.Start_EnergyOpenCircuit 启动开路电位（能源）实验。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                capacity_trig_direction:
+                  description: Capacity限制方向(0=None,1=≥,2=≤)
+                  type: integer
+                capacity_trig_value:
+                  description: Capacity限制值
+                  type: number
+                continue_time:
+                  description: 持续时间(s)
+                  type: number
+                current_rand:
+                  description: 电流量程(mA)
+                  type: string
+                delta_i:
+                  description: DeltaI筛选值
+                  type: number
+                delta_q:
+                  description: DeltaQ筛选值
+                  type: number
+                excursion_rate:
+                  description: 漂移速率
+                  type: number
+                is_current_rand_auto:
+                  description: 电流量程是否自动(1/0)
+                  type: integer
+                is_use_delta_i:
+                  description: 是否使用DeltaI筛选
+                  type: boolean
+                is_use_delta_q:
+                  description: 是否使用DeltaQ筛选
+                  type: boolean
+                is_use_excursion_rate:
+                  description: 是否使用漂移速率
+                  type: boolean
+                is_use_resolution:
+                  description: 是否使用分辨率
+                  type: boolean
+                is_voltage_rand_auto:
+                  description: 电压量程是否自动(1/0)
+                  type: integer
+                is_voltage_trig:
+                  description: 是否启用电位/电流限制
+                  type: boolean
+                machine_id:
+                  description: 仪器ID
+                  type: integer
+                resolution:
+                  description: 分辨率
+                  type: number
+                time_per_point:
+                  description: 每点时间(s)
+                  type: number
+                voltage_or_current_trig_direction:
+                  description: 限制方向(0=None,1=≥,2=≤)
+                  type: integer
+                voltage_or_current_trig_value:
+                  description: 电位或电流限制值
+                  type: number
+                voltage_rand:
+                  description: 电压量程(mV)
+                  type: string
+              required:
+              - time_per_point
+              - continue_time
+              type: object
+            result:
+              properties:
+                machine_id:
+                  type: integer
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              - return_info
+              type: object
+          required:
+          - goal
+          title: start_open_circuit_energy参数
+          type: object
+        type: UniLabJsonCommand
+      start_realtime_output:
+        feedback: {}
+        goal:
+          dest_dir: dest_dir
+          interval: interval
+          machine_id: machine_id
+        goal_default:
+          dest_dir: ''
+          interval: 0.5
+          machine_id: 0
+        handles: {}
+        result:
+          file: file
+          machine_id: machine_id
+          running: running
+          success: success
+        schema:
+          description: 开启实时输出，按间隔采样并写入文件。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                dest_dir:
+                  type: string
+                interval:
+                  type: number
+                machine_id:
+                  type: integer
+              required: []
+              type: object
+            result:
+              properties:
+                file:
+                  type: string
+                machine_id:
+                  type: integer
+                running:
+                  type: boolean
+                success:
+                  type: boolean
+              required:
+              - success
+              - running
+              - file
+              type: object
+          required:
+          - goal
+          title: start_realtime_output参数
+          type: object
+        type: UniLabJsonCommand
+      stop_experiment:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          machine_id: machine_id
+          return_info: return_info
+          success: success
+        schema:
+          description: 停止当前仪器上的实验。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+              required: []
+              type: object
+            result:
+              properties:
+                machine_id:
+                  type: integer
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: stop_experiment参数
+          type: object
+        type: UniLabJsonCommand
+      stop_realtime_output:
+        feedback: {}
+        goal:
+          machine_id: machine_id
+        goal_default:
+          machine_id: 0
+        handles: {}
+        result:
+          file: file
+          machine_id: machine_id
+          success: success
+        schema:
+          description: 停止实时输出。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                machine_id:
+                  type: integer
+              required: []
+              type: object
+            result:
+              properties:
+                file:
+                  type: string
+                machine_id:
+                  type: integer
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: stop_realtime_output参数
+          type: object
+        type: UniLabJsonCommand
+      test_chronopotentiometry_param:
+        feedback: {}
+        goal:
+          continue_time: continue_time
+          current: current
+          current_filter: current_filter
+          current_rand: current_rand
+          interval: interval
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_voltage_filter_auto: is_voltage_filter_auto
+          machine_id: machine_id
+          output_dir: output_dir
+          stop_after: stop_after
+          time_per_point: time_per_point
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+        goal_default:
+          continue_time: 10.0
+          current: 0.1
+          current_filter: 10Hz
+          current_rand: '1000'
+          interval: 0.5
+          is_current_filter_auto: 1
+          is_current_rand_auto: 1
+          is_voltage_filter_auto: 1
+          machine_id: 0
+          stop_after: false
+          time_per_point: 0.1
+          voltage_filter: 10Hz
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          export_dest: export_dest
+          export_files: export_files
+          machine_id: machine_id
+          realtime_file: realtime_file
+          return_info: return_info
+          success: success
+        schema:
+          description: 启动计时电位法，实时写入并导出到指定目录，支持自动停止。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                continue_time:
+                  type: number
+                current:
+                  type: number
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                interval:
+                  type: number
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_voltage_filter_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 导出目录(绝对路径或有效相对路径)
+                  type: string
+                stop_after:
+                  type: boolean
+                time_per_point:
+                  type: number
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                export_dest:
+                  type: string
+                export_files:
+                  items:
+                    type: string
+                  type: array
+                machine_id:
+                  type: integer
+                realtime_file:
+                  type: string
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: test_chronopotentiometry_param参数
+          type: object
+        type: UniLabJsonCommand
+      test_cyclic_voltammetry_multi:
+        feedback: {}
+        goal:
+          current_filter: current_filter
+          current_rand: current_rand
+          cycle_count: cycle_count
+          delay_time: delay_time
+          finally_potential: finally_potential
+          finally_potential_vs_type: finally_potential_vs_type
+          initial_potential: initial_potential
+          initial_potential_vs_type: initial_potential_vs_type
+          interval: interval
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_use_finally_potential: is_use_finally_potential
+          is_use_initial_potential: is_use_initial_potential
+          is_voltage_filter_auto: is_voltage_filter_auto
+          is_voltage_rand_auto: is_voltage_rand_auto
+          machine_id: machine_id
+          output_dir: output_dir
+          scan_rate: scan_rate
+          stop_after: stop_after
+          top_potential1: top_potential1
+          top_potential1_vs_type: top_potential1_vs_type
+          top_potential2: top_potential2
+          top_potential2_vs_type: top_potential2_vs_type
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+        goal_default:
+          current_filter: 10Hz
+          current_rand: '1000'
+          cycle_count: 2
+          delay_time: 0.0
+          finally_potential: -1.0
+          finally_potential_vs_type: 0
+          initial_potential: -1.0
+          initial_potential_vs_type: 0
+          interval: 0.5
+          is_current_filter_auto: 1
+          is_current_rand_auto: 1
+          is_use_finally_potential: true
+          is_use_initial_potential: true
+          is_voltage_filter_auto: 1
+          is_voltage_rand_auto: 1
+          machine_id: 0
+          scan_rate: 0.2
+          stop_after: false
+          top_potential1: 1.0
+          top_potential1_vs_type: 0
+          top_potential2: -2.0
+          top_potential2_vs_type: 0
+          voltage_filter: 10Hz
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          export_dest: export_dest
+          export_files: export_files
+          machine_id: machine_id
+          realtime_file: realtime_file
+          return_info: return_info
+          success: success
+        schema:
+          description: 启动循环伏安(多循环)，实时写入并导出到指定目录，支持自动停止。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                cycle_count:
+                  type: integer
+                delay_time:
+                  type: number
+                finally_potential:
+                  type: number
+                finally_potential_vs_type:
+                  type: integer
+                initial_potential:
+                  type: number
+                initial_potential_vs_type:
+                  type: integer
+                interval:
+                  type: number
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_use_finally_potential:
+                  type: boolean
+                is_use_initial_potential:
+                  type: boolean
+                is_voltage_filter_auto:
+                  type: integer
+                is_voltage_rand_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 导出目录(绝对路径或有效相对路径)
+                  type: string
+                scan_rate:
+                  type: number
+                stop_after:
+                  type: boolean
+                top_potential1:
+                  type: number
+                top_potential1_vs_type:
+                  type: integer
+                top_potential2:
+                  type: number
+                top_potential2_vs_type:
+                  type: integer
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                export_dest:
+                  type: string
+                export_files:
+                  items:
+                    type: string
+                  type: array
+                machine_id:
+                  type: integer
+                realtime_file:
+                  type: string
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: test_cyclic_voltammetry_multi参数
+          type: object
+        type: UniLabJsonCommand
+      test_eis:
+        feedback: {}
+        goal:
+          amplitude: amplitude
+          current_filter: current_filter
+          current_rand: current_rand
+          data_quality: data_quality
+          delay_time: delay_time
+          end_freq: end_freq
+          interval: interval
+          interval_type: interval_type
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_sync_start: is_sync_start
+          is_voltage_filter_auto: is_voltage_filter_auto
+          is_voltage_rand_auto: is_voltage_rand_auto
+          machine_id: machine_id
+          output_dir: output_dir
+          point_count: point_count
+          start_freq: start_freq
+          stop_after: stop_after
+          voltage: voltage
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+          voltage_vs_type: voltage_vs_type
+        goal_default:
+          amplitude: 0.01
+          current_filter: 10Hz
+          current_rand: '1000'
+          data_quality: 1
+          delay_time: 0.0
+          end_freq: 0.1
+          interval: 0.5
+          interval_type: 1
+          is_current_filter_auto: 1
+          is_current_rand_auto: 1
+          is_sync_start: true
+          is_voltage_filter_auto: 1
+          is_voltage_rand_auto: 0
+          machine_id: 0
+          point_count: 10
+          start_freq: 10000.0
+          stop_after: false
+          voltage: 0.0
+          voltage_filter: 10Hz
+          voltage_rand: '10000'
+          voltage_vs_type: 0
+        handles: {}
+        result:
+          export_dest: export_dest
+          export_files: export_files
+          machine_id: machine_id
+          realtime_file: realtime_file
+          return_info: return_info
+          success: success
+        schema:
+          description: 启动阻抗(EIS)，实时写入并导出到指定目录，支持自动停止。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                amplitude:
+                  type: number
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                data_quality:
+                  type: integer
+                delay_time:
+                  type: number
+                end_freq:
+                  type: number
+                interval:
+                  type: number
+                interval_type:
+                  type: integer
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_sync_start:
+                  type: boolean
+                is_voltage_filter_auto:
+                  type: integer
+                is_voltage_rand_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 导出目录(绝对路径或有效相对路径)
+                  type: string
+                point_count:
+                  type: integer
+                start_freq:
+                  type: number
+                stop_after:
+                  type: boolean
+                voltage:
+                  type: number
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+                voltage_vs_type:
+                  type: integer
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                export_dest:
+                  type: string
+                export_files:
+                  items:
+                    type: string
+                  type: array
+                machine_id:
+                  type: integer
+                realtime_file:
+                  type: string
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: test_eis参数
+          type: object
+        type: UniLabJsonCommand
+      test_gitt:
+        feedback: {}
+        goal:
+          capacity_trig_direction: capacity_trig_direction
+          capacity_trig_value: capacity_trig_value
+          continue_time_cc: continue_time_cc
+          continue_time_oc: continue_time_oc
+          current: current
+          current_rand_cc: current_rand_cc
+          current_rand_oc: current_rand_oc
+          delta_i: delta_i
+          delta_q: delta_q
+          excursion_rate: excursion_rate
+          interval: interval
+          is_current_rand_auto_cc: is_current_rand_auto_cc
+          is_current_rand_auto_oc: is_current_rand_auto_oc
+          is_use_delta_i: is_use_delta_i
+          is_use_delta_q: is_use_delta_q
+          is_use_excursion_rate: is_use_excursion_rate
+          is_use_resolution: is_use_resolution
+          is_voltage_rand_auto_cc: is_voltage_rand_auto_cc
+          is_voltage_rand_auto_oc: is_voltage_rand_auto_oc
+          is_voltage_trig: is_voltage_trig
+          machine_id: machine_id
+          output_dir: output_dir
+          resolution: resolution
+          stop_after: stop_after
+          time_per_point_cc: time_per_point_cc
+          time_per_point_oc: time_per_point_oc
+          voltage_or_current_trig_direction: voltage_or_current_trig_direction
+          voltage_or_current_trig_value: voltage_or_current_trig_value
+          voltage_rand_cc: voltage_rand_cc
+          voltage_rand_oc: voltage_rand_oc
+        goal_default:
+          capacity_trig_direction: 0
+          capacity_trig_value: 0.0
+          continue_time_cc: 60.0
+          continue_time_oc: 60.0
+          current: 1.0
+          current_rand_cc: '1000'
+          current_rand_oc: '1000'
+          delta_i: 0.0
+          delta_q: 0.0
+          excursion_rate: 0.0
+          interval: 0.5
+          is_current_rand_auto_cc: 1
+          is_current_rand_auto_oc: 0
+          is_use_delta_i: false
+          is_use_delta_q: false
+          is_use_excursion_rate: false
+          is_use_resolution: false
+          is_voltage_rand_auto_cc: 0
+          is_voltage_rand_auto_oc: 0
+          is_voltage_trig: true
+          machine_id: 0
+          resolution: 10.0
+          stop_after: false
+          time_per_point_cc: 0.1
+          time_per_point_oc: 0.1
+          voltage_or_current_trig_direction: 0
+          voltage_or_current_trig_value: 0.0
+          voltage_rand_cc: '10000'
+          voltage_rand_oc: '1000'
+        handles: {}
+        result:
+          export_dest: export_dest
+          export_files: export_files
+          machine_id: machine_id
+          realtime_file: realtime_file
+          return_info: return_info
+          success: success
+        schema:
+          description: 启动恒电流间歇滴定法(GITT)，实时写入并导出到指定目录，支持自动停止。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                capacity_trig_direction:
+                  type: integer
+                capacity_trig_value:
+                  type: number
+                continue_time_cc:
+                  type: number
+                continue_time_oc:
+                  type: number
+                current:
+                  type: number
+                current_rand_cc:
+                  type: string
+                current_rand_oc:
+                  type: string
+                delta_i:
+                  type: number
+                delta_q:
+                  type: number
+                excursion_rate:
+                  type: number
+                interval:
+                  type: number
+                is_current_rand_auto_cc:
+                  type: integer
+                is_current_rand_auto_oc:
+                  type: integer
+                is_use_delta_i:
+                  type: boolean
+                is_use_delta_q:
+                  type: boolean
+                is_use_excursion_rate:
+                  type: boolean
+                is_use_resolution:
+                  type: boolean
+                is_voltage_rand_auto_cc:
+                  type: integer
+                is_voltage_rand_auto_oc:
+                  type: integer
+                is_voltage_trig:
+                  type: boolean
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 导出目录(绝对路径或有效相对路径)
+                  type: string
+                resolution:
+                  type: number
+                stop_after:
+                  type: boolean
+                time_per_point_cc:
+                  type: number
+                time_per_point_oc:
+                  type: number
+                voltage_or_current_trig_direction:
+                  type: integer
+                voltage_or_current_trig_value:
+                  type: number
+                voltage_rand_cc:
+                  type: string
+                voltage_rand_oc:
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                export_dest:
+                  type: string
+                export_files:
+                  items:
+                    type: string
+                  type: array
+                machine_id:
+                  type: integer
+                realtime_file:
+                  type: string
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: test_gitt参数
+          type: object
+        type: UniLabJsonCommand
+      test_linear_scan_voltammetry:
+        feedback: {}
+        goal:
+          current_filter: current_filter
+          current_rand: current_rand
+          delay_time: delay_time
+          end_voltage: end_voltage
+          end_voltage_vs_type: end_voltage_vs_type
+          interval: interval
+          is_current_filter_auto: is_current_filter_auto
+          is_current_rand_auto: is_current_rand_auto
+          is_voltage_filter_auto: is_voltage_filter_auto
+          is_voltage_rand_auto: is_voltage_rand_auto
+          machine_id: machine_id
+          output_dir: output_dir
+          point_count: point_count
+          scan_rate: scan_rate
+          start_voltage: start_voltage
+          start_voltage_vs_type: start_voltage_vs_type
+          stop_after: stop_after
+          voltage_filter: voltage_filter
+          voltage_rand: voltage_rand
+        goal_default:
+          current_filter: 10Hz
+          current_rand: '1000'
+          delay_time: 0.0
+          end_voltage: 1.0
+          end_voltage_vs_type: 0
+          interval: 0.5
+          is_current_filter_auto: 1
+          is_current_rand_auto: 1
+          is_voltage_filter_auto: 1
+          is_voltage_rand_auto: 0
+          machine_id: 0
+          point_count: 100
+          scan_rate: 0.01
+          start_voltage: 0.0
+          start_voltage_vs_type: 0
+          stop_after: false
+          voltage_filter: 10Hz
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          export_dest: export_dest
+          export_files: export_files
+          machine_id: machine_id
+          realtime_file: realtime_file
+          return_info: return_info
+          success: success
+        schema:
+          description: 启动线性扫描(LSV)，实时写入并导出到指定目录，支持自动停止。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                current_filter:
+                  type: string
+                current_rand:
+                  type: string
+                delay_time:
+                  type: number
+                end_voltage:
+                  type: number
+                end_voltage_vs_type:
+                  type: integer
+                interval:
+                  type: number
+                is_current_filter_auto:
+                  type: integer
+                is_current_rand_auto:
+                  type: integer
+                is_voltage_filter_auto:
+                  type: integer
+                is_voltage_rand_auto:
+                  type: integer
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 导出目录(绝对路径或有效相对路径)
+                  type: string
+                point_count:
+                  type: integer
+                scan_rate:
+                  type: number
+                start_voltage:
+                  type: number
+                start_voltage_vs_type:
+                  type: integer
+                stop_after:
+                  type: boolean
+                voltage_filter:
+                  type: string
+                voltage_rand:
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                export_dest:
+                  type: string
+                export_files:
+                  items:
+                    type: string
+                  type: array
+                machine_id:
+                  type: integer
+                realtime_file:
+                  type: string
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: test_linear_scan_voltammetry参数
+          type: object
+        type: UniLabJsonCommand
+      test_open_circuit_energy:
+        feedback: {}
+        goal:
+          capacity_trig_direction: capacity_trig_direction
+          capacity_trig_value: capacity_trig_value
+          continue_time: continue_time
+          current_rand: current_rand
+          delta_i: delta_i
+          delta_q: delta_q
+          excursion_rate: excursion_rate
+          interval: interval
+          is_current_rand_auto: is_current_rand_auto
+          is_use_delta_i: is_use_delta_i
+          is_use_delta_q: is_use_delta_q
+          is_use_excursion_rate: is_use_excursion_rate
+          is_use_resolution: is_use_resolution
+          is_voltage_rand_auto: is_voltage_rand_auto
+          is_voltage_trig: is_voltage_trig
+          machine_id: machine_id
+          output_dir: output_dir
+          resolution: resolution
+          stop_after: stop_after
+          time_per_point: time_per_point
+          voltage_or_current_trig_direction: voltage_or_current_trig_direction
+          voltage_or_current_trig_value: voltage_or_current_trig_value
+          voltage_rand: voltage_rand
+        goal_default:
+          capacity_trig_direction: 0
+          capacity_trig_value: 0.0
+          continue_time: 120.0
+          current_rand: '1000'
+          delta_i: 0.0
+          delta_q: 0.0
+          excursion_rate: 0.0
+          interval: 0.5
+          is_current_rand_auto: 0
+          is_use_delta_i: false
+          is_use_delta_q: false
+          is_use_excursion_rate: false
+          is_use_resolution: false
+          is_voltage_rand_auto: 0
+          is_voltage_trig: true
+          machine_id: 0
+          resolution: 10.0
+          stop_after: true
+          time_per_point: 0.1
+          voltage_or_current_trig_direction: 0
+          voltage_or_current_trig_value: 0.0
+          voltage_rand: '1000'
+        handles: {}
+        result:
+          export_dest: export_dest
+          export_files: export_files
+          machine_id: machine_id
+          realtime_file: realtime_file
+          return_info: return_info
+          success: success
+        schema:
+          description: 启动开路电位，实时写入并导出到指定目录，支持自动停止。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                capacity_trig_direction:
+                  description: Capacity限制方向(0=None,1=≥,2=≤)
+                  type: integer
+                capacity_trig_value:
+                  description: Capacity限制值
+                  type: number
+                continue_time:
+                  description: 持续时间(s)
+                  type: number
+                current_rand:
+                  description: 电流量程(mA)
+                  type: string
+                delta_i:
+                  description: DeltaI筛选值
+                  type: number
+                delta_q:
+                  description: DeltaQ筛选值
+                  type: number
+                excursion_rate:
+                  description: 漂移速率
+                  type: number
+                interval:
+                  type: number
+                is_current_rand_auto:
+                  description: 电流量程是否自动(1/0)
+                  type: integer
+                is_use_delta_i:
+                  description: 是否使用DeltaI筛选
+                  type: boolean
+                is_use_delta_q:
+                  description: 是否使用DeltaQ筛选
+                  type: boolean
+                is_use_excursion_rate:
+                  description: 是否使用漂移速率
+                  type: boolean
+                is_use_resolution:
+                  description: 是否使用分辨率
+                  type: boolean
+                is_voltage_rand_auto:
+                  description: 电压量程是否自动(1/0)
+                  type: integer
+                is_voltage_trig:
+                  description: 是否启用电位/电流限制
+                  type: boolean
+                machine_id:
+                  type: integer
+                output_dir:
+                  description: 导出目录(绝对路径或有效相对路径)
+                  type: string
+                resolution:
+                  description: 分辨率
+                  type: number
+                stop_after:
+                  type: boolean
+                time_per_point:
+                  description: 每点时间(s)
+                  type: number
+                voltage_or_current_trig_direction:
+                  description: 限制方向(0=None,1=≥,2=≤)
+                  type: integer
+                voltage_or_current_trig_value:
+                  description: 电位或电流限制值
+                  type: number
+                voltage_rand:
+                  description: 电压量程(mV)
+                  type: string
+              required:
+              - output_dir
+              type: object
+            result:
+              properties:
+                export_dest:
+                  type: string
+                export_files:
+                  items:
+                    type: string
+                  type: array
+                machine_id:
+                  type: integer
+                realtime_file:
+                  type: string
+                return_info:
+                  type: string
+                success:
+                  type: boolean
+              required:
+              - success
+              type: object
+          required:
+          - goal
+          title: test_open_circuit_energy参数
+          type: object
+        type: UniLabJsonCommand
+    module: unilabos.devices.donghua_ec.donghua_ec:DonghuaEC
+    status_types:
+      machine_id: int
+      status: str
+    type: python
+  config_info: []
+  description: Donghua 电化学仪（DH700x 系列）接入，当前支持开路电位（能源）实验接口。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties:
+        dll_path:
+          default: ''
+          description: 可选，若与 interface_dir 不同可指定 ECCore.dll 完整路径
+          type: string
+        interface_dir:
+          default: ''
+          description: DHInterface 目录（包含 ECCore.dll 与配置文件）
+          type: string
+        machine_id:
+          default: 0
+          description: 默认仪器ID
+          type: integer
+      required: []
+      type: object
+    data:
+      properties:
+        machine_id:
+          type: integer
+        status:
+          type: string
+      required: []
+      type: object
+  version: 0.1.0

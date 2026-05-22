@@ -198,6 +198,8 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes option, target,
+                    speed, lift_height, mt_height
                   type: string
               title: SendCmd_Goal
               type: object
@@ -241,6 +243,8 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes quaternion, speed,
+                    position
                   type: string
               title: SendCmd_Goal
               type: object
@@ -284,6 +288,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
               additionalProperties: false
               properties:
                 command:
+                  description: A JSON-formatted string that includes speed
                   type: string
               title: SendCmd_Goal
               type: object
