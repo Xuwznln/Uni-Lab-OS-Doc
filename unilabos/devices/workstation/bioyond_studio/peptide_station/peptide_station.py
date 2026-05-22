@@ -168,8 +168,12 @@ class PeptideCommonSubmitOptionalParams(TypedDict, total=False):
     parameter_overrides: Annotated[
         List[Dict[str, Any]],
         Field(
-            default=[{"m": 0, "n": 0, "Key": "Example", "Value": "example value"}],
-            description="参数覆盖列表：Key 和 Value 必填，m/n 可选；省略 m/n 时 Key 必须唯一匹配。",
+            default_factory=list,
+            description=(
+                "参数覆盖列表，默认留空（不覆盖）。"
+                "如需覆盖子工作流某个步骤参数，按 [{\"Key\": \"参数名\", \"Value\": \"值\", \"m\": 0, \"n\": 0}] 格式填写。"
+                "Key 必须与 Bioyond 子工作流里某个 step 参数名精确匹配；m/n 可选，省略时 Key 在工作流内必须唯一。"
+            ),
         ),
     ]
     border_number: Annotated[int, Field(default=1, description="LIMS 创建订单 borderNumber，默认 1。")]
