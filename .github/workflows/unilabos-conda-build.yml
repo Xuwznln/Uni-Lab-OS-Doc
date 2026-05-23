@@ -59,7 +59,7 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-64
-          - os: macos-15 # Intel (via Rosetta)
+          - os: macos-15-intel # Intel x86_64
             platform: osx-64
           - os: macos-latest # ARM64
             platform: osx-arm64
@@ -131,7 +131,7 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true'
         run: |
           echo "Building unilabos-env (conda environment dependencies)..."
-          conda run -n build-env rattler-build build -r .conda/environment/recipe.yaml -c uni-lab -c robostack-staging -c conda-forge
+          conda run -n build-env rattler-build build -r .conda/environment/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c robostack-staging -c conda-forge
 
       - name: Upload unilabos-env to Anaconda.org (if enabled)
         if: |
@@ -151,7 +151,7 @@ jobs:
         run: |
           echo "Building unilabos package..."
           # 如果已上传到 Anaconda，从 uni-lab channel 获取 unilabos-env；否则从本地 output 获取
-          conda run -n build-env rattler-build build -r .conda/base/recipe.yaml -c uni-lab -c robostack-staging -c conda-forge --channel ./output
+          conda run -n build-env rattler-build build -r .conda/base/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c robostack-staging -c conda-forge --channel ./output
 
       - name: Upload unilabos to Anaconda.org (if enabled)
         if: |
@@ -173,7 +173,7 @@ jobs:
           github.event.inputs.build_full == 'true'
         run: |
           echo "Building unilabos-full package on ${{ matrix.platform }}..."
-          conda run -n build-env rattler-build build -r .conda/full/recipe.yaml -c uni-lab -c robostack-staging -c conda-forge --channel ./output
+          conda run -n build-env rattler-build build -r .conda/full/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c robostack-staging -c conda-forge --channel ./output
 
       - name: Upload unilabos-full to Anaconda.org (if enabled)
         if: |

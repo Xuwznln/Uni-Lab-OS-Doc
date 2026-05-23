@@ -63,7 +63,7 @@ jobs:
           - os: ubuntu-latest
             platform: linux-64
             env_file: unilabos-linux-64.yaml
-          - os: macos-15 # Intel (via Rosetta)
+          - os: macos-15-intel # Intel x86_64
             platform: osx-64
             env_file: unilabos-osx-64.yaml
           - os: macos-latest # ARM64
@@ -130,11 +130,7 @@ jobs:
       - name: Build conda package
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          if [[ "${{ matrix.platform }}" == "osx-arm64" ]]; then
-            conda run -n build-env rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
-          else
-            conda run -n build-env rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
-          fi
+          conda run -n build-env rattler-build build -r ./recipes/msgs/recipe.yaml --target-platform ${{ matrix.platform }} -c robostack -c robostack-staging -c conda-forge
 
       - name: List built packages
         if: steps.should_build.outputs.should_build == 'true'
