@@ -1,6 +1,8 @@
 # Action Index — virtual_workbench
 
-6 个动作，按功能分类。每个动作的完整 JSON Schema 在 `actions/<name>.json`。
+当前纳入 5 个动作，按功能分类。每个动作的完整 JSON Schema 在 `actions/<name>.json`。
+
+暂跳过：`manual_confirm`、扣电测试 `test`。这两个动作需要启用时，先从最新 `req_device_registry_upload.json` 重新提取 schema 并校验参数。
 
 ---
 
@@ -60,17 +62,18 @@
 
 ---
 
-## 人工确认
+## 暂跳过动作
 
 ### `manual_confirm`
 
-创建人工确认节点，等待用户手动确认后继续（含物料转移上下文）
+创建人工确认节点，等待用户手动确认后继续（含物料转移上下文）。当前先不纳入推荐操作范围。
 
 - **action_type**: `UniLabJsonCommand`
 - **Schema**: [`actions/manual_confirm.json`](actions/manual_confirm.json)
-- **核心参数**: `resource`, `target_device`, `mount_resource`, `timeout_seconds`, `assignee_user_ids`
-- **占位符字段**:
-  - `resource` — **ResourceSlot**，物料数组
-  - `target_device` — **DeviceSlot**，目标设备路径
-  - `mount_resource` — **ResourceSlot**，目标孔位数组
-  - `assignee_user_ids` — `unilabos_manual_confirm` 类型
+- **状态**: 暂跳过。源码参数已包含扣电测试相关字段，历史 JSON 可能过期；需要启用时重新提取 schema。
+
+### `test`
+
+启动扣电测试。当前先不纳入本 skill。
+
+- **状态**: 暂跳过。需要启用时从注册表生成 `actions/test.json` 后再补充索引。

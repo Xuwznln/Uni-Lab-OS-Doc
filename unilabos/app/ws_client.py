@@ -1034,10 +1034,15 @@ class MessageProcessor:
 
                     success = host_node.notify_resource_tree_update(dev_id, act, item_list)
 
-                    if success:
+                    if success is True:
                         logger.info(
                             f"[MessageProcessor] Resource tree {act} completed for device {dev_id}, "
                             f"items: {len(item_list)}"
+                        )
+                    elif success is None:
+                        logger.info(
+                            f"[MessageProcessor] Resource tree {act} skipped for device {dev_id}: "
+                            "在线增加设备暂不支持"
                         )
                     else:
                         logger.warning(f"[MessageProcessor] Resource tree {act} failed for device {dev_id}")
@@ -1062,6 +1067,11 @@ class MessageProcessor:
 
         for item in device_list:
             target_node_id = item.get("target_node_id", "host_node")
+            if action == "add":
+                logger.info(
+                    f"[DeviceManage] 在线增加设备暂不支持，跳过 add_device: {item.get('id', '')}"
+                )
+                continue
 
             def _notify(target_id: str, act: str, cfg: ResourceDictType):
                 try:

@@ -45,6 +45,7 @@ from unilabos.resources.graphio import (
 )
 from unilabos.resources.plr_additional_res_reg import register
 from unilabos.ros.msgs.message_converter import (
+    String,
     convert_to_ros_msg,
     convert_from_ros_msg_with_mapping,
     convert_to_ros_msg_with_mapping,
@@ -250,7 +251,8 @@ class PropertyPublisher:
     ):
         self.node = node
         self.name = name
-        self.msg_type = msg_type
+        self.msg_type = self._normalize_msg_type(msg_type)
+        self.original_msg_type = msg_type
         self.get_method = get_method
         self.timer_period = initial_period
         self.print_publish = print_publish
@@ -258,15 +260,35 @@ class PropertyPublisher:
 
         self._value = None
         try:
-            self.publisher_ = node.create_publisher(msg_type, f"{name}", qos)
+            self.publisher_ = node.create_publisher(self.msg_type, f"{name}", qos)
         except Exception as e:
             self.node.lab_logger().error(
-                f"StatusError, DeviceId: {self.node.device_id} 创建发布者 {name} 失败，可能由于注册表有误，类型: {msg_type}，错误: {e}"
+                f"StatusError, DeviceId: {self.node.device_id} 创建发布者 {name} 失败，"
+                f"可能由于注册表有误，类型: {msg_type}，错误: {e}"
             )
+            self.msg_type = String
+            try:
+                self.publisher_ = node.create_publisher(self.msg_type, f"{name}", qos)
+                self.node.lab_logger().warning(
+                    f"属性 {name} 的发布类型已降级为 String，原始类型: {msg_type}"
+                )
+            except Exception:
+                self.publisher_ = None
         self.timer = node.create_timer(self.timer_period, self.publish_property)
         self.__loop = ROS2DeviceNode.get_asyncio_loop()
-        str_msg_type = str(msg_type)[8:-2]
+        str_msg_type = str(self.msg_type)[8:-2]
         self.node.lab_logger().trace(f"发布属性: {name}, 类型: {str_msg_type}, 周期: {initial_period}秒, QoS: {qos}")
+
+    @staticmethod
+    def _normalize_msg_type(msg_type):
+        if msg_type in (dict, list, tuple, set) or msg_type in ("dict", "list", "tuple", "set"):
+            return String
+        return msg_type
+
+    def _normalize_value(self, value):
+        if self.msg_type is String and isinstance(value, (dict, list, tuple, set)):
+            return json.dumps(value, ensure_ascii=False, cls=TypeEncoder)
+        return value
 
     def get_property(self):
         if asyncio.iscoroutinefunction(self.get_method):
@@ -302,12 +324,16 @@ class PropertyPublisher:
                 pass
                 # self.node.lab_logger().trace(f"【.publish_property】发布 {self.msg_type}: {value}")
             if value is not None:
+                if self.publisher_ is None:
+                    return
+                value = self._normalize_value(value)
                 msg = convert_to_ros_msg(self.msg_type, value)
                 self.publisher_.publish(msg)
                 # self.node.lab_logger().trace(f"【.publish_property】属性 {self.name} 发布成功")
         except Exception as e:
+            topic = getattr(self.publisher_, "topic", self.name)
             self.node.lab_logger().error(
-                f"【.publish_property】发布属性 {self.publisher_.topic} 出错: {str(e)}\n{traceback.format_exc()}"
+                f"【.publish_property】发布属性 {topic} 出错: {str(e)}\n{traceback.format_exc()}"
             )
 
     def change_frequency(self, period):

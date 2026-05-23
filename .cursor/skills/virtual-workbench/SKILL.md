@@ -10,7 +10,8 @@ description: Operate Virtual Workbench via REST API — prepare materials, move 
 - **device_id**: `virtual_workbench`
 - **Python 源码**: `unilabos/devices/virtual/workbench.py`
 - **设备类**: `VirtualWorkbench`
-- **动作数**: 6（`auto-prepare_materials`, `auto-move_to_heating_station`, `auto-start_heating`, `auto-move_to_output`, `transfer`, `manual_confirm`）
+- **当前纳入动作**: 5 个（`auto-prepare_materials`, `auto-move_to_heating_station`, `auto-start_heating`, `auto-move_to_output`, `transfer`）
+- **暂跳过动作**: `manual_confirm`、扣电测试 `test`（需要启用时先从最新注册表重新提取 schema）
 - **设备描述**: 模拟工作台，包含 1 个机械臂（每次操作 2s，独占锁）和 3 个加热台（每次加热 60s，可并行）
 
 ### 典型工作流程
@@ -151,7 +152,8 @@ curl -s -X POST "$BASE/api/v1/lab/mcp/run/action" \
 | `auto-start_heating` | `UniLabJsonCommand` |
 | `auto-move_to_output` | `UniLabJsonCommand` |
 | `transfer` | `UniLabJsonCommandAsync` |
-| `manual_confirm` | `UniLabJsonCommand` |
+
+> `manual_confirm` 和扣电测试 `test` 当前不纳入本 skill 的推荐操作范围；不要基于历史 JSON 直接调用，需先重新生成并校验 schema。
 
 ### 10. 查询任务状态
 
@@ -225,11 +227,9 @@ curl -s -X PUT "$BASE/api/v1/edge/material/node" \
 | `transfer`        | `resource`       | ResourceSlot | 待转移物料数组       |
 | `transfer`        | `target_device`  | DeviceSlot   | 目标设备路径         |
 | `transfer`        | `mount_resource` | ResourceSlot | 目标孔位数组         |
-| `manual_confirm`  | `resource`       | ResourceSlot | 确认用物料数组       |
-| `manual_confirm`  | `target_device`  | DeviceSlot   | 确认用目标设备       |
-| `manual_confirm`  | `mount_resource` | ResourceSlot | 确认用目标孔位数组   |
 
 > `prepare_materials`、`move_to_heating_station`、`start_heating`、`move_to_output` 这 4 个动作**无 Slot 字段**，参数为纯数值/整数。
+> `manual_confirm` 先跳过，不维护其 Slot 字段表。
 
 ---
 
@@ -270,3 +270,13 @@ prepare_materials (count=5)
 ```
 
 创建节点时，`prepare_materials` 的 5 个 output handle（`channel_1` ~ `channel_5`）分别连接到 5 个 `move_to_heating_station` 节点的 `material_input` handle。每个 `move_to_heating_station` 的 `heating_station_output` 和 `material_number_output` 连接到对应 `start_heating` 的 `station_id_input` 和 `material_number_input`。
+
+`start_heating` 完成后还需要继续连接到 `move_to_output`，否则加热完成的物料不会移出加热台：
+
+| source action | source handle | target action | target handle | 传递参数 |
+| ------------- | ------------- | ------------- | ------------- | -------- |
+| `auto-prepare_materials` | `channel_N` | `auto-move_to_heating_station` | `material_input` | `material_number` |
+| `auto-move_to_heating_station` | `heating_station_output` | `auto-start_heating` | `station_id_input` | `station_id` |
+| `auto-move_to_heating_station` | `material_number_output` | `auto-start_heating` | `material_number_input` | `material_number` |
+| `auto-start_heating` | `heating_done_station` | `auto-move_to_output` | `output_station_input` | `station_id` |
+| `auto-start_heating` | `heating_done_material` | `auto-move_to_output` | `output_material_input` | `material_number` |
