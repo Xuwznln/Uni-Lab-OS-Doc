@@ -74,6 +74,8 @@ jobs:
             env_file: unilabos-win64.yaml
 
     runs-on: ${{ matrix.os }}
+    env:
+      CONDA_NO_PLUGINS: "true"
 
     defaults:
       run:
