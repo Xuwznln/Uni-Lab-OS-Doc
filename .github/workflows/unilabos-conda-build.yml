@@ -109,7 +109,7 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true'
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cmd //D //S //C "call \"%CONDA%\\condabin\\mamba.bat\" install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y"
+            cmd //D //S //C '%CONDA%\condabin\mamba.bat install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y'
           else
             mamba install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y
           fi
