@@ -108,7 +108,11 @@ jobs:
       - name: Install rattler-build and anaconda-client
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          mamba install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmd //D //S //C "call \"%CONDA%\\condabin\\mamba.bat\" install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y"
+          else
+            mamba install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y
+          fi
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
