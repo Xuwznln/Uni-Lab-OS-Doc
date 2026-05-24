@@ -67,8 +67,6 @@ jobs:
             platform: win-64
 
     runs-on: ${{ matrix.os }}
-    env:
-      CONDA_NO_PLUGINS: "true"
 
     defaults:
       run:
@@ -115,6 +113,7 @@ jobs:
           else
             mamba install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y
           fi
+          echo "CONDA_NO_PLUGINS=true" >> "$GITHUB_ENV"
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
