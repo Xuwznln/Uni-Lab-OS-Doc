@@ -336,6 +336,27 @@ def parse_args():
         default="",
         help="Workflow description, used when publishing the workflow",
     )
+    workflow_parser.add_argument(
+        "--target_device",
+        type=str,
+        default="prcxi",
+        help=(
+            "Target instrument name at vendor granularity (e.g. 'prcxi', 'beckman', 'tecan'). "
+            "Decides which target_devices.<name>.rules section in labware_mapping.yaml is used. "
+            "Unknown names fall back to target_devices.default. Default: 'prcxi'."
+        ),
+    )
+    workflow_parser.add_argument(
+        "--target_model",
+        type=str,
+        default=None,
+        help=(
+            "Optional target instrument model name within the same vendor (e.g. '9320', '4040'). "
+            "Used to look up target_devices.<target_device>.models.<target_model>.slot_remap / "
+            ".rules for model-specific deck layout or rule overrides. Falls back to the vendor-level "
+            "configuration when omitted or the model is not declared. Default: None."
+        ),
+    )
     return parser
 
 

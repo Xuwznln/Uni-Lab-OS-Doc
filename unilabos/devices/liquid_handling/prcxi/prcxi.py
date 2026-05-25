@@ -1191,9 +1191,21 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         return super().set_liquid(wells, liquid_names, volumes)
 
     def set_liquid_from_plate(
-        self, plate: ResourceSlot, well_names: list[str], liquid_names: list[str], volumes: list[float]
+        self,
+        wells: Optional[Sequence[Union[Well, Dict[str, Any]]]] = None,
+        liquid_names: Optional[list[str]] = None,
+        volumes: Optional[list[float]] = None,
+        *,
+        plate: Optional[ResourceSlot] = None,
+        well_names: Optional[list[str]] = None,
     ) -> SetLiquidFromPlateReturn:
-        return super().set_liquid_from_plate(plate, well_names, liquid_names, volumes)
+        return super().set_liquid_from_plate(
+            wells=wells,
+            liquid_names=liquid_names,
+            volumes=volumes,
+            plate=plate,
+            well_names=well_names,
+        )
 
     def set_group(self, group_name: str, wells: List[Well], volumes: List[float]):
         return super().set_group(group_name, wells, volumes)
@@ -1355,16 +1367,36 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             tip_rack = tip_racks[0]
         else:
             tip_rack = tip_racks[0].parent
+        # 小体积单通道 head 切换：仅当 caller 没显式指定多通道时才生效。
+        # P1 v4 多通道协议（use_channels=[0..7]）即便体积 ≤ 10uL 也应保留 8 通道，
+        # 避免把 dis_vols=[8.3]*8 这种「8 通道每孔 8.3uL」的展开退化为单通道串行。
         small_vols = all(v <= 10.0 for v in _asp_list) and all(v <= 10.0 for v in _dis_list)
-        if small_vols and self._tip_rack_is_10ul_range(tip_rack):
+        _explicit_multi = isinstance(use_channels, (list, tuple)) and len(use_channels) > 1
+        if small_vols and self._tip_rack_is_10ul_range(tip_rack) and not _explicit_multi:
             use_channels = [1]
             mix_vol = max(min(mix_vol, 10), 0) if mix_vol is not None else None
+        # P2 v2：跨板 transfer_liquid 场景下 sources / targets 列表里可能引用多个 plate
+        # （v1 旧实现只取 [0] 会漏掉 slot 3/5/6 的位置同步）。这里改为遍历所有 source/target
+        # 的 parent plate，按首次出现顺序去重——既保证跨板都能 update_pipetting_position，
+        # 又避免同板多孔重复发送。详见 02-cross-slot-merge.md §3.3.2 / §9.5 step 5。
         change_slots = []
-        change_slots.append(sources[0].parent)
-        change_slots.append(targets[0].parent)
+        seen_plates = set()
 
-        change_slots.append(tip_rack)
-        
+        def _push_unique_plate(plate_obj):
+            if plate_obj is None:
+                return
+            pname = getattr(plate_obj, "name", None) or id(plate_obj)
+            if pname in seen_plates:
+                return
+            seen_plates.add(pname)
+            change_slots.append(plate_obj)
+
+        for src in sources:
+            _push_unique_plate(getattr(src, "parent", None))
+        for tgt in targets:
+            _push_unique_plate(getattr(tgt, "parent", None))
+        _push_unique_plate(tip_rack)
+
         self.tip_height = tip_rack.children[0].get_size_z()
 
         change_slots_positions = []

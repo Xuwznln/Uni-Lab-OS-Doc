@@ -28,6 +28,15 @@ from pylabrobot.resources import (
 )
 from typing_extensions import TypedDict
 
+from unilabos.devices.liquid_handling.liquid_history import (
+    LiquidHistoryEntry,
+    append_liquid_history as _append_liquid_history,
+    capture_tip_liquid_name as _capture_tip_liquid_name,
+    normalize_liquid_history as _normalize_liquid_history,
+    same_liquid_via_liquids as _same_liquid_via_liquids,
+    same_liquid_via_liquids_pair as _same_liquid_via_liquids_pair,
+    well_current_liquid_name as _well_current_liquid_name,
+)
 from unilabos.devices.liquid_handling.rviz_backend import UniLiquidHandlerRvizBackend
 from unilabos.registry.placeholder_type import ResourceSlot
 from unilabos.resources.resource_tracker import (
@@ -234,6 +243,13 @@ class LiquidHandlerMiddleware(LiquidHandler):
         if spread == "":
             spread = "custom"
 
+        # P9 — 在 super().aspirate 之前**预读**每个 source well 的液体名（用于 history 写入）；
+        # super().aspirate 会消费 tracker.liquids，aspirate 后再读会拿不到液体身份。
+        # 详见 ``product_designs/protocol_convert/09-liquid-history-unknown-debug.md`` §6.2。
+        liquid_names_before_aspirate: List[str] = [
+            _well_current_liquid_name(res) for res in resources
+        ]
+
         for i, res in enumerate(resources):
             tracker = getattr(res, "tracker", None)
             if tracker is None or getattr(tracker, "is_disabled", False):
@@ -263,9 +279,14 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 try:
                     tracker.add_liquid(max(need - used, 1.0))
                 except Exception:
-                    history = getattr(tracker, "liquid_history", None)
-                    if isinstance(history, list):
-                        history.append(("auto_init", max(fill_vol, need, 1.0)))
+                    # P9 — 旧版 v2 tuple ``("auto_init", vol)`` 写入升级为 v3 dict，
+                    # 与 ``_append_liquid_history`` 写入形态保持一致。
+                    _append_liquid_history(
+                        res,
+                        "auto_init",
+                        float(max(fill_vol, need, 1.0)),
+                        "auto_init",
+                    )
 
         if self._simulator:
             try:
@@ -371,7 +392,7 @@ class LiquidHandlerMiddleware(LiquidHandler):
         else:
             channels_to_use = use_channels
 
-        for resource, volume, channel in zip(resources, vols, channels_to_use):
+        for i, (resource, volume, channel) in enumerate(zip(resources, vols, channels_to_use)):
             sample_uuid_value = getattr(resource, "unilabos_extra", {}).get(EXTRA_SAMPLE_UUID, None)
             res_samples.append({"name": resource.name, "sample_uuid": sample_uuid_value})
             res_volumes.append(volume)
@@ -379,6 +400,11 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 EXTRA_SAMPLE_UUID: sample_uuid_value,
                 "volume": volume,
             }
+            # P9 — aspirate history 写入 source well：volume 取**负数**与 dispense/set 对称
+            # （sum(history.volume) ≈ 残量）；name 取 aspirate 前预读的 liquid_name（操作后 tracker
+            # 被 PLR 消费，此时读会拿不到液体身份）。
+            name_before = liquid_names_before_aspirate[i] if i < len(liquid_names_before_aspirate) else ""
+            _append_liquid_history(resource, name_before, -float(volume or 0.0), "aspirate")
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
             task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
@@ -523,6 +549,11 @@ class LiquidHandlerMiddleware(LiquidHandler):
             resource.unilabos_extra[EXTRA_SAMPLE_UUID] = res_uuid
             res_samples.append({"name": resource.name, EXTRA_SAMPLE_UUID: res_uuid})
             res_volumes.append(volume)
+            # P9 — dispense history 写入 target well：volume 取**正数**；
+            # name 从 target tracker.liquids 末项取（PLR dispense 后 target tracker 顶层就是
+            # 本次新加的液体），volume tracker bypass 路径下 name 可能为空字符串，符合预期。
+            target_liquid_name = _well_current_liquid_name(resource)
+            _append_liquid_history(resource, target_liquid_name, float(volume or 0.0), "dispense")
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
             task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
@@ -915,6 +946,11 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             backend_type = backend
         self._simulator = simulator
         self.group_info = dict()
+        # P10 v2 — Tip 复用判等开关；默认 on（pop 出 kwargs 避免污染父类签名）。
+        # 详见 ``product_designs/protocol_convert/10-tip-reuse-by-liquid-history.md`` §3.6。
+        self._tip_reuse_by_liquid_name: bool = bool(
+            kwargs.pop("tip_reuse_by_liquid_name", True)
+        )
         super().__init__(backend_type, deck, simulator, channel_num, total_height=total_height, **kwargs)
 
     def post_init(self, ros_node: BaseROS2DeviceNode):
@@ -975,7 +1011,9 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     plr_history = getattr(plr_tracker, "liquid_history", None)
                     if (isinstance(local_history, list) and len(local_history) == 0
                             and isinstance(plr_history, list) and len(plr_history) > 0):
-                        local_tracker.liquid_history = list(plr_history)
+                        # P9 — 远端 history 归一为 v3 dict（plr_history 可能仍是 v2 tuple）
+                        normalized_history = _normalize_liquid_history(plr_history)
+                        local_tracker.liquid_history = normalized_history
                     elif (isinstance(local_history, list) and len(local_history) > 0
                             and isinstance(plr_history, list) and len(plr_history) == 0):
                         # 远端认为容器为空，重置本地 tracker 以保持同步
@@ -995,11 +1033,12 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 local_history = getattr(tracker, "liquid_history", None)
                 data = orig_dict.get("data") or {}
                 dict_history = data.get("liquid_history")
+                # P9 — 多形态升级：v3 dict / v2 tuple / list[str] 全归一为 v3 dict 列表。
+                # 详见 ``product_designs/protocol_convert/09-liquid-history-unknown-debug.md`` §6.4。
                 if isinstance(local_history, list) and len(local_history) == 0:
                     if isinstance(dict_history, list) and len(dict_history) > 0:
-                        tracker.liquid_history = [
-                            (name, float(vol)) for name, vol in dict_history
-                        ]
+                        normalized_history = _normalize_liquid_history(dict_history)
+                        tracker.liquid_history = normalized_history
                 elif isinstance(local_history, list) and len(local_history) > 0:
                     if isinstance(dict_history, list) and len(dict_history) == 0:
                         # 调用方认为容器为空，重置本地 tracker
@@ -1031,62 +1070,322 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         for well, liquid_name, volume in zip(wells, liquid_names, volumes):
             safe_volume = _clamp_volume(well, volume)
             well.set_liquids([(liquid_name, safe_volume)])  # type: ignore
+            # P9 — set_liquid 是 history 的"播种"入口（Stage 3 set_liquid_from_plate 节点会调到这里）：
+            # 同时为 PLR tracker.liquids 写入 (name, vol) 和为扩展属性 tracker.liquid_history 写入
+            # 结构化 entry，保证后续 OS→Cloud sync 能完整保留液体身份。
+            _append_liquid_history(well, liquid_name, safe_volume, "set")
             res_volumes.append(safe_volume)
 
         return SetLiquidReturn(
             wells=ResourceTreeSet.from_plr_resources(wells, known_newly_created=False).dump(), volumes=res_volumes  # type: ignore
         )
 
-    def set_liquid_from_plate(
-        self, plate: ResourceSlot, well_names: list[str], liquid_names: list[str], volumes: list[float]
-    ) -> SetLiquidFromPlateReturn:
-        """Set the liquid in wells of a plate by well names (e.g., A1, A2, B3).
-
-        如果 liquid_names 和 volumes 为空，但 plate 和 well_names 不为空，直接返回 plate 和 wells。
-        """
-        assert issubclass(plate.__class__, Plate) or issubclass(plate.__class__, TubeRack) , f"plate must be a Plate, now: {type(plate)}"
-        plate: Union[Plate, TubeRack]
-        # 根据 well_names 获取对应的 Well 对象
+    def _resolve_wells_from_plate(
+        self,
+        plate: Union[Plate, TubeRack, ResourceSlot],
+        well_names: list[str],
+    ) -> list[Well]:
+        """旧签名兼容路径：plate + well_names → 顺序 Well 列表。"""
+        assert issubclass(plate.__class__, Plate) or issubclass(plate.__class__, TubeRack), (
+            f"plate must be a Plate or TubeRack, now: {type(plate)}"
+        )
         if issubclass(plate.__class__, Plate):
-            wells = [plate.get_well(name) for name in well_names]
-        elif issubclass(plate.__class__, TubeRack):
-            wells = [plate.get_tube(name) for name in well_names]
-        res_volumes = []
+            return [plate.get_well(name) for name in well_names]  # type: ignore
+        return [plate.get_tube(name) for name in well_names]  # type: ignore
 
-        # 如果 liquid_names 和 volumes 都为空，直接返回
+    def _coerce_well(self, w: Union[Well, Dict[str, Any]]) -> Well:
+        """dict → PLR Well：通过 self._ros_node.resource_tracker 同步解析；Well 原样返回。
+
+        约定 dict 至少含 ``uuid`` 或 ``unilabos_uuid`` 字段，与
+        ``_resolve_to_plr_resources`` 的入参 schema 对齐。
+        """
+        if isinstance(w, Well):
+            return w
+        if isinstance(w, dict):
+            uid = w.get("uuid") or w.get("unilabos_uuid")
+            if uid is None:
+                raise TypeError(
+                    f"dict 格式的 well 必须包含 uuid 或 unilabos_uuid 字段: {w!r}"
+                )
+            if not hasattr(self, "_ros_node") or self._ros_node is None:
+                raise ValueError(
+                    "传入 dict 格式的 wells 时，需通过 post_init 注入 _ros_node，"
+                    "才能从物料系统按 uuid 解析为 PLR Well。"
+                )
+            matches = self._ros_node.resource_tracker.figure_resource(
+                {"uuid": uid}, try_mode=True
+            )
+            if not matches:
+                raise ValueError(
+                    f"无法解析 well: uuid={uid!r} 未在 resource_tracker 中找到（"
+                    f"name={w.get('name')!r}, parent={w.get('parent')!r}）"
+                )
+            return cast(Well, matches[0])
+        raise TypeError(f"无法解析 well: {w!r}")
+
+    def _set_liquid_grouped_by_plate(
+        self,
+        wells: list[Well],
+        liquid_names: list[str],
+        volumes: list[float],
+    ) -> SetLiquidFromPlateReturn:
+        """按 ``well.parent`` 分桶后多次 ``self.set_liquid``，最终按原顺序拼回 volumes。
+
+        作为 ``set_liquid_from_plate`` 的唯一执行路径（新旧两条入口都收敛到这里）。
+        """
+        n = len(wells)
+
+        # 收集涉及的 plate 实例（按首次出现顺序），用于返回 plate 字段
+        plate_objs: List[Union[Plate, TubeRack]] = []
+        seen_plates: Set[str] = set()
+        for w in wells:
+            parent = getattr(w, "parent", None)
+            if parent is None:
+                continue
+            pname = getattr(parent, "name", None) or str(id(parent))
+            if pname in seen_plates:
+                continue
+            seen_plates.add(pname)
+            plate_objs.append(cast(Union[Plate, TubeRack], parent))
+
+        # 早返回：liquid_names / volumes 均为空 → 仅回显 wells / plates
         if not liquid_names and not volumes:
             return SetLiquidFromPlateReturn(
-                plate=ResourceTreeSet.from_plr_resources([plate], known_newly_created=False).dump(),  # type: ignore
-                wells=ResourceTreeSet.from_plr_resources(wells, known_newly_created=False).dump(),  # type: ignore
-                volumes=res_volumes,
+                plate=ResourceTreeSet.from_plr_resources(plate_objs, known_newly_created=False).dump() if plate_objs else [],  # type: ignore
+                wells=ResourceTreeSet.from_plr_resources(wells, known_newly_created=False).dump() if wells else [],  # type: ignore
+                volumes=[],
             )
 
-        def _clamp_volume(resource: Union[Well, Container], volume: float) -> float:
-            # 防止初始化液量超过容器容量，导致后续 dispense 时 free volume 为负
-            clamped = max(float(volume), 0.0)
-            max_volume = getattr(resource, "max_volume", None)
-            if isinstance(max_volume, (int, float)) and max_volume > 0:
-                clamped = min(clamped, float(max_volume))
-            return clamped
+        if len(liquid_names) != n or len(volumes) != n:
+            raise ValueError(
+                f"set_liquid_from_plate: len(wells)={n}, len(liquid_names)={len(liquid_names)}, "
+                f"len(volumes)={len(volumes)} 三者必须等长"
+            )
 
-        for well, liquid_name, volume in zip(wells, liquid_names, volumes):
-            safe_volume = _clamp_volume(well, volume)
-            well.set_liquids([(liquid_name, safe_volume)])  # type: ignore
-            res_volumes.append(safe_volume)
+        # 按 parent 分桶；记录原始 index 以便结果回拼
+        buckets: Dict[str, List[int]] = {}
+        for idx, w in enumerate(wells):
+            parent = getattr(w, "parent", None)
+            key = getattr(parent, "name", None) if parent is not None else None
+            key = key if key is not None else "_orphan"
+            buckets.setdefault(key, []).append(idx)
 
+        res_volumes: List[float] = [0.0] * n
+
+        # 按 plate 顺序串行 set_liquid（避免设备物理碰撞 / 同板批量处理）
+        for plate_key, idxs in buckets.items():
+            sub_wells = [wells[i] for i in idxs]
+            sub_names = [liquid_names[i] for i in idxs]
+            sub_vols = [volumes[i] for i in idxs]
+            sub_ret = self.set_liquid(sub_wells, sub_names, sub_vols)
+            sub_ret_volumes = sub_ret.get("volumes", []) if isinstance(sub_ret, dict) else getattr(sub_ret, "volumes", [])
+            for local_idx, orig_idx in enumerate(idxs):
+                if local_idx < len(sub_ret_volumes):
+                    res_volumes[orig_idx] = float(sub_ret_volumes[local_idx])
+
+        # 同步资源到 ROS（每板独立 wells 列表，但 update_resource 一次性提交更高效）
         if hasattr(self, "_ros_node") and self._ros_node is not None:
-            task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": wells})
+            task = ROS2DeviceNode.run_async_func(
+                self._ros_node.update_resource, True, **{"resources": wells}
+            )
             submit_time = time.time()
             while not task.done():
                 if time.time() - submit_time > 10:
-                    self._ros_node.lab_logger().info(f"set_liquid_from_plate {plate} 超时")
+                    self._ros_node.lab_logger().info(
+                        f"set_liquid_from_plate (grouped) 超时, plates={list(buckets.keys())}"
+                    )
                     break
                 time.sleep(0.01)
 
         return SetLiquidFromPlateReturn(
-            plate=ResourceTreeSet.from_plr_resources([plate], known_newly_created=False).dump(),  # type: ignore
+            plate=ResourceTreeSet.from_plr_resources(plate_objs, known_newly_created=False).dump() if plate_objs else [],  # type: ignore
             wells=ResourceTreeSet.from_plr_resources(wells, known_newly_created=False).dump(),  # type: ignore
             volumes=res_volumes,
+        )
+
+    def set_liquid_from_plate(
+        self,
+        wells: Optional[Sequence[Union[Well, Dict[str, Any]]]] = None,
+        liquid_names: Optional[list[str]] = None,
+        volumes: Optional[list[float]] = None,
+        *,
+        plate: Optional[Union[Plate, TubeRack, ResourceSlot]] = None,
+        well_names: Optional[list[str]] = None,
+    ) -> SetLiquidFromPlateReturn:
+        """按孔批量设定液体（P3 框选化）。
+
+        优先路径（新签名，推荐）：
+
+            set_liquid_from_plate(
+                wells=[well_obj_or_dict, ...],
+                liquid_names=["...", ...],
+                volumes=[v, ...],
+            )
+
+        ``wells`` 中元素既可以是 PLR ``Well`` 实例，也可以是含 ``uuid`` 字段的 dict
+        （由 ``resource_tracker`` 同步解析）；允许跨多 plate，内部按 ``well.parent``
+        分桶后多次调用 :meth:`set_liquid`。
+
+        兼容路径（旧签名，仅在 ``wells`` 为 ``None`` 时启用）：
+
+            set_liquid_from_plate(plate=plate, well_names=["A1","A2",...],
+                                  liquid_names=[...], volumes=[...])
+
+        Parameters
+        ----------
+        wells
+            待设液的 Well 列表（含 PLR 实例或 dict 引用），跨板允许。
+        liquid_names
+            与 ``wells`` 等长的液体名列表。
+        volumes
+            与 ``wells`` 等长的体积列表（µL）；内部会按容器容量上限 clamp。
+        plate, well_names
+            旧调用约定，仅当 ``wells`` 未传时生效。
+        """
+
+        # ============================================================
+        # P3 框选化兼容修复：上游 ROS placeholder 在解析
+        # ``wells_identifier`` 边（create_resource.labware → 本节点）时，
+        # 可能直接把单个 PLR Plate 资源 dict 写入 ``wells``，而非
+        # ``list[Well]``。多入边时只保留最后一条（H7），导致 §14 跨板
+        # merged 节点失去除最后 plate 外的入边。
+        #
+        # 检测此 schema 错位并按以下策略恢复：
+        #   - 若 liquid_names 全相同 → 单 plate 场景，wells 视为该 plate
+        #     走 plate + well_names 旧路径。
+        #   - 若 liquid_names 含 distinct names（§14 merged 跨板场景）→
+        #     按 liquid_names 逐个反查 resource_tracker 得到各自 plate，
+        #     再用 well_names[i] 取 plate.get_well 构造跨板 wells 列表。
+        # ============================================================
+        if (
+            isinstance(wells, dict)
+            and "class" in wells
+            and well_names is not None
+            and (plate is None or (isinstance(plate, list) and len(plate) == 0))
+        ):
+            # 判别单 plate vs 跨 plate：liquid_names 是否含 distinct names
+            _ln = list(liquid_names or [])
+            _wn = list(well_names or [])
+            distinct_liquids = set(_ln) if _ln else set()
+            is_cross_plate = (
+                len(distinct_liquids) > 1
+                and len(_ln) == len(_wn)
+                and len(_wn) > 1
+            )
+
+            if is_cross_plate:
+                # 跨板 merged 场景：优先按 well_names 中的 "<plate_plr_name>/<well>" prefix
+                # 拆解逐个查 plate（common.py §14 fix 把 plate name 编码进 well_names）。
+                # 兜底：若 well_names 不含 "/"，按 liquid_names 当 reagent_key 查（通常 miss）。
+                resolved_cross: list[Well] = []
+                cross_resolve_errors: list[str] = []
+                tracker = getattr(self, "_ros_node", None)
+                tracker = tracker.resource_tracker if tracker is not None else None
+                use_prefixed = all(isinstance(wn, str) and "/" in wn for wn in _wn)
+
+                for idx, (reagent_key, w_name) in enumerate(zip(_ln, _wn)):
+                    try:
+                        plate_instance = None
+                        if use_prefixed and "/" in w_name:
+                            # 主路径（§14 fix）：well_names[i] = "<plate_plr_name>/<well>"
+                            plate_plr_name, real_well_name = w_name.rsplit("/", 1)
+                            if tracker is not None:
+                                figured = tracker.figure_resource(
+                                    {"name": plate_plr_name}, try_mode=True
+                                )
+                                if figured:
+                                    plate_instance = figured[0]
+                            actual_well_name = real_well_name
+                        else:
+                            # 兜底：legacy 形态（well_names 是纯 well 名）
+                            actual_well_name = w_name
+                            if tracker is not None:
+                                figured = tracker.figure_resource(
+                                    {"name": reagent_key}, try_mode=True
+                                )
+                                if figured:
+                                    plate_instance = figured[0]
+                                else:
+                                    figured = tracker.figure_resource(
+                                        {"id": reagent_key}, try_mode=True
+                                    )
+                                    if figured:
+                                        plate_instance = figured[0]
+
+                        if plate_instance is None:
+                            cross_resolve_errors.append(
+                                f"idx={idx} reagent_key={reagent_key!r} w_name={w_name!r}: resource_tracker miss"
+                            )
+                            continue
+                        if not (
+                            issubclass(plate_instance.__class__, Plate)
+                            or issubclass(plate_instance.__class__, TubeRack)
+                        ):
+                            cross_resolve_errors.append(
+                                f"idx={idx} reagent_key={reagent_key!r}: not Plate/TubeRack (got {type(plate_instance).__name__})"
+                            )
+                            continue
+                        if issubclass(plate_instance.__class__, Plate):
+                            resolved_cross.append(plate_instance.get_well(actual_well_name))
+                        else:
+                            resolved_cross.append(plate_instance.get_tube(actual_well_name))
+                    except Exception as _e:
+                        cross_resolve_errors.append(
+                            f"idx={idx} reagent_key={reagent_key!r} well={w_name!r}: {type(_e).__name__}: {_e}"
+                        )
+
+                if len(resolved_cross) == len(_wn):
+                    return self._set_liquid_grouped_by_plate(
+                        resolved_cross,
+                        _ln,
+                        list(volumes or []),
+                    )
+                # 跨板 fallback 解析失败 → 抛清晰错误，避免静默落回单 plate 单 well 错误降级。
+                # 触发原因通常是 legacy 工作流图（common.py §14 fix 之前生成）的 well_names
+                # 缺少 "<plate_plr_name>/<well>" prefix，导致 abstract 层无法跨板定位 plate。
+                raise ValueError(
+                    "set_liquid_from_plate: 检测到 P2 v2 跨板 merged 节点"
+                    f"（liquid_names 含 {len(distinct_liquids)} 个 distinct names），"
+                    "但 well_names 解析失败 / 缺少 '<plate_plr_name>/<well>' prefix。"
+                    "这通常是 LEGACY 工作流图（在 §14 well_names prefix fix 之前生成）。"
+                    "请用最新版 common.py 重新转换 + 重新上传协议到 Cloud Lab。"
+                    f"\n  current well_names sample: {_wn[:3]}"
+                    f"\n  current liquid_names sample: {_ln[:3]}"
+                    f"\n  cross_resolve errors first3: {cross_resolve_errors[:3]}"
+                )
+
+            # 单 plate 兼容路径（或跨板解析失败 fallback）
+            plate_data = wells
+            wells = None  # 清空，让下面走旧路径
+            try:
+                if hasattr(self, "_ros_node") and self._ros_node is not None:
+                    figured = self._ros_node.resource_tracker.figure_resource(
+                        {"name": plate_data.get("name")}, try_mode=True
+                    )
+                    if figured:
+                        plate = figured[0]
+                if plate is None or (isinstance(plate, list) and len(plate) == 0):
+                    from unilabos.resources.resource_tracker import ResourceTreeSet
+                    fallback_tree = ResourceTreeSet.from_raw_dict_list([plate_data])
+                    plr_list = fallback_tree.to_plr_resources() if len(fallback_tree.trees) > 0 else []
+                    if plr_list:
+                        plate = plr_list[0]
+            except Exception:
+                pass
+
+        if wells is None:
+            if plate is None or well_names is None or (isinstance(plate, list) and len(plate) == 0):
+                raise ValueError(
+                    "set_liquid_from_plate: 必须传 wells，或同时传 plate + well_names"
+                )
+            resolved_wells = self._resolve_wells_from_plate(plate, well_names)
+        else:
+            resolved_wells = [self._coerce_well(w) for w in wells]
+
+        return self._set_liquid_grouped_by_plate(
+            resolved_wells,
+            list(liquid_names or []),
+            list(volumes or []),
         )
 
     # ---------------------------------------------------------------
@@ -1579,27 +1878,32 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         #     if len_dis_vols != num_sources and len_dis_vols != num_targets:
         #         raise ValueError(f"dis_vols length must be equal to sources or targets length, but got {len_dis_vols} and {num_sources} and {num_targets}")
 
+        # 辅助函数：
+        # - wrap=True: 返回 [value]（用于 liquid_height 等列表参数）
+        # - wrap=False: 返回 value（用于 mix_* 标量参数）
+        def safe_get(value, idx, default=None, wrap: bool = True):
+            if value is None:
+                return default
+            try:
+                if isinstance(value, (list, tuple)):
+                    if len(value) == 0:
+                        return default
+                    item = value[idx % len(value)]
+                else:
+                    item = value
+                return [item] if wrap else item
+            except Exception:
+                return default
+
+        # P10 v2 — 读取 tip 复用开关；测试 fixture 跳过 super().__init__ 时
+        # 用 getattr fallback 到 True，保证默认行为一致。
+        tip_reuse_by_liquid_name = bool(getattr(self, "_tip_reuse_by_liquid_name", True))
+
         if len(use_channels) != 8:
             max_len = max(num_sources, num_targets, len_asp_vols, len_dis_vols)
             prev_dropped = True  # 循环开始前通道上无 tip
+            current_tip_liquid_name: Optional[str] = None  # P10 v2：tip 残液身份
             for i in range(max_len):
-
-                # 辅助函数：
-                # - wrap=True: 返回 [value]（用于 liquid_height 等列表参数）
-                # - wrap=False: 返回 value（用于 mix_* 标量参数）
-                def safe_get(value, idx, default=None, wrap: bool = True):
-                    if value is None:
-                        return default
-                    try:
-                        if isinstance(value, (list, tuple)):
-                            if len(value) == 0:
-                                return default
-                            item = value[idx % len(value)]
-                        else:
-                            item = value
-                        return [item] if wrap else item
-                    except Exception:
-                        return default
 
                 # 动态构建参数字典，只传递实际提供的参数
                 kwargs = {
@@ -1646,20 +1950,38 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 cur_source = sources[i % num_sources]
                 cur_target = targets[i % num_targets]
 
-                # drop: 仅当下一轮的 source 和 target 都相同时才保留 tip（下一轮可以复用）
+                # drop: identity-keep（同 PLR Well 对象）OR liquids-equivalence
+                # （cur/next source ``tracker.liquids[-1]`` 同名）→ 任一命中即保留 tip。
                 drop_tip = True
                 if i < max_len - 1:
                     next_source = sources[(i + 1) % num_sources]
                     next_target = targets[(i + 1) % num_targets]
-                    if cur_target is next_target and cur_source is next_source:
+                    identity_keep = (cur_target is next_target) and (cur_source is next_source)
+                    liquids_keep = (
+                        tip_reuse_by_liquid_name
+                        and _same_liquid_via_liquids_pair(cur_source, next_source)
+                    )
+                    if identity_keep or liquids_keep:
                         drop_tip = False
 
-                # pick_up: 仅当上一轮保留了 tip（未 drop）且 source 相同时才复用
+                # pick_up: identity-keep（同 PLR Well 对象）OR liquids-equivalence
+                # （cur source ``tracker.liquids[-1]`` 与 tip 残液同名）→ 任一命中即复用 tip。
                 pick_up_tip = True
                 if i > 0 and not prev_dropped:
                     prev_source = sources[(i - 1) % num_sources]
-                    if cur_source is prev_source:
+                    identity_keep = (cur_source is prev_source)
+                    liquids_keep = (
+                        tip_reuse_by_liquid_name
+                        and _same_liquid_via_liquids(cur_source, current_tip_liquid_name)
+                    )
+                    if identity_keep or liquids_keep:
                         pick_up_tip = False
+
+                # P10 v2 时序：tip 残液名必须在 aspirate **之前**预读
+                # （PLR aspirate 顶层归零时会 pop ``tracker.liquids`` 顶层）。
+                pending_tip_name: Optional[str] = None
+                if pick_up_tip:
+                    pending_tip_name = _capture_tip_liquid_name(cur_source)
 
                 prev_dropped = drop_tip
 
@@ -1667,6 +1989,155 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 kwargs['drop'] = drop_tip
 
                 await self._transfer_base_method(**kwargs)
+
+                if pick_up_tip:
+                    current_tip_liquid_name = pending_tip_name
+                if drop_tip:
+                    current_tip_liquid_name = None
+        else:
+            # ---------------------------------------------------------------
+            # P1 v4 多通道分支：use_channels=[0..7]，sources / targets /
+            # asp_vols / dis_vols 长度均为 8 × M（M 为列数 / 8 通道并发批次数）。
+            #
+            # 每段 8 个 wells + 8 个 vols 同时下发给 PLR，一次完成 8 通道
+            # 并发 aspirate/dispense。M 段串行执行，对应 M 次 tip pickup /
+            # 8 通道 transfer 周期。
+            #
+            # flow_rates / blow_out_air_volume / blow_out_air_volume_before /
+            # liquid_height / delays / pre_aspirate_from_target 若长度也是 8M
+            # 则按段同切；若长度恰好为 M（一段一值）则 broadcast 到 8；若长度
+            # 不足则按 idx % len 循环回退。
+            # ---------------------------------------------------------------
+            n_src_seg = max(1, num_sources // 8)
+            n_tgt_seg = max(1, num_targets // 8)
+            n_asp_seg = max(1, len_asp_vols // 8)
+            n_dis_seg = max(1, len_dis_vols // 8)
+            max_seg = max(n_src_seg, n_tgt_seg, n_asp_seg, n_dis_seg)
+
+            def _slice8(value, seg_idx):
+                """从 ``value`` 抽出第 ``seg_idx`` 段（长度 8 的 list）。
+
+                - 若 ``value`` 长度是 8 的倍数 → 按段切 8 元素；
+                - 若 ``value`` 长度等于段数（M） → 取 ``value[seg_idx]`` 并 broadcast 到 8；
+                - 单 scalar / 长度 1 → broadcast 到 8；
+                - 其它 → 循环回退到 ``value[seg_idx % len(value)]`` 并 broadcast。
+                """
+                if value is None:
+                    return None
+                if isinstance(value, (int, float)):
+                    return [float(value)] * 8
+                if not isinstance(value, (list, tuple)):
+                    return None
+                if len(value) == 0:
+                    return None
+                if len(value) % 8 == 0 and len(value) >= 8:
+                    n = len(value) // 8
+                    s = (seg_idx % n) * 8
+                    return list(value[s : s + 8])
+                # 长度 == 段数 → 1 vol per segment，broadcast 到 8 通道
+                item = value[seg_idx % len(value)]
+                return [item] * 8
+
+            prev_dropped = True
+            current_tip_liquid_name: Optional[str] = None  # P10 v2：tip 残液身份（段锚孔粒度）
+            for seg in range(max_seg):
+                src_slice = list(sources[(seg % n_src_seg) * 8 : (seg % n_src_seg + 1) * 8]) \
+                    if num_sources >= 8 else [sources[seg % num_sources]] * 8
+                tgt_slice = list(targets[(seg % n_tgt_seg) * 8 : (seg % n_tgt_seg + 1) * 8]) \
+                    if num_targets >= 8 else [targets[seg % num_targets]] * 8
+                asp_slice = asp_vols[(seg % n_asp_seg) * 8 : (seg % n_asp_seg + 1) * 8] \
+                    if len_asp_vols >= 8 else [asp_vols[seg % len_asp_vols]] * 8
+                dis_slice = dis_vols[(seg % n_dis_seg) * 8 : (seg % n_dis_seg + 1) * 8] \
+                    if len_dis_vols >= 8 else [dis_vols[seg % len_dis_vols]] * 8
+
+                kwargs = {
+                    'sources': src_slice,
+                    'targets': tgt_slice,
+                    'tip_racks': tip_racks,
+                    'use_channels': use_channels,
+                    'asp_vols': asp_slice,
+                    'dis_vols': dis_slice,
+                }
+
+                if asp_flow_rates is not None:
+                    kwargs['asp_flow_rates'] = _slice8(asp_flow_rates, seg)
+                if dis_flow_rates is not None:
+                    kwargs['dis_flow_rates'] = _slice8(dis_flow_rates, seg)
+                if offsets is not None:
+                    kwargs['offsets'] = _slice8(offsets, seg)
+                if touch_tip is not None:
+                    kwargs['touch_tip'] = bool(touch_tip)
+                if liquid_height is not None:
+                    kwargs['liquid_height'] = _slice8(liquid_height, seg)
+                if blow_out_air_volume is not None:
+                    kwargs['blow_out_air_volume'] = _slice8(blow_out_air_volume, seg)
+                if blow_out_air_volume_before is not None:
+                    kwargs['blow_out_air_volume_before'] = _slice8(blow_out_air_volume_before, seg)
+                if spread is not None:
+                    kwargs['spread'] = spread
+                # mix_* 仍按标量传递（PLR 多通道 mix 用 use_channels 自动并发 8 wells）
+                if mix_stage is not None:
+                    kwargs['mix_stage'] = safe_get(mix_stage, seg, wrap=False)
+                if mix_times is not None:
+                    kwargs['mix_times'] = safe_get(mix_times, seg, wrap=False)
+                if mix_vol is not None:
+                    kwargs['mix_vol'] = safe_get(mix_vol, seg, wrap=False)
+                if mix_rate is not None:
+                    kwargs['mix_rate'] = safe_get(mix_rate, seg, wrap=False)
+                if mix_liquid_height is not None:
+                    kwargs['mix_liquid_height'] = safe_get(mix_liquid_height, seg, wrap=False)
+                if delays is not None:
+                    kwargs['delays'] = _slice8(delays, seg)
+                if pre_aspirate_from_target is not None:
+                    kwargs['pre_aspirate_from_target'] = _slice8(pre_aspirate_from_target, seg)
+
+                # 段间 tip 复用：identity-keep（同段锚孔 PLR Well 对象）OR
+                # liquids-equivalence（段锚孔 ``tracker.liquids[-1]`` 同名）→ 任一命中即保留 tip。
+                # 设计假设：8 通道段内 8 wells 同液（由 P1 multi-channel-flatten 保证）。
+                cur_src_anchor = src_slice[0]
+                cur_tgt_anchor = tgt_slice[0]
+                drop_tip = True
+                if seg < max_seg - 1:
+                    next_src_anchor = sources[((seg + 1) % n_src_seg) * 8] \
+                        if num_sources >= 8 else sources[(seg + 1) % num_sources]
+                    next_tgt_anchor = targets[((seg + 1) % n_tgt_seg) * 8] \
+                        if num_targets >= 8 else targets[(seg + 1) % num_targets]
+                    identity_keep = (cur_tgt_anchor is next_tgt_anchor) and (cur_src_anchor is next_src_anchor)
+                    liquids_keep = (
+                        tip_reuse_by_liquid_name
+                        and _same_liquid_via_liquids_pair(cur_src_anchor, next_src_anchor)
+                    )
+                    if identity_keep or liquids_keep:
+                        drop_tip = False
+
+                pick_up_tip = True
+                if seg > 0 and not prev_dropped:
+                    prev_src_anchor = sources[((seg - 1) % n_src_seg) * 8] \
+                        if num_sources >= 8 else sources[(seg - 1) % num_sources]
+                    identity_keep = (cur_src_anchor is prev_src_anchor)
+                    liquids_keep = (
+                        tip_reuse_by_liquid_name
+                        and _same_liquid_via_liquids(cur_src_anchor, current_tip_liquid_name)
+                    )
+                    if identity_keep or liquids_keep:
+                        pick_up_tip = False
+
+                # P10 v2 时序：tip 残液名必须在 aspirate **之前**预读
+                pending_tip_name: Optional[str] = None
+                if pick_up_tip:
+                    pending_tip_name = _capture_tip_liquid_name(cur_src_anchor)
+
+                prev_dropped = drop_tip
+
+                kwargs['pick_up'] = pick_up_tip
+                kwargs['drop'] = drop_tip
+
+                await self._transfer_base_method(**kwargs)
+
+                if pick_up_tip:
+                    current_tip_liquid_name = pending_tip_name
+                if drop_tip:
+                    current_tip_liquid_name = None
 
 
         return TransferLiquidReturn(
@@ -1703,22 +2174,68 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         delays = kwargs.get('delays')
         pre_aspirate_from_target = kwargs.get('pre_aspirate_from_target')
 
+        # P1 v4 多通道：当 use_channels 长度 > 1（如 8 通道）时，下层
+        # PLR aspirate/dispense 接受「N 个 resources + N 个 vols + N
+        # 个 use_channels」逐通道独立操作；单通道时仍按 `[sources[0]]`
+        # / `[asp_vols[0]]` 单元素列表调用。
+        multi_channel = isinstance(use_channels, (list, tuple)) and len(use_channels) > 1
+        n_ch = len(use_channels) if multi_channel else 1
+
+        def _pad_to_n(lst, n, default=None):
+            """把 list 截/扩到长度 n；None / 空列表返回 None。"""
+            if lst is None:
+                return None
+            if not isinstance(lst, (list, tuple)) or len(lst) == 0:
+                return None
+            if len(lst) >= n:
+                return list(lst[:n])
+            return list(lst) + [default if default is not None else lst[-1]] * (n - len(lst))
+
+        if multi_channel:
+            asp_resources = list(sources[:n_ch]) if len(sources) >= n_ch else list(sources)
+            dis_resources = list(targets[:n_ch]) if len(targets) >= n_ch else list(targets)
+            asp_vols_arg = list(asp_vols[:n_ch])
+            dis_vols_arg = list(dis_vols[:n_ch])
+            asp_flow_arg = _pad_to_n(asp_flow_rates, n_ch) if asp_flow_rates else None
+            dis_flow_arg = _pad_to_n(dis_flow_rates, n_ch) if dis_flow_rates else None
+            asp_liquid_h = _pad_to_n(liquid_height, n_ch) if liquid_height else None
+            dis_liquid_h = _pad_to_n(liquid_height, n_ch) if liquid_height else None
+            asp_offsets = _pad_to_n(offsets, n_ch) if offsets else None
+            dis_offsets = _pad_to_n(offsets, n_ch) if offsets else None
+            # mix 仍以 anchor well 调用，让 use_channels 在 PLR 内部并发列扩展
+            mix_src_anchor = [sources[0]]
+            mix_tgt_anchor = [targets[0]]
+        else:
+            asp_resources = [sources[0]]
+            dis_resources = [targets[0]]
+            asp_vols_arg = [asp_vols[0]]
+            dis_vols_arg = [dis_vols[0]]
+            asp_flow_arg = [asp_flow_rates[0]] if asp_flow_rates and len(asp_flow_rates) > 0 else None
+            dis_flow_arg = [dis_flow_rates[0]] if dis_flow_rates and len(dis_flow_rates) > 0 else None
+            asp_liquid_h = [liquid_height[0]] if liquid_height and len(liquid_height) > 0 else None
+            dis_liquid_h = [liquid_height[0]] if liquid_height and len(liquid_height) > 0 else None
+            asp_offsets = [offsets[0]] if offsets and len(offsets) > 0 else None
+            dis_offsets = [offsets[0]] if offsets and len(offsets) > 0 else None
+            mix_src_anchor = [sources[0]]
+            mix_tgt_anchor = [targets[0]]
+
         tip = []
         if pick_up:
             tip.append(self._get_next_tip())
             await self.pick_up_tips(tip,use_channels=use_channels)
-        blow_out_air_volume_before_vol = 0.0
-        if blow_out_air_volume_before is not None and len(blow_out_air_volume_before) > 0:
-            blow_out_air_volume_before_vol = float(blow_out_air_volume_before[0] or 0.0)
-        blow_out_air_volume_vol = 0.0
-        if blow_out_air_volume is not None and len(blow_out_air_volume) > 0:
-            blow_out_air_volume_vol = float(blow_out_air_volume[0] or 0.0)
+        # P1 v4：blow_before / blow_after 是每通道独立的，列表长度应为 n_ch。
+        # 标量化处理（取 first 非零）用于决定是否触发 before-aspirate；下发到
+        # PLR 时仍按通道列表传递。
+        blow_before_list = _pad_to_n(blow_out_air_volume_before, n_ch) if blow_out_air_volume_before else None
+        blow_after_list = _pad_to_n(blow_out_air_volume, n_ch) if blow_out_air_volume else None
+        blow_out_air_volume_before_vol = float(blow_before_list[0] or 0.0) if blow_before_list else 0.0
+        blow_out_air_volume_vol = float(blow_after_list[0] or 0.0) if blow_after_list else 0.0
         # PLR 的 blow_out_air_volume 是空气参数，不计入液体体积。
         # before 空气通过单独预吸实现，after 空气通过 blow_out_air_volume 参数实现。
 
         if mix_stage in ["before", "both"] and mix_times is not None and mix_times > 0:
             await self.mix(
-                targets=[sources[0]],
+                targets=mix_src_anchor,
                 mix_time=mix_times,
                 mix_vol=mix_vol,
                 offsets=offsets if offsets else None,
@@ -1729,18 +2246,20 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
         if blow_out_air_volume_before_vol > 0:
             source_tracker = getattr(sources[0], "tracker", None)
-            source_tracker_was_disabled = bool(getattr(source_tracker, "is_disabled", False))
             try:
                 if source_tracker is not None and hasattr(source_tracker, "disable"):
                     source_tracker.disable()
                 await self.aspirate(
-                    resources=[sources[0]],
-                    vols=[0],
+                    resources=asp_resources,
+                    vols=[0] * len(asp_resources),
                     use_channels=use_channels,
                     flow_rates=None,
-                    offsets=[Coordinate(x=0, y=0, z=sources[0].get_size_z())],
+                    offsets=[Coordinate(x=0, y=0, z=sources[0].get_size_z())] * len(asp_resources),
                     liquid_height=None,
-                    blow_out_air_volume=[blow_out_air_volume_before_vol],
+                    blow_out_air_volume=(
+                        blow_before_list if multi_channel
+                        else [blow_out_air_volume_before_vol]
+                    ),
                     spread="custom",
                 )
             finally:
@@ -1748,34 +2267,44 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     source_tracker.enable()
 
         await self.aspirate(
-            resources=[sources[0]],
-            vols=[asp_vols[0]],
+            resources=asp_resources,
+            vols=asp_vols_arg,
             use_channels=use_channels,
-            flow_rates=[asp_flow_rates[0]] if asp_flow_rates and len(asp_flow_rates) > 0 else None,
-            offsets=[offsets[0]] if offsets and len(offsets) > 0 else None,
-            liquid_height=[liquid_height[0]] if liquid_height and len(liquid_height) > 0 else None,
+            flow_rates=asp_flow_arg,
+            offsets=asp_offsets,
+            liquid_height=asp_liquid_h,
             blow_out_air_volume=(
-                [blow_out_air_volume_vol] if blow_out_air_volume_vol > 0 else None
+                blow_after_list if (multi_channel and blow_after_list and any((v or 0) > 0 for v in blow_after_list))
+                else ([blow_out_air_volume_vol] if blow_out_air_volume_vol > 0 else None)
             ),
             spread=spread,
         )
-        if delays is not None:
+        if delays is not None and len(delays) > 0:
             await self.custom_delay(seconds=delays[0])
+        # 合并 before/after 空气体积逐通道；dispense 时一次性吐回。
+        if multi_channel:
+            blow_for_dispense = [
+                float(((blow_after_list[k] if blow_after_list else 0) or 0)
+                      + ((blow_before_list[k] if blow_before_list else 0) or 0))
+                for k in range(n_ch)
+            ]
+        else:
+            blow_for_dispense = [blow_out_air_volume_vol + blow_out_air_volume_before_vol]
         await self.dispense(
-            resources=[targets[0]],
-            vols=[dis_vols[0]],
+            resources=dis_resources,
+            vols=dis_vols_arg,
             use_channels=use_channels,
-            flow_rates=[dis_flow_rates[0]] if dis_flow_rates and len(dis_flow_rates) > 0 else None,
-            offsets=[offsets[0]] if offsets and len(offsets) > 0 else None,
-            blow_out_air_volume=[blow_out_air_volume_vol+blow_out_air_volume_before_vol],
-            liquid_height=[liquid_height[0]] if liquid_height and len(liquid_height) > 0 else None,
+            flow_rates=dis_flow_arg,
+            offsets=dis_offsets,
+            blow_out_air_volume=blow_for_dispense,
+            liquid_height=dis_liquid_h,
             spread=spread,
         )
         if delays is not None and len(delays) > 1:
             await self.custom_delay(seconds=delays[1])
         if mix_stage in ["after", "both"] and mix_times is not None and mix_times > 0:
             await self.mix(
-                targets=[targets[0]],
+                targets=mix_tgt_anchor,
                 mix_time=mix_times,
                 mix_vol=mix_vol,
                 offsets=offsets if offsets else None,

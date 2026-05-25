@@ -850,9 +850,11 @@ liquid_handler:
           plate: null
           volumes: null
           well_names: null
+          wells: null
         handles: {}
         placeholder_keys:
           plate: unilabos_resources
+          wells: unilabos_resources
         result: {}
         schema:
           description: ''
@@ -952,9 +954,89 @@ liquid_handler:
                   items:
                     type: string
                   type: array
+                wells:
+                  items:
+                    additionalProperties: false
+                    properties:
+                      category:
+                        type: string
+                      children:
+                        items:
+                          type: string
+                        type: array
+                      config:
+                        type: string
+                      data:
+                        type: string
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      parent:
+                        type: string
+                      pose:
+                        additionalProperties: false
+                        properties:
+                          orientation:
+                            additionalProperties: false
+                            properties:
+                              w:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              x:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              y:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              z:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            type: object
+                          position:
+                            additionalProperties: false
+                            properties:
+                              x:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              y:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              z:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            type: object
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        type: object
+                      sample_id:
+                        type: string
+                      type:
+                        type: string
+                    title: well
+                    type: object
+                  type: array
               required:
-              - plate
-              - well_names
               - liquid_names
               - volumes
               type: object
@@ -9373,13 +9455,19 @@ liquid_handler.prcxi:
           plate: null
           volumes: null
           well_names: null
+          wells: null
         handles:
           input:
+          - data_key: '@this.0@@@wells'
+            data_source: handle
+            data_type: resource
+            handler_key: wells_identifier
+            label: 待设定液体孔（框选）
           - data_key: '@this.0@@@plate'
             data_source: handle
             data_type: resource
             handler_key: input_plate
-            label: 待设定液体板
+            label: 待设定液体板（兼容 fallback）
           output:
           - data_key: plate.@flatten
             data_source: executor
@@ -9398,6 +9486,7 @@ liquid_handler.prcxi:
             label: 各孔设定体积
         placeholder_keys:
           plate: unilabos_resources
+          wells: unilabos_resources
         result: {}
         schema:
           description: ''
@@ -9497,9 +9586,89 @@ liquid_handler.prcxi:
                   items:
                     type: string
                   type: array
+                wells:
+                  items:
+                    additionalProperties: false
+                    properties:
+                      category:
+                        type: string
+                      children:
+                        items:
+                          type: string
+                        type: array
+                      config:
+                        type: string
+                      data:
+                        type: string
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      parent:
+                        type: string
+                      pose:
+                        additionalProperties: false
+                        properties:
+                          orientation:
+                            additionalProperties: false
+                            properties:
+                              w:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              x:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              y:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              z:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            type: object
+                          position:
+                            additionalProperties: false
+                            properties:
+                              x:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              y:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                              z:
+                                maximum: 1.7976931348623157e+308
+                                minimum: -1.7976931348623157e+308
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            type: object
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        type: object
+                      sample_id:
+                        type: string
+                      type:
+                        type: string
+                    title: well
+                    type: object
+                  type: array
               required:
-              - plate
-              - well_names
               - liquid_names
               - volumes
               type: object

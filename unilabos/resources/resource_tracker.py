@@ -33,6 +33,42 @@ RETURN_UNILABOS_SAMPLES = "unilabos_samples"
 SampleUUIDsType = Dict[str, Optional["PLRResource"]]
 
 
+def _augment_states_with_liquid_history(
+    resource: "PLRResource",
+    states: Dict[str, Any],
+) -> None:
+    """P9 — 把 Uni-Lab 在 PLR tracker 上挂的 ``liquid_history`` 扩展属性并入
+    ``serialize_all_state()`` 返回的 well state dict。
+
+    PLR 原生 ``serialize_all_state()`` 只输出 ``{liquids, pending_liquids}``，
+    会丢失 ``tracker.liquid_history``。本 helper 递归遍历资源树，把每个有 tracker 的
+    节点的 ``liquid_history`` 写入 ``states[node.name]["liquid_history"]``。
+
+    设计要点：
+        - 不可变：若 ``states[name]`` 已有 ``liquid_history`` 字段则不覆盖（向后兼容）。
+        - 列表浅拷贝：避免运行时 mutation 影响 dump 结果。
+        - 节点无 tracker / tracker 无 ``liquid_history`` 属性 → 跳过（不写默认 ``[]``，
+          否则会污染非 well 节点 state）。
+
+    详见 ``product_designs/protocol_convert/09-liquid-history-unknown-debug.md`` §6.3。
+    """
+
+    def _walk(node: "PLRResource") -> None:
+        name = getattr(node, "name", None)
+        if isinstance(name, str) and name in states:
+            tracker = getattr(node, "tracker", None)
+            if tracker is not None:
+                history = getattr(tracker, "liquid_history", None)
+                if isinstance(history, list):
+                    state = states[name]
+                    if isinstance(state, dict) and "liquid_history" not in state:
+                        state["liquid_history"] = list(history)
+        for child in getattr(node, "children", ()) or ():
+            _walk(child)
+
+    _walk(resource)
+
+
 class LabSample(TypedDict):
     sample_uuid: str
     oss_path: str
@@ -577,6 +613,11 @@ class ResourceTreeSet(object):
 
             serialized_data = resource.serialize()
             all_states = resource.serialize_all_state()
+            # P9 — PLR 原生 serialize_all_state 只输出 {liquids, pending_liquids}，
+            # 丢弃 Uni-Lab 在 tracker 上挂的扩展属性 liquid_history。在这里把它并回 state dict
+            # 以确保 OS→Cloud sync 链路完整保留液体历史。
+            # 详见 ``product_designs/protocol_convert/09-liquid-history-unknown-debug.md`` §6.3。
+            _augment_states_with_liquid_history(resource, all_states)
 
             # 根节点没有父节点，传入 None
             root_instance = resource_plr_inner(serialized_data, None, all_states, uuid_list)

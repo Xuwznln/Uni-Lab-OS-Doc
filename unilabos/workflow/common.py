@@ -23,7 +23,7 @@
 - 遍历所有 reagent，按 slot 去重，为每个唯一的 slot 创建一个板子
 - 所有 create_resource 节点的 parent_uuid 指向 Group 节点，minimized=true
 - 生成参数:
-    res_id / 节点 name / display_name: {匹配后的 prcxi 类名}_slot_{槽位}
+    res_id / 节点 name / display_name: {匹配后的 target 类名}_slot_{槽位}
     device_id: /PRCXI
     class_name: 与 res_id 中类型一致（如 PRCXI 384/96 孔板注册类）
     parent: /PRCXI/PRCXI_Deck
@@ -38,12 +38,18 @@
 - 首先创建一个 Group 节点（type="Group", minimized=true），用于包含所有 set_liquid_from_plate 节点
 - 遍历所有 reagent，为每个试剂创建 set_liquid_from_plate 节点
 - 所有 set_liquid_from_plate 节点的 parent_uuid 指向 Group 节点，minimized=true
-- 生成参数:
+- 生成参数（P3 框选化，新主路径）:
+    wells: [
+        {id, name, parent: labware_id, type: "well"},
+        ...
+    ]（list[dict]，每孔一个资源引用；前端通过 placeholder 框选 well 时回填 uuid）
+    liquid_names: ["cell_lines", "cell_lines", "cell_lines"]（与 wells 数量一致）
+    volumes: [1e5, 1e5, 1e5]（与 wells 数量一致，默认体积）
+    # 兼容字段（旧 runtime / 旧 schema fallback）:
     plate: []（通过连接传递，来自 create_resource 的 labware）
     well_names: ["A1", "A3", "A5"]（来自 reagent 的 well 数组）
-    liquid_names: ["cell_lines", "cell_lines", "cell_lines"]（与 well 数量一致）
-    volumes: [1e5, 1e5, 1e5]（与 well 数量一致，默认体积）
-- 输入连接: create_resource (labware) -> set_liquid_from_plate (input_plate)
+- 输入连接: create_resource (labware) -> set_liquid_from_plate (wells_identifier)
+    （P3 §3.4.3 简化方案：source_port 仍为 labware；placeholder 内部把 labware.wells.@flatten 映射到 wells 字段）
 - 输出端口: output_wells（用于连接 transfer_liquid）
 - 控制流: set_liquid_from_plate 连接在所有 create_resource 之后，通过 ready 端口串联
 
@@ -69,7 +75,7 @@
 
 物料流:
     [create_resource] --labware--> [set_liquid_from_plate] --output_wells--> [transfer_liquid] --sources_out/targets_out--> [下一个 transfer_liquid]
-          (slot=1)                    (cell_lines)           (input_plate)     (sources_identifier)                          (sources_identifier)
+          (slot=1)                    (cell_lines)         (wells_identifier)  (sources_identifier)                          (sources_identifier)
           (slot=4)                    (Liquid_1)                               (targets_identifier)                          (targets_identifier)
 
 ==================== 端口映射 ====================
@@ -78,8 +84,8 @@ create_resource:
     输出: labware
 
 set_liquid_from_plate:
-    输入: input_plate
-    输出: output_plate, output_wells
+    输入: wells -> wells_identifier（P3 主路径；input_plate 作旧 schema fallback 仍存在）
+    输出: output_plate, output_wells, output_volumes
 
 transfer_liquid:
     输入: sources -> sources_identifier, targets -> targets_identifier
@@ -102,11 +108,24 @@ transfer_liquid:
 
 import re
 import uuid
+import warnings
 
 import networkx as nx
 from networkx.drawing.nx_agraph import to_agraph
 import matplotlib.pyplot as plt
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Set, Tuple, Optional
+
+from unilabos.workflow.labware_mapping import (
+    infer_kind as _yaml_infer_kind,
+    remap_slot as _yaml_remap_slot,
+    resolve_target_class as _yaml_resolve_target_class,
+)
+
+# P6.1 默认目标仪器；caller 不显式传 target_device 时使用。
+# 注意：这里写 "prcxi" 是 P6 历史兜底（与原版 _tip_prcxi_class_for_max_ul、
+# _apply_prcxi_labware_auto_match 走 PRCXI 模板的语义一致），与 YAML
+# 顶层是否声明 prcxi 段无关。
+DEFAULT_TARGET_DEVICE = "prcxi"
 
 Json = Dict[str, Any]
 
@@ -142,14 +161,25 @@ PARAM_RENAME_MAPPING = {
 }
 
 
-def _map_deck_slot(raw_slot: str, object_type: str = "") -> str:
-    """协议槽位 -> 实际 deck：4→13，8→14，12+trash→16，其余不变。"""
-    s = "" if raw_slot is None else str(raw_slot).strip()
-    if not s:
-        return ""
-    if s == "12" and (object_type or "").strip().lower() == "trash":
-        return "16"
-    return {"4": "13", "8": "14"}.get(s, s)
+def _map_deck_slot(
+    raw_slot: str,
+    object_type: str = "",
+    *,
+    target_device: str = DEFAULT_TARGET_DEVICE,
+    target_model: Optional[str] = None,
+) -> str:
+    """协议槽位 -> 实际 deck：默认 4→13，8→14，12+trash→16，其余不变。
+
+    P6.1.1：``slot_remap`` 内嵌在 ``target_devices.<target_device>`` 下，
+    可由 ``target_devices.<target_device>.models.<target_model>.slot_remap`` 进一步覆盖。
+    转调 :func:`labware_mapping.remap_slot`，走 4 段 fallback 链（model → device → default → builtin）。
+    """
+    return _yaml_remap_slot(
+        raw_slot,
+        object_type,
+        target_device=target_device,
+        target_model=target_model,
+    )
 
 
 def _labware_def_index(labware_defs: Optional[List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
@@ -169,27 +199,16 @@ def _labware_hint_text(labware_id: str, item: Dict[str, Any]) -> str:
 
 
 def _infer_reagent_kind(labware_id: str, item: Dict[str, Any]) -> str:
-    ot = (item.get("object") or "").strip().lower()
-    if ot == "trash":
-        return "trash"
-    if ot == "tiprack":
-        return "tip_rack"
-    lid = _labware_hint_text(labware_id, item)
-    if "trash" in lid:
-        return "trash"
-    # tiprack / tip + rack（顺序在 tuberack 之前）
-    if "tiprack" in lid or ("tip" in lid and "rack" in lid):
-        return "tip_rack"
-    # 离心管架 / OpenTrons tuberack（勿与 96 tiprack 混淆）
-    if "tuberack" in lid or "tube_rack" in lid:
-        return "tube_rack"
-    if "eppendorf" in lid and "rack" in lid:
-        return "tube_rack"
-    if "safelock" in lid and "rack" in lid:
-        return "tube_rack"
-    if "rack" in lid and "tip" not in lid:
-        return "tube_rack"
-    return "plate"
+    """labware → ``plate / tip_rack / tube_rack / trash``。
+
+    P6：转调 ``labware_mapping.infer_kind``，匹配规则由
+    ``Uni-Lab-OS/labware_mapping.yaml`` 的 ``kinds`` 段声明（顺序敏感、首个命中胜出）。
+    object 字段（``trash`` / ``tiprack``）优先级保留在 YAML loader 内部。
+    """
+    return _yaml_infer_kind(
+        _labware_hint_text(labware_id, item),
+        (item.get("object") or "") if isinstance(item, dict) else "",
+    )
 
 
 def _infer_tube_rack_num_positions(labware_id: str, item: Dict[str, Any]) -> int:
@@ -231,8 +250,15 @@ def _infer_plate_num_children_from_wells(wells: Any) -> Optional[int]:
 
 
 def _infer_plate_num_children_from_labware_hint(labware_id: str, item: Dict[str, Any]) -> Optional[int]:
-    """从 labware 命名（如 custom_384_wellplate、nest_96_wellplate）解析孔数，供模板匹配。"""
-    hint = _labware_hint_text(labware_id, item)
+    """从 labware 命名（如 custom_384_wellplate、nest_96_wellplate）解析孔数，供模板匹配。
+
+    P6 hint bug 修复（2026-05-22）：hint 只用 ``item["labware"]``，**不**拼上
+    ``labware_id``（reagent_key 业务名，如 ``samples_6``、``samples_24`` 末尾数字
+    会被宽松正则 ``[_\\s](\\d+)[_\\s]`` 误识别为孔板规格，进而触发
+    ``_apply_target_labware_class_auto_match`` fallback 到 PRCXI 4-孔 trough 模板，
+    最终把同 deck 槽位上所有 reagent 的 ``target_class_name`` unify 成错误的 trough class）。
+    """
+    hint = str(item.get("labware", "") or "").lower()
     m = re.search(
         r"\b(1536|384|96|48|24|12|6)(\s*[-_]?\s*well|wellplate|_well_)",
         hint,
@@ -291,20 +317,24 @@ def _flatten_transfer_vols(value: Any) -> List[float]:
         return []
 
 
-def _tip_prcxi_class_for_max_ul(max_ul: float) -> str:
-    """按移液最大体积分档推介 PRCXI tip 类名：≤10 µL → 10µL；<300 → 300µL；否则 1000µL。"""
-    if max_ul <= 10:
-        return "PRCXI_10uL_Tips"
-    if max_ul < 300:
-        return "PRCXI_300ul_Tips"
-    return "PRCXI_1000uL_Tips"
-
-
 def _apply_tip_rack_class_from_transfer_volumes(
     labware_info: Dict[str, Dict[str, Any]],
     protocol_steps_refactored: List[Dict[str, Any]],
+    *,
+    target_device: str = DEFAULT_TARGET_DEVICE,
+    target_model: Optional[str] = None,
 ) -> None:
-    """根据各 ``transfer_liquid`` 的 asp_vols/dis_vols 为对应 ``tip_racks`` 写入 ``prcxi_class_name``。"""
+    """根据各 ``transfer_liquid`` 的 asp_vols/dis_vols 为对应 ``tip_racks`` 写入 ``target_class_name``。
+
+    P6.1：tip 量程档不再硬编码 PRCXI 三档，改为查
+    ``labware_mapping.yaml`` 的 ``target_devices.<target_device>.rules``（tip_rack
+    + hole_count=96 + volume_max 闭区间）。YAML 未命中时 fallback 到
+    ``CLASS_NAMES_MAPPING['tip_rack']``（保守默认 PRCXI_300ul_Tips）。
+
+    P6.1.1：``target_model`` 透传给 :func:`_yaml_resolve_target_class`，
+    允许同厂商不同型号声明不同 tip 量程档（如 PRCXI 9320 与 4040 用同档，
+    Beckman i7 与 i5 可能用不同档）。
+    """
     tip_to_max_ul: Dict[str, float] = {}
 
     for step in protocol_steps_refactored:
@@ -326,13 +356,17 @@ def _apply_tip_rack_class_from_transfer_volumes(
         step_max = max(nums)
         tip_to_max_ul[tip_key] = max(tip_to_max_ul.get(tip_key, 0.0), step_max)
 
+    default_tip_cls = CLASS_NAMES_MAPPING.get("tip_rack", "PRCXI_300ul_Tips")
     for tip_key, max_ul in tip_to_max_ul.items():
         item = labware_info.get(tip_key)
         if item is None:
             continue
         if _infer_reagent_kind(tip_key, item) != "tip_rack":
             continue
-        item["prcxi_class_name"] = _tip_prcxi_class_for_max_ul(max_ul)
+        cls = _yaml_resolve_target_class(
+            target_device, "tip_rack", hole_count=96, volume=max_ul, target_model=target_model
+        )
+        item["target_class_name"] = cls if cls else default_tip_cls
 
 
 def _volume_template_covers_requirement(template: Dict[str, Any], req: Optional[float], kind: str) -> bool:
@@ -377,13 +411,24 @@ def _match_score_prcxi_template(
     return hole_diff * 1000 + vol_diff
 
 
-def _apply_prcxi_labware_auto_match(
+def _apply_target_labware_class_auto_match(
     labware_info: Dict[str, Dict[str, Any]],
     labware_defs: Optional[List[Dict[str, Any]]] = None,
     *,
     preserve_tip_rack_incoming_class: bool = True,
+    target_device: str = DEFAULT_TARGET_DEVICE,
+    target_model: Optional[str] = None,
 ) -> None:
-    """上传构建图前：按孔数+容量将 reagent 条目匹配到 ``prcxi_labware`` 注册类名，写入 ``prcxi_class_name``。
+    """上传构建图前：按孔数 + 容量将 reagent 条目匹配到目标仪器物料注册类名，写入 ``target_class_name``。
+
+    P6.1 流程：
+
+    1. 先查 ``labware_mapping.yaml`` 的 ``target_devices.<target_device>.rules``
+       （未声明的 target_device 由 :func:`_yaml_resolve_target_class` 自动 fallback
+       到固定段 ``target_devices.default``）；命中直接采用。
+    2. YAML 未命中（孔数 / 体积超出表内规则覆盖范围）→ 走 ``prcxi_labware``
+       注册模板打分匹配 fallback，并打 warning 提示「请补到映射表」。
+
     若给出需求体积，仅选用模板标称 Volume >= 该值的物料，并在满足条件的模板中选余量最小者。
 
     ``preserve_tip_rack_incoming_class=True``（默认）时：**仅 tip_rack** 不做模板匹配，类名由 ``class_name``/``class`` 或
@@ -394,19 +439,19 @@ def _apply_prcxi_labware_auto_match(
 
     default_prcxi_tip_class = CLASS_NAMES_MAPPING.get("tip_rack", "PRCXI_300ul_Tips")
 
+    # P6.1：模板 fallback 只在 prcxi_labware 可导入且非空时启用；YAML 查表路径**始终**生效。
+    # 这样在最小 Python 环境（无 pylabrobot）下，YAML 命中也能写入 target_class_name。
+    templates: List[Dict[str, Any]] = []
     try:
         from unilabos.devices.liquid_handling.prcxi.prcxi_labware import get_prcxi_labware_template_specs
+        templates = list(get_prcxi_labware_template_specs() or [])
     except Exception:
-        return
-
-    templates = get_prcxi_labware_template_specs()
-    if not templates:
-        return
+        templates = []
 
     def_map = _labware_def_index(labware_defs)
 
     for labware_id, item in labware_info.items():
-        if item.get("prcxi_class_name"):
+        if item.get("target_class_name"):
             continue
 
         kind = _infer_reagent_kind(labware_id, item)
@@ -416,12 +461,12 @@ def _apply_prcxi_labware_auto_match(
             if inc_s == default_prcxi_tip_class:
                 inc_s = ""
             if inc_s:
-                item["prcxi_class_name"] = inc_s
+                item["target_class_name"] = inc_s
             continue
 
         explicit = item.get("class_name") or item.get("class")
         if explicit and str(explicit).startswith("PRCXI_"):
-            item["prcxi_class_name"] = str(explicit)
+            item["target_class_name"] = str(explicit)
             continue
 
         extra = def_map.get(str(labware_id), {})
@@ -456,6 +501,20 @@ def _apply_prcxi_labware_auto_match(
         if kind == "tip_rack" and child_max_volume_f is None:
             child_max_volume_f = _tip_volume_hint(item, labware_id) or 300.0
 
+        # P6.1: 先查 labware_mapping.yaml；命中直接采用，跳过 PRCXI 模板打分匹配
+        # P6.1.1: target_model 透传，允许型号级 rules 覆盖
+        yaml_cls = _yaml_resolve_target_class(
+            target_device,
+            kind,
+            hole_count=num_children if kind != "trash" else None,
+            volume=child_max_volume_f,
+            target_model=target_model,
+        )
+        if yaml_cls:
+            item["target_class_name"] = yaml_cls
+            continue
+
+        # YAML 未命中：fallback 到 PRCXI 模板打分匹配（保留历史行为）+ warning 提示补表
         candidates = [t for t in templates if t["kind"] == kind]
         if not candidates:
             continue
@@ -473,21 +532,38 @@ def _apply_prcxi_labware_auto_match(
                 best = t
 
         if best:
-            item["prcxi_class_name"] = best["class_name"]
+            item["target_class_name"] = best["class_name"]
+            warnings.warn(
+                f"labware {labware_id!r} (kind={kind}, holes={num_children}, vol={child_max_volume_f}) "
+                f"未在 labware_mapping.yaml 的 target_devices.{target_device}.rules / "
+                f"target_devices.default.rules 中命中，已用 PRCXI 模板兜底 {best['class_name']}；"
+                f"建议在 labware_mapping.yaml 中补一条对应规则。"
+            )
 
 
-def _reconcile_slot_carrier_prcxi_class(
+def _reconcile_slot_carrier_target_class(
     labware_info: Dict[str, Dict[str, Any]],
     *,
     preserve_tip_rack_incoming_class: bool = False,
+    target_device: str = DEFAULT_TARGET_DEVICE,
+    target_model: Optional[str] = None,
 ) -> None:
-    """同一 deck 槽位上多条 reagent 时，按载体类型优先级统一 ``prcxi_class_name``，避免先遍历到 96 板后槽位被错误绑定。
+    """同一 deck 槽位上多条 reagent 时，按载体类型优先级统一 ``target_class_name``，避免先遍历到 96 板后槽位被错误绑定。
 
-    ``preserve_tip_rack_incoming_class=True`` 时：tip_rack 条目不参与同槽类名合并（不被覆盖、也不把 tip 类名扩散到同槽其它条目）。"""
+    ``preserve_tip_rack_incoming_class=True`` 时：tip_rack 条目不参与同槽类名合并（不被覆盖、也不把 tip 类名扩散到同槽其它条目）。
+
+    P6.1.1：``target_device`` / ``target_model`` 透传给 :func:`_map_deck_slot`，
+    保证「同槽位归并」按目标仪器型号的实际 deck 物理布局进行。
+    """
     by_slot: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
     for lid, item in labware_info.items():
         ot = item.get("object", "") or ""
-        slot = _map_deck_slot(str(item.get("slot", "")), ot)
+        slot = _map_deck_slot(
+            str(item.get("slot", "")),
+            ot,
+            target_device=target_device,
+            target_model=target_model,
+        )
         if not slot:
             continue
         by_slot.setdefault(str(slot), []).append((lid, item))
@@ -506,7 +582,7 @@ def _reconcile_slot_carrier_prcxi_class(
         for lid, it in pairs_sorted:
             if preserve_tip_rack_incoming_class and _infer_reagent_kind(lid, it) == "tip_rack":
                 continue
-            c = it.get("prcxi_class_name")
+            c = it.get("target_class_name")
             if c:
                 best_cls = c
                 break
@@ -515,7 +591,7 @@ def _reconcile_slot_carrier_prcxi_class(
         for lid, it in pairs:
             if preserve_tip_rack_incoming_class and _infer_reagent_kind(lid, it) == "tip_rack":
                 continue
-            it["prcxi_class_name"] = best_cls
+            it["target_class_name"] = best_cls
 
 
 # ---------------- Graph ----------------
@@ -737,6 +813,188 @@ def refactor_data(
     return refactored_data
 
 
+MERGED_TARGETS_SYNTHETIC_PREFIX = "_merged_targets_"
+
+
+def _collect_set_liquid_coverage(
+    protocol_steps: List[Dict[str, Any]],
+) -> Tuple[Set[str], Set[str]]:
+    """P2 v2 §14：预扫描 transfer_liquid 的 ``params.targets``，统计 reagent_key 覆盖关系。
+
+    输入要求：``protocol_steps`` 已经过 :func:`refactor_data` 标准化，每个 step 形如
+    ``{"template_name": "transfer_liquid", "param": {"targets": ...}, ...}``。
+
+    Returns
+    -------
+    (covered_by_merged, referenced_by_str)
+        ``covered_by_merged`` —— 所有出现在某个 ``list[str] targets`` 中的 reagent_keys。
+        ``referenced_by_str`` —— 所有以 ``str`` 形态出现在 ``targets`` 中的 reagent_keys。
+
+    用途
+    ----
+    第二步循环（``for labware_id, item in labware_info.items()``）根据这两个集合
+    判断某 target reagent_key 是否完全被 ``_emit_merged_set_liquid`` 接管：
+    若 ``key ∈ covered_by_merged ∧ key ∉ referenced_by_str``，则跳过 per-plate
+    ``set_liquid_from_plate`` 节点（避免冗余）。
+
+    详见 ``product_designs/protocol_convert/02-cross-slot-merge.md`` §14。
+    """
+    covered_by_merged: Set[str] = set()
+    referenced_by_str: Set[str] = set()
+    for step in protocol_steps:
+        if step.get("template_name") != "transfer_liquid":
+            continue
+        tgt = (step.get("param") or {}).get("targets")
+        if isinstance(tgt, list):
+            for t in tgt:
+                if isinstance(t, str) and t:
+                    covered_by_merged.add(t)
+        elif isinstance(tgt, str) and tgt:
+            referenced_by_str.add(tgt)
+    return covered_by_merged, referenced_by_str
+
+
+def _emit_merged_set_liquid(
+    G: "WorkflowGraph",
+    target_reagent_keys: List[str],
+    labware_info: Dict[str, Dict[str, Any]],
+    slot_to_create_resource: Dict[str, str],
+    *,
+    set_liquid_group_id: str,
+    merged_index: int,
+    target_device: str,
+    target_model: Optional[str],
+) -> Tuple[str, str]:
+    """P2 v2：为含 ``list[str] targets`` 的 transfer_liquid 节点插入一个 merged
+    ``set_liquid_from_plate`` 跨板聚合节点。
+
+    详见 ``product_designs/protocol_convert/02-cross-slot-merge.md`` §9.2 / §9.5。
+
+    构造逻辑：
+
+    1. 按 ``target_reagent_keys`` 顺序遍历，逐 key 使用独立 cursor 取
+       ``labware_info[key].well[cursor % len(wells)]`` 作为该 dispense 对应的 well 名；
+       wells 列表为空时退化为 ``key`` 本身（不带 ``/<well>`` 后缀）。
+    2. 把每个 dispense 的 ``{id, name, parent: key, type: "well"}`` 顺序压入
+       merged 节点的 ``param.wells``——这是 v2 的「顺序权威」载体（构造期固化）。
+    3. 多入边：对每个 distinct reagent_key 涉及的 plate，从对应 ``create_resource``
+       节点连一条 ``labware → wells_identifier`` 入边（同 plate 不重复连接）。
+    4. 注册一个 synthetic str ``_merged_targets_<idx>``，供 caller 改写
+       ``params.targets`` 与 ``resource_last_writer`` 映射。
+
+    Returns
+    -------
+    (synthetic_key, merged_node_id)
+        ``synthetic_key`` —— 写入到 ``transfer_liquid.params.targets``（str 形态），
+        以及 ``resource_last_writer[synthetic_key] = f"{merged_node_id}:output_wells"``。
+        ``merged_node_id`` —— 新插入节点的 UUID。
+    """
+    # 每个 reagent_key 一个 cursor，按 dispense 顺序推进；mod 处理同 well 重复 dispense
+    cursor: Dict[str, int] = {}
+    merged_wells: List[Dict[str, Any]] = []
+    liquid_names: List[str] = []
+    # P2 v2 §14 fix（2026-05-22）：merged 节点的 well_names 用 "<plate_plr_name>/<well>" 形态
+    # 编码每个 dispense 对应的 PLR Plate 实例名，让 abstract 层 fallback 能定位跨板 plate
+    # （否则 ROS placeholder 的 wells_identifier 多入边只保留最后一个 plate，导致跨板信息丢失）。
+    # plate_plr_name 复用 create_resource 节点的命名约定: f"{target_class_name}_slot_{mapped_slot}".
+    well_names_prefixed: List[str] = []
+    for key in target_reagent_keys:
+        info = labware_info.get(key) or {}
+        wells = info.get("well") or []
+        idx = cursor.get(key, 0)
+        if wells:
+            well_name = wells[idx % len(wells)]
+            ref_id = f"{key}/{well_name}"
+        else:
+            well_name = None
+            ref_id = key
+        cursor[key] = idx + 1
+        merged_wells.append({
+            "id": ref_id,
+            "name": ref_id,
+            "parent": key,
+            "type": "well",
+        })
+        # P8（2026-05-24）：reagent block 显式 ``liquid_name`` 字段优先，作为写入 PLR
+        # tracker / 前端的真实化学名；缺省时 fallback 到 reagent_key（行为不变）。
+        # 详见 ``product_designs/protocol_convert/08-liquid-name-from-reagent-block.md`` §3.4。
+        ln_value = info.get("liquid_name") or str(key)
+        liquid_names.append(ln_value)
+
+        # 计算 PLR Plate name 给 well_names prefix（跨板 fallback 用）
+        object_type = info.get("object", "") or ""
+        mapped_slot = _map_deck_slot(
+            str(info.get("slot", "")),
+            object_type,
+            target_device=target_device,
+            target_model=target_model,
+        )
+        target_class = info.get("target_class_name") or ""
+        if target_class and mapped_slot and well_name:
+            plate_plr_name = f"{target_class}_slot_{mapped_slot}".replace(" ", "_")
+            well_names_prefixed.append(f"{plate_plr_name}/{well_name}")
+        elif well_name:
+            # target_class 未知时仅写 well 名（abstract 层会走单 plate fallback；
+            # 跨板信息丢失，但至少不破坏单 slot 协议）
+            well_names_prefixed.append(well_name)
+        else:
+            well_names_prefixed.append("")
+
+    merged_node_id = str(uuid.uuid4())
+    synthetic_key = f"{MERGED_TARGETS_SYNTHETIC_PREFIX}{merged_index}"
+
+    G.add_node(
+        merged_node_id,
+        template_name="set_liquid_from_plate",
+        resource_name="liquid_handler.prcxi",
+        name=synthetic_key,
+        display_name=f"MergedTargets({len(set(target_reagent_keys))}p×{len(merged_wells)}w)",
+        description=f"Merged set_liquid_from_plate: targets={target_reagent_keys}",
+        lab_node_type="Reagent",
+        footer="set_liquid_from_plate-liquid_handler.prcxi",
+        device_name=DEVICE_NAME_DEFAULT,
+        type=NODE_TYPE_DEFAULT,
+        parent_uuid=set_liquid_group_id,
+        minimized=True,
+        param={
+            "wells": merged_wells,
+            "liquid_names": liquid_names,
+            # volumes=0：target plate 不预先注入液体，仅占位（同 per-plate set_liquid 行为）。
+            "volumes": [0] * len(merged_wells),
+            # 兼容字段：保留 plate/well_names 让旧 runtime / 旧前端可继续解析
+            "plate": [],
+            # 升级：well_names 元素为 "<plate_plr_name>/<well>" 形态（含跨板 plate 定位信息），
+            # abstract 层 set_liquid_from_plate 的 schema_fallback 会按 "/" 拆解逐个查 plate。
+            "well_names": well_names_prefixed,
+        },
+    )
+
+    # 多入边：对每个 distinct plate 接一条 create_resource.labware → wells_identifier
+    seen_keys: set = set()
+    for key in target_reagent_keys:
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        info = labware_info.get(key) or {}
+        object_type = info.get("object", "") or ""
+        mapped_slot = _map_deck_slot(
+            str(info.get("slot", "")),
+            object_type,
+            target_device=target_device,
+            target_model=target_model,
+        )
+        cr_node = slot_to_create_resource.get(mapped_slot)
+        if cr_node:
+            G.add_edge(
+                cr_node,
+                merged_node_id,
+                source_port="labware",
+                target_port="wells_identifier",
+            )
+
+    return synthetic_key, merged_node_id
+
+
 def build_protocol_graph(
     labware_info: Dict[str, Dict[str, Any]],
     protocol_steps: List[Dict[str, Any]],
@@ -744,6 +1002,8 @@ def build_protocol_graph(
     action_resource_mapping: Optional[Dict[str, str]] = None,
     labware_defs: Optional[List[Dict[str, Any]]] = None,
     preserve_tip_rack_incoming_class: bool = False,
+    target_device: str = DEFAULT_TARGET_DEVICE,
+    target_model: Optional[str] = None,
 ) -> WorkflowGraph:
     """统一的协议图构建函数，根据设备类型自动选择构建逻辑
 
@@ -755,9 +1015,16 @@ def build_protocol_graph(
         labware_defs: 可选，``[{"id": "...", "num_wells": 96, "max_volume": 2200}, ...]`` 等，辅助 PRCXI 模板匹配
         preserve_tip_rack_incoming_class: 默认 True 时**仅 tip_rack** 不跑模板匹配（类名由传入的 class/labware 决定）；
             **其它载体**仍按 PRCXI 模板匹配。False 时 **全部**（含 tip_rack）都走模板匹配。
+        target_device: P6.1 新增。目标仪器名（厂商粒度，如 ``prcxi`` / ``beckman`` / ``tecan``）。
+            决定查 ``labware_mapping.yaml`` 中 ``target_devices.<target_device>.rules`` 段；未声明的
+            名字由 :func:`labware_mapping.resolve_target_class` 自动 fallback 到固定段
+            ``target_devices.default``。默认 ``"prcxi"``（与历史 P6 完全等价）。
+        target_model: P6.1.1 新增。同厂商内的目标型号名（如 ``"9320"`` / ``"4040"``）；
+            决定查 ``target_devices.<target_device>.models.<target_model>`` 下的 ``slot_remap`` /
+            ``rules`` 覆盖。``None`` 表示不区分型号，走厂商级配置。
 
     会先 ``refactor_data`` 规范化步骤，再根据 ``transfer_liquid`` 的 ``asp_vols``/``dis_vols`` 为对应
-    ``tip_racks`` 写入 ``prcxi_class_name``（最大体积 ``≤10`` → ``PRCXI_10uL_Tips``，``<300`` → ``PRCXI_300ul_Tips``，
+    ``tip_racks`` 写入 ``target_class_name``（最大体积 ``≤10`` → ``PRCXI_10uL_Tips``，``<300`` → ``PRCXI_300ul_Tips``，
     否则 ``PRCXI_1000uL_Tips``）；无有效体积的步骤不覆盖。
     """
     G = WorkflowGraph()
@@ -765,24 +1032,38 @@ def build_protocol_graph(
     slot_to_create_resource = {}  # slot -> create_resource node_id
 
     protocol_steps = refactor_data(protocol_steps, action_resource_mapping)
-    _apply_tip_rack_class_from_transfer_volumes(labware_info, protocol_steps)
+    _apply_tip_rack_class_from_transfer_volumes(
+        labware_info,
+        protocol_steps,
+        target_device=target_device,
+        target_model=target_model,
+    )
 
-    _apply_prcxi_labware_auto_match(
+    _apply_target_labware_class_auto_match(
         labware_info,
         labware_defs,
         preserve_tip_rack_incoming_class=preserve_tip_rack_incoming_class,
+        target_device=target_device,
+        target_model=target_model,
     )
-    _reconcile_slot_carrier_prcxi_class(
+    _reconcile_slot_carrier_target_class(
         labware_info,
         preserve_tip_rack_incoming_class=preserve_tip_rack_incoming_class,
+        target_device=target_device,
+        target_model=target_model,
     )
 
     # ==================== 第一步：按 slot 去重创建 create_resource 节点 ====================
-    # 按槽聚合：同一 slot 多条 reagent 时不能只取遍历顺序第一条，否则 tip 的 prcxi_class_name / object 会被其它条目盖住
+    # 按槽聚合：同一 slot 多条 reagent 时不能只取遍历顺序第一条，否则 tip 的 target_class_name / object 会被其它条目盖住
     by_slot: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
     for labware_id, item in labware_info.items():
         object_type = item.get("object", "") or ""
-        slot = _map_deck_slot(str(item.get("slot", "")), object_type)
+        slot = _map_deck_slot(
+            str(item.get("slot", "")),
+            object_type,
+            target_device=target_device,
+            target_model=target_model,
+        )
         if not slot:
             continue
         by_slot.setdefault(slot, []).append((labware_id, item))
@@ -795,25 +1076,25 @@ def build_protocol_graph(
         tip_pairs = [(lid, it) for lid, it in pairs if _ot_tip(it)]
         chosen_lid = ""
         chosen_item: Dict[str, Any] = {}
-        prcxi_val: Optional[str] = None
+        target_class_val: Optional[str] = None
 
         scan = tip_pairs if tip_pairs else pairs
         for lid, it in scan:
-            c = it.get("prcxi_class_name")
+            c = it.get("target_class_name")
             if c:
-                chosen_lid, chosen_item, prcxi_val = lid, it, str(c)
+                chosen_lid, chosen_item, target_class_val = lid, it, str(c)
                 break
         if not chosen_lid and scan:
             chosen_lid, chosen_item = scan[0]
-            pv = chosen_item.get("prcxi_class_name")
-            prcxi_val = str(pv) if pv else None
+            pv = chosen_item.get("target_class_name")
+            target_class_val = str(pv) if pv else None
 
         labware = str(chosen_item.get("labware", "") or "")
         slots_info[slot] = {
             "labware": labware,
             "labware_id": chosen_lid,
             "object": chosen_item.get("object", "") or "",
-            "prcxi_class_name": prcxi_val,
+            "target_class_name": target_class_val,
         }
 
     # 创建 Group 节点，包含所有 create_resource 节点
@@ -838,7 +1119,7 @@ def build_protocol_graph(
         node_id = str(uuid.uuid4())
         object_type = info.get("object", "") or ""
         ot_lo = str(object_type).strip().lower()
-        matched = info.get("prcxi_class_name")
+        matched = info.get("target_class_name")
         if ot_lo == "trash":
             res_type_name = "PRCXI_trash"
         elif matched:
@@ -898,6 +1179,13 @@ def build_protocol_graph(
         param=None,
     )
 
+    # P2 v2 §14：预扫描 list-targets / str-targets 覆盖关系，
+    # 第二步循环将跳过被 merged 节点完全接管的 target reagent_keys（避免冗余 per-plate 节点）。
+    # 详见 product_designs/protocol_convert/02-cross-slot-merge.md §14。
+    set_liquid_covered_by_merged, set_liquid_referenced_by_str = _collect_set_liquid_coverage(
+        protocol_steps
+    )
+
     set_liquid_index = 0
 
     for labware_id, item in labware_info.items():
@@ -908,7 +1196,23 @@ def build_protocol_graph(
             continue
 
         object_type = item.get("object", "") or ""
-        slot = _map_deck_slot(str(item.get("slot", "")), object_type)
+
+        # P2 v2 §14：被 merged 节点完全接管的 target reagent_key 跳过 per-plate 创建。
+        # 仅当 object="target" ∧ key ∈ covered_by_merged ∧ key ∉ referenced_by_str 时才跳过；
+        # 共用 key（被 list 与 str 双重引用）必须保留 per-plate，否则 str transfer 失去 output_wells 来源（R1 缓解）。
+        if (
+            object_type == "target"
+            and labware_id in set_liquid_covered_by_merged
+            and labware_id not in set_liquid_referenced_by_str
+        ):
+            continue
+
+        slot = _map_deck_slot(
+            str(item.get("slot", "")),
+            object_type,
+            target_device=target_device,
+            target_model=target_model,
+        )
         wells = item.get("well", [])
         if not wells or not slot:
             continue
@@ -918,13 +1222,32 @@ def build_protocol_graph(
         well_count = len(wells)
         liquid_volume = DEFAULT_LIQUID_VOLUME if object_type == "source" else 0
 
+        # P8（2026-05-24）：reagent block 显式 ``liquid_name`` 字段优先于 reagent_key，
+        # 用于写入 PLR tracker / 前端显示的真实化学名（保留空格 / 中文 / 括号等，
+        # **不** 经过 ``replace(" ", "_")``）。缺省时 fallback 到 ``res_id``（行为不变）。
+        # 详见 ``product_designs/protocol_convert/08-liquid-name-from-reagent-block.md`` §3.4。
+        liquid_name_value = str(item.get("liquid_name") or res_id)
+
         node_id = str(uuid.uuid4())
         set_liquid_index += 1
-        prcxi_mat = item.get("prcxi_class_name")
-        if prcxi_mat:
-            sl_node_title = f"{prcxi_mat}_slot_{slot}_{res_id}"
+        target_class = item.get("target_class_name")
+        if target_class:
+            sl_node_title = f"{target_class}_slot_{slot}_{res_id}"
         else:
             sl_node_title = f"lab_{res_id.lower()}_slot_{slot}_{set_liquid_index}"
+
+        # P3 框选化：新主路径 = param.wells（list[dict]，每孔一个资源引用），
+        # 端口 target_port="wells_identifier"。
+        # 旧字段（plate / well_names）仍写入 param 作 fallback，便于旧 runtime / 旧 schema 解析。
+        well_resource_refs = [
+            {
+                "id": f"{labware_id}/{w}",
+                "name": f"{labware_id}/{w}",
+                "parent": labware_id,
+                "type": "well",
+            }
+            for w in wells
+        ]
 
         G.add_node(
             node_id,
@@ -940,19 +1263,30 @@ def build_protocol_graph(
             parent_uuid=set_liquid_group_id,  # 指向 Group 节点
             minimized=True,  # 折叠显示
             param={
-                "plate": [],  # 通过连接传递
-                "well_names": wells,  # 孔位名数组，如 ["A1", "A3", "A5"]
-                "liquid_names": [res_id] * well_count,
+                # P3 新主路径：wells 框选化（list[well_resource_ref]）
+                "wells": well_resource_refs,
+                "liquid_names": [liquid_name_value] * well_count,
                 "volumes": [liquid_volume] * well_count,
+                # 兼容字段：保留 plate / well_names 以便旧 runtime / 旧前端继续工作；
+                # 新 yaml schema 已将 required 改为 [liquid_names, volumes]
+                "plate": [],
+                "well_names": wells,
             },
         )
 
         # set_liquid_from_plate 之间不需要 ready 连接
 
-        # 物料流：create_resource 的 labware -> set_liquid_from_plate 的 input_plate
+        # 物料流：create_resource 的 labware -> set_liquid_from_plate 的 wells_identifier
+        # （P3 §3.4.3 简化方案：source_port 仍为 labware；目标端口换为 wells_identifier，
+        # placeholder 内部把 labware.wells.@flatten 映射到 wells 字段）
         create_res_node_id = slot_to_create_resource.get(slot)
         if create_res_node_id:
-            G.add_edge(create_res_node_id, node_id, source_port="labware", target_port="input_plate")
+            G.add_edge(
+                create_res_node_id,
+                node_id,
+                source_port="labware",
+                target_port="wells_identifier",
+            )
 
         # set_liquid_from_plate 的输出 output_wells 用于连接 transfer_liquid
         resource_last_writer[labware_id] = f"{node_id}:output_wells"
@@ -1000,6 +1334,9 @@ def build_protocol_graph(
         "dis_flow_rates",
         "liquid_height",
     ]
+
+    # P2 v2：跨板 transfer_liquid 的 merged set_liquid_from_plate 节点计数器
+    merged_set_liquid_counter = 0
 
     # 处理协议步骤
     for step in protocol_steps:
@@ -1064,6 +1401,53 @@ def build_protocol_graph(
                         warnings.append(f"delays 包含无法转换为数字的值: {delay_item}，已忽略")
                 params["delays"] = normalized_delays
 
+        # use_channels 输入归一化（P1 多通道意图透传）：
+        # - 与 LiquidHandler.transfer_liquid 的 use_channels: Optional[List[int]] 入参对齐
+        # - None / 缺失 / 非 list 一律删除该 key，让 runtime 走自动选头默认逻辑
+        # - 不参与 EXPAND_BY_WELLS_PARAMS：use_channels 是「这条 transfer 用哪些通道」的常量，
+        #   长度由通道数决定（单通道 [0]/[1]、8 通道 [0..7]），与 targets 的 wells 数无关。
+        if "use_channels" in params:
+            uc_value = params["use_channels"]
+            if uc_value is None:
+                params.pop("use_channels")
+            elif isinstance(uc_value, list):
+                try:
+                    params["use_channels"] = [int(x) for x in uc_value]
+                except (TypeError, ValueError):
+                    warnings.append(f"use_channels 列表中存在无法转换为 int 的值: {uc_value}，已忽略")
+                    params.pop("use_channels")
+            else:
+                warnings.append(
+                    f"use_channels 期望 list[int]，实际 {type(uc_value).__name__}，已忽略"
+                )
+                params.pop("use_channels")
+
+        # ============================================================
+        # P2 v2 跨板聚合：当 params.targets 是 list[str] 时，插入一个
+        # merged set_liquid_from_plate 节点把跨板 wells 聚合成有序 List[Container]，
+        # 然后改写 params.targets 为 synthetic str。详见
+        # product_designs/protocol_convert/02-cross-slot-merge.md §9.2。
+        # ============================================================
+        raw_targets = params.get("targets")
+        if (
+            isinstance(raw_targets, list)
+            and len(raw_targets) > 0
+            and all(isinstance(t, str) and t for t in raw_targets)
+        ):
+            synth_key, merged_node_id = _emit_merged_set_liquid(
+                G,
+                raw_targets,
+                labware_info,
+                slot_to_create_resource,
+                set_liquid_group_id=set_liquid_group_id,
+                merged_index=merged_set_liquid_counter,
+                target_device=target_device,
+                target_model=target_model,
+            )
+            merged_set_liquid_counter += 1
+            params["targets"] = synth_key
+            resource_last_writer[synth_key] = f"{merged_node_id}:output_wells"
+
         # 处理输入连接
         for param_key, target_port in INPUT_PORT_MAPPING.items():
             resource_name = params.get(param_key)
@@ -1081,9 +1465,21 @@ def build_protocol_graph(
         targets_wells_count = 1
         sources_wells_count = 1
 
+        # P2 v2：synthetic merged targets key（_merged_targets_<idx>）不在 labware_info 中，
+        # wells 数量从 dis_vols 长度推断，且不打「未在 reagent 中定义」warning。
+        targets_is_synthetic = (
+            isinstance(targets_name, str)
+            and targets_name.startswith(MERGED_TARGETS_SYNTHETIC_PREFIX)
+        )
+
         if targets_name and targets_name in labware_info:
             target_wells = labware_info[targets_name].get("well", [])
             targets_wells_count = len(target_wells) if target_wells else 1
+        elif targets_is_synthetic:
+            # merged set_liquid 的 wells 长度 == dis_vols 长度（顺序权威由 Stage 3 构造期固化）
+            dis_vols_val = params.get("dis_vols")
+            if isinstance(dis_vols_val, list) and dis_vols_val:
+                targets_wells_count = len(dis_vols_val)
         elif targets_name:
             warnings.append(f"targets={targets_name} 未在 reagent 中定义")
 
@@ -1093,12 +1489,27 @@ def build_protocol_graph(
         elif sources_name:
             warnings.append(f"sources={sources_name} 未在 reagent 中定义")
 
-        # 检查 sources 和 targets 的 wells 数量是否匹配
-        if targets_wells_count != sources_wells_count and targets_name and sources_name:
+        # 检查 sources 和 targets 的 wells 数量是否匹配（v2 跨板：1:N 是合法的，跳过 warning）
+        if (
+            targets_wells_count != sources_wells_count
+            and targets_name
+            and sources_name
+            and not targets_is_synthetic
+            and sources_wells_count not in (0, 1)
+        ):
             warnings.append(f"wells 数量不匹配: sources={sources_wells_count}, targets={targets_wells_count}")
 
         # 使用 targets 的 wells 数量来扩展参数
         wells_count = targets_wells_count
+
+        # P1 多通道：use_channels 存在且 len > 1（multi 协议）时，
+        # asp_vols / dis_vols 等数组的长度已是 8 × M（Stage 2 复制完毕），
+        # 与 reagent.well 长度（plate=8 / reservoir=1）不一定相等——跳过 wells 长度对齐警告，
+        # 让长度由 use_channels × 列锚条目决定。
+        is_multi_channel = (
+            isinstance(params.get("use_channels"), list)
+            and len(params.get("use_channels", [])) > 1
+        )
 
         # 扩展单值参数为数组（根据 targets 的 wells 数量）
         for expand_param in EXPAND_BY_WELLS_PARAMS:
@@ -1107,8 +1518,8 @@ def build_protocol_graph(
                 # 如果是单个值，扩展为数组
                 if not isinstance(value, list):
                     params[expand_param] = [value] * wells_count
-                # 如果已经是数组但长度不对，记录警告
-                elif len(value) != wells_count:
+                # 如果已经是数组但长度不对，记录警告（multi 通道场景下跳过）
+                elif len(value) != wells_count and not is_multi_channel:
                     warnings.append(f"{expand_param} 数量({len(value)})与 wells({wells_count})不匹配")
 
         # 如果 sources/targets 已通过连接传递，将参数值改为空数组
@@ -1140,10 +1551,17 @@ def build_protocol_graph(
         last_control_node_id = node_id
 
         # 处理输出：更新 resource_last_writer
+        # P2 v2：``step.param[param_key]`` 可能是 list[str]（跨板 reagent_keys），
+        # 此时为每个 reagent_key 注册 transfer_liquid 的下游 writer，保留多 reagent
+        # 链式 transfer 的能力。
         for param_key, output_port in OUTPUT_PORT_MAPPING.items():
-            resource_name = step.get("param", {}).get(param_key)  # 使用原始参数值
-            if resource_name:
-                resource_last_writer[resource_name] = f"{node_id}:{output_port}"
+            raw_value = step.get("param", {}).get(param_key)  # 使用原始参数值
+            if isinstance(raw_value, list):
+                for name in raw_value:
+                    if isinstance(name, str) and name:
+                        resource_last_writer[name] = f"{node_id}:{output_port}"
+            elif raw_value:
+                resource_last_writer[raw_value] = f"{node_id}:{output_port}"
 
     return G
 
