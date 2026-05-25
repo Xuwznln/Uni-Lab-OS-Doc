@@ -25,6 +25,7 @@ def bioyond_warehouse_numeric_stack(
     columns: int = 17,
     bioyond_axis: str = "xy_row_col",
     bioyond_key_axis: str = "row_col",
+    frontend_y_flip: bool = False,
 ) -> WareHouse:
     """创建 Bioyond 数字库位堆栈，库位名使用服务端返回的 行-列 格式。
 
@@ -46,17 +47,22 @@ def bioyond_warehouse_numeric_stack(
     item_dx = 147.0
     item_dy = 106.0
     item_dz = 130.0
-    locations = [
-        Coordinate(dx + col * item_dx, dy + row * item_dy, dz)
-        for row in range(num_items_y)
-        for col in range(num_items_x)
-    ]
+    resource_size_x = 127.0
+    resource_size_y = 86.0
+    resource_size_z = 25.0
+    size_y = dy + item_dy * num_items_y
+    locations = []
+    for row in range(num_items_y):
+        display_y = dy + row * item_dy
+        y = size_y - display_y - resource_size_y if frontend_y_flip else display_y
+        for col in range(num_items_x):
+            locations.append(Coordinate(dx + col * item_dx, y, dz))
     holders = create_homogeneous_resources(
         klass=ResourceHolder,
         locations=locations,
-        resource_size_x=127.0,
-        resource_size_y=86.0,
-        resource_size_z=25.0,
+        resource_size_x=resource_size_x,
+        resource_size_y=resource_size_y,
+        resource_size_z=resource_size_z,
         name_prefix=name,
     )
     if bioyond_key_axis == "row_col":
@@ -76,7 +82,7 @@ def bioyond_warehouse_numeric_stack(
     warehouse = BioyondWareHouse(
         name=name,
         size_x=dx + item_dx * num_items_x,
-        size_y=dy + item_dy * num_items_y,
+        size_y=size_y,
         size_z=dz + item_dz * num_items_z,
         num_items_x=num_items_x,
         num_items_y=num_items_y,
@@ -97,6 +103,7 @@ def bioyond_warehouse_live_grid(
     slot_keys: list[str] | None = None,
     bioyond_axis: str = "xy_col_row",
     bioyond_key_axis: str = "row_col",
+    frontend_y_flip: bool = False,
 ) -> WareHouse:
     """创建 Bioyond 实测库位网格，按服务端 code 保存位点标签。
 
@@ -112,17 +119,22 @@ def bioyond_warehouse_live_grid(
     item_dx = 147.0
     item_dy = 106.0
     item_dz = 130.0
-    locations = [
-        Coordinate(dx + col * item_dx, dy + row * item_dy, dz)
-        for row in range(num_items_y)
-        for col in range(num_items_x)
-    ]
+    resource_size_x = 127.0
+    resource_size_y = 86.0
+    resource_size_z = 25.0
+    size_y = dy + item_dy * num_items_y
+    locations = []
+    for row in range(num_items_y):
+        display_y = dy + row * item_dy
+        y = size_y - display_y - resource_size_y if frontend_y_flip else display_y
+        for col in range(num_items_x):
+            locations.append(Coordinate(dx + col * item_dx, y, dz))
     holders = create_homogeneous_resources(
         klass=ResourceHolder,
         locations=locations,
-        resource_size_x=127.0,
-        resource_size_y=86.0,
-        resource_size_z=25.0,
+        resource_size_x=resource_size_x,
+        resource_size_y=resource_size_y,
+        resource_size_z=resource_size_z,
         name_prefix=name,
     )
     keys = slot_keys or [str(index + 1) for index in range(num_items_x * num_items_y)]
@@ -139,7 +151,7 @@ def bioyond_warehouse_live_grid(
     return BioyondWareHouse(
         name=name,
         size_x=dx + item_dx * num_items_x,
-        size_y=dy + item_dy * num_items_y,
+        size_y=size_y,
         size_z=dz + item_dz * num_items_z,
         num_items_x=num_items_x,
         num_items_y=num_items_y,

@@ -56,13 +56,17 @@ class ConnectionMonitor:
     def _monitor_loop(self):
         while self._running:
             try:
-                # 使用 lightweight API 检查连接
-                # query_matial_type_list 是比较快的查询
-                start_time = time.time()
-                result = self.workstation.hardware_interface.material_type_list()
+                # 使用轻量级调度状态接口检查连接，避免启动时打印完整物料类型列表。
+                result = self.workstation.hardware_interface.scheduler_status()
 
                 status = "online" if result else "offline"
-                msg = "Connection established" if status == "online" else "Failed to get material type list"
+                if status == "online":
+                    msg = (
+                        f"Scheduler status={result.get('status')}, "
+                        f"hasTask={result.get('hasTask')}"
+                    )
+                else:
+                    msg = "Failed to get scheduler status"
 
                 if status != self._last_status:
                     logger.info(f"Bioyond连接状态变更: {self._last_status} -> {status}")
@@ -730,7 +734,7 @@ class BioyondWorkstation(WorkstationBase):
         """解析 ``debug_log_dir`` 为绝对路径。"""
         configured = (getattr(self, "bioyond_config", {}) or {}).get("debug_log_dir")
         default_dir = getattr(self, "_DEBUG_LOG_DEFAULT_DIR", None)
-        candidate = configured or default_dir or "temp_benyao/_logs/bioyond_debug"
+        candidate = configured or default_dir or "bioyond_debug_records"
         path = Path(candidate)
         if not path.is_absolute():
             repo_root = Path(__file__).resolve().parents[4]

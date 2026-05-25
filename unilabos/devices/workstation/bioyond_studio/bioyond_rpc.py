@@ -415,21 +415,24 @@ class BioyondV1RPC(BaseRequest):
             return {}
         return response.get("data", {})
 
-    def reset_location(self, location_id: str) -> int:
+    def reset_location(self, location_id: Optional[str] = None) -> int:
         """复位库位
 
+        现场实测 ``POST /api/lims/storage/reset-location`` 不传 ``data`` 即可成功
+        因此默认无 ``data`` 字段；保留 ``location_id`` 仅为兼容旧调用，传入会被忽略。
+
         参数:
-            location_id: 库位ID
+            location_id: 兼容入参，已被忽略；新逻辑不再以 location 为粒度复位。
 
         返回值:
             int: 成功返回1，失败返回0
         """
+        del location_id
         response = self.post(
             url=f'{self.host}/api/lims/storage/reset-location',
             params={
                 "apiKey": self.api_key,
                 "requestTime": self.get_current_time_iso8601(),
-                "data": location_id,
             })
         if not response or response['code'] != 1:
             return 0
@@ -779,6 +782,49 @@ class BioyondV1RPC(BaseRequest):
 
         return response.get("data", {})
 
+    def take_out(
+        self,
+        order_id: str,
+        preintake_ids: list[str] | None = None,
+        material_ids: list[str] | None = None,
+    ) -> dict:
+        """取出订单关联通量/物料
+
+        参数:
+            order_id: 订单ID
+            preintake_ids: 通量ID列表，可为空
+            material_ids: 物料ID列表，可为空
+
+        返回值:
+            dict: 服务端响应包，失败返回空字典
+        """
+        if not order_id:
+            self._logger.error("取出订单关联通量/物料错误: 缺少订单ID")
+            return {}
+
+        params = {
+            "orderId": order_id,
+            "preintakeIds": list(preintake_ids or []),
+            "materialIds": list(material_ids or []),
+        }
+
+        response = self.post(
+            url=f'{self.host}/api/lims/order/take-out',
+            params={
+                "apiKey": self.api_key,
+                "requestTime": self.get_current_time_iso8601(),
+                "data": params,
+            })
+
+        if not response:
+            return {}
+
+        if response['code'] != 1:
+            self._logger.error(f"取出订单关联通量/物料错误: {response.get('message', '')}")
+            return response
+
+        return response
+
     def cancel_order(self, json_str: str) -> bool:
         """取消指定任务
 
@@ -886,21 +932,24 @@ class BioyondV1RPC(BaseRequest):
             return {}
         return response.get("data", {})
 
-    def reset_order_status(self, order_id: str) -> int:
+    def reset_order_status(self, order_id: Optional[str] = None) -> int:
         """复位订单状态
 
+        现场实测 ``POST /api/lims/order/reset-order-status`` 不传 ``data`` 即可成功
+        因此默认无 ``data`` 字段；保留 ``order_id`` 仅为兼容旧调用，传入会被忽略。
+
         参数:
-            order_id: 订单ID
+            order_id: 兼容入参，已被忽略；新逻辑不再以单订单为粒度复位。
 
         返回值:
             int: 成功返回1，失败返回0
         """
+        del order_id
         response = self.post(
             url=f'{self.host}/api/lims/order/reset-order-status',
             params={
                 "apiKey": self.api_key,
                 "requestTime": self.get_current_time_iso8601(),
-                "data": order_id,
             })
         if not response or response['code'] != 1:
             return 0
