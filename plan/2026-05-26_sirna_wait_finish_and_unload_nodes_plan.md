@@ -42,8 +42,12 @@ scheduler_stop  →  reset  →  submit_experiment_1  →  start_experiment
 |---|------|------|
 | 1 | 下料节点交互形式 | **manual_confirm**：阻塞展示物料表→等待操作员勾选→调用 take-out |
 | 2 | take-out 的 `preintakeIds` / `materialIds` 来源 | **传 `[]` / `[]`**：只传 `orderId`，让奔耀按订单自己决定取出范围 |
+| 3 | `all-stock-material` 的 `orderId` 来源 | **wait 节点入参 `order_id`**：直接接收上游 `start_experiment.order_id` 输出 handle；不从 `/report/order_finish` 推送报文里反推 |
+| 4 | 下料表列结构 | 与上料表 `_build_result_table` 对齐的 **4 列**：设备 / 位置 / 物料名称 / 数量；数据来自 `all-stock-material` 返回的 `locations[0].whName`、`locations[0].code`、`name`、`quantity` |
 
 > 决策 2 直接简化了下游：`unload_materials` 不需要从 `all-stock-material` 或 `usedMaterials` 反推 ID 列表去喂 take-out；它只负责"展示给人看 + 勾选后通知 Bioyond"。`all-stock-material` 的数据只用来**给操作员看下料指引**，不进 take-out 请求体。
+>
+> 决策 3 明确两类 ID 的职责拆分：`order_id`（UUID） 只用来调 `all-stock-material`，`order_code`（业务编号字符串）只用来匹配 `/report/order_finish` 推送。两个都从上游 `start_experiment` 输出 handle 拿，不需要反查（若 `order_code` 上游未传，节点内部保留通过 `rpc.order_report(order_id).code` 兜底反查的能力，仅作为容错；不影响 `all-stock-material` 调用形参）。
 
 ---
 
@@ -194,11 +198,19 @@ def wait_for_order_finish(
 
 ### 4.2 主流程（伪代码）
 
+`order_id` 直接由上游 `start_experiment.order_id` 通过输入 handle 喂进来；本节点不做 `order_id` 反查。
+`order_code` 主要也由上游 `start_experiment.order_code` 喂进来，仅作为 `/report/order_finish` 推送匹配的 key；
+若上游未连 `order_code`，节点内部仍保留 `rpc.order_report(order_id).code` 的兜底反查，纯粹是容错——
+**`order_code` 不参与 `all-stock-material` 请求体**。
+
 ```text
 1. resolve order_id / order_code
    - 把 order_id, order_code 从 self._kwarg_text(kwargs, ...) 兜底一次
-   - 若 order_code 为空且 order_id 非空:
-        report = rpc.order_report(order_id, return_envelope=False) 或现有 get_order_report 路径
+   - order_id 必填（用于推送匹配的兜底反查 + 调用 all-stock-material）：
+        若未提供，且 order_ids 长度==1，取 order_ids[0]；
+        若 order_ids 长度>1 且未指定 order_id/order_code → raise（避免误选订单）
+   - 若 order_code 为空且 order_id 非空（兜底反查；仅用于推送匹配，不参与 all-stock-material）:
+        report = rpc.order_report(order_id) 现有路径
         order_code = report.get("code") or report.get("orderCode") or ""
    - 若 order_code 仍为空 → raise ValueError("wait_for_order_finish 需要 order_code 或可解析的 order_id")
 
@@ -224,32 +236,41 @@ def wait_for_order_finish(
        "-12": "manual_stop",
    }.get(raw_status, f"unknown_{raw_status}" if raw_status else "missing_status")
 
-5. 拉取实验台物料（仅 status in {success, abnormal_stop, manual_stop} 时调用，timeout/未知状态跳过）
+5. 拉取实验台物料（用 order_id，不是 order_code！）
+   # 仅 status in {success, abnormal_stop, manual_stop} 时调用，timeout/未知状态跳过。
    rpc = self._require_hardware_interface("all_stock_material")
    all_materials_json = json.dumps({"orderId": order_id}, ensure_ascii=False)  # typeMode 不传 → 全部类型
    all_materials = rpc.all_stock_material(all_materials_json) or []
 
-6. 整理 unloadTable
+6. 整理 unloadTable（4 列：设备 / 位置 / 物料名称 / 数量，与上料表 _build_result_table 对齐）
    unload_rows = []
-   for m in all_materials:
-       loc = (m.get("locations") or [{}])[0]   # 取第一个库位；同名物料多库位时由 _build_unload_rows 拆多行
-       unload_rows.append({
-           "whName":       loc.get("whName") or "",
-           "posX":         loc.get("x"),
-           "posY":         loc.get("y"),
-           "posZ":         loc.get("z"),
-           "unit":         m.get("unit") or "",
-           "materialName": m.get("name") or "",
-           "materialCode": m.get("code") or "",
-           "typeMode":     m.get("typeMode") or "",
-           "quantity":     m.get("quantity"),
-           "isUse":        bool(m.get("isUse", False)),
-       })
-   unloadTable = self._build_result_table(
-       {"Unload": unload_rows},     # 复用现有 _build_result_table 风格
-       table_name="下料指引",
-   )
-   # 列顺序由 UNLOAD_TABLE_COLUMNS 常量声明，见 §4.3
+   for mat in all_materials:
+       material_name = str(mat.get("name") or "")
+       top_quantity = mat.get("quantity")
+       locations = mat.get("locations") or []
+       if not locations:
+           # 没有 location 时仍保留一行空坐标占位，提示操作员该物料无法定位。
+           unload_rows.append({
+               "whName":       "",
+               "locationCode": "",
+               "materialName": material_name,
+               "quantity":     "" if top_quantity is None else str(top_quantity),
+           })
+           continue
+       for loc in locations:
+           if not isinstance(loc, dict):
+               continue
+           # 同名物料多库位时按 location 拆多行，方便操作员一对一物理取出。
+           loc_quantity = loc.get("quantity")
+           if loc_quantity is None:
+               loc_quantity = top_quantity
+           unload_rows.append({
+               "whName":       str(loc.get("whName") or ""),
+               "locationCode": str(loc.get("code") or ""),
+               "materialName": material_name,
+               "quantity":     "" if loc_quantity is None else str(loc_quantity),
+           })
+   unloadTable = self._build_unload_table(unload_rows)  # 见 §4.3
 
 7. 返回
    return {
@@ -267,24 +288,35 @@ def wait_for_order_finish(
 
 ### 4.3 新增常量 `UNLOAD_TABLE_COLUMNS`
 
-放在 `sirna_station.py` 顶部常量区，与 `RESULT_TABLE_COLUMNS` 等同级：
+放在 `sirna_station.py` 顶部常量区，与上料表 `_build_result_table` 的列定义对齐（4 列、`{"name", "key"}` 格式）：
 
 ```python
-UNLOAD_TABLE_COLUMNS = [
-    {"key": "whName",       "label": "仓库名称"},
-    {"key": "posX",         "label": "坐标 X"},
-    {"key": "posY",         "label": "坐标 Y"},
-    {"key": "posZ",         "label": "坐标 Z"},
-    {"key": "unit",         "label": "单位"},
-    {"key": "materialName", "label": "物料名称"},
-    {"key": "materialCode", "label": "物料编码"},
-    {"key": "typeMode",     "label": "物料类型"},  # Sample/Reagent/Consumables
-    {"key": "quantity",     "label": "数量"},
-    {"key": "isUse",        "label": "是否使用"},
+UNLOAD_TABLE_COLUMNS: List[Dict[str, str]] = [
+    {"name": "设备",     "key": "whName"},
+    {"name": "位置",     "key": "locationCode"},
+    {"name": "物料名称", "key": "materialName"},
+    {"name": "数量",     "key": "quantity"},
 ]
 ```
 
-> 列顺序与下料节点 `unloadTable` 输入 handle 渲染顺序一致，操作员一眼能找到要取的物料和具体仓库坐标。
+`_build_unload_table` 直接把该常量作为 `columns` 字段（不再做 `label`→`name` 翻译）：
+
+```python
+@staticmethod
+def _build_unload_table(
+    unload_rows: List[Dict[str, Any]],
+    table_name: str = "下料指引",
+) -> Dict[str, Any]:
+    return {
+        "data": list(unload_rows or []),
+        "columns": list(UNLOAD_TABLE_COLUMNS),
+        "tableName": table_name,
+    }
+```
+
+> 与上料表对齐的好处：前端可以复用上料表的渲染逻辑，操作员体验也一致——「设备 / 位置 / 物料名称 / 数量」是装/卸物料场景里最关键的 4 列。
+>
+> 取舍：去掉的列（坐标 X/Y/Z、单位、物料编码、物料类型、是否使用）改为放进 `all_stock_materials` 原始数组的输出 handle（已存在），需要时下游/调试可以从原始数据里拿到。
 
 ### 4.4 多订单情况
 
@@ -470,6 +502,34 @@ flowchart LR
 
 1. **多订单等待策略**：当前 v1 只等 `order_id` 或显式 `order_code` 中的"那一笔"，多 order_ids 直接 raise；未来如果 sirna 真有多 borderNumber 场景，是否要让 wait 节点循环等所有？
 2. **`order_code` 反查路径**：当前设计走 `rpc.order_report(order_id)` 取 `code` 字段；如果 sirna 后续做 `2026-05-25_sirna_rpc_action_split_cleanup_plan.md` Phase 4 的 envelope 改造，反查路径要切到 `return_envelope=True` 并显式从 envelope 拿 `data.code`。
-3. **`unloadTable` 是否区分 `typeMode`**：现在所有物料合并成一张表，列里带 `typeMode` 调试字段；如果操作员习惯按"样品/试剂/耗材"分屏，下个迭代可拆三张 sub-table（仿 `end_experiment` 的 `unload_tables.Sample/Consumables/Reagent` 结构）。
+3. **`unloadTable` 是否区分 `typeMode`**：v2 已简化为 4 列、所有物料合并成一张表；若操作员习惯按"样品/试剂/耗材"分屏，下个迭代可在保持 4 列的基础上按 `typeMode` 拆 sub-table。原始 `typeMode` / 坐标 / 单位 / 物料编码 / isUse 字段仍保留在 `all_stock_materials` 输出 handle 里，下游需要时可以取。
 4. **`isUse=false` 物料是否需要过滤**：v1 不过滤，让操作员看到全部；若多余信息影响判读，可加入参 `include_unused: bool = True`。
 5. **超时后下游 `unload_materials` 怎么办**：v1 下 wait 节点超时仍返回结构正常但 `unloadTable.data=[]` 的对象，下游 manual_confirm 会展示空表；操作员勾选后照样调 take-out。如果业务希望"超时直接阻断工作流不进入下料"，需要在 wait 节点 raise 而非返回 timeout 结构。
+
+---
+
+## 十一、修订记录
+
+### 2026-05-26（v2，人类反馈修订）
+
+修订原因：v1 plan 在「all-stock-material 调用入参」和「下料表列结构」两点上不够清晰/不够简洁。
+
+| 段落 | 修订前 | 修订后 |
+|------|--------|--------|
+| §二 决策表 | 仅 2 条 | 追加决策 3（`all-stock-material` 用 `order_id`，来源是上游 `start_experiment.order_id`）和决策 4（下料表与上料表对齐 4 列） |
+| §四 4.2 第 1 步 | "若 order_code 为空且 order_id 非空: 反查 order_code" 表述容易让人误以为反查是为了调 all-stock-material | 明确「`order_id` 必填，用于调 all-stock-material；`order_code` 只用于推送匹配，反查路径仅作容错兜底」 |
+| §四 4.2 第 5 步 | `json.dumps({"orderId": order_id})` | 注释加粗强调「用 order_id，不是 order_code」 |
+| §四 4.2 第 6 步 | 整理 10 列 unload_rows（whName/posX/posY/posZ/unit/materialName/materialCode/typeMode/quantity/isUse） | 简化为 4 列（whName/locationCode/materialName/quantity），同名物料多库位时按 location 拆多行；其余字段仍保留在 `all_stock_materials` 原始输出 |
+| §四 4.3 `UNLOAD_TABLE_COLUMNS` | 10 列 `{"key", "label"}` 格式 | 4 列 `{"name", "key"}` 格式，与上料表 `_build_result_table.columns` 一字一致 |
+| §四 4.3 `_build_unload_table` 实现 | 把 `label` 翻译到 `name` | 直接把 `UNLOAD_TABLE_COLUMNS` 当 `columns` 字段输出，少一层翻译 |
+| §十 第 3 条 | 原内容引用了已经删除的 `typeMode` 列 | 改为说明 v2 已简化为 4 列；多余字段仍可从 `all_stock_materials` 取 |
+
+代码相应改动（待 Agent 模式执行）：
+
+1. `unilabos/devices/workstation/bioyond_studio/sirna_station/sirna_station.py`
+   - `UNLOAD_TABLE_COLUMNS` 改为 4 列 `{"name", "key"}` 格式（替换现有 10 列定义）。
+   - `_build_unload_rows_from_all_stock_material` 改为只填 4 个字段：`whName`/`locationCode`/`materialName`/`quantity`；同名物料多库位仍按 location 拆多行；空 location 仍占位一行。
+   - `_build_unload_table` 直接 `"columns": list(UNLOAD_TABLE_COLUMNS)`，去掉 `label`→`name` 翻译。
+   - `wait_for_order_finish` 主流程不需要改（已经是用 `order_id` 调 `all_stock_material`）。
+2. `unilabos/devices/workstation/bioyond_studio/bioyond_rpc.py` — 不需要再改。
+3. 测试代码（todo `tests`）改为按新的 4 列断言下料表结构。
