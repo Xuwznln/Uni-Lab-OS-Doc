@@ -8,6 +8,8 @@ import copy
 import json
 import os
 import sys
+import threading
+import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -165,6 +167,23 @@ SIRNA_EXPERIMENT_2_SUB_WORKFLOW_NAME = "基因编辑检测"
 SIRNA_EXPERIMENT_2_WORKFLOW_ID = "3a1fcdbd-316c-a4b8-a7ee-a262099552fa"
 SIRNA_EXPERIMENT_2_SUB_WORKFLOW_ID = "3a1fd2d4-5d3f-fae1-8b3d-ec6d0abb6646"
 SIRNA_WORKFLOW_BINDING_LAST_UPDATED = "2026-05-12"
+
+
+# 「下料指引表」列结构（plan v2：4 列，与上料表 _build_result_table 一致，便于前端复用渲染逻辑）
+UNLOAD_TABLE_COLUMNS: List[Dict[str, str]] = [
+    {"name": "设备", "key": "whName"},
+    {"name": "位置", "key": "locationCode"},
+    {"name": "物料名称", "key": "materialName"},
+    {"name": "数量", "key": "quantity"},
+]
+
+
+# Bioyond /report/order_finish 推送 status 字段语义映射（与 cell workstation 对齐）。
+ORDER_FINISH_STATUS_MAP: Dict[str, str] = {
+    "30": "success",
+    "-11": "abnormal_stop",
+    "-12": "manual_stop",
+}
 
 
 class SubmitExperimentRequiredParams(TypedDict):
@@ -399,6 +418,13 @@ class BioyondSirnaStation(BioyondWorkstation):
         else:
             super().__init__(bioyond_config=self.bioyond_config, deck=deck)
 
+        # 「等待订单完成」节点使用的事件 + 最近一次推送上下文。
+        # 必须在基类 HTTP 服务启动前赋值，避免 /report/order_finish 推送先到时字段未建造成 AttributeError。
+        self.order_finish_event: threading.Event = threading.Event()
+        self.last_order_code: Optional[str] = None
+        self.last_order_report: Optional[Dict[str, Any]] = None
+        self.last_used_materials: List[Any] = []
+
         logger.info("BioyondSirnaStation 初始化完成")
 
     @not_action
@@ -411,6 +437,52 @@ class BioyondSirnaStation(BioyondWorkstation):
             )
             return
         super().post_init(ros_node)
+
+    @not_action
+    def process_order_finish_report(
+        self,
+        report_request: Any,
+        used_materials: Optional[List[Any]] = None,
+    ) -> Any:
+        """Override 基类 ``/report/order_finish`` 回调，做 orderCode 匹配 + 事件触发。
+
+        必须先调用 ``super().process_order_finish_report()`` 以保留基类副作用（``_publish_task_status``
+        推送 ROS 任务状态、status==30 时触发 ``resource_synchronizer.sync_from_external()`` 同步物料）。
+        当推送的 ``orderCode`` 与 ``self.last_order_code`` 严格相等时 ``set()`` 事件，
+        否则仅记日志，保证多 ``wait_for_order_finish`` 节点的隔离。
+        """
+        materials = list(used_materials or [])
+        try:
+            base_result = super().process_order_finish_report(report_request, materials)
+        except Exception as exc:
+            # 防御性兜底：基类异常不应吞掉事件触发，否则 wait 节点永远等不到结果。
+            logger.error(
+                f"[sirna] 基类 process_order_finish_report 抛错: {exc}",
+                exc_info=True,
+            )
+            base_result = {"processed": False, "error": str(exc)}
+
+        data = getattr(report_request, "data", None) or {}
+        order_code = str(data.get("orderCode") or "")
+        status = data.get("status")
+
+        self.last_order_report = data
+        self.last_used_materials = materials
+
+        logger.info(
+            f"[sirna] /report/order_finish 收到: orderCode={order_code} status={status} "
+            f"expected={self.last_order_code!r} used_materials={len(materials)}"
+        )
+
+        if self.last_order_code and order_code == self.last_order_code:
+            logger.info("[sirna] order_finish orderCode 匹配，触发 order_finish_event")
+            self.order_finish_event.set()
+        else:
+            logger.info(
+                f"[sirna] order_finish orderCode 不匹配当前等待项，仅记录 "
+                f"(expected={self.last_order_code!r} got={order_code!r})"
+            )
+        return base_result
 
     def _debug_call_session(self, action_name: str):
         parent_debug_session = getattr(super(), "_debug_call_session", None)
@@ -1252,6 +1324,28 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_source=DataSource.HANDLE,
                 io_type="source",
             ),
+            # plan §3.4 — 给下游 wait_for_order_finish / unload_materials 暴露订单 metadata。
+            ActionOutputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_ids",
+                data_type="bioyond_order_ids",
+                label="实验ID列表",
+                data_key="order_ids",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_code",
+                data_type="bioyond_order_code",
+                label="订单编号",
+                data_key="order_code",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def start_experiment(
@@ -1334,10 +1428,400 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "scheduler_start_result": result,
                 "order_id": resolved_order_ids[0],
                 "order_ids": resolved_order_ids,
+                # plan §3.4 — 下游 wait_for_order_finish 用 order_code 做 /report/order_finish 推送匹配。
+                # 当前 start_experiment 不直接持有 order_code，留空字符串占位即可；wait 节点会通过
+                # rpc.order_report(order_id) 兜底反查 code 字段。
+                "order_code": "",
                 "resultTable": resultTable or {},
                 "start_experiment": start_info,
                 "gates": gates,
                 "confirmation_message": "调度器启动成功" if result == 1 else "调度器启动失败，请检查 LIMS 状态",
+            }
+
+    @action(
+        always_free=True,
+        goal_default={
+            "order_id": "",
+            "order_code": "",
+            "timeout_seconds": 36000,
+            "poll_mode": True,
+            "poll_interval_seconds": 0.5,
+        },
+        description=(
+            "阻塞等待奔耀通过 /report/order_finish 推送任务完成，"
+            "并调用 /api/lims/storage/all-stock-material 整理「下料指引表」给下游节点。"
+            "v1 仅等待单个订单：order_ids 长度>1 且未指定 order_id/order_code 时报错。"
+        ),
+        handles=[
+            ActionInputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="order_ids",
+                data_type="bioyond_order_ids",
+                label="实验ID列表",
+                data_key="order_ids",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="order_code",
+                data_type="bioyond_order_code",
+                label="订单编号",
+                data_key="order_code",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_code",
+                data_type="bioyond_order_code",
+                label="订单编号",
+                data_key="order_code",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_finish_status",
+                data_type="string",
+                label="完成状态",
+                data_key="order_finish_status",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_finish_report",
+                data_type="object",
+                label="订单完成推送报文",
+                data_key="order_finish_report",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="used_materials",
+                data_type="array",
+                label="使用物料列表",
+                data_key="used_materials",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="all_stock_materials",
+                data_type="array",
+                label="实验台全部物料",
+                data_key="all_stock_materials",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="unloadTable",
+                data_type="object",
+                label="下料指引表",
+                data_key="unloadTable",
+                data_source=DataSource.EXECUTOR,
+                io_type="target",
+            ),
+        ],
+    )
+    def wait_for_order_finish(
+        self,
+        order_id: str = "",
+        order_code: str = "",
+        order_ids: Optional[List[str]] = None,
+        timeout_seconds: int = 36000,
+        poll_mode: bool = True,
+        poll_interval_seconds: float = 0.5,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """阻塞等待奔耀订单完成推送，并整理「下料指引表」给下游节点。
+
+        Args:
+            order_id: 实验 UUID（用于调 all-stock-material 与 order_code 兜底反查）。
+            order_code: 订单编号字符串（用于匹配 /report/order_finish 推送）；缺省时
+                内部通过 ``rpc.order_report(order_id)`` 反查 ``code`` 字段。
+            order_ids: 兼容 submit_experiment 多订单输出；当 ``order_id`` 为空且长度 == 1 时
+                自动取第一个；长度 > 1 且未显式指定 ``order_id`` / ``order_code`` 时 ``raise``。
+            timeout_seconds: 超时秒数；0 表示不限时（沿用 ``threading.Event.wait(timeout=None)``）。
+            poll_mode: True 走 0.5s 轮询 + 超时（不挡 ROS2 feedback 派发线程），
+                False 走单次 ``event.wait()``。
+            poll_interval_seconds: 轮询间隔（仅 poll_mode 生效），测试用例可调小。
+
+        Returns:
+            含 ``success``/``order_id``/``order_code``/``order_finish_status``/``order_finish_report``/
+            ``used_materials``/``all_stock_materials``/``unloadTable``/``confirmation_message`` 的字典。
+        """
+        with self._debug_call_session("wait_for_order_finish"):
+            del kwargs
+
+            # 1) 解析 order_id：优先入参；缺省时尝试从 order_ids 取唯一一个。
+            normalized_order_id = str(order_id or "").strip()
+            candidates = [str(v).strip() for v in (order_ids or []) if str(v or "").strip()]
+            if not normalized_order_id:
+                if len(candidates) == 1:
+                    normalized_order_id = candidates[0]
+                elif len(candidates) > 1:
+                    raise ValueError(
+                        "wait_for_order_finish 在多 order_ids 场景下需要显式指定 order_id 或 order_code；"
+                        f"当前 order_ids={candidates}"
+                    )
+
+            normalized_order_code = str(order_code or "").strip()
+            if not normalized_order_id and not normalized_order_code:
+                raise ValueError(
+                    "wait_for_order_finish 需要提供 order_id 或 order_code（请连接上游 start_experiment 输出）"
+                )
+
+            # 2) 若仅有 order_id 没有 order_code，兜底反查（仅用于推送匹配，不参与 all-stock-material）。
+            if not normalized_order_code and normalized_order_id:
+                try:
+                    rpc_for_report = self._require_hardware_interface("order_report")
+                    report = rpc_for_report.order_report(normalized_order_id)
+                    if isinstance(report, dict):
+                        normalized_order_code = str(
+                            report.get("code") or report.get("orderCode") or ""
+                        ).strip()
+                except Exception as exc:
+                    logger.warning(
+                        f"[sirna] wait_for_order_finish 反查 order_code 失败 "
+                        f"(order_id={normalized_order_id}): {exc}"
+                    )
+
+            if not normalized_order_code:
+                raise ValueError(
+                    "wait_for_order_finish 无法解析 order_code（rpc.order_report 反查也失败）；"
+                    "请显式传入 order_code 或确认 order_id 在 Bioyond LIMS 中存在"
+                )
+
+            # 3) 准备事件状态，必须在 last_order_code 赋值后再 clear()，避免基类回调竞态。
+            self.last_order_code = normalized_order_code
+            self.last_order_report = None
+            self.last_used_materials = []
+            self.order_finish_event.clear()
+
+            logger.info(
+                f"[sirna] wait_for_order_finish 开始等待: order_id={normalized_order_id} "
+                f"order_code={normalized_order_code} timeout={timeout_seconds}s poll={poll_mode}"
+            )
+
+            # 4) 阻塞等待推送。timeout_seconds<=0 当作不限时。
+            timeout_effective: Optional[float] = float(timeout_seconds) if timeout_seconds and timeout_seconds > 0 else None
+            triggered = False
+            if poll_mode:
+                interval = max(float(poll_interval_seconds or 0.5), 0.001)
+                deadline = (time.monotonic() + timeout_effective) if timeout_effective else None
+                while True:
+                    if self.order_finish_event.wait(timeout=interval):
+                        triggered = True
+                        break
+                    if deadline is not None and time.monotonic() >= deadline:
+                        break
+            else:
+                triggered = bool(self.order_finish_event.wait(timeout=timeout_effective))
+
+            # 5) 解析推送状态。
+            report = self.last_order_report or {}
+            if not triggered:
+                mapped_status = "timeout"
+                logger.warning(
+                    f"[sirna] wait_for_order_finish 超时: order_code={normalized_order_code}"
+                )
+            else:
+                raw_status = str(report.get("status", "")).strip() if isinstance(report, dict) else ""
+                if raw_status in ORDER_FINISH_STATUS_MAP:
+                    mapped_status = ORDER_FINISH_STATUS_MAP[raw_status]
+                elif raw_status:
+                    mapped_status = f"unknown_{raw_status}"
+                else:
+                    mapped_status = "missing_status"
+
+            # 6) 仅在 status 命中已知正常状态时拉取实验台物料；timeout / unknown / missing 不调。
+            all_materials: List[Dict[str, Any]] = []
+            if mapped_status in {"success", "abnormal_stop", "manual_stop"} and normalized_order_id:
+                try:
+                    rpc_for_stock = self._require_hardware_interface("all_stock_material")
+                    payload = {"orderId": normalized_order_id}
+                    raw = rpc_for_stock.all_stock_material(
+                        json.dumps(payload, ensure_ascii=False)
+                    )
+                    if isinstance(raw, list):
+                        all_materials = list(raw)
+                except Exception as exc:
+                    logger.error(
+                        f"[sirna] wait_for_order_finish 调用 all_stock_material 失败: {exc}",
+                        exc_info=True,
+                    )
+
+            # 7) 整理 unloadTable（4 列 v2 结构）+ 序列化 used_materials。
+            unload_rows = self._build_unload_rows_from_all_stock_material(all_materials)
+            unload_table = self._build_unload_table(unload_rows)
+            used_materials_serialized = [
+                self._used_material_to_dict(item) for item in self.last_used_materials
+            ]
+
+            return {
+                "success": mapped_status in {"success", "abnormal_stop", "manual_stop"},
+                "order_id": normalized_order_id,
+                "order_code": normalized_order_code,
+                "order_finish_status": mapped_status,
+                "order_finish_report": report if isinstance(report, dict) else {},
+                "used_materials": used_materials_serialized,
+                "all_stock_materials": all_materials,
+                "unloadTable": unload_table,
+                "confirmation_message": (
+                    f"任务完成: status={mapped_status}; 已整理 {len(unload_rows)} 行下料指引"
+                ),
+            }
+
+    @action(
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={
+            "unloadTable": "unilabos_manual_confirm",
+            "assignee_user_ids": "unilabos_manual_confirm",
+        },
+        goal_default={
+            "order_id": "",
+            "materials_unloaded": False,
+            "timeout_seconds": 3600,
+            "assignee_user_ids": [],
+        },
+        feedback_interval=300,
+        description=(
+            "展示上一节点 wait_for_order_finish 整理的下料指引表；"
+            "操作员物理取出后勾选 materials_unloaded=True，本节点再调用 "
+            "/api/lims/order/take-out 通知奔耀下料完成（preintakeIds=[], materialIds=[]）。"
+        ),
+        handles=[
+            ActionInputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="order_code",
+                data_type="bioyond_order_code",
+                label="订单编号",
+                data_key="order_code",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="unloadTable",
+                data_type="object",
+                label="下料指引表",
+                data_key="unloadTable",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="used_materials",
+                data_type="array",
+                label="使用物料列表",
+                data_key="used_materials",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="order_finish_report",
+                data_type="object",
+                label="订单完成推送报文",
+                data_key="order_finish_report",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(
+                key="success",
+                data_type="boolean",
+                label="是否成功",
+                data_key="success",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="take_out_result",
+                data_type="object",
+                label="take-out 返回包",
+                data_key="take_out_result",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    def unload_materials(
+        self,
+        order_id: str = "",
+        materials_unloaded: bool = False,
+        timeout_seconds: int = 3600,
+        assignee_user_ids: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """人工下料确认节点：勾选「已完成下料」后调用 ``take-out`` 通知奔耀。
+
+        plan 决策：``take_out`` 形参恒为 ``(order_id, [], [])`` —— 不按物料挑选，
+        由奔耀根据订单自己决定取出范围；本节点只负责"展示给人看 + 勾选后通知"。
+
+        Args:
+            order_id: 上游 ``wait_for_order_finish`` 提供的订单 UUID（必填）。
+            materials_unloaded: 操作员勾选确认物理下料已完成；未勾选则 ``raise RuntimeError``。
+            timeout_seconds: 框架超时时间（秒，本动作不读）。
+            assignee_user_ids: 框架分配用户 ID 列表（本动作不读）。
+
+        Returns:
+            含 ``success`` / ``order_id`` / ``take_out_result`` / ``confirmation_message`` 的字典。
+        """
+        with self._debug_call_session("unload_materials"):
+            del timeout_seconds, assignee_user_ids, kwargs
+
+            normalized_order_id = str(order_id or "").strip()
+            if not normalized_order_id:
+                raise ValueError(
+                    "unload_materials 需要 order_id（请连接 wait_for_order_finish.order_id 或显式传入）"
+                )
+
+            if not self._as_manual_gate(materials_unloaded):
+                raise RuntimeError("下料未确认，拒绝调用 take-out")
+
+            rpc = self._require_hardware_interface("take_out")
+            logger.info(
+                f"[sirna] unload_materials 调用 take_out: order_id={normalized_order_id}"
+            )
+            take_out_response = rpc.take_out(normalized_order_id, [], [])
+            logger.info(
+                f"[sirna] unload_materials take_out 返回: {take_out_response}"
+            )
+
+            if isinstance(take_out_response, dict):
+                success = take_out_response.get("code") == 1
+                message = str(take_out_response.get("message", "") or "")
+                normalized_response: Dict[str, Any] = dict(take_out_response)
+            else:
+                success = False
+                message = ""
+                normalized_response = {}
+
+            return {
+                "success": bool(success),
+                "order_id": normalized_order_id,
+                "take_out_result": normalized_response,
+                "confirmation_message": (
+                    "下料确认，已通知奔耀 take-out 成功"
+                    if success
+                    else f"下料确认，但 take-out 返回失败/异常，请检查 LIMS 状态: {message}"
+                ),
             }
 
     @action(
@@ -3017,6 +3501,71 @@ class BioyondSirnaStation(BioyondWorkstation):
             "columns": columns,
             "tableName": table_name,
         }
+
+    @staticmethod
+    def _build_unload_rows_from_all_stock_material(
+        all_materials: Optional[List[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        """把 ``all-stock-material`` 返回数据展平成下料表行（plan v2：4 列）。
+
+        每条物料若有多 ``locations`` 则按 location 拆多行，方便操作员一对一物理取出；
+        ``locations`` 为空时仍保留一行空坐标占位，提示该物料无法定位但需要操作员处理。
+        """
+        rows: List[Dict[str, Any]] = []
+        for mat in all_materials or []:
+            if not isinstance(mat, dict):
+                continue
+            material_name = str(mat.get("name") or "")
+            top_quantity = mat.get("quantity")
+            locations = mat.get("locations") or []
+            if not isinstance(locations, list) or not locations:
+                rows.append({
+                    "whName": "",
+                    "locationCode": "",
+                    "materialName": material_name,
+                    "quantity": "" if top_quantity is None else str(top_quantity),
+                })
+                continue
+            for loc in locations:
+                if not isinstance(loc, dict):
+                    continue
+                loc_quantity = loc.get("quantity")
+                if loc_quantity is None:
+                    loc_quantity = top_quantity
+                rows.append({
+                    "whName": str(loc.get("whName") or ""),
+                    "locationCode": str(loc.get("code") or ""),
+                    "materialName": material_name,
+                    "quantity": "" if loc_quantity is None else str(loc_quantity),
+                })
+        return rows
+
+    @staticmethod
+    def _build_unload_table(
+        unload_rows: Optional[List[Dict[str, Any]]],
+        table_name: str = "下料指引",
+    ) -> Dict[str, Any]:
+        """按 ``UNLOAD_TABLE_COLUMNS`` 渲染下料指引表的 ``data/columns/tableName`` 三段。"""
+        return {
+            "data": list(unload_rows or []),
+            "columns": list(UNLOAD_TABLE_COLUMNS),
+            "tableName": table_name,
+        }
+
+    @staticmethod
+    def _used_material_to_dict(item: Any) -> Dict[str, Any]:
+        """把基类 ``WorkstationReportRequest.usedMaterials`` 元素序列化成可 JSON 输出的 dict。
+
+        基类把 usedMaterials 反序列化成对象（有 ``materialId``/``locationId``/``usedQuantity`` 等属性），
+        本方法兜底 dict / 对象 / 其他三种情况，避免后续 json.dumps 抛。
+        """
+        if isinstance(item, dict):
+            return dict(item)
+        if item is None:
+            return {}
+        if hasattr(item, "__dict__"):
+            return {key: value for key, value in vars(item).items() if not key.startswith("_")}
+        return {"value": str(item)}
 
     def _resolve_wh_name_by_material_id(self, material_id: str, cache: Dict[str, Dict[str, Any]]) -> str:
         if not material_id:

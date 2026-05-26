@@ -129,6 +129,47 @@ class BioyondV1RPC(BaseRequest):
             return []
         return response.get("data", [])
 
+    def all_stock_material(self, json_str: str) -> list:
+        """拉取订单当前实验台上的全部物料（isUse=true/false 都返回，含 typeMode 字段）。
+
+        对应飞书《补充接口》文档 1. 拉取所有物料数据 -- /api/lims/storage/all-stock-material。
+
+        Args:
+            json_str: JSON 字符串，必须包含 orderId（订单 UUID）。
+                可选 typeMode（0=耗材/1=样品/2=试剂；省略则返回全部类型）。
+                示例: '{"orderId": "<uuid>", "typeMode": 0}'
+
+        Returns:
+            list[dict]: 失败、json 解析错、orderId 缺失、code != 1 时统一返回 []；
+                成功时返回 response['data']，每项含 id/code/name/typeMode/locations 等。
+        """
+        try:
+            params = json.loads(json_str)
+        except json.JSONDecodeError:
+            self._logger.error("all_stock_material 错误: json_str 无法解析")
+            return []
+
+        if not isinstance(params, dict) or not params.get("orderId"):
+            self._logger.error("all_stock_material 错误: 缺少 orderId")
+            return []
+
+        response = self.post(
+            url=f'{self.host}/api/lims/storage/all-stock-material',
+            params={
+                "apiKey": self.api_key,
+                "requestTime": self.get_current_time_iso8601(),
+                "data": params,
+            })
+
+        if not response or response.get('code') != 1:
+            if response:
+                self._logger.error(
+                    f"all_stock_material 错误: code={response.get('code')} "
+                    f"message={response.get('message', '')}"
+                )
+            return []
+        return response.get("data", [])
+
     def query_warehouse_by_material_type(self, type_id: str) -> dict:
         """
             描述：查询物料类型可以入库的库位
