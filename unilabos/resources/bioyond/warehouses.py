@@ -169,21 +169,24 @@ def bioyond_warehouse_live_grid(
 def bioyond_warehouse_sirna_g3_liquid_handler(name: str = "G3移液站") -> WareHouse:
     """创建小核酸 G3 移液站库位堆栈：显示为 14 行 x 1 列，标签保持 1-1..1-14。"""
     return bioyond_warehouse_numeric_stack(
-        name, rows=14, columns=1, bioyond_axis="xy_col_row", bioyond_key_axis="col_row"
+        name, rows=14, columns=1, bioyond_axis="xy_col_row", bioyond_key_axis="col_row",
+        frontend_y_flip=True,
     )
 
 
 def bioyond_warehouse_sirna_automation_stack(name: str = "自动化堆栈") -> WareHouse:
     """创建小核酸自动化堆栈：显示为 17 行 x 10 列，标签保持 1-1..10-17。"""
     return bioyond_warehouse_numeric_stack(
-        name, rows=17, columns=10, bioyond_axis="xy_col_row", bioyond_key_axis="col_row"
+        name, rows=17, columns=10, bioyond_axis="xy_col_row", bioyond_key_axis="col_row",
+        frontend_y_flip=True,
     )
 
 
 def bioyond_warehouse_sirna_centrifuge_balance_plate_stack(name: str = "离心机配平板堆栈") -> WareHouse:
     """创建小核酸离心机配平板堆栈：显示为 1 行 x 2 列，标签保持 1-1、2-1。"""
     return bioyond_warehouse_numeric_stack(
-        name, rows=1, columns=2, bioyond_axis="xy_col_row", bioyond_key_axis="col_row"
+        name, rows=1, columns=2, bioyond_axis="xy_col_row", bioyond_key_axis="col_row",
+        frontend_y_flip=True,
     )
 
 

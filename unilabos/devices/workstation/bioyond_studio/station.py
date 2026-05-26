@@ -761,7 +761,7 @@ class BioyondWorkstation(WorkstationBase):
           已被 ``wrap_rpc_http`` 包装过的 RPC 客户端都会捕获本次 action
           产生的 HTTP 调用并写入 Markdown 文件。
 
-        子类（如 ``end_experiment``、``manual_unload`` 等）可以直接在
+        子类（如 ``manual_unload`` 等）可以直接在
         action 体里以 ``with self._debug_call_session("action_name"):`` 包裹。
         """
         cfg = getattr(self, "bioyond_config", {}) or {}

@@ -168,6 +168,13 @@ class BIOYOND_SirnaStation_Deck(Deck):
             if key_axis and not hasattr(child, "bioyond_key_axis"):
                 child.bioyond_key_axis = key_axis
 
+    def _frontend_flipped_location(self, resource, display_location: Coordinate) -> Coordinate:
+        return Coordinate(
+            display_location.x,
+            self.get_size_y() - display_location.y - resource.get_size_y(),
+            display_location.z,
+        )
+
     def setup(self) -> None:
         # Sirna 读接口 /api/storage/location/locations-by-type 返回完整固定堆栈清单。
         # LIMS 在库物料接口仍使用相同的 自动化堆栈 名称和数字库位编码。
@@ -183,7 +190,13 @@ class BIOYOND_SirnaStation_Deck(Deck):
         }
 
         for warehouse_name, warehouse in self.warehouses.items():
-            self.assign_child_resource(warehouse, location=self.warehouse_locations[warehouse_name])
+            self.assign_child_resource(
+                warehouse,
+                location=self._frontend_flipped_location(
+                    warehouse,
+                    self.warehouse_locations[warehouse_name],
+                ),
+            )
 
 class BIOYOND_YB_Deck(Deck):
     def __init__(

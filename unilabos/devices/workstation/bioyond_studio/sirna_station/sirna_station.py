@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
 from urllib import error, request
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 DEBUG_CLI_ENABLED = False
 
@@ -115,7 +115,33 @@ except Exception as exc:  # pragma: no cover - 允许在轻量探测模式下运
 WORKFLOW_LIST_ENDPOINT = "/api/lims/workflow/work-flow-list"
 SUPPORTED_WORKFLOW_TYPES = {0, 1, 2}
 DEFAULT_READY_SIGNAL = "READY"
-DEFAULT_RESET_OPERATIONS = ("scheduler_reset", "reset_order_status", "reset_location")
+RESET_PHYSICAL_CLEANUP_MESSAGE = "确认离心机配平板堆栈、G3移液站、自动化堆栈已清空，仪器内没有残留样品、耗材、试剂"
+RESET_OPERATION_DEFINITIONS = (
+    {
+        "key": "reset_scheduler",
+        "label": "复位调度器",
+        "method": "scheduler_reset",
+        "endpoint": "/api/lims/scheduler/reset",
+    },
+    {
+        "key": "reset_order_status",
+        "label": "复位订单状态",
+        "method": "reset_order_status",
+        "endpoint": "/api/lims/order/reset-order-status",
+    },
+    {
+        "key": "reset_location",
+        "label": "复位库位",
+        "method": "reset_location",
+        "endpoint": "/api/lims/storage/reset-location",
+    },
+    {
+        "key": "reset_devices",
+        "label": "复位设备",
+        "method": "reset_devices",
+        "endpoint": "/api/lims/device/reset-devices",
+    },
+)
 DEFAULT_SIRNA_MATERIAL_TYPE_MAPPINGS = {
     "bioyond_sirna_g3_200ul_tip_rack": ["G3-200ul枪头盒", ""],
     "bioyond_sirna_g3_50ul_tip_rack": ["G3-50ul枪头盒", ""],
@@ -128,6 +154,14 @@ SIRNA_EXPERIMENT_1_SUB_WORKFLOW_NAME = "报告基因检测流程"
 SIRNA_EXPERIMENT_1_WORKFLOW_ID = "3a1fc8e9-f807-3f9e-6f48-7132f594141a"
 SIRNA_EXPERIMENT_1_SUB_WORKFLOW_ID = "3a1fc8ea-35b0-ce0c-1a46-ab506b647e4e"
 SIRNA_EXPERIMENT_2_WORKFLOW_NAME = "场景二：基因表达检测"
+OrderStatus = Literal["全部（\"\"）", "成功（80）", "失败（90）", "执行中（60）", "已取出（100）"]
+ORDER_STATUS_VALUE_MAP = {
+    "全部（\"\"）": "",
+    "成功（80）": "80",
+    "失败（90）": "90",
+    "执行中（60）": "60",
+    "已取出（100）": "100",
+}
 SIRNA_EXPERIMENT_2_SUB_WORKFLOW_NAME = "基因编辑检测"
 SIRNA_EXPERIMENT_2_WORKFLOW_ID = "3a1fcdbd-316c-a4b8-a7ee-a262099552fa"
 SIRNA_EXPERIMENT_2_SUB_WORKFLOW_ID = "3a1fd2d4-5d3f-fae1-8b3d-ec6d0abb6646"
@@ -143,8 +177,11 @@ class SubmitExperimentOptionalParams(TypedDict, total=False):
     sub_workflow_name: Annotated[str, Field(description="子工作流名称（可选；为空时选中根工作流下的可用子工作流）")]
     order_code: Annotated[str, Field(description="订单编号（可选，自动生成）")]
     order_name: Annotated[str, Field(description="订单名称（可选，自动生成）")]
-    parameter_overrides: Annotated[str, Field(description="参数覆盖（文本格式）")]
-    auto_register_materials: Annotated[bool, Field(default=True, description="是否自动注册物料（默认True）")]
+    parameter_overrides: Annotated[
+        List[Dict[str, Any]],
+        Field(description='参数覆盖列表，格式应为 [{"m": 0, "n": 0, "Key": "Example", "Value": "example value"}]。'),
+    ]
+    auto_register_materials: Annotated[bool, Field(default=True, description="是否自动同步 Bioyond 物料到资源树")]
 
 
 # 绑定信息（最后更新 2026-05-12）：
@@ -157,8 +194,11 @@ class Experiment1RequiredParams(TypedDict):
 class Experiment1OptionalParams(TypedDict, total=False):
     order_code: Annotated[str, Field(description="订单编号（可选，自动生成）")]
     order_name: Annotated[str, Field(description="订单名称（可选，自动生成）")]
-    parameter_overrides: Annotated[str, Field(description="参数覆盖（文本格式）")]
-    auto_register_materials: Annotated[bool, Field(default=True, description="是否自动注册物料（默认True）")]
+    parameter_overrides: Annotated[
+        List[Dict[str, Any]],
+        Field(description='参数覆盖列表，格式应为 [{"m": 0, "n": 0, "Key": "Example", "Value": "example value"}]。'),
+    ]
+    auto_register_materials: Annotated[bool, Field(default=True, description="是否自动同步 Bioyond 物料到资源树")]
 
 
 # 绑定信息（最后更新 2026-05-12）：
@@ -171,8 +211,11 @@ class Experiment2RequiredParams(TypedDict):
 class Experiment2OptionalParams(TypedDict, total=False):
     order_code: Annotated[str, Field(description="订单编号（可选，自动生成）")]
     order_name: Annotated[str, Field(description="订单名称（可选，自动生成）")]
-    parameter_overrides: Annotated[str, Field(description="参数覆盖（文本格式）")]
-    auto_register_materials: Annotated[bool, Field(default=True, description="是否自动注册物料（默认True）")]
+    parameter_overrides: Annotated[
+        List[Dict[str, Any]],
+        Field(description='参数覆盖列表，格式应为 [{"m": 0, "n": 0, "Key": "Example", "Value": "example value"}]。'),
+    ]
+    auto_register_materials: Annotated[bool, Field(default=True, description="是否自动同步 Bioyond 物料到资源树")]
 
 
 def _utc_now_iso8601_ms() -> str:
@@ -330,7 +373,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         if missing_api_keys:
             logger.warning(
                 "BioyondSirnaStation 缺少 Bioyond API 配置 %s，进入延迟初始化模式。"
-                "动作可在调用前通过 config 重新配置或在 goal 中传入 api_host/api_key 后再使用。"
+                "请通过站点 graph/config 或环境变量补齐后再调用 RPC 动作。"
                 "缺失项可来自 graph 节点 config，或环境变量 "
                 "BIOYOND_SIRNA_API_HOST / BIOYOND_SIRNA_EXP1_API_HOST 与 "
                 "BIOYOND_SIRNA_API_KEY / BIOYOND_SIRNA_EXP1_API_KEY。",
@@ -369,17 +412,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             )
             return
         super().post_init(ros_node)
-        # Phase 4 — install Sirna-specific synchronizer that partitions reagents
-        # into liquid contents. Only swap the synchronizer; do not re-run sync
-        # here (base post_init may have already published the deck).
-        try:
-            if getattr(self, "resource_synchronizer", None) is not None and not isinstance(
-                self.resource_synchronizer, SirnaResourceSynchronizer
-            ):
-                self.resource_synchronizer = SirnaResourceSynchronizer(self)
-                logger.info("已安装 SirnaResourceSynchronizer（Phase 4）")
-        except Exception as exc:  # pragma: no cover - 防御性
-            logger.warning(f"SirnaResourceSynchronizer 安装失败: {exc}")
 
     def _debug_call_session(self, action_name: str):
         parent_debug_session = getattr(super(), "_debug_call_session", None)
@@ -424,72 +456,183 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @action(
         always_free=True,
-        goal_default={
-            "reset_operations": ["scheduler_reset", "reset_order_status", "reset_location"],
-        },
-        description="复位小核酸实验前状态",
+        description="自动复位小核酸工作站状态（失败仅记录告警，不阻断流程）",
     )
-    def reset(
+    def reset_auto(
         self,
-        reset_operations: Optional[
-            List[Literal["scheduler_reset", "reset_order_status", "reset_location"]]
-        ] = None,
-        **kwargs: Any,
+        reset_scheduler: bool = True,
+        reset_order_status: bool = True,
+        reset_location: bool = True,
+        reset_devices: bool = False,
+        sync_from_external_after_reset: bool = False,
     ) -> Dict[str, Any]:
-        """复位调度器、订单状态和库位，并按清理读回结果决定是否 take-out。"""
-        with self._debug_call_session("reset"):
-            reset_order_id = self._kwarg_text(kwargs, "reset_order_id")
-            reset_location_id = self._kwarg_text(kwargs, "reset_location_id")
-            cleanup_order_code = self._kwarg_text(kwargs, "cleanup_order_code")
-            api_host = self._kwarg_text(kwargs, "api_host")
-            api_key = self._kwarg_text(kwargs, "api_key")
-            ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
-            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
-            self._require_ready_signal(ready_signal)
+        """按固定顺序执行选中的复位操作；自动模式下失败只返回告警。"""
+        with self._debug_call_session("reset_auto"):
             rpc = self._require_hardware_interface_for_reset()
             result = self._run_reset_operations(
                 rpc,
-                reset_operations=reset_operations,
-                reset_order_id=reset_order_id,
-                reset_location_id=reset_location_id,
-                cleanup_order_code=cleanup_order_code,
+                reset_scheduler=reset_scheduler,
+                reset_order_status=reset_order_status,
+                reset_location=reset_location,
+                reset_devices=reset_devices,
+                action_name="reset_auto",
             )
-            result["external_material_sync"] = self._run_shared_external_material_sync(rpc=rpc)
-            return self._with_ready_signal(result)
+            self._maybe_sync_after_reset(
+                result,
+                sync_from_external_after_reset=sync_from_external_after_reset,
+                manual_mode=False,
+            )
+            result["success"] = True
+            return result
 
     @action(
         always_free=True,
-        description="使用 BioyondWorkstation 共享物料同步路径，从 Bioyond 重新同步外部物料。",
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
+        goal_default={
+            "reset_scheduler": True,
+            "reset_order_status": True,
+            "reset_location": True,
+            "reset_devices": False,
+            "sync_from_external_after_reset": False,
+            "physical_cleanup_confirmed": False,
+            "timeout_seconds": 3600,
+            "assignee_user_ids": [],
+        },
+        feedback_interval=300,
+        description="确认离心机配平板堆栈、G3移液站、自动化堆栈已清空，仪器内没有残留样品、耗材、试剂",
     )
-    def resync_external_materials(
+    def reset_manual(
         self,
-        refresh_material_cache: bool = False,
+        reset_scheduler: bool = True,
+        reset_order_status: bool = True,
+        reset_location: bool = True,
+        reset_devices: bool = False,
+        sync_from_external_after_reset: bool = False,
+        physical_cleanup_confirmed: bool = False,
+        timeout_seconds: int = 3600,
+        assignee_user_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """人工确认物理清空后复位；失败会在收集全部操作结果后阻断流程。"""
+        with self._debug_call_session("reset_manual"):
+            result = self._empty_reset_result(
+                action_name="reset_manual",
+                reset_scheduler=reset_scheduler,
+                reset_order_status=reset_order_status,
+                reset_location=reset_location,
+                reset_devices=reset_devices,
+            )
+            result["confirmation_message"] = RESET_PHYSICAL_CLEANUP_MESSAGE
+            result["timeout_seconds"] = timeout_seconds
+            result["assignee_user_ids"] = list(assignee_user_ids or [])
+            if not self._as_manual_gate(physical_cleanup_confirmed):
+                result["success"] = False
+                result["blocked"] = True
+                result["all_operations_successful"] = False
+                result["skipped_operations"] = [
+                    {
+                        "key": operation["key"],
+                        "label": operation["label"],
+                        "reason": "manual_cleanup_not_confirmed",
+                    }
+                    for operation in RESET_OPERATION_DEFINITIONS
+                ]
+                result["warnings"].append({
+                    "operation": "physical_cleanup_confirmed",
+                    "reason": "manual_cleanup_not_confirmed",
+                    "message": RESET_PHYSICAL_CLEANUP_MESSAGE,
+                })
+                return result
+
+            rpc = self._require_hardware_interface_for_reset()
+            result = self._run_reset_operations(
+                rpc,
+                reset_scheduler=reset_scheduler,
+                reset_order_status=reset_order_status,
+                reset_location=reset_location,
+                reset_devices=reset_devices,
+                action_name="reset_manual",
+            )
+            result["confirmation_message"] = RESET_PHYSICAL_CLEANUP_MESSAGE
+            result["timeout_seconds"] = timeout_seconds
+            result["assignee_user_ids"] = list(assignee_user_ids or [])
+            self._maybe_sync_after_reset(
+                result,
+                sync_from_external_after_reset=sync_from_external_after_reset,
+                manual_mode=True,
+            )
+            if not result["all_operations_successful"]:
+                failed = [call["operation"] for call in result["executed_calls"] if not call.get("success")]
+                raise RuntimeError(
+                    "reset_manual 复位失败: "
+                    f"failed_operations={failed}; details={result['executed_calls']}"
+                )
+            sync_result = result.get("external_material_sync")
+            if (
+                isinstance(sync_result, dict)
+                and sync_result.get("sync_attempted")
+                and not sync_result.get("success")
+            ):
+                raise RuntimeError(f"reset_manual 同步失败: {sync_result}")
+            result["success"] = True
+            return result
+
+    @action(
+        always_free=True,
+        description="从 Bioyond 同步库存物料到本地资源树",
+    )
+    def sync_from_external(
+        self,
+        publish_resource_tree: bool = True,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """手动触发共享 Bioyond 外部物料同步。
-
-        Args:
-            refresh_material_cache: 是否在同步前额外刷新 Bioyond 物料缓存。通常保持 False，
-                共享同步路径会用同一次库存查询结果更新缓存。
-        """
-        with self._debug_call_session("resync_external_materials"):
-            api_host = self._kwarg_text(kwargs, "api_host")
-            api_key = self._kwarg_text(kwargs, "api_key")
-            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
-            return self._run_shared_external_material_sync(
-                refresh_material_cache=refresh_material_cache,
+        """手动触发 Bioyond 外部物料同步。"""
+        del kwargs
+        with self._debug_call_session("sync_from_external"):
+            return self._sync_from_external_and_optionally_publish(
+                publish_resource_tree=publish_resource_tree,
+                action_name="sync_from_external",
             )
 
     @action(
         always_free=True,
-        description="手动确认后直接启动 Bioyond 小核酸调度器，不执行装载确认门禁",
+        description="只读查询 Bioyond 小核酸调度器状态",
+    )
+    def scheduler_status(
+        self,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """直接调用 Bioyond 调度器状态接口。"""
+        del kwargs
+        with self._debug_call_session("scheduler_status"):
+            rpc = self._require_hardware_interface("scheduler_status")
+            status = rpc.scheduler_status()
+            scheduler_status = status.get("schedulerStatus") if isinstance(status, dict) else None
+            has_task = status.get("hasTask") if isinstance(status, dict) else None
+            logger.info(
+                "小核酸调度器状态查询完成: schedulerStatus=%s hasTask=%s",
+                scheduler_status,
+                has_task,
+            )
+            return {
+                "success": bool(status),
+                "scheduler_status": status if isinstance(status, dict) else {},
+                "status": scheduler_status or "",
+                "has_task": bool(has_task) if has_task is not None else False,
+                "return_info": status,
+            }
+
+    @action(
+        always_free=True,
+        description="直接启动 Bioyond 小核酸调度器，不执行装载确认门禁",
     )
     def scheduler_start(
         self,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """直接调用 Bioyond 调度器启动接口。"""
-        return self._run_scheduler_action("scheduler_start", "启动", **kwargs)
+        del kwargs
+        return self._run_scheduler_action("scheduler_start", "启动")
 
     @action(
         always_free=True,
@@ -500,7 +643,8 @@ class BioyondSirnaStation(BioyondWorkstation):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """直接调用 Bioyond 调度器停止接口。"""
-        return self._run_scheduler_action("scheduler_stop", "停止", **kwargs)
+        del kwargs
+        return self._run_scheduler_action("scheduler_stop", "停止")
 
     @action(
         always_free=True,
@@ -511,7 +655,8 @@ class BioyondSirnaStation(BioyondWorkstation):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """直接调用 Bioyond 调度器暂停接口。"""
-        return self._run_scheduler_action("scheduler_pause", "暂停", **kwargs)
+        del kwargs
+        return self._run_scheduler_action("scheduler_pause", "暂停")
 
     @action(
         always_free=True,
@@ -522,89 +667,133 @@ class BioyondSirnaStation(BioyondWorkstation):
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """直接调用 Bioyond 调度器继续接口。"""
-        return self._run_scheduler_action("scheduler_continue", "继续", **kwargs)
+        del kwargs
+        return self._run_scheduler_action("scheduler_continue", "继续")
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
         goal_default={
             "order_id": "",
-            "order_code": "",
-            "cancel_experiment": True,
-            "take_out_remaining": True,
-            "confirmed": False,
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
+            "preintake_ids": [],
+            "material_ids": [],
         },
-        feedback_interval=300,
-        description="手动确认后取消 Bioyond 实验，并按订单快照释放残留物料",
+        description="按订单取出 Bioyond LIMS 中已分配/预占的物料",
+        handles=[
+            ActionInputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
     )
-    def cancel_experiment_and_take_out(
+    def take_out(
         self,
-        order_id: str = "",
-        order_code: str = "",
-        cancel_experiment: bool = True,
-        take_out_remaining: bool = True,
-        confirmed: bool = False,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
+        order_id: str,
+        preintake_ids: Optional[List[str]] = None,
+        material_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """取消实验并释放订单残留物料。"""
-        with self._debug_call_session("cancel_experiment_and_take_out"):
-            del timeout_seconds, assignee_user_ids
-            api_host = self._kwarg_text(kwargs, "api_host")
-            api_key = self._kwarg_text(kwargs, "api_key")
-            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
-            if not self._as_manual_gate(confirmed):
-                raise RuntimeError("取消实验/释放物料需要操作员确认")
+        """按订单调用 Bioyond take-out 接口。
 
+        Args:
+            order_id: Bioyond 实验 ID。
+            preintake_ids: 可选预占记录 ID 列表；省略时传空列表。
+            material_ids: 可选物料 ID 列表；省略时传空列表。
+        """
+        with self._debug_call_session("take_out"):
+            del kwargs
             normalized_order_id = str(order_id or "").strip()
-            filter_text = str(order_code or normalized_order_id or "").strip()
-            if not filter_text:
-                raise RuntimeError("取消实验/释放物料需要提供 order_id 或 order_code")
-
-            rpc = self._require_hardware_interface("order_query")
-            snapshot = self._query_order_snapshot(rpc, filter_text)
-            targets = self._extract_takeout_targets(snapshot, normalized_order_id)
-            resolved_order_id = str(targets.get("order_id") or normalized_order_id or "").strip()
-            if not resolved_order_id and cancel_experiment:
-                raise RuntimeError("未能解析可取消的 Bioyond order_id")
-
-            result: Dict[str, Any] = {
-                "success": True,
-                "order_id": resolved_order_id,
-                "order_code": str(order_code or ""),
-                "cleanup_targets": targets,
-                "selected_operations": {
-                    "cancel_experiment": bool(cancel_experiment),
-                    "take_out_remaining": bool(take_out_remaining),
-                },
+            if not normalized_order_id:
+                raise ValueError("take_out 需要提供非空 order_id")
+            normalized_preintake_ids = self._normalize_optional_string_list(
+                preintake_ids,
+                "preintake_ids",
+            )
+            normalized_material_ids = self._normalize_optional_string_list(
+                material_ids,
+                "material_ids",
+            )
+            rpc = self._require_hardware_interface("take_out")
+            take_out_result = rpc.take_out(
+                normalized_order_id,
+                normalized_preintake_ids,
+                normalized_material_ids,
+            )
+            logger.info(
+                "小核酸 take_out 返回: order_id=%s preintakes=%s materials=%s result=%s",
+                normalized_order_id,
+                len(normalized_preintake_ids),
+                len(normalized_material_ids),
+                take_out_result,
+            )
+            normalized_result = self._normalize_service_result(take_out_result)
+            return {
+                "success": normalized_result["success"],
+                "order_id": normalized_order_id,
+                "preintake_ids": normalized_preintake_ids,
+                "material_ids": normalized_material_ids,
+                "take_out": take_out_result,
+                "raw_result": take_out_result,
+                "code": normalized_result.get("code"),
+                "message": normalized_result.get("message", ""),
             }
-            if cancel_experiment:
-                self._require_rpc_method(rpc, "cancel_experiment")
-                cancel_result = rpc.cancel_experiment(resolved_order_id)
-                result["cancel_experiment"] = cancel_result
-                result["success"] = bool(cancel_result == 1)
-                logger.info(
-                    "小核酸取消实验返回: order_id=%s result=%s",
-                    resolved_order_id,
-                    cancel_result,
-                )
-            if take_out_remaining:
-                if targets.get("requires_take_out"):
-                    take_out_result = self._take_out_remaining_materials(rpc, targets)
-                    result["take_out"] = take_out_result
-                    logger.info("小核酸取消后 take_out 返回: %s", take_out_result)
-                else:
-                    result["take_out"] = {
-                        "skipped": True,
-                        "reason": "订单快照未发现 preIntake/material 释放目标",
-                    }
-                    logger.info("小核酸取消后跳过 take_out: 未发现释放目标")
-            result["confirmation_message"] = "取消/释放操作已提交" if result["success"] else "取消实验失败，请检查 LIMS 状态"
-            return result
+
+    @action(
+        always_free=True,
+        goal_default={"order_codes": []},
+        description="按实验编号批量取消 Bioyond 实验，仅调用批量取消接口，不执行 take_out",
+        handles=[
+            ActionInputHandle(
+                key="order_codes",
+                data_type="bioyond_order_codes",
+                label="实验编号列表",
+                data_key="order_codes",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+        ],
+    )
+    def batch_cancel_experiment(
+        self,
+        order_codes: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """按 orderCode 列表批量取消 Bioyond 实验。
+
+        Args:
+            order_codes: 非空 Bioyond 实验编号列表；该接口在 Sirna 中传 orderCode。
+        """
+        with self._debug_call_session("batch_cancel_experiment"):
+            del kwargs
+            normalized_order_codes = self._normalize_optional_string_list(
+                order_codes,
+                "order_codes",
+            )
+            if not normalized_order_codes:
+                raise ValueError("取消实验需要提供非空 order_codes 列表；该接口在 Sirna 中传 orderCode 列表")
+            rpc = self._require_hardware_interface("batch_cancel_experiment")
+            code = rpc.batch_cancel_experiment(normalized_order_codes)
+            logger.info(
+                "小核酸批量取消实验返回: order_codes=%s code=%s",
+                normalized_order_codes,
+                code,
+            )
+            return {
+                "success": code == 1,
+                "order_codes": normalized_order_codes,
+                "code": code,
+                "message": "取消实验已提交" if code == 1 else "取消实验失败，请检查 LIMS 状态",
+            }
 
     @action(
         always_free=True,
@@ -623,36 +812,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_type="bioyond_order_ids",
                 label="实验ID列表",
                 data_key="order_ids",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                # TEMP frontend-compat key: current cloud manual-confirm table path.
-                key="target_device",
-                data_type="device_id",
-                label="目标设备",
-                data_key="target_device",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                # TEMP frontend-compat key: material/resource name display (renderer compat).
-                key="resource",
-                data_type="resource",
-                label="待装载物料",
-                data_key="resource",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                # TEMP frontend-compat key: display as material/resource name.
-                key="coin_cell_code", data_type="array",
-                label="物料名称",
-                data_key="coin_cell_code",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                # TEMP frontend-compat key: display as mount/position.
-                key="mount_resource", data_type="resource",
-                label="库位",
-                data_key="mount_resource",
                 data_source=DataSource.EXECUTOR,
             ),
             ActionOutputHandle(
@@ -681,8 +840,8 @@ class BioyondSirnaStation(BioyondWorkstation):
                 sample_throughput: 样品通量（1-96，必填），表示一次实验处理的样品数量。
             optional_params: 可选参数组
                 order_name: 订单名称（可选，自动生成）
-                parameter_overrides: 参数覆盖（文本格式）
-                auto_register_materials: 是否自动注册物料（默认True）
+                parameter_overrides: 结构化参数覆盖列表
+                auto_register_materials: 是否自动同步 Bioyond 物料到资源树（默认True）
             timeout_seconds: 超时时间（秒，框架参数）
             assignee_user_ids: 分配用户ID列表（框架参数）
 
@@ -695,7 +854,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             - materials (List[Dict]): 物料记录列表
             - materials_by_type (Dict): 按类型分组的物料
             - confirmation_message (str): 确认消息
-            - registration_result (Dict): 物料注册结果
+            - material_registration (Dict): 提交后物料同步摘要
         """
         optional_params = optional_params or {}
         if isinstance(required_params, dict):
@@ -710,7 +869,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             sample_throughput=int(sample_throughput),
             order_code=str(optional_params.get("order_code", "") or ""),
             order_name=str(optional_params.get("order_name", "") or ""),
-            parameter_overrides=optional_params.get("parameter_overrides", ""),
+            parameter_overrides=optional_params.get("parameter_overrides", []),
             auto_register_materials=bool(optional_params.get("auto_register_materials", True)),
             **kwargs,
         )
@@ -718,6 +877,30 @@ class BioyondSirnaStation(BioyondWorkstation):
     @action(
         always_free=True,
         description="按工作流名称提交小核酸实验（通用入口，不暴露工作流 ID）",
+        handles=[
+            ActionOutputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_ids",
+                data_type="bioyond_order_ids",
+                label="实验ID列表",
+                data_key="order_ids",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="resultTable",
+                data_type="object",
+                label="物料装载结果表",
+                data_key="resultTable",
+                data_source=DataSource.EXECUTOR,
+                io_type="target",
+            ),
+        ],
     )
     def submit_experiment(
         self,
@@ -744,7 +927,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             sample_throughput=int(sample_throughput),
             order_code=str(optional_params.get("order_code", "") or ""),
             order_name=str(optional_params.get("order_name", "") or ""),
-            parameter_overrides=optional_params.get("parameter_overrides", ""),
+            parameter_overrides=optional_params.get("parameter_overrides", []),
             auto_register_materials=bool(optional_params.get("auto_register_materials", True)),
             timeout_seconds=timeout_seconds,
             assignee_user_ids=assignee_user_ids,
@@ -767,32 +950,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_type="bioyond_order_ids",
                 label="实验ID列表",
                 data_key="order_ids",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="target_device",
-                data_type="device_id",
-                label="目标设备",
-                data_key="target_device",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="resource",
-                data_type="resource",
-                label="待装载物料",
-                data_key="resource",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="coin_cell_code", data_type="array",
-                label="物料名称",
-                data_key="coin_cell_code",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="mount_resource", data_type="resource",
-                label="库位",
-                data_key="mount_resource",
                 data_source=DataSource.EXECUTOR,
             ),
             ActionOutputHandle(
@@ -825,7 +982,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             sample_throughput=int(sample_throughput),
             order_code=str(optional_params.get("order_code", "") or ""),
             order_name=str(optional_params.get("order_name", "") or ""),
-            parameter_overrides=optional_params.get("parameter_overrides", ""),
+            parameter_overrides=optional_params.get("parameter_overrides", []),
             auto_register_materials=bool(optional_params.get("auto_register_materials", True)),
             **kwargs,
         )
@@ -846,20 +1003,14 @@ class BioyondSirnaStation(BioyondWorkstation):
         with self._debug_call_session(action_name):
             if self._is_blank(workflow_name):
                 raise ValueError("提交实验必须提供 workflow_name（工作流名称），不能提供或依赖 workflow id")
-            target_device = (
-                self._kwarg_text(kwargs, "unilabos_device_id")
-                or self._kwarg_text(kwargs, "device_id")
-                or "bioyond_sirna_station"
-            )
             logger.info(
                 "小核酸实验提交开始: action=%s experiment=%s workflow=%s sub_workflow=%s "
-                "sample_throughput=%s target_device=%s auto_register_materials=%s overrides=%s",
+                "sample_throughput=%s auto_register_materials=%s overrides=%s",
                 action_name,
                 experiment_number,
                 workflow_name,
                 sub_workflow_name,
                 sample_throughput,
-                target_device,
                 bool(auto_register_materials),
                 bool(parameter_overrides),
             )
@@ -879,10 +1030,9 @@ class BioyondSirnaStation(BioyondWorkstation):
             )
 
             step_data = rpc.workflow_step_query(workflow["sub_workflow_id"])
-            parsed_overrides = self._parse_parameter_overrides_text(str(parameter_overrides or ""))
-            param_values, parameter_template = self._build_param_values_from_step_data(
+            param_values, parameter_template, override_warnings = self._build_param_values_from_step_data(
                 step_data,
-                parameter_overrides=parsed_overrides,
+                parameter_overrides=parameter_overrides,
                 include_all_task_displayable=False,
             )
             if not param_values:
@@ -894,7 +1044,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                 len(param_values),
                 param_entry_count,
                 len(parameter_template),
-                len(parsed_overrides),
+                len(self._parameter_override_items(parameter_overrides)),
             )
 
             resolved_order_code, resolved_order_name = self._build_bioyond_order_identity(
@@ -961,12 +1111,13 @@ class BioyondSirnaStation(BioyondWorkstation):
             elif not suggested_locations:
                 logger.warning("小核酸实验创建成功但未解析到推荐库位: order_code=%s", resolved_order_code)
 
-            registration_result = {
-                "registered": [],
-                "skipped": material_records,
-                "reason": f"{action_name}_resource_sync_disabled",
-                "auto_register_materials": bool(auto_register_materials),
-            }
+            warnings = list(override_warnings)
+            material_registration, registration_warnings = self._submit_material_registration_summary(
+                requested=bool(auto_register_materials),
+                create_success=create_success,
+                rpc=rpc,
+            )
+            warnings.extend(registration_warnings)
 
             result = {
                 "success": create_success,
@@ -974,7 +1125,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "order_name": resolved_order_name,
                 "order_id": order_ids[0] if order_ids else "",
                 "order_ids": order_ids,
-                "target_device": target_device,
                 "workflow": workflow,
                 "sample_throughput": int(sample_throughput),
                 "payload": order_payload,
@@ -989,15 +1139,12 @@ class BioyondSirnaStation(BioyondWorkstation):
                     confirmation_data.get("materials_by_type", {}),
                     table_name="物料放置指引",
                 ),
-                "manual_load_probe": self._build_manual_load_probe(
-                    confirmation_data.get("materials_by_type", {})
-                ),
                 "suggested_locations": suggested_locations,
                 "start_experiment": start_experiment_info,
                 "confirmation_message": confirmation_data.get("confirmation_message", ""),
-                "registration_result": registration_result,
+                "material_registration": material_registration,
+                "warnings": warnings,
             }
-            result.update(result["manual_load_probe"])
             logger.info(
                 "小核酸实验提交完成: action=%s order_code=%s success=%s manual_load_rows=%s",
                 action_name,
@@ -1010,50 +1157,77 @@ class BioyondSirnaStation(BioyondWorkstation):
             )
             return result
 
-    def _parse_parameter_overrides_text(self, text: str) -> Dict[str, Any]:
-        """Parse parameter overrides from text format.
+    def _submit_material_registration_summary(
+        self,
+        requested: bool,
+        create_success: bool,
+        rpc: Any,
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        if not requested:
+            return {
+                "requested": False,
+                "attempted": False,
+                "success": None,
+                "publish_resource_tree": True,
+                "resource_tree_update_requested": False,
+                "message": "未请求 Bioyond 物料同步",
+            }, []
+        if not create_success:
+            return {
+                "requested": True,
+                "attempted": False,
+                "success": False,
+                "skipped": True,
+                "publish_resource_tree": True,
+                "resource_tree_update_requested": False,
+                "message": "Bioyond 订单创建未成功，跳过物料同步",
+            }, ["auto_register_materials_skipped_due_to_create_order_failure"]
 
-        Supports two formats:
-        1. Key-value pairs: "key1=value1,key2=value2"
-        2. JSON string: '{"key1": "value1", "key2": "value2"}'
+        try:
+            del rpc
+            sync_result = self._sync_from_external_and_optionally_publish(
+                publish_resource_tree=True,
+                action_name="auto_register_materials.sync_from_external",
+            )
+        except Exception as exc:
+            logger.warning("小核酸提交后 Bioyond 物料同步失败: %s", exc)
+            return {
+                "requested": True,
+                "attempted": True,
+                "success": False,
+                "publish_resource_tree": True,
+                "resource_tree_update_requested": False,
+                "message": "Bioyond 资源同步失败",
+                "error": str(exc),
+            }, ["auto_register_materials_sync_failed"]
 
-        Args:
-            text: Parameter overrides as text
+        success = bool(isinstance(sync_result, dict) and sync_result.get("success"))
+        skipped = bool(isinstance(sync_result, dict) and sync_result.get("skipped"))
+        summary = {
+            "requested": True,
+            "attempted": not skipped,
+            "success": success,
+            "publish_resource_tree": True,
+            "resource_tree_update_requested": success,
+            "message": "Bioyond 资源同步成功" if success else "Bioyond 资源同步失败",
+        }
+        if skipped:
+            summary["skipped"] = True
+            summary["message"] = "Bioyond 资源同步跳过"
+        if isinstance(sync_result, dict) and sync_result.get("error"):
+            summary["error"] = sync_result["error"]
 
-        Returns:
-            Dict of parameter overrides
-        """
-        if not text or not text.strip():
-            return {}
-
-        text = text.strip()
-
-        # Try JSON format first
-        if text.startswith("{"):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                logger.warning(f"无法解析 JSON 格式的参数覆盖: {text}")
-                return {}
-
-        # Parse key=value,key=value format
-        result = {}
-        for pair in text.split(","):
-            pair = pair.strip()
-            if "=" not in pair:
-                continue
-            key, value = pair.split("=", 1)
-            result[key.strip()] = value.strip()
-
-        return result
+        warnings: List[str] = []
+        if skipped:
+            warnings.append("auto_register_materials_sync_skipped")
+        elif not success:
+            warnings.append("auto_register_materials_sync_failed")
+        return summary, warnings
 
     @action(
         always_free=True,
         node_type=NodeType.MANUAL_CONFIRM,
         placeholder_keys={
-            "target_device": "unilabos_devices",
-            "resource": "unilabos_resources",
-            "mount_resource": "unilabos_resources",
             "resultTable": "unilabos_manual_confirm",
             "assignee_user_ids": "unilabos_manual_confirm",
         },
@@ -1065,50 +1239,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         feedback_interval=300,
         description="请核对并装载实验物料；勾选装载确认后方可启动调度",
         handles=[
-            ActionInputHandle(
-                # TEMP frontend-compat key: current cloud manual-confirm table path.
-                key="target_device",
-                data_type="device_id",
-                label="目标设备",
-                data_key="target_device",
-                data_source=DataSource.HANDLE,
-                io_type="source",
-            ),
-            ActionInputHandle(
-                # TEMP frontend-compat key: material/resource name (renderer compat).
-                key="resource",
-                data_type="resource",
-                label="待装载物料",
-                data_key="resource",
-                data_source=DataSource.HANDLE,
-                io_type="source",
-            ),
-            ActionInputHandle(
-                # TEMP frontend-compat key: material/resource name.
-                key="coin_cell_code",
-                data_type="array",
-                label="物料名称",
-                data_key="coin_cell_code",
-                data_source=DataSource.HANDLE,
-                io_type="source",
-            ),
-            ActionInputHandle(
-                # TEMP frontend-compat key: mount/position.
-                key="mount_resource",
-                data_type="resource",
-                label="库位",
-                data_key="mount_resource",
-                data_source=DataSource.HANDLE,
-                io_type="source",
-            ),
-            ActionInputHandle(
-                key="resultTable",
-                data_type="object",
-                label="物料装载结果表",
-                data_key="resultTable",
-                data_source=DataSource.HANDLE,
-                io_type="source",
-            ),
             # Order metadata for scheduler start.
             ActionInputHandle(
                 key="order_id", data_type="bioyond_order_id",
@@ -1125,16 +1255,21 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_source=DataSource.HANDLE,
                 io_type="source",
             ),
+            ActionInputHandle(
+                key="resultTable",
+                data_type="object",
+                label="物料装载结果表",
+                data_key="resultTable",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
         ],
     )
     def start_experiment(
         self,
-        target_device: DeviceSlot = "bioyond_sirna_station",
-        resource: Optional[List[ResourceSlot]] = None,
-        coin_cell_code: Optional[List[str]] = None,
-        mount_resource: Optional[List[ResourceSlot]] = None,
         resultTable: Optional[Dict[str, Any]] = None,
         order_id: str = "",
+        order_ids: Optional[List[str]] = None,
         materials_loaded: bool = False,
         timeout_seconds: int = 3600,
         assignee_user_ids: Optional[List[str]] = None,
@@ -1143,42 +1278,24 @@ class BioyondSirnaStation(BioyondWorkstation):
         """Guided manual-load checkpoint that gates ``rpc.scheduler_start()``.
 
         Args:
-            target_device: 目标设备，保留用于当前云端手动确认表格兼容路径。
-            resource: 上游句柄提供的待装载物料显示值。
-            coin_cell_code: 上游句柄提供的临时物料名称列。
-            mount_resource: 上游句柄提供的临时库位列。
             resultTable: 上游句柄提供的新格式结果表（data/columns/tableName）。
             order_id: 上游 ``submit_experiment_1`` 创建的订单 ID（可选；若上游连接则自动传入）。
+            order_ids: 上游 ``submit_experiment`` 创建的订单 ID 列表。
             materials_loaded: 操作员勾选确认物料已装载。未勾选且存在物料显示则阻断启动。
             timeout_seconds: 超时时间（秒，框架参数）。
             assignee_user_ids: 分配用户 ID 列表（框架参数）。
         """
         with self._debug_call_session("start_experiment"):
-            target_device = (
-                target_device
-                or self._kwarg_text(kwargs, "target_device")
-                or "bioyond_sirna_station"
-            )
-            if resource is None:
-                resource = kwargs.get("resource")
-            if coin_cell_code is None:
-                coin_cell_code = kwargs.get("coin_cell_code")
-            if mount_resource is None:
-                mount_resource = kwargs.get("mount_resource")
-            order_ids = kwargs.get("order_ids")
             submit_experiment_result = kwargs.get("submit_experiment_result")
-            api_host = self._kwarg_text(kwargs, "api_host")
-            api_key = self._kwarg_text(kwargs, "api_key")
             ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
-            del target_device, timeout_seconds, assignee_user_ids
-            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
+            del timeout_seconds, assignee_user_ids
             self._require_ready_signal(ready_signal)
 
             category_arrays = {
                 "materials_loaded": (
                     "物料",
                     self._as_manual_gate(materials_loaded),
-                    [resource, coin_cell_code, mount_resource],
+                    [self._result_table_rows(resultTable)],
                 ),
             }
             gates: Dict[str, Dict[str, Any]] = {}
@@ -1391,18 +1508,22 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
         goal_default={
+            "status": "全部（\"\"）",
+            "max_results": 10,
             "filter_text": "",
-            "status": "",
+            "sorting": "creationTime desc",
+            "skipCount": 0,
+            "timeType": "",
+            "beginTime": None,
+            "endTime": None,
             "latest_only": True,
-            "max_results": 20,
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
         },
-        feedback_interval=300,
-        description="只读查询 Bioyond LIMS 订单列表，可作为下游节点的 order_id 来源",
+        description=(
+            "只读查询 Bioyond LIMS 订单列表。"
+            "status 必填：全部（\"\"）/成功（80）/失败（90）/执行中（60）/已取出（100）。"
+            "max_results 对应 pageCount，默认 10。其余查询条件可选。"
+        ),
         handles=[
             ActionOutputHandle(
                 key="order_id",
@@ -1418,114 +1539,153 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_key="order_ids",
                 data_source=DataSource.EXECUTOR,
             ),
+            ActionOutputHandle(
+                key="order_code",
+                data_type="bioyond_order_code",
+                label="实验编号",
+                data_key="order_code",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="order_codes",
+                data_type="bioyond_order_codes",
+                label="实验编号列表",
+                data_key="order_codes",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def get_order_list(
         self,
+        status: OrderStatus,
+        max_results: int = 10,
         filter_text: str = "",
-        status: str = "",
+        sorting: str = "creationTime desc",
+        skipCount: int = 0,
+        timeType: str = "",
+        beginTime: Optional[str] = None,
+        endTime: Optional[str] = None,
         latest_only: bool = True,
-        max_results: int = 20,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """只读查询 Bioyond LIMS 订单列表。
 
-        ``api_host`` / ``api_key`` 隐藏不再作为前端可见参数；缺失会沿用现有 RPC 配置错误。
-
         Args:
+            status: 订单状态下拉值，映射到 Bioyond ``order_query.status``。
+            max_results: 一次返回的最大订单条数，对应 ``pageCount``，默认 10。
             filter_text: 订单编号 / 名称模糊匹配字符串，对应 LIMS ``order_query.filter``。
-            status: 订单状态字段过滤值（透传给 ``order_query.status``，留空表示不过滤）。
+            sorting: 排序字段，默认 ``creationTime desc``。
+            skipCount: 跳过条数，对应 Bioyond ``skipCount``。
+            timeType: 查询时间类型，可选 CreationTime 或 FinishedTime；留空表示不限定，实测没啥用。
+            beginTime: 开始时间，可选。时间格式示例 2026-05-26T13:50:54.742373，实测没啥用。
+            endTime: 结束时间，可选。时间格式示例 2026-05-26T13:50:54.742373，必须大于 beginTime，实测没啥用。
             latest_only: 默认 ``True``，仅返回最新（创建时间最大）的一条订单作为 ``order_id``。
-            max_results: 一次返回的最大订单条数（透传给 ``pageCount``，默认 20）。
-            timeout_seconds: 超时时间（秒，框架参数）。
-            assignee_user_ids: 分配用户 ID 列表（框架参数）。
 
         Returns:
-            ``{"success": bool, "orders": [...], "order_id": str, "order_ids": [...], "query": {...}}``。
+            ``{"success": bool, "orders": [...], "order_id": str, "order_ids": [...], "order_code": str, "order_codes": [...], "query": {...}}``。
         """
         with self._debug_call_session("get_order_list"):
-            del timeout_seconds, assignee_user_ids, kwargs
+            del kwargs
             try:
                 normalized_max = int(max_results)
             except (TypeError, ValueError):
-                normalized_max = 20
+                normalized_max = 10
             if normalized_max <= 0:
-                normalized_max = 20
+                normalized_max = 10
+            try:
+                normalized_skip = int(skipCount or 0)
+            except (TypeError, ValueError):
+                normalized_skip = 0
+            normalized_skip = max(0, normalized_skip)
+            status_text = str(status)
+            if status_text not in ORDER_STATUS_VALUE_MAP:
+                raise ValueError(f"未知订单状态: {status_text!r}; 支持 {list(ORDER_STATUS_VALUE_MAP)}")
             rpc = self._require_hardware_interface("order_query")
             query_payload = {
-                "timeType": "",
-                "beginTime": None,
-                "endTime": None,
-                "status": str(status or ""),
+                "timeType": str(timeType or ""),
+                "beginTime": str(beginTime).strip() if beginTime else None,
+                "endTime": str(endTime).strip() if endTime else None,
+                "status": ORDER_STATUS_VALUE_MAP[status_text],
                 "filter": str(filter_text or ""),
-                "skipCount": 0,
+                "skipCount": normalized_skip,
                 "pageCount": normalized_max,
-                "sorting": "creationTime desc",
+                "sorting": str(sorting or "creationTime desc"),
             }
             logger.info(
                 "正在查询 Bioyond LIMS 订单列表 filter=%r status=%r latest_only=%s",
                 filter_text,
-                status,
+                status_text,
                 latest_only,
             )
             raw_result = rpc.order_query(json.dumps(query_payload, ensure_ascii=False))
             items = self._order_items(raw_result)
 
             orders: List[Dict[str, Any]] = []
+            warnings: List[str] = []
             for item in items:
                 order_id = str(item.get("id") or "")
                 if not order_id:
                     continue
-                orders.append({
+                order_code = str(item.get("orderCode") or "").strip()
+                normalized_order = {
                     "order_id": order_id,
-                    "order_code": str(item.get("orderCode") or ""),
+                    "order_code": order_code,
                     "order_name": str(item.get("name") or item.get("orderName") or ""),
                     "status": str(item.get("status") or item.get("statusName") or ""),
                     "created_at": str(item.get("creationTime") or item.get("createTime") or ""),
                     "raw": item,
+                }
+                if not order_code:
+                    warning = f"order {order_id} 缺少 orderCode，已从 order_codes 输出中省略"
+                    warnings.append(warning)
+                    normalized_order["missing_order_code"] = True
+                    logger.warning("Bioyond LIMS 订单缺少 orderCode: order_id=%s raw=%s", order_id, item)
+                orders.append({
+                    **normalized_order,
                 })
 
             order_ids = [order["order_id"] for order in orders]
+            order_codes = [order["order_code"] for order in orders if order.get("order_code")]
             if latest_only and orders:
                 chosen = orders[0]
                 order_id_value = chosen["order_id"]
+                order_code_value = str(chosen.get("order_code") or "")
             elif len(order_ids) == 1:
                 order_id_value = order_ids[0]
+                order_code_value = order_codes[0] if len(order_codes) == 1 else ""
             else:
                 order_id_value = ""
+                order_code_value = ""
             logger.info(
-                "Bioyond LIMS 订单列表查询完成: raw_items=%s orders=%s selected_order_id=%s",
+                "Bioyond LIMS 订单列表查询完成: raw_items=%s orders=%s selected_order_id=%s selected_order_code=%s",
                 len(items),
                 len(orders),
                 order_id_value,
+                order_code_value,
             )
             if not orders:
                 logger.warning(
                     "Bioyond LIMS 订单列表未查询到结果: filter=%r status=%r",
                     filter_text,
-                    status,
+                    status_text,
                 )
 
-            return {
+            result = {
                 "success": bool(orders),
                 "orders": orders,
                 "order_id": order_id_value,
                 "order_ids": order_ids,
+                "order_code": order_code_value,
+                "order_codes": order_codes,
                 "query": query_payload,
             }
+            if warnings:
+                result["warnings"] = warnings
+            return result
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
-        goal_default={
-            "order_id": "",
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
-        },
-        feedback_interval=300,
+        goal_default={"order_id": ""},
         description="只读查询 Bioyond LIMS 订单报告",
         handles=[
             ActionOutputHandle(
@@ -1547,35 +1707,25 @@ class BioyondSirnaStation(BioyondWorkstation):
     def get_order_report(
         self,
         order_id: str = "",
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """只读查询 Bioyond LIMS 订单报告。
 
-        ``api_host`` / ``api_key`` 隐藏不作为前端可见参数，可由执行器 kwargs 注入覆盖。
-
         Args:
             order_id: Bioyond LIMS 订单 ID。
-            timeout_seconds: 超时时间（秒，框架参数）。
-            assignee_user_ids: 分配用户 ID 列表（框架参数）。
 
         Returns:
             ``{"success": bool, "order_id": str, "report": {...}, "raw": ...}``。
         """
         with self._debug_call_session("get_order_report"):
-            del timeout_seconds, assignee_user_ids
+            del kwargs
             normalized_order_id = str(order_id or "").strip()
             if not normalized_order_id:
                 raise ValueError("order_id 不能为空")
 
-            api_host = self._kwarg_text(kwargs, "api_host")
-            api_key = self._kwarg_text(kwargs, "api_key")
-            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
-
             rpc = self._require_hardware_interface("order_report")
             logger.info("正在查询 Bioyond LIMS 订单报告 order_id=%s", normalized_order_id)
-            raw_result = rpc.order_report(normalized_order_id)
+            raw_result = rpc.order_report(normalized_order_id, return_envelope=True)
             result = self._normalize_order_report_result(normalized_order_id, raw_result)
             report_data = result.get("report")
             logger.info(
@@ -1594,8 +1744,6 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
         goal_default={
             "order_id": "",
             "filter_text": "",
@@ -1605,10 +1753,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             "include_gantt_with_simulation": True,
             "include_material_info": True,
             "include_raw": True,
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
         },
-        feedback_interval=300,
         description="聚合 Bioyond LIMS 前端样式订单报告",
         handles=[
             ActionOutputHandle(
@@ -1637,8 +1782,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         include_gantt_with_simulation: bool = True,
         include_material_info: bool = True,
         include_raw: bool = True,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """聚合 Bioyond LIMS 前端样式订单报告。
@@ -1652,17 +1795,12 @@ class BioyondSirnaStation(BioyondWorkstation):
             include_gantt_with_simulation: 是否优先查询合并模拟甘特图。
             include_material_info: 是否对订单物料 ID 查询物料详情。
             include_raw: 是否返回各分段原始响应和错误。
-            timeout_seconds: 超时时间（秒，框架参数）。
-            assignee_user_ids: 分配用户 ID 列表（框架参数）。
 
         Returns:
             前端报告调试结构，包含 header、parameters、samples、materials、timeline、raw/errors。
         """
         with self._debug_call_session("get_aggregated_order_report"):
-            del timeout_seconds, assignee_user_ids
-            api_host = self._kwarg_text(kwargs, "api_host")
-            api_key = self._kwarg_text(kwargs, "api_key")
-            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
+            del kwargs
 
             requested_order_id = str(order_id or "").strip()
             query_filter = str(filter_text or requested_order_id or "").strip()
@@ -1696,7 +1834,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                     rpc,
                     query_payload,
                     errors,
-                    fallback_on_empty=include_raw,
                 )
                 if include_raw:
                     raw_sections["order_list"] = order_list_payload
@@ -1719,6 +1856,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             )
 
             report_payload: Any = None
+            primary_report_failed = False
             normalized_report: Dict[str, Any] = {
                 "success": False,
                 "order_id": resolved_order_id,
@@ -1729,14 +1867,13 @@ class BioyondSirnaStation(BioyondWorkstation):
                 report_payload = self._call_single_arg_lims_section(
                     rpc,
                     "order_report",
-                    "/api/lims/order/order-report",
                     resolved_order_id,
                     errors,
                     "order_report",
-                    fallback_on_empty=True,
                 )
                 normalized_report = self._normalize_order_report_result(resolved_order_id, report_payload)
                 if not normalized_report.get("success"):
+                    primary_report_failed = True
                     message = str(normalized_report.get("message") or "order_report 未返回可用 data")
                     logger.error(
                         "Bioyond LIMS order_report 调用失败 order_id=%s: %s",
@@ -1757,11 +1894,9 @@ class BioyondSirnaStation(BioyondWorkstation):
                 gantt_payload = self._call_single_arg_lims_section(
                     rpc,
                     "gantt_with_simulation_by_order_id",
-                    "/api/lims/order/gantt-with-simulation-by-order-id",
                     resolved_order_id,
                     errors,
                     "gantt_with_simulation",
-                    fallback_on_empty=include_raw,
                 )
                 if include_raw:
                     raw_sections["gantt_with_simulation"] = gantt_payload
@@ -1773,11 +1908,9 @@ class BioyondSirnaStation(BioyondWorkstation):
                 gantt_payload = self._call_single_arg_lims_section(
                     rpc,
                     "gantts_by_order_id",
-                    "/api/lims/order/gantts-by-order-id",
                     resolved_order_id,
                     errors,
                     "gantt",
-                    fallback_on_empty=include_raw,
                 )
                 if include_raw:
                     raw_sections["gantt"] = gantt_payload
@@ -1796,11 +1929,9 @@ class BioyondSirnaStation(BioyondWorkstation):
                     material_payload = self._call_single_arg_lims_section(
                         rpc,
                         "material_info",
-                        "/api/lims/storage/material-info",
                         material_id,
                         errors,
                         f"material_info:{material_id}",
-                        fallback_on_empty=include_raw,
                     )
                     material_data = self._service_data_or_value(material_payload)
                     if isinstance(material_data, dict):
@@ -1816,7 +1947,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             samples = self._build_aggregated_report_samples(order_record, report_data, material_info_by_id)
             reagents, consumables = self._split_used_materials(report_data)
 
-            success = bool(order_record or report_data or timeline or samples)
+            success = bool(order_record or report_data or timeline or samples) and not primary_report_failed
             logger.info(
                 "聚合订单报告查询完成: order_id=%s success=%s samples=%s reagents=%s "
                 "consumables=%s timeline=%s source=%s errors=%s warnings=%s",
@@ -1843,6 +1974,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "consumables": consumables,
                 "timeline": timeline,
                 "timeline_source": timeline_source,
+                "section_errors": errors,
                 "errors": errors,
                 "warnings": warnings,
             }
@@ -1884,8 +2016,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                 f"  - 当前 api_key:  {'已配置' if api_key_present else '<缺失>'}",
                 "请按以下任一方式补齐后重试：",
                 "  1) 在前端节点 config 中填入 api_host / api_key 并重新下发 graph；",
-                "  2) 在动作 goal 参数中直接传入 api_host / api_key（reset / start_experiment 已支持）；",
-                "  3) 设置环境变量后重启 edge：",
+                "  2) 设置环境变量后重启 edge：",
                 "       BIOYOND_SIRNA_API_HOST 或 BIOYOND_SIRNA_EXP1_API_HOST",
                 "       BIOYOND_SIRNA_API_KEY  或 BIOYOND_SIRNA_EXP1_API_KEY",
             ]
@@ -1912,17 +2043,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 if not self._is_blank(value):
                     config[key] = value
                     break
-
-    def _update_runtime_api_config(self, api_host: str = "", api_key: str = "") -> None:
-        changed = False
-        if not self._is_blank(api_host) and self.bioyond_config.get("api_host") != api_host:
-            self.bioyond_config["api_host"] = api_host
-            changed = True
-        if not self._is_blank(api_key) and self.bioyond_config.get("api_key") != api_key:
-            self.bioyond_config["api_key"] = api_key
-            changed = True
-        if changed:
-            self.hardware_interface = None
 
     def _config_value(self, *keys: str) -> Optional[str]:
         config = getattr(self, "bioyond_config", {}) or {}
@@ -1983,24 +2103,63 @@ class BioyondSirnaStation(BioyondWorkstation):
         step_data: Any,
         parameter_overrides: Any,
         include_all_task_displayable: bool,
-    ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
+    ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]], List[str]]:
         parameter_map = self._extract_workflow_parameter_map(step_data)
         if not isinstance(parameter_map, dict):
             logger.error("workflow_step_query 未返回可解析的步骤参数: type=%s", type(parameter_map).__name__)
             raise RuntimeError("workflow_step_query 未返回可解析的步骤参数")
         param_values: Dict[str, List[Dict[str, Any]]] = {}
+        flattened, parameter_template = self._flatten_workflow_parameters(parameter_map)
+        override_items, override_warnings = self._resolve_parameter_override_items(parameter_overrides, flattened)
+        override_record_ids = {id(item["record"]) for item in override_items}
+        records_by_step: Dict[str, List[Dict[str, Any]]] = {}
+        for record in flattened:
+            records_by_step.setdefault(record["step_id"], []).append(record)
+
+        for step_id, records in records_by_step.items():
+            entries: List[Dict[str, Any]] = []
+            for record in records:
+                parameter_type = str(record.get("type") or "")
+                task_displayable = record.get("TaskDisplayable", 1)
+                if parameter_type.lower() == "hidden" or task_displayable == 0:
+                    continue
+                is_required_default = record.get("key") == "protocolName"
+                is_explicit_override = id(record) in override_record_ids
+                if not include_all_task_displayable and not is_required_default and not is_explicit_override:
+                    continue
+                value_for_create_order = record.get("value")
+                if self._is_blank(value_for_create_order) and not is_explicit_override:
+                    continue
+                entry: Dict[str, Any] = {
+                    "key": record["key"],
+                    "value": "" if self._is_blank(value_for_create_order) else str(value_for_create_order),
+                }
+                if record.get("m") is not None:
+                    entry["m"] = record["m"]
+                if record.get("n") is not None:
+                    entry["n"] = record["n"]
+                entries.append(entry)
+            if entries:
+                param_values[step_id] = entries
+
+        self._apply_structured_parameter_overrides(param_values, override_items)
+        return param_values, parameter_template, override_warnings
+
+    def _flatten_workflow_parameters(
+        self,
+        parameter_map: Dict[str, Any],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        flattened: List[Dict[str, Any]] = []
         parameter_template: List[Dict[str, Any]] = []
-        override_items = self._parameter_override_items(parameter_overrides)
-        override_keys = {key for key, _ in override_items}
         for step_id, value in parameter_map.items():
             if not self._looks_like_uuid(step_id):
                 continue
-            entries: List[Dict[str, Any]] = []
             for module in self._as_list(value):
                 if not isinstance(module, dict):
                     continue
                 module_m = module.get("m")
                 module_n = module.get("n")
+                module_name = module.get("name") or module.get("moduleName") or module.get("ModuleName") or ""
                 for parameter in self._as_list(module.get("parameterList") or module.get("ParameterList")):
                     if not isinstance(parameter, dict):
                         continue
@@ -2009,38 +2168,38 @@ class BioyondSirnaStation(BioyondWorkstation):
                         continue
                     task_displayable = parameter.get("TaskDisplayable", parameter.get("taskDisplayable", 1))
                     parameter_type = str(parameter.get("Type") or parameter.get("type") or "")
-                    template_item = {
+                    raw_m = parameter.get("m")
+                    raw_n = parameter.get("n")
+                    m_value = self._optional_int(module_m if self._is_blank(raw_m) else raw_m)
+                    n_value = self._optional_int(module_n if self._is_blank(raw_n) else raw_n)
+                    live_value = parameter.get("Value") if "Value" in parameter else parameter.get("value")
+                    display_value = parameter.get("DisplayValue") if "DisplayValue" in parameter else parameter.get("displayValue")
+                    value_for_create_order = self._value_for_create_order(parameter)
+                    record = {
                         "step_id": str(step_id),
-                        "module": module.get("name") or module.get("moduleName") or "",
-                        "m": module_m,
-                        "n": module_n,
+                        "step_uuid": str(step_id),
+                        "module": module_name,
+                        "step_name": module.get("stepName") or module.get("StepName") or "",
+                        "m": m_value,
+                        "n": n_value,
                         "key": key,
+                        "display_name": (
+                            parameter.get("DisplayName")
+                            or parameter.get("displayName")
+                            or parameter.get("Name")
+                            or parameter.get("name")
+                            or ""
+                        ),
                         "type": parameter_type,
                         "task_displayable": task_displayable,
-                        "value": self._value_for_create_order(parameter),
+                        "TaskDisplayable": task_displayable,
+                        "Value": live_value,
+                        "DisplayValue": display_value,
+                        "value": value_for_create_order,
                     }
-                    parameter_template.append(template_item)
-                    if parameter_type.lower() == "hidden" or task_displayable == 0:
-                        continue
-                    is_required_default = key == "protocolName"
-                    is_explicit_override = key in override_keys
-                    if not include_all_task_displayable and not is_required_default and not is_explicit_override:
-                        continue
-                    value_for_create_order = self._value_for_create_order(parameter)
-                    if self._is_blank(value_for_create_order) and not is_explicit_override:
-                        continue
-                    entry: Dict[str, Any] = {"key": key, "value": "" if self._is_blank(value_for_create_order) else str(value_for_create_order)}
-                    m_value = parameter.get("m", module_m)
-                    n_value = parameter.get("n", module_n)
-                    if not self._is_blank(m_value):
-                        entry["m"] = int(m_value)
-                    if not self._is_blank(n_value):
-                        entry["n"] = int(n_value)
-                    entries.append(entry)
-            if entries:
-                param_values[str(step_id)] = entries
-        self._apply_parameter_overrides(param_values, override_items)
-        return param_values, parameter_template
+                    flattened.append(record)
+                    parameter_template.append(dict(record))
+        return flattened, parameter_template
 
     def _value_for_create_order(self, parameter: Dict[str, Any]) -> Any:
         value = parameter.get("Value") if "Value" in parameter else parameter.get("value")
@@ -2049,52 +2208,112 @@ class BioyondSirnaStation(BioyondWorkstation):
             return display_value
         return value
 
-    def _apply_parameter_overrides(
+    def _apply_structured_parameter_overrides(
         self,
         param_values: Dict[str, List[Dict[str, Any]]],
-        overrides: Any,
+        override_items: List[Dict[str, Any]],
     ) -> None:
-        override_items = self._parameter_override_items(overrides)
         if not override_items:
             return
-        for key, value in override_items:
-            matched = False
-            for entries in param_values.values():
-                for entry in entries:
-                    if entry.get("key") == key:
-                        entry["value"] = value
-                        matched = True
-            if not matched:
-                logger.error("参数覆盖未命中 paramValues: key=%s", key)
-                raise ValueError(f"paramValues 中找不到可覆盖参数: {key}")
+        for item in override_items:
+            record = item["record"]
+            step_id = record["step_id"]
+            entries = param_values.setdefault(step_id, [])
+            replacement: Dict[str, Any] = {"key": record["key"], "value": item["value"]}
+            if record.get("m") is not None:
+                replacement["m"] = record["m"]
+            if record.get("n") is not None:
+                replacement["n"] = record["n"]
+            for index, entry in enumerate(entries):
+                if self._same_param_value_entry(entry, replacement):
+                    entries[index] = replacement
+                    break
+            else:
+                entries.append(replacement)
 
-    def _parameter_override_items(self, overrides: Any) -> List[Tuple[str, Any]]:
+    def _resolve_parameter_override_items(
+        self,
+        overrides: Any,
+        flattened_parameters: List[Dict[str, Any]],
+    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+        raw_items = self._parameter_override_items(overrides)
+        if not raw_items:
+            return [], []
+        deduped: Dict[Tuple[str, Optional[int], Optional[int]], Dict[str, Any]] = {}
+        warnings: List[str] = []
+        for item in raw_items:
+            key = item["key"]
+            dedupe_key = (key, item.get("m"), item.get("n"))
+            if dedupe_key in deduped:
+                warning = f"parameter_override_duplicate_last_write_wins:{key}"
+                warnings.append(warning)
+                logger.warning("参数覆盖重复，采用最后一次填写: key=%s m=%s n=%s", key, item.get("m"), item.get("n"))
+            deduped[dedupe_key] = item
+
+        resolved: List[Dict[str, Any]] = []
+        for item in deduped.values():
+            candidates = [
+                record
+                for record in flattened_parameters
+                if record.get("key") == item["key"]
+                and (item.get("m") is None or record.get("m") == item.get("m"))
+                and (item.get("n") is None or record.get("n") == item.get("n"))
+            ]
+            if not candidates:
+                raise ValueError(
+                    f"paramValues 中找不到可覆盖参数: {item['key']} (m={item.get('m')}, n={item.get('n')})"
+                )
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"参数覆盖匹配到多个 Bioyond 参数，请补充 m/n 消歧: {item['key']}"
+                )
+            resolved.append({"record": candidates[0], "value": item["value"]})
+        return resolved, warnings
+
+    def _parameter_override_items(self, overrides: Any) -> List[Dict[str, Any]]:
         if not overrides:
             return []
+        if isinstance(overrides, str):
+            raise ValueError("parameter_overrides 必须是结构化列表，不能使用 'a=b,c=d' 文本格式")
         if isinstance(overrides, dict):
-            return [(str(key), value) for key, value in overrides.items() if not self._is_blank(value)]
-        override_items: List[Tuple[str, Any]] = []
+            if not any(key in overrides for key in ("Key", "key", "Value", "value")):
+                raise ValueError("parameter_overrides 必须是包含 m/n/Key/Value 的对象列表，不能使用 key-only 字典")
+            overrides = [overrides]
+        override_items: List[Dict[str, Any]] = []
         for override in self._as_list(overrides):
             if not override:
                 continue
             if isinstance(override, dict):
-                override_items.extend(
-                    (str(key), value) for key, value in override.items() if not self._is_blank(value)
-                )
+                key = override.get("Key") if "Key" in override else override.get("key")
+                if self._is_blank(key):
+                    raise ValueError("parameter_overrides 条目缺少 Key")
+                if "Value" in override:
+                    value = override["Value"]
+                elif "value" in override:
+                    value = override["value"]
+                else:
+                    raise ValueError(f"parameter_overrides 条目缺少 Value: {key!r}")
+                override_items.append({
+                    "key": str(key),
+                    "value": value,
+                    "m": self._optional_int(override.get("m")),
+                    "n": self._optional_int(override.get("n")),
+                })
                 continue
-            if isinstance(override, (list, tuple)) and len(override) == 2:
-                if self._is_blank(override[1]):
-                    continue
-                override_items.append((str(override[0]), override[1]))
-                continue
-            if "=" not in str(override):
-                logger.error("参数覆盖格式错误: override=%r", override)
-                raise ValueError(f"参数覆盖必须使用 key=value 格式: {override!r}")
-            key, value = str(override).split("=", 1)
-            if self._is_blank(value):
-                continue
-            override_items.append((key, value))
+            raise ValueError(f"parameter_overrides 条目必须是包含 m/n/Key/Value 的对象: {override!r}")
         return override_items
+
+    def _same_param_value_entry(self, left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+        return (
+            left.get("key") == right.get("key")
+            and left.get("m") == right.get("m")
+            and left.get("n") == right.get("n")
+        )
+
+    def _optional_int(self, value: Any) -> Optional[int]:
+        if self._is_blank(value):
+            return None
+        return int(value)
 
     def _build_bioyond_order_identity(
         self,
@@ -2125,81 +2344,71 @@ class BioyondSirnaStation(BioyondWorkstation):
         value = f"{prefix}{suffix}"
         return order_code or value, order_name or value
 
-    def _parse_experiment1_create_result(self, result: Any, order_code: Optional[str] = None) -> Dict[str, Any]:
-        parsed_result = self._parse_lims_result(result)
-        material_records = self._extract_create_order_materials(parsed_result)
-        suggested_locations = self._extract_suggested_locations(material_records)
-        order_ids = self._extract_created_order_ids(parsed_result)
-        return {
-            "order_id": order_ids[0] if order_ids else None,
-            "order_ids": order_ids,
-            "order_code": order_code,
-            "materials": material_records,
-            "suggested_locations": suggested_locations,
-            "raw_result": parsed_result,
-        }
-
-    def _reset_before_experiment_create(self, rpc: Any) -> Dict[str, Any]:
-        return self._run_reset_operations(rpc)
-
-    def _run_shared_external_material_sync(
+    def _sync_from_external_and_optionally_publish(
         self,
-        rpc: Optional[Any] = None,
-        refresh_material_cache: bool = False,
+        publish_resource_tree: bool,
+        action_name: str,
     ) -> Dict[str, Any]:
-        """为 reset / 手动 resync 运行共享 Bioyond 外部物料同步路径。"""
-        if rpc is None:
-            rpc = self._require_hardware_interface_for_reset()
-
+        """运行 base Bioyond 同步器，成功后按需发布资源树。"""
+        self._require_hardware_interface("stock_material")
         result: Dict[str, Any] = {
             "success": False,
+            "action": action_name,
             "sync_mode": "shared_bioyond",
             "synchronizer": "BioyondResourceSynchronizer",
-            "refresh_material_cache": {"skipped": True, "reason": "disabled"},
+            "publish_resource_tree": bool(publish_resource_tree),
+            "resource_tree_update_requested": False,
+            "sync_attempted": False,
+            "warnings": [],
         }
-        logger.info(
-            "共享 Bioyond 外部物料同步开始: refresh_material_cache=%s",
-            bool(refresh_material_cache),
-        )
 
-        if refresh_material_cache:
-            if hasattr(rpc, "refresh_material_cache"):
-                result["refresh_material_cache"] = rpc.refresh_material_cache()
-                logger.info(
-                    "共享 Bioyond 外部物料缓存刷新完成: result=%s",
-                    result["refresh_material_cache"],
-                )
-            else:
-                result["refresh_material_cache"] = {
-                    "skipped": True,
-                    "reason": "rpc_method_unavailable",
-                }
-                logger.warning("共享 Bioyond 外部物料缓存刷新跳过: RPC 缺少 refresh_material_cache")
+        if getattr(self, "deck", None) is None:
+            warning = {
+                "reason": "no_deck",
+                "message": "Bioyond 资源同步跳过：工作站未初始化 deck",
+            }
+            result["skipped"] = True
+            result["warnings"].append(warning)
+            result["message"] = warning["message"]
+            logger.warning(warning["message"])
+            return result
 
         try:
-            synchronizer = BioyondResourceSynchronizer(self)
+            synchronizer = getattr(self, "resource_synchronizer", None)
+            if type(synchronizer) is not BioyondResourceSynchronizer:
+                synchronizer = BioyondResourceSynchronizer(self)
+                self.resource_synchronizer = synchronizer
+            result["sync_attempted"] = True
             result["success"] = bool(synchronizer.sync_from_external())
-            if result["success"]:
+            if result["success"] and publish_resource_tree:
                 self._publish_resource_tree_update()
-                logger.info("共享 Bioyond 外部物料同步完成并已发布资源树更新")
+                result["resource_tree_update_requested"] = True
+            result["message"] = "Bioyond 资源同步成功" if result["success"] else "Bioyond 资源同步失败"
+            if result["success"]:
+                logger.info("Bioyond 外部物料同步完成: publish_resource_tree=%s", bool(publish_resource_tree))
             else:
-                logger.warning("共享 Bioyond 外部物料同步未返回成功，继续返回结果供上游处理")
+                result["warnings"].append({
+                    "reason": "sync_returned_false",
+                    "message": "Bioyond 资源同步未返回成功",
+                })
+                logger.warning("Bioyond 外部物料同步未返回成功")
         except Exception as exc:
-            logger.error(f"共享 Bioyond 外部物料同步失败: {exc}")
+            logger.error(f"Bioyond 外部物料同步失败: {exc}")
             result["error"] = str(exc)
+            result["message"] = "Bioyond 资源同步失败"
+            result["warnings"].append({
+                "reason": "sync_exception",
+                "message": str(exc),
+            })
         return result
 
     def _run_scheduler_action(
         self,
         method_name: str,
         action_label: str,
-        **kwargs: Any,
     ) -> Dict[str, Any]:
         """统一封装直接调度器动作，保持 station action 只是薄包装。"""
         with self._debug_call_session(method_name):
-            api_host = self._kwarg_text(kwargs, "api_host")
-            api_key = self._kwarg_text(kwargs, "api_key")
-            self._update_runtime_api_config(api_host=api_host, api_key=api_key)
             rpc = self._require_hardware_interface(method_name)
             logger.info("正在%s小核酸调度器: method=%s", action_label, method_name)
             result = getattr(rpc, method_name)()
@@ -2223,295 +2432,167 @@ class BioyondSirnaStation(BioyondWorkstation):
     def _run_reset_operations(
         self,
         rpc: Any,
-        reset_operations: Optional[List[str]] = None,
-        reset_order_id: str = "",
-        reset_location_id: str = "",
-        cleanup_order_code: str = "",
+        reset_scheduler: bool,
+        reset_order_status: bool,
+        reset_location: bool,
+        reset_devices: bool,
+        action_name: str,
     ) -> Dict[str, Any]:
-        operations = self._normalize_reset_operations(reset_operations)
-        cleanup_order_code = cleanup_order_code or self._config_value(
-            "experiment_1_cleanup_order_code",
-            "sirna_exp1_cleanup_order_code",
-            "experiment_1_reset_order_filter",
-            "sirna_exp1_reset_order_filter",
-        ) or ""
-        logger.info(
-            "小核酸复位操作开始: operations=%s reset_order_id=%s reset_location_id=%s cleanup_order_code=%s",
-            operations,
-            reset_order_id,
-            reset_location_id,
-            cleanup_order_code,
+        result = self._empty_reset_result(
+            action_name=action_name,
+            reset_scheduler=reset_scheduler,
+            reset_order_status=reset_order_status,
+            reset_location=reset_location,
+            reset_devices=reset_devices,
         )
-        skipped_operations: List[Dict[str, str]] = []
-        if "reset_order_status" in operations:
-            reset_order_id = self._resolve_reset_order_id(rpc, reset_order_id, cleanup_order_code)
-            if not reset_order_id:
-                skipped_operations.append({
-                    "operation": "reset_order_status",
-                    "reason": "未查询到可复位订单，跳过订单状态复位",
+        logger.info(
+            "小核酸复位操作开始: action=%s selected=%s",
+            action_name,
+            [item["key"] for item in result["selected_operations"] if item["selected"]],
+        )
+
+        for operation in RESET_OPERATION_DEFINITIONS:
+            key = operation["key"]
+            selected = next(item["selected"] for item in result["selected_operations"] if item["key"] == key)
+            if not selected:
+                continue
+            call: Dict[str, Any] = {
+                "operation": key,
+                "label": operation["label"],
+                "method": operation["method"],
+                "endpoint": operation["endpoint"],
+                "success": False,
+            }
+            try:
+                method = getattr(rpc, operation["method"], None)
+                if not callable(method):
+                    raise RuntimeError(f"Bioyond RPC 客户端缺少 {operation['method']} 方法")
+                return_code = method()
+                call["return_code"] = return_code
+                call["success"] = return_code == 1
+                if not call["success"]:
+                    result["warnings"].append({
+                        "operation": key,
+                        "reason": "non_success_return_code",
+                        "return_code": return_code,
+                    })
+            except Exception as exc:
+                call["exception"] = f"{type(exc).__name__}: {exc}"
+                result["warnings"].append({
+                    "operation": key,
+                    "reason": "exception",
+                    "message": str(exc),
                 })
-                logger.warning("小核酸复位跳过订单状态复位: 未查询到可复位订单")
-        if "reset_location" in operations:
-            reset_location_id = self._resolve_reset_location_id(rpc, reset_location_id)
+            result["executed_calls"].append(call)
+            result[key] = call.get("return_code")
 
-        result: Dict[str, Any] = {
-            "selected_operations": operations,
-            "reset_order_id": reset_order_id,
-            "reset_location_id": reset_location_id,
-        }
-        if skipped_operations:
-            result["skipped_operations"] = skipped_operations
-        if "scheduler_reset" in operations:
-            self._require_rpc_method(rpc, "scheduler_reset")
-            result["scheduler_reset"] = rpc.scheduler_reset()
-            logger.info("小核酸复位 scheduler_reset 返回: %s", result["scheduler_reset"])
-            if result["scheduler_reset"] in ({}, None, False):
-                logger.warning("小核酸复位 scheduler_reset 未返回明确成功结果")
-        if "reset_order_status" in operations and reset_order_id:
-            self._require_rpc_method(rpc, "reset_order_status")
-            result["reset_order_status"] = rpc.reset_order_status(reset_order_id)
-            logger.info(
-                "小核酸复位 reset_order_status 返回: order_id=%s result=%s",
-                reset_order_id,
-                result["reset_order_status"],
-            )
-            if result["reset_order_status"] in ({}, None, False):
-                logger.warning("小核酸复位 reset_order_status 未返回明确成功结果: order_id=%s", reset_order_id)
-        if "reset_location" in operations:
-            self._require_rpc_method(rpc, "reset_location")
-            result["reset_location"] = rpc.reset_location(reset_location_id)
-            logger.info(
-                "小核酸复位 reset_location 返回: location_id=%s result=%s",
-                reset_location_id,
-                result["reset_location"],
-            )
-            if result["reset_location"] in ({}, None, False):
-                logger.warning("小核酸复位 reset_location 未返回明确成功结果: location_id=%s", reset_location_id)
+        if not result["executed_calls"]:
+            result["warnings"].append({
+                "reason": "no_reset_operations_selected",
+                "message": "未选择任何复位操作",
+            })
 
-        if "reset_order_status" in operations and reset_order_id:
-            snapshot = self._query_order_snapshot(rpc, cleanup_order_code or reset_order_id)
-            targets = self._extract_takeout_targets(snapshot, reset_order_id)
-            result["cleanup_targets"] = targets
-            logger.info(
-                "小核酸复位清理检查: requires_take_out=%s preintakes=%s materials=%s",
-                targets["requires_take_out"],
-                len(targets["preintake_ids"]),
-                len(targets["material_ids"]),
-            )
-            if targets["requires_take_out"]:
-                result["take_out"] = self._take_out_remaining_materials(rpc, targets)
-                logger.info("小核酸复位 take_out 返回: %s", result["take_out"])
-                if result["take_out"] in ({}, None, False):
-                    logger.warning("小核酸复位 take_out 未返回明确成功结果")
-        logger.info("小核酸复位操作完成: selected=%s skipped=%s", operations, len(skipped_operations))
+        result["all_operations_successful"] = all(
+            call.get("success") for call in result["executed_calls"]
+        )
+        logger.info(
+            "小核酸复位操作完成: action=%s all_success=%s warnings=%d",
+            action_name,
+            result["all_operations_successful"],
+            len(result["warnings"]),
+        )
         return result
 
-    def _resolve_reset_order_id(self, rpc: Any, reset_order_id: str = "", cleanup_order_code: str = "") -> str:
-        explicit_order_id = reset_order_id or self._config_value(
-            "experiment_1_reset_order_id",
-            "sirna_exp1_reset_order_id",
-        ) or ""
-        if explicit_order_id:
-            return explicit_order_id
-
-        filter_text = cleanup_order_code or self._config_value(
-            "experiment_1_cleanup_order_code",
-            "sirna_exp1_cleanup_order_code",
-            "experiment_1_reset_order_filter",
-            "sirna_exp1_reset_order_filter",
-            "experiment_1_reset_order_code",
-            "sirna_exp1_reset_order_code",
-            "experiment_1_reset_order_name",
-            "sirna_exp1_reset_order_name",
-        ) or ""
-        if filter_text:
-            snapshot = self._query_order_snapshot(rpc, filter_text)
-            order_item = self._select_reset_order_item(snapshot, filter_text)
-            if order_item:
-                return str(order_item["id"])
-            logger.warning(f"未能通过订单筛选条件 {filter_text!r} 查询到可复位订单，跳过 reset_order_status")
-            return ""
-
-        last_order_ids = [
-            str(order_id)
-            for order_id in self._as_list(getattr(self, "_last_submitted_order_ids", []))
-            if not self._is_blank(order_id)
-        ]
-        if last_order_ids:
-            return last_order_ids[0]
-
-        logger.warning(
-            "不能自动确定 reset_order_status 的订单ID。"
-            "请在站点配置中提供 experiment_1_reset_order_filter / experiment_1_cleanup_order_code，"
-            "或先通过 submit_experiment 产生上游订单信息。本次跳过订单状态复位。"
-        )
-        return ""
-
-    def _resolve_reset_location_id(self, rpc: Any, reset_location_id: str = "") -> str:
-        explicit_location_id = reset_location_id or self._config_value(
-            "experiment_1_reset_location_id",
-            "sirna_exp1_reset_location_id",
-        ) or ""
-        if explicit_location_id:
-            return explicit_location_id
-
-        location_code = self._config_value(
-            "experiment_1_reset_location_code",
-            "sirna_exp1_reset_location_code",
-            "reset_location_code",
-        ) or ""
-        location_name = self._config_value(
-            "experiment_1_reset_location_name",
-            "sirna_exp1_reset_location_name",
-            "reset_location_name",
-        ) or ""
-        warehouse_name = self._config_value(
-            "experiment_1_reset_location_warehouse_name",
-            "sirna_exp1_reset_location_warehouse_name",
-            "reset_location_warehouse_name",
-        ) or ""
-
-        selector = location_code or location_name
-        if not selector:
-            raise RuntimeError(
-                "不能自动确定 reset_location 的库位ID。"
-                "请在站点配置中提供 experiment_1_reset_location_code/name "
-                "以及可选 experiment_1_reset_location_warehouse_name。"
-            )
-
-        mapped_location_id = self._location_id_from_mapping(rpc, selector)
-        if mapped_location_id:
-            return mapped_location_id
-
-        inventory = self._query_location_inventory(rpc)
-        location = self._select_location_from_inventory(
-            inventory,
-            location_code=location_code,
-            location_name=location_name,
-            warehouse_name=warehouse_name,
-        )
-        if location and location.get("id"):
-            return str(location["id"])
-
-        label = f"{warehouse_name}/{selector}" if warehouse_name else selector
-        raise RuntimeError(f"未能通过库位选择条件 {label!r} 查询到 reset-location 库位ID")
-
-    def _select_reset_order_item(self, order_snapshot: Any, filter_text: str) -> Optional[Dict[str, Any]]:
-        items = self._order_items(order_snapshot)
-        if not items:
-            return None
-        exact_candidates = [
-            item
-            for item in items
-            if any(str(item.get(key) or "") == filter_text for key in ("id", "orderCode", "code", "name"))
-        ]
-        candidates = exact_candidates or items
-        return self._latest_order_item(candidates)
-
-    def _latest_order_item(self, items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if not items:
-            return None
-        timestamp_keys = ("creationTime", "requestTime", "startPreparationTime", "completeTime")
-
-        def sort_key(item: Dict[str, Any]) -> str:
-            for key in timestamp_keys:
-                value = item.get(key)
-                if value:
-                    return str(value)
-            return ""
-
-        return sorted(items, key=sort_key, reverse=True)[0]
-
-    def _location_id_from_mapping(self, rpc: Any, selector: str) -> str:
-        mapping = getattr(rpc, "location_mapping", None)
-        if isinstance(mapping, dict):
-            value = mapping.get(selector)
-            if value:
-                return str(value)
-        return ""
-
-    def _query_location_inventory(self, rpc: Any) -> List[Dict[str, Any]]:
-        for method_name in ("locations_by_type", "query_locations_by_type"):
-            method = getattr(rpc, method_name, None)
-            if callable(method):
-                response = method(type=0, typeMode=0, materialType=0)
-                return self._location_inventory_items(response)
-
-        if all(hasattr(rpc, attr) for attr in ("get", "host")):
-            response = rpc.get(
-                url=f"{rpc.host}/api/storage/location/locations-by-type",
-                params={"type": 0, "typeMode": 0, "materialType": 0},
-                headers={"Accept": "application/json"},
-            )
-            return self._location_inventory_items(response)
-
-        raise RuntimeError("Bioyond RPC 客户端缺少库位库存查询能力，不能自动解析 reset_location_id")
-
-    def _location_inventory_items(self, response: Any) -> List[Dict[str, Any]]:
-        parsed = self._parse_lims_result(response)
-        if isinstance(parsed, dict) and isinstance(parsed.get("data"), list):
-            return [item for item in parsed["data"] if isinstance(item, dict)]
-        if isinstance(parsed, list):
-            return [item for item in parsed if isinstance(item, dict)]
-        return []
-
-    def _select_location_from_inventory(
+    def _empty_reset_result(
         self,
-        warehouses: List[Dict[str, Any]],
-        location_code: str = "",
-        location_name: str = "",
-        warehouse_name: str = "",
-    ) -> Optional[Dict[str, Any]]:
-        selector = location_code or location_name
-        matches: List[Dict[str, Any]] = []
-        for warehouse in warehouses:
-            current_warehouse_name = str(warehouse.get("name") or warehouse.get("warehouseName") or "")
-            if warehouse_name and current_warehouse_name != warehouse_name:
-                continue
-            for location in self._as_list(warehouse.get("locations")):
-                if not isinstance(location, dict):
-                    continue
-                values = {
-                    str(location.get("id") or ""),
-                    str(location.get("code") or ""),
-                    str(location.get("name") or ""),
-                    str(location.get("locationShowName") or ""),
-                    str(location.get("locationCode") or ""),
-                }
-                if selector in values:
-                    item = dict(location)
-                    item.setdefault("warehouseName", current_warehouse_name)
-                    matches.append(item)
-        if not matches:
-            return None
-        if len(matches) > 1 and not warehouse_name:
-            raise RuntimeError(f"库位选择条件 {selector!r} 匹配到多个堆栈，请配置 reset_location_warehouse_name")
-        return matches[0]
-
-    def _normalize_reset_operations(self, reset_operations: Optional[List[str]]) -> List[str]:
-        values = reset_operations or list(DEFAULT_RESET_OPERATIONS)
-        aliases = {
-            "scheduler": "scheduler_reset",
-            "order": "reset_order_status",
-            "order_status": "reset_order_status",
-            "location": "reset_location",
-            "storage": "reset_location",
+        action_name: str,
+        reset_scheduler: bool,
+        reset_order_status: bool,
+        reset_location: bool,
+        reset_devices: bool,
+    ) -> Dict[str, Any]:
+        selected_by_key = {
+            "reset_scheduler": bool(reset_scheduler),
+            "reset_order_status": bool(reset_order_status),
+            "reset_location": bool(reset_location),
+            "reset_devices": bool(reset_devices),
         }
-        normalized: List[str] = []
-        for operation in values:
-            key = str(operation).strip()
-            if not key:
-                continue
-            key = aliases.get(key, key)
-            if key not in DEFAULT_RESET_OPERATIONS:
-                raise ValueError(f"未知复位操作: {operation!r}; 支持 {list(DEFAULT_RESET_OPERATIONS)}")
-            if key not in normalized:
-                normalized.append(key)
-        return normalized
+        selected_operations = [
+            {
+                "key": operation["key"],
+                "label": operation["label"],
+                "selected": selected_by_key[operation["key"]],
+            }
+            for operation in RESET_OPERATION_DEFINITIONS
+        ]
+        skipped_operations = [
+            {
+                "key": operation["key"],
+                "label": operation["label"],
+                "reason": "not_selected",
+            }
+            for operation in RESET_OPERATION_DEFINITIONS
+            if not selected_by_key[operation["key"]]
+        ]
+        return {
+            "success": False,
+            "action": action_name,
+            "selected_operations": selected_operations,
+            "executed_calls": [],
+            "skipped_operations": skipped_operations,
+            "warnings": [],
+            "all_operations_successful": False,
+        }
+
+    def _maybe_sync_after_reset(
+        self,
+        result: Dict[str, Any],
+        sync_from_external_after_reset: bool,
+        manual_mode: bool,
+    ) -> None:
+        result["sync_from_external_after_reset"] = bool(sync_from_external_after_reset)
+        if not sync_from_external_after_reset:
+            return
+        if not result.get("all_operations_successful"):
+            warning = {
+                "reason": "sync_from_external_after_reset_skipped_due_to_reset_failure",
+                "message": "复位操作未全部成功，跳过请求的外部物料同步",
+            }
+            result["warnings"].append(warning)
+            result["external_material_sync"] = {
+                "success": False,
+                "skipped": True,
+                "sync_attempted": False,
+                "reason": warning["reason"],
+                "warnings": [warning],
+            }
+            logger.warning(warning["message"])
+            return
+
+        sync_result = self._sync_from_external_and_optionally_publish(
+            publish_resource_tree=True,
+            action_name=f"{result.get('action', 'reset')}.sync_from_external_after_reset",
+        )
+        result["external_material_sync"] = sync_result
+        if not sync_result.get("success"):
+            warning = {
+                "reason": "sync_from_external_after_reset_failed",
+                "message": sync_result.get("message", "外部物料同步失败"),
+            }
+            result["warnings"].append(warning)
+            if manual_mode and sync_result.get("skipped"):
+                logger.warning("manual reset requested sync but sync was skipped: %s", sync_result)
 
     def _require_rpc_method(self, rpc: Any, method_name: str) -> None:
         if not hasattr(rpc, method_name):
             raise RuntimeError(f"Bioyond RPC 客户端缺少 {method_name} 方法")
+
+    def _normalize_optional_string_list(self, value: Optional[List[str]], field_name: str) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, str) or not isinstance(value, list):
+            raise ValueError(f"{field_name} 必须是列表，不能传单个字符串或其他类型")
+        return [str(item).strip() for item in value if str(item or "").strip()]
 
     def _require_ready_signal(self, ready_signal: str) -> None:
         if str(ready_signal).strip().upper() != DEFAULT_READY_SIGNAL:
@@ -2568,66 +2649,13 @@ class BioyondSirnaStation(BioyondWorkstation):
             raise RuntimeError("启动实验需要 submit_experiment 上游结果，或显式提供 order_id/order_ids")
         return {"order_ids": resolved_order_ids}
 
-    def _query_order_snapshot(self, rpc: Any, filter_text: str) -> Any:
-        self._require_rpc_method(rpc, "order_query")
-        query = {
-            "timeType": "",
-            "beginTime": None,
-            "endTime": None,
-            "status": "",
-            "filter": filter_text,
-            "skipCount": 0,
-            "pageCount": 20,
-            "sorting": "",
-        }
-        return rpc.order_query(json.dumps(query, ensure_ascii=False))
-
-    def _extract_takeout_targets(self, order_snapshot: Any, fallback_order_id: str) -> Dict[str, Any]:
-        order_id = fallback_order_id
-        preintake_ids = set()
-        material_ids = set()
-        for item in self._order_items(order_snapshot):
-            order_id = str(item.get("id") or order_id)
-            for preintake in self._as_list(item.get("preIntakes")):
-                if not isinstance(preintake, dict):
-                    continue
-                if preintake.get("id"):
-                    preintake_ids.add(str(preintake["id"]))
-                if preintake.get("materialId"):
-                    material_ids.add(str(preintake["materialId"]))
-                material_ids_text = str(preintake.get("materialIds") or "")
-                for material_id in material_ids_text.replace(";", "|").replace(",", "|").split("|"):
-                    if material_id.strip():
-                        material_ids.add(material_id.strip())
-                for sample in self._as_list(preintake.get("sampleMaterials")):
-                    if isinstance(sample, dict) and sample.get("materialId"):
-                        material_ids.add(str(sample["materialId"]))
-        return {
-            "order_id": order_id,
-            "preintake_ids": sorted(preintake_ids),
-            "material_ids": sorted(material_ids),
-            "requires_take_out": bool(preintake_ids or material_ids),
-        }
-
-    def _take_out_remaining_materials(self, rpc: Any, targets: Dict[str, Any]) -> Any:
-        payload = {
-            "orderId": targets["order_id"],
-            "preintakeIds": targets["preintake_ids"],
-            "materialIds": targets["material_ids"],
-        }
-        if hasattr(rpc, "take_out"):
-            return rpc.take_out(payload["orderId"], payload["preintakeIds"], payload["materialIds"])
-        if not all(hasattr(rpc, attr) for attr in ("post", "host", "api_key", "get_current_time_iso8601")):
-            raise RuntimeError("Bioyond RPC 客户端缺少 take-out 调用能力")
-        response = rpc.post(
-            url=f"{rpc.host}/api/lims/order/take-out",
-            params={
-                "apiKey": rpc.api_key,
-                "requestTime": rpc.get_current_time_iso8601(),
-                "data": payload,
-            },
-        )
-        return response or {}
+    def _result_table_rows(self, result_table: Optional[Dict[str, Any]]) -> List[Any]:
+        if not isinstance(result_table, dict):
+            return []
+        rows = result_table.get("data")
+        if rows is None:
+            rows = result_table.get("rows")
+        return self._as_list(rows)
 
     def _extract_workflow_parameter_map(self, step_data: Any) -> Any:
         parsed = self._json_loads_if_string(step_data)
@@ -2733,62 +2761,29 @@ class BioyondSirnaStation(BioyondWorkstation):
         rpc: Any,
         query_payload: Dict[str, Any],
         errors: List[str],
-        fallback_on_empty: bool = False,
     ) -> Any:
         if hasattr(rpc, "order_query"):
             try:
-                result = rpc.order_query(json.dumps(query_payload, ensure_ascii=False))
-                if fallback_on_empty and result in ({}, None, []):
-                    return self._fallback_or_original_lims_section(
-                        rpc,
-                        "/api/lims/order/order-list",
-                        query_payload,
-                        errors,
-                        "order_list",
-                        result,
-                    )
-                return result
+                return rpc.order_query(json.dumps(query_payload, ensure_ascii=False), return_envelope=True)
             except Exception as exc:
                 errors.append(f"order_list: {exc}")
                 logger.warning("聚合订单报告 order_list 查询失败，继续使用空结果: %s", exc)
                 return {}
-        logger.warning("聚合订单报告 order_list 缺少专用 RPC 方法，尝试通用 POST fallback")
-        return self._post_lims_section(
-            rpc,
-            "/api/lims/order/order-list",
-            query_payload,
-            errors,
-            "order_list",
-        )
+        errors.append("order_list: Bioyond RPC 客户端缺少 order_query 方法")
+        logger.error("聚合订单报告 order_list 缺少专用 RPC 方法")
+        return {}
 
     def _call_single_arg_lims_section(
         self,
         rpc: Any,
         method_name: str,
-        endpoint: str,
         data: str,
         errors: List[str],
         section_name: str,
-        fallback_on_empty: bool = False,
     ) -> Any:
         if hasattr(rpc, method_name):
             try:
-                result = getattr(rpc, method_name)(data)
-                if fallback_on_empty and result in ({}, None, []):
-                    logger.warning(
-                        "聚合订单报告 %s 返回为空，尝试通用 POST fallback: endpoint=%s",
-                        section_name,
-                        endpoint,
-                    )
-                    return self._fallback_or_original_lims_section(
-                        rpc,
-                        endpoint,
-                        data,
-                        errors,
-                        section_name,
-                        result,
-                    )
-                return result
+                return getattr(rpc, method_name)(data, return_envelope=True)
             except Exception as exc:
                 errors.append(f"{section_name}: {exc}")
                 logger.warning(
@@ -2797,68 +2792,9 @@ class BioyondSirnaStation(BioyondWorkstation):
                     exc,
                 )
                 return {}
-        logger.warning(
-            "聚合订单报告 %s 缺少 RPC 方法 %s，尝试通用 POST fallback",
-            section_name,
-            method_name,
-        )
-        return self._post_lims_section(rpc, endpoint, data, errors, section_name)
-
-    def _fallback_or_original_lims_section(
-        self,
-        rpc: Any,
-        endpoint: str,
-        data: Any,
-        errors: List[str],
-        section_name: str,
-        original: Any,
-    ) -> Any:
-        if not self._can_raw_post_lims_section(rpc):
-            logger.warning(
-                "聚合订单报告 %s 返回为空且 RPC 不支持通用 POST fallback，保留原始空结果",
-                section_name,
-            )
-            return original
-        fallback = self._post_lims_section(rpc, endpoint, data, errors, section_name)
-        return fallback or original
-
-    def _can_raw_post_lims_section(self, rpc: Any) -> bool:
-        return all(hasattr(rpc, attr) for attr in ("post", "host", "api_key", "get_current_time_iso8601"))
-
-    def _post_lims_section(
-        self,
-        rpc: Any,
-        endpoint: str,
-        data: Any,
-        errors: List[str],
-        section_name: str,
-    ) -> Any:
-        if not self._can_raw_post_lims_section(rpc):
-            errors.append(f"{section_name}: Bioyond RPC 客户端缺少 {endpoint} 调用能力")
-            logger.error(
-                "聚合订单报告 %s 无法 fallback: RPC 缺少 %s 调用能力",
-                section_name,
-                endpoint,
-            )
-            return {}
-        try:
-            return rpc.post(
-                url=f"{str(rpc.host).rstrip('/')}{endpoint}",
-                params={
-                    "apiKey": rpc.api_key,
-                    "requestTime": rpc.get_current_time_iso8601(),
-                    "data": data,
-                },
-            ) or {}
-        except Exception as exc:
-            errors.append(f"{section_name}: {exc}")
-            logger.warning(
-                "聚合订单报告 %s fallback POST 失败，继续使用空结果: endpoint=%s error=%s",
-                section_name,
-                endpoint,
-                exc,
-            )
-            return {}
+        errors.append(f"{section_name}: Bioyond RPC 客户端缺少 {method_name} 方法")
+        logger.error("聚合订单报告 %s 缺少 RPC 方法 %s", section_name, method_name)
+        return {}
 
     def _service_data_or_value(self, payload: Any) -> Any:
         parsed = self._parse_lims_result(payload)
@@ -2867,6 +2803,19 @@ class BioyondSirnaStation(BioyondWorkstation):
         ):
             return self._parse_lims_result(parsed.get("data"))
         return parsed
+
+    def _normalize_service_result(self, payload: Any) -> Dict[str, Any]:
+        parsed = self._parse_lims_result(payload)
+        code = parsed.get("code") if isinstance(parsed, dict) else parsed
+        message = ""
+        if isinstance(parsed, dict):
+            message = str(parsed.get("message") or "")
+        return {
+            "success": code in {1, "1"},
+            "code": code,
+            "message": message,
+            "raw": parsed,
+        }
 
     def _append_lims_section_error(
         self,
@@ -3324,55 +3273,13 @@ class BioyondSirnaStation(BioyondWorkstation):
             "tableName": table_name,
         }
 
-    @staticmethod
-    def _manual_load_resource_stub(
-        row: Dict[str, Any],
-        *,
-        name: str,
-        kind: str,
-        index: int,
-    ) -> Dict[str, Any]:
-        location_label = str(row.get("locationShowName") or row.get("locationCode") or "")
-        display_name = name or location_label or f"{kind}_{index + 1}"
-        stable_key = f"bioyond-sirna-manual-load:{kind}:{index}:{display_name}"
-        return {
-            "id": display_name,
-            "uuid": str(uuid5(NAMESPACE_URL, stable_key)),
-            "name": display_name,
-            "description": "Bioyond 手动装载临时资源",
-            "schema": {},
-            "model": {},
-            "icon": "",
-            "parent_uuid": None,
-            "type": "resource",
-            "class": "",
-            "config": {
-                "materialId": str(row.get("materialId") or ""),
-                "materialCode": str(row.get("materialCode") or ""),
-                "materialName": str(row.get("materialName") or ""),
-                "locationId": str(row.get("locationId") or ""),
-                "locationCode": str(row.get("locationCode") or ""),
-                "locationShowName": str(row.get("locationShowName") or ""),
-            },
-            "data": {
-                "display_name": display_name,
-                "locationShowName": str(row.get("locationShowName") or ""),
-                "locationCode": str(row.get("locationCode") or ""),
-            },
-            "extra": {
-                "bioyond_manual_load_kind": kind,
-                "bioyond_location_display": location_label,
-            },
-            "machine_name": "",
-        }
-
     def _classify_labware_mode(self, child: Any) -> str:
         """Map a placed labware to ``Sample`` / ``Consumables`` / ``Reagent``.
 
         Resolution order:
 
         1. ``unilabos_extra["material_bioyond_type_mode"]`` if previously set
-           by the load path (``_register_materials_to_tree``) — most reliable.
+           by external Bioyond synchronization metadata — most reliable.
         2. PLR class identity: troughs map to ``Reagent``; tip racks map to
            ``Consumables``; everything else (plates, tubes, etc.) defaults
            to ``Sample``.
@@ -3409,7 +3316,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         return "Sample"
 
     def _iter_reagent_liquids(self, parent: Any) -> Iterable[Dict[str, Any]]:
-        """Yield reagent-content rows attached to ``parent`` via ``_attach_liquid_to_parent``.
+        """Yield reagent-content rows attached to ``parent`` via Bioyond metadata.
 
         Cross-references ``parent.unilabos_extra["reagent_bioyond_ids"]`` (the
         structured Bioyond metadata source-of-truth) with ``parent.tracker.liquids``
@@ -3621,203 +3528,9 @@ class BioyondSirnaStation(BioyondWorkstation):
             self._publish_resource_tree_update()
         return cleared
 
-    def _build_manual_load_probe(
-        self,
-        materials_by_type: Dict[str, List[Dict[str, Any]]],
-    ) -> Dict[str, List[Any]]:
-        """构造临时前端兼容的手动装载表格值。
-
-        当前临时使用 ``coin_cell_code`` 表示物料名称，``mount_resource`` 表示库位。
-        因为 ``mount_resource`` 声明为 ``data_type="resource"``，这里要把
-        ``locationShowName/locationCode`` 放到资源形状的 ``name`` 字段上，而不是
-        直接返回字符串列表。前端支持通用 action-input 表格后应替换为 Sirna 自有 key。
-        """
-        rows: List[Dict[str, Any]] = []
-        for mode in ("Sample", "Consumables", "Reagent"):
-            rows.extend((materials_by_type or {}).get(mode, []) or [])
-        material_names = [
-            str(row.get("materialName") or row.get("materialCode") or "") for row in rows
-        ]
-        location_names = [
-            str(row.get("locationShowName") or row.get("locationCode") or "") for row in rows
-        ]
-        return {
-            "resource": material_names,
-            "coin_cell_code": material_names,
-            "mount_resource": [
-                self._manual_load_resource_stub(
-                    row,
-                    name=location_names[index],
-                    kind="location",
-                    index=index,
-                )
-                for index, row in enumerate(rows)
-            ],
-            "mount_resource_label": location_names,
-        }
-
-    def _register_materials_to_tree(self, material_records: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Register Bioyond materials to UniLabOS resource tree after user confirmation.
-
-        ID-first resolver pipeline (Phase 2/3):
-
-        1. Each ``mat`` is classified as ``slot_labware`` / ``liquid_content`` / ``unsupported``
-           via :meth:`_classify_material_record`.
-        2. Slot labware is resolved to ``(warehouse, location_code)`` using
-           :meth:`_resolve_material_record_to_warehouse` which prefers ``material-info``
-           and falls back to ``warehouse-info-by-mat-type-id`` keyed by ``locationId``.
-        3. Liquid content is attached to the parent trough at the resolved slot via
-           :meth:`_attach_liquid_to_parent` (idempotent by Bioyond material id).
-        4. Unsupported / contradictory rows are surfaced loudly with all Bioyond IDs.
-
-        ``locationCode`` alone is never used for production registration.
-        """
-        from unilabos.resources.bioyond.sirna_materials import get_material_class_by_type_code
-
-        deck = getattr(self, "deck", None)
-        if deck is None:
-            logger.warning("deck 未初始化，跳过 resource tree 注册")
-            return {"registered": [], "skipped": material_records, "reason": "no_deck"}
-
-        # Per-batch caches so a single submit_experiment_1 call doesn't refetch.
-        warehouse_inventory_cache: Dict[str, List[Dict[str, Any]]] = {}
-        material_info_cache: Dict[str, Dict[str, Any]] = {}
-
-        registered: List[Dict[str, Any]] = []
-        skipped: List[Dict[str, Any]] = []
-
-        for mat in material_records:
-            classification = self._classify_material_record(mat)
-            if classification == "unsupported":
-                logger.warning(
-                    "未支持的物料类型，跳过: materialId=%s materialTypeCode=%s materialTypeName=%s",
-                    mat.get("materialId"),
-                    mat.get("materialTypeCode"),
-                    mat.get("materialTypeName"),
-                )
-                skipped.append({**mat, "_skip_reason": "unsupported_classification"})
-                continue
-
-            try:
-                resolved = self._resolve_material_record_to_warehouse(
-                    mat,
-                    warehouse_inventory_cache=warehouse_inventory_cache,
-                    material_info_cache=material_info_cache,
-                )
-            except (ValueError, RuntimeError) as exc:
-                logger.warning(
-                    "解析 Bioyond 库位失败: materialId=%s materialTypeId=%s locationId=%s 错误=%s",
-                    mat.get("materialId"),
-                    mat.get("materialTypeId"),
-                    mat.get("locationId"),
-                    exc,
-                )
-                skipped.append({**mat, "_skip_reason": f"resolution_failed: {exc}"})
-                continue
-
-            warehouse = resolved.get("warehouse")
-            location_code = resolved.get("location_code")
-            if warehouse is None or not location_code:
-                skipped.append({**mat, "_skip_reason": "no_warehouse_or_slot"})
-                continue
-
-            if classification == "slot_labware":
-                type_code = mat.get("materialTypeCode", "")
-                resource_class = get_material_class_by_type_code(type_code)
-                if resource_class is None:
-                    logger.warning(
-                        "未知 materialTypeCode %s（slot_labware），跳过: %s",
-                        type_code, mat.get("materialName"),
-                    )
-                    skipped.append({**mat, "_skip_reason": "unmapped_material_type_code"})
-                    continue
-                material_code = mat.get("materialCode") or f"mat_{type_code}_{location_code}"
-                plr_resource = resource_class(name=material_code)
-                plr_resource.unilabos_extra = self._build_slot_labware_extra(mat, resolved)
-                try:
-                    warehouse[location_code] = plr_resource
-                    registered.append({
-                        "kind": "slot_labware",
-                        "material_code": material_code,
-                        "material_name": mat.get("materialName", ""),
-                        "location_code": location_code,
-                        "warehouse": warehouse.name,
-                        "warehouse_bioyond_id": resolved.get("warehouse_id", ""),
-                        "resolution_source": resolved.get("source", ""),
-                    })
-                except (IndexError, KeyError, TypeError) as exc:
-                    logger.warning(
-                        "放置物料 %s 到 %s[%s] 失败: %s",
-                        material_code, warehouse.name, location_code, exc,
-                    )
-                    skipped.append({**mat, "_skip_reason": f"assign_failed: {exc}"})
-                continue
-
-            # liquid_content
-            attach_result = self._attach_liquid_to_parent(
-                mat=mat, warehouse=warehouse, location_code=location_code, resolved=resolved
-            )
-            if attach_result.get("status") == "ok":
-                registered.append({
-                    "kind": "liquid_content",
-                    "material_code": mat.get("materialCode", ""),
-                    "material_name": mat.get("materialName", ""),
-                    "location_code": location_code,
-                    "warehouse": warehouse.name,
-                    "warehouse_bioyond_id": resolved.get("warehouse_id", ""),
-                    "parent": attach_result.get("parent_name", ""),
-                    "duplicate": attach_result.get("duplicate", False),
-                    "resolution_source": resolved.get("source", ""),
-                })
-            else:
-                skipped.append({**mat, "_skip_reason": attach_result.get("reason", "liquid_attach_failed")})
-
-        self._publish_resource_tree_update()
-        return {"registered": registered, "skipped": skipped}
-
     # ------------------------------------------------------------------
-    # Phase 2 / Phase 3 helpers: classification + ID-first resolver
+    # ID-first resolver helpers used by manual-load table rendering.
     # ------------------------------------------------------------------
-
-    def _classify_material_record(self, mat: Dict[str, Any]) -> str:
-        """Return ``slot_labware`` | ``liquid_content`` | ``unsupported``.
-
-        Rules (in order):
-        1. If ``materialTypeCode`` maps to a known PLR class via
-           ``get_material_class_by_type_code`` AND the mapped class is *not* the
-           reagent trough, treat as ``slot_labware``.
-        2. If ``materialTypeMode`` is ``Reagent`` and the mapped class is missing
-           or is a trough container, treat as ``liquid_content`` (will attach to
-           an already-placed parent trough).
-        3. Otherwise, mark ``unsupported``.
-
-        The reagent-trough class is only chosen as ``slot_labware`` when the row's
-        material name matches a configured trough labware name (e.g. configured
-        explicitly via ``material_type_mappings``). When evidence is ambiguous, prefer
-        ``liquid_content`` so the data lands on the parent rather than overwriting it.
-        """
-        from unilabos.resources.bioyond.sirna_materials import (
-            get_material_class_by_type_code,
-            BioyondSirna_ReagentTrough,
-        )
-
-        type_code = str(mat.get("materialTypeCode") or "")
-        type_mode = str(mat.get("materialTypeMode") or "")
-        mapped = get_material_class_by_type_code(type_code) if type_code else None
-
-        if mapped is not None and mapped is not BioyondSirna_ReagentTrough:
-            return "slot_labware"
-
-        if type_mode == "Reagent":
-            return "liquid_content"
-
-        if mapped is None and type_mode in {"Sample", "Consumables"}:
-            return "unsupported"
-
-        # Default: if mapped trough class but Reagent mode -> liquid; otherwise unsupported.
-        if mapped is BioyondSirna_ReagentTrough and type_mode == "Reagent":
-            return "liquid_content"
-        return "unsupported"
 
     def _resolve_material_record_to_warehouse(
         self,
@@ -4044,103 +3757,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             return code in ordering
         return False
 
-    def _build_slot_labware_extra(
-        self, mat: Dict[str, Any], resolved: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        return {
-            "material_bioyond_id": mat.get("materialId", ""),
-            "material_bioyond_code": mat.get("materialCode", ""),
-            "material_bioyond_name": mat.get("materialName", ""),
-            "material_bioyond_type_id": mat.get("materialTypeId", ""),
-            "material_bioyond_type_code": mat.get("materialTypeCode", ""),
-            "material_bioyond_type_mode": mat.get("materialTypeMode", ""),
-            "location_bioyond_id": mat.get("locationId", ""),
-            "location_code": resolved.get("location_code", ""),
-            "warehouse_bioyond_id": resolved.get("warehouse_id", ""),
-            "warehouse_bioyond_name": resolved.get("warehouse_name", ""),
-            "location_resolution_source": resolved.get("source", ""),
-        }
-
-    def _attach_liquid_to_parent(
-        self,
-        mat: Dict[str, Any],
-        warehouse: Any,
-        location_code: str,
-        resolved: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Attach a reagent ``mat`` as liquid content on the parent labware at the slot.
-
-        Returns ``{"status": "ok"|"deferred", "reason": str, "parent_name": str, "duplicate": bool}``.
-        Idempotent by Bioyond ``materialId``.
-        """
-        try:
-            holder = warehouse[location_code]
-        except (KeyError, IndexError):
-            return {"status": "deferred", "reason": f"warehouse_slot_missing:{location_code}"}
-        # ``warehouse[code]`` returns the assigned resource when occupied, otherwise
-        # an empty ResourceHolder. Detect both shapes.
-        parent = None
-        if hasattr(holder, "tracker"):
-            parent = holder
-        else:
-            children = list(getattr(holder, "children", []) or [])
-            if children:
-                parent = children[0]
-        if parent is None:
-            return {
-                "status": "deferred",
-                "reason": f"missing_parent_labware:{warehouse.name}/{location_code}",
-            }
-
-        bioyond_id = str(mat.get("materialId") or "")
-        extra = getattr(parent, "unilabos_extra", None)
-        if not isinstance(extra, dict):
-            extra = {}
-        reagent_ids = list(extra.get("reagent_bioyond_ids") or [])
-        duplicate = any(
-            isinstance(item, dict) and str(item.get("material_bioyond_id") or "") == bioyond_id
-            for item in reagent_ids
-        )
-        if not duplicate:
-            reagent_ids.append({
-                "material_bioyond_id": bioyond_id,
-                "material_bioyond_code": mat.get("materialCode", ""),
-                "material_bioyond_name": mat.get("materialName", ""),
-                "material_bioyond_type_id": mat.get("materialTypeId", ""),
-                "material_bioyond_type_code": mat.get("materialTypeCode", ""),
-                "location_bioyond_id": mat.get("locationId", ""),
-                "quantity": mat.get("quantity"),
-                "location_resolution_source": resolved.get("source", ""),
-            })
-            extra["reagent_bioyond_ids"] = reagent_ids
-            try:
-                setattr(parent, "unilabos_extra", extra)
-            except Exception:  # pragma: no cover - read-only proxy
-                pass
-
-            # Best-effort: also add a Liquid entry to parent.tracker if it supports it.
-            tracker = getattr(parent, "tracker", None)
-            if tracker is not None and hasattr(tracker, "add_liquid"):
-                try:
-                    quantity_text = str(mat.get("quantity") or "0")
-                    # Try to parse a leading number; fall back to 0 to preserve idempotency.
-                    import re as _re
-                    match = _re.match(r"\s*(\d+(?:\.\d+)?)", quantity_text)
-                    qty_value = float(match.group(1)) if match else 0.0
-                    if qty_value > 0:
-                        # No unit information from Bioyond reagent rows; default ul.
-                        tracker.add_liquid(qty_value, unit="ul")
-                except Exception as exc:  # pragma: no cover - tracker variants
-                    logger.debug("tracker.add_liquid 失败（非阻塞）: %s", exc)
-
-        return {
-            "status": "ok",
-            "parent_name": getattr(parent, "name", ""),
-            "duplicate": duplicate,
-            "reason": "",
-        }
-
-
     def _resolve_location_to_warehouse(self, location_code: str) -> Tuple[Any, int]:
         """[Diagnostic / legacy fallback] Map slot label to (warehouse, idx).
 
@@ -4295,172 +3911,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         if isinstance(value, dict):
             return not value
         return False
-
-
-# TODO: Refactor this into a small BioyondResourceSynchronizer classification hook
-# before re-enabling long-term; keep only the Sirna reagent-as-liquid rule here.
-class SirnaResourceSynchronizer(BioyondResourceSynchronizer):
-    """Sirna-specific resource synchronizer.
-
-    Phase 4 of the resource-system mega plan: external Bioyond stock-material
-    rows are partitioned into ``slot_labware`` rows (handled by the existing
-    ``BioyondResourceSynchronizer.sync_from_external`` path) and reagent
-    ``liquid_content`` rows that should attach to a parent trough on the deck.
-
-    The base implementation goes through ``resource_bioyond_to_plr`` which can
-    silently fall back to ``RegularContainer`` for unmapped types. The Sirna
-    override classifies before calling the base path, attaches reagent contents
-    to already-placed parent labware, and logs (with Bioyond ids) any rows that
-    need a parent that doesn't exist yet.
-
-    The override does not double-sync: when rows are taken over here they are
-    excluded from the data passed to the base sync.
-    """
-
-    def sync_from_external(self) -> bool:  # type: ignore[override]
-        rpc = getattr(self.workstation, "hardware_interface", None)
-        if rpc is None:
-            logger.error("Bioyond API 客户端未初始化")
-            return False
-        try:
-            type1 = rpc.stock_material('{"typeMode": 1, "includeDetail": true}') or []
-            type2 = rpc.stock_material('{"typeMode": 2, "includeDetail": true}') or []
-            type0 = rpc.stock_material('{"typeMode": 0, "includeDetail": true}') or []
-        except Exception as exc:  # pragma: no cover - 网络
-            logger.error(f"[Sirna sync] stock_material 调用失败: {exc}")
-            return False
-
-        all_rows: List[Dict[str, Any]] = []
-        for batch in (type0, type1, type2):
-            if isinstance(batch, list):
-                all_rows.extend(item for item in batch if isinstance(item, dict))
-
-        labware_rows, liquid_rows = self._partition_external_rows(all_rows)
-
-        # Apply liquid attachments first so duplicate writes from a re-sync are
-        # detected via the unilabos_extra reagent_bioyond_ids list.
-        deferred_liquids: List[Dict[str, Any]] = []
-        for row in liquid_rows:
-            attached = self._attach_external_liquid_row(row)
-            if attached.get("status") != "ok":
-                deferred_liquids.append({**row, "_skip_reason": attached.get("reason", "")})
-
-        # Delegate labware path to the base implementation by temporarily replacing
-        # the stock-material results. We re-run only when there is something to do.
-        if labware_rows:
-            try:
-                from unilabos.resources.graphio import resource_bioyond_to_plr
-                resource_bioyond_to_plr(
-                    labware_rows,
-                    type_mapping=self.workstation.bioyond_config.get("material_type_mappings", {}),
-                    deck=self.workstation.deck,
-                )
-            except Exception as exc:  # pragma: no cover - graphio failure
-                logger.error(f"[Sirna sync] labware 转换失败: {exc}")
-
-        if deferred_liquids:
-            logger.warning(
-                "[Sirna sync] %d 条 reagent 行无父 labware，已延后: %s",
-                len(deferred_liquids),
-                [r.get("_skip_reason") for r in deferred_liquids[:5]],
-            )
-        return True
-
-    def _partition_external_rows(
-        self, rows: List[Dict[str, Any]]
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """Split external rows by classifier rules.
-
-        Reagent rows whose ``typeName`` is mapped to a known PLR class become
-        labware. Reagent rows without a mapped class are treated as liquid
-        content rows. ``Sample`` / ``Consumables`` rows always go to labware.
-        """
-        from unilabos.resources.bioyond.sirna_materials import (
-            BioyondSirna_ReagentTrough,
-            get_material_class_by_type_code,
-        )
-
-        type_mapping = self.workstation.bioyond_config.get("material_type_mappings", {})
-        reverse: Dict[str, Any] = {}
-        for key, value in type_mapping.items():
-            if isinstance(value, (tuple, list)) and value:
-                display = value[0]
-                if display:
-                    reverse.setdefault(display, key)
-
-        labware: List[Dict[str, Any]] = []
-        liquid: List[Dict[str, Any]] = []
-        for row in rows:
-            type_name = row.get("typeName") or ""
-            type_mode_int = row.get("typeMode")  # external API uses int 0/1/2
-            mapped_key = reverse.get(type_name)
-            mapped_class = None
-            # Use mapped_key to derive class via type code if possible. Sirna materials
-            # uses code-based map; here we just rely on the type_name → mapping presence.
-            if mapped_key:
-                # try to find class via id; fall back to non-trough.
-                # In practice, Sirna materials map by code, so trough check is by name.
-                if "试剂槽" in type_name and BioyondSirna_ReagentTrough is not None:
-                    mapped_class = BioyondSirna_ReagentTrough
-                else:
-                    mapped_class = object  # any non-trough sentinel
-            is_reagent_mode = (type_mode_int == 2)
-            if mapped_class is not None and mapped_class is not BioyondSirna_ReagentTrough:
-                labware.append(row)
-                continue
-            if is_reagent_mode and mapped_class is None:
-                liquid.append(row)
-                continue
-            if is_reagent_mode and mapped_class is BioyondSirna_ReagentTrough:
-                # Trough labware: PLR class exists; treat as labware.
-                labware.append(row)
-                continue
-            # Default: labware so we don't accidentally drop unmapped sample rows.
-            labware.append(row)
-        return labware, liquid
-
-    def _attach_external_liquid_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
-        """Attach an external reagent row to a parent labware on the deck.
-
-        Locates the parent through ``locations[0].whName + locations[0].code`` and
-        delegates to the station's ``_attach_liquid_to_parent`` helper.
-        """
-        deck = getattr(self.workstation, "deck", None)
-        if deck is None:
-            return {"status": "deferred", "reason": "no_deck"}
-        locations = row.get("locations") or []
-        if not isinstance(locations, list) or not locations:
-            return {"status": "deferred", "reason": "no_locations"}
-        loc = locations[0] if isinstance(locations[0], dict) else {}
-        wh_name = str(loc.get("whName") or "")
-        code = str(loc.get("code") or "")
-        warehouse = None
-        for child in getattr(deck, "children", []):
-            if getattr(child, "name", "") == wh_name:
-                warehouse = child
-                break
-        if warehouse is None or not code:
-            return {"status": "deferred", "reason": f"no_warehouse_or_code:{wh_name}/{code}"}
-        # Build a synthetic mat dict in create-order shape so we can reuse the
-        # station-side helper without duplicating logic.
-        mat = {
-            "materialId": row.get("id"),
-            "materialCode": row.get("code"),
-            "materialName": row.get("name"),
-            "materialTypeId": row.get("typeId"),
-            "materialTypeName": row.get("typeName"),
-            "quantity": row.get("quantity"),
-            "locationId": loc.get("id"),
-        }
-        attach = getattr(self.workstation, "_attach_liquid_to_parent", None)
-        if attach is None:
-            return {"status": "deferred", "reason": "station_missing_helper"}
-        return attach(
-            mat=mat,
-            warehouse=warehouse,
-            location_code=code,
-            resolved={"warehouse_id": "", "warehouse_name": wh_name, "source": "stock-material"},
-        )
 
 
 def main() -> int:

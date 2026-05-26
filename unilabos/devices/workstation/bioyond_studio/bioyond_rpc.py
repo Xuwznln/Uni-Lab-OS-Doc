@@ -79,6 +79,27 @@ class BioyondV1RPC(BaseRequest):
     def get_logger(self):
         return self._logger
 
+    @staticmethod
+    def _data_or_envelope(
+        response: Any,
+        *,
+        return_envelope: bool = False,
+        direct_dto_fallback: bool = False,
+    ) -> dict:
+        if return_envelope:
+            return response or {}
+        if not response:
+            return {}
+        if isinstance(response, dict) and response.get("code") == 1:
+            return response.get("data") or {}
+        if (
+            direct_dto_fallback
+            and isinstance(response, dict)
+            and "code" not in response
+        ):
+            return response
+        return {}
+
     # ==================== 物料查询相关接口 ====================
 
     def stock_material(self, json_str: str) -> list:
@@ -395,11 +416,17 @@ class BioyondV1RPC(BaseRequest):
             return 0
         return response.get("code", 0)
 
-    def material_info(self, material_id: str) -> dict:
+    def material_info(
+        self,
+        material_id: str,
+        *,
+        return_envelope: bool = False,
+    ) -> dict:
         """查询物料详情
 
         参数:
             material_id: 物料ID
+            return_envelope: 是否返回完整响应包
 
         返回值:
             dict: 物料信息字典，失败返回空字典
@@ -411,9 +438,11 @@ class BioyondV1RPC(BaseRequest):
                 "requestTime": self.get_current_time_iso8601(),
                 "data": material_id,
             })
-        if not response or response['code'] != 1:
-            return {}
-        return response.get("data", {})
+        return self._data_or_envelope(
+            response,
+            return_envelope=return_envelope,
+            direct_dto_fallback=True,
+        )
 
     def reset_location(self, location_id: Optional[str] = None) -> int:
         """复位库位
@@ -681,7 +710,7 @@ class BioyondV1RPC(BaseRequest):
             self._logger.error(error_msg)
             raise BioyondException(error_msg) from e
 
-    def order_query(self, json_str: str) -> dict:
+    def order_query(self, json_str: str, *, return_envelope: bool = False) -> dict:
         """
             描述：查询任务列表
             json_str 格式为JSON字符串
@@ -699,15 +728,14 @@ class BioyondV1RPC(BaseRequest):
                 "data": params
             })
 
-        if not response or response['code'] != 1:
-            return {}
-        return response.get("data", {})
+        return self._data_or_envelope(response, return_envelope=return_envelope)
 
-    def order_report(self, order_id: str) -> dict:
+    def order_report(self, order_id: str, *, return_envelope: bool = False) -> dict:
         """查询订单报告
 
         参数:
             order_id: 订单ID
+            return_envelope: 是否返回完整响应包
 
         返回值:
             dict: 报告数据，失败返回空字典
@@ -719,9 +747,7 @@ class BioyondV1RPC(BaseRequest):
                 "requestTime": self.get_current_time_iso8601(),
                 "data": order_id,
             })
-        if not response or response['code'] != 1:
-            return {}
-        return response.get("data", {})
+        return self._data_or_envelope(response, return_envelope=return_envelope)
 
     def order_takeout(self, json_str: str) -> int:
         """取出任务产物
@@ -876,7 +902,7 @@ class BioyondV1RPC(BaseRequest):
         """批量取消实验
 
         参数:
-            order_ids: 订单ID列表
+            order_ids: 通用字符串列表；Sirna 传入订单/实验编码
 
         返回值:
             int: 成功返回1，失败返回0
@@ -892,11 +918,17 @@ class BioyondV1RPC(BaseRequest):
             return 0
         return response.get("code", 0)
 
-    def gantts_by_order_id(self, order_id: str) -> dict:
+    def gantts_by_order_id(
+        self,
+        order_id: str,
+        *,
+        return_envelope: bool = False,
+    ) -> dict:
         """查询订单甘特图数据
 
         参数:
             order_id: 订单ID
+            return_envelope: 是否返回完整响应包
 
         返回值:
             dict: 甘特数据，失败返回空字典
@@ -908,9 +940,7 @@ class BioyondV1RPC(BaseRequest):
                 "requestTime": self.get_current_time_iso8601(),
                 "data": order_id,
             })
-        if not response or response['code'] != 1:
-            return {}
-        return response.get("data", {})
+        return self._data_or_envelope(response, return_envelope=return_envelope)
 
     def simulation_gantt_by_order_id(self, order_id: str) -> dict:
         """查询订单模拟甘特图数据
@@ -955,11 +985,17 @@ class BioyondV1RPC(BaseRequest):
             return 0
         return response.get("code", 0)
 
-    def gantt_with_simulation_by_order_id(self, order_id: str) -> dict:
+    def gantt_with_simulation_by_order_id(
+        self,
+        order_id: str,
+        *,
+        return_envelope: bool = False,
+    ) -> dict:
         """查询订单甘特与模拟联合数据
 
         参数:
             order_id: 订单ID
+            return_envelope: 是否返回完整响应包
 
         返回值:
             dict: 联合数据，失败返回空字典
@@ -971,9 +1007,7 @@ class BioyondV1RPC(BaseRequest):
                 "requestTime": self.get_current_time_iso8601(),
                 "data": order_id,
             })
-        if not response or response['code'] != 1:
-            return {}
-        return response.get("data", {})
+        return self._data_or_envelope(response, return_envelope=return_envelope)
 
     # ==================== 设备管理相关接口 ====================
 
