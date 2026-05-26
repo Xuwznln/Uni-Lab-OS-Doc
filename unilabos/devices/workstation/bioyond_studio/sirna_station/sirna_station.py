@@ -114,7 +114,6 @@ except Exception as exc:  # pragma: no cover - 允许在轻量探测模式下运
 
 WORKFLOW_LIST_ENDPOINT = "/api/lims/workflow/work-flow-list"
 SUPPORTED_WORKFLOW_TYPES = {0, 1, 2}
-DEFAULT_READY_SIGNAL = "READY"
 RESET_PHYSICAL_CLEANUP_MESSAGE = "确认离心机配平板堆栈、G3移液站、自动化堆栈已清空，仪器内没有残留样品、耗材、试剂"
 RESET_OPERATION_DEFINITIONS = (
     {
@@ -422,19 +421,11 @@ class BioyondSirnaStation(BioyondWorkstation):
     @staticmethod
     def _missing_api_config_keys(config: Dict[str, Any]) -> List[str]:
         missing: List[str] = []
-        if BioyondSirnaStation._is_blank_value(config.get("api_host")):
+        if BioyondSirnaStation._is_blank(config.get("api_host")):
             missing.append("api_host")
-        if BioyondSirnaStation._is_blank_value(config.get("api_key")):
+        if BioyondSirnaStation._is_blank(config.get("api_key")):
             missing.append("api_key")
         return missing
-
-    @staticmethod
-    def _is_blank_value(value: Any) -> bool:
-        if value is None:
-            return True
-        if isinstance(value, str):
-            return value.strip() == ""
-        return False
 
     def fetch_workflow_list(
         self,
@@ -465,9 +456,11 @@ class BioyondSirnaStation(BioyondWorkstation):
         reset_location: bool = True,
         reset_devices: bool = False,
         sync_from_external_after_reset: bool = False,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """按固定顺序执行选中的复位操作；自动模式下失败只返回告警。"""
         with self._debug_call_session("reset_auto"):
+            del kwargs
             rpc = self._require_hardware_interface_for_reset()
             result = self._run_reset_operations(
                 rpc,
@@ -512,9 +505,11 @@ class BioyondSirnaStation(BioyondWorkstation):
         physical_cleanup_confirmed: bool = False,
         timeout_seconds: int = 3600,
         assignee_user_ids: Optional[List[str]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """人工确认物理清空后复位；失败会在收集全部操作结果后阻断流程。"""
         with self._debug_call_session("reset_manual"):
+            del kwargs
             result = self._empty_reset_result(
                 action_name="reset_manual",
                 reset_scheduler=reset_scheduler,
@@ -1132,9 +1127,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "create_order_result": parsed_result,
                 "materials": material_records,
                 "materials_by_type": confirmation_data.get("materials_by_type", {}),
-                "manual_load_tables": self._build_manual_load_tables(
-                    confirmation_data.get("materials_by_type", {})
-                ),
                 "resultTable": self._build_result_table(
                     confirmation_data.get("materials_by_type", {}),
                     table_name="物料放置指引",
@@ -1146,14 +1138,11 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "warnings": warnings,
             }
             logger.info(
-                "小核酸实验提交完成: action=%s order_code=%s success=%s manual_load_rows=%s",
+                "小核酸实验提交完成: action=%s order_code=%s success=%s result_rows=%s",
                 action_name,
                 resolved_order_code,
                 result["success"],
-                {
-                    key: len(self._as_list(value.get("material_name") if isinstance(value, dict) else []))
-                    for key, value in result["manual_load_tables"].items()
-                },
+                len(self._result_table_rows(result["resultTable"])),
             )
             return result
 
@@ -1286,10 +1275,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             assignee_user_ids: 分配用户 ID 列表（框架参数）。
         """
         with self._debug_call_session("start_experiment"):
-            submit_experiment_result = kwargs.get("submit_experiment_result")
-            ready_signal = self._kwarg_text(kwargs, "ready_signal") or DEFAULT_READY_SIGNAL
-            del timeout_seconds, assignee_user_ids
-            self._require_ready_signal(ready_signal)
+            del timeout_seconds, assignee_user_ids, kwargs
 
             category_arrays = {
                 "materials_loaded": (
@@ -1315,9 +1301,20 @@ class BioyondSirnaStation(BioyondWorkstation):
             #         f"以下分类装载尚未确认，无法启动调度: {', '.join(missing_labels)}"
             #     )
 
-            start_info = self._resolve_start_experiment_info(
-                submit_experiment_result, order_id, order_ids
-            )
+            resolved_order_ids: List[str] = []
+            if order_id:
+                resolved_order_ids.append(str(order_id))
+            for candidate in self._as_list(order_ids):
+                if candidate:
+                    resolved_order_ids.append(str(candidate))
+            resolved_order_ids = list(dict.fromkeys(resolved_order_ids))
+            if not resolved_order_ids:
+                raise RuntimeError("启动实验需要显式提供 order_id 或 order_ids")
+            start_info = {
+                "order_id": resolved_order_ids[0],
+                "order_ids": resolved_order_ids,
+                "resultTable": resultTable or {},
+            }
             logger.info(
                 "小核酸实验启动检查: order_id=%s order_ids=%s gates=%s missing=%s",
                 start_info.get("order_id", ""),
@@ -1331,179 +1328,16 @@ class BioyondSirnaStation(BioyondWorkstation):
             logger.info("小核酸调度器启动返回: result=%s success=%s", result, result == 1)
             if result != 1:
                 logger.error("小核酸调度器启动失败或返回非成功码: result=%s", result)
-            return self._with_ready_signal({
+            return {
                 "success": result == 1,
                 "return_info": result,
                 "scheduler_start_result": result,
+                "order_id": resolved_order_ids[0],
+                "order_ids": resolved_order_ids,
+                "resultTable": resultTable or {},
                 "start_experiment": start_info,
                 "gates": gates,
                 "confirmation_message": "调度器启动成功" if result == 1 else "调度器启动失败，请检查 LIMS 状态",
-            })
-
-    @action(
-        always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
-        goal_default={
-            "order_id": "",
-            "samples_unloaded": False,
-            "consumables_unloaded": False,
-            "reagents_unloaded": False,
-            "timeout_seconds": 3600,
-            "assignee_user_ids": [],
-        },
-        feedback_interval=300,
-        description=(
-            "请按当前 deck 状态卸载实验物料；勾选三类卸载确认后才会清空资源树。"
-            " 若上游 reagent-as-liquid 同步未启用，试剂列可能为空，仅展示 labware。"
-        ),
-        handles=[
-            ActionOutputHandle(
-                key="unload_samples_name", data_type="array",
-                label="样本-物料名称", data_key="unload_tables.Sample.material_name",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_samples_code", data_type="array",
-                label="样本-物料编号", data_key="unload_tables.Sample.material_code",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_samples_location", data_type="array",
-                label="样本-库位", data_key="unload_tables.Sample.location",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_samples_quantity", data_type="array",
-                label="样本-数量", data_key="unload_tables.Sample.quantity",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_consumables_name", data_type="array",
-                label="耗材-物料名称", data_key="unload_tables.Consumables.material_name",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_consumables_code", data_type="array",
-                label="耗材-物料编号", data_key="unload_tables.Consumables.material_code",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_consumables_location", data_type="array",
-                label="耗材-库位", data_key="unload_tables.Consumables.location",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_consumables_quantity", data_type="array",
-                label="耗材-数量", data_key="unload_tables.Consumables.quantity",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_reagents_name", data_type="array",
-                label="试剂-物料名称", data_key="unload_tables.Reagent.material_name",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_reagents_code", data_type="array",
-                label="试剂-物料编号", data_key="unload_tables.Reagent.material_code",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_reagents_location", data_type="array",
-                label="试剂-库位", data_key="unload_tables.Reagent.location",
-                data_source=DataSource.EXECUTOR,
-            ),
-            ActionOutputHandle(
-                key="unload_reagents_quantity", data_type="array",
-                label="试剂-数量", data_key="unload_tables.Reagent.quantity",
-                data_source=DataSource.EXECUTOR,
-            ),
-        ],
-    )
-    def end_experiment(
-        self,
-        order_id: str = "",
-        samples_unloaded: bool = False,
-        consumables_unloaded: bool = False,
-        reagents_unloaded: bool = False,
-        timeout_seconds: int = 3600,
-        assignee_user_ids: Optional[List[str]] = None,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """Guided manual-unload checkpoint that clears the deck after confirmation.
-
-        TODO: 未来应改成监听 Bioyond order_finish/finish signal 后触发的卸载向导，
-        而不是由工作流显式调用的本地 deck 清理节点。
-
-        Mirrors :meth:`start_experiment` in shape: three boolean gates default
-        to ``False``, three sibling-array display tables (Sample / Consumables
-        / Reagent × material_name / material_code / location / quantity)
-        populated from current deck state, and a raise-on-missing-gate path.
-
-        Args:
-            order_id: 可选；只展示 ``unilabos_extra["order_id"]`` 等于该值的物料。
-                未指定则覆盖整个 deck。
-            samples_unloaded: 操作员勾选确认 ``Sample`` 类已卸载。
-            consumables_unloaded: 操作员勾选确认 ``Consumables`` 类已卸载。
-            reagents_unloaded: 操作员勾选确认 ``Reagent`` 类已卸载（含 trough 试剂内容）。
-            timeout_seconds: 框架超时时间（秒）。
-            assignee_user_ids: 框架分配用户列表。
-        """
-        with self._debug_call_session("end_experiment"):
-            del timeout_seconds, assignee_user_ids, kwargs
-
-            order_filter = order_id.strip() if isinstance(order_id, str) else ""
-            manifest = self._build_unload_materials_by_type(
-                order_id_filter=order_filter or None,
-            )
-            manifest_counts = {
-                mode_key: len(self._as_list(records))
-                for mode_key, records in manifest.items()
-            }
-            logger.info(
-                "小核酸实验卸载检查开始: order_id=%s manifest_counts=%s",
-                order_filter or "<all>",
-                manifest_counts,
-            )
-            unload_tables = self._build_manual_load_tables(manifest)
-
-            category_specs = [
-                ("Sample", self._as_manual_gate(samples_unloaded), "样本", "samples_unloaded"),
-                ("Consumables", self._as_manual_gate(consumables_unloaded), "耗材", "consumables_unloaded"),
-                ("Reagent", self._as_manual_gate(reagents_unloaded), "试剂", "reagents_unloaded"),
-            ]
-            gates: Dict[str, Dict[str, Any]] = {}
-            missing_labels: List[str] = []
-            for mode_key, ticked, label, gate_key in category_specs:
-                required = bool(manifest.get(mode_key))
-                gates[gate_key] = {"label": label, "required": required, "ticked": bool(ticked)}
-                if required and not ticked:
-                    missing_labels.append(label)
-            logger.info("小核酸实验卸载门禁状态: gates=%s missing=%s", gates, missing_labels)
-            if missing_labels:
-                logger.error("小核酸实验卸载被阻断: missing=%s", missing_labels)
-                raise RuntimeError(
-                    f"以下分类卸载尚未确认，无法清空资源树: {', '.join(missing_labels)}"
-                )
-
-            cleared = self._clear_unloaded_materials(manifest)
-            logger.info("小核酸实验卸载清理完成: cleared=%s", cleared)
-
-            # Refresh the table snapshot so consumers see the post-mutation state.
-            post_manifest = self._build_unload_materials_by_type(
-                order_id_filter=order_filter or None,
-            )
-
-            return {
-                "success": True,
-                "order_id": order_filter,
-                "unloaded": cleared,
-                "gates": gates,
-                "unload_tables": unload_tables,
-                "post_unload_tables": self._build_manual_load_tables(post_manifest),
-                "confirmation_message": (
-                    "deck 已按操作员确认清空" if any(cleared.values()) else "deck 当前为空，无需卸载"
-                ),
             }
 
     @action(
@@ -2026,9 +1860,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         rpc = BioyondV1RPC(self.bioyond_config)
         self._set_hardware_interface(rpc)
         return self.hardware_interface
-
-    def _has_required_api_config(self, config: Dict[str, Any]) -> bool:
-        return not self._missing_api_config_keys(config)
 
     def _apply_env_api_config(self, config: Dict[str, Any]) -> None:
         env_pairs = {
@@ -2583,28 +2414,12 @@ class BioyondSirnaStation(BioyondWorkstation):
             if manual_mode and sync_result.get("skipped"):
                 logger.warning("manual reset requested sync but sync was skipped: %s", sync_result)
 
-    def _require_rpc_method(self, rpc: Any, method_name: str) -> None:
-        if not hasattr(rpc, method_name):
-            raise RuntimeError(f"Bioyond RPC 客户端缺少 {method_name} 方法")
-
     def _normalize_optional_string_list(self, value: Optional[List[str]], field_name: str) -> List[str]:
         if value is None:
             return []
         if isinstance(value, str) or not isinstance(value, list):
             raise ValueError(f"{field_name} 必须是列表，不能传单个字符串或其他类型")
         return [str(item).strip() for item in value if str(item or "").strip()]
-
-    def _require_ready_signal(self, ready_signal: str) -> None:
-        if str(ready_signal).strip().upper() != DEFAULT_READY_SIGNAL:
-            raise RuntimeError(f"小核酸工作流需要收到 {DEFAULT_READY_SIGNAL} 信号，当前为: {ready_signal!r}")
-
-    def _with_ready_signal(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        payload = dict(result)
-        payload["ready"] = DEFAULT_READY_SIGNAL
-        payload["signal"] = DEFAULT_READY_SIGNAL
-        payload["ready_signal"] = DEFAULT_READY_SIGNAL
-        payload["received_ready_signal"] = DEFAULT_READY_SIGNAL
-        return payload
 
     @staticmethod
     def _as_manual_gate(value: Any) -> bool:
@@ -2617,37 +2432,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             if normalized in {"false", "0", "no", "n", "off", "unchecked", ""}:
                 return False
         return bool(value)
-
-    def _resolve_start_experiment_info(
-        self,
-        submit_experiment_result: Optional[Dict[str, Any]],
-        order_id: str,
-        order_ids: Optional[List[str]],
-    ) -> Dict[str, Any]:
-        payload = submit_experiment_result or {}
-        start_info = payload.get("start_experiment") if isinstance(payload, dict) else None
-        if isinstance(start_info, dict):
-            resolved_order_ids = [str(candidate) for candidate in self._as_list(start_info.get("order_ids")) if candidate]
-            if start_info.get("order_id"):
-                resolved_order_ids.append(str(start_info["order_id"]))
-            resolved_order_ids = list(dict.fromkeys(resolved_order_ids))
-            if resolved_order_ids:
-                resolved = dict(start_info)
-                resolved["order_ids"] = resolved_order_ids
-                return resolved
-        resolved_order_ids = list(order_ids or [])
-        if order_id:
-            resolved_order_ids.insert(0, order_id)
-        if isinstance(payload, dict):
-            for candidate in self._as_list(payload.get("order_ids")):
-                if candidate:
-                    resolved_order_ids.append(str(candidate))
-            if payload.get("order_id"):
-                resolved_order_ids.append(str(payload["order_id"]))
-        resolved_order_ids = list(dict.fromkeys(resolved_order_ids))
-        if not resolved_order_ids:
-            raise RuntimeError("启动实验需要 submit_experiment 上游结果，或显式提供 order_id/order_ids")
-        return {"order_ids": resolved_order_ids}
 
     def _result_table_rows(self, result_table: Optional[Dict[str, Any]]) -> List[Any]:
         if not isinstance(result_table, dict):
@@ -3179,31 +2963,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             grouped[mode].append(mat)
         return grouped
 
-    def _build_manual_load_tables(
-        self,
-        materials_by_type: Dict[str, List[Dict[str, Any]]],
-    ) -> Dict[str, Dict[str, List[str]]]:
-        """Derive sibling-array tables per Bioyond material category.
-
-        Output shape matches the production sibling-array handles on
-        ``submit_experiment_1``: ``manual_load_tables.<Mode>.<column>`` where
-        ``<column>`` is ``material_name | material_code | location | quantity``
-        and each value is a row-aligned ``List[str]``.
-        """
-        tables: Dict[str, Dict[str, List[str]]] = {}
-        for mode in ("Sample", "Consumables", "Reagent"):
-            rows = (materials_by_type or {}).get(mode, []) or []
-            tables[mode] = {
-                "material_name": [str(row.get("materialName") or "") for row in rows],
-                "material_code": [str(row.get("materialCode") or "") for row in rows],
-                "location": [
-                    str(row.get("locationShowName") or row.get("locationCode") or "")
-                    for row in rows
-                ],
-                "quantity": [str(row.get("quantity") or "") for row in rows],
-            }
-        return tables
-
     def _build_result_table(
         self,
         materials_by_type: Dict[str, List[Dict[str, Any]]],
@@ -3218,39 +2977,25 @@ class BioyondSirnaStation(BioyondWorkstation):
         Returns:
             包含以下键的字典: data（行对象列表）、columns（列规格列表）、tableName
         """
-        # 展平所有类型的物料
-        all_materials = []
-        for mode in ("Sample", "Consumables", "Reagent"):
-            all_materials.extend(materials_by_type.get(mode, []))
-
-        # 为每个物料解析仓库名称
-        warehouse_inventory_cache: Dict[str, List[Dict[str, Any]]] = {}
         material_info_cache: Dict[str, Dict[str, Any]] = {}
+        ordered_modes: List[str] = []
+        for mode in ("Sample", "Consumables", "Reagent"):
+            if mode in materials_by_type:
+                ordered_modes.append(mode)
+        for mode in materials_by_type:
+            if mode not in ordered_modes:
+                ordered_modes.append(mode)
 
         data_rows = []
-        for mat in all_materials:
-            # 从 materialId 解析仓库名称
-            try:
-                resolved = self._resolve_material_record_to_warehouse(
-                    mat,
-                    warehouse_inventory_cache=warehouse_inventory_cache,
-                    material_info_cache=material_info_cache,
-                )
-                wh_name = resolved.get("warehouse_name", "")
-            except Exception as exc:
-                logger.warning(
-                    "无法解析仓库名称: materialId=%s, error=%s",
-                    mat.get("materialId"),
-                    exc,
-                )
-                wh_name = ""
-
-            data_rows.append({
-                "whName": wh_name,
-                "locationCode": str(mat.get("locationShowName") or mat.get("locationCode") or ""),
-                "materialName": str(mat.get("materialName") or ""),
-                "quantity": str(mat.get("quantity") or ""),
-            })
+        for mode in ordered_modes:
+            for mat in materials_by_type.get(mode, []):
+                material_id = str(mat.get("materialId") or "")
+                data_rows.append({
+                    "whName": self._resolve_wh_name_by_material_id(material_id, material_info_cache),
+                    "locationCode": str(mat.get("locationShowName") or mat.get("locationCode") or ""),
+                    "materialName": str(mat.get("materialName") or ""),
+                    "quantity": str(mat.get("quantity") or ""),
+                })
 
         # 定义列 schema
         columns = [
@@ -3273,526 +3018,18 @@ class BioyondSirnaStation(BioyondWorkstation):
             "tableName": table_name,
         }
 
-    def _classify_labware_mode(self, child: Any) -> str:
-        """Map a placed labware to ``Sample`` / ``Consumables`` / ``Reagent``.
-
-        Resolution order:
-
-        1. ``unilabos_extra["material_bioyond_type_mode"]`` if previously set
-           by external Bioyond synchronization metadata — most reliable.
-        2. PLR class identity: troughs map to ``Reagent``; tip racks map to
-           ``Consumables``; everything else (plates, tubes, etc.) defaults
-           to ``Sample``.
-
-        The classifier is intentionally permissive: an unrecognized class
-        falls back to ``Sample`` so the operator still sees the row instead
-        of the unload silently dropping it.
-        """
-        extra = getattr(child, "unilabos_extra", None) or {}
-        if isinstance(extra, dict):
-            mode = str(extra.get("material_bioyond_type_mode") or "")
-            if mode in {"Sample", "Consumables", "Reagent"}:
-                return mode
-        try:
-            from unilabos.resources.bioyond.sirna_materials import (
-                BioyondSirna_ReagentTrough,
-            )
-        except Exception:  # pragma: no cover - lightweight env
-            BioyondSirna_ReagentTrough = None  # type: ignore[assignment]
-        if BioyondSirna_ReagentTrough is not None and isinstance(child, BioyondSirna_ReagentTrough):
-            return "Reagent"
-        category_attr = getattr(child, "category", "") or ""
-        category = str(category_attr).lower()
-        if "tip" in category:
-            return "Consumables"
-        if "trough" in category or "reagent" in category:
-            return "Reagent"
-        # Class-name heuristic for environments without category metadata.
-        cls_name = type(child).__name__.lower()
-        if "tip" in cls_name:
-            return "Consumables"
-        if "trough" in cls_name or "reagent" in cls_name:
-            return "Reagent"
-        return "Sample"
-
-    def _iter_reagent_liquids(self, parent: Any) -> Iterable[Dict[str, Any]]:
-        """Yield reagent-content rows attached to ``parent`` via Bioyond metadata.
-
-        Cross-references ``parent.unilabos_extra["reagent_bioyond_ids"]`` (the
-        structured Bioyond metadata source-of-truth) with ``parent.tracker.liquids``
-        when present. Tolerates missing metadata so this helper is usable even
-        on legacy decks that predate the reagent-as-liquid plan.
-        """
-        extra = getattr(parent, "unilabos_extra", None) or {}
-        reagent_ids: List[Any] = []
-        if isinstance(extra, dict):
-            reagent_ids = list(extra.get("reagent_bioyond_ids") or [])
-
-        parent_name = getattr(parent, "name", "") or ""
-        warehouse = getattr(parent, "parent", None)
-        warehouse_name = getattr(warehouse, "name", "") or ""
-        location_label = f"{warehouse_name}/{parent_name}" if warehouse_name else parent_name
-
-        for entry in reagent_ids:
-            if not isinstance(entry, dict):
-                continue
-            yield {
-                "materialName": str(entry.get("material_bioyond_name") or ""),
-                "materialCode": str(entry.get("material_bioyond_code") or ""),
-                "materialTypeCode": str(entry.get("material_bioyond_type_code") or ""),
-                "materialTypeMode": "Reagent",
-                "locationCode": "",
-                "locationShowName": location_label,
-                "quantity": entry.get("quantity") or "",
-                "trough": parent,
-                "material_bioyond_id": str(entry.get("material_bioyond_id") or ""),
-            }
-
-    def _build_unload_materials_by_type(
-        self,
-        *,
-        order_id_filter: Optional[str] = None,
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """Walk ``self.deck`` and emit a Bioyond-shaped material list grouped by mode.
-
-        Output rows expose ``materialName / materialCode / locationCode /
-        locationShowName / quantity / materialTypeMode`` keys, mirroring the
-        fields :meth:`_build_manual_load_tables` consumes. No side effects.
-
-        Args:
-            order_id_filter: When provided, slot-bound labware whose
-                ``unilabos_extra["order_id"]`` does not equal this value is
-                skipped. Reagent contents are not order-scoped.
-        """
-        grouped: Dict[str, List[Dict[str, Any]]] = {
-            "Sample": [],
-            "Consumables": [],
-            "Reagent": [],
-        }
-        deck = getattr(self, "deck", None)
-        if deck is None:
-            return grouped
-        for warehouse in getattr(deck, "children", []) or []:
-            ordering = getattr(warehouse, "_ordering", None)
-            if not isinstance(ordering, dict):
-                continue
-            for slot_label in ordering.keys():
-                try:
-                    child = warehouse[slot_label]
-                except (KeyError, IndexError, TypeError):
-                    continue
-                # Distinguish placed labware from unoccupied ResourceHolder
-                # variants. Empty slots show as None on this carrier.
-                if child is None:
-                    continue
-                if not hasattr(child, "tracker") and not hasattr(child, "children"):
-                    continue
-                # Plain ResourceHolder placeholders for empty sites are skipped.
-                if type(child).__name__ == "ResourceHolder" and not list(getattr(child, "children", []) or []):
-                    continue
-
-                extra = getattr(child, "unilabos_extra", None) or {}
-                if not isinstance(extra, dict):
-                    extra = {}
-                if order_id_filter and extra.get("order_id") and extra.get("order_id") != order_id_filter:
-                    continue
-
-                mode = self._classify_labware_mode(child)
-                row = {
-                    "materialName": str(extra.get("material_bioyond_name") or getattr(child, "name", "") or ""),
-                    "materialCode": str(extra.get("material_bioyond_code") or getattr(child, "name", "") or ""),
-                    "materialTypeCode": str(extra.get("material_bioyond_type_code") or ""),
-                    "materialTypeMode": mode,
-                    "locationCode": str(extra.get("location_code") or slot_label or ""),
-                    "locationShowName": f"{getattr(warehouse, 'name', '')}/{slot_label}",
-                    "quantity": getattr(child, "quantity", 1),
-                    "_warehouse": warehouse,
-                    "_slot_label": str(slot_label),
-                    "_child": child,
-                }
-                grouped.setdefault(mode, []).append(row)
-
-                # Reagent contents on this trough/labware (from reagent_bioyond_ids).
-                for liquid_row in self._iter_reagent_liquids(child):
-                    grouped["Reagent"].append(liquid_row)
-        return grouped
-
-    def _clear_unloaded_materials(
-        self,
-        manifest: Dict[str, List[Dict[str, Any]]],
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """Apply the unload mutation: clear slot-bound labware, zero reagent liquids.
-
-        Returns a dict shaped like the manifest but with each row reduced to
-        the minimal fields downstream consumers need (material code/name, the
-        warehouse name, and the slot label or trough name).
-        """
-        cleared: Dict[str, List[Dict[str, Any]]] = {
-            "Sample": [],
-            "Consumables": [],
-            "Reagent": [],
-        }
-        affected_warehouses: List[Any] = []
-
-        def _remember(warehouse: Any) -> None:
-            if warehouse is None:
-                return
-            if any(warehouse is existing for existing in affected_warehouses):
-                return
-            affected_warehouses.append(warehouse)
-
-        # 1) Slot-bound labware (Sample / Consumables).
-        for mode in ("Sample", "Consumables"):
-            for row in manifest.get(mode, []):
-                warehouse = row.get("_warehouse")
-                slot_label = row.get("_slot_label") or row.get("locationCode") or ""
-                if warehouse is None and slot_label:
-                    try:
-                        warehouse, _idx = self._resolve_location_to_warehouse(slot_label)
-                    except (ValueError, RuntimeError) as exc:
-                        logger.warning(
-                            "卸载物料 %s 时无法解析库位 %s: %s",
-                            row.get("materialCode"), slot_label, exc,
-                        )
-                        continue
-                if warehouse is None or not slot_label:
-                    continue
-                try:
-                    if warehouse[slot_label] is not None:
-                        warehouse[slot_label] = None
-                        cleared[mode].append({
-                            "material_code": str(row.get("materialCode") or ""),
-                            "material_name": str(row.get("materialName") or ""),
-                            "location": slot_label,
-                            "warehouse": getattr(warehouse, "name", ""),
-                        })
-                        _remember(warehouse)
-                except (IndexError, KeyError, TypeError) as exc:
-                    logger.warning(
-                        "卸载物料 %s 时清空库位 %s[%s] 失败: %s",
-                        row.get("materialCode"), getattr(warehouse, "name", "?"),
-                        slot_label, exc,
-                    )
-
-        # 2) Reagent rows: contents on a parent trough vs slot-bound trough labware.
-        for row in manifest.get("Reagent", []):
-            trough = row.get("trough")
-            if trough is not None:
-                tracker = getattr(trough, "tracker", None)
-                if tracker is not None and hasattr(tracker, "set_liquids"):
-                    try:
-                        tracker.set_liquids([])
-                    except Exception as exc:  # pragma: no cover - tracker variants
-                        logger.debug("tracker.set_liquids 失败（非阻塞）: %s", exc)
-                extra = getattr(trough, "unilabos_extra", None)
-                if isinstance(extra, dict):
-                    extra["reagent_bioyond_ids"] = []
-                    try:
-                        setattr(trough, "unilabos_extra", extra)
-                    except Exception:  # pragma: no cover - read-only proxy
-                        pass
-                cleared["Reagent"].append({
-                    "material_name": str(row.get("materialName") or ""),
-                    "material_code": str(row.get("materialCode") or ""),
-                    "trough": getattr(trough, "name", ""),
-                    "warehouse": getattr(getattr(trough, "parent", None), "name", ""),
-                })
-                _remember(getattr(trough, "parent", None))
-                continue
-
-            # Slot-bound Reagent labware (e.g. trough labware). Preserve the
-            # labware on the deck — only its contents (liquids + reagent ids)
-            # are zeroed. ``reset`` is the LIMS-side path for full removal.
-            child = row.get("_child")
-            if child is not None:
-                tracker = getattr(child, "tracker", None)
-                if tracker is not None and hasattr(tracker, "set_liquids"):
-                    try:
-                        tracker.set_liquids([])
-                    except Exception as exc:  # pragma: no cover - tracker variants
-                        logger.debug("tracker.set_liquids 失败（非阻塞）: %s", exc)
-                extra = getattr(child, "unilabos_extra", None)
-                if isinstance(extra, dict) and extra.get("reagent_bioyond_ids"):
-                    extra["reagent_bioyond_ids"] = []
-                    try:
-                        setattr(child, "unilabos_extra", extra)
-                    except Exception:  # pragma: no cover - read-only proxy
-                        pass
-                _remember(row.get("_warehouse") or getattr(child, "parent", None))
-                continue
-
-        # 3) Publish the deck after mutations. ``_publish_resource_tree_update``
-        # publishes the whole deck, so a single call covers all warehouses we
-        # touched. ``affected_warehouses`` is kept for telemetry / tests.
-        if affected_warehouses:
-            self._publish_resource_tree_update()
-        return cleared
-
-    # ------------------------------------------------------------------
-    # ID-first resolver helpers used by manual-load table rendering.
-    # ------------------------------------------------------------------
-
-    def _resolve_material_record_to_warehouse(
-        self,
-        mat: Dict[str, Any],
-        warehouse_inventory_cache: Dict[str, List[Dict[str, Any]]],
-        material_info_cache: Dict[str, Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """Resolve a Bioyond allocation record to (warehouse, location_code) by IDs.
-
-        Resolution order: ``material-info`` → ``warehouse-info-by-mat-type-id``.
-        Falls back to a code-only diagnostic that raises on ambiguity.
-        """
-        material_id = str(mat.get("materialId") or "")
-        material_type_id = str(mat.get("materialTypeId") or "")
-        location_id = str(mat.get("locationId") or "")
-        location_code = str(mat.get("locationShowName") or mat.get("locationCode") or "")
-
-        # 1) material-info path
-        try:
-            resolved = self._resolve_by_material_info(
-                material_id=material_id,
-                location_id=location_id,
-                material_info_cache=material_info_cache,
-            )
-            if resolved is not None:
-                return resolved
-        except RuntimeError as exc:
-            # RPC error: log and continue with fallback path.
-            logger.debug("material-info 解析失败，回退: %s", exc)
-
-        # 2) warehouse-info-by-mat-type-id path
-        try:
-            resolved = self._resolve_by_type_location_inventory(
-                material_type_id=material_type_id,
-                location_id=location_id,
-                warehouse_inventory_cache=warehouse_inventory_cache,
-            )
-            if resolved is not None:
-                return resolved
-        except RuntimeError as exc:
-            logger.debug("warehouse-info-by-mat-type-id 解析失败，回退: %s", exc)
-
-        # 3) Diagnostic-only code fallback. Only allowed when exactly one warehouse
-        #    on the deck owns this slot label. Any ambiguity raises.
-        if location_code:
-            warehouse, _idx = self._resolve_location_to_warehouse(location_code)
-            return {
-                "warehouse": warehouse,
-                "warehouse_id": "",
-                "warehouse_name": warehouse.name,
-                "location_id": location_id,
-                "location_code": location_code,
-                "source": "code_only_fallback",
-            }
-        raise RuntimeError(
-            f"无法解析 Bioyond 库位: materialId={material_id} materialTypeId={material_type_id} "
-            f"locationId={location_id} locationCode={location_code}"
-        )
-
-    def _resolve_by_material_info(
-        self,
-        material_id: str,
-        location_id: str,
-        material_info_cache: Dict[str, Dict[str, Any]],
-    ) -> Optional[Dict[str, Any]]:
-        """Resolve via ``BioyondV1RPC.material_info(material_id)``.
-
-        Schema returns ``locations[].whid/whName/code`` plus ``locations[].id`` (the
-        location_id). When ``location_id`` is non-empty we prefer matching by id, else
-        by ``code`` plus the deck's ``warehouse_bioyond_ids`` mapping.
-        """
-        rpc = getattr(self, "hardware_interface", None)
-        if rpc is None or not material_id:
-            return None
-        if material_id in material_info_cache:
-            payload = material_info_cache[material_id]
-        else:
+    def _resolve_wh_name_by_material_id(self, material_id: str, cache: Dict[str, Dict[str, Any]]) -> str:
+        if not material_id:
+            return ""
+        if material_id not in cache:
             try:
-                payload = rpc.material_info(material_id) or {}
-            except Exception as exc:  # pragma: no cover - 网络错误
-                raise RuntimeError(f"material_info({material_id}) RPC 失败: {exc}") from exc
-            material_info_cache[material_id] = payload
-
-        locations = payload.get("locations") if isinstance(payload, dict) else None
-        if not isinstance(locations, list) or not locations:
-            return None
-
-        # Match by id first.
-        for loc in locations:
-            if not isinstance(loc, dict):
-                continue
-            if location_id and str(loc.get("id") or "") == location_id:
-                return self._build_resolution_from_material_info_loc(loc, source="material-info")
-        # Fall back to first usable row.
-        for loc in locations:
-            if not isinstance(loc, dict):
-                continue
-            if loc.get("whid") or loc.get("whName") or loc.get("code"):
-                return self._build_resolution_from_material_info_loc(loc, source="material-info")
-        return None
-
-    def _build_resolution_from_material_info_loc(
-        self, loc: Dict[str, Any], source: str
-    ) -> Optional[Dict[str, Any]]:
-        whid = str(loc.get("whid") or "")
-        wh_name = str(loc.get("whName") or "")
-        code = str(loc.get("code") or "")
-        warehouse = self._warehouse_by_bioyond_id_or_name(whid=whid, wh_name=wh_name)
-        if warehouse is None or not code:
-            return None
-        if not self._location_code_in_warehouse(warehouse, code):
-            logger.warning(
-                "material-info 返回库位 %s 在仓库 %s 中不存在，跳过",
-                code, getattr(warehouse, "name", "?"),
-            )
-            return None
-        return {
-            "warehouse": warehouse,
-            "warehouse_id": whid,
-            "warehouse_name": wh_name or warehouse.name,
-            "location_id": str(loc.get("id") or ""),
-            "location_code": code,
-            "x": loc.get("x"),
-            "y": loc.get("y"),
-            "z": loc.get("z"),
-            "source": source,
-        }
-
-    def _resolve_by_type_location_inventory(
-        self,
-        material_type_id: str,
-        location_id: str,
-        warehouse_inventory_cache: Dict[str, List[Dict[str, Any]]],
-    ) -> Optional[Dict[str, Any]]:
-        """Resolve via ``warehouse-info-by-mat-type-id`` inventory rows.
-
-        Each row contains ``id``/``warehouseId``/``warehouseName``/``code``. We pick
-        the row whose ``id == location_id``.
-        """
-        rpc = getattr(self, "hardware_interface", None)
-        if rpc is None or not material_type_id or not location_id:
-            return None
-        if material_type_id in warehouse_inventory_cache:
-            rows = warehouse_inventory_cache[material_type_id]
-        else:
-            try:
-                payload = rpc.query_warehouse_by_material_type(material_type_id) or {}
-            except Exception as exc:  # pragma: no cover - 网络错误
-                raise RuntimeError(
-                    f"warehouse-info-by-mat-type-id({material_type_id}) RPC 失败: {exc}"
-                ) from exc
-            rows = []
-            if isinstance(payload, dict):
-                # query_warehouse_by_material_type returns response['data'] dict-or-list.
-                data = payload.get("data") if isinstance(payload, dict) else None
-                if isinstance(data, list):
-                    rows = data
-                elif isinstance(payload, dict):
-                    # query helper returns response['data'] already, treat top-level dict
-                    # as a single row only if it has expected keys.
-                    if "id" in payload and "warehouseId" in payload:
-                        rows = [payload]
-            elif isinstance(payload, list):
-                rows = payload
-            warehouse_inventory_cache[material_type_id] = rows
-
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            if str(row.get("id") or "") != location_id:
-                continue
-            whid = str(row.get("warehouseId") or "")
-            wh_name = str(row.get("warehouseName") or "")
-            code = str(row.get("code") or "")
-            warehouse = self._warehouse_by_bioyond_id_or_name(whid=whid, wh_name=wh_name)
-            if warehouse is None or not code:
-                continue
-            if not self._location_code_in_warehouse(warehouse, code):
-                logger.warning(
-                    "warehouse-info row 库位 %s 在仓库 %s 中不存在，跳过",
-                    code, getattr(warehouse, "name", "?"),
-                )
-                continue
-            return {
-                "warehouse": warehouse,
-                "warehouse_id": whid,
-                "warehouse_name": wh_name or warehouse.name,
-                "location_id": location_id,
-                "location_code": code,
-                "x": row.get("x"),
-                "y": row.get("y"),
-                "z": row.get("z"),
-                "source": "warehouse-info-by-mat-type-id",
-            }
-        return None
-
-    def _warehouse_by_bioyond_id_or_name(self, whid: str, wh_name: str) -> Any:
-        """Locate a deck child warehouse by Bioyond id (preferred) or display name."""
-        deck = getattr(self, "deck", None)
-        if deck is None:
-            return None
-        # Bioyond id mapping (deck-level config: deck.warehouse_bioyond_ids).
-        id_map = getattr(deck, "warehouse_bioyond_ids", {}) or {}
-        # Also pick up station-level config if deck has no mapping yet.
-        if not id_map:
-            cfg = getattr(self, "bioyond_config", {}) or {}
-            id_map = cfg.get("warehouse_bioyond_ids") or {}
-        if whid:
-            target_name = id_map.get(whid)
-            if target_name:
-                for child in deck.children:
-                    if getattr(child, "name", "") == target_name:
-                        return child
-        if wh_name:
-            for child in deck.children:
-                if getattr(child, "name", "") == wh_name:
-                    return child
-        return None
-
-    @staticmethod
-    def _location_code_in_warehouse(warehouse: Any, code: str) -> bool:
-        ordering = getattr(warehouse, "_ordering", None)
-        if isinstance(ordering, dict):
-            return code in ordering
-        return False
-
-    def _resolve_location_to_warehouse(self, location_code: str) -> Tuple[Any, int]:
-        """[Diagnostic / legacy fallback] Map slot label to (warehouse, idx).
-
-        Production registration goes through :meth:`_resolve_material_record_to_warehouse`,
-        which uses Bioyond IDs (``materialId`` / ``materialTypeId`` / ``locationId``).
-
-        This code-only resolver is kept for diagnostics / unit tests and now raises
-        on ambiguity instead of silently picking a warehouse by display dimensions.
-        """
-        deck = getattr(self, "deck", None)
-        if deck is None:
-            raise RuntimeError("deck 未初始化")
-
-        parts = location_code.replace("-", "-").split("-")
-        if len(parts) != 2:
-            raise ValueError(f"无法解析库位代码: {location_code!r}")
-        site_key = f"{parts[0]}-{parts[1]}"
-
-        # Match exclusively by registered slot labels — never by display geometry.
-        candidates: List[Tuple[Any, int]] = []
-        for child in deck.children:
-            ordering = getattr(child, "_ordering", None)
-            if not isinstance(ordering, dict):
-                continue
-            if site_key in ordering:
-                idx = list(ordering.keys()).index(site_key)
-                candidates.append((child, idx))
-
-        if not candidates:
-            raise ValueError(f"未找到与库位 {location_code!r} 匹配的 warehouse（按 ordering 标签）")
-        if len(candidates) > 1:
-            warehouse_names = [getattr(w, "name", "?") for w, _ in candidates]
-            raise RuntimeError(
-                f"库位 {location_code!r} 在多个仓库中存在，需要 Bioyond ID 才能消歧: {warehouse_names}"
-            )
-        return candidates[0]
+                cache[material_id] = self._require_hardware_interface("material_info").material_info(material_id) or {}
+            except Exception as exc:
+                logger.warning("material_info 查询失败 material_id=%s: %s", material_id, exc)
+                cache[material_id] = {}
+        locations = self._as_list(cache[material_id].get("locations"))
+        location = next((loc for loc in locations if isinstance(loc, dict)), {})
+        return str(location.get("whName") or "")
 
     def _publish_resource_tree_update(self) -> None:
         """触发 UniLabOS 资源树更新（异步、非阻塞）。
@@ -3897,17 +3134,14 @@ class BioyondSirnaStation(BioyondWorkstation):
             return []
         return value if isinstance(value, list) else [value]
 
-    def _kwarg_text(self, kwargs: Dict[str, Any], key: str) -> str:
-        value = kwargs.get(key)
-        return "" if self._is_blank(value) else str(value)
-
-    def _is_blank(self, value: Any) -> bool:
+    @staticmethod
+    def _is_blank(value: Any) -> bool:
         if value is None:
             return True
         if isinstance(value, str):
             return value.strip() == ""
         if isinstance(value, list):
-            return all(self._is_blank(item) for item in value)
+            return all(BioyondSirnaStation._is_blank(item) for item in value)
         if isinstance(value, dict):
             return not value
         return False
