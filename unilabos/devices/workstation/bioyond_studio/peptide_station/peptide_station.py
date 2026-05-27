@@ -118,6 +118,7 @@ RESET_MANUAL_CONFIRM_MESSAGE = (
     "请确认G3、CEM、Tecan、撕膜机、封膜机、打标机、旋转堆栈上下料位、3个转台等位置的物料已清理完毕；\n"
     "请开门检查冰箱、IDOT、酶标仪、离心机、LCMS内部没有遗留物料。"
 )
+CEM_INFO_CONFIRM_MESSAGE = "打开下述链接查看CEM校验信息，确认无误后勾选 cem_info_confirmed。"
 RESULT_TABLE_COLUMNS = [
     {"name": "设备", "key": "whName"},
     {"name": "位置", "key": "locationCode"},
@@ -499,7 +500,13 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def submit_experiment(
@@ -531,7 +538,13 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def submit_experiment_day2(
@@ -557,7 +570,13 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def submit_experiment_day3(
@@ -583,7 +602,13 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def submit_experiment_day4(
@@ -609,7 +634,13 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
-            ActionOutputHandle(key="sample_file", data_type="bioyond_sample_file", label="样品文件", data_key="sample_file", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def submit_experiment_day4_LCMS(
@@ -622,11 +653,7 @@ class BioyondPeptideStation(BioyondWorkstation):
 
     @action(
         always_free=True,
-        node_type=NodeType.MANUAL_CONFIRM,
-        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
-        goal_default={"materials_loaded": False, "timeout_seconds": 3600, "assignee_user_ids": []},
-        feedback_interval=300,
-        description="Day1 线肽合成提交占位（暂不创建订单）",
+        description="提交 Day1 线肽合成实验",
         handles=[
             ActionInputHandle(
                 key="sample_excel_relative_path",
@@ -636,6 +663,17 @@ class BioyondPeptideStation(BioyondWorkstation):
                 data_source=DataSource.HANDLE,
                 io_type="source",
             ),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resultTable", data_type="table", label="装载确认表", data_key="resultTable", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="cem_method_file_name", data_type="str", label="CEM 方法文件", data_key="cem_method_file_name", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def submit_experiment_day1(
@@ -643,35 +681,139 @@ class BioyondPeptideStation(BioyondWorkstation):
         required_params: PeptideDay1RequiredParams,
         optional_params: Optional[PeptideDay1OptionalParams] = None,
         sample_excel_relative_path: str = "",
-        **kwargs: Any,
     ) -> Dict[str, Any]:
-        # TODO: Day1 订单创建待 API 现场验证后再接入 create_order；目前只回显占位结构。
-        del kwargs
-        optional = dict(optional_params or {})
-        sample_file, selected = self._resolve_submit_sample_file(
-            required_params,
-            optional,
-            sample_excel_relative_path,
-        )
-        cem_method = str(required_params.get("cem_method_file_name") or DAY1_CEM_METHOD_DEFAULT).strip() or DAY1_CEM_METHOD_DEFAULT
-        partial_entries, override_warnings = self._build_partial_parameter_entries(
-            sample_excel_relative_path=sample_file,
-            day_key="day1",
-            parameter_overrides=optional.get("parameter_overrides"),
-            extra_autofill=[{"Key": DAY1_CEM_METHOD_KEY, "Value": cem_method}],
-        )
-        binding = self._resolve_workflow_binding("day1")
+        required = dict(required_params or {})
+        cem_method = str(required.get("cem_method_file_name") or DAY1_CEM_METHOD_DEFAULT).strip() or DAY1_CEM_METHOD_DEFAULT
+        required["cem_method_file_name"] = cem_method
+        result = self._submit_experiment_core("day1", required, optional_params, sample_excel_relative_path)
+        result["cem_method_file_name"] = cem_method
+        return result
+
+    @action(
+        always_free=True,
+        description="生成 Day1 CEM 校验信息",
+        goal_default={"cem_method_file_name": DAY1_CEM_METHOD_DEFAULT},
+        handles=[
+            ActionInputHandle(
+                key="cem_method_file_name",
+                data_type="str",
+                label="CEM 方法文件",
+                data_key="cem_method_file_name",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionInputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(key="success", data_type="bool", label="是否成功", data_key="success", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="cem_method_file_name", data_type="str", label="CEM 方法文件", data_key="cem_method_file_name", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(key="cem_pdf_path", data_type="str", label="CEM 校验文件路径", data_key="cem_pdf_path", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="cem_info_url", data_type="str", label="CEM 校验链接", data_key="cem_info_url", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="prepare_cem_response", data_type="json", label="prepare-cEM 响应", data_key="prepare_cem_response", data_source=DataSource.EXECUTOR),
+        ],
+    )
+    def prepare_cem(
+        self,
+        cem_method_file_name: str = DAY1_CEM_METHOD_DEFAULT,
+        sample_excel_relative_path: str = "",
+    ) -> Dict[str, Any]:
+        excel_path = str(sample_excel_relative_path or "").strip().replace("/", "\\")
+        if not excel_path:
+            raise PeptideWorkflowError("prepare_cem 缺少 sample_excel_relative_path")
+        method = str(cem_method_file_name or DAY1_CEM_METHOD_DEFAULT).strip() or DAY1_CEM_METHOD_DEFAULT
+        rpc = self._require_hardware_interface()
+        api_host = str(getattr(rpc, "host", "") or self.bioyond_config.get("api_host", "")).rstrip("/")
+        request_body = {
+            "apiKey": rpc.api_key,
+            "requestTime": _utc_now_iso8601_ms(),
+            "data": {"methodFileName": method, "excelPath": excel_path},
+        }
+        with self._debug_call_session("prepare_cem"):
+            response = rpc.post(
+                url=f"{api_host}/api/lims/order/prepare-cEM",
+                params=request_body,
+            )
+        if not isinstance(response, dict) or response.get("code") != 1:
+            raise RuntimeError(f"prepare-cEM 调用失败: {response}")
+        data = response.get("data")
+        cem_pdf_path = self._extract_cem_pdf_path(data)
+        if not cem_pdf_path:
+            raise RuntimeError(f"prepare-cEM 响应缺少 data: {response}")
         return {
             "success": True,
-            "status": "manual_confirm_placeholder",
-            "message": "Day1 订单创建暂未启用，请人工确认样品与方法文件后继续下游节点。",
-            "workflow": binding,
-            "sample_file": sample_file,
-            "selected_sample_excel": selected,
-            "partial_parameter_entries": partial_entries,
-            "cem_method_file_name": cem_method,
-            "auto_register_materials": bool(optional.get("auto_register_materials", True)),
-            "warnings": override_warnings,
+            "cem_method_file_name": method,
+            "sample_excel_relative_path": excel_path,
+            "cem_pdf_path": cem_pdf_path,
+            "cem_info_url": self._join_api_url(api_host, cem_pdf_path),
+            "prepare_cem_response": response,
+        }
+
+    @action(
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
+        goal_default={"cem_info_confirmed": False, "timeout_seconds": 3600, "assignee_user_ids": []},
+        feedback_interval=300,
+        description=CEM_INFO_CONFIRM_MESSAGE,
+        handles=[
+            ActionInputHandle(key="cem_pdf_path", data_type="str", label="CEM 校验文件路径", data_key="cem_pdf_path", data_source=DataSource.HANDLE, io_type="source"),
+            ActionInputHandle(key="cem_info_url", data_type="str", label="CEM 校验链接", data_key="cem_info_url", data_source=DataSource.HANDLE, io_type="source"),
+            ActionInputHandle(key="cem_method_file_name", data_type="str", label="CEM 方法文件", data_key="cem_method_file_name", data_source=DataSource.HANDLE, io_type="source"),
+            ActionInputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(key="cem_pdf_path", data_type="str", label="CEM 校验文件路径", data_key="cem_pdf_path", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="cem_info_url", data_type="str", label="CEM 校验链接", data_key="cem_info_url", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="cem_method_file_name", data_type="str", label="CEM 方法文件", data_key="cem_method_file_name", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(
+                key="sample_excel_relative_path",
+                data_type="bioyond_sample_file",
+                label="样品 Excel 相对路径",
+                data_key="sample_excel_relative_path",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(key="instruction_text", data_type="str", label="确认说明", data_key="instruction_text", data_source=DataSource.EXECUTOR),
+        ],
+    )
+    def confirm_cem_info(
+        self,
+        cem_pdf_path: str = "",
+        cem_info_url: str = "",
+        cem_method_file_name: str = "",
+        sample_excel_relative_path: str = "",
+        cem_info_confirmed: bool = False,
+        timeout_seconds: int = 3600,
+        assignee_user_ids: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        del timeout_seconds, assignee_user_ids, kwargs
+        if not bool(cem_info_confirmed):
+            raise RuntimeError("CEM 校验信息未确认，拒绝继续工作流")
+        return {
+            "success": True,
+            "cem_pdf_path": str(cem_pdf_path or ""),
+            "cem_info_url": str(cem_info_url or ""),
+            "cem_method_file_name": str(cem_method_file_name or DAY1_CEM_METHOD_DEFAULT).strip() or DAY1_CEM_METHOD_DEFAULT,
+            "sample_excel_relative_path": str(sample_excel_relative_path or "").replace("/", "\\"),
+            "cem_info_confirmed": True,
+            "instruction_text": CEM_INFO_CONFIRM_MESSAGE,
         }
 
     def _submit_experiment_core(
@@ -698,10 +840,11 @@ class BioyondPeptideStation(BioyondWorkstation):
             else:
                 binding = self._resolve_workflow_binding(day_key or "")
 
-            sample_file, selected = self._resolve_submit_sample_file(required_params, optional, sample_excel_relative_path)
+            resolved_sample_excel_path, selected = self._resolve_submit_sample_file(required_params, optional, sample_excel_relative_path)
             partial_entries, override_warnings = self._build_partial_parameter_entries(
-                sample_excel_relative_path=sample_file,
+                sample_excel_relative_path=resolved_sample_excel_path,
                 day_key=day_key,
+                required_params=required_params,
                 parameter_overrides=optional.get("parameter_overrides"),
             )
             warnings.extend(override_warnings)
@@ -739,7 +882,7 @@ class BioyondPeptideStation(BioyondWorkstation):
                 "order_name": order_name,
                 "workflow": binding,
                 "sub_workflow_id": binding["sub_workflow_id"],
-                "sample_file": sample_file,
+                "sample_excel_relative_path": resolved_sample_excel_path,
                 "selected_sample_excel": selected,
                 "payload_summary": {"borderNumber": int(optional.get("border_number") or 1), "orderCode": order_code},
                 "create_order_data_raw": create_order_raw,
@@ -1230,6 +1373,22 @@ class BioyondPeptideStation(BioyondWorkstation):
             raise PeptideWorkflowError(f"找到多个匹配 {pattern!r} 的样品 Excel: {names}")
         return matched[0]
 
+    @staticmethod
+    def _extract_cem_pdf_path(data: Any) -> str:
+        if isinstance(data, dict):
+            for key in ("cemPdfPath", "cem_pdf_path", "pdfPath", "path", "url"):
+                value = data.get(key)
+                if value:
+                    return str(value)
+            return ""
+        return str(data or "")
+
+    @staticmethod
+    def _join_api_url(api_host: str, path: str) -> str:
+        base = str(api_host or "").rstrip("/")
+        suffix = str(path or "").replace("\\", "/").lstrip("/")
+        return f"{base}/{suffix}" if base else suffix
+
     def _list_sample_excels(self, name_filter: str = "", begin_date: Any = None, end_date: Any = None) -> List[Dict[str, Any]]:
         rpc = self._require_hardware_interface()
         payload = {"beginDate": begin_date, "endDate": end_date, "nameFilter": name_filter or None}
@@ -1453,13 +1612,15 @@ class BioyondPeptideStation(BioyondWorkstation):
         *,
         sample_excel_relative_path: str,
         day_key: Optional[str],
+        required_params: Optional[Dict[str, Any]] = None,
         parameter_overrides: Any = None,
-        extra_autofill: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[str]]:
         warnings: List[str] = []
         entries: List[Dict[str, Any]] = [{"Key": PEPTIDE_SAMPLE_FILE_KEY, "Value": sample_excel_relative_path}]
-        if day_key == "day1" and extra_autofill:
-            entries.extend(extra_autofill)
+        if day_key == "day1":
+            required = dict(required_params or {})
+            cem_method = str(required.get("cem_method_file_name") or DAY1_CEM_METHOD_DEFAULT).strip() or DAY1_CEM_METHOD_DEFAULT
+            entries.append({"Key": DAY1_CEM_METHOD_KEY, "Value": cem_method})
         entries.extend(self._normalize_override_list(parameter_overrides, warnings))
         return entries, warnings
 
