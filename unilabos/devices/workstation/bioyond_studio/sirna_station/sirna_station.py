@@ -1520,10 +1520,10 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_source=DataSource.EXECUTOR,
             ),
             ActionOutputHandle(
-                key="unloadTable",
+                key="resultTable",
                 data_type="object",
                 label="下料指引表",
-                data_key="unloadTable",
+                data_key="resultTable",
                 data_source=DataSource.EXECUTOR,
                 io_type="target",
             ),
@@ -1554,7 +1554,7 @@ class BioyondSirnaStation(BioyondWorkstation):
 
         Returns:
             含 ``success``/``order_id``/``order_code``/``order_finish_status``/``order_finish_report``/
-            ``used_materials``/``all_stock_materials``/``unloadTable``/``confirmation_message`` 的字典。
+            ``used_materials``/``all_stock_materials``/``resultTable``/``confirmation_message`` 的字典。
         """
         with self._debug_call_session("wait_for_order_finish"):
             del kwargs
@@ -1657,7 +1657,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                         exc_info=True,
                     )
 
-            # 7) 整理 unloadTable（4 列 v2 结构）+ 序列化 used_materials。
+            # 7) 整理 resultTable（4 列 v2 结构）+ 序列化 used_materials。
             unload_rows = self._build_unload_rows_from_all_stock_material(all_materials)
             unload_table = self._build_unload_table(unload_rows)
             used_materials_serialized = [
@@ -1672,7 +1672,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "order_finish_report": report if isinstance(report, dict) else {},
                 "used_materials": used_materials_serialized,
                 "all_stock_materials": all_materials,
-                "unloadTable": unload_table,
+                "resultTable": unload_table,
                 "confirmation_message": (
                     f"任务完成: status={mapped_status}; 已整理 {len(unload_rows)} 行下料指引"
                 ),
@@ -1682,7 +1682,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         always_free=True,
         node_type=NodeType.MANUAL_CONFIRM,
         placeholder_keys={
-            "unloadTable": "unilabos_manual_confirm",
+            "resultTable": "unilabos_manual_confirm",
             "assignee_user_ids": "unilabos_manual_confirm",
         },
         goal_default={
@@ -1715,10 +1715,10 @@ class BioyondSirnaStation(BioyondWorkstation):
                 io_type="source",
             ),
             ActionInputHandle(
-                key="unloadTable",
+                key="resultTable",
                 data_type="object",
                 label="下料指引表",
-                data_key="unloadTable",
+                data_key="resultTable",
                 data_source=DataSource.HANDLE,
                 io_type="source",
             ),

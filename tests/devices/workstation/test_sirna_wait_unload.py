@@ -296,7 +296,7 @@ def test_wait_for_order_finish_returns_timeout_when_event_never_fires() -> None:
     assert result["order_id"] == "OID-1"
     assert result["order_code"] == "EXP-001"
     assert result["all_stock_materials"] == []
-    assert result["unloadTable"]["data"] == []
+    assert result["resultTable"]["data"] == []
     # timeout 时不应调 all_stock_material
     assert station.hardware_interface.all_stock_calls == []
 
@@ -339,9 +339,9 @@ def test_wait_for_order_finish_uses_order_id_not_order_code_when_calling_all_sto
     assert payload == {"orderId": "OID-1"}, (
         "all-stock-material 必须接收 orderId 作为输入（plan v2 用户反馈核心要点）"
     )
-    # unloadTable 用新 4 列结构
-    assert result["unloadTable"]["columns"][0] == {"name": "设备", "key": "whName"}
-    assert result["unloadTable"]["data"] == [
+    # resultTable 用新 4 列结构
+    assert result["resultTable"]["columns"][0] == {"name": "设备", "key": "whName"}
+    assert result["resultTable"]["data"] == [
         {"whName": "自动化堆栈", "locationCode": "1-1", "materialName": "样品A", "quantity": "1"}
     ]
     # used_materials 序列化成 dict
@@ -539,7 +539,7 @@ def test_wait_for_order_finish_is_ast_visible_with_expected_handles() -> None:
     assert {
         "order_id", "order_code",
         "order_finish_status", "order_finish_report",
-        "used_materials", "all_stock_materials", "unloadTable",
+        "used_materials", "all_stock_materials", "resultTable",
     } <= handle_keys
 
 
@@ -552,7 +552,7 @@ def test_unload_materials_is_ast_visible_as_manual_confirm() -> None:
     args = meta["action_args"]
     assert args["node_type"] == "MANUAL_CONFIRM"
     assert args["always_free"] is True
-    assert args["placeholder_keys"]["unloadTable"] == "unilabos_manual_confirm"
+    assert args["placeholder_keys"]["resultTable"] == "unilabos_manual_confirm"
     assert args["placeholder_keys"]["assignee_user_ids"] == "unilabos_manual_confirm"
 
     goal_default = args["goal_default"]
@@ -564,7 +564,7 @@ def test_unload_materials_is_ast_visible_as_manual_confirm() -> None:
     # 输入：order_id 必须接 wait 节点；不应有任何 take-out 目标 ID 类的输入
     # （决策：take-out 形参恒为 [] / []，不让操作员误选）
     assert {
-        "order_id", "order_code", "unloadTable", "used_materials", "order_finish_report",
+        "order_id", "order_code", "resultTable", "used_materials", "order_finish_report",
     } <= handle_keys
     for forbidden in ("preintakeIds", "materialIds", "preintake_ids", "material_ids"):
         assert forbidden not in handle_keys, (
