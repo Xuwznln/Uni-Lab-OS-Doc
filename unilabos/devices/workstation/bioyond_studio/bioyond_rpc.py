@@ -130,18 +130,24 @@ class BioyondV1RPC(BaseRequest):
         return response.get("data", [])
 
     def all_stock_material(self, json_str: str) -> list:
-        """拉取订单当前实验台上的全部物料（isUse=true/false 都返回，含 typeMode 字段）。
+        """拉取订单当前实验台上的全部物料（按 orderId 查询，含 locations/quantity 字段）。
 
-        对应飞书《补充接口》文档 1. 拉取所有物料数据 -- /api/lims/storage/all-stock-material。
+        对应飞书《瑞博 LIMS 通信协议》「实验物料详情查询接口」--
+        POST ``/api/lims/storage/materials-by-order-id``。请求体 ``data`` 字段
+        直接传 orderId GUID 字符串（不是对象），返回每项含
+        id/typeName/code/barCode/name/quantity/locations 等字段。
+
+        历史方法名保留为 ``all_stock_material``，便于上游 station 代码与
+        前端 handle key ``all_stock_materials`` 不变；底层 endpoint 已迁移
+        至 ``materials-by-order-id``。
 
         Args:
             json_str: JSON 字符串，必须包含 orderId（订单 UUID）。
-                可选 typeMode（0=耗材/1=样品/2=试剂；省略则返回全部类型）。
-                示例: '{"orderId": "<uuid>", "typeMode": 0}'
+                示例: '{"orderId": "<uuid>"}'
 
         Returns:
             list[dict]: 失败、json 解析错、orderId 缺失、code != 1 时统一返回 []；
-                成功时返回 response['data']，每项含 id/code/name/typeMode/locations 等。
+                成功时返回 response['data'] 的列表（``data`` 为 null 时也返回 []）。
         """
         try:
             params = json.loads(json_str)
@@ -153,12 +159,14 @@ class BioyondV1RPC(BaseRequest):
             self._logger.error("all_stock_material 错误: 缺少 orderId")
             return []
 
+        order_id = str(params["orderId"])
+
         response = self.post(
-            url=f'{self.host}/api/lims/storage/all-stock-material',
+            url=f'{self.host}/api/lims/storage/materials-by-order-id',
             params={
                 "apiKey": self.api_key,
                 "requestTime": self.get_current_time_iso8601(),
-                "data": params,
+                "data": order_id,
             })
 
         if not response or response.get('code') != 1:
@@ -168,7 +176,7 @@ class BioyondV1RPC(BaseRequest):
                     f"message={response.get('message', '')}"
                 )
             return []
-        return response.get("data", [])
+        return response.get("data") or []
 
     def query_warehouse_by_material_type(self, type_id: str) -> dict:
         """

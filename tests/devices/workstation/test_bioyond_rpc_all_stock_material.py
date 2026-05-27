@@ -1,12 +1,19 @@
-"""单元测试：``BioyondV1RPC.all_stock_material`` 新增方法的 payload 契约。
+"""单元测试：``BioyondV1RPC.all_stock_material`` 方法的 payload 契约。
 
 设计原则：
 
 - 静态 AST 测试（always-on）：在轻量环境（无 ``rclpy``）下也能跑，验证方法存在 +
   其源码出现关键 endpoint / 字段名 / orderId 校验逻辑。
 - 运行时测试（``pytest.importorskip("rclpy")``）：在完整环境下跑，验证
-  HTTP 出口（url / params / data）严格按飞书《补充接口》文档构造，且空 orderId
-  / 失败响应 / 非法 JSON 均返回 ``[]``。
+  HTTP 出口（url / params / data）严格按飞书《瑞博 LIMS 通信协议》
+  「实验物料详情查询接口」(``/api/lims/storage/materials-by-order-id``)
+  构造 —— ``data`` 字段直接传 orderId GUID 字符串 ——
+  且空 orderId / 失败响应 / 非法 JSON / ``data: null`` 均返回 ``[]``。
+
+历史背景：方法名保留 ``all_stock_material``（不重命名），便于上游 station
+代码与前端 handle key ``all_stock_materials`` 不变；endpoint 已从
+``/api/lims/storage/all-stock-material``（仿真器未实现，404）迁移到
+飞书主协议文档里实际存在的 ``materials-by-order-id``。
 """
 
 from __future__ import annotations
@@ -60,13 +67,18 @@ def test_all_stock_material_source_targets_correct_endpoint_and_payload() -> Non
         full_source = RPC_PATH.read_text(encoding="utf-8")
         segment = ast.get_source_segment(full_source, func)
         source = segment or ""
-    assert "all-stock-material" in source, (
-        "all_stock_material 必须 POST /api/lims/storage/all-stock-material"
+    assert "materials-by-order-id" in source, (
+        "all_stock_material 必须 POST /api/lims/storage/materials-by-order-id"
+        "（飞书《瑞博 LIMS 通信协议》「实验物料详情查询接口」）"
+    )
+    assert "all-stock-material" not in source, (
+        "旧 endpoint /api/lims/storage/all-stock-material 在仿真器返回 404，"
+        "不应继续出现在源码里"
     )
     assert "apiKey" in source and "requestTime" in source and "data" in source, (
         "payload 必须包含 apiKey / requestTime / data 三个 Bioyond 标准字段"
     )
-    assert "orderId" in source, "必须按 orderId 校验/过滤 —— 不是 orderCode"
+    assert "orderId" in source, "必须按 orderId 校验 —— 不是 orderCode"
 
 
 # ---------------------------------------------------------------------------
@@ -117,13 +129,17 @@ def test_all_stock_material_runtime_posts_to_correct_url_with_order_id(rpc_class
 
     rpc.post = fake_post  # type: ignore[method-assign]
 
+    # 入参 dict 里多余字段（如历史 typeMode）应被忽略——新接口只认 orderId。
     result = rpc.all_stock_material(json.dumps({"orderId": "OID-xyz", "typeMode": 0}))
 
     assert result == [{"id": "m1", "name": "X"}]
-    assert posted["url"] == "http://invalid.local/api/lims/storage/all-stock-material"
+    assert posted["url"] == "http://invalid.local/api/lims/storage/materials-by-order-id"
     assert posted["params"]["apiKey"] == "test-key"
     assert "requestTime" in posted["params"], "Bioyond payload 缺 requestTime"
-    assert posted["params"]["data"] == {"orderId": "OID-xyz", "typeMode": 0}
+    # 飞书文档明确：materials-by-order-id 的 data 字段是 GUID 字符串，不是对象。
+    assert posted["params"]["data"] == "OID-xyz", (
+        "materials-by-order-id 的 data 字段必须是 orderId GUID 字符串，不能传对象"
+    )
 
 
 def test_all_stock_material_runtime_returns_empty_when_order_id_missing(rpc_class: Any) -> None:
@@ -160,9 +176,16 @@ def test_all_stock_material_runtime_returns_data_list_on_success(rpc_class: Any)
     sample_payload: List[Dict[str, Any]] = [
         {
             "id": "m1", "code": "0017-00733", "name": "G3-50ul枪头盒",
-            "typeMode": "Sample",
+            "typeName": "G3-50ul枪头盒",
             "locations": [{"code": "10-2", "whName": "自动化堆栈", "quantity": 1}],
         }
     ]
     rpc.post = lambda **_kw: {"code": 1, "data": sample_payload}  # type: ignore[method-assign]
     assert rpc.all_stock_material(json.dumps({"orderId": "OID-1"})) == sample_payload
+
+
+def test_all_stock_material_runtime_returns_empty_when_response_data_is_null(rpc_class: Any) -> None:
+    """data 为 null 时不能返回 None（否则 wait_for_order_finish 里 isinstance(raw, list) 假，下游 unloadTable.data=[] 但不易诊断）。"""
+    rpc = _make_rpc(rpc_class)
+    rpc.post = lambda **_kw: {"code": 1, "data": None}  # type: ignore[method-assign]
+    assert rpc.all_stock_material(json.dumps({"orderId": "OID-1"})) == []
