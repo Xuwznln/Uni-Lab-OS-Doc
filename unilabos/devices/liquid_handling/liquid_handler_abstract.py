@@ -1267,10 +1267,23 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             _ln = list(liquid_names or [])
             _wn = list(well_names or [])
             distinct_liquids = set(_ln) if _ln else set()
+            # P2 v2 §14 fix（2026-05-27）：well_names 全部含 "<plate_name>/<well>" prefix
+            # 是 common.py merged 节点的权威信号 —— 即便 liquid_names 全相同
+            # （同一 reagent 跨多板分装，例如 "agar" 同时写入 slot_3/5/6/7/13），
+            # 也必须走 cross-plate 分支按 prefix 逐 well 定位 plate；否则会落到
+            # 单 plate fallback，把 prefixed well_names 喂给错的 plate 触发
+            # ``IndexError: 'PRCXI_..._slot_3/A5' does not exist on resource 'PRCXI_..._slot_5'``。
+            has_prefixed_well_names = (
+                len(_wn) > 0
+                and all(isinstance(w, str) and "/" in w for w in _wn)
+            )
             is_cross_plate = (
-                len(distinct_liquids) > 1
-                and len(_ln) == len(_wn)
-                and len(_wn) > 1
+                has_prefixed_well_names
+                or (
+                    len(distinct_liquids) > 1
+                    and len(_ln) == len(_wn)
+                    and len(_wn) > 1
+                )
             )
 
             if is_cross_plate:
@@ -1791,33 +1804,6 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         none_keys: List[str] = [],
     ) -> TransferLiquidReturn:
         """Transfer liquid with automatic mode detection.
-
-        Supports three transfer modes:
-        1. One-to-many (1 source -> N targets): Distribute from one source to multiple targets
-        2. One-to-one (N sources -> N targets): Standard transfer, each source to corresponding target
-        3. Many-to-one (N sources -> 1 target): Combine multiple sources into one target
-
-        Parameters
-        ----------
-        asp_vols, dis_vols
-            Single volume (µL) or list. Automatically expanded based on transfer mode.
-        sources, targets
-            Containers (wells or plates)，可为 PLR 实例或 dict（含 uuid 字段，将自动解析）。
-            Length determines transfer mode:
-            - len(sources) == 1, len(targets) > 1: One-to-many mode
-            - len(sources) == len(targets): One-to-one mode
-            - len(sources) > 1, len(targets) == 1: Many-to-one mode
-        tip_racks
-            One or more TipRacks（可为 PLR 实例或含 uuid 的 dict）providing fresh tips.
-        is_96_well
-            Set *True* to use the 96‑channel head.
-        mix_stage
-            When to mix the target wells relative to dispensing. Default "none" means
-            no mixing occurs even if mix_times is provided. Use "before", "after", or
-            "both" to mix at the corresponding stage(s).
-        mix_times
-            Number of mix cycles. If *None* (default) no mixing occurs regardless of
-            mix_stage.
         """
         # 若传入 dict（含 uuid），解析为 PLR Container/TipRack
         sources = await self._resolve_to_plr_resources(sources)
@@ -1827,6 +1813,17 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         num_targets = len(targets)
         len_asp_vols = len(asp_vols)
         len_dis_vols = len(dis_vols)
+
+        # 输入完整性防护：避免后续 ``i % num_sources`` / ``i % num_targets`` / ``i % len_asp_vols``
+        # 在空列表场景触发 ``ZeroDivisionError``，统一给出可定位的参数错误信息。
+        if num_sources == 0:
+            raise ValueError("transfer_liquid requires non-empty sources.")
+        if num_targets == 0:
+            raise ValueError("transfer_liquid requires non-empty targets.")
+        if len_asp_vols == 0:
+            raise ValueError("transfer_liquid requires non-empty asp_vols.")
+        if len_dis_vols == 0:
+            raise ValueError("transfer_liquid requires non-empty dis_vols.")
         # 确保 use_channels 有默认值
         if use_channels is None or len(use_channels) == 0:
             # 默认使用设备所有通道（例如 8 通道移液站默认就是 0-7）
@@ -1995,149 +1992,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 if drop_tip:
                     current_tip_liquid_name = None
         else:
-            # ---------------------------------------------------------------
-            # P1 v4 多通道分支：use_channels=[0..7]，sources / targets /
-            # asp_vols / dis_vols 长度均为 8 × M（M 为列数 / 8 通道并发批次数）。
-            #
-            # 每段 8 个 wells + 8 个 vols 同时下发给 PLR，一次完成 8 通道
-            # 并发 aspirate/dispense。M 段串行执行，对应 M 次 tip pickup /
-            # 8 通道 transfer 周期。
-            #
-            # flow_rates / blow_out_air_volume / blow_out_air_volume_before /
-            # liquid_height / delays / pre_aspirate_from_target 若长度也是 8M
-            # 则按段同切；若长度恰好为 M（一段一值）则 broadcast 到 8；若长度
-            # 不足则按 idx % len 循环回退。
-            # ---------------------------------------------------------------
-            n_src_seg = max(1, num_sources // 8)
-            n_tgt_seg = max(1, num_targets // 8)
-            n_asp_seg = max(1, len_asp_vols // 8)
-            n_dis_seg = max(1, len_dis_vols // 8)
-            max_seg = max(n_src_seg, n_tgt_seg, n_asp_seg, n_dis_seg)
-
-            def _slice8(value, seg_idx):
-                """从 ``value`` 抽出第 ``seg_idx`` 段（长度 8 的 list）。
-
-                - 若 ``value`` 长度是 8 的倍数 → 按段切 8 元素；
-                - 若 ``value`` 长度等于段数（M） → 取 ``value[seg_idx]`` 并 broadcast 到 8；
-                - 单 scalar / 长度 1 → broadcast 到 8；
-                - 其它 → 循环回退到 ``value[seg_idx % len(value)]`` 并 broadcast。
-                """
-                if value is None:
-                    return None
-                if isinstance(value, (int, float)):
-                    return [float(value)] * 8
-                if not isinstance(value, (list, tuple)):
-                    return None
-                if len(value) == 0:
-                    return None
-                if len(value) % 8 == 0 and len(value) >= 8:
-                    n = len(value) // 8
-                    s = (seg_idx % n) * 8
-                    return list(value[s : s + 8])
-                # 长度 == 段数 → 1 vol per segment，broadcast 到 8 通道
-                item = value[seg_idx % len(value)]
-                return [item] * 8
-
-            prev_dropped = True
-            current_tip_liquid_name: Optional[str] = None  # P10 v2：tip 残液身份（段锚孔粒度）
-            for seg in range(max_seg):
-                src_slice = list(sources[(seg % n_src_seg) * 8 : (seg % n_src_seg + 1) * 8]) \
-                    if num_sources >= 8 else [sources[seg % num_sources]] * 8
-                tgt_slice = list(targets[(seg % n_tgt_seg) * 8 : (seg % n_tgt_seg + 1) * 8]) \
-                    if num_targets >= 8 else [targets[seg % num_targets]] * 8
-                asp_slice = asp_vols[(seg % n_asp_seg) * 8 : (seg % n_asp_seg + 1) * 8] \
-                    if len_asp_vols >= 8 else [asp_vols[seg % len_asp_vols]] * 8
-                dis_slice = dis_vols[(seg % n_dis_seg) * 8 : (seg % n_dis_seg + 1) * 8] \
-                    if len_dis_vols >= 8 else [dis_vols[seg % len_dis_vols]] * 8
-
-                kwargs = {
-                    'sources': src_slice,
-                    'targets': tgt_slice,
-                    'tip_racks': tip_racks,
-                    'use_channels': use_channels,
-                    'asp_vols': asp_slice,
-                    'dis_vols': dis_slice,
-                }
-
-                if asp_flow_rates is not None:
-                    kwargs['asp_flow_rates'] = _slice8(asp_flow_rates, seg)
-                if dis_flow_rates is not None:
-                    kwargs['dis_flow_rates'] = _slice8(dis_flow_rates, seg)
-                if offsets is not None:
-                    kwargs['offsets'] = _slice8(offsets, seg)
-                if touch_tip is not None:
-                    kwargs['touch_tip'] = bool(touch_tip)
-                if liquid_height is not None:
-                    kwargs['liquid_height'] = _slice8(liquid_height, seg)
-                if blow_out_air_volume is not None:
-                    kwargs['blow_out_air_volume'] = _slice8(blow_out_air_volume, seg)
-                if blow_out_air_volume_before is not None:
-                    kwargs['blow_out_air_volume_before'] = _slice8(blow_out_air_volume_before, seg)
-                if spread is not None:
-                    kwargs['spread'] = spread
-                # mix_* 仍按标量传递（PLR 多通道 mix 用 use_channels 自动并发 8 wells）
-                if mix_stage is not None:
-                    kwargs['mix_stage'] = safe_get(mix_stage, seg, wrap=False)
-                if mix_times is not None:
-                    kwargs['mix_times'] = safe_get(mix_times, seg, wrap=False)
-                if mix_vol is not None:
-                    kwargs['mix_vol'] = safe_get(mix_vol, seg, wrap=False)
-                if mix_rate is not None:
-                    kwargs['mix_rate'] = safe_get(mix_rate, seg, wrap=False)
-                if mix_liquid_height is not None:
-                    kwargs['mix_liquid_height'] = safe_get(mix_liquid_height, seg, wrap=False)
-                if delays is not None:
-                    kwargs['delays'] = _slice8(delays, seg)
-                if pre_aspirate_from_target is not None:
-                    kwargs['pre_aspirate_from_target'] = _slice8(pre_aspirate_from_target, seg)
-
-                # 段间 tip 复用：identity-keep（同段锚孔 PLR Well 对象）OR
-                # liquids-equivalence（段锚孔 ``tracker.liquids[-1]`` 同名）→ 任一命中即保留 tip。
-                # 设计假设：8 通道段内 8 wells 同液（由 P1 multi-channel-flatten 保证）。
-                cur_src_anchor = src_slice[0]
-                cur_tgt_anchor = tgt_slice[0]
-                drop_tip = True
-                if seg < max_seg - 1:
-                    next_src_anchor = sources[((seg + 1) % n_src_seg) * 8] \
-                        if num_sources >= 8 else sources[(seg + 1) % num_sources]
-                    next_tgt_anchor = targets[((seg + 1) % n_tgt_seg) * 8] \
-                        if num_targets >= 8 else targets[(seg + 1) % num_targets]
-                    identity_keep = (cur_tgt_anchor is next_tgt_anchor) and (cur_src_anchor is next_src_anchor)
-                    liquids_keep = (
-                        tip_reuse_by_liquid_name
-                        and _same_liquid_via_liquids_pair(cur_src_anchor, next_src_anchor)
-                    )
-                    if identity_keep or liquids_keep:
-                        drop_tip = False
-
-                pick_up_tip = True
-                if seg > 0 and not prev_dropped:
-                    prev_src_anchor = sources[((seg - 1) % n_src_seg) * 8] \
-                        if num_sources >= 8 else sources[(seg - 1) % num_sources]
-                    identity_keep = (cur_src_anchor is prev_src_anchor)
-                    liquids_keep = (
-                        tip_reuse_by_liquid_name
-                        and _same_liquid_via_liquids(cur_src_anchor, current_tip_liquid_name)
-                    )
-                    if identity_keep or liquids_keep:
-                        pick_up_tip = False
-
-                # P10 v2 时序：tip 残液名必须在 aspirate **之前**预读
-                pending_tip_name: Optional[str] = None
-                if pick_up_tip:
-                    pending_tip_name = _capture_tip_liquid_name(cur_src_anchor)
-
-                prev_dropped = drop_tip
-
-                kwargs['pick_up'] = pick_up_tip
-                kwargs['drop'] = drop_tip
-
-                await self._transfer_base_method(**kwargs)
-
-                if pick_up_tip:
-                    current_tip_liquid_name = pending_tip_name
-                if drop_tip:
-                    current_tip_liquid_name = None
+            pass
 
 
         return TransferLiquidReturn(

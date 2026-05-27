@@ -508,3 +508,38 @@ def test_transfer_liquid_mode_detection_unsupported_shape_raises():
             )
         )
 
+
+def test_transfer_liquid_empty_sources_raises_value_error():
+    lh = FakeLiquidHandler(channel_num=1)
+    lh.current_tip = iter(make_tip_iter(16))
+
+    with pytest.raises(ValueError, match="non-empty sources"):
+        run(
+            lh.transfer_liquid(
+                sources=[],
+                targets=[DummyContainer("T0")],
+                tip_racks=[],
+                use_channels=[0],
+                asp_vols=[1],
+                dis_vols=[1],
+                mix_times=0,
+            )
+        )
+
+
+def test_transfer_liquid_empty_asp_vols_raises_value_error():
+    lh = FakeLiquidHandler(channel_num=1)
+    lh.current_tip = iter(make_tip_iter(16))
+
+    with pytest.raises(ValueError, match="non-empty asp_vols"):
+        run(
+            lh.transfer_liquid(
+                sources=[DummyContainer("S0")],
+                targets=[DummyContainer("T0")],
+                tip_racks=[],
+                use_channels=[0],
+                asp_vols=[],
+                dis_vols=[1],
+                mix_times=0,
+            )
+        )

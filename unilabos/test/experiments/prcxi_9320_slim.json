@@ -21,7 +21,7 @@
                 },
                 "host": "10.20.30.184",
                 "port": 9999,
-                "debug": false,
+                "debug": true,
                 "setup": false,
                 "is_9320": true,
                 "timeout": 10,

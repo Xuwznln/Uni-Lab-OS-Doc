@@ -55,6 +55,9 @@ from unilabos.devices.liquid_handling.liquid_handler_abstract import (
     SetLiquidFromPlateReturn,
     TransferLiquidReturn,
 )
+from unilabos.devices.liquid_handling.prcxi.flatten_utils import (
+    flatten_multi_channel_kwargs as _flatten_multi_channel_kwargs_impl,
+)
 from unilabos.registry.placeholder_type import ResourceSlot
 from unilabos.resources.itemized_carrier import ItemizedCarrier
 from unilabos.resources.resource_tracker import ResourceTreeSet
@@ -828,7 +831,13 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         xy_coupling = -0.0045,
         calibration_points: Optional[Dict[str, List[List[float]]]] = None,
         calibration_labware_type: Optional[str] = "PRCXI_300ul_Tips",
+        has_true_8channel: bool = False,
     ):
+        # P1 v5 — 是否为「真 8 通道并行」硬件。9300 / 9320 物理上是单 pipette 头
+        # （head 上虽有 8 个 tip 工位但只能顺序点动），默认 False；未来 9600 / 真 8
+        # 通道 head 上线时 YAML / registry 把这个值置 True，跳过 ``transfer_liquid``
+        # 顶部的 8→1 扁平化分支。详见 ``product_designs/protocol_convert/01-multi-channel-flatten.md`` §11.
+        self.has_true_8channel: bool = bool(has_true_8channel)
 
         self._rail_width = rail_width
         self._rail_interval = rail_interval
@@ -1323,6 +1332,13 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         ident = f"{getattr(rack, 'model', '') or ''} {type(rack).__name__}".lower()
         return "10ul" in ident
 
+    # P1 v5 — 扁平化 helper：实现位于 PLR-free 模块 ``prcxi.flatten_utils``，
+    # 这里做薄包装以保留"helper 与 PRCXI 静态方法聚在一起"的设计语义
+    # （详见 ``product_designs/protocol_convert/01-multi-channel-flatten.md`` §11.3）。
+    # 拆分原因：本地 PLR 版本不匹配时也能跑 helper 单测（与 P10 v2 的
+    # ``liquid_history.py`` 同策略）。
+    _flatten_multi_channel_kwargs = staticmethod(_flatten_multi_channel_kwargs_impl)
+
     async def transfer_liquid(
         self,
         sources: Sequence[Container],
@@ -1361,12 +1377,64 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         sources = await self._resolve_to_plr_resources(sources)
         targets = await self._resolve_to_plr_resources(targets)
         tip_racks = list(await self._resolve_to_plr_resources(tip_racks))
+        if len(tip_racks) == 0:
+            raise ValueError(
+                "transfer_liquid requires at least one tip rack, but got empty tip_racks."
+            )
         # 远端解析回来的 PLR 实例可能未挂到 self.deck，主动绑定一次，避免 backend 取 plate.parent==None
         self._attach_resources_to_deck_if_needed(list(sources) + list(targets) + list(tip_racks))
         if isinstance(tip_racks[0], TipRack):
             tip_rack = tip_racks[0]
         else:
             tip_rack = tip_racks[0].parent
+
+        # === P1 v5：8 通道扁平化（详见 product_designs/protocol_convert/01-multi-channel-flatten.md §11）===
+        # 触发条件：caller 传 use_channels=[0..7] 且当前 PRCXI 不是真 8 通道并行硬件。
+        # 单头硬件（9300 / 9320）把 8 通道意图按列展开为 8 × M 次单通道顺序执行。
+        _is_eight_channel_request = (
+            isinstance(use_channels, (list, tuple))
+            and len(use_channels) == 8
+            and list(use_channels) == [0, 1, 2, 3, 4, 5, 6, 7]
+        )
+        _flatten_8_to_1 = _is_eight_channel_request and not getattr(
+            self, "has_true_8channel", False
+        )
+
+        if _flatten_8_to_1:
+            flattened = self._flatten_multi_channel_kwargs(
+                sources=sources,
+                targets=targets,
+                asp_vols=_asp_list,
+                dis_vols=_dis_list,
+                asp_flow_rates=asp_flow_rates,
+                dis_flow_rates=dis_flow_rates,
+                offsets=offsets,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                blow_out_air_volume_before=blow_out_air_volume_before,
+                delays=delays,
+                pre_aspirate_from_target=pre_aspirate_from_target,
+            )
+            sources = flattened["sources"]
+            targets = flattened["targets"]
+            asp_vols = flattened["asp_vols"]
+            dis_vols = flattened["dis_vols"]
+            asp_flow_rates = flattened["asp_flow_rates"]
+            dis_flow_rates = flattened["dis_flow_rates"]
+            offsets = flattened["offsets"]
+            liquid_height = flattened["liquid_height"]
+            blow_out_air_volume = flattened["blow_out_air_volume"]
+            blow_out_air_volume_before = flattened["blow_out_air_volume_before"]
+            delays = flattened["delays"]
+            pre_aspirate_from_target = flattened["pre_aspirate_from_target"]
+            # 让下面的 small-vols heuristic 自由选 [0] / [1]
+            use_channels = None
+            # 扁平化后 _asp_list / _dis_list 已经是 8×M 长度的真实逐孔体积，
+            # 此后的 small_vols 重新判定会基于全量逐孔体积（与原 8 通道一致）。
+            _asp_list = list(asp_vols)
+            _dis_list = list(dis_vols)
+        # === P1 v5 end ===
+
         # 小体积单通道 head 切换：仅当 caller 没显式指定多通道时才生效。
         # P1 v4 多通道协议（use_channels=[0..7]）即便体积 ≤ 10uL 也应保留 8 通道，
         # 避免把 dis_vols=[8.3]*8 这种「8 通道每孔 8.3uL」的展开退化为单通道串行。
@@ -1427,31 +1495,42 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             self._unilabos_backend.api_client.update_pipetting_position(self._unilabos_backend.matrix_id, change_slots_positions)
 
 
-        res =  await super().transfer_liquid(
-            sources,
-            targets,
-            tip_racks,
-            use_channels=use_channels,
-            asp_vols=asp_vols,
-            dis_vols=dis_vols,
-            asp_flow_rates=asp_flow_rates,
-            dis_flow_rates=dis_flow_rates,
-            offsets=offsets,
-            touch_tip=touch_tip,
-            liquid_height=liquid_height,
-            blow_out_air_volume=blow_out_air_volume,
-            blow_out_air_volume_before=None,
-            spread=spread,
-            is_96_well=is_96_well,
-            mix_stage=mix_stage,
-            mix_times=mix_times,
-            mix_vol=mix_vol,
-            mix_rate=mix_rate,
-            mix_liquid_height=mix_liquid_height,
-            delays=delays,
-            pre_aspirate_from_target=pre_aspirate_from_target,
-            none_keys=none_keys,
-        )
+        # P1 v5（Q6=B）：扁平化路径下调 super 时临时关 liquids-keep，防跨孔同名物料潜在污染。
+        # identity-keep（同一物理 well 反复抽，例如 reservoir）继续生效 —— 同一液池零污染。
+        # 用 try/finally 保证函数返回（含异常）后恢复用户原始 config，影响仅限本次扁平化调用。
+        # 详见 product_designs/protocol_convert/01-multi-channel-flatten.md §11.4b。
+        _prev_tip_reuse = getattr(self, "_tip_reuse_by_liquid_name", True)
+        try:
+            if _flatten_8_to_1:
+                self._tip_reuse_by_liquid_name = False
+            res = await super().transfer_liquid(
+                sources,
+                targets,
+                tip_racks,
+                use_channels=use_channels,
+                asp_vols=asp_vols,
+                dis_vols=dis_vols,
+                asp_flow_rates=asp_flow_rates,
+                dis_flow_rates=dis_flow_rates,
+                offsets=offsets,
+                touch_tip=touch_tip,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                blow_out_air_volume_before=None,
+                spread=spread,
+                is_96_well=is_96_well,
+                mix_stage=mix_stage,
+                mix_times=mix_times,
+                mix_vol=mix_vol,
+                mix_rate=mix_rate,
+                mix_liquid_height=mix_liquid_height,
+                delays=delays,
+                pre_aspirate_from_target=pre_aspirate_from_target,
+                none_keys=none_keys,
+            )
+        finally:
+            if _flatten_8_to_1:
+                self._tip_reuse_by_liquid_name = _prev_tip_reuse
         if self.step_mode:
             await self.run_protocol()
         return res
@@ -2345,9 +2424,18 @@ class PRCXI9300Api:
         return self.call("IMachineState", "GetLocation", [axis_num])
 
     # ---------------------------------------------------- 版位矩阵（IMatrix）
-    def get_all_materials(self) -> Dict[str, Any]:
-        """GetStepState"""
-        return self.call("IMatrix", "GetAllMaterial", [])
+    def get_all_materials(self) -> List[Dict[str, Any]]:
+        """GetAllMaterial - 返回所有已注册物料列表。
+
+        PRCXI Lilith 服务端在「无物料」或某些边界场景下可能返回非 list
+        （bool / None / dict / JSON 字面量 ``true`` / ``false``），这里
+        统一归一化为 ``List[Dict]``，避免上游 ``for m in material_list``
+        触发 ``TypeError: 'bool' object is not iterable`` 等。
+        """
+        raw = self.call("IMatrix", "GetAllMaterial", [])
+        if isinstance(raw, list):
+            return raw
+        return []
 
     def list_matrices(self) -> List[Dict[str, Any]]:
         """GetWorkTabletMatrices"""
