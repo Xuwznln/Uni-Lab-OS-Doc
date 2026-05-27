@@ -833,8 +833,6 @@ class BioyondPeptideStation(BioyondWorkstation):
                 workflow_name = str(required_params.get("workflow_name") or "").strip()
                 if not workflow_name:
                     raise PeptideWorkflowError("submit_experiment 必须提供 workflow_name")
-                if workflow_name == DAY1_PEPTIDE_WORKFLOW_NAME or "day1" in workflow_name.lower():
-                    raise PeptideWorkflowError("Day1 请使用 submit_experiment_day1；通用提交暂不支持 Day1 线肽合成")
                 subworkflow_name = str(optional.get("subworkflow_name") or "").strip()
                 binding = self._resolve_workflow_binding_from_names(workflow_name, subworkflow_name)
             else:
