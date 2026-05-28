@@ -116,6 +116,70 @@ class TestAppendLiquidHistory:
 
         assert well.tracker.liquid_history[0]["action"] == "legacy"
 
+    # -----------------------------------------------------------------
+    # 0-vol guard（用户 2026-05-28 决策）：vol == 0 应被静默跳过，
+    # 避免 set_liquid(name, 0) 等场景把 (name, 0.0) 噪声塞进审计日志。
+    # -----------------------------------------------------------------
+
+    def test_append_zero_volume_is_skipped(self) -> None:
+        """vol == 0.0 → 不写 history（用户决策）。"""
+        well = DummyWell()
+        append_liquid_history(well, "agar", 0.0, "set")
+        assert well.tracker.liquid_history == []
+
+    def test_append_tiny_volume_below_epsilon_is_skipped(self) -> None:
+        """abs(vol) < 1e-9 → 不写（防浮点误差）。"""
+        well = DummyWell()
+        append_liquid_history(well, "agar", 1e-12, "set")
+        append_liquid_history(well, "agar", -1e-12, "aspirate")
+        assert well.tracker.liquid_history == []
+
+    def test_append_nonzero_volume_still_writes(self) -> None:
+        """vol > 0 / vol < 0（aspirate 负数）正常通过 guard，按原路径写入。
+
+        注：当前实现为 PLR 兼容写 tuple ``(name, vol)``（见 liquid_history.py:96-118 注释），
+        所以这里用 tuple 索引断言，不用 dict key。schema-v3 dict 形态的对外
+        normalize 由 :func:`normalize_liquid_history` 完成。
+        """
+        well = DummyWell()
+        append_liquid_history(well, "agar", 50.0, "set")
+        append_liquid_history(well, "agar", -50.0, "aspirate")
+        assert len(well.tracker.liquid_history) == 2
+        assert well.tracker.liquid_history[0][1] == 50.0
+        assert well.tracker.liquid_history[1][1] == -50.0
+
+    def test_append_volume_just_above_epsilon_is_kept(self) -> None:
+        """abs(vol) >= 1e-9 → 保留（边界值正向验证）。"""
+        well = DummyWell()
+        append_liquid_history(well, "x", 1e-6, "set")  # 0.001 nL，仍 >> 1e-9
+        assert len(well.tracker.liquid_history) == 1
+        assert well.tracker.liquid_history[0][1] == 1e-6
+
+    def test_append_zero_volume_still_normalizes_existing_dict_entries(self) -> None:
+        """归零 append 也必须先归一化 history（防 PLR ``current_liquids`` 解 dict 失败）。
+
+        场景：远端 snapshot 把 dict 形态的 v3 entry 直接塞进 ``tracker.liquid_history``，
+        随后第一次调到本 helper 是 ``set_liquid(name, 0)``。若 0-vol skip 走在归一化之前，
+        history 会一直保留 dict → PLR ``for name, vol in self.liquid_history`` 崩溃，
+        进而拖垮 aspirate / drop 时序，最终让通道残留 tip 引发 HasTipError。
+        """
+        well = DummyWell()
+        well.tracker.liquid_history = [
+            {"name": "Plasma", "volume": 50.0, "action": "set"},
+            ("Water", 30.0, "ul"),  # 兼容 3-tuple 旧形态
+        ]
+        append_liquid_history(well, "noop", 0.0, "set")
+        assert well.tracker.liquid_history == [
+            ("Plasma", 50.0),
+            ("Water", 30.0),
+        ]
+
+    def test_append_zero_volume_still_normalizes_string_entries(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = ["A", "B"]
+        append_liquid_history(well, "noop", 0.0, "set")
+        assert well.tracker.liquid_history == [("A", 0.0), ("B", 0.0)]
+
     def test_append_respects_max_entries_rolling(self) -> None:
         """超过 ``LIQUID_HISTORY_MAX_ENTRIES`` 时丢弃头部，保留最近 entries。"""
         well = DummyWell()

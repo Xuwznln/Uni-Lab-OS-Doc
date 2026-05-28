@@ -400,24 +400,27 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 EXTRA_SAMPLE_UUID: sample_uuid_value,
                 "volume": volume,
             }
-            # P9 — aspirate history 由 PLR ``ContainerVolumeTracker.remove_liquid`` 自动写入，
-            # 但 PLR 写的是 ``(None, -vol, "ul")``——丢失液体身份；这里用 P9 已预读的
-            # ``name_before`` 把 PLR 末条的 ``None`` 修补成 ``(name_before, -vol, "ul")``，
-            # 保留对称的"sum(history.volume) ≈ 残量"语义且不重复 append。
-            # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 2。
+            # P9 — aspirate history 由 PLR ``ContainerVolumeTracker.remove_liquid`` 自动写入。
+            # 注（2026-05-28 debug 实证）：installed PLR ``remove_liquid`` 写的是 **2-tuple**
+            # ``(None, -vol)``（不是 RESOLUTION-2026-05-28 文档曾假设的 3-tuple ``(None, -vol, "ul")``）。
+            # 这里用 P9 已预读的 ``name_before`` 把 PLR 末条的 ``None`` 修补成
+            # ``(name_before, -vol)`` 2-tuple —— 保留对称的 "sum(history.volume) ≈ 残量" 语义，
+            # 且必须保持 2-tuple 形态，否则 PLR ``VolumeTracker.current_liquids`` 在
+            # ``for name, vol in self.liquid_history`` 时会 ValueError：too many values to unpack。
+            # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 2 + 本次 debug session dc5aa5。
             name_before = liquid_names_before_aspirate[i] if i < len(liquid_names_before_aspirate) else ""
             tracker = getattr(resource, "tracker", None)
             hist = getattr(tracker, "liquid_history", None) if tracker is not None else None
             if isinstance(hist, list) and hist:
                 last = hist[-1]
-                # PLR 写的是 (None, -vol, "ul")；只在 name 缺失时才覆盖（避免误改下游用户写入项）
+                # 只在 name 缺失（None / "" / 旧 3-tuple 同样 name 缺失）时才覆盖，避免误改下游用户写入项
                 if isinstance(last, (list, tuple)) and len(last) >= 2 and (last[0] is None or last[0] == ""):
                     try:
                         last_vol = float(last[1])
                     except (TypeError, ValueError):
                         last_vol = -float(volume or 0.0)
-                    last_unit = last[2] if len(last) >= 3 else "ul"
-                    hist[-1] = (str(name_before or ""), last_vol, last_unit)
+                    # 关键：写 2-tuple ``(name, vol)``，与 PLR 现行 history schema 一致
+                    hist[-1] = (str(name_before or ""), last_vol)
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
             task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
@@ -1096,10 +1099,11 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     if isinstance(dict_history, list) and len(dict_history) > 0:
                         normalized_history = _normalize_liquid_history(dict_history)
                         tracker.liquid_history = normalized_history
-                elif isinstance(local_history, list) and len(local_history) > 0:
-                    if isinstance(dict_history, list) and len(dict_history) == 0:
-                        # 调用方认为容器为空，重置本地 tracker
-                        tracker.liquid_history = []
+                # local 非空时永远保留 —— ``dict_history`` 仅是 caller 构造资源时的 snapshot，
+                # caller 无法追踪 runtime 写入（aspirate/dispense/set_liquid），发 ``[]`` 并不代表容器真为空。
+                # 以 caller snapshot 覆盖 live state 会把累积的所有 transfer / set_liquid 痕迹擦掉。
+                # 详见 debug session dc5aa5（实证：一次 transfer 入口的 resolve 把整板 96 个 target wells
+                # 的 history 全清，导致 ``liquids`` 派生为空）。
             result[idx] = res
         return result
 
@@ -1128,9 +1132,13 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             safe_volume = _clamp_volume(well, volume)
             # set_liquid 是 history 的"播种"入口（Stage 3 set_liquid_from_plate 节点会调到这里）。
             # PLR ``liquids.setter`` 在 ``abs(vol) > 1e-9`` 时会自动 append 一条 ``(name, vol, "ul")``；
-            # 当 ``vol == 0``（典型：跨板 merged set_liquid_from_plate 的 0 µL 占位播种）时 PLR 跳过，
-            # Uni-Lab 这里补一条 ``(name, 0.0)`` 占位，保证 history 至少有一条液体身份记录。
-            # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 3。
+            # 当 ``vol == 0`` 时 PLR 跳过，Uni-Lab 走 ``_append_liquid_history`` 兜底。
+            # 注（2026-05-28 用户决策）：``_append_liquid_history`` 已在 helper 内对 0-vol 早 return，
+            # 所以 ``set_liquid(name, 0)`` **不再产生 history 占位条目**；但 ``set_liquids`` 已把
+            # ``(name, 0.0)`` 写入 ``tracker.liquids`` —— 液体身份仍保留（well_current_liquid_name /
+            # tip-reuse 仍可用），仅审计日志不冗余 0-vol 噪声。
+            # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 3
+            # + ``liquid_history.py:append_liquid_history`` 顶部 0-vol guard。
             tracker = getattr(well, "tracker", None)
             hist_ref = getattr(tracker, "liquid_history", None) if tracker is not None else None
             len_before = len(hist_ref) if isinstance(hist_ref, list) else 0

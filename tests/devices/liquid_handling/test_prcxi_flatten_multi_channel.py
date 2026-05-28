@@ -228,6 +228,42 @@ class TestFlattenHelper:
                 dis_vols=[],
             )
 
+    def test_f6b_empty_optional_per_well_equals_none(self) -> None:
+        """F6b：可选 per-well 参数空 list 等价于 None（"未填值"语义）。
+
+        Caller 不传 ``offsets`` / ``asp_flow_rates`` / ``delays`` 等参数时上游下发
+        ``[]`` 是常见行为；必须当 "走默认 / 不限制" 处理，不能触发 rule 5 报错。
+        2026-05-28 用户实测：transfer 流程下发 ``offsets=[]`` 触发 ValueError
+        ("参数 offsets 长度 0 不匹配 8 通道扁平化要求") 阻塞 protocol 执行。
+        """
+        sources = [DummyWell(f"S{i}") for i in range(8)]
+        targets = [DummyWell(f"T{i}") for i in range(8)]
+        out = flatten_multi_channel_kwargs(
+            sources=sources,
+            targets=targets,
+            asp_vols=[100.0] * 8,
+            dis_vols=[100.0] * 8,
+            offsets=[],
+            asp_flow_rates=(),
+            dis_flow_rates=[],
+            delays=[],
+            blow_out_air_volume=[],
+            blow_out_air_volume_before=[],
+            liquid_height=[],
+            pre_aspirate_from_target=[],
+        )
+        for key in (
+            "offsets",
+            "asp_flow_rates",
+            "dis_flow_rates",
+            "delays",
+            "blow_out_air_volume",
+            "blow_out_air_volume_before",
+            "liquid_height",
+            "pre_aspirate_from_target",
+        ):
+            assert out[key] is None, f"{key} 期望被归一为 None，实际 {out[key]!r}"
+
     def test_f8_plate_passthrough_no_expand(self) -> None:
         """F8：plate 整列 24 wells 直接透传，长度不变。"""
         sources = [DummyWell(f"S{i}") for i in range(24)]
@@ -243,39 +279,46 @@ class TestFlattenHelper:
         assert out["asp_vols"] == [100.0] * 24
         assert out["dis_vols"] == [120.0] * 24
 
-    def test_f8_reservoir_expand_each_by_8(self) -> None:
-        """F8：reservoir M=3 → 每 well 重复 8 次，长度 24。"""
+    def test_f8_length_m_sources_raises(self) -> None:
+        """F8（policy 2026-05-28）：sources 长度 ``= M`` 在 8 通道模式下**非法**。
+
+        8 通道模式的最小操作单元是 "1 op = 8 通道并行"，length=M 的 sources
+        隐含 "每 op 只移液 M 个"，与硬件物理事实冲突。多 reservoir 必须改用
+        ``n == 1`` 广播或 ``n == N`` 显式逐 op。
+        """
         reservoir_wells = [DummyWell(f"R{i}") for i in range(3)]
-        out = flatten_multi_channel_kwargs(
-            sources=reservoir_wells,
-            targets=reservoir_wells,
-            asp_vols=[8.3] * 24,
-            dis_vols=[8.3] * 24,
-        )
-        # 每个 reservoir well 应连续出现 8 次（A1..H1 都从 R0 抽）。
-        assert out["sources"][0:8] == [reservoir_wells[0]] * 8
-        assert out["sources"][8:16] == [reservoir_wells[1]] * 8
-        assert out["sources"][16:24] == [reservoir_wells[2]] * 8
-        assert len(out["sources"]) == 24
+        with pytest.raises(ValueError, match="不匹配 8 通道扁平化要求"):
+            flatten_multi_channel_kwargs(
+                sources=reservoir_wells,         # 长度 3 = M，应报错
+                targets=reservoir_wells,
+                asp_vols=[8.3] * 24,             # n_total=24, M=3
+                dis_vols=[8.3] * 24,
+            )
 
     def test_f8_flow_rates_liquid_height_sync_expand(self) -> None:
-        """F8：``flow_rates`` / ``liquid_height`` 等同步展开（M → 8×M / 1 → 广播 / None / 标量透传）。"""
-        sources = [DummyWell(f"R{i}") for i in range(3)]
+        """F8：``flow_rates`` / ``liquid_height`` 等同步展开（n_total / 8 / 1 / None / 标量）。
+
+        2026-05-28 policy：移除 ``n == M`` 分支后，per-channel 参数合法长度仅
+        n_total / 8 / 1（per-channel-tile / 广播）。
+        """
+        sources = [DummyWell(f"R{i}") for i in range(8)]      # 长度 8 → rule 2 tile M 次
+        targets = [DummyWell(f"T{i}") for i in range(8)]
         out = flatten_multi_channel_kwargs(
             sources=sources,
-            targets=sources,
-            asp_vols=[8.3] * 24,
+            targets=targets,
+            asp_vols=[8.3] * 24,                              # n_total=24, M=3
             dis_vols=[8.3] * 24,
-            asp_flow_rates=[1.0, 2.0, 3.0],     # 长度 M → ×8
-            dis_flow_rates=[0.5] * 24,           # 已经 24 → 透传
-            liquid_height=[0.0],                  # 长度 1 → 广播 24
-            blow_out_air_volume=None,             # None 透传
-            blow_out_air_volume_before=5.0,       # 标量透传
-            delays=42,                            # 标量透传
+            asp_flow_rates=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],  # 长度 8 → per-channel tile
+            dis_flow_rates=[0.5] * 24,                         # 已经 24 → 透传
+            liquid_height=[0.0],                                # 长度 1 → 广播 24
+            blow_out_air_volume=None,                           # None 透传
+            blow_out_air_volume_before=5.0,                     # 标量透传
+            delays=42,                                          # 标量透传
         )
-        assert out["asp_flow_rates"][0:8] == [1.0] * 8
-        assert out["asp_flow_rates"][8:16] == [2.0] * 8
-        assert out["asp_flow_rates"][16:24] == [3.0] * 8
+        # 长度 8 → tile M=3 次：列 1/2/3 各拷贝一份 [1..8]
+        assert out["asp_flow_rates"] == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0] * 3
+        assert out["sources"] == sources * 3
+        assert out["targets"] == targets * 3
         assert out["dis_flow_rates"] == [0.5] * 24
         assert out["liquid_height"] == [0.0] * 24
         assert out["blow_out_air_volume"] is None
@@ -306,6 +349,170 @@ class TestFlattenHelper:
         )
         assert out["blow_out_air_volume"] is fake
         assert out["pre_aspirate_from_target"] == 0.5
+
+
+# ---------------------------------------------------------------------------
+# §13 新增：length-8 → tile M 次（A~H channel column 复用 M 个目标列）
+# 详见 product_designs/protocol_convert/01-multi-channel-flatten.md §0 / §13
+# ---------------------------------------------------------------------------
+
+
+class TestFlattenLength8TileRule:
+    """F12 / F12b / F13 / F14 / F15：length-8 → tile M 次规则（§13 / §0.2 rule 2）。
+
+    governing rule（§0.2 policy 2026-05-28）顺序：
+      1. n == n_total → passthrough
+      2. n == 8       → tile M 次（A~H channel column 唯一语义）
+      3. n == 1       → broadcast
+      4. else         → raise ValueError
+
+    注：``n == m_cols`` (repeat-each by 8) **已删除**——8 通道模式的最小操作单元
+    是 "1 op = 8 通道并行"，length=M 隐含 "每 op 只移液 M 个" 与硬件冲突。
+    """
+
+    def test_f12_length8_sources_tile_m4_columns(self) -> None:
+        """F12：length-8 sources（A..H 一整列）+ M=4 → tile 4 次（75cfa6 step 5 主路径）。"""
+        column_a_to_h = [DummyWell(name) for name in ["A1", "B1", "C1", "D1", "E1", "F1", "G1", "H1"]]
+        # samples_8 在 75cfa6 中 column-major 排列：A1..H1, A2..H2, A3..H3, A4..H4
+        targets_32 = [
+            DummyWell(f"{row}{col}") for col in (1, 2, 3, 4) for row in "ABCDEFGH"
+        ]
+        out = flatten_multi_channel_kwargs(
+            sources=column_a_to_h,
+            targets=targets_32,
+            asp_vols=[2.0] * 32,    # n_total=32, m_cols=4
+            dis_vols=[2.0] * 32,
+        )
+        # 关键断言：tile（非 repeat-each）—— 每 8 个一组**循环**为 [A1..H1]
+        assert len(out["sources"]) == 32
+        assert out["sources"][0:8] == column_a_to_h
+        assert out["sources"][8:16] == column_a_to_h     # tile：A1..H1 再次复用
+        assert out["sources"][16:24] == column_a_to_h    # tile：第 3 次
+        assert out["sources"][24:32] == column_a_to_h    # tile：第 4 次
+        # 反断言：**不是** repeat-each —— 否则 [0:8] 应全为 column_a_to_h[0] 而非 A1..H1
+        assert out["sources"][0:8] != [column_a_to_h[0]] * 8
+        # targets 长度 == n_total → passthrough
+        assert out["targets"] == targets_32
+
+    def test_f12_iteration_pairing_is_a_to_h_per_column(self) -> None:
+        """F12 补充：iteration `i` 的 source / target 配对验证 A→H 列复用语义。"""
+        column_a_to_h = [DummyWell(name) for name in ["A1", "B1", "C1", "D1", "E1", "F1", "G1", "H1"]]
+        targets_32 = [
+            DummyWell(f"{row}{col}") for col in (1, 2, 3, 4) for row in "ABCDEFGH"
+        ]
+        out = flatten_multi_channel_kwargs(
+            sources=column_a_to_h,
+            targets=targets_32,
+            asp_vols=[2.0] * 32,
+            dis_vols=[2.0] * 32,
+        )
+        # op i 的物理含义：channel = i % 8（A..H 循环）, move/col = i // 8
+        for i in range(32):
+            channel = i % 8
+            assert out["sources"][i] is column_a_to_h[channel], (
+                f"op {i}: channel={channel} 应抽 source[{channel}]={column_a_to_h[channel].name}，"
+                f"实际 {out['sources'][i].name}"
+            )
+
+    def test_f12b_per_channel_flow_rates_tile(self) -> None:
+        """F12b：length-8 per-channel asp_flow_rates 同步 tile（§0.2 第 3 个不变量）。"""
+        column_a_to_h = [DummyWell(name) for name in ["A1", "B1", "C1", "D1", "E1", "F1", "G1", "H1"]]
+        targets_32 = [DummyWell(f"T{i}") for i in range(32)]
+        per_channel_rates = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]   # 8 通道各自 flow rate
+        out = flatten_multi_channel_kwargs(
+            sources=column_a_to_h,
+            targets=targets_32,
+            asp_vols=[2.0] * 32,
+            dis_vols=[2.0] * 32,
+            asp_flow_rates=per_channel_rates,                          # length 8 → 同步 tile
+            dis_flow_rates=per_channel_rates,
+        )
+        expected = per_channel_rates * 4
+        assert out["asp_flow_rates"] == expected
+        assert out["dis_flow_rates"] == expected
+        # 物理语义验证：每个 channel 在所有 M 列都保持自己的速率
+        for i in range(32):
+            channel = i % 8
+            assert out["asp_flow_rates"][i] == per_channel_rates[channel]
+
+    def test_f13_length8_n_total8_m1_passthrough_wins(self) -> None:
+        """F13：length-8 + n_total=8（M=1，单列）→ rule 1 passthrough 优先于 rule 2 tile。"""
+        column_a_to_h = [DummyWell(name) for name in ["A1", "B1", "C1", "D1", "E1", "F1", "G1", "H1"]]
+        out = flatten_multi_channel_kwargs(
+            sources=column_a_to_h,
+            targets=column_a_to_h,
+            asp_vols=[100.0] * 8,   # n_total=8, m_cols=1
+            dis_vols=[100.0] * 8,
+        )
+        # rule 1 命中：passthrough（不进 tile 分支，列表对象同 identity）
+        assert out["sources"] == column_a_to_h
+        # 验证 identity（rule 1 走 list(value) 拷贝，元素 is 同对象）
+        for i in range(8):
+            assert out["sources"][i] is column_a_to_h[i]
+
+    def test_f14_length8_m_cols8_collision_tile_wins(self) -> None:
+        """F14：length-8 + m_cols=8（碰撞带）→ rule 2 tile 命中（length=M=8 与 rule 2 同长度，rule 2 唯一可行）。"""
+        column_a_to_h = [DummyWell(name) for name in ["A1", "B1", "C1", "D1", "E1", "F1", "G1", "H1"]]
+        targets_64 = [DummyWell(f"T{i}") for i in range(64)]
+        out = flatten_multi_channel_kwargs(
+            sources=column_a_to_h,
+            targets=targets_64,
+            asp_vols=[8.3] * 64,    # n_total=64, m_cols=8（碰撞带）
+            dis_vols=[8.3] * 64,
+        )
+        # 关键断言：tile（**非** repeat-each）—— 每 8 个一组循环为 A..H 而非 [A1]*8 + [B1]*8 + ...
+        assert len(out["sources"]) == 64
+        for col in range(8):
+            assert out["sources"][col * 8:(col + 1) * 8] == column_a_to_h, (
+                f"col {col}: tile 应得 A..H 全列，"
+                f"实际 {[w.name for w in out['sources'][col * 8:(col + 1) * 8]]}"
+            )
+        # 反断言：**不是** repeat-each —— [0:8] 不应全为 A1
+        assert out["sources"][0:8] != [column_a_to_h[0]] * 8
+        # 反断言：i 位置的 channel 应是 i % 8（tile），而非 i // 8（repeat-each）
+        for i in range(64):
+            assert out["sources"][i] is column_a_to_h[i % 8]
+
+    def test_f15_length_neither_8_nor_known_raises(self) -> None:
+        """F15：length 7（非 8 / n_total / 1）仍 raise，message 含期望集合。
+
+        2026-05-28 policy：移除 ``n == m_cols`` 分支后，合法长度集仅 n_total / 8 / 1。
+        错误信息不再列 m_cols。
+        """
+        sources_7 = [DummyWell(f"S{i}") for i in range(7)]
+        targets_32 = [DummyWell(f"T{i}") for i in range(32)]
+        with pytest.raises(ValueError) as exc_info:
+            flatten_multi_channel_kwargs(
+                sources=sources_7,
+                targets=targets_32,
+                asp_vols=[100.0] * 32,   # n_total=32, M=4
+                dis_vols=[100.0] * 32,
+            )
+        msg = str(exc_info.value)
+        assert "sources" in msg
+        assert "7" in msg
+        # 期望集合应明示 8 / n_total / 1
+        assert "8" in msg
+        assert "32" in msg
+        assert "1" in msg
+        # 反断言：错误信息不再列 m_cols (4) —— 它是反例不是合法长度
+        assert " 4 " not in msg, f"错误信息不应再列 m_cols=4，实际: {msg}"
+
+    def test_length_m_neither_8_nor_n_total_raises(self) -> None:
+        """policy 2026-05-28：M=3 + length=3 在 8 通道模式下**报错**。
+
+        移除 rule 3（n == M repeat-each by 8）后，length=M 既不是 n_total，
+        也不是 8 / 1，落到 rule 4 必 raise ValueError。多 reservoir 必须
+        改用 ``n == 1`` 广播或 ``n == N`` 显式逐 op。
+        """
+        reservoirs_3 = [DummyWell(f"R{i}") for i in range(3)]
+        with pytest.raises(ValueError, match="不匹配 8 通道扁平化要求"):
+            flatten_multi_channel_kwargs(
+                sources=reservoirs_3,
+                targets=reservoirs_3,
+                asp_vols=[8.3] * 24,    # n_total=24, M=3，sources 长度 3 = M 非法
+                dis_vols=[8.3] * 24,
+            )
 
 
 # ---------------------------------------------------------------------------

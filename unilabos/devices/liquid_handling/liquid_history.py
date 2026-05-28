@@ -15,7 +15,6 @@ from typing import Any, List, Tuple
 
 from typing_extensions import TypedDict
 
-
 # liquid_history 元素 schema v3
 # 详见 ``product_designs/protocol_convert/09-liquid-history-unknown-debug.md`` §6.1。
 # 旧格式（v2 ``(name, vol)`` 元组、list[str]）由 ``normalize_liquid_history`` 升级。
@@ -77,6 +76,12 @@ def append_liquid_history(
           :class:`LiquidHistoryEntry` schema 一致。
         - ``aspirate`` 的 ``volume`` 应为**负数**（与 dispense/set 正数对称，
           ``sum(history.volume)`` ≈ 当前残量）。
+        - **0-vol 跳过**（用户 2026-05-28 决策）：``abs(volume) < 1e-9`` 直接 return，
+          避免 ``set_liquid(name, 0)`` 等场景把 ``(name, 0.0)`` 噪声塞进审计日志。
+          注意：跳过点**位于 history 归一化之后**——即便不 append，也保证 history 已被
+          刷成 2-tuple 形态，防止后续 PLR ``current_liquids`` 解 dict / 3-tuple 失败。
+          PLR ``tracker.liquids`` 仍由 caller 经 ``set_liquids`` 维护，
+          液体身份不丢失（``well_current_liquid_name`` / tip-reuse 仍工作）。
         - ``well`` 无 tracker 或 tracker 不可写时 graceful 静默（避免污染主流程）。
         - 滚动上限 ``LIQUID_HISTORY_MAX_ENTRIES``：超出时丢弃**头部**（保留最近）。
 
@@ -95,6 +100,9 @@ def append_liquid_history(
     # 兼容修复：PLR VolumeTracker.current_liquids 依赖 tracker.liquid_history 为
     # list[(name, vol)]；若写入 dict 会在 `for name, vol in liquid_history` 时崩溃。
     # 这里把历史就地归一为 tuple 形态，再 append tuple，避免 unpack ValueError。
+    # 注（2026-05-28）：必须在 0-vol skip **之前** 做，否则若调用方第一次写就是
+    # ``set_liquid(name, 0)``、history 又来自远端 dict snapshot，会绕过归一化保险，
+    # 让后续 PLR ``current_liquids`` 解 dict 失败 → 间接拖垮 transfer / 残留 tip。
     normalized_pairs: List[Tuple[str, float]] = []
     for item in history:
         if isinstance(item, (list, tuple)) and len(item) >= 2:
@@ -114,6 +122,16 @@ def append_liquid_history(
         elif isinstance(item, str):
             normalized_pairs.append((item, 0.0))
     history[:] = normalized_pairs
+    # 0-vol 跳过（用户 2026-05-28 决策）：set_liquid("agar", 0) 等场景不写审计条目。
+    # 用 abs(...) < 1e-9 防浮点误差；aspirate 的负 vol（如 -50.0）正常通过。
+    # 关键时序：放在归一化 **之后**，确保即便本次跳过 append，history 仍被刷新为 2-tuple，
+    # 不会让 PLR ``current_liquids`` 后续踩到 dict / 3-tuple 旧形态。
+    try:
+        if abs(float(volume)) < 1e-9:
+            return
+    except (TypeError, ValueError):
+        # 非数值 volume：让原有路径走（保守，不偷偷跳过；下面 float(volume) 会再 raise 提示）
+        pass
     entry = (str(liquid_name or ""), float(volume))
     history.append(entry)
     overflow = len(history) - LIQUID_HISTORY_MAX_ENTRIES

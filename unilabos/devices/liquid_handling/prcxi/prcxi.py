@@ -1388,7 +1388,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         else:
             tip_rack = tip_racks[0].parent
 
-        # === P1 v5：8 通道扁平化（详见 product_designs/protocol_convert/01-multi-channel-flatten.md §11）===
+        # === P1 v5：8 通道扁平化 ===
+        # 设计文档：product_designs/protocol_convert/01-multi-channel-flatten.md
+        #   §0   framework convention：8 通道 pipette 方向恒为 A~H column（governing rule）
+        #   §11  v5 设计变更：抽象层去掉 fanout，PRCXI 子类内扁平化
+        #   §13  length-8 → tile M（A~H channel column 复用 M 个目标列）
         # 触发条件：caller 传 use_channels=[0..7] 且当前 PRCXI 不是真 8 通道并行硬件。
         # 单头硬件（9300 / 9320）把 8 通道意图按列展开为 8 × M 次单通道顺序执行。
         _is_eight_channel_request = (
