@@ -400,11 +400,24 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 EXTRA_SAMPLE_UUID: sample_uuid_value,
                 "volume": volume,
             }
-            # P9 — aspirate history 写入 source well：volume 取**负数**与 dispense/set 对称
-            # （sum(history.volume) ≈ 残量）；name 取 aspirate 前预读的 liquid_name（操作后 tracker
-            # 被 PLR 消费，此时读会拿不到液体身份）。
+            # P9 — aspirate history 由 PLR ``ContainerVolumeTracker.remove_liquid`` 自动写入，
+            # 但 PLR 写的是 ``(None, -vol, "ul")``——丢失液体身份；这里用 P9 已预读的
+            # ``name_before`` 把 PLR 末条的 ``None`` 修补成 ``(name_before, -vol, "ul")``，
+            # 保留对称的"sum(history.volume) ≈ 残量"语义且不重复 append。
+            # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 2。
             name_before = liquid_names_before_aspirate[i] if i < len(liquid_names_before_aspirate) else ""
-            _append_liquid_history(resource, name_before, -float(volume or 0.0), "aspirate")
+            tracker = getattr(resource, "tracker", None)
+            hist = getattr(tracker, "liquid_history", None) if tracker is not None else None
+            if isinstance(hist, list) and hist:
+                last = hist[-1]
+                # PLR 写的是 (None, -vol, "ul")；只在 name 缺失时才覆盖（避免误改下游用户写入项）
+                if isinstance(last, (list, tuple)) and len(last) >= 2 and (last[0] is None or last[0] == ""):
+                    try:
+                        last_vol = float(last[1])
+                    except (TypeError, ValueError):
+                        last_vol = -float(volume or 0.0)
+                    last_unit = last[2] if len(last) >= 3 else "ul"
+                    hist[-1] = (str(name_before or ""), last_vol, last_unit)
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
             task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
@@ -543,19 +556,63 @@ class LiquidHandlerMiddleware(LiquidHandler):
             channels_to_use = [0] * len(resources)
         else:
             channels_to_use = use_channels
+        # === [D-DBG] dispense 入口逐次抓取 resources/channels（候选 C/B）===
+        # 单通道每次 len(resources) 应 == 1；==2 且两通道对同 well → 候选 C；
+        # 与 [T-DBG] 配对：一条 transfer 的 [D-DBG] 出现次数应 == num_targets，
+        # 若 > num_targets 或同一 well 被记录 2 次 → 候选 B 或候选 D。
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            try:
+                _res_names = [f"{getattr(r.parent, 'name', '?')}/{r.name}" for r in resources]
+                self._ros_node.lab_logger().info(
+                    f"[D-DBG] dispense handler={id(self):x} "
+                    f"n_res={len(resources)} channels={list(channels_to_use)} "
+                    f"vols={list(actual_vols)} resources={_res_names}"
+                )
+            except Exception as _e:
+                self._ros_node.lab_logger().warning(f"[D-DBG] log failed: {_e}")
         for resource, volume, channel in zip(resources, actual_vols, channels_to_use):
             res_uuid = self.pending_liquids_dict[channel][EXTRA_SAMPLE_UUID]
             self.pending_liquids_dict[channel]["volume"] -= volume
             resource.unilabos_extra[EXTRA_SAMPLE_UUID] = res_uuid
             res_samples.append({"name": resource.name, EXTRA_SAMPLE_UUID: res_uuid})
             res_volumes.append(volume)
-            # P9 — dispense history 写入 target well：volume 取**正数**；
-            # name 从 target tracker.liquids 末项取（PLR dispense 后 target tracker 顶层就是
-            # 本次新加的液体），volume tracker bypass 路径下 name 可能为空字符串，符合预期。
-            target_liquid_name = _well_current_liquid_name(resource)
-            _append_liquid_history(resource, target_liquid_name, float(volume or 0.0), "dispense")
+            # === [U2-DBG] PLR add_liquid 自带 history append 验证（双写根因锁定）===
+            # 时机：super().dispense() 已返回；下面不再调 _append_liquid_history；
+            # B1 修复后 history_pre_append_len 期望 == 2（PLR add_liquid 写了一条），
+            # 与 [U-DBG] origin=dispense 的 history_lens 应保持一致 → 不再双写。
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                try:
+                    _pre_hist = list(getattr(getattr(resource, "tracker", None), "liquid_history", []) or [])
+                    self._ros_node.lab_logger().info(
+                        f"[U2-DBG] dispense pre_append "
+                        f"name={getattr(resource.parent, 'name', '?')}/{resource.name} "
+                        f"history_pre_append_len={len(_pre_hist)} "
+                        f"history_pre_append={_pre_hist}"
+                    )
+                except Exception as _e:
+                    self._ros_node.lab_logger().warning(f"[U2-DBG] log failed: {_e}")
+            # P9 dispense history 由 PLR ``ContainerVolumeTracker.add_liquid`` 自动写入
+            # （三元组 ``(name, vol, "ul")``，含液体身份），Uni-Lab 不再重复 append。
+            # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 1。
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
+            # === [U-DBG] dispense 后 update_resource 上行 payload 抓取（候选 E 判别）===
+            # 同一 well 在 set + dispense 阶段各上传一次时，看 history_lens 形态：
+            #   [1] 然后 [2] → OS 发全量，下游 merge 错（候选 E.cloud）
+            #   [1] 然后 [1] → OS 发增量，下游 append 拼起来（候选 E.diff）
+            #   [2] 两次相同 → OS 重复发同一份 payload（候选 E.os_dup）
+            try:
+                _u_names = [f"{getattr(r.parent, 'name', '?')}/{r.name}" for r in resources]
+                _u_lens = [len(getattr(getattr(r, "tracker", None), "liquid_history", []) or []) for r in resources]
+                _u_hist = [getattr(getattr(r, "tracker", None), "liquid_history", []) for r in resources]
+                _u_vols = [getattr(getattr(r, "tracker", None), "_used_volume", None) for r in resources]
+                self._ros_node.lab_logger().info(
+                    f"[U-DBG] origin=dispense ts={time.time():.3f} "
+                    f"names={_u_names} history_lens={_u_lens} "
+                    f"used_vols={_u_vols} histories={_u_hist}"
+                )
+            except Exception as _e:
+                self._ros_node.lab_logger().warning(f"[U-DBG] log failed (dispense): {_e}")
             task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
             submit_time = time.time()
             while not task.done():
@@ -1069,11 +1126,18 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
         for well, liquid_name, volume in zip(wells, liquid_names, volumes):
             safe_volume = _clamp_volume(well, volume)
+            # set_liquid 是 history 的"播种"入口（Stage 3 set_liquid_from_plate 节点会调到这里）。
+            # PLR ``liquids.setter`` 在 ``abs(vol) > 1e-9`` 时会自动 append 一条 ``(name, vol, "ul")``；
+            # 当 ``vol == 0``（典型：跨板 merged set_liquid_from_plate 的 0 µL 占位播种）时 PLR 跳过，
+            # Uni-Lab 这里补一条 ``(name, 0.0)`` 占位，保证 history 至少有一条液体身份记录。
+            # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 3。
+            tracker = getattr(well, "tracker", None)
+            hist_ref = getattr(tracker, "liquid_history", None) if tracker is not None else None
+            len_before = len(hist_ref) if isinstance(hist_ref, list) else 0
             well.set_liquids([(liquid_name, safe_volume)])  # type: ignore
-            # P9 — set_liquid 是 history 的"播种"入口（Stage 3 set_liquid_from_plate 节点会调到这里）：
-            # 同时为 PLR tracker.liquids 写入 (name, vol) 和为扩展属性 tracker.liquid_history 写入
-            # 结构化 entry，保证后续 OS→Cloud sync 能完整保留液体身份。
-            _append_liquid_history(well, liquid_name, safe_volume, "set")
+            len_after = len(hist_ref) if isinstance(hist_ref, list) else 0
+            if len_after == len_before:
+                _append_liquid_history(well, liquid_name, safe_volume, "set")
             res_volumes.append(safe_volume)
 
         return SetLiquidReturn(
@@ -1185,6 +1249,22 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
         # 同步资源到 ROS（每板独立 wells 列表，但 update_resource 一次性提交更高效）
         if hasattr(self, "_ros_node") and self._ros_node is not None:
+            # === [U-DBG] set_liquid_from_plate 后 update_resource 上行 payload 抓取（候选 E 判别）===
+            # 与 origin=dispense 那条配对看：同一 well 两次 history_lens 是 [1]→[2] / [1]→[1] / [2]→[2]，
+            # 分别对应 E.cloud / E.diff / E.os_dup（详见文件顶部 dispense 处注释）。
+            try:
+                _u_names = [f"{getattr(w.parent, 'name', '?')}/{w.name}" for w in wells]
+                _u_lens = [len(getattr(getattr(w, "tracker", None), "liquid_history", []) or []) for w in wells]
+                _u_hist = [getattr(getattr(w, "tracker", None), "liquid_history", []) for w in wells]
+                _u_vols = [getattr(getattr(w, "tracker", None), "_used_volume", None) for w in wells]
+                self._ros_node.lab_logger().info(
+                    f"[U-DBG] origin=set_liquid ts={time.time():.3f} "
+                    f"plates={list(buckets.keys())} "
+                    f"names={_u_names} history_lens={_u_lens} "
+                    f"used_vols={_u_vols} histories={_u_hist}"
+                )
+            except Exception as _e:
+                self._ros_node.lab_logger().warning(f"[U-DBG] log failed (set_liquid): {_e}")
             task = ROS2DeviceNode.run_async_func(
                 self._ros_node.update_resource, True, **{"resources": wells}
             )
@@ -1814,6 +1894,27 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         len_asp_vols = len(asp_vols)
         len_dis_vols = len(dis_vols)
 
+        # === [T-DBG] 跨板 dispense 翻倍排查（候选 B）===
+        # 51b9a5 协议每条 transfer 应有 num_targets == 9 且 9 个 well 名 distinct。
+        # 若 num_targets >= 18 或 target_dup > 0 → 命中候选 B
+        # （merged set_liquid_from_plate.output_wells → transfer.targets 把 wells 翻倍）。
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            try:
+                _src_names = [f"{getattr(s.parent, 'name', '?')}/{s.name}" for s in sources]
+                _tgt_names = [f"{getattr(t.parent, 'name', '?')}/{t.name}" for t in targets]
+                _tgt_dup = len(_tgt_names) - len(set(_tgt_names))
+                self._ros_node.lab_logger().info(
+                    f"[T-DBG] transfer_liquid handler={id(self):x} "
+                    f"num_sources={num_sources} num_targets={num_targets} "
+                    f"len_asp_vols={len_asp_vols} len_dis_vols={len_dis_vols} "
+                    f"target_dup={_tgt_dup} "
+                    f"sources={_src_names} targets={_tgt_names} "
+                    f"asp_vols={list(asp_vols)} dis_vols={list(dis_vols)} "
+                    f"use_channels={use_channels} mix_stage={mix_stage}"
+                )
+            except Exception as _e:
+                self._ros_node.lab_logger().warning(f"[T-DBG] log failed: {_e}")
+
         # 输入完整性防护：避免后续 ``i % num_sources`` / ``i % num_targets`` / ``i % len_asp_vols``
         # 在空列表场景触发 ``ZeroDivisionError``，统一给出可定位的参数错误信息。
         if num_sources == 0:
@@ -2011,6 +2112,22 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         drop: bool = True,
         **kwargs
     ):
+
+        # === [B-DBG] _transfer_base_method 调用计数（候选 D）===
+        # 每条 transfer 应调用 num_targets 次（51b9a5 → 9 次）；
+        # 同一 (source, target) 出现 2 次 → 候选 D（同节点被 ROS 触发 2 次）。
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            try:
+                _src_names = [f"{getattr(s.parent, 'name', '?')}/{s.name}" for s in sources]
+                _tgt_names = [f"{getattr(t.parent, 'name', '?')}/{t.name}" for t in targets]
+                self._ros_node.lab_logger().info(
+                    f"[B-DBG] _transfer_base_method handler={id(self):x} "
+                    f"pick_up={pick_up} drop={drop} use_channels={use_channels} "
+                    f"asp_vols={list(asp_vols)} dis_vols={list(dis_vols)} "
+                    f"sources={_src_names} targets={_tgt_names}"
+                )
+            except Exception as _e:
+                self._ros_node.lab_logger().warning(f"[B-DBG] log failed: {_e}")
 
         # 从kwargs中提取参数，提供默认值
         asp_flow_rates = kwargs.get('asp_flow_rates')

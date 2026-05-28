@@ -1400,6 +1400,24 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             self, "has_true_8channel", False
         )
 
+        # === [P-DBG] PRCXI use_channels 翻倍排查（候选 C）===
+        # 51b9a5 协议未传 use_channels；进入 PRCXI 后小体积 head 切换会把它设为 [1]；
+        # _flatten_8_to_1 应为 False。若 use_channels=[0..7] 或 _flatten_8_to_1=True → 命中候选 C。
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            try:
+                _src_names = [f"{getattr(s.parent, 'name', '?')}/{s.name}" for s in sources]
+                _tgt_names = [f"{getattr(t.parent, 'name', '?')}/{t.name}" for t in targets]
+                self._ros_node.lab_logger().info(
+                    f"[P-DBG] prcxi.transfer_liquid handler={id(self):x} "
+                    f"use_channels={use_channels} _flatten_8_to_1={_flatten_8_to_1} "
+                    f"has_true_8channel={getattr(self, 'has_true_8channel', False)} "
+                    f"asp_list_len={len(_asp_list)} dis_list_len={len(_dis_list)} "
+                    f"n_sources={len(sources)} n_targets={len(targets)} "
+                    f"sources={_src_names} targets={_tgt_names}"
+                )
+            except Exception as _e:
+                self._ros_node.lab_logger().warning(f"[P-DBG] log failed: {_e}")
+
         if _flatten_8_to_1:
             flattened = self._flatten_multi_channel_kwargs(
                 sources=sources,
