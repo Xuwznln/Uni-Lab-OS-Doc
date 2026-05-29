@@ -11,9 +11,19 @@ serialize 链路使用。
 
 from __future__ import annotations
 
+import re
 from typing import Any, List, Tuple
 
 from typing_extensions import TypedDict
+
+
+# PLR ``VolumeTracker._get_liquid_name(None)`` 在 add_liquid 缺 name 时会写入
+# ``f"Unknown{counter}"`` 并 bump ``unknown_counter``;``patch_unknown_history_last``
+# 用此正则识别 PLR 自动占位名,允许就地改写为真实化学名(详见
+# ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` 后续 §"PLR 上游
+# add_liquid 漏传 liquid name 的兜底改名补丁")。
+_UNKNOWN_LIQUID_NAME_RE = re.compile(r"^Unknown\d+$")
+
 
 # liquid_history 元素 schema v3
 # 详见 ``product_designs/protocol_convert/09-liquid-history-unknown-debug.md`` §6.1。
@@ -204,6 +214,62 @@ def capture_tip_liquid_name(source_well: Any) -> "str | None":
     """
     name = well_current_liquid_name(source_well)
     return name if is_known_liquid_name(name) else None
+
+
+def is_placeholder_liquid_name(name: Any) -> bool:
+    """判定一个 liquid_history entry 的 name 字段是否是"占位 / 未知"。
+
+    覆盖三种来源:
+        - ``None``:PLR ``remove_liquid`` 默认值;
+        - 空字符串 ``""``:Uni-Lab 早期 fallback;
+        - ``Unknown<digit>``:PLR ``VolumeTracker._get_liquid_name(None)`` 占位。
+
+    设计意图:仅用作"末条改名"补丁的判定门——已经写入真实化学名的 entry
+    应一律保留,避免误覆盖业务侧手填值。
+    """
+    if name is None:
+        return True
+    if not isinstance(name, str):
+        return False
+    if name == "":
+        return True
+    return bool(_UNKNOWN_LIQUID_NAME_RE.match(name))
+
+
+def patch_unknown_history_last(tracker: Any, expected_name: str) -> bool:
+    """把 ``tracker.liquid_history`` 末条的占位 name 就地替换成 ``expected_name``。
+
+    适用场景:PLR ``LiquidHandler.aspirate / dispense`` 调
+    ``add_liquid(volume=...)`` 时漏传 liquid 参数,导致 tip / target tracker
+    末条记为 ``Unknown<n>``;Uni-Lab 在 super 调用之后用本 helper 把末条 name
+    覆盖为真实化学名,**不增减 entry**(与 RESOLUTION B1 修复"PLR 当 history
+    单一真相源"原则保持一致)。
+
+    返回值:
+        ``True``  —— 末条原本是占位且被改写;
+        ``False`` —— 末条不存在 / 已写真名 / tracker 不可写,什么都没动。
+
+    安全保证:
+        - ``expected_name`` 为空 / 不是字符串时直接返回(不写空字符串覆盖)。
+        - 末条不是 list/tuple、长度 < 2 时返回(避免 IndexError)。
+        - 仅当末条 name 命中 ``is_placeholder_liquid_name`` 时改写,否则一律保留。
+    """
+    if not expected_name or not isinstance(expected_name, str):
+        return False
+    if tracker is None:
+        return False
+    history = getattr(tracker, "liquid_history", None)
+    if not isinstance(history, list) or not history:
+        return False
+    last = history[-1]
+    if not isinstance(last, (list, tuple)) or len(last) < 2:
+        return False
+    if not is_placeholder_liquid_name(last[0]):
+        return False
+    last_vol = last[1]
+    last_unit = last[2] if len(last) >= 3 else "ul"
+    history[-1] = (expected_name, last_vol, last_unit)
+    return True
 
 
 def normalize_liquid_history(raw: Any) -> List[Tuple[str, float]]:

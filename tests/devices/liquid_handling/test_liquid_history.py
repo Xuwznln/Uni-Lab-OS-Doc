@@ -25,7 +25,9 @@ from unilabos.devices.liquid_handling.liquid_history import (
     LIQUID_HISTORY_MAX_ENTRIES,
     LiquidHistoryEntry,
     append_liquid_history,
+    is_placeholder_liquid_name,
     normalize_liquid_history,
+    patch_unknown_history_last,
     well_current_liquid_name,
 )
 
@@ -306,3 +308,132 @@ class TestWellCurrentLiquidName:
         well = DummyWell()
         well.tracker.liquids = ["Saline"]
         assert well_current_liquid_name(well) == "Saline"
+
+
+# ---------------------------------------------------------------------------
+# is_placeholder_liquid_name —— PLR ``Unknown<n>`` 占位名识别
+# ---------------------------------------------------------------------------
+
+
+class TestIsPlaceholderLiquidName:
+    def test_none_is_placeholder(self) -> None:
+        assert is_placeholder_liquid_name(None) is True
+
+    def test_empty_string_is_placeholder(self) -> None:
+        assert is_placeholder_liquid_name("") is True
+
+    def test_unknown_with_digits_is_placeholder(self) -> None:
+        assert is_placeholder_liquid_name("Unknown1") is True
+        assert is_placeholder_liquid_name("Unknown42") is True
+        assert is_placeholder_liquid_name("Unknown1234567890") is True
+
+    def test_unknown_without_digits_not_placeholder(self) -> None:
+        # 仅严格 ``Unknown<digit+>`` 模式视为占位;裸 "Unknown" / 大小写变体 / 含空格
+        # 一律保留(可能是用户/业务侧故意写的字面值)。
+        assert is_placeholder_liquid_name("Unknown") is False
+        assert is_placeholder_liquid_name("unknown") is False
+        assert is_placeholder_liquid_name("UNKNOWN1") is False
+        assert is_placeholder_liquid_name("Unknown 1") is False
+
+    def test_real_chemistry_name_not_placeholder(self) -> None:
+        for name in ["sample", "agar", "PBS", "Tris HCl pH 8.0", "无菌水"]:
+            assert is_placeholder_liquid_name(name) is False, name
+
+    def test_non_string_not_placeholder(self) -> None:
+        # 数字 / list 等异常输入既不是合法 name 也不算 placeholder(避免误改下游)
+        assert is_placeholder_liquid_name(42) is False
+        assert is_placeholder_liquid_name(["Unknown1"]) is False
+
+
+# ---------------------------------------------------------------------------
+# patch_unknown_history_last —— "末条改名" 兜底补丁
+# ---------------------------------------------------------------------------
+
+
+class TestPatchUnknownHistoryLast:
+    def test_patches_unknown_n_in_3_tuple(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [("Unknown1", 3.0, "ul")]
+        assert patch_unknown_history_last(well.tracker, "sample") is True
+        assert well.tracker.liquid_history[-1] == ("sample", 3.0, "ul")
+
+    def test_patches_none_name_in_3_tuple(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [(None, -3.0, "ul")]
+        assert patch_unknown_history_last(well.tracker, "sample") is True
+        assert well.tracker.liquid_history[-1] == ("sample", -3.0, "ul")
+
+    def test_patches_empty_name_in_2_tuple_keeps_default_unit(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [("", 3.0)]
+        assert patch_unknown_history_last(well.tracker, "agar") is True
+        assert well.tracker.liquid_history[-1] == ("agar", 3.0, "ul")
+
+    def test_does_not_overwrite_real_name(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [("PBS", 100.0, "ul")]
+        assert patch_unknown_history_last(well.tracker, "sample") is False
+        assert well.tracker.liquid_history[-1] == ("PBS", 100.0, "ul")
+
+    def test_only_touches_last_entry(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [
+            ("agar", 0.0, "ul"),
+            ("Unknown1", 3.0, "ul"),
+        ]
+        patch_unknown_history_last(well.tracker, "sample")
+        # 第 0 条不动,第 1 条改名
+        assert well.tracker.liquid_history[0] == ("agar", 0.0, "ul")
+        assert well.tracker.liquid_history[1] == ("sample", 3.0, "ul")
+
+    def test_empty_expected_name_is_noop(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [("Unknown1", 3.0, "ul")]
+        assert patch_unknown_history_last(well.tracker, "") is False
+        assert well.tracker.liquid_history[-1] == ("Unknown1", 3.0, "ul")
+
+    def test_non_string_expected_name_is_noop(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [("Unknown1", 3.0, "ul")]
+        assert patch_unknown_history_last(well.tracker, 123) is False  # type: ignore[arg-type]
+
+    def test_none_tracker_returns_false(self) -> None:
+        assert patch_unknown_history_last(None, "sample") is False
+
+    def test_missing_history_attr_returns_false(self) -> None:
+        class NoHistoryTracker:
+            pass
+
+        assert patch_unknown_history_last(NoHistoryTracker(), "sample") is False
+
+    def test_empty_history_returns_false(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = []
+        assert patch_unknown_history_last(well.tracker, "sample") is False
+
+    def test_malformed_last_entry_returns_false(self) -> None:
+        well = DummyWell()
+        # 最后一条不是 tuple/list,例如 dict —— 不动
+        well.tracker.liquid_history = [{"name": "Unknown1", "volume": 3}]
+        assert patch_unknown_history_last(well.tracker, "sample") is False
+        assert well.tracker.liquid_history[-1] == {"name": "Unknown1", "volume": 3}
+
+    def test_too_short_last_entry_returns_false(self) -> None:
+        well = DummyWell()
+        well.tracker.liquid_history = [("only_name",)]
+        assert patch_unknown_history_last(well.tracker, "sample") is False
+        assert well.tracker.liquid_history[-1] == ("only_name",)
+
+    def test_real_world_aspirate_dispense_pair(self) -> None:
+        """场景:agar 板初始化(set,vol=0)+ dispense 3µL → 末条 Unknown1 改名为 sample。"""
+        well = DummyWell()
+        # 还原前端实测 51b9a5 的 history:agar 占位 + Unknown1 dispense
+        well.tracker.liquid_history = [
+            ("agar", 0.0, "ul"),
+            ("Unknown1", 3.0, "ul"),
+        ]
+        assert patch_unknown_history_last(well.tracker, "sample") is True
+        assert well.tracker.liquid_history == [
+            ("agar", 0.0, "ul"),
+            ("sample", 3.0, "ul"),
+        ]
