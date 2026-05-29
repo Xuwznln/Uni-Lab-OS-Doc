@@ -1073,7 +1073,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     pip_pos = self.plr_pos_to_prcxi(child)
                     pip_pos.x = slot_pos[0] - 40
                     pip_pos.y = slot_pos[1] - child.get_size_y() / 2 
-                    pip_pos.z = pip_pos.z - 40
+                    pip_pos.z = pip_pos.z - 70
                 half_x = child.get_size_x() / 2
                 z_wall = child.get_size_z()
 
@@ -2183,6 +2183,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             hole_row = tipspot_index % ny + 1
         if ops[0].blow_out_air_volume is not None:
             assist_fun1 = f"反向吸液({float(min(max(ops[0].blow_out_air_volume,0),10))}ul)"
+        raw_liquid_height = ops[0].liquid_height
+        safe_liquid_height = 0.0 if raw_liquid_height is None else float(raw_liquid_height)
 
         step = self.api_client.Imbibing(
             axis=axis,
@@ -2192,7 +2194,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             hole_row=hole_row,
             hole_col=hole_col,
             blending_times=0,
-            balance_height=int(min(max(ops[0].liquid_height,0),10)),
+            balance_height=float(min(max(safe_liquid_height,0),10)),
             plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
             hole_numbers="1,2,3,4,5,6,7,8",
             assist_fun1=assist_fun1,
@@ -2251,16 +2253,18 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             assist_fun1 = f"吹样({float(min(max(ops[0].blow_out_air_volume,5),10))}ul)"
         else :
             assist_fun1 = f"吹样({5.0}ul)"
+        raw_liquid_height = ops[0].liquid_height
+        safe_liquid_height = 0.0 if raw_liquid_height is None else float(raw_liquid_height)
 
         step = self.api_client.Tapping(
             axis=axis,
-            dosage=int(volumes[0]),
+            dosage=float(volumes[0]),
             plate_no=PlateNo,
             is_whole_plate=False,
             hole_row=hole_row,
             hole_col=hole_col,
             blending_times=0,
-            balance_height=int(min(max(ops[0].liquid_height,0),10)),
+            balance_height=float(min(max(safe_liquid_height,0),10)),
             plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
             hole_numbers="1,2,3,4,5,6,7,8",
             assist_fun1=assist_fun1,
