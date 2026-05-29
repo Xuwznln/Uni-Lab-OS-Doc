@@ -33,6 +33,7 @@ from unilabos.devices.liquid_handling.liquid_history import (
     append_liquid_history as _append_liquid_history,
     capture_tip_liquid_name as _capture_tip_liquid_name,
     normalize_liquid_history as _normalize_liquid_history,
+    patch_unknown_history_last as _patch_unknown_history_last,
     same_liquid_via_liquids as _same_liquid_via_liquids,
     same_liquid_via_liquids_pair as _same_liquid_via_liquids_pair,
     well_current_liquid_name as _well_current_liquid_name,
@@ -396,9 +397,13 @@ class LiquidHandlerMiddleware(LiquidHandler):
             sample_uuid_value = getattr(resource, "unilabos_extra", {}).get(EXTRA_SAMPLE_UUID, None)
             res_samples.append({"name": resource.name, "sample_uuid": sample_uuid_value})
             res_volumes.append(volume)
+            name_before = liquid_names_before_aspirate[i] if i < len(liquid_names_before_aspirate) else ""
+            # 把 source 当前液体名挂到 channel 元数据,作为 dispense 时 target 末条
+            # 改名的权威来源(避免读 tip 历史拿到 PLR 写下的 ``Unknown<n>`` 占位名)。
             self.pending_liquids_dict[channel] = {
                 EXTRA_SAMPLE_UUID: sample_uuid_value,
                 "volume": volume,
+                "liquid_name": str(name_before or ""),
             }
             # P9 — aspirate history 由 PLR ``ContainerVolumeTracker.remove_liquid`` 自动写入。
             # 注（2026-05-28 debug 实证）：installed PLR ``remove_liquid`` 写的是 **2-tuple**
@@ -421,6 +426,20 @@ class LiquidHandlerMiddleware(LiquidHandler):
                         last_vol = -float(volume or 0.0)
                     # 关键：写 2-tuple ``(name, vol)``，与 PLR 现行 history schema 一致
                     hist[-1] = (str(name_before or ""), last_vol)
+            # P9 / B2 —— 修复 PLR aspirate 路径丢失液体身份:
+            # 1. ``ContainerVolumeTracker.remove_liquid(vol)`` → source 末条 ``(None, -vol, "ul")``;
+            # 2. ``LiquidHandler.aspirate`` 调 ``op.tip.tracker.add_liquid(volume=op.volume)``
+            #    没传 liquid 名 → tip 末条 ``(Unknown<n>, +vol, "ul")``,bump tip ``unknown_counter``。
+            # 这里用 P9 预读的 ``name_before`` 把两侧末条的占位 name 就地改写为真实化学名,
+            # **不增减 entry**(与 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3
+            # B1 修复"PLR 当 history 单一真相源"原则一致)。
+            _patch_unknown_history_last(getattr(resource, "tracker", None), str(name_before or ""))
+            # tip 末条改名:取本通道实际承载的 tip(``self.head[channel].get_tip()``)。
+            try:
+                tip = self.head[channel].get_tip()  # type: ignore[index]
+            except Exception:
+                tip = None
+            _patch_unknown_history_last(getattr(tip, "tracker", None), str(name_before or ""))
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
             task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
@@ -597,6 +616,30 @@ class LiquidHandlerMiddleware(LiquidHandler):
             # P9 dispense history 由 PLR ``ContainerVolumeTracker.add_liquid`` 自动写入
             # （三元组 ``(name, vol, "ul")``，含液体身份），Uni-Lab 不再重复 append。
             # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 1。
+
+            # B2 —— 修复 PLR dispense 路径丢失液体身份:
+            # ``LiquidHandler.dispense`` 调 ``op.resource.tracker.add_liquid(volume=op.volume)``
+            # 没传 liquid 名 → target 末条 ``(Unknown<n>, +vol, "ul")``,bump target
+            # tracker 的 ``unknown_counter``。这里从 aspirate 时挂在 channel 上的
+            # ``pending_liquids_dict[channel]["liquid_name"]`` 取出权威液体名,
+            # 把 target 末条改名为真实化学名(同 aspirate 端 ``_patch_unknown_history_last``
+            # 策略),不增减 entry,不影响 PLR ``current_liquids`` / ``volume`` 的反推。
+            channel_name = ""
+            try:
+                channel_meta = self.pending_liquids_dict.get(channel) if isinstance(self.pending_liquids_dict, dict) else None
+                if isinstance(channel_meta, dict):
+                    channel_name = str(channel_meta.get("liquid_name") or "")
+            except Exception:
+                channel_name = ""
+            if not channel_name:
+                # 兜底:从 tip 现有历史读取(aspirate 改名补丁已经把 tip 末条改成真实名)
+                try:
+                    tip = self.head[channel].get_tip()  # type: ignore[index]
+                except Exception:
+                    tip = None
+                channel_name = _well_current_liquid_name(tip) if tip is not None else ""
+            if channel_name:
+                _patch_unknown_history_last(getattr(resource, "tracker", None), channel_name)
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
             # === [U-DBG] dispense 后 update_resource 上行 payload 抓取（候选 E 判别）===
@@ -1130,6 +1173,24 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
         for well, liquid_name, volume in zip(wells, liquid_names, volumes):
             safe_volume = _clamp_volume(well, volume)
+            tracker = getattr(well, "tracker", None)
+
+            # 防御性跳过：set_liquid_from_plate 对 target 孔位用 **0 体积**做"占位初始化"。
+            # 若该孔已被前序 stage 的 transfer 注入液体（used_volume > 0），再用 0 覆盖会令 PLR
+            # ``set_liquids`` 删除旧液体，在 liquid_history 写入一条负记录（如 ``('', -25.6)``），
+            # 把已移入的液体清零 —— 导致多 stage 累加丢失前序体积（最终只剩最后一次 dispense）。
+            # 这里在"0 体积占位 + 孔已非空"时跳过破坏性覆盖，保证最终体积 = 各 stage dispense 之和。
+            # 与「初始化前置」（workflow/common.py 让所有 set_liquid 排在首个 transfer 前）互为
+            # 兜底：即便调度时序异常使某次占位初始化晚于一次 dispense，也不会再清零累积液体。
+            if safe_volume <= 1e-9:
+                try:
+                    existing_used = float(tracker.get_used_volume()) if tracker is not None else 0.0
+                except Exception:
+                    existing_used = 0.0
+                if existing_used > 1e-9:
+                    res_volumes.append(existing_used)
+                    continue
+
             # set_liquid 是 history 的"播种"入口（Stage 3 set_liquid_from_plate 节点会调到这里）。
             # PLR ``liquids.setter`` 在 ``abs(vol) > 1e-9`` 时会自动 append 一条 ``(name, vol, "ul")``；
             # 当 ``vol == 0`` 时 PLR 跳过，Uni-Lab 走 ``_append_liquid_history`` 兜底。
@@ -1139,7 +1200,6 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             # tip-reuse 仍可用），仅审计日志不冗余 0-vol 噪声。
             # 详见 ``RESOLUTION-2026-05-28-plr-liquid-history-double-write.md`` §3 改动 3
             # + ``liquid_history.py:append_liquid_history`` 顶部 0-vol guard。
-            tracker = getattr(well, "tracker", None)
             hist_ref = getattr(tracker, "liquid_history", None) if tracker is not None else None
             len_before = len(hist_ref) if isinstance(hist_ref, list) else 0
             well.set_liquids([(liquid_name, safe_volume)])  # type: ignore

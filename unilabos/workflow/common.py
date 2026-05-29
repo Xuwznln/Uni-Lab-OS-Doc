@@ -70,6 +70,10 @@
     - create_resource 之间: 无 ready 连接
     - set_liquid_from_plate 之间: 无 ready 连接
     - create_resource 与 set_liquid_from_plate 之间: 无 ready 连接
+    - 第一个 transfer_liquid: 通过 ready 等待所有 create_resource 与所有 set_liquid_from_plate
+      （含跨板 merged 节点）完成，确保所有孔位在第一次移液开始前已全部初始化
+      （set_liquid_from_plate 是绝对覆盖语义，必须在任何移液前完成，否则后续 stage 的
+      初始化会把已移入的液体重置归零）
     - transfer_liquid 之间: 通过 ready 端口串联
         transfer_liquid_1 -> transfer_liquid_2 -> transfer_liquid_3 -> ...
 
@@ -1187,6 +1191,9 @@ def build_protocol_graph(
     )
 
     set_liquid_index = 0
+    # 收集所有 set_liquid_from_plate 节点（per-plate + 下方预创建的 merged），
+    # 用于让第一个 transfer_liquid 通过 ready 等待全部初始化完成（见「初始化前置」说明）。
+    all_set_liquid_node_ids: List[str] = []
 
     for labware_id, item in labware_info.items():
         # 跳过 Tip/Rack 类型
@@ -1273,6 +1280,7 @@ def build_protocol_graph(
                 "well_names": wells,
             },
         )
+        all_set_liquid_node_ids.append(node_id)
 
         # set_liquid_from_plate 之间不需要 ready 连接
 
@@ -1293,6 +1301,43 @@ def build_protocol_graph(
 
     # 收集所有 create_resource 节点 ID，用于让第一个 transfer_liquid 等待所有资源创建完成
     all_create_resource_node_ids = list(slot_to_create_resource.values())
+
+    # ============================================================
+    # 初始化前置：预创建所有跨板 merged set_liquid_from_plate 节点
+    # ------------------------------------------------------------
+    # set_liquid_from_plate 的 runtime 语义是「绝对设定」（well.set_liquids 覆盖孔位 tracker
+    # 的液体状态），而非累加。若像旧逻辑那样在主循环里按需创建 merged 节点，多 stage 协议中
+    # 后一个 stage 的 merged 节点只通过数据边连到它对应的 transfer，可能被调度到前一个 stage
+    # 的 transfer 之后才执行，从而把已经移入的液体重置归零，导致后续 stage 统计的总液体量
+    # 丢失前序移液量。
+    # 这里把全部 merged 节点提前创建好，并在下方让第一个 transfer_liquid 通过 ready 等待所有
+    # set_liquid_from_plate（per-plate + merged）完成，确保「先全部初始化、再开始移液」。
+    # ============================================================
+    merged_set_liquid_counter = 0
+    step_to_merged: Dict[int, Tuple[str, str]] = {}  # step 索引 -> (synthetic_key, merged_node_id)
+    for step_idx, step in enumerate(protocol_steps):
+        if step.get("template_name") != "transfer_liquid":
+            continue
+        raw_targets = (step.get("param") or {}).get("targets")
+        if (
+            isinstance(raw_targets, list)
+            and len(raw_targets) > 0
+            and all(isinstance(t, str) and t for t in raw_targets)
+        ):
+            synth_key, merged_node_id = _emit_merged_set_liquid(
+                G,
+                raw_targets,
+                labware_info,
+                slot_to_create_resource,
+                set_liquid_group_id=set_liquid_group_id,
+                merged_index=merged_set_liquid_counter,
+                target_device=target_device,
+                target_model=target_model,
+            )
+            merged_set_liquid_counter += 1
+            step_to_merged[step_idx] = (synth_key, merged_node_id)
+            all_set_liquid_node_ids.append(merged_node_id)
+            resource_last_writer[synth_key] = f"{merged_node_id}:output_wells"
 
     # transfer_liquid 之间通过 ready 串联；第一个 transfer_liquid 需要等待所有 create_resource 完成
     last_control_node_id = trash_create_node_id
@@ -1335,11 +1380,8 @@ def build_protocol_graph(
         "liquid_height",
     ]
 
-    # P2 v2：跨板 transfer_liquid 的 merged set_liquid_from_plate 节点计数器
-    merged_set_liquid_counter = 0
-
     # 处理协议步骤
-    for step in protocol_steps:
+    for step_idx, step in enumerate(protocol_steps):
         node_id = str(uuid.uuid4())
         params = step.get("param", {}).copy()  # 复制一份，避免修改原数据
         connected_params = set()  # 记录被连接的参数
@@ -1423,30 +1465,15 @@ def build_protocol_graph(
                 params.pop("use_channels")
 
         # ============================================================
-        # P2 v2 跨板聚合：当 params.targets 是 list[str] 时，插入一个
-        # merged set_liquid_from_plate 节点把跨板 wells 聚合成有序 List[Container]，
-        # 然后改写 params.targets 为 synthetic str。详见
-        # product_designs/protocol_convert/02-cross-slot-merge.md §9.2。
+        # P2 v2 跨板聚合：当 params.targets 是 list[str] 时，对应的 merged
+        # set_liquid_from_plate 节点已在主循环前预创建（见「初始化前置」），其
+        # resource_last_writer[synth_key] 也已注册。这里直接把 params.targets 改写为
+        # synthetic str，让 INPUT_PORT_MAPPING 走 P3 既有的单边路径。
+        # 详见 product_designs/protocol_convert/02-cross-slot-merge.md §9.2。
         # ============================================================
-        raw_targets = params.get("targets")
-        if (
-            isinstance(raw_targets, list)
-            and len(raw_targets) > 0
-            and all(isinstance(t, str) and t for t in raw_targets)
-        ):
-            synth_key, merged_node_id = _emit_merged_set_liquid(
-                G,
-                raw_targets,
-                labware_info,
-                slot_to_create_resource,
-                set_liquid_group_id=set_liquid_group_id,
-                merged_index=merged_set_liquid_counter,
-                target_device=target_device,
-                target_model=target_model,
-            )
-            merged_set_liquid_counter += 1
+        if step_idx in step_to_merged:
+            synth_key, _merged_node_id = step_to_merged[step_idx]
             params["targets"] = synth_key
-            resource_last_writer[synth_key] = f"{merged_node_id}:output_wells"
 
         # 处理输入连接
         for param_key, target_port in INPUT_PORT_MAPPING.items():
@@ -1545,6 +1572,11 @@ def build_protocol_graph(
             # 第一个 transfer_liquid 需要等待所有 create_resource 完成
             for cr_node_id in all_create_resource_node_ids:
                 G.add_edge(cr_node_id, node_id, source_port="ready", target_port="ready")
+            # 同时等待所有 set_liquid_from_plate（per-plate + merged）完成初始化，
+            # 保证「先全部初始化、再开始移液」：set_liquid_from_plate 是绝对覆盖语义，
+            # 若晚于某次移液执行会把已移入的液体重置归零。
+            for sl_node_id in all_set_liquid_node_ids:
+                G.add_edge(sl_node_id, node_id, source_port="ready", target_port="ready")
             is_first_action_node = False
         elif last_control_node_id is not None:
             G.add_edge(last_control_node_id, node_id, source_port="ready", target_port="ready")
