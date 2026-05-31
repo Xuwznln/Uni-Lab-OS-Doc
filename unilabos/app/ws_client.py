@@ -519,7 +519,7 @@ class MessageProcessor:
                     ssl=ssl_context,
                     open_timeout=20,
                     ping_interval=WSConfig.ping_interval,
-                    ping_timeout=10,
+                    ping_timeout=WSConfig.ping_timeout,
                     close_timeout=5,
                     additional_headers={
                         "Authorization": f"Lab {BasicConfig.auth_secret()}",
@@ -602,6 +602,7 @@ class MessageProcessor:
 
         async for message in self.websocket:
             try:
+                logger.trace(f"[WS_RECV] {message}")
                 data = json.loads(message)
                 message_type = data.get("action", "")
                 message_data = data.get("data")
@@ -653,9 +654,10 @@ class MessageProcessor:
                         try:
                             message_str = json.dumps(msg, ensure_ascii=False)
                             await self.websocket.send(message_str)
-                            # logger.trace(f"[MessageProcessor] Message sent: {msg.get('action', 'unknown')}")  # type: ignore  # noqa: E501
+                            logger.trace(f"[WS_SEND] {message_str}")
                         except Exception as e:
                             logger.error(f"[MessageProcessor] Failed to send message: {str(e)}")
+                            logger.error(f"[WS_SEND_FAILED] {msg}")
                             logger.error(traceback.format_exc())
                             break
 

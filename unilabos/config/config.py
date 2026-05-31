@@ -41,7 +41,8 @@ class BasicConfig:
 class WSConfig:
     reconnect_interval = 5  # 重连间隔（秒）
     max_reconnect_attempts = 999  # 最大重连次数
-    ping_interval = 20  # ping间隔（秒）
+    ping_interval = 5  # ping间隔（秒），对齐服务端 PingPeriod
+    ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
 
 
 # HTTP配置
@@ -77,7 +78,7 @@ def _update_config_from_env():
         if not env_key.startswith(prefix):
             continue
         try:
-            key_path = env_key[len(prefix) :]  # Remove UNILAB_ prefix
+            key_path = env_key[len(prefix):]  # Remove UNILAB_ prefix
             class_field = key_path.upper().split("_", 1)
             if len(class_field) != 2:
                 logger.warning(f"[ENV] 环境变量格式不正确：{env_key}")
