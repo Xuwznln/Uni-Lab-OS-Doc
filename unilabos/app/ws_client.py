@@ -144,6 +144,27 @@ class DeviceActionManager:
         """
         with self.lock:
             device_key = job_info.device_action_key
+            existing_job = self.all_jobs.get(job_info.job_id)
+            if existing_job is not None:
+                if job_info.task_id != existing_job.task_id:
+                    logger.warning(
+                        "[DeviceActionManager] Duplicate job_id has different task_id: "
+                        f"{job_info.job_id[:8]} old={existing_job.task_id[:8]} new={job_info.task_id[:8]}"
+                    )
+                if job_info.notebook_id and not existing_job.notebook_id:
+                    existing_job.notebook_id = job_info.notebook_id
+                existing_job.update_timestamp()
+                job_log = format_job_log(
+                    existing_job.job_id,
+                    existing_job.task_id,
+                    existing_job.device_id,
+                    existing_job.action_name,
+                )
+                logger.info(
+                    f"[DeviceActionManager] Duplicate queue request ignored for job {job_log}, "
+                    f"status={existing_job.status}"
+                )
+                return existing_job.status == JobStatus.READY
 
             # 总是将job添加到all_jobs中
             self.all_jobs[job_info.job_id] = job_info
@@ -731,6 +752,48 @@ class MessageProcessor:
             logger.error("[MessageProcessor] Missing required fields in query_action_state")
             return
 
+        job_log = format_job_log(job_id, task_id, device_id, action_name)
+        existing_job = self.device_manager.get_job_info(job_id)
+        if existing_job and existing_job.task_id == task_id:
+            if existing_job.status == JobStatus.READY:
+                response_type, free, need_more = "query_action_status", True, 0
+            elif existing_job.status == JobStatus.QUEUE:
+                response_type, free, need_more = "query_action_status", False, 10
+            else:
+                response_type, free, need_more = "job_call_back_status", False, 10
+
+            await self._send_action_state_response(
+                existing_job.device_id,
+                existing_job.action_name,
+                existing_job.task_id,
+                existing_job.job_id,
+                response_type,
+                free,
+                need_more,
+                notebook_id=existing_job.notebook_id or notebook_id,
+            )
+            logger.info(
+                f"[MessageProcessor] Returned existing job state for query_action_state {job_log}: "
+                f"{existing_job.status}"
+            )
+            return
+
+        if self.websocket_client and self.websocket_client.has_job_start_request(job_id, task_id):
+            replayed = self.websocket_client.replay_cached_job_start_response(job_id, task_id)
+            if not replayed:
+                await self._send_action_state_response(
+                    device_id,
+                    action_name,
+                    task_id,
+                    job_id,
+                    "job_call_back_status",
+                    False,
+                    10,
+                    notebook_id=notebook_id,
+                )
+            logger.info(f"[MessageProcessor] Returned cached/running state for completed query_action_state {job_log}")
+            return
+
         device_action_key = f"/devices/{device_id}/{action_name}"
 
         # 检查action是否为always_free
@@ -752,7 +815,6 @@ class MessageProcessor:
         # 添加到设备管理器
         can_start_immediately = self.device_manager.add_queue_request(job_info)
 
-        job_log = format_job_log(job_id, task_id, device_id, action_name)
         if can_start_immediately:
             # 可以立即开始
             await self._send_action_state_response(
@@ -1542,6 +1604,34 @@ class WebSocketClient(BaseCommunicationClient):
             self._prune_job_start_cache_locked()
             return True
 
+    def has_job_start_request(self, job_id: str, task_id: str) -> bool:
+        """判断同一(task_id, job_id)的job_start是否已被处理或已有结果缓存。"""
+        key = self._job_start_cache_key(job_id, task_id)
+        if key is None:
+            return False
+
+        with self._job_start_cache_lock:
+            self._prune_job_start_cache_locked()
+            cached = self._job_start_cache.get(key)
+            if cached is None:
+                return False
+            cached.updated_at = time.time()
+            return True
+
+    def get_cached_job_start_response_status(self, job_id: str, task_id: str) -> str:
+        """获取同一job_start已缓存的回复状态。"""
+        key = self._job_start_cache_key(job_id, task_id)
+        if key is None:
+            return ""
+
+        with self._job_start_cache_lock:
+            self._prune_job_start_cache_locked()
+            cached = self._job_start_cache.get(key)
+            if cached is None:
+                return ""
+            cached.updated_at = time.time()
+            return cached.response_status
+
     def cache_job_start_response(self, item: QueueItem, message: Dict[str, Any], status: str) -> None:
         """缓存job_start对应的最新回复，供断链重发时回放。"""
         key = self._job_start_cache_key(item.job_id, item.task_id)
@@ -1664,6 +1754,17 @@ class WebSocketClient(BaseCommunicationClient):
                     logger.warning(f"[WebSocketClient] Failed to remove job {item.job_id} from HostNode status")
 
             self.queue_processor.handle_job_completed(item.job_id, status)
+
+            cached_status = self.get_cached_job_start_response_status(item.job_id, item.task_id)
+            if cached_status in ["success", "failed"]:
+                # 断线重连时，旧 READY 占位可能在结果已回放后触发 timeout failed。
+                # 已有终态时不允许重复终态覆盖缓存或再次发送，success 也不允许被 failed 降级。
+                if cached_status == "success" or cached_status == status:
+                    logger.warning(
+                        f"[WebSocketClient] Skipped duplicate terminal job status for {job_log}: "
+                        f"cached={cached_status}, incoming={status}"
+                    )
+                    return
 
         # running状态按job_id做debounce，内容变化时仍然上报
         if status == "running":
