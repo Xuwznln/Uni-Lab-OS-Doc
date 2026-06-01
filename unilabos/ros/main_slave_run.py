@@ -25,6 +25,7 @@ from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.sim.clock_control import SimClockControlNode
 from unilabos.sim.clock_publisher import SimClockPublisher
 from unilabos.sim.context import get_runtime_context
+from unilabos.sim.twin_runtime import TwinPollerNode, collect_twin_pairs
 from unilabos.utils import logger
 from unilabos.config.config import BasicConfig
 from unilabos.utils.type_check import TypeEncoder
@@ -48,8 +49,30 @@ def _start_runtime_sim_nodes(executor) -> None:
     rclpy.__sim_runtime_nodes = nodes
 
 
+def _start_twin_poller(executor, devices_provider) -> None:
+    """twin 模式下启动周期 poller,驱动每个 TwinDriverPair.bridge.poll_once().
+
+    devices_provider: 返回当前设备集合的可调用对象(支持设备延迟创建)。
+    """
+    ctx = get_runtime_context()
+    if ctx.mode != "twin":
+        rclpy.__twin_poller = None
+        return
+    poller = TwinPollerNode(
+        pairs=lambda: collect_twin_pairs(devices_provider()),
+        poll_rate_hz=50.0,
+        auto_start=True,
+    )
+    if poller.node is not None:
+        executor.add_node(poller.node)
+    rclpy.__twin_poller = poller
+
+
 def exit() -> None:
     """关闭ROS节点和资源"""
+    twin_poller = getattr(rclpy, "__twin_poller", None)
+    if twin_poller is not None and hasattr(twin_poller, "shutdown"):
+        twin_poller.shutdown()
     for runtime_node in getattr(rclpy, "__sim_runtime_nodes", []):
         if hasattr(runtime_node, "shutdown"):
             runtime_node.shutdown()
@@ -99,6 +122,9 @@ def main(
         bridges,
         discovery_interval,
     )
+
+    # twin 模式:周期驱动 HostNode 下设备的 TwinBridge(设备可能延迟创建,用 provider)
+    _start_twin_poller(executor, lambda: getattr(host_node, "devices_instances", {}))
 
     if visual != "disable":
         from unilabos.ros.nodes.presets.joint_republisher import JointRepublisher
@@ -232,6 +258,9 @@ def slave(
                 logger.info(f"Device {device_id} initialized.")
             else:
                 logger.warning(f"Device {device_id} initialization failed.")
+
+    # twin 模式:周期驱动已建设备的 TwinBridge.poll_once()
+    _start_twin_poller(executor, lambda: devices_instances)
 
     # 5. 如果启用可视化，创建可视化相关节点
     if visual != "disable":
