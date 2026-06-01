@@ -267,8 +267,17 @@ def patch_unknown_history_last(tracker: Any, expected_name: str) -> bool:
     if not is_placeholder_liquid_name(last[0]):
         return False
     last_vol = last[1]
-    last_unit = last[2] if len(last) >= 3 else "ul"
-    history[-1] = (expected_name, last_vol, last_unit)
+    # 关键：保持原条目的元组长度（arity）。当前安装的 PLR ``VolumeTracker`` 使用
+    # **二元组** ``(name, vol)``（``add_liquid`` / ``remove_liquid`` 均写二元组，
+    # ``current_liquids`` 走 ``for name, vol in self.liquid_history`` 解包）。若这里
+    # 把二元组升级成三元组 ``(name, vol, "ul")``，下一次 dispense 调
+    # ``op.tip.tracker.remove_liquid`` → ``current_liquids`` 解包就会
+    # ``ValueError: too many values to unpack (expected 2)``。仅当原条目本就是
+    # 旧版 PLR 三元组时，才保留其单位字段以维持兼容。
+    if len(last) >= 3:
+        history[-1] = (expected_name, last_vol, last[2])
+    else:
+        history[-1] = (expected_name, last_vol)
     return True
 
 

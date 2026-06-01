@@ -363,11 +363,20 @@ class TestPatchUnknownHistoryLast:
         assert patch_unknown_history_last(well.tracker, "sample") is True
         assert well.tracker.liquid_history[-1] == ("sample", -3.0, "ul")
 
-    def test_patches_empty_name_in_2_tuple_keeps_default_unit(self) -> None:
+    def test_patches_empty_name_in_2_tuple_preserves_arity(self) -> None:
+        # 当前安装的 PLR 使用二元组 (name, vol)：改名后必须仍是二元组，
+        # 否则 current_liquids 的 `for name, vol in liquid_history` 会解包失败。
         well = DummyWell()
         well.tracker.liquid_history = [("", 3.0)]
         assert patch_unknown_history_last(well.tracker, "agar") is True
-        assert well.tracker.liquid_history[-1] == ("agar", 3.0, "ul")
+        assert well.tracker.liquid_history[-1] == ("agar", 3.0)
+
+    def test_patches_unknown_n_in_2_tuple_preserves_arity(self) -> None:
+        # 回归：PLR add_liquid 写的二元组 ("Unknown1", 3.0) 改名后保持二元组。
+        well = DummyWell()
+        well.tracker.liquid_history = [("Unknown1", 3.0)]
+        assert patch_unknown_history_last(well.tracker, "sample") is True
+        assert well.tracker.liquid_history[-1] == ("sample", 3.0)
 
     def test_does_not_overwrite_real_name(self) -> None:
         well = DummyWell()
