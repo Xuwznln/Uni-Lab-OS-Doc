@@ -1,4 +1,6 @@
 networkx
+pydantic>=2
+PyYAML
 typing_extensions
 websockets
 msgcenterpy>=0.1.8

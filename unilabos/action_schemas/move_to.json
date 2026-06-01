@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1",
+  "action": "move_to",
+  "args": {
+    "target_pose": "pose",
+    "speed_m_s": 0.1,
+    "frame_id": "lab_world"
+  },
+  "preconditions": [
+    {"type": "pose_known", "target": "target_pose"}
+  ],
+  "postconditions": [
+    {"type": "pose_near", "target": "tool0", "expected": [0.0, 0.0, 0.0], "tolerance": 0.01}
+  ],
+  "policy_preference": ["classical"],
+  "timeout_s": 20,
+  "metadata": {
+    "description": "Move the robot end effector to a target pose."
+  }
+}

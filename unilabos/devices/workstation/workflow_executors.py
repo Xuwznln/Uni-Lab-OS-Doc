@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from unilabos.devices.work_station.workstation_base import WorkstationBase
 
 from unilabos.utils.log import logger
+from unilabos.sim.clock import sim_sleep_sync
 
 
 class WorkflowExecutor(ABC):
@@ -99,7 +100,7 @@ class ModbusWorkflowExecutor(WorkflowExecutor):
             logger.info("启动电池制造流程")
             
             # 4. 确认启动成功
-            time.sleep(0.5)
+            sim_sleep_sync(0.5)
             status = self.hardware_interface.read_register('COIL_SYS_START_STATUS', count=1)
             success = status[0] if status else False
             
@@ -138,7 +139,7 @@ class ModbusWorkflowExecutor(WorkflowExecutor):
                 if status and status[0]:
                     logger.info(f"物料装载完成: {material_type} -> {position}")
                     return True
-                time.sleep(0.5)
+                sim_sleep_sync(0.5)
             
             logger.error(f"物料装载超时: {material_type} -> {position}")
             return False
@@ -176,7 +177,7 @@ class ModbusWorkflowExecutor(WorkflowExecutor):
                         logger.warning(f"质量检测失败: {check_type}")
                         return False
                         
-                time.sleep(1.0)
+                sim_sleep_sync(1.0)
             
             logger.error(f"质量检测超时: {check_type}")
             return False
@@ -207,7 +208,7 @@ class ModbusWorkflowExecutor(WorkflowExecutor):
                 self.hardware_interface.write_register('COIL_SYS_STOP_CMD', True)
                 logger.info("执行正常停止")
             
-            time.sleep(0.5)
+            sim_sleep_sync(0.5)
             status = self.hardware_interface.read_register('COIL_SYS_STOP_STATUS', count=1)
             return status[0] if status else False
             
@@ -324,7 +325,7 @@ class HttpWorkflowExecutor(WorkflowExecutor):
             # 保持温度指定时间
             if hold_time > 0:
                 logger.info(f"保持温度 {hold_time} 秒")
-                time.sleep(hold_time)
+                sim_sleep_sync(hold_time)
             
             return True
             

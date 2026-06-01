@@ -1,7 +1,13 @@
+from __future__ import annotations
+
 import threading
 
 from unilabos.resources.resource_tracker import ResourceTreeSet
+from unilabos.sim.runtime import RuntimeServices, configure_runtime
 from unilabos.utils import logger
+
+
+_runtime_services: RuntimeServices | None = None
 
 
 # 根据选择的 backend 启动相应的功能
@@ -18,6 +24,25 @@ def start_backend(
     resources_mesh_config: dict = {},
     **kwargs,
 ):
+    global _runtime_services
+    mode = kwargs.get("mode", "real")
+    sim_rate = kwargs.get("sim_rate", 1.0)
+    sim_paused = kwargs.get("sim_paused", False)
+    start_sim_services = backend == "ros" and not kwargs.get("disable_sim_services", False)
+    _runtime_services = configure_runtime(
+        mode=mode,
+        sim_rate=sim_rate,
+        sim_paused=sim_paused,
+        start_ros_services=False,
+    )
+    _runtime_services.context.sim_services_enabled = start_sim_services and mode in ("sim", "twin")
+    logger.info(
+        "Runtime mode initialized: "
+        f"mode={mode}, sim_rate={_runtime_services.context.clock.scale}, "
+        f"paused={_runtime_services.context.clock.paused}, "
+        f"sim_services={start_sim_services and mode in ('sim', 'twin')}"
+    )
+
     if backend == "ros":
         # 假设 ros_main, simple_main, automancer_main 是不同 backend 的启动函数
         from unilabos.ros.main_slave_run import main, slave  # 如果选择 'ros' 作为 backend

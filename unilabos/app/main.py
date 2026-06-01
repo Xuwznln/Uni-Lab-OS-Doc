@@ -9,8 +9,6 @@ import sys
 import threading
 import time
 from typing import Dict, Any, List
-import networkx as nx
-import yaml
 
 # Windows 中文系统 stdout 默认 GBK，无法编码 banner / emoji 日志中的 Unicode 字符
 # 强制 stdout/stderr 用 UTF-8，避免 print 触发 UnicodeEncodeError 导致进程崩溃
@@ -140,7 +138,7 @@ def convert_argv_dashes_to_underscores(args: argparse.ArgumentParser):
                 break
 
 
-def parse_args():
+def build_argparser():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description="Start Uni-Lab Edge server.")
     subparsers = parser.add_subparsers(title="Valid subcommands", dest="command")
@@ -297,6 +295,30 @@ def parse_args():
         default=500,
         help="Maximum number of automatic restarts in restart mode (default: 500)",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["real", "sim", "twin"],
+        default="real",
+        help="Runtime mode: real hardware, full simulation, or one-way digital twin.",
+    )
+    parser.add_argument(
+        "--sim_rate",
+        type=float,
+        default=1.0,
+        help="Simulation acceleration ratio. Only sim mode can run faster than real time.",
+    )
+    parser.add_argument(
+        "--sim_paused",
+        action="store_true",
+        default=False,
+        help="Start the simulation clock paused.",
+    )
+    parser.add_argument(
+        "--disable_sim_services",
+        action="store_true",
+        default=False,
+        help="Do not auto-start /clock publisher and sim clock control ROS services.",
+    )
     # workflow upload subcommand
     workflow_parser = subparsers.add_parser(
         "workflow_upload",
@@ -337,6 +359,10 @@ def parse_args():
         help="Workflow description, used when publishing the workflow",
     )
     return parser
+
+
+def parse_args():
+    return build_argparser()
 
 
 def main():
@@ -564,6 +590,9 @@ def main():
     if not BasicConfig.ak or not BasicConfig.sk:
         print_status("后续运行必须拥有一个实验室，请前往 https://leap-lab.bohrium.com 注册实验室！", "warning")
         os._exit(1)
+    import networkx as nx
+    import yaml
+
     graph: nx.Graph
     resource_tree_set: ResourceTreeSet
     resource_links: List[Dict[str, Any]]

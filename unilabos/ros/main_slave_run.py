@@ -22,13 +22,37 @@ from rclpy.timer import Timer
 from unilabos.registry.registry import lab_registry
 from unilabos.ros.initialize_device import initialize_device_from_dict
 from unilabos.ros.nodes.presets.host_node import HostNode
+from unilabos.sim.clock_control import SimClockControlNode
+from unilabos.sim.clock_publisher import SimClockPublisher
+from unilabos.sim.context import get_runtime_context
 from unilabos.utils import logger
 from unilabos.config.config import BasicConfig
 from unilabos.utils.type_check import TypeEncoder
 
 
+def _start_runtime_sim_nodes(executor) -> None:
+    ctx = get_runtime_context()
+    if ctx.mode not in ("sim", "twin") or not getattr(ctx, "sim_services_enabled", True):
+        rclpy.__sim_runtime_nodes = []
+        return
+
+    nodes = []
+    clock_pub = SimClockPublisher(ctx.clock, rate_hz=100, auto_start=True)
+    if clock_pub.node is not None:
+        executor.add_node(clock_pub.node)
+        nodes.append(clock_pub)
+    clock_ctl = SimClockControlNode(ctx.clock, auto_start=True)
+    if clock_ctl.node is not None:
+        executor.add_node(clock_ctl.node)
+        nodes.append(clock_ctl)
+    rclpy.__sim_runtime_nodes = nodes
+
+
 def exit() -> None:
     """关闭ROS节点和资源"""
+    for runtime_node in getattr(rclpy, "__sim_runtime_nodes", []):
+        if hasattr(runtime_node, "shutdown"):
+            runtime_node.shutdown()
     host_instance = HostNode.get_instance()
     if host_instance is not None:
         # 停止发现定时器
@@ -63,6 +87,7 @@ def main(
     else:
         logger.info("[ROS] rclpy already initialized, reusing context")
     executor = rclpy.__executor = MultiThreadedExecutor(num_threads=max(os.cpu_count() * 4, 48))
+    _start_runtime_sim_nodes(executor)
     # 创建主机节点
     host_node = HostNode(
         "host_node",
@@ -124,6 +149,7 @@ def slave(
     executor = rclpy.__executor
     if not executor:
         executor = rclpy.__executor = MultiThreadedExecutor(num_threads=max(os.cpu_count() * 4, 48))
+    _start_runtime_sim_nodes(executor)
 
     # 1.5 启动 executor 线程
     thread = threading.Thread(target=executor.spin, daemon=True, name="slave_executor_thread")
@@ -201,6 +227,8 @@ def slave(
             d = initialize_device_from_dict(device_id, device_config)
             if d is not None:
                 devices_instances[device_id] = d
+                if hasattr(d, "bridge"):
+                    rclpy.__twin_pairs = getattr(rclpy, "__twin_pairs", []) + [d]
                 logger.info(f"Device {device_id} initialized.")
             else:
                 logger.warning(f"Device {device_id} initialization failed.")
