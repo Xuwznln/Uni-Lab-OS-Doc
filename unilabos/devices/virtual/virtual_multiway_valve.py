@@ -1,8 +1,8 @@
-import time
 import logging
 from typing import Union, Dict, Optional
 
 from unilabos.registry.decorators import topic_config
+from unilabos.sim.clock import sim_sleep_sync
 
 
 class VirtualMultiwayValve:
@@ -100,7 +100,7 @@ class VirtualMultiwayValve:
                 pos_desc = f"端口{pos}"
             
             old_position = self._current_position
-            old_port = self.get_current_port()
+            old_port = self.current_port
             
             self.logger.info(f"🔄 阀门切换: {old_position}({old_port}) → {pos} {pos_emoji}")
             
@@ -113,13 +113,13 @@ class VirtualMultiwayValve:
 
             if switch_time > 0:
                 self.logger.info(f"⏱️ 阀门移动中... 预计用时: {switch_time:.1f}秒 🔄")
-                time.sleep(switch_time)
+                sim_sleep_sync(switch_time)
             
             self._current_position = pos
             self._status = "Idle"
             self._valve_state = "Ready"
             
-            current_port = self.get_current_port()
+            current_port = self.current_port
             success_msg = f"✅ 阀门已切换到位置 {pos} ({current_port}) {pos_emoji}"
             
             self.logger.info(success_msg)
@@ -163,7 +163,7 @@ class VirtualMultiwayValve:
         
         self._status = "Busy"
         self._valve_state = "Closing"
-        time.sleep(0.5)
+        sim_sleep_sync(0.5)
 
         # 可以选择保持当前位置或设置特殊关闭状态
         self._status = "Idle"

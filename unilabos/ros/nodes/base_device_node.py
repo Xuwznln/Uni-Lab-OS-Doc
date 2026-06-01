@@ -27,6 +27,7 @@ import asyncio
 import rclpy
 import yaml
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.action import ActionServer, ActionClient
 from rclpy.action.server import ServerGoalHandle
 from rclpy.client import Client
@@ -79,6 +80,15 @@ if TYPE_CHECKING:
     from pylabrobot.resources import Resource as ResourcePLR
 
 T = TypeVar("T")
+
+
+def _derive_use_sim_time() -> bool:
+    try:
+        from unilabos.sim.context import get_runtime_context
+
+        return get_runtime_context().mode in ("sim", "twin")
+    except Exception:
+        return False
 
 
 class RclpyAsyncMutex:
@@ -401,7 +411,13 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         # 初始化ROS节点
         self.node_name = f'{device_id.split("/")[-1]}'
         self.namespace = f"/devices/{device_id}"
-        Node.__init__(self, self.node_name, namespace=self.namespace)  # type: ignore
+        Node.__init__(
+            self,
+            self.node_name,
+            namespace=self.namespace,
+            parameter_overrides=[Parameter("use_sim_time", Parameter.Type.BOOL, _derive_use_sim_time())],
+            automatically_declare_parameters_from_overrides=True,
+        )  # type: ignore
         if self.resource_tracker is None:
             self.lab_logger().critical("资源跟踪器未初始化，请检查")
 

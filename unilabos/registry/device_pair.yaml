@@ -1,0 +1,78 @@
+pairs:
+  - real: heaterstirrer.dalong
+    virtual: virtual_heatchill
+    twin_observed: [temperature, rpm, status]
+    twin_throttle_hz: 2
+
+  - real: syringe_pump_with_valve.runze.SY03B-T06
+    virtual: virtual_transfer_pump
+    twin_observed: [status, volume, valve_position]
+    twin_throttle_hz: 5
+
+  - real: syringe_pump_with_valve.runze.SY03B-T08
+    virtual: virtual_transfer_pump
+    twin_observed: [status, volume, valve_position]
+    twin_throttle_hz: 5
+
+  - real: vacuum_pump.mock
+    virtual: virtual_vacuum_pump
+    twin_observed: [status]
+    twin_throttle_hz: 2
+
+  - real: gas_source.mock
+    virtual: virtual_gas_source
+    twin_observed: [status]
+    twin_throttle_hz: 2
+
+  - real: solenoid_valve
+    virtual: virtual_solenoid_valve
+    twin_observed: [valve_position, status]
+    twin_throttle_hz: 10
+
+  - real: solenoid_valve.mock
+    virtual: virtual_solenoid_valve
+    twin_observed: [valve_position, status]
+    twin_throttle_hz: 10
+
+  - real: virtual_multiway_valve
+    virtual: virtual_multiway_valve
+    twin_observed: [current_position, valve_state, status]
+    twin_throttle_hz: 10
+
+  - real: robotic_arm.elite
+    virtual: robotic_arm.SCARA_with_slider.moveit.virtual
+    twin_observed: [joint_states, tcp_pose]
+    twin_throttle_hz: 50
+
+  - real: Qone_nmr
+    virtual: null
+    missing_sim_policy: fail
+
+  - real: cameracontroller_device
+    virtual: null
+    missing_sim_policy: skip
+
+  - real: virtual_centrifuge
+    virtual: virtual_centrifuge
+  - real: virtual_column
+    virtual: virtual_column
+  - real: virtual_filter
+    virtual: virtual_filter
+  - real: virtual_gas_source
+    virtual: virtual_gas_source
+  - real: virtual_heatchill
+    virtual: virtual_heatchill
+  - real: virtual_rotavap
+    virtual: virtual_rotavap
+  - real: virtual_separator
+    virtual: virtual_separator
+  - real: virtual_solenoid_valve
+    virtual: virtual_solenoid_valve
+  - real: virtual_solid_dispenser
+    virtual: virtual_solid_dispenser
+  - real: virtual_stirrer
+    virtual: virtual_stirrer
+  - real: virtual_transfer_pump
+    virtual: virtual_transfer_pump
+  - real: virtual_vacuum_pump
+    virtual: virtual_vacuum_pump

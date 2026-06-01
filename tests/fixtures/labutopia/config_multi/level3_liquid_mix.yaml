@@ -1,0 +1,10 @@
+name: Level3_LiquidMixing
+mode: headless
+task_type: LiquidMixing
+controller_type: stir
+usd_path: assets/chemistry_lab/lab_005/lab_005.usd
+robot:
+  name: franka
+  prim_path: /World/franka
+task:
+  max_steps: 400

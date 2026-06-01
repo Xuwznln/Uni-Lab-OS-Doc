@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
 import rclpy
 from rosidl_runtime_py import message_to_ordereddict
+from unilabos.sim.clock import sim_sleep
 
 from unilabos.messages import *  # type: ignore  # protocol names
 from rclpy.action import ActionServer, ActionClient
@@ -373,7 +374,7 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
                     if isinstance(action, dict):
                         # 如果是单个动作，直接执行
                         if action["action_name"] == "wait":
-                            time.sleep(action["action_kwargs"]["time"])
+                            await sim_sleep(action["action_kwargs"]["time"])
                             step_results.append({"step": i + 1, "action": "wait", "result": "completed"})
                         else:
                             try:

@@ -8,6 +8,8 @@ import time
 import traceback
 import threading
 from datetime import datetime
+
+from unilabos.sim.clock import sim_sleep_sync
 from typing import Dict, Any, List, Optional, Union
 import json
 from pathlib import Path
@@ -76,7 +78,7 @@ class ConnectionMonitor:
                     self._publish_event("error", str(e))
                     self._last_status = "error"
 
-            time.sleep(self.check_interval)
+            sim_sleep_sync(self.check_interval)  # 协议轮询节拍,响应 --sim_rate
 
     def _publish_event(self, status, message):
         try:

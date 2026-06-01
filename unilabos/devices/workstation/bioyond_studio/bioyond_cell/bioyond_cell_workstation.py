@@ -10,6 +10,8 @@ import time
 from datetime import datetime, timedelta
 import re
 import threading
+
+from unilabos.sim.clock import sim_sleep_sync
 import json
 from copy import deepcopy
 from urllib3 import response
@@ -131,7 +133,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             self.http_service_started = True
             logger.info(f"WorkstationHTTPService 成功启动: {host}:{port}")
             while True:
-                time.sleep(1) #一直挂着，直到进程退出
+                time.sleep(1)  # wall clock: process-hold,一直挂着直到进程退出(故意不走 sim clock)
         except Exception as e:
             self.http_service_started = False
             logger.error(f"启动 WorkstationHTTPService 失败: {e}", exc_info=True)
@@ -268,7 +270,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 return {"status": "timeout", "orderCode": order_code}
             
             # 短暂 sleep，让出控制权给 ROS2 处理 feedback
-            time.sleep(poll_interval)
+            sim_sleep_sync(poll_interval)  # 协议轮询节拍,响应 --sim_rate
 
         # 事件已触发，获取报送数据
         logger.info(f"[轮询模式] [DEBUG] ✅ Event 已触发！共轮询 {poll_count} 次")
@@ -1646,7 +1648,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     return True
 
                 logger.info(f"等待中: {name}, status={status}")
-            time.sleep(interval)
+            sim_sleep_sync(interval)  # 协议轮询节拍,响应 --sim_rate
 
         logger.warning("超时未找到成功的物料转移任务")
         return False

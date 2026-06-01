@@ -1,0 +1,107 @@
+{
+  "schema_version": "robo-unilabos.robot_asset.v1",
+  "robot_id": "roboarm_chem_04",
+  "display_name": "RoboArm for Chemistry 04",
+  "asset_role": "early_kinematic_query_validation",
+  "urdf": "urdf/roboarm_chem_04_query.urdf",
+  "source_urdf": "urdf/04_source.urdf",
+  "mesh_dir": "meshes",
+  "base_frame": "base_link",
+  "tool_frame": "tool0",
+  "tool_link": "Link_5",
+  "tool_offset_xyz": [0.0, 0.0, 0.14],
+  "workspace": {
+    "frame_id": "base_link",
+    "center": [0.0, 0.0, 0.25],
+    "size": [1.2, 1.2, 0.8],
+    "model": "rough_kinematic_workspace"
+  },
+  "state_endpoint": {
+    "default_url": "http://192.168.1.112:8090/api/leader/state",
+    "transport": "http_json",
+    "mode": "read_only",
+    "torque_policy": "keep_torque"
+  },
+  "servo": {
+    "hardware_family": "Feetech/RDK",
+    "baudrate": 1000000,
+    "ticks_per_rev": 4096,
+    "logical_joint_mapping": {
+      "J1": {
+        "formula": "single",
+        "servo": "base",
+        "center": 2048
+      },
+      "J2": {
+        "formula": "linear_combination",
+        "divisor": 2,
+        "terms": [
+          {
+            "servo": "s1",
+            "center": 2048,
+            "sign": 1
+          },
+          {
+            "servo": "s2",
+            "center": 2048,
+            "sign": -1
+          }
+        ]
+      },
+      "J3": {
+        "formula": "linear_combination",
+        "divisor": 2,
+        "terms": [
+          {
+            "servo": "e2",
+            "center": 2048,
+            "sign": 1
+          },
+          {
+            "servo": "e1",
+            "center": 2048,
+            "sign": -1
+          }
+        ]
+      },
+      "J4": {
+        "formula": "single",
+        "servo": "wrist_p",
+        "center": 2048
+      },
+      "J5": {
+        "formula": "single",
+        "servo": "wrist_r",
+        "center": 2048
+      },
+      "JF": {
+        "formula": "single",
+        "servo": "gripper",
+        "center": 2000
+      }
+    }
+  },
+  "query_contract": {
+    "pose_targets": [
+      "roboarm_chem_04.tool0",
+      "roboarm_chem_04.Link_5"
+    ],
+    "state_target": "roboarm_chem_04",
+    "affordance_kind": "end_effector",
+    "safety_zone_id": "roboarm_chem_04.rough_workspace"
+  },
+  "validation": {
+    "maturity": "kinematic_query_smoke",
+    "guarantees": [
+      "URDF geometry can be parsed without ROS",
+      "live read-only Feetech ticks can be mapped to approximate URDF joints",
+      "Robo-UniLabOS QueryService can return pose, state, affordance, and safety zone"
+    ],
+    "boundaries": [
+      "tool0 is a provisional operation frame derived from Link_5 plus a 14 cm offset",
+      "servo-pair to URDF-joint mapping is approximate and read-only; it is not a calibrated control mapping",
+      "the cleaned URDF is for query/FK validation, not high-fidelity dynamics",
+      "real actuation, torque enable, follower execution, and transaction safety are not exercised by this asset validation"
+    ]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "asset_id": "World__beaker1",
+  "source": {
+    "dataset": "LabUtopia",
+    "usd_path": "assets/chemistry_lab/lab_001/lab_001.usd",
+    "prim_path": "/World/beaker1"
+  },
+  "asset_class_tags": ["beaker", "container", "liquid_holder"],
+  "geometry": {
+    "source_type": "usd_prim",
+    "bbox_size_m_approx": [0.15491, 0.15491, 0.12656],
+    "bbox_min": [11.94607, -0.23989, 0.13932],
+    "bbox_max": [12.10098, -0.08497, 0.26588]
+  },
+  "affordances": ["beaker", "container", "liquid_holder"],
+  "candidate_tasks": ["HeatLiquid", "PourLiquid", "StirLiquid", "TransportBeaker"],
+  "psb_semantics": {
+    "observable_or_relevant_signals": ["color", "temperature", "volume_estimate"]
+  }
+}

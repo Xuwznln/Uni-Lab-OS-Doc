@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.1",
+  "action": "press_button",
+  "args": {
+    "target": "resource.affordance",
+    "approach_axis": "-x",
+    "press_distance_m": 0.04
+  },
+  "preconditions": [
+    {"type": "object_present", "object": "target"},
+    {"type": "affordance_kind", "kind": "button"}
+  ],
+  "postconditions": [
+    {"type": "pose_axis_gt", "target": "button", "axis": "x", "threshold": 0.405}
+  ],
+  "policy_preference": ["classical", "ACT", "DiffusionPolicy", "VLA"],
+  "timeout_s": 30,
+  "metadata": {
+    "description": "Press a button affordance using a guarded linear approach."
+  }
+}

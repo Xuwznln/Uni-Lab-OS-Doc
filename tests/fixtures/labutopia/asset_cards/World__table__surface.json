@@ -1,0 +1,20 @@
+{
+  "asset_id": "World__table__surface",
+  "source": {
+    "dataset": "LabUtopia",
+    "usd_path": "assets/chemistry_lab/lab_001/lab_001.usd",
+    "prim_path": "/World/table/surface"
+  },
+  "asset_class_tags": ["bench", "support_surface"],
+  "geometry": {
+    "source_type": "usd_prim",
+    "bbox_size_m_approx": [2.0, 1.2, 0.08],
+    "bbox_min": [10.0, -0.8, 0.0],
+    "bbox_max": [12.0, 0.4, 0.08]
+  },
+  "affordances": ["bench", "support_surface"],
+  "candidate_tasks": ["PlaceObject", "RobotWorkspaceCalibration"],
+  "psb_semantics": {
+    "observable_or_relevant_signals": ["occupancy", "surface_clearance"]
+  }
+}

@@ -2,6 +2,8 @@ import json
 import time
 import requests
 from typing import List, Dict, Any
+
+from unilabos.sim.clock import sim_sleep_sync
 import json
 import requests
 from pathlib import Path
@@ -1133,7 +1135,7 @@ class BioyondReactionStation(BioyondWorkstation):
                 for oc in completed_round:
                     del pending[oc]
                 if pending:
-                    time.sleep(check_interval)
+                    sim_sleep_sync(check_interval)  # 协议轮询节拍,响应 --sim_rate
             completed_count = sum(1 for r in reports if r['status'] == 'completed')
             timeout_count = sum(1 for r in reports if r['status'] == 'timeout')
             error_count = sum(1 for r in reports if r['status'] == 'error')

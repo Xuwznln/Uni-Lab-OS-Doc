@@ -123,6 +123,8 @@ set(srv_files
   "srv/ResourceAdd.srv"
   "srv/ResourceUpdate.srv"
   "srv/ResourceDelete.srv"
+  "srv/SetSimRate.srv"
+  "srv/GetSimStatus.srv"
 )
 
 set(msg_files

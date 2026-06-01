@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package unilabos.query;
+
+// Generic JSON command boundary, identical to unilabos.api.query_dispatch.
+// `command` / `response` are the same JSON strings used by the ROS2 SerialCommand
+// path, so gRPC reuses the transport-agnostic dispatch with zero duplicated logic.
+service QueryService {
+  rpc Query (QueryRequest) returns (QueryReply);
+}
+
+message QueryRequest {
+  string command = 1;
+}
+
+message QueryReply {
+  string response = 1;
+}
