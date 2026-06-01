@@ -2,6 +2,8 @@ from datetime import datetime
 import json
 import time
 from typing import Optional, Dict, Any, List
+
+from unilabos.sim.clock import sim_sleep_sync
 from typing_extensions import TypedDict
 import requests
 import pint
@@ -1623,7 +1625,7 @@ class BioyondDispensingStation(BioyondWorkstation):
 
                 # 如果还有待完成的任务，等待后继续
                 if pending_orders:
-                    time.sleep(check_interval)
+                    sim_sleep_sync(check_interval)  # 协议轮询节拍,响应 --sim_rate
 
                     # 每分钟记录一次等待状态
                     new_elapsed_time = time.time() - start_time

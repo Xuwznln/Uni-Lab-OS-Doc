@@ -1502,7 +1502,7 @@ class OpcUaClient(BaseClient):
                                     reconnect_attempts = 0
                         except Exception as e:
                             logger.error(f"重新连接失败 (尝试 {reconnect_attempts}/{max_reconnect_attempts}): {e}")
-                            time.sleep(5)  # 重连失败后等待5秒
+                            time.sleep(5)  # wall clock: I/O retry backoff,重连失败后等待5秒(故意不走 sim clock)
                     else:
                         logger.error(f"达到最大重连次数 ({max_reconnect_attempts})，停止重连")
                         self._connection_monitor_running = False
@@ -1514,7 +1514,7 @@ class OpcUaClient(BaseClient):
                 logger.error(f"连接监控出错: {e}")
             
             # 等待下次检查
-            time.sleep(self._connection_check_interval)
+            time.sleep(self._connection_check_interval)  # wall clock: I/O periodic connection check(故意不走 sim clock)
     
     def _start_connection_monitor(self):
         """启动连接监控线程"""
