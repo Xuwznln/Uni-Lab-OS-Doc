@@ -58,6 +58,21 @@ FLATTENED_LIVE = [
     {"step": "39c78d4b-b5d3-f721-2001-9d52000084c4", "step_name": "S2", "Key": "protocol", "m": 14, "n": 28, "Value": "", "DisplayValue": "", "TaskDisplayable": 1},
     {"step": "39c78d4b-b5d3-f721-2001-9d52000084c5", "step_name": "S3", "Key": "CEMMethodFileName", "m": 0, "n": 0, "Value": "", "DisplayValue": "", "TaskDisplayable": 1},
 ]
+ERROR_HANDLING_REPORT = {
+    "task": "3a21938a-9888-85a7-95ce-ffdbff4513a2",
+    "ijk": "0_0_2",
+    "token": "c130d6a5-0bfd-4a8d-830d-202981714318",
+    "sampleId": "3a21938a-988c-fd90-be55-f84428b844b9",
+    "level": 2,
+    "module": 4,
+    "code": 4005,
+    "errMessage": "步骤故障",
+    "errInnerMessage": "执行设备LabelPrinterA,目标设备LabelPrinterA 执行步骤 BY_Print 失败。",
+    "errInnerMessage2": "执行设备LabelPrinterA，目标设备LabelPrinterA步骤 BY_Print 执行指令 LabelPrinter-BY_Print 失败。",
+    "errInnerMessage3": "executeDeviceCommand: 0_0_2 BY_Print LabelPrinter-BY_Print failed.",
+    "optionMessage": "Please choose option: 1:RetryCmd, 2:SkipCmd, 5:StopCurrent.",
+    "creationTime": "2026-06-01T12:08:01.4912763+08:00",
+}
 
 
 def _import_module() -> Any:
@@ -77,6 +92,61 @@ def _make_station() -> Any:
     return station
 
 
+def _import_bioyond_rpc_module() -> Any:
+    pytest.importorskip("rclpy.logging", reason="Bioyond RPC 依赖 UniLab/ROS 运行环境")
+    return importlib.import_module("unilabos.devices.workstation.bioyond_studio.bioyond_rpc")
+
+
+def test_build_scheduler_error_handling_reply_data_accepts_advertised_options() -> None:
+    rpc_module = _import_bioyond_rpc_module()
+    for option in (1, 2, 5):
+        out = rpc_module.build_scheduler_error_handling_reply_data(
+            ERROR_HANDLING_REPORT,
+            option,
+            creation_time="2026-06-01T04:09:18.271Z",
+        )
+        assert out == {
+            "ijk": "0_0_2",
+            "token": "c130d6a5-0bfd-4a8d-830d-202981714318",
+            "errorHandlingOption": option,
+            "creationTime": "2026-06-01T04:09:18.271Z",
+        }
+
+
+def test_build_scheduler_error_handling_reply_data_validates_required_fields() -> None:
+    rpc_module = _import_bioyond_rpc_module()
+    for field_name in ("ijk", "token"):
+        payload = dict(ERROR_HANDLING_REPORT)
+        payload.pop(field_name)
+        with pytest.raises(ValueError, match=field_name):
+            rpc_module.build_scheduler_error_handling_reply_data(payload, 1)
+
+
+def test_build_scheduler_error_handling_reply_data_rejects_unadvertised_option() -> None:
+    rpc_module = _import_bioyond_rpc_module()
+    with pytest.raises(ValueError, match="optionMessage"):
+        rpc_module.build_scheduler_error_handling_reply_data(ERROR_HANDLING_REPORT, 3)
+
+
+def test_bioyond_external_error_logging_includes_structured_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    try:
+        station_module = importlib.import_module("unilabos.devices.workstation.bioyond_studio.station")
+    except ModuleNotFoundError as exc:
+        pytest.skip(f"BioyondWorkstation optional dependency is unavailable: {exc.name}")
+    workstation = object.__new__(station_module.BioyondWorkstation)
+    messages: List[str] = []
+
+    monkeypatch.setattr(station_module.logger, "error", lambda message, *args, **kwargs: messages.append(str(message)))
+    out = workstation.handle_external_error(ERROR_HANDLING_REPORT)
+    joined = "\n".join(messages)
+
+    assert out["handled"] is True
+    assert out["error_type"] == "bioyond_error"
+    assert "错误信息: 步骤故障\n执行设备LabelPrinterA" in joined
+    assert "LabelPrinter-BY_Print failed." in joined
+    assert "Please choose option: 1:RetryCmd, 2:SkipCmd, 5:StopCurrent." in joined
+
+
 # ---------------------------------------------------------------------------
 # 1. AST/导入面
 # ---------------------------------------------------------------------------
@@ -90,6 +160,8 @@ def test_required_actions_exposed() -> None:
         "get_step_parameters",
         "submit_experiment",
         "submit_experiment_day1",
+        "prepare_cem",
+        "confirm_cem_info",
         "submit_experiment_day2",
         "submit_experiment_day3",
         "submit_experiment_day4",
@@ -113,9 +185,11 @@ def test_required_actions_exposed() -> None:
 def test_manual_confirm_node_types() -> None:
     module = _import_module()
     cls = getattr(module, CLASS_NAME)
-    manual = {"submit_experiment_day1", "start_experiment", "reset_manual"}
+    manual = {"confirm_cem_info", "start_experiment", "reset_manual"}
     normal = {
         "submit_experiment",
+        "submit_experiment_day1",
+        "prepare_cem",
         "submit_experiment_day2",
         "submit_experiment_day3",
         "submit_experiment_day4",
@@ -150,12 +224,11 @@ def test_submit_and_reset_signatures_exclude_legacy_manual_confirm() -> None:
         assert "assignee_user_ids" not in params, name
 
 
-def test_day1_submit_accepts_manual_confirm_kwargs() -> None:
-    """plan: Day1 是 MANUAL_CONFIRM；框架会注入 timeout_seconds/assignee_user_ids，函数必须能接收。"""
+def test_day1_submit_is_normal_action_signature() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
     sig = inspect.signature(cls.submit_experiment_day1)
     has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-    assert has_kwargs, "submit_experiment_day1 必须有 **kwargs 以容纳人工确认框架字段"
+    assert not has_kwargs, "submit_experiment_day1 已是普通 action，不应接收人工确认框架字段"
 
 
 def test_typed_dicts_present() -> None:
@@ -293,12 +366,13 @@ def test_partial_entries_inject_samplefile_and_overrides() -> None:
     assert warnings == []
 
 
-def test_day1_partial_entries_inject_cem_default() -> None:
+def test_day1_cem_default_enters_required_param_flow() -> None:
     station = _make_station()
     entries, _ = station._build_partial_parameter_entries(
         sample_excel_relative_path="upload\\sample\\f.xlsx",
         day_key="day1",
-        extra_autofill=[{"Key": "CEMMethodFileName", "Value": "5microdouble-20250911.MPM"}],
+        required_params={"sample_excel_pattern": "", "cem_method_file_name": ""},
+        parameter_overrides=[],
     )
     assert any(e["Key"] == "CEMMethodFileName" and e["Value"] == "5microdouble-20250911.MPM" for e in entries)
 
@@ -401,6 +475,7 @@ def test_submit_experiment_generic_succeeds() -> None:
     assert result["success"] is True
     assert result["order_id"] == ORDER_GUID
     assert result["resultTable"]["tableName"] == "resultTable"
+    assert result["sample_excel_relative_path"] == "upload\\sample\\f.xlsx"
 
 
 def test_submit_experiment_rejects_day1_alias() -> None:
@@ -425,30 +500,135 @@ def test_submit_experiment_day2_calls_pipeline() -> None:
     assert result["order_ids"] == [ORDER_GUID]
     assert result["auto_register_materials"] is True
     assert result["material_registration"]["status"] == "not_implemented"
+    assert result["sample_excel_relative_path"] == "upload\\sample\\f.xlsx"
 
 
-def test_day1_placeholder_does_not_call_create_order() -> None:
+def test_submit_experiment_day1_calls_pipeline_and_injects_default_cem_method() -> None:
     station = _make_station()
-    station._resolve_workflow_binding = MagicMock(return_value={  # type: ignore[method-assign]
-        "workflow_name": "Day1线肽合成",
-        "root_workflow_id": "rid",
-        "sub_workflow_id": "sid",
-        "sub_workflow_name": "Day1线肽合成",
-        "raw": {},
-    })
-    station._create_order = MagicMock(side_effect=AssertionError("Day1 不应触达 create_order"))  # type: ignore[method-assign]
-    out = station.submit_experiment_day1(
+    _wire_submit_pipeline(station)
+    result = station.submit_experiment_day1(
         {"sample_excel_pattern": "", "cem_method_file_name": ""},
         {},
         sample_excel_relative_path="upload/sample/f.xlsx",
-        # 模拟人工确认框架注入的字段（这条会抦住 BUG 3）
-        timeout_seconds=3600,
-        assignee_user_ids=[],
-        materials_loaded=False,
     )
-    assert out["status"] == "manual_confirm_placeholder"
+    station._create_order.assert_called_once()
+    order_payload = station._create_order.call_args.args[0]
+    param_values = order_payload[0]["paramValues"]
+    sent_params = [entry for values in param_values.values() for entry in values]
+    assert result["success"] is True
+    assert result["cem_method_file_name"] == "5microdouble-20250911.MPM"
+    assert result["sample_excel_relative_path"] == "upload\\sample\\f.xlsx"
+    assert any(
+        entry["key"] == "CEMMethodFileName" and entry["value"] == "5microdouble-20250911.MPM"
+        for entry in sent_params
+    )
+    assert any(entry["key"] == "SampleFile" and entry["value"] == "upload\\sample\\f.xlsx" for entry in sent_params)
+
+
+def test_prepare_cem_uses_peptide_rpc_post_and_default_method() -> None:
+    station = _make_station()
+    station.hardware_interface.post.return_value = {"code": 1, "data": "/files/cem.pdf"}
+    out = station.prepare_cem(cem_method_file_name="", sample_excel_relative_path="upload/sample/f.xlsx")
+    args, kwargs = station.hardware_interface.post.call_args
+    assert kwargs["url"] == "http://test/api/lims/order/prepare-cEM"
+    body = kwargs["params"]
+    assert body["apiKey"] == "k"
+    assert body["data"] == {
+        "methodFileName": "5microdouble-20250911.MPM",
+        "excelPath": r"upload\sample\f.xlsx",
+    }
+    assert "commonlyOrderId" not in body["data"]
+    assert out["success"] is True
     assert out["cem_method_file_name"] == "5microdouble-20250911.MPM"
-    assert isinstance(out["partial_parameter_entries"], list)
+    assert out["sample_excel_relative_path"] == "upload\\sample\\f.xlsx"
+    assert out["cem_pdf_path"] == "/files/cem.pdf"
+    assert out["cem_info_url"] == "http://test/files/cem.pdf"
+    assert args == ()
+
+
+def test_prepare_cem_preserves_raw_pdf_path_but_normalizes_url() -> None:
+    station = _make_station()
+    station.hardware_interface.post.return_value = {
+        "code": 1,
+        "data": r"upload\Report\DPR019\1-CEM.pdf",
+    }
+    out = station.prepare_cem(sample_excel_relative_path=r"upload\sample\f.xlsx")
+    assert out["cem_pdf_path"] == r"upload\Report\DPR019\1-CEM.pdf"
+    assert out["cem_info_url"] == "http://test/upload/Report/DPR019/1-CEM.pdf"
+
+
+def test_prepare_cem_handle_keys() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    meta = getattr(cls.prepare_cem, "_action_registry_meta", {})
+    handles = meta.get("handles", [])
+    if isinstance(handles, dict):
+        handle_items = list(handles.get("input", [])) + list(handles.get("output", []))
+        handle_keys = [handle.get("handler_key") or handle.get("key") for handle in handle_items]
+    else:
+        handle_keys = [handle.key for handle in handles]
+    assert "cem_method_file_name" in handle_keys
+    assert "sample_excel_relative_path" in handle_keys
+    assert "cem_pdf_path" in handle_keys
+    assert "cem_info_url" in handle_keys
+    assert "prepare_cem_response" in handle_keys
+
+
+def test_prepare_cem_rejects_missing_excel_path() -> None:
+    station = _make_station()
+    with pytest.raises(Exception):
+        station.prepare_cem(sample_excel_relative_path="")
+    station.hardware_interface.post.assert_not_called()
+
+
+def test_prepare_cem_rejects_non_success_response() -> None:
+    station = _make_station()
+    station.hardware_interface.post.return_value = {"code": 0, "message": "bad"}
+    with pytest.raises(RuntimeError):
+        station.prepare_cem(sample_excel_relative_path="upload/sample/f.xlsx")
+
+
+def test_prepare_cem_rejects_missing_data() -> None:
+    station = _make_station()
+    station.hardware_interface.post.return_value = {"code": 1, "data": ""}
+    with pytest.raises(RuntimeError):
+        station.prepare_cem(sample_excel_relative_path="upload/sample/f.xlsx")
+
+
+def test_confirm_cem_info_metadata_shape() -> None:
+    module = _import_module()
+    cls = getattr(module, CLASS_NAME)
+    meta = getattr(cls.confirm_cem_info, "_action_registry_meta", {})
+    assert meta.get("node_type") == module.NodeType.MANUAL_CONFIRM
+    assert meta.get("always_free") is True
+    assert meta.get("placeholder_keys") == {"assignee_user_ids": "unilabos_manual_confirm"}
+    assert meta.get("goal_default") == {
+        "cem_info_confirmed": False,
+        "timeout_seconds": 3600,
+        "assignee_user_ids": [],
+    }
+
+
+def test_confirm_cem_info_returns_instruction_after_confirmation() -> None:
+    station = _make_station()
+    out = station.confirm_cem_info(
+        cem_pdf_path="/files/cem.pdf",
+        cem_info_url="http://test/files/cem.pdf",
+        cem_method_file_name="method.MPM",
+        sample_excel_relative_path="upload/sample/f.xlsx",
+        cem_info_confirmed=True,
+    )
+    assert out["success"] is True
+    assert out["cem_pdf_path"] == "/files/cem.pdf"
+    assert out["cem_info_url"] == "http://test/files/cem.pdf"
+    assert out["cem_method_file_name"] == "method.MPM"
+    assert out["sample_excel_relative_path"] == "upload\\sample\\f.xlsx"
+    assert "打开下述链接查看CEM校验信息" in out["instruction_text"]
+
+
+def test_confirm_cem_info_blocks_without_confirmation() -> None:
+    station = _make_station()
+    with pytest.raises(RuntimeError):
+        station.confirm_cem_info(cem_info_confirmed=False)
 
 
 # ---------------------------------------------------------------------------

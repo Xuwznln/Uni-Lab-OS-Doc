@@ -1669,7 +1669,8 @@ class BioyondWorkstation(WorkstationBase):
                     )
                     if error_data.get(key) not in (None, "")
                 ]
-                logger.error(f"  错误信息: {'\\n'.join(error_message_parts) if error_message_parts else '无'}")
+                error_message = "\n".join(error_message_parts) if error_message_parts else "无"
+                logger.error(f"  错误信息: {error_message}")
                 error_type = "bioyond_error"
             else:
                 # 标准格式
