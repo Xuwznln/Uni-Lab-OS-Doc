@@ -217,6 +217,56 @@ def test_build_unload_rows_falls_back_to_top_quantity() -> None:
     assert rows[0]["quantity"] == "9"
 
 
+def test_build_unload_rows_falls_back_when_location_quantity_is_zero() -> None:
+    """奔曜 materials-by-order-id 实测返回 location.quantity=0（运行时计数），
+    material.quantity 才是操作员关心的真实总量。
+    历史 bug：``if loc_quantity is None`` 不能命中 0，导致前端全是 0。
+    """
+    module = _import_sirna_module()
+    cls = getattr(module, "BioyondSirnaStation")
+    rows = cls._build_unload_rows_from_all_stock_material([
+        {
+            "id": "m_real", "name": "G3-50ul枪头盒", "quantity": 1.0,
+            "locations": [{"code": "10-2", "whName": "自动化堆栈", "quantity": 0}],
+        }
+    ])
+    assert rows[0]["quantity"] == "1", (
+        "location.quantity=0 必须回退到 material.quantity，否则前端表格全是 0"
+    )
+
+
+def test_build_unload_rows_formats_integer_float_as_int_string() -> None:
+    """奔曜返回的 quantity 经常是 float（``1.0``/``4.0``）。
+    前端显示 ``1.0`` 不友好，整数值 float 应该去尾 ``.0`` 输出 ``"1"``。"""
+    module = _import_sirna_module()
+    cls = getattr(module, "BioyondSirnaStation")
+    rows = cls._build_unload_rows_from_all_stock_material([
+        {
+            "id": "m1", "name": "A", "quantity": 4.0,
+            "locations": [{"code": "3-2", "whName": "WH", "quantity": 4.0}],
+        },
+        {
+            "id": "m2", "name": "B", "quantity": 1.0,
+            "locations": [],  # 走 top_quantity 路径
+        },
+    ])
+    assert rows[0]["quantity"] == "4"
+    assert rows[1]["quantity"] == "1"
+
+
+def test_build_unload_rows_keeps_non_integer_float_as_is() -> None:
+    """非整数 float（``1.5`` 这类）必须保留原样，不能截断成 ``1``。"""
+    module = _import_sirna_module()
+    cls = getattr(module, "BioyondSirnaStation")
+    rows = cls._build_unload_rows_from_all_stock_material([
+        {
+            "id": "m", "name": "X", "quantity": 1.5,
+            "locations": [{"code": "1-1", "whName": "WH", "quantity": 1.5}],
+        }
+    ])
+    assert rows[0]["quantity"] == "1.5"
+
+
 def test_build_unload_rows_handles_empty_input_and_non_dict_items() -> None:
     module = _import_sirna_module()
     cls = getattr(module, "BioyondSirnaStation")

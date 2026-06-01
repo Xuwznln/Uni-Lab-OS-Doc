@@ -3503,13 +3503,37 @@ class BioyondSirnaStation(BioyondWorkstation):
         }
 
     @staticmethod
+    def _format_unload_quantity(q: Any) -> str:
+        """把 materials-by-order-id 返回的 ``quantity`` 字段格式化成展示字符串。
+
+        - ``None`` / 空串 → ``""``（前端 No data 占位）
+        - 整数值 float（``1.0`` / ``4.0``）→ ``"1"`` / ``"4"``，去掉无意义的 ``.0`` 尾巴
+        - 其他保留 ``str(q)`` 原样
+        """
+        if q is None or q == "":
+            return ""
+        if isinstance(q, bool):
+            return str(q)
+        if isinstance(q, float) and q.is_integer():
+            return str(int(q))
+        return str(q)
+
+    @classmethod
     def _build_unload_rows_from_all_stock_material(
+        cls,
         all_materials: Optional[List[Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
-        """把 ``all-stock-material`` 返回数据展平成下料表行（plan v2：4 列）。
+        """把 ``materials-by-order-id`` 返回数据展平成下料表行（plan v2：4 列）。
 
         每条物料若有多 ``locations`` 则按 location 拆多行，方便操作员一对一物理取出；
         ``locations`` 为空时仍保留一行空坐标占位，提示该物料无法定位但需要操作员处理。
+
+        Quantity 语义（实测奔曜实现）：
+        - 物料级 ``quantity`` 是该物料在订单里的真实总量（操作员关心的"几个"）。
+        - location 级 ``quantity`` 是运行时计数，实验未开始 / 已结束时通常为 0；
+          下料指引场景没有展示价值。
+        因此 location 级为 0 / None / 空时一律回退到物料级 ``top_quantity``，
+        避免前端表格里全是 0 的误导。
         """
         rows: List[Dict[str, Any]] = []
         for mat in all_materials or []:
@@ -3523,20 +3547,22 @@ class BioyondSirnaStation(BioyondWorkstation):
                     "whName": "",
                     "locationCode": "",
                     "materialName": material_name,
-                    "quantity": "" if top_quantity is None else str(top_quantity),
+                    "quantity": cls._format_unload_quantity(top_quantity),
                 })
                 continue
             for loc in locations:
                 if not isinstance(loc, dict):
                     continue
                 loc_quantity = loc.get("quantity")
-                if loc_quantity is None:
+                # 关键：奔曜实际返回 location.quantity=0（运行时计数），
+                # 必须用 truthy 判断回退到物料级 quantity，不能用 `is None`。
+                if not loc_quantity:
                     loc_quantity = top_quantity
                 rows.append({
                     "whName": str(loc.get("whName") or ""),
                     "locationCode": str(loc.get("code") or ""),
                     "materialName": material_name,
-                    "quantity": "" if loc_quantity is None else str(loc_quantity),
+                    "quantity": cls._format_unload_quantity(loc_quantity),
                 })
         return rows
 
