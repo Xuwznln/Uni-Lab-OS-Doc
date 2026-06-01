@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import ast
 import copy
 import json
@@ -14,6 +13,7 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote
 from uuid import UUID
 
 import requests
@@ -1552,6 +1552,18 @@ class BioyondPeptideStation(BioyondWorkstation):
             "message": "聚合报告尚未实现，请使用 get_order_report。",
         }
 
+    @action(always_free=True, description="查询订单报告文件列表")
+    def get_order_report_files(self, order_id: str) -> Dict[str, Any]:
+        resolved = self._require_uuid(order_id, "order_id")
+        rpc = self._require_hardware_interface()
+        with self._debug_call_session("get_order_report_files"):
+            files = rpc.order_report_files(resolved)
+        api_host = str(getattr(rpc, "host", "") or self.bioyond_config.get("api_host", "")).rstrip("/")
+        file_urls = [self._join_api_url(api_host, path) for path in files]
+        zip_urls = [url for url in file_urls if url.lower().endswith(".zip")]
+        file_zip = zip_urls[-1] if zip_urls else ""
+        return {"success": True, "order_id": resolved, "file_zip": file_zip, "files": file_urls, "file_count": len(file_urls)}
+
     # ---------- 样品 Excel ----------
 
     def _resolve_submit_sample_file(
@@ -1603,7 +1615,7 @@ class BioyondPeptideStation(BioyondWorkstation):
     @staticmethod
     def _join_api_url(api_host: str, path: str) -> str:
         base = str(api_host or "").rstrip("/")
-        suffix = str(path or "").replace("\\", "/").lstrip("/")
+        suffix = quote(str(path or "").replace("\\", "/").lstrip("/"), safe="/")
         return f"{base}/{suffix}" if base else suffix
 
     def _list_sample_excels(self, name_filter: str = "", begin_date: Any = None, end_date: Any = None) -> List[Dict[str, Any]]:
@@ -2328,21 +2340,3 @@ class BioyondPeptideStation(BioyondWorkstation):
         if value is None:
             return []
         return value if isinstance(value, list) else [value]
-
-
-def main() -> int:
-    assert DEBUG_CLI_ENABLED, "CLI 工作流探测仅在 DEBUG_CLI_ENABLED=True 时可用"
-    parser = argparse.ArgumentParser(description="Peptide Station 工作流列表拉取（调试）")
-    parser.add_argument("config_path", help="JSON 配置文件路径")
-    parser.add_argument("--workflow-type", type=int, default=0)
-    parser.add_argument("--filter", default="")
-    args = parser.parse_args()
-    result = fetch_workflow_list(config_path=args.config_path, workflow_type=args.workflow_type, filter_text=args.filter)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    response_body = result.get("response", {})
-    ok = result.get("http_status") == 200 and isinstance(response_body, dict) and response_body.get("code") == 1
-    return 0 if ok else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

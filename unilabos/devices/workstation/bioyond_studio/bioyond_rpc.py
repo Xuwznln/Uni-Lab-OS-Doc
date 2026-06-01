@@ -773,6 +773,27 @@ class BioyondV1RPC(BaseRequest):
             return {}
         return response.get("data", {})
 
+    def order_report_files(self, order_id: str) -> list:
+        """查询订单报告文件列表
+
+        参数:
+            order_id: 订单ID (GUID)
+
+        返回值:
+            list: 报告文件URL/路径列表，失败返回空列表
+        """
+        response = self.post(
+            url=f'{self.host}/api/lims/order/order-report-files',
+            params={
+                "apiKey": self.api_key,
+                "requestTime": self.get_current_time_iso8601(),
+                "data": order_id,
+            })
+        if not response or response.get('code') != 1:
+            return []
+        data = response.get("data", [])
+        return data if isinstance(data, list) else []
+
     def order_takeout(self, json_str: str) -> int:
         """取出任务产物
 
