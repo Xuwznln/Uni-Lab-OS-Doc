@@ -20,6 +20,8 @@ class RuntimeContext:
     missing_sim_policy_default: MissingSimPolicy = "stub"
     sim_paused: bool = False
     sim_services_enabled: bool = True
+    query_api_enabled: bool = True
+    query_grpc_port: int = 50051
 
     def __post_init__(self) -> None:
         if self.mode not in ("real", "sim", "twin"):

@@ -319,6 +319,18 @@ def build_argparser():
         default=False,
         help="Do not auto-start /clock publisher and sim clock control ROS services.",
     )
+    parser.add_argument(
+        "--disable_query_api",
+        action="store_true",
+        default=False,
+        help="Do not auto-start the Robo-UniLabOS query API (ROS2 /unilabos/query + gRPC).",
+    )
+    parser.add_argument(
+        "--query_grpc_port",
+        type=int,
+        default=50051,
+        help="gRPC port for the query API (0 disables gRPC; ROS2 service still starts).",
+    )
     # workflow upload subcommand
     workflow_parser = subparsers.add_parser(
         "workflow_upload",

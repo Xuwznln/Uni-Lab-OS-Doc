@@ -36,11 +36,15 @@ def start_backend(
         start_ros_services=False,
     )
     _runtime_services.context.sim_services_enabled = start_sim_services and mode in ("sim", "twin")
+    _runtime_services.context.query_api_enabled = backend == "ros" and not kwargs.get("disable_query_api", False)
+    _runtime_services.context.query_grpc_port = int(kwargs.get("query_grpc_port", 50051))
     logger.info(
         "Runtime mode initialized: "
         f"mode={mode}, sim_rate={_runtime_services.context.clock.scale}, "
         f"paused={_runtime_services.context.clock.paused}, "
-        f"sim_services={start_sim_services and mode in ('sim', 'twin')}"
+        f"sim_services={start_sim_services and mode in ('sim', 'twin')}, "
+        f"query_api={_runtime_services.context.query_api_enabled}, "
+        f"grpc_port={_runtime_services.context.query_grpc_port}"
     )
 
     if backend == "ros":

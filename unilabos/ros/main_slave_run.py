@@ -68,8 +68,57 @@ def _start_twin_poller(executor, devices_provider) -> None:
     rclpy.__twin_poller = poller
 
 
+def _start_query_services(executor) -> None:
+    """启动 Robo-UniLabOS 信息层对外暴露:ROS2 /unilabos/query + gRPC :50051。
+
+    ROS2 服务节点与 gRPC server 共享同一个 QueryService/QueryEngine(含 RosLiveSource),
+    因此两条传输看到的是同一份实时态(订阅 /joint_states)。gRPC 缺 grpcio 或端口占用
+    时优雅跳过,不影响 edge 启动。
+    """
+    ctx = get_runtime_context()
+    if not getattr(ctx, "query_api_enabled", False):
+        rclpy.__query_services = []
+        return
+
+    services = []
+    try:
+        from unilabos.api import QueryService
+        from unilabos.api.ros2_query_service import QueryServiceNode
+        from unilabos.queries.ros_live_source import build_live_query_engine
+
+        live, engine = build_live_query_engine()
+        service = QueryService(engine)
+
+        qnode = QueryServiceNode(service, auto_start=True)
+        if qnode.node is not None:
+            live.attach_ros(qnode.node, joint_states_topic="/joint_states")
+            executor.add_node(qnode.node)
+            services.append(qnode)
+            logger.info("Query API ROS2 service started at /unilabos/query")
+
+        port = int(getattr(ctx, "query_grpc_port", 50051) or 0)
+        if port >= 0 and port != 0:
+            try:
+                from unilabos.api.grpc_query_service import QueryGrpcServer
+
+                grpc_server = QueryGrpcServer(service, port=port, auto_start=True)
+                services.append(grpc_server)
+                logger.info(f"Query API gRPC server started at :{grpc_server.bound_port}")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Query API gRPC server not started (grpcio missing or port busy?): {e}")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Query API not started: {e}")
+    rclpy.__query_services = services
+
+
 def exit() -> None:
     """关闭ROS节点和资源"""
+    for query_service in getattr(rclpy, "__query_services", []):
+        if hasattr(query_service, "shutdown"):
+            try:
+                query_service.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
     twin_poller = getattr(rclpy, "__twin_poller", None)
     if twin_poller is not None and hasattr(twin_poller, "shutdown"):
         twin_poller.shutdown()
@@ -125,6 +174,8 @@ def main(
 
     # twin 模式:周期驱动 HostNode 下设备的 TwinBridge(设备可能延迟创建,用 provider)
     _start_twin_poller(executor, lambda: getattr(host_node, "devices_instances", {}))
+    # 信息层对外暴露:ROS2 /unilabos/query + gRPC :50051
+    _start_query_services(executor)
 
     if visual != "disable":
         from unilabos.ros.nodes.presets.joint_republisher import JointRepublisher
@@ -261,6 +312,8 @@ def slave(
 
     # twin 模式:周期驱动已建设备的 TwinBridge.poll_once()
     _start_twin_poller(executor, lambda: devices_instances)
+    # 信息层对外暴露:ROS2 /unilabos/query + gRPC :50051
+    _start_query_services(executor)
 
     # 5. 如果启用可视化，创建可视化相关节点
     if visual != "disable":
