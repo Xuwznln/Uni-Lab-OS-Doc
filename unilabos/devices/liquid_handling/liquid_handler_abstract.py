@@ -1067,6 +1067,10 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         items: Sequence[Union[Container, TipRack, Dict[str, Any]]],
     ) -> List[Union[Container, TipRack]]:
         """将 dict 格式的资源解析为 PLR 实例。若全部已是 PLR，直接返回。"""
+        # 容错：上游可能传入 None（例如某些 transfer 步骤缺省 sources/targets/tip_racks），
+        # 直接当作空序列处理，避免 ``enumerate(None)`` 抛 ``TypeError: 'NoneType' object is not iterable``。
+        if items is None:
+            return []
         dict_items = [(i, x) for i, x in enumerate(items) if isinstance(x, dict)]
         if not dict_items:
             return list(items)

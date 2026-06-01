@@ -1377,6 +1377,19 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         sources = await self._resolve_to_plr_resources(sources)
         targets = await self._resolve_to_plr_resources(targets)
         tip_racks = list(await self._resolve_to_plr_resources(tip_racks))
+        # 退化的空 transfer：workflow 偶发下发 sources/targets/tip_racks/asp_vols/dis_vols
+        # 全为 None 的占位节点（runtime 实测：真实 transfer 前后各夹了一个全 None 的 goal）。
+        # 这类「无源无目标」的传输本质是 no-op，直接返回空结果，避免整个 action 因后续
+        # "empty tip_racks" 校验而崩溃。仍保留下方校验以覆盖「有源有目标但缺 tip_rack」的真实误配。
+        if len(sources) == 0 and len(targets) == 0:
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                try:
+                    self._ros_node.lab_logger().warning(
+                        "transfer_liquid 收到空的 sources/targets（占位 / no-op 节点），跳过本次传输。"
+                    )
+                except Exception:
+                    pass
+            return TransferLiquidReturn(sources=[], targets=[])
         if len(tip_racks) == 0:
             raise ValueError(
                 "transfer_liquid requires at least one tip rack, but got empty tip_racks."
