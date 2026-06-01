@@ -206,6 +206,7 @@ class ImportManager:
             "ast_analysis_success": False,
             "import_map": {},
             "init_params": [],
+            "init_docstring": None,
             "status_methods": {},
             "action_methods": {},
         }
@@ -251,6 +252,7 @@ class ImportManager:
 
         # 映射到统一字段名（与 registry.py complete_registry 消费端一致）
         result["init_params"] = body.get("init_params", [])
+        result["init_docstring"] = body.get("init_docstring")
         result["status_methods"] = body.get("status_properties", {})
         result["action_methods"] = {
             k: {

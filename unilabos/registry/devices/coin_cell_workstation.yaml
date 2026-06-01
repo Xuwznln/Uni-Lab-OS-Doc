@@ -150,15 +150,15 @@ coincellassemblyworkstation_device:
               properties:
                 assembly_pressure:
                   default: 4200
-                  description: 电池压制力(N)
+                  description: 电池压制力 (N)
                   type: integer
                 assembly_type:
                   default: 7
-                  description: 组装类型(7=不用铝箔垫, 8=使用铝箔垫)
+                  description: 组装类型 (7=不用铝箔垫, 8=使用铝箔垫)
                   type: integer
                 battery_clean_ignore:
                   default: false
-                  description: 是否忽略电池清洁步骤
+                  description: 是否忽略电池清洁
                   type: boolean
                 battery_pressure_mode:
                   default: true
@@ -166,29 +166,29 @@ coincellassemblyworkstation_device:
                   type: boolean
                 dual_drop_first_volume:
                   default: 25
-                  description: 二次滴液第一次排液体积(μL)
+                  description: 二次滴液第一次排液体积 (μL)
                   type: integer
                 dual_drop_mode:
                   default: false
-                  description: 电解液添加模式(false=单次滴液, true=二次滴液)
+                  description: 电解液添加模式 (False=单次滴液, True=二次滴液)
                   type: boolean
                 dual_drop_start_timing:
                   default: false
-                  description: 二次滴液开始滴液时机(false=正极片前, true=正极片后)
+                  description: 二次滴液开始滴液时机 (False=正极片前, True=正极片后)
                   type: boolean
                 dual_drop_suction_timing:
                   default: false
-                  description: 二次滴液吸液时机(false=正常吸液, true=先吸液)
+                  description: 二次滴液吸液时机 (False=正常吸液, True=先吸液)
                   type: boolean
                 elec_num:
                   description: 电解液瓶数
                   type: string
                 elec_use_num:
-                  description: 每瓶电解液组装电池数
+                  description: 每瓶电解液组装的电池数
                   type: string
                 elec_vol:
                   default: 50
-                  description: 电解液吸液量(μL)
+                  description: 电解液吸液量 (μL)
                   type: integer
                 file_path:
                   default: /Users/sml/work
@@ -196,7 +196,7 @@ coincellassemblyworkstation_device:
                   type: string
                 fujipian_juzhendianwei:
                   default: 0
-                  description: 负极片矩阵点位。盘位置从1开始计数，有效范围：1-8, 13-20 (写入值比实际位置少1，例如：写0取盘位1，写1取盘位2)
+                  description: 负极片矩阵点位
                   type: integer
                 fujipian_panshu:
                   default: 0
@@ -204,7 +204,7 @@ coincellassemblyworkstation_device:
                   type: integer
                 gemo_juzhendianwei:
                   default: 0
-                  description: 隔膜矩阵点位。盘位置从1开始计数，有效范围：1-8, 13-20 (写入值比实际位置少1，例如：写0取盘位1，写1取盘位2)
+                  description: 隔膜矩阵点位
                   type: integer
                 gemopanshu:
                   default: 0
@@ -216,7 +216,7 @@ coincellassemblyworkstation_device:
                   type: boolean
                 qiangtou_juzhendianwei:
                   default: 0
-                  description: 枪头盒矩阵点位。盘位置从1开始计数，有效范围：1-32, 64-96 (写入值比实际位置少1，例如：写0取盘位1，写1取盘位2)
+                  description: 枪头盒矩阵点位
                   type: integer
               required:
               - elec_num
@@ -308,7 +308,13 @@ coincellassemblyworkstation_device:
               properties:
                 material_search_enable:
                   default: false
-                  description: 是否启用物料搜寻功能。设备初始化后会弹出物料搜寻确认弹窗，此参数控制自动点击"是"(启用)或"否"(不启用)。默认为false(不启用物料搜寻)
+                  description: '是否启用物料搜寻功能。
+
+                    设备初始化后会弹出物料搜寻确认弹窗，
+
+                    此参数控制自动点击''是''（启用）或''否''（不启用）。
+
+                    默认为False（不启用物料搜寻）。'
                   type: boolean
               required: []
               type: object
@@ -547,15 +553,15 @@ coincellassemblyworkstation_device:
               properties:
                 assembly_pressure:
                   default: 4200
-                  description: 电池压制力(N)
+                  description: 电池压制力 (N)
                   type: integer
                 assembly_type:
                   default: 7
-                  description: 组装类型(7=不用铝箔垫, 8=使用铝箔垫)
+                  description: 组装类型 (7=不用铝箔垫, 8=使用铝箔垫)
                   type: integer
                 battery_clean_ignore:
                   default: false
-                  description: 是否忽略电池清洁步骤
+                  description: 是否忽略电池清洁
                   type: boolean
                 battery_pressure_mode:
                   default: true
@@ -563,29 +569,29 @@ coincellassemblyworkstation_device:
                   type: boolean
                 dual_drop_first_volume:
                   default: 25
-                  description: 二次滴液第一次排液体积(μL)
+                  description: 二次滴液第一次排液体积 (μL)
                   type: integer
                 dual_drop_mode:
                   default: false
-                  description: 电解液添加模式(false=单次滴液, true=二次滴液)
+                  description: 电解液添加模式 (False=单次滴液, True=二次滴液)
                   type: boolean
                 dual_drop_start_timing:
                   default: false
-                  description: 二次滴液开始滴液时机(false=正极片前, true=正极片后)
+                  description: 二次滴液开始滴液时机 (False=正极片前, True=正极片后)
                   type: boolean
                 dual_drop_suction_timing:
                   default: false
-                  description: 二次滴液吸液时机(false=正常吸液, true=先吸液)
+                  description: 二次滴液吸液时机 (False=正常吸液, True=先吸液)
                   type: boolean
                 elec_num:
-                  description: 电解液瓶数，如果在workflow中已通过handles连接上游(create_orders的bottle_count输出)，则此参数会自动从上游获取，无需手动填写；如果单独使用此函数(没有上游连接)，则必须手动填写电解液瓶数
+                  description: 电解液瓶数
                   type: string
                 elec_use_num:
-                  description: 每瓶电解液组装电池数
+                  description: 每瓶电解液组装的电池数
                   type: string
                 elec_vol:
                   default: 50
-                  description: 电解液吸液量(μL)
+                  description: 电解液吸液量 (μL)
                   type: integer
                 file_path:
                   default: /Users/sml/work
@@ -593,7 +599,7 @@ coincellassemblyworkstation_device:
                   type: string
                 fujipian_juzhendianwei:
                   default: 0
-                  description: 负极片矩阵点位。盘位置从1开始计数，有效范围：1-8, 13-20 (写入值比实际位置少1，例如：写0取盘位1，写1取盘位2)
+                  description: 负极片矩阵点位
                   type: integer
                 fujipian_panshu:
                   default: 0
@@ -601,7 +607,7 @@ coincellassemblyworkstation_device:
                   type: integer
                 gemo_juzhendianwei:
                   default: 0
-                  description: 隔膜矩阵点位。盘位置从1开始计数，有效范围：1-8, 13-20 (写入值比实际位置少1，例如：写0取盘位1，写1取盘位2)
+                  description: 隔膜矩阵点位
                   type: integer
                 gemopanshu:
                   default: 0
@@ -613,7 +619,7 @@ coincellassemblyworkstation_device:
                   type: boolean
                 qiangtou_juzhendianwei:
                   default: 0
-                  description: 枪头盒矩阵点位。盘位置从1开始计数，有效范围：1-32, 64-96 (写入值比实际位置少1，例如：写0取盘位1，写1取盘位2)
+                  description: 枪头盒矩阵点位
                   type: integer
               required:
               - elec_num

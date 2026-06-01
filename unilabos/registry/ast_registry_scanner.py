@@ -20,6 +20,7 @@ Usage:
 import ast
 import hashlib
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -32,10 +33,20 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 1       # 缓存格式版本号，格式变更时递增
+_CACHE_VERSION = 3       # 缓存格式版本号，格式变更时递增
+_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
 _REGISTRY_DECORATOR_MODULE = "unilabos.registry.decorators"
+
+
+def _validate_device_ids(device_ids: List[str]) -> None:
+    invalid_ids = [device_id for device_id in device_ids if not _DEVICE_ID_RE.fullmatch(device_id)]
+    if invalid_ids:
+        raise ValueError(
+            "@device id 只能包含英文、数字、下划线: "
+            + ", ".join(repr(device_id) for device_id in invalid_ids)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -258,8 +269,6 @@ def scan_directory(
     }
 
 
-
-
 # ---------------------------------------------------------------------------
 # File-level parsing
 # ---------------------------------------------------------------------------
@@ -344,14 +353,16 @@ def _parse_file(
                     did = device_args.get("id") or device_args.get("device_id")
                     device_ids = [did] if did else [f"{module_path}:{node.name}"]
 
+                _validate_device_ids(device_ids)
                 id_meta = device_args.get("id_meta") or {}
+                display_name = device_args.get("displayname") or device_args.get("display_name", "")
                 base_meta = {
                     "class_name": node.name,
                     "module": f"{module_path}:{node.name}",
                     "file_path": str(filepath).replace("\\", "/"),
                     "category": device_args.get("category", []),
                     "description": device_args.get("description", ""),
-                    "display_name": device_args.get("display_name", ""),
+                    "display_name": display_name,
                     "icon": device_args.get("icon", ""),
                     "version": device_args.get("version", "1.0.0"),
                     "device_type": _detect_class_type(node, import_map),
@@ -361,6 +372,7 @@ def _parse_file(
                     "actions": class_body.get("actions", {}),
                     "status_properties": class_body.get("status_properties", {}),
                     "init_params": class_body.get("init_params", []),
+                    "init_docstring": class_body.get("init_docstring"),
                     "auto_methods": class_body.get("auto_methods", {}),
                     "import_map": import_map,
                 }
@@ -368,9 +380,12 @@ def _parse_file(
                     meta = dict(base_meta)
                     meta["device_id"] = did
                     overrides = id_meta.get(did, {})
-                    for key in ("handles", "description", "icon", "model", "hardware_interface"):
+                    for key in ("handles", "description", "display_name", "displayname", "icon", "model", "hardware_interface"):
                         if key in overrides:
-                            meta[key] = overrides[key]
+                            if key == "displayname":
+                                meta["display_name"] = overrides[key]
+                            else:
+                                meta[key] = overrides[key]
                     devices.append(meta)
 
             # --- @resource on classes ---
@@ -495,7 +510,6 @@ def _collect_imports(tree: ast.Module, module_path: str = "") -> Dict[str, str]:
                         import_map.setdefault(target.id, f"{module_path}:{target.id}")
 
     return import_map
-
 
 
 # ---------------------------------------------------------------------------
@@ -768,6 +782,7 @@ def _extract_class_body(
         "actions": {},          # method_name -> action_info
         "status_properties": {},  # prop_name -> status_info
         "init_params": [],      # [{"name": ..., "type": ..., "default": ...}, ...]
+        "init_docstring": None,
         "auto_methods": {},     # method_name -> method_info (no @action decorator)
     }
 
@@ -780,6 +795,7 @@ def _extract_class_body(
         # --- __init__ ---
         if method_name == "__init__":
             result["init_params"] = _extract_method_params(item, import_map)
+            result["init_docstring"] = ast.get_docstring(item)
             continue
 
         # --- Skip private/dunder ---
@@ -825,6 +841,7 @@ def _extract_class_body(
             action_args.setdefault("placeholder_keys", {})
             action_args.setdefault("always_free", False)
             action_args.setdefault("is_protocol", False)
+            action_args.setdefault("feedback_interval", 1.0)
             action_args.setdefault("description", "")
             action_args.setdefault("auto_prefix", False)
             action_args.setdefault("parent", False)

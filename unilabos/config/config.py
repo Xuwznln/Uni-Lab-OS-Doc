@@ -41,12 +41,14 @@ class BasicConfig:
 class WSConfig:
     reconnect_interval = 5  # 重连间隔（秒）
     max_reconnect_attempts = 999  # 最大重连次数
-    ping_interval = 20  # ping间隔（秒）
+    ping_interval = 5  # ping间隔（秒），对齐服务端 PingPeriod
+    ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
+    ready_timeout_extension = 20  # 每次断链/重连为 READY job 增加的宽限时间（秒）
 
 
 # HTTP配置
 class HTTPConfig:
-    remote_addr = "https://uni-lab.bohrium.com/api/v1"
+    remote_addr = "https://leap-lab.bohrium.com/api/v1"
 
 
 # ROS配置
@@ -77,7 +79,7 @@ def _update_config_from_env():
         if not env_key.startswith(prefix):
             continue
         try:
-            key_path = env_key[len(prefix) :]  # Remove UNILAB_ prefix
+            key_path = env_key[len(prefix):]  # Remove UNILAB_ prefix
             class_field = key_path.upper().split("_", 1)
             if len(class_field) != 2:
                 logger.warning(f"[ENV] 环境变量格式不正确：{env_key}")

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import os
 import platform
 import shutil
@@ -11,6 +12,15 @@ import time
 from typing import Dict, Any, List
 import networkx as nx
 import yaml
+
+# Windows 中文系统 stdout 默认 GBK，无法编码 banner / emoji 日志中的 Unicode 字符
+# 强制 stdout/stderr 用 UTF-8，避免 print 触发 UnicodeEncodeError 导致进程崩溃
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
 
 # 首先添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -233,7 +243,7 @@ def parse_args():
     parser.add_argument(
         "--addr",
         type=str,
-        default="https://uni-lab.bohrium.com/api/v1",
+        default="https://leap-lab.bohrium.com/api/v1",
         help="Laboratory backend address",
     )
     parser.add_argument(
@@ -328,6 +338,29 @@ def parse_args():
         help="Workflow description, used when publishing the workflow",
     )
     return parser
+
+
+def _resolve_graph_file_path(file_path: str | None) -> str | None:
+    if file_path is None:
+        return None
+    if os.path.isfile(file_path):
+        return file_path
+    temp_file_path = os.path.abspath(str(os.path.join(__file__, "..", "..", file_path)))
+    if os.path.isfile(temp_file_path):
+        print_status(f"使用相对路径{temp_file_path}", "info")
+        return temp_file_path
+    return file_path
+
+
+def _load_graph_json_preview(file_path: str | None) -> Dict[str, Any] | None:
+    if not file_path or not file_path.endswith(".json") or not os.path.isfile(file_path):
+        return None
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        print_status(f"预读取 graph JSON 失败，跳过 community 包解析: {exc}", "warning")
+        return None
 
 
 def main():
@@ -427,7 +460,7 @@ def main():
         load_config_from_file(config_path)
 
     # 根据配置重新设置日志级别
-    from unilabos.utils.log import configure_logger, logger
+    from unilabos.utils.log import configure_logger, configure_comm_logger, logger
 
     if hasattr(BasicConfig, "log_level"):
         logger.info(f"Log level set to '{BasicConfig.log_level}' from config file.")
@@ -435,13 +468,18 @@ def main():
     if file_path is not None:
         logger.info(f"[LOG_FILE] {file_path}")
 
+    # 为服务端通信(WebSocket)配置独立日志，避免与主日志混在一起，便于排查通信机制
+    comm_log_path = configure_comm_logger(loglevel=BasicConfig.log_level, working_dir=working_dir)
+    if comm_log_path is not None:
+        logger.info(f"[COMM_LOG_FILE] {comm_log_path}")
+
     if args.addr != parser.get_default("addr"):
         if args.addr == "test":
             print_status("使用测试环境地址", "info")
-            HTTPConfig.remote_addr = "https://uni-lab.test.bohrium.com/api/v1"
+            HTTPConfig.remote_addr = "https://leap-lab.test.bohrium.com/api/v1"
         elif args.addr == "uat":
             print_status("使用uat环境地址", "info")
-            HTTPConfig.remote_addr = "https://uni-lab.uat.bohrium.com/api/v1"
+            HTTPConfig.remote_addr = "https://leap-lab.uat.bohrium.com/api/v1"
         elif args.addr == "local":
             print_status("使用本地环境地址", "info")
             HTTPConfig.remote_addr = "http://127.0.0.1:48197/api/v1"
@@ -495,6 +533,52 @@ def main():
     # 显示启动横幅
     print_unilab_banner(args_dict)
 
+    # Step -1: 预读取 graph 中的 community.* class，并在 build_registry 前挂载社区设备包
+    if not check_mode and not workflow_upload:
+        startup_json_preview = None
+        graph_file_path = _resolve_graph_file_path(args_dict.get("graph") or BasicConfig.startup_json_path)
+        args_dict["_graph_file_path"] = graph_file_path
+        graph_preview = _load_graph_json_preview(graph_file_path)
+
+        http_client_for_community = None
+        if BasicConfig.ak and BasicConfig.sk:
+            from unilabos.app.web import http_client as _http_client_for_community
+
+            http_client_for_community = _http_client_for_community
+            if graph_preview is None and graph_file_path is None:
+                startup_json_preview = http_client_for_community.request_startup_json()
+                args_dict["_startup_json"] = startup_json_preview
+                graph_preview = startup_json_preview
+
+        if graph_preview:
+            from unilabos.app.community_packages import (
+                CommunityPackageError,
+                apply_community_aliases,
+                prepare_community_packages,
+            )
+
+            try:
+                community_result = prepare_community_packages(
+                    graph_preview,
+                    working_dir=BasicConfig.working_dir,
+                    http_client=http_client_for_community,
+                )
+            except CommunityPackageError as exc:
+                print_status(str(exc), "error")
+                os._exit(1)
+
+            if community_result.devices_dirs:
+                existing_devices_dirs = args_dict.get("devices") or []
+                args_dict["devices"] = existing_devices_dirs + community_result.devices_dirs
+                if not skip_env_check:
+                    from unilabos.utils.environment_check import check_device_package_requirements
+
+                    if not check_device_package_requirements(args_dict["devices"]):
+                        print_status("community 设备包依赖检查失败，程序退出", "error")
+                        os._exit(1)
+            args_dict["_community_aliases"] = community_result.aliases
+            args_dict["_apply_community_aliases"] = apply_community_aliases
+
     # Step 0: AST 分析优先 + YAML 注册表加载
     # check_mode 和 upload_registry 都会执行实际 import 验证
     devices_dirs = args_dict.get("devices", None)
@@ -508,6 +592,9 @@ def main():
         complete_registry=complete_registry,
         external_only=external_only,
     )
+    apply_community_aliases = args_dict.get("_apply_community_aliases")
+    if apply_community_aliases:
+        apply_community_aliases(lab_registry, args_dict.get("_community_aliases") or {})
 
     # Check mode: 注册表验证完成后直接退出
     if check_mode:
@@ -553,14 +640,18 @@ def main():
         os._exit(0)
 
     if not BasicConfig.ak or not BasicConfig.sk:
-        print_status("后续运行必须拥有一个实验室，请前往 https://uni-lab.bohrium.com 注册实验室！", "warning")
+        print_status("后续运行必须拥有一个实验室，请前往 https://leap-lab.bohrium.com 注册实验室！", "warning")
         os._exit(1)
     graph: nx.Graph
     resource_tree_set: ResourceTreeSet
     resource_links: List[Dict[str, Any]]
-    request_startup_json = http_client.request_startup_json()
+    request_startup_json = args_dict.get("_startup_json")
+    if request_startup_json is None:
+        request_startup_json = http_client.request_startup_json()
 
-    file_path = args_dict.get("graph", BasicConfig.startup_json_path)
+    file_path = args_dict.get("_graph_file_path")
+    if file_path is None:
+        file_path = _resolve_graph_file_path(args_dict.get("graph") or BasicConfig.startup_json_path)
     if file_path is None:
         if not request_startup_json:
             print_status(
@@ -571,11 +662,6 @@ def main():
             print_status("联网获取设备加载文件成功", "info")
         graph, resource_tree_set, resource_links = read_node_link_json(request_startup_json)
     else:
-        if not os.path.isfile(file_path):
-            temp_file_path = os.path.abspath(str(os.path.join(__file__, "..", "..", file_path)))
-            if os.path.isfile(temp_file_path):
-                print_status(f"使用相对路径{temp_file_path}", "info")
-                file_path = temp_file_path
         if file_path.endswith(".json"):
             graph, resource_tree_set, resource_links = read_node_link_json(file_path)
         else:

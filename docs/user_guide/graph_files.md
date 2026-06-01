@@ -626,7 +626,7 @@ unilab
 
 **云端图文件管理**:
 
-1. 登录 https://uni-lab.bohrium.com
+1. 登录 https://leap-lab.bohrium.com
 2. 进入"设备配置"
 3. 创建或编辑配置
 4. 保存到云端

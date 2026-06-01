@@ -409,11 +409,11 @@ xrd_d7mate:
               properties:
                 end_theta:
                   default: 80.0
-                  description: 结束角度（≥5.5°，且必须大于start_theta）
+                  description: 结束角度（≥5.5°，且必须大于 start_theta）
                   type: number
                 exp_time:
                   default: 0.1
-                  description: 曝光时间（0.1-5.0秒）
+                  description: 曝光时间（0.1-5.0 秒）
                   type: number
                 increment:
                   default: 0.05
@@ -421,7 +421,7 @@ xrd_d7mate:
                   type: number
                 sample_id:
                   default: ''
-                  description: 样品标识符
+                  description: 样品名称
                   type: string
                 start_theta:
                   default: 10.0
@@ -433,7 +433,7 @@ xrd_d7mate:
                   type: string
                 wait_minutes:
                   default: 3.0
-                  description: 允许上样后等待分钟数
+                  description: 在允许上样后、发送样品准备完成前的等待分钟数（默认 3 分钟）
                   type: number
               required: []
               title: StartWorkflow_Goal
@@ -492,12 +492,15 @@ xrd_d7mate:
       properties:
         host:
           default: 127.0.0.1
+          description: 设备IP地址
           type: string
         port:
           default: 6001
+          description: 通信端口，默认6001
           type: string
         timeout:
           default: 10.0
+          description: 超时时间，单位秒
           type: string
       required: []
       type: object

@@ -9,4 +9,6 @@ class BasicConfig:
 class WSConfig:
     reconnect_interval = 5  # 重连间隔（秒）
     max_reconnect_attempts = 999  # 最大重连次数
-    ping_interval = 30  # ping间隔（秒）
+    ping_interval = 5  # ping间隔（秒），对齐服务端 PingPeriod
+    ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
+    ready_timeout_extension = 20  # 每次断链/重连为 READY job 增加的宽限时间（秒）

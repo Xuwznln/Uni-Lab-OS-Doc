@@ -51,14 +51,18 @@ Qone_nmr:
               properties:
                 check_interval:
                   default: 60
+                  description: 检查间隔时间（秒），默认60秒
                   type: string
                 expected_count:
                   default: 1
+                  description: 期望生成的.nmr文件数量，默认1个
                   type: string
                 monitor_dir:
+                  description: 要监督的目录路径，如果未指定则使用self.monitor_directory
                   type: string
                 stability_checks:
                   default: 3
+                  description: 文件大小稳定性检查次数，默认3次
                   type: string
               required: []
               type: object
@@ -85,11 +89,14 @@ Qone_nmr:
             goal:
               properties:
                 output_dir:
+                  description: 输出目录（如果未指定，使用self.output_directory）
                   type: string
                 string_list:
+                  description: 字符串列表
                   type: string
                 txt_encoding:
                   default: utf-8
+                  description: 文件编码
                   type: string
               required:
               - string_list
@@ -151,6 +158,13 @@ Qone_nmr:
               additionalProperties: false
               properties:
                 string:
+                  description: '包含多个字符串的输入数据，支持两种格式：
+
+                    1. 逗号分隔：如 "A 1 B 2 C 3, X 10 Y 20 Z 30"
+
+                    2. 换行分隔：如 "A 1 B 2 C 3
+
+                    X 10 Y 20 Z 30"'
                   type: string
               title: StrSingleInput_Goal
               type: object

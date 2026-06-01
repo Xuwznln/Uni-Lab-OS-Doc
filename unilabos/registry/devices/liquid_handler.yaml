@@ -510,9 +510,11 @@ liquid_handler:
             goal:
               properties:
                 msg:
+                  description: information to be printed
                   type: string
                 seconds:
                   default: 0
+                  description: seconds to wait
                   type: string
               required: []
               type: object
@@ -2963,15 +2965,22 @@ liquid_handler:
               additionalProperties: false
               properties:
                 channel:
+                  description: int
                   maximum: 2147483647
                   minimum: -2147483648
                   type: integer
                 dis_to_top:
+                  description: 'float
+
+                    Height in mm to move to relative to the well top.'
                   maximum: 1.7976931348623157e+308
                   minimum: -1.7976931348623157e+308
                   type: number
                 well:
                   additionalProperties: false
+                  description: 'Well
+
+                    The target well.'
                   properties:
                     category:
                       type: string
@@ -4829,11 +4838,13 @@ liquid_handler:
     config:
       properties:
         backend:
+          description: Backend to use.
           type: object
         channel_num:
           default: 8
           type: integer
         deck:
+          description: Deck to use.
           type: object
         simulator:
           default: false
@@ -4883,14 +4894,17 @@ liquid_handler.biomek:
                 bind_parent_id:
                   type: string
                 liquid_input_slot:
+                  description: 液体输入槽列表
                   items:
                     type: integer
                   type: array
                 liquid_type:
+                  description: 液体类型列表
                   items:
                     type: string
                   type: array
                 liquid_volume:
+                  description: 液体体积列表
                   items:
                     type: integer
                   type: array
@@ -4901,6 +4915,7 @@ liquid_handler.biomek:
                     type: object
                   type: array
                 slot_on_deck:
+                  description: 甲板上的槽位
                   type: integer
               required:
               - resource_tracker
@@ -5036,20 +5051,27 @@ liquid_handler.biomek:
               additionalProperties: false
               properties:
                 none_keys:
+                  description: 需要设置为None的键列表
                   items:
                     type: string
                   type: array
                 protocol_author:
+                  description: 协议作者
                   type: string
                 protocol_date:
+                  description: 协议日期
                   type: string
                 protocol_description:
+                  description: 协议描述
                   type: string
                 protocol_name:
+                  description: 协议名称
                   type: string
                 protocol_type:
+                  description: 协议类型
                   type: string
                 protocol_version:
+                  description: 协议版本
                   type: string
               title: LiquidHandlerProtocolCreation_Goal
               type: object

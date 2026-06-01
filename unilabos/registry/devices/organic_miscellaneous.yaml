@@ -207,8 +207,12 @@ separator.homemade:
             goal:
               properties:
                 condition:
+                  description: The condition to be monitored, either 'delta' or 'time'.
                   type: string
                 value:
+                  description: 'The threshold value for the condition.
+
+                    `delta > 0.05`, `time > 60`'
                   type: string
               required:
               - condition
@@ -305,12 +309,17 @@ separator.homemade:
                 event:
                   type: string
                 settling_time:
+                  description: The duration for which to settle after stirring, in
+                    seconds. Defaults to 10.
                   type: string
                 stir_speed:
+                  description: The speed of stirring, in RPM. Defaults to 300.
                   maximum: 1.7976931348623157e+308
                   minimum: -1.7976931348623157e+308
                   type: number
                 stir_time:
+                  description: The duration for which to stir, in seconds. Defaults
+                    to 10.
                   maximum: 1.7976931348623157e+308
                   minimum: -1.7976931348623157e+308
                   type: number

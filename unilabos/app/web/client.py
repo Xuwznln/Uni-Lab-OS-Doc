@@ -36,6 +36,9 @@ class HTTPClient:
             auth_secret = BasicConfig.auth_secret()
             self.auth = auth_secret
             info(f"正在使用ak sk作为授权信息：[{auth_secret}]")
+        # 复用 TCP/TLS 连接，避免每次请求重新握手
+        self._session = requests.Session()
+        self._session.headers.update({"Authorization": f"Lab {self.auth}"})
         info(f"HTTPClient 初始化完成: remote_addr={self.remote_addr}")
 
     def resource_edge_add(self, resources: List[Dict[str, Any]]) -> requests.Response:
@@ -48,7 +51,7 @@ class HTTPClient:
         Returns:
             Response: API响应对象
         """
-        response = requests.post(
+        response = self._session.post(
             f"{self.remote_addr}/edge/material/edge",
             json={
                 "edges": resources,
@@ -75,26 +78,28 @@ class HTTPClient:
         Returns:
             Dict[str, str]: 旧UUID到新UUID的映射关系 {old_uuid: new_uuid}
         """
-        with open(os.path.join(BasicConfig.working_dir, "req_resource_tree_add.json"), "w", encoding="utf-8") as f:
-            payload = {"nodes": [x for xs in resources.dump() for x in xs], "mount_uuid": mount_uuid}
-            f.write(json.dumps(payload, indent=4))
-        # 从序列化数据中提取所有节点的UUID（保存旧UUID）
-        old_uuids = {n.res_content.uuid: n for n in resources.all_nodes}
+        # dump() 只调用一次，复用给文件保存和 HTTP 请求
         nodes_info = [x for xs in resources.dump() for x in xs]
+        old_uuids = {n.res_content.uuid: n for n in resources.all_nodes}
+        payload = {"nodes": nodes_info, "mount_uuid": mount_uuid}
+        body_bytes = _fast_dumps(payload)
+        with open(os.path.join(BasicConfig.working_dir, "req_resource_tree_add.json"), "wb") as f:
+            f.write(_fast_dumps_pretty(payload))
+        http_headers = {"Content-Type": "application/json"}
         if not self.initialized or first_add:
             self.initialized = True
             info(f"首次添加资源，当前远程地址: {self.remote_addr}")
-            response = requests.post(
+            response = self._session.post(
                 f"{self.remote_addr}/edge/material",
-                json={"nodes": nodes_info, "mount_uuid": mount_uuid},
-                headers={"Authorization": f"Lab {self.auth}"},
+                data=body_bytes,
+                headers=http_headers,
                 timeout=60,
             )
         else:
-            response = requests.put(
+            response = self._session.put(
                 f"{self.remote_addr}/edge/material",
-                json={"nodes": nodes_info, "mount_uuid": mount_uuid},
-                headers={"Authorization": f"Lab {self.auth}"},
+                data=body_bytes,
+                headers=http_headers,
                 timeout=10,
             )
 
@@ -133,7 +138,7 @@ class HTTPClient:
         """
         with open(os.path.join(BasicConfig.working_dir, "req_resource_tree_get.json"), "w", encoding="utf-8") as f:
             f.write(json.dumps({"uuids": uuid_list, "with_children": with_children}, indent=4))
-        response = requests.post(
+        response = self._session.post(
             f"{self.remote_addr}/edge/material/query",
             json={"uuids": uuid_list, "with_children": with_children},
             headers={"Authorization": f"Lab {self.auth}"},
@@ -147,6 +152,7 @@ class HTTPClient:
                 logger.error(f"查询物料失败: {response.text}")
             else:
                 data = res["data"]["nodes"]
+                logger.trace(f"resource_tree_get查询到物料: {data}")
                 return data
         else:
             logger.error(f"查询物料失败: {response.text}")
@@ -164,14 +170,14 @@ class HTTPClient:
         if not self.initialized:
             self.initialized = True
             info(f"首次添加资源，当前远程地址: {self.remote_addr}")
-            response = requests.post(
+            response = self._session.post(
                 f"{self.remote_addr}/lab/material",
                 json={"nodes": resources},
                 headers={"Authorization": f"Lab {self.auth}"},
                 timeout=100,
             )
         else:
-            response = requests.put(
+            response = self._session.put(
                 f"{self.remote_addr}/lab/material",
                 json={"nodes": resources},
                 headers={"Authorization": f"Lab {self.auth}"},
@@ -198,7 +204,7 @@ class HTTPClient:
         """
         with open(os.path.join(BasicConfig.working_dir, "req_resource_get.json"), "w", encoding="utf-8") as f:
             f.write(json.dumps({"id": id, "with_children": with_children}, indent=4))
-        response = requests.get(
+        response = self._session.get(
             f"{self.remote_addr}/lab/material",
             params={"id": id, "with_children": with_children},
             headers={"Authorization": f"Lab {self.auth}"},
@@ -239,14 +245,14 @@ class HTTPClient:
         if not self.initialized:
             self.initialized = True
             info(f"首次添加资源，当前远程地址: {self.remote_addr}")
-            response = requests.post(
+            response = self._session.post(
                 f"{self.remote_addr}/lab/material",
                 json={"nodes": resources},
                 headers={"Authorization": f"Lab {self.auth}"},
                 timeout=100,
             )
         else:
-            response = requests.put(
+            response = self._session.put(
                 f"{self.remote_addr}/lab/material",
                 json={"nodes": resources},
                 headers={"Authorization": f"Lab {self.auth}"},
@@ -276,7 +282,7 @@ class HTTPClient:
         with open(file_path, "rb") as file:
             files = {"files": file}
             logger.info(f"上传文件: {file_path} 到 {scene}")
-            response = requests.post(
+            response = self._session.post(
                 f"{self.remote_addr}/api/account/file_upload/{scene}",
                 files=files,
                 headers={"Authorization": f"Lab {self.auth}"},
@@ -316,7 +322,7 @@ class HTTPClient:
             "Content-Type": "application/json",
             "Content-Encoding": "gzip",
         }
-        response = requests.post(
+        response = self._session.post(
             f"{self.remote_addr}/lab/resource",
             data=compressed_body,
             headers=headers,
@@ -350,7 +356,7 @@ class HTTPClient:
         Returns:
             Response: API响应对象
         """
-        response = requests.get(
+        response = self._session.get(
             f"{self.remote_addr}/edge/material/download",
             headers={"Authorization": f"Lab {self.auth}"},
             timeout=(3, 30),
@@ -369,6 +375,34 @@ class HTTPClient:
                 logger.error(f"解析启动配置JSON失败: {str(e.args)}\n响应内容: {response.text}")
                 logger.error(f"响应内容: {response.text}")
         return None
+
+    def resolve_community_packages(
+        self,
+        classes: List[str],
+        current_packages: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        根据 graph 中的 community.* class 解析需要加载的社区设备包。
+        """
+        payload = {
+            "classes": classes,
+            "machine_name": BasicConfig.machine_name,
+            "current_packages": current_packages or [],
+        }
+        req_path = os.path.join(BasicConfig.working_dir, "req_community_package_resolve.json")
+        with open(req_path, "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=4))
+        response = self._session.post(
+            f"{self.remote_addr}/lab/square/community-packages/resolve",
+            json=payload,
+            headers={"Authorization": f"Lab {self.auth}"},
+            timeout=(5, 30),
+        )
+        res_path = os.path.join(BasicConfig.working_dir, "res_community_package_resolve.json")
+        with open(res_path, "w", encoding="utf-8") as f:
+            f.write(f"{response.status_code}" + "\n" + response.text)
+        response.raise_for_status()
+        return response.json()
 
     def workflow_import(
         self,
@@ -411,7 +445,7 @@ class HTTPClient:
         with open(os.path.join(BasicConfig.working_dir, "req_workflow_upload.json"), "w", encoding="utf-8") as f:
             f.write(json.dumps(payload, indent=4, ensure_ascii=False))
 
-        response = requests.post(
+        response = self._session.post(
             f"{self.remote_addr}/lab/workflow/owner/import",
             json=payload,
             headers={"Authorization": f"Lab {self.auth}"},
