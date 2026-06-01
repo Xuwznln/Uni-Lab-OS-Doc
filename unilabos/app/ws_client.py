@@ -183,6 +183,7 @@ class DeviceActionManager:
                         "[DeviceActionManager] Duplicate job_id has different task_id: "
                         f"{job_info.job_id[:8]} old={existing_job.task_id[:8]} new={job_info.task_id[:8]}"
                     )
+                    return False
                 if job_info.notebook_id and not existing_job.notebook_id:
                     existing_job.notebook_id = job_info.notebook_id
                 existing_job.update_timestamp()
@@ -833,16 +834,18 @@ class MessageProcessor:
 
         job_log = format_job_log(job_id, task_id, device_id, action_name)
 
-        # 1) 该 job 仍在设备管理器中（READY/QUEUE/STARTED）：返回真实当前状态。
-        #    这是保证服务端 busy/running 节奏判断正确的关键，且不重复入队。
+        # 1) 该 job 仍在设备管理器中（READY/QUEUE/STARTED）：不重复入队。
+        #    READY/STARTED 表示同一个 job 已被本地接收/执行，断线重连后仍回复 free，
+        #    让服务端继续发送 job_start；重复 job_start 会被幂等缓存拦截或回放结果。
+        #    QUEUE 表示该 job 尚未轮到执行，仍回复 busy。
         #    完成后 end_job 会把 job 从管理器移除，故运行中的 job 一定能在此命中。
         existing_job = self.device_manager.get_job_info(job_id)
-        if existing_job and existing_job.task_id == task_id:
-            if existing_job.status == JobStatus.READY:
+        if existing_job and existing_job.job_id == job_id and existing_job.task_id == task_id:
+            if existing_job.status in (JobStatus.READY, JobStatus.STARTED):
                 response_type, free, need_more = "query_action_status", True, 0
             elif existing_job.status == JobStatus.QUEUE:
                 response_type, free, need_more = "query_action_status", False, 10
-            else:  # STARTED：正在执行
+            else:
                 response_type, free, need_more = "job_call_back_status", False, 10
             await self._send_action_state_response(
                 existing_job.device_id,
@@ -961,6 +964,15 @@ class MessageProcessor:
             # 服务端对always_free动作可能跳过query_action_state直接发job_start，
             # 此时job尚未注册，需要自动补注册
             existing_job = self.device_manager.get_job_info(req.job_id)
+            if existing_job and existing_job.task_id != req.task_id:
+                logger.warning(
+                    "[MessageProcessor] job_start job_id matched but task_id mismatched, skip start: "
+                    "job=%s old_task=%s new_task=%s",
+                    req.job_id[:8],
+                    existing_job.task_id[:8],
+                    req.task_id[:8],
+                )
+                return
             if not existing_job:
                 action_name = req.action
                 device_action_key = f"/devices/{req.device_id}/{action_name}"
