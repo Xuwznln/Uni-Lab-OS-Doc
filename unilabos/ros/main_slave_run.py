@@ -71,8 +71,18 @@ def _start_twin_poller(executor, devices_provider) -> None:
 def _build_labutopia_sources(ctx) -> list:
     """按 RuntimeContext 配置加载 LabUtopia 静态场景源(资产卡 + 任务配置)。"""
     sources = []
+    usd_path = getattr(ctx, "query_labutopia_usd", None)
     assets_dir = getattr(ctx, "query_labutopia_assets", None)
     config_dir = getattr(ctx, "query_labutopia_config", None)
+    if usd_path:
+        # USD 源置首:提供精确的逐 prim xform 位姿(优先于资产卡的 bbox 中心)
+        try:
+            from unilabos.queries.labutopia import LabUtopiaUsdSource
+
+            sources.append(LabUtopiaUsdSource(usd_path))
+            logger.info(f"Query API: loaded LabUtopia USD stage from {usd_path}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Query API: failed to load LabUtopia USD ({usd_path}): {e}")
     if assets_dir:
         try:
             from unilabos.queries.labutopia import LabUtopiaAssetCardSource

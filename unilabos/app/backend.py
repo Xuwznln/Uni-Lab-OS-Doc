@@ -40,6 +40,7 @@ def start_backend(
     _runtime_services.context.query_grpc_port = int(kwargs.get("query_grpc_port", 50051))
     _runtime_services.context.query_labutopia_assets = kwargs.get("query_labutopia_assets")
     _runtime_services.context.query_labutopia_config = kwargs.get("query_labutopia_config")
+    _runtime_services.context.query_labutopia_usd = kwargs.get("query_labutopia_usd")
     logger.info(
         "Runtime mode initialized: "
         f"mode={mode}, sim_rate={_runtime_services.context.clock.scale}, "

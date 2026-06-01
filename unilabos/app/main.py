@@ -343,6 +343,12 @@ def build_argparser():
         default=None,
         help="Directory of LabUtopia task config (*.yaml) to serve action schemas / affordances.",
     )
+    parser.add_argument(
+        "--query_labutopia_usd",
+        type=str,
+        default=None,
+        help="Path to a LabUtopia USD stage for precise per-prim poses (requires pxr/usd-core).",
+    )
     # workflow upload subcommand
     workflow_parser = subparsers.add_parser(
         "workflow_upload",
