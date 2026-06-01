@@ -297,7 +297,7 @@ def wait_for_order_finish(
 | `UNLOAD_TABLE_COLUMNS` (L128) | **6 列 v1**: `whName/posX/posY/posZ/unit/materialName` | **整段替换为 sirna v2 4 列**: `whName/locationCode/materialName/quantity`（设备/位置/物料名称/数量）|
 | `UNLOAD_TABLE_COLUMNS_MULTI_ORDER` (L136) | 多订单 7 列 | **整段删除**（v2 不再支持多订单下料场景） |
 | `ORDER_FINISH_STATUS_MAP` | **缺** | **新增**，复刻 sirna [L182-186](../../Uni-Lab-OS-sirna/unilabos/devices/workstation/bioyond_studio/sirna_station/sirna_station.py) `{"30":"success","-11":"abnormal_stop","-12":"manual_stop"}` |
-| `MATERIAL_TYPE_ORDER` (L140) | `("Sample","Consumables","Reagent")` | 保留（被 v1 helper `_compose_unload_table` 用，删 helper 后变孤儿；建议**一并删除**减少噪音） |
+| `MATERIAL_TYPE_ORDER` (L140) | `("Sample","Consumables","Reagent")` | **保留**（2026-06-01 实施时纠正：该常量实际被上料表构建器 `_build_result_table` L1774 使用，并非 v1 unload 孤儿；删除会破坏上料表，故保留） |
 | `PEPTIDE_SAMPLE_FILE_KEY` / `DAY1_CEM_METHOD_KEY` / `DAY1_CEM_METHOD_DEFAULT` | 多肽 day1 业务常量 | **保留**，不动 |
 
 替换后 `UNLOAD_TABLE_COLUMNS`（与 sirna 一字一致）：
@@ -490,7 +490,7 @@ flowchart LR
 | 文件 | 改动 | 风险 |
 |------|------|------|
 | `unilabos/devices/workstation/bioyond_studio/bioyond_rpc.py` | 新增 `all_stock_material()` 一个方法 | 仅新增；其他工作站不受影响 |
-| `unilabos/devices/workstation/bioyond_studio/peptide_station/peptide_station.py` | ① 顶部常量：替换 `UNLOAD_TABLE_COLUMNS` 为 4 列 + 删 `UNLOAD_TABLE_COLUMNS_MULTI_ORDER` + 新增 `ORDER_FINISH_STATUS_MAP`（建议一并删 `MATERIAL_TYPE_ORDER`）；② `__init__` 末尾补 `last_used_materials`；③ 整段替换 `process_order_finish_report`；④ 删除 `wait_for_order_finish` + `unload_materials` v1 实现 + 9 个 v1 helper（保留 `_extract_order_ids`），原位复刻 sirna v2 节点 + 3 个 helper；⑤ `start_experiment` 输出 handle 新增 `order_code` + 返回字典补 `order_code` 占位 | `start_experiment` 输出 handle 新增是兼容性最敏感的点；`UNLOAD_TABLE_COLUMNS` 列结构变更可能影响**仅依赖该常量结构的旧测试或前端渲染逻辑** — 必须在 §十一 测试里逐项覆盖 |
+| `unilabos/devices/workstation/bioyond_studio/peptide_station/peptide_station.py` | ① 顶部常量：替换 `UNLOAD_TABLE_COLUMNS` 为 4 列 + 删 `UNLOAD_TABLE_COLUMNS_MULTI_ORDER` + 删 `MATERIAL_TYPE_ORDER` + 新增 `ORDER_FINISH_STATUS_MAP`；② `__init__` 末尾补 `last_used_materials`；③ 整段替换 `process_order_finish_report`；④ 删除 `wait_for_order_finish` + `unload_materials` v1 实现 + 9 个 v1 helper（保留 `_extract_order_ids`），原位复刻 sirna v2 节点 + 3 个 helper；⑤ `start_experiment` 输出 handle 新增 `order_code` + 返回字典补 `order_code` 占位 | `start_experiment` 输出 handle 新增是兼容性最敏感的点；`UNLOAD_TABLE_COLUMNS` 列结构变更可能影响**仅依赖该常量结构的旧测试或前端渲染逻辑** — 必须在 §十一 测试里逐项覆盖 |
 | `unilabos/devices/workstation/bioyond_studio/station.py` | **不动** | override 中保留 `super().process_order_finish_report()` 调用 |
 | `unilabos/devices/workstation/workstation_http_service.py` | **不动** | 基类已注册 `/report/order_finish` 路由 |
 | `unilabos/devices/workstation/bioyond_studio/peptide_station/tests/test_peptide_station_contracts.py` | 删除 9 个 v1 测试用例（[L988-1190](../unilabos/devices/workstation/bioyond_studio/peptide_station/tests/test_peptide_station_contracts.py)），新增对应 v2 用例（参照 sirna `test_sirna_wait_unload.py`） | 测试覆盖必须保持或提升 |
@@ -531,22 +531,24 @@ flowchart LR
 | L1156 | `test_unload_materials_does_not_raise_when_take_out_fails` | 同上 |
 | L1185 | `test_unload_table_columns_constant_layout` | v2 列结构 6→4 列，断言彻底失效 |
 
-### 11.2 新增的 peptide v2 测试（参考 sirna `test_sirna_wait_unload.py` + `test_bioyond_rpc_all_stock_material.py`）
+### 11.2 新增的 peptide v2 测试
 
-| 测试 | 文件 | 覆盖 |
-|------|------|------|
-| `all_stock_material` payload | `test_peptide_bioyond_rpc_all_stock_material.py`（新增）或扩 `test_bioyond_rpc.py` | URL = `/api/lims/storage/all-stock-material`；data 含 `orderId`；缺 `orderId` → 返回 `[]` 且记日志 |
-| `process_order_finish_report` override | `test_peptide_station_contracts.py` | ① super() 必被 mock 验证；② orderCode 匹配 → `event.is_set()`；③ 不匹配 → `event` 仍未置位；④ `last_used_materials` 被记录 |
-| `wait_for_order_finish` 事件路径 | 同上 | ① 事件提前 set + status="30" → success；② 超时 → status=`timeout`、success=False、不调 `all_stock_material`；③ status=`-11` → `abnormal_stop`、仍调 `all_stock_material` |
-| `wait_for_order_finish` 入参兜底 | 同上 | ① 只传 `order_id` 不传 `order_code`：mock `order_report` 返回 `{"code":"EXP-001"}` resolve OK；② 都不传 → raise；③ `order_ids.length>1` 且未指定 → raise |
-| `wait_for_order_finish` `unloadTable` 整理 | 同上 | 给 fake rpc 灌 1 条带 `locations[0].whName/code`、`name`、`quantity` 的物料 → `unloadTable.data` 含正确 4 列；`columns == UNLOAD_TABLE_COLUMNS` 引用相等 |
-| `wait_for_order_finish` `used_materials` 透传 | 同上 | 通过 `process_order_finish_report` 注入混合 dataclass/dict 的 `used_materials`，wait 返回字典中 `used_materials` 全部为 dict |
-| `unload_materials` 门禁 | 同上 | `materials_unloaded=False` → raise；`materials_unloaded=True` 且 `order_id=""` → raise |
-| `unload_materials` take-out 透传 | 同上 | `materials_unloaded=True, order_id="abc"` → fake rpc 收到 `take_out("abc", [], [])`；返回包 `{"code":1}` → success=True；`{"code":99}` → success=False；非 dict 返回 → success=False |
-| `start_experiment` 输出 handle 新增 | 同上 | AST 扫描 `start_experiment` 的 ActionOutputHandle 列表中含 `order_code`；返回字典含 `order_code` key |
-| `UNLOAD_TABLE_COLUMNS` v2 形态 | 同上 | 长度=4；keys=`["whName","locationCode","materialName","quantity"]`；names=`["设备","位置","物料名称","数量"]` |
-| `ORDER_FINISH_STATUS_MAP` 内容 | 同上 | `{"30":"success","-11":"abnormal_stop","-12":"manual_stop"}` |
-| `UNLOAD_TABLE_COLUMNS_MULTI_ORDER` 已删除 | 同上 | 用 `pytest.importorskip` + `getattr(module, ..., None) is None` 反向断言常量不存在 |
+**位置（2026-05-29 锁定）**：所有 v2 新增测试集中放在新文件 [`unilabos/devices/workstation/bioyond_studio/peptide_station/tests/test_peptide_wait_unload.py`](../unilabos/devices/workstation/bioyond_studio/peptide_station/tests/test_peptide_wait_unload.py) — 包括 RPC 层的 `all_stock_material` payload 测试和 station 层的 wait/unload/process_order_finish_report 测试。不拆分多文件，与现有 `test_peptide_station_contracts.py`（保留 v1 删完后剩余的 ~58 个用例）解耦。
+
+| 测试 | 覆盖 |
+|------|------|
+| `all_stock_material` payload | URL = `/api/lims/storage/all-stock-material`；data 含 `orderId`；缺 `orderId` → 返回 `[]` 且记日志；JSON 解析失败 → 返回 `[]`；code != 1 → 返回 `[]` |
+| `process_order_finish_report` override | ① super() 必被 mock 验证；② orderCode 匹配 → `event.is_set()`；③ 不匹配 → `event` 仍未置位；④ `last_used_materials` 被记录 |
+| `wait_for_order_finish` 事件路径 | ① 事件提前 set + status="30" → success；② 超时 → status=`timeout`、success=False、不调 `all_stock_material`；③ status=`-11` → `abnormal_stop`、仍调 `all_stock_material` |
+| `wait_for_order_finish` 入参兜底 | ① 只传 `order_id` 不传 `order_code`：mock `order_report` 返回 `{"code":"EXP-001"}` resolve OK；② 都不传 → raise；③ `order_ids.length>1` 且未指定 → raise |
+| `wait_for_order_finish` `unloadTable` 整理 | 给 fake rpc 灌 1 条带 `locations[0].whName/code`、`name`、`quantity` 的物料 → `unloadTable.data` 含正确 4 列；`columns == UNLOAD_TABLE_COLUMNS` 引用相等 |
+| `wait_for_order_finish` `used_materials` 透传 | 通过 `process_order_finish_report` 注入混合 dataclass/dict 的 `used_materials`，wait 返回字典中 `used_materials` 全部为 dict |
+| `unload_materials` 门禁 | `materials_unloaded=False` → raise；`materials_unloaded=True` 且 `order_id=""` → raise |
+| `unload_materials` take-out 透传 | `materials_unloaded=True, order_id="abc"` → fake rpc 收到 `take_out("abc", [], [])`；返回包 `{"code":1}` → success=True；`{"code":99}` → success=False；非 dict 返回 → success=False |
+| `start_experiment` 输出 handle 新增 | AST 扫描 `start_experiment` 的 ActionOutputHandle 列表中含 `order_code`；返回字典含 `order_code` key |
+| `UNLOAD_TABLE_COLUMNS` v2 形态 | 长度=4；keys=`["whName","locationCode","materialName","quantity"]`；names=`["设备","位置","物料名称","数量"]` |
+| `ORDER_FINISH_STATUS_MAP` 内容 | `{"30":"success","-11":"abnormal_stop","-12":"manual_stop"}` |
+| `UNLOAD_TABLE_COLUMNS_MULTI_ORDER` / `MATERIAL_TYPE_ORDER` 已删除 | 用 `getattr(module, ..., None) is None` 反向断言常量不存在 |
 
 测试组装策略沿用 sirna v2 的 `object.__new__(BioyondPeptideStation)` + 手动注入 `hardware_interface`/`bioyond_config`/`order_finish_event`/`last_order_code`/`last_order_report`/`last_used_materials` 的做法，避免 ROS/HTTP boot。
 
@@ -560,7 +562,7 @@ flowchart LR
 - [ ] `wait_for_order_finish` 是 normal action（非 manual_confirm），输出 handles 含 `order_id`/`order_code`/`order_finish_status`/`order_finish_report`/`used_materials`/`all_stock_materials`/`unloadTable`，主体逻辑与 sirna `wait_for_order_finish` 一字一致。
 - [ ] `unload_materials` 是 `manual_confirm`，输入含 `order_id`+`unloadTable`，`materials_unloaded=False` 时 raise，`True` 时 take-out 调用为 `rpc.take_out(order_id, [], [])`。
 - [ ] `start_experiment` 输出 handle 新增 `order_code`，返回字典含 `order_code` key。
-- [ ] `UNLOAD_TABLE_COLUMNS` 是 4 列 v2 结构；`ORDER_FINISH_STATUS_MAP` 已新增；`UNLOAD_TABLE_COLUMNS_MULTI_ORDER` 已删除（建议 `MATERIAL_TYPE_ORDER` 一并删除）。
+- [ ] `UNLOAD_TABLE_COLUMNS` 是 4 列 v2 结构；`ORDER_FINISH_STATUS_MAP` 已新增；`UNLOAD_TABLE_COLUMNS_MULTI_ORDER` / `MATERIAL_TYPE_ORDER` 已删除。
 - [ ] 9 个 v1 私有 helper（`_wait_single_order_finish` / `_resolve_order_code` / `_extract_used_materials` / `_collect_material_ids` / `_collect_preintake_ids` / `_build_unload_rows` / `_fetch_material_info_cached` / `_first_location` / `_stringify_coord` / `_compose_unload_table`）已全部删除；`_extract_order_ids` 保留。
 - [ ] `_build_unload_rows_from_all_stock_material` / `_build_unload_table` / `_used_material_to_dict` 三个新 helper 已加入类内，与 sirna `38963ef` 一字一致。
 - [ ] `unload_materials` 不解析 `unloadTable` 内容、不从 `all_stock_materials` 提取 ID 喂 take-out；仅传 `[]/[]`。
@@ -573,7 +575,7 @@ flowchart LR
 ## 十三、待人类下次确认（不阻塞 v1 开发）
 
 1. **`order_code` 占位空串是否够用**：peptide `start_experiment` 当前 `_run_scheduler_action` 不返回 `order_code`，本 plan 在返回字典里设 `result["order_code"] = ""`。wait 节点会走 `rpc.order_report(order_id).code` 内联反查兜底。是否需要在 submit_experiment_dayN 阶段就把 `order_code` 顺出来传到 `start_experiment`？建议独立 plan 推进。
-2. **`MATERIAL_TYPE_ORDER` 是否一起删**：删除 9 个 v1 helper 后该常量变孤儿；保留无害但有维护噪音，建议在本 plan 一并删。
+2. ~~**`MATERIAL_TYPE_ORDER` 是否一起删**~~：2026-05-29 已确认 — **一并删**。
 3. **多订单等待并发**：v1 raise；未来如果多肽真有多 borderNumber 场景需要并发，独立 plan 推进 event 改 dict 化。
 4. **`isUse=false` 物料是否过滤**：v1 不过滤；可加入参 `include_unused: bool = True`（默认 True 不过滤）。
 5. **超时后下游 `unload_materials` 怎么办**：v1 wait 超时返回结构正常但 `unloadTable.data=[]` 的对象，下游 manual_confirm 展示空表，操作员勾选后仍调 take-out。如果业务希望"超时直接阻断不进入下料"，需要在 wait 节点 raise（与 sirna v2 §十-5 一致）。
@@ -611,7 +613,7 @@ flowchart LR
 
 1. `unilabos/devices/workstation/bioyond_studio/bioyond_rpc.py` — 追加 `all_stock_material` 41 行实现。
 2. `unilabos/devices/workstation/bioyond_studio/peptide_station/peptide_station.py`：
-   - 顶部常量：替换 `UNLOAD_TABLE_COLUMNS`（6→4 列）、删 `UNLOAD_TABLE_COLUMNS_MULTI_ORDER`、新增 `ORDER_FINISH_STATUS_MAP`、（建议）删 `MATERIAL_TYPE_ORDER`。
+   - 顶部常量：替换 `UNLOAD_TABLE_COLUMNS`（6→4 列）、删 `UNLOAD_TABLE_COLUMNS_MULTI_ORDER`、删 `MATERIAL_TYPE_ORDER`、新增 `ORDER_FINISH_STATUS_MAP`。
    - `__init__` 末尾补 `last_used_materials`。
    - `process_order_finish_report` 整段替换。
    - 删除 `wait_for_order_finish` v1 实现（L993-1082），原位 deep_clone sirna L1532-1679。
@@ -621,4 +623,5 @@ flowchart LR
    - `start_experiment` 输出 handles 追加 `order_code`，返回字典补 `order_code` 占位。
 3. `unilabos/devices/workstation/bioyond_studio/peptide_station/tests/test_peptide_station_contracts.py`：
    - 删除 9 个 v1 测试用例。
-   - 新增 ~12 个 v2 测试用例，参照 sirna `test_sirna_wait_unload.py` + `test_bioyond_rpc_all_stock_material.py`。
+4. `unilabos/devices/workstation/bioyond_studio/peptide_station/tests/test_peptide_wait_unload.py`（**新建**，2026-05-29 锁定为单一文件）：
+   - 新增 ~12 个 v2 测试用例（覆盖 RPC `all_stock_material` + station `wait_for_order_finish` / `unload_materials` / `process_order_finish_report` / `start_experiment` 输出 handle / 4 个常量改造），参照 sirna 的 `test_sirna_wait_unload.py` + `test_bioyond_rpc_all_stock_material.py` 的断言风格但合并到单一文件。
