@@ -1,0 +1,158 @@
+{
+  "nodes": [
+    {
+      "id": "roboarm_1",
+      "name": "RoboArm 1",
+      "type": "device",
+      "class": "robotic_arm.SCARA_with_slider.moveit.virtual",
+      "position": {"x": 0, "y": 0, "z": 0},
+      "config": {},
+      "data": {},
+      "extra": {
+        "robo_unilabos": {
+          "resource_type": "robot_arm",
+          "frame_id": "roboarm_1/base",
+          "pose": {
+            "frame_id": "lab_world",
+            "position": {"x": 0, "y": 0, "z": 0},
+            "orientation_rpy": {"roll": 0, "pitch": 0, "yaw": 0}
+          },
+          "state_variables": {
+            "mode": "simulation"
+          }
+        }
+      }
+    },
+    {
+      "id": "balance_1",
+      "name": "Analytical Balance 1",
+      "type": "device",
+      "class": "balance.mettler_toledo_xpr",
+      "position": {"x": 520, "y": 120, "z": 0},
+      "config": {},
+      "data": {},
+      "extra": {
+        "robo_unilabos": {
+          "resource_type": "balance",
+          "frame_id": "balance_1/base",
+          "pose": {
+            "frame_id": "lab_world",
+            "position": {"x": 520, "y": 120, "z": 0},
+            "orientation_rpy": {"roll": 0, "pitch": 0, "yaw": 0}
+          },
+          "reachable_by": ["roboarm_1"],
+          "access_zones": [
+            {
+              "id": "access_front",
+              "frame_id": "balance_1/access_front",
+              "pose": {
+                "position": {"x": 0, "y": -180, "z": 120},
+                "orientation_rpy": {"roll": 0, "pitch": 0, "yaw": 0}
+              },
+              "reachable_by": ["roboarm_1"]
+            }
+          ],
+          "affordances": [
+            {
+              "id": "pan",
+              "kind": "place_surface",
+              "frame_id": "balance_1/pan",
+              "pose": {
+                "position": {"x": 0, "y": 0, "z": 82},
+                "orientation_rpy": {"roll": 0, "pitch": 0, "yaw": 0}
+              },
+              "action_primitives": ["place", "pick"],
+              "reachable_by": ["roboarm_1"],
+              "access_zone": "access_front",
+              "device_endpoint": {
+                "read": "mass_g",
+                "stability": "stable"
+              }
+            }
+          ],
+          "state_variables": {
+            "mass_g": null,
+            "stable": false
+          },
+          "device_endpoints": {
+            "tare": "device.balance_1.tare",
+            "read_mass": "device.balance_1.read.mass_g"
+          },
+          "locks": {
+            "exclusive": true
+          },
+          "safety": {
+            "max_payload_g": 220
+          },
+          "calibration": {
+            "method": "aruco_marker",
+            "marker_id": "balance_marker_1"
+          }
+        }
+      }
+    },
+    {
+      "id": "rack_1",
+      "name": "Sample Rack 1",
+      "type": "resource",
+      "class": "sample_rack",
+      "position": {"x": 240, "y": -260, "z": 0},
+      "config": {},
+      "data": {},
+      "extra": {
+        "robo_unilabos": {
+          "resource_type": "sample_rack",
+          "frame_id": "rack_1/base",
+          "reachable_by": ["roboarm_1"],
+          "affordances": [
+            {
+              "id": "slot_A1",
+              "kind": "container_slot",
+              "frame_id": "rack_1/slot_A1",
+              "pose": {
+                "position": {"x": 0, "y": 0, "z": 42},
+                "orientation_rpy": {"roll": 0, "pitch": 0, "yaw": 0}
+              },
+              "action_primitives": ["place", "pick"],
+              "reachable_by": ["roboarm_1"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "vial_A",
+      "name": "Sample Vial A",
+      "type": "resource",
+      "class": "container.vial",
+      "position": {"x": 240, "y": -260, "z": 42},
+      "config": {},
+      "data": {},
+      "extra": {
+        "robo_unilabos": {
+          "resource_type": "container",
+          "frame_id": "vial_A/body",
+          "reachable_by": ["roboarm_1"],
+          "affordances": [
+            {
+              "id": "grasp_body",
+              "kind": "grasp_region",
+              "frame_id": "vial_A/grasp_body",
+              "pose": {
+                "position": {"x": 0, "y": 0, "z": 28},
+                "orientation_rpy": {"roll": 0, "pitch": 0, "yaw": 0}
+              },
+              "action_primitives": ["grasp", "release"],
+              "reachable_by": ["roboarm_1"]
+            }
+          ],
+          "state_variables": {
+            "location": "rack_1.slot_A1"
+          }
+        }
+      }
+    }
+  ],
+  "links": []
+}
+

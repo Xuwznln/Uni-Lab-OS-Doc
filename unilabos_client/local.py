@@ -6,6 +6,9 @@ from unilabos.api import QueryService
 from unilabos.hal.mock import MockHAL
 from unilabos.queries.action_catalog_source import ActionCatalogSource
 from unilabos.queries.engine import QueryEngine
+from unilabos.queries.labutopia import LabUtopiaAssetCardSource, LabUtopiaTaskConfigSource, LabUtopiaUsdSource
+from unilabos.queries.resource_map_source import ResourceMapSource
+from unilabos.queries.robot_asset import robot_model_source_from_asset
 
 
 class RoboUniLabOS:
@@ -30,22 +33,19 @@ class RoboUniLabOS:
         robot_assets: Optional[Iterable[str]] = None,
         mock_hals: Optional[Iterable[str]] = None,
     ) -> "RoboUniLabOS":
-        unsupported = {
-            "graph": graph,
-            "asset_cards": asset_cards,
-            "labutopia_config": labutopia_config,
-            "usd": usd,
-            "robot_assets": list(robot_assets or []),
-        }
-        enabled_unsupported = {key: value for key, value in unsupported.items() if value}
-        if enabled_unsupported:
-            raise NotImplementedError(
-                "This integration includes the Phase 13 core query API only; "
-                f"unsupported optional sources: {', '.join(sorted(enabled_unsupported))}"
-            )
         sources = []
+        for robot_asset in robot_assets or []:
+            sources.append(robot_model_source_from_asset(robot_asset))
+        if graph:
+            sources.append(ResourceMapSource.from_file(graph))
+        if asset_cards:
+            sources.append(LabUtopiaAssetCardSource.from_directory(asset_cards))
         if action_catalog:
             sources.append(ActionCatalogSource.from_file(action_catalog))
+        if labutopia_config:
+            sources.append(LabUtopiaTaskConfigSource.from_directory(labutopia_config))
+        if usd:
+            sources.append(LabUtopiaUsdSource(usd))
         engine = QueryEngine(sources=sources)
         for robot_id in mock_hals or []:
             engine.hal_registry.register(robot_id, MockHAL(robot_id=robot_id))
