@@ -68,6 +68,30 @@ def _start_twin_poller(executor, devices_provider) -> None:
     rclpy.__twin_poller = poller
 
 
+def _build_labutopia_sources(ctx) -> list:
+    """按 RuntimeContext 配置加载 LabUtopia 静态场景源(资产卡 + 任务配置)。"""
+    sources = []
+    assets_dir = getattr(ctx, "query_labutopia_assets", None)
+    config_dir = getattr(ctx, "query_labutopia_config", None)
+    if assets_dir:
+        try:
+            from unilabos.queries.labutopia import LabUtopiaAssetCardSource
+
+            sources.append(LabUtopiaAssetCardSource.from_directory(assets_dir))
+            logger.info(f"Query API: loaded LabUtopia asset cards from {assets_dir}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Query API: failed to load LabUtopia asset cards ({assets_dir}): {e}")
+    if config_dir:
+        try:
+            from unilabos.queries.labutopia import LabUtopiaTaskConfigSource
+
+            sources.append(LabUtopiaTaskConfigSource.from_directory(config_dir))
+            logger.info(f"Query API: loaded LabUtopia task config from {config_dir}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Query API: failed to load LabUtopia task config ({config_dir}): {e}")
+    return sources
+
+
 def _start_query_services(executor) -> None:
     """启动 Robo-UniLabOS 信息层对外暴露:ROS2 /unilabos/query + gRPC :50051。
 
@@ -86,7 +110,8 @@ def _start_query_services(executor) -> None:
         from unilabos.api.ros2_query_service import QueryServiceNode
         from unilabos.queries.ros_live_source import build_live_query_engine
 
-        live, engine = build_live_query_engine()
+        static_sources = _build_labutopia_sources(ctx)
+        live, engine = build_live_query_engine(static_sources=static_sources)
         service = QueryService(engine)
 
         qnode = QueryServiceNode(service, auto_start=True)

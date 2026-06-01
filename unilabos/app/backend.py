@@ -38,6 +38,8 @@ def start_backend(
     _runtime_services.context.sim_services_enabled = start_sim_services and mode in ("sim", "twin")
     _runtime_services.context.query_api_enabled = backend == "ros" and not kwargs.get("disable_query_api", False)
     _runtime_services.context.query_grpc_port = int(kwargs.get("query_grpc_port", 50051))
+    _runtime_services.context.query_labutopia_assets = kwargs.get("query_labutopia_assets")
+    _runtime_services.context.query_labutopia_config = kwargs.get("query_labutopia_config")
     logger.info(
         "Runtime mode initialized: "
         f"mode={mode}, sim_rate={_runtime_services.context.clock.scale}, "

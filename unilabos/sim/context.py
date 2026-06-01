@@ -22,6 +22,8 @@ class RuntimeContext:
     sim_services_enabled: bool = True
     query_api_enabled: bool = True
     query_grpc_port: int = 50051
+    query_labutopia_assets: Optional[str] = None
+    query_labutopia_config: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.mode not in ("real", "sim", "twin"):

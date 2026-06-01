@@ -331,6 +331,18 @@ def build_argparser():
         default=50051,
         help="gRPC port for the query API (0 disables gRPC; ROS2 service still starts).",
     )
+    parser.add_argument(
+        "--query_labutopia_assets",
+        type=str,
+        default=None,
+        help="Directory of LabUtopia asset cards (*.json) to serve as a query scene source.",
+    )
+    parser.add_argument(
+        "--query_labutopia_config",
+        type=str,
+        default=None,
+        help="Directory of LabUtopia task config (*.yaml) to serve action schemas / affordances.",
+    )
     # workflow upload subcommand
     workflow_parser = subparsers.add_parser(
         "workflow_upload",
