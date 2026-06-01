@@ -350,6 +350,38 @@ class BioyondPeptideStation(BioyondWorkstation):
             return parent_debug_session(action_name)
         return nullcontext()
 
+    def handle_external_error(self, error_data: Dict[str, Any]) -> Dict[str, Any]:
+        """处理奔曜错误报送，并为后续 SSE 人工选择回复预留上下文。"""
+        parent_handler = getattr(super(), "handle_external_error", None)
+        if parent_handler is not None:
+            base_result = parent_handler(error_data)
+        else:
+            base_result = {
+                "handled": True,
+                "error_type": "bioyond_error" if isinstance(error_data, dict) and "code" in error_data else "unknown",
+                "timestamp": datetime.now().isoformat(),
+            }
+        if not isinstance(error_data, dict) or not any(
+            error_data.get(key) for key in ("ijk", "token", "optionMessage")
+        ):
+            return base_result
+
+        result = dict(base_result) if isinstance(base_result, dict) else {"base_result": base_result}
+        result.update(
+            {
+                "reply_status": "pending_sse_option",
+                "error_reply_context": {
+                    "ijk": error_data.get("ijk"),
+                    "token": error_data.get("token"),
+                    "optionMessage": error_data.get("optionMessage"),
+                },
+            }
+        )
+        # TODO: 待错误 SSE/人工确认工具提供 reply_option 后，调用
+        # build_scheduler_error_handling_reply_data(error_data, reply_option)，
+        # 再通过 self._require_hardware_interface().scheduler_reply_error_handling(reply_data) 回复奔曜。
+        return result
+
     def fetch_workflow_list(
         self,
         workflow_type: int = 0,

@@ -9,6 +9,63 @@ from datetime import datetime, timezone
 from unilabos.device_comms.rpc import BaseRequest
 from typing import Optional, List, Dict, Any
 import json
+import re
+
+
+def build_scheduler_error_handling_reply_data(
+    error_report: Dict[str, Any],
+    reply_option: int,
+    *,
+    creation_time: Optional[str] = None,
+) -> Dict[str, Any]:
+    """构造调度错误处理回复的 data 字段。
+
+    参数:
+        error_report: 已由父级 /report/error_handling 处理流程解包后的奔曜错误内容，
+            即 HTTP 报文 body["text"]，不是完整的 /report/error_handling 外层 envelope。
+            必须包含 ijk 和 token 字段。
+        reply_option: 用户选择的错误处理选项，应来自 optionMessage 中提示的可选值；
+            常见值为 1=RetryCmd、2=SkipCmd、5=StopCurrent。
+        creation_time: 可选的回复创建时间；不传时使用当前 UTC ISO8601 毫秒时间。
+
+    返回:
+        Dict[str, Any]: 仅返回 /api/lims/scheduler/reply-error-handling 所需的内部
+        data 对象。apiKey 和 requestTime 仍由 scheduler_reply_error_handling RPC 包装。
+
+    异常:
+        ValueError: 缺少 ijk/token，reply_option 不是整数，或 reply_option 不在
+        可解析的 optionMessage 选项中。
+    """
+    if not isinstance(error_report, dict):
+        raise ValueError("error_report 必须是已经解包后的奔曜错误字典")
+
+    ijk = error_report.get("ijk")
+    token = error_report.get("token")
+    if ijk in (None, ""):
+        raise ValueError("error_report 缺少必要字段: ijk")
+    if token in (None, ""):
+        raise ValueError("error_report 缺少必要字段: token")
+
+    try:
+        option = int(reply_option)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"reply_option 必须是整数: {reply_option!r}") from exc
+
+    option_message = error_report.get("optionMessage")
+    if isinstance(option_message, str):
+        advertised_options = {int(match) for match in re.findall(r"(?<!\d)(\d+)\s*:", option_message)}
+        if advertised_options and option not in advertised_options:
+            allowed = ", ".join(str(item) for item in sorted(advertised_options))
+            raise ValueError(f"reply_option={option} 不在 optionMessage 可选项中: {allowed}")
+
+    return {
+        "ijk": str(ijk),
+        "token": str(token),
+        "errorHandlingOption": option,
+        "creationTime": creation_time or datetime.now(timezone.utc).isoformat(
+            timespec="milliseconds"
+        ).replace("+00:00", "Z"),
+    }
 
 
 

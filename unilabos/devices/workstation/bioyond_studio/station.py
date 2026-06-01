@@ -1657,7 +1657,19 @@ class BioyondWorkstation(WorkstationBase):
                 # 奔曜格式
                 logger.error(f"[错误处理报送-奔曜] 任务: {error_data.get('task')}")
                 logger.error(f"  错误代码: {error_data.get('code')}")
-                logger.error(f"  错误信息: {error_data.get('message', '无')}")
+                error_message_parts = [
+                    str(error_data.get(key)).strip()
+                    for key in (
+                        "message",
+                        "errMessage",
+                        "errInnerMessage",
+                        "errInnerMessage2",
+                        "errInnerMessage3",
+                        "optionMessage",
+                    )
+                    if error_data.get(key) not in (None, "")
+                ]
+                logger.error(f"  错误信息: {'\\n'.join(error_message_parts) if error_message_parts else '无'}")
                 error_type = "bioyond_error"
             else:
                 # 标准格式
