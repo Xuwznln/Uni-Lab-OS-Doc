@@ -108,3 +108,28 @@ def ros2_transport(
     _transport.owns_node = owns_node  # type: ignore[attr-defined]
     _transport.node = client_node  # type: ignore[attr-defined]
     return _transport
+
+
+def grpc_transport(target: str = "localhost:50051", timeout_s: float = 5.0) -> Transport:
+    """Transport backed by the gRPC query server.
+
+    grpcio / generated stubs imported lazily. The exact same RoboUniLabOSRemote
+    works over gRPC, ROS2, or local with no code change.
+    """
+    import grpc
+
+    from unilabos.api.proto import query_pb2, query_pb2_grpc
+
+    channel = grpc.insecure_channel(target)
+    stub = query_pb2_grpc.QueryServiceStub(channel)
+
+    def _transport(command: str) -> str:
+        try:
+            reply = stub.Query(query_pb2.QueryRequest(command=command), timeout=timeout_s)
+            return reply.response
+        except grpc.RpcError as exc:  # noqa: BLE001
+            detail = exc.details() if hasattr(exc, "details") else str(exc)
+            return json.dumps({"ok": False, "error": str(detail), "code": "grpc_error"})
+
+    _transport.channel = channel  # type: ignore[attr-defined]
+    return _transport

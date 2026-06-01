@@ -19,3 +19,5 @@ crcmod-plus
 pymodbus
 matplotlib
 pylibftdi
+grpcio
+grpcio-tools
