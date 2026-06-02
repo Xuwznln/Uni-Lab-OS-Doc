@@ -889,7 +889,7 @@ class LiquidHandlerMiddleware(LiquidHandler):
     async def move_plate(
         self,
         plate: Plate,
-        to: Union[ResourceStack, ResourceHolder, Resource, Coordinate],
+        to: Union[ResourceStack, ResourceHolder, Resource, Coordinate, int],
         intermediate_locations: Optional[List[Coordinate]] = None,
         pickup_offset: Coordinate = Coordinate.zero(),
         destination_offset: Coordinate = Coordinate.zero(),
@@ -910,7 +910,7 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 pickup_distance_from_top,
                 **backend_kwargs,
             )
-        return await super().move_plate(
+        res = await super().move_plate(
             plate,
             to,
             intermediate_locations,
@@ -921,6 +921,12 @@ class LiquidHandlerMiddleware(LiquidHandler):
             pickup_distance_from_top,
             **backend_kwargs,
         )
+                # 上行物料状态（push 整棵 deck，确保 parent/slot 结构变更同步）。
+        if getattr(self, "_ros_node", None) is not None and isinstance(self.deck, Deck):
+            ROS2DeviceNode.run_async_func(
+                self._ros_node.update_resource, True, **{"resources": [plate]}
+            )
+        return res
 
     def serialize(self):
         if self._simulator:

@@ -61,7 +61,7 @@ from unilabos.devices.liquid_handling.prcxi.flatten_utils import (
 from unilabos.registry.placeholder_type import ResourceSlot
 from unilabos.resources.itemized_carrier import ItemizedCarrier
 from unilabos.resources.resource_tracker import ResourceTreeSet
-from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
+from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode, ROS2DeviceNode
 
 
 class PRCXIError(RuntimeError):
@@ -852,7 +852,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self._slot_prcxi_positions: Dict[int, Tuple[float, float]] = {}
         self.calibration_labware_type = calibration_labware_type
         self.max_z_pipetting = 185
-        self.max_z_claw = 170
+        self.max_z_claw = 300
 
         if calibration_points is not None:
             self.calibrate_from_points(calibration_points, labware_type=self.calibration_labware_type)
@@ -1055,27 +1055,39 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             # 重新计算所有槽位的位置（初始化时 deck 可能为空，此时才有资源）
             pipetting_positions = []
             claw_positions = []
+            seen_numbers = set()
             for child in self.deck.children:
                 number = self._get_slot_number(child)
 
                 if number is None:
                     continue
+                seen_numbers.add(number)
 
-                pos = self.plr_pos_to_prcxi(child, self.left_2_claw)
+                # 若 slot 上有 module/plate_adapter，下钻到其上承载的板(leaf)并取支撑层真实高度。
+                leaf, support, support_layer = self._slot_plate_and_support(child)
+                plate_h = self._recover_height(leaf)
                 slot_pos = self._slot_prcxi_positions[number]
+
+                # 夹爪：物理基准 = 支撑层高度 + 板中心；加 claw 帧偏移后 clamp 到 max_z_claw（不截到
+                # deck_z，否则 +offset 会把所有矮板都顶到 deck_z 导致夹爪高度对板高/支撑不敏感）。
+                pos = self.plr_pos_to_prcxi(leaf, self.left_2_claw)
                 pos.x = slot_pos[0] - child.get_size_x() / 2 + self.left_2_claw.x
                 pos.y = slot_pos[1] - child.get_size_y() / 2 + self.left_2_claw.y
+                pos.z = self.deck_z - (support + plate_h / 2.0) + self.left_2_claw.z
                 claw_positions.append({"Number": number, "XPos": pos.x, "YPos": pos.y, "ZPos": max(min(pos.z, self.max_z_claw),0)})
 
-                if child.children:
-                    pip_pos = self.plr_pos_to_prcxi(child.children[0])
+                # 移液：以承载板的 A1 孔为目标（孔几何完好），再按支撑层高度抬高一层。
+                if getattr(leaf, "children", None):
+                    well = leaf.children[0]
+                    pip_pos = self.plr_pos_to_prcxi(well)
+                    pip_pos.z = self._support_free_prcxi_z(well, leaf, support, support_layer) - support
                 else:
-                    pip_pos = self.plr_pos_to_prcxi(child)
+                    pip_pos = self.plr_pos_to_prcxi(leaf)
                     pip_pos.x = slot_pos[0] - 40
-                    pip_pos.y = slot_pos[1] - child.get_size_y() / 2 
-                    pip_pos.z = pip_pos.z - 70
-                half_x = child.get_size_x() / 2
-                z_wall = child.get_size_z()
+                    pip_pos.y = slot_pos[1] - leaf.get_size_y() / 2
+                    pip_pos.z = self.deck_z - support - 70
+                half_x = leaf.get_size_x() / 2
+                z_wall = plate_h
 
                 pipetting_positions.append({
                     "Number": number,
@@ -1091,6 +1103,49 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "X2_Left": half_x,
                     "X2_Right": half_x,
                     "ZAgainstTheWall2": pip_pos.z - z_wall,
+                })
+
+            # 空 slot（无物料）也初始化点位：按默认 labware 足迹（标准板 128×86）+ 台面高度，
+            # 镜像上面「无 children」分支的算法，保证每个已校准 slot 都有夹爪 + 移液位置。
+            default_w = float(PRCXI9300Deck._DEFAULT_SITE_SIZE.get("width", 128.0))
+            default_h = float(PRCXI9300Deck._DEFAULT_SITE_SIZE.get("height", 86.0))
+            default_half_x = default_w / 2
+            for number in sorted(self._slot_prcxi_positions):
+                if number in seen_numbers:
+                    continue
+                if self.deck._get_site_resource(number - 1) is not None:
+                    continue
+                slot_pos = self._slot_prcxi_positions[number]
+
+                # 夹爪：台面高度（z=0 → prcxi_z=deck_z），按默认足迹居中。
+                claw_z = self.deck_z + self.left_2_claw.z
+                claw_x = slot_pos[0] - default_w / 2 + self.left_2_claw.x
+                claw_y = slot_pos[1] - default_h / 2 + self.left_2_claw.y
+                claw_positions.append({
+                    "Number": number,
+                    "XPos": min(max(0, claw_x), self.deck_x),
+                    "YPos": min(max(0, claw_y), self.deck_y),
+                    "ZPos": max(min(claw_z, self.max_z_claw), 0),
+                })
+
+                # 移液：台面高度下探 70（与「无 children」分支一致）。
+                pip_x = slot_pos[0] - 40
+                pip_y = slot_pos[1] - default_h / 2
+                pip_z = self.deck_z - 70
+                pipetting_positions.append({
+                    "Number": number,
+                    "XPos": min(max(0, pip_x), self.deck_x),
+                    "YPos": min(max(0, pip_y), self.deck_y),
+                    "ZPos": max(min(pip_z, self.max_z_pipetting), 0),
+                    "X_Left": default_half_x,
+                    "X_Right": default_half_x,
+                    "ZAgainstTheWall": pip_z,
+                    "X2Pos": pip_x + self.right_2_left.x,
+                    "Y2Pos": pip_y + self.right_2_left.y,
+                    "Z2Pos": max(min((pip_z + self.right_2_left.z), self.max_z_pipetting), 0),
+                    "X2_Left": default_half_x,
+                    "X2_Right": default_half_x,
+                    "ZAgainstTheWall2": pip_z,
                 })
 
             if pipetting_positions:
@@ -1156,6 +1211,85 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 return self._get_slot_number(current)
             current = getattr(current, "parent", None)
         return self._get_slot_number(resource)
+
+    def _slot_plate_and_support(self, deck_child):
+        """返回 ``(leaf_plate_or_self, support_height, support_layer)``。
+
+        若 ``deck_child`` 是 module / plate_adapter（``support_layer``），则下钻到其上
+        承载的板（``leaf``），``support_height`` = 该 module/adapter 层的 ``get_size_z()``
+        （用于把移液枪 / 夹爪高度抬高一个支撑层的高度，PRCXI 坐标系下即 prcxi_z 减去该高度）。
+        若 ``deck_child`` 本身就是板（直接放在 deck 上），则 support_height=0、support_layer=None。
+        """
+        if isinstance(deck_child, (PRCXI9300ModuleSite, PlateAdapter)):
+            support = self._recover_height(deck_child)
+            leaf = deck_child.children[0] if getattr(deck_child, "children", None) else deck_child
+            return leaf, support, deck_child
+        return deck_child, 0.0, None
+
+    def _recover_height(self, resource) -> float:
+        """还原资源真实高度（mm）。云端反序列化的 deck 资源 ``get_size_z()`` 往往为 0，
+        但其几何信息散落在别处，按以下顺序还原：
+
+        1. ``get_size_z()`` 本身 >0 时直接用；
+        2. 子物体（孔 / tip）顶面 ``max(child.location.z + child.get_size_z())`` —— 适用于板 / tip_rack；
+        3. 按 ``model`` / ``unilabos_resource_class`` 在 prcxi_modules / prcxi_labware 工厂还原原始
+           size_z —— 适用于 module / plate_adapter（其子物体是 size 同样为 0 的板，无法靠 extent 推断）。
+        """
+        if resource is None:
+            return 0.0
+        try:
+            h = float(resource.get_size_z() or 0.0)
+        except Exception:
+            h = 0.0
+        if h > 0:
+            return h
+        try:
+            tops = []
+            for c in (getattr(resource, "children", None) or []):
+                lz = getattr(getattr(c, "location", None), "z", 0) or 0
+                sz = c.get_size_z() if hasattr(c, "get_size_z") else 0
+                top = (lz or 0) + (sz or 0)
+                if top and top > 0:
+                    tops.append(top)
+            if tops:
+                return float(max(tops))
+        except Exception:
+            pass
+        model = getattr(resource, "model", None)
+        if not model:
+            extra = getattr(resource, "unilabos_extra", {}) or {}
+            model = extra.get("unilabos_resource_class")
+        if model:
+            try:
+                from . import prcxi_modules, prcxi_labware
+            except Exception:
+                prcxi_modules = prcxi_labware = None
+            for _mod in (prcxi_modules, prcxi_labware):
+                fac = getattr(_mod, str(model), None) if _mod is not None else None
+                if callable(fac):
+                    try:
+                        return float(fac("_h_probe").get_size_z() or 0.0)
+                    except Exception:
+                        pass
+        return 0.0
+
+    def _support_free_prcxi_z(self, target, leaf, support, support_layer, offset_z: float = 0.0) -> float:
+        """计算 ``target`` 的「无支撑层」prcxi z（含 deck_z 顶面截断），供调用方再统一减去 support。
+
+        直接用 ``get_absolute_location`` 而非 plr_pos_to_prcxi 的父链 hack，避免父链对
+        deck 高度/支撑层高度的不一致累加。当板叠放在 module/adapter 顶面（``leaf.location.z != 0``）
+        时，``get_absolute_location`` 已把支撑高度算进绝对坐标，这里先剔除，得到「板若直接放
+        deck 表面」的基准 z。调用方随后统一 ``- support`` 抬高一层，再各自做 max_z 截断，
+        保证支撑高度不被各级 clamp 吃掉，且无支撑物料行为与历史完全一致。
+        """
+        z_pos = 't' if isinstance(target, TipSpot) else 'c'
+        tip_h = 0 if isinstance(target, TipSpot) else self.tip_height
+        abs_z = target.get_absolute_location(x='c', y='c', z=z_pos).z + tip_h
+        leaf_loc = getattr(leaf, 'location', None)
+        if support_layer is not None and leaf_loc is not None and getattr(leaf_loc, 'z', 0) != 0:
+            abs_z -= support
+        prcxi_z = self.deck_z - abs_z + offset_z
+        return min(max(0, prcxi_z), self.deck_z)
 
     def plr_pos_to_prcxi(self, resource: Resource, resource_offset: Coordinate = Coordinate(0, 0, 0), offset: Coordinate = Coordinate(0, 0, 0)):
         z_pos = 'c'
@@ -1507,9 +1641,19 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         
             number = self._get_slot_number(slot)
             
-            pip_pos = self.plr_pos_to_prcxi(slot.children[0])
-            half_x = slot.children[0].get_size_x() / 2 * abs(1 + self.x_increase)
-            z_wall = slot.children[0].get_size_z()
+            well = slot.children[0]
+            # 板叠放在 module/plate_adapter 上时，移液头按「无支撑基准 - support」抬高一层；
+            # support 取支撑层真实高度（云端反序列化的 get_size_z 常为 0，需 _recover_height 还原）。
+            slot_parent = getattr(slot, "parent", None)
+            if isinstance(slot_parent, (PRCXI9300ModuleSite, PlateAdapter)):
+                support = self._recover_height(slot_parent)
+                support_layer = slot_parent
+            else:
+                support, support_layer = 0.0, None
+            pip_pos = self.plr_pos_to_prcxi(well)
+            pip_pos.z = self._support_free_prcxi_z(well, slot, support, support_layer) - support
+            half_x = well.get_size_x() / 2 * abs(1 + self.x_increase)
+            z_wall = self._recover_height(slot)
 
             change_slots_positions.append({
                 "Number": number,
@@ -1685,8 +1829,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
     async def move_plate(
         self,
-        plate: Plate,
-        to: Resource,
+        plate: List[ResourceSlot],
+        to: int,
         intermediate_locations: Optional[List[Coordinate]] = None,
         pickup_offset: Coordinate = Coordinate.zero(),
         destination_offset: Coordinate = Coordinate.zero(),
@@ -1695,19 +1839,81 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         pickup_distance_from_top: float = 13.2 - 3.33,
         **backend_kwargs,
     ):
+        """把 ``plate`` 搬到 ``to`` 号 slot。
 
-        return await super().move_plate(
-            plate,
-            to,
-            intermediate_locations,
-            pickup_offset,
-            destination_offset,
-            drop_direction,
-            pickup_direction,
-            pickup_distance_from_top,
-            target_plate_number=to,
-            **backend_kwargs,
-        )
+        ``to`` 现在是目标 **slot 号（int）**，不再要求传 Resource：
+        - 取板仍沿用移液那套逻辑，从 ``plate`` 物料反推它当前所在 slot；
+        - 放板按 ``to`` 号位下发 pick+drop；
+        - 放置后把 ``plate`` 在资源树里 reparent 到目标 slot；若该 slot 上有
+          plate_adapter 或 module，则 plate 最终挂到该 adapter/module 上，并同步更新物料。
+
+        因 pylabrobot 的 ``move_plate/move_resource`` 需要 ``to`` 是 Resource/Coordinate
+        来做坐标计算与 reparent，``to:int`` 时不再委托父类，由本方法直接驱动 backend +
+        手动 reparent。
+        """
+        # 注册 schema 中 plate 为「资源数组」（与 transfer_liquid 的 sources 一致，便于网页选取），
+        # 运行期解析回来可能是单元素 list；这里统一取首个 Plate。
+        if isinstance(plate, (list, tuple)):
+            if not plate:
+                raise ValueError("move_plate 需要一个 plate，但收到空列表")
+            plate = plate[0]
+
+        # 向后兼容：仍允许传 Resource（反推槽位号）。
+        if not isinstance(to, int):
+            to = self._unilabos_backend._deck_plate_slot_no(to, getattr(to, "parent", None))
+
+        # 确保 plate 已挂到 deck，并从 plate 反推当前（源）slot。
+        self._attach_resources_to_deck_if_needed([plate])
+        src_slot = self._unilabos_backend._deck_plate_slot_no(plate, getattr(plate, "parent", None))
+
+        # 下发硬件 pick+drop（simulator 模式只更新物料，不产生硬件步骤）。
+        step = None
+        if not self._simulator:
+            await self._unilabos_backend.pick_up_resource(None, source_plate_number=src_slot)
+            step = await self._unilabos_backend.drop_resource(None, target_plate_number=to)
+
+        # 更新物料：把 plate reparent 到目标 slot；若目标 slot 上有 plate_adapter/module 则挂到其上。
+        deck = self.deck
+        dst_resource = None
+        if isinstance(deck, PRCXI9300Deck):
+            try:
+                dst_resource = deck._get_site_resource(to - 1)
+            except Exception:
+                dst_resource = None
+
+        # 入参 plate 可能与 deck 树里的实例不是同一对象（远端反序列化），但同名。pylabrobot
+        # 的 assign_child_resource 会按 root 全树做命名查重，若直接挂入参 plate 而旧的同名实例
+        # 仍在树上，会抛 "already assigned to deck"。这里统一按名字定位树内真实实例并搬动它。
+        target_plate = plate
+        if isinstance(deck, PRCXI9300Deck):
+            plate_name = getattr(plate, "name", None)
+            if plate_name is not None:
+                stack = list(deck.children)
+                while stack:
+                    node = stack.pop()
+                    if getattr(node, "name", None) == plate_name:
+                        target_plate = node
+                        break
+                    stack.extend(getattr(node, "children", None) or [])
+
+        old_parent = getattr(target_plate, "parent", None)
+        if old_parent is not None and old_parent is not dst_resource:
+            try:
+                old_parent.unassign_child_resource(target_plate)
+            except Exception:
+                pass
+        if isinstance(dst_resource, (PlateAdapter, PRCXI9300ModuleSite)):
+            # 已经在目标 module/adapter 下则无需重复挂（否则触发命名查重报错）。
+            if getattr(target_plate, "parent", None) is not dst_resource:
+                dst_resource.assign_child_resource(target_plate)
+        elif isinstance(deck, PRCXI9300Deck):
+            deck.assign_child_at_slot(target_plate, to, reassign=True)
+        # 同步槽位标记，保证后续 _get_slot_number 反推一致。
+        extra = getattr(target_plate, "unilabos_extra", None)
+        if isinstance(extra, dict):
+            extra["update_resource_site"] = f"T{to}"
+
+        return step
 
 
 class PRCXI9300Backend(LiquidHandlerBackend):
@@ -1769,35 +1975,47 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         return None
 
     def _deck_plate_slot_no(self, plate, deck=None) -> int:
-        """台面板位槽号（1–16）：优先 _get_slot_number；否则沿父链/handler.deck 找到 deck 后取序号+1。"""
-        sn = PRCXI9300Handler._get_slot_number(plate)
-        if sn is not None:
-            return sn
-        actual_deck = self._resolve_deck(plate, deck)
-        if actual_deck is None:
-            raise RuntimeError(
-                f"无法定位 {getattr(plate, 'name', '?')} 所在的 PRCXI9300Deck："
-                "请确认 tip_rack/plate 已挂到 self.deck，或在 unilabos_extra 中提供 update_resource_site=Tn。"
-            )
-        if plate in actual_deck.children:
-            index = actual_deck.children.index(plate)
-            plate_new = actual_deck.children[index]
-            sn = PRCXI9300Handler._get_slot_number(plate_new)
+        """台面板位槽号（1–16）。
+
+        plate 可能并非直接挂在 slot，而是嵌套在 slot 上的 plate_adapter / module 之下
+        （资源树 deck -> module -> plate）。此时沿 parent 链上溯到 deck 的直接子节点，
+        用最接近 deck 的那层（其 location 才是真正的 slot 坐标）解析槽位号。
+        """
+        # 沿 parent 链收集 [plate, ..., deck 直接子节点]。
+        chain = []
+        cur = plate
+        while cur is not None and not isinstance(cur, PRCXI9300Deck):
+            chain.append(cur)
+            if isinstance(getattr(cur, "parent", None), PRCXI9300Deck):
+                break
+            cur = getattr(cur, "parent", None)
+
+        # 1) 显式 update_resource_site 最优先（move_plate 写回 / 声明），plate 自身或其上层皆可。
+        for cand in chain:
+            extra = getattr(cand, "unilabos_extra", {}) or {}
+            digits = "".join(c for c in str(extra.get("update_resource_site", "") or "") if c.isdigit())
+            if digits:
+                return int(digits)
+
+        # 2) 位置反算：优先最接近 deck 的那层（嵌套 plate 的 location 相对父级，不可信）。
+        for cand in reversed(chain):
+            sn = PRCXI9300Handler._get_slot_number(cand)
             if sn is not None:
                 return sn
-            else:
-                raise RuntimeError(
-                    f"无法定位 {getattr(plate_new, 'name', '?')} 所在的 PRCXI9300Deck："
-                    f"x: {plate_new.location}"
-                )
-        # 名字兜底（远端解析回来的实例与 deck 上的不是同一对象）
-        plate_name = getattr(plate, "name", None)
-        if plate_name is not None:
-            for i, c in enumerate(actual_deck.children):
-                if getattr(c, "name", None) == plate_name:
-                    return i + 1
+
+        # 3) 名字兜底：需要 deck（远端解析回来的实例与 deck 上不是同一对象时）。
+        actual_deck = self._resolve_deck(plate, deck)
+        if actual_deck is not None:
+            for cand in reversed(chain):
+                cname = getattr(cand, "name", None)
+                if cname is not None:
+                    for i, c in enumerate(actual_deck.children):
+                        if getattr(c, "name", None) == cname:
+                            return i + 1
+
         raise RuntimeError(
-            f"{getattr(plate, 'name', '?')} 不在 deck.children 中且无可解析的槽位号"
+            f"无法定位 {getattr(plate, 'name', '?')} 所在的 PRCXI 槽位"
+            "（已沿 parent 链上溯 adapter/module；请确认已挂到 deck 或在 unilabos_extra 中提供 update_resource_site=Tn）。"
         )
 
     @staticmethod
@@ -1820,15 +2038,19 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.steps_todo_list.append(step)
         return step
 
-    async def pick_up_resource(self, pickup: ResourcePickup, **backend_kwargs):
+    async def pick_up_resource(self, pickup: Optional[ResourcePickup] = None, **backend_kwargs):
 
-        resource = pickup.resource
-        offset = pickup.offset
-        pickup_distance_from_top = pickup.pickup_distance_from_top
-        direction = pickup.direction
-        plate = resource.parent
-        deck = plate.parent
-        plate_number = self._deck_plate_slot_no(plate, deck)
+        # 优先用调用方显式给出的源 slot 号（int）；否则回退到从 pickup.resource 反推。
+        source_plate_number = backend_kwargs.get("source_plate_number", None)
+        if isinstance(source_plate_number, int):
+            plate_number = source_plate_number
+        else:
+            if pickup is None:
+                raise ValueError("pick_up_resource requires either source_plate_number(int) or a ResourcePickup")
+            # pickup.resource 即被夹取的 plate 本身（move_plate→move_resource→pick_up_resource
+            # 传入的就是 plate），直接据此反推槽号，不再向上取 parent。
+            plate = pickup.resource
+            plate_number = self._deck_plate_slot_no(plate, getattr(plate, "parent", None))
         is_whole_plate = True
         balance_height = 0
         step = self.api_client.clamp_jaw_pick_up(plate_number, is_whole_plate, balance_height)
@@ -1836,11 +2058,15 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.steps_todo_list.append(step)
         return step
 
-    async def drop_resource(self, drop: ResourceDrop, **backend_kwargs):
+    async def drop_resource(self, drop: Optional[ResourceDrop] = None, **backend_kwargs):
 
         plate_number = None
         target_plate_number = backend_kwargs.get("target_plate_number", None)
-        if target_plate_number is not None:
+        if isinstance(target_plate_number, int):
+            # 调用方直接给出目标 slot 号（int）。
+            plate_number = target_plate_number
+        elif target_plate_number is not None:
+            # 向后兼容：target_plate_number 为 Resource 时反推槽位号。
             plate = target_plate_number
             deck = plate.parent
             plate_number = self._deck_plate_slot_no(plate, deck)
@@ -1865,29 +2091,19 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.steps_todo_list = []
 
         if not len(self.matrix_id):
-            self.matrix_id = str(uuid.uuid4())
-            
-            material_list = self.api_client.get_all_materials()
-            material_dict = {material["uuid"]: material for material in material_list}
-            
-            work_tablets = []
-            for num, material_id in self.tablets_info.items():
-                work_tablets.append({
-                    "Number": num,
-                    "Material": material_dict[material_id]
-                })
+            # tablets_info 在 9320 下恒为空（仅非 9320 分支会 append），且历史的
+            # `tablets_info.items()` 假设 tablets_info 为 dict 已失效（实际是 list[WorkTablets]）。
+            # 统一改为复用 handler 基于 deck.children 的自动匹配建表逻辑（与首次 transfer_liquid
+            # 路径 _match_and_create_matrix 一致），由其回填 self.matrix_id。
+            handler = getattr(self, "_handler", None)
+            if handler is not None and hasattr(handler, "_match_and_create_matrix"):
+                handler._match_and_create_matrix()
 
-            self.matrix_info = {
-                "MatrixId": self.matrix_id,
-                "MatrixName": self.matrix_id,
-                "WorkTablets": work_tablets,
-                }
-            # print(json.dumps(self.matrix_info, indent=2))
-            res = self.api_client.add_WorkTablet_Matrix(self.matrix_info)
-            if not res["Success"]:
-                self.matrix_id = ""
-                raise AssertionError(f"Failed to create matrix: {res.get('Message', 'Unknown error')}")
-            print(f"PRCXI9300Backend created matrix with ID: {self.matrix_info['MatrixId']}, result: {res}")
+            if not len(self.matrix_id):
+                raise AssertionError(
+                    "create_protocol 未能创建/匹配 WorkTabletMatrix："
+                    "deck 上无可识别耗材或自动匹配失败（请确认槽位物料已挂载）。"
+                )
 
     def run_protocol(self, protocol_id: str = None):
         assert self.is_reset_ok, "PRCXI9300Backend is not reset successfully. Please call setup() first."

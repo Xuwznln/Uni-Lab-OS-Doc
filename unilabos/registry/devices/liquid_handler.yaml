@@ -2394,52 +2394,16 @@ liquid_handler:
             x: 0.0
             y: 0.0
             z: 0.0
-          plate:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          plate: null
           put_direction: ''
           resource_offset:
             x: 0.0
             y: 0.0
             z: 0.0
-          to:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          to: 0
         handles: {}
+        placeholder_keys:
+          plate: unilabos_resources
         result:
           name: name
         schema:
@@ -2520,96 +2484,79 @@ liquid_handler:
                   title: pickup_offset
                   type: object
                 plate:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
+                  items:
+                    properties:
+                      category:
                         type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
-                  title: plate
-                  type: object
+                      children:
+                        items:
+                          type: string
+                        type: array
+                      config:
+                        type: string
+                      data:
+                        type: string
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      parent:
+                        type: string
+                      pose:
+                        properties:
+                          orientation:
+                            properties:
+                              w:
+                                type: number
+                              x:
+                                type: number
+                              y:
+                                type: number
+                              z:
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            type: object
+                          position:
+                            properties:
+                              x:
+                                type: number
+                              y:
+                                type: number
+                              z:
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            type: object
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        type: object
+                      sample_id:
+                        type: string
+                      type:
+                        type: string
+                    required:
+                    - id
+                    - name
+                    - sample_id
+                    - children
+                    - parent
+                    - type
+                    - category
+                    - pose
+                    - config
+                    - data
+                    type: object
+                  type: array
                 put_direction:
                   type: string
                 resource_offset:
@@ -2634,96 +2581,10 @@ liquid_handler:
                   title: resource_offset
                   type: object
                 to:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  maximum: 9223372036854775807
+                  minimum: -9223372036854775808
                   title: to
-                  type: object
+                  type: integer
               title: LiquidHandlerMovePlate_Goal
               type: object
             result:
@@ -2739,7 +2600,7 @@ liquid_handler:
           - goal
           title: LiquidHandlerMovePlate
           type: object
-        type: LiquidHandlerMovePlate
+        type: UniLabJsonCommandAsync
       move_resource:
         feedback: {}
         goal:
@@ -8531,55 +8392,16 @@ liquid_handler.prcxi:
             x: 0.0
             y: 0.0
             z: 0.0
-          plate:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          plate: null
           put_direction: ''
           resource_offset:
             x: 0.0
             y: 0.0
             z: 0.0
-          to:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          to: 0
         handles: {}
         placeholder_keys:
           plate: unilabos_resources
-          to: unilabos_resources
         result:
           return_info: return_info
           success: success
@@ -8661,96 +8483,79 @@ liquid_handler.prcxi:
                   title: pickup_offset
                   type: object
                 plate:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
+                  items:
+                    properties:
+                      category:
                         type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
-                  title: plate
-                  type: object
+                      children:
+                        items:
+                          type: string
+                        type: array
+                      config:
+                        type: string
+                      data:
+                        type: string
+                      id:
+                        type: string
+                      name:
+                        type: string
+                      parent:
+                        type: string
+                      pose:
+                        properties:
+                          orientation:
+                            properties:
+                              w:
+                                type: number
+                              x:
+                                type: number
+                              y:
+                                type: number
+                              z:
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            - w
+                            title: orientation
+                            type: object
+                          position:
+                            properties:
+                              x:
+                                type: number
+                              y:
+                                type: number
+                              z:
+                                type: number
+                            required:
+                            - x
+                            - y
+                            - z
+                            title: position
+                            type: object
+                        required:
+                        - position
+                        - orientation
+                        title: pose
+                        type: object
+                      sample_id:
+                        type: string
+                      type:
+                        type: string
+                    required:
+                    - id
+                    - name
+                    - sample_id
+                    - children
+                    - parent
+                    - type
+                    - category
+                    - pose
+                    - config
+                    - data
+                    type: object
+                  type: array
                 put_direction:
                   type: string
                 resource_offset:
@@ -8775,96 +8580,10 @@ liquid_handler.prcxi:
                   title: resource_offset
                   type: object
                 to:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  maximum: 9223372036854775807
+                  minimum: -9223372036854775808
                   title: to
-                  type: object
+                  type: integer
               title: LiquidHandlerMovePlate_Goal
               type: object
             result:
@@ -8880,7 +8599,7 @@ liquid_handler.prcxi:
           - goal
           title: LiquidHandlerMovePlate
           type: object
-        type: LiquidHandlerMovePlate
+        type: UniLabJsonCommandAsync
       pick_up_tips:
         feedback: {}
         goal:
