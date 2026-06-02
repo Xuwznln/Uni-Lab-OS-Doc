@@ -1,6 +1,7 @@
 import asyncio
-import time
 from typing import Dict, Any, Optional
+
+from unilabos.sim.clock import sim_sleep_sync
 
 
 class VirtualVacuumPump:
@@ -32,7 +33,7 @@ class VirtualVacuumPump:
 
     def set_status(self, string):
         self._status = string
-        time.sleep(5)
+        sim_sleep_sync(5)
 
     def open(self):
         self._status = "OPEN"

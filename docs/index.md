@@ -20,4 +20,5 @@ developer_guide/add_action.md
 developer_guide/add_registry.md
 developer_guide/add_yaml.md
 developer_guide/action_includes.md
+developer_guide/robo_unilabos_deferred_assets_handoff.md
 ```

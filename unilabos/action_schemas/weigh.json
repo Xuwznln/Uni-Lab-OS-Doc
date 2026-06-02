@@ -1,0 +1,22 @@
+{
+  "schema_version": "0.1",
+  "action": "weigh",
+  "args": {
+    "sample": "resource",
+    "balance": "balance_1",
+    "target_mass_g": 5.0,
+    "tolerance_g": 0.05
+  },
+  "preconditions": [
+    {"type": "device_state", "device": "balance_1", "state": "idle"},
+    {"type": "object_present", "object": "sample"}
+  ],
+  "postconditions": [
+    {"type": "mass_in_range", "device": "balance_1", "min": 4.95, "max": 5.05}
+  ],
+  "policy_preference": ["classical", "human", "VLA"],
+  "timeout_s": 60,
+  "metadata": {
+    "description": "Place a sample on a balance and verify the mass reading."
+  }
+}

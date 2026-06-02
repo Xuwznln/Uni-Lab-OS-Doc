@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.1",
+  "action": "open_lid",
+  "args": {
+    "target": "resource.affordance",
+    "joint_hint": "revolute",
+    "open_angle_deg": 30
+  },
+  "preconditions": [
+    {"type": "object_present", "object": "target"}
+  ],
+  "postconditions": [
+    {"type": "device_state", "device": "target", "state": "open"}
+  ],
+  "policy_preference": ["classical", "ACT", "DiffusionPolicy"],
+  "timeout_s": 45,
+  "metadata": {
+    "description": "Open a hinged cap, lid, door, or panel."
+  }
+}

@@ -1,6 +1,7 @@
 recursive-include unilabos/test *
 recursive-include unilabos/utils *
 recursive-include unilabos/registry *.yaml
+recursive-include unilabos/action_schemas *.json
 recursive-include unilabos/app/web/static *
 recursive-include unilabos/app/web/templates *
 recursive-include unilabos/device_mesh/devices *

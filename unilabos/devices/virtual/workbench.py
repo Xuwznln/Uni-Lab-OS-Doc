@@ -38,6 +38,7 @@ from unilabos.resources.resource_tracker import (
     LabSample,
     ResourceTreeSet,
 )
+from unilabos.sim.clock import sim_sleep_sync
 
 # ============ TypedDict 返回类型定义 ============
 
@@ -714,7 +715,7 @@ class VirtualWorkbench:
                 if station_id is None:
                     self.logger.info(f"[{material_id}] 没有空闲加热台, 等待中...")
                     self._release_arm()
-                    time.sleep(0.5)
+                    sim_sleep_sync(0.5)
                     self._acquire_arm(task_desc)
 
             with self._stations_lock:
@@ -727,7 +728,7 @@ class VirtualWorkbench:
                 self._active_tasks[material_id]["assigned_station"] = station_id
             self.logger.info(f"[{material_id}] 机械臂正在移动到加热台{station_id}...")
 
-            time.sleep(self.ARM_OPERATION_TIME)
+            sim_sleep_sync(self.ARM_OPERATION_TIME)
 
             self._update_data_status(f"{material_id}已放入加热台{station_id}")
             self.logger.info(
@@ -940,7 +941,7 @@ class VirtualWorkbench:
             if elapsed >= self.HEATING_TIME:
                 break
 
-            time.sleep(1.0)
+            sim_sleep_sync(1.0)
 
         with self._stations_lock:
             self._heating_stations[station_id].state = HeatingStationState.COMPLETED
@@ -1095,7 +1096,7 @@ class VirtualWorkbench:
             self.logger.info(
                 f"[{material_id}] 机械臂正在从加热台{station_id}取出并移动到{output_position}..."
             )
-            time.sleep(self.ARM_OPERATION_TIME)
+            sim_sleep_sync(self.ARM_OPERATION_TIME)
 
             with self._stations_lock:
                 self._heating_stations[station_id].state = HeatingStationState.IDLE

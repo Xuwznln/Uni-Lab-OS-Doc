@@ -1,0 +1,5 @@
+---
+string mode
+float64 rate
+bool paused
+float64 sim_now

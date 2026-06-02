@@ -1,0 +1,12 @@
+name: Level2_press_extra
+mode: headless
+task_type: press
+controller_type: press
+usd_path: assets/chemistry_lab/lab_004/lab_004.usd
+target_button_path: /World/lab2_button
+sub_obj_path: /World/lab2_button/button
+robot:
+  name: franka
+  prim_path: /World/franka
+task:
+  max_steps: 250

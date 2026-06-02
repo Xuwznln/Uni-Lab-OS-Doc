@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.1",
+  "action": "pour",
+  "args": {
+    "source": "container",
+    "target": "container",
+    "volume_ml": null
+  },
+  "preconditions": [
+    {"type": "object_present", "object": "source"},
+    {"type": "object_present", "object": "target"}
+  ],
+  "postconditions": [
+    {"type": "custom", "name": "liquid_transferred"}
+  ],
+  "policy_preference": ["DiffusionPolicy", "ACT", "VLA", "classical"],
+  "timeout_s": 90,
+  "metadata": {
+    "description": "Pour liquid from one container into another."
+  }
+}
