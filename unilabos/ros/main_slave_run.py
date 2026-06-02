@@ -102,6 +102,17 @@ def _build_labutopia_sources(ctx) -> list:
     return sources
 
 
+def _build_query_static_sources(ctx) -> list:
+    sources = []
+    physics = getattr(ctx, "physics", None)
+    if physics is not None:
+        from unilabos.queries.physics_live_source import PhysicsLiveSource
+
+        sources.append(PhysicsLiveSource(physics))
+    sources.extend(_build_labutopia_sources(ctx))
+    return sources
+
+
 def _start_query_services(executor) -> None:
     """启动 Robo-UniLabOS 信息层对外暴露:ROS2 /unilabos/query + gRPC :50051。
 
@@ -120,7 +131,7 @@ def _start_query_services(executor) -> None:
         from unilabos.api.ros2_query_service import QueryServiceNode
         from unilabos.queries.ros_live_source import build_live_query_engine
 
-        static_sources = _build_labutopia_sources(ctx)
+        static_sources = _build_query_static_sources(ctx)
         live, engine = build_live_query_engine(static_sources=static_sources)
         service = QueryService(engine)
 

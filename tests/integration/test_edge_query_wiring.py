@@ -12,6 +12,24 @@ import pytest
 rclpy = pytest.importorskip("rclpy")
 
 
+def test_build_query_static_sources_puts_physics_before_labutopia(monkeypatch):
+    from unilabos.ros.main_slave_run import _build_query_static_sources
+    from unilabos.sim.backends.fake_physics import FakePhysicsBackend
+    from unilabos.sim.context import RuntimeContext
+
+    class StaticSource:
+        name = "static"
+
+    import unilabos.ros.main_slave_run as mod
+
+    monkeypatch.setattr(mod, "_build_labutopia_sources", lambda ctx: [StaticSource()])
+
+    sources = _build_query_static_sources(RuntimeContext(mode="sim", physics=FakePhysicsBackend()))
+
+    assert sources[0].name == "physics_live"
+    assert sources[1].name == "static"
+
+
 @pytest.mark.integration
 def test_edge_query_services_live_flow(ros_context):
     from rclpy.executors import SingleThreadedExecutor
