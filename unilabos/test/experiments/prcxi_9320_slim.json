@@ -25,7 +25,7 @@
                 "setup": true,
                 "is_9320": true,
                 "timeout": 10,
-                "matrix_id": "5de524d0-3f95-406c-86dd-f83626ebc7cb",
+                "matrix_id": "",
                 "simulator": true,
                 "channel_num": 2
             },

@@ -28,7 +28,7 @@ if unilabos_dir not in sys.path:
 
 from unilabos.app.utils import cleanup_for_restart
 from unilabos.utils.banner_print import print_status, print_unilab_banner
-from unilabos.config.config import load_config, BasicConfig, HTTPConfig
+from unilabos.config.config import load_config, BasicConfig, HTTPConfig, SimGatewayConfig
 
 # Global restart flags (used by ws_client and web/server)
 _restart_requested: bool = False
@@ -791,6 +791,7 @@ def main():
     if "fastapi" in args_dict["app_bridges"]:
         args_dict["bridges"].append(http_client)
     # 获取通信客户端（仅支持WebSocket）
+    isaac_gateway = None
     if BasicConfig.is_host_mode:
         comm_client = get_communication_client()
         if "websocket" in args_dict["app_bridges"]:
@@ -798,6 +799,8 @@ def main():
 
             def _exit(signum, frame):
                 comm_client.stop()
+                if isaac_gateway is not None:
+                    isaac_gateway.stop()
                 sys.exit(0)
 
             signal.signal(signal.SIGINT, _exit)
@@ -805,6 +808,30 @@ def main():
             comm_client.start()
     else:
         print_status("SlaveMode跳过Websocket连接")
+
+    if SimGatewayConfig.enabled:
+        try:
+            from unilabos.sim.isaac_gateway import IsaacSimGateway
+
+            isaac_gateway = IsaacSimGateway.from_config()
+            isaac_gateway.start()
+
+            def _default_collision_handler(payload):
+                # 默认安全处理：结构化告警日志；可后续替换为停机/审计逻辑
+                print_status(f"[IsaacSim] 碰撞事件: {payload.get('pairs') or payload}", "warning")
+
+            isaac_gateway.add_collision_handler(_default_collision_handler)
+            print_status(f"IsaacSimGateway 已启动: {SimGatewayConfig.endpoint}", "info")
+            # visual != disable 时改用 ResourceVisualization 的整场景 URDF（见下方 RV 构建后），
+            # 避免给设备发占位 URI；仅在无可视化（无 RV）时走逐资源 sync 兜底。
+            if args_dict["visual"] == "disable":
+                try:
+                    synced = isaac_gateway.sync_from_resource_tree_set(args_dict["resources_config"])
+                    print_status(f"IsaacSimGateway 资源同步完成，已发送 {synced} 条 asset.upsert", "info")
+                except Exception as sync_err:
+                    print_status(f"IsaacSimGateway 资源同步失败: {sync_err}", "warning")
+        except Exception as e:
+            print_status(f"IsaacSimGateway 启动失败: {e}", "warning")
 
     args_dict["resources_mesh_config"] = {}
     args_dict["resources_edge_config"] = resource_edge_info
@@ -823,6 +850,13 @@ def main():
                 enable_rviz=enable_rviz,
             )
             args_dict["resources_mesh_config"] = resource_visualization.resource_model
+            # 把整场景展开后的 URDF 作为单个 full_dev 设备发给 Isaac Sim
+            if isaac_gateway is not None:
+                try:
+                    isaac_gateway.upsert_scene_urdf(resource_visualization.urdf_str)
+                    print_status("IsaacSimGateway 已发送整场景 scene.urdf", "info")
+                except Exception as scene_err:
+                    print_status(f"IsaacSimGateway 场景URDF发送失败: {scene_err}", "warning")
             start_backend(**args_dict)
             server_thread = threading.Thread(
                 target=start_server,
@@ -857,6 +891,8 @@ def main():
             )
             if restart_requested:
                 print_status("[Main] Restart requested, cleaning up...", "info")
+                if isaac_gateway is not None:
+                    isaac_gateway.stop()
                 cleanup_for_restart()
                 return
     else:
@@ -869,6 +905,8 @@ def main():
         )
         if restart_requested:
             print_status("[Main] Restart requested, cleaning up...", "info")
+            if isaac_gateway is not None:
+                isaac_gateway.stop()
             cleanup_for_restart()
             os._exit(RESTART_EXIT_CODE)
 

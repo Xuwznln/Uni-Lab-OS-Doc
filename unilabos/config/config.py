@@ -64,6 +64,25 @@ class ROSConfig:
     ]
 
 
+class SimGatewayConfig:
+    enabled = False
+    endpoint = "ws://127.0.0.1:9000/edge-sim/v1"
+    auth_token = ""
+    target = "isaac-sim-main"
+    world_name = "lab_world_01"
+    reconnect_backoff_ms = 1000
+    heartbeat_interval_ms = 5000
+    auto_bootstrap = True
+    # 按顺序从 Resource.model 中查找模型 URI 的键（逗号分隔）
+    asset_uri_key_order = "source_uri,uri,url,path,asset"
+    # URI 缺失时的兜底前缀：{prefix}{klass}
+    asset_uri_fallback_prefix = "unilab://class/"
+    # joint_command.set（Sim 反向驱动 Edge）落地话题：按 joint 名直接发布 JointState
+    # 默认发到 /joint_states（会经现有订阅回流给 Sim 形成闭环确认）；
+    # 若不想回流可改成独立话题，如 /isaac/joint_command
+    joint_command_topic = "/joint_states"
+
+
 def _update_config_from_module(module):
     for name, obj in globals().items():
         if isinstance(obj, type) and name.endswith("Config"):
