@@ -3,6 +3,7 @@ from typing import Union, Dict, Optional
 
 from unilabos.registry.decorators import topic_config
 from unilabos.sim.clock import sim_sleep_sync
+from unilabos.sim.device_physics import dispatch_device_command
 
 
 class VirtualMultiwayValve:
@@ -11,6 +12,7 @@ class VirtualMultiwayValve:
     """
     def __init__(self, port: str = "VIRTUAL", positions: int = 8, **kwargs):
         self.port = port
+        self.device_id = kwargs.get("device_id") or kwargs.get("id") or self.port
         self.max_positions = positions  # 1-8号位
         self.total_positions = positions + 1  # 0-8号位，共9个位置
         
@@ -107,6 +109,10 @@ class VirtualMultiwayValve:
             self._status = "Busy"
             self._valve_state = "Moving"
             self._target_position = pos
+            dispatch_device_command(
+                self.device_id,
+                {"type": "set_position", "position": pos, "device": "virtual_multiway_valve"},
+            )
             
             # 模拟阀门切换时间
             switch_time = abs(self._current_position - pos) * 0.5  # 每个位置0.5秒
@@ -163,6 +169,10 @@ class VirtualMultiwayValve:
         
         self._status = "Busy"
         self._valve_state = "Closing"
+        dispatch_device_command(
+            self.device_id,
+            {"type": "close", "position": self._current_position, "device": "virtual_multiway_valve"},
+        )
         sim_sleep_sync(0.5)
 
         # 可以选择保持当前位置或设置特殊关闭状态

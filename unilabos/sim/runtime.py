@@ -26,9 +26,23 @@ def configure_runtime(
     sim_rate: float = 1.0,
     sim_paused: bool = False,
     start_ros_services: bool = False,
+    physics=None,
+    physics_backend_name: str = "none",
+    physics_endpoint: str | None = None,
+    physics_scene: str | None = None,
+    physics_timeout: float = 120.0,
 ) -> RuntimeServices:
     clock = SimClock(mode=mode, scale=sim_rate)
-    context = RuntimeContext(mode=mode, clock=clock, sim_paused=sim_paused)
+    context = RuntimeContext(
+        mode=mode,
+        clock=clock,
+        sim_paused=sim_paused,
+        physics=physics,
+        physics_backend_name=physics_backend_name,
+        physics_endpoint=physics_endpoint,
+        physics_scene=physics_scene,
+        physics_timeout=physics_timeout,
+    )
     init_runtime_context(context)
     services = RuntimeServices(context=context)
     if start_ros_services and mode in ("sim", "twin"):

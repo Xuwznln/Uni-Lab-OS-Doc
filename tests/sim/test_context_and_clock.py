@@ -30,6 +30,19 @@ def test_init_sets_context_and_pause():
     assert ctx.clock.paused is True
 
 
+def test_runtime_context_stores_physics_configuration():
+    ctx = RuntimeContext(
+        mode="sim",
+        physics_backend_name="isaac",
+        physics_endpoint="http://127.0.0.1:8091",
+        physics_scene="/tmp/lab.usd",
+    )
+
+    assert ctx.physics_backend_name == "isaac"
+    assert ctx.physics_endpoint == "http://127.0.0.1:8091"
+    assert ctx.physics_scene == "/tmp/lab.usd"
+
+
 def test_sim_clock_sleep_scales_wall_time():
     clock = SimClock("sim", scale=20.0)
     t0 = time.monotonic()

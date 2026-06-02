@@ -321,6 +321,30 @@ def build_argparser():
         help="Do not auto-start /clock publisher and sim clock control ROS services.",
     )
     parser.add_argument(
+        "--physics",
+        choices=["none", "fake", "isaac"],
+        default="none",
+        help="Physics backend for sim mode: none, fake in-process backend, or Isaac HTTP bridge.",
+    )
+    parser.add_argument(
+        "--physics_endpoint",
+        type=str,
+        default=None,
+        help="Physics backend endpoint, required for --physics isaac.",
+    )
+    parser.add_argument(
+        "--physics_scene",
+        type=str,
+        default=None,
+        help="Scene path to load into the selected physics backend during startup.",
+    )
+    parser.add_argument(
+        "--physics_timeout",
+        type=float,
+        default=120.0,
+        help="Physics backend RPC timeout in seconds.",
+    )
+    parser.add_argument(
         "--disable_query_api",
         action="store_true",
         default=False,
@@ -417,6 +441,14 @@ def _load_graph_json_preview(file_path: str | None) -> Dict[str, Any] | None:
     except Exception as exc:
         print_status(f"预读取 graph JSON 失败，跳过 community 包解析: {exc}", "warning")
         return None
+
+
+def _can_start_without_cloud_auth(args_dict: Dict[str, Any], graph_file_path: str | None) -> bool:
+    if graph_file_path is None:
+        return False
+    if args_dict.get("use_remote_resource", False):
+        return False
+    return "websocket" not in (args_dict.get("app_bridges") or [])
 
 
 def main():
@@ -695,22 +727,25 @@ def main():
         print_status("工作流上传完成，程序退出", "info")
         os._exit(0)
 
-    if not BasicConfig.ak or not BasicConfig.sk:
-        print_status("后续运行必须拥有一个实验室，请前往 https://leap-lab.bohrium.com 注册实验室！", "warning")
-        os._exit(1)
     import networkx as nx
     import yaml
 
     graph: nx.Graph
     resource_tree_set: ResourceTreeSet
     resource_links: List[Dict[str, Any]]
-    request_startup_json = args_dict.get("_startup_json")
-    if request_startup_json is None:
-        request_startup_json = http_client.request_startup_json()
-
     file_path = args_dict.get("_graph_file_path")
     if file_path is None:
         file_path = _resolve_graph_file_path(args_dict.get("graph") or BasicConfig.startup_json_path)
+    can_start_without_auth = _can_start_without_cloud_auth(args_dict, file_path)
+    if not BasicConfig.ak or not BasicConfig.sk:
+        if not can_start_without_auth:
+            print_status("后续运行必须拥有一个实验室，请前往 https://leap-lab.bohrium.com 注册实验室！", "warning")
+            os._exit(1)
+        print_status("未提供 ak/sk，使用本地 graph 和非 websocket bridge 进入离线启动模式", "warning")
+
+    request_startup_json = args_dict.get("_startup_json")
+    if request_startup_json is None and BasicConfig.ak and BasicConfig.sk:
+        request_startup_json = http_client.request_startup_json()
     if file_path is None:
         if not request_startup_json:
             print_status(

@@ -2,6 +2,7 @@ import unittest
 
 from unilabos.hal.adapters.ur_adapter import URHAL
 from unilabos.queries.models import Pose
+from unilabos.sim.context import RuntimeContext, _reset_for_test, init_runtime_context
 
 
 class FakeRTDEControl:
@@ -71,6 +72,25 @@ class URAdapterTest(unittest.TestCase):
             ("ur5_left", {"type": "gripper", "state": "closed"}),
             backend.commands[-1],
         )
+
+    def test_sim_mode_defaults_to_runtime_physics_backend(self):
+        _reset_for_test()
+        backend = FakeSimBackend()
+        init_runtime_context(RuntimeContext(mode="sim", physics=backend, physics_backend_name="fake"))
+        try:
+            hal = URHAL(host="sim", robot_id="ur5_runtime", mode="sim")
+
+            hal.move_j([0, 1, 2, 3, 4, 5], speed=0.4)
+
+            self.assertEqual(
+                (
+                    "ur5_runtime",
+                    {"type": "move_j", "joint_positions": [0, 1, 2, 3, 4, 5], "speed": 0.4},
+                ),
+                backend.commands[-1],
+            )
+        finally:
+            _reset_for_test()
 
 
 if __name__ == "__main__":
