@@ -586,8 +586,8 @@ class MessageProcessor:
                     self.websocket_url,
                     ssl=ssl_context,
                     open_timeout=20,
-                    ping_interval=WSConfig.ping_interval,
-                    ping_timeout=WSConfig.ping_timeout,
+                    ping_interval=WSConfig.ws_ping_interval,
+                    ping_timeout=WSConfig.ws_ping_timeout,
                     close_timeout=5,
                     additional_headers={
                         "Authorization": f"Lab {BasicConfig.auth_secret()}",
@@ -936,11 +936,21 @@ class MessageProcessor:
 
             job_log = format_job_log(req.job_id, req.task_id, req.device_id, req.action)
 
+            existing_job = self.device_manager.get_job_info(req.job_id)
+            if existing_job and existing_job.task_id != req.task_id:
+                logger.warning(
+                    "[MessageProcessor] job_start job_id matched but task_id mismatched, skip start: "
+                    "job=%s old_task=%s new_task=%s",
+                    req.job_id[:8],
+                    existing_job.task_id[:8],
+                    req.task_id[:8],
+                )
+                return
+
             if self.websocket_client:
                 # 幂等缓存：首次 job_start 登记缓存并真正执行；
                 # 重复的 (task_id, job_id) 则假装执行——直接回放之前缓存的结果，不再下发设备动作。
-                is_new_request = self.websocket_client.register_job_start_request(data)
-                if not is_new_request:
+                if self.websocket_client.is_job_cached(req.job_id, req.task_id):
                     self.websocket_client.log_cached_job(req.job_id, req.task_id, source="job_start")
                     replayed = self.websocket_client.replay_cached_job_start_response(req.job_id, req.task_id)
                     if replayed:
@@ -954,45 +964,16 @@ class MessageProcessor:
                         )
                     return
 
-            # 服务端对always_free动作可能跳过query_action_state直接发job_start，
-            # 此时job尚未注册，需要自动补注册
-            existing_job = self.device_manager.get_job_info(req.job_id)
-            if existing_job and existing_job.task_id != req.task_id:
-                logger.warning(
-                    "[MessageProcessor] job_start job_id matched but task_id mismatched, skip start: "
-                    "job=%s old_task=%s new_task=%s",
-                    req.job_id[:8],
-                    existing_job.task_id[:8],
-                    req.task_id[:8],
-                )
-                return
             if not existing_job:
-                action_name = req.action
-                device_action_key = f"/devices/{req.device_id}/{action_name}"
-                action_always_free = self._check_action_always_free(req.device_id, action_name)
-
-                if action_always_free:
-                    job_info = JobInfo(
-                        job_id=req.job_id,
-                        task_id=req.task_id,
-                        device_id=req.device_id,
-                        notebook_id=req.notebook_id,
-                        action_name=action_name,
-                        device_action_key=device_action_key,
-                        status=JobStatus.QUEUE,
-                        start_time=time.time(),
-                        always_free=True,
-                    )
-                    self.device_manager.add_queue_request(job_info)
-                    existing_job = job_info
-                    logger.info(f"[MessageProcessor] Job {job_log} always_free, auto-registered from direct job_start")
-                else:
-                    logger.error(f"[MessageProcessor] Job {job_log} not registered (missing query_action_state)")
-                    return
+                logger.error(f"[MessageProcessor] Job {job_log} not registered (missing query_action_state)")
+                return
 
             if existing_job and req.notebook_id and not existing_job.notebook_id:
                 existing_job.notebook_id = req.notebook_id
             notebook_id = req.notebook_id or (existing_job.notebook_id if existing_job else "")
+
+            if self.websocket_client:
+                self.websocket_client.register_job_start_request(data)
 
             success = self.device_manager.start_job(req.job_id)
             if not success:
@@ -1345,8 +1326,8 @@ class MessageProcessor:
                 "type": typ,
                 "device_id": device_id,
                 "action_name": action_name,
-                "task_id": task_id,
-                "job_id": job_id,
+                "task_id": task_id,  # 服务端主动查才有
+                "job_id": job_id,  # 服务端主动查才有
                 "notebook_id": notebook_id,
                 "free": free,
                 "need_more": need_more + 1,
@@ -1454,6 +1435,9 @@ class QueueProcessor:
                 # 发送正在执行任务的running状态
                 self._send_running_status()
 
+                # 周期性重发 READY 任务的 free 通知（防止 end_job 那一次性推送在链路抖动时丢失）
+                self._send_ready_status()
+
                 # 发送排队任务的busy状态
                 self._send_busy_status()
 
@@ -1499,6 +1483,37 @@ class QueueProcessor:
             self.message_processor.send_message(message)
             job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
             logger.trace(f"[QueueProcessor] Sent running status for job {job_log}")  # type: ignore
+
+    def _send_ready_status(self):
+        """周期性重发 READY 任务的 free 通知。
+
+        READY 的 free=true 原本只在 end_job 时一次性推送，若该消息恰好遇到链路抖动/掉线
+        而丢失，服务端将永远收不到“可执行”信号，导致该 job 在 10s 后被误判 READY 超时。
+        这里与 _send_running_status / _send_busy_status 对称，按周期补发，确保最终一致。
+        """
+        if not self.message_processor.is_connected():
+            return
+
+        for job_info in self.device_manager.get_active_jobs():
+            if job_info.status != JobStatus.READY:
+                continue
+
+            message = {
+                "action": "report_action_state",
+                "data": {
+                    "type": "query_action_status",
+                    "device_id": job_info.device_id,
+                    "action_name": job_info.action_name,
+                    "task_id": job_info.task_id,
+                    "job_id": job_info.job_id,
+                    "notebook_id": job_info.notebook_id,
+                    "free": True,
+                    "need_more": 0,
+                },
+            }
+            self.message_processor.send_message(message)
+            job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
+            logger.trace(f"[QueueProcessor] Re-sent free for READY job {job_log}")  # type: ignore
 
     def _send_busy_status(self):
         """发送排队任务的busy状态"""
