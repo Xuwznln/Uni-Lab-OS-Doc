@@ -244,7 +244,16 @@ def parse_args():
         "--addr",
         type=str,
         default="https://leap-lab.bohrium.com/api/v1",
-        help="Laboratory backend address",
+        help="Laboratory backend address (API)",
+    )
+    parser.add_argument(
+        "--schedule_addr",
+        type=str,
+        default="",
+        help=(
+            "Schedule WebSocket address. If empty, derived from --addr: "
+            "port +1 when --addr has a port, otherwise the same host is used."
+        ),
     )
     parser.add_argument(
         "--skip_env_check",
@@ -485,6 +494,11 @@ def main():
             HTTPConfig.remote_addr = "http://127.0.0.1:48197/api/v1"
         else:
             HTTPConfig.remote_addr = args.addr
+
+    # schedule 通道地址：显式指定则直接使用，否则在连接时从 remote_addr 派生
+    if args_dict.get("schedule_addr", ""):
+        HTTPConfig.schedule_addr = args_dict["schedule_addr"]
+        print_status(f"使用独立 schedule 地址: {HTTPConfig.schedule_addr}", "info")
 
     # 设置BasicConfig参数
     if args_dict.get("ak", ""):
