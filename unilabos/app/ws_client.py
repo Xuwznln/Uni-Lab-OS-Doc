@@ -936,21 +936,11 @@ class MessageProcessor:
 
             job_log = format_job_log(req.job_id, req.task_id, req.device_id, req.action)
 
-            existing_job = self.device_manager.get_job_info(req.job_id)
-            if existing_job and existing_job.task_id != req.task_id:
-                logger.warning(
-                    "[MessageProcessor] job_start job_id matched but task_id mismatched, skip start: "
-                    "job=%s old_task=%s new_task=%s",
-                    req.job_id[:8],
-                    existing_job.task_id[:8],
-                    req.task_id[:8],
-                )
-                return
-
             if self.websocket_client:
                 # 幂等缓存：首次 job_start 登记缓存并真正执行；
                 # 重复的 (task_id, job_id) 则假装执行——直接回放之前缓存的结果，不再下发设备动作。
-                if self.websocket_client.is_job_cached(req.job_id, req.task_id):
+                is_new_request = self.websocket_client.register_job_start_request(data)
+                if not is_new_request:
                     self.websocket_client.log_cached_job(req.job_id, req.task_id, source="job_start")
                     replayed = self.websocket_client.replay_cached_job_start_response(req.job_id, req.task_id)
                     if replayed:
@@ -964,16 +954,45 @@ class MessageProcessor:
                         )
                     return
 
-            if not existing_job:
-                logger.error(f"[MessageProcessor] Job {job_log} not registered (missing query_action_state)")
+            # 服务端对always_free动作可能跳过query_action_state直接发job_start，
+            # 此时job尚未注册，需要自动补注册
+            existing_job = self.device_manager.get_job_info(req.job_id)
+            if existing_job and existing_job.task_id != req.task_id:
+                logger.warning(
+                    "[MessageProcessor] job_start job_id matched but task_id mismatched, skip start: "
+                    "job=%s old_task=%s new_task=%s",
+                    req.job_id[:8],
+                    existing_job.task_id[:8],
+                    req.task_id[:8],
+                )
                 return
+            if not existing_job:
+                action_name = req.action
+                device_action_key = f"/devices/{req.device_id}/{action_name}"
+                action_always_free = self._check_action_always_free(req.device_id, action_name)
+
+                if action_always_free:
+                    job_info = JobInfo(
+                        job_id=req.job_id,
+                        task_id=req.task_id,
+                        device_id=req.device_id,
+                        notebook_id=req.notebook_id,
+                        action_name=action_name,
+                        device_action_key=device_action_key,
+                        status=JobStatus.QUEUE,
+                        start_time=time.time(),
+                        always_free=True,
+                    )
+                    self.device_manager.add_queue_request(job_info)
+                    existing_job = job_info
+                    logger.info(f"[MessageProcessor] Job {job_log} always_free, auto-registered from direct job_start")
+                else:
+                    logger.error(f"[MessageProcessor] Job {job_log} not registered (missing query_action_state)")
+                    return
 
             if existing_job and req.notebook_id and not existing_job.notebook_id:
                 existing_job.notebook_id = req.notebook_id
             notebook_id = req.notebook_id or (existing_job.notebook_id if existing_job else "")
-
-            if self.websocket_client:
-                self.websocket_client.register_job_start_request(data)
 
             success = self.device_manager.start_job(req.job_id)
             if not success:
@@ -1326,8 +1345,8 @@ class MessageProcessor:
                 "type": typ,
                 "device_id": device_id,
                 "action_name": action_name,
-                "task_id": task_id,  # 服务端主动查才有
-                "job_id": job_id,  # 服务端主动查才有
+                "task_id": task_id,
+                "job_id": job_id,
                 "notebook_id": notebook_id,
                 "free": free,
                 "need_more": need_more + 1,
@@ -1397,11 +1416,6 @@ class QueueProcessor:
         """运行队列处理主循环"""
         logger.trace("[QueueProcessor] Queue processor started")
 
-        # 全量重广播按固定周期触发，与事件唤醒解耦。
-        # 初值置为"上次广播在一个周期前"，使首轮立即做一次全量状态对齐。
-        broadcast_interval = 10.0
-        last_broadcast = time.monotonic() - broadcast_interval
-
         while self.is_running:
             try:
                 # 检查READY状态超时的任务
@@ -1434,25 +1448,17 @@ class QueueProcessor:
                                 serialize_result_info("Job READY state timeout after 10 seconds", False, {}),
                             )
 
-                # 注意：此处不再 notify 自己，超时失败已通过 publish_job_status->end_job
-                # 触发下一个任务的就绪通知；再 notify 只会让本循环空转。
+                    # 立即触发状态更新
+                    self.notify_queue_update()
 
-                # 全量重广播只按固定 ~broadcast_interval 周期触发，与事件唤醒彻底解耦：
-                # - 并发 query 入队等事件只唤醒本循环做"及时超时检查"，不在此重广播，
-                #   否则 N 个并发 query 会触发近 O(N^2) 条重复且 need_more 自相矛盾的帧，
-                #   形成突发风暴打爆服务端导致断连；每个 query 的响应已由
-                #   _handle_query_action_state 单独发送，无需重广播。
-                # - 用时间戳判周期，保证即使持续有事件，丢包补发的重广播也不会被饿死，
-                #   且突发期内至多触发 1 次重广播（而非每个事件一次）。
-                now = time.monotonic()
-                if now - last_broadcast >= broadcast_interval:
-                    self._send_running_status()  # 正在执行任务的 running 状态
-                    self._send_ready_status()  # READY 任务的 free（防 end_job 一次性推送在抖动时丢失）
-                    self._send_busy_status()  # 排队任务的 busy 状态
-                    last_broadcast = now
+                # 发送正在执行任务的running状态
+                self._send_running_status()
 
-                # 等待一个周期或被事件提前唤醒（事件仅用于尽快做超时检查）。
-                self.queue_update_event.wait(timeout=broadcast_interval)
+                # 发送排队任务的busy状态
+                self._send_busy_status()
+
+                # 等待10秒或者等待事件通知
+                self.queue_update_event.wait(timeout=10)
                 self.queue_update_event.clear()  # 清除事件
 
             except Exception as e:
@@ -1493,37 +1499,6 @@ class QueueProcessor:
             self.message_processor.send_message(message)
             job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
             logger.trace(f"[QueueProcessor] Sent running status for job {job_log}")  # type: ignore
-
-    def _send_ready_status(self):
-        """周期性重发 READY 任务的 free 通知。
-
-        READY 的 free=true 原本只在 end_job 时一次性推送，若该消息恰好遇到链路抖动/掉线
-        而丢失，服务端将永远收不到“可执行”信号，导致该 job 在 10s 后被误判 READY 超时。
-        这里与 _send_running_status / _send_busy_status 对称，按周期补发，确保最终一致。
-        """
-        if not self.message_processor.is_connected():
-            return
-
-        for job_info in self.device_manager.get_active_jobs():
-            if job_info.status != JobStatus.READY:
-                continue
-
-            message = {
-                "action": "report_action_state",
-                "data": {
-                    "type": "query_action_status",
-                    "device_id": job_info.device_id,
-                    "action_name": job_info.action_name,
-                    "task_id": job_info.task_id,
-                    "job_id": job_info.job_id,
-                    "notebook_id": job_info.notebook_id,
-                    "free": True,
-                    "need_more": 0,
-                },
-            }
-            self.message_processor.send_message(message)
-            job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
-            logger.trace(f"[QueueProcessor] Re-sent free for READY job {job_log}")  # type: ignore
 
     def _send_busy_status(self):
         """发送排队任务的busy状态"""
