@@ -1,0 +1,444 @@
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #1d2430;
+    --muted: #5b6675;
+    --line: #d9e0e8;
+    --surface: #f7f9fb;
+    --panel: #ffffff;
+    --teal: #087f7a;
+    --blue: #2f5da8;
+    --amber: #a45f00;
+    --green: #2f7d45;
+    --red: #a33a3a;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--ink);
+    background: #eef3f7;
+  }
+
+  .page {
+    min-height: 100vh;
+    padding: 28px;
+  }
+
+  .header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    max-width: 1280px;
+    margin: 0 auto 18px;
+  }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  .subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.55;
+    max-width: 780px;
+  }
+
+  .asset-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    max-width: 1280px;
+    margin: 0 auto 22px;
+  }
+
+  .asset {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-height: 82px;
+  }
+
+  .asset strong {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 5px;
+  }
+
+  .asset span {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+
+  .options {
+    max-width: 1280px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .option {
+    border: 2px solid transparent;
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 14px;
+    cursor: pointer;
+    min-height: 670px;
+    transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+  }
+
+  .option:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(19, 36, 55, 0.12);
+  }
+
+  .option.selected {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 4px rgba(8, 127, 122, 0.12);
+  }
+
+  .option-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .option h2 {
+    margin: 0;
+    font-size: 18px;
+    letter-spacing: 0;
+  }
+
+  .badge {
+    flex: 0 0 auto;
+    border: 1px solid #b9d8d6;
+    background: #eaf7f6;
+    color: #06605d;
+    border-radius: 999px;
+    font-size: 11px;
+    padding: 4px 8px;
+    font-weight: 650;
+  }
+
+  .map {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border: 1px solid #bfcbd8;
+    border-radius: 8px;
+    background:
+      linear-gradient(rgba(81, 96, 116, 0.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(81, 96, 116, 0.12) 1px, transparent 1px),
+      #f8fafc;
+    background-size: 10% 10%;
+    overflow: hidden;
+  }
+
+  .bench,
+  .robot,
+  .instrument,
+  .labware,
+  .camera,
+  .zone,
+  .wall,
+  .transfer,
+  .floor-label {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.15;
+    font-size: 11px;
+    font-weight: 650;
+    color: #16202d;
+  }
+
+  .bench {
+    border: 1px solid #58718b;
+    background: #dfe8f1;
+    border-radius: 6px;
+  }
+
+  .wall {
+    background: #c5d0dc;
+    color: #273546;
+  }
+
+  .robot {
+    border-radius: 999px;
+    border: 2px solid #174f78;
+    background: #d8eefc;
+    width: 18%;
+    height: 18%;
+    z-index: 4;
+  }
+
+  .reach {
+    position: absolute;
+    border-radius: 999px;
+    border: 2px dashed rgba(47, 93, 168, 0.42);
+    background: rgba(47, 93, 168, 0.07);
+    z-index: 1;
+  }
+
+  .instrument {
+    border: 1px solid #a26a0d;
+    background: #ffe7bd;
+    border-radius: 5px;
+    z-index: 3;
+  }
+
+  .labware {
+    border: 1px solid #2b7a47;
+    background: #dff4e5;
+    border-radius: 5px;
+    z-index: 3;
+  }
+
+  .transfer {
+    border: 1px dashed #09736f;
+    background: rgba(8, 127, 122, 0.12);
+    border-radius: 6px;
+    color: #065653;
+    z-index: 2;
+  }
+
+  .camera {
+    border: 1px solid #7061a8;
+    background: #ede8ff;
+    border-radius: 999px;
+    z-index: 5;
+  }
+
+  .zone {
+    border: 1px dashed rgba(163, 58, 58, 0.55);
+    background: rgba(255, 229, 229, 0.55);
+    border-radius: 7px;
+    color: #7b2a2a;
+    z-index: 0;
+  }
+
+  .floor-label {
+    color: #637287;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .notes {
+    margin-top: 12px;
+    display: grid;
+    gap: 8px;
+  }
+
+  .note {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    gap: 8px;
+    align-items: start;
+    padding: 8px 0;
+    border-top: 1px solid #edf1f5;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .note b {
+    font-size: 11px;
+    color: #334155;
+  }
+
+  .note span {
+    color: var(--muted);
+  }
+
+  .legend {
+    max-width: 1280px;
+    margin: 16px auto 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .key {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #b8c4d0;
+  }
+
+  .footer {
+    max-width: 1280px;
+    margin: 18px auto 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 1100px) {
+    .asset-strip,
+    .options {
+      grid-template-columns: 1fr;
+    }
+
+    .option {
+      min-height: 0;
+    }
+  }
+</style>
+
+<script>
+  function toggleSelect(el) {
+    document.querySelectorAll(".option").forEach((item) => item.classList.remove("selected"));
+    el.classList.add("selected");
+  }
+</script>
+
+<div class="page">
+  <header class="header">
+    <div>
+      <h1>Isaac Sim 初始实验室布局候选</h1>
+      <p class="subtitle">
+        基于 4090 上已发现的 RoboArm Chem 04 URDF、Matterix 桌面/烧杯/热台资产，以及 LabUtopia 化学实验室场景。
+        这里先校准空间和展示路线，确认后再生成可执行的 Isaac 初始化布局脚本。
+      </p>
+    </div>
+  </header>
+
+  <section class="asset-strip">
+    <div class="asset">
+      <strong>机械臂</strong>
+      <span>/home/ubuntu/canonical/Uni-Lab-OS/robot_assets/roboarm_chem_04/urdf/roboarm_chem_04_query.urdf</span>
+    </div>
+    <div class="asset">
+      <strong>工作台</strong>
+      <span>/home/ubuntu/Matterix/source/matterix_assets/data/infrastructure/tables/table-thorlabs-75x90/table.usda</span>
+    </div>
+    <div class="asset">
+      <strong>仪器和容器</strong>
+      <span>hotplate_start_button.usda, beaker-500ml.usda, 后续可补泵、阀、天平、相机等 USD</span>
+    </div>
+    <div class="asset">
+      <strong>背景实验室</strong>
+      <span>/home/ubuntu/labsim/LabUtopia_repro/assets/chemistry_lab/lab_001/lab_001.usd</span>
+    </div>
+  </section>
+
+  <main class="options">
+    <section class="option selected" data-choice="central-island" onclick="toggleSelect(this)">
+      <div class="option-title">
+        <h2>A. 中央机械臂岛</h2>
+        <span class="badge">推荐录屏首版</span>
+      </div>
+      <div class="map" aria-label="中央机械臂岛布局">
+        <div class="floor-label" style="left: 3%; top: 2%;">后墙 / LabUtopia 背景</div>
+        <div class="wall" style="left: 0; top: 0; width: 100%; height: 5%;">仪器背景墙</div>
+        <div class="bench" style="left: 14%; top: 16%; width: 72%; height: 58%;">Thorlabs 75x90 主桌</div>
+        <div class="reach" style="left: 18%; top: 19%; width: 64%; height: 64%;"></div>
+        <div class="robot" style="left: 41%; top: 38%;">RoboArm<br>Chem 04</div>
+        <div class="instrument" style="left: 24%; top: 26%; width: 19%; height: 12%;">热台<br>Hotplate</div>
+        <div class="labware" style="left: 26%; top: 43%; width: 14%; height: 10%;">烧杯<br>500ml</div>
+        <div class="labware" style="left: 58%; top: 28%; width: 17%; height: 10%;">试剂<br>托盘</div>
+        <div class="instrument" style="left: 56%; top: 48%; width: 20%; height: 12%;">仪器<br>占位</div>
+        <div class="transfer" style="left: 39%; top: 61%; width: 22%; height: 10%;">Transfer<br>Deck</div>
+        <div class="camera" style="left: 45%; top: 81%; width: 10%; height: 10%;">Cam</div>
+        <div class="zone" style="left: 10%; top: 78%; width: 80%; height: 14%;">前侧安全/观察通道</div>
+      </div>
+      <div class="notes">
+        <div class="note"><b>适合展示</b><span>一镜到底展示真实 PNG、query 机械臂/仪器 prim pose、验证 Uni-Lab-OS 到 Isaac worker 的闭环。</span></div>
+        <div class="note"><b>Isaac 坐标</b><span>建议机械臂 base 在世界原点附近；主桌中心对齐原点，仪器在 reach 半径内形成清晰语义区。</span></div>
+        <div class="note"><b>后续扩展</b><span>最容易增加抓取点、放置区、相机视角和动作轨迹；不需要先解决复杂房间约束。</span></div>
+      </div>
+    </section>
+
+    <section class="option" data-choice="linear-bench" onclick="toggleSelect(this)">
+      <div class="option-title">
+        <h2>B. 线性实验台</h2>
+        <span class="badge">真实实验室感</span>
+      </div>
+      <div class="map" aria-label="线性实验台布局">
+        <div class="wall" style="left: 0; top: 0; width: 100%; height: 7%;">后墙 / 长台背景</div>
+        <div class="bench" style="left: 6%; top: 18%; width: 88%; height: 40%;">长工作台</div>
+        <div class="reach" style="left: 24%; top: 29%; width: 52%; height: 52%;"></div>
+        <div class="robot" style="left: 41%; top: 49%;">RoboArm<br>Chem 04</div>
+        <div class="instrument" style="left: 12%; top: 25%; width: 17%; height: 11%;">热台</div>
+        <div class="labware" style="left: 31%; top: 25%; width: 15%; height: 10%;">烧杯</div>
+        <div class="instrument" style="left: 54%; top: 24%; width: 16%; height: 11%;">泵/阀<br>占位</div>
+        <div class="instrument" style="left: 73%; top: 24%; width: 15%; height: 11%;">天平<br>占位</div>
+        <div class="transfer" style="left: 39%; top: 38%; width: 22%; height: 9%;">操作带</div>
+        <div class="camera" style="left: 45%; top: 76%; width: 10%; height: 10%;">Cam</div>
+        <div class="zone" style="left: 8%; top: 69%; width: 84%; height: 16%;">人员/录屏观察区</div>
+      </div>
+      <div class="notes">
+        <div class="note"><b>适合展示</b><span>像真实化学台面，便于解释“机械臂面对一排仪器”的使用场景。</span></div>
+        <div class="note"><b>风险</b><span>如果 RoboArm Chem 04 的有效工作半径偏小，后排仪器可能超出可达范围，需要实测 URDF 尺寸。</span></div>
+        <div class="note"><b>后续扩展</b><span>适合做仪器 query 和视觉展示；复杂抓取可能需要重新调整仪器间距。</span></div>
+      </div>
+    </section>
+
+    <section class="option" data-choice="u-cell" onclick="toggleSelect(this)">
+      <div class="option-title">
+        <h2>C. U 型自动化单元</h2>
+        <span class="badge">面向长期自动化</span>
+      </div>
+      <div class="map" aria-label="U 型自动化单元布局">
+        <div class="wall" style="left: 0; top: 0; width: 100%; height: 6%;">背景实验室</div>
+        <div class="bench" style="left: 8%; top: 18%; width: 24%; height: 58%;">左侧台</div>
+        <div class="bench" style="left: 34%; top: 18%; width: 32%; height: 24%;">后侧台</div>
+        <div class="bench" style="left: 68%; top: 18%; width: 24%; height: 58%;">右侧台</div>
+        <div class="reach" style="left: 22%; top: 27%; width: 56%; height: 56%;"></div>
+        <div class="robot" style="left: 41%; top: 47%;">RoboArm<br>Chem 04</div>
+        <div class="instrument" style="left: 13%; top: 28%; width: 14%; height: 12%;">热台</div>
+        <div class="labware" style="left: 39%; top: 24%; width: 20%; height: 10%;">反应/容器区</div>
+        <div class="instrument" style="left: 73%; top: 28%; width: 14%; height: 12%;">检测<br>占位</div>
+        <div class="labware" style="left: 13%; top: 54%; width: 14%; height: 10%;">耗材</div>
+        <div class="instrument" style="left: 73%; top: 54%; width: 14%; height: 10%;">废液/泵</div>
+        <div class="transfer" style="left: 39%; top: 67%; width: 22%; height: 10%;">中央转运区</div>
+        <div class="camera" style="left: 45%; top: 84%; width: 10%; height: 10%;">Cam</div>
+        <div class="zone" style="left: 28%; top: 78%; width: 44%; height: 17%;">安全门/观察口</div>
+      </div>
+      <div class="notes">
+        <div class="note"><b>适合展示</b><span>最像完整自动化 workcell，后续可做安全区、任务队列、多仪器流程。</span></div>
+        <div class="note"><b>风险</b><span>布局复杂，初版需要更多碰撞体、相机角度和仪器间距调参。</span></div>
+        <div class="note"><b>后续扩展</b><span>适合 C6/C7 之后接入动作规划、仪器状态动画和多步骤实验流程。</span></div>
+      </div>
+    </section>
+  </main>
+
+  <section class="legend">
+    <span class="key"><span class="swatch" style="background:#d8eefc;"></span>RoboArm Chem 04</span>
+    <span class="key"><span class="swatch" style="background:#dfe8f1;"></span>工作台</span>
+    <span class="key"><span class="swatch" style="background:#ffe7bd;"></span>仪器</span>
+    <span class="key"><span class="swatch" style="background:#dff4e5;"></span>容器/耗材</span>
+    <span class="key"><span class="swatch" style="background:rgba(47,93,168,0.07); border-style:dashed;"></span>机械臂 reach 估计</span>
+    <span class="key"><span class="swatch" style="background:#ede8ff;"></span>录屏相机</span>
+  </section>
+
+  <p class="footer">
+    建议先选 A 作为 Isaac 初始化布局：它的可达性、query 物理态、PNG 真画面、录屏叙事都最稳。
+    选定后，下一步再把资产路径、prim 命名、坐标、相机和验收命令固化到 4090 的场景生成脚本中。
+  </p>
+</div>

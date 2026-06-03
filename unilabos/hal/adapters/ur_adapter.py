@@ -139,11 +139,17 @@ class URHAL(RobotHAL):
         self.gripper.close()
 
     def _sim_observation(self) -> dict[str, Any]:
-        if self.sim_backend is None:
-            raise RuntimeError("URHAL sim mode requires sim_backend")
-        return dict(self.sim_backend.get_observation(self.robot_id))
+        return dict(self._active_sim_backend().get_observation(self.robot_id))
 
     def _sim_command(self, command: dict[str, Any]) -> None:
-        if self.sim_backend is None:
-            raise RuntimeError("URHAL sim mode requires sim_backend")
-        self.sim_backend.set_command(self.robot_id, command)
+        self._active_sim_backend().set_command(self.robot_id, command)
+
+    def _active_sim_backend(self):
+        if self.sim_backend is not None:
+            return self.sim_backend
+        from unilabos.sim.context import get_runtime_context
+
+        backend = get_runtime_context().physics
+        if backend is None:
+            raise RuntimeError("URHAL sim mode requires sim_backend or RuntimeContext.physics")
+        return backend

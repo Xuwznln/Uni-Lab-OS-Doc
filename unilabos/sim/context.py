@@ -17,6 +17,10 @@ class RuntimeContext:
     mode: RuntimeMode = "real"
     clock: SimClock = field(default_factory=lambda: SimClock("real"))
     physics: Optional[PhysicsBackend] = None
+    physics_backend_name: str = "none"
+    physics_endpoint: Optional[str] = None
+    physics_scene: Optional[str] = None
+    physics_timeout: float = 120.0
     missing_sim_policy_default: MissingSimPolicy = "stub"
     sim_paused: bool = False
     sim_services_enabled: bool = True
