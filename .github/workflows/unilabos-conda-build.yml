@@ -59,7 +59,7 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-64
-          - os: macos-15 # Intel (via Rosetta)
+          - os: macos-15-intel # Intel x86_64
             platform: osx-64
           - os: macos-latest # ARM64
             platform: osx-arm64
@@ -94,10 +94,11 @@ jobs:
 
       - name: Setup Miniforge
         if: steps.should_build.outputs.should_build == 'true'
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           use-mamba: true
+          python-version: '3.11.14'
           channels: conda-forge,robostack-staging,uni-lab
           channel-priority: strict
           activate-environment: build-env
@@ -107,13 +108,22 @@ jobs:
       - name: Install rattler-build and anaconda-client
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          mamba install --override-channels -c conda-forge rattler-build anaconda-client -y
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmd //D //S //C '%CONDA%\condabin\mamba.bat install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y'
+          else
+            mamba install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y
+          fi
+          echo "CONDA_NO_PLUGINS=true" >> "$GITHUB_ENV"
+          echo "PYTHONUTF8=1" >> "$GITHUB_ENV"
+          echo "PYTHONIOENCODING=utf-8" >> "$GITHUB_ENV"
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
         run: |
           conda info
-          conda list | grep -E "(rattler-build|anaconda-client)"
+          conda list -n build-env | grep -E "(rattler-build|anaconda-client)"
+          conda run -n build-env rattler-build --version
+          conda run -n build-env anaconda --version
           echo "Platform: ${{ matrix.platform }}"
           echo "OS: ${{ matrix.os }}"
           echo "Build full package: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_full == 'true' }}"
@@ -128,7 +138,7 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true'
         run: |
           echo "Building unilabos-env (conda environment dependencies)..."
-          rattler-build build -r .conda/environment/recipe.yaml -c uni-lab -c robostack-staging -c conda-forge
+          conda run -n build-env rattler-build build -r .conda/environment/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c robostack-staging -c conda-forge
 
       - name: Upload unilabos-env to Anaconda.org (if enabled)
         if: |
@@ -140,7 +150,7 @@ jobs:
         run: |
           echo "Uploading unilabos-env to uni-lab organization..."
           for package in $(find ./output -name "unilabos-env*.conda"); do
-            anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
+            conda run -n build-env anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
           done
 
       - name: Build unilabos (with pip package)
@@ -148,7 +158,7 @@ jobs:
         run: |
           echo "Building unilabos package..."
           # 如果已上传到 Anaconda，从 uni-lab channel 获取 unilabos-env；否则从本地 output 获取
-          rattler-build build -r .conda/base/recipe.yaml -c uni-lab -c robostack-staging -c conda-forge --channel ./output
+          conda run -n build-env rattler-build build -r .conda/base/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c robostack-staging -c conda-forge --channel ./output
 
       - name: Upload unilabos to Anaconda.org (if enabled)
         if: |
@@ -160,7 +170,7 @@ jobs:
         run: |
           echo "Uploading unilabos to uni-lab organization..."
           for package in $(find ./output -name "unilabos-0*.conda" -o -name "unilabos-[0-9]*.conda"); do
-            anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
+            conda run -n build-env anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
           done
 
       - name: Build unilabos-full - Only when explicitly requested
@@ -170,7 +180,7 @@ jobs:
           github.event.inputs.build_full == 'true'
         run: |
           echo "Building unilabos-full package on ${{ matrix.platform }}..."
-          rattler-build build -r .conda/full/recipe.yaml -c uni-lab -c robostack-staging -c conda-forge --channel ./output
+          conda run -n build-env rattler-build build -r .conda/full/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c robostack-staging -c conda-forge --channel ./output
 
       - name: Upload unilabos-full to Anaconda.org (if enabled)
         if: |
@@ -181,7 +191,7 @@ jobs:
         run: |
           echo "Uploading unilabos-full to uni-lab organization..."
           for package in $(find ./output -name "unilabos-full*.conda"); do
-            anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
+            conda run -n build-env anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
           done
 
       - name: List built packages

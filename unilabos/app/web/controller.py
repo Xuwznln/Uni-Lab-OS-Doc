@@ -320,6 +320,7 @@ def job_add(req: JobAddReq) -> JobData:
             action_name=action_name,
             task_id=task_id,
             job_id=job_id,
+            notebook_id=req.notebook_id,
             device_action_key=device_action_key,
         )
 
