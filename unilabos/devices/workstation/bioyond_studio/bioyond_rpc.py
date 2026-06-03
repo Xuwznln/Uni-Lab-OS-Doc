@@ -169,7 +169,7 @@ class BioyondV1RPC(BaseRequest):
         """拉取订单当前实验台上的全部物料（按 orderId 查询，含 locations/quantity 字段）。
 
         对应飞书《瑞博 LIMS 通信协议》「实验物料详情查询接口」--
-        POST ``/api/lims/storage/materials-by-order-id``。请求体 ``data`` 字段
+        POST ``/api/lims/order/materials-by-order-id``。请求体 ``data`` 字段
         直接传 orderId GUID 字符串（不是对象），返回每项含
         id/typeName/code/barCode/name/quantity/locations 等字段。
 
@@ -198,7 +198,7 @@ class BioyondV1RPC(BaseRequest):
         order_id = str(params["orderId"])
 
         response = self.post(
-            url=f'{self.host}/api/lims/storage/materials-by-order-id',
+            url=f'{self.host}/api/lims/order/materials-by-order-id',
             params={
                 "apiKey": self.api_key,
                 "requestTime": self.get_current_time_iso8601(),

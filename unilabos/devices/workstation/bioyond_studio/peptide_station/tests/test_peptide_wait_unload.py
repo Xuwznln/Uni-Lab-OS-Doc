@@ -2,7 +2,7 @@
 
 覆盖 plan ``plan/2026-05-29_add_two_node_new.md`` §十一 的测试目标：
 
-- ``BioyondV1RPC.all_stock_material``：endpoint = ``/api/lims/storage/materials-by-order-id``、
+- ``BioyondV1RPC.all_stock_material``：endpoint = ``/api/lims/order/materials-by-order-id``、
   ``data`` 传 orderId GUID 字符串、缺 orderId / 非法 JSON / code != 1 / data 为 null 均返回 ``[]``。
 - ``process_order_finish_report`` override：先 super() 再保存 state，orderCode 匹配触发 event；
   super() 抛错时仍要触发 event（防御性）。
@@ -120,7 +120,7 @@ def test_all_stock_material_source_targets_correct_endpoint_and_payload() -> Non
         full_source = RPC_PATH.read_text(encoding="utf-8")
         source = ast.get_source_segment(full_source, func) or ""
     assert "materials-by-order-id" in source, (
-        "all_stock_material 必须 POST /api/lims/storage/materials-by-order-id"
+        "all_stock_material 必须 POST /api/lims/order/materials-by-order-id"
     )
     assert "all-stock-material" not in source, (
         "旧 endpoint /api/lims/storage/all-stock-material 仿真器 404，不应继续出现"
@@ -187,7 +187,7 @@ def test_all_stock_material_runtime_posts_to_correct_url_with_order_id(rpc_class
     result = rpc.all_stock_material(json.dumps({"orderId": "OID-xyz", "typeMode": 0}))
 
     assert result == [{"id": "m1", "name": "X"}]
-    assert posted["url"] == "http://invalid.local/api/lims/storage/materials-by-order-id"
+    assert posted["url"] == "http://invalid.local/api/lims/order/materials-by-order-id"
     assert posted["params"]["apiKey"] == "test-key"
     assert "requestTime" in posted["params"]
     assert posted["params"]["data"] == "OID-xyz", (

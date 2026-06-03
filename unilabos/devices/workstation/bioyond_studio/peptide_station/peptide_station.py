@@ -1030,7 +1030,7 @@ class BioyondPeptideStation(BioyondWorkstation):
         },
         description=(
             "阻塞等待奔耀通过 /report/order_finish 推送任务完成，"
-            "并调用 /api/lims/storage/all-stock-material 整理「下料指引表」给下游节点。"
+            "并调用 /api/lims/order/materials-by-order-id 整理「下料指引表」给下游节点。"
             "v1 仅等待单个订单：order_ids 长度>1 且未指定 order_id/order_code 时报错。"
         ),
         handles=[
@@ -1123,7 +1123,7 @@ class BioyondPeptideStation(BioyondWorkstation):
         """阻塞等待奔耀订单完成推送，并整理「下料指引表」给下游节点。
 
         Args:
-            order_id: 实验 UUID（用于调 all-stock-material 与 order_code 兜底反查）。
+            order_id: 实验 UUID（用于调 materials-by-order-id 与 order_code 兜底反查）。
             order_code: 订单编号字符串（用于匹配 /report/order_finish 推送）；缺省时
                 内部通过 ``rpc.order_report(order_id)`` 反查 ``code`` 字段。
             order_ids: 兼容 submit_experiment 多订单输出；当 ``order_id`` 为空且长度 == 1 时
@@ -1158,7 +1158,7 @@ class BioyondPeptideStation(BioyondWorkstation):
                     "wait_for_order_finish 需要提供 order_id 或 order_code（请连接上游 start_experiment 输出）"
                 )
 
-            # 2) 若仅有 order_id 没有 order_code，兜底反查（仅用于推送匹配，不参与 all-stock-material）。
+            # 2) 若仅有 order_id 没有 order_code，兜底反查（仅用于推送匹配，不参与 materials-by-order-id）。
             if not normalized_order_code and normalized_order_id:
                 try:
                     rpc_for_report = self._require_hardware_interface("order_report")
