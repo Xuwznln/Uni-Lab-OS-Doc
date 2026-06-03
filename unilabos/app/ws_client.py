@@ -1397,6 +1397,9 @@ class QueueProcessor:
         """运行队列处理主循环"""
         logger.trace("[QueueProcessor] Queue processor started")
 
+        # 首轮按"周期 tick"处理(做一次全量状态对齐)。
+        woken_by_event = False
+
         while self.is_running:
             try:
                 # 检查READY状态超时的任务
@@ -1429,20 +1432,24 @@ class QueueProcessor:
                                 serialize_result_info("Job READY state timeout after 10 seconds", False, {}),
                             )
 
-                    # 立即触发状态更新
-                    self.notify_queue_update()
+                # 注意：此处不再 notify 自己，超时失败已通过 publish_job_status->end_job
+                # 触发下一个任务的就绪通知；再 notify 只会让本循环空转。
 
-                # 发送正在执行任务的running状态
-                self._send_running_status()
+                # 仅在"周期 tick"(非事件唤醒)时做全量状态重广播。
+                # 事件唤醒(如并发 query 入队)只用于及时检查超时，绝不在此重广播，
+                # 否则 N 个并发 query 会触发近 O(N^2) 条重复且 need_more 自相矛盾的帧，
+                # 形成突发风暴打爆服务端导致断连。每个 query 自身的响应已由
+                # _handle_query_action_state 单独发送，周期 tick 负责丢包补发即可。
+                if not woken_by_event:
+                    # 发送正在执行任务的running状态
+                    self._send_running_status()
+                    # 周期性重发 READY 任务的 free 通知（防止 end_job 那一次性推送在链路抖动时丢失）
+                    self._send_ready_status()
+                    # 发送排队任务的busy状态
+                    self._send_busy_status()
 
-                # 周期性重发 READY 任务的 free 通知（防止 end_job 那一次性推送在链路抖动时丢失）
-                self._send_ready_status()
-
-                # 发送排队任务的busy状态
-                self._send_busy_status()
-
-                # 等待10秒或者等待事件通知
-                self.queue_update_event.wait(timeout=10)
+                # 等待10秒或者等待事件通知；返回 True 表示被事件唤醒，False 表示周期到点。
+                woken_by_event = self.queue_update_event.wait(timeout=10)
                 self.queue_update_event.clear()  # 清除事件
 
             except Exception as e:
