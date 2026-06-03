@@ -7,7 +7,7 @@ import uuid
 
 from unilabos.utils.tools import fast_dumps_str as _fast_dumps_str, fast_loads as _fast_loads
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Dict, Any, List, ClassVar, Set, Union
+from typing import TYPE_CHECKING, Optional, Dict, Any, List, ClassVar, Set, Tuple, Union
 
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import Point
@@ -527,6 +527,22 @@ class HostNode(BaseROS2DeviceNode):
         else:
             self.lab_logger().debug("[Host Node] Device discovery already in progress, skipping.")
 
+    def _report_action_locks_free(self, action_pairs: List[Tuple[str, str]]) -> None:
+        """向所有桥接器主动上报新发现 action 的锁状态为 free(report_action_lock)。
+
+        服务端直接下发 job 模式下，需要在发现新设备/新 action 时主动告知其可用，
+        而不再依赖 query_action_state。
+        """
+        if not action_pairs:
+            return
+        locks = [{"device_id": dev, "action_name": act, "free": True} for dev, act in action_pairs]
+        for bridge in self.bridges:
+            if hasattr(bridge, "publish_action_locks"):
+                try:
+                    bridge.publish_action_locks(locks)
+                except Exception as e:
+                    self.lab_logger().warning(f"[Host Node] publish_action_locks failed: {e}")
+
     def _create_action_clients_for_device(self, device_id: str, namespace: str) -> None:
         """
         为设备创建所有必要的ActionClient
@@ -535,6 +551,8 @@ class HostNode(BaseROS2DeviceNode):
             device_id: 设备ID
             namespace: 设备命名空间
         """
+        new_action_pairs: List[Tuple[str, str]] = []
+        edge_device_id = namespace[9:]
         for action_id, action_types in get_action_server_names_and_types_by_node(self, device_id, namespace):
             if action_id not in self._action_clients:
                 try:
@@ -544,18 +562,12 @@ class HostNode(BaseROS2DeviceNode):
                     )
                     self.lab_logger().trace(f"[Host Node] Created ActionClient (Discovery): {action_id}")
                     action_name = action_id[len(namespace) + 1 :]
-                    edge_device_id = namespace[9:]
-                    # from unilabos.app.comm_factory import get_communication_client
-                    # comm_client = get_communication_client()
-                    # info_with_schema = ros_action_to_json_schema(action_type)
-                    # comm_client.publish_actions(action_name, {
-                    #     "device_id": edge_device_id,
-                    #     "device_type": "",
-                    #     "action_name": action_name,
-                    #     "schema": info_with_schema,
-                    # })
+                    new_action_pairs.append((edge_device_id, action_name))
                 except Exception as e:
                     self.lab_logger().error(f"[Host Node] Failed to create ActionClient for {action_id}: {str(e)}")
+
+        # 发现新 action 后主动上报其 free 锁状态
+        self._report_action_locks_free(new_action_pairs)
 
     async def create_resource_detailed(
         self,
@@ -688,6 +700,7 @@ class HostNode(BaseROS2DeviceNode):
         self.devices_instances[device_id] = d
         # noinspection PyProtectedMember
         self._action_value_mappings[device_id] = d._ros_node._action_value_mappings
+        new_action_pairs: List[Tuple[str, str]] = []
         # noinspection PyProtectedMember
         for action_name, action_value_mapping in d._ros_node._action_value_mappings.items():
             if action_name.startswith("auto-") or str(action_value_mapping.get("type", "")).startswith(
@@ -706,20 +719,14 @@ class HostNode(BaseROS2DeviceNode):
                 self.lab_logger().trace(
                     f"[Host Node] Created ActionClient (Local): {action_id}"
                 )  # 子设备再创建用的是Discover发现的
-                # from unilabos.app.comm_factory import get_communication_client
-                # comm_client = get_communication_client()
-                # info_with_schema = ros_action_to_json_schema(action_type)
-                # comm_client.publish_actions(action_name, {
-                #     "device_id": device_id,
-                #     "device_type": device_config["class"],
-                #     "action_name": action_name,
-                #     "schema": info_with_schema,
-                # })
+                new_action_pairs.append((device_id, action_name))
             else:
                 self.lab_logger().warning(f"[Host Node] ActionClient {action_id} already exists.")
         device_key = f"{self.devices_names[device_id]}/{device_id}"  # 这里不涉及二级device_id
         # 添加到在线设备列表
         self._online_devices.add(device_key)
+        # 新注册本地设备 action 后主动上报其 free 锁状态
+        self._report_action_locks_free(new_action_pairs)
 
     def update_device_status_subscriptions(self) -> None:
         """
