@@ -637,6 +637,8 @@ class MessageProcessor:
                 self._handle_pong(message_data)
             elif message_type == "query_action_state":
                 await self._handle_query_action_state(message_data)
+            elif message_type == "query_action_lock":
+                await self._handle_query_action_lock(message_data)
             elif message_type == "job_start":
                 await self._handle_job_start(message_data)
             elif message_type == "cancel_action" or message_type == "cancel_task":
@@ -739,6 +741,17 @@ class MessageProcessor:
             notebook_id=notebook_id,
         )
         logger.trace(f"[MessageProcessor] query_action_state {job_log} 返回当前状态 free")
+
+    async def _handle_query_action_lock(self, data: Dict[str, Any]):
+        """处理 query_action_lock：服务端要求客户端重新上报当前全量锁(每个 device+action 的忙闲)。
+
+        与 query_action_state(查询单个 job) 不同，这里是全量锁快照重传，用于服务端侧状态重新对齐。
+        """
+        if not self.websocket_client:
+            logger.warning("[MessageProcessor] query_action_lock received but websocket_client unavailable")
+            return
+        self.websocket_client.report_all_action_locks()
+        logger.trace("[MessageProcessor] query_action_lock: re-reported all action locks")
 
     async def _handle_job_start(self, data: Dict[str, Any]):
         """处理job_start消息：服务端直接下发，本地直跑或排队(不再要求先 query_action_state)。"""
@@ -1733,6 +1746,32 @@ class WebSocketClient(BaseCommunicationClient):
         self.message_processor.send_message(message)
         logger.info(f"[WebSocketClient] report_action_lock sent for {len(locks)} action(s)")
 
+    def report_all_action_locks(self) -> None:
+        """重新上报全量锁快照：遍历所有 device+action，按 DeviceActionManager 的忙闲状态上报 free/busy。
+
+        用于 host_ready/重连后的锁对齐，以及响应服务端主动下发的 query_action_lock。
+        """
+        if self.is_disabled or not self.is_connected():
+            logger.debug("[WebSocketClient] Not connected, skip report_all_action_locks")
+            return
+
+        host_node = HostNode.get_instance(0)
+        if host_node is None:
+            logger.debug("[WebSocketClient] Host node 尚未就绪，跳过全量锁上报")
+            return
+
+        locks: List[Dict[str, Any]] = []
+        for device_id in host_node.devices_names.keys():
+            action_names = set()
+            for action_id in host_node._action_clients.keys():
+                if device_id in action_id:
+                    action_names.add(action_id.split("/")[-1])
+            for action_name in action_names:
+                device_action_key = f"/devices/{device_id}/{action_name}"
+                free = not self.device_manager.is_action_busy(device_action_key)
+                locks.append({"device_id": device_id, "action_name": action_name, "free": free})
+        self.publish_action_locks(locks)
+
     def publish_host_ready(self) -> None:
         """发布host_node ready信号，包含设备和动作信息"""
         if self.is_disabled or not self.is_connected():
@@ -1800,11 +1839,4 @@ class WebSocketClient(BaseCommunicationClient):
 
         # 紧随 host_ready 发送一条全量锁快照：启动时全部 free，
         # 重连时按 DeviceActionManager 反映正在运行/排队的 busy，实现锁状态对齐。
-        locks = []
-        for dev in devices:
-            device_id = dev["device_id"]
-            for action_name in dev.get("actions", {}).keys():
-                device_action_key = f"/devices/{device_id}/{action_name}"
-                free = not self.device_manager.is_action_busy(device_action_key)
-                locks.append({"device_id": device_id, "action_name": action_name, "free": free})
-        self.publish_action_locks(locks)
+        self.report_all_action_locks()
