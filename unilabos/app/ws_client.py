@@ -1397,8 +1397,10 @@ class QueueProcessor:
         """运行队列处理主循环"""
         logger.trace("[QueueProcessor] Queue processor started")
 
-        # 首轮按"周期 tick"处理(做一次全量状态对齐)。
-        woken_by_event = False
+        # 全量重广播按固定周期触发，与事件唤醒解耦。
+        # 初值置为"上次广播在一个周期前"，使首轮立即做一次全量状态对齐。
+        broadcast_interval = 10.0
+        last_broadcast = time.monotonic() - broadcast_interval
 
         while self.is_running:
             try:
@@ -1435,21 +1437,22 @@ class QueueProcessor:
                 # 注意：此处不再 notify 自己，超时失败已通过 publish_job_status->end_job
                 # 触发下一个任务的就绪通知；再 notify 只会让本循环空转。
 
-                # 仅在"周期 tick"(非事件唤醒)时做全量状态重广播。
-                # 事件唤醒(如并发 query 入队)只用于及时检查超时，绝不在此重广播，
-                # 否则 N 个并发 query 会触发近 O(N^2) 条重复且 need_more 自相矛盾的帧，
-                # 形成突发风暴打爆服务端导致断连。每个 query 自身的响应已由
-                # _handle_query_action_state 单独发送，周期 tick 负责丢包补发即可。
-                if not woken_by_event:
-                    # 发送正在执行任务的running状态
-                    self._send_running_status()
-                    # 周期性重发 READY 任务的 free 通知（防止 end_job 那一次性推送在链路抖动时丢失）
-                    self._send_ready_status()
-                    # 发送排队任务的busy状态
-                    self._send_busy_status()
+                # 全量重广播只按固定 ~broadcast_interval 周期触发，与事件唤醒彻底解耦：
+                # - 并发 query 入队等事件只唤醒本循环做"及时超时检查"，不在此重广播，
+                #   否则 N 个并发 query 会触发近 O(N^2) 条重复且 need_more 自相矛盾的帧，
+                #   形成突发风暴打爆服务端导致断连；每个 query 的响应已由
+                #   _handle_query_action_state 单独发送，无需重广播。
+                # - 用时间戳判周期，保证即使持续有事件，丢包补发的重广播也不会被饿死，
+                #   且突发期内至多触发 1 次重广播（而非每个事件一次）。
+                now = time.monotonic()
+                if now - last_broadcast >= broadcast_interval:
+                    self._send_running_status()  # 正在执行任务的 running 状态
+                    self._send_ready_status()  # READY 任务的 free（防 end_job 一次性推送在抖动时丢失）
+                    self._send_busy_status()  # 排队任务的 busy 状态
+                    last_broadcast = now
 
-                # 等待10秒或者等待事件通知；返回 True 表示被事件唤醒，False 表示周期到点。
-                woken_by_event = self.queue_update_event.wait(timeout=10)
+                # 等待一个周期或被事件提前唤醒（事件仅用于尽快做超时检查）。
+                self.queue_update_event.wait(timeout=broadcast_interval)
                 self.queue_update_event.clear()  # 清除事件
 
             except Exception as e:
@@ -1659,23 +1662,28 @@ class WebSocketClient(BaseCommunicationClient):
         logger.info(f"[WebSocketClient] Client_id: {self.client_id}")
 
     def _build_websocket_url(self) -> Optional[str]:
-        """构建WebSocket连接URL"""
+        """构建 schedule 通道的 WebSocket 连接 URL
+
+        地址来源优先级：
+        1. HTTPConfig.schedule_addr（--schedule_addr 显式指定）→ 直接使用，不做端口偏移
+        2. HTTPConfig.remote_addr（--addr）派生：带端口则 +1，否则沿用原 netloc
+        """
+        # 1. 显式 schedule 地址
+        if HTTPConfig.schedule_addr:
+            parsed = urlparse(HTTPConfig.schedule_addr)
+            scheme = "wss" if parsed.scheme in ("https", "wss") else "ws"
+            return f"{scheme}://{parsed.netloc}/api/v1/ws/schedule"
+
+        # 2. 从 api 地址派生
         if not HTTPConfig.remote_addr:
             return None
 
         parsed = urlparse(HTTPConfig.remote_addr)
-
-        if parsed.scheme == "https":
-            scheme = "wss"
-        else:
-            scheme = "ws"
+        scheme = "wss" if parsed.scheme == "https" else "ws"
 
         if ":" in parsed.netloc and parsed.port is not None:
-            url = f"{scheme}://{parsed.hostname}:{parsed.port + 1}/api/v1/ws/schedule"
-        else:
-            url = f"{scheme}://{parsed.netloc}/api/v1/ws/schedule"
-
-        return url
+            return f"{scheme}://{parsed.hostname}:{parsed.port + 1}/api/v1/ws/schedule"
+        return f"{scheme}://{parsed.netloc}/api/v1/ws/schedule"
 
     @staticmethod
     def _job_start_cache_key(job_id: str, task_id: str) -> Optional[Tuple[str, str]]:
