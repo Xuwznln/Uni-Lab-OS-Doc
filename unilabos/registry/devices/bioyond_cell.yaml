@@ -369,7 +369,6 @@ bioyond_cell:
           vial_plates: null
           temperature_points: null
           validate_barcode: true
-          stop_scheduler_timeout: 5.0
         handles:
           input:
           - data_key: '@this@@@vial_plates'
@@ -413,10 +412,6 @@ bioyond_cell:
                   default: true
                   description: 是否在提交前校验 plateBarCode 在物料系统中存在
                   type: boolean
-                stop_scheduler_timeout:
-                  default: 5.0
-                  description: '【已弃用】保留入参兼容旧 workflow 配置；本 action 不再做 scheduler stop/start 切换'
-                  type: number
               required:
               - vial_plates
               - temperature_points

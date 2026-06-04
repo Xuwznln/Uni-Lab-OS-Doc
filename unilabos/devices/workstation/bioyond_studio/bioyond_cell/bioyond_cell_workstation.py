@@ -1523,7 +1523,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         vial_plates: List[Dict[str, Any]],
         temperature_points: List[float],
         validate_barcode: bool = True,
-        stop_scheduler_timeout: float = 5.0,  # noqa: ARG002 - deprecated, kept for handle 兼容
+        **_legacy_kwargs: Any,
     ) -> Dict[str, Any]:
         """
         2.37 5 号电导工作站自动新建实验（接配液 output handle）。
@@ -1537,8 +1537,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
           实测配液 (`/api/lims/order/orders`) 在调度 Running 时也能成功创建订单；
           5 号站电导接口同理，stop/start 切换是冗余的过度设计。
         - 调度状态由上游 action 自行管理；本函数仅 POST 提交订单。
-        - 仍保留 `stop_scheduler_timeout` 入参（兼容已有 yaml handle / workflow 配置），
-          但内部不使用，标为 deprecated。
+        - **_legacy_kwargs 兜住老 workflow JSON 残留的过期入参（如 stop_scheduler_timeout），
+          静默丢弃避免 TypeError；新代码不应依赖此通道。
 
         Args:
             vial_plates: 上游配液输出的分液瓶板列表，每项需含
@@ -1547,7 +1547,6 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 长度=1 → 广播到所有分液板；长度=N（=分液板数）→ 一一对应；其他长度报错。
                 **同一块板上的所有分液瓶共享同一温度点（一块板一个温度）。**
             validate_barcode: 提交前是否对 plateBarCode 做物料系统强校验，默认 True
-            stop_scheduler_timeout: **已弃用**，保留入参仅为不破坏现有 yaml handle。
 
         Returns:
             {
