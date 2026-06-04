@@ -202,59 +202,6 @@ bioyond_cell:
           title: create_orders参数
           type: object
         type: UniLabJsonCommand
-      auto-create_orders_mock:
-        always_free: true
-        feedback: {}
-        goal: {}
-        goal_default:
-          xlsx_path: null
-          csv_export_path: ''
-          plate_type_name: 20ml分液瓶板
-        handles:
-          output:
-          - data_key: total_orders
-            data_source: executor
-            data_type: integer
-            handler_key: mock_bottle_count
-            label: 配液瓶数(虚拟)
-          - data_key: vial_plates
-            data_source: executor
-            data_type: array
-            handler_key: mock_vial_plates_output
-            label: 分液瓶板列表(虚拟)
-          - data_key: mass_ratios
-            data_source: executor
-            data_type: array
-            handler_key: mock_mass_ratios_output
-            label: 配方信息列表(虚拟)
-        placeholder_keys: {}
-        result: {}
-        schema:
-          description: 虚拟版 create_orders（dry-run，不调 LIMS、不真正跑实验），读相同的 Excel 模板，输出与 create_orders 完全一致结构的数据。用于配液虚拟机无法产出真实分液板条码时下游联调（电导自动入口、CSV 等）。所有 GUID/barCode/locationId 均为合成值，不可用于真实 LIMS 操作。
-          properties:
-            feedback: {}
-            goal:
-              properties:
-                xlsx_path:
-                  description: 配液实验导入 xlsx 路径（与 create_orders 同模板）
-                  type: string
-                csv_export_path:
-                  default: ''
-                  description: CSV 导出目录路径，为空则不导出
-                  type: string
-                plate_type_name:
-                  default: 20ml分液瓶板
-                  description: 合成 vial_plate 的 typeName
-                  type: string
-              required:
-              - xlsx_path
-              type: object
-            result: {}
-          required:
-          - goal
-          title: create_orders_mock参数
-          type: object
-        type: UniLabJsonCommand
       auto-create_orders_formulation:
         always_free: true
         feedback: {}
