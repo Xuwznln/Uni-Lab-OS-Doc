@@ -131,7 +131,7 @@ def test_resolve_tube_rack_holes():
 def test_resolve_plate_holes():
     assert lm.resolve_target_class("prcxi", "plate", 96, None) == "PRCXI_BioER_96_wellplate"
     assert (
-        lm.resolve_target_class("prcxi", "plate", 384, None) == "PRCXI_BioER_384_wellplate"
+        lm.resolve_target_class("prcxi", "plate", 384, None) == "PRCXI_BioRad_384_wellplate"
     )
 
 

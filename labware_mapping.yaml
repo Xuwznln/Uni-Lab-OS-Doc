@@ -73,7 +73,7 @@ target_devices:
       - { kind: tube_rack, hole_count: 10, class_name: PRCXI_EP_Adapter, notes: "Falcon 4x50 + 6x15 mL（10 位兼容 4×6 适配器）" }
       # ─ plate ─
       - { kind: plate,     hole_count: 96,  class_name: PRCXI_BioER_96_wellplate }
-      - { kind: plate,     hole_count: 384, class_name: PRCXI_BioER_384_wellplate }
+      - { kind: plate,     hole_count: 384, class_name: PRCXI_BioRad_384_wellplate }
       # ─ trash ─
       - { kind: trash,                       class_name: PRCXI_trash }
 
@@ -101,7 +101,7 @@ target_devices:
       - { kind: tube_rack, hole_count: 10, class_name: PRCXI_EP_Adapter, notes: "Falcon 4x50 + 6x15 mL（10 位兼容 4×6 适配器）" }
       # ─ plate ─
       - { kind: plate,     hole_count: 96,  class_name: PRCXI_BioER_96_wellplate }
-      - { kind: plate,     hole_count: 384, class_name: PRCXI_BioER_384_wellplate }
+      - { kind: plate,     hole_count: 384, class_name: PRCXI_BioRad_384_wellplate }
       # ─ trash ─
       - { kind: trash,                       class_name: PRCXI_trash }
     models:

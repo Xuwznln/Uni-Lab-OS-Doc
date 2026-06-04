@@ -53,7 +53,7 @@ _BUILTIN_DEFAULT_RULES: List[Dict[str, Any]] = [
     {"kind": "tube_rack", "hole_count": 24, "class_name": "PRCXI_EP_Adapter"},
     {"kind": "tube_rack", "hole_count": 10, "class_name": "PRCXI_EP_Adapter"},
     {"kind": "plate",     "hole_count": 96,  "class_name": "PRCXI_BioER_96_wellplate"},
-    {"kind": "plate",     "hole_count": 384, "class_name": "PRCXI_BioER_384_wellplate"},
+    {"kind": "plate",     "hole_count": 384, "class_name": "PRCXI_BioRad_384_wellplate"},
     {"kind": "trash",                        "class_name": "PRCXI_trash"},
 ]
 
