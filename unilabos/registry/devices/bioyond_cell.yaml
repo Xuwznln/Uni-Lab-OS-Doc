@@ -377,32 +377,6 @@ bioyond_cell:
             data_type: array
             handler_key: vial_plates_input
             label: 分液瓶板列表（来自配液 auto-create_orders / auto-create_orders_formulation）
-          output:
-          - data_key: total_entries
-            data_source: executor
-            data_type: integer
-            handler_key: conductivity_auto_total_entries
-            label: 电导实验条目数
-          - data_key: validated_barcodes
-            data_source: executor
-            data_type: array
-            handler_key: conductivity_auto_validated_barcodes
-            label: 已校验通过的板条码列表
-          - data_key: status
-            data_source: executor
-            data_type: string
-            handler_key: conductivity_auto_status
-            label: 提交状态(submitted/partial/error)
-          - data_key: batch_id
-            data_source: executor
-            data_type: string
-            handler_key: conductivity_auto_batch_id
-            label: 算法批次ID（来自上游 vial_plates）
-          - data_key: new_order_codes
-            data_source: executor
-            data_type: array
-            handler_key: conductivity_auto_new_order_codes
-            label: LIMS 新建的电导单号列表（成功 entry 对应的 BSO20260604000XX）
         placeholder_keys: {}
         result: {}
         schema:
