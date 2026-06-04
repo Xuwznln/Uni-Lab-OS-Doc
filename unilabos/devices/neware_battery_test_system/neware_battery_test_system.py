@@ -2023,6 +2023,19 @@ class NewareBatteryTestSystem:
         assembly_data = assembly_data or []
         formulations = formulations or []
 
+        # 入参诊断：定位「输出为空」时，先确认上游/人工到底传进来了什么
+        _in_msg = (
+            f"[manual_confirm] 入参 -> assembly_data={len(assembly_data)}, "
+            f"formulations={len(formulations)}, mount_resource={len(mount_resource or [])}, "
+            f"resource={len(resource or [])}, collector_mass={len(collector_mass or [])}, "
+            f"active_material={len(active_material or [])}, capacity={len(capacity or [])}, "
+            f"battery_system={len(battery_system or [])}, target_device={target_device!r}"
+        )
+        if self._ros_node:
+            self._ros_node.lab_logger().info(_in_msg)
+        else:
+            print(_in_msg)
+
         Time = [b.get("Time", "") for b in assembly_data]
         open_circuit_voltage = [b.get("open_circuit_voltage", 0.0) for b in assembly_data]
         pole_weight = [b.get("pole_weight", 0.0) for b in assembly_data]
@@ -2060,7 +2073,7 @@ class NewareBatteryTestSystem:
             else:
                 print(f"[manual_confirm] 整合 CSV 导出失败: {e}")
 
-        return {
+        result = {
             "resource": resource_dump,
             "coin_cell_code": coin_cell_code,
             "electrolyte_code": electrolyte_code,
@@ -2072,6 +2085,20 @@ class NewareBatteryTestSystem:
             "battery_system": battery_system,
             "pole_weight": pole_weight,
         }
+
+        # 产出诊断：派生字段（coin_cell_code/electrolyte_code/pole_weight）只来自 assembly_data，
+        # 若 assembly_data 未接入则这三项必为空，下游 submit_auto_export_excel 会拿不到数据
+        _out_msg = (
+            f"[manual_confirm] 产出 -> coin_cell_code={coin_cell_code}, "
+            f"electrolyte_code={electrolyte_code}, pole_weight={pole_weight}, "
+            f"collector_mass={collector_mass}, battery_system={battery_system}"
+        )
+        if self._ros_node:
+            self._ros_node.lab_logger().info(_out_msg)
+        else:
+            print(_out_msg)
+
+        return result
 
     def _export_manual_confirm_csv(
         self,
