@@ -202,6 +202,59 @@ bioyond_cell:
           title: create_orders参数
           type: object
         type: UniLabJsonCommand
+      auto-create_orders_mock:
+        always_free: true
+        feedback: {}
+        goal: {}
+        goal_default:
+          xlsx_path: null
+          csv_export_path: ''
+          plate_type_name: 20ml分液瓶板
+        handles:
+          output:
+          - data_key: total_orders
+            data_source: executor
+            data_type: integer
+            handler_key: mock_bottle_count
+            label: 配液瓶数(虚拟)
+          - data_key: vial_plates
+            data_source: executor
+            data_type: array
+            handler_key: mock_vial_plates_output
+            label: 分液瓶板列表(虚拟)
+          - data_key: mass_ratios
+            data_source: executor
+            data_type: array
+            handler_key: mock_mass_ratios_output
+            label: 配方信息列表(虚拟)
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 虚拟版 create_orders（dry-run，不调 LIMS、不真正跑实验），读相同的 Excel 模板，输出与 create_orders 完全一致结构的数据。用于配液虚拟机无法产出真实分液板条码时下游联调（电导自动入口、CSV 等）。所有 GUID/barCode/locationId 均为合成值，不可用于真实 LIMS 操作。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                xlsx_path:
+                  description: 配液实验导入 xlsx 路径（与 create_orders 同模板）
+                  type: string
+                csv_export_path:
+                  default: ''
+                  description: CSV 导出目录路径，为空则不导出
+                  type: string
+                plate_type_name:
+                  default: 20ml分液瓶板
+                  description: 合成 vial_plate 的 typeName
+                  type: string
+              required:
+              - xlsx_path
+              type: object
+            result: {}
+          required:
+          - goal
+          title: create_orders_mock参数
+          type: object
+        type: UniLabJsonCommand
       auto-create_orders_formulation:
         always_free: true
         feedback: {}
@@ -316,6 +369,141 @@ bioyond_cell:
           required:
           - goal
           title: create_orders_formulation参数
+          type: object
+        type: UniLabJsonCommand
+      auto-create_conductivity_orders_from_excel:
+        always_free: true
+        feedback: {}
+        goal: {}
+        goal_default:
+          xlsx_path: null
+          validate_barcode: true
+        handles:
+          output:
+          - data_key: total_entries
+            data_source: executor
+            data_type: integer
+            handler_key: conductivity_total_entries
+            label: 电导实验条目数
+          - data_key: validated_barcodes
+            data_source: executor
+            data_type: array
+            handler_key: conductivity_validated_barcodes
+            label: 已校验通过的板条码列表
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 5号电导工作站手动新建实验（从 Excel 模板批量提交）。Excel 列：算法批次ID/配方ID/创建日期/板BarCode/内部瓶位置X/内部瓶位置Y/温控点。提交前会按板条码批量校验物料系统是否已建对应分液板。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                xlsx_path:
+                  description: 电导实验模板 xlsx 路径
+                  type: string
+                validate_barcode:
+                  default: true
+                  description: 是否在提交前校验 plateBarCode 在物料系统中存在
+                  type: boolean
+              required:
+              - xlsx_path
+              type: object
+            result: {}
+          required:
+          - goal
+          title: create_conductivity_orders_from_excel参数
+          type: object
+        type: UniLabJsonCommand
+      auto-create_conductivity_orders_auto:
+        always_free: true
+        feedback: {}
+        goal: {}
+        goal_default:
+          vial_plates: null
+          temperature_points: null
+          validate_barcode: true
+          stop_scheduler_timeout: 5.0
+        handles:
+          input:
+          - data_key: '@this@@@vial_plates'
+            data_source: handle
+            data_type: array
+            handler_key: vial_plates_input
+            label: 分液瓶板列表（来自配液 auto-create_orders / auto-create_orders_formulation）
+          output:
+          - data_key: total_entries
+            data_source: executor
+            data_type: integer
+            handler_key: conductivity_auto_total_entries
+            label: 电导实验条目数
+          - data_key: validated_barcodes
+            data_source: executor
+            data_type: array
+            handler_key: conductivity_auto_validated_barcodes
+            label: 已校验通过的板条码列表
+          - data_key: status
+            data_source: executor
+            data_type: string
+            handler_key: conductivity_auto_status
+            label: 提交状态(submitted/partial/error)
+          - data_key: batch_id
+            data_source: executor
+            data_type: string
+            handler_key: conductivity_auto_batch_id
+            label: 算法批次ID（来自上游 vial_plates）
+          - data_key: new_order_codes
+            data_source: executor
+            data_type: array
+            handler_key: conductivity_auto_new_order_codes
+            label: LIMS 新建的电导单号列表（成功 entry 对应的 BSO20260604000XX）
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 5号电导工作站自动新建实验。直接接收上游配液 handle 输出的 vial_plates（含 batch_id/orderCode/barCode/materialId），通过 LIMS material-info 查每块板的真实瓶位 (X,Y)。多 order 共用同一物理板时按 bottle.associateId 反查归属 orderCode。调度状态由上游/外部管理，本 action 不切换调度。同一块板上的所有分液瓶共享同一温度点。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                vial_plates:
+                  description: 分液瓶板列表（来自配液输出的 handle，每项需含 batch_id/materialId/barCode/orderCode）
+                  items:
+                    properties:
+                      barCode:
+                        type: string
+                      batch_id:
+                        type: string
+                      materialId:
+                        type: string
+                      orderCode:
+                        type: string
+                    required:
+                    - batch_id
+                    - materialId
+                    - barCode
+                    - orderCode
+                    type: object
+                  type: array
+                temperature_points:
+                  description: 温度点列表（℃）。长度=1 时广播到所有分液板；长度=分液板数时按顺序一一对应；其他长度报错。业务规则：一块板共享一个温度，板上所有分液瓶都用该温度。
+                  items:
+                    type: number
+                  type: array
+                validate_barcode:
+                  default: true
+                  description: 是否在提交前校验 plateBarCode 在物料系统中存在
+                  type: boolean
+                stop_scheduler_timeout:
+                  default: 5.0
+                  description: '【已弃用】保留入参兼容旧 workflow 配置；本 action 不再做 scheduler stop/start 切换'
+                  type: number
+              required:
+              - vial_plates
+              - temperature_points
+              type: object
+            result: {}
+          required:
+          - goal
+          title: create_conductivity_orders_auto参数
           type: object
         type: UniLabJsonCommand
       auto-create_sample:

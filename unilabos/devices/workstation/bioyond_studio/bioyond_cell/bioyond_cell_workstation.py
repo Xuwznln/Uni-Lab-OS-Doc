@@ -13,9 +13,11 @@ import threading
 import json
 import csv
 import os
+import uuid
 from copy import deepcopy
 from urllib3 import response
 from unilabos.devices.workstation.bioyond_studio.station import BioyondWorkstation, BioyondResourceSynchronizer
+from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondException
 # ⚠️ config.py 已废弃 - 所有配置现在从 JSON 文件加载
 # from unilabos.devices.workstation.bioyond_studio.config import API_CONFIG, ...
 from unilabos.devices.workstation.workstation_http_service import WorkstationHTTPService
@@ -700,10 +702,18 @@ class BioyondCellWorkstation(BioyondWorkstation):
         return response
 
     # -------------------- 订单提交/等待/后处理（公共逻辑） --------------------
-    def _submit_and_wait_orders(self, orders: List[Dict[str, Any]], tag: str = "create_orders") -> Dict[str, Any]:
+    def _submit_and_wait_orders(
+        self,
+        orders: List[Dict[str, Any]],
+        tag: str = "create_orders",
+        batch_id: str = "",
+    ) -> Dict[str, Any]:
         """
         公共流程：提交 orders → 等待完成 → 计算质量比 → 提取分液瓶板 → 返回结果。
         由 create_orders / create_orders_formulation 调用。
+
+        batch_id 由调用方传入（约定 = Excel 文件名 / 入参 batch_id），随 final_result 透出，
+        供下游通过 UniLab output handle 引用。
         """
         logger.info(f"[{tag}] 即将提交 {len(orders)} 个订单")
         response = self._post_lims("/api/lims/order/orders", orders)
@@ -775,34 +785,67 @@ class BioyondCellWorkstation(BioyondWorkstation):
         logger.info(f"[{tag}] 质量比计算完成")
 
         # ========== 提取分液瓶板信息 + 创建资源树对象 ==========
-        all_vial_plates = []
-        processed_material_ids = set()
+        # 关键设计（2026-06-04 调整）：
+        # 物理 plate 是按 materialId 唯一的；同一块物理 plate 可能在多个 order 的
+        # usedMaterials 里都被列出（例如 2 个配液 order 把瓶子分别装到同一物理板的不同孔位）。
+        # 因此 all_vial_plates 必须按 materialId 去重，每个 unique plate 用 order_refs 字段
+        # 收集所有引用过它的 (orderId, orderCode) 对；下游电导用 bottle.associateId 反查归属。
+        plates_by_material: Dict[str, Dict[str, Any]] = {}
         for report in all_reports:
-            vial_plate_info = self._extract_vial_plate_from_report(report)
-            if vial_plate_info:
-                material_id = vial_plate_info.get("materialId")
-                all_vial_plates.append(vial_plate_info)
-                if material_id in processed_material_ids:
-                    logger.info(
-                        f"[资源树] ℹ️ 瓶板资源已存在: materialId={material_id[:20]}..., "
-                        f"orderCode={vial_plate_info.get('orderCode')} (共用同一瓶板，跳过重复创建)"
+            plate_list = self._extract_vial_plate_from_report(report)
+            for vial_plate_info in plate_list:
+                material_id = vial_plate_info.get("materialId") or ""
+                if not material_id:
+                    logger.warning(
+                        f"[资源树] ⚠️ 跳过 materialId 为空的 plate_info: {vial_plate_info}"
                     )
                     continue
-                try:
-                    self._create_vial_plate_resource(vial_plate_info)
-                    processed_material_ids.add(material_id)
+
+                ref_entry = {
+                    "orderId": vial_plate_info.get("orderId") or "",
+                    "orderCode": vial_plate_info.get("orderCode") or "",
+                }
+
+                if material_id in plates_by_material:
+                    existing = plates_by_material[material_id]
+                    if ref_entry not in existing["order_refs"]:
+                        existing["order_refs"].append(ref_entry)
                     logger.info(
-                        f"[资源树] ✅ 瓶板资源创建成功: orderCode={vial_plate_info.get('orderCode')}, "
+                        f"[资源树] ℹ️ 瓶板已存在，合并 order_ref: materialId={material_id[:20]}..., "
+                        f"+orderCode={ref_entry['orderCode']} (共用同一物理瓶板)"
+                    )
+                    continue
+
+                # 首次出现，创建去重后的条目；保留 first 的 locationId/typeName/barCode
+                merged = {
+                    "materialId": material_id,
+                    "locationId": vial_plate_info.get("locationId") or "",
+                    "orderCode": ref_entry["orderCode"],  # = 第一次引用的 orderCode（向后兼容）
+                    "orderId": ref_entry["orderId"],      # 同上
+                    "typeName": vial_plate_info.get("typeName") or "",
+                    "barCode": vial_plate_info.get("barCode") or "",
+                    "batch_id": batch_id,
+                    "order_refs": [ref_entry],            # 完整列表，下游电导按 associateId 反查
+                }
+                plates_by_material[material_id] = merged
+
+                try:
+                    self._create_vial_plate_resource(merged)
+                    logger.info(
+                        f"[资源树] ✅ 瓶板资源创建成功: orderCode={ref_entry['orderCode']}, "
                         f"materialId={material_id[:20]}..."
                     )
                 except Exception as e:
                     logger.error(
-                        f"[资源树] 创建失败: orderCode={vial_plate_info.get('orderCode')}, 错误={e}"
+                        f"[资源树] 创建失败: orderCode={ref_entry['orderCode']}, 错误={e}"
                     )
 
+        all_vial_plates: List[Dict[str, Any]] = list(plates_by_material.values())
+
         logger.info(
-            f"[{tag}] 提取到 {len(all_vial_plates)} 个订单的分液瓶板信息 "
-            f"(对应 {len(processed_material_ids)} 个物理瓶板)"
+            f"[{tag}] 跨 {len(all_reports)} 个订单去重后得到 {len(all_vial_plates)} 块物理瓶板 "
+            f"(每块板的 order_refs 长度: "
+            f"{[len(p['order_refs']) for p in all_vial_plates]})"
         )
 
         # ========== 提取配液瓶 + 分液瓶信息（用于 CSV 导出）==========
@@ -928,8 +971,14 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "conductivity_bottle_count": col_cond_cnt,
         })
 
-        # 物料列：所有以 (g) 结尾
-        material_cols = [c for c in df.columns if isinstance(c, str) and c.endswith("(g)")]
+        # 物料列：所有以 (g) 结尾，但排除"总质量(g)"等聚合列
+        # （totalMass 自动按物料质量求和，不能把"总质量"当物料发给 LIMS，否则 LIMS 报"物料总质量不可用"）
+        _NON_MATERIAL_NAMES = {"总质量", "totalMass", "TotalMass", "total_mass"}
+        material_cols = [
+            c for c in df.columns
+            if isinstance(c, str) and c.endswith("(g)")
+            and c.replace("(g)", "").strip() not in _NON_MATERIAL_NAMES
+        ]
         print(f"[create_orders_v2] 识别到的物料列: {material_cols}")
         if not material_cols:
             raise KeyError("未发现任何以“(g)”结尾的物料列，请检查表头。")
@@ -1019,7 +1068,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             logger.error("[create_orders] 没有有效的订单可提交")
             return {"status": "error", "message": "没有有效订单数据"}
 
-        result = self._submit_and_wait_orders(orders, tag="create_orders")
+        result = self._submit_and_wait_orders(orders, tag="create_orders", batch_id=batch_id)
 
         # ========== CSV 导出 ==========
         if csv_export_path:
@@ -1030,7 +1079,339 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.error(f"[create_orders] CSV 导出失败: {e}")
 
         return result
-    
+
+    # -------------------- 2.14 新建实验（虚拟入口，dry-run 不调 LIMS） --------------------
+    def create_orders_mock(
+        self,
+        xlsx_path: str,
+        csv_export_path: str = "",
+        plate_type_name: str = "20ml分液瓶板",
+    ) -> Dict[str, Any]:
+        """
+        虚拟版 create_orders：读 Excel 模板（与 create_orders 完全一致的列），
+        但**不调用 LIMS**、**不真正跑实验**，只合成与 create_orders 同结构的返回值。
+
+        用途：
+        - 配液虚拟机无法产出真实分液板条码 / GUID 时，下游联调（电导自动入口、CSV 等）。
+
+        合成约定：
+        - batchId   = path.stem
+        - orderCode = f"MOCK-{batchId}-{idx+1:03d}"
+        - materialId/locationId/barCode 都按 GUID/真实前缀风格合成，但**仅用于流程串通**。
+        - locationId 前缀沿用 "3a19debc-84b5-"（自动堆栈-左），方便 _extract_*_from_report 类筛选。
+        - real_mass_ratio = target_mass_ratio（dry-run 视为完全配准）
+        - reports / original_response 仅给出最小占位结构，保持键齐全。
+
+        Args:
+            xlsx_path: 与 create_orders 同款模板的 xlsx 路径。
+            csv_export_path: 可选，与 create_orders 一致的 CSV 导出目录。
+            plate_type_name: 合成 vial_plate 的 typeName，默认 "20ml分液瓶板"。
+
+        Returns:
+            与 _submit_and_wait_orders 同结构的 dict
+            (status / total_orders / bottle_count / reports / mass_ratios /
+             vial_plates / prep_bottles / vial_bottles / original_response)
+        """
+        path = Path(xlsx_path)
+        logger.info(f"[create_orders_mock] 使用 Excel 路径: {path}")
+        if not path.exists():
+            raise FileNotFoundError(f"未找到 Excel 文件：{path}")
+
+        try:
+            df = pd.read_excel(path, sheet_name=0, engine="openpyxl")
+        except Exception as e:
+            raise RuntimeError(f"读取 Excel 失败：{e}")
+        logger.info(
+            f"[create_orders_mock] Excel 读取成功，行数: {len(df)}, 列: {list(df.columns)}"
+        )
+
+        def _pick(col_names: List[str]) -> Optional[str]:
+            for c in col_names:
+                if c in df.columns:
+                    return c
+            return None
+
+        col_order_name = _pick(["配方ID", "orderName", "订单编号"])
+        col_create_time = _pick(["创建日期", "createTime"])
+        col_bottle_type = _pick(["配液瓶类型", "bottleType"])
+        col_mix_time = _pick(["混匀时间(s)", "mixTime"])
+        col_load = _pick(["扣电组装分液体积", "loadSheddingInfo"])
+        col_pouch = _pick(["软包组装分液体积", "pouchCellInfo"])
+        col_cond = _pick(["电导测试分液体积", "conductivityInfo"])
+        col_cond_cnt = _pick(["电导测试分液瓶数", "conductivityBottleCount"])
+
+        # 同 create_orders：排除"总质量(g)"等聚合列，避免被当成物料发给 LIMS
+        _NON_MATERIAL_NAMES = {"总质量", "totalMass", "TotalMass", "total_mass"}
+        material_cols = [
+            c for c in df.columns
+            if isinstance(c, str) and c.endswith("(g)")
+            and c.replace("(g)", "").strip() not in _NON_MATERIAL_NAMES
+        ]
+        if not material_cols:
+            raise KeyError("未发现任何以\"(g)\"结尾的物料列，请检查表头。")
+
+        batch_id = path.stem
+
+        def _to_ymd_slash(v) -> str:
+            if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() == "":
+                ts = datetime.now()
+            else:
+                try:
+                    ts = pd.to_datetime(v)
+                except Exception:
+                    ts = datetime.now()
+            return f"{ts.year}/{ts.month}/{ts.day}"
+
+        def _as_int(val, default=0) -> int:
+            try:
+                if pd.isna(val):
+                    return default
+                return int(val)
+            except Exception:
+                return default
+
+        def _as_float(val, default=0.0) -> float:
+            try:
+                if pd.isna(val):
+                    return default
+                return float(val)
+            except Exception:
+                return default
+
+        def _as_str(val, default="") -> str:
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return default
+            s = str(val).strip()
+            return s if s else default
+
+        def _new_guid_with_prefix(prefix: str) -> str:
+            """合成 GUID 风格 id：把指定前缀（含连字符）拼到随机 GUID 头部"""
+            full = uuid.uuid4().hex
+            tail = f"{full[0:4]}-{full[4:8]}-{full[8:20]}"
+            return prefix + tail
+
+        AUTO_STACK_LEFT_PREFIX = "3a19debc-84b5-"
+        MANUAL_WINDOW_PREFIX = "3a19deae-2c7a-"
+
+        orders: List[Dict[str, Any]] = []
+        for idx, row in df.iterrows():
+            mats: List[Dict[str, Any]] = []
+            total_mass = 0.0
+            for mcol in material_cols:
+                val = row.get(mcol, None)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    continue
+                try:
+                    mass = float(val)
+                except Exception:
+                    continue
+                if mass > 0:
+                    mats.append({"name": mcol.replace("(g)", ""), "mass": mass})
+                    total_mass += mass
+
+            order_data = {
+                "batchId": batch_id,
+                "orderName": _as_str(row[col_order_name], default=f"{batch_id}_order_{idx+1}") if col_order_name else f"{batch_id}_order_{idx+1}",
+                "createTime": _to_ymd_slash(row[col_create_time]) if col_create_time else _to_ymd_slash(None),
+                "bottleType": _as_str(row[col_bottle_type], default="配液小瓶") if col_bottle_type else "配液小瓶",
+                "mixTime": _as_int(row[col_mix_time]) if col_mix_time else 0,
+                "loadSheddingInfo": _as_float(row[col_load]) if col_load else 0.0,
+                "pouchCellInfo": _as_float(row[col_pouch]) if col_pouch else 0,
+                "conductivityInfo": _as_float(row[col_cond]) if col_cond else 0,
+                "conductivityBottleCount": _as_int(row[col_cond_cnt]) if col_cond_cnt else 0,
+                "materialInfos": mats,
+                "totalMass": round(total_mass, 4),
+            }
+            orders.append(order_data)
+            logger.info(
+                f"[create_orders_mock] 第 {idx+1} 行解析: orderName={order_data['orderName']}, "
+                f"materials={len(mats)}, totalMass={order_data['totalMass']}, "
+                f"conductivityBottleCount={order_data['conductivityBottleCount']}"
+            )
+
+        if not orders:
+            return {"status": "error", "message": "没有有效订单数据（mock）"}
+
+        # ========== 合成同 create_orders 完全一致结构的结果 ==========
+        all_reports: List[Dict[str, Any]] = []
+        all_mass_ratios: List[Dict[str, Any]] = []
+        all_vial_plates: List[Dict[str, Any]] = []
+        all_prep_bottles: List[Optional[Dict[str, Any]]] = []
+        all_vial_bottles: List[List[Dict[str, Any]]] = []
+        original_data_list: List[Dict[str, Any]] = []
+
+        for idx, order in enumerate(orders):
+            order_code = f"MOCK-{batch_id}-{idx+1:03d}"
+            order_name = order["orderName"]
+
+            # ---- 合成 vial_plate ----
+            plate_material_id = str(uuid.uuid4())
+            plate_location_id = _new_guid_with_prefix(AUTO_STACK_LEFT_PREFIX)
+            plate_barcode = f"MOCK{datetime.now().strftime('%y%m%d')}{idx+1:04d}"
+            vial_plate = {
+                "materialId": plate_material_id,
+                "locationId": plate_location_id,
+                "orderCode": order_code,
+                "typeName": plate_type_name,
+                "barCode": plate_barcode,
+                "batch_id": batch_id,
+            }
+            all_vial_plates.append(vial_plate)
+
+            # ---- 合成 prep_bottle ----
+            prep_material_id = str(uuid.uuid4())
+            prep_location_id = _new_guid_with_prefix(MANUAL_WINDOW_PREFIX)
+            prep_barcode = f"MOCKPREP{datetime.now().strftime('%y%m%d')}{idx+1:04d}"
+            prep_type_name = order["bottleType"] if "(" in order["bottleType"] else "配液瓶(大)"
+            prep_bottle = {
+                "materialId": prep_material_id,
+                "locationId": prep_location_id,
+                "orderCode": order_code,
+                "typeName": prep_type_name,
+                "barCode": prep_barcode,
+            }
+            all_prep_bottles.append(prep_bottle)
+
+            # ---- 合成 vial_bottles（和 plate 同一块板上）----
+            cond_cnt = max(1, int(order.get("conductivityBottleCount") or 0))
+            vial_volume = float(order.get("conductivityInfo") or 0)
+            vial_type = "5ml分液瓶" if vial_volume <= 5 else "20ml分液瓶"
+            vial_bottles_for_order: List[Dict[str, Any]] = []
+            for vidx in range(cond_cnt):
+                vial_bottles_for_order.append({
+                    "materialId": str(uuid.uuid4()),
+                    "locationId": plate_location_id,
+                    "orderCode": order_code,
+                    "typeName": vial_type,
+                    "barCode": f"MOCKVIAL{datetime.now().strftime('%y%m%d')}{idx+1:03d}{vidx+1:02d}",
+                })
+            all_vial_bottles.append(vial_bottles_for_order)
+
+            # ---- 合成 mass_ratios（real == target，dry-run 视为完美配准）----
+            total_mass = float(order.get("totalMass") or 0.0)
+            target_ratio: Dict[str, float] = {}
+            if total_mass > 0:
+                for m in order.get("materialInfos", []):
+                    target_ratio[m["name"]] = round(float(m["mass"]) / total_mass, 6)
+            mass_ratios_entry: Dict[str, Any] = {
+                "orderCode": order_code,
+                "orderName": order_name,
+                "real_mass_ratio": dict(target_ratio),
+                "target_mass_ratio": dict(target_ratio),
+                "prep_bottle_barcode": prep_barcode,
+                "vial_bottle_barcodes": (
+                    "" if not vial_bottles_for_order
+                    else (vial_bottles_for_order[0]["barCode"]
+                          if len(vial_bottles_for_order) == 1
+                          else json.dumps([v["barCode"] for v in vial_bottles_for_order],
+                                          ensure_ascii=False))
+                ),
+            }
+            all_mass_ratios.append(mass_ratios_entry)
+
+            # ---- 合成 report（最小占位）----
+            used_materials = []
+            used_materials.append({
+                "materialId": plate_material_id,
+                "locationId": plate_location_id,
+                "typemode": "1",
+                "typeName": plate_type_name,
+                "barCode": plate_barcode,
+                "realQuantity": 1,
+                "usedQuantity": 1,
+            })
+            used_materials.append({
+                "materialId": prep_material_id,
+                "locationId": prep_location_id,
+                "typemode": "1",
+                "typeName": prep_type_name,
+                "barCode": prep_barcode,
+                "realQuantity": 1,
+                "usedQuantity": 1,
+            })
+            for v in vial_bottles_for_order:
+                used_materials.append({
+                    "materialId": v["materialId"],
+                    "locationId": v["locationId"],
+                    "typemode": "1",
+                    "typeName": v["typeName"],
+                    "barCode": v["barCode"],
+                    "realQuantity": 1,
+                    "usedQuantity": 1,
+                })
+            for m in order.get("materialInfos", []):
+                used_materials.append({
+                    "materialId": str(uuid.uuid4()),
+                    "locationId": "",
+                    "typemode": "2",
+                    "name": m["name"],
+                    "realQuantity": float(m["mass"]),
+                    "usedQuantity": float(m["mass"]),
+                })
+            report = {
+                "orderCode": order_code,
+                "orderName": order_name,
+                "batchId": batch_id,
+                "status": "Finished",
+                "createTime": order["createTime"],
+                "bottleType": order["bottleType"],
+                "totalMass": order["totalMass"],
+                "usedMaterials": used_materials,
+                "mock": True,
+            }
+            all_reports.append(report)
+
+            original_data_list.append({
+                "orderCode": order_code,
+                "orderName": order_name,
+                "batchId": batch_id,
+                "status": "submitted_mock",
+            })
+
+        original_response = {
+            "code": 1,
+            "data": original_data_list,
+            "message": "",
+            "timestamp": int(time.time() * 1000),
+            "mock": True,
+        }
+
+        final_result = {
+            "status": "all_completed",
+            "total_orders": len(orders),
+            "bottle_count": len(orders),
+            "reports": all_reports,
+            "mass_ratios": all_mass_ratios,
+            "vial_plates": all_vial_plates,
+            "prep_bottles": all_prep_bottles,
+            "vial_bottles": all_vial_bottles,
+            "original_response": original_response,
+            "mock": True,
+        }
+
+        logger.info("=" * 80)
+        logger.info(
+            f"[create_orders_mock] 合成完成：orders={len(orders)}, "
+            f"vial_plates={len(all_vial_plates)}, "
+            f"prep_bottles={sum(1 for p in all_prep_bottles if p)}, "
+            f"vial_bottles={sum(len(v) for v in all_vial_bottles)}"
+        )
+        for i, vp in enumerate(all_vial_plates, 1):
+            logger.info(
+                f"  [{i}] orderCode={vp['orderCode']}, barCode={vp['barCode']}, "
+                f"materialId={vp['materialId'][:20]}..., locationId={vp['locationId'][:20]}..."
+            )
+        logger.info("=" * 80)
+
+        if csv_export_path:
+            try:
+                csv_file = self._export_order_csv(final_result, csv_export_path)
+                final_result["csv_file"] = csv_file
+            except Exception as e:
+                logger.error(f"[create_orders_mock] CSV 导出失败: {e}")
+
+        return final_result
+
     def create_orders_formulation(
         self,
         formulation: List[Dict[str, Any]],
@@ -1135,7 +1516,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             logger.error("[create_orders_formulation] 没有有效的订单可提交")
             return {"status": "error", "message": "没有有效配方数据"}
 
-        result = self._submit_and_wait_orders(orders, tag="create_orders_formulation")
+        result = self._submit_and_wait_orders(orders, tag="create_orders_formulation", batch_id=batch_id)
 
         # ========== CSV 导出 ==========
         if csv_export_path:
@@ -1147,91 +1528,664 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         return result
 
-    def _extract_vial_plate_from_report(self, report: Dict) -> Optional[Dict]:
+    # -------------------- 2.37 5号站新建实验（手动 Excel 入口） --------------------
+    def _validate_plate_barcode(self, barcode: str) -> Dict[str, Any]:
         """
-        从 order_finish 报文中提取分液瓶板信息
-        
+        在 LIMS 物料系统中按 barCode 查找分液板物料，命中返回物料字典，未命中抛 BioyondException。
+
+        - 先用 typeMode=1（样品）+ filter=barcode 查询；未命中再用 typeMode=2（试剂）兜底。
+        - 实例级缓存：同一次 Excel 提交中多行复用同一板条码时只查 1 次 LIMS。
+
         Args:
-            report: LIMS order_finish 报文
-        
+            barcode: 分液板条码（必须与 LIMS 物料系统中的 barCode 严格相等）
+
+        Returns:
+            dict: 物料完整记录（含 id / name / typeName / barCode 等）
+
+        Raises:
+            BioyondException: 物料系统中不存在该 barCode
+        """
+        if not barcode:
+            raise BioyondException("板条码不能为空")
+
+        # 懒初始化缓存
+        if not hasattr(self, "_validated_plate_barcode_cache"):
+            self._validated_plate_barcode_cache: Dict[str, Dict[str, Any]] = {}
+
+        if barcode in self._validated_plate_barcode_cache:
+            logger.debug(f"[校验条码] 缓存命中: {barcode}")
+            return self._validated_plate_barcode_cache[barcode]
+
+        # typeMode: 1=样品, 2=试剂, 0=耗材；分液板通常在 1，兜底查 2
+        for type_mode in (1, 2):
+            query = {"typeMode": type_mode, "filter": barcode, "includeDetail": False}
+            resp = self._post_lims("/api/lims/storage/stock-material", query)
+            if not isinstance(resp, dict) or resp.get("code") != 1:
+                logger.warning(
+                    f"[校验条码] stock-material 查询返回异常: typeMode={type_mode}, "
+                    f"barcode={barcode}, resp={resp}"
+                )
+                continue
+
+            for mat in resp.get("data", []) or []:
+                if mat.get("barCode") == barcode:
+                    logger.info(
+                        f"[校验条码] ✅ 命中: barCode={barcode}, typeName={mat.get('typeName')}, "
+                        f"name={mat.get('name')}, typeMode={type_mode}"
+                    )
+                    self._validated_plate_barcode_cache[barcode] = mat
+                    return mat
+
+        raise BioyondException(
+            f"板条码 {barcode} 未在物料系统中找到，请先在 LIMS 建立对应的分液板物料"
+        )
+
+    def create_conductivity_orders_from_excel(
+        self,
+        xlsx_path: str,
+        validate_barcode: bool = True,
+        start_scheduler: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        2.37 5号电导工作站手动新建实验（Excel 入口）。
+
+        手动电导路径上没有"启动调度+上料"的前置流程（那是配液专用的
+        scheduler_start_and_auto_feeding），因此本函数会在提交订单前主动
+        调用 scheduler_start，确保订单进入队列后立即被调度消费。
+
+        Excel 列（中文 / 英文均支持）：
+            算法批次ID / batchId
+            配方ID / orderId / orderName
+            创建日期 / createTime
+            板BarCode / plateBarCode
+            内部瓶位置X / bottleX
+            内部瓶位置Y / bottleY
+            温控点 / temperaturePoint
+
+        Args:
+            xlsx_path: Excel 模板路径
+            validate_barcode: 是否在提交前对 plateBarCode 做物料系统强校验，默认 True
+            start_scheduler: 提交订单前是否先启动调度，默认 True。
+                调度若已 Running，再次启动是幂等的；置 False 可在外部控制时机。
+
         Returns:
             {
-                "materialId": "...",
-                "locationId": "...",
-                "orderCode": "...",
-                "typeName": "5ml分液瓶板",  # 可选
-                "barCode": "..."  # 可选
+                "status": "submitted" | "partial" | "error",
+                "total_entries": int,
+                "validated_barcodes": List[str],
+                "response": <LIMS 原始返回>,
+                "scheduler_start_response": <可选，调度启动返回>,
             }
+
+        Raises:
+            FileNotFoundError: Excel 文件不存在
+            ValueError: Excel 缺少必要列或没有有效行
+            BioyondException: validate_barcode=True 时板条码在物料系统中找不到
+        """
+        path = Path(xlsx_path) if xlsx_path else None
+        if path is None or not path.exists():
+            raise FileNotFoundError(f"未找到电导实验 Excel: {xlsx_path}")
+
+        logger.info(f"[create_conductivity_orders_from_excel] 读取 Excel: {path}")
+        try:
+            df = pd.read_excel(path, sheet_name=0, engine="openpyxl")
+        except Exception as e:
+            raise RuntimeError(f"读取 Excel 失败: {e}")
+        logger.info(
+            f"[create_conductivity_orders_from_excel] 读取成功，行数={len(df)}, 列={list(df.columns)}"
+        )
+
+        def _pick(col_names: List[str]) -> Optional[str]:
+            for c in col_names:
+                if c in df.columns:
+                    return c
+            return None
+
+        col_batch = _pick(["算法批次ID", "batchId"])
+        col_order = _pick(["配方ID", "orderId", "orderName"])
+        col_ctime = _pick(["创建日期", "createTime"])
+        col_code = _pick(["板BarCode", "plateBarCode"])
+        col_x = _pick(["内部瓶位置X", "bottleX"])
+        col_y = _pick(["内部瓶位置Y", "bottleY"])
+        col_temp = _pick(["温控点", "temperaturePoint"])
+
+        required_map = {
+            "batchId": col_batch,
+            "orderId": col_order,
+            "plateBarCode": col_code,
+            "bottleX": col_x,
+            "bottleY": col_y,
+            "temperaturePoint": col_temp,
+        }
+        missing = [k for k, v in required_map.items() if not v]
+        if missing:
+            raise ValueError(
+                f"Excel 缺少必要列: {missing}，请检查表头（支持中文或英文列名）"
+            )
+
+        def _to_ymd_slash(v) -> str:
+            if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() == "":
+                ts = datetime.now()
+            else:
+                try:
+                    ts = pd.to_datetime(v)
+                except Exception:
+                    ts = datetime.now()
+            return (
+                f"{ts.year}/{ts.month}/{ts.day} "
+                f"{ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}"
+            )
+
+        def _as_int(val, default=0) -> int:
+            try:
+                if pd.isna(val):
+                    return default
+                return int(val)
+            except Exception:
+                return default
+
+        def _as_float(val, default=0.0) -> float:
+            try:
+                if pd.isna(val):
+                    return default
+                return float(val)
+            except Exception:
+                return default
+
+        def _as_str(val, default="") -> str:
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                return default
+            s = str(val).strip()
+            return s if s else default
+
+        entries: List[Dict[str, Any]] = []
+        for idx, row in df.iterrows():
+            plate_barcode = _as_str(row[col_code])
+            if not plate_barcode:
+                logger.warning(
+                    f"[create_conductivity_orders_from_excel] 第 {idx + 1} 行 plateBarCode 为空，跳过"
+                )
+                continue
+
+            batch_id = _as_str(row[col_batch])
+            order_id = _as_str(row[col_order])
+            if not batch_id or not order_id:
+                logger.warning(
+                    f"[create_conductivity_orders_from_excel] 第 {idx + 1} 行 batchId/orderId 为空，跳过"
+                )
+                continue
+
+            entry = {
+                "batchId": batch_id,
+                "orderId": order_id,
+                "createTime": _to_ymd_slash(row[col_ctime]) if col_ctime else _to_ymd_slash(None),
+                "plateBarCode": plate_barcode,
+                "bottleX": _as_int(row[col_x]),
+                "bottleY": _as_int(row[col_y]),
+                "temperaturePoint": _as_float(row[col_temp]),
+            }
+            entries.append(entry)
+            logger.info(
+                f"[create_conductivity_orders_from_excel] 第 {idx + 1} 行: "
+                f"orderId={entry['orderId']}, plateBarCode={entry['plateBarCode']}, "
+                f"X={entry['bottleX']}, Y={entry['bottleY']}, T={entry['temperaturePoint']}"
+            )
+
+        if not entries:
+            raise ValueError("Excel 没有有效行可提交，请检查模板内容")
+
+        unique_barcodes = sorted({e["plateBarCode"] for e in entries})
+        logger.info(
+            f"[create_conductivity_orders_from_excel] 共组装 {len(entries)} 条 entry，"
+            f"涉及 {len(unique_barcodes)} 个板条码: {unique_barcodes}"
+        )
+
+        if validate_barcode:
+            logger.info(
+                f"[create_conductivity_orders_from_excel] 开始批量校验 plateBarCode "
+                f"({len(unique_barcodes)} 个)..."
+            )
+            for bc in unique_barcodes:
+                self._validate_plate_barcode(bc)
+            logger.info("[create_conductivity_orders_from_excel] ✅ 所有 plateBarCode 校验通过")
+        else:
+            logger.warning(
+                "[create_conductivity_orders_from_excel] ⚠️ validate_barcode=False，跳过板条码校验"
+            )
+
+        scheduler_start_resp: Optional[Dict[str, Any]] = None
+        if start_scheduler:
+            logger.info(
+                "[create_conductivity_orders_from_excel] 启动调度（确保订单进队列后立即消费）..."
+            )
+            try:
+                scheduler_start_resp = self.scheduler_start()
+                logger.info(
+                    f"[create_conductivity_orders_from_excel] 调度启动返回: {scheduler_start_resp}"
+                )
+                if not (isinstance(scheduler_start_resp, dict) and scheduler_start_resp.get("code") == 1):
+                    logger.warning(
+                        "[create_conductivity_orders_from_excel] ⚠️ 调度启动未返回 code=1，"
+                        "继续提交订单，但订单可能不会被立即消费"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[create_conductivity_orders_from_excel] ⚠️ 启动调度异常（继续提交订单）: {e}"
+                )
+                scheduler_start_resp = {"error": str(e)}
+        else:
+            logger.info(
+                "[create_conductivity_orders_from_excel] start_scheduler=False，跳过启动调度"
+            )
+
+        logger.info(
+            f"[create_conductivity_orders_from_excel] 提交 {len(entries)} 条 entry 到 "
+            f"/api/lims/order/conductivity-orders"
+        )
+        response = self._post_lims("/api/lims/order/conductivity-orders", entries)
+        try:
+            response_dump = json.dumps(response, ensure_ascii=False)
+        except Exception:
+            response_dump = str(response)
+        logger.info(
+            f"[create_conductivity_orders_from_excel] LIMS 完整返回: {response_dump}"
+        )
+        if isinstance(response, dict):
+            data_field = response.get("data")
+            if not data_field:
+                logger.warning(
+                    "[create_conductivity_orders_from_excel] ⚠️ LIMS 返回中 data 为空，"
+                    "奔曜软件可能没有真正建任务，请检查 createTime 格式 / orderId 是否存在 / 板条码绑定情况"
+                )
+            else:
+                logger.info(
+                    f"[create_conductivity_orders_from_excel] LIMS data 含 {len(data_field) if isinstance(data_field, list) else 1} 条"
+                )
+
+        # 2026-06-04 修：成功判据从 orderId!=EMPTY_GUID 改为 errorMessage为空+orderCode非空。
+        # LIMS 创建阶段总是返回 orderId=全 0 GUID，实际执行时才填。
+        status = "error"
+        new_order_codes_excel: List[str] = []
+        if isinstance(response, dict) and response.get("code") == 1:
+            data_field = response.get("data") or []
+            if isinstance(data_field, list) and data_field:
+                valid_entries = []
+                error_entries = []
+                for d in data_field:
+                    if not isinstance(d, dict):
+                        continue
+                    err_msg = (d.get("errorMessage") or "").strip()
+                    new_code = (d.get("orderCode") or "").strip()
+                    if not err_msg and new_code:
+                        valid_entries.append(d)
+                        new_order_codes_excel.append(new_code)
+                    else:
+                        error_entries.append(d)
+                if len(valid_entries) == len(data_field):
+                    status = "submitted"
+                elif valid_entries:
+                    status = "partial"
+                else:
+                    status = "error"
+                if error_entries:
+                    logger.warning(
+                        f"[create_conductivity_orders_from_excel] ⚠️ {len(error_entries)} 条 entry 创建失败:"
+                    )
+                    for e in error_entries:
+                        logger.warning(
+                            f"  - errorMessage={e.get('errorMessage')!r}, orderCode={e.get('orderCode')!r}"
+                        )
+            else:
+                status = "error"
+        logger.info(
+            f"[create_conductivity_orders_from_excel] 最终 status={status}, "
+            f"LIMS 新建电导单号={new_order_codes_excel}"
+        )
+        return {
+            "status": status,
+            "total_entries": len(entries),
+            "validated_barcodes": unique_barcodes,
+            "response": response,
+            "scheduler_start_response": scheduler_start_resp,
+        }
+
+    # -------------------- 2.37 5号站新建实验（自动入口，接配液 handle） --------------------
+    def create_conductivity_orders_auto(
+        self,
+        vial_plates: List[Dict[str, Any]],
+        temperature_points: List[float],
+        validate_barcode: bool = True,
+        stop_scheduler_timeout: float = 5.0,  # noqa: ARG002 - deprecated, kept for handle 兼容
+    ) -> Dict[str, Any]:
+        """
+        2.37 5 号电导工作站自动新建实验（接配液 output handle）。
+
+        相比手动 Excel 入口 (create_conductivity_orders_from_excel)，本函数：
+        - 上游 vial_plates 自带 batch_id / orderCode / barCode / materialId
+        - 通过 LIMS material-info (2.4) 查每块板的 detail 拿真实瓶位 (X, Y)
+
+        2026-06-04 调整（与配液 _submit_and_wait_orders 保持一致）：
+        - 不再 scheduler_stop / scheduler_start 切换。
+          实测配液 (`/api/lims/order/orders`) 在调度 Running 时也能成功创建订单；
+          5 号站电导接口同理，stop/start 切换是冗余的过度设计。
+        - 调度状态由上游 action 自行管理；本函数仅 POST 提交订单。
+        - 仍保留 `stop_scheduler_timeout` 入参（兼容已有 yaml handle / workflow 配置），
+          但内部不使用，标为 deprecated。
+
+        Args:
+            vial_plates: 上游配液输出的分液瓶板列表，每项需含
+                batch_id / materialId / barCode / orderCode（缺任一报错）
+            temperature_points: 温度点列表（℃）。
+                长度=1 → 广播到所有分液板；长度=N（=分液板数）→ 一一对应；其他长度报错。
+                **同一块板上的所有分液瓶共享同一温度点（一块板一个温度）。**
+            validate_barcode: 提交前是否对 plateBarCode 做物料系统强校验，默认 True
+            stop_scheduler_timeout: **已弃用**，保留入参仅为不破坏现有 yaml handle。
+
+        Returns:
+            {
+                "status": "submitted" | "partial" | "error",
+                "total_entries": int,
+                "validated_barcodes": List[str],
+                "batch_id": str,
+                "response": <LIMS POST 原始返回>,
+            }
+
+        Raises:
+            ValueError: 入参不合法（vial_plates 空 / temperature_points 长度异常 / batch_id 为空 / plate 缺关键字段）
+            BioyondException: barCode 校验失败 / detail 中无瓶位
+        """
+        if not vial_plates or not isinstance(vial_plates, list):
+            raise ValueError("vial_plates 不能为空")
+        if not temperature_points or not isinstance(temperature_points, list):
+            raise ValueError("temperature_points 不能为空")
+
+        # 提取 batch_id（同 batch 内所有 plate 共享同一值）
+        batch_id_raw = vial_plates[0].get("batch_id") if isinstance(vial_plates[0], dict) else None
+        if not batch_id_raw:
+            raise ValueError("vial_plates[0] 缺少 batch_id 字段，请检查上游配液输出")
+        batch_id = str(batch_id_raw).strip()
+        if not batch_id:
+            raise ValueError("vial_plates[0].batch_id 为空字符串")
+
+        n_plates = len(vial_plates)
+        n_temps = len(temperature_points)
+        if n_temps not in (1, n_plates):
+            raise ValueError(
+                f"temperature_points 长度 {n_temps} 非法："
+                f"应为 1（广播）或 {n_plates}（与分液板数一致）。"
+                f"业务规则：一块板共享一个温度。"
+            )
+
+        logger.info(
+            f"[create_conductivity_orders_auto] 开始：batch_id={batch_id}, "
+            f"分液板数={n_plates}, 温度点数={n_temps}"
+        )
+
+        def _to_ymd_slash_hms() -> str:
+            ts = datetime.now()
+            return (
+                f"{ts.year}/{ts.month}/{ts.day} "
+                f"{ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}"
+            )
+
+        # ========== 阶段1: 校验 + 查瓶位 + 组装 entries（调度仍 Running 时执行，安全）==========
+        EXPECTED_PLATE_TYPE = "20ml分液瓶板"
+        entries: List[Dict[str, Any]] = []
+        for idx, plate in enumerate(vial_plates):
+            if not isinstance(plate, dict):
+                raise ValueError(f"vial_plates[{idx}] 不是 dict: {plate!r}")
+
+            plate_barcode = plate.get("barCode")
+            fallback_order_code = plate.get("orderCode")  # 仅作 associateId 反查失败时的兜底
+            material_id = plate.get("materialId")
+            type_name = plate.get("typeName", "")
+            if not plate_barcode or not fallback_order_code or not material_id:
+                raise ValueError(
+                    f"vial_plates[{idx}] 缺少关键字段: "
+                    f"barCode={plate_barcode!r}, orderCode={fallback_order_code!r}, "
+                    f"materialId={material_id!r}"
+                )
+            # 业务规则：电导测试只接受 20ml 分液瓶板
+            if type_name and type_name != EXPECTED_PLATE_TYPE:
+                raise BioyondException(
+                    f"vial_plates[{idx}] typeName={type_name!r}，电导测试要求 "
+                    f"{EXPECTED_PLATE_TYPE!r}。请检查上游配液是否提取到了正确的板"
+                    f"（参考 _extract_vial_plate_from_report 与 LIMS 工艺配置）。"
+                )
+
+            if validate_barcode:
+                self._validate_plate_barcode(plate_barcode)
+
+            # 该板上所有引用过它的 order 列表（去重 + 配液阶段写入）。
+            # 单 order 场景下长度 1；多 order 共用板时按 bottle.associateId 反查归属。
+            order_refs = plate.get("order_refs") or []
+            if not order_refs:
+                # 兼容上游历史 handle 数据（没注入 order_refs）—— 当作单 order
+                order_refs = [{
+                    "orderId": plate.get("orderId") or "",
+                    "orderCode": fallback_order_code,
+                }]
+
+            bottles = self._query_plate_bottle_positions(material_id)
+
+            plate_temp = float(temperature_points[0] if n_temps == 1 else temperature_points[idx])
+
+            for bottle in bottles:
+                bottle_assoc = (bottle.get("associateId") or "").strip()
+                resolved_order_code = self._resolve_order_code_for_bottle(
+                    bottle_associate_id=bottle_assoc,
+                    order_refs=order_refs,
+                    fallback=fallback_order_code,
+                    plate_barcode=plate_barcode,
+                    bottle_xy=(bottle["x"], bottle["y"]),
+                )
+
+                entry = {
+                    "batchId": batch_id,
+                    "orderId": resolved_order_code,
+                    "createTime": _to_ymd_slash_hms(),
+                    "plateBarCode": plate_barcode,
+                    "bottleX": bottle["x"],
+                    "bottleY": bottle["y"],
+                    "temperaturePoint": plate_temp,
+                }
+                entries.append(entry)
+                logger.info(
+                    f"[create_conductivity_orders_auto] entry: "
+                    f"plate#{idx+1} orderId={resolved_order_code} "
+                    f"(bottle.assoc={bottle_assoc[:8] if bottle_assoc else '<none>'}), "
+                    f"plateBarCode={plate_barcode}, X={bottle['x']}, Y={bottle['y']}, T={plate_temp}"
+                )
+
+        if not entries:
+            raise ValueError("entries 组装为空，无法提交")
+
+        unique_barcodes = sorted({e["plateBarCode"] for e in entries})
+        logger.info(
+            f"[create_conductivity_orders_auto] 共组装 {len(entries)} 条 entry，"
+            f"涉及 {len(unique_barcodes)} 个板条码"
+        )
+
+        # ========== 阶段2: 直接 POST（调度由上游/外部管理，与配液 _submit_and_wait_orders 一致）==========
+        logger.info(
+            f"[create_conductivity_orders_auto] POST {len(entries)} 条 entry 到 "
+            f"/api/lims/order/conductivity-orders ..."
+        )
+        response = self._post_lims("/api/lims/order/conductivity-orders", entries)
+        try:
+            response_dump = json.dumps(response, ensure_ascii=False)
+        except Exception:
+            response_dump = str(response)
+        logger.info(f"[create_conductivity_orders_auto] LIMS 完整返回: {response_dump}")
+
+        # ========== 阶段3: 解析 response 算 status ==========
+        # 2026-06-04 修：原先用 orderId != EMPTY_GUID 判断成功是错的——
+        # LIMS 创建阶段总是返回 orderId="00000000-...-000000000000"（execution 时才填 GUID）。
+        # 实际可用的成功判据是 errorMessage 为空 + orderCode 非空（=LIMS 已建出新电导单号）。
+        # 失败示例：errorMessage="...没有在5号手套箱仓库..." & orderCode=null & usedMaterials=[]
+        # 成功示例：errorMessage=null & orderCode="BSO20260604000XX" & usedMaterials=[plate, bottle]
+        status = "error"
+        new_order_codes: List[str] = []
+        if isinstance(response, dict) and response.get("code") == 1:
+            data_field = response.get("data") or []
+            if isinstance(data_field, list) and data_field:
+                valid_entries = []
+                error_entries = []
+                for d in data_field:
+                    if not isinstance(d, dict):
+                        continue
+                    err_msg = (d.get("errorMessage") or "").strip()
+                    new_code = (d.get("orderCode") or "").strip()
+                    if not err_msg and new_code:
+                        valid_entries.append(d)
+                        new_order_codes.append(new_code)
+                    else:
+                        error_entries.append(d)
+
+                if len(valid_entries) == len(data_field):
+                    status = "submitted"
+                elif valid_entries:
+                    status = "partial"
+                else:
+                    status = "error"
+
+                if error_entries:
+                    logger.warning(
+                        f"[create_conductivity_orders_auto] ⚠️ {len(error_entries)} 条 entry 创建失败:"
+                    )
+                    for e in error_entries:
+                        logger.warning(
+                            f"  - errorMessage={e.get('errorMessage')!r}, "
+                            f"orderCode={e.get('orderCode')!r}"
+                        )
+        logger.info(
+            f"[create_conductivity_orders_auto] 最终 status={status}, "
+            f"LIMS 新建电导单号={new_order_codes}"
+        )
+
+        return {
+            "status": status,
+            "total_entries": len(entries),
+            "validated_barcodes": unique_barcodes,
+            "batch_id": batch_id,
+            "new_order_codes": new_order_codes,  # LIMS 新建的电导单号列表（成功 entry 对应的）
+            "response": response,
+        }
+
+    def _extract_vial_plate_from_report(self, report: Dict) -> List[Dict[str, Any]]:
+        """
+        从 order_finish 报文中提取该订单**所有**的分液瓶板。
+
+        2026-06-04 重构：
+        - 返回类型由 Optional[Dict] 改为 List[Dict]。
+          按协议 3.37 示例，一个 orderId 下完全允许多块不同 plateBarCode 的板，
+          配液工艺也确实会把同一 orderCode 拆到多块 20ml 分液瓶板上（电导多温度场景）。
+        - 扫描所有 typemode=1 物料，逐个查 material-info（2.4 接口拿 typeName / barCode）；
+          优先收集 typeName == "20ml分液瓶板"，全部返回；
+          没有 20ml 时退回到其他 "*分液瓶板"（带 warning），保持兼容。
+        - 不再用 locationId 前缀（"3a19debc-84b5-" 自动堆栈-左）做硬过滤，
+          实测 LIMS 把 20ml 板放在 3a1c68b5-… 等其它库位，老规则会误漏。
+
+        Args:
+            report: LIMS 订单完成推送报文（2.23 push 报文，usedMaterials 仅含
+                materialId / locationId / typeMode / usedQuantity / realQuantity）
+
+        Returns:
+            List[Dict]：每块板一条字典，结构为
+            {
+                "materialId": "GUID",
+                "locationId": "GUID",
+                "orderCode": "BSO...",
+                "orderId": "GUID",  # 配液订单 GUID，用于跨 order 共用板时按瓶子的 associateId 反查归属
+                "typeName": "20ml分液瓶板",
+                "barCode": "..."   # 可能为空字符串（LIMS 端没建条码时）
+            }
+            未找到任何分液瓶板时返回 []。
         """
         order_code = report.get("orderCode", "N/A")
+        order_id_guid = report.get("orderId", "") or ""
         used_materials = report.get("usedMaterials", [])
-        
-        # ========== 新增：调试日志 ==========
+
         logger.info(
             f"[提取分液瓶板] 开始处理订单 orderCode={order_code}, "
             f"物料数量={len(used_materials)}"
         )
-        
-        # 配置：自动堆栈-左的 locationId 前缀
-        AUTO_STACK_LEFT_PREFIX = "3a19debc-84b5-"
-        
+
+        PREFERRED_TYPE = "20ml分液瓶板"
+        candidates_preferred: List[Dict[str, Any]] = []
+        candidates_other_plate: List[Dict[str, Any]] = []
+        seen_material_ids: set = set()
+
         for idx, material in enumerate(used_materials):
-            location_id = material.get("locationId", "")
             typemode = material.get("typemode", "")
             material_id = material.get("materialId", "")
-            
+            location_id = material.get("locationId", "") or ""
+            if str(typemode) != "1" or not material_id:
+                continue
+            # 同一 materialId 在 usedMaterials 里可能被列多次（出库/入库等场景），去重
+            if material_id in seen_material_ids:
+                continue
+            seen_material_ids.add(material_id)
+
             logger.debug(
-                f"[提取分液瓶板] 物料 #{idx+1}: materialId={material_id[:20]}..., "
-                f"locationId={location_id[:20] if location_id else 'None'}..., "
-                f"typemode={typemode}"
+                f"[提取分液瓶板] 候选 typemode=1 物料 #{idx+1}: "
+                f"materialId={material_id[:20]}..., locationId={location_id[:20]}..."
             )
-            
-            # 判断条件：typemode=1 且 locationId 以自动堆栈-左前缀开头
-            # ⚠️ 检查 location_id 不为 None
-            if typemode == "1" and location_id and location_id.startswith(AUTO_STACK_LEFT_PREFIX):
-                logger.info(
-                    f"[提取分液瓶板] 找到候选物料: materialId={material_id}, "
-                    f"locationId={location_id}"
+
+            try:
+                material_info = self._query_material_info(material_id)
+            except Exception as e:
+                logger.warning(
+                    f"[提取分液瓶板] ⚠️ 查询物料详情失败: materialId={material_id}, 错误={e}"
                 )
-                
-                # 可选：调用 LIMS API 2.4 获取详细信息
-                try:
-                    material_info = self._query_material_info(material_id)
-                    type_name = material_info.get("typeName", "")
-                    
-                    # 确认是分液瓶板
-                    if "分液瓶板" in type_name:
-                        logger.info(
-                            f"[提取分液瓶板] ✅ 确认为分液瓶板: orderCode={order_code}, "
-                            f"materialId={material_id}, locationId={location_id}, "
-                            f"typeName={type_name}"
-                        )
-                        return {
-                            "materialId": material_id,
-                            "locationId": location_id,
-                            "orderCode": order_code,
-                            "typeName": type_name,
-                            "barCode": material_info.get("barCode")
-                        }
-                    else:
-                        logger.warning(
-                            f"[提取分液瓶板] ⚠️ 候选物料不是分液瓶板: typeName={type_name}, "
-                            f"跳过并继续搜索"
-                        )
-                except Exception as e:
-                    logger.warning(
-                        f"[提取分液瓶板] ⚠️ 查询物料详情失败: materialId={material_id}, "
-                        f"错误={str(e)}, 返回基本信息"
-                    )
-                    # 即使查询失败，也返回基本信息
-                    return {
-                        "materialId": material_id,
-                        "locationId": location_id,
-                        "orderCode": order_code
-                    }
-        
-        logger.warning(f"[提取分液瓶板] ❌ 未找到分液瓶板: orderCode={order_code}")
-        return None
+                continue
+
+            type_name = material_info.get("typeName", "") or ""
+            if "分液瓶板" not in type_name:
+                logger.debug(f"[提取分液瓶板] 跳过非分液瓶板: typeName={type_name}")
+                continue
+
+            plate_info = {
+                "materialId": material_id,
+                "locationId": location_id,
+                "orderCode": order_code,
+                "orderId": order_id_guid,
+                "typeName": type_name,
+                "barCode": material_info.get("barCode") or "",
+            }
+            if type_name == PREFERRED_TYPE:
+                candidates_preferred.append(plate_info)
+                logger.info(
+                    f"[提取分液瓶板] ✅ 命中 {PREFERRED_TYPE}: "
+                    f"materialId={material_id}, locationId={location_id}, "
+                    f"barCode={plate_info['barCode']}"
+                )
+            else:
+                candidates_other_plate.append(plate_info)
+                logger.info(
+                    f"[提取分液瓶板] 命中其它分液瓶板: typeName={type_name}, "
+                    f"materialId={material_id}, barCode={plate_info['barCode']}"
+                )
+
+        if candidates_preferred:
+            logger.info(
+                f"[提取分液瓶板] ✅ orderCode={order_code} 共找到 "
+                f"{len(candidates_preferred)} 块 {PREFERRED_TYPE}: "
+                f"{[(p['barCode'] or p['materialId'][:8]) for p in candidates_preferred]}"
+            )
+            return candidates_preferred
+
+        if candidates_other_plate:
+            logger.warning(
+                f"[提取分液瓶板] ⚠️ orderCode={order_code} 未找到 {PREFERRED_TYPE}，"
+                f"回退到 {len(candidates_other_plate)} 块 "
+                f"{[p['typeName'] for p in candidates_other_plate]}。"
+                f"电导测试要求 {PREFERRED_TYPE}，请检查 LIMS 工艺配置或上游入参。"
+            )
+            return candidates_other_plate
+
+        logger.warning(f"[提取分液瓶板] ❌ 未找到任何分液瓶板: orderCode={order_code}")
+        return []
 
     def _extract_prep_bottle_from_report(self, report: Dict) -> Optional[Dict]:
         """
@@ -1586,7 +2540,135 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 f"错误类型={type(e).__name__}, 错误信息={str(e)}"
             )
             raise
-    
+
+    def _resolve_order_code_for_bottle(
+        self,
+        bottle_associate_id: str,
+        order_refs: List[Dict[str, str]],
+        fallback: str,
+        plate_barcode: str = "",
+        bottle_xy: Tuple[int, int] = (0, 0),
+    ) -> str:
+        """
+        根据瓶子的 associateId 在板的 order_refs 中找到归属的 orderCode。
+
+        多 order 共用同一物理 plate 时（如配液 2 瓶 → 共享 2 块板交错装），
+        瓶子的 associateId（关联订单 GUID）才是判断该瓶来自哪个配液 order 的唯一可靠依据。
+
+        匹配优先级：
+        1. associateId == order_refs[i].orderId (GUID 严格相等)
+        2. associateId == order_refs[i].orderCode (兜底，万一 LIMS 用 BSO 字符串)
+        3. 都没匹配上 → 用 fallback (= 板首次出现时的 orderCode)，并打 warning
+
+        Returns:
+            最终用于 LIMS 电导 entry.orderId 字段的 BSO 形式 orderCode 字符串
+        """
+        if bottle_associate_id:
+            for ref in order_refs:
+                if ref.get("orderId") and ref["orderId"] == bottle_associate_id:
+                    return ref.get("orderCode") or fallback
+            for ref in order_refs:
+                if ref.get("orderCode") and ref["orderCode"] == bottle_associate_id:
+                    return ref["orderCode"]
+
+        # 单 order 场景：order_refs 长度=1，直接用它
+        if len(order_refs) == 1:
+            return order_refs[0].get("orderCode") or fallback
+
+        # 多 order 但 associateId 没法对上（LIMS 没填或对不上 GUID）→ fallback + warn
+        ref_summary = [
+            f"{(r.get('orderCode') or '?')}↔{(r.get('orderId') or '?')[:8]}"
+            for r in order_refs
+        ]
+        logger.warning(
+            f"[reslove_order_code] ⚠️ plate={plate_barcode}, bottle XY={bottle_xy}: "
+            f"associateId={bottle_associate_id[:8] if bottle_associate_id else '<empty>'}... "
+            f"未能在 order_refs 中匹配（refs={ref_summary}），fallback 到 {fallback}。"
+            f"这条电导 entry 的 orderId 可能不准确，请人工核对。"
+        )
+        return fallback
+
+    def _query_plate_bottle_positions(
+        self, plate_material_id: str
+    ) -> List[Dict[str, Any]]:
+        """
+        查询分液瓶板上所有分液瓶的孔位 (X, Y) 坐标。
+
+        通过调 LIMS API 2.4 (/api/lims/storage/material-info) 拿到板的 detail[*]，
+        每条 detail 即为一个孔位，按 (x, y) 取出所有有效孔位返回。
+
+        2026-06-04 修：原先按 typeName 过滤"含'分液瓶'"在实际数据上失效——
+        LIMS 端 detail.typeName 经常为空字符串/None，导致过滤后变 0 块。
+        现在与 `_populate_vial_bottles`（资源树创建用的同一份返回）保持一致，
+        只要 detail 项有 x/y 即视为孔位；典型情况下板上每条 detail 就是一个瓶位，
+        过滤 typeName 含"分液瓶板"的条目以防 detail 里掺了子板（极罕见）。
+
+        Args:
+            plate_material_id: 分液瓶板 materialId (GUID)
+
+        Returns:
+            [{"x": int, "y": int, "typeName": str, "name": str,
+              "detailMaterialId": str, "code": str, "associateId": str}, ...]
+            associateId 为该瓶子关联的配液订单 GUID（跨 order 共用板时用于反查归属）
+
+        Raises:
+            BioyondException: detail 为空 / 全部条目缺 x/y
+        """
+        data = self._query_material_info(plate_material_id)
+        detail = data.get("detail") or []
+        logger.info(
+            f"[查询瓶位] 板 {plate_material_id[:20]}... 的 detail 共 {len(detail)} 条原始记录"
+        )
+        bottles: List[Dict[str, Any]] = []
+        for idx, d in enumerate(detail):
+            if not isinstance(d, dict):
+                logger.debug(f"[查询瓶位] detail[{idx}] 非 dict，跳过: {d!r}")
+                continue
+            type_name = (d.get("typeName") or "").strip()
+            x_raw = d.get("x")
+            y_raw = d.get("y")
+            if x_raw is None or y_raw is None:
+                logger.debug(
+                    f"[查询瓶位] detail[{idx}] 缺 x/y，跳过: typeName={type_name!r}, "
+                    f"x={x_raw}, y={y_raw}, code={d.get('code')!r}"
+                )
+                continue
+            # 几乎不可能，但保护一下：detail 里若混入子板，跳过
+            if "分液瓶板" in type_name:
+                logger.debug(
+                    f"[查询瓶位] detail[{idx}] typeName 含'分液瓶板'，跳过（避免把子板当瓶）: "
+                    f"typeName={type_name!r}"
+                )
+                continue
+            try:
+                x_int = int(x_raw)
+                y_int = int(y_raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"[查询瓶位] detail[{idx}] x/y 不能转 int，跳过: x={x_raw!r}, y={y_raw!r}"
+                )
+                continue
+            bottles.append({
+                "x": x_int,
+                "y": y_int,
+                "typeName": type_name,
+                "name": d.get("name", "") or "",
+                "code": d.get("code", "") or "",
+                "detailMaterialId": d.get("detailMaterialId", "") or "",
+                "associateId": d.get("associateId", "") or "",
+            })
+
+        if not bottles:
+            raise BioyondException(
+                f"分液瓶板 {plate_material_id} 的 detail 中未找到任何有效孔位 "
+                f"(原始 detail 长度={len(detail)})"
+            )
+        logger.info(
+            f"[查询瓶位] ✅ 板 {plate_material_id[:20]}... 共提取 {len(bottles)} 个孔位: "
+            f"{[(b['x'], b['y'], b['typeName'] or '<no_type>', (b['associateId'] or '<no_assoc>')[:8]) for b in bottles]}"
+        )
+        return bottles
+
     def _create_vial_plate_resource(self, vial_plate_info: Dict) -> None:
         """
         创建分液瓶板资源对象并添加到资源树
@@ -2193,6 +3275,48 @@ class BioyondCellWorkstation(BioyondWorkstation):
         请求体只包含 apiKey 和 requestTime
         """
         return self._post_lims("/api/lims/scheduler/reset")
+
+    def _wait_scheduler_status(
+        self,
+        target: str = "Stop",
+        timeout: float = 5.0,
+        interval: float = 0.5,
+    ) -> Dict[str, Any]:
+        """
+        轮询调度状态接口 (2.1)，直到 schedulerStatus 等于 target。
+
+        Args:
+            target: 期望达到的调度状态字符串。可选值（PDF 2.1）：
+                Init / Stop / Running / Pause / ErrorPause / ErrorStop
+            timeout: 总等待秒数。
+            interval: 每次轮询间隔秒数。
+
+        Returns:
+            达到目标时的 data 字典 (含 schedulerStatus / hasTask / creationTime)
+
+        Raises:
+            BioyondException: 超时未达到目标状态
+        """
+        deadline = time.monotonic() + timeout
+        last_status: Optional[str] = None
+        while time.monotonic() < deadline:
+            resp = self._post_lims("/api/lims/scheduler/scheduler-status")
+            data = resp.get("data") if isinstance(resp, dict) else None
+            if isinstance(data, dict):
+                last_status = data.get("schedulerStatus")
+                if last_status == target:
+                    logger.info(
+                        f"[_wait_scheduler_status] ✅ 达到目标状态 {target}，"
+                        f"hasTask={data.get('hasTask')}"
+                    )
+                    return data
+                logger.debug(
+                    f"[_wait_scheduler_status] 当前 status={last_status}，目标={target}，继续等..."
+                )
+            time.sleep(interval)
+        raise BioyondException(
+            f"等待调度状态 {target} 超时（{timeout}s），最后一次 status={last_status}"
+        )
 
     def scheduler_start_and_auto_feeding(
         self,
