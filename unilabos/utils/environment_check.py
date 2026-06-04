@@ -47,14 +47,10 @@ def _has_uv() -> bool:
 
 def _install_command(installer: str, package: str, upgrade: bool, is_chinese: bool) -> List[str]:
     if installer == "uv":
-<<<<<<< HEAD
-        cmd = ["uv", "pip", "install"]
-=======
         # uv >= 0.5 默认要求虚拟环境，对 conda env 会报 "No virtual environment found"。
         # 显式 --python sys.executable 让 uv 把当前解释器（conda/venv/system 都行）
         # 视为目标环境，绕开 venv 检测。
         cmd = ["uv", "pip", "install", "--python", sys.executable]
->>>>>>> dev
         if upgrade:
             cmd.append("--upgrade")
         cmd.append(package)
@@ -96,15 +92,11 @@ def _print_manual_git_install_hint(requirement: str) -> None:
         return
 
     repo_dir = _repo_dir_name(git_url)
-<<<<<<< HEAD
-    install_cmd = "uv pip install -e ." if _has_uv() else f"{sys.executable} -m pip install -e ."
-=======
     install_cmd = (
         f'uv pip install --python "{sys.executable}" -e .'
         if _has_uv()
         else f"{sys.executable} -m pip install -e ."
     )
->>>>>>> dev
     if _is_chinese_locale() and not _has_uv():
         install_cmd += " -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 

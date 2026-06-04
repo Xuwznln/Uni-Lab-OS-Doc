@@ -652,13 +652,9 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             **other_calling_param,
                         )
                     # noinspection PyUnresolvedReferences
-<<<<<<< HEAD
-                    rts_with_parent = ResourceTreeSet.from_plr_resources([plr_instance])
-=======
                     # _t3 = time.time()
                     rts_with_parent = ResourceTreeSet.from_plr_resources([parent_resource])
                     # _n_parent = len(rts_with_parent.all_nodes)
->>>>>>> dev
                     if rts_with_parent.root_nodes[0].res_content.uuid_parent is None:
                         rts_with_parent.root_nodes[0].res_content.parent_uuid = self.uuid
                     request.command = _fast_dumps_str(
@@ -676,17 +672,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     #     f"[AR:{_ar_tag}] 二次上传序列化 {_n_parent}节点 {((_t4 - _t3) * 1000):.0f}ms, 发送中..."
                     # )
                     tree_response: SerialCommand.Response = await client.call_async(request)
-<<<<<<< HEAD
-                    _raw_resp = tree_response.response if tree_response else ""
-                    if _raw_resp:
-                        uuid_maps = json.loads(_raw_resp)
-                    else:
-                        uuid_maps = {}
-                        self._lab_logger.warning("Resource tree add 返回空响应，跳过 UUID 映射")
-=======
                     # _t5 = time.time()
                     uuid_maps = _fast_loads(tree_response.response)
->>>>>>> dev
                     self.resource_tracker.loop_update_uuid(input_resources, uuid_maps)
                     # self._lab_logger.info(
                     #     f"[AR:{_ar_tag}] 二次上传完成 HTTP={(_t5 - _t4) * 1000:.0f}ms "
@@ -1760,10 +1747,6 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     _poll_future = Future()
 
                     def _on_sync_done(fut):
-<<<<<<< HEAD
-                        if not _poll_future.done():
-                            _poll_future.set_result(None)
-=======
                         async def _wake():
                             if not _poll_future.done():
                                 _poll_future.set_result(None)
@@ -1772,7 +1755,6 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         # Wake the awaiting action coroutine from the executor thread;
                         # otherwise it may only resume when the executor naturally wakes up.
                         rclpy.get_global_executor().create_task(_wake())
->>>>>>> dev
 
                     future.add_done_callback(_on_sync_done)
                     await _poll_future

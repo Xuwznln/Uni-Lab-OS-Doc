@@ -50,11 +50,8 @@ class WSConfig:
 # HTTP配置
 class HTTPConfig:
     remote_addr = "https://leap-lab.bohrium.com/api/v1"
-<<<<<<< HEAD
-=======
     # schedule 通道（WebSocket）地址；为空时从 remote_addr 派生：带端口则 +1，否则沿用原 netloc
     schedule_addr = ""
->>>>>>> dev
 
 
 # ROS配置

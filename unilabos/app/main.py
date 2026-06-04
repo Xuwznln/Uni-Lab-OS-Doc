@@ -244,9 +244,6 @@ def parse_args():
         "--addr",
         type=str,
         default="https://leap-lab.bohrium.com/api/v1",
-<<<<<<< HEAD
-        help="Laboratory backend address",
-=======
         help="Laboratory backend address (API)",
     )
     parser.add_argument(
@@ -257,7 +254,6 @@ def parse_args():
             "Schedule WebSocket address. If empty, derived from --addr: "
             "port +1 when --addr has a port, otherwise the same host is used."
         ),
->>>>>>> dev
     )
     parser.add_argument(
         "--skip_env_check",

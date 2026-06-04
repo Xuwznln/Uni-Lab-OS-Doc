@@ -214,18 +214,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
                   type: string
                 status:
                   type: string
-<<<<<<< HEAD
                 target:
-=======
-              title: SendCmd_Feedback
-              type: object
-            goal:
-              additionalProperties: false
-              properties:
-                command:
-                  description: A JSON-formatted string that includes option, target,
-                    speed, lift_height, mt_height
->>>>>>> dev
                   type: string
                 x_distance:
                   type: string
