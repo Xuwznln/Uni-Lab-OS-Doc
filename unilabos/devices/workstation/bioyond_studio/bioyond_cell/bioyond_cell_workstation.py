@@ -2944,48 +2944,6 @@ class BioyondCellWorkstation(BioyondWorkstation):
         """
         return self._post_lims("/api/lims/scheduler/reset")
 
-    def _wait_scheduler_status(
-        self,
-        target: str = "Stop",
-        timeout: float = 5.0,
-        interval: float = 0.5,
-    ) -> Dict[str, Any]:
-        """
-        轮询调度状态接口 (2.1)，直到 schedulerStatus 等于 target。
-
-        Args:
-            target: 期望达到的调度状态字符串。可选值（PDF 2.1）：
-                Init / Stop / Running / Pause / ErrorPause / ErrorStop
-            timeout: 总等待秒数。
-            interval: 每次轮询间隔秒数。
-
-        Returns:
-            达到目标时的 data 字典 (含 schedulerStatus / hasTask / creationTime)
-
-        Raises:
-            BioyondException: 超时未达到目标状态
-        """
-        deadline = time.monotonic() + timeout
-        last_status: Optional[str] = None
-        while time.monotonic() < deadline:
-            resp = self._post_lims("/api/lims/scheduler/scheduler-status")
-            data = resp.get("data") if isinstance(resp, dict) else None
-            if isinstance(data, dict):
-                last_status = data.get("schedulerStatus")
-                if last_status == target:
-                    logger.info(
-                        f"[_wait_scheduler_status] ✅ 达到目标状态 {target}，"
-                        f"hasTask={data.get('hasTask')}"
-                    )
-                    return data
-                logger.debug(
-                    f"[_wait_scheduler_status] 当前 status={last_status}，目标={target}，继续等..."
-                )
-            time.sleep(interval)
-        raise BioyondException(
-            f"等待调度状态 {target} 超时（{timeout}s），最后一次 status={last_status}"
-        )
-
     def scheduler_start_and_auto_feeding(
         self,
         # ★ Excel路径参数
