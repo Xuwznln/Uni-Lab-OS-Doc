@@ -50,6 +50,8 @@ _BUILTIN_DEFAULT_RULES: List[Dict[str, Any]] = [
     {"kind": "tip_rack",  "hole_count": 96, "volume_max": 10,    "class_name": "PRCXI_10uL_Tips"},
     {"kind": "tip_rack",  "hole_count": 96, "volume_max": 299.9, "class_name": "PRCXI_300ul_Tips"},
     {"kind": "tip_rack",  "hole_count": 96,                     "class_name": "PRCXI_1000uL_Tips"},
+    {"kind": "tube_rack", "hole_count": 2,  "class_name": "PRCXI_2_Reagent_Rack_50mL"},
+    {"kind": "tube_rack", "hole_count": 8,  "class_name": "PRCXI_8_Reagent_Rack_10mL"},
     {"kind": "tube_rack", "hole_count": 24, "class_name": "PRCXI_EP_Adapter"},
     {"kind": "tube_rack", "hole_count": 10, "class_name": "PRCXI_EP_Adapter"},
     {"kind": "plate",     "hole_count": 96,  "class_name": "PRCXI_BioER_96_wellplate"},

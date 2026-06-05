@@ -69,6 +69,8 @@ target_devices:
       - { kind: tip_rack,  hole_count: 96, volume_max: 299.9, class_name: PRCXI_300ul_Tips }
       - { kind: tip_rack,  hole_count: 96,                    class_name: PRCXI_1000uL_Tips }
       # ─ tube rack ─
+      - { kind: tube_rack, hole_count: 2,  class_name: PRCXI_2_Reagent_Rack_50mL, notes: "2 孔 50 mL 试剂架" }
+      - { kind: tube_rack, hole_count: 8,  class_name: PRCXI_8_Reagent_Rack_10mL, notes: "8 孔 10 mL 试剂架" }
       - { kind: tube_rack, hole_count: 24, class_name: PRCXI_EP_Adapter, notes: "Eppendorf 1.5/2 mL 24 位 4×6" }
       - { kind: tube_rack, hole_count: 10, class_name: PRCXI_EP_Adapter, notes: "Falcon 4x50 + 6x15 mL（10 位兼容 4×6 适配器）" }
       # ─ plate ─
@@ -97,6 +99,8 @@ target_devices:
       - { kind: tip_rack,  hole_count: 96, volume_max: 299.9, class_name: PRCXI_300ul_Tips }
       - { kind: tip_rack,  hole_count: 96,                    class_name: PRCXI_1000uL_Tips }
       # ─ tube rack ─
+      - { kind: tube_rack, hole_count: 2,  class_name: PRCXI_2_Reagent_Rack_50mL, notes: "2 孔 50 mL 试剂架" }
+      - { kind: tube_rack, hole_count: 8,  class_name: PRCXI_8_Reagent_Rack_10mL, notes: "8 孔 10 mL 试剂架" }
       - { kind: tube_rack, hole_count: 24, class_name: PRCXI_EP_Adapter, notes: "Eppendorf 1.5/2 mL 24 位 4×6" }
       - { kind: tube_rack, hole_count: 10, class_name: PRCXI_EP_Adapter, notes: "Falcon 4x50 + 6x15 mL（10 位兼容 4×6 适配器）" }
       # ─ plate ─

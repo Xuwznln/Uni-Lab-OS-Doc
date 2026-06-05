@@ -626,6 +626,114 @@ def PRCXI_EP_Adapter(name: str) -> PRCXI9300TubeRack:
             max_volume=1500.0
         )
     )
+
+
+def PRCXI_2_Reagent_Rack_50mL(name: str) -> PRCXI9300TubeRack:
+    """
+    对应 JSON Code: zx-004-50 (试剂2)
+    这是一个 1x2 的 50mL 试剂架。
+    """
+    return PRCXI9300TubeRack(
+        name=name,
+        size_x=127.76,
+        size_y=85.48,
+        size_z=0.0,
+        model="PRCXI_2_Reagent_Rack_50mL",
+        category="tube_rack",
+        material_info={
+            "uuid": "094e9130a0a24913bdebb8a2bdcf457a",
+            "Code": "zx-004-50",
+            "SupplyType": 1,
+            "Name": "试剂2",
+            "SummaryName": None,
+            "Factory": None,
+            "LengthNum": None,
+            "WidthNum": None,
+            "HeightNum": 0.0,
+            "DepthNum": 0.0,
+            "PipetteHeight": None,
+            "HoleDiameter": None,
+            "Margins_X": None,
+            "Margins_Y": None,
+            "HoleColum": 2,
+            "HoleRow": 1,
+            "Volume": 50,
+            "ImagePath": "C:\\Program Files\\Pipetting workstation chip",
+            "CreateTime": None,
+            "UpdateTime": None,
+            "XSpacing": 64.0,
+            "YSpacing": 0.0,
+            "materialEnum": 0,
+        },
+        ordered_items=create_ordered_items_2d(
+            Tube,
+            num_items_x=2,
+            num_items_y=1,
+            dx=0.0,
+            dy=0.0,
+            dz=0.0,
+            item_dx=64.0,
+            item_dy=0.0,
+            size_x=30.0,
+            size_y=30.0,
+            size_z=0.0,
+            max_volume=50000.0,
+        ),
+    )
+
+
+def PRCXI_8_Reagent_Rack_10mL(name: str) -> PRCXI9300TubeRack:
+    """
+    对应 JSON Code: zx-003-10 (试剂1)
+    这是一个 2x4 的 10mL 试剂架。
+    """
+    return PRCXI9300TubeRack(
+        name=name,
+        size_x=127.76,
+        size_y=85.48,
+        size_z=0.0,
+        model="PRCXI_8_Reagent_Rack_10mL",
+        category="tube_rack",
+        material_info={
+            "uuid": "6086fe7ae1434a0e80fa4194ef3eb0e1",
+            "Code": "zx-003-10",
+            "SupplyType": 1,
+            "Name": "试剂1",
+            "SummaryName": None,
+            "Factory": None,
+            "LengthNum": None,
+            "WidthNum": None,
+            "HeightNum": 0.0,
+            "DepthNum": 0.0,
+            "PipetteHeight": None,
+            "HoleDiameter": None,
+            "Margins_X": None,
+            "Margins_Y": None,
+            "HoleColum": 4,
+            "HoleRow": 2,
+            "Volume": 10,
+            "ImagePath": "C:\\Program Files\\Pipetting workstation chip",
+            "CreateTime": None,
+            "UpdateTime": None,
+            "XSpacing": 42.0,
+            "YSpacing": 32.0,
+            "materialEnum": 0,
+        },
+        ordered_items=create_ordered_items_2d(
+            Tube,
+            num_items_x=4,
+            num_items_y=2,
+            dx=0.0,
+            dy=0.0,
+            dz=0.0,
+            item_dx=42.0,
+            item_dy=32.0,
+            size_x=16.0,
+            size_y=16.0,
+            size_z=0.0,
+            max_volume=10000.0,
+        ),
+    )
 # =========================================================================
 # Plate Adapters
 # =========================================================================
@@ -727,6 +835,8 @@ PRCXI_TEMPLATE_FACTORY_KINDS: List[Tuple[Callable[..., Any], str]] = [
     (PRCXI_trash, "trash"),
     (PRCXI_96_DeepWell, "plate"),
     (PRCXI_EP_Adapter, "tube_rack"),
+    (PRCXI_2_Reagent_Rack_50mL, "tube_rack"),
+    (PRCXI_8_Reagent_Rack_10mL, "tube_rack"),
     (PRCXI_1250uL_Tips, "tip_rack"),
     (PRCXI_10uL_Tips, "tip_rack"),
     (PRCXI_1000uL_Tips, "tip_rack"),
