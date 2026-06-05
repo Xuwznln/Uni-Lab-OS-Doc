@@ -514,9 +514,9 @@ def YB_PrepBottle_60mL_Carrier(name: str) -> BottleCarrier:
     carrier_size_z = 95.0
 
     # 瓶位尺寸
-    bottle_diameter = 55.0
-    bottle_spacing_x = 60.0  # X方向间距
-    bottle_spacing_y = 60.0  # Y方向间距
+    bottle_diameter = 40.0
+    bottle_spacing_x = 50.0  # X方向间距
+    bottle_spacing_y = 50.0  # Y方向间距
 
     # 计算起始位置 (居中排列)
     start_x = (carrier_size_x - (2 - 1) * bottle_spacing_x - bottle_diameter) / 2

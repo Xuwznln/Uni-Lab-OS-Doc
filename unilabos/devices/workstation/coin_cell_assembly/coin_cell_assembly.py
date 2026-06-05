@@ -1511,6 +1511,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self._unilab_send_msg_assembly_type(assembly_type)
         time.sleep(1)
         #发送电池压制力
+        self._target_assembly_pressure = assembly_pressure
         self._unilab_send_msg_assembly_pressure(assembly_pressure)
         time.sleep(1)
         self._unilab_send_msg_succ_cmd(True)
@@ -1660,7 +1661,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                 writer = csv.writer(csvfile)
                 writer.writerow([
                     'Time', 'open_circuit_voltage', 'pole_weight', 
-                    'assembly_time', 'assembly_pressure', 'electrolyte_volume', 
+                    'assembly_time', 'target_assembly_pressure', 'real_assembly_pressure', 'electrolyte_volume', 
                     'data_coin_type', 'electrolyte_code', 'coin_cell_code',
                     'orderName', 'prep_bottle_barcode', 'vial_bottle_barcodes',
                     'target_mass_ratio', 'real_mass_ratio'
@@ -1728,9 +1729,10 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             else:
                 logger.debug(f"[CSV写入] 电池 {data_battery_number}: 未找到配方信息数据")
             
+            target_assembly_pressure = getattr(self, '_target_assembly_pressure', '')
             writer.writerow([
                 timestamp, data_open_circuit_voltage, data_pole_weight,
-                data_assembly_time, data_assembly_pressure, data_electrolyte_volume,
+                data_assembly_time, target_assembly_pressure, data_assembly_pressure, data_electrolyte_volume,
                 data_coin_type, data_electrolyte_code, data_coin_cell_code,
                 formulation_order_name, prep_bottle_barcode, vial_bottle_barcodes,
                 target_ratio_str, real_ratio_str

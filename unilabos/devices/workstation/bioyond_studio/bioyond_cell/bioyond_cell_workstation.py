@@ -891,6 +891,20 @@ class BioyondCellWorkstation(BioyondWorkstation):
             else:
                 all_mass_ratios[idx]["vial_bottle_barcodes"] = ""
 
+        # ========== 提取各类瓶板的源坐标（用于 321/32 任务 handles 传参）==========
+        def _find_plate_xyz(plates, type_keyword):
+            for p in plates:
+                if p and type_keyword in p.get("typeName", ""):
+                    return p.get("source_x", 1), p.get("source_y", 1), p.get("source_z", 1)
+            return 1, 1, 1
+
+        vial_321_x, vial_321_y, vial_321_z = _find_plate_xyz(all_vial_plates, "5ml分液瓶板")
+        vial_32_x, vial_32_y, vial_32_z = _find_plate_xyz(all_vial_plates, "20ml分液瓶板")
+        logger.info(
+            f"[{tag}] 3-2-1源坐标（5ml）: ({vial_321_x},{vial_321_y},{vial_321_z}), "
+            f"3-2源坐标（20ml）: ({vial_32_x},{vial_32_y},{vial_32_z})"
+        )
+
         # ========== 构造最终结果 ==========
         final_result = {
             "status": "all_completed",
@@ -902,6 +916,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "prep_bottles": all_prep_bottles,
             "vial_bottles": all_vial_bottles,
             "original_response": response,
+            "vial_321_source_pos": {"x": vial_321_x, "y": vial_321_y, "z": vial_321_z},
+            "vial_32_source_pos": {"x": vial_32_x, "y": vial_32_y, "z": vial_32_z},
         }
 
         logger.info("=" * 80)
@@ -1812,6 +1828,18 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.debug(f"[提取分液瓶板] 跳过非分液瓶板: typeName={type_name}")
                 continue
 
+            # 从 locations 取"自动堆栈-左"仓库的 xyz 坐标（上游 851b923 引入），
+            # 用于 transfer_3_to_2_to_1 / transfer_3_to_2 通过 handle 接收源坐标。
+            # 多 plate 场景下每块板独立预存自己的坐标，下游 _find_plate_xyz 仍能正确按板型选取。
+            AUTO_STACK_LEFT_WH_ID = "3a19debc-84b4-0359-e2d4-b3beea49348b"
+            src_x, src_y, src_z = 1, 1, 1
+            for loc in (material_info.get("locations") or []):
+                if loc.get("whid") == AUTO_STACK_LEFT_WH_ID:
+                    src_x = loc.get("x", 1)
+                    src_y = loc.get("y", 1)
+                    src_z = loc.get("z", 1)
+                    break
+
             plate_info = {
                 "materialId": material_id,
                 "locationId": location_id,
@@ -1819,19 +1847,23 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "orderId": order_id_guid,
                 "typeName": type_name,
                 "barCode": material_info.get("barCode") or "",
+                "source_x": src_x,
+                "source_y": src_y,
+                "source_z": src_z,
             }
             if type_name == PREFERRED_TYPE:
                 candidates_preferred.append(plate_info)
                 logger.info(
                     f"[提取分液瓶板] ✅ 命中 {PREFERRED_TYPE}: "
                     f"materialId={material_id}, locationId={location_id}, "
-                    f"barCode={plate_info['barCode']}"
+                    f"barCode={plate_info['barCode']}, 坐标=({src_x},{src_y},{src_z})"
                 )
             else:
                 candidates_other_plate.append(plate_info)
                 logger.info(
                     f"[提取分液瓶板] 命中其它分液瓶板: typeName={type_name}, "
-                    f"materialId={material_id}, barCode={plate_info['barCode']}"
+                    f"materialId={material_id}, barCode={plate_info['barCode']}, "
+                    f"坐标=({src_x},{src_y},{src_z})"
                 )
 
         if candidates_preferred:
@@ -2530,7 +2562,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         vial_plates: List[Dict],
         target_device: str = "BatteryStation",
         target_location: str = "bottle_rack_6x2",
-        mass_ratios: List[Dict] = None,  # ✅ 新增：配方信息（用于瓶子放置位置映射）
+        mass_ratios: List[Dict] = None,
+        source_pos: Optional[Dict] = None,  # 可选：统一 xyz 覆盖（当 vial_plate 内无预存坐标时使用）
         **kwargs  # 兼容性参数，捕获已废弃的 vial_plate_info 等参数
     ) -> Dict[str, Any]:
         """
@@ -2627,11 +2660,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 
                 logger.info(f"{'='*60}")
                 
-                # 调用单个转运逻辑
+                # 调用单个转运逻辑（source_pos 作为兜底坐标，低于 plate_info 内预存 xyz）
                 result = self._transfer_single_vial_plate(
                     vial_plate_info=plate_info,
                     target_device=target_device,
-                    target_location=target_location
+                    target_location=target_location,
+                    source_pos_fallback=source_pos
                 )
                 
                 transferred_material_ids.add(material_id)
@@ -2679,7 +2713,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         self,
         vial_plate_info: Dict,
         target_device: str,
-        target_location: str
+        target_location: str,
+        source_pos_fallback: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
         转运单个分液瓶板（内部方法）
@@ -2709,9 +2744,20 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # 步骤2：获取 warehouse_id
         warehouse_id = self._get_warehouse_id(wh_name)
         
-        # 步骤3：槽位名称 → 坐标
-        x, y, z = self._slot_to_coordinates(slot_name)
-        logger.info(f"[自动转运] 坐标: ({x}, {y}, {z})")
+        # 步骤3：确定坐标（优先级：vial_plate_info 预存 > source_pos_fallback > 槽位计算）
+        if all(k in vial_plate_info for k in ("source_x", "source_y", "source_z")):
+            x = vial_plate_info["source_x"]
+            y = vial_plate_info["source_y"]
+            z = vial_plate_info["source_z"]
+            logger.info(f"[自动转运] 使用物料信息坐标: ({x}, {y}, {z})")
+        elif source_pos_fallback:
+            x = source_pos_fallback.get("x", 1)
+            y = source_pos_fallback.get("y", 1)
+            z = source_pos_fallback.get("z", 1)
+            logger.info(f"[自动转运] 使用 source_pos 兜底坐标: ({x}, {y}, {z})")
+        else:
+            x, y, z = self._slot_to_coordinates(slot_name)
+            logger.info(f"[自动转运] 按槽位计算坐标: ({x}, {y}, {z})")
         
         # 步骤4：调用物理转运
         lims_result = self.transfer_3_to_2_to_1(
@@ -3095,7 +3141,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
     def transfer_3_to_2_to_1(self,
                             #  source_wh_id: Optional[str] = None,
                             source_wh_id: Optional[str] = '3a19debc-84b4-0359-e2d4-b3beea49348b',
-                             source_x: int = 1, source_y: int = 1, source_z: int = 1) -> Dict[str, Any]:
+                             source_x: int = 1, source_y: int = 1, source_z: int = 1,
+                             source_pos: Optional[Dict] = None) -> Dict[str, Any]:
+        if source_pos:
+            source_x = source_pos.get("x", source_x)
+            source_y = source_pos.get("y", source_y)
+            source_z = source_pos.get("z", source_z)
         payload: Dict[str, Any] = {
             "sourcePosX": source_x, "sourcePosY": source_y, "sourcePosZ": source_z
         }
@@ -3116,7 +3167,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
                         source_wh_id: Optional[str] = '3a19debc-84b4-0359-e2d4-b3beea49348b',
                         source_x: int = 1, 
                         source_y: int = 1, 
-                        source_z: int = 1) -> Dict[str, Any]:
+                        source_z: int = 1,
+                        source_pos: Optional[Dict] = None) -> Dict[str, Any]:
         """
         2.34 3-2 物料转运接口
         
@@ -3127,10 +3179,15 @@ class BioyondCellWorkstation(BioyondWorkstation):
             source_x: 来源位置 X 坐标
             source_y: 来源位置 Y 坐标
             source_z: 来源位置 Z 坐标
+            source_pos: 整合 xyz 的字典（优先级高于单独的 x/y/z 参数）
             
         Returns:
             dict: 包含任务 orderId 和 orderCode 的响应
         """
+        if source_pos:
+            source_x = source_pos.get("x", source_x)
+            source_y = source_pos.get("y", source_y)
+            source_z = source_pos.get("z", source_z)
         payload: Dict[str, Any] = {
             "sourcePosX": source_x, 
             "sourcePosY": source_y, 
@@ -3617,6 +3674,13 @@ class BioyondCellWorkstation(BioyondWorkstation):
         logger.debug(f"[类型映射] 可用类型列表: {[v[0] for v in mappings.values()]}")
         return None
     
+    # 各板型对应的子位排列 (num_x, num_y)，用于构建 details
+    BOARD_GRID = {
+        "配液瓶(大)板": (2, 2),
+        "配液瓶(小)板": (2, 4),
+        "5ml分液瓶板":  (2, 4),
+    }
+
     def create_sample(
         self,
         name: str,
@@ -3654,10 +3718,14 @@ class BioyondCellWorkstation(BioyondWorkstation):
         location_id = self.bioyond_config['warehouse_mapping'][warehouse_name]["site_uuids"][location_code]
         logger.info(f"创建样品入库: {name} -> {warehouse_name}/{location_code} (UUID: {location_id})")
 
+        # 根据板型获取子位网格尺寸，缺省回退到 2×4
+        num_x, num_y = self.BOARD_GRID.get(board_type, (2, 4))
+        logger.debug(f"[create_sample] 板型 '{board_type}' 子位网格: {num_x}×{num_y}")
+
         # 新建小瓶
         details = []
-        for y in range(1, 5):
-            for x in range(1, 3):
+        for y in range(1, num_y + 1):
+            for x in range(1, num_x + 1):
                 details.append({
                     "typeId": bottle_type_id,
                     "code": "",
