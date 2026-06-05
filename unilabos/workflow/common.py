@@ -1246,11 +1246,21 @@ def build_protocol_graph(
         # P3 框选化：新主路径 = param.wells（list[dict]，每孔一个资源引用），
         # 端口 target_port="wells_identifier"。
         # 旧字段（plate / well_names）仍写入 param 作 fallback，便于旧 runtime / 旧 schema 解析。
+        #
+        # well 引用 parent 必须用**物理板名**（``{target_class}_slot_{slot}``，与 create_resource
+        # 的 res_id 对齐），而非逻辑 reagent_key（如 ``Liquid_2`` / ``samples_3``）。否则运行时
+        # wells_identifier 边未覆盖 wells 时，set_liquid 收到的逻辑 parent 在 resource_tracker
+        # 中根本不存在（只注册了 ``{class}_slot_{N}``），``_coerce_well`` 无法解析而报错。
+        # 与 merged 路径（well_names 用 ``<plate_plr_name>/<well>`` prefix）保持一致。
+        # 实证：源容器从未以 reagent_key 命名注册，resource_tracker 中只有 ``{class}_slot_{N}``。
+        sl_plate_plr_name = (
+            f"{target_class}_slot_{slot}".replace(" ", "_") if target_class else str(labware_id)
+        )
         well_resource_refs = [
             {
-                "id": f"{labware_id}/{w}",
-                "name": f"{labware_id}/{w}",
-                "parent": labware_id,
+                "id": f"{sl_plate_plr_name}/{w}",
+                "name": f"{sl_plate_plr_name}/{w}",
+                "parent": sl_plate_plr_name,
                 "type": "well",
             }
             for w in wells

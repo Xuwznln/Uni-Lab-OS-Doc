@@ -1262,8 +1262,18 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         if isinstance(w, dict):
             uid = w.get("uuid") or w.get("unilabos_uuid")
             if uid is None:
+                # P3 fallback：无 uuid 时按 parent 物理板名 + 孔坐标从 resource_tracker 解析。
+                # 转换层（workflow/common.py）已把 well.parent 写成物理板名 ``{class}_slot_{slot}``
+                # （与 create_resource 的 res_id 对齐）；运行时 wells_identifier 边未覆盖 wells 时
+                # （edge 未生效 / 旧 schema），仍可凭 parent + 孔坐标定位到已创建的板并取孔。
+                resolved = self._resolve_well_by_parent_ref(w)
+                if resolved is not None:
+                    return resolved
                 raise TypeError(
-                    f"dict 格式的 well 必须包含 uuid 或 unilabos_uuid 字段: {w!r}"
+                    f"dict 格式的 well 无法解析：缺 uuid 且 parent={w.get('parent')!r} 未在 "
+                    f"resource_tracker 中找到对应板（well={w.get('name')!r}）。请确认上游 "
+                    f"create_resource 已创建该物理板，且转换层 wells.parent 使用物理板名"
+                    f"（{{class}}_slot_{{slot}}）。原始: {w!r}"
                 )
             if not hasattr(self, "_ros_node") or self._ros_node is None:
                 raise ValueError(
@@ -1280,6 +1290,39 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 )
             return cast(Well, matches[0])
         raise TypeError(f"无法解析 well: {w!r}")
+
+    def _resolve_well_by_parent_ref(self, w: Dict[str, Any]) -> Optional[Well]:
+        """无 uuid 的 well dict → PLR Well：按 ``parent`` 物理板名 + 孔坐标解析。
+
+        ``w`` 形如 ``{"id": "<plate>/<well>", "name": "<plate>/<well>", "parent": "<plate>"}``，
+        其中 ``<plate>`` 是物理板名（``{class}_slot_{slot}``，与 create_resource res_id 对齐）。
+        在 ``resource_tracker`` 中按板名定位 Plate / TubeRack，再按孔坐标取孔；
+        TubeRack 复用 :meth:`_resolve_tube_compat` 兼容新版 PLR holder 模型。
+        解析不到返回 ``None``（由调用方决定是否抛错）。
+        """
+        tr = getattr(getattr(self, "_ros_node", None), "resource_tracker", None)
+        if tr is None:
+            return None
+        parent_name = w.get("parent")
+        ref_name = w.get("name") or w.get("id") or ""
+        coord = ref_name.rsplit("/", 1)[-1] if isinstance(ref_name, str) and "/" in ref_name else ref_name
+        if not parent_name or not coord:
+            return None
+        try:
+            matches = tr.figure_resource({"name": parent_name}, try_mode=True)
+        except Exception:
+            return None
+        plate = matches[0] if isinstance(matches, list) and matches else None
+        if plate is None:
+            return None
+        try:
+            if issubclass(plate.__class__, Plate):
+                return cast(Well, plate.get_well(coord))
+            if issubclass(plate.__class__, TubeRack):
+                return cast(Well, self._resolve_tube_compat(plate, coord))
+        except Exception:
+            return None
+        return None
 
     def _set_liquid_grouped_by_plate(
         self,
