@@ -179,6 +179,16 @@ bioyond_cell:
             data_type: array
             handler_key: mass_ratios_output
             label: 配方信息列表
+          - data_key: vial_321_source_pos
+            data_source: executor
+            data_type: object
+            handler_key: vial_321_source_pos_output
+            label: 5ml瓶板源坐标（321任务）
+          - data_key: vial_32_source_pos
+            data_source: executor
+            data_type: object
+            handler_key: vial_32_source_pos_output
+            label: 20ml瓶板源坐标（32任务）
         placeholder_keys: {}
         result: {}
         schema:
@@ -234,6 +244,16 @@ bioyond_cell:
             data_type: array
             handler_key: mass_ratios_output
             label: 配方信息列表
+          - data_key: vial_321_source_pos
+            data_source: executor
+            data_type: object
+            handler_key: vial_321_source_pos_output
+            label: 5ml瓶板源坐标（321任务）
+          - data_key: vial_32_source_pos
+            data_source: executor
+            data_type: object
+            handler_key: vial_32_source_pos_output
+            label: 20ml瓶板源坐标（32任务）
         placeholder_keys:
           formulation: unilabos_formulation
         result: {}
@@ -747,7 +767,14 @@ bioyond_cell:
           source_x: 1
           source_y: 1
           source_z: 1
-        handles: {}
+          source_pos: null
+        handles:
+          input:
+          - data_key: '@this@@@source_pos'
+            data_source: handle
+            data_type: object
+            handler_key: vial_32_source_pos_output
+            label: 20ml瓶板源坐标
         placeholder_keys: {}
         result: {}
         schema:
@@ -789,7 +816,14 @@ bioyond_cell:
           source_x: 1
           source_y: 1
           source_z: 1
-        handles: {}
+          source_pos: null
+        handles:
+          input:
+          - data_key: '@this@@@source_pos'
+            data_source: handle
+            data_type: object
+            handler_key: vial_321_source_pos_output
+            label: 5ml瓶板源坐标
         placeholder_keys: {}
         result: {}
         schema:
@@ -825,6 +859,7 @@ bioyond_cell:
           target_device: BatteryStation
           target_location: bottle_rack_6x2
           vial_plates: null
+          source_pos: null
         handles:
           input:
           - data_key: '@this@@@vial_plates'
