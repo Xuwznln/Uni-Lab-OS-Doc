@@ -27,8 +27,12 @@
                 "timeout": 10,
                 "matrix_id": "",
                 "simulator": false,
-                "channel_num": 2,
-                "step_mode": false,
+                "channel_num": 8,
+                "pip_setting": {
+                    "left": {"vol": 300, "channels": 1},
+                    "right": {"vol": 1000, "channels": 8}
+                },
+                "step_mode": true,
                 "calibration_points": {
                     "line_1": [[452.07,21.19], [313.88,21.19], [177.17,21.19], [39.08,21.19]],
                     "line_2": [[451.37,116.68], [313.28,116.88], [176.58,116.69], [38.58,117.18]],
