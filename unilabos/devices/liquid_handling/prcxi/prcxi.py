@@ -57,6 +57,11 @@ from unilabos.devices.liquid_handling.liquid_handler_abstract import (
 )
 from unilabos.devices.liquid_handling.prcxi.flatten_utils import (
     flatten_multi_channel_kwargs as _flatten_multi_channel_kwargs_impl,
+    normalize_pip_setting as _normalize_pip_setting,
+    select_axis as _select_axis,
+    axis_channel_list as _axis_channel_list,
+    axis_from_channels as _axis_from_channels_util,
+    RIGHT_CHANNEL_BASE as _RIGHT_CHANNEL_BASE,
 )
 from unilabos.registry.placeholder_type import ResourceSlot
 from unilabos.resources.itemized_carrier import ItemizedCarrier
@@ -832,7 +837,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         calibration_points: Optional[Dict[str, List[List[float]]]] = None,
         calibration_labware_type: Optional[str] = "PRCXI_300ul_Tips",
         has_true_8channel: bool = False,
+        pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
+        # 枪头轴配置：``{"left": {"vol": 100, "channels": 8}, "right": {"vol": 1000, "channels": 1}}``
+        # 代表左轴 100µL/8 通道、右轴 1000µL/1 通道。None → 走 legacy 路由（≤10µL→右单通道[1]、
+        # 8 通道[0..7]扁平化、backend [0]→Left/[1]→Right）。设置后启用 pip_setting 路由：
+        # 按「通道优先、再看体积」选轴，通道编号约定左[0..7]/右[8..15]，channels 即真并行度。
+        self.pip_setting: Optional[Dict[str, Dict[str, Any]]] = _normalize_pip_setting(pip_setting)
+
         # P1 v5 — 是否为「真 8 通道并行」硬件。9300 / 9320 物理上是单 pipette 头
         # （head 上虽有 8 个 tip 工位但只能顺序点动），默认 False；未来 9600 / 真 8
         # 通道 head 上线时 YAML / registry 把这个值置 True，跳过 ``transfer_liquid``
@@ -885,7 +897,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             else:
                 print("9300设备不支持 单点动作模式")
         self._unilabos_backend = PRCXI9300Backend(
-            tablets_info, host, port, timeout, channel_num, axis, setup, debug, matrix_id, is_9320
+            tablets_info, host, port, timeout, channel_num, axis, setup, debug, matrix_id, is_9320,
+            pip_setting=self.pip_setting,
         )
         super().__init__(backend=self._unilabos_backend, deck=deck, simulator=simulator, channel_num=channel_num)
         self._first_transfer_done = False
@@ -1547,9 +1560,24 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             and len(use_channels) == 8
             and list(use_channels) == [0, 1, 2, 3, 4, 5, 6, 7]
         )
-        _flatten_8_to_1 = _is_eight_channel_request and not getattr(
-            self, "has_true_8channel", False
-        )
+
+        # 选轴/扁平化判定：pip_setting 路由（通道优先、再看体积；channels 即真并行度）
+        # vs. legacy（≤10µL→右单通道[1]、8 通道[0..7]按 has_true_8channel 扁平化）。
+        _pip_setting = getattr(self, "pip_setting", None)
+        if _pip_setting is not None:
+            _n_req = 8 if _is_eight_channel_request else 1
+            _all_vols = [float(v) for v in (_asp_list + _dis_list) if v is not None]
+            _max_vol = max(_all_vols) if _all_vols else 0.0
+            _sel_axis = _select_axis(_pip_setting, _n_req, _max_vol)
+            _axis_ch = int(_pip_setting[_sel_axis]["channels"])
+            # 多通道请求落到并行度不足的轴（典型：8 通道但体积超过多通道轴量程→右单通道）→ 扁平化。
+            _flatten_8_to_1 = _n_req == 8 and _axis_ch < 8
+        else:
+            _sel_axis = None
+            _axis_ch = None
+            _flatten_8_to_1 = _is_eight_channel_request and not getattr(
+                self, "has_true_8channel", False
+            )
 
         # === [P-DBG] PRCXI use_channels 翻倍排查（候选 C）===
         # 51b9a5 协议未传 use_channels；进入 PRCXI 后小体积 head 切换会把它设为 [1]；
@@ -1561,6 +1589,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 self._ros_node.lab_logger().info(
                     f"[P-DBG] prcxi.transfer_liquid handler={id(self):x} "
                     f"use_channels={use_channels} _flatten_8_to_1={_flatten_8_to_1} "
+                    f"pip_setting={_pip_setting} sel_axis={_sel_axis} "
                     f"has_true_8channel={getattr(self, 'has_true_8channel', False)} "
                     f"asp_list_len={len(_asp_list)} dis_list_len={len(_dis_list)} "
                     f"n_sources={len(sources)} n_targets={len(targets)} "
@@ -1596,22 +1625,32 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             blow_out_air_volume_before = flattened["blow_out_air_volume_before"]
             delays = flattened["delays"]
             pre_aspirate_from_target = flattened["pre_aspirate_from_target"]
-            # 让下面的 small-vols heuristic 自由选 [0] / [1]
-            use_channels = None
+            if _pip_setting is None:
+                # legacy：让下面的 small-vols heuristic 自由选 [0] / [1]
+                use_channels = None
             # 扁平化后 _asp_list / _dis_list 已经是 8×M 长度的真实逐孔体积，
-            # 此后的 small_vols 重新判定会基于全量逐孔体积（与原 8 通道一致）。
+            # 此后的判定基于全量逐孔体积（与原 8 通道一致）。
             _asp_list = list(asp_vols)
             _dis_list = list(dis_vols)
         # === P1 v5 end ===
 
-        # 小体积单通道 head 切换：仅当 caller 没显式指定多通道时才生效。
-        # P1 v4 多通道协议（use_channels=[0..7]）即便体积 ≤ 10uL 也应保留 8 通道，
-        # 避免把 dis_vols=[8.3]*8 这种「8 通道每孔 8.3uL」的展开退化为单通道串行。
-        small_vols = all(v <= 10.0 for v in _asp_list) and all(v <= 10.0 for v in _dis_list)
-        _explicit_multi = isinstance(use_channels, (list, tuple)) and len(use_channels) > 1
-        if small_vols and self._tip_rack_is_10ul_range(tip_rack) and not _explicit_multi:
-            use_channels = [1]
-            mix_vol = max(min(mix_vol, 10), 0) if mix_vol is not None else None
+        if _pip_setting is not None:
+            # 选定轴 → use_channels（新编号：左[0..7]/右[8..15]）。扁平化后为单通道。
+            _n_final = 1 if _flatten_8_to_1 else min(_n_req, _axis_ch)
+            use_channels = _axis_channel_list(_sel_axis, _n_final)
+            # mix 体积按所选轴量程上限收口（避免在小量程轴上下发超量 mix）。
+            _axis_vol = float(_pip_setting[_sel_axis]["vol"])
+            if mix_vol is not None:
+                mix_vol = max(min(mix_vol, _axis_vol), 0)
+        else:
+            # 小体积单通道 head 切换：仅当 caller 没显式指定多通道时才生效。
+            # P1 v4 多通道协议（use_channels=[0..7]）即便体积 ≤ 10uL 也应保留 8 通道，
+            # 避免把 dis_vols=[8.3]*8 这种「8 通道每孔 8.3uL」的展开退化为单通道串行。
+            small_vols = all(v <= 10.0 for v in _asp_list) and all(v <= 10.0 for v in _dis_list)
+            _explicit_multi = isinstance(use_channels, (list, tuple)) and len(use_channels) > 1
+            if small_vols and self._tip_rack_is_10ul_range(tip_rack) and not _explicit_multi:
+                use_channels = [1]
+                mix_vol = max(min(mix_vol, 10), 0) if mix_vol is not None else None
         # P2 v2：跨板 transfer_liquid 场景下 sources / targets 列表里可能引用多个 plate
         # （v1 旧实现只取 [0] 会漏掉 slot 3/5/6 的位置同步）。这里改为遍历所有 source/target
         # 的 parent plate，按首次出现顺序去重——既保证跨板都能 update_pipetting_position，
@@ -1720,6 +1759,24 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
     async def touch_tip(self, targets: Sequence[Container]):
         return await super().touch_tip(targets)
 
+    def _route_axis_and_channels(self, use_channels):
+        """pip_setting 路由：从 use_channels 推轴写入 ``backend._active_axis``，返回 PLR 合法的
+        0-based 通道。右轴 ``[8..15]`` → 减 8 为 ``[0..7]`` 并置 ``Right``；左轴 ``[0..7]`` 原样
+        并置 ``Left``。未配置 pip_setting 或空入参 → 原样返回（legacy 行为不变）。
+
+        说明：右轴下标 ``[8..15]`` 仅作设备内部的「选轴意图」信号，绝不透传给 PLR
+        （PLR 只接受 ``0..channel_num-1`` 且会 ``head[channel]`` 索引）；轴信息改由
+        ``_active_axis`` 传给 backend。
+        """
+        if getattr(self, "pip_setting", None) is None or not use_channels:
+            return use_channels
+        chans = list(use_channels)
+        axis = _axis_from_channels_util(chans)  # "Left"/"Right"（跨段/越界会抛错）
+        self._unilabos_backend._active_axis = axis
+        if axis == "Right":
+            return [c - _RIGHT_CHANNEL_BASE for c in chans]  # [8..15] -> [0..7]
+        return chans
+
     async def mix(
         self,
         targets: Sequence[Container],
@@ -1731,6 +1788,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         none_keys: List[str] = [],
         use_channels: Optional[List[int]] = [0],
     ):
+        use_channels = self._route_axis_and_channels(use_channels)
         return await self._unilabos_backend.mix(
             targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys, use_channels
         )
@@ -1745,6 +1803,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         offsets: Optional[List[Coordinate]] = None,
         **backend_kwargs,
     ):
+        use_channels = self._route_axis_and_channels(use_channels)
         return await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
 
     async def aspirate(
@@ -1759,7 +1818,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         spread: Literal["wide", "tight", "custom"] = "wide",
         **backend_kwargs,
     ):
-
+        use_channels = self._route_axis_and_channels(use_channels)
         return await super().aspirate(
             resources,
             vols,
@@ -1780,6 +1839,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         allow_nonzero_volume: bool = False,
         **backend_kwargs,
     ):
+        # 注意：此处**不**做 _route_axis_and_channels 路由。drop_tips 在转移流程里仅作为
+        # PLR ``discard_tips → self.drop_tips`` 的回调进入（见 PLR liquid_handler.discard_tips），
+        # 此时 use_channels 已被上游 ``discard_tips`` override 翻译为 0-based [0..7]、
+        # ``backend._active_axis`` 也已置好。若在此再次路由，[0..7] 会被误判为左轴而把
+        # ``_active_axis`` 覆写成 Left（导致右轴转移的 UnLoad 走错轴）。
         return await super().drop_tips(tip_spots, use_channels, offsets, allow_nonzero_volume, **backend_kwargs)
 
     async def dispense(
@@ -1794,6 +1858,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         spread: Literal["wide", "tight", "custom"] = "wide",
         **backend_kwargs,
     ):
+        use_channels = self._route_axis_and_channels(use_channels)
         return await super().dispense(
             resources,
             vols,
@@ -1813,6 +1878,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         offsets: Optional[List[Coordinate]] = None,
         **backend_kwargs,
     ):
+        use_channels = self._route_axis_and_channels(use_channels)
         return await super().discard_tips(use_channels, allow_nonzero_volume, offsets, **backend_kwargs)
 
     def set_tiprack(self, tip_racks: Sequence[TipRack]):
@@ -1865,12 +1931,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         # 确保 plate 已挂到 deck，并从 plate 反推当前（源）slot。
         self._attach_resources_to_deck_if_needed([plate])
         src_slot = self._unilabos_backend._deck_plate_slot_no(plate, getattr(plate, "parent", None))
-
+        if self.step_mode:
+            await self.create_protocol(f"move_plate{time.time()}")
         # 下发硬件 pick+drop（simulator 模式只更新物料，不产生硬件步骤）。
         step = None
         if not self._simulator:
-            await self._unilabos_backend.pick_up_resource(None, source_plate_number=src_slot)
-            step = await self._unilabos_backend.drop_resource(None, target_plate_number=to)
+            pick_step = await self._unilabos_backend.pick_up_resource(None, source_plate_number=src_slot)
+            drop_step = await self._unilabos_backend.drop_resource(None, target_plate_number=to)
+            step = [pick_step, drop_step]
 
         # 更新物料：把 plate reparent 到目标 slot；若目标 slot 上有 plate_adapter/module 则挂到其上。
         deck = self.deck
@@ -1913,6 +1981,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         if isinstance(extra, dict):
             extra["update_resource_site"] = f"T{to}"
 
+        if self.step_mode and step is not None:
+            await self.run_protocol()
         return step
 
 
@@ -1948,6 +2018,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         debug=False,
         matrix_id="",
         is_9320=False,
+        pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> None:
         super().__init__()
         self.tablets_info = tablets_info
@@ -1958,6 +2029,12 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self._execute_setup = setup
         self.debug = debug
         self.axis = "Left"
+        # 枪头轴配置（由 PRCXI9300Handler 透传）。None → legacy [0]→Left/[1]→Right。
+        self.pip_setting: Optional[Dict[str, Dict[str, Any]]] = pip_setting
+        # 当前操作选定的物理轴（"Left"/"Right"），由设备层 op override 在调用前写入。
+        # pip_setting 模式下 backend 凭此判轴（而非解码通道下标），避免把右轴下标 [8..15]
+        # 透传给 PLR（PLR 只接受 0..channel_num-1）。
+        self._active_axis: Optional[str] = None
 
     def _resolve_deck(self, plate, deck=None) -> Optional["PRCXI9300Deck"]:
         """定位 plate 所属的 PRCXI9300Deck：按 deck 入参 → plate 的祖先链 → handler.deck 顺序回退。"""
@@ -2053,7 +2130,10 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             plate_number = self._deck_plate_slot_no(plate, getattr(plate, "parent", None))
         is_whole_plate = True
         balance_height = 0
-        step = self.api_client.clamp_jaw_pick_up(plate_number, is_whole_plate, balance_height)
+        hierarchy = int(backend_kwargs.get("hierarchy", 1))  # 夹取层级，默认 1
+        step = self.api_client.clamp_jaw_pick_up(
+            plate_number, is_whole_plate, balance_height, hierarchy=hierarchy
+        )
 
         self.steps_todo_list.append(step)
         return step
@@ -2075,7 +2155,10 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         balance_height = 0
         if plate_number is None:
             raise ValueError("target_plate_number is required when dropping a resource")
-        step = self.api_client.clamp_jaw_drop(plate_number, is_whole_plate, balance_height)
+        hierarchy = int(backend_kwargs.get("hierarchy", 1))  # 放下层级，默认 1
+        step = self.api_client.clamp_jaw_drop(
+            plate_number, is_whole_plate, balance_height, hierarchy=hierarchy
+        )
         self.steps_todo_list.append(step)
         return step
 
@@ -2131,6 +2214,55 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             return [0, 1, 2, 3, 4, 5, 6, 7]
         return use_channels
 
+    @staticmethod
+    def _normalize_use_channels(use_channels) -> Optional[List[int]]:
+        """numpy / list / None → list[int] | None。"""
+        if use_channels is None:
+            return None
+        if hasattr(use_channels, "tolist"):
+            return list(use_channels.tolist())
+        return list(use_channels)
+
+    def _axis_from_channels(self, use_channels, volume: Optional[float] = None) -> str:
+        """决定本次操作的物理轴 → ``"Left"`` / ``"Right"``。
+
+        - 配置了 ``pip_setting``：用设备层在调用前写入的 ``self._active_axis``（默认 ``"Left"``），
+          并在给出 ``volume`` 时按对应轴 ``vol`` 校验是否超量程。``use_channels`` 此时已是
+          PLR 合法的 0-based 下标，不再用于判轴。
+        - 未配置：走 legacy 约定（``[0]`` → Left，``[1]`` → Right，其余报错）。
+        """
+        if self.pip_setting is not None:
+            axis = self._active_axis or "Left"
+            if volume is not None:
+                key = "left" if axis == "Left" else "right"
+                spec = self.pip_setting.get(key)
+                if spec is not None and float(volume) > float(spec["vol"]) + 1e-9:
+                    raise ValueError(
+                        f"体积 {volume}µL 超过 {key} 轴量程 {spec['vol']}µL（active_axis={axis}）"
+                    )
+            return axis
+        chans = self._normalize_use_channels(use_channels)
+        if chans == [0]:
+            return "Left"
+        if chans == [1]:
+            return "Right"
+        raise ValueError("Invalid use channels: " + str(chans))
+
+    def _effective_num_channels(self, use_channels) -> int:
+        """当前操作的有效并行通道数。
+
+        配置 ``pip_setting`` 时取所选轴（``self._active_axis``）的 ``channels`` 与本次
+        ``use_channels`` 长度的较小值；未配置时回退到全局 ``self.num_channels``（legacy）。
+        """
+        if self.pip_setting is None:
+            return self.num_channels
+        chans = self._normalize_use_channels(use_channels) or []
+        axis = self._active_axis or "Left"
+        key = "left" if axis == "Left" else "right"
+        spec = self.pip_setting.get(key) or {}
+        axis_ch = int(spec.get("channels", self.num_channels))
+        return min(len(chans), axis_ch) if chans else axis_ch
+
     async def setup(self):
         await super().setup()
         try:
@@ -2170,18 +2302,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     async def pick_up_tips(self, ops: List[Pickup], use_channels: List[int] = None):
         """Pick up tips from the specified resource."""
-        # INSERT_YOUR_CODE
-        # Ensure use_channels is converted to a list of ints if it's an array
-        if hasattr(use_channels, "tolist"):
-            _use_channels = use_channels.tolist()
-        else:
-            _use_channels = list(use_channels) if use_channels is not None else None
-        if _use_channels == [0]:
-            axis = "Left"
-        elif _use_channels == [1]:
-            axis = "Right"
-        else:
-            raise ValueError("Invalid use channels: " + str(_use_channels))
+        axis = self._axis_from_channels(use_channels)
+        _eff_nc = self._effective_num_channels(use_channels)
         plate_slots = []
         for op in ops:
             plate = op.resource.parent
@@ -2207,7 +2329,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
         hole_row = 1
-        if self.num_channels != 8:
+        if _eff_nc != 8:
             hole_row = tipspot_index % ny + 1
 
         step = self.api_client.Load(
@@ -2220,22 +2342,14 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             blending_times=0,
             balance_height=0,
             plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
-            hole_numbers=f"{(hole_col - 1) * ny + hole_row}" if self._num_channels != 8 else "1,2,3,4,5",
+            hole_numbers=f"{(hole_col - 1) * ny + hole_row}" if _eff_nc != 8 else "1,2,3,4,5",
         )
         self.steps_todo_list.append(step)
 
     async def drop_tips(self, ops: List[Drop], use_channels: List[int] = None):
         """Pick up tips from the specified resource."""
-        if hasattr(use_channels, "tolist"):
-            _use_channels = use_channels.tolist()
-        else:
-            _use_channels = list(use_channels) if use_channels is not None else None
-        if _use_channels == [0]:
-            axis = "Left"
-        elif _use_channels == [1]:
-            axis = "Right"
-        else:
-            raise ValueError("Invalid use channels: " + str(_use_channels))
+        axis = self._axis_from_channels(use_channels)
+        _eff_nc = self._effective_num_channels(use_channels)
         # 检查trash #
         if ops[0].resource.name == "trash":
             _plate = ops[0].resource
@@ -2285,7 +2399,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
         hole_row = 1
-        if self.num_channels != 8:
+        if _eff_nc != 8:
             hole_row = tipspot_index % ny + 1
 
         step = self.api_client.UnLoad(
@@ -2314,12 +2428,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         use_channels: Optional[List[int]] = [0],
     ):
         """Mix liquid in the specified resources."""
-        if use_channels == [0]:
-            axis = "Left"
-        elif use_channels == [1]:
-            axis = "Right"
-        else:
-            raise ValueError("Invalid use channels: " + str(use_channels))
+        axis = self._axis_from_channels(use_channels)
+        _eff_nc = self._effective_num_channels(use_channels)
         plate_slots = []
         for op in targets:
             deck = op.parent.parent.parent
@@ -2346,7 +2456,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         PlateNo = plate_slots[0]
         hole_col = tip_columns[0] + 1
         hole_row = 1
-        if self.num_channels != 8:
+        if _eff_nc != 8:
             hole_row = tipspot_index % ny + 1
 
         assert mix_time > 0
@@ -2366,16 +2476,10 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     async def aspirate(self, ops: List[SingleChannelAspiration], use_channels: List[int] = None):
         """Aspirate liquid from the specified resources."""
-        if hasattr(use_channels, "tolist"):
-            _use_channels = use_channels.tolist()
-        else:
-            _use_channels = list(use_channels) if use_channels is not None else None
-        if _use_channels == [0]:
-            axis = "Left"
-        elif _use_channels == [1]:
-            axis = "Right"
-        else:
-            raise ValueError("Invalid use channels: " + str(_use_channels))
+        axis = self._axis_from_channels(
+            use_channels, volume=getattr(ops[0], "volume", None) if ops else None
+        )
+        _eff_nc = self._effective_num_channels(use_channels)
         plate_slots = []
         for op in ops:
             plate = op.resource.parent
@@ -2408,7 +2512,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         hole_col = tip_columns[0] + 1
         hole_row = 1
         assist_fun1 = ""
-        if self.num_channels != 8:
+        if _eff_nc != 8:
             hole_row = tipspot_index % ny + 1
         if ops[0].blow_out_air_volume is not None:
             assist_fun1 = f"反向吸液({float(min(max(ops[0].blow_out_air_volume,0),10))}ul)"
@@ -2432,16 +2536,10 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     async def dispense(self, ops: List[SingleChannelDispense], use_channels: List[int] = None):
         """Dispense liquid into the specified resources."""
-        if hasattr(use_channels, "tolist"):
-            _use_channels = use_channels.tolist()
-        else:
-            _use_channels = list(use_channels) if use_channels is not None else None
-        if _use_channels == [0]:
-            axis = "Left"
-        elif _use_channels == [1]:
-            axis = "Right"
-        else:
-            raise ValueError("Invalid use channels: " + str(_use_channels))
+        axis = self._axis_from_channels(
+            use_channels, volume=getattr(ops[0], "volume", None) if ops else None
+        )
+        _eff_nc = self._effective_num_channels(use_channels)
         plate_slots = []
         for op in ops:
             plate = op.resource.parent
@@ -2474,7 +2572,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         hole_col = tip_columns[0] + 1
 
         hole_row = 1
-        if self.num_channels != 8:
+        if _eff_nc != 8:
             hole_row = tipspot_index % ny + 1
 
         assist_fun1 = ""
@@ -2918,7 +3016,10 @@ class PRCXI9300Api:
         plate_no: int,
         is_whole_plate: bool,
         balance_height: int,
+        hierarchy: int = 1,
     ) -> Dict[str, Any]:
+        # ``Hierarchy``（层级）决定夹爪夹取/放下的高度档位（板位堆叠层级），与 SDK StepData
+        # 的 ``hierarchy`` 字段对齐，默认 1。
         return {
             "StepAxis": "ClampingJaw",
             "Function": "DefectiveLift",
@@ -2928,6 +3029,7 @@ class PRCXI9300Api:
             "HoleCol": 1,
             "BalanceHeight": balance_height,
             "PlateOrHoleNum": f"T{plate_no}",
+            "Hierarchy": hierarchy,
         }
 
     def clamp_jaw_drop(
@@ -2935,7 +3037,10 @@ class PRCXI9300Api:
         plate_no: int,
         is_whole_plate: bool,
         balance_height: int,
+        hierarchy: int = 1,
     ) -> Dict[str, Any]:
+        # ``Hierarchy``（层级）决定夹爪夹取/放下的高度档位（板位堆叠层级），与 SDK StepData
+        # 的 ``hierarchy`` 字段对齐，默认 1。
         return {
             "StepAxis": "ClampingJaw",
             "Function": "PutDown",
@@ -2945,6 +3050,7 @@ class PRCXI9300Api:
             "HoleCol": 1,
             "BalanceHeight": balance_height,
             "PlateOrHoleNum": f"T{plate_no}",
+            "Hierarchy": hierarchy,
         }
 
     def shaker_action(self, time: int, module_no: int, amplitude: int, is_wait: bool):

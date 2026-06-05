@@ -2232,7 +2232,59 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 if drop_tip:
                     current_tip_liquid_name = None
         else:
-            pass
+            # len(use_channels) == 8：按列（每 8 孔一组 A~H）复用 _transfer_base_method。
+            # 用户决策：每列换新枪头（pick_up/drop=True），不做列间复用。
+            # 上方 2071-2075 已校验 channel_num==8 且各长度为 8 的倍数，故 max_len 为 8 的倍数。
+            max_len = max(num_sources, num_targets, len_asp_vols, len_dis_vols)
+
+            def _col8(seq, c):
+                """取第 c 列（8 孔）切片；空/None → None（视为未提供）。"""
+                if not seq:
+                    return None
+                n = len(seq)
+                return [seq[(c + j) % n] for j in range(8)]
+
+            for c in range(0, max_len, 8):
+                kwargs = {
+                    'sources': _col8(sources, c),
+                    'targets': _col8(targets, c),
+                    'tip_racks': tip_racks,
+                    'use_channels': use_channels,
+                    'asp_vols': _col8(asp_vols, c),
+                    'dis_vols': _col8(dis_vols, c),
+                    'pick_up': True,
+                    'drop': True,
+                }
+                # 可选 per-well 参数：length-8 列切片（空 → 跳过）
+                for key, src in (
+                    ('asp_flow_rates', asp_flow_rates),
+                    ('dis_flow_rates', dis_flow_rates),
+                    ('offsets', offsets),
+                    ('liquid_height', liquid_height),
+                    ('blow_out_air_volume', blow_out_air_volume),
+                    ('blow_out_air_volume_before', blow_out_air_volume_before),
+                    ('delays', delays),
+                    ('pre_aspirate_from_target', pre_aspirate_from_target),
+                ):
+                    v = _col8(src, c)
+                    if v is not None:
+                        kwargs[key] = v
+                if touch_tip is not None:
+                    kwargs['touch_tip'] = touch_tip if touch_tip else False
+                if spread is not None:
+                    kwargs['spread'] = spread
+                # 标量 mix_* 取该列代表值
+                for key, src in (
+                    ('mix_stage', mix_stage),
+                    ('mix_times', mix_times),
+                    ('mix_vol', mix_vol),
+                    ('mix_rate', mix_rate),
+                    ('mix_liquid_height', mix_liquid_height),
+                ):
+                    if src is not None:
+                        kwargs[key] = safe_get(src, c, wrap=False)
+
+                await self._transfer_base_method(**kwargs)
 
 
         return TransferLiquidReturn(
@@ -2332,7 +2384,9 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
         tip = []
         if pick_up:
-            tip.append(self._get_next_tip())
+            # 多通道（如 8 通道）需取 n_ch 个 tip 工位（每通道一个）；单通道 n_ch=1 行为不变。
+            for _ in range(n_ch):
+                tip.append(self._get_next_tip())
             await self.pick_up_tips(tip,use_channels=use_channels)
         # P1 v4：blow_before / blow_after 是每通道独立的，列表长度应为 n_ch。
         # 标量化处理（取 first 非零）用于决定是否触发 before-aspirate；下发到
