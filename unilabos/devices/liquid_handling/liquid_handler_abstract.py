@@ -1775,9 +1775,8 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     # 8个8个来取任务序列
 
                     for i in range(0, len(sources), 8):
-                        tip = []
-                        for _ in range(len(use_channels)):
-                            tip.append(self._get_next_tip())
+                        # 列式硬件做列对齐：当前列剩余不足整列时跳过残余、从下一整列开头取。
+                        tip = self._acquire_tip_column(len(use_channels))
                         await self.pick_up_tips(tip)
                         current_targets = waste_liquid[i : i + 8]
                         current_reagent_sources = sources[i : i + 8]
@@ -2385,8 +2384,9 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         tip = []
         if pick_up:
             # 多通道（如 8 通道）需取 n_ch 个 tip 工位（每通道一个）；单通道 n_ch=1 行为不变。
-            for _ in range(n_ch):
-                tip.append(self._get_next_tip())
+            # 列式硬件（_pickup_column_aligned）会做列对齐：当前列剩余不足整列时跳过残余、
+            # 从下一整列开头取，保证 8 通道每次都是完整列。
+            tip = self._acquire_tip_column(n_ch)
             await self.pick_up_tips(tip,use_channels=use_channels)
         # P1 v4：blow_before / blow_after 是每通道独立的，列表长度应为 n_ch。
         # 标量化处理（取 first 非零）用于决定是否触发 before-aspirate；下发到
@@ -2617,6 +2617,42 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
     def _flatten_tips_from_one(self, rack: Resource) -> List[Resource]:
         """将单个 TipRack/TipSpot 展开为孔位列表（顺序与 ``iter_tips`` 一致）。"""
         return list(self._iter_tips_single_rack_or_spot(rack))
+
+    # 列式 8 通道硬件（如 PRCXI）按整列取枪头：子类置 True 后，多通道取枪头会做列对齐。
+    # 默认 False，不影响可任意取枪头的非列式设备。
+    _pickup_column_aligned: bool = False
+
+    def _tip_column_height(self, key) -> int:
+        """该型号枪头列高 = 首个 rack 的 ``num_items_y``（列优先扁平池里每列的孔数）。"""
+        racks = (getattr(self, "_tip_racks_by_type", None) or {}).get(key) or []
+        if not racks:
+            return 0
+        ny = getattr(racks[0], "num_items_y", None)
+        try:
+            n = int(ny) if ny is not None else 0
+        except (TypeError, ValueError):
+            n = 0
+        return n if n > 0 else 0
+
+    def _acquire_tip_column(self, n_ch: int) -> List[Resource]:
+        """取 ``n_ch`` 个枪头。
+
+        列对齐（仅当 ``_pickup_column_aligned`` 且 ``n_ch > 1``）：若 ``_tip_next_index`` 不在列
+        边界（当前列剩余不足以从列首取整列），跳过当前列残余枪头、对齐到下一整列开头再取。
+        被跳过的残余枪头视为弃用（不再分配）。``n_ch == 1`` 或未开启时行为不变。
+        """
+        if getattr(self, "_pickup_column_aligned", False) and n_ch > 1:
+            key = getattr(self, "_active_tip_type_key", None)
+            flat = (getattr(self, "_tip_flat_spots", None) or {}).get(key) if key else None
+            if key is not None and flat:
+                ny = self._tip_column_height(key)
+                if ny and ny > 0:
+                    idx = self._tip_next_index.get(key, 0)
+                    rem = idx % ny
+                    if rem != 0:
+                        # 跳过当前列残余，对齐到下一整列列首
+                        self._tip_next_index[key] = idx + (ny - rem)
+        return [self._get_next_tip() for _ in range(n_ch)]
 
     def _get_next_tip(self):
         """从按型号分组的扁平枪头池取下一孔；耗尽时抛出明确错误而非 StopIteration。"""

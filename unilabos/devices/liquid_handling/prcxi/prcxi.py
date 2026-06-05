@@ -801,6 +801,9 @@ class PRCXI9300PlateAdapter(PlateAdapter):
 
 class PRCXI9300Handler(LiquidHandlerAbstract):
     support_touch_tip = False
+    # PRCXI 为列式 8 通道硬件，整列取枪头：开启列对齐（当前列剩余不足整列时跳过残余、
+    # 从下一整列开头取），保证 8 通道 pick/asp/disp/drop 始终是完整列。
+    _pickup_column_aligned = True
 
     @property
     def reset_ok(self) -> bool:
