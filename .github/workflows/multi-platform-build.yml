@@ -63,7 +63,7 @@ jobs:
           - os: ubuntu-latest
             platform: linux-64
             env_file: unilabos-linux-64.yaml
-          - os: macos-15 # Intel (via Rosetta)
+          - os: macos-15-intel # Intel x86_64
             platform: osx-64
             env_file: unilabos-osx-64.yaml
           - os: macos-latest # ARM64
@@ -101,10 +101,11 @@ jobs:
 
       - name: Setup Miniforge
         if: steps.should_build.outputs.should_build == 'true'
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest
           use-mamba: true
+          python-version: '3.11.14'
           channels: conda-forge,robostack-staging
           channel-priority: strict
           activate-environment: build-env
@@ -114,24 +115,29 @@ jobs:
       - name: Install rattler-build and anaconda-client
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          mamba install --override-channels -c conda-forge rattler-build anaconda-client -y
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cmd //D //S //C '%CONDA%\condabin\mamba.bat install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y'
+          else
+            mamba install -n build-env --override-channels -c conda-forge rattler-build anaconda-client -y
+          fi
+          echo "CONDA_NO_PLUGINS=true" >> "$GITHUB_ENV"
+          echo "PYTHONUTF8=1" >> "$GITHUB_ENV"
+          echo "PYTHONIOENCODING=utf-8" >> "$GITHUB_ENV"
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
         run: |
           conda info
-          conda list | grep -E "(rattler-build|anaconda-client)"
+          conda list -n build-env | grep -E "(rattler-build|anaconda-client)"
+          conda run -n build-env rattler-build --version
+          conda run -n build-env anaconda --version
           echo "Platform: ${{ matrix.platform }}"
           echo "OS: ${{ matrix.os }}"
 
       - name: Build conda package
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          if [[ "${{ matrix.platform }}" == "osx-arm64" ]]; then
-            rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
-          else
-            rattler-build build -r ./recipes/msgs/recipe.yaml -c robostack -c robostack-staging -c conda-forge
-          fi
+          conda run -n build-env rattler-build build -r ./recipes/msgs/recipe.yaml --target-platform ${{ matrix.platform }} -c robostack -c robostack-staging -c conda-forge
 
       - name: List built packages
         if: steps.should_build.outputs.should_build == 'true'
@@ -171,5 +177,5 @@ jobs:
         run: |
           for package in $(find ./output -name "*.conda"); do
             echo "Uploading $package to unilab organization..."
-            anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
+            conda run -n build-env anaconda -t ${{ secrets.ANACONDA_API_TOKEN }} upload --user uni-lab --force "$package"
           done

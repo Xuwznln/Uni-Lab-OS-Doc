@@ -1889,7 +1889,9 @@ class HostNode(BaseROS2DeviceNode):
         else:
             self.lab_logger().warning("⚠️ 收到无效的Pong响应（缺少ping_id）")
 
-    def notify_resource_tree_update(self, device_id: str, action: str, resource_uuid_list: List[str]) -> bool:
+    def notify_resource_tree_update(
+        self, device_id: str, action: str, resource_uuid_list: List[str]
+    ) -> Optional[bool]:
         """
         通知设备节点更新资源树
 
@@ -1899,13 +1901,14 @@ class HostNode(BaseROS2DeviceNode):
             resource_uuid_list: 资源UUIDs
 
         Returns:
-            bool: 操作是否成功
+            True if the update completed, False if it failed, None if it was intentionally skipped.
         """
         try:
-            # 检查设备是否存在
             if device_id not in self.devices_names:
-                self.lab_logger().error(f"[Host Node-Resource] Device {device_id} not found in devices_names")
-                return False
+                self.lab_logger().info(
+                    f"[Host Node-Resource] 在线增加设备暂不支持，跳过设备 {device_id} 的资源树 {action} 更新"
+                )
+                return None
 
             namespace = self.devices_names[device_id]
             device_key = f"{namespace}/{device_id}"

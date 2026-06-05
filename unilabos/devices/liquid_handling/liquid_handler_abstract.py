@@ -1233,7 +1233,23 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         )
         if issubclass(plate.__class__, Plate):
             return [plate.get_well(name) for name in well_names]  # type: ignore
-        return [plate.get_tube(name) for name in well_names]  # type: ignore
+        return [self._resolve_tube_compat(plate, name) for name in well_names]  # type: ignore
+
+    @staticmethod
+    def _resolve_tube_compat(rack: TubeRack, name: str) -> Container:
+        """从 TubeRack 取液体容器（Tube），兼容新版 PLR 的 holder 模型。
+
+        新版 PLR 把 ``TubeRack`` 定义为 ``ItemizedResource[ResourceHolder]``，其
+        ``get_tube`` 返回 ``holder.resource``；而 Uni-Lab 的 ``PRCXI9300TubeRack``
+        把 ``Tube`` 直接作为子资源（``get_item`` 即 Tube），导致 ``get_tube`` 恒返回
+        ``None`` —— 进而让 set_liquid 收到 ``None`` well 并崩溃。这里优先 ``get_tube``，
+        为 ``None`` 时回退到 ``get_item``（若子资源是 holder 再取 ``.resource``）。
+        """
+        tube = rack.get_tube(name)
+        if tube is not None:
+            return tube  # type: ignore[return-value]
+        item = rack.get_item(name)
+        return getattr(item, "resource", item)
 
     def _coerce_well(self, w: Union[Well, Dict[str, Any]]) -> Well:
         """dict → PLR Well：通过 self._ros_node.resource_tracker 同步解析；Well 原样返回。
@@ -1499,7 +1515,9 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                         if issubclass(plate_instance.__class__, Plate):
                             resolved_cross.append(plate_instance.get_well(actual_well_name))
                         else:
-                            resolved_cross.append(plate_instance.get_tube(actual_well_name))
+                            resolved_cross.append(
+                                self._resolve_tube_compat(plate_instance, actual_well_name)
+                            )
                     except Exception as _e:
                         cross_resolve_errors.append(
                             f"idx={idx} reagent_key={reagent_key!r} well={w_name!r}: {type(_e).__name__}: {_e}"

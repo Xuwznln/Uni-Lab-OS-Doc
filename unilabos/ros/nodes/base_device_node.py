@@ -45,6 +45,7 @@ from unilabos.resources.graphio import (
 )
 from unilabos.resources.plr_additional_res_reg import register
 from unilabos.ros.msgs.message_converter import (
+    String,
     convert_to_ros_msg,
     convert_from_ros_msg_with_mapping,
     convert_to_ros_msg_with_mapping,
@@ -250,7 +251,8 @@ class PropertyPublisher:
     ):
         self.node = node
         self.name = name
-        self.msg_type = msg_type
+        self.msg_type = self._normalize_msg_type(msg_type)
+        self.original_msg_type = msg_type
         self.get_method = get_method
         self.timer_period = initial_period
         self.print_publish = print_publish
@@ -258,15 +260,35 @@ class PropertyPublisher:
 
         self._value = None
         try:
-            self.publisher_ = node.create_publisher(msg_type, f"{name}", qos)
+            self.publisher_ = node.create_publisher(self.msg_type, f"{name}", qos)
         except Exception as e:
             self.node.lab_logger().error(
-                f"StatusError, DeviceId: {self.node.device_id} 创建发布者 {name} 失败，可能由于注册表有误，类型: {msg_type}，错误: {e}"
+                f"StatusError, DeviceId: {self.node.device_id} 创建发布者 {name} 失败，"
+                f"可能由于注册表有误，类型: {msg_type}，错误: {e}"
             )
+            self.msg_type = String
+            try:
+                self.publisher_ = node.create_publisher(self.msg_type, f"{name}", qos)
+                self.node.lab_logger().warning(
+                    f"属性 {name} 的发布类型已降级为 String，原始类型: {msg_type}"
+                )
+            except Exception:
+                self.publisher_ = None
         self.timer = node.create_timer(self.timer_period, self.publish_property)
         self.__loop = ROS2DeviceNode.get_asyncio_loop()
-        str_msg_type = str(msg_type)[8:-2]
+        str_msg_type = str(self.msg_type)[8:-2]
         self.node.lab_logger().trace(f"发布属性: {name}, 类型: {str_msg_type}, 周期: {initial_period}秒, QoS: {qos}")
+
+    @staticmethod
+    def _normalize_msg_type(msg_type):
+        if msg_type in (dict, list, tuple, set) or msg_type in ("dict", "list", "tuple", "set"):
+            return String
+        return msg_type
+
+    def _normalize_value(self, value):
+        if self.msg_type is String and isinstance(value, (dict, list, tuple, set)):
+            return json.dumps(value, ensure_ascii=False, cls=TypeEncoder)
+        return value
 
     def get_property(self):
         if asyncio.iscoroutinefunction(self.get_method):
@@ -302,12 +324,16 @@ class PropertyPublisher:
                 pass
                 # self.node.lab_logger().trace(f"【.publish_property】发布 {self.msg_type}: {value}")
             if value is not None:
+                if self.publisher_ is None:
+                    return
+                value = self._normalize_value(value)
                 msg = convert_to_ros_msg(self.msg_type, value)
                 self.publisher_.publish(msg)
                 # self.node.lab_logger().trace(f"【.publish_property】属性 {self.name} 发布成功")
         except Exception as e:
+            topic = getattr(self.publisher_, "topic", self.name)
             self.node.lab_logger().error(
-                f"【.publish_property】发布属性 {self.publisher_.topic} 出错: {str(e)}\n{traceback.format_exc()}"
+                f"【.publish_property】发布属性 {topic} 出错: {str(e)}\n{traceback.format_exc()}"
             )
 
     def change_frequency(self, period):
@@ -483,6 +509,13 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             location = command_json["bind_location"]
             other_calling_param = command_json["other_calling_param"]
             input_resources = command_json["resource"]
+            # 归一化：单个 Resource（dict）按 create_resource_detailed 的
+            # ``Union[list[Resource], Resource]`` 约定也是合法入参，但下游
+            # ``from_raw_dict_list`` 只接受 list；若直接传 dict 会被当成可迭代对象
+            # 遍历出 key 字符串，触发 ``'str' object does not support item assignment``。
+            # 这里统一包成单元素列表，保证单资源 / 多资源两种形态都能正确建树。
+            if isinstance(input_resources, dict):
+                input_resources = [input_resources]
             initialize_full = other_calling_param.pop("initialize_full", False)
             # 用来增加液体
             ADD_LIQUID_TYPE = other_calling_param.pop("ADD_LIQUID_TYPE", [])
@@ -626,7 +659,9 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             **other_calling_param,
                         )
                     # noinspection PyUnresolvedReferences
-                    rts_with_parent = ResourceTreeSet.from_plr_resources([plr_instance])
+                    # _t3 = time.time()
+                    rts_with_parent = ResourceTreeSet.from_plr_resources([parent_resource])
+                    # _n_parent = len(rts_with_parent.all_nodes)
                     if rts_with_parent.root_nodes[0].res_content.uuid_parent is None:
                         rts_with_parent.root_nodes[0].res_content.parent_uuid = self.uuid
                     request.command = _fast_dumps_str(
@@ -644,12 +679,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     #     f"[AR:{_ar_tag}] 二次上传序列化 {_n_parent}节点 {((_t4 - _t3) * 1000):.0f}ms, 发送中..."
                     # )
                     tree_response: SerialCommand.Response = await client.call_async(request)
-                    _raw_resp = tree_response.response if tree_response else ""
-                    if _raw_resp:
-                        uuid_maps = json.loads(_raw_resp)
-                    else:
-                        uuid_maps = {}
-                        self._lab_logger.warning("Resource tree add 返回空响应，跳过 UUID 映射")
+                    # _t5 = time.time()
+                    uuid_maps = _fast_loads(tree_response.response)
                     self.resource_tracker.loop_update_uuid(input_resources, uuid_maps)
                     # self._lab_logger.info(
                     #     f"[AR:{_ar_tag}] 二次上传完成 HTTP={(_t5 - _t4) * 1000:.0f}ms "
@@ -1723,8 +1754,14 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     _poll_future = Future()
 
                     def _on_sync_done(fut):
-                        if not _poll_future.done():
-                            _poll_future.set_result(None)
+                        async def _wake():
+                            if not _poll_future.done():
+                                _poll_future.set_result(None)
+
+                        # ThreadPoolExecutor callbacks run outside the rclpy executor.
+                        # Wake the awaiting action coroutine from the executor thread;
+                        # otherwise it may only resume when the executor naturally wakes up.
+                        rclpy.get_global_executor().create_task(_wake())
 
                     future.add_done_callback(_on_sync_done)
                     await _poll_future
