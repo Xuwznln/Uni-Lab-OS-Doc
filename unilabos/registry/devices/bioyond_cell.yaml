@@ -389,6 +389,8 @@ bioyond_cell:
           vial_plates: null
           temperature_points: null
           validate_barcode: true
+          wait_for_finish: true
+          wait_timeout_seconds: 36000
         handles:
           input:
           - data_key: '@this@@@vial_plates'
@@ -399,7 +401,7 @@ bioyond_cell:
         placeholder_keys: {}
         result: {}
         schema:
-          description: 5号电导工作站自动新建实验。直接接收上游配液 handle 输出的 vial_plates（含 batch_id/orderCode/barCode/materialId），通过 LIMS material-info 查每块板的真实瓶位 (X,Y)。多 order 共用同一物理板时按 bottle.associateId 反查归属 orderCode。调度状态由上游/外部管理，本 action 不切换调度。同一块板上的所有分液瓶共享同一温度点。
+          description: 5号电导工作站自动新建实验。直接接收上游配液 handle 输出的 vial_plates（含 batch_id/orderCode/barCode/materialId），通过 LIMS material-info 查每块板的真实瓶位 (X,Y)。多 order 共用同一物理板时按 bottle.associateId 反查归属 orderCode。调度状态由上游/外部管理，本 action 不切换调度。同一块板上的所有分液瓶共享同一温度点。默认 wait_for_finish=true：与配液一致，节点会阻塞到所有 LIMS 新建电导单收到 /report/order_finish 推送（数小时级），失败/超时也照样回收。
           properties:
             feedback: {}
             goal:
@@ -432,6 +434,14 @@ bioyond_cell:
                   default: true
                   description: 是否在提交前校验 plateBarCode 在物料系统中存在
                   type: boolean
+                wait_for_finish:
+                  default: true
+                  description: 是否阻塞等所有 LIMS 新建电导单收到 /report/order_finish 推送。true=与配液一致，节点会一直运行到测试完成；false=fire-and-forget，POST 完即返回，剩下交给奔曜软件。
+                  type: boolean
+                wait_timeout_seconds:
+                  default: 36000
+                  description: 单个电导单 wait 超时秒数，仅 wait_for_finish=true 时生效。默认 36000 秒（10 小时），与配液一致。
+                  type: integer
               required:
               - vial_plates
               - temperature_points

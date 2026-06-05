@@ -111,11 +111,18 @@ class BioyondCellWorkstation(BioyondWorkstation):
         t.start()
         logger.info("HTTP 服务线程已启动")
         
-        # 初始化订单报送事件
+        # 初始化订单报送事件（配液 wait_for_order_finish 单值机制，原样保留）
         self.order_finish_event = threading.Event()
         self.last_order_status = None
         self.last_order_code = None
-        
+
+        # ========== 电导专用：多订单并发等待（2026-06-05 追加，不影响配液路径）==========
+        # 与 wait_for_order_finish 的单值机制并存，仅供 _wait_conductivity_finish 使用。
+        # process_order_finish_report 在末尾追加旁路，把所有 finish 报文同时灌进这里。
+        self._order_finish_lock = threading.Lock()
+        self._order_finish_events: Dict[str, threading.Event] = {}
+        self._order_finish_reports: Dict[str, Dict[str, Any]] = {}
+
         logger.info(f"✅ BioyondCellWorkstation 初始化完成 (debug_mode={self.debug_mode})")
 
     @property
@@ -179,7 +186,54 @@ class BioyondCellWorkstation(BioyondWorkstation):
             logger.warning(f"[DEBUG]    实际: '{order_code}'")
         
         logger.info(f"[DEBUG] ========================================")
+
+        # ========== 电导专用旁路（2026-06-05 追加，不影响配液路径）==========
+        # 把每条 finish 报文按 orderCode 缓存到 _order_finish_reports，并触发对应 Event。
+        # _wait_conductivity_finish 用这两个 dict 实现多订单乱序完成的并发安全等待。
+        # 配液仍走 last_order_code/order_finish_event 单值机制，行为不变。
+        if order_code:
+            with self._order_finish_lock:
+                self._order_finish_reports[order_code] = report_request.data
+                ev = self._order_finish_events.get(order_code)
+                if ev is not None:
+                    ev.set()
+
         return {"status": "received"}
+
+    def _classify_finish_report(self, order_code: str, report: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        把 LIMS finish 报文按 status 字段映射为 wait 函数的统一返回格式。
+        - 30 → success，-11 → abnormal_stop，-12 → manual_stop，其他 → unknown_<status>
+        - 报文 orderCode 与等待 orderCode 不一致时返回 mismatch（理论上新机制下不应再出现）
+        """
+        if not report:
+            logger.warning(f"[wait_for_order_finish] 报文为空: orderCode={order_code}")
+            return {"status": "mismatch", "report": {}}
+
+        report_code = report.get("orderCode")
+        status_raw = str(report.get("status", ""))
+
+        if report_code != order_code:
+            logger.warning(
+                f"[wait_for_order_finish] 报文 orderCode 与请求不一致: "
+                f"报文={report_code} ≠ 请求={order_code}"
+            )
+            return {"status": "mismatch", "report": report}
+
+        if status_raw == "30":
+            logger.info(f"[wait_for_order_finish] ✓ 任务成功 (orderCode={order_code})")
+            return {"status": "success", "report": report}
+        elif status_raw == "-11":
+            logger.error(f"[wait_for_order_finish] ✗ 任务异常停止 (orderCode={order_code})")
+            return {"status": "abnormal_stop", "report": report}
+        elif status_raw == "-12":
+            logger.warning(f"[wait_for_order_finish] 任务人工停止 (orderCode={order_code})")
+            return {"status": "manual_stop", "report": report}
+        else:
+            logger.warning(
+                f"[wait_for_order_finish] 任务未知状态 status={status_raw} (orderCode={order_code})"
+            )
+            return {"status": f"unknown_{status_raw}", "report": report}
 
     def wait_for_order_finish(self, order_code: str, timeout: int = 36000) -> Dict[str, Any]:
         """
@@ -300,6 +354,56 @@ class BioyondCellWorkstation(BioyondWorkstation):
         else:
             logger.warning(f"[轮询模式] 任务未知状态 ({status}) (orderCode={order_code})")
             return {"status": f"unknown_{status}", "report": report}
+
+    def _wait_conductivity_finish(self, order_code: str, timeout: int = 36000) -> Dict[str, Any]:
+        """
+        电导专用：等待指定 orderCode 的 /report/order_finish 报送（并发安全）。
+
+        与 wait_for_order_finish（配液用，单值机制）的关键区别：
+        - 使用 _order_finish_events[orderCode] 独立 Event，多订单同时 wait 互不干扰
+        - 推送先于 wait 调用时报文已缓存到 _order_finish_reports，wait 进来直接命中
+        - 配液的 last_order_code / order_finish_event 不动，配液路径完全不变
+
+        Args:
+            order_code: LIMS 电导单号 (BSO...)
+            timeout: 超时时间（秒）
+        Returns:
+            同 wait_for_order_finish 的返回格式
+        """
+        if not order_code:
+            logger.error("_wait_conductivity_finish() 被调用，但 order_code 为空！")
+            return {"status": "error", "message": "empty order_code"}
+
+        # 注册等待 + 检查是否已有缓存报文（推送先到的场景）
+        with self._order_finish_lock:
+            cached = self._order_finish_reports.get(order_code)
+            if cached is not None:
+                logger.info(
+                    f"[电导wait] 报文已缓存，立即返回: orderCode={order_code}"
+                )
+                self._order_finish_reports.pop(order_code, None)
+                return self._classify_finish_report(order_code, cached)
+
+            ev = self._order_finish_events.get(order_code)
+            if ev is None:
+                ev = threading.Event()
+                self._order_finish_events[order_code] = ev
+
+        logger.info(
+            f"[电导wait] 等待电导单完成: orderCode={order_code} (timeout={timeout}s)"
+        )
+
+        triggered = ev.wait(timeout=timeout)
+
+        with self._order_finish_lock:
+            self._order_finish_events.pop(order_code, None)
+            report = self._order_finish_reports.pop(order_code, None)
+
+        if not triggered:
+            logger.error(f"[电导wait] 等待电导单超时: orderCode={order_code}")
+            return {"status": "timeout", "orderCode": order_code}
+
+        return self._classify_finish_report(order_code, report or {})
 
 
     def get_material_info(self, material_id: str) -> Dict[str, Any]:
@@ -1539,6 +1643,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         vial_plates: List[Dict[str, Any]],
         temperature_points: List[float],
         validate_barcode: bool = True,
+        wait_for_finish: bool = True,
+        wait_timeout_seconds: int = 36000,
         **_legacy_kwargs: Any,
     ) -> Dict[str, Any]:
         """
@@ -1556,6 +1662,15 @@ class BioyondCellWorkstation(BioyondWorkstation):
         - **_legacy_kwargs 兜住老 workflow JSON 残留的过期入参（如 stop_scheduler_timeout），
           静默丢弃避免 TypeError；新代码不应依赖此通道。
 
+        2026-06-05 调整（与配液保持一致的"阻塞等完成"语义）：
+        - 默认 wait_for_finish=True：POST 拿到 LIMS 新建电导单号后，
+          逐个调 _wait_conductivity_finish 阻塞等 /report/order_finish 推送，
+          所有电导单跑完才 return —— 节点会一直运行直到电导测试完成（数小时级）。
+        - 电导用专属的 _wait_conductivity_finish（按 orderCode 字典 + 报文缓存），
+          多订单乱序完成互不干扰；推送先于 wait 调用到达也不会丢失。
+        - 配液仍走原 wait_for_order_finish 单值机制，路径完全不变。
+        - wait_for_finish=False 时回退到 fire-and-forget 行为，仅创建不等。
+
         Args:
             vial_plates: 上游配液输出的分液瓶板列表，每项需含
                 batch_id / materialId / barCode / orderCode（缺任一报错）
@@ -1563,14 +1678,20 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 长度=1 → 广播到所有分液板；长度=N（=分液板数）→ 一一对应；其他长度报错。
                 **同一块板上的所有分液瓶共享同一温度点（一块板一个温度）。**
             validate_barcode: 提交前是否对 plateBarCode 做物料系统强校验，默认 True
+            wait_for_finish: 是否阻塞等待所有 LIMS 新建电导单完成，默认 True
+            wait_timeout_seconds: 单个订单 wait 超时秒数，默认 36000s = 10h（与配液一致）
 
         Returns:
             {
-                "status": "submitted" | "partial" | "error",
+                "status": "submitted" | "partial" | "error" | "all_completed" | "partial_completed",
                 "total_entries": int,
                 "validated_barcodes": List[str],
                 "batch_id": str,
+                "new_order_codes": List[str],
                 "response": <LIMS POST 原始返回>,
+                # 仅当 wait_for_finish=True 时有：
+                "conductivity_reports": List[Dict],  # 每个订单的 finish 报文 / 异常状态
+                "completion_summary": {"success": int, "timeout": int, "abnormal": int, ...},
             }
 
         Raises:
@@ -1746,7 +1867,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             f"LIMS 新建电导单号={new_order_codes}"
         )
 
-        return {
+        result: Dict[str, Any] = {
             "status": status,
             "total_entries": len(entries),
             "validated_barcodes": unique_barcodes,
@@ -1754,6 +1875,76 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "new_order_codes": new_order_codes,  # LIMS 新建的电导单号列表（成功 entry 对应的）
             "response": response,
         }
+
+        # ========== 阶段4: （可选）阻塞等所有 LIMS 新建电导单跑完 ==========
+        # 与配液 _submit_and_wait_orders 同款 pattern：逐个 wait_for_order_finish。
+        # 节点会一直运行到所有电导单子收到 /report/order_finish 推送（成功/异常/超时）。
+        if wait_for_finish and new_order_codes:
+            logger.info(
+                f"[create_conductivity_orders_auto] 开始阻塞等待 {len(new_order_codes)} "
+                f"个电导单完成 (单订单 timeout={wait_timeout_seconds}s)..."
+            )
+            conductivity_reports: List[Dict[str, Any]] = []
+            summary = {
+                "success": 0,
+                "timeout": 0,
+                "abnormal_stop": 0,
+                "manual_stop": 0,
+                "mismatch": 0,
+                "other": 0,
+            }
+            for idx, order_code in enumerate(new_order_codes, 1):
+                logger.info(
+                    f"[create_conductivity_orders_auto] 等待第 {idx}/{len(new_order_codes)} "
+                    f"个电导单: {order_code}"
+                )
+                wait_result = self._wait_conductivity_finish(
+                    order_code, timeout=wait_timeout_seconds
+                )
+                wait_status = wait_result.get("status", "other")
+                if wait_status == "success":
+                    summary["success"] += 1
+                    logger.info(
+                        f"[create_conductivity_orders_auto] ✓ 电导单 {order_code} 完成"
+                    )
+                elif wait_status in summary:
+                    summary[wait_status] += 1
+                    logger.warning(
+                        f"[create_conductivity_orders_auto] ⚠ 电导单 {order_code} "
+                        f"非正常结束: status={wait_status}"
+                    )
+                else:
+                    summary["other"] += 1
+                    logger.warning(
+                        f"[create_conductivity_orders_auto] ⚠ 电导单 {order_code} "
+                        f"未知 wait status: {wait_status}"
+                    )
+                conductivity_reports.append({
+                    "orderCode": order_code,
+                    "wait_status": wait_status,
+                    "report": wait_result.get("report"),
+                    "message": wait_result.get("message"),
+                })
+
+            # 综合 status：所有 wait_status==success → all_completed；部分成功 → partial_completed
+            if summary["success"] == len(new_order_codes):
+                result["status"] = "all_completed"
+            elif summary["success"] > 0:
+                result["status"] = "partial_completed"
+            # 其余情况保留原 status（submitted/partial/error）
+
+            result["conductivity_reports"] = conductivity_reports
+            result["completion_summary"] = summary
+            logger.info(
+                f"[create_conductivity_orders_auto] 全部电导单等待结束："
+                f"summary={summary}, final_status={result['status']}"
+            )
+        elif wait_for_finish and not new_order_codes:
+            logger.warning(
+                "[create_conductivity_orders_auto] wait_for_finish=True 但 LIMS 未返回任何成功 orderCode，跳过等待"
+            )
+
+        return result
 
     def _extract_vial_plate_from_report(self, report: Dict) -> List[Dict[str, Any]]:
         """
