@@ -409,6 +409,7 @@ neware_battery_test_system:
         result:
           resource: resource
           coin_cell_code: coin_cell_code
+          electrolyte_code: electrolyte_code
           target_device: target_device
           mount_resource: mount_resource
           collector_mass: collector_mass
