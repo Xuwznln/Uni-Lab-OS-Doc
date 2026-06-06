@@ -1489,6 +1489,35 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
     # ``liquid_history.py`` 同策略）。
     _flatten_multi_channel_kwargs = staticmethod(_flatten_multi_channel_kwargs_impl)
 
+    async def _cleanup_after_failed_transfer(self):
+        """transfer_liquid 出错后尽力把 head 上残留 tip 丢到 trash 并清空 head 软件状态，
+        避免下次 pickup 报 'Channel has tip' 且无需重启 edge。本方法自身不抛异常。"""
+        try:
+            mounted = self.get_mounted_tips()  # 各通道当前是否有 tip
+        except Exception:
+            mounted = []
+        if any(t is not None for t in (mounted or [])):
+            try:
+                # step_mode 下需单独建一个清理 protocol 并执行（丢到 trash）
+                if self.step_mode:
+                    await self.create_protocol(f"cleanup_drop_tips{time.time()}")
+                # use_channels=None → PLR 自动取「当前有 tip 的通道」丢到 trash
+                await self.discard_tips()
+                if self.step_mode:
+                    await self.run_protocol()
+            except Exception as _e:
+                # 物理丢弃尽力而为：若错误发生在「构建步骤期」(机器尚未真正夹 tip)，设备丢空 tip 可能报错，忽略
+                if hasattr(self, "_ros_node") and self._ros_node is not None:
+                    try:
+                        self._ros_node.lab_logger().warning(f"清理残留 tip 失败（已忽略）: {_e}")
+                    except Exception:
+                        pass
+        # 兜底：无论物理丢弃成败，清空 PLR head 软件状态，保证下次 pickup 不再报 'Channel has tip'
+        try:
+            self.clear_head_state()
+        except Exception:
+            pass
+
     async def transfer_liquid(
         self,
         sources: Sequence[Container],
@@ -1749,12 +1778,17 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 pre_aspirate_from_target=pre_aspirate_from_target,
                 none_keys=none_keys,
             )
+            if self.step_mode:
+                await self.run_protocol()
+            return res
+        except Exception:
+            # 中途失败（构建期 super().transfer_liquid 或执行期 run_protocol）：清理残留 tip +
+            # 清 head 软件状态，下次 transfer_liquid 无需重启 edge 即可重开。
+            await self._cleanup_after_failed_transfer()
+            raise
         finally:
             if _flatten_8_to_1:
                 self._tip_reuse_by_liquid_name = _prev_tip_reuse
-        if self.step_mode:
-            await self.run_protocol()
-        return res
 
     async def custom_delay(self, seconds=0, msg=None):
         return await super().custom_delay(seconds, msg)
