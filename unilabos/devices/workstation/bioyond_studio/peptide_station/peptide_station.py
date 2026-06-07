@@ -1532,6 +1532,29 @@ class BioyondPeptideStation(BioyondWorkstation):
         del kwargs
         return self._run_scheduler_action("scheduler_continue", "继续")
 
+    @action(always_free=True, description="设置 Bioyond LIMS 推送到本机 HTTP 服务的 IP 和端口")
+    def set_http_server_ip_config(self, ip: str = "", port: int = 0) -> Dict[str, Any]:
+        """设置 Bioyond LIMS 回调/推送目标地址。
+
+        Args:
+            ip: HTTP 服务 IP；留空时使用配置 ``HTTP_host``。
+            port: HTTP 服务端口；传 0 时使用配置 ``HTTP_port``。
+        """
+        target_ip = str(ip or self.bioyond_config.get("HTTP_host") or "").strip()
+        target_port = int(port or self.bioyond_config.get("HTTP_port") or 0)
+        rpc = self._require_hardware_interface("set_ip_config")
+        with self._debug_call_session("set_http_server_ip_config"):
+            raw = rpc.set_ip_config(target_ip, target_port)
+        success = isinstance(raw, dict) and raw.get("code") == 1
+        message = str(raw.get("message", "") or "") if isinstance(raw, dict) else ""
+        return {
+            "success": bool(success),
+            "ip": target_ip,
+            "port": target_port,
+            "raw": raw if isinstance(raw, dict) else {},
+            "message": message if success else (message or "设置 Bioyond LIMS 推送地址失败"),
+        }
+
     @action(always_free=True, description="查询 LIMS 订单列表")
     def get_order_list(
         self,

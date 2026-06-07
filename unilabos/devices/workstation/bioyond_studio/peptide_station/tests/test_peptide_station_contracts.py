@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import json
+from types import SimpleNamespace
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
@@ -173,6 +174,7 @@ def test_required_actions_exposed() -> None:
         "scheduler_stop",
         "scheduler_pause",
         "scheduler_continue",
+        "set_http_server_ip_config",
         "get_order_list",
         "get_order_report",
         "get_aggregated_order_report",
@@ -1087,6 +1089,99 @@ def test_rpc_reset_location_sends_no_data_key() -> None:
     sent_params = kwargs.get("params") or (args[1] if len(args) > 1 else {})
     assert "data" not in sent_params, "reset_location 不应再发送 data 字段"
     assert set(sent_params.keys()) == {"apiKey", "requestTime"}
+
+
+def test_set_http_server_ip_config_defaults_to_config_and_returns_raw() -> None:
+    station = _make_station()
+    station.bioyond_config.update({"HTTP_host": "127.0.0.1", "HTTP_port": 8090})
+    rpc = station.hardware_interface
+    rpc.set_ip_config.return_value = {"code": 1, "message": "ok", "data": None}
+
+    out = station.set_http_server_ip_config()
+
+    rpc.set_ip_config.assert_called_once_with("127.0.0.1", 8090)
+    assert out == {
+        "success": True,
+        "ip": "127.0.0.1",
+        "port": 8090,
+        "raw": {"code": 1, "message": "ok", "data": None},
+        "message": "ok",
+    }
+
+
+def test_set_http_server_ip_config_returns_failure_message() -> None:
+    station = _make_station()
+    rpc = station.hardware_interface
+    rpc.set_ip_config.return_value = {"code": 0, "message": "bad"}
+
+    out = station.set_http_server_ip_config("127.0.0.1", 8090)
+
+    assert out["success"] is False
+    assert out["raw"] == {"code": 0, "message": "bad"}
+    assert out["message"] == "bad"
+
+
+def test_set_http_server_ip_config_exposes_ip_and_port_metadata() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    signature = inspect.signature(cls.set_http_server_ip_config)
+    assert signature.parameters["ip"].default == ""
+    assert signature.parameters["port"].default == 0
+    meta = getattr(cls.set_http_server_ip_config, "_action_registry_meta", {})
+    assert meta.get("always_free") is True
+    assert "推送" in meta.get("description", "")
+
+
+def test_rpc_set_ip_config_sends_put_envelope() -> None:
+    rpc_module = _import_bioyond_rpc_module()
+
+    rpc = object.__new__(rpc_module.BioyondV1RPC)
+    rpc.host = "http://test"
+    rpc.api_key = "k"
+    rpc._logger = MagicMock()
+    rpc.get_current_time_iso8601 = MagicMock(return_value="2026-06-07T08:00:00.000Z")  # type: ignore[method-assign]
+    response = MagicMock(
+        status_code=200,
+        text='{"code": 1, "message": "ok"}',
+        request=SimpleNamespace(body="request-body"),
+    )
+    response.json.return_value = {"code": 1, "message": "ok"}
+    rpc_module.requests.put = MagicMock(return_value=response)
+
+    out = rpc.set_ip_config("127.0.0.1", "8090")
+
+    assert out == {"code": 1, "message": "ok"}
+    rpc_module.requests.put.assert_called_once_with(
+        url="http://test/api/lims/order/ip-config",
+        data=json.dumps({
+            "apiKey": "k",
+            "requestTime": "2026-06-07T08:00:00.000Z",
+            "data": {"ip": "127.0.0.1", "port": 8090},
+        }),
+        headers={"Content-Type": "application/json"},
+        timeout=120,
+    )
+
+
+def test_rpc_set_ip_config_rejects_invalid_port() -> None:
+    rpc_module = _import_bioyond_rpc_module()
+
+    rpc = object.__new__(rpc_module.BioyondV1RPC)
+    rpc.host = "http://test"
+    rpc.api_key = "k"
+    rpc_module.requests.put = MagicMock()
+    with pytest.raises(ValueError, match="port"):
+        rpc.set_ip_config("127.0.0.1", 70000)
+    rpc_module.requests.put.assert_not_called()
+
+
+def test_rpc_set_ip_config_rejects_blank_ip() -> None:
+    rpc_module = _import_bioyond_rpc_module()
+
+    rpc = object.__new__(rpc_module.BioyondV1RPC)
+    rpc_module.requests.put = MagicMock()
+    with pytest.raises(ValueError, match="ip"):
+        rpc.set_ip_config("", 8090)
+    rpc_module.requests.put.assert_not_called()
 
 
 # --- plan §Tests 12 + 13: 任何 reset 路径都不调用 take_out / refresh_material_cache ---

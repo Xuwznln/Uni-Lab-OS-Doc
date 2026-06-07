@@ -10,6 +10,7 @@ from unilabos.device_comms.rpc import BaseRequest
 from typing import Optional, List, Dict, Any
 import json
 import re
+import requests
 
 
 def build_scheduler_error_handling_reply_data(
@@ -135,6 +136,38 @@ class BioyondV1RPC(BaseRequest):
 
     def get_logger(self):
         return self._logger
+
+    def set_ip_config(self, ip: str, port: int) -> dict:
+        """更新 Bioyond LIMS 推送/回调目标地址。"""
+        target_ip = str(ip or "").strip()
+        if not target_ip:
+            raise ValueError("ip 不能为空")
+        target_port = int(port)
+        if target_port < 1 or target_port > 65535:
+            raise ValueError("port 必须在 1..65535 范围内")
+
+        params = {
+            "apiKey": self.api_key,
+            "requestTime": self.get_current_time_iso8601(),
+            "data": {"ip": target_ip, "port": target_port},
+        }
+        try:
+            response = requests.put(
+                url=f'{self.host}/api/lims/order/ip-config',
+                data=json.dumps(params),
+                headers={"Content-Type": "application/json"},
+                timeout=120,
+            )
+            self.get_logger().debug(
+                f"Request >>> : {response.request.body} {response.status_code} {response.text}"
+            )
+            if response.status_code != 200:
+                raise Exception("Request ERROR:", response.text)
+            parsed = response.json()
+        except Exception as exc:
+            self.get_logger().error(f"Request ERROR: {exc}")
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
 
     # ==================== 物料查询相关接口 ====================
 
