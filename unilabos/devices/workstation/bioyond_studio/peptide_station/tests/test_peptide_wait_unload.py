@@ -2,13 +2,13 @@
 
 覆盖 plan ``plan/2026-05-29_add_two_node_new.md`` §十一 的测试目标：
 
-- ``BioyondV1RPC.all_stock_material``：endpoint = ``/api/lims/order/materials-by-order-id``、
+- ``BioyondV1RPC.materials_by_order_id``：endpoint = ``/api/lims/order/materials-by-order-id``、
   ``data`` 传 orderId GUID 字符串、缺 orderId / 非法 JSON / code != 1 / data 为 null 均返回 ``[]``。
 - ``process_order_finish_report`` override：先 super() 再保存 state，orderCode 匹配触发 event；
   super() 抛错时仍要触发 event（防御性）。
 - ``_build_unload_rows_from_all_stock_material`` + ``_build_unload_table``：4 列 ``{"name", "key"}``
   结构、同名物料多库位拆多行、空 location 占位、location.quantity=0 回退物料级、float 去尾。
-- ``wait_for_order_finish``：超时、立即唤醒、status 映射、用 ``order_id`` 调 ``all_stock_material``、
+- ``wait_for_order_finish``：超时、立即唤醒、status 映射、用 ``order_id`` 调 ``materials_by_order_id``、
   ``order_code`` 兜底反查、缺 order_id 报错、多 order_ids 歧义报错。
 - ``unload_materials``：``materials_unloaded=False`` raise；调用 ``rpc.take_out(order_id, [], [])``；
   code==1 → success，code==99 → success=False，非 dict 响应 → success=False。
@@ -93,34 +93,38 @@ class _FakeUsedMaterial:
 
 
 # ---------------------------------------------------------------------------
-# 0. BioyondV1RPC.all_stock_material —— AST-only (run everywhere)
+# 0. BioyondV1RPC.materials_by_order_id —— AST-only (run everywhere)
 # ---------------------------------------------------------------------------
 
 
-def _all_stock_material_function() -> ast.FunctionDef:
+def _rpc_function(name: str) -> ast.FunctionDef:
     source = RPC_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(RPC_PATH))
     for module_node in ast.walk(tree):
         if isinstance(module_node, ast.ClassDef) and module_node.name == "BioyondV1RPC":
             for item in module_node.body:
-                if isinstance(item, ast.FunctionDef) and item.name == "all_stock_material":
+                if isinstance(item, ast.FunctionDef) and item.name == name:
                     return item
-    raise AssertionError("BioyondV1RPC.all_stock_material AST node not found")
+    raise AssertionError(f"BioyondV1RPC.{name} AST node not found")
 
 
-def test_all_stock_material_method_exists_in_class() -> None:
-    func = _all_stock_material_function()
+def _materials_by_order_id_function() -> ast.FunctionDef:
+    return _rpc_function("materials_by_order_id")
+
+
+def test_materials_by_order_id_method_exists_in_class() -> None:
+    func = _materials_by_order_id_function()
     assert [arg.arg for arg in func.args.args] == ["self", "json_str"]
 
 
-def test_all_stock_material_source_targets_correct_endpoint_and_payload() -> None:
-    func = _all_stock_material_function()
+def test_materials_by_order_id_source_targets_correct_endpoint_and_payload() -> None:
+    func = _materials_by_order_id_function()
     source = ast.unparse(func) if hasattr(ast, "unparse") else ""
     if not source:
         full_source = RPC_PATH.read_text(encoding="utf-8")
         source = ast.get_source_segment(full_source, func) or ""
     assert "materials-by-order-id" in source, (
-        "all_stock_material 必须 POST /api/lims/order/materials-by-order-id"
+        "materials_by_order_id 必须 POST /api/lims/order/materials-by-order-id"
     )
     assert "all-stock-material" not in source, (
         "旧 endpoint /api/lims/storage/all-stock-material 仿真器 404，不应继续出现"
@@ -130,7 +134,7 @@ def test_all_stock_material_source_targets_correct_endpoint_and_payload() -> Non
 
 
 # ---------------------------------------------------------------------------
-# 0b. BioyondV1RPC.all_stock_material —— runtime (requires rclpy import chain)
+# 0b. BioyondV1RPC.materials_by_order_id —— runtime (requires rclpy import chain)
 # ---------------------------------------------------------------------------
 
 
@@ -173,7 +177,7 @@ def _make_rpc(rpc_class: Any) -> Any:
     return instance
 
 
-def test_all_stock_material_runtime_posts_to_correct_url_with_order_id(rpc_class: Any) -> None:
+def test_materials_by_order_id_runtime_posts_to_correct_url_with_order_id(rpc_class: Any) -> None:
     rpc = _make_rpc(rpc_class)
     posted: Dict[str, Any] = {}
 
@@ -184,7 +188,7 @@ def test_all_stock_material_runtime_posts_to_correct_url_with_order_id(rpc_class
 
     rpc.post = fake_post  # type: ignore[method-assign]
 
-    result = rpc.all_stock_material(json.dumps({"orderId": "OID-xyz", "typeMode": 0}))
+    result = rpc.materials_by_order_id(json.dumps({"orderId": "OID-xyz", "typeMode": 0}))
 
     assert result == [{"id": "m1", "name": "X"}]
     assert posted["url"] == "http://invalid.local/api/lims/order/materials-by-order-id"
@@ -195,29 +199,29 @@ def test_all_stock_material_runtime_posts_to_correct_url_with_order_id(rpc_class
     )
 
 
-def test_all_stock_material_runtime_returns_empty_when_order_id_missing(rpc_class: Any) -> None:
+def test_materials_by_order_id_runtime_returns_empty_when_order_id_missing(rpc_class: Any) -> None:
     rpc = _make_rpc(rpc_class)
     rpc.post = lambda **_kw: pytest.fail("缺 orderId 时不应发起 HTTP 请求")  # type: ignore[method-assign]
-    assert rpc.all_stock_material(json.dumps({"typeMode": 0})) == []
+    assert rpc.materials_by_order_id(json.dumps({"typeMode": 0})) == []
     assert any("orderId" in msg for msg in rpc._logger.errors)
 
 
-def test_all_stock_material_runtime_returns_empty_on_invalid_json(rpc_class: Any) -> None:
+def test_materials_by_order_id_runtime_returns_empty_on_invalid_json(rpc_class: Any) -> None:
     rpc = _make_rpc(rpc_class)
     rpc.post = lambda **_kw: pytest.fail("json 解析失败时不应发起 HTTP 请求")  # type: ignore[method-assign]
-    assert rpc.all_stock_material("not-json") == []
+    assert rpc.materials_by_order_id("not-json") == []
 
 
-def test_all_stock_material_runtime_returns_empty_when_code_not_one(rpc_class: Any) -> None:
+def test_materials_by_order_id_runtime_returns_empty_when_code_not_one(rpc_class: Any) -> None:
     rpc = _make_rpc(rpc_class)
     rpc.post = lambda **_kw: {"code": 99, "message": "boom", "data": [{"id": "x"}]}  # type: ignore[method-assign]
-    assert rpc.all_stock_material(json.dumps({"orderId": "OID-1"})) == []
+    assert rpc.materials_by_order_id(json.dumps({"orderId": "OID-1"})) == []
 
 
-def test_all_stock_material_runtime_returns_empty_when_data_is_null(rpc_class: Any) -> None:
+def test_materials_by_order_id_runtime_returns_empty_when_data_is_null(rpc_class: Any) -> None:
     rpc = _make_rpc(rpc_class)
     rpc.post = lambda **_kw: {"code": 1, "data": None}  # type: ignore[method-assign]
-    assert rpc.all_stock_material(json.dumps({"orderId": "OID-1"})) == []
+    assert rpc.materials_by_order_id(json.dumps({"orderId": "OID-1"})) == []
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +285,7 @@ def test_build_unload_rows_uses_four_columns_from_locations() -> None:
     ])
     assert rows == [
         {"whName": "自动化堆栈", "locationCode": "10-2",
-         "materialName": "G3-50ul枪头盒", "quantity": "1"}
+         "materialName": "G3-50ul枪头盒", "quantity": "1 个"}
     ]
     for row in rows:
         assert set(row.keys()) == {"whName", "locationCode", "materialName", "quantity"}
@@ -301,16 +305,25 @@ def test_build_unload_rows_splits_multi_locations() -> None:
     assert len(rows) == 2
     assert [row["locationCode"] for row in rows] == ["10-3", "10-4"]
     assert all(row["materialName"] == "细胞培养板" for row in rows)
+    assert [row["quantity"] for row in rows] == ["1", "1"]
 
 
 def test_build_unload_rows_keeps_empty_location_placeholder() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
     rows = cls._build_unload_rows_from_all_stock_material([
-        {"id": "m3", "name": "裂解液", "quantity": 5, "locations": []},
+        {"id": "m3", "name": "裂解液", "quantity": 5, "unit": "mL", "locations": []},
     ])
     assert rows == [
-        {"whName": "", "locationCode": "", "materialName": "裂解液", "quantity": "5"},
+        {"whName": "", "locationCode": "", "materialName": "裂解液", "quantity": "5 mL"},
     ]
+
+
+def test_build_unload_rows_preserves_quantity_only_when_unit_empty() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    rows = cls._build_unload_rows_from_all_stock_material([
+        {"id": "m3", "name": "裂解液", "quantity": 5, "unit": "", "locations": []},
+    ])
+    assert rows[0]["quantity"] == "5"
 
 
 def test_build_unload_rows_falls_back_when_location_quantity_is_zero() -> None:
@@ -394,7 +407,7 @@ class _FakeRPCForWait:
         all_stock_response: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         self.order_report_calls: List[str] = []
-        self.all_stock_calls: List[str] = []
+        self.materials_by_order_id_calls: List[str] = []
         self._order_report_response = order_report_response or {}
         self._all_stock_response = list(all_stock_response or [])
 
@@ -402,8 +415,8 @@ class _FakeRPCForWait:
         self.order_report_calls.append(order_id)
         return dict(self._order_report_response)
 
-    def all_stock_material(self, json_str: str) -> List[Dict[str, Any]]:
-        self.all_stock_calls.append(json_str)
+    def materials_by_order_id(self, json_str: str) -> List[Dict[str, Any]]:
+        self.materials_by_order_id_calls.append(json_str)
         return list(self._all_stock_response)
 
 
@@ -424,10 +437,10 @@ def test_wait_for_order_finish_returns_timeout_when_event_never_fires() -> None:
     assert result["order_code"] == "EXP-001"
     assert result["all_stock_materials"] == []
     assert result["resultTable"]["data"] == []
-    assert station.hardware_interface.all_stock_calls == []
+    assert station.hardware_interface.materials_by_order_id_calls == []
 
 
-def test_wait_for_order_finish_uses_order_id_when_calling_all_stock_material() -> None:
+def test_wait_for_order_finish_uses_order_id_when_calling_materials_by_order_id() -> None:
     station = _fresh_station()
     rpc = _FakeRPCForWait(
         all_stock_response=[
@@ -455,9 +468,9 @@ def test_wait_for_order_finish_uses_order_id_when_calling_all_stock_material() -
 
     assert result["order_finish_status"] == "success"
     assert result["success"] is True
-    assert len(rpc.all_stock_calls) == 1
-    payload = json.loads(rpc.all_stock_calls[0])
-    assert payload == {"orderId": "OID-1"}, "all-stock-material 必须接收 orderId 作为输入"
+    assert len(rpc.materials_by_order_id_calls) == 1
+    payload = json.loads(rpc.materials_by_order_id_calls[0])
+    assert payload == {"orderId": "OID-1"}, "materials_by_order_id 必须接收 orderId 作为输入"
     assert result["resultTable"]["columns"][0] == {"name": "设备", "key": "whName"}
     assert result["resultTable"]["data"] == [
         {"whName": "自动化堆栈", "locationCode": "1-1", "materialName": "样品A", "quantity": "1"}

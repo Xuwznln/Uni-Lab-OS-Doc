@@ -176,6 +176,9 @@ def test_required_actions_exposed() -> None:
         "scheduler_continue",
         "set_http_server_ip_config",
         "get_order_list",
+        "take_out",
+        "materials_by_order_id",
+        "batch_cancel_experiment",
         "get_order_report",
         "get_aggregated_order_report",
     }
@@ -725,6 +728,106 @@ def test_get_order_list_passes_json_string() -> None:
     payload = json.loads(args[0])
     assert payload["filter"] == "abc"
     assert payload["pageCount"] == 10
+
+
+def test_get_order_list_returns_order_handles_and_status_mapping() -> None:
+    station = _make_station()
+    station.hardware_interface.order_query.return_value = {
+        "items": [
+            {"id": "OID-1", "orderCode": "EXP-001", "name": "N1", "status": "80", "creationTime": "T1"},
+            {"id": "OID-2", "code": "EXP-002", "name": "N2", "status": "60", "creationTime": "T2"},
+        ],
+        "totalCount": 2,
+    }
+
+    out = station.get_order_list(status="成功（80）", max_results=2, latest_only=False)
+
+    args, _ = station.hardware_interface.order_query.call_args
+    payload = json.loads(args[0])
+    assert payload["status"] == "80"
+    assert payload["pageCount"] == 2
+    assert out["success"] is True
+    assert out["order_ids"] == ["OID-1", "OID-2"]
+    assert out["order_id"] == "OID-1"
+    assert out["order_codes"] == ["EXP-001", "EXP-002"]
+    assert out["order_code"] == "EXP-001"
+    assert out["orders"][0]["order_name"] == "N1"
+
+
+def test_get_order_list_warns_without_order_code() -> None:
+    station = _make_station()
+    station.hardware_interface.order_query.return_value = {"items": [{"id": "OID-1", "name": "N1"}], "totalCount": 1}
+    out = station.get_order_list()
+    assert out["order_ids"] == ["OID-1"]
+    assert out["order_codes"] == []
+    assert "order_list_item_missing_order_code" in out["warnings"]
+
+
+def test_take_out_action_normalizes_lists_and_returns_raw_result() -> None:
+    station = _make_station()
+    station.hardware_interface.take_out.return_value = {"code": 1, "message": "ok"}
+    out = station.take_out(" OID-1 ", preintake_ids=[" P1 ", ""], material_ids="M1")
+    station.hardware_interface.take_out.assert_called_once_with("OID-1", ["P1"], ["M1"])
+    assert out["success"] is True
+    assert out["raw_result"] == {"code": 1, "message": "ok"}
+    assert out["code"] == 1
+
+
+def test_take_out_action_rejects_empty_order_id() -> None:
+    station = _make_station()
+    with pytest.raises(ValueError, match="order_id"):
+        station.take_out("  ")
+    station.hardware_interface.take_out.assert_not_called()
+
+
+def test_materials_by_order_id_action_uses_order_id_payload() -> None:
+    station = _make_station()
+    station.hardware_interface.materials_by_order_id.return_value = [{"id": "m1", "name": "样品A"}]
+
+    out = station.materials_by_order_id(" OID-1 ")
+
+    station.hardware_interface.materials_by_order_id.assert_called_once()
+    payload = json.loads(station.hardware_interface.materials_by_order_id.call_args.args[0])
+    assert payload == {"orderId": "OID-1"}
+    assert out["success"] is True
+    assert out["order_id"] == "OID-1"
+    assert out["materials"] == [{"id": "m1", "name": "样品A"}]
+    assert out["material_count"] == 1
+
+
+def test_materials_by_order_id_action_rejects_empty_order_id() -> None:
+    station = _make_station()
+    with pytest.raises(ValueError, match="order_id"):
+        station.materials_by_order_id("")
+    station.hardware_interface.materials_by_order_id.assert_not_called()
+
+
+def test_batch_cancel_experiment_uses_order_codes() -> None:
+    station = _make_station()
+    station.hardware_interface.batch_cancel_experiment.return_value = 1
+    out = station.batch_cancel_experiment([" EXP-001 ", ""])
+    station.hardware_interface.batch_cancel_experiment.assert_called_once_with(["EXP-001"])
+    assert out == {"success": True, "order_codes": ["EXP-001"], "code": 1, "message": "批量取消成功"}
+
+
+def test_batch_cancel_experiment_rejects_empty_order_codes() -> None:
+    station = _make_station()
+    with pytest.raises(ValueError, match="order_codes"):
+        station.batch_cancel_experiment([])
+    station.hardware_interface.batch_cancel_experiment.assert_not_called()
+
+
+def test_direct_take_out_and_batch_cancel_metadata() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    take_out_meta = getattr(cls.take_out, "_action_registry_meta", {})
+    materials_meta = getattr(cls.materials_by_order_id, "_action_registry_meta", {})
+    cancel_meta = getattr(cls.batch_cancel_experiment, "_action_registry_meta", {})
+    assert take_out_meta.get("goal_default") == {"order_id": "", "preintake_ids": [], "material_ids": []}
+    assert materials_meta.get("goal_default") == {"order_id": ""}
+    assert "order_id" in [handle.key for handle in materials_meta.get("handles", [])]
+    assert "materials" in [handle.key for handle in materials_meta.get("handles", [])]
+    assert cancel_meta.get("goal_default") == {"order_codes": []}
+    assert "order_codes" in [handle.key for handle in cancel_meta.get("handles", [])]
 
 
 def test_get_order_report_calls_typed_rpc() -> None:

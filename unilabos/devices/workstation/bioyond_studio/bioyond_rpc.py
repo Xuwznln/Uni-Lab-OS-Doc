@@ -198,17 +198,13 @@ class BioyondV1RPC(BaseRequest):
             return []
         return response.get("data", [])
 
-    def all_stock_material(self, json_str: str) -> list:
+    def materials_by_order_id(self, json_str: str) -> list:
         """拉取订单当前实验台上的全部物料（按 orderId 查询，含 locations/quantity 字段）。
 
         对应飞书《瑞博 LIMS 通信协议》「实验物料详情查询接口」--
         POST ``/api/lims/order/materials-by-order-id``。请求体 ``data`` 字段
         直接传 orderId GUID 字符串（不是对象），返回每项含
         id/typeName/code/barCode/name/quantity/locations 等字段。
-
-        历史方法名保留为 ``all_stock_material``，便于上游 station 代码与
-        前端 handle key ``all_stock_materials`` 不变；底层 endpoint 已迁移
-        至 ``materials-by-order-id``。
 
         Args:
             json_str: JSON 字符串，必须包含 orderId（订单 UUID）。
@@ -221,11 +217,11 @@ class BioyondV1RPC(BaseRequest):
         try:
             params = json.loads(json_str)
         except json.JSONDecodeError:
-            self._logger.error("all_stock_material 错误: json_str 无法解析")
+            self._logger.error("materials_by_order_id 错误: json_str 无法解析")
             return []
 
         if not isinstance(params, dict) or not params.get("orderId"):
-            self._logger.error("all_stock_material 错误: 缺少 orderId")
+            self._logger.error("materials_by_order_id 错误: 缺少 orderId")
             return []
 
         order_id = str(params["orderId"])
@@ -241,7 +237,7 @@ class BioyondV1RPC(BaseRequest):
         if not response or response.get('code') != 1:
             if response:
                 self._logger.error(
-                    f"all_stock_material 错误: code={response.get('code')} "
+                    f"materials_by_order_id 错误: code={response.get('code')} "
                     f"message={response.get('message', '')}"
                 )
             return []
@@ -1033,11 +1029,11 @@ class BioyondV1RPC(BaseRequest):
             return 0
         return response.get("code", 0)
 
-    def batch_cancel_experiment(self, order_ids: List[str]) -> int:
+    def batch_cancel_experiment(self, order_codes: List[str]) -> int:
         """批量取消实验
 
         参数:
-            order_ids: 订单ID列表
+            order_codes: 实验编号列表
 
         返回值:
             int: 成功返回1，失败返回0
@@ -1047,7 +1043,7 @@ class BioyondV1RPC(BaseRequest):
             params={
                 "apiKey": self.api_key,
                 "requestTime": self.get_current_time_iso8601(),
-                "data": order_ids,
+                "data": order_codes,
             })
         if not response or response['code'] != 1:
             return 0

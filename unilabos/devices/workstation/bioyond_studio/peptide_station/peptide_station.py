@@ -13,7 +13,7 @@ import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Optional, Tuple
+from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, Tuple
 from urllib.parse import quote
 from uuid import UUID
 
@@ -140,6 +140,19 @@ ORDER_FINISH_STATUS_MAP: Dict[str, str] = {
     "30": "success",
     "-11": "abnormal_stop",
     "-12": "manual_stop",
+}
+OrderStatus = Literal['全部（""）', "成功（80）", "失败（90）", "执行中（60）", "已取出（100）"]
+ORDER_STATUS_VALUE_MAP: Dict[str, str] = {
+    '全部（""）': "",
+    "成功（80）": "80",
+    "失败（90）": "90",
+    "执行中（60）": "60",
+    "已取出（100）": "100",
+    "": "",
+    "80": "80",
+    "90": "90",
+    "60": "60",
+    "100": "100",
 }
 MATERIAL_TYPE_ORDER = ("Sample", "Consumables", "Reagent")
 PEPTIDE_SAMPLE_FILE_KEY = "SampleFile"
@@ -1226,16 +1239,17 @@ class BioyondPeptideStation(BioyondWorkstation):
             all_materials: List[Dict[str, Any]] = []
             if mapped_status in {"success", "abnormal_stop", "manual_stop"} and normalized_order_id:
                 try:
-                    rpc_for_stock = self._require_hardware_interface("all_stock_material")
+                    rpc_for_stock = self._require_hardware_interface()
                     payload = {"orderId": normalized_order_id}
-                    raw = rpc_for_stock.all_stock_material(
-                        json.dumps(payload, ensure_ascii=False)
-                    )
+                    stock_method = getattr(rpc_for_stock, "materials_by_order_id", None)
+                    if not callable(stock_method):
+                        raise RuntimeError("Bioyond RPC 客户端缺少 materials_by_order_id 方法")
+                    raw = stock_method(json.dumps(payload, ensure_ascii=False))
                     if isinstance(raw, list):
                         all_materials = list(raw)
                 except Exception as exc:
                     logger.error(
-                        f"[peptide] wait_for_order_finish 调用 all_stock_material 失败: {exc}",
+                        f"[peptide] wait_for_order_finish 调用 materials_by_order_id 失败: {exc}",
                         exc_info=True,
                     )
 
@@ -1555,34 +1569,201 @@ class BioyondPeptideStation(BioyondWorkstation):
             "message": message if success else (message or "设置 Bioyond LIMS 推送地址失败"),
         }
 
-    @action(always_free=True, description="查询 LIMS 订单列表")
+    @action(
+        always_free=True,
+        goal_default={
+            "status": '全部（""）',
+            "max_results": 10,
+            "filter_text": "",
+            "sorting": "creationTime desc",
+            "skipCount": 0,
+            "timeType": "",
+            "beginTime": None,
+            "endTime": None,
+            "latest_only": True,
+        },
+        description=(
+            "只读查询 Bioyond LIMS 订单列表。"
+            "status 必填：全部（\"\"）/成功（80）/失败（90）/执行中（60）/已取出（100）。"
+            "max_results 对应 pageCount，默认 10。其余查询条件可选。"
+        ),
+        handles=[
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_ids", data_type="bioyond_order_ids", label="实验ID列表", data_key="order_ids", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_code", data_type="bioyond_order_code", label="实验编号", data_key="order_code", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="order_codes", data_type="bioyond_order_codes", label="实验编号列表", data_key="order_codes", data_source=DataSource.EXECUTOR),
+        ],
+    )
     def get_order_list(
         self,
-        time_type: str = "",
-        begin_time: Any = None,
-        end_time: Any = None,
-        status: str = "",
+        status: OrderStatus = '全部（""）',
+        max_results: int = 10,
         filter_text: str = "",
-        skip_count: int = 0,
-        page_count: int = 20,
-        sorting: str = "",
+        sorting: str = "creationTime desc",
+        skipCount: int = 0,
+        timeType: str = "",
+        beginTime: Optional[str] = None,
+        endTime: Optional[str] = None,
+        latest_only: bool = True,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
+        timeType = str(kwargs.pop("time_type", timeType) or "")
+        beginTime = kwargs.pop("begin_time", beginTime)
+        endTime = kwargs.pop("end_time", endTime)
+        skipCount = int(kwargs.pop("skip_count", skipCount) or 0)
+        max_results = int(kwargs.pop("page_count", max_results) or 10)
+        del kwargs
+        normalized_status = ORDER_STATUS_VALUE_MAP.get(str(status), str(status or ""))
         params = self._normalize_order_list_params(
             {
-                "timeType": time_type,
-                "beginTime": begin_time,
-                "endTime": end_time,
-                "status": status,
+                "timeType": timeType,
+                "beginTime": beginTime,
+                "endTime": endTime,
+                "status": normalized_status,
                 "filter": filter_text,
-                "skipCount": skip_count,
-                "pageCount": page_count,
+                "skipCount": skipCount,
+                "pageCount": max_results,
                 "sorting": sorting,
             }
         )
         with self._debug_call_session("get_order_list"):
             raw = self._require_hardware_interface().order_query(json.dumps(params, ensure_ascii=False))
         items = self._as_list(raw.get("items") if isinstance(raw, dict) else raw)
-        return {"success": True, "raw": raw, "items": items, "total_count": raw.get("totalCount") if isinstance(raw, dict) else len(items)}
+        if latest_only and items:
+            items = items[:1]
+        orders: List[Dict[str, Any]] = []
+        warnings: List[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            order_id = str(item.get("id") or "").strip()
+            order_code = str(item.get("orderCode") or item.get("code") or "").strip()
+            if not order_id:
+                warnings.append("order_list_item_missing_id")
+                continue
+            if not order_code:
+                warnings.append("order_list_item_missing_order_code")
+            orders.append({
+                "order_id": order_id,
+                "order_code": order_code,
+                "order_name": str(item.get("name") or item.get("orderName") or ""),
+                "status": str(item.get("status") or ""),
+                "created_at": str(item.get("creationTime") or item.get("createdAt") or ""),
+                "raw": item,
+            })
+        order_ids = [item["order_id"] for item in orders]
+        order_codes = [item["order_code"] for item in orders if item.get("order_code")]
+        return {
+            "success": bool(orders),
+            "raw": raw,
+            "query": params,
+            "items": items,
+            "orders": orders,
+            "total_count": raw.get("totalCount") if isinstance(raw, dict) else len(items),
+            "order_ids": order_ids,
+            "order_id": order_ids[0] if order_ids else "",
+            "order_codes": order_codes,
+            "order_code": order_codes[0] if order_codes else "",
+            "warnings": warnings,
+        }
+
+    @action(
+        always_free=True,
+        goal_default={"order_id": "", "preintake_ids": [], "material_ids": []},
+        description="按订单取出 Bioyond LIMS 中已分配/预占的物料",
+        handles=[
+            ActionInputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.HANDLE, io_type="source"),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+        ],
+    )
+    def take_out(
+        self,
+        order_id: str,
+        preintake_ids: Optional[List[str]] = None,
+        material_ids: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        del kwargs
+        normalized_order_id = str(order_id or "").strip()
+        if not normalized_order_id:
+            raise ValueError("take_out 需要 order_id")
+        normalized_preintake_ids = self._normalize_string_list(preintake_ids)
+        normalized_material_ids = self._normalize_string_list(material_ids)
+        rpc = self._require_hardware_interface("take_out")
+        with self._debug_call_session("take_out"):
+            raw = rpc.take_out(normalized_order_id, normalized_preintake_ids, normalized_material_ids)
+        code = raw.get("code") if isinstance(raw, dict) else None
+        message = str(raw.get("message", "") or "") if isinstance(raw, dict) else ""
+        return {
+            "success": code == 1,
+            "order_id": normalized_order_id,
+            "preintake_ids": normalized_preintake_ids,
+            "material_ids": normalized_material_ids,
+            "take_out": raw if isinstance(raw, dict) else {},
+            "raw_result": raw if isinstance(raw, dict) else {},
+            "code": code,
+            "message": message,
+        }
+
+    @action(
+        always_free=True,
+        goal_default={"order_id": ""},
+        description="按实验ID查询 Bioyond LIMS 订单实验台物料（materials-by-order-id）",
+        handles=[
+            ActionInputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.HANDLE, io_type="source"),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="materials", data_type="array", label="订单实验台物料", data_key="materials", data_source=DataSource.EXECUTOR),
+        ],
+    )
+    def materials_by_order_id(self, order_id: str, **kwargs: Any) -> Dict[str, Any]:
+        """按 orderId UUID 查询订单实验台物料。
+
+        Args:
+            order_id: Bioyond LIMS 订单 UUID；不是 orderCode/实验编号。
+        """
+        del kwargs
+        normalized_order_id = str(order_id or "").strip()
+        if not normalized_order_id:
+            raise ValueError("materials_by_order_id 需要 order_id")
+        rpc = self._require_hardware_interface("materials_by_order_id")
+        payload = {"orderId": normalized_order_id}
+        with self._debug_call_session("materials_by_order_id"):
+            raw = rpc.materials_by_order_id(json.dumps(payload, ensure_ascii=False))
+        materials = list(raw) if isinstance(raw, list) else []
+        return {
+            "success": bool(materials),
+            "order_id": normalized_order_id,
+            "materials": materials,
+            "all_stock_materials": materials,
+            "material_count": len(materials),
+        }
+
+    @action(
+        always_free=True,
+        goal_default={"order_codes": []},
+        description="按实验编号批量取消 Bioyond 实验，仅调用批量取消接口，不执行 take_out",
+        handles=[
+            ActionInputHandle(key="order_codes", data_type="bioyond_order_codes", label="实验编号列表", data_key="order_codes", data_source=DataSource.HANDLE, io_type="source"),
+        ],
+    )
+    def batch_cancel_experiment(
+        self,
+        order_codes: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        del kwargs
+        normalized_order_codes = self._normalize_string_list(order_codes)
+        if not normalized_order_codes:
+            raise ValueError("batch_cancel_experiment 需要 order_codes")
+        rpc = self._require_hardware_interface("batch_cancel_experiment")
+        with self._debug_call_session("batch_cancel_experiment"):
+            code = rpc.batch_cancel_experiment(normalized_order_codes)
+        return {
+            "success": code == 1,
+            "order_codes": normalized_order_codes,
+            "code": code,
+            "message": "批量取消成功" if code == 1 else "批量取消失败",
+        }
 
     @action(always_free=True, description="查询单订单实验报告")
     def get_order_report(self, order_id: str) -> Dict[str, Any]:
@@ -2175,6 +2356,21 @@ class BioyondPeptideStation(BioyondWorkstation):
         return str(q)
 
     @classmethod
+    def _format_unload_quantity_with_unit(cls, quantity: Any, unit: Any) -> str:
+        formatted = cls._format_unload_quantity(quantity)
+        normalized_unit = str(unit or "").strip()
+        if not formatted or not normalized_unit:
+            return formatted
+        return f"{formatted} {normalized_unit}"
+
+    @staticmethod
+    def _normalize_string_list(value: Any) -> List[str]:
+        if value is None:
+            return []
+        source = value if isinstance(value, list) else [value]
+        return [str(item).strip() for item in source if str(item or "").strip()]
+
+    @classmethod
     def _build_unload_rows_from_all_stock_material(
         cls,
         all_materials: Optional[List[Dict[str, Any]]],
@@ -2197,13 +2393,14 @@ class BioyondPeptideStation(BioyondWorkstation):
                 continue
             material_name = str(mat.get("name") or "")
             top_quantity = mat.get("quantity")
+            unit = mat.get("unit")
             locations = mat.get("locations") or []
             if not isinstance(locations, list) or not locations:
                 rows.append({
                     "whName": "",
                     "locationCode": "",
                     "materialName": material_name,
-                    "quantity": cls._format_unload_quantity(top_quantity),
+                    "quantity": cls._format_unload_quantity_with_unit(top_quantity, unit),
                 })
                 continue
             for loc in locations:
@@ -2218,7 +2415,7 @@ class BioyondPeptideStation(BioyondWorkstation):
                     "whName": str(loc.get("whName") or ""),
                     "locationCode": str(loc.get("code") or ""),
                     "materialName": material_name,
-                    "quantity": cls._format_unload_quantity(loc_quantity),
+                    "quantity": cls._format_unload_quantity_with_unit(loc_quantity, unit),
                 })
         return rows
 
