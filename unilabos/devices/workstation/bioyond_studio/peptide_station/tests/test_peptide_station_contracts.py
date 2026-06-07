@@ -664,12 +664,24 @@ def test_build_result_table_order_and_columns() -> None:
     table = station._build_result_table(parsed["materials_by_type"])
     assert table["tableName"] == "resultTable"
     assert [c["key"] for c in table["columns"]] == ["whName", "locationCode", "materialName", "quantity"]
-    # 顺序：Sample → Consumables → Future（未知 mode 保留在末尾）
     names = [row["materialName"] for row in table["data"]]
-    assert names == ["96孔板", "200μL枪头盒", "未知耗材"]
+    assert names == ["200μL枪头盒", "96孔板", "未知耗材"]
     # locationShowName 优先 locationCode
-    assert table["data"][0]["locationCode"] == "A1-show"
-    assert table["data"][1]["locationCode"] == "1-01"
+    assert table["data"][0]["locationCode"] == "1-01"
+    assert table["data"][1]["locationCode"] == "A1-show"
+
+
+def test_build_result_table_sorts_blank_last_and_location_naturally() -> None:
+    station = _make_station()
+    table = station._build_result_table({
+        "Sample": [
+            {"materialName": "样品", "materialId": "mat-1", "quantity": "1", "locationCode": "10-2"},
+            {"materialName": "样品", "materialId": "mat-1", "quantity": "1", "locationCode": "2-02"},
+            {"materialName": "", "materialId": "mat-1", "quantity": "1", "locationCode": "1-01"},
+            {"materialName": "样品", "materialId": "mat-1", "quantity": "1", "locationCode": "2-01"},
+        ]
+    })
+    assert [row["locationCode"] for row in table["data"]] == ["2-01", "2-02", "10-2", "1-01"]
 
 
 def test_build_result_table_empty_returns_empty_data() -> None:

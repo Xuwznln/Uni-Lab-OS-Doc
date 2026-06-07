@@ -6,6 +6,7 @@ import ast
 import copy
 import json
 import mimetypes
+import re
 import sys
 import threading
 import time
@@ -2031,6 +2032,32 @@ class BioyondPeptideStation(BioyondWorkstation):
             "materials_by_type": materials_by_type,
         }
 
+    @staticmethod
+    def _sort_result_table_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def text_key(value: Any) -> Tuple[int, str]:
+            text = str(value or "").strip()
+            return (1, "") if not text else (0, text)
+
+        def location_key(value: Any) -> Tuple[int, Tuple[Any, ...]]:
+            text = str(value or "").strip()
+            if not text:
+                return (1, ())
+            chunks: List[Any] = []
+            for chunk in re.split(r"(\d+)", text):
+                if not chunk:
+                    continue
+                chunks.append((0, int(chunk)) if chunk.isdigit() else (1, chunk))
+            return (0, tuple(chunks))
+
+        return sorted(
+            rows,
+            key=lambda row: (
+                text_key(row.get("materialName")),
+                text_key(row.get("whName")),
+                location_key(row.get("locationCode")),
+            ),
+        )
+
     def _build_result_table(self, materials_by_type: Dict[str, List[Dict[str, Any]]], table_name: str = "resultTable") -> Dict[str, Any]:
         material_info_cache: Dict[str, Dict[str, Any]] = {}
         ordered_modes: List[str] = []
@@ -2053,7 +2080,7 @@ class BioyondPeptideStation(BioyondWorkstation):
                         "quantity": str(record.get("quantity") or ""),
                     }
                 )
-        return {"data": rows, "columns": copy.deepcopy(RESULT_TABLE_COLUMNS), "tableName": table_name}
+        return {"data": self._sort_result_table_rows(rows), "columns": copy.deepcopy(RESULT_TABLE_COLUMNS), "tableName": table_name}
 
     def _resolve_wh_name_by_material_id(self, material_id: str, cache: Dict[str, Dict[str, Any]]) -> str:
         if not material_id:
@@ -2179,7 +2206,7 @@ class BioyondPeptideStation(BioyondWorkstation):
     ) -> Dict[str, Any]:
         """按 ``UNLOAD_TABLE_COLUMNS`` 渲染下料指引表的 ``data/columns/tableName`` 三段。"""
         return {
-            "data": list(unload_rows or []),
+            "data": BioyondPeptideStation._sort_result_table_rows(list(unload_rows or [])),
             "columns": list(UNLOAD_TABLE_COLUMNS),
             "tableName": table_name,
         }

@@ -370,6 +370,17 @@ def test_build_unload_table_uses_four_columns_in_name_key_format() -> None:
     ]
 
 
+def test_build_unload_table_sorts_rows_by_material_warehouse_and_location() -> None:
+    cls = getattr(_import_module(), CLASS_NAME)
+    table = cls._build_unload_table([
+        {"whName": "WH", "locationCode": "10-2", "materialName": "样品", "quantity": "1"},
+        {"whName": "WH", "locationCode": "2-02", "materialName": "样品", "quantity": "1"},
+        {"whName": "WH", "locationCode": "2-01", "materialName": "样品", "quantity": "1"},
+        {"whName": "WH", "locationCode": "1-01", "materialName": "", "quantity": "1"},
+    ])
+    assert [row["locationCode"] for row in table["data"]] == ["2-01", "2-02", "10-2", "1-01"]
+
+
 # ---------------------------------------------------------------------------
 # 3. wait_for_order_finish
 # ---------------------------------------------------------------------------
@@ -452,6 +463,35 @@ def test_wait_for_order_finish_uses_order_id_when_calling_all_stock_material() -
         {"whName": "自动化堆栈", "locationCode": "1-1", "materialName": "样品A", "quantity": "1"}
     ]
     assert result["used_materials"] == [{"materialId": "mat-1", "usedQuantity": 1}]
+
+
+def test_wait_for_order_finish_returns_sorted_unload_result_table() -> None:
+    station = _fresh_station()
+    rpc = _FakeRPCForWait(
+        all_stock_response=[
+            {"id": "m3", "name": "样品", "quantity": 1, "locations": [{"code": "10-2", "whName": "WH"}]},
+            {"id": "m2", "name": "样品", "quantity": 1, "locations": [{"code": "2-02", "whName": "WH"}]},
+            {"id": "m1", "name": "样品", "quantity": 1, "locations": [{"code": "2-01", "whName": "WH"}]},
+        ],
+    )
+    station.hardware_interface = rpc
+
+    def trigger_later() -> None:
+        time.sleep(0.05)
+        station.last_order_report = {"orderCode": "EXP-001", "status": "30"}
+        station.order_finish_event.set()
+
+    threading.Thread(target=trigger_later, daemon=True).start()
+
+    result = station.wait_for_order_finish(
+        order_id="OID-1",
+        order_code="EXP-001",
+        timeout_seconds=2,
+        poll_mode=True,
+        poll_interval_seconds=0.01,
+    )
+
+    assert [row["locationCode"] for row in result["resultTable"]["data"]] == ["2-01", "2-02", "10-2"]
 
 
 @pytest.mark.parametrize("raw_status,expected_status,expected_success", [
