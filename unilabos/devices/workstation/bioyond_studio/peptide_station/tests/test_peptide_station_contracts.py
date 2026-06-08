@@ -174,13 +174,17 @@ def test_required_actions_exposed() -> None:
         "scheduler_stop",
         "scheduler_pause",
         "scheduler_continue",
-        "set_http_server_ip_config",
+        "update_push_ip",
         "get_order_list",
         "take_out",
         "materials_by_order_id",
+        "construct_unload_table",
         "batch_cancel_experiment",
         "get_order_report",
         "get_aggregated_order_report",
+        "get_order_report_files",
+        "display_values",
+        "display_values_manual_confirm",
     }
     have = {name for name, _ in inspect.getmembers(cls, inspect.isfunction)}
     missing = sorted(required - have)
@@ -190,7 +194,7 @@ def test_required_actions_exposed() -> None:
 def test_manual_confirm_node_types() -> None:
     module = _import_module()
     cls = getattr(module, CLASS_NAME)
-    manual = {"confirm_cem_info", "start_experiment", "reset_manual"}
+    manual = {"confirm_cem_info", "start_experiment", "reset_manual", "display_values_manual_confirm"}
     normal = {
         "submit_experiment",
         "submit_experiment_day1",
@@ -205,6 +209,8 @@ def test_manual_confirm_node_types() -> None:
         "get_step_parameters",
         "get_order_list",
         "get_order_report",
+        "get_order_report_files",
+        "display_values",
     }
     for name in manual:
         meta = getattr(getattr(cls, name), "_action_registry_meta", {})
@@ -802,6 +808,31 @@ def test_materials_by_order_id_action_rejects_empty_order_id() -> None:
     station.hardware_interface.materials_by_order_id.assert_not_called()
 
 
+def test_construct_unload_table_uses_shared_materials_by_order_id_core() -> None:
+    station = _make_station()
+    station.hardware_interface.materials_by_order_id.return_value = [
+        {"id": "m1", "name": "样品A", "quantity": 1, "unit": "个", "locations": [{"code": "2-01", "whName": "WH"}]}
+    ]
+
+    out = station.construct_unload_table(" OID-1 ")
+
+    payload = json.loads(station.hardware_interface.materials_by_order_id.call_args.args[0])
+    assert payload == {"orderId": "OID-1"}
+    assert out["success"] is True
+    assert out["order_id"] == "OID-1"
+    assert out["materials_by_order_id"] == station.hardware_interface.materials_by_order_id.return_value
+    assert out["resultTable"]["data"] == [
+        {"whName": "WH", "locationCode": "2-01", "materialName": "样品A", "quantity": "1 个"}
+    ]
+
+
+def test_construct_unload_table_rejects_empty_order_id() -> None:
+    station = _make_station()
+    with pytest.raises(ValueError, match="order_id"):
+        station.construct_unload_table("")
+    station.hardware_interface.materials_by_order_id.assert_not_called()
+
+
 def test_batch_cancel_experiment_uses_order_codes() -> None:
     station = _make_station()
     station.hardware_interface.batch_cancel_experiment.return_value = 1
@@ -821,11 +852,15 @@ def test_direct_take_out_and_batch_cancel_metadata() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
     take_out_meta = getattr(cls.take_out, "_action_registry_meta", {})
     materials_meta = getattr(cls.materials_by_order_id, "_action_registry_meta", {})
+    construct_meta = getattr(cls.construct_unload_table, "_action_registry_meta", {})
     cancel_meta = getattr(cls.batch_cancel_experiment, "_action_registry_meta", {})
     assert take_out_meta.get("goal_default") == {"order_id": "", "preintake_ids": [], "material_ids": []}
     assert materials_meta.get("goal_default") == {"order_id": ""}
     assert "order_id" in [handle.key for handle in materials_meta.get("handles", [])]
     assert "materials" in [handle.key for handle in materials_meta.get("handles", [])]
+    assert construct_meta.get("goal_default") == {"order_id": ""}
+    construct_keys = [handle.key for handle in construct_meta.get("handles", [])]
+    assert {"order_id", "materials_by_order_id", "resultTable"} <= set(construct_keys)
     assert cancel_meta.get("goal_default") == {"order_codes": []}
     assert "order_codes" in [handle.key for handle in cancel_meta.get("handles", [])]
 
@@ -837,6 +872,78 @@ def test_get_order_report_calls_typed_rpc() -> None:
     station.hardware_interface.order_report.assert_called_once_with(ORDER_GUID)
     assert out["success"] is True
     assert out["summary"]["id"] == ORDER_GUID
+
+
+def test_get_order_report_files_handles_and_returns_file_outputs() -> None:
+    station = _make_station()
+    station.hardware_interface.host = "http://test"
+    station.hardware_interface.order_report_files.return_value = [
+        "/report/a.csv",
+        "/report/result.zip",
+    ]
+
+    out = station.get_order_report_files(ORDER_GUID)
+
+    station.hardware_interface.order_report_files.assert_called_once_with(ORDER_GUID)
+    assert out["file_zip"] == "http://test/report/result.zip"
+    assert out["files"] == ["http://test/report/a.csv", "http://test/report/result.zip"]
+    cls = getattr(_import_module(), CLASS_NAME)
+    meta = getattr(cls.get_order_report_files, "_action_registry_meta", {})
+    handle_keys = [handle.key for handle in meta.get("handles", [])]
+    assert {"order_id", "file_zip", "files"} <= set(handle_keys)
+
+
+def test_display_values_returns_title_and_values() -> None:
+    station = _make_station()
+    values = {"files": ["http://test/report.zip"], "count": 1}
+
+    out = station.display_values(title="报告内容", values=values)
+
+    assert out == {
+        "success": True,
+        "title": "报告内容",
+        "values": json.dumps(values, ensure_ascii=False, indent=2),
+    }
+
+
+def test_display_values_manual_confirm_metadata_and_return() -> None:
+    module = _import_module()
+    cls = getattr(module, CLASS_NAME)
+    meta = getattr(cls.display_values_manual_confirm, "_action_registry_meta", {})
+    assert meta.get("node_type") == module.NodeType.MANUAL_CONFIRM
+    assert meta.get("placeholder_keys") == {"assignee_user_ids": "unilabos_manual_confirm"}
+    assert meta.get("goal_default") == {
+        "title": "",
+        "values": None,
+        "display_confirmed": False,
+        "timeout_seconds": 3600,
+        "assignee_user_ids": [],
+    }
+    handle_keys = [handle.key for handle in meta.get("handles", [])]
+    assert {"values", "assignee_user_ids", "title"} <= set(handle_keys)
+    values_handles = [handle for handle in meta.get("handles", []) if handle.key == "values"]
+    assert values_handles
+    assert all(handle.data_type == "str" for handle in values_handles)
+
+    station = _make_station()
+    values = ["http://test/a.csv", "http://test/report.zip"]
+    out = station.display_values_manual_confirm(
+        title="报告文件",
+        values=values,
+        display_confirmed=True,
+        assignee_user_ids=["u1"],
+    )
+    assert out["success"] is True
+    assert out["title"] == "报告文件"
+    assert out["values"] == json.dumps(values, ensure_ascii=False, indent=2)
+    assert out["display_confirmed"] is True
+    assert out["assignee_user_ids"] == ["u1"]
+
+
+def test_display_values_manual_confirm_blocks_without_confirmation() -> None:
+    station = _make_station()
+    with pytest.raises(RuntimeError, match="展示内容"):
+        station.display_values_manual_confirm(display_confirmed=False)
 
 
 def test_get_aggregated_order_report_is_todo_placeholder() -> None:
@@ -1194,13 +1301,13 @@ def test_rpc_reset_location_sends_no_data_key() -> None:
     assert set(sent_params.keys()) == {"apiKey", "requestTime"}
 
 
-def test_set_http_server_ip_config_defaults_to_config_and_returns_raw() -> None:
+def test_update_push_ip_defaults_to_config_and_returns_raw() -> None:
     station = _make_station()
     station.bioyond_config.update({"HTTP_host": "127.0.0.1", "HTTP_port": 8090})
     rpc = station.hardware_interface
     rpc.set_ip_config.return_value = {"code": 1, "message": "ok", "data": None}
 
-    out = station.set_http_server_ip_config()
+    out = station.update_push_ip()
 
     rpc.set_ip_config.assert_called_once_with("127.0.0.1", 8090)
     assert out == {
@@ -1212,24 +1319,24 @@ def test_set_http_server_ip_config_defaults_to_config_and_returns_raw() -> None:
     }
 
 
-def test_set_http_server_ip_config_returns_failure_message() -> None:
+def test_update_push_ip_returns_failure_message() -> None:
     station = _make_station()
     rpc = station.hardware_interface
     rpc.set_ip_config.return_value = {"code": 0, "message": "bad"}
 
-    out = station.set_http_server_ip_config("127.0.0.1", 8090)
+    out = station.update_push_ip("127.0.0.1", 8090)
 
     assert out["success"] is False
     assert out["raw"] == {"code": 0, "message": "bad"}
     assert out["message"] == "bad"
 
 
-def test_set_http_server_ip_config_exposes_ip_and_port_metadata() -> None:
+def test_update_push_ip_exposes_ip_and_port_metadata() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    signature = inspect.signature(cls.set_http_server_ip_config)
+    signature = inspect.signature(cls.update_push_ip)
     assert signature.parameters["ip"].default == ""
     assert signature.parameters["port"].default == 0
-    meta = getattr(cls.set_http_server_ip_config, "_action_registry_meta", {})
+    meta = getattr(cls.update_push_ip, "_action_registry_meta", {})
     assert meta.get("always_free") is True
     assert "推送" in meta.get("description", "")
 

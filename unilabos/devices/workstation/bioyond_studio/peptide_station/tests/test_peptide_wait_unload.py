@@ -6,7 +6,7 @@
   ``data`` 传 orderId GUID 字符串、缺 orderId / 非法 JSON / code != 1 / data 为 null 均返回 ``[]``。
 - ``process_order_finish_report`` override：先 super() 再保存 state，orderCode 匹配触发 event；
   super() 抛错时仍要触发 event（防御性）。
-- ``_build_unload_rows_from_all_stock_material`` + ``_build_unload_table``：4 列 ``{"name", "key"}``
+- ``_build_unload_rows_from_materials_by_order_id`` + ``_build_unload_table``：4 列 ``{"name", "key"}``
   结构、同名物料多库位拆多行、空 location 占位、location.quantity=0 回退物料级、float 去尾。
 - ``wait_for_order_finish``：超时、立即唤醒、status 映射、用 ``order_id`` 调 ``materials_by_order_id``、
   ``order_code`` 兜底反查、缺 order_id 报错、多 order_ids 歧义报错。
@@ -267,13 +267,13 @@ def test_process_order_finish_report_no_event_when_no_expected_code_pending() ->
 
 
 # ---------------------------------------------------------------------------
-# 2. _build_unload_rows_from_all_stock_material + _build_unload_table
+# 2. _build_unload_rows_from_materials_by_order_id + _build_unload_table
 # ---------------------------------------------------------------------------
 
 
 def test_build_unload_rows_uses_four_columns_from_locations() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    rows = cls._build_unload_rows_from_all_stock_material([
+    rows = cls._build_unload_rows_from_materials_by_order_id([
         {
             "id": "m1", "code": "0017-00733", "name": "G3-50ul枪头盒",
             "typeMode": "Sample", "unit": "个", "quantity": 1.0, "isUse": False,
@@ -293,7 +293,7 @@ def test_build_unload_rows_uses_four_columns_from_locations() -> None:
 
 def test_build_unload_rows_splits_multi_locations() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    rows = cls._build_unload_rows_from_all_stock_material([
+    rows = cls._build_unload_rows_from_materials_by_order_id([
         {
             "id": "m2", "name": "细胞培养板", "quantity": 2.0,
             "locations": [
@@ -310,7 +310,7 @@ def test_build_unload_rows_splits_multi_locations() -> None:
 
 def test_build_unload_rows_keeps_empty_location_placeholder() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    rows = cls._build_unload_rows_from_all_stock_material([
+    rows = cls._build_unload_rows_from_materials_by_order_id([
         {"id": "m3", "name": "裂解液", "quantity": 5, "unit": "mL", "locations": []},
     ])
     assert rows == [
@@ -320,7 +320,7 @@ def test_build_unload_rows_keeps_empty_location_placeholder() -> None:
 
 def test_build_unload_rows_preserves_quantity_only_when_unit_empty() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    rows = cls._build_unload_rows_from_all_stock_material([
+    rows = cls._build_unload_rows_from_materials_by_order_id([
         {"id": "m3", "name": "裂解液", "quantity": 5, "unit": "", "locations": []},
     ])
     assert rows[0]["quantity"] == "5"
@@ -328,7 +328,7 @@ def test_build_unload_rows_preserves_quantity_only_when_unit_empty() -> None:
 
 def test_build_unload_rows_falls_back_when_location_quantity_is_zero() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    rows = cls._build_unload_rows_from_all_stock_material([
+    rows = cls._build_unload_rows_from_materials_by_order_id([
         {
             "id": "m_real", "name": "G3-50ul枪头盒", "quantity": 1.0,
             "locations": [{"code": "10-2", "whName": "自动化堆栈", "quantity": 0}],
@@ -339,7 +339,7 @@ def test_build_unload_rows_falls_back_when_location_quantity_is_zero() -> None:
 
 def test_build_unload_rows_formats_integer_float_as_int_string() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    rows = cls._build_unload_rows_from_all_stock_material([
+    rows = cls._build_unload_rows_from_materials_by_order_id([
         {"id": "m1", "name": "A", "quantity": 4.0,
          "locations": [{"code": "3-2", "whName": "WH", "quantity": 4.0}]},
         {"id": "m2", "name": "B", "quantity": 1.0, "locations": []},
@@ -350,7 +350,7 @@ def test_build_unload_rows_formats_integer_float_as_int_string() -> None:
 
 def test_build_unload_rows_keeps_non_integer_float_as_is() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    rows = cls._build_unload_rows_from_all_stock_material([
+    rows = cls._build_unload_rows_from_materials_by_order_id([
         {"id": "m", "name": "X", "quantity": 1.5,
          "locations": [{"code": "1-1", "whName": "WH", "quantity": 1.5}]}
     ])
@@ -359,9 +359,9 @@ def test_build_unload_rows_keeps_non_integer_float_as_is() -> None:
 
 def test_build_unload_rows_handles_empty_input_and_non_dict_items() -> None:
     cls = getattr(_import_module(), CLASS_NAME)
-    assert cls._build_unload_rows_from_all_stock_material([]) == []
-    assert cls._build_unload_rows_from_all_stock_material(None) == []  # type: ignore[arg-type]
-    assert cls._build_unload_rows_from_all_stock_material(["not-a-dict"]) == []  # type: ignore[list-item]
+    assert cls._build_unload_rows_from_materials_by_order_id([]) == []
+    assert cls._build_unload_rows_from_materials_by_order_id(None) == []  # type: ignore[arg-type]
+    assert cls._build_unload_rows_from_materials_by_order_id(["not-a-dict"]) == []  # type: ignore[list-item]
 
 
 def test_build_unload_table_uses_four_columns_in_name_key_format() -> None:
@@ -435,7 +435,7 @@ def test_wait_for_order_finish_returns_timeout_when_event_never_fires() -> None:
     assert result["success"] is False
     assert result["order_id"] == "OID-1"
     assert result["order_code"] == "EXP-001"
-    assert result["all_stock_materials"] == []
+    assert result["materials_by_order_id"] == []
     assert result["resultTable"]["data"] == []
     assert station.hardware_interface.materials_by_order_id_calls == []
 
@@ -623,12 +623,18 @@ def test_unload_materials_calls_take_out_with_empty_id_lists() -> None:
     station = _fresh_station()
     rpc = _FakeRPCForUnload(response={"code": 1, "data": {}, "message": "OK"})
     station.hardware_interface = rpc
+    unload_table = {"tableName": "resultTable", "data": [{"materialName": "样品A"}]}
 
-    result = station.unload_materials(order_id="OID-1", materials_unloaded=True)
+    result = station.unload_materials(
+        order_id="OID-1",
+        resultTable=unload_table,
+        materials_unloaded=True,
+    )
 
     assert rpc.take_out_calls == [("OID-1", [], [])]
     assert result["success"] is True
     assert result["order_id"] == "OID-1"
+    assert "resultTable" not in result
     assert result["take_out_result"] == {"code": 1, "data": {}, "message": "OK"}
 
 
@@ -693,7 +699,7 @@ def test_wait_for_order_finish_is_ast_visible_with_expected_handles() -> None:
     assert {
         "order_id", "order_code",
         "order_finish_status", "order_finish_report",
-        "used_materials", "all_stock_materials", "resultTable",
+        "used_materials", "materials_by_order_id", "resultTable",
     } <= handle_keys
 
 
@@ -718,6 +724,10 @@ def test_unload_materials_is_ast_visible_as_manual_confirm() -> None:
     assert {
         "order_id", "order_code", "resultTable", "used_materials", "order_finish_report",
     } <= handle_keys
+    result_table_handles = [handle for handle in args["handles"] if handle["key"] == "resultTable"]
+    assert result_table_handles
+    assert len(result_table_handles) == 1
+    assert result_table_handles[0]["data_type"] == "table"
     for forbidden in ("preintakeIds", "materialIds", "preintake_ids", "material_ids"):
         assert forbidden not in handle_keys, (
             f"unload_materials 决策上不应再接收 {forbidden}：take-out 只传 [] / []"

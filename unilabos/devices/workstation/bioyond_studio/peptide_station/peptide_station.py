@@ -1108,10 +1108,10 @@ class BioyondPeptideStation(BioyondWorkstation):
                 data_source=DataSource.EXECUTOR,
             ),
             ActionOutputHandle(
-                key="all_stock_materials",
+                key="materials_by_order_id",
                 data_type="array",
-                label="实验台全部物料",
-                data_key="all_stock_materials",
+                label="订单实验台物料",
+                data_key="materials_by_order_id",
                 data_source=DataSource.EXECUTOR,
             ),
             ActionOutputHandle(
@@ -1149,7 +1149,7 @@ class BioyondPeptideStation(BioyondWorkstation):
 
         Returns:
             含 ``success``/``order_id``/``order_code``/``order_finish_status``/``order_finish_report``/
-            ``used_materials``/``all_stock_materials``/``resultTable``/``confirmation_message`` 的字典。
+            ``used_materials``/``materials_by_order_id``/``resultTable``/``confirmation_message`` 的字典。
         """
         with self._debug_call_session("wait_for_order_finish"):
             del kwargs
@@ -1236,17 +1236,13 @@ class BioyondPeptideStation(BioyondWorkstation):
                     mapped_status = "missing_status"
 
             # 6) 仅在 status 命中已知正常状态时拉取实验台物料；timeout / unknown / missing 不调。
-            all_materials: List[Dict[str, Any]] = []
+            materials_by_order_id: List[Dict[str, Any]] = []
+            unload_table = self._build_unload_table([])
             if mapped_status in {"success", "abnormal_stop", "manual_stop"} and normalized_order_id:
                 try:
-                    rpc_for_stock = self._require_hardware_interface()
-                    payload = {"orderId": normalized_order_id}
-                    stock_method = getattr(rpc_for_stock, "materials_by_order_id", None)
-                    if not callable(stock_method):
-                        raise RuntimeError("Bioyond RPC 客户端缺少 materials_by_order_id 方法")
-                    raw = stock_method(json.dumps(payload, ensure_ascii=False))
-                    if isinstance(raw, list):
-                        all_materials = list(raw)
+                    unload_payload = self._construct_unload_table_payload(normalized_order_id)
+                    materials_by_order_id = unload_payload["materials_by_order_id"]
+                    unload_table = unload_payload["resultTable"]
                 except Exception as exc:
                     logger.error(
                         f"[peptide] wait_for_order_finish 调用 materials_by_order_id 失败: {exc}",
@@ -1254,8 +1250,6 @@ class BioyondPeptideStation(BioyondWorkstation):
                     )
 
             # 7) 整理 resultTable（4 列 v2 结构）+ 序列化 used_materials。
-            unload_rows = self._build_unload_rows_from_all_stock_material(all_materials)
-            unload_table = self._build_unload_table(unload_rows)
             used_materials_serialized = [
                 self._used_material_to_dict(item) for item in self.last_used_materials
             ]
@@ -1267,12 +1261,32 @@ class BioyondPeptideStation(BioyondWorkstation):
                 "order_finish_status": mapped_status,
                 "order_finish_report": report if isinstance(report, dict) else {},
                 "used_materials": used_materials_serialized,
-                "all_stock_materials": all_materials,
+                "materials_by_order_id": materials_by_order_id,
                 "resultTable": unload_table,
                 "confirmation_message": (
-                    f"任务完成: status={mapped_status}; 已整理 {len(unload_rows)} 行下料指引"
+                    f"任务完成: status={mapped_status}; 已整理 {len(unload_table.get('data', []))} 行下料指引"
                 ),
             }
+
+    @action(
+        always_free=True,
+        goal_default={"order_id": ""},
+        description="按实验ID查询订单实验台物料并构造下料指引表，作为 wait_for_order_finish 的备用节点",
+        handles=[
+            ActionInputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.HANDLE, io_type="source"),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="materials_by_order_id", data_type="array", label="订单实验台物料", data_key="materials_by_order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="resultTable", data_type="object", label="下料指引表", data_key="resultTable", data_source=DataSource.EXECUTOR, io_type="target"),
+        ],
+    )
+    def construct_unload_table(self, order_id: str, **kwargs: Any) -> Dict[str, Any]:
+        """按 orderId UUID 查询物料并构造下料指引表。"""
+        del kwargs
+        normalized_order_id = str(order_id or "").strip()
+        if not normalized_order_id:
+            raise ValueError("construct_unload_table 需要 order_id")
+        with self._debug_call_session("construct_unload_table"):
+            return self._construct_unload_table_payload(normalized_order_id)
 
     @action(
         always_free=True,
@@ -1312,7 +1326,7 @@ class BioyondPeptideStation(BioyondWorkstation):
             ),
             ActionInputHandle(
                 key="resultTable",
-                data_type="object",
+                data_type="table",
                 label="下料指引表",
                 data_key="resultTable",
                 data_source=DataSource.HANDLE,
@@ -1360,6 +1374,7 @@ class BioyondPeptideStation(BioyondWorkstation):
     def unload_materials(
         self,
         order_id: str = "",
+        resultTable: Optional[Dict[str, Any]] = None,
         materials_unloaded: bool = False,
         timeout_seconds: int = 3600,
         assignee_user_ids: Optional[List[str]] = None,
@@ -1547,7 +1562,7 @@ class BioyondPeptideStation(BioyondWorkstation):
         return self._run_scheduler_action("scheduler_continue", "继续")
 
     @action(always_free=True, description="设置 Bioyond LIMS 推送到本机 HTTP 服务的 IP 和端口")
-    def set_http_server_ip_config(self, ip: str = "", port: int = 0) -> Dict[str, Any]:
+    def update_push_ip(self, ip: str = "", port: int = 0) -> Dict[str, Any]:
         """设置 Bioyond LIMS 回调/推送目标地址。
 
         Args:
@@ -1557,7 +1572,7 @@ class BioyondPeptideStation(BioyondWorkstation):
         target_ip = str(ip or self.bioyond_config.get("HTTP_host") or "").strip()
         target_port = int(port or self.bioyond_config.get("HTTP_port") or 0)
         rpc = self._require_hardware_interface("set_ip_config")
-        with self._debug_call_session("set_http_server_ip_config"):
+        with self._debug_call_session("update_push_ip"):
             raw = rpc.set_ip_config(target_ip, target_port)
         success = isinstance(raw, dict) and raw.get("code") == 1
         message = str(raw.get("message", "") or "") if isinstance(raw, dict) else ""
@@ -1734,7 +1749,6 @@ class BioyondPeptideStation(BioyondWorkstation):
             "success": bool(materials),
             "order_id": normalized_order_id,
             "materials": materials,
-            "all_stock_materials": materials,
             "material_count": len(materials),
         }
 
@@ -1789,7 +1803,16 @@ class BioyondPeptideStation(BioyondWorkstation):
             "message": "聚合报告尚未实现，请使用 get_order_report。",
         }
 
-    @action(always_free=True, description="查询订单报告文件列表")
+    @action(
+        always_free=True,
+        description="查询订单报告文件列表",
+        handles=[
+            ActionInputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.HANDLE, io_type="source"),
+            ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="file_zip", data_type="str", label="报告 ZIP 文件", data_key="file_zip", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="files", data_type="array", label="报告文件列表", data_key="files", data_source=DataSource.EXECUTOR),
+        ],
+    )
     def get_order_report_files(self, order_id: str) -> Dict[str, Any]:
         resolved = self._require_uuid(order_id, "order_id")
         rpc = self._require_hardware_interface()
@@ -1800,6 +1823,63 @@ class BioyondPeptideStation(BioyondWorkstation):
         zip_urls = [url for url in file_urls if url.lower().endswith(".zip")]
         file_zip = zip_urls[-1] if zip_urls else ""
         return {"success": True, "order_id": resolved, "file_zip": file_zip, "files": file_urls, "file_count": len(file_urls)}
+
+    @action(
+        always_free=True,
+        goal_default={"title": "", "values": None},
+        description="展示上游传入的任意内容",
+        handles=[
+            ActionInputHandle(key="values", data_type="str", label="内容", data_key="values", data_source=DataSource.HANDLE, io_type="source"),
+            ActionOutputHandle(key="title", data_type="str", label="标题", data_key="title", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="values", data_type="str", label="内容", data_key="values", data_source=DataSource.EXECUTOR),
+        ],
+    )
+    def display_values(self, title: str = "", values: Any = None, **kwargs: Any) -> Dict[str, Any]:
+        """普通展示节点：透传任意上游内容。"""
+        del kwargs
+        return {"success": True, "title": str(title or ""), "values": self._display_text(values)}
+
+    @action(
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
+        goal_default={
+            "title": "",
+            "values": None,
+            "display_confirmed": False,
+            "timeout_seconds": 3600,
+            "assignee_user_ids": [],
+        },
+        feedback_interval=300,
+        description="展示上游传入的任意内容，并等待人工确认",
+        handles=[
+            ActionInputHandle(key="values", data_type="str", label="内容", data_key="values", data_source=DataSource.HANDLE, io_type="source"),
+            ActionInputHandle(key="assignee_user_ids", data_type="array", label="确认人", data_key="assignee_user_ids", data_source=DataSource.HANDLE, io_type="source"),
+            ActionOutputHandle(key="title", data_type="str", label="标题", data_key="title", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="values", data_type="str", label="内容", data_key="values", data_source=DataSource.EXECUTOR),
+        ],
+    )
+    def display_values_manual_confirm(
+        self,
+        title: str = "",
+        values: Any = None,
+        display_confirmed: bool = False,
+        timeout_seconds: int = 3600,
+        assignee_user_ids: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """人工确认展示内容已查看。"""
+        del timeout_seconds, kwargs
+        if not self._as_manual_gate(display_confirmed):
+            raise RuntimeError("展示内容尚未确认")
+        return {
+            "success": True,
+            "title": str(title or ""),
+            "values": self._display_text(values),
+            "display_confirmed": True,
+            "assignee_user_ids": list(assignee_user_ids or []),
+            "instruction_text": "请查看内容，确认完成后勾选 display_confirmed。",
+        }
 
     # ---------- 样品 Excel ----------
 
@@ -2340,6 +2420,17 @@ class BioyondPeptideStation(BioyondWorkstation):
         return bool(value)
 
     @staticmethod
+    def _display_text(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except TypeError:
+            return str(value)
+
+    @staticmethod
     def _format_unload_quantity(q: Any) -> str:
         """把 materials-by-order-id 返回的 ``quantity`` 字段格式化成展示字符串。
 
@@ -2371,7 +2462,7 @@ class BioyondPeptideStation(BioyondWorkstation):
         return [str(item).strip() for item in source if str(item or "").strip()]
 
     @classmethod
-    def _build_unload_rows_from_all_stock_material(
+    def _build_unload_rows_from_materials_by_order_id(
         cls,
         all_materials: Optional[List[Dict[str, Any]]],
     ) -> List[Dict[str, Any]]:
@@ -2418,6 +2509,28 @@ class BioyondPeptideStation(BioyondWorkstation):
                     "quantity": cls._format_unload_quantity_with_unit(loc_quantity, unit),
                 })
         return rows
+
+    def _fetch_materials_by_order_id(self, order_id: str) -> List[Dict[str, Any]]:
+        normalized_order_id = str(order_id or "").strip()
+        if not normalized_order_id:
+            raise ValueError("materials_by_order_id 需要 order_id")
+        rpc_for_stock = self._require_hardware_interface("materials_by_order_id")
+        payload = {"orderId": normalized_order_id}
+        raw = rpc_for_stock.materials_by_order_id(json.dumps(payload, ensure_ascii=False))
+        return list(raw) if isinstance(raw, list) else []
+
+    def _construct_unload_table_payload(self, order_id: str) -> Dict[str, Any]:
+        normalized_order_id = str(order_id or "").strip()
+        materials_by_order_id = self._fetch_materials_by_order_id(normalized_order_id)
+        unload_rows = self._build_unload_rows_from_materials_by_order_id(materials_by_order_id)
+        unload_table = self._build_unload_table(unload_rows)
+        return {
+            "success": True,
+            "order_id": normalized_order_id,
+            "materials_by_order_id": materials_by_order_id,
+            "resultTable": unload_table,
+            "confirmation_message": f"已整理 {len(unload_rows)} 行下料指引",
+        }
 
     @staticmethod
     def _build_unload_table(
