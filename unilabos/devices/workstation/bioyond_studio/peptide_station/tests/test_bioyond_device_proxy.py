@@ -67,6 +67,72 @@ def _make_proxy(proxy_cls: Any, device_name: str) -> Any:
     )
 
 
+def test_proxy_init_tolerates_operation_snapshot_generation_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _import_module()
+    config_path = tmp_path / "bioyond_config.json"
+    config_path.write_text(json.dumps({"api_host": "http://bioyond.example", "api_key": "test-key"}), encoding="utf-8")
+    missing_snapshot_path = tmp_path / "missing_device_list_snapshot.json"
+    post_mock = MagicMock(side_effect=RuntimeError("device-list unavailable"))
+    monkeypatch.setattr(module.requests, "post", post_mock)
+
+    proxy = module.BioyondFridgeProxy(
+        config_path=str(config_path),
+        operation_snapshot_path=str(missing_snapshot_path),
+        bioyond_device_name="冰箱",
+    )
+
+    assert proxy.operation_snapshot is None
+    assert proxy._fixture_device is None
+    assert not missing_snapshot_path.exists()
+    assert post_mock.call_count == 1
+
+
+def test_missing_snapshot_is_generated_during_init_and_reused_for_action(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _import_module()
+    config_path = tmp_path / "bioyond_config.json"
+    config_path.write_text(json.dumps({"api_host": "http://bioyond.example", "api_key": "test-key"}), encoding="utf-8")
+    missing_snapshot_path = tmp_path / "missing_device_list_snapshot.json"
+    captured: Dict[str, Any] = {"urls": []}
+
+    def fake_post(url: str, data: str, headers: Dict[str, str], timeout: int) -> Any:
+        captured["urls"].append(url)
+        request_body = json.loads(data)
+        assert request_body["apiKey"] == "test-key"
+        if url.endswith("/api/lims/device/device-list"):
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {
+                    "code": 1,
+                    "data": [
+                        {
+                            "deviceName": "冰箱",
+                            "operations": [{"index": 2, "description": "关门", "cmd": "CloseDoor", "parameters": []}],
+                        }
+                    ],
+                },
+            )
+        captured["submitted_operation"] = request_body["data"]
+        return SimpleNamespace(status_code=200, json=lambda: {"code": 1, "message": "ok"})
+
+    monkeypatch.setattr(module.requests, "post", fake_post)
+    proxy = module.BioyondFridgeProxy(
+        config_path=str(config_path),
+        operation_snapshot_path=str(missing_snapshot_path),
+        bioyond_device_name="冰箱",
+    )
+
+    result = proxy.close_door()
+
+    assert result["success"] is True
+    assert missing_snapshot_path.exists()
+    assert json.loads(missing_snapshot_path.read_text(encoding="utf-8"))["data"][0]["deviceName"] == "冰箱"
+    assert captured["urls"] == [
+        "http://bioyond.example/api/lims/device/device-list",
+        "http://bioyond.example/api/lims/device/execute-operation",
+    ]
+    assert captured["submitted_operation"]["description"] == "关门"
+
+
 def test_fridge_close_builds_execute_operation_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _import_module()
     proxy = _make_proxy(module.BioyondFridgeProxy, "冰箱")

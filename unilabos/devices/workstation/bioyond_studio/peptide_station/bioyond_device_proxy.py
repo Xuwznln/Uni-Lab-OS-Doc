@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
 
@@ -59,8 +60,9 @@ class BioyondDeviceProxyBase:
         self.api_key = str(self.bioyond_config.get("api_key") or "")
         if not self.api_host or not self.api_key:
             raise ValueError("Bioyond device proxy requires api_host/api_key in station config")
-        self.operation_snapshot = self._load_json(self.operation_snapshot_path)
-        self._fixture_device = self._resolve_fixture_device()
+        self.operation_snapshot: Optional[Dict[str, Any]] = None
+        self._fixture_device: Optional[Dict[str, Any]] = None
+        self._ensure_operation_snapshot_file()
 
     @staticmethod
     def _load_json(path: str) -> Dict[str, Any]:
@@ -74,19 +76,66 @@ class BioyondDeviceProxyBase:
     def _now_iso8601() -> str:
         return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
+    def _fetch_operation_snapshot(self) -> Dict[str, Any]:
+        endpoint = f"{self.api_host}/api/lims/device/device-list"
+        request_body = {"apiKey": self.api_key, "requestTime": self._now_iso8601(), "data": ""}
+        try:
+            response = requests.post(
+                endpoint,
+                data=json.dumps(request_body, ensure_ascii=False),
+                headers={"Content-Type": "application/json"},
+                timeout=int(self.bioyond_config.get("timeout", 120) or 120),
+            )
+            snapshot = response.json() if response.status_code == 200 else {"code": 0, "message": response.text}
+        except Exception as exc:
+            raise RuntimeError(f"Bioyond device-list request failed: {exc}") from exc
+        if not isinstance(snapshot, dict):
+            raise ValueError("Bioyond device-list returned non-dict response")
+        if snapshot.get("code") != 1:
+            raise ValueError(f"Bioyond device-list failed: {snapshot.get('message', '')}")
+        self.operation_snapshot = snapshot
+        return snapshot
+
+    def _ensure_operation_snapshot_file(self) -> None:
+        if not self.operation_snapshot_path or os.path.exists(self.operation_snapshot_path):
+            return
+        try:
+            snapshot = self._fetch_operation_snapshot()
+            parent_dir = os.path.dirname(self.operation_snapshot_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(self.operation_snapshot_path, "w", encoding="utf-8") as file_obj:
+                json.dump(snapshot, file_obj, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            logger.error(f"Bioyond device operation snapshot generation failed: {exc}")
+
+    def _load_operation_snapshot(self) -> Dict[str, Any]:
+        if self.operation_snapshot is not None:
+            return self.operation_snapshot
+        if self.operation_snapshot_path and os.path.exists(self.operation_snapshot_path):
+            self.operation_snapshot = self._load_json(self.operation_snapshot_path)
+            return self.operation_snapshot
+        return self._fetch_operation_snapshot()
+
     def _resolve_fixture_device(self) -> Dict[str, Any]:
-        devices = self.operation_snapshot.get("data") or []
+        if self._fixture_device is not None:
+            return self._fixture_device
+        snapshot = self._load_operation_snapshot()
+        devices = snapshot.get("data") or []
         for device_item in devices:
             if not isinstance(device_item, dict):
                 continue
             if self.bioyond_device_id and str(device_item.get("id") or "") == self.bioyond_device_id:
+                self._fixture_device = device_item
                 return device_item
             if self.bioyond_device_name and str(device_item.get("deviceName") or "") == self.bioyond_device_name:
+                self._fixture_device = device_item
                 return device_item
         raise ValueError(f"Bioyond operation fixture lacks device: {self.bioyond_device_name or self.bioyond_device_id}")
 
     def _resolve_operation_template(self, description: str) -> Dict[str, Any]:
-        for operation in self._fixture_device.get("operations") or []:
+        fixture_device = self._resolve_fixture_device()
+        for operation in fixture_device.get("operations") or []:
             if isinstance(operation, dict) and operation.get("description") == description:
                 return copy.deepcopy(operation)
         raise ValueError(f"Bioyond fixture device {self.bioyond_device_name} lacks operation: {description}")
@@ -115,8 +164,8 @@ class BioyondDeviceProxyBase:
         return operation
 
     def _execute_operation(self, description: str, parameter_values: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        operation = self._build_operation_payload(description, parameter_values or {})
         endpoint = f"{self.api_host}/api/lims/device/execute-operation"
+        operation = self._build_operation_payload(description, parameter_values or {})
         request_body = {"apiKey": self.api_key, "requestTime": self._now_iso8601(), "data": operation}
         try:
             response = requests.post(
@@ -138,7 +187,7 @@ class BioyondDeviceProxyBase:
             "timestamp": response_data.get("timestamp"),
             "data": response_data.get("data"),
             "endpoint": endpoint,
-            "device_name": self.bioyond_device_name or self._fixture_device.get("deviceName", ""),
+            "device_name": self.bioyond_device_name or (self._fixture_device or {}).get("deviceName", ""),
             "operation": description,
             "response": response_data,
             "submitted_operation": operation,
@@ -821,4 +870,3 @@ class BioyondSafetyMonitorProxy(BioyondDeviceProxyBase):
         """清错。"""
         del kwargs
         return self._execute_operation('清错', {})
-
