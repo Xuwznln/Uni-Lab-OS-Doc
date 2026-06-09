@@ -8,7 +8,7 @@
   结构、同名物料多库位拆多行、空 location 占位。
 - ``wait_for_order_finish``：超时、立即唤醒、status 映射、用 ``order_id`` 调
   ``all_stock_material``（不是 order_code）、``order_code`` 兜底反查、缺 order_id 报错。
-- ``unload_materials``：``materials_unloaded=False`` raise；调用 ``rpc.take_out(order_id, [], [])``；
+- ``unload_materials``：缺 ``order_id`` raise；点击确认即调用 ``rpc.take_out(order_id, [], [])``；
   code==1 → success，code==99 → success=False。
 - AST 可见性：``wait_for_order_finish`` / ``unload_materials`` / ``start_experiment`` 的
   metadata（goal_default、handles、placeholder_keys、node_type）符合 plan 设计。
@@ -498,18 +498,11 @@ class _FakeRPCForUnload:
         return self._response
 
 
-def test_unload_materials_raises_without_confirmation() -> None:
-    station = _fresh_station()
-    station.hardware_interface = _FakeRPCForUnload()
-    with pytest.raises(RuntimeError, match="下料未确认"):
-        station.unload_materials(order_id="OID-1", materials_unloaded=False)
-
-
 def test_unload_materials_raises_without_order_id() -> None:
     station = _fresh_station()
     station.hardware_interface = _FakeRPCForUnload()
     with pytest.raises(ValueError, match="order_id"):
-        station.unload_materials(order_id="", materials_unloaded=True)
+        station.unload_materials(order_id="")
 
 
 def test_unload_materials_calls_take_out_with_empty_id_lists() -> None:
@@ -518,7 +511,7 @@ def test_unload_materials_calls_take_out_with_empty_id_lists() -> None:
     rpc = _FakeRPCForUnload(response={"code": 1, "data": {}, "message": "OK"})
     station.hardware_interface = rpc
 
-    result = station.unload_materials(order_id="OID-1", materials_unloaded=True)
+    result = station.unload_materials(order_id="OID-1")
 
     assert rpc.take_out_calls == [("OID-1", [], [])]
     assert result["success"] is True
@@ -531,7 +524,7 @@ def test_unload_materials_reports_failure_when_take_out_code_not_one() -> None:
     rpc = _FakeRPCForUnload(response={"code": 99, "message": "service error"})
     station.hardware_interface = rpc
 
-    result = station.unload_materials(order_id="OID-1", materials_unloaded=True)
+    result = station.unload_materials(order_id="OID-1")
     assert rpc.take_out_calls == [("OID-1", [], [])]
     assert result["success"] is False
     assert "service error" in result["confirmation_message"]
@@ -542,7 +535,7 @@ def test_unload_materials_handles_non_dict_take_out_response() -> None:
     rpc = _FakeRPCForUnload(response=None)
     station.hardware_interface = rpc
 
-    result = station.unload_materials(order_id="OID-1", materials_unloaded=True)
+    result = station.unload_materials(order_id="OID-1")
     assert result["success"] is False
     assert result["take_out_result"] == {}
 
@@ -607,7 +600,9 @@ def test_unload_materials_is_ast_visible_as_manual_confirm() -> None:
 
     goal_default = args["goal_default"]
     assert goal_default["order_id"] == ""
-    assert goal_default["materials_unloaded"] is False
+    assert "materials_unloaded" not in goal_default, (
+        "materials_unloaded 门禁已移除，goal_default 不应再包含该字段"
+    )
     assert goal_default["timeout_seconds"] == 3600
 
     handle_keys = {handle["key"] for handle in args["handles"]}

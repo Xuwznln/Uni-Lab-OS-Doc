@@ -1687,14 +1687,13 @@ class BioyondSirnaStation(BioyondWorkstation):
         },
         goal_default={
             "order_id": "",
-            "materials_unloaded": False,
             "timeout_seconds": 3600,
             "assignee_user_ids": [],
         },
         feedback_interval=300,
         description=(
             "展示上一节点 wait_for_order_finish 整理的下料指引表；"
-            "操作员物理取出后勾选 materials_unloaded=True，本节点再调用 "
+            "操作员物理取出后点击确认通过，本节点即调用 "
             "/api/lims/order/take-out 通知奔耀下料完成（preintakeIds=[], materialIds=[]）。"
         ),
         handles=[
@@ -1764,19 +1763,17 @@ class BioyondSirnaStation(BioyondWorkstation):
     def unload_materials(
         self,
         order_id: str = "",
-        materials_unloaded: bool = False,
         timeout_seconds: int = 3600,
         assignee_user_ids: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """人工下料确认节点：勾选「已完成下料」后调用 ``take-out`` 通知奔耀。
+        """人工下料确认节点：操作员点击确认通过后调用 ``take-out`` 通知奔耀。
 
         plan 决策：``take_out`` 形参恒为 ``(order_id, [], [])`` —— 不按物料挑选，
-        由奔耀根据订单自己决定取出范围；本节点只负责"展示给人看 + 勾选后通知"。
+        由奔耀根据订单自己决定取出范围；本节点只负责"展示给人看 + 确认后通知"。
 
         Args:
             order_id: 上游 ``wait_for_order_finish`` 提供的订单 UUID（必填）。
-            materials_unloaded: 操作员勾选确认物理下料已完成；未勾选则 ``raise RuntimeError``。
             timeout_seconds: 框架超时时间（秒，本动作不读）。
             assignee_user_ids: 框架分配用户 ID 列表（本动作不读）。
 
@@ -1791,9 +1788,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 raise ValueError(
                     "unload_materials 需要 order_id（请连接 wait_for_order_finish.order_id 或显式传入）"
                 )
-
-            if not self._as_manual_gate(materials_unloaded):
-                raise RuntimeError("下料未确认，拒绝调用 take-out")
 
             rpc = self._require_hardware_interface("take_out")
             logger.info(
