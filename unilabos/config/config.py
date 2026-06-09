@@ -54,6 +54,14 @@ class HTTPConfig:
     schedule_addr = ""
 
 
+# 甘特图回传配置（scheduler 下发 device_info 消息时，edge 拉甘特并回传后端）
+class GanttReportConfig:
+    # 总开关：关闭时收到 device_info 也不上报
+    enabled = True
+    # 回传接口 path，拼接在 HTTPConfig.remote_addr（已含 /api/v1）之后
+    report_path = "/edge/job/result"
+
+
 # ROS配置
 class ROSConfig:
     modules = [

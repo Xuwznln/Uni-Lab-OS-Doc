@@ -781,6 +781,8 @@ class MessageProcessor:
                 await self._handle_device_manage(message_data, "remove")
             elif message_type == "request_restart":
                 await self._handle_request_restart(message_data)
+            elif message_type == "device_info":
+                await self._handle_device_info(message_data)
             else:
                 logger.debug(f"[MessageProcessor] Unknown message type: {message_type}")
 
@@ -793,6 +795,59 @@ class MessageProcessor:
         host_node = HostNode.get_instance(0)
         if host_node:
             host_node.handle_pong_response(pong_data)
+
+    async def _handle_device_info(self, message_data: Dict[str, Any]):
+        """处理 scheduler 下发的 device_info 消息（即甘特图回传触发）。
+
+        仅定位设备实例并调用其 ``report_gantt_by_order``（内部起后台线程），**不在 ws 消息循环里**
+        做网络/RPC，保证不阻塞、不影响正常消息处理。
+        """
+        if not isinstance(message_data, dict):
+            logger.error("[MessageProcessor] device_info 缺少 data 字段")
+            return
+
+        uuid = str(message_data.get("uuid", "") or "").strip()
+        if not uuid:
+            logger.error("[MessageProcessor] device_info 缺少 uuid，忽略")
+            return
+
+        # 必须显式携带 device_id；缺失则不触发甘特回传
+        device_id = str(message_data.get("device_id", "") or "").strip()
+        if not device_id:
+            logger.warning(
+                f"[MessageProcessor] device_info 未携带 device_id，不触发甘特回传 uuid={uuid}"
+            )
+            return
+
+        host_node = HostNode.get_instance(0)
+        if not host_node:
+            logger.error(f"[MessageProcessor] HostNode 不可用，无法处理 device_info uuid={uuid}")
+            return
+
+        station = self._locate_gantt_station(host_node, device_id)
+        if station is None:
+            logger.error(
+                f"[MessageProcessor] device_id={device_id} 未定位到可上报甘特的设备实例，"
+                f"不触发 uuid={uuid}"
+            )
+            return
+
+        try:
+            station.report_gantt_by_order(uuid)
+        except Exception as exc:
+            logger.error(
+                f"[MessageProcessor] 触发甘特图回传失败 uuid={uuid}: {exc}", exc_info=True
+            )
+
+    @staticmethod
+    def _locate_gantt_station(host_node: Any, device_id: str) -> Any:
+        """按 device_id 精确定位甘特上报的设备驱动实例；找不到/无能力则返回 None（不兜底）。"""
+        devices_instances = getattr(host_node, "devices_instances", {}) or {}
+        node = devices_instances.get(device_id)
+        driver = getattr(node, "driver_instance", None) if node else None
+        if driver is not None and hasattr(driver, "report_gantt_by_order"):
+            return driver
+        return None
 
     def _check_action_always_free(self, device_id: str, action_name: str) -> bool:
         """检查该action是否标记为always_free，通过HostNode统一的_action_value_mappings查找"""

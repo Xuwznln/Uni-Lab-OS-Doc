@@ -425,6 +425,10 @@ class BioyondSirnaStation(BioyondWorkstation):
         self.last_order_report: Optional[Dict[str, Any]] = None
         self.last_used_materials: List[Any] = []
 
+        # 甘特图回传：同 uuid 幂等去重 + 并发保护
+        self._gantt_report_lock: threading.Lock = threading.Lock()
+        self._gantt_reported_uuids: set[str] = set()
+
         logger.info("BioyondSirnaStation 初始化完成")
 
     @not_action
@@ -2301,6 +2305,82 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "timeline": timeline,
             }
             return result
+
+    @not_action
+    def report_gantt_by_order(self, uuid: str) -> None:
+        """收到 scheduler ``device_info`` 触发后，后台一次性拉甘特并回传后端。
+
+        通过 ``get_order_list(status="执行中（60）", latest_only=False)`` **实时查询** LIMS 所有正在
+        执行的订单，逐个调 ``gantt_with_simulation_by_order_id`` 取**完整原始响应**，汇总成一个数组，
+        **只 POST 一次**（body 的 ``data`` 为该数组，每个元素是一个订单甘特接口的原始响应）。当前无
+        执行中订单时记日志跳过。``uuid`` 仅作回传 body 的 ``uuid`` 字段。整个过程在后台 daemon 线程
+        执行，绝不阻塞调用方（ws 消息循环），异常只记日志不外抛。
+        """
+        from unilabos.config.config import GanttReportConfig
+
+        if not GanttReportConfig.enabled:
+            logger.info("甘特图回传已禁用(GanttReportConfig.enabled=False)，跳过 uuid=%s", uuid)
+            return
+
+        normalized_uuid = str(uuid or "").strip()
+        if not normalized_uuid:
+            logger.error("report_gantt_by_order 缺少 uuid，跳过")
+            return
+
+        with self._gantt_report_lock:
+            if normalized_uuid in self._gantt_reported_uuids:
+                logger.info("甘特图回传 uuid=%s 已触发过，跳过(幂等)", normalized_uuid)
+                return
+            self._gantt_reported_uuids.add(normalized_uuid)
+
+        thread = threading.Thread(
+            target=self._gantt_report_worker,
+            args=(normalized_uuid,),
+            name=f"gantt-report-{normalized_uuid[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        logger.info("甘特图回传线程已启动: uuid=%s", normalized_uuid)
+
+    @not_action
+    def _gantt_report_worker(self, uuid: str) -> None:
+        """后台线程体：实时查所有执行中订单 → 逐个拉甘特(原始响应)汇总成数组 → 一次性 POST 回传。"""
+        try:
+            order_result = self.get_order_list(status="执行中（60）", latest_only=False)
+            order_ids = [
+                str(oid).strip()
+                for oid in (order_result or {}).get("order_ids", [])
+                if str(oid).strip()
+            ]
+            if not order_ids:
+                logger.error(
+                    "甘特图回传：未查询到执行中(60)的订单，跳过 uuid=%s",
+                    uuid,
+                )
+                return
+            rpc = self._require_hardware_interface("gantt_with_simulation_by_order_id")
+            gantts: List[Any] = []
+            for order_id in order_ids:
+                try:
+                    gantts.append(
+                        rpc.gantt_with_simulation_by_order_id(order_id, return_envelope=True)
+                    )
+                except Exception as exc:
+                    logger.error("甘特图拉取失败 order_id=%s: %s", order_id, exc)
+            if not gantts:
+                logger.error("甘特图回传：所有订单拉取均失败，跳过 uuid=%s", uuid)
+                return
+            logger.info(
+                "甘特图拉取完成: uuid=%s 执行中订单数=%s 成功=%s",
+                uuid,
+                len(order_ids),
+                len(gantts),
+            )
+            from unilabos.app.web import http_client
+
+            http_client.report_gantt(uuid, gantts)
+        except Exception as exc:
+            logger.error("甘特图回传失败 uuid=%s: %s", uuid, exc, exc_info=True)
 
     def _require_hardware_interface(self, method_name: str) -> Any:
         rpc = getattr(self, "hardware_interface", None)
