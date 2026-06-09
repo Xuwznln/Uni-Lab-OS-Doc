@@ -141,6 +141,72 @@ class TestTransferLiquid8Channel:
         assert calls[0]["asp_flow_rates"] == asp_flow[0:8]
         assert calls[1]["asp_flow_rates"] == asp_flow[8:16]
 
+    def test_8channel_distribute_targets_equal_M(self) -> None:
+        """distribute：sources=8（单列）、targets=9（M 个锚）、vols=72（8×M）。
+
+        复现 00222e-dd/Drug Dosing 真实形态：旧实现因 targets=9 不被 8 整除而 ValueError。
+        修复（见 01-multi-channel-flatten.md §6.1）后应放行并按组分发：M=9 次
+        _transfer_base_method，sources 整列 tile 复用、targets 每锚复制 8、vols 取 8 切片。
+        """
+        handler = self._make_handler()
+        sources = [_Well(f"S{i}") for i in range(8)]  # 单列 8 孔
+        targets = [_Well(f"T{i}") for i in range(9)]  # 9 个锚 = M
+        asp_vols = [float(i) for i in range(72)]      # 8×M
+        dis_vols = [float(100 + i) for i in range(72)]
+
+        calls: List[dict] = []
+
+        async def _capture(*args: Any, **kwargs: Any) -> Any:
+            calls.append(dict(kwargs))
+
+        handler._transfer_base_method = _capture  # type: ignore[assignment]
+
+        with _patch_serialize():
+            _run(
+                handler.transfer_liquid(
+                    sources=sources,
+                    targets=targets,
+                    tip_racks=[object()],
+                    use_channels=list(range(8)),
+                    asp_vols=asp_vols,
+                    dis_vols=dis_vols,
+                )
+            )
+
+        assert len(calls) == 9, f"M=9 应分发 9 次，实际 {len(calls)}"
+        # 第 0 组：sources 整列复用、targets 每锚复制 8、vols 取 [0:8]
+        assert calls[0]["sources"] == sources[0:8]
+        assert calls[0]["targets"] == [targets[0]] * 8
+        assert calls[0]["asp_vols"] == asp_vols[0:8]
+        assert calls[0]["dis_vols"] == dis_vols[0:8]
+        # 第 8 组（最后一组）
+        assert calls[8]["sources"] == sources[0:8]
+        assert calls[8]["targets"] == [targets[8]] * 8
+        assert calls[8]["dis_vols"] == dis_vols[64:72]
+
+    def test_8channel_requires_vols_divisible_by_8(self) -> None:
+        """vols 非 8 倍数（=9）应报错；targets=9 不再因此被拒。"""
+        handler = self._make_handler()
+        sources = [_Well(f"S{i}") for i in range(9)]
+        targets = [_Well(f"T{i}") for i in range(9)]
+
+        async def _capture(*args: Any, **kwargs: Any) -> Any:
+            return None
+
+        handler._transfer_base_method = _capture  # type: ignore[assignment]
+
+        with _patch_serialize(), pytest.raises(ValueError, match="divisible by 8"):
+            _run(
+                handler.transfer_liquid(
+                    sources=sources,
+                    targets=targets,
+                    tip_racks=[object()],
+                    use_channels=list(range(8)),
+                    asp_vols=[1.0] * 9,
+                    dis_vols=[1.0] * 9,
+                )
+            )
+
 
 @_skip_if_no_plr
 class TestTransferBaseMethodMultiChannelTips:

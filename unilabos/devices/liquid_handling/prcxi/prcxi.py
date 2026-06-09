@@ -228,9 +228,12 @@ class PRCXI9300Deck(Deck):
             raise ValueError(f"No available site on deck '{self.name}' for resource '{resource.name}'")
 
         if not reassign and self._get_site_resource(idx) is not None:
-            existing = self.root.get_resource(resource.name)
-            if existing is not resource and existing.parent is not None:
-                existing.parent.unassign_child_resource(existing)
+            # 当指定 slot 已占用时，直接按 slot 现有占位物料做替换。
+            # 旧逻辑按 ``resource.name`` 去 root 检索，若名称尚未注册会抛 ResourceNotFoundError，
+            # 进而把可恢复的 create_resource 变成硬失败。
+            occupant = self._get_site_resource(idx)
+            if occupant is not None and occupant is not resource and occupant.parent is not None:
+                occupant.parent.unassign_child_resource(occupant)
 
 
         loc = self._get_site_location(idx)
@@ -839,8 +842,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         xy_coupling = -0.0045,
         calibration_points: Optional[Dict[str, List[List[float]]]] = None,
         calibration_labware_type: Optional[str] = "PRCXI_300ul_Tips",
-        has_true_8channel: bool = False,
         pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
+        skip_position_recalc_when_matrix_exists: bool = True,
     ):
         # 枪头轴配置：``{"left": {"vol": 100, "channels": 8}, "right": {"vol": 1000, "channels": 1}}``
         # 代表左轴 100µL/8 通道、右轴 1000µL/1 通道。None → 走 legacy 路由（≤10µL→右单通道[1]、
@@ -848,11 +851,15 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         # 按「通道优先、再看体积」选轴，通道编号约定左[0..7]/右[8..15]，channels 即真并行度。
         self.pip_setting: Optional[Dict[str, Dict[str, Any]]] = _normalize_pip_setting(pip_setting)
 
-        # P1 v5 — 是否为「真 8 通道并行」硬件。9300 / 9320 物理上是单 pipette 头
-        # （head 上虽有 8 个 tip 工位但只能顺序点动），默认 False；未来 9600 / 真 8
-        # 通道 head 上线时 YAML / registry 把这个值置 True，跳过 ``transfer_liquid``
-        # 顶部的 8→1 扁平化分支。详见 ``product_designs/protocol_convert/01-multi-channel-flatten.md`` §11.
-        self.has_true_8channel: bool = bool(has_true_8channel)
+        # 根据 pip_setting 判断是否为「真 8 通道并行」硬件。若 pip_setting 任一轴 channels >= 8，则视为真 8 通道。
+        self.has_true_8channel: bool = (
+            self.pip_setting is not None and
+            any(
+                isinstance(cfg, dict) and cfg.get("channels", 0) >= 8
+                for cfg in self.pip_setting.values()
+            )
+        )
+ 
 
         self._rail_width = rail_width
         self._rail_interval = rail_interval
@@ -868,6 +875,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self.calibration_labware_type = calibration_labware_type
         self.max_z_pipetting = 185
         self.max_z_claw = 300
+        # 类级配置：当 backend.matrix_id 已存在时，是否跳过运行期位置重算/回写。
+        # 设为 True 可避免每次 transfer 重复 update_pipetting_position。
+        self.skip_position_recalc_when_matrix_exists = bool(
+            skip_position_recalc_when_matrix_exists
+        )
 
         if calibration_points is not None:
             self.calibrate_from_points(calibration_points, labware_type=self.calibration_labware_type)
@@ -912,6 +924,18 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
     def _get_slot_number(resource) -> Optional[int]:
         """从 resource 的 unilabos_extra["update_resource_site"]（如 "T13"）或位置反算槽位号。"""
         return _get_slot_number(resource)
+
+    def _matrix_id_has_value(self) -> bool:
+        """当前 backend.matrix_id 是否已有有效值。"""
+        matrix_id = str(getattr(self._unilabos_backend, "matrix_id", "") or "").strip()
+        return bool(matrix_id)
+
+    def _should_skip_runtime_position_recalc(self) -> bool:
+        """是否跳过运行期位置重算（供各方法复用）。"""
+        return (
+            self.skip_position_recalc_when_matrix_exists
+            and self._matrix_id_has_value()
+        )
 
     def _top_level_consumable(self, resource):
         """从任意 PLR 资源沿 parent 向上找"放在 deck 上的那一层耗材"。"""
@@ -1545,6 +1569,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         pre_aspirate_from_target: Optional[float] = None,
         none_keys: List[str] = [],
     ) -> TransferLiquidReturn:
+        # 必须在 _match_and_create_matrix 之前判断：
+        # _match_and_create_matrix 会在首次 transfer 时创建 matrix_id，若在其后判断会恒为「有值」。
+        skip_pipetting_position_recalc = self._should_skip_runtime_position_recalc()
         if not self._first_transfer_done:
             self._match_and_create_matrix()
             self._first_transfer_done = True
@@ -1683,66 +1710,68 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if small_vols and self._tip_rack_is_10ul_range(tip_rack) and not _explicit_multi:
                 use_channels = [1]
                 mix_vol = max(min(mix_vol, 10), 0) if mix_vol is not None else None
-        # P2 v2：跨板 transfer_liquid 场景下 sources / targets 列表里可能引用多个 plate
-        # （v1 旧实现只取 [0] 会漏掉 slot 3/5/6 的位置同步）。这里改为遍历所有 source/target
-        # 的 parent plate，按首次出现顺序去重——既保证跨板都能 update_pipetting_position，
-        # 又避免同板多孔重复发送。详见 02-cross-slot-merge.md §3.3.2 / §9.5 step 5。
-        change_slots = []
-        seen_plates = set()
-
-        def _push_unique_plate(plate_obj):
-            if plate_obj is None:
-                return
-            pname = getattr(plate_obj, "name", None) or id(plate_obj)
-            if pname in seen_plates:
-                return
-            seen_plates.add(pname)
-            change_slots.append(plate_obj)
-
-        for src in sources:
-            _push_unique_plate(getattr(src, "parent", None))
-        for tgt in targets:
-            _push_unique_plate(getattr(tgt, "parent", None))
-        _push_unique_plate(tip_rack)
-
         self.tip_height = tip_rack.children[0].get_size_z()
+        # matrix_id 已有值时，跳过板位重算；仅在首次创建 matrix 后回写板位坐标。
+        if not skip_pipetting_position_recalc:
+            # P2 v2：跨板 transfer_liquid 场景下 sources / targets 列表里可能引用多个 plate
+            # （v1 旧实现只取 [0] 会漏掉 slot 3/5/6 的位置同步）。这里改为遍历所有 source/target
+            # 的 parent plate，按首次出现顺序去重——既保证跨板都能 update_pipetting_position，
+            # 又避免同板多孔重复发送。详见 02-cross-slot-merge.md §3.3.2 / §9.5 step 5。
+            change_slots = []
+            seen_plates = set()
 
-        change_slots_positions = []
-        for slot in change_slots:
-        
-            number = self._get_slot_number(slot)
-            
-            well = slot.children[0]
-            # 板叠放在 module/plate_adapter 上时，移液头按「无支撑基准 - support」抬高一层；
-            # support 取支撑层真实高度（云端反序列化的 get_size_z 常为 0，需 _recover_height 还原）。
-            slot_parent = getattr(slot, "parent", None)
-            if isinstance(slot_parent, (PRCXI9300ModuleSite, PlateAdapter)):
-                support = self._recover_height(slot_parent)
-                support_layer = slot_parent
-            else:
-                support, support_layer = 0.0, None
-            pip_pos = self.plr_pos_to_prcxi(well)
-            pip_pos.z = self._support_free_prcxi_z(well, slot, support, support_layer) - support
-            half_x = well.get_size_x() / 2 * abs(1 + self.x_increase)
-            z_wall = self._recover_height(slot)
+            def _push_unique_plate(plate_obj):
+                if plate_obj is None:
+                    return
+                pname = getattr(plate_obj, "name", None) or id(plate_obj)
+                if pname in seen_plates:
+                    return
+                seen_plates.add(pname)
+                change_slots.append(plate_obj)
 
-            change_slots_positions.append({
-                "Number": number,
-                "XPos": pip_pos.x,
-                "YPos": pip_pos.y,
-                "ZPos": pip_pos.z, 
-                "X_Left": half_x,
-                "X_Right": half_x,
-                "ZAgainstTheWall": pip_pos.z - z_wall,
-                "X2Pos": pip_pos.x + self.right_2_left.x,
-                "Y2Pos": pip_pos.y + self.right_2_left.y,
-                "Z2Pos": pip_pos.z + self.right_2_left.z,
-                "X2_Left": half_x,
-                "X2_Right": half_x,
-                "ZAgainstTheWall2": pip_pos.z - z_wall,
-            })
-        if change_slots_positions:
-            self._unilabos_backend.api_client.update_pipetting_position(self._unilabos_backend.matrix_id, change_slots_positions)
+            for src in sources:
+                _push_unique_plate(getattr(src, "parent", None))
+            for tgt in targets:
+                _push_unique_plate(getattr(tgt, "parent", None))
+            _push_unique_plate(tip_rack)
+
+            change_slots_positions = []
+            for slot in change_slots:
+                number = self._get_slot_number(slot)
+
+                well = slot.children[0]
+                # 板叠放在 module/plate_adapter 上时，移液头按「无支撑基准 - support」抬高一层；
+                # support 取支撑层真实高度（云端反序列化的 get_size_z 常为 0，需 _recover_height 还原）。
+                slot_parent = getattr(slot, "parent", None)
+                if isinstance(slot_parent, (PRCXI9300ModuleSite, PlateAdapter)):
+                    support = self._recover_height(slot_parent)
+                    support_layer = slot_parent
+                else:
+                    support, support_layer = 0.0, None
+                pip_pos = self.plr_pos_to_prcxi(well)
+                pip_pos.z = self._support_free_prcxi_z(well, slot, support, support_layer) - support
+                half_x = well.get_size_x() / 2 * abs(1 + self.x_increase)
+                z_wall = self._recover_height(slot)
+
+                change_slots_positions.append({
+                    "Number": number,
+                    "XPos": pip_pos.x,
+                    "YPos": pip_pos.y,
+                    "ZPos": pip_pos.z,
+                    "X_Left": half_x,
+                    "X_Right": half_x,
+                    "ZAgainstTheWall": pip_pos.z - z_wall,
+                    "X2Pos": pip_pos.x + self.right_2_left.x,
+                    "Y2Pos": pip_pos.y + self.right_2_left.y,
+                    "Z2Pos": pip_pos.z + self.right_2_left.z,
+                    "X2_Left": half_x,
+                    "X2_Right": half_x,
+                    "ZAgainstTheWall2": pip_pos.z - z_wall,
+                })
+            if change_slots_positions:
+                self._unilabos_backend.api_client.update_pipetting_position(
+                    self._unilabos_backend.matrix_id, change_slots_positions
+                )
 
 
         # P1 v5（Q6=B）：扁平化路径下调 super 时临时关 liquids-keep，防跨孔同名物料潜在污染。

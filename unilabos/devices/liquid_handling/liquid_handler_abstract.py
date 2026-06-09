@@ -2070,8 +2070,27 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         elif len(use_channels) == 8:
             if self.channel_num != 8:
                 raise ValueError(f"if channel_num is 8, use_channels length must be 8, but got {len(use_channels)}")
-            if num_sources%8 != 0 or num_targets%8 != 0 or len_asp_vols%8 != 0 or len_dis_vols%8 != 0:
-                raise ValueError(f"if channel_num is 8, sources, targets, asp_vols, and dis_vols length must be divisible by 8, but got {num_sources}, {num_targets}, {len_asp_vols}, and {len_dis_vols}")
+            # P1 多通道约定（见 product_designs/protocol_convert/01-multi-channel-flatten.md §6.1）：
+            # asp_vols/dis_vols 长度为 8×M（M=列锚条目数），sources/targets 可能是 8×M（plate 整列展开）
+            # 或 M（reservoir/distribute/跨槽，每锚 1 个 well，运行时按通道复制）。
+            # 核心约束：体积数组为 8 的倍数且 asp==dis；sources/targets 各自为 %8==0 或 ==M。
+            if len_asp_vols % 8 != 0 or len_dis_vols % 8 != 0 or len_asp_vols != len_dis_vols:
+                raise ValueError(
+                    "if channel_num is 8, asp_vols and dis_vols length must be divisible by 8 and equal, "
+                    f"but got asp_vols={len_asp_vols}, dis_vols={len_dis_vols}"
+                )
+            _M = len_asp_vols // 8
+            # ``sources/targets`` 在真实工作流里可能是 1 / M / 8 / 8*M，也可能是其它长度
+            # （例如跨阶段拼接后出现 17 这类长度）。后续 ``_resolve_per_channel`` 会统一规整到
+            # 8*M 并按组切片处理，这里不再提前拒绝，避免把可执行输入误判为错误。
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                try:
+                    self._ros_node.lab_logger().debug(
+                        "[T-DBG] 8ch shape accepted: "
+                        f"sources={num_sources}, targets={num_targets}, M={_M}, total={8 * _M}"
+                    )
+                except Exception:
+                    pass
 
         if is_96_well:
             pass  # This mode is not verified.
@@ -2231,30 +2250,89 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 if drop_tip:
                     current_tip_liquid_name = None
         else:
-            # len(use_channels) == 8：按列（每 8 孔一组 A~H）复用 _transfer_base_method。
-            # 用户决策：每列换新枪头（pick_up/drop=True），不做列间复用。
-            # 上方 2071-2075 已校验 channel_num==8 且各长度为 8 的倍数，故 max_len 为 8 的倍数。
-            max_len = max(num_sources, num_targets, len_asp_vols, len_dis_vols)
+            # len(use_channels) == 8：真 8 通道并行，按组（每 8 通道一组）调用 _transfer_base_method。
+            # 用户决策：每组换新枪头（pick_up/drop=True），不做组间复用。
+            # asp_vols/dis_vols 长度 = 8×M（M=列锚条目数，上方已校验）；sources/targets 为 8×M 或 M。
+            # 设计见 product_designs/protocol_convert/01-multi-channel-flatten.md §6.1。
+            M = len_asp_vols // 8
 
-            def _col8(seq, c):
-                """取第 c 列（8 孔）切片；空/None → None（视为未提供）。"""
+            def _resolve_per_channel(seq):
+                """把序列规整为长度 8×M，供逐组 8 切片；空/None → None（可选参数未提供）。
+
+                - 8×M：原样（plate 整列展开）
+                - M（且 != 8）：每元素复制 8 次（reservoir/distribute，每锚共享）
+                - 8 或 M==8：整列 tile M 次（单列源/目标逐组复用）
+                - 1：广播为 8×M
+                - 其它：
+                  - n > 8 且末组不完整：仅用末组尾段循环补齐，避免跨组取模导致列混排
+                  - 其余兜底：按 i%n 取模填满 8×M
+                """
                 if not seq:
                     return None
                 n = len(seq)
-                return [seq[(c + j) % n] for j in range(8)]
+                total = 8 * M
+                if n == total:
+                    return list(seq)
+                if n == M and n != 8:
+                    out = []
+                    for w in seq:
+                        out.extend([w] * 8)
+                    return out
+                if n == 8 or n == M:  # 单列（含 M==8 边界）→ 逐组 tile
+                    return list(seq) * M
+                if n == 1:
+                    return [seq[0]] * total
+                if n > total:
+                    return list(seq[:total])
+                if n < total and n > 8:
+                    rem = n % 8
+                    if rem != 0:
+                        # 示例：17 -> 24 时，保留前 16（2 组完整）+ 用最后 1 个元素补齐第三组，
+                        # 避免旧逻辑跨组循环成 [x, ... prev_group...] 造成 8 通道混列。
+                        out = list(seq)
+                        tail = list(seq[-rem:])
+                        while len(out) < total:
+                            out.append(tail[(len(out) - n) % rem])
+                        return out
+                return [seq[i % n] for i in range(total)]
 
-            for c in range(0, max_len, 8):
+            sources_r = _resolve_per_channel(sources)
+            targets_r = _resolve_per_channel(targets)
+            asp_vols_r = list(asp_vols)
+            dis_vols_r = list(dis_vols)
+
+            def _group_source_key(group_idx: int):
+                lo2, hi2 = group_idx * 8, (group_idx + 1) * 8
+                grp = sources_r[lo2:hi2]
+                return tuple(f"{getattr(s.parent, 'name', '?')}/{s.name}" for s in grp)
+
+            for k in range(M):
+                lo, hi = k * 8, (k + 1) * 8
+                # P10 v2（8 通道）：当相邻组 source 完全一致时复用枪头，缓解大批量流程 tip 耗尽。
+                # 规则：
+                # - 与前一组 source 一致 -> 本组不 pick_up
+                # - 与后一组 source 一致 -> 本组不 drop
+                # - 其它情况维持 pick/drop
+                cur_key = _group_source_key(k)
+                prev_key = _group_source_key(k - 1) if k > 0 else None
+                next_key = _group_source_key(k + 1) if k + 1 < M else None
+                if tip_reuse_by_liquid_name:
+                    pick_up = not (prev_key is not None and cur_key == prev_key)
+                    drop = not (next_key is not None and cur_key == next_key)
+                else:
+                    pick_up = True
+                    drop = True
                 kwargs = {
-                    'sources': _col8(sources, c),
-                    'targets': _col8(targets, c),
+                    'sources': sources_r[lo:hi],
+                    'targets': targets_r[lo:hi],
                     'tip_racks': tip_racks,
                     'use_channels': use_channels,
-                    'asp_vols': _col8(asp_vols, c),
-                    'dis_vols': _col8(dis_vols, c),
-                    'pick_up': True,
-                    'drop': True,
+                    'asp_vols': asp_vols_r[lo:hi],
+                    'dis_vols': dis_vols_r[lo:hi],
+                    'pick_up': pick_up,
+                    'drop': drop,
                 }
-                # 可选 per-well 参数：length-8 列切片（空 → 跳过）
+                # 可选 per-well 参数：规整为 8×M 后取第 k 组（空 → 跳过）
                 for key, src in (
                     ('asp_flow_rates', asp_flow_rates),
                     ('dis_flow_rates', dis_flow_rates),
@@ -2265,14 +2343,14 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     ('delays', delays),
                     ('pre_aspirate_from_target', pre_aspirate_from_target),
                 ):
-                    v = _col8(src, c)
-                    if v is not None:
-                        kwargs[key] = v
+                    rv = _resolve_per_channel(src)
+                    if rv is not None:
+                        kwargs[key] = rv[lo:hi]
                 if touch_tip is not None:
                     kwargs['touch_tip'] = touch_tip if touch_tip else False
                 if spread is not None:
                     kwargs['spread'] = spread
-                # 标量 mix_* 取该列代表值
+                # 标量 mix_* 取该组代表值（按组下标 k；越界由 safe_get 兜底）
                 for key, src in (
                     ('mix_stage', mix_stage),
                     ('mix_times', mix_times),
@@ -2281,9 +2359,22 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     ('mix_liquid_height', mix_liquid_height),
                 ):
                     if src is not None:
-                        kwargs[key] = safe_get(src, c, wrap=False)
+                        kwargs[key] = safe_get(src, k, wrap=False)
 
-                await self._transfer_base_method(**kwargs)
+                try:
+                    await self._transfer_base_method(**kwargs)
+                except ValueError as e:
+                    # 384 孔板等狭小井距资源可能不支持 8 通道间距，降级为单通道串行执行该组。
+                    if "Resource is too small to space channels." in str(e):
+                        if hasattr(self, "_ros_node") and self._ros_node is not None:
+                            self._ros_node.lab_logger().warning(
+                                "[T-DBG] 8ch spacing unsupported, fallback to single channel for this group"
+                            )
+                        kwargs_sc = dict(kwargs)
+                        kwargs_sc['use_channels'] = [0]
+                        await self._transfer_base_method(**kwargs_sc)
+                    else:
+                        raise
 
 
         return TransferLiquidReturn(
