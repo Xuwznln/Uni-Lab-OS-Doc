@@ -93,6 +93,29 @@ def _make_station() -> Any:
     return station
 
 
+def _action_handle_items(meta: Dict[str, Any]) -> List[Any]:
+    handles = meta.get("handles", [])
+    if isinstance(handles, dict):
+        return list(handles.get("input", [])) + list(handles.get("output", []))
+    return list(handles)
+
+
+def _action_handle_key(handle: Any) -> Any:
+    if isinstance(handle, dict):
+        return handle.get("handler_key") or handle.get("key")
+    return handle.key
+
+
+def _action_handle_attr(handle: Any, key: str) -> Any:
+    if isinstance(handle, dict):
+        return handle.get(key)
+    return getattr(handle, key)
+
+
+def _action_handle_keys(meta: Dict[str, Any]) -> List[Any]:
+    return [_action_handle_key(handle) for handle in _action_handle_items(meta)]
+
+
 def _import_bioyond_rpc_module() -> Any:
     pytest.importorskip("rclpy.logging", reason="Bioyond RPC 依赖 UniLab/ROS 运行环境")
     return importlib.import_module("unilabos.devices.workstation.bioyond_studio.bioyond_rpc")
@@ -175,6 +198,8 @@ def test_required_actions_exposed() -> None:
         "scheduler_pause",
         "scheduler_continue",
         "update_push_ip",
+        "wait_for_error_handling",
+        "reply_error_handling",
         "get_order_list",
         "take_out",
         "materials_by_order_id",
@@ -194,7 +219,13 @@ def test_required_actions_exposed() -> None:
 def test_manual_confirm_node_types() -> None:
     module = _import_module()
     cls = getattr(module, CLASS_NAME)
-    manual = {"confirm_cem_info", "start_experiment", "reset_manual", "display_values_manual_confirm"}
+    manual = {
+        "confirm_cem_info",
+        "start_experiment",
+        "reset_manual",
+        "reply_error_handling",
+        "display_values_manual_confirm",
+    }
     normal = {
         "submit_experiment",
         "submit_experiment_day1",
@@ -207,6 +238,7 @@ def test_manual_confirm_node_types() -> None:
         "scheduler_start",
         "list_sample_excels",
         "get_step_parameters",
+        "wait_for_error_handling",
         "get_order_list",
         "get_order_report",
         "get_order_report_files",
@@ -856,13 +888,14 @@ def test_direct_take_out_and_batch_cancel_metadata() -> None:
     cancel_meta = getattr(cls.batch_cancel_experiment, "_action_registry_meta", {})
     assert take_out_meta.get("goal_default") == {"order_id": "", "preintake_ids": [], "material_ids": []}
     assert materials_meta.get("goal_default") == {"order_id": ""}
-    assert "order_id" in [handle.key for handle in materials_meta.get("handles", [])]
-    assert "materials" in [handle.key for handle in materials_meta.get("handles", [])]
+    materials_keys = _action_handle_keys(materials_meta)
+    assert "order_id" in materials_keys
+    assert "materials" in materials_keys
     assert construct_meta.get("goal_default") == {"order_id": ""}
-    construct_keys = [handle.key for handle in construct_meta.get("handles", [])]
+    construct_keys = _action_handle_keys(construct_meta)
     assert {"order_id", "materials_by_order_id", "resultTable"} <= set(construct_keys)
     assert cancel_meta.get("goal_default") == {"order_codes": []}
-    assert "order_codes" in [handle.key for handle in cancel_meta.get("handles", [])]
+    assert "order_codes" in _action_handle_keys(cancel_meta)
 
 
 def test_get_order_report_calls_typed_rpc() -> None:
@@ -889,7 +922,7 @@ def test_get_order_report_files_handles_and_returns_file_outputs() -> None:
     assert out["files"] == ["http://test/report/a.csv", "http://test/report/result.zip"]
     cls = getattr(_import_module(), CLASS_NAME)
     meta = getattr(cls.get_order_report_files, "_action_registry_meta", {})
-    handle_keys = [handle.key for handle in meta.get("handles", [])]
+    handle_keys = _action_handle_keys(meta)
     assert {"order_id", "file_zip", "files"} <= set(handle_keys)
 
 
@@ -919,11 +952,14 @@ def test_display_values_manual_confirm_metadata_and_return() -> None:
         "timeout_seconds": 3600,
         "assignee_user_ids": [],
     }
-    handle_keys = [handle.key for handle in meta.get("handles", [])]
+    handle_keys = _action_handle_keys(meta)
     assert {"values", "assignee_user_ids", "title"} <= set(handle_keys)
-    values_handles = [handle for handle in meta.get("handles", []) if handle.key == "values"]
+    values_handles = [
+        handle for handle in _action_handle_items(meta)
+        if _action_handle_key(handle) == "values"
+    ]
     assert values_handles
-    assert all(handle.data_type == "str" for handle in values_handles)
+    assert all(_action_handle_attr(handle, "data_type") == "str" for handle in values_handles)
 
     station = _make_station()
     values = ["http://test/a.csv", "http://test/report.zip"]
