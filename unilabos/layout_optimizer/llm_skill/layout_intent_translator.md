@@ -308,5 +308,8 @@ The endpoint returns:
 - `workflow_edges` — extracted workflow connections
 - `errors` — any intents that failed to translate
 
-### Optimization
-After user confirms the translation, pass `constraints` and `workflow_edges` to `POST /optimize` along with the device list and lab dimensions.
+### Optimization (preferred: self-healing)
+After user confirms the translation, pass `constraints` and `workflow_edges` to `POST /optimize/auto` along with the device list and lab dimensions. This endpoint self-heals failures: it runs an analytical conflict pre-check, then a parallel multi-start DE, and on failure returns `conflicts` (deterministic, situation A) or `violations` (persistent culprits across runs, situation B) so you can give targeted relax advice. `POST /optimize` still exists for a single deterministic run and now also returns `breakdown` / `violations` / `conflicts`.
+
+### Hard vs soft (matters for relax advice)
+Only four intents generate **hard** constraints (their violation makes the layout infeasible): `reachable_by` (→ `reachability`), `max_distance` (→ `distance_less_than`), `min_distance` (→ `distance_greater_than`), `min_spacing`. Plus two always-on hard constraints not tied to any intent: collision (`no_collision`) and boundary (`within_bounds`) — so a failure culprit may be "lab too small / too many devices / spacing too large" rather than a distance intent. All other intents (`close_together`, `keep_adjacent`, `far_apart`, `workflow_hint`, `face_outward`, `face_inward`, `align_cardinal`) are **soft** and never cause infeasibility. When suggesting relaxations, target the hard culprits named in `conflicts`/`violations`.

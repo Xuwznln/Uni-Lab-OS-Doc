@@ -78,38 +78,32 @@ curl -s http://localhost:8000/scene/lab
 
 返回 `{"width": W, "depth": D}`。在 optimize 请求中使用这些值。此步骤不打印任何内容。
 
-### 步骤 4 — 优化布局
+### 步骤 4 — 优化布局（自动失败自愈）
 
-使用以下内容构建 optimize 请求：
+使用**失败自愈**端点 `POST /optimize/auto`。服务端会：(1) 先做解析冲突预检，把可证无解的输入短路进 `conflicts`（情况 A）；(2) 把 `seeds × seeders` 网格放到**多个进程并行**跑，第一个可行起点胜出、其余被杀掉（情况 B）；(3) 全部失败时在 `violations` 中返回所有 run 都违反的硬约束（`persistent: true` 即绑死罪魁）。
+
+构建请求：
 - `devices`：步骤 1 中相关的设备（id、name、device_type）
 - `lab`：步骤 3.5 中的 `{"width": W, "depth": D}`
 - `constraints`：来自步骤 3 的 interpret 响应
 - `workflow_edges`：来自步骤 3 的 interpret 响应
-- `seeder`：`"compact_outward"`（默认）
-- `seeder_overrides`：通常不需要。基本方位对齐由 `align_cardinal` 意图处理（生成 `prefer_aligned` 约束）。不要在 seeder_overrides 中使用 `align_weight`——它已被弃用。
-- `snap_cardinal`：`false`（默认）。仅当用户明确要求对齐到 0/90/180/270 时才设为 `true`。
-- `run_de`：`true`
-- `maxiter`：`200`
-- `seed`：`42`
+- `seeds`：`[42, 7, 123, 2024]`（多起点）
+- `seeders`：`["compact_outward", "spread_inward", "workflow_cluster"]`
+- `maxiter`：`400`（固定的较大值；DE 会自行 early-stop —— 不要扫 maxiter）
+- `snap_cardinal`：`false`（默认）
 
 运行：
 ```
-curl -s -X POST http://localhost:8000/optimize \
+curl -s -X POST http://localhost:8000/optimize/auto \
   -H "Content-Type: application/json" \
   -d '{ ... }'
 ```
 
-打印：
-```
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: X.XX, success: true/false
-```
+打印 `optimizing layout (parallel multi-start DE)...`，然后分支：
 
-如果 `success` 为 false，打印：
-```
-error: optimization failed (cost: inf) — constraints may conflict
-```
-并停止。
+- **`success: true`** → `optimization complete — cost: X.XX, seeder: <winner>, tried X/Y starts`，进入步骤 5。
+- **`success: false` 且有 `conflicts`**（情况 A）→ 逐条打印 `message`，然后用 `conflicts[].suggestion` 构建选项**调用 AskQuestion 工具**。不要应用摆放。
+- **`success: false` 且无 `conflicts`**（情况 B）→ 打印 `persistent: true` 的 `violations`，然后**调用 AskQuestion 工具**请用户放宽被点名的硬约束。不要应用摆放。
 
 ### 步骤 5 — 应用摆放
 
@@ -153,8 +147,22 @@ layout applied — N devices positioned
 ## 错误处理
 
 - 服务器无法访问：`error: server unreachable at localhost:8000`
-- 优化失败：`error: optimization failed (cost: inf) — constraints may conflict`
-- 发生任何错误后，停止并等待用户输入。
+- 优化失败由步骤 4 的分支处理 —— 服务端已经并行重试并诊断了原因。不要自己换 seed 再 POST；呈现 `conflicts`/`violations` 并用 AskQuestion 工具请用户放宽，然后从步骤 2 重新执行。`success` 为 false 时不要应用摆放。
+
+## AskQuestion 选项模板（失败放宽）
+
+`success: false` 时调用 AskQuestion，第一个选项设为推荐项（末尾加" (Recommended)"）；工具会自动追加"Other"。用真实设备名替换占位符。
+
+- **conflicts → `area`**：扩大实验室 (rec) / 移除一台设备 / 换更小设备
+- **conflicts → `device_too_large`**：扩大实验室 (rec) / 移除该设备 / 换更小型号
+- **conflicts → `distance_contradiction`**：放宽最大距离 (rec) / 放宽最小距离 / 删除其中一条
+- **conflicts → `min_distance_exceeds_lab`**：减小最小距离 (rec) / 扩大实验室 / 删除该约束
+- **conflicts → `max_distance_below_min_spacing`**：增大最大距离 (rec) / 减小 min_spacing / 删除其中一条
+- **violations（persistent）→ `reachability`**：去掉该目标 (rec) / 增大臂展 / 放宽挤占它的约束 / 扩大实验室
+- **violations → `min_spacing`**：减小 min_spacing (rec) / 扩大实验室 / 移除设备
+- **violations → `distance_greater_than`**：减小最小距离 (rec) / 删除该约束 / 扩大实验室
+- **violations → `distance_less_than`**：增大最大距离 (rec) / 删除该约束
+- **violations → `no_collision`/`within_bounds`**：扩大实验室 (rec) / 移除设备 / 减小 min_spacing
 
 ## 设备名称解析
 
@@ -181,8 +189,8 @@ constraints:
   soft: all devices close together (high priority)
   soft: align to cardinal directions
 
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: 0.00, success: true
+optimizing layout (parallel multi-start DE)...
+optimization complete — cost: 0.00, seeder: compact_outward, tried 1/12 starts
 
 applying placements to scene...
 layout applied — 5 devices positioned

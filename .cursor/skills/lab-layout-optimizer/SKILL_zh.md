@@ -123,38 +123,57 @@ curl -s http://localhost:8000/scene/lab
 
 返回 `{"width": W, "depth": D}`。在 optimize 请求中使用这些值。此步骤不打印任何内容。
 
-### 第 4 步 —— 优化布局
+### 第 4 步 —— 优化布局（自动失败自愈）
 
-使用以下内容构建 optimize 请求：
+使用**失败自愈**端点 `POST /optimize/auto`。它在服务端完成三件事，因此你**无需**自己编排重试：
+
+1. **解析冲突预检（情况 A）。** 在跑任何 DE 之前，先检测可行域确定性为空的**硬冲突**（设备总面积 > 实验室面积、单台设备装不下、`max_distance < min_distance`、`min_distance > 实验室对角线`、`max_distance < min_spacing`）。命中则**短路**，不跑 DE，直接在 `conflicts` 中返回。
+2. **并行多起点 DE（情况 B）。** 否则把 `seeds × seeders` 网格放到**多个进程并行**跑。第一个找到可行布局的起点胜出，其余立即被杀掉。
+3. **聚合罪魁。** 若所有起点都失败，在 `violations` 中返回"在所有 run 里都违反"的硬约束（`persistent: true` 的即为绑死的罪魁）。
+
+构建请求：
 - `devices`：第 1 步中相关的设备（id、name、device_type）
 - `lab`：第 3.5 步得到的 `{"width": W, "depth": D}`
 - `constraints`：来自第 3 步 interpret 的响应
 - `workflow_edges`：来自第 3 步 interpret 的响应
-- `seeder`：`"compact_outward"`（默认）
-- `seeder_overrides`：一般不需要。基本方向对齐由 `align_cardinal` 意图处理（生成 `prefer_aligned` 约束）。不要在 seeder_overrides 中使用 `align_weight` —— 它已废弃。
+- `seeds`：`[42, 7, 123, 2024]`（多起点多样性）
+- `seeders`：`["compact_outward", "spread_inward", "workflow_cluster"]`
+- `maxiter`：`400`（固定的较大值；DE 会自行 early-stop —— **不要**把 maxiter 当作网格维度去扫）
 - `snap_cardinal`：`false`（默认）。仅当用户明确要求吸附到 0/90/180/270 时才设为 `true`。
-- `run_de`：`true`
-- `maxiter`：`200`
-- `seed`：`42`
+- `seeder_overrides`：一般不需要。方向对齐由 `align_cardinal` 意图处理。不要使用 `align_weight` —— 它已废弃。
 
 运行：
 ```
-curl -s -X POST http://localhost:8000/optimize \
+curl -s -X POST http://localhost:8000/optimize/auto \
   -H "Content-Type: application/json" \
   -d '{ ... }'
 ```
 
 打印：
 ```
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: X.XX, success: true/false
+optimizing layout (parallel multi-start DE)...
 ```
 
-如果 `success` 为 false，打印：
+然后根据响应分支：
+
+**(a) `success: true`** —— 打印并进入第 5 步：
 ```
-error: optimization failed (cost: inf) — constraints may conflict
+optimization complete — cost: X.XX, seeder: <winner>, tried X/Y starts
 ```
-并停止。
+
+**(b) `success: false` 且 `conflicts` 非空（情况 A —— 约束无法同时满足）：** 不要应用摆放。对每条冲突用其 `message` 打印一行，然后**调用 AskQuestion 工具**询问用户如何放宽。选项从每条冲突的 `suggestion` 生成（例如扩大实验室、删除/更换设备、增大某个 `max_distance`、减小某个 `min_distance`/`min_spacing`、或删除某条约束）。示例状态行：
+```
+optimization failed — hard constraints conflict (no valid layout exists):
+  [area] total device area 32.0㎡ exceeds lab 25.0㎡
+```
+随后调用 AskQuestion 给出具体放宽选项。用户回答后，从第 2 步带着调整后的意图/尺寸重新执行。
+
+**(c) `success: false` 且 `conflicts` 为空（情况 B —— 所有并行起点都失败）：** 不要应用摆放。打印 `violations` 中 `persistent: true` 的项（这些是每个起点都降不到 0 的硬约束），然后**调用 AskQuestion 工具**请用户放宽被点名的约束。示例：
+```
+optimization failed after Y parallel starts — persistent violation:
+  reachability(arm_slider, inheco_odtc_96xl)
+```
+随后针对该约束调用 AskQuestion（例如去掉该可达性目标、增大臂展、或减少挤占它的其他约束）。
 
 ### 第 5 步 —— 应用摆放（placements）
 
@@ -198,8 +217,42 @@ layout applied — N devices positioned
 ## 错误处理（Error Handling）
 
 - 服务不可达：`error: server unreachable at localhost:8000`
-- 优化失败：`error: optimization failed (cost: inf) — constraints may conflict`
-- 发生任何错误后，停止并等待用户输入。
+- 优化失败由第 4 步的 (a)/(b)/(c) 分支处理 —— 服务端已经并行重试并诊断了原因，因此**不要**自己换 seed 再 POST。直接呈现 `conflicts`/`violations` 并用 AskQuestion 请用户放宽。
+- 出现硬冲突（情况 A）或多起点耗尽（情况 B）后，不要应用摆放；等用户给出放宽决定，再从第 2 步重新执行。
+
+## 输出规则例外 —— 失败时使用 AskQuestion
+
+"只输出简短状态行"的规则在正常路径上依然有效。唯一例外：当 `/optimize/auto` 返回 `success: false` 时，在打印简短诊断行之后，你**必须**调用 AskQuestion 工具收集用户的放宽选择。选项来自 `conflicts[].suggestion`（情况 A）或 `persistent` 的 `violations`（情况 B）。
+
+## AskQuestion 选项模板（失败放宽）
+
+按下表逐字使用（用 conflict/violation 载荷里的真实设备名替换占位符）。第一个选项设为推荐项并在末尾加" (Recommended)"。AskQuestion 工具会自动追加"Other"自由输入项，**不要**自己再加"Other"。
+
+### 情况 A —— `conflicts` 非空（确定性不可行）
+
+每条冲突生成一个 AskQuestion `questions[]` 条目，按 `conflict.kind` 映射：
+
+| `kind` | `prompt` | `options`（id → label） |
+|---|---|---|
+| `area` | "设备占地总面积超过实验室，物理上放不下。如何放宽？" | `enlarge` → 扩大实验室 (Recommended) · `remove` → 移除一台设备 · `smaller` → 换用更小占地的设备 |
+| `device_too_large` | "设备 '{device}' 任意朝向都装不进当前实验室。如何处理？" | `enlarge` → 扩大实验室 (Recommended) · `remove` → 移除该设备 · `smaller` → 换用更小型号 |
+| `distance_contradiction` | "'{a}' 与 '{b}' 被同时要求 ≤ {max}m 且 ≥ {min}m，二者矛盾。放宽哪个？" | `relax_max` → 放宽最大距离 (Recommended) · `relax_min` → 放宽最小距离 · `drop_one` → 删除其中一条 |
+| `min_distance_exceeds_lab` | "'{a}' 与 '{b}' 要求间距 ≥ {min}m，超过实验室对角线。如何放宽？" | `relax_min` → 减小该最小距离 (Recommended) · `enlarge` → 扩大实验室 · `drop` → 删除该最小距离约束 |
+| `max_distance_below_min_spacing` | "'{a}' 与 '{b}' 要求间距 ≤ {max}m，小于全局最小间隙。如何放宽？" | `relax_max` → 增大该最大距离 (Recommended) · `relax_spacing` → 减小 min_spacing · `drop_one` → 删除其中一条 |
+
+### 情况 B —— 所有并行起点都失败（`violations` 中 `persistent: true`）
+
+针对排名最前的 `persistent` 违反生成一个 AskQuestion 条目，按 `violation.rule` 映射：
+
+| `rule` | `prompt` | `options`（id → label） |
+|---|---|---|
+| `reachability` | "在其他约束下，机械臂始终够不到 '{target}'。如何放宽？" | `drop_target` → 去掉该可达性目标 (Recommended) · `inc_reach` → 增大臂展 arm_reach · `loosen_others` → 放宽挤占它的约束（min_spacing/far_apart） · `enlarge` → 扩大实验室 |
+| `min_spacing` | "全局最小间隙太大，设备摆不开。如何放宽？" | `relax_spacing` → 减小 min_spacing (Recommended) · `enlarge` → 扩大实验室 · `remove` → 移除一台设备 |
+| `distance_greater_than` | "'{a}' 与 '{b}' 的最小距离与其余约束无法同时满足。如何放宽？" | `relax_min` → 减小该最小距离 (Recommended) · `drop` → 删除该约束 · `enlarge` → 扩大实验室 |
+| `distance_less_than` | "'{a}' 与 '{b}' 的最大距离与其余约束无法同时满足。如何放宽？" | `relax_max` → 增大该最大距离 (Recommended) · `drop` → 删除该约束 |
+| `no_collision` / `within_bounds` | "设备在当前实验室里无法做到不重叠/不越界。如何放宽？" | `enlarge` → 扩大实验室 (Recommended) · `remove` → 移除一台设备 · `relax_spacing` → 减小 min_spacing |
+
+用户回答后，将所选放宽应用到意图（或通过 `POST /scene/lab` 改实验室尺寸），再带着调整后的请求从第 2 步重新执行。
 
 ## 停止服务
 
@@ -238,8 +291,8 @@ constraints:
   soft: all devices close together (high priority)
   soft: align to cardinal directions
 
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: 0.00, success: true
+optimizing layout (parallel multi-start DE)...
+optimization complete — cost: 0.00, seeder: compact_outward, tried 1/12 starts
 
 applying placements to scene...
 layout applied — 5 devices positioned

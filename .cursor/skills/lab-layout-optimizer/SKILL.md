@@ -123,38 +123,57 @@ curl -s http://localhost:8000/scene/lab
 
 Returns `{"width": W, "depth": D}`. Use these values for the optimize request. Do NOT print anything for this step.
 
-### Step 4 — Optimize layout
+### Step 4 — Optimize layout (auto self-healing)
 
-Build the optimize request using:
+Use the **self-healing** endpoint `POST /optimize/auto`. It does three things server-side, so you do NOT orchestrate retries yourself:
+
+1. **Analytical pre-check (situation A).** Before running any DE, it checks for *deterministic* conflicts whose feasible region is provably empty (total device area > lab area, a device that cannot fit, `max_distance < min_distance`, `min_distance > lab diagonal`, `max_distance < min_spacing`). If any are found it **short-circuits** without running DE and returns them in `conflicts`.
+2. **Parallel multi-start DE (situation B).** Otherwise it runs the `seeds × seeders` grid in **parallel processes**. The FIRST start that finds a feasible layout wins and the others are killed immediately.
+3. **Aggregated culprits.** If every start fails, it returns the hard constraints that stayed violated across ALL runs in `violations` (`persistent: true` ones are the binding culprits).
+
+Build the request using:
 - `devices`: the relevant devices from Step 1 (id, name, device_type)
 - `lab`: the `{"width": W, "depth": D}` from Step 3.5
 - `constraints`: from Step 3 interpret response
 - `workflow_edges`: from Step 3 interpret response
-- `seeder`: `"compact_outward"` (default)
-- `seeder_overrides`: generally not needed. Cardinal alignment is handled by the `align_cardinal` intent (generates `prefer_aligned` constraint). Do NOT use `align_weight` in seeder_overrides — it is deprecated.
+- `seeds`: `[42, 7, 123, 2024]` (multi-start diversity)
+- `seeders`: `["compact_outward", "spread_inward", "workflow_cluster"]`
+- `maxiter`: `400` (fixed large value; DE early-stops on its own — do NOT sweep maxiter as a grid axis)
 - `snap_cardinal`: `false` (default). Set `true` only if user explicitly requests snapping to 0/90/180/270.
-- `run_de`: `true`
-- `maxiter`: `200`
-- `seed`: `42`
+- `seeder_overrides`: generally not needed. Cardinal alignment is handled by the `align_cardinal` intent. Do NOT use `align_weight` — it is deprecated.
 
 Run:
 ```
-curl -s -X POST http://localhost:8000/optimize \
+curl -s -X POST http://localhost:8000/optimize/auto \
   -H "Content-Type: application/json" \
   -d '{ ... }'
 ```
 
 Print:
 ```
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: X.XX, success: true/false
+optimizing layout (parallel multi-start DE)...
 ```
 
-If `success` is false, print:
+Then branch on the response:
+
+**(a) `success: true`** — print and go to Step 5:
 ```
-error: optimization failed (cost: inf) — constraints may conflict
+optimization complete — cost: X.XX, seeder: <winner>, tried X/Y starts
 ```
-And stop.
+
+**(b) `success: false` and `conflicts` non-empty (situation A — constraints can't all be satisfied):** Do NOT apply placements. Print one line per conflict using its `message`, then **use the AskQuestion tool** to ask the user how to relax. Build the options from each conflict's `suggestion` (e.g. enlarge the lab, remove/replace a device, increase a `max_distance`, decrease a `min_distance`/`min_spacing`, or drop one constraint). Example status lines:
+```
+optimization failed — hard constraints conflict (no valid layout exists):
+  [area] total device area 32.0㎡ exceeds lab 25.0㎡
+```
+Then call AskQuestion with concrete relax choices. After the user answers, re-run from Step 2 with the adjusted intents/lab.
+
+**(c) `success: false` and `conflicts` empty (situation B — all parallel starts failed):** Do NOT apply placements. Print the `persistent: true` entries from `violations` (these are the hard constraints that never reached zero across every start), then **use the AskQuestion tool** to ask the user to relax the named constraint(s). Example:
+```
+optimization failed after Y parallel starts — persistent violation:
+  reachability(arm_slider, inheco_odtc_96xl)
+```
+Then call AskQuestion targeting that constraint (e.g. drop the reachability target, increase arm reach, or reduce other constraints crowding it).
 
 ### Step 5 — Apply placements
 
@@ -198,8 +217,42 @@ If the user gives a follow-up request (e.g., "now move the sealer farther from t
 ## Error Handling
 
 - Server unreachable: `error: server unreachable at localhost:8000`
-- Optimize fails: `error: optimization failed (cost: inf) — constraints may conflict`
-- After any error, stop and wait for user input.
+- Optimize failure is handled by the Step 4 branches (a)/(b)/(c) — the server already retried in parallel and diagnosed the cause, so do NOT manually re-POST with different seeds. Instead surface `conflicts`/`violations` and use AskQuestion to let the user relax.
+- After a hard conflict (situation A) or exhausted multi-start (situation B), do NOT apply placements; wait for the user's relax decision, then re-run from Step 2.
+
+## Output Rules Exception — AskQuestion on failure
+
+The "only short status lines" rule still holds for the happy path. The ONE exception: when `/optimize/auto` returns `success: false`, after printing the short diagnostic lines you MUST call the AskQuestion tool to collect the user's relaxation choice. Derive the options from `conflicts[].suggestion` (situation A) or the `persistent` `violations` (situation B).
+
+## AskQuestion Templates (failure relaxation)
+
+Use these fixed templates verbatim (substitute real device names from the conflict/violation payload). Always make the first option the recommended one and append " (Recommended)". The tool always appends an "Other" free-text path, so do NOT add your own "Other".
+
+### Situation A — `conflicts` non-empty (deterministic infeasibility)
+
+Emit ONE AskQuestion `questions[]` entry per conflict, keyed by `conflict.kind`:
+
+| `kind` | `prompt` | `options` (id → label) |
+|---|---|---|
+| `area` | "Total device footprint exceeds the lab — it physically cannot fit. How should I relax this?" | `enlarge` → Enlarge the lab (Recommended) · `remove` → Remove a device · `smaller` → Swap in smaller-footprint devices |
+| `device_too_large` | "Device '{device}' cannot fit in the current lab in any orientation. How should I handle it?" | `enlarge` → Enlarge the lab (Recommended) · `remove` → Remove this device · `smaller` → Use a smaller model |
+| `distance_contradiction` | "'{a}' and '{b}' are required to be both ≤ {max}m and ≥ {min}m apart — contradictory. Which do I relax?" | `relax_max` → Loosen the max distance (Recommended) · `relax_min` → Loosen the min distance · `drop_one` → Drop one of the two |
+| `min_distance_exceeds_lab` | "'{a}' and '{b}' must be ≥ {min}m apart, exceeding the lab diagonal. How should I relax this?" | `relax_min` → Reduce the min distance (Recommended) · `enlarge` → Enlarge the lab · `drop` → Drop the min-distance rule |
+| `max_distance_below_min_spacing` | "'{a}' and '{b}' must be ≤ {max}m apart, below the global min spacing. How should I relax this?" | `relax_max` → Increase the max distance (Recommended) · `relax_spacing` → Reduce min_spacing · `drop_one` → Drop one rule |
+
+### Situation B — all parallel starts failed (`violations` with `persistent: true`)
+
+Emit ONE AskQuestion entry targeting the top `persistent` violation, keyed by `violation.rule`:
+
+| `rule` | `prompt` | `options` (id → label) |
+|---|---|---|
+| `reachability` | "The arm can never reach '{target}' under the other constraints. How should I relax this?" | `drop_target` → Drop this reachability target (Recommended) · `inc_reach` → Increase the arm's reach · `loosen_others` → Loosen constraints crowding it (min_spacing/far_apart) · `enlarge` → Enlarge the lab |
+| `min_spacing` | "The global min spacing is too large for the devices to fit. How should I relax this?" | `relax_spacing` → Reduce min_spacing (Recommended) · `enlarge` → Enlarge the lab · `remove` → Remove a device |
+| `distance_greater_than` | "The min distance between '{a}' and '{b}' can't be met together with the rest. How should I relax this?" | `relax_min` → Reduce that min distance (Recommended) · `drop` → Drop the rule · `enlarge` → Enlarge the lab |
+| `distance_less_than` | "The max distance between '{a}' and '{b}' can't be met together with the rest. How should I relax this?" | `relax_max` → Increase that max distance (Recommended) · `drop` → Drop the rule |
+| `no_collision` / `within_bounds` | "Devices can't be arranged without overlap/overflow in this lab. How should I relax this?" | `enlarge` → Enlarge the lab (Recommended) · `remove` → Remove a device · `relax_spacing` → Reduce min_spacing |
+
+After the user answers, apply the chosen relaxation to the intents (or to the lab dimensions via `POST /scene/lab`) and re-run from Step 2 with the adjusted request.
 
 ## Stopping the server
 
@@ -238,8 +291,8 @@ constraints:
   soft: all devices close together (high priority)
   soft: align to cardinal directions
 
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: 0.00, success: true
+optimizing layout (parallel multi-start DE)...
+optimization complete — cost: 0.00, seeder: compact_outward, tried 1/12 starts
 
 applying placements to scene...
 layout applied — 5 devices positioned

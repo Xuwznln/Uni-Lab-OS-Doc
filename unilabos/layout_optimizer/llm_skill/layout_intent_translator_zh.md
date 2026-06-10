@@ -308,5 +308,8 @@ Content-Type: application/json
 - `workflow_edges` — 提取出的工作流连接
 - `errors` — 任何翻译失败的意图
 
-### 优化
-在用户确认翻译结果后，将 `constraints` 和 `workflow_edges` 连同设备列表和实验室尺寸一起传给 `POST /optimize`。
+### 优化（推荐：失败自愈）
+在用户确认翻译结果后，将 `constraints` 和 `workflow_edges` 连同设备列表和实验室尺寸一起传给 `POST /optimize/auto`。该端点会自动处理失败：先做解析冲突预检，再跑并行多起点 DE，失败时返回 `conflicts`（确定性冲突，情况 A）或 `violations`（跨 run 持续违反的罪魁，情况 B），便于你给出针对性的放宽建议。`POST /optimize` 仍可用于单次确定性运行，且现在也会返回 `breakdown` / `violations` / `conflicts`。
+
+### 硬约束 vs 软约束（关系到放宽建议）
+只有四个意图生成**硬**约束（违反即布局不可行）：`reachable_by`（→ `reachability`）、`max_distance`（→ `distance_less_than`）、`min_distance`（→ `distance_greater_than`）、`min_spacing`。此外还有两条不来自任何意图、永远开启的硬约束：碰撞（`no_collision`）与边界（`within_bounds`）—— 所以失败罪魁可能是"实验室太小 / 设备太多 / 间隙太大"，而非某条距离意图。其余意图（`close_together`、`keep_adjacent`、`far_apart`、`workflow_hint`、`face_outward`、`face_inward`、`align_cardinal`）都是**软**约束，永远不会导致不可行。给出放宽建议时，针对 `conflicts`/`violations` 中点名的硬约束。

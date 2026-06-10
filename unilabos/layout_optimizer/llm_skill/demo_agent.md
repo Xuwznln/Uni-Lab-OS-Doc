@@ -78,38 +78,32 @@ curl -s http://localhost:8000/scene/lab
 
 Returns `{"width": W, "depth": D}`. Use these values for the optimize request. Do NOT print anything for this step.
 
-### Step 4 — Optimize layout
+### Step 4 — Optimize layout (auto self-healing)
 
-Build the optimize request using:
+Use the **self-healing** endpoint `POST /optimize/auto`. Server-side it (1) runs an analytical conflict pre-check that short-circuits provably-infeasible inputs into `conflicts` (situation A), (2) runs the `seeds × seeders` grid as **parallel processes** where the first feasible start wins and the rest are killed (situation B), and (3) on total failure returns the hard constraints that stayed violated across ALL runs in `violations` (`persistent: true` = binding culprit).
+
+Build the request using:
 - `devices`: the relevant devices from Step 1 (id, name, device_type)
 - `lab`: the `{"width": W, "depth": D}` from Step 3.5
 - `constraints`: from Step 3 interpret response
 - `workflow_edges`: from Step 3 interpret response
-- `seeder`: `"compact_outward"` (default)
-- `seeder_overrides`: generally not needed. Cardinal alignment is handled by the `align_cardinal` intent (generates `prefer_aligned` constraint). Do NOT use `align_weight` in seeder_overrides — it is deprecated.
-- `snap_cardinal`: `false` (default). Set `true` only if user explicitly requests snapping to 0/90/180/270.
-- `run_de`: `true`
-- `maxiter`: `200`
-- `seed`: `42`
+- `seeds`: `[42, 7, 123, 2024]` (multi-start)
+- `seeders`: `["compact_outward", "spread_inward", "workflow_cluster"]`
+- `maxiter`: `400` (fixed large; DE early-stops — do NOT sweep maxiter)
+- `snap_cardinal`: `false` (default)
 
 Run:
 ```
-curl -s -X POST http://localhost:8000/optimize \
+curl -s -X POST http://localhost:8000/optimize/auto \
   -H "Content-Type: application/json" \
   -d '{ ... }'
 ```
 
-Print:
-```
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: X.XX, success: true/false
-```
+Print `optimizing layout (parallel multi-start DE)...`, then branch:
 
-If `success` is false, print:
-```
-error: optimization failed (cost: inf) — constraints may conflict
-```
-And stop.
+- **`success: true`** → `optimization complete — cost: X.XX, seeder: <winner>, tried X/Y starts`, go to Step 5.
+- **`success: false` with `conflicts`** (situation A) → print each `message`, then call the **AskQuestion tool** with relax options built from `conflicts[].suggestion`. Do not apply placements.
+- **`success: false` without `conflicts`** (situation B) → print the `persistent: true` `violations`, then call the **AskQuestion tool** to relax the named hard constraint(s). Do not apply placements.
 
 ### Step 5 — Apply placements
 
@@ -153,8 +147,22 @@ If the user gives a follow-up request (e.g., "now move the sealer farther from t
 ## Error Handling
 
 - Server unreachable: `error: server unreachable at localhost:8000`
-- Optimize fails: `error: optimization failed (cost: inf) — constraints may conflict`
-- After any error, stop and wait for user input.
+- Optimize failure is handled by the Step 4 branches — the server already retried in parallel and diagnosed the cause. Do NOT manually re-POST with different seeds; surface `conflicts`/`violations` and use the AskQuestion tool to let the user relax, then re-run from Step 2. Do not apply placements while `success` is false.
+
+## AskQuestion Templates (failure relaxation)
+
+On `success: false`, call AskQuestion with the recommended option first (append " (Recommended)"); the tool auto-adds an "Other" path. Substitute real device names.
+
+- **conflicts → `area`**: enlarge lab (rec) / remove a device / smaller devices
+- **conflicts → `device_too_large`**: enlarge lab (rec) / remove device / smaller model
+- **conflicts → `distance_contradiction`**: loosen max distance (rec) / loosen min distance / drop one
+- **conflicts → `min_distance_exceeds_lab`**: reduce min distance (rec) / enlarge lab / drop rule
+- **conflicts → `max_distance_below_min_spacing`**: increase max distance (rec) / reduce min_spacing / drop one
+- **violations (persistent) → `reachability`**: drop the target (rec) / increase arm reach / loosen crowding constraints / enlarge lab
+- **violations → `min_spacing`**: reduce min_spacing (rec) / enlarge lab / remove device
+- **violations → `distance_greater_than`**: reduce min distance (rec) / drop rule / enlarge lab
+- **violations → `distance_less_than`**: increase max distance (rec) / drop rule
+- **violations → `no_collision`/`within_bounds`**: enlarge lab (rec) / remove device / reduce min_spacing
 
 ## Device Name Resolution
 
@@ -181,8 +189,8 @@ constraints:
   soft: all devices close together (high priority)
   soft: align to cardinal directions
 
-optimizing layout (DE, 200 iterations)...
-optimization complete — cost: 0.00, success: true
+optimizing layout (parallel multi-start DE)...
+optimization complete — cost: 0.00, seeder: compact_outward, tried 1/12 starts
 
 applying placements to scene...
 layout applied — 5 devices positioned

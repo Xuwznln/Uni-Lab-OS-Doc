@@ -164,11 +164,60 @@ Returns all 11 intent types with parameter specs. LLM agent should call this bef
   "cost": 0.0,
   "success": true,
   "seeder_used": "compact_outward",
-  "de_ran": true
+  "de_ran": true,
+  "breakdown": [{"name": "[predefined] collision", "rule": "no_collision", "type": "hard", "weight": 500, "cost": 0.0}, ...],
+  "violations": [],
+  "conflicts": []
 }
 ```
 
 `position`/`rotation` format matches Cloud's `CommonPositionType`. `rotation.z` is θ in radians.
+
+**Failure diagnostics (since 2026-06):** every `/optimize` response now also carries:
+- `breakdown` — per-constraint graduated penalty for the final layout (predefined collision/boundary + user constraints).
+- `violations` — the hard constraints with `cost > 0`, sorted desc (the failure culprits).
+- `conflicts` — deterministic conflicts found by the analytical pre-check (see `/optimize/auto`).
+
+### `POST /optimize/auto` — Self-healing layout optimization
+
+Wraps `/optimize` with failure self-healing. Accepts everything `/optimize` does, plus a multi-start grid, and runs it across **parallel processes**:
+
+```json
+{
+  "devices": [...],
+  "lab": {"width": 6.0, "depth": 4.0},
+  "constraints": [...],
+  "workflow_edges": [...],
+  "seeds": [42, 7, 123, 2024],
+  "seeders": ["compact_outward", "spread_inward", "workflow_cluster"],
+  "maxiter": 400,
+  "max_workers": null
+}
+```
+
+Server behaviour:
+1. **Analytical pre-check (situation A).** Detects provably-infeasible inputs (total device area > lab area, a device that can't fit, `max_distance < min_distance`, `min_distance > lab diagonal`, `max_distance < min_spacing`) and **short-circuits** without running DE. Zero false positives — only deterministic conflicts.
+2. **Parallel multi-start DE (situation B).** Runs the `seeds × seeders` grid in `multiprocessing` (spawn) processes; the FIRST start that reaches a feasible layout wins and the rest are terminated. `maxiter` is fixed-large (DE early-stops), it is NOT a grid axis.
+3. **Aggregated culprits.** If all starts fail, returns the hard constraints that stayed violated across ALL runs (`persistent: true` = binding culprit).
+
+**Response (extends OptimizeResponse):**
+
+```json
+{
+  "placements": [...],
+  "cost": 0.0,
+  "success": true,
+  "seeder_used": "compact_outward",   // winning seeder
+  "de_ran": true,
+  "tried": 1,                          // starts completed before a winner / exhaustion
+  "total": 12,                         // planned starts (len(seeds) × len(seeders))
+  "conflicts": [],                     // non-empty ⇒ situation A (short-circuited)
+  "violations": [],                    // persistent culprits when all starts fail (situation B)
+  "breakdown": []
+}
+```
+
+Each `conflicts[]` entry has `{kind, message, devices, rules, suggestion}`; each `violations[]` entry (failure path) has `{name, rule, type, runs_violated, total_runs, mean_residual, persistent}`.
 
 **DE hyperparameters:**
 
@@ -385,7 +434,9 @@ To switch to real checkers: `LAYOUT_CHECKER_MODE=moveit` + pass MoveIt2 instance
 | `constraints.py`        | 627   | Unified constraint evaluation (hard + soft + graduated + crossing penalty)                |
 | `obb.py`                | 257   | OBB geometry: corners, overlap SAT, min_distance, penetration_depth, segment intersection |
 | `intent_interpreter.py` | 366   | 11 intent handlers, pure translation, no side effects                                     |
-| `server.py`             | 743   | FastAPI: /interpret, /optimize, /devices, /scene/* endpoints                              |
+| `feasibility.py`        | ~310  | Analytical conflict pre-check (situation A) + breakdown/violations extraction (no import side effects, multiprocessing-safe) |
+| `parallel_optimize.py`  | ~290  | Parallel multi-start DE (spawn): first-success-wins + kill others + aggregate persistent culprits |
+| `server.py`             | ~900  | FastAPI: /interpret, /optimize, /optimize/auto, /devices, /scene/* endpoints              |
 | `lab_parser.py`         | 50    | Parse lab floor plan JSON to Lab dataclass                                                |
 
 
