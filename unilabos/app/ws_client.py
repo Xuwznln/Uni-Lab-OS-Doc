@@ -832,8 +832,13 @@ class MessageProcessor:
             )
             return
 
+        # scheduler 在 payload 里下发 order-list 查询参数(timeType/beginTime/endTime/skipCount/pageCount/status)
+        payload = message_data.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+
         try:
-            station.report_gantt_by_order(uuid)
+            station.report_gantt_by_order(uuid, payload)
         except Exception as exc:
             logger.error(
                 f"[MessageProcessor] 触发甘特图回传失败 uuid={uuid}: {exc}", exc_info=True

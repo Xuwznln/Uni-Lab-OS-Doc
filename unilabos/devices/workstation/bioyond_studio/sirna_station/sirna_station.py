@@ -2612,15 +2612,20 @@ class BioyondSirnaStation(BioyondWorkstation):
             return result
 
     @not_action
-    def report_gantt_by_order(self, uuid: str) -> None:
+    def report_gantt_by_order(
+        self, uuid: str, query: Optional[Dict[str, Any]] = None
+    ) -> None:
         """收到 scheduler ``device_info`` 触发后，后台一次性拉甘特并回传后端。
 
-        通过 ``get_order_list(status="执行中（60）", latest_only=False)`` **实时查询** LIMS 所有正在
-        执行的订单，逐个调 ``gantt_with_simulation_by_order_id`` 取原始响应里的 ``data`` 字段
-        （即 ``{"items": [...]}``，避免与 body 外层 ``data`` 重复嵌套），汇总成一个数组，
-        **只 POST 一次**（body 的 ``data`` 为该数组，每个元素是一个订单甘特数据 ``{"items": [...]}``）。当前无
-        执行中订单时记日志跳过。``uuid`` 仅作回传 body 的 ``uuid`` 字段。整个过程在后台 daemon 线程
-        执行，绝不阻塞调用方（ws 消息循环），异常只记日志不外抛。
+        查询条件由 scheduler 通过 ``device_info.payload`` 下发（``query`` 参数），含
+        ``{timeType, beginTime, endTime, skipCount, pageCount, status}``。本方法把这些参数
+        **原样透传**给 LIMS ``order-list`` 接口（``status`` 为原始值，空 = 不限状态查全部），
+        **自动翻页**收集所有 ``items[].id``（即 order_id），再逐个调
+        ``gantt_with_simulation_by_order_id`` 取原始响应里的 ``data`` 字段（即 ``{"items": [...]}``，
+        避免与 body 外层 ``data`` 重复嵌套），汇总成一个数组，**只 POST 一次**
+        （body 的 ``data`` 为该数组，每个元素是一个订单的甘特数据 ``{"items": [...]}``）。payload
+        未命中任何订单时记日志跳过。``uuid`` 仅作回传 body 的 ``uuid`` 字段。整个过程在后台
+        daemon 线程执行，绝不阻塞调用方（ws 消息循环），异常只记日志不外抛。
         """
         from unilabos.config.config import GanttReportConfig
 
@@ -2633,6 +2638,8 @@ class BioyondSirnaStation(BioyondWorkstation):
             logger.error("report_gantt_by_order 缺少 uuid，跳过")
             return
 
+        normalized_query: Dict[str, Any] = dict(query) if isinstance(query, dict) else {}
+
         with self._gantt_report_lock:
             if normalized_uuid in self._gantt_reported_uuids:
                 logger.info("甘特图回传 uuid=%s 已触发过，跳过(幂等)", normalized_uuid)
@@ -2641,7 +2648,7 @@ class BioyondSirnaStation(BioyondWorkstation):
 
         thread = threading.Thread(
             target=self._gantt_report_worker,
-            args=(normalized_uuid,),
+            args=(normalized_uuid, normalized_query),
             name=f"gantt-report-{normalized_uuid[:8]}",
             daemon=True,
         )
@@ -2649,19 +2656,74 @@ class BioyondSirnaStation(BioyondWorkstation):
         logger.info("甘特图回传线程已启动: uuid=%s", normalized_uuid)
 
     @not_action
-    def _gantt_report_worker(self, uuid: str) -> None:
-        """后台线程体：实时查所有执行中订单 → 逐个拉甘特、取响应里的 data({"items":[...]}) 汇总成数组 → 一次性 POST 回传。"""
+    def _query_order_ids_for_gantt(self, query: Dict[str, Any]) -> List[str]:
+        """按 payload 透传查询 LIMS ``order-list``，自动翻页收集所有 order_id（``items[].id``）。
+
+        - ``status`` 原始值透传（空 = 不限状态查全部），不做 ``ORDER_STATUS_VALUE_MAP`` 标签映射；
+        - 以 payload 的 ``skipCount`` 为起点、``pageCount`` 为单页批大小（缺省 50，order-list 必填），
+          按返回的 ``totalCount`` 翻完所有页；
+        - 设安全上限 ``max_pages`` 防御脏 ``totalCount`` 导致死循环。
+        """
+        query = query or {}
         try:
-            order_result = self.get_order_list(status="执行中（60）", latest_only=False)
-            order_ids = [
-                str(oid).strip()
-                for oid in (order_result or {}).get("order_ids", [])
-                if str(oid).strip()
-            ]
+            page = int(query.get("pageCount") or 0)
+        except (TypeError, ValueError):
+            page = 0
+        if page <= 0:
+            page = 50  # order-list 的 pageCount 必填，缺省给一个批大小
+        try:
+            skip = int(query.get("skipCount") or 0)
+        except (TypeError, ValueError):
+            skip = 0
+        skip = max(0, skip)
+
+        status = query.get("status")
+        base_payload = {
+            "timeType": str(query.get("timeType") or ""),
+            "beginTime": query.get("beginTime") or None,
+            "endTime": query.get("endTime") or None,
+            "status": "" if status in (None, "") else str(status),
+            "filter": str(query.get("filter") or ""),
+            "sorting": str(query.get("sorting") or "creationTime desc"),
+            "pageCount": page,
+        }
+
+        rpc = self._require_hardware_interface("order_query")
+        order_ids: List[str] = []
+        seen: set = set()
+        total: Optional[int] = None
+        max_pages = 200  # 安全上限，防御脏 totalCount 死循环
+        for _ in range(max_pages):
+            payload = {**base_payload, "skipCount": skip}
+            page_data = rpc.order_query(json.dumps(payload, ensure_ascii=False)) or {}
+            items = page_data.get("items") or []
+            if total is None:
+                try:
+                    total = int(page_data.get("totalCount"))
+                except (TypeError, ValueError):
+                    total = None
+            for item in items:
+                oid = str((item or {}).get("id") or "").strip()
+                if oid and oid not in seen:
+                    seen.add(oid)
+                    order_ids.append(oid)
+            if not items:
+                break
+            skip += page
+            if total is not None and skip >= total:
+                break
+        return order_ids
+
+    @not_action
+    def _gantt_report_worker(self, uuid: str, query: Dict[str, Any]) -> None:
+        """后台线程体：用 payload 透传查 order-list(自动翻页)拿全部 order_id → 逐个拉甘特、取响应里的 data({"items":[...]}) 汇总成数组 → 一次性 POST 回传。"""
+        try:
+            order_ids = self._query_order_ids_for_gantt(query)
             if not order_ids:
                 logger.error(
-                    "甘特图回传：未查询到执行中(60)的订单，跳过 uuid=%s",
+                    "甘特图回传：payload 查询未命中任何订单，跳过 uuid=%s query=%s",
                     uuid,
+                    query,
                 )
                 return
             rpc = self._require_hardware_interface("gantt_with_simulation_by_order_id")
@@ -2684,7 +2746,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                 logger.error("甘特图回传：所有订单拉取均失败，跳过 uuid=%s", uuid)
                 return
             logger.info(
-                "甘特图拉取完成: uuid=%s 执行中订单数=%s 成功=%s",
+                "甘特图拉取完成: uuid=%s 命中订单数=%s 成功=%s",
                 uuid,
                 len(order_ids),
                 len(gantts),
