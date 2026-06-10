@@ -222,6 +222,48 @@ def parse_qpcr_xml(xml_path: str, max_points: int | None = None):
     return pos_by_sample, fluor_by_sample
 
 
+def parse_qpcr_melt(xml_path: str, amp_cycles: int = 45):
+    """解析熔解段, 返回 (pos_by_sample, melt_by_sample)。
+
+    单遍 iterparse: 取每孔扩增循环之后(Acq 序号 > amp_cycles)的采集点作为熔解段,
+    每点保留 (Temp, Fluor); 同时收集 AnalysisSample 的 sample_no->Position 映射。
+    melt_by_sample[num] = (temps[], fluors[]).
+    """
+    pos_by_sample: dict[str, str] = {}
+    melt_by_sample: dict[str, tuple[list[float], list[float]]] = {}
+
+    for _ev, el in ET.iterparse(xml_path, events=("end",)):
+        if el.tag == "Sample":
+            num = el.get("Number")
+            if num is not None:
+                temps: list[float] = []
+                fluors: list[float] = []
+                for acq in el.findall("Acq"):
+                    k = acq.get("Number")
+                    if k is None or int(k) <= amp_cycles:
+                        continue
+                    chan = acq.find("Chan")
+                    if chan is None:
+                        continue
+                    fl = chan.find("prop[@name='Fluor']")
+                    tp = chan.find("prop[@name='Temp']")
+                    if fl is not None and fl.text and tp is not None and tp.text:
+                        temps.append(float(tp.text))
+                        fluors.append(float(fl.text))
+                if temps:
+                    melt_by_sample[num] = (temps, fluors)
+            el.clear()
+        elif el.tag == "AnalysisSample":
+            name_el = el.find("prop[@name='name']")
+            pos_el = el.find("prop[@name='Position']")
+            if name_el is not None and name_el.text and pos_el is not None and pos_el.text:
+                sample_no = name_el.text.strip().split()[-1]
+                pos_by_sample[sample_no] = pos_el.text.strip()
+            el.clear()
+
+    return pos_by_sample, melt_by_sample
+
+
 def pos_str(row384: int, col384: int) -> str:
     return f"{ROWS384[row384 - 1]}{col384}"
 
@@ -329,6 +371,68 @@ def plot_amp_curves(fluor_by_pos, meta, out_png, dpi, amp_cycles=45, logy=False)
     ax.set_xlabel("采集点序号 (Acquisition index)")
     ax.set_ylabel("荧光 (Fluorescence)" + ("  [log]" if logy else ""))
     ax.set_title("qPCR 全程原始荧光曲线 (全部 384 孔, 每孔 %d 点)" % max_len)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_melt_curves(melt_by_pos, meta, out_png, dpi, smooth=9,
+                     tmin_margin=1.5, tmax_margin=1.0):
+    """熔解曲线: 逐孔按温度排序后求 -dF/dT, 画 -dF/dT vs 温度(全部 384 孔)。
+
+    smooth: 荧光移动平均窗口(奇数, >1 启用), 采用边缘填充避免序列首尾的卷积伪影。
+    tmin_margin/tmax_margin: 裁掉斜升起止的热/光学稳定瞬态(默认起始+1.5°C、末端-1.0°C),
+        避免边界尖峰压垮 y 轴; 导数仍在完整序列上计算后再按窗口截取。
+    """
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+    n_t = n_r = 0
+    y_pool: list[float] = []
+    for pos, (temps, fluors) in melt_by_pos.items():
+        if not temps or len(temps) < 5:
+            continue
+        t = np.asarray(temps, dtype=float)
+        f = np.asarray(fluors, dtype=float)
+        order = np.argsort(t)
+        t, f = t[order], f[order]
+        if smooth and smooth > 1 and len(f) >= smooth:
+            pad = smooth // 2
+            fp = np.pad(f, pad, mode="edge")
+            f = np.convolve(fp, np.ones(smooth) / smooth, mode="valid")[:len(t)]
+        d = -np.gradient(f, t)
+        # 截取稳定分析窗口, 去掉斜升起止瞬态
+        win = (t >= t.min() + tmin_margin) & (t <= t.max() - tmax_margin)
+        if win.sum() < 3:
+            win = np.ones_like(t, dtype=bool)
+        tw, dw = t[win], d[win]
+        gene = (meta.get(pos) or {}).get("gene")
+        if gene == "target":
+            color, n_t = TARGET_COLOR, n_t + 1
+        elif gene == "reference":
+            color, n_r = REF_COLOR, n_r + 1
+        else:
+            color = "#999999"
+        ax.plot(tw, dw, color=color, lw=0.5, alpha=0.35)
+        y_pool.extend(dw.tolist())
+
+    # 稳健 y 轴范围(1%-99% 分位 + 留白), 防个别孔异常值压垮整图
+    if y_pool:
+        arr = np.asarray(y_pool, dtype=float)
+        lo, hi = np.percentile(arr, 1), np.percentile(arr, 99)
+        pad = max((hi - lo) * 0.1, 1e-6)
+        ax.set_ylim(lo - pad, hi + pad)
+
+    from matplotlib.lines import Line2D
+    handles = [
+        Line2D([0], [0], color=TARGET_COLOR, lw=2, label=f"目的基因 target (n={n_t})"),
+        Line2D([0], [0], color=REF_COLOR, lw=2, label=f"内参基因 reference (n={n_r})"),
+    ]
+    ax.legend(handles=handles, fontsize=9, loc="upper left")
+    ax.set_xlabel("温度 Temperature (°C)")
+    ax.set_ylabel("-dF/dT (Derivative)")
+    ax.set_title("qPCR 熔解曲线 Melt Curve (-dF/dT, 全部 384 孔)")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     fig.savefig(out_png, dpi=dpi, bbox_inches="tight")
@@ -523,6 +627,28 @@ def render_qpcr_curve_image(
     out_dir = os.path.dirname(os.path.abspath(out_png))
     os.makedirs(out_dir, exist_ok=True)
     plot_amp_curves(fluor_by_pos, meta, out_png, dpi, amp_cycles=amp_cycles, logy=logy)
+    return out_png
+
+
+def render_qpcr_melt_image(
+    xml_path: str,
+    out_png: str,
+    plate_map_path: str = DEFAULT_MAP,
+    amp_cycles: int = 45,
+    dpi: int = 150,
+) -> str:
+    """从 qPCR XML 熔解段生成熔解曲线 PNG(-dF/dT vs 温度, 供记录本 img 节点)，返回 out_png 路径。"""
+    pos_by_sample, melt_by_sample = parse_qpcr_melt(xml_path, amp_cycles=amp_cycles)
+    melt_by_pos = {
+        pos_by_sample[sn]: tf
+        for sn, tf in melt_by_sample.items()
+        if sn in pos_by_sample
+    }
+    map96 = read_plate_map(plate_map_path)
+    meta = build_well_meta(map96)
+    out_dir = os.path.dirname(os.path.abspath(out_png))
+    os.makedirs(out_dir, exist_ok=True)
+    plot_melt_curves(melt_by_pos, meta, out_png, dpi)
     return out_png
 
 
