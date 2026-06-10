@@ -1822,6 +1822,296 @@ class BioyondSirnaStation(BioyondWorkstation):
                 ),
             }
 
+    # ------------------------------------------------------------------
+    # 节点 m：计算实验二结果并写入实验记录本
+    # ------------------------------------------------------------------
+
+    def _resolve_notebook_id(self, action_name: str) -> str:
+        """从 device_manager 反查当前 job 的 notebook_id(不改框架)。
+
+        notebook_id 不进 ROS goal，但活在 ``DeviceActionManager.JobInfo``；
+        本节点与 ws client 同进程，经 ``get_communication_client().device_manager``
+        按 ``device_action_key`` 命中当前 active job。always_free 节点走
+        ``get_active_jobs()`` 兜底。取不到返回空串(由调用方决定是否中止)。
+        """
+        try:
+            from unilabos.app.communication import get_communication_client
+
+            client = get_communication_client()
+            dm = getattr(client, "device_manager", None)
+            device_id = getattr(getattr(self, "_ros_node", None), "device_id", None)
+            if dm is None or not device_id:
+                logger.warning(
+                    f"[sirna] _resolve_notebook_id 无法取得 device_manager/device_id "
+                    f"(device_id={device_id})"
+                )
+                return ""
+            key = f"/devices/{device_id}/{action_name}"
+            job = dm.active_jobs.get(key)
+            if job is None:
+                try:
+                    job = next(
+                        (j for j in dm.get_active_jobs() if getattr(j, "device_action_key", "") == key),
+                        None,
+                    )
+                except Exception:  # pragma: no cover - 兜底
+                    job = None
+            return (getattr(job, "notebook_id", "") or "") if job is not None else ""
+        except Exception as exc:  # pragma: no cover - 反查失败不应阻断主流程之外的判断
+            logger.warning(f"[sirna] _resolve_notebook_id 异常: {exc}")
+            return ""
+
+    @staticmethod
+    def _parse_report_files(report_file: Any) -> List[str]:
+        """把 reportFile 归一成相对路径列表(兼容 list 或 ;,/换行 分隔的字符串)。"""
+        if isinstance(report_file, (list, tuple)):
+            items = [str(p) for p in report_file]
+        elif isinstance(report_file, str):
+            items = report_file.replace(";", ",").replace("\n", ",").split(",")
+        else:
+            items = []
+        return [p.strip() for p in items if str(p).strip()]
+
+    @staticmethod
+    def _extract_report_files(report: Dict[str, Any]) -> List[str]:
+        """从 order_report data 提取 reportFile 相对路径列表。
+
+        兼容：``extraProperties`` 为 dict 或 JSON 字符串；``reportFile`` 也可能直接挂顶层。
+        """
+        extra = report.get("extraProperties")
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except Exception:
+                extra = {}
+        if not isinstance(extra, dict):
+            extra = {}
+        report_file = extra.get("reportFile")
+        if report_file in (None, "", []):
+            report_file = report.get("reportFile")
+        return BioyondSirnaStation._parse_report_files(report_file)
+
+    @staticmethod
+    def _locate_report_file(host_prefix: str, rel: str) -> str:
+        """把 LIMS 相对路径拼到本地前缀(默认 D:\\bioyond_rb\\host)。"""
+        rel_norm = str(rel).strip().replace("\\", "/").lstrip("/")
+        parts = [p for p in rel_norm.split("/") if p]
+        return os.path.join(host_prefix, *parts) if parts else host_prefix
+
+    def _poll_order_report(
+        self,
+        order_id: str,
+        poll_interval_seconds: float,
+        poll_timeout_seconds: float,
+    ) -> Dict[str, Any]:
+        """轮询 rpc.order_report 直到 status==80，返回报告 data 字典。"""
+        rpc = self._require_hardware_interface("order_report")
+        interval = max(float(poll_interval_seconds or 10.0), 0.5)
+        deadline = (
+            time.monotonic() + float(poll_timeout_seconds)
+            if poll_timeout_seconds and poll_timeout_seconds > 0
+            else None
+        )
+        while True:
+            report = rpc.order_report(order_id)
+            status = report.get("status") if isinstance(report, dict) else None
+            if status in (80, "80"):
+                logger.info(f"[sirna] order_report 命中 status=80 (order_id={order_id})")
+                return report
+            logger.info(
+                f"[sirna] order_report 轮询中 order_id={order_id} status={status}，"
+                f"{interval}s 后重试"
+            )
+            if deadline is not None and time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"order_report 轮询超时(order_id={order_id}, 末次 status={status})"
+                )
+            time.sleep(interval)
+
+    @action(
+        goal_default={
+            "order_id": "",
+            "notebook_id": "",
+            "host_prefix": r"D:\bioyond_rb\host",
+            "poll_interval_seconds": 10.0,
+            "poll_timeout_seconds": 3600,
+            "plate_map_path": "",
+            "archive_raw_files": True,
+        },
+        feedback_interval=300,
+        description=(
+            "计算实验二结果并写入实验记录本：轮询 order-report 直到 status==80 拿到 "
+            "reportFile 两个文件(.csv=RNA / .xml=qPCR)，定位本地文件后生成 RNA 浓度检测"
+            "(原生表格) 与 qPCR 扩增曲线(图片，传 OSS)，再追加到 notebook 的 lab_record。"
+            "order_id 可连 wait_for_order_finish 或手填；notebook_id 留空自动反查当前记录本，"
+            "单独测试时可手填指定写入哪本。"
+        ),
+        handles=[
+            ActionInputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(
+                key="success",
+                data_type="boolean",
+                label="是否成功",
+                data_key="success",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="notebook_id",
+                data_type="string",
+                label="记录本ID",
+                data_key="notebook_id",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="image_urls",
+                data_type="array",
+                label="图片URL列表",
+                data_key="image_urls",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    def compute_experiment2_result(
+        self,
+        order_id: str = "",
+        notebook_id: str = "",
+        host_prefix: str = r"D:\bioyond_rb\host",
+        poll_interval_seconds: float = 10.0,
+        poll_timeout_seconds: int = 3600,
+        plate_map_path: str = "",
+        archive_raw_files: bool = True,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """计算实验二结果(RNA 表格 + qPCR 曲线图)并写入实验记录本。
+
+        Args:
+            order_id: 实验订单 UUID(连上游 wait_for_order_finish.order_id，亦可手填)。
+            notebook_id: 目标记录本 UUID；**留空则自动从当前 job 反查(生产默认)**。
+                单独测试时可手填，把结果写进指定记录本。
+            host_prefix: 报告文件本地前缀(工作站固定盘符路径)。
+            poll_interval_seconds: order_report 轮询间隔秒。
+            poll_timeout_seconds: order_report 轮询超时秒(<=0 不限时)。
+            plate_map_path: 96 孔样本映射 xlsx；缺省用 gen_report.DEFAULT_MAP。
+            archive_raw_files: 是否把原始 csv/xml 作为附件(file)归档进记录本。
+
+        Returns:
+            含 success / order_id / notebook_id / image_urls / confirmation_message 的字典。
+        """
+        import tempfile
+        from datetime import datetime as _dt
+
+        from unilabos.devices.workstation.bioyond_studio.sirna_station import (
+            notebook_client as nbc,
+        )
+        from unilabos.script import gen_report
+
+        with self._debug_call_session("compute_experiment2_result"):
+            del kwargs
+
+            normalized_order_id = str(order_id or "").strip()
+            if not normalized_order_id:
+                raise ValueError(
+                    "compute_experiment2_result 需要 order_id(请连接 wait_for_order_finish.order_id)"
+                )
+
+            # 1) 取 notebook_id：优先手填(便于单独测试)，否则 device_manager 反查；
+            #    取不到则中止，不静默写空记录本。
+            notebook_id = str(notebook_id or "").strip()
+            if not notebook_id:
+                notebook_id = self._resolve_notebook_id("compute_experiment2_result")
+            if not notebook_id:
+                raise ValueError(
+                    "compute_experiment2_result 未取到 notebook_id(未手填且 device_manager "
+                    "当前无匹配 active job)；中止写记录本。手动测试请显式传入 notebook_id。"
+                )
+
+            # 2) 轮询 order_report 直到 status==80，取 reportFile 两路径
+            report = self._poll_order_report(
+                normalized_order_id, poll_interval_seconds, poll_timeout_seconds
+            )
+            rel_files = self._extract_report_files(report)
+            if not rel_files:
+                raise RuntimeError(
+                    f"order_report(status=80) 未解析到 reportFile；report keys={list(report.keys())}"
+                )
+
+            csv_path = xml_path = ""
+            for rel in rel_files:
+                local = self._locate_report_file(host_prefix, rel)
+                ext = os.path.splitext(local)[1].lower()
+                if ext == ".csv":
+                    csv_path = local
+                elif ext == ".xml":
+                    xml_path = local
+            logger.info(
+                f"[sirna] 实验二报告文件定位: csv={csv_path or '<无>'} xml={xml_path or '<无>'}"
+            )
+            if not csv_path or not os.path.exists(csv_path):
+                raise FileNotFoundError(f"RNA(.csv) 报告文件缺失或不存在: {csv_path}")
+            if not xml_path or not os.path.exists(xml_path):
+                raise FileNotFoundError(f"qPCR(.xml) 报告文件缺失或不存在: {xml_path}")
+
+            # 3) 生成数据/图片
+            plate_map = str(plate_map_path or "").strip() or gen_report.DEFAULT_MAP
+            out_dir = os.path.join(tempfile.gettempdir(), "sirna_exp2", normalized_order_id)
+            os.makedirs(out_dir, exist_ok=True)
+
+            rna = gen_report.build_rna_table(csv_path, plate_map_path=plate_map)
+            qpcr_png = os.path.join(out_dir, "qpcr_amp_curves.png")
+            gen_report.render_qpcr_curve_image(xml_path, qpcr_png, plate_map_path=plate_map)
+
+            # 4) qPCR 图片走 OSS(img 节点需 url)
+            img_meta = nbc.upload_to_oss(qpcr_png, scene="image", content_type="image/png")
+
+            # 5) 构造记录本块：RNA 原生表格 + qPCR 图片(+ 可选原始文件归档)
+            stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            blocks: List[Dict[str, Any]] = [
+                nbc.text_block(f"实验二结果(自动生成 {stamp}, order_id={normalized_order_id})"),
+                nbc.text_block("一、RNA 浓度检测"),
+                nbc.build_table_node(rna["header"], rna["rows"]),
+                nbc.text_block("二、qPCR 扩增曲线"),
+                nbc.build_image_node(img_meta),
+            ]
+
+            if archive_raw_files:
+                blocks.append(nbc.text_block("三、原始数据附件"))
+                for raw_path, scene, ctype in (
+                    (csv_path, "file", "text/csv"),
+                    (xml_path, "file", "application/xml"),
+                ):
+                    try:
+                        meta = nbc.upload_to_oss(raw_path, scene=scene, content_type=ctype)
+                        blocks.append(nbc.build_file_node(meta))
+                    except Exception as exc:
+                        logger.warning(f"[sirna] 原始文件归档上传失败({raw_path}): {exc}")
+
+            # 末尾补一个空段落：img/file 是 void 节点，作为末块时前端难以在其后落光标继续编辑。
+            blocks.append(nbc.text_block(""))
+
+            # 6) 追加到记录本并保存(写前校验 editing)
+            result = nbc.append_blocks_to_notebook(notebook_id, blocks)
+            logger.info(
+                f"[sirna] 实验二结果已写入记录本 notebook_id={notebook_id} "
+                f"appended={result['appended']} total={result['total']}"
+            )
+
+            return {
+                "success": True,
+                "order_id": normalized_order_id,
+                "notebook_id": notebook_id,
+                "image_urls": [img_meta.get("url", "")],
+                "confirmation_message": (
+                    f"实验二结果已写入记录本 {notebook_id}: RNA 表格 {len(rna['rows'])} 行 + qPCR 曲线图"
+                ),
+            }
+
     @action(
         always_free=True,
         goal_default={
