@@ -1200,6 +1200,11 @@ loadDeviceCatalog().then(() => {
 });
 
 /* ── Scene Poller (demo agent) ─────────────── */
+// 轮询后端 /scene/placements，把布局结果同步到 3D 场景。
+// 关键能力：当某条 placement 对应的设备尚未在场景中时，自动按其 device_id
+// 从已加载的 CATALOG 创建实体（用户无需手动添加），再移动到目标位置。
+// 匹配以 placement.uuid 为主键（为“同型号多台”预留），device_id 仅作为
+// 兼容“手动添加设备”的回退匹配。
 let _scenePollVersion = 0;
 setInterval(async () => {
   try {
@@ -1208,18 +1213,47 @@ setInterval(async () => {
     const data = await res.json();
     if (data.version < _scenePollVersion) _scenePollVersion = 0;  // server restart
     if (data.version <= _scenePollVersion) return;
+    if (!Object.keys(CATALOG).length) return;  // 设备目录尚未就绪，跳过本次
     _scenePollVersion = data.version;
+    // 先按后端 lab 尺寸同步地板与输入框，再用更新后的尺寸换算 placements 坐标。
+    // 注意：直接改 value 并调 rebuildLab()，不派发 change 事件，避免回推 /scene/lab 形成回环。
+    if (data.lab && typeof data.lab.width === 'number' && typeof data.lab.depth === 'number') {
+      const labWInput = document.getElementById('lab-w');
+      const labDInput = document.getElementById('lab-d');
+      if (parseFloat(labWInput.value) !== data.lab.width || parseFloat(labDInput.value) !== data.lab.depth) {
+        labWInput.value = data.lab.width;
+        labDInput.value = data.lab.depth;
+        rebuildLab();
+      }
+    }
     const labW = parseFloat(document.getElementById('lab-w').value) || 4;
     const labD = parseFloat(document.getElementById('lab-d').value) || 4;
+    const claimed = new Set();  // 本批次已占用的实体 uuid，避免多台同型号互相抢占
+    let created = false;
     for (const p of data.placements) {
       const did = p.device_id;
-      const entry = state.selected.find(s => s.device_id === did || s.uuid === did);
-      if (!entry) continue;
+      const puuid = p.uuid || did;
+      // 1) 以 uuid 为主键匹配（支持同型号多台）
+      let entry = state.selected.find(s => s.uuid === puuid);
+      // 2) 回退：匹配同型号且本批次未占用的实体（兼容手动添加的设备）
+      if (!entry) entry = state.selected.find(s => s.device_id === did && !claimed.has(s.uuid));
+      // 3) 仍未匹配则自动创建（仅当目录中存在该设备时）
+      if (!entry) {
+        if (!CATALOG[did]) continue;
+        addDeviceToScene(did, puuid);
+        if (!deviceMeshes[puuid]) continue;  // 模型创建失败则跳过
+        entry = { device_id: did, uuid: puuid };
+        state.selected.push(entry);
+        created = true;
+      }
+      claimed.add(entry.uuid);
       const px = p.position?.x ?? 0;
       const py = p.position?.y ?? 0;
       const theta = p.rotation?.z ?? 0;
+      state.placements[entry.uuid] = p;
       animatePlacement(entry.uuid, px - labW / 2, py - labD / 2, theta);
     }
+    if (created) updateUI();  // 自动新增设备后刷新侧栏与计数
   } catch (_) { /* server may not be running */ }
 }, 1000);
 </script>

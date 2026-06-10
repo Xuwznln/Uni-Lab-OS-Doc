@@ -705,9 +705,14 @@ async def get_lab_dimensions():
 
 @app.post("/scene/lab")
 async def set_lab_dimensions(dims: LabDimensions):
-    """前端在加载和尺寸变更时推送。"""
+    """前端在加载和尺寸变更时推送；agent 也可调用以改变实验室尺寸。
+
+    bump 一次 _scene_state["version"]，让前端在 1s 轮询中检测到 version 增长，
+    随响应里的 lab 字段一并同步地板尺寸（即便本次没有新的 placements）。
+    """
     _lab_state["width"] = dims.width
     _lab_state["depth"] = dims.depth
+    _scene_state["version"] += 1
     return _lab_state
 
 
@@ -730,8 +735,12 @@ async def set_scene_placements(request: ScenePlacementsRequest):
 
 @app.get("/scene/placements")
 async def get_scene_placements():
-    """前端轮询此端点，检测 version 变化后应用布局。"""
-    return _scene_state
+    """前端轮询此端点，检测 version 变化后应用布局。
+
+    响应里附带当前 lab 尺寸，使前端在同一次 version 跳变中原子地同步
+    地板尺寸与设备位置，避免「地板用旧尺寸、坐标按新尺寸换算」导致出界。
+    """
+    return {**_scene_state, "lab": _lab_state}
 
 
 @app.delete("/scene/placements")
