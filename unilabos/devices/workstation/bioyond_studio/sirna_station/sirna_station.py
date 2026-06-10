@@ -1876,20 +1876,13 @@ class BioyondSirnaStation(BioyondWorkstation):
     def _extract_report_files(report: Dict[str, Any]) -> List[str]:
         """从 order_report data 提取 reportFile 相对路径列表。
 
-        兼容：``extraProperties`` 为 dict 或 JSON 字符串；``reportFile`` 也可能直接挂顶层。
+        与奔耀约定：报告文件(.csv/.xml)固定挂在 ``preIntakes[].extraProperties.reportFile``。
         """
-        extra = report.get("extraProperties")
-        if isinstance(extra, str):
-            try:
-                extra = json.loads(extra)
-            except Exception:
-                extra = {}
-        if not isinstance(extra, dict):
-            extra = {}
-        report_file = extra.get("reportFile")
-        if report_file in (None, "", []):
-            report_file = report.get("reportFile")
-        return BioyondSirnaStation._parse_report_files(report_file)
+        files: List[str] = []
+        for item in report.get("preIntakes") or []:
+            report_file = (item.get("extraProperties") or {}).get("reportFile")
+            files.extend(BioyondSirnaStation._parse_report_files(report_file))
+        return files
 
     @staticmethod
     def _locate_report_file(host_prefix: str, rel: str) -> str:
@@ -1989,7 +1982,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         archive_raw_files: bool = True,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """计算实验二结果(RNA 表格 + qPCR 曲线图)并写入实验记录本。
+        """计算实验二结果(RNA 表格 + qPCR 板排布图 + 扩增曲线图 + ΔΔCT 统计表)并写入实验记录本。
 
         Args:
             order_id: 实验订单 UUID(连上游 wait_for_order_finish.order_id，亦可手填)。
@@ -2066,22 +2059,34 @@ class BioyondSirnaStation(BioyondWorkstation):
             rna = gen_report.build_rna_table(csv_path, plate_map_path=plate_map)
             qpcr_png = os.path.join(out_dir, "qpcr_amp_curves.png")
             gen_report.render_qpcr_curve_image(xml_path, qpcr_png, plate_map_path=plate_map)
+            layout_png = os.path.join(out_dir, "qpcr_plate_layout.png")
+            gen_report.render_qpcr_plate_layout_image(xml_path, layout_png, plate_map_path=plate_map)
+            stats = gen_report.build_qpcr_stats_table(xml_path, plate_map_path=plate_map)
 
-            # 4) qPCR 图片走 OSS(img 节点需 url)
-            img_meta = nbc.upload_to_oss(qpcr_png, scene="image", content_type="image/png")
+            # 4) 图片走 OSS(img 节点需 url)：板排布图 + 扩增曲线图
+            layout_meta = nbc.upload_to_oss(layout_png, scene="image", content_type="image/png")
+            curve_meta = nbc.upload_to_oss(qpcr_png, scene="image", content_type="image/png")
 
-            # 5) 构造记录本块：RNA 原生表格 + qPCR 图片(+ 可选原始文件归档)
+            # 5) 构造记录本块：RNA 表格 + 板排布图 + 扩增曲线图 + ΔΔCT 统计表(+ 可选原始文件归档)
             stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            ave_blank = (stats.get("meta") or {}).get("ave_blank")
+            threshold = (stats.get("meta") or {}).get("threshold")
+            stats_note = f"阈值法 CT(threshold={threshold})；Ave.Blank(空白ΔCT均值)={ave_blank}"
             blocks: List[Dict[str, Any]] = [
                 nbc.text_block(f"实验二结果(自动生成 {stamp}, order_id={normalized_order_id})"),
                 nbc.text_block("一、RNA 浓度检测"),
                 nbc.build_table_node(rna["header"], rna["rows"]),
-                nbc.text_block("二、qPCR 扩增曲线"),
-                nbc.build_image_node(img_meta),
+                nbc.text_block("二、qPCR 板排布图"),
+                nbc.build_image_node(layout_meta),
+                nbc.text_block("三、qPCR 扩增曲线"),
+                nbc.build_image_node(curve_meta),
+                nbc.text_block("四、qPCR 统计分析 (ΔΔCT 相对定量)"),
+                nbc.text_block(stats_note),
+                nbc.build_table_node(stats["header"], stats["rows"]),
             ]
 
             if archive_raw_files:
-                blocks.append(nbc.text_block("三、原始数据附件"))
+                blocks.append(nbc.text_block("五、原始数据附件"))
                 for raw_path, scene, ctype in (
                     (csv_path, "file", "text/csv"),
                     (xml_path, "file", "application/xml"),
@@ -2106,9 +2111,10 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "success": True,
                 "order_id": normalized_order_id,
                 "notebook_id": notebook_id,
-                "image_urls": [img_meta.get("url", "")],
+                "image_urls": [layout_meta.get("url", ""), curve_meta.get("url", "")],
                 "confirmation_message": (
-                    f"实验二结果已写入记录本 {notebook_id}: RNA 表格 {len(rna['rows'])} 行 + qPCR 曲线图"
+                    f"实验二结果已写入记录本 {notebook_id}: RNA 表格 {len(rna['rows'])} 行 + "
+                    f"qPCR 板排布图 + 扩增曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
                 ),
             }
 

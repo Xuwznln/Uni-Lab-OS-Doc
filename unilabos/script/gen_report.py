@@ -541,6 +541,93 @@ def render_qpcr_plate_layout_image(
     return out_png
 
 
+def build_qpcr_stats_table(
+    xml_path: str,
+    plate_map_path: str = DEFAULT_MAP,
+    threshold: float = 3.0,
+    amp_cycles: int = 45,
+    max_points: int | None = None,
+) -> dict:
+    """从 qPCR XML 生成 ΔΔCT 统计分析结构化表格(供记录本原生 table 节点)。
+
+    阈值法 CT → ΔCT=CT目的-CT内参 → ΔΔCT=ΔCT-Ave.Blank(空白ΔCT均值)
+    → 相对定量 RQ=2^(-ΔΔCT)，按样本聚合 RQ 均值/标准差(同组仅首行显示均值/SD)。
+
+    Returns:
+        {"header": [...], "rows": [[单元格字符串...], ...], "meta": {...}}
+    """
+    pos_by_sample, fluor_by_sample = parse_qpcr_xml(xml_path, max_points)
+    fluor_by_pos = {
+        pos_by_sample[sn]: vals
+        for sn, vals in fluor_by_sample.items()
+        if sn in pos_by_sample
+    }
+    map96 = read_plate_map(plate_map_path)
+    ct_by_pos = {
+        pos: ct_threshold(vals[:amp_cycles], threshold)
+        for pos, vals in fluor_by_pos.items()
+    }
+    rows_raw = build_rows(map96, ct_by_pos)
+    ave_blank = compute_ave_blank(rows_raw)
+
+    def _num(v) -> str:
+        return "" if v is None else f"{round(v, 4)}"
+
+    # 逐复孔算 ΔCT/ΔΔCT/RQ，并按样本收集 RQ 以求均值/SD
+    enriched = []
+    rq_by_sample: dict[str, list[float]] = {}
+    for r in rows_raw:
+        ct_t, ct_r = r["ct_target"], r["ct_ref"]
+        dct = ddct = rq = None
+        if ct_t is not None and ct_r is not None:
+            dct = ct_t - ct_r
+            if ave_blank is not None:
+                ddct = dct - ave_blank
+                rq = 2 ** (-ddct)
+                rq_by_sample.setdefault(r["sample"], []).append(rq)
+        enriched.append((r, ct_t, ct_r, dct, ddct, rq))
+
+    rq_stats: dict[str, tuple[str, str]] = {}
+    for s, vals in rq_by_sample.items():
+        mean = f"{round(statistics.mean(vals), 4)}" if vals else ""
+        sd = f"{round(statistics.stdev(vals), 4)}" if len(vals) > 1 else ("0.0" if vals else "")
+        rq_stats[s] = (mean, sd)
+
+    header = [
+        "位置(目的孔 内参孔)", "样本", "内参CT", "目的CT",
+        "ΔCT", "ΔΔCT", "2^(-ΔΔCT)", "RQ均值", "RQ标准差",
+    ]
+    rows: list[list[str]] = []
+    prev_sample = None
+    for (r, ct_t, ct_r, dct, ddct, rq) in enriched:
+        sample = r["sample"]
+        if sample != prev_sample:
+            mean, sd = rq_stats.get(sample, ("", ""))
+            prev_sample = sample
+        else:
+            mean = sd = ""  # 同一样本组仅首行显示均值/SD
+        rows.append([
+            r["pos_label"],
+            sample,
+            _num(ct_r) if ct_r is not None else "Undetermined",
+            _num(ct_t) if ct_t is not None else "Undetermined",
+            _num(dct),
+            _num(ddct),
+            _num(rq),
+            mean,
+            sd,
+        ])
+    return {
+        "header": header,
+        "rows": rows,
+        "meta": {
+            "source": os.path.basename(xml_path),
+            "threshold": threshold,
+            "ave_blank": round(ave_blank, 4) if ave_blank is not None else None,
+        },
+    }
+
+
 # ===========================================================================
 # main
 # ===========================================================================
