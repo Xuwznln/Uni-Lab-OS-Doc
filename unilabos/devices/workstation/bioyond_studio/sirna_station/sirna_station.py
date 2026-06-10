@@ -2616,8 +2616,9 @@ class BioyondSirnaStation(BioyondWorkstation):
         """收到 scheduler ``device_info`` 触发后，后台一次性拉甘特并回传后端。
 
         通过 ``get_order_list(status="执行中（60）", latest_only=False)`` **实时查询** LIMS 所有正在
-        执行的订单，逐个调 ``gantt_with_simulation_by_order_id`` 取**完整原始响应**，汇总成一个数组，
-        **只 POST 一次**（body 的 ``data`` 为该数组，每个元素是一个订单甘特接口的原始响应）。当前无
+        执行的订单，逐个调 ``gantt_with_simulation_by_order_id`` 取原始响应里的 ``data`` 字段
+        （即 ``{"items": [...]}``，避免与 body 外层 ``data`` 重复嵌套），汇总成一个数组，
+        **只 POST 一次**（body 的 ``data`` 为该数组，每个元素是一个订单甘特数据 ``{"items": [...]}``）。当前无
         执行中订单时记日志跳过。``uuid`` 仅作回传 body 的 ``uuid`` 字段。整个过程在后台 daemon 线程
         执行，绝不阻塞调用方（ws 消息循环），异常只记日志不外抛。
         """
@@ -2649,7 +2650,7 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @not_action
     def _gantt_report_worker(self, uuid: str) -> None:
-        """后台线程体：实时查所有执行中订单 → 逐个拉甘特(原始响应)汇总成数组 → 一次性 POST 回传。"""
+        """后台线程体：实时查所有执行中订单 → 逐个拉甘特、取响应里的 data({"items":[...]}) 汇总成数组 → 一次性 POST 回传。"""
         try:
             order_result = self.get_order_list(status="执行中（60）", latest_only=False)
             order_ids = [
@@ -2667,9 +2668,16 @@ class BioyondSirnaStation(BioyondWorkstation):
             gantts: List[Any] = []
             for order_id in order_ids:
                 try:
-                    gantts.append(
-                        rpc.gantt_with_simulation_by_order_id(order_id, return_envelope=True)
+                    envelope = rpc.gantt_with_simulation_by_order_id(
+                        order_id, return_envelope=True
                     )
+                    gantt_data = (envelope or {}).get("data")
+                    if gantt_data is None:
+                        logger.error(
+                            "甘特图响应缺少 data 字段，跳过 order_id=%s", order_id
+                        )
+                        continue
+                    gantts.append(gantt_data)
                 except Exception as exc:
                     logger.error("甘特图拉取失败 order_id=%s: %s", order_id, exc)
             if not gantts:
