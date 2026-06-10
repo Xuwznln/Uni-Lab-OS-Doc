@@ -20,6 +20,7 @@ dependencies:
   - networkx
   - matplotlib
   - pint
+  - openpyxl
   # Device communication
   - pyserial
   - pyusb
