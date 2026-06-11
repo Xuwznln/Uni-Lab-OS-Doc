@@ -2030,14 +2030,14 @@ class BioyondSirnaStation(BioyondWorkstation):
                 )
 
             # 1) 取 notebook_id：优先手填(便于单独测试)，否则 device_manager 反查；
-            #    取不到则中止，不静默写空记录本。
+            #    取不到则只记 warning、跳过写记录本(不报错)，计算结果照常返回。
             notebook_id = str(notebook_id or "").strip()
             if not notebook_id:
                 notebook_id = self._resolve_notebook_id("compute_experiment2_result")
             if not notebook_id:
-                raise ValueError(
-                    "compute_experiment2_result 未取到 notebook_id(未手填且 device_manager "
-                    "当前无匹配 active job)；中止写记录本。手动测试请显式传入 notebook_id。"
+                logger.warning(
+                    "[sirna] compute_experiment2_result 未取到 notebook_id(未手填且 device_manager "
+                    "当前无匹配 active job)；跳过写记录本，仅返回计算结果。"
                 )
 
             # 2) 轮询 order_report 直到 status==80，取 reportFile 两路径
@@ -2120,12 +2120,22 @@ class BioyondSirnaStation(BioyondWorkstation):
             # 末尾补一个空段落：img/file 是 void 节点，作为末块时前端难以在其后落光标继续编辑。
             blocks.append(nbc.text_block(""))
 
-            # 6) 追加到记录本并保存(写前校验 editing)
-            result = nbc.append_blocks_to_notebook(notebook_id, blocks)
-            logger.info(
-                f"[sirna] 实验二结果已写入记录本 notebook_id={notebook_id} "
-                f"appended={result['appended']} total={result['total']}"
-            )
+            # 6) 追加到记录本并保存(写前校验 editing)；无 notebook_id 则跳过写入
+            if notebook_id:
+                append_result = nbc.append_blocks_to_notebook(notebook_id, blocks)
+                logger.info(
+                    f"[sirna] 实验二结果已写入记录本 notebook_id={notebook_id} "
+                    f"appended={append_result['appended']} total={append_result['total']}"
+                )
+                confirmation_message = (
+                    f"实验二结果已写入记录本 {notebook_id}: RNA 表格 {len(rna['rows'])} 行 + "
+                    f"qPCR 板排布图 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
+                )
+            else:
+                confirmation_message = (
+                    f"实验二结果已计算(未取到 notebook_id，跳过写记录本): RNA 表格 {len(rna['rows'])} 行 + "
+                    f"qPCR 板排布图 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
+                )
 
             return {
                 "success": True,
@@ -2136,10 +2146,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                     curve_meta.get("url", ""),
                     melt_meta.get("url", ""),
                 ],
-                "confirmation_message": (
-                    f"实验二结果已写入记录本 {notebook_id}: RNA 表格 {len(rna['rows'])} 行 + "
-                    f"qPCR 板排布图 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
-                ),
+                "confirmation_message": confirmation_message,
             }
 
     # ==================== 实验一：细胞板名称记录(文件 m) ====================
@@ -2351,14 +2358,15 @@ class BioyondSirnaStation(BioyondWorkstation):
                     "compute_experiment1_result 需要 order_id(请连接 wait_for_order_finish.order_id)"
                 )
 
-            # 取 notebook_id：手填优先(便于单独测试)，否则 device_manager 反查；取不到则中止
+            # 取 notebook_id：手填优先(便于单独测试)，否则 device_manager 反查；
+            # 取不到则只记 warning、跳过写记录本(不报错)，计算结果照常返回。
             notebook_id = str(notebook_id or "").strip()
             if not notebook_id:
                 notebook_id = self._resolve_notebook_id("compute_experiment1_result")
             if not notebook_id:
-                raise ValueError(
-                    "compute_experiment1_result 未取到 notebook_id(未手填且 device_manager "
-                    "当前无匹配 active job)；中止写记录本。手动测试请显式传入 notebook_id。"
+                logger.warning(
+                    "[sirna] compute_experiment1_result 未取到 notebook_id(未手填且 device_manager "
+                    "当前无匹配 active job)；跳过写记录本，仅返回计算结果。"
                 )
 
             # 1) 读文件 m：4 块细胞培养板(materialId↔板号↔板名)
@@ -2477,26 +2485,36 @@ class BioyondSirnaStation(BioyondWorkstation):
                 len(plates_data), len(result["data"]), blank_means,
             )
 
-            # 写入实验记录本：结果表转原生表格块后追加(无图片，仅一张表)
-            columns = result["columns"]
-            header = [c["name"] for c in columns]
-            rows = [[row[c["key"]] for c in columns] for row in result["data"]]
-            stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-            blocks: List[Dict[str, Any]] = [
-                nbc.text_block(
-                    f"实验一结果(自动生成 {stamp}, order_id={normalized_order_id})"
-                ),
-                nbc.text_block("一、双荧光素酶报告基因检测结果"),
-                nbc.build_table_node(header, rows),
-                nbc.text_block(f"各板空白对照 ratio 均值: {blank_means}"),
-                # 末尾补空段落：table 后便于前端继续编辑
-                nbc.text_block(""),
-            ]
-            append_result = nbc.append_blocks_to_notebook(notebook_id, blocks)
-            logger.info(
-                "[sirna] 实验一结果已写入记录本 notebook_id=%s appended=%s total=%s",
-                notebook_id, append_result["appended"], append_result["total"],
-            )
+            # 写入实验记录本：结果表转原生表格块后追加(无图片，仅一张表)；无 notebook_id 则跳过
+            if notebook_id:
+                columns = result["columns"]
+                header = [c["name"] for c in columns]
+                rows = [[row[c["key"]] for c in columns] for row in result["data"]]
+                stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+                blocks: List[Dict[str, Any]] = [
+                    nbc.text_block(
+                        f"实验一结果(自动生成 {stamp}, order_id={normalized_order_id})"
+                    ),
+                    nbc.text_block("一、双荧光素酶报告基因检测结果"),
+                    nbc.build_table_node(header, rows),
+                    nbc.text_block(f"各板空白对照 ratio 均值: {blank_means}"),
+                    # 末尾补空段落：table 后便于前端继续编辑
+                    nbc.text_block(""),
+                ]
+                append_result = nbc.append_blocks_to_notebook(notebook_id, blocks)
+                logger.info(
+                    "[sirna] 实验一结果已写入记录本 notebook_id=%s appended=%s total=%s",
+                    notebook_id, append_result["appended"], append_result["total"],
+                )
+                confirmation_message = (
+                    f"实验一结果已写入记录本 {notebook_id}: {len(plates_data)} 块板, "
+                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means})"
+                )
+            else:
+                confirmation_message = (
+                    f"实验一结果已计算(未取到 notebook_id，跳过写记录本): {len(plates_data)} 块板, "
+                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means})"
+                )
 
             return {
                 "success": True,
@@ -2504,10 +2522,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "notebook_id": notebook_id,
                 "resultTable": result_table,
                 "meta": result["meta"],
-                "confirmation_message": (
-                    f"实验一结果已写入记录本 {notebook_id}: {len(plates_data)} 块板, "
-                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means})"
-                ),
+                "confirmation_message": confirmation_message,
             }
 
     @action(
