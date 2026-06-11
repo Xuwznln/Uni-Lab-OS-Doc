@@ -339,6 +339,13 @@ def build_argparser():
         help="Scene path to load into the selected physics backend during startup.",
     )
     parser.add_argument(
+        "--scene",
+        type=str,
+        default=None,
+        help="Path to a lab architecture scene JSON ({nodes, rootNodeIds}); overrides the scene "
+        "carried in the startup download. Walls/slabs are merged into full_dev for MoveIt collision.",
+    )
+    parser.add_argument(
         "--physics_timeout",
         type=float,
         default=120.0,
@@ -746,6 +753,25 @@ def main():
     request_startup_json = args_dict.get("_startup_json")
     if request_startup_json is None and BasicConfig.ak and BasicConfig.sk:
         request_startup_json = http_client.request_startup_json()
+
+    # 实验室建筑场景：--scene 本地文件优先，否则取启动下载里携带的 scene 字段
+    # （方案 A，后端未提供时为 None，优雅降级，不影响设备装配）
+    scene_json = None
+    scene_file = args_dict.get("scene")
+    if scene_file:
+        if os.path.exists(scene_file):
+            try:
+                with open(scene_file, encoding="utf-8") as f:
+                    scene_json = json.load(f)
+                print_status(f"已从本地文件加载实验室建筑场景: {scene_file}", "info")
+            except (OSError, json.JSONDecodeError) as e:
+                print_status(f"加载实验室建筑场景文件失败 {scene_file}: {e}", "warning")
+        else:
+            print_status(f"实验室建筑场景文件不存在: {scene_file}", "warning")
+    elif isinstance(request_startup_json, dict):
+        scene_json = request_startup_json.get("scene")
+    args_dict["scene_json"] = scene_json
+
     if file_path is None:
         if not request_startup_json:
             print_status(
@@ -883,6 +909,7 @@ def main():
                 devices_and_resources,
                 [n.res_content for n in args_dict["resources_config"].all_nodes],  # type: ignore  # FIXME
                 enable_rviz=enable_rviz,
+                scene_json=args_dict.get("scene_json"),
             )
             args_dict["resources_mesh_config"] = resource_visualization.resource_model
             # 把整场景展开后的 URDF 作为单个 full_dev 设备发给 Isaac Sim

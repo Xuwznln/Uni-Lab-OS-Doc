@@ -21,3 +21,6 @@ matplotlib
 pylibftdi
 grpcio
 grpcio-tools
+shapely
+trimesh
+mapbox_earcut

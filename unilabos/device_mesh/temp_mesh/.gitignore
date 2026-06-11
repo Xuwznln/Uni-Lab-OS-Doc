@@ -1,0 +1,3 @@
+# edge 启动时生成的 world_scene xacro/SRDF 与 slab STL，均为运行期产物，不纳入版本控制
+*
+!.gitignore

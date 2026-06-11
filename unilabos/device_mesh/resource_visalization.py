@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from pathlib import Path
 import re
 
@@ -60,7 +61,7 @@ def get_pattern_matches(folder, pattern):
     return matches
 
 class ResourceVisualization:
-    def __init__(self, device: dict, resource: dict, enable_rviz: bool = True):
+    def __init__(self, device: dict, resource: dict, enable_rviz: bool = True, scene_json=None):
         """初始化资源可视化类
         
         该类用于将设备和资源的3D模型可视化展示。通过解析设备和资源的配置信息,
@@ -71,6 +72,8 @@ class ResourceVisualization:
             resource (dict): 资源配置字典,包含资源的类型、位置等信息 
             registry (dict): 注册表字典,包含设备和资源类型的注册信息
             enable_rviz (bool, optional): 是否启用RViz可视化. Defaults to True.
+            scene_json (dict | None, optional): 实验室建筑场景图 {nodes, rootNodeIds}，
+                非空时生成 world_scene 宏并合并进 full_dev. Defaults to None.
         """
         self.launch_service = LaunchService()
         self.launch_description = LaunchDescription()
@@ -79,6 +82,7 @@ class ResourceVisualization:
         self.resource_type = ['deck', 'plate', 'container', 'tip_rack']
         self.mesh_path = Path(__file__).parent.absolute()
         self.enable_rviz = enable_rviz
+        self.scene_json = scene_json
         registry = lab_registry
 
         self.srdf_str = '''<?xml version="1.0" ?>
@@ -187,6 +191,10 @@ class ResourceVisualization:
                             self.moveit_nodes[node["id"]] = model_config['mesh']
                     else:
                         print("错误的注册表类型！")
+
+        # 合并实验室建筑场景 world_scene（墙体 box / 地板 box 或 mesh）
+        self._append_world_scene(xacro_uri)
+
         re = etree.tostring(self.root, encoding="unicode")
         doc = xacro.parse(re)
         xacro.process_doc(doc)
@@ -201,6 +209,65 @@ class ResourceVisualization:
 
         if self.moveit_nodes:
             self.moveit_init()
+
+    def _append_world_scene(self, xacro_uri: str) -> None:
+        """把建筑场景生成为 world_scene 宏并 include + 实例化进 full_dev / SRDF。
+
+        启动时先清空再重建 temp_mesh/（含生成的 xacro 与 STL），再追加 include。
+        失败时不影响设备部分的正常装配。
+        """
+        if not self.scene_json:
+            return
+        try:
+            from unilabos.resources.architecture_scene import (
+                generate_world_scene_srdf_xacro,
+                generate_world_scene_xacro,
+                parse_scene,
+            )
+
+            temp_mesh_dir = os.path.join(str(self.mesh_path), "temp_mesh")
+            # 删除 -> 重建最新：清空除 .gitignore 外的所有产物
+            if os.path.isdir(temp_mesh_dir):
+                for child in os.listdir(temp_mesh_dir):
+                    if child == ".gitignore":
+                        continue
+                    child_path = os.path.join(temp_mesh_dir, child)
+                    if os.path.isdir(child_path):
+                        shutil.rmtree(child_path, ignore_errors=True)
+                    else:
+                        try:
+                            os.remove(child_path)
+                        except OSError:
+                            pass
+            os.makedirs(temp_mesh_dir, exist_ok=True)
+
+            elements = parse_scene(self.scene_json, temp_mesh_dir)
+            if not elements:
+                print("[scene] 场景解析结果为空，跳过 world_scene 合并")
+                return
+
+            world_scene_xacro = os.path.join(temp_mesh_dir, "world_scene.xacro")
+            world_scene_srdf = os.path.join(temp_mesh_dir, "world_scene.srdf.xacro")
+            generate_world_scene_xacro(elements, str(self.mesh_path), world_scene_xacro)
+            generate_world_scene_srdf_xacro(elements, world_scene_srdf)
+
+            # URDF：include + 实例化 world_scene 宏（world_base 挂到 world）
+            scene_include = etree.SubElement(self.root, f"{{{xacro_uri}}}include")
+            scene_include.set("filename", world_scene_xacro)
+            scene_macro = etree.SubElement(self.root, f"{{{xacro_uri}}}world_scene")
+            scene_macro.set("mesh_path", str(self.mesh_path))
+            scene_macro.set("parent_link", "world")
+            for attr in ("x", "y", "z", "rx", "ry", "r"):
+                scene_macro.set(attr, "0")
+
+            # SRDF：include + 实例化 world_scene_srdf 宏（建筑 link 两两 disable_collisions）
+            srdf_include = etree.SubElement(self.root_srdf, f"{{{xacro_uri}}}include")
+            srdf_include.set("filename", world_scene_srdf)
+            etree.SubElement(self.root_srdf, f"{{{xacro_uri}}}world_scene_srdf")
+
+            print(f"[scene] 已合并 {len(elements)} 个建筑构件到 full_dev")
+        except Exception as scene_err:  # noqa: BLE001 - 场景失败不应阻断设备装配
+            print(f"[scene] world_scene 合并失败: {scene_err}")
 
     def moveit_init(self):
 
