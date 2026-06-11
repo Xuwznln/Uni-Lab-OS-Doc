@@ -110,10 +110,11 @@ def test_handle_external_error_queues_scheduler_errors_and_sets_event() -> None:
     out = station.handle_external_error(_error())
 
     assert out["reply_status"] == "pending_manual_confirm"
-    assert out["error_handling_id"]
+    assert out["token"] == "token-1"
     assert out["queued_error_count"] == 1
     assert station.error_handling_event.is_set()
     assert len(station.error_queue) == 1
+    assert station.error_queue[0]["token"] == "token-1"
     assert station.error_queue[0]["error_report"]["token"] == "token-1"
     assert station.error_queue[0]["status"] == "pending"
 
@@ -140,16 +141,16 @@ def test_wait_for_error_handling_times_out_when_queue_empty() -> None:
 
 def test_wait_for_error_handling_claims_fifo_and_moves_to_in_flight() -> None:
     station, _rpc = _fresh_station()
-    first = station.handle_external_error(_error(task="task-1", token="token-1"))["error_handling_id"]
-    second = station.handle_external_error(_error(task="task-2", token="token-2"))["error_handling_id"]
+    first = station.handle_external_error(_error(task="task-1", token="token-1"))["token"]
+    second = station.handle_external_error(_error(task="task-2", token="token-2"))["token"]
 
     out = station.wait_for_error_handling(timeout_seconds=1, poll_interval_seconds=0.001, ignore_errors_with=[])
 
     assert out["success"] is True
-    assert out["error_handling_id"] == first
+    assert out["token"] == first
     assert out["task"] == "task-1"
     assert list(station.error_in_flight) == [first]
-    assert station.error_queue[0]["error_handling_id"] == second
+    assert station.error_queue[0]["token"] == second
     assert station.error_handling_event.is_set()
 
 
@@ -157,17 +158,17 @@ def test_reply_success_keeps_remaining_queue_available(monkeypatch: pytest.Monke
     module = _import_module()
     _patch_reply_builder(monkeypatch, module)
     station, _rpc = _fresh_station()
-    first = station.handle_external_error(_error(task="task-1", token="token-1"))["error_handling_id"]
-    second = station.handle_external_error(_error(task="task-2", token="token-2"))["error_handling_id"]
+    first = station.handle_external_error(_error(task="task-1", token="token-1"))["token"]
+    second = station.handle_external_error(_error(task="task-2", token="token-2"))["token"]
     station.wait_for_error_handling(timeout_seconds=1, poll_interval_seconds=0.001, ignore_errors_with=[])
 
-    reply = station.reply_error_handling(error_handling_id=first, reply_choice="skip")
+    reply = station.reply_error_handling(token=first, reply_choice="skip")
     next_wait = station.wait_for_error_handling(timeout_seconds=1, poll_interval_seconds=0.001, ignore_errors_with=[])
 
     assert reply["success"] is True
     assert reply["reply_status"] == "sent"
     assert first not in station.error_in_flight
-    assert next_wait["error_handling_id"] == second
+    assert next_wait["token"] == second
 
 
 def test_wait_auto_skips_default_ignored_error_and_returns_next_manual_error(
@@ -182,13 +183,13 @@ def test_wait_auto_skips_default_ignored_error_and_returns_next_manual_error(
             token="token-ignored",
             errInnerMessage="Executor LabelPrinterA failed while running BY_Print.",
         )
-    )["error_handling_id"]
-    manual = station.handle_external_error(_error(task="manual", token="token-manual"))["error_handling_id"]
+    )["token"]
+    manual = station.handle_external_error(_error(task="manual", token="token-manual"))["token"]
 
     out = station.wait_for_error_handling(timeout_seconds=1, poll_interval_seconds=0.001)
 
-    assert out["error_handling_id"] == manual
-    assert out["auto_handled_errors"][0]["error_handling_id"] == ignored
+    assert out["token"] == manual
+    assert out["auto_handled_errors"][0]["token"] == ignored
     assert out["auto_handled_errors"][0]["reply_result"] == 1
     assert builder_calls[0][1] == 2
     assert rpc.scheduler_reply_calls[0]["errorHandlingOption"] == 2
@@ -208,12 +209,12 @@ def test_wait_auto_skip_failure_preserves_item_for_manual_reply(
             token="token-ignored",
             errInnerMessage="Executor LabelPrinterA failed while running BY_Print.",
         )
-    )["error_handling_id"]
+    )["token"]
 
     out = station.wait_for_error_handling(timeout_seconds=1, poll_interval_seconds=0.001)
 
     assert out["success"] is True
-    assert out["error_handling_id"] == ignored
+    assert out["token"] == ignored
     assert out["auto_handled_errors"][0]["reply_result"] == 0
     assert station.error_in_flight[ignored]["status"] == "auto_skip_failed"
 
@@ -226,7 +227,7 @@ def test_wait_custom_empty_ignore_list_disables_default_auto_skip(
     station, rpc = _fresh_station()
     error_id = station.handle_external_error(
         _error(errInnerMessage="Executor LabelPrinterA failed while running BY_Print.")
-    )["error_handling_id"]
+    )["token"]
 
     out = station.wait_for_error_handling(
         timeout_seconds=1,
@@ -234,7 +235,7 @@ def test_wait_custom_empty_ignore_list_disables_default_auto_skip(
         ignore_errors_with=[],
     )
 
-    assert out["error_handling_id"] == error_id
+    assert out["token"] == error_id
     assert out["auto_handled_errors"] == []
     assert rpc.scheduler_reply_calls == []
     assert station.error_in_flight[error_id]["status"] == "in_flight"
@@ -253,37 +254,37 @@ def test_reply_error_handling_maps_choice_and_removes_in_flight(
     builder_calls = _patch_reply_builder(monkeypatch, module)
     station, rpc = _fresh_station()
     report = _error(token=f"token-{choice}")
-    station.error_in_flight["err-1"] = {
-        "error_handling_id": "err-1",
+    station.error_in_flight[report["token"]] = {
+        "token": report["token"],
         "status": "in_flight",
         "error_report": report,
     }
 
-    out = station.reply_error_handling(error_handling_id="err-1", reply_choice=choice)
+    out = station.reply_error_handling(token=report["token"], reply_choice=choice)
 
     assert out["success"] is True
     assert out["reply_status"] == "sent"
     assert out["bioyond_option"] == expected_option
     assert builder_calls == [(report, expected_option)]
     assert rpc.scheduler_reply_calls[0]["errorHandlingOption"] == expected_option
-    assert "err-1" not in station.error_in_flight
+    assert report["token"] not in station.error_in_flight
 
 
 def test_reply_error_handling_failure_keeps_in_flight(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _import_module()
     _patch_reply_builder(monkeypatch, module)
     station, _rpc = _fresh_station(_FakeRpc(result_code=0))
-    station.error_in_flight["err-1"] = {
-        "error_handling_id": "err-1",
+    station.error_in_flight["token-1"] = {
+        "token": "token-1",
         "status": "in_flight",
         "error_report": _error(),
     }
 
-    out = station.reply_error_handling(error_handling_id="err-1", reply_choice="retry")
+    out = station.reply_error_handling(token="token-1", reply_choice="retry")
 
     assert out["success"] is False
     assert out["reply_status"] == "send_failed"
-    assert station.error_in_flight["err-1"]["status"] == "send_failed"
+    assert station.error_in_flight["token-1"]["status"] == "send_failed"
 
 
 def test_reply_error_handling_requires_in_flight_context(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,11 +292,44 @@ def test_reply_error_handling_requires_in_flight_context(monkeypatch: pytest.Mon
     _patch_reply_builder(monkeypatch, module)
     station, rpc = _fresh_station()
 
-    out = station.reply_error_handling(error_handling_id="missing", error_report=_error(), reply_choice="retry")
+    out = station.reply_error_handling(token="missing", reply_choice="retry")
 
     assert out["success"] is False
-    assert out["reply_status"] == "missing_in_flight"
+    assert out["reply_status"] == "missing_context"
     assert rpc.scheduler_reply_calls == []
+
+
+def test_reply_error_handling_without_token_uses_error_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _import_module()
+    builder_calls = _patch_reply_builder(monkeypatch, module)
+    station, rpc = _fresh_station()
+    report = _error(errMessage="E1", errInnerMessage="E2")
+
+    out = station.reply_error_handling(error_report=report, reply_choice="end_experiment")
+
+    assert out["success"] is True
+    assert out["token"] == "token-1"
+    assert out["bioyond_option"] == 5
+    assert "E1\nE2" in out["confirmation_message"]
+    assert builder_calls == [(report, 5)]
+    assert rpc.scheduler_reply_calls[0]["errorHandlingOption"] == 5
+
+
+def test_reply_error_handling_error_report_claims_matching_queued_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _import_module()
+    _patch_reply_builder(monkeypatch, module)
+    station, _rpc = _fresh_station()
+    report = _error(token="token-direct")
+    station.handle_external_error(report)
+
+    out = station.reply_error_handling(error_report=report, reply_choice="skip")
+
+    assert out["success"] is True
+    assert out["token"] == "token-direct"
+    assert station.error_queue == []
+    assert station.error_in_flight == {}
 
 
 def test_error_handling_action_metadata_and_literal_choice() -> None:
@@ -314,6 +348,7 @@ def test_error_handling_action_metadata_and_literal_choice() -> None:
     assert reply_meta.get("placeholder_keys") == {"assignee_user_ids": "unilabos_manual_confirm"}
     assert reply_meta["goal_default"] == {
         "reply_choice": "retry",
+        "error_message": "",
         "timeout_seconds": 3600,
         "assignee_user_ids": [],
     }
@@ -337,15 +372,18 @@ def test_error_handling_nodes_are_ast_visible() -> None:
         "Executor LabelPrinterA failed while running BY_Print."
     ]
     wait_handles = {handle["key"] for handle in wait_args["handles"]}
-    assert {"ignore_errors_with", "error_handling_id", "error_report", "error_message"} <= wait_handles
+    assert wait_handles == {"available_options", "token", "error_report", "error_message"}
 
     reply_args = actions["reply_error_handling"]["action_args"]
     assert reply_args["always_free"] is True
     assert reply_args["node_type"] == "MANUAL_CONFIRM"
     assert reply_args["placeholder_keys"] == {"assignee_user_ids": "unilabos_manual_confirm"}
     assert reply_args["goal_default"]["reply_choice"] == "retry"
+    assert reply_args["goal_default"]["error_message"] == ""
     reply_handles = {handle["key"] for handle in reply_args["handles"]}
-    assert {"error_handling_id", "error_report", "reply_choice", "reply_status"} <= reply_handles
+    assert reply_handles == {"token", "error_report", "error_message"}
+    error_message_handle = next(handle for handle in reply_args["handles"] if handle["key"] == "error_message")
+    assert error_message_handle["data_type"] == "text"
     reply_params = {
         param["name"]: param
         for param in actions["reply_error_handling"].get("params", [])
