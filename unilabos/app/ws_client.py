@@ -1763,9 +1763,14 @@ class WebSocketClient(BaseCommunicationClient):
         locks: List[Dict[str, Any]] = []
         for device_id in host_node.devices_names.keys():
             action_names = set()
-            for action_id in host_node._action_clients.keys():
-                if device_id in action_id:
-                    action_names.add(action_id.split("/")[-1])
+            # 从全量动作映射(_action_value_mappings)取动作名，而非仅 _action_clients。
+            # UniLabJsonCommand 类型的动作不会建独立 ROS ActionServer、不进 _action_clients，
+            # 但仍是可经 _execute_driver_command 调用的能力（如 virtual_workbench 的全部动作），
+            # 必须纳入锁快照；"auto-" 前缀为异步/自动变体，跳过以避免与规范动作名重复。
+            for action_name in host_node._action_value_mappings.get(device_id, {}).keys():
+                if action_name.startswith("auto-"):
+                    continue
+                action_names.add(action_name)
             for action_name in action_names:
                 device_action_key = f"/devices/{device_id}/{action_name}"
                 free = not self.device_manager.is_action_busy(device_action_key)
@@ -1834,9 +1839,9 @@ class WebSocketClient(BaseCommunicationClient):
                 "devices": devices,
             },
         }
+        # 先上报全量锁快照，再发 host_ready：借助发送队列 FIFO 顺序，
+        # 服务端会先收到 report_action_lock、再收到 host_node_ready。
+        # 启动时全部 free，重连时按 DeviceActionManager 反映正在运行/排队的 busy，实现锁状态对齐。
+        self.report_all_action_locks()
         self.message_processor.send_message(message)
         logger.info(f"[WebSocketClient] Host node ready signal published with {len(devices)} devices")
-
-        # 紧随 host_ready 发送一条全量锁快照：启动时全部 free，
-        # 重连时按 DeviceActionManager 反映正在运行/排队的 busy，实现锁状态对齐。
-        self.report_all_action_locks()
