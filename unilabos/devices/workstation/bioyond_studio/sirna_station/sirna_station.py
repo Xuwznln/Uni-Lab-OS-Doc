@@ -7,6 +7,7 @@ import ast
 import copy
 import json
 import os
+import random
 import sys
 import threading
 import time
@@ -2371,6 +2372,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                 report_file = (preintake.get("extraProperties") or {}).get("reportFile")
                 rels = self._parse_report_files(report_file)
                 renilla_grid = firefly_grid = None
+                unassigned_grids = []  # 仿真兜底：无 renilla/firefly 关键字的文件先收集
                 for rel in rels:
                     local = self._locate_report_file(host_prefix, rel)
                     if not os.path.exists(local):
@@ -2383,7 +2385,17 @@ class BioyondSirnaStation(BioyondWorkstation):
                     elif channel == "firefly":
                         firefly_grid = grid
                     else:
-                        logger.warning("[sirna] 无法判别通道(renilla/firefly): %s", local)
+                        unassigned_grids.append(grid)
+
+                # 仿真兜底：判不出通道时随机分配给缺失通道；正式环境关键字命中时 unassigned_grids 为空，本段不生效
+                random.shuffle(unassigned_grids)
+                if renilla_grid is None and unassigned_grids:
+                    renilla_grid = unassigned_grids.pop()
+                    logger.warning("[sirna] 未判别出 renilla 通道，仿真兜底随机分配一个文件作为 renilla")
+                if firefly_grid is None and unassigned_grids:
+                    firefly_grid = unassigned_grids.pop()
+                    logger.warning("[sirna] 未判别出 firefly 通道，仿真兜底随机分配一个文件作为 firefly")
+
                 if renilla_grid is None or firefly_grid is None:
                     logger.warning(
                         "[sirna] 通量 seq=%s 缺 renilla/firefly 文件，跳过(renilla=%s firefly=%s)",
