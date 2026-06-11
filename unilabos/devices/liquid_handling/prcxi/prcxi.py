@@ -852,8 +852,15 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         # （head 上虽有 8 个 tip 工位但只能顺序点动），默认 False；未来 9600 / 真 8
         # 通道 head 上线时 YAML / registry 把这个值置 True，跳过 ``transfer_liquid``
         # 顶部的 8→1 扁平化分支。详见 ``product_designs/protocol_convert/01-multi-channel-flatten.md`` §11.
-        self.has_true_8channel: bool = bool(has_true_8channel)
-
+        # 通过 pip_setting 判断是否为“真 8 通道”硬件（channels=8 就认为是并行8通道）
+        self.has_true_8channel: bool = False
+        if self.pip_setting:
+            for axis_conf in self.pip_setting.values():
+                if isinstance(axis_conf, dict) and axis_conf.get("channels", 0) == 8:
+                    self.has_true_8channel = True
+                    break
+ 
+        self.no_matrix_id: bool = bool(matrix_id == "")
         self._rail_width = rail_width
         self._rail_interval = rail_interval
         self.deck_x = (start_rail + rail_nums*5 + (rail_nums-1)*rail_interval) * rail_width
@@ -968,6 +975,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         """首次 transfer_liquid 时，根据 deck 上的 resource 自动匹配耗材并创建 WorkTabletMatrix。"""
         backend = self._unilabos_backend
         api = backend.api_client
+        print("--------------------------------")
+        print(f"backend.matrix_id: {backend.matrix_id}")
 
         if backend.matrix_id:
             return
@@ -1420,6 +1429,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             none_keys=none_keys,
         )
 
+    async def reset(self):
+        await self._unilabos_backend.reset()
+        
     async def add_liquid(
         self,
         asp_vols: Union[List[float], float],
@@ -1691,7 +1703,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         seen_plates = set()
 
         def _push_unique_plate(plate_obj):
-            if plate_obj is None:
+            if plate_obj is None or not self.no_matrix_id:
                 return
             pname = getattr(plate_obj, "name", None) or id(plate_obj)
             if pname in seen_plates:
@@ -1709,7 +1721,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
         change_slots_positions = []
         for slot in change_slots:
-        
+            if self.no_matrix_id:
+                continue
             number = self._get_slot_number(slot)
             
             well = slot.children[0]
@@ -2239,7 +2252,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         print(json.dumps(self.steps_todo_list, indent=2))
         if not self.api_client.start():
             return False
-        if not self.api_client.wait_for_finish():
+        if not self.api_client.wait_for_finish(len(self.steps_todo_list)):
             return False
         return True
 
@@ -2300,32 +2313,34 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         axis_ch = int(spec.get("channels", self.num_channels))
         return min(len(chans), axis_ch) if chans else axis_ch
 
+    async def reset(self):
+        error_code = self.api_client.get_error_code()
+        if error_code:
+            print(f"PRCXI9300 error code detected: {error_code}")
+
+        # 清除错误代码
+        self.api_client.clear_error_code()
+        print("PRCXI9300 error code cleared.")
+        self.api_client.call("IAutomation", "Stop")
+        # 执行重置
+        print("Starting PRCXI9300 reset...")
+        self.api_client.call("IAutomation", "Reset")
+
+        # 检查重置状态并等待完成
+        while not self.is_reset_ok:
+            print("Waiting for PRCXI9300 to reset...")
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                await self._ros_node.sleep(1)
+            else:
+                await asyncio.sleep(1)
+        print("PRCXI9300 reset successfully.")
     async def setup(self):
         await super().setup()
         try:
             if self._execute_setup:
                 # 先获取错误代码
-                error_code = self.api_client.get_error_code()
-                if error_code:
-                    print(f"PRCXI9300 error code detected: {error_code}")
-
-                # 清除错误代码
-                self.api_client.clear_error_code()
-                print("PRCXI9300 error code cleared.")
-                self.api_client.call("IAutomation", "Stop")
-                # 执行重置
-                print("Starting PRCXI9300 reset...")
-                self.api_client.call("IAutomation", "Reset")
-
-                # 检查重置状态并等待完成
-                while not self.is_reset_ok:
-                    print("Waiting for PRCXI9300 to reset...")
-                    if hasattr(self, "_ros_node") and self._ros_node is not None:
-                        await self._ros_node.sleep(1)
-                    else:
-                        await asyncio.sleep(1)
-                print("PRCXI9300 reset successfully.")
                 
+                await self.reset()
                 # self.api_client.update_clamp_jaw_position(self.matrix_id, self.claw_positions)
 
         except ConnectionRefusedError as e:
@@ -2739,22 +2754,22 @@ class PRCXI9300Api:
     def start(self) -> bool:
         return self.call("IAutomation", "Start")
 
-    def wait_for_finish(self) -> bool:
+    def wait_for_finish(self, num_steps: int = 1) -> bool:
         success = False
         start = False
         while not success:
             status = self.step_state_list()
-            if len(status) == 1:
-                start = True
-            if status is None:
-                break
+            if status is None :
+                time.sleep(1)
+            if len(status) != num_steps:
+                time.sleep(1)
             if len(status) == 0:
                 break
             if status[-1]["State"] == 2 and start:
                 success = True
             elif status[-1]["State"] > 2:
                 break
-            elif status[-1]["State"] == 0:
+            elif status[-1]["State"] == 0 or len(status) == 1:
                 start = True
             else:
                 time.sleep(1)

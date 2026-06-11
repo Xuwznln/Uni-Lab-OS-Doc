@@ -1,0 +1,36 @@
+{
+  "nodes": [
+    {
+      "id": "huapu_hplc",
+      "name": "华谱 HPLC",
+      "children": [],
+      "parent": null,
+      "type": "device",
+      "class": "huapu_hplc",
+      "position": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+      },
+      "config": {
+        "host": "10.10.10.1",
+        "port": 8001,
+        "timeout": 10.0,
+        "default_project_id": 1,
+        "default_sequence_method_id": 2,
+        "default_process_method_id": 2,
+        "default_report_method_id": 4,
+        "default_instrument_id": 1,
+        "export_path": "C:\\Users\\DP\\Desktop\\深研院\\AI4C\\华谱对接",
+        "default_seq_tray_num": 1,
+        "default_tray_num": 1,
+        "default_x_position": "A",
+        "default_y_position": 1,
+        "poll_interval": 5.0,
+        "poll_timeout": 7200.0
+      },
+      "data": {}
+    }
+  ],
+  "links": []
+}

@@ -149,56 +149,57 @@ class Variable(Base):
 
     def write(self, value: Any) -> bool:
         try:
-            # 如果声明了数据类型，则尝试转换并使用对应的 Variant 写入
+            # 只写入值，不写入时间戳和状态码
+            # 使用底层 write 服务，构建 WriteValue 请求
             coerced = value
-            try:
-                if self._data_type is not None:
-                    # 基于声明的数据类型做简单类型转换
-                    dt = self._data_type
-                    if dt in (DataType.SBYTE, DataType.BYTE, DataType.INT16, DataType.UINT16,
-                              DataType.INT32, DataType.UINT32, DataType.INT64, DataType.UINT64):
-                        # 数值类型 -> int
-                        if isinstance(value, str):
-                            coerced = int(value)
-                        else:
-                            coerced = int(value)
-                    elif dt in (DataType.FLOAT, DataType.DOUBLE):
-                        if isinstance(value, str):
-                            coerced = float(value)
-                        else:
-                            coerced = float(value)
-                    elif dt == DataType.BOOLEAN:
-                        if isinstance(value, str):
-                            v = value.strip().lower()
-                            if v in ("true", "1", "yes", "on"):
-                                coerced = True
-                            elif v in ("false", "0", "no", "off"):
-                                coerced = False
-                            else:
-                                coerced = bool(value)
+            
+            if self._data_type is not None:
+                # 基于声明的数据类型做简单类型转换
+                dt = self._data_type
+                if dt in (DataType.SBYTE, DataType.BYTE, DataType.INT16, DataType.UINT16,
+                          DataType.INT32, DataType.UINT32, DataType.INT64, DataType.UINT64):
+                    # 数值类型 -> int
+                    if isinstance(value, str):
+                        coerced = int(value)
+                    else:
+                        coerced = int(value)
+                elif dt in (DataType.FLOAT, DataType.DOUBLE):
+                    if isinstance(value, str):
+                        coerced = float(value)
+                    else:
+                        coerced = float(value)
+                elif dt == DataType.BOOLEAN:
+                    if isinstance(value, str):
+                        v = value.strip().lower()
+                        if v in ("true", "1", "yes", "on"):
+                            coerced = True
+                        elif v in ("false", "0", "no", "off"):
+                            coerced = False
                         else:
                             coerced = bool(value)
-                    elif dt == DataType.STRING or dt == DataType.BYTESTRING or dt == DataType.DATETIME:
-                        coerced = str(value)
+                    else:
+                        coerced = bool(value)
+                elif dt == DataType.STRING or dt == DataType.BYTESTRING or dt == DataType.DATETIME:
+                    coerced = str(value)
+            
+            # 创建带有明确类型的 Variant，然后包装成 DataValue
+            # 这样可以确保类型匹配，同时不包含时间戳和状态码
+            if self._data_type is not None:
+                # 明确指定数据类型
+                variant = ua.Variant(coerced, self._data_type.value)
+            else:
+                # 未声明数据类型，让 OPC UA 自动推断
+                variant = ua.Variant(coerced)
+            
+            # 创建 DataValue（只包含值，不包含时间戳）
+            dv = ua.DataValue(variant)
+            dv.SourceTimestamp = None
+            dv.ServerTimestamp = None
+            dv.StatusCode = None        
 
-                    # 使用 ua.Variant 明确指定 VariantType
-                    try:
-                        variant = ua.Variant(coerced, dt.value)
-                        self._get_node().set_value(variant)
-                    except Exception:
-                        # 回退：有些 set_value 实现接受 (value, variant_type)
-                        try:
-                            self._get_node().set_value(coerced, dt.value)
-                        except Exception:
-                            # 最后回退到直接写入（保持兼容性）
-                            self._get_node().set_value(coerced)
-                else:
-                    # 未声明数据类型，直接写入
-                    self._get_node().set_value(value)
-            except Exception:
-                # 若在转换或按数据类型写入失败，尝试直接写入原始值并让上层捕获错误
-                self._get_node().set_value(value)
-
+            # 使用 set_value 方法写入
+            self._get_node().set_value(dv)
+            
             return False
         except Exception as e:
             print(f"写入变量 {self._name} 失败: {e}")
