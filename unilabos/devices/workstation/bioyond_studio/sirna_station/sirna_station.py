@@ -1142,6 +1142,13 @@ class BioyondSirnaStation(BioyondWorkstation):
             order_ids = self._extract_created_order_ids(parsed_result)
             self._last_submitted_order_ids = list(order_ids)
             self._last_submitted_order_code = resolved_order_code
+            # 实验一：把 4 块细胞培养板(materialName/materialId/locationShowName)落盘为
+            # data/细胞板名称记录/{orderId}.csv，板名尾缀 1/2/3/4，供后续结果计算节点读取。
+            if experiment_number == 1:
+                try:
+                    self._dump_cell_plates_file(order_ids, material_records)
+                except Exception as exc:  # 落盘失败不阻断提交主流程
+                    logger.warning("[sirna] 写细胞板名称记录文件失败: %s", exc)
             start_experiment_info = {
                 "order_ids": order_ids,
                 "order_code": resolved_order_code,
@@ -2124,6 +2131,313 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "confirmation_message": (
                     f"实验二结果已写入记录本 {notebook_id}: RNA 表格 {len(rna['rows'])} 行 + "
                     f"qPCR 板排布图 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
+                ),
+            }
+
+    # ==================== 实验一：细胞板名称记录(文件 m) ====================
+
+    @staticmethod
+    def _cell_plates_record_dir() -> str:
+        """实验一细胞板名称记录目录: <repo>/data/细胞板名称记录。"""
+        repo_root = Path(__file__).resolve().parents[5]
+        return str(repo_root / "data" / "细胞板名称记录")
+
+    def _dump_cell_plates_file(
+        self,
+        order_ids: List[str],
+        material_records: List[Dict[str, Any]],
+    ) -> str:
+        """把实验一 4 块细胞培养板信息落盘为 data/细胞板名称记录/{orderId}.csv。
+
+        - 筛 ``materialName == "细胞培养板"`` 的记录，按出现顺序赋 seq 1..4，板名改为 细胞培养板{seq}。
+        - 主键用 ``materialId``(板物料 id，下游 material-info 用它)，不记领用记录 ``id``。
+        - 仅写本地文件，不回写 LIMS。
+        """
+        order_id = str(order_ids[0]).strip() if order_ids else ""
+        if not order_id:
+            for rec in material_records or []:
+                if isinstance(rec, dict) and rec.get("orderId"):
+                    order_id = str(rec["orderId"]).strip()
+                    break
+        if not order_id:
+            logger.warning("[sirna] 落盘细胞板文件: 未解析到 order_id，跳过")
+            return ""
+
+        plates: List[Dict[str, str]] = []
+        for rec in material_records or []:
+            if not isinstance(rec, dict):
+                continue
+            name = str(rec.get("materialName") or "").strip()
+            if name == "细胞培养板":
+                seq = len(plates) + 1
+                plates.append({
+                    "seq": str(seq),
+                    "materialId": str(rec.get("materialId") or ""),
+                    "materialName": f"细胞培养板{seq}",
+                    "materialCode": str(rec.get("materialCode") or ""),
+                    "locationShowName": str(rec.get("locationShowName") or rec.get("locationCode") or ""),
+                })
+
+        if len(plates) != 4:
+            logger.warning("[sirna] 落盘细胞板文件: 命中细胞培养板 %s 块(期望 4)", len(plates))
+
+        out_dir = self._cell_plates_record_dir()
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{order_id}.csv")
+        import csv as _csv
+
+        with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+            writer = _csv.writer(f)
+            writer.writerow(["seq", "materialId", "materialName", "materialCode", "locationShowName"])
+            for p in plates:
+                writer.writerow([
+                    p["seq"], p["materialId"],
+                    p["materialName"], p["materialCode"], p["locationShowName"],
+                ])
+        logger.info(
+            "[sirna] 已写细胞板名称记录: %s (细胞培养板 %s 块)", out_path, len(plates),
+        )
+        return out_path
+
+    def _read_cell_plates_file(self, order_id: str) -> Dict[str, Any]:
+        """读 data/细胞板名称记录/{orderId}.csv，返回 {plates, path}。"""
+        out_path = os.path.join(self._cell_plates_record_dir(), f"{str(order_id).strip()}.csv")
+        if not os.path.exists(out_path):
+            raise FileNotFoundError(
+                f"未找到细胞板名称记录 {out_path}；请先执行 submit_experiment_1 生成"
+            )
+        import csv as _csv
+
+        plates: List[Dict[str, Any]] = []
+        with open(out_path, encoding="utf-8-sig", newline="") as f:
+            for row in _csv.DictReader(f):
+                try:
+                    seq = int(str(row.get("seq") or "0").strip() or "0")
+                except ValueError:
+                    seq = -1
+                material_id = str(row.get("materialId") or "").strip()
+                if seq <= 0 or not material_id:
+                    continue
+                plates.append({
+                    "seq": seq,
+                    "materialId": material_id,
+                    "materialName": str(row.get("materialName") or f"细胞培养板{seq}").strip(),
+                    "locationShowName": str(row.get("locationShowName") or "").strip(),
+                })
+        return {"plates": plates, "path": out_path}
+
+    @staticmethod
+    def _extract_preintake_cell_plate_ids(preintake: Dict[str, Any]) -> List[str]:
+        """从一个 preIntake(通量)取本通量细胞培养板 materialId 列表(去重保序)。
+
+        优先 ``sampleMaterials[]``(取 materialName=='细胞培养板' 的 materialId)，
+        兜底用 ``materialIds`` 竖线串拆分。
+        """
+        ids: List[str] = []
+        seen = set()
+        for sm in preintake.get("sampleMaterials") or []:
+            if not isinstance(sm, dict):
+                continue
+            name = str(sm.get("materialName") or "").strip()
+            if name and name != "细胞培养板":
+                continue
+            mid = str(sm.get("materialId") or "").strip()
+            if mid and mid not in seen:
+                seen.add(mid)
+                ids.append(mid)
+        if not ids:
+            for mid in str(preintake.get("materialIds") or "").split("|"):
+                mid = mid.strip()
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    ids.append(mid)
+        return ids
+
+    @action(
+        goal_default={
+            "order_id": "",
+            "host_prefix": r"D:\bioyond_rb\host",
+            "poll_interval_seconds": 10.0,
+            "poll_timeout_seconds": 3600,
+            "plate_map_path": "",
+        },
+        feedback_interval=300,
+        description=(
+            "计算实验一结果(双荧光素酶报告基因检测): 读细胞板名称记录(文件 m) + 实验一细胞培养板.xlsx, "
+            "轮询 order-report 到 status==80 取每通量 renilla/firefly 两个 384 孔 CSV, "
+            "按 384孔板 material-info 的 96->384 映射换算 ratio=Renilla/Firefly、"
+            "抑制率=1-ratio/mean(空白对照), 按样本聚合 mean/SD(空白对照结果列留空), 输出结果表。"
+        ),
+        handles=[
+            ActionInputHandle(
+                key="order_id",
+                data_type="bioyond_order_id",
+                label="实验ID",
+                data_key="order_id",
+                data_source=DataSource.HANDLE,
+                io_type="source",
+            ),
+            ActionOutputHandle(
+                key="success",
+                data_type="boolean",
+                label="是否成功",
+                data_key="success",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="resultTable",
+                data_type="object",
+                label="实验一结果表",
+                data_key="resultTable",
+                data_source=DataSource.EXECUTOR,
+                io_type="target",
+            ),
+        ],
+    )
+    def compute_experiment1_result(
+        self,
+        order_id: str = "",
+        host_prefix: str = r"D:\bioyond_rb\host",
+        poll_interval_seconds: float = 10.0,
+        poll_timeout_seconds: int = 3600,
+        plate_map_path: str = "",
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """计算实验一结果(双荧光素酶 ratio / 抑制率)并输出结果表。
+
+        Args:
+            order_id: 实验订单 UUID(连上游 wait_for_order_finish.order_id，亦可手填)。
+            host_prefix: 报告文件本地前缀(工作站固定盘符路径)。
+            poll_interval_seconds: order_report 轮询间隔秒。
+            poll_timeout_seconds: order_report 轮询超时秒(<=0 不限时)。
+            plate_map_path: 实验一孔板布局 xlsx；缺省用 exp1_report.DEFAULT_PLATE_MAP。
+
+        Returns:
+            含 success / order_id / resultTable(data+columns+tableName) / meta 的字典。
+        """
+        from unilabos.script import exp1_report as e1
+
+        with self._debug_call_session("compute_experiment1_result"):
+            del kwargs
+
+            normalized_order_id = str(order_id or "").strip()
+            if not normalized_order_id:
+                raise ValueError(
+                    "compute_experiment1_result 需要 order_id(请连接 wait_for_order_finish.order_id)"
+                )
+
+            # 1) 读文件 m：4 块细胞培养板(materialId↔板号↔板名)
+            file_m = self._read_cell_plates_file(normalized_order_id)
+            plate_by_material = {p["materialId"]: p for p in file_m["plates"]}
+
+            rpc = self._require_hardware_interface("material_info")
+
+            # 每板各自 materialId 调 material-info 拿 96->384 映射，按 materialId 缓存(多通量复用)
+            mapping_cache: Dict[str, Dict[str, str]] = {}
+
+            def _mapping_for(material_id: str) -> Dict[str, str]:
+                if material_id in mapping_cache:
+                    return mapping_cache[material_id]
+                info = rpc.material_info(material_id)
+                wm = e1.parse_well_mapping(info if isinstance(info, dict) else {})
+                if not wm:
+                    logger.warning("[sirna] 未取到 96->384 孔位映射(materialId=%s)", material_id)
+                mapping_cache[material_id] = wm
+                return wm
+
+            # 2) 轮询 order_report 到 status==80
+            report = self._poll_order_report(
+                normalized_order_id, poll_interval_seconds, poll_timeout_seconds
+            )
+            preintakes = report.get("preIntakes") or []
+
+            # 3) 孔板布局 xlsx(样本身份)
+            plate_map = str(plate_map_path or "").strip() or e1.DEFAULT_PLATE_MAP
+
+            # 4) 逐 preIntake(=通量)：解析整板 renilla/firefly，再对本通量每块细胞培养板各自取映射
+            plates_data: List[Dict[str, Any]] = []
+            for preintake in preintakes:
+                if not isinstance(preintake, dict):
+                    continue
+
+                # 4a) 本通量两文件(整块 384 板的 renilla/firefly)
+                report_file = (preintake.get("extraProperties") or {}).get("reportFile")
+                rels = self._parse_report_files(report_file)
+                renilla_grid = firefly_grid = None
+                for rel in rels:
+                    local = self._locate_report_file(host_prefix, rel)
+                    if not os.path.exists(local):
+                        logger.warning("[sirna] 报告文件不存在: %s", local)
+                        continue
+                    grid, meta = e1.parse_biotek_384_csv(local)
+                    channel = e1.detect_channel(local, meta)
+                    if channel == "renilla":
+                        renilla_grid = grid
+                    elif channel == "firefly":
+                        firefly_grid = grid
+                    else:
+                        logger.warning("[sirna] 无法判别通道(renilla/firefly): %s", local)
+                if renilla_grid is None or firefly_grid is None:
+                    logger.warning(
+                        "[sirna] 通量 seq=%s 缺 renilla/firefly 文件，跳过(renilla=%s firefly=%s)",
+                        preintake.get("sequence"), renilla_grid is not None, firefly_grid is not None,
+                    )
+                    continue
+
+                # 4b) 本通量包含的细胞培养板 materialId：优先 sampleMaterials，兜底 materialIds 竖线串
+                material_ids = self._extract_preintake_cell_plate_ids(preintake)
+
+                # 4c) 每块板各自映射 + 各自 xlsx sheet，挂同一对整板 grid
+                for material_id in material_ids:
+                    plate = plate_by_material.get(material_id)
+                    seq = plate["seq"] if plate else None
+                    sheet_name = plate["materialName"] if plate else None
+                    plate_name = sheet_name or f"板-{material_id[:8]}"
+
+                    mapping = _mapping_for(material_id)
+                    if not mapping:
+                        logger.warning("[sirna] 板 %s 无映射，跳过", plate_name)
+                        continue
+
+                    try:
+                        labels = e1.read_plate_map_sheet(plate_map, sheet_name=sheet_name)
+                    except Exception as exc:
+                        logger.warning("[sirna] 读取孔板布局失败(%s/%s): %s", plate_map, sheet_name, exc)
+                        labels = {}
+
+                    plates_data.append({
+                        "plate_name": plate_name,
+                        "seq": seq,
+                        "labels": labels,
+                        "mapping": mapping,
+                        "renilla": renilla_grid,
+                        "firefly": firefly_grid,
+                    })
+
+            if not plates_data:
+                raise RuntimeError(
+                    "compute_experiment1_result 未解析到任何板数据(检查 reportFile 定位与 renilla/firefly 通道判别)"
+                )
+
+            result = e1.compute_exp1_result(plates_data)
+            result_table = {
+                "data": result["data"],
+                "columns": result["columns"],
+                "tableName": "experiment1_result",
+            }
+            blank_means = result["meta"].get("blank_mean_ratio_by_seq")
+            logger.info(
+                "[sirna] 实验一结果计算完成: 板=%s 行=%s 各板空白ratio均值=%s",
+                len(plates_data), len(result["data"]), blank_means,
+            )
+            return {
+                "success": True,
+                "order_id": normalized_order_id,
+                "resultTable": result_table,
+                "meta": result["meta"],
+                "confirmation_message": (
+                    f"实验一结果已计算: {len(plates_data)} 块板, {len(result['data'])} 行 "
+                    f"(各板空白对照 ratio 均值={blank_means})"
                 ),
             }
 
