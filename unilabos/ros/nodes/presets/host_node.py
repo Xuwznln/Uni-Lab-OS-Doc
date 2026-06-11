@@ -566,6 +566,16 @@ class HostNode(BaseROS2DeviceNode):
                 except Exception as e:
                     self.lab_logger().error(f"[Host Node] Failed to create ActionClient for {action_id}: {str(e)}")
 
+        # 补充 UniLabJsonCommand 类型动作：这类动作不建独立 ROS ActionServer，
+        # 不会出现在 get_action_server_names_and_types_by_node 的结果里，但仍是可经
+        # _execute_driver_command 调用的能力（如 virtual_workbench 的全部动作）。
+        # 发现新设备时同样要补报其 free 锁，否则服务端永远感知不到这些动作。
+        already = {action_name for _, action_name in new_action_pairs}
+        for action_name in self._action_value_mappings.get(edge_device_id, {}).keys():
+            if action_name.startswith("auto-") or action_name in already:
+                continue
+            new_action_pairs.append((edge_device_id, action_name))
+
         # 发现新 action 后主动上报其 free 锁状态
         self._report_action_locks_free(new_action_pairs)
 
