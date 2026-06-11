@@ -163,6 +163,13 @@ ORDER_STATUS_VALUE_MAP = {
     "执行中（60）": "60",
     "已取出（100）": "100",
 }
+
+# 甘特图回传的订单状态分流：
+# - 执行中(60)：先查 3.29，空则回退 3.30 仿真甘特
+# - 成功(80)/失败(90)/已取出(100)：只查 3.29 实验甘特
+# - 其它/未知状态：跳过不回传
+GANTT_RUNNING_STATUS = 60
+GANTT_FINISHED_STATUSES = frozenset({80, 90, 100})
 SIRNA_EXPERIMENT_2_SUB_WORKFLOW_NAME = "基因编辑检测"
 SIRNA_EXPERIMENT_2_WORKFLOW_ID = "3a1fcdbd-316c-a4b8-a7ee-a262099552fa"
 SIRNA_EXPERIMENT_2_SUB_WORKFLOW_ID = "3a1fd2d4-5d3f-fae1-8b3d-ec6d0abb6646"
@@ -2970,13 +2977,17 @@ class BioyondSirnaStation(BioyondWorkstation):
         logger.info("甘特图回传线程已启动: uuid=%s", normalized_uuid)
 
     @not_action
-    def _query_order_ids_for_gantt(self, query: Dict[str, Any]) -> List[str]:
-        """按 payload 透传查询 LIMS ``order-list``，自动翻页收集所有 order_id（``items[].id``）。
+    def _query_orders_for_gantt(self, query: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """按 payload 透传查询 LIMS ``order-list``，自动翻页收集所有 ``(order_id, status)``。
 
         - ``status`` 原始值透传（空 = 不限状态查全部），不做 ``ORDER_STATUS_VALUE_MAP`` 标签映射；
         - 以 payload 的 ``skipCount`` 为起点、``pageCount`` 为单页批大小（缺省 50，order-list 必填），
           按返回的 ``totalCount`` 翻完所有页；
         - 设安全上限 ``max_pages`` 防御脏 ``totalCount`` 导致死循环。
+
+        Returns:
+            ``[{"order_id": str, "status": int|None}, ...]``（按 order_id 去重，status 取 item
+            的整数 ``status`` 字段，用于后续选甘特接口）。
         """
         query = query or {}
         try:
@@ -2985,6 +2996,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             page = 0
         if page <= 0:
             page = 50  # order-list 的 pageCount 必填，缺省给一个批大小
+
         try:
             skip = int(query.get("skipCount") or 0)
         except (TypeError, ValueError):
@@ -3003,7 +3015,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         }
 
         rpc = self._require_hardware_interface("order_query")
-        order_ids: List[str] = []
+        orders: List[Dict[str, Any]] = []
         seen: set = set()
         total: Optional[int] = None
         max_pages = 200  # 安全上限，防御脏 totalCount 死循环
@@ -3020,50 +3032,101 @@ class BioyondSirnaStation(BioyondWorkstation):
                 oid = str((item or {}).get("id") or "").strip()
                 if oid and oid not in seen:
                     seen.add(oid)
-                    order_ids.append(oid)
+                    try:
+                        item_status: Optional[int] = int((item or {}).get("status"))
+                    except (TypeError, ValueError):
+                        item_status = None
+                    orders.append({"order_id": oid, "status": item_status})
             if not items:
                 break
             skip += page
             if total is not None and skip >= total:
                 break
-        return order_ids
+        return orders
+
+    @not_action
+    def _fetch_gantt_for_order(
+        self, order_id: str, status: Optional[int]
+    ) -> Optional[Dict[str, Any]]:
+        """按订单 status 选甘特接口，统一返回 ``{"items": [...]}``；不需要回传的订单返回 ``None``。
+
+        - ``status == 60``（执行中）：先查 3.29 ``gantts_by_order_id``（``data`` 为数组）；非空就用它，
+          为空才回退 3.30 ``gantt_with_simulation_by_order_id``（``data`` 为 ``{"items":[...]}``）。
+        - ``status ∈ {80, 90, 100}``（成功/失败/已取出）：只查 3.29。
+        - 其它 / 未知 status：跳过，返回 ``None``（不查、不回传）。
+        """
+        if status == GANTT_RUNNING_STATUS:
+            rpc = self._require_hardware_interface("gantts_by_order_id")
+            env29 = rpc.gantts_by_order_id(order_id, return_envelope=True) or {}
+            items29 = env29.get("data")
+            items29 = items29 if isinstance(items29, list) else []
+            if items29:
+                return {"items": items29}
+            # 3.29 为空 → 回退仿真甘特 3.30
+            rpc30 = self._require_hardware_interface("gantt_with_simulation_by_order_id")
+            env30 = rpc30.gantt_with_simulation_by_order_id(order_id, return_envelope=True) or {}
+            data30 = env30.get("data")
+            if isinstance(data30, dict):
+                data30.setdefault("items", [])
+                return data30
+            return {"items": []}
+
+        if status in GANTT_FINISHED_STATUSES:
+            rpc = self._require_hardware_interface("gantts_by_order_id")
+            env29 = rpc.gantts_by_order_id(order_id, return_envelope=True) or {}
+            items29 = env29.get("data")
+            items29 = items29 if isinstance(items29, list) else []
+            return {"items": items29}
+
+        # 其它 / 未知 status：跳过
+        return None
 
     @not_action
     def _gantt_report_worker(self, uuid: str, query: Dict[str, Any]) -> None:
-        """后台线程体：用 payload 透传查 order-list(自动翻页)拿全部 order_id → 逐个拉甘特、取响应里的 data({"items":[...]}) 汇总成数组 → 一次性 POST 回传。"""
+        """后台线程体：透传查 order-list(自动翻页)拿全部 (order_id, status) → 按 status 选甘特接口
+        （60 先 3.29 空回退 3.30；80/90/100 只 3.29；其它跳过）→ 统一 {"items":[...]} 汇总成数组
+        → 一次性 POST 回传。"""
         try:
-            order_ids = self._query_order_ids_for_gantt(query)
-            if not order_ids:
+            orders = self._query_orders_for_gantt(query)
+            if not orders:
                 logger.error(
                     "甘特图回传：payload 查询未命中任何订单，跳过 uuid=%s query=%s",
                     uuid,
                     query,
                 )
                 return
-            rpc = self._require_hardware_interface("gantt_with_simulation_by_order_id")
             gantts: List[Any] = []
-            for order_id in order_ids:
+            skipped = 0
+            for order in orders:
+                order_id = order["order_id"]
+                order_status = order.get("status")
                 try:
-                    envelope = rpc.gantt_with_simulation_by_order_id(
-                        order_id, return_envelope=True
-                    )
-                    gantt_data = (envelope or {}).get("data")
-                    if gantt_data is None:
-                        logger.error(
-                            "甘特图响应缺少 data 字段，跳过 order_id=%s", order_id
+                    gantt = self._fetch_gantt_for_order(order_id, order_status)
+                    if gantt is None:
+                        skipped += 1
+                        logger.info(
+                            "甘特图回传：跳过 status=%s 的订单 order_id=%s（不在回传状态范围）",
+                            order_status,
+                            order_id,
                         )
                         continue
-                    gantts.append(gantt_data)
+                    gantts.append(gantt)
                 except Exception as exc:
-                    logger.error("甘特图拉取失败 order_id=%s: %s", order_id, exc)
+                    logger.error(
+                        "甘特图拉取失败 order_id=%s status=%s: %s",
+                        order_id,
+                        order_status,
+                        exc,
+                    )
             if not gantts:
-                logger.error("甘特图回传：所有订单拉取均失败，跳过 uuid=%s", uuid)
+                logger.error("甘特图回传：无可回传的订单甘特，跳过 uuid=%s", uuid)
                 return
             logger.info(
-                "甘特图拉取完成: uuid=%s 命中订单数=%s 成功=%s",
+                "甘特图拉取完成: uuid=%s 命中订单数=%s 成功=%s 跳过=%s",
                 uuid,
-                len(order_ids),
+                len(orders),
                 len(gantts),
+                skipped,
             )
             from unilabos.app.web import http_client
 
