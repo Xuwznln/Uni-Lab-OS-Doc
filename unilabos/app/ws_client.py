@@ -811,6 +811,14 @@ class MessageProcessor:
             logger.error("[MessageProcessor] device_info 缺少 uuid，忽略")
             return
 
+        # [临时调试] 甘特图回传链路耗时埋点：记录收到 device_info 的时刻（计时起点）
+        try:
+            from unilabos.app import gantt_timing
+
+            gantt_timing.mark_received(uuid)
+        except Exception:
+            pass
+
         # 必须显式携带 device_id；缺失则不触发甘特回传
         device_id = str(message_data.get("device_id", "") or "").strip()
         if not device_id:

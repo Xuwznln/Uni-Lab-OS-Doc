@@ -252,3 +252,32 @@ def report_gantt(self, uuid: str, data: Any) -> requests.Response:
 - 边界：payload 查不到订单 → 记日志跳过不 POST；部分订单甘特拉取失败 → 跳过该条、其余正常上传。
 - 触发模型为**事件驱动一次性**（每条 device_info 查一次+POST 一次），不做周期轮询；钩子非阻塞且按 uuid 幂等。
 - 后端 `/api/v1/edge/job/result` 接收逻辑不在本 plan，path 走配置。
+
+## 附录：[临时调试] 全链路耗时埋点（用完即删）
+
+> 目的：分析 scheduler 下发 `device_info` 后，edge 侧到最终调用后端 `/api/v1/edge/job/result` 的**全链路耗时**，以及中途各 LIMS 接口（order-list / gantts-by-order-id / gantt-with-simulation-by-order-id）的**单次耗时**。所有日志写入独立文件，便于离线分析；分析完成后整体删除以下改动即可。
+
+### 日志输出位置
+- 目录：`/Users/dp/python/Uni-Lab-OS-sirna/gantt_timing/`（由 `unilabos/app/gantt_timing.py` 内 `_LOG_DIR` 计算为 repo 根目录下的 `gantt_timing/`）。
+- **每个 `device_info`（每个 `uuid`）单独一个文件**：`gantt_timing_<uuid>.log`（uuid 中非 `[A-Za-z0-9_.-]` 字符会被替换为 `_`）。`finish()` 时关闭该 uuid 的文件句柄。
+- 每行格式：`时间戳 | uuid=<uuid> | [步骤] | 耗时=xx.xms | 附加信息`。
+
+### 改动清单（删除时按此回滚）
+1. **新增文件** `unilabos/app/gantt_timing.py`：专用文件 logger，提供 `mark_received(uuid)` / `timed(uuid, label, extra)` / `record(...)` / `finish(uuid, summary)`。删除时直接删整个文件。
+2. **`unilabos/app/ws_client.py`** `_handle_device_info`：在 `uuid` 校验通过后插入 `gantt_timing.mark_received(uuid)`（计时起点）。删除该 try 块即可。
+3. **`unilabos/devices/workstation/bioyond_studio/sirna_station/sirna_station.py`**：
+   - `_gantt_report_worker`：用 `gantt_timing.timed(...)` 包裹 order-list 查询、单订单甘特拉取、回传 POST，结尾 `gantt_timing.finish(...)` 记总耗时（含未命中/无甘特/异常分支）。
+   - `_query_orders_for_gantt(query, _timing_uuid=None)`：新增 `_timing_uuid` 形参，翻页循环内对每次 `order_query`（单页）计时。
+   - `_fetch_gantt_for_order(order_id, status, _timing_uuid=None)`：新增 `_timing_uuid` 形参，分别对 3.29 / 3.30 调用计时。
+   - 删除时去掉 `_timing_uuid` 形参与 `gantt_timing` 相关包裹、还原直连调用即可。
+
+### 记录的埋点节点
+- `[收到 device_info]`：计时起点（ws 线程）。
+- `[order-list] 单页请求`：每翻一页一条（含 page/skip/pageCount）。
+- `[order-list] 全部翻页查询订单` + `命中订单数`：order-list 阶段总耗时与订单数。
+- `[甘特拉取] 单订单`：每个订单整体耗时（含 status）。
+- `[3.29 gantts-by-order-id]` / `[3.30 gantt-with-simulation-by-order-id]`：各甘特接口单次耗时。
+- `[回传 POST] /edge/job/result`：最终回传后端接口耗时（含 data_count）。
+- `[全链路结束] 总耗时`：从收到 device_info 到回传完成的端到端耗时。
+
+> 注：本轮未改 `unilabos/device_comms/rpc.py`（上一轮临时加的通用 HTTP 计时已回退），所有耗时统一收敛到上面的专用日志文件。

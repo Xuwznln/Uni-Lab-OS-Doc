@@ -2989,7 +2989,9 @@ class BioyondSirnaStation(BioyondWorkstation):
         logger.info("甘特图回传线程已启动: uuid=%s", normalized_uuid)
 
     @not_action
-    def _query_orders_for_gantt(self, query: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _query_orders_for_gantt(
+        self, query: Dict[str, Any], _timing_uuid: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """按 payload 透传查询 LIMS ``order-list``，自动翻页收集所有 ``(order_id, status)``。
 
         - ``status`` 原始值透传（空 = 不限状态查全部），不做 ``ORDER_STATUS_VALUE_MAP`` 标签映射；
@@ -3031,9 +3033,22 @@ class BioyondSirnaStation(BioyondWorkstation):
         seen: set = set()
         total: Optional[int] = None
         max_pages = 200  # 安全上限，防御脏 totalCount 死循环
+        # [临时调试] 甘特图回传链路耗时埋点
+        from unilabos.app import gantt_timing
+
+        page_idx = 0
         for _ in range(max_pages):
             payload = {**base_payload, "skipCount": skip}
-            page_data = rpc.order_query(json.dumps(payload, ensure_ascii=False)) or {}
+            if _timing_uuid:
+                with gantt_timing.timed(
+                    _timing_uuid,
+                    "[order-list] 单页请求",
+                    extra=f"page={page_idx} skip={skip} pageCount={page}",
+                ):
+                    page_data = rpc.order_query(json.dumps(payload, ensure_ascii=False)) or {}
+            else:
+                page_data = rpc.order_query(json.dumps(payload, ensure_ascii=False)) or {}
+            page_idx += 1
             items = page_data.get("items") or []
             if total is None:
                 try:
@@ -3058,7 +3073,7 @@ class BioyondSirnaStation(BioyondWorkstation):
 
     @not_action
     def _fetch_gantt_for_order(
-        self, order_id: str, status: Optional[int]
+        self, order_id: str, status: Optional[int], _timing_uuid: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """按订单 status 选甘特接口，统一返回 ``{"items": [...]}``；不需要回传的订单返回 ``None``。
 
@@ -3067,16 +3082,37 @@ class BioyondSirnaStation(BioyondWorkstation):
         - ``status ∈ {80, 90, 100}``（成功/失败/已取出）：只查 3.29。
         - 其它 / 未知 status：跳过，返回 ``None``（不查、不回传）。
         """
+        # [临时调试] 甘特图回传链路耗时埋点
+        from unilabos.app import gantt_timing
+
+        def _call_3_29(rpc):
+            if _timing_uuid:
+                with gantt_timing.timed(
+                    _timing_uuid, "[3.29 gantts-by-order-id]", extra=f"order_id={order_id}"
+                ):
+                    return rpc.gantts_by_order_id(order_id, return_envelope=True) or {}
+            return rpc.gantts_by_order_id(order_id, return_envelope=True) or {}
+
+        def _call_3_30(rpc):
+            if _timing_uuid:
+                with gantt_timing.timed(
+                    _timing_uuid,
+                    "[3.30 gantt-with-simulation-by-order-id]",
+                    extra=f"order_id={order_id}",
+                ):
+                    return rpc.gantt_with_simulation_by_order_id(order_id, return_envelope=True) or {}
+            return rpc.gantt_with_simulation_by_order_id(order_id, return_envelope=True) or {}
+
         if status == GANTT_RUNNING_STATUS:
             rpc = self._require_hardware_interface("gantts_by_order_id")
-            env29 = rpc.gantts_by_order_id(order_id, return_envelope=True) or {}
+            env29 = _call_3_29(rpc)
             items29 = env29.get("data")
             items29 = items29 if isinstance(items29, list) else []
             if items29:
                 return {"items": items29}
             # 3.29 为空 → 回退仿真甘特 3.30
             rpc30 = self._require_hardware_interface("gantt_with_simulation_by_order_id")
-            env30 = rpc30.gantt_with_simulation_by_order_id(order_id, return_envelope=True) or {}
+            env30 = _call_3_30(rpc30)
             data30 = env30.get("data")
             if isinstance(data30, dict):
                 data30.setdefault("items", [])
@@ -3085,7 +3121,7 @@ class BioyondSirnaStation(BioyondWorkstation):
 
         if status in GANTT_FINISHED_STATUSES:
             rpc = self._require_hardware_interface("gantts_by_order_id")
-            env29 = rpc.gantts_by_order_id(order_id, return_envelope=True) or {}
+            env29 = _call_3_29(rpc)
             items29 = env29.get("data")
             items29 = items29 if isinstance(items29, list) else []
             return {"items": items29}
@@ -3098,14 +3134,20 @@ class BioyondSirnaStation(BioyondWorkstation):
         """后台线程体：透传查 order-list(自动翻页)拿全部 (order_id, status) → 按 status 选甘特接口
         （60 先 3.29 空回退 3.30；80/90/100 只 3.29；其它跳过）→ 统一 {"items":[...]} 汇总成数组
         → 一次性 POST 回传。"""
+        # [临时调试] 甘特图回传链路耗时埋点
+        from unilabos.app import gantt_timing
+
         try:
-            orders = self._query_orders_for_gantt(query)
+            with gantt_timing.timed(uuid, "[order-list] 全部翻页查询订单"):
+                orders = self._query_orders_for_gantt(query, _timing_uuid=uuid)
+            gantt_timing.record(uuid, "[order-list] 命中订单数", 0.0, extra=f"count={len(orders)}")
             if not orders:
                 logger.error(
                     "甘特图回传：payload 查询未命中任何订单，跳过 uuid=%s query=%s",
                     uuid,
                     query,
                 )
+                gantt_timing.finish(uuid, summary="未命中订单，未回传")
                 return
             gantts: List[Any] = []
             skipped = 0
@@ -3113,7 +3155,12 @@ class BioyondSirnaStation(BioyondWorkstation):
                 order_id = order["order_id"]
                 order_status = order.get("status")
                 try:
-                    gantt = self._fetch_gantt_for_order(order_id, order_status)
+                    with gantt_timing.timed(
+                        uuid, "[甘特拉取] 单订单", extra=f"order_id={order_id} status={order_status}"
+                    ):
+                        gantt = self._fetch_gantt_for_order(
+                            order_id, order_status, _timing_uuid=uuid
+                        )
                     if gantt is None:
                         skipped += 1
                         logger.info(
@@ -3132,6 +3179,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                     )
             if not gantts:
                 logger.error("甘特图回传：无可回传的订单甘特，跳过 uuid=%s", uuid)
+                gantt_timing.finish(uuid, summary="无可回传甘特，未回传")
                 return
             logger.info(
                 "甘特图拉取完成: uuid=%s 命中订单数=%s 成功=%s 跳过=%s",
@@ -3142,9 +3190,17 @@ class BioyondSirnaStation(BioyondWorkstation):
             )
             from unilabos.app.web import http_client
 
-            http_client.report_gantt(uuid, gantts)
+            with gantt_timing.timed(
+                uuid, "[回传 POST] /edge/job/result", extra=f"data_count={len(gantts)}"
+            ):
+                http_client.report_gantt(uuid, gantts)
+            gantt_timing.finish(
+                uuid,
+                summary=f"命中订单={len(orders)} 回传={len(gantts)} 跳过={skipped}",
+            )
         except Exception as exc:
             logger.error("甘特图回传失败 uuid=%s: %s", uuid, exc, exc_info=True)
+            gantt_timing.finish(uuid, summary=f"异常中断: {exc}")
 
     def _require_hardware_interface(self, method_name: str) -> Any:
         rpc = getattr(self, "hardware_interface", None)

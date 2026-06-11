@@ -1,5 +1,4 @@
 import json
-import time
 import requests
 from rclpy.logging import get_logger
 
@@ -12,11 +11,8 @@ class BaseRequest:
         return self._logger
 
     def get(self, url, params, headers={"Content-Type": "application/json"}):
-        start = time.perf_counter()
         try:
             response = requests.get(url, params=params, headers=headers, timeout=30)
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            self.get_logger().info(f"HTTP GET {url} 耗时 {elapsed_ms:.1f}ms status={response.status_code}")
             self.get_logger().debug(
                 f"Request >>> : {params} {response.status_code} {response.text}"
             )
@@ -24,18 +20,14 @@ class BaseRequest:
                 return response.json()
 
         except Exception as e:
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            self.get_logger().error(f"HTTP GET {url} 失败 耗时 {elapsed_ms:.1f}ms: {e}")
+            self.get_logger().error(f"Request ERROR: {e}")
             return
 
     def post(self, url, params={}, files=None, headers={"Content-Type": "application/json"}):
-        start = time.perf_counter()
         try:
             response = requests.post(
                 url, data=json.dumps(params) if params else None, headers=headers, timeout=120, files=files
             )
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            self.get_logger().info(f"HTTP POST {url} 耗时 {elapsed_ms:.1f}ms status={response.status_code}")
             self.get_logger().debug(
                 f"Request >>> : {response.request.body} {response.status_code} {response.text}"
             )
@@ -45,8 +37,7 @@ class BaseRequest:
                 raise Exception("Request ERROR:", response.text)
 
         except Exception as e:
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            self.get_logger().error(f"HTTP POST {url} 失败 耗时 {elapsed_ms:.1f}ms: {e}")
+            self.get_logger().error(f"Request ERROR: {e}")
             return
 
     def form_post(self, url, params):
