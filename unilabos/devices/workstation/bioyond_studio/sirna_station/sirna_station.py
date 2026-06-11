@@ -3197,14 +3197,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             with gantt_timing.timed(uuid, "[order-list] 全部翻页查询订单"):
                 orders = self._query_orders_for_gantt(query, _timing_uuid=uuid)
             gantt_timing.record(uuid, "[order-list] 命中订单数", 0.0, extra=f"count={len(orders)}")
-            if not orders:
-                logger.error(
-                    "甘特图回传：payload 查询未命中任何订单，跳过 uuid=%s query=%s",
-                    uuid,
-                    query,
-                )
-                gantt_timing.finish(uuid, summary="未命中订单，未回传")
-                return
             gantts: List[Any] = []
             skipped = 0
             for order in orders:
@@ -3233,10 +3225,11 @@ class BioyondSirnaStation(BioyondWorkstation):
                         order_status,
                         exc,
                     )
-            if not gantts:
-                logger.error("甘特图回传：无可回传的订单甘特，跳过 uuid=%s", uuid)
-                gantt_timing.finish(uuid, summary="无可回传甘特，未回传")
-                return
+            # 无论是否查到订单/甘特，都回传一次；查询为空时回传空数组 data=[]
+            if not orders:
+                logger.warning("甘特图回传：order-list 未命中任何订单，回传空数据 uuid=%s", uuid)
+            elif not gantts:
+                logger.warning("甘特图回传：无非空甘特，回传空数据 uuid=%s", uuid)
             logger.info(
                 "甘特图拉取完成: uuid=%s 命中订单数=%s 成功=%s 跳过=%s",
                 uuid,

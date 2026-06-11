@@ -274,12 +274,28 @@ def report_gantt(self, uuid: str, data: Any) -> requests.Response:
    `skipped` 计数、`if not gantts` 早退、计时埋点逻辑均不变。
 
 ### 效果
-- 所有订单甘特都为空 → `gantts` 为空 → 命中现有 `if not gantts` 分支，记日志、不 POST。
-- 部分订单有数据 → 只 POST 非空的那些；`data_count` 与日志"成功"数自动反映过滤后数量。
+- 空 items 的订单不进回传数组（被 `_fetch_gantt_for_order` 过滤为 None）。
+- 部分订单有数据 → POST 的 `data` 只含非空的那些。
 
 ### 验证
 - `python3 -m py_compile` 通过。
 - 逻辑核对：3.29 返回空数组且 3.30 返回 `{"items":[]}` 的订单 → `_fetch_gantt_for_order` 返回 None → 不进回传数组。
+
+## 增量修改：查询为空也回传（空数据）（本轮）
+
+### 变更
+**无论 order-list 是否命中订单、是否有非空甘特，都调用一次 `{remote_addr}/api/v1/edge/job/result`**；查询为空时回传 `data: []`（空数组）。即：之前"未命中订单/无可回传甘特就跳过不 POST"的两处提前 `return` 已移除。
+
+### 改动点
+`[sirna_station.py](/Users/dp/python/Uni-Lab-OS-sirna/unilabos/devices/workstation/bioyond_studio/sirna_station/sirna_station.py)` `_gantt_report_worker`：
+- 删除 `if not orders: ... return` 与 `if not gantts: ... return` 两处早退。
+- 订单为空时不进 for 循环，`gantts` 自然为 `[]`；甘特全为空时 `gantts` 也为 `[]`。
+- 两种空场景仅记 `warning` 日志，随后照常 `http_client.report_gantt(uuid, gantts)`（body `data` 为 `[]`）。
+- `gantt_timing` 计时埋点不变；`finish` 的 summary 仍记命中/回传/跳过数。
+
+### 注意（覆盖前文）
+- 前文「范围 / 端到端数据流 / 待确认假设」中"payload 查不到订单 → 记日志跳过不 POST""无可回传甘特就跳过"的描述**已作废**，以本节为准：**任何情况都回传一次**，空则 `data=[]`。
+- 后端 `/edge/job/result` 需能接受 `data` 为空数组。
 
 ## 附录：[临时调试] 全链路耗时埋点（用完即删）
 
