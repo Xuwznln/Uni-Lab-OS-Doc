@@ -297,6 +297,38 @@ def report_gantt(self, uuid: str, data: Any) -> requests.Response:
 - 前文「范围 / 端到端数据流 / 待确认假设」中"payload 查不到订单 → 记日志跳过不 POST""无可回传甘特就跳过"的描述**已作废**，以本节为准：**任何情况都回传一次**，空则 `data=[]`。
 - 后端 `/edge/job/result` 需能接受 `data` 为空数组。
 
+## 增量修改：弃用 3.29，全部走 3.30（本轮）
+
+### 变更
+甘特图查询**不再调用 3.29** `gantts_by_order_id`，所有需回传的订单**统一只走 3.30** `gantt_with_simulation_by_order_id`（返回 `data={"items":[...]}`）。
+
+- **status 过滤保留**：仅 `status ∈ {60, 80, 90, 100}` 的订单查询甘特；其它 / 未知 status（如待运行 0）仍跳过、返回 `None`。
+- **统一接口**：上述可回传 status 一律只调 3.30（不再有"60 先 3.29 空回退 3.30""80/90/100 只 3.29"的分流）。
+- **空 items 过滤**：3.30 返回的 `items` 为空 → 该订单返回 `None`、不进回传数组。
+- **全空也回传**：所有订单都被过滤/跳过时，worker 仍回传一次 `data=[]`（沿用上一轮逻辑，不变）。
+
+### 改动点
+`[sirna_station.py](/Users/dp/python/Uni-Lab-OS-sirna/unilabos/devices/workstation/bioyond_studio/sirna_station/sirna_station.py)`
+- `_fetch_gantt_for_order`：删除 `_call_3_29` 及所有 `gantts_by_order_id` 调用；合并两个 status 分支为一个判断，逻辑：
+
+```python
+if status == GANTT_RUNNING_STATUS or status in GANTT_FINISHED_STATUSES:
+    rpc30 = self._require_hardware_interface("gantt_with_simulation_by_order_id")
+    env30 = _call_3_30(rpc30)
+    data30 = env30.get("data")
+    if isinstance(data30, dict):
+        items30 = data30.get("items")
+        if isinstance(items30, list) and items30:
+            return data30
+    return None  # 3.30 items 为空 → 过滤
+return None      # 其它/未知 status → 跳过
+```
+
+- `_gantt_report_worker` docstring：描述改为"60/80/90/100 统一走 3.30；其它跳过"。
+
+### 注意（覆盖前文）
+前文「逻辑变更说明 → 甘特接口按订单 status 分流」「实现步骤 2b」「待确认/假设」中所有关于 **3.29 / 3.30 分流**（"60 先 3.29 空回退 3.30""80/90/100 只查 3.29"）的描述**已作废**，以本节为准：**只用 3.30**。
+
 ## 附录：[临时调试] 全链路耗时埋点（用完即删）
 
 > 目的：分析 scheduler 下发 `device_info` 后，edge 侧到最终调用后端 `/api/v1/edge/job/result` 的**全链路耗时**，以及中途各 LIMS 接口（order-list / gantts-by-order-id / gantt-with-simulation-by-order-id）的**单次耗时**。所有日志写入独立文件，便于离线分析；分析完成后整体删除以下改动即可。
