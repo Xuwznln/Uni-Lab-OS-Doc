@@ -2264,6 +2264,7 @@ class BioyondSirnaStation(BioyondWorkstation):
     @action(
         goal_default={
             "order_id": "",
+            "notebook_id": "",
             "host_prefix": r"D:\bioyond_rb\host",
             "poll_interval_seconds": 10.0,
             "poll_timeout_seconds": 3600,
@@ -2271,10 +2272,11 @@ class BioyondSirnaStation(BioyondWorkstation):
         },
         feedback_interval=300,
         description=(
-            "计算实验一结果(双荧光素酶报告基因检测): 读细胞板名称记录(文件 m) + 实验一细胞培养板.xlsx, "
+            "计算实验一结果(双荧光素酶报告基因检测)并写入实验记录本: 读细胞板名称记录(文件 m) + 实验一细胞培养板.xlsx, "
             "轮询 order-report 到 status==80 取每通量 renilla/firefly 两个 384 孔 CSV, "
             "按 384孔板 material-info 的 96->384 映射换算 ratio=Renilla/Firefly、"
-            "抑制率=1-ratio/mean(空白对照), 按样本聚合 mean/SD(空白对照结果列留空), 输出结果表。"
+            "抑制率=1-ratio/mean(空白对照), 按样本聚合 mean/SD(空白对照结果列留空), 输出结果表并追加到记录本。"
+            "order_id 可连 wait_for_order_finish 或手填；notebook_id 留空自动反查当前记录本，单独测试时可手填。"
         ),
         handles=[
             ActionInputHandle(
@@ -2300,29 +2302,44 @@ class BioyondSirnaStation(BioyondWorkstation):
                 data_source=DataSource.EXECUTOR,
                 io_type="target",
             ),
+            ActionOutputHandle(
+                key="notebook_id",
+                data_type="string",
+                label="记录本ID",
+                data_key="notebook_id",
+                data_source=DataSource.EXECUTOR,
+            ),
         ],
     )
     def compute_experiment1_result(
         self,
         order_id: str = "",
+        notebook_id: str = "",
         host_prefix: str = r"D:\bioyond_rb\host",
         poll_interval_seconds: float = 10.0,
         poll_timeout_seconds: int = 3600,
         plate_map_path: str = "",
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """计算实验一结果(双荧光素酶 ratio / 抑制率)并输出结果表。
+        """计算实验一结果(双荧光素酶 ratio / 抑制率)并写入实验记录本。
 
         Args:
             order_id: 实验订单 UUID(连上游 wait_for_order_finish.order_id，亦可手填)。
+            notebook_id: 目标记录本 UUID；**留空则自动从当前 job 反查(生产默认)**。
+                单独测试时可手填，把结果写进指定记录本。
             host_prefix: 报告文件本地前缀(工作站固定盘符路径)。
             poll_interval_seconds: order_report 轮询间隔秒。
             poll_timeout_seconds: order_report 轮询超时秒(<=0 不限时)。
             plate_map_path: 实验一孔板布局 xlsx；缺省用 exp1_report.DEFAULT_PLATE_MAP。
 
         Returns:
-            含 success / order_id / resultTable(data+columns+tableName) / meta 的字典。
+            含 success / order_id / notebook_id / resultTable(data+columns+tableName) / meta 的字典。
         """
+        from datetime import datetime as _dt
+
+        from unilabos.devices.workstation.bioyond_studio.sirna_station import (
+            notebook_client as nbc,
+        )
         from unilabos.script import exp1_report as e1
 
         with self._debug_call_session("compute_experiment1_result"):
@@ -2332,6 +2349,16 @@ class BioyondSirnaStation(BioyondWorkstation):
             if not normalized_order_id:
                 raise ValueError(
                     "compute_experiment1_result 需要 order_id(请连接 wait_for_order_finish.order_id)"
+                )
+
+            # 取 notebook_id：手填优先(便于单独测试)，否则 device_manager 反查；取不到则中止
+            notebook_id = str(notebook_id or "").strip()
+            if not notebook_id:
+                notebook_id = self._resolve_notebook_id("compute_experiment1_result")
+            if not notebook_id:
+                raise ValueError(
+                    "compute_experiment1_result 未取到 notebook_id(未手填且 device_manager "
+                    "当前无匹配 active job)；中止写记录本。手动测试请显式传入 notebook_id。"
                 )
 
             # 1) 读文件 m：4 块细胞培养板(materialId↔板号↔板名)
@@ -2449,14 +2476,37 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "[sirna] 实验一结果计算完成: 板=%s 行=%s 各板空白ratio均值=%s",
                 len(plates_data), len(result["data"]), blank_means,
             )
+
+            # 写入实验记录本：结果表转原生表格块后追加(无图片，仅一张表)
+            columns = result["columns"]
+            header = [c["name"] for c in columns]
+            rows = [[row[c["key"]] for c in columns] for row in result["data"]]
+            stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            blocks: List[Dict[str, Any]] = [
+                nbc.text_block(
+                    f"实验一结果(自动生成 {stamp}, order_id={normalized_order_id})"
+                ),
+                nbc.text_block("一、双荧光素酶报告基因检测结果"),
+                nbc.build_table_node(header, rows),
+                nbc.text_block(f"各板空白对照 ratio 均值: {blank_means}"),
+                # 末尾补空段落：table 后便于前端继续编辑
+                nbc.text_block(""),
+            ]
+            append_result = nbc.append_blocks_to_notebook(notebook_id, blocks)
+            logger.info(
+                "[sirna] 实验一结果已写入记录本 notebook_id=%s appended=%s total=%s",
+                notebook_id, append_result["appended"], append_result["total"],
+            )
+
             return {
                 "success": True,
                 "order_id": normalized_order_id,
+                "notebook_id": notebook_id,
                 "resultTable": result_table,
                 "meta": result["meta"],
                 "confirmation_message": (
-                    f"实验一结果已计算: {len(plates_data)} 块板, {len(result['data'])} 行 "
-                    f"(各板空白对照 ratio 均值={blank_means})"
+                    f"实验一结果已写入记录本 {notebook_id}: {len(plates_data)} 块板, "
+                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means})"
                 ),
             }
 
