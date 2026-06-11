@@ -253,6 +253,34 @@ def report_gantt(self, uuid: str, data: Any) -> requests.Response:
 - 触发模型为**事件驱动一次性**（每条 device_info 查一次+POST 一次），不做周期轮询；钩子非阻塞且按 uuid 幂等。
 - 后端 `/api/v1/edge/job/result` 接收逻辑不在本 plan，path 走配置。
 
+## 增量修改：过滤 items 为空的甘特数据（本轮）
+
+### 背景
+调用 3.29 / 3.30 后，部分订单的甘特 `items` 为空（如 status=60 执行中但 3.29、3.30 都查不到、或 status∈{80,90,100} 但 3.29 为空）。当前实现会把这些 `{"items": []}` 也收进回传数组 POST 给后端，造成无用数据传输。本轮改为：**空 items 直接过滤掉，不进回传数组**。
+
+### 改动点（单文件）
+`[sirna_station.py](/Users/dp/python/Uni-Lab-OS-sirna/unilabos/devices/workstation/bioyond_studio/sirna_station/sirna_station.py)`
+
+1. **`_fetch_gantt_for_order`：空 items 一律返回 `None`**（复用 worker 既有"跳过"路径）
+   - `status == 60` 分支：
+     - 3.29 非空 → `return {"items": items29}`（不变）
+     - 回退 3.30：仅当 `data30["items"]` 是非空 list 才 `return data30`，否则 `return None`
+     - 原末尾 `return {"items": []}` → 改为 `return None`
+   - `status ∈ {80,90,100}` 分支：`items29` 非空 → `return {"items": items29}`；为空 → `return None`
+   - 其它 status：保持 `return None`
+   - 同步更新 docstring：补"3.29/3.30 均为空 items 时返回 None，不回传"。
+2. **worker 跳过日志措辞**：`gantt is None` 的日志由写死的"（不在回传状态范围）"改为中性措辞
+   `"甘特图回传：跳过 order_id=%s status=%s（无甘特数据或状态不在回传范围）"`。
+   `skipped` 计数、`if not gantts` 早退、计时埋点逻辑均不变。
+
+### 效果
+- 所有订单甘特都为空 → `gantts` 为空 → 命中现有 `if not gantts` 分支，记日志、不 POST。
+- 部分订单有数据 → 只 POST 非空的那些；`data_count` 与日志"成功"数自动反映过滤后数量。
+
+### 验证
+- `python3 -m py_compile` 通过。
+- 逻辑核对：3.29 返回空数组且 3.30 返回 `{"items":[]}` 的订单 → `_fetch_gantt_for_order` 返回 None → 不进回传数组。
+
 ## 附录：[临时调试] 全链路耗时埋点（用完即删）
 
 > 目的：分析 scheduler 下发 `device_info` 后，edge 侧到最终调用后端 `/api/v1/edge/job/result` 的**全链路耗时**，以及中途各 LIMS 接口（order-list / gantts-by-order-id / gantt-with-simulation-by-order-id）的**单次耗时**。所有日志写入独立文件，便于离线分析；分析完成后整体删除以下改动即可。

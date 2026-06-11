@@ -3125,12 +3125,13 @@ class BioyondSirnaStation(BioyondWorkstation):
     def _fetch_gantt_for_order(
         self, order_id: str, status: Optional[int], _timing_uuid: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """按订单 status 选甘特接口，统一返回 ``{"items": [...]}``；不需要回传的订单返回 ``None``。
+        """按订单 status 选甘特接口，返回 ``{"items": [...]}``；无需回传的订单返回 ``None``。
 
         - ``status == 60``（执行中）：先查 3.29 ``gantts_by_order_id``（``data`` 为数组）；非空就用它，
           为空才回退 3.30 ``gantt_with_simulation_by_order_id``（``data`` 为 ``{"items":[...]}``）。
         - ``status ∈ {80, 90, 100}``（成功/失败/已取出）：只查 3.29。
         - 其它 / 未知 status：跳过，返回 ``None``（不查、不回传）。
+        - **``items`` 为空（3.29/3.30 均无数据）时返回 ``None``，不回传无用空数据。**
         """
         # [临时调试] 甘特图回传链路耗时埋点
         from unilabos.app import gantt_timing
@@ -3165,16 +3166,21 @@ class BioyondSirnaStation(BioyondWorkstation):
             env30 = _call_3_30(rpc30)
             data30 = env30.get("data")
             if isinstance(data30, dict):
-                data30.setdefault("items", [])
-                return data30
-            return {"items": []}
+                items30 = data30.get("items")
+                if isinstance(items30, list) and items30:
+                    return data30
+            # 3.29/3.30 均为空 → 过滤掉，不回传
+            return None
 
         if status in GANTT_FINISHED_STATUSES:
             rpc = self._require_hardware_interface("gantts_by_order_id")
             env29 = _call_3_29(rpc)
             items29 = env29.get("data")
             items29 = items29 if isinstance(items29, list) else []
-            return {"items": items29}
+            if items29:
+                return {"items": items29}
+            # 3.29 为空 → 过滤掉，不回传
+            return None
 
         # 其它 / 未知 status：跳过
         return None
@@ -3214,9 +3220,9 @@ class BioyondSirnaStation(BioyondWorkstation):
                     if gantt is None:
                         skipped += 1
                         logger.info(
-                            "甘特图回传：跳过 status=%s 的订单 order_id=%s（不在回传状态范围）",
-                            order_status,
+                            "甘特图回传：跳过订单 order_id=%s status=%s（无甘特数据或状态不在回传范围）",
                             order_id,
+                            order_status,
                         )
                         continue
                     gantts.append(gantt)

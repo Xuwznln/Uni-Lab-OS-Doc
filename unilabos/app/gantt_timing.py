@@ -15,6 +15,13 @@ import re
 import threading
 import time
 from contextlib import contextmanager
+from datetime import datetime
+
+
+def _now_str() -> str:
+    """当前墙钟时间，精确到毫秒。"""
+    now = datetime.now()
+    return now.strftime("%Y-%m-%d %H:%M:%S.") + f"{now.microsecond // 1000:03d}"
 
 _LOG_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -54,9 +61,12 @@ def _get_logger(uuid: str):
 
 def mark_received(uuid: str) -> None:
     """记录收到 device_info 触发的时刻（全链路计时起点）。"""
+    arrived_at = _now_str()
     with _starts_lock:
-        _starts[uuid] = time.perf_counter()
-    _get_logger(uuid).info(f"uuid={uuid} | [收到 device_info] 全链路计时开始")
+        _starts[uuid] = (time.perf_counter(), arrived_at)
+    _get_logger(uuid).info(
+        f"uuid={uuid} | [收到 device_info] action 到达时刻={arrived_at} 全链路计时开始"
+    )
 
 
 def record(uuid: str, label: str, elapsed_ms: float, extra: str = "") -> None:
@@ -78,15 +88,22 @@ def timed(uuid: str, label: str, extra: str = ""):
 
 def finish(uuid: str, summary: str = "") -> None:
     """记录全链路结束并计算从 mark_received 到现在的总耗时，并关闭该 uuid 的文件句柄。"""
+    finished_at = _now_str()
     with _starts_lock:
-        t0 = _starts.pop(uuid, None)
+        start = _starts.pop(uuid, None)
     lg = _get_logger(uuid)
-    if t0 is None:
-        lg.info(f"uuid={uuid} | [全链路结束] (无起点记录) {summary}")
+    if start is None:
+        lg.info(
+            f"uuid={uuid} | [全链路结束] 完成时刻={finished_at} (无起点记录) {summary}"
+        )
     else:
+        t0, arrived_at = start
         total_ms = (time.perf_counter() - t0) * 1000
         suffix = f" | {summary}" if summary else ""
-        lg.info(f"uuid={uuid} | [全链路结束] 总耗时={total_ms:.1f}ms{suffix}")
+        lg.info(
+            f"uuid={uuid} | [全链路结束] action 到达时刻={arrived_at} 调用api完成时刻={finished_at} "
+            f"总耗时={total_ms:.1f}ms{suffix}"
+        )
     # 关闭并释放该 uuid 的文件句柄，避免句柄长期占用
     with _loggers_lock:
         removed = _loggers.pop(uuid, None)
