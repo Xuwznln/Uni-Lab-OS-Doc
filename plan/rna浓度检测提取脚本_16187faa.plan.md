@@ -9,7 +9,7 @@ todos:
     content: 解析 BioTek CSV：定位 Results、读 8×12 RFU 网格（丢弃末列滤光片标记）、抓元信息
     status: pending
   - id: parse-platemap
-    content: 解析 细胞培养板.xlsx，建立 孔位→样本标签 映射
+    content: 解析 实验二细胞培养板.xlsx，建立 孔位→样本标签 映射
     status: pending
   - id: calc
     content: 实现可替换的占位换算函数 fluor_to_concentration + 空白扣除
@@ -55,7 +55,7 @@ isProject: false
 
 ## 输入
 - 荧光数据：`/Users/dp/python/Uni-Lab-OS-sirna/data/test0420_260604_124254.csv`（BioTek Synergy H1，96 孔，Ex485/Em528）。结构：前置元信息（Software Version / Date / Reader 等），`Results` 段后是表头 `\t1..12`，随后 8 行 `A..H` 的 RFU 值（每行末尾还有一个 `485,528` 滤光片标记列，需丢弃）。
-- 孔板图：`/Users/dp/python/Uni-Lab-OS-sirna/data/细胞培养板.xlsx`（8×12，单元格为「空白对照」或「样品N-ID」，N=1..11，由 `data/gen_plate.py` 生成）。
+- 孔板图：`/Users/dp/python/Uni-Lab-OS-sirna/data/实验二细胞培养板.xlsx`（原 `细胞培养板.xlsx`，已重命名；8×12，单元格为「空白对照」或「样品N-ID」，N=1..11，由 `data/gen_plate.py` 生成）。
 
 ## 输出
 - 文件：`rna_concentration.csv`（路径用 `--out` 指定，默认放 `data/` 下）。
@@ -89,7 +89,7 @@ isProject: false
 - qPCR 原始数据：`/Users/dp/python/Uni-Lab-OS-sirna/data/场景二实验数据-qpcr20260520181417.xml`（Roche LightCycler 480，384 孔，SYBR Green）。
   - `<analyses>/<AnalysisSample>/{name=Sample N, Position}`：样本号↔孔位（已核实**行优先**：Sample1=A1、Sample2=A2、…、Sample24=A24、Sample25=B1）。
   - `<Acquisitions>/<Sample Number=N>/<Acq Number=k>/<Chan>/Fluor`：**第 1–45 点 = 扩增（恒温~60°C 逐循环）**，第 46 点起 = 熔解。协议 `amplification` Cycles=45。
-- 孔板图（样本身份来源）：`/Users/dp/python/Uni-Lab-OS-sirna/data/细胞培养板.xlsx`（96 孔 8×12，单元格为「空白对照」或「样品N-ID」）。
+- 孔板图（样本身份来源）：`/Users/dp/python/Uni-Lab-OS-sirna/data/实验二细胞培养板.xlsx`（原 `细胞培养板.xlsx`，已重命名；96 孔 8×12，单元格为「空白对照」或「样品N-ID」）。
 
 ## 96 孔 → 384 孔 映射规则（用户提供，已确认）
 - 96 孔 (R 行 1..8, C 列 1..12) → 384 孔 2×2 区块：行 = 2R-1, 2R；列 = 2C-1, 2C。

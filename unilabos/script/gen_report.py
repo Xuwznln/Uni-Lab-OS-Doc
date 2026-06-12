@@ -62,7 +62,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
 DEFAULT_FLUOR = os.path.join(_REPO, "data", "test0420_260604_124254.csv")
 DEFAULT_XML = os.path.join(_REPO, "data", "场景二实验数据-qpcr20260520181417.xml")
-DEFAULT_MAP = os.path.join(_REPO, "data", "细胞培养板.xlsx")
+DEFAULT_MAP = os.path.join(_REPO, "data", "实验二细胞培养板.xlsx")
 DEFAULT_OUT = os.path.join(_REPO, "data", "实验报告.xlsx")
 
 

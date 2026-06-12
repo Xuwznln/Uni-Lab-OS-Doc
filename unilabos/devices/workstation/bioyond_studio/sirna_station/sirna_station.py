@@ -1686,7 +1686,26 @@ class BioyondSirnaStation(BioyondWorkstation):
                     )
 
             # 7) 整理 resultTable（4 列 v2 结构）+ 序列化 used_materials。
-            unload_rows = self._build_unload_rows_from_all_stock_material(all_materials)
+            # 实验一补充4：读提交期落盘的 m 文件，把细胞培养板下料行也显示带全局序号的板名
+            # (细胞培养板{seq})，与上料「物料放置指引」一致。m 文件按 materialId 落盘，与
+            # all-stock-material 物料 id 同源；缺文件(非实验一/换机/被清理)不现算，回退原名并 warning。
+            name_by_material_id: Dict[str, str] = {}
+            try:
+                plates = self._read_cell_plates_file(normalized_order_id).get("plates") or []
+                name_by_material_id = {
+                    str(p.get("materialId") or "").strip(): str(p.get("materialName") or "").strip()
+                    for p in plates
+                    if str(p.get("materialId") or "").strip() and str(p.get("materialName") or "").strip()
+                }
+            except Exception as exc:  # FileNotFoundError 等：不现算，回退原名，记日志便于追溯
+                logger.warning(
+                    "[sirna] 下料表未找到细胞板名称记录(order_id=%s)，细胞培养板回退显示原名: %s",
+                    normalized_order_id,
+                    exc,
+                )
+            unload_rows = self._build_unload_rows_from_all_stock_material(
+                all_materials, name_by_material_id
+            )
             unload_table = self._build_unload_table(unload_rows)
             used_materials_serialized = [
                 self._used_material_to_dict(item) for item in self.last_used_materials
@@ -4570,11 +4589,17 @@ class BioyondSirnaStation(BioyondWorkstation):
     def _build_unload_rows_from_all_stock_material(
         cls,
         all_materials: Optional[List[Dict[str, Any]]],
+        name_by_material_id: Optional[Dict[str, str]] = None,
     ) -> List[Dict[str, Any]]:
         """把 ``materials-by-order-id`` 返回数据展平成下料表行（plan v2：4 列）。
 
         每条物料若有多 ``locations`` 则按 location 拆多行，方便操作员一对一物理取出；
         ``locations`` 为空时仍保留一行空坐标占位，提示该物料无法定位但需要操作员处理。
+
+        ``name_by_material_id``（实验一补充4）：``materialId -> 板名(细胞培养板{seq})`` 映射，
+        来自提交期落盘的 m 文件 ``data/细胞板名称记录/{orderId}.csv``。命中（按物料 ``id``）的
+        细胞培养板按 m 文件显示带全局序号的名字，与上料「物料放置指引」一致；未命中（其它物料、
+        非实验一订单、或 m 文件缺失）一律回退原始 ``name``。
 
         Quantity 语义（实测奔曜实现）：
         - 物料级 ``quantity`` 是该物料在订单里的真实总量（操作员关心的"几个"）。
@@ -4583,11 +4608,14 @@ class BioyondSirnaStation(BioyondWorkstation):
         因此 location 级为 0 / None / 空时一律回退到物料级 ``top_quantity``，
         避免前端表格里全是 0 的误导。
         """
+        name_map = name_by_material_id or {}
         rows: List[Dict[str, Any]] = []
         for mat in all_materials or []:
             if not isinstance(mat, dict):
                 continue
-            material_name = str(mat.get("name") or "")
+            # 物料 id 命中 m 文件则用带序号板名(细胞培养板{seq})，否则回退原始 name
+            material_id = str(mat.get("id") or "").strip()
+            material_name = name_map.get(material_id) or str(mat.get("name") or "")
             top_quantity = mat.get("quantity")
             locations = mat.get("locations") or []
             if not isinstance(locations, list) or not locations:
