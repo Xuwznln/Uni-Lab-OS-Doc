@@ -216,6 +216,7 @@ def compute_exp1_result(plates: List[Dict[str, Any]]) -> Dict[str, Any]:
         renilla = plate.get("renilla") or {}
         firefly = plate.get("firefly") or {}
         plate_name = plate.get("plate_name") or f"细胞培养板{plate.get('seq', '')}"
+        preintake_code = plate.get("preintake_code") or ""
         for w96 in sorted(labels.keys(), key=_well96_sort_key):
             label = labels[w96]
             w384 = mapping.get(w96)
@@ -223,6 +224,7 @@ def compute_exp1_result(plates: List[Dict[str, Any]]) -> Dict[str, Any]:
             ff = firefly.get(w384) if w384 else None
             ratio = (ren / ff) if (ren is not None and ff) else None
             wells.append({
+                "preintake": preintake_code,
                 "plate": plate_name,
                 "seq": plate.get("seq"),
                 "well96": w96,
@@ -273,6 +275,7 @@ def compute_exp1_result(plates: List[Dict[str, Any]]) -> Dict[str, Any]:
         else:
             mean = sd = None
         data.append({
+            "preintake": w.get("preintake") or "",
             "plate": w["plate"],
             "well": w["well96"],
             "sample": w["label"],
@@ -285,6 +288,7 @@ def compute_exp1_result(plates: List[Dict[str, Any]]) -> Dict[str, Any]:
         })
 
     columns = [
+        {"name": "通量名称", "key": "preintake"},
         {"name": "板", "key": "plate"},
         {"name": "孔位", "key": "well"},
         {"name": "样本", "key": "sample"},

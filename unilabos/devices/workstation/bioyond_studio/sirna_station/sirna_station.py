@@ -1146,15 +1146,24 @@ class BioyondSirnaStation(BioyondWorkstation):
             raw_result = rpc.create_order(json.dumps(copy.deepcopy(order_payload), ensure_ascii=False))
             parsed_result = self._parse_lims_result(raw_result)
             material_records = self._extract_create_order_materials(parsed_result)
-            suggested_locations = self._extract_suggested_locations(material_records)
             order_ids = self._extract_created_order_ids(parsed_result)
             self._last_submitted_order_ids = list(order_ids)
             self._last_submitted_order_code = resolved_order_code
-            # 实验一：把 4 块细胞培养板(materialName/materialId/locationShowName)落盘为
-            # data/细胞板名称记录/{orderId}.csv，板名尾缀 1/2/3/4，供后续结果计算节点读取。
+            # 实验一：从 order-report 取通量信息(通量名称=code/通量id=id)，按
+            # (通量sequence, 通量内顺序) 全局给细胞培养板编号 seq，并把 materialName 重命名为
+            # 细胞培养板{seq}，使前端「物料放置指引」带序号；随后落盘 m 文件(含通量列)。
+            preintake_index: Dict[str, Dict[str, Any]] = {}
             if experiment_number == 1:
                 try:
-                    self._dump_cell_plates_file(order_ids, material_records)
+                    preintake_index = self._build_cell_plate_preintake_index(rpc, order_ids)
+                    self._relabel_cell_plates_with_seq(material_records, preintake_index)
+                except Exception as exc:  # 通量信息获取/重命名失败不阻断提交主流程
+                    logger.warning("[sirna] 实验一通量信息获取/重命名失败: %s", exc)
+            suggested_locations = self._extract_suggested_locations(material_records)
+            # data/细胞板名称记录/{orderId}.csv：板名尾缀 1..N(全局)，含通量名称/通量id，供后续结果计算节点读取。
+            if experiment_number == 1:
+                try:
+                    self._dump_cell_plates_file(order_ids, material_records, preintake_index)
                 except Exception as exc:  # 落盘失败不阻断提交主流程
                     logger.warning("[sirna] 写细胞板名称记录文件失败: %s", exc)
             start_experiment_info = {
@@ -2157,17 +2166,94 @@ class BioyondSirnaStation(BioyondWorkstation):
         repo_root = Path(__file__).resolve().parents[5]
         return str(repo_root / "data" / "细胞板名称记录")
 
+    def _build_cell_plate_preintake_index(
+        self,
+        rpc: Any,
+        order_ids: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """从 order-report 取通量信息，建 materialId -> 通量/全局seq 索引。
+
+        单次调用 ``rpc.order_report(order_id)``，遍历 ``preIntakes``(每个=一通量)，
+        按 ``(通量sequence, 通量内 sampleMaterials 顺序)`` 给细胞培养板全局编号 seq=1..N，
+        并记录通量名称(``preIntake.code``)与通量id(``preIntake.id``)。
+
+        返回 ``{materialId: {"seq": int, "preIntakeCode": str, "preIntakeId": str}}``；
+        order-report 未就绪/无 preIntakes/异常时返回空字典(调用方退回出现顺序)。
+        """
+        index: Dict[str, Dict[str, Any]] = {}
+        order_id = str(order_ids[0]).strip() if order_ids else ""
+        if not order_id:
+            return index
+        try:
+            report = rpc.order_report(order_id)
+        except Exception as exc:
+            logger.warning("[sirna] 取 order-report 失败(用于通量索引): %s", exc)
+            return index
+        if not isinstance(report, dict):
+            return index
+        preintakes = report.get("preIntakes") or []
+        if not preintakes:
+            logger.warning("[sirna] order-report 暂无 preIntakes(order_id=%s)，通量列将留空", order_id)
+            return index
+
+        def _seq_key(p: Dict[str, Any]) -> int:
+            try:
+                return int(p.get("sequence") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        counter = 0
+        for preintake in sorted(
+            (p for p in preintakes if isinstance(p, dict)), key=_seq_key
+        ):
+            code = str(preintake.get("code") or "")
+            pid = str(preintake.get("id") or "")
+            for sm in preintake.get("sampleMaterials") or []:
+                if not isinstance(sm, dict):
+                    continue
+                if str(sm.get("materialName") or "").strip() != "细胞培养板":
+                    continue
+                mid = str(sm.get("materialId") or "").strip()
+                if not mid or mid in index:
+                    continue
+                counter += 1
+                index[mid] = {"seq": counter, "preIntakeCode": code, "preIntakeId": pid}
+        return index
+
+    @staticmethod
+    def _relabel_cell_plates_with_seq(
+        material_records: List[Dict[str, Any]],
+        preintake_index: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """按 materialId->seq 把 material_records 里细胞培养板就地重命名为 细胞培养板{seq}。
+
+        供前端「物料放置指引」/确认文案显示带序号的板名。索引为空则不改。
+        """
+        if not preintake_index:
+            return
+        for rec in material_records or []:
+            if not isinstance(rec, dict):
+                continue
+            if str(rec.get("materialName") or "").strip() != "细胞培养板":
+                continue
+            info = preintake_index.get(str(rec.get("materialId") or "").strip())
+            if info:
+                rec["materialName"] = f"细胞培养板{info['seq']}"
+
     def _dump_cell_plates_file(
         self,
         order_ids: List[str],
         material_records: List[Dict[str, Any]],
+        preintake_index: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> str:
-        """把实验一 4 块细胞培养板信息落盘为 data/细胞板名称记录/{orderId}.csv。
+        """把实验一细胞培养板信息落盘为 data/细胞板名称记录/{orderId}.csv。
 
-        - 筛 ``materialName == "细胞培养板"`` 的记录，按出现顺序赋 seq 1..4，板名改为 细胞培养板{seq}。
+        - 有 ``preintake_index`` 时按其全局 seq(通量分组)排序与编号，并记录通量名称/通量id；
+          否则退回按 ``materialName == "细胞培养板"`` 出现顺序赋 seq、通量列留空。
         - 主键用 ``materialId``(板物料 id，下游 material-info 用它)，不记领用记录 ``id``。
-        - 仅写本地文件，不回写 LIMS。
+        - 仅写本地文件，不回写 LIMS。支持多通量：命中块数为 4 的倍数且 <=16 视为正常。
         """
+        preintake_index = preintake_index or {}
         order_id = str(order_ids[0]).strip() if order_ids else ""
         if not order_id:
             for rec in material_records or []:
@@ -2178,23 +2264,43 @@ class BioyondSirnaStation(BioyondWorkstation):
             logger.warning("[sirna] 落盘细胞板文件: 未解析到 order_id，跳过")
             return ""
 
-        plates: List[Dict[str, str]] = []
-        for rec in material_records or []:
-            if not isinstance(rec, dict):
-                continue
-            name = str(rec.get("materialName") or "").strip()
-            if name == "细胞培养板":
-                seq = len(plates) + 1
-                plates.append({
-                    "seq": str(seq),
-                    "materialId": str(rec.get("materialId") or ""),
-                    "materialName": f"细胞培养板{seq}",
-                    "materialCode": str(rec.get("materialCode") or ""),
-                    "locationShowName": str(rec.get("locationShowName") or rec.get("locationCode") or ""),
-                })
+        # 识别细胞培养板记录：有索引时按 materialId 归属(重命名后名字已带序号)，否则按板名
+        if preintake_index:
+            cell_records = [
+                rec for rec in (material_records or [])
+                if isinstance(rec, dict)
+                and str(rec.get("materialId") or "").strip() in preintake_index
+            ]
+            cell_records.sort(
+                key=lambda r: preintake_index[str(r.get("materialId") or "").strip()]["seq"]
+            )
+        else:
+            cell_records = [
+                rec for rec in (material_records or [])
+                if isinstance(rec, dict)
+                and str(rec.get("materialName") or "").strip() == "细胞培养板"
+            ]
 
-        if len(plates) != 4:
-            logger.warning("[sirna] 落盘细胞板文件: 命中细胞培养板 %s 块(期望 4)", len(plates))
+        plates: List[Dict[str, str]] = []
+        for i, rec in enumerate(cell_records, 1):
+            mid = str(rec.get("materialId") or "")
+            info = preintake_index.get(mid.strip()) or {}
+            seq = int(info.get("seq") or i)
+            plates.append({
+                "seq": str(seq),
+                "materialId": mid,
+                "materialName": f"细胞培养板{seq}",
+                "materialCode": str(rec.get("materialCode") or ""),
+                "locationShowName": str(rec.get("locationShowName") or rec.get("locationCode") or ""),
+                "preIntakeCode": str(info.get("preIntakeCode") or ""),
+                "preIntakeId": str(info.get("preIntakeId") or ""),
+            })
+
+        n = len(plates)
+        if n == 0 or n % 4 != 0 or n > 16:
+            logger.warning(
+                "[sirna] 落盘细胞板文件: 命中细胞培养板 %s 块(期望 4 的倍数且<=16)", n
+            )
 
         out_dir = self._cell_plates_record_dir()
         os.makedirs(out_dir, exist_ok=True)
@@ -2203,14 +2309,18 @@ class BioyondSirnaStation(BioyondWorkstation):
 
         with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
             writer = _csv.writer(f)
-            writer.writerow(["seq", "materialId", "materialName", "materialCode", "locationShowName"])
+            writer.writerow([
+                "seq", "materialId", "materialName", "materialCode",
+                "locationShowName", "preIntakeCode", "preIntakeId",
+            ])
             for p in plates:
                 writer.writerow([
-                    p["seq"], p["materialId"],
-                    p["materialName"], p["materialCode"], p["locationShowName"],
+                    p["seq"], p["materialId"], p["materialName"], p["materialCode"],
+                    p["locationShowName"], p["preIntakeCode"], p["preIntakeId"],
                 ])
         logger.info(
-            "[sirna] 已写细胞板名称记录: %s (细胞培养板 %s 块)", out_path, len(plates),
+            "[sirna] 已写细胞板名称记录: %s (细胞培养板 %s 块, 通量信息=%s)",
+            out_path, n, "有" if preintake_index else "无",
         )
         return out_path
 
@@ -2238,6 +2348,9 @@ class BioyondSirnaStation(BioyondWorkstation):
                     "materialId": material_id,
                     "materialName": str(row.get("materialName") or f"细胞培养板{seq}").strip(),
                     "locationShowName": str(row.get("locationShowName") or "").strip(),
+                    # 兼容旧文件：无通量列时留空
+                    "preIntakeCode": str(row.get("preIntakeCode") or "").strip(),
+                    "preIntakeId": str(row.get("preIntakeId") or "").strip(),
                 })
         return {"plates": plates, "path": out_path}
 
@@ -2440,6 +2553,7 @@ class BioyondSirnaStation(BioyondWorkstation):
 
                 # 4b) 本通量包含的细胞培养板 materialId：优先 sampleMaterials，兜底 materialIds 竖线串
                 material_ids = self._extract_preintake_cell_plate_ids(preintake)
+                preintake_code = str(preintake.get("code") or "")  # 通量名称(结果表首列)
 
                 # 4c) 每块板各自映射 + 各自 xlsx sheet，挂同一对整板 grid
                 for material_id in material_ids:
@@ -2462,6 +2576,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                     plates_data.append({
                         "plate_name": plate_name,
                         "seq": seq,
+                        "preintake_code": preintake_code,
                         "labels": labels,
                         "mapping": mapping,
                         "renilla": renilla_grid,
