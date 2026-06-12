@@ -535,7 +535,15 @@ class HostNode(BaseROS2DeviceNode):
         """
         if not action_pairs:
             return
-        locks = [{"device_id": dev, "action_name": act, "free": True} for dev, act in action_pairs]
+        # _execute_driver_command[_async] 是通用驱动命令入口，并非具体业务动作，
+        # 不作为锁上报（与 WebSocketClient.report_all_action_locks 的过滤保持一致）。
+        locks = [
+            {"device_id": dev, "action_name": act, "free": True}
+            for dev, act in action_pairs
+            if not act.startswith("_execute_driver_command")
+        ]
+        if not locks:
+            return
         for bridge in self.bridges:
             if hasattr(bridge, "publish_action_locks"):
                 try:
@@ -566,13 +574,15 @@ class HostNode(BaseROS2DeviceNode):
                 except Exception as e:
                     self.lab_logger().error(f"[Host Node] Failed to create ActionClient for {action_id}: {str(e)}")
 
-        # 补充 UniLabJsonCommand 类型动作：这类动作不建独立 ROS ActionServer，
-        # 不会出现在 get_action_server_names_and_types_by_node 的结果里，但仍是可经
-        # _execute_driver_command 调用的能力（如 virtual_workbench 的全部动作）。
-        # 发现新设备时同样要补报其 free 锁，否则服务端永远感知不到这些动作。
+        # 补充 _action_value_mappings 中其余动作：UniLabJsonCommand 类型动作不建独立
+        # ROS ActionServer，不会出现在 get_action_server_names_and_types_by_node 的结果里；
+        # @action(auto_prefix=True) 注册成的 "auto-" 动作(如 workbench 的 prepare_materials 等)
+        # 同理。它们仍是可经 _execute_driver_command 调用的能力，发现新设备时必须全量补报其
+        # free 锁，否则服务端永远感知不到这些动作。_execute_driver_command[_async] 由
+        # _report_action_locks_free 统一过滤，不在此处特判。
         already = {action_name for _, action_name in new_action_pairs}
         for action_name in self._action_value_mappings.get(edge_device_id, {}).keys():
-            if action_name.startswith("auto-") or action_name in already:
+            if action_name in already:
                 continue
             new_action_pairs.append((edge_device_id, action_name))
 
@@ -711,6 +721,8 @@ class HostNode(BaseROS2DeviceNode):
         # noinspection PyProtectedMember
         self._action_value_mappings[device_id] = d._ros_node._action_value_mappings
         new_action_pairs: List[Tuple[str, str]] = []
+        # 仅为建独立 ROS ActionServer 的动作创建 ActionClient：
+        # auto-/UniLabJsonCommand 动作无 ROS action server，无法也无需建 ActionClient。
         # noinspection PyProtectedMember
         for action_name, action_value_mapping in d._ros_node._action_value_mappings.items():
             if action_name.startswith("auto-") or str(action_value_mapping.get("type", "")).startswith(
@@ -732,6 +744,16 @@ class HostNode(BaseROS2DeviceNode):
                 new_action_pairs.append((device_id, action_name))
             else:
                 self.lab_logger().warning(f"[Host Node] ActionClient {action_id} already exists.")
+        # 锁上报需全量：auto-/UniLabJsonCommand 动作虽不建 ActionClient，但仍是可经
+        # _execute_driver_command 调用的能力(如 workbench 的 prepare_materials 等)，必须一并
+        # 上报 free 锁，与 report_all_action_locks 的全量快照保持一致。_execute_driver_command
+        # [_async] 由 _report_action_locks_free 统一过滤。
+        # noinspection PyProtectedMember
+        already = {action_name for _, action_name in new_action_pairs}
+        for action_name in d._ros_node._action_value_mappings.keys():
+            if action_name in already:
+                continue
+            new_action_pairs.append((device_id, action_name))
         device_key = f"{self.devices_names[device_id]}/{device_id}"  # 这里不涉及二级device_id
         # 添加到在线设备列表
         self._online_devices.add(device_key)

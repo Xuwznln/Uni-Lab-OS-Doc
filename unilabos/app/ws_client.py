@@ -1763,12 +1763,14 @@ class WebSocketClient(BaseCommunicationClient):
         locks: List[Dict[str, Any]] = []
         for device_id in host_node.devices_names.keys():
             action_names = set()
-            # 从全量动作映射(_action_value_mappings)取动作名，而非仅 _action_clients。
-            # UniLabJsonCommand 类型的动作不会建独立 ROS ActionServer、不进 _action_clients，
-            # 但仍是可经 _execute_driver_command 调用的能力（如 virtual_workbench 的全部动作），
-            # 必须纳入锁快照；"auto-" 前缀为异步/自动变体，跳过以避免与规范动作名重复。
+            # 从全量动作映射(_action_value_mappings)取动作名，而非仅 _action_clients：
+            # 它是设备“可调用动作”的权威清单，需全量上报，包含
+            #   - 建独立 ROS ActionServer 的动作；
+            #   - UniLabJsonCommand 动作(不建 ActionServer、经 _execute_driver_command 调用)；
+            #   - @action(auto_prefix=True) 注册成的 "auto-" 动作(如 workbench 的 prepare_materials 等)。
+            # 仅跳过 _execute_driver_command[_async]：它是上述动作的通用调用通道本身，并非具体业务动作。
             for action_name in host_node._action_value_mappings.get(device_id, {}).keys():
-                if action_name.startswith("auto-"):
+                if action_name.startswith("_execute_driver_command"):
                     continue
                 action_names.add(action_name)
             for action_name in action_names:
