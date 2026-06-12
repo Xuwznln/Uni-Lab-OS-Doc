@@ -482,16 +482,41 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.warning(f"总质量为0，无法计算{key}质量比")
                 return {item["name"]: 0.0 for item in items}
             return {item["name"]: round(item[key] / total, 4) for item in items}
-        
+
+        # 4. 计算各试剂允差：(真实质量 - 目标质量) / 目标质量
+        def calculate_mass_tolerance(items: List[Dict]) -> Dict[str, float]:
+            result = {}
+            for item in items:
+                target = item["used_quantity"]
+                real = item["real_quantity"]
+                if target == 0:
+                    result[item["name"]] = None
+                else:
+                    result[item["name"]] = round((real - target) / target, 6)
+            return result
+
+        # 5. 计算总质量允差：(Σ真实质量 - Σ目标质量) / Σ目标质量
+        total_real = sum(item["real_quantity"] for item in reagent_data)
+        total_used = sum(item["used_quantity"] for item in reagent_data)
+        if total_used == 0:
+            total_mass_tolerance = None
+        else:
+            total_mass_tolerance = round((total_real - total_used) / total_used, 6)
+
         real_mass_ratio = calculate_mass_ratio(reagent_data, "real_quantity")
         target_mass_ratio = calculate_mass_ratio(reagent_data, "used_quantity")
-        
+        mass_tolerance = calculate_mass_tolerance(reagent_data)
+
         logger.info(f"真实质量比: {real_mass_ratio}")
         logger.info(f"目标质量比: {target_mass_ratio}")
-        
+        logger.info(f"各试剂允差: {mass_tolerance}")
+        logger.info(f"总质量允差: {total_mass_tolerance}")
+
         return {
             "real_mass_ratio": real_mass_ratio,
             "target_mass_ratio": target_mass_ratio,
+            "mass_tolerance": mass_tolerance,
+            "total_mass_tolerance": total_mass_tolerance,
             "reagent_details": reagent_data
         }
 
@@ -866,8 +891,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                         "orderName": report.get("orderName", "N/A"),
                         "real_mass_ratio": mass_ratios.get("real_mass_ratio", {}),
                         "target_mass_ratio": mass_ratios.get("target_mass_ratio", {}),
+                        "mass_tolerance": mass_ratios.get("mass_tolerance", {}),
+                        "total_mass_tolerance": mass_ratios.get("total_mass_tolerance", None),
                     })
-                    logger.info(f"✓ 已计算订单 {order_code} 的试剂质量比")
+                    logger.info(f"✓ 已计算订单 {order_code} 的试剂质量比和允差")
                 except Exception as e:
                     logger.error(f"计算订单 {order_code} 质量比失败: {e}")
                     all_mass_ratios.append({
@@ -875,6 +902,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
                         "orderName": report.get("orderName", "N/A"),
                         "real_mass_ratio": {},
                         "target_mass_ratio": {},
+                        "mass_tolerance": {},
+                        "total_mass_tolerance": None,
                         "error": str(e),
                     })
             else:
@@ -883,6 +912,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     "orderName": report.get("orderName", "N/A"),
                     "real_mass_ratio": {},
                     "target_mass_ratio": {},
+                    "mass_tolerance": {},
+                    "total_mass_tolerance": None,
                     "error": "订单未成功完成",
                 })
 
@@ -2083,7 +2114,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         筛选条件：
         - typemode == "1" 且 realQuantity == 1 且 usedQuantity == 1
-        - locationId 以 "3a19deae-2c7a-" 开头（手动传递窗右或手动传递窗左）
+        - locationId 满足以下任意一个：
+            · 前缀为 "3a19deae-2c7a-"（手动传递窗右/左）
+            · 精确等于 "3a1a224d-ed49-710c-a9c3-3fc61d479cbb"（移液站内小瓶板仓库）
+            · 精确等于 "3a1a224c-c727-fa62-1f2b-0037a84b9fca"（移液站内大瓶板仓库）
         二次确认：
         - 调用 LIMS API 2.4，typeName 包含 "配液瓶(小)" 或 "配液瓶(大)"
 
@@ -2108,8 +2142,24 @@ class BioyondCellWorkstation(BioyondWorkstation):
             f"物料数量={len(used_materials)}"
         )
 
-        # 手动传递窗右/左的 locationId 前缀
-        MANUAL_WINDOW_PREFIX = "3a19deae-2c7a-"
+        # 配液瓶合法位置：满足任意一个即可
+        # - 手动传递窗右/左（前缀匹配）
+        # - 移液站内小瓶板仓库（无需提前入料，精确匹配）
+        # - 移液站内大瓶板仓库（无需提前入料，精确匹配）
+        PREP_BOTTLE_LOCATION_PREFIXES = ("3a19deae-2c7a-",)
+        PREP_BOTTLE_LOCATION_EXACT = (
+            "3a1a224d-ed49-710c-a9c3-3fc61d479cbb",  # 移液站内小瓶板仓库
+            "3a1a224c-c727-fa62-1f2b-0037a84b9fca",  # 移液站内大瓶板仓库
+        )
+
+        def _is_prep_bottle_location(loc_id: str) -> bool:
+            if not loc_id:
+                return False
+            if any(loc_id.startswith(p) for p in PREP_BOTTLE_LOCATION_PREFIXES):
+                return True
+            if loc_id in PREP_BOTTLE_LOCATION_EXACT:
+                return True
+            return False
 
         for idx, material in enumerate(used_materials):
             location_id = material.get("locationId", "")
@@ -2118,13 +2168,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
             real_qty = material.get("realQuantity")
             used_qty = material.get("usedQuantity")
 
-            # 筛选条件：typemode=1, realQuantity=1, usedQuantity=1, 手动传递窗位置
+            # 筛选条件：typemode=1, realQuantity=1, usedQuantity=1, 配液瓶合法位置
             if (
                 typemode == "1"
                 and real_qty == 1
                 and used_qty == 1
-                and location_id
-                and location_id.startswith(MANUAL_WINDOW_PREFIX)
+                and _is_prep_bottle_location(location_id)
             ):
                 logger.debug(
                     f"[提取配液瓶] 候选物料 #{idx+1}: materialId={material_id[:20]}..."
@@ -2325,6 +2374,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "配液瓶类型", "配液瓶二维码",
                 "分液瓶类型", "分液瓶二维码",
                 "目标配液质量比", "真实配液质量比",
+                "各试剂允差", "总质量允差",
                 "时间",
             ])
 
@@ -2360,14 +2410,19 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 ratio_info = ratio_map.get(order_code, {})
                 target_ratio = ratio_info.get("target_mass_ratio", {})
                 real_ratio = ratio_info.get("real_mass_ratio", {})
+                mass_tolerance = ratio_info.get("mass_tolerance", {})
+                total_mass_tolerance = ratio_info.get("total_mass_tolerance", None)
                 target_ratio_str = json.dumps(target_ratio, ensure_ascii=False) if target_ratio else ""
                 real_ratio_str = json.dumps(real_ratio, ensure_ascii=False) if real_ratio else ""
+                mass_tolerance_str = json.dumps(mass_tolerance, ensure_ascii=False) if mass_tolerance else ""
+                total_mass_tolerance_str = "" if total_mass_tolerance is None else str(total_mass_tolerance)
 
                 writer.writerow([
                     order_code, order_name,
                     prep_type, prep_barcode,
                     vial_type_str, vial_barcode_str,
                     target_ratio_str, real_ratio_str,
+                    mass_tolerance_str, total_mass_tolerance_str,
                     export_time,
                 ])
 
