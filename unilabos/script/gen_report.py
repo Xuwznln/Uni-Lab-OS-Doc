@@ -46,11 +46,41 @@ from openpyxl.drawing.image import Image as XLImage  # noqa: E402
 from openpyxl.styles import Font  # noqa: E402
 from openpyxl.utils import get_column_letter  # noqa: E402
 
-# 中文字体(macOS 常见可用字体)
-matplotlib.rcParams["font.sans-serif"] = [
-    "Arial Unicode MS", "Hiragino Sans GB", "Heiti TC", "STHeiti", "Songti SC",
+# 中文字体：跨平台列表，matplotlib 取第一个已安装的。
+# 工作站是 Windows(SimHei/微软雅黑自带)，开发机多为 macOS，CI/Linux 兜底 Noto/文泉驿。
+_CJK_FONT_CANDIDATES = [
+    "Microsoft YaHei", "SimHei", "SimSun", "Microsoft JhengHei",  # Windows
+    "Arial Unicode MS", "Hiragino Sans GB", "Heiti TC", "STHeiti", "Songti SC",  # macOS
+    "Noto Sans CJK SC", "Source Han Sans SC", "Source Han Sans CN",
+    "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "Noto Sans CJK JP",  # Linux
 ]
-matplotlib.rcParams["axes.unicode_minus"] = False
+
+
+def _setup_cjk_font() -> None:
+    """把首个已安装的中文字体设为 matplotlib 默认 sans-serif，避免中文显示为空心方块(□)。
+
+    matplotlib 仅在字体已注册时才生效；这里显式查 ``fontManager`` 命中后置顶，
+    并保留整列表作为回退。命中不到时记一次告警(图中文会变 □，但不阻断出图)。
+    """
+    import matplotlib.font_manager as fm
+
+    installed = {f.name for f in fm.fontManager.ttflist}
+    chosen = next((name for name in _CJK_FONT_CANDIDATES if name in installed), None)
+    ordered = ([chosen] if chosen else []) + _CJK_FONT_CANDIDATES + ["DejaVu Sans"]
+    matplotlib.rcParams["font.sans-serif"] = ordered
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["axes.unicode_minus"] = False
+    if chosen is None:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "[gen_report] 未找到中文字体(候选: %s)，图中中文可能显示为方块；"
+            "请在运行机(工作站)安装 SimHei/微软雅黑 等中文字体。",
+            ", ".join(_CJK_FONT_CANDIDATES),
+        )
+
+
+_setup_cjk_font()
 
 ROWS8 = "ABCDEFGH"             # 96 孔 8 行
 ROWS384 = "ABCDEFGHIJKLMNOP"   # 384 孔 16 行
