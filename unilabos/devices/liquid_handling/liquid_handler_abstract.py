@@ -1068,6 +1068,56 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             "resources": [self.deck]
         })
 
+    def _dict_to_well_parent_proxy(self, d: Dict[str, Any]) -> Dict[str, Any]:
+        """从 transfer dict 的 id/name 提取 parent 板名 + 孔坐标（如 A1）。"""
+        ref = str(d.get("id") or d.get("name") or "")
+        parts = [p for p in ref.strip("/").split("/") if p]
+        parent = d.get("parent")
+        well_part = str(d.get("name") or "")
+        if len(parts) >= 2:
+            parent = parent or parts[-2]
+            well_part = parts[-1]
+        if not parent or not well_part:
+            return {}
+        coord = well_part.rsplit("_well_", 1)[-1] if "_well_" in well_part else well_part
+        return {"parent": parent, "name": coord, "id": ref}
+
+    def _resolve_dict_resource_local(
+        self,
+        d: Dict[str, Any],
+        uid: Optional[str] = None,
+    ) -> Optional[Union[Container, TipRack]]:
+        """UUID / 远端资源树未命中时，按 name、id 或板+孔在本地 tracker 解析。"""
+        tr = self._ros_node.resource_tracker
+
+        if uid:
+            matches = tr.figure_resource({"uuid": uid}, try_mode=True)
+            if matches:
+                return cast(Union[Container, TipRack], matches[0])
+
+        for key in ("id", "name"):
+            val = d.get(key)
+            if not val:
+                continue
+            if key == "id":
+                matches = tr.figure_resource({"id": val}, try_mode=True)
+                if matches:
+                    return cast(Union[Container, TipRack], matches[0])
+            leaf = val.rsplit("/", 1)[-1] if isinstance(val, str) and "/" in val else val
+            for candidate in (leaf, val):
+                if not candidate:
+                    continue
+                matches = tr.figure_resource({"name": candidate}, try_mode=True)
+                if matches:
+                    return cast(Union[Container, TipRack], matches[0])
+
+        proxy = self._dict_to_well_parent_proxy(d)
+        if proxy:
+            well = self._resolve_well_by_parent_ref(proxy)
+            if well is not None:
+                return cast(Union[Container, TipRack], well)
+        return None
+
     async def _resolve_to_plr_resources(
         self,
         items: Sequence[Union[Container, TipRack, Dict[str, Any]]],
@@ -1092,10 +1142,10 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         def _resolve_from_local_by_uuids() -> List[Union[Container, TipRack]]:
             resolved_locals: List[Union[Container, TipRack]] = []
             missing: List[str] = []
-            for uid in uuids:
-                matches = self._ros_node.resource_tracker.figure_resource({"uuid": uid}, try_mode=True)
-                if matches:
-                    resolved_locals.append(cast(Union[Container, TipRack], matches[0]))
+            for (_, d), uid in zip(dict_items, uuids):
+                local_res = self._resolve_dict_resource_local(d, uid)
+                if local_res is not None:
+                    resolved_locals.append(local_res)
                 else:
                     missing.append(str(uid))
             if missing:

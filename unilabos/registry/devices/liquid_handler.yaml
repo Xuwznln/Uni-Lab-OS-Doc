@@ -9033,6 +9033,26 @@ liquid_handler.prcxi:
           title: LiquidHandlerRemove
           type: object
         type: LiquidHandlerRemove
+      reset:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: ''
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              type: object
+            result: {}
+          required:
+          - goal
+          title: reset参数
+          type: object
+        type: UniLabJsonCommandAsync
       set_liquid:
         feedback: {}
         goal:

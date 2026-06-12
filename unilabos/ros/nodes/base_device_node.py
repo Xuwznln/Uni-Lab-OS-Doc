@@ -2141,18 +2141,49 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 f"执行动作时JSON缺少function_name或function_args: {ex}\n原JSON: {string}\n{traceback.format_exc()}"
             )
 
+    def _resolve_resource_local(self, resource_data: "ResourceDictType") -> Optional[Any]:
+        """云端 UUID 未命中时，按 uuid / id / name 在本地 resource_tracker 解析。"""
+        uid = resource_data.get("uuid")
+        if uid:
+            matches = self.resource_tracker.figure_resource({"uuid": uid}, try_mode=True)
+            if matches:
+                return matches[0]
+
+        for key in ("id", "name"):
+            val = resource_data.get(key)
+            if not val:
+                continue
+            if key == "id":
+                matches = self.resource_tracker.figure_resource({"id": val}, try_mode=True)
+                if matches:
+                    return matches[0]
+            leaf = val.rsplit("/", 1)[-1] if isinstance(val, str) and "/" in val else val
+            for candidate in (leaf, val):
+                if not candidate:
+                    continue
+                matches = self.resource_tracker.figure_resource({"name": candidate}, try_mode=True)
+                if matches:
+                    return matches[0]
+        return None
+
     async def _convert_resource_async(self, resource_data: "ResourceDictType"):
         """异步转换 ResourceDictType 为 PLR 实例，优先用 uuid 查询"""
         unilabos_uuid = resource_data.get("uuid")
+        plr_resource = None
 
         if unilabos_uuid:
-            resource_tree = await self.get_resource([unilabos_uuid], with_children=True)
-            plr_resources = resource_tree.to_plr_resources()
-            if plr_resources:
-                plr_resource = plr_resources[0]
-            else:
-                raise ValueError(f"通过 uuid={unilabos_uuid} 查询资源为空")
-        else:
+            try:
+                resource_tree = await self.get_resource([unilabos_uuid], with_children=True)
+                plr_resources = resource_tree.to_plr_resources()
+                if plr_resources:
+                    plr_resource = plr_resources[0]
+            except Exception:
+                plr_resource = None
+
+        if plr_resource is None:
+            plr_resource = self._resolve_resource_local(resource_data)
+
+        if plr_resource is None:
             res_id = resource_data.get("id") or resource_data.get("name", "")
             if not res_id:
                 raise ValueError(f"资源数据缺少 uuid 和 id: {list(resource_data.keys())}")
