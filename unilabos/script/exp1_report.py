@@ -329,3 +329,70 @@ def _well96_sort_key(well: str) -> Tuple[int, int]:
     if not m:
         return (99, 99)
     return (ROWS96.index(m.group(1)), int(m.group(2)))
+
+
+def build_exp1_report_xlsx(
+    result: Dict[str, Any],
+    out_xlsx: str,
+    order_id: str = "",
+    stamp: str = "",
+) -> str:
+    """把 ``compute_exp1_result`` 的结果表导出为单 sheet xlsx(供记录本可下载附件)。
+
+    Args:
+        result: ``compute_exp1_result`` 返回的 ``{"columns", "data", "meta"}``。
+        out_xlsx: 输出 xlsx 路径。
+        order_id: 可选，写入标题行。
+        stamp: 可选时间戳，写入标题行。
+
+    Returns:
+        out_xlsx 路径。
+    """
+    if not _OPENPYXL_OK:  # pragma: no cover - 轻量环境
+        raise RuntimeError("build_exp1_report_xlsx 需要 openpyxl，请先安装")
+    import openpyxl
+    from openpyxl.styles import Font
+
+    columns = result.get("columns") or []
+    data = result.get("data") or []
+    meta = result.get("meta") or {}
+
+    out_dir = os.path.dirname(os.path.abspath(out_xlsx))
+    os.makedirs(out_dir, exist_ok=True)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "实验一结果"
+
+    r = 1
+    title_bits = ["实验一结果(双荧光素酶报告基因检测)"]
+    if order_id:
+        title_bits.append(f"order_id={order_id}")
+    if stamp:
+        title_bits.append(stamp)
+    ws.cell(row=r, column=1, value=" ".join(title_bits)).font = Font(bold=True)
+    r += 2
+
+    header_row = r
+    for j, col in enumerate(columns, start=1):
+        ws.cell(row=header_row, column=j, value=col.get("name", "")).font = Font(bold=True)
+    r += 1
+
+    for row in data:
+        for j, col in enumerate(columns, start=1):
+            ws.cell(row=r, column=j, value=row.get(col.get("key", ""), ""))
+        r += 1
+
+    blank_means = meta.get("blank_mean_ratio_by_seq")
+    if blank_means is not None:
+        r += 1
+        ws.cell(row=r, column=1, value=f"各板空白对照 ratio 均值: {blank_means}")
+
+    # 简单列宽：表头文字长度
+    for j, col in enumerate(columns, start=1):
+        ws.column_dimensions[chr(64 + j) if j <= 26 else "A"].width = max(
+            10, len(str(col.get("name", ""))) + 4
+        )
+
+    wb.save(out_xlsx)
+    return out_xlsx

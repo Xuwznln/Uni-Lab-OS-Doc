@@ -2108,10 +2108,34 @@ class BioyondSirnaStation(BioyondWorkstation):
             gen_report.render_qpcr_melt_image(xml_path, melt_png, plate_map_path=plate_map)
             stats = gen_report.build_qpcr_stats_table(xml_path, plate_map_path=plate_map)
 
+            # 生成完整报告 xlsx(RNA/板排布+曲线/统计 多 sheet)，作为可下载附件
+            report_xlsx = ""
+            try:
+                report_xlsx = gen_report.build_report_xlsx(
+                    csv_path,
+                    xml_path,
+                    os.path.join(out_dir, "场景二实验报告.xlsx"),
+                    plate_map_path=plate_map,
+                )
+            except Exception as exc:  # 报告生成失败不阻断主流程
+                logger.warning(f"[sirna] 实验二报告 xlsx 生成失败: {exc}", exc_info=True)
+
             # 4) 图片走 OSS(img 节点需 url)：板排布图 + 扩增曲线图 + 熔解曲线图
             layout_meta = nbc.upload_to_oss(layout_png, scene="image", content_type="image/png")
             curve_meta = nbc.upload_to_oss(qpcr_png, scene="image", content_type="image/png")
             melt_meta = nbc.upload_to_oss(melt_png, scene="image", content_type="image/png")
+
+            # 报告 xlsx 走 OSS(file 节点，可下载卡片)
+            report_meta: Dict[str, Any] = {}
+            if report_xlsx and os.path.exists(report_xlsx):
+                try:
+                    report_meta = nbc.upload_to_oss(
+                        report_xlsx,
+                        scene="file",
+                        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                except Exception as exc:
+                    logger.warning(f"[sirna] 实验二报告 xlsx 上传失败: {exc}")
 
             # 5) 构造记录本块：RNA 表格 + 板排布图 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表(+ 可选原始文件归档)
             stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2133,8 +2157,13 @@ class BioyondSirnaStation(BioyondWorkstation):
                 nbc.build_table_node(stats["header"], stats["rows"]),
             ]
 
+            # 六、实验报告(可下载 xlsx)
+            if report_meta.get("url"):
+                blocks.append(nbc.text_block("六、实验报告 (可下载 xlsx)"))
+                blocks.append(nbc.build_file_node(report_meta))
+
             if archive_raw_files:
-                blocks.append(nbc.text_block("六、原始数据附件"))
+                blocks.append(nbc.text_block("七、原始数据附件"))
                 for raw_path, scene, ctype in (
                     (csv_path, "file", "text/csv"),
                     (xml_path, "file", "application/xml"),
@@ -2174,6 +2203,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                     curve_meta.get("url", ""),
                     melt_meta.get("url", ""),
                 ],
+                "report_url": report_meta.get("url", ""),
                 "confirmation_message": confirmation_message,
             }
 
@@ -2458,6 +2488,7 @@ class BioyondSirnaStation(BioyondWorkstation):
         poll_interval_seconds: float = 10.0,
         poll_timeout_seconds: int = 3600,
         plate_map_path: str = "",
+        archive_raw_files: bool = True,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """计算实验一结果(双荧光素酶 ratio / 抑制率)并写入实验记录本。
@@ -2470,10 +2501,13 @@ class BioyondSirnaStation(BioyondWorkstation):
             poll_interval_seconds: order_report 轮询间隔秒。
             poll_timeout_seconds: order_report 轮询超时秒(<=0 不限时)。
             plate_map_path: 实验一孔板布局 xlsx；缺省用 exp1_report.DEFAULT_PLATE_MAP。
+            archive_raw_files: 是否把各通量 renilla/firefly 原始 384 CSV 作为附件(file)归档进记录本。
 
         Returns:
-            含 success / order_id / notebook_id / resultTable(data+columns+tableName) / meta 的字典。
+            含 success / order_id / notebook_id / resultTable(data+columns+tableName) /
+            report_url / raw_file_urls / meta 的字典。
         """
+        import tempfile
         from datetime import datetime as _dt
 
         from unilabos.devices.workstation.bioyond_studio.sirna_station import (
@@ -2531,6 +2565,7 @@ class BioyondSirnaStation(BioyondWorkstation):
 
             # 4) 逐 preIntake(=通量)：解析整板 renilla/firefly，再对本通量每块细胞培养板各自取映射
             plates_data: List[Dict[str, Any]] = []
+            raw_csv_paths: List[str] = []  # 各通量已定位的 renilla/firefly 384 CSV(去重保序，供归档下载)
             for preintake in preintakes:
                 if not isinstance(preintake, dict):
                     continue
@@ -2545,6 +2580,8 @@ class BioyondSirnaStation(BioyondWorkstation):
                     if not os.path.exists(local):
                         logger.warning("[sirna] 报告文件不存在: %s", local)
                         continue
+                    if local not in raw_csv_paths:
+                        raw_csv_paths.append(local)
                     grid, meta = e1.parse_biotek_384_csv(local)
                     channel = e1.detect_channel(local, meta)
                     if channel == "renilla":
@@ -2619,22 +2656,68 @@ class BioyondSirnaStation(BioyondWorkstation):
                 len(plates_data), len(result["data"]), blank_means,
             )
 
-            # 写入实验记录本：结果表转原生表格块后追加(无图片，仅一张表)；无 notebook_id 则跳过
+            stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            out_dir = os.path.join(tempfile.gettempdir(), "sirna_exp1", normalized_order_id)
+            os.makedirs(out_dir, exist_ok=True)
+
+            # 结果表导出 xlsx，作为可下载附件
+            report_xlsx = ""
+            try:
+                report_xlsx = e1.build_exp1_report_xlsx(
+                    result,
+                    os.path.join(out_dir, "实验一结果.xlsx"),
+                    order_id=normalized_order_id,
+                    stamp=stamp,
+                )
+            except Exception as exc:  # 报告生成失败不阻断主流程
+                logger.warning(f"[sirna] 实验一结果 xlsx 生成失败: {exc}", exc_info=True)
+
+            report_meta: Dict[str, Any] = {}
+            if report_xlsx and os.path.exists(report_xlsx):
+                try:
+                    report_meta = nbc.upload_to_oss(
+                        report_xlsx,
+                        scene="file",
+                        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    )
+                except Exception as exc:
+                    logger.warning(f"[sirna] 实验一结果 xlsx 上传失败: {exc}")
+
+            # 原始数据(各通量 renilla/firefly 384 CSV)上传 OSS，作为可下载附件
+            raw_file_metas: List[Dict[str, Any]] = []
+            if archive_raw_files:
+                for raw in raw_csv_paths:
+                    try:
+                        raw_file_metas.append(
+                            nbc.upload_to_oss(raw, scene="file", content_type="text/csv")
+                        )
+                    except Exception as exc:
+                        logger.warning(f"[sirna] 实验一原始文件归档上传失败({raw}): {exc}")
+
+            # 构造记录本块：结果表 + 实验报告(可下载 xlsx) + 原始数据附件
+            columns = result["columns"]
+            header = [c["name"] for c in columns]
+            rows = [[row[c["key"]] for c in columns] for row in result["data"]]
+            blocks: List[Dict[str, Any]] = [
+                nbc.text_block(
+                    f"实验一结果(自动生成 {stamp}, order_id={normalized_order_id})"
+                ),
+                nbc.text_block("一、双荧光素酶报告基因检测结果"),
+                nbc.build_table_node(header, rows),
+                nbc.text_block(f"各板空白对照 ratio 均值: {blank_means}"),
+            ]
+            if report_meta.get("url"):
+                blocks.append(nbc.text_block("二、实验报告 (可下载 xlsx)"))
+                blocks.append(nbc.build_file_node(report_meta))
+            if raw_file_metas:
+                blocks.append(nbc.text_block("三、原始数据附件"))
+                for meta in raw_file_metas:
+                    blocks.append(nbc.build_file_node(meta))
+            # 末尾补空段落：table/file 后便于前端继续编辑
+            blocks.append(nbc.text_block(""))
+
+            # 写入实验记录本(无 notebook_id 则跳过)
             if notebook_id:
-                columns = result["columns"]
-                header = [c["name"] for c in columns]
-                rows = [[row[c["key"]] for c in columns] for row in result["data"]]
-                stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-                blocks: List[Dict[str, Any]] = [
-                    nbc.text_block(
-                        f"实验一结果(自动生成 {stamp}, order_id={normalized_order_id})"
-                    ),
-                    nbc.text_block("一、双荧光素酶报告基因检测结果"),
-                    nbc.build_table_node(header, rows),
-                    nbc.text_block(f"各板空白对照 ratio 均值: {blank_means}"),
-                    # 末尾补空段落：table 后便于前端继续编辑
-                    nbc.text_block(""),
-                ]
                 append_result = nbc.append_blocks_to_notebook(notebook_id, blocks)
                 logger.info(
                     "[sirna] 实验一结果已写入记录本 notebook_id=%s appended=%s total=%s",
@@ -2642,7 +2725,9 @@ class BioyondSirnaStation(BioyondWorkstation):
                 )
                 confirmation_message = (
                     f"实验一结果已写入记录本 {notebook_id}: {len(plates_data)} 块板, "
-                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means})"
+                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means}); "
+                    f"已挂 xlsx{'' if report_meta.get('url') else '(失败)'} + "
+                    f"{len(raw_file_metas)} 个原始 CSV 附件"
                 )
             else:
                 confirmation_message = (
@@ -2655,6 +2740,8 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "order_id": normalized_order_id,
                 "notebook_id": notebook_id,
                 "resultTable": result_table,
+                "report_url": report_meta.get("url", ""),
+                "raw_file_urls": [m.get("url", "") for m in raw_file_metas],
                 "meta": result["meta"],
                 "confirmation_message": confirmation_message,
             }

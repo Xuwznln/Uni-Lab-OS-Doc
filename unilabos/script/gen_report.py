@@ -495,6 +495,8 @@ def build_rows(map96, ct_by_pos):
             rows.append(dict(
                 sample=label,
                 pos_label=f"{tpos} {rpos}",
+                pos_target=tpos,
+                pos_ref=rpos,
                 ct_target=ct_by_pos.get(tpos),
                 ct_ref=ct_by_pos.get(rpos),
                 _sortk=(sample_sort_key(label), r, c, rep),
@@ -719,13 +721,16 @@ def build_qpcr_stats_table(
         sd = f"{round(statistics.stdev(vals), 4)}" if len(vals) > 1 else ("0.0" if vals else "")
         rq_stats[s] = (mean, sd)
 
+    # 列名对齐报告 xlsx(图三)：内参基因/目的基因(存CT值)、Ave. Blank、Mean、SD；
+    # 位置拆「目的孔」「内参孔」两列；去掉「样本」列(仍按样本内部分组算 Mean/SD)。
     header = [
-        "位置(目的孔 内参孔)", "样本", "内参CT", "目的CT",
-        "ΔCT", "ΔΔCT", "2^(-ΔΔCT)", "RQ均值", "RQ标准差",
+        "目的孔", "内参孔", "内参基因", "目的基因",
+        "ΔCT", "Ave. Blank", "ΔΔCT", "2^(-ΔΔCT)", "Mean", "SD",
     ]
+    ave_blank_str = _num(ave_blank)  # 仅整表首行显值(对齐图三 =AVERAGE 只挂首行)
     rows: list[list[str]] = []
     prev_sample = None
-    for (r, ct_t, ct_r, dct, ddct, rq) in enriched:
+    for idx, (r, ct_t, ct_r, dct, ddct, rq) in enumerate(enriched):
         sample = r["sample"]
         if sample != prev_sample:
             mean, sd = rq_stats.get(sample, ("", ""))
@@ -733,11 +738,12 @@ def build_qpcr_stats_table(
         else:
             mean = sd = ""  # 同一样本组仅首行显示均值/SD
         rows.append([
-            r["pos_label"],
-            sample,
+            r["pos_target"],
+            r["pos_ref"],
             _num(ct_r) if ct_r is not None else "Undetermined",
             _num(ct_t) if ct_t is not None else "Undetermined",
             _num(dct),
+            ave_blank_str if idx == 0 else "",
             _num(ddct),
             _num(rq),
             mean,
@@ -780,54 +786,84 @@ def parse_args():
     return p.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    out_dir = os.path.dirname(os.path.abspath(args.out))
+def build_report_xlsx(
+    fluor_csv: str,
+    xml_path: str,
+    out_xlsx: str,
+    plate_map_path: str = DEFAULT_MAP,
+    slope: float = 1.0,
+    intercept: float = 0.0,
+    blank_mode: str = "subtract",
+    threshold: float = 3.0,
+    amp_cycles: int = 45,
+    max_points: int | None = None,
+    dpi: int = 150,
+    logy: bool = False,
+) -> str:
+    """装配场景二完整报告工作簿(RNA浓度 / 板排布+扩增曲线 / qPCR统计与分析)并保存。
+
+    供节点 m(compute_experiment2_result) 直接调用，生成可下载附件 xlsx；
+    ``main()`` 亦复用本函数。返回 ``out_xlsx`` 路径。
+    """
+    out_dir = os.path.dirname(os.path.abspath(out_xlsx))
     os.makedirs(out_dir, exist_ok=True)
+    # 中间 PNG 落到独立子目录，避免覆盖调用方(节点)同目录已上传的 qpcr_*.png
+    img_dir = os.path.join(out_dir, "_report_imgs")
+    os.makedirs(img_dir, exist_ok=True)
 
     wb = openpyxl.Workbook()
-    # 移除默认空 sheet(后面都用 create_sheet)
-    default_ws = wb.active
+    default_ws = wb.active  # 移除默认空 sheet(后面都用 create_sheet)
 
     # ---- 第 1 部分: RNA 浓度 ----
-    print(f"[1/4] RNA 浓度: 解析荧光 CSV {args.fluor_csv}")
     conc_by_sample, rna_meta, blank_mean = compute_rna(
-        args.fluor_csv, args.plate_map, args.slope, args.intercept, args.blank_mode)
-    print(f"      样本数: {len(conc_by_sample)}, 空白RFU均值: {blank_mean:.2f}")
-    add_rna_sheet(wb, conc_by_sample, args.fluor_csv, rna_meta, blank_mean, args.slope, args.intercept)
+        fluor_csv, plate_map_path, slope, intercept, blank_mode)
+    add_rna_sheet(wb, conc_by_sample, fluor_csv, rna_meta, blank_mean, slope, intercept)
 
     # ---- 第 2 部分: 解析 qPCR + 映射 ----
-    print(f"[2/4] qPCR: 解析 XML {args.xml}")
-    pos_by_sample, fluor_by_sample = parse_qpcr_xml(args.xml, args.max_points)
+    pos_by_sample, fluor_by_sample = parse_qpcr_xml(xml_path, max_points)
     npoints = max((len(v) for v in fluor_by_sample.values()), default=0)
     fluor_by_pos = {pos_by_sample[sn]: vals for sn, vals in fluor_by_sample.items()
                     if sn in pos_by_sample}
-    map96 = read_plate_map(args.plate_map)
+    map96 = read_plate_map(plate_map_path)
     meta = build_well_meta(map96)
-    print(f"      384 孔: {len(fluor_by_pos)}, 每孔点数: {npoints}, 96 孔有效格: {len(map96)}")
 
     # ---- 绘图 + 板排布/曲线 sheet ----
-    layout_png = os.path.join(out_dir, "qpcr_plate_layout.png")
-    curve_png = os.path.join(out_dir, "qpcr_amp_curves.png")
-    print(f"[3/4] 绘图 -> {os.path.basename(layout_png)}, {os.path.basename(curve_png)}")
-    plot_plate_layout(meta, map96, layout_png, args.dpi)
-    plot_amp_curves(fluor_by_pos, meta, curve_png, args.dpi,
-                    amp_cycles=args.amp_cycles, logy=args.logy)
+    layout_png = os.path.join(img_dir, "qpcr_plate_layout.png")
+    curve_png = os.path.join(img_dir, "qpcr_amp_curves.png")
+    plot_plate_layout(meta, map96, layout_png, dpi)
+    plot_amp_curves(fluor_by_pos, meta, curve_png, dpi, amp_cycles=amp_cycles, logy=logy)
     add_plate_sheets(wb, layout_png, curve_png, fluor_by_pos, meta, npoints)
 
     # ---- 第 3 部分: 统计与分析 ----
-    ct_by_pos = {pos: ct_threshold(vals[:args.amp_cycles], args.threshold)
+    ct_by_pos = {pos: ct_threshold(vals[:amp_cycles], threshold)
                  for pos, vals in fluor_by_pos.items()}
-    n_det = sum(1 for v in ct_by_pos.values() if v is not None)
     rows = build_rows(map96, ct_by_pos)
     ave_blank = compute_ave_blank(rows)
-    print(f"[4/4] 统计: 阈值={args.threshold}, 可定CT孔={n_det}/{len(ct_by_pos)}, "
-          f"Ave.Blank={('%.4f' % ave_blank) if ave_blank is not None else 'NA'}")
-    add_stats_sheet(wb, rows, args.xml, args.threshold, ave_blank)
+    add_stats_sheet(wb, rows, xml_path, threshold, ave_blank)
 
     # 删除默认空 sheet 并保存(图片随本次一次性写入, 不会丢失)
     wb.remove(default_ws)
-    wb.save(args.out)
+    wb.save(out_xlsx)
+    return out_xlsx
+
+
+def main() -> int:
+    args = parse_args()
+    print(f"[*] RNA={args.fluor_csv}\n    XML={args.xml}\n    MAP={args.plate_map}")
+    build_report_xlsx(
+        args.fluor_csv,
+        args.xml,
+        args.out,
+        plate_map_path=args.plate_map,
+        slope=args.slope,
+        intercept=args.intercept,
+        blank_mode=args.blank_mode,
+        threshold=args.threshold,
+        amp_cycles=args.amp_cycles,
+        max_points=args.max_points,
+        dpi=args.dpi,
+        logy=args.logy,
+    )
     print(f"完成 -> {args.out}")
     return 0
 
