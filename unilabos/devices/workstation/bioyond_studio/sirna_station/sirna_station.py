@@ -3104,15 +3104,16 @@ class BioyondSirnaStation(BioyondWorkstation):
         page_idx = 0
         for _ in range(max_pages):
             payload = {**base_payload, "skipCount": skip}
+            payload_str = json.dumps(payload, ensure_ascii=False)
             if _timing_uuid:
                 with gantt_timing.timed(
                     _timing_uuid,
                     "[order-list] 单页请求",
-                    extra=f"page={page_idx} skip={skip} pageCount={page}",
+                    extra=f"page={page_idx} skip={skip} pageCount={page} req={payload_str}",
                 ):
-                    page_data = rpc.order_query(json.dumps(payload, ensure_ascii=False)) or {}
+                    page_data = rpc.order_query(payload_str) or {}
             else:
-                page_data = rpc.order_query(json.dumps(payload, ensure_ascii=False)) or {}
+                page_data = rpc.order_query(payload_str) or {}
             page_idx += 1
             items = page_data.get("items") or []
             if total is None:
