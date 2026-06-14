@@ -16,8 +16,11 @@ URL 一律拼成 ``{remote_addr}/lab/...``，不再额外加 ``/api/v1``。
 
 from __future__ import annotations
 
+import json
 import mimetypes
 import os
+import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
 import requests
@@ -60,6 +63,40 @@ def _guess_content_type(filename: str) -> str:
 # OSS 上传
 # ---------------------------------------------------------------------------
 
+def _storage_put(
+    filename: str,
+    data_bytes: bytes,
+    scene: str,
+    content_type: str,
+    sub_path: str = "",
+    timeout: float = 60.0,
+) -> Dict[str, Any]:
+    """GET /lab/storage/token → PUT 预签名 URL；返回 token 接口的 data 字典。
+
+    后端按 content_type 签名，PUT 必须发送相同 Content-Type，否则签名校验失败。
+    """
+    params: Dict[str, str] = {"scene": scene, "filename": filename, "content_type": content_type}
+    if sub_path:
+        params["sub_path"] = sub_path
+    token_resp = requests.get(
+        f"{_base_url()}/lab/storage/token",
+        params=params,
+        headers=_lab_headers(),
+        timeout=timeout,
+    )
+    token_resp.raise_for_status()
+    body = token_resp.json()
+    if body.get("code") != 0 or "data" not in body:
+        raise RuntimeError(f"获取 storage token 失败: {body}")
+    data = body["data"]
+    put_ct = data.get("content_type") or content_type
+    put_resp = requests.put(
+        data["url"], data=data_bytes, headers={"Content-Type": put_ct}, timeout=timeout
+    )
+    put_resp.raise_for_status()
+    return data
+
+
 def upload_to_oss(
     file_path: str,
     scene: str = "image",
@@ -72,7 +109,6 @@ def upload_to_oss(
         file_path: 本地文件路径。
         scene: 存储场景，图片用 ``image``，附件用 ``file``。
         content_type: 显式 Content-Type；缺省按扩展名推断。
-            注意：后端按 content_type 签名，PUT 必须发送相同值，否则签名校验失败。
 
     Returns:
         {"url": <public_url>, "path": <对象key>, "name": <文件名>,
@@ -83,28 +119,10 @@ def upload_to_oss(
 
     filename = os.path.basename(file_path)
     ctype = content_type or _guess_content_type(filename)
-
-    token_resp = requests.get(
-        f"{_base_url()}/lab/storage/token",
-        params={"scene": scene, "filename": filename, "content_type": ctype},
-        headers=_lab_headers(),
-        timeout=timeout,
-    )
-    token_resp.raise_for_status()
-    body = token_resp.json()
-    if body.get("code") != 0 or "data" not in body:
-        raise RuntimeError(f"获取 storage token 失败: {body}")
-    data = body["data"]
-    put_url = data["url"]
-    put_ct = data.get("content_type") or ctype
-
     with open(file_path, "rb") as fh:
-        put_resp = requests.put(
-            put_url, data=fh.read(), headers={"Content-Type": put_ct}, timeout=timeout
-        )
-    put_resp.raise_for_status()
+        raw = fh.read()
+    data = _storage_put(filename, raw, scene, ctype, timeout=timeout)
 
-    size = os.path.getsize(file_path)
     public_url = data.get("public_url") or ""
     if not public_url:
         logger.warning(
@@ -116,9 +134,38 @@ def upload_to_oss(
         "url": public_url,
         "path": data.get("path", ""),
         "name": filename,
-        "size": size,
+        "size": len(raw),
         "mimeType": ctype,
     }
+
+
+def upload_lab_record_to_oss(
+    uuid: str,
+    lab_record: List[Dict[str, Any]],
+    timeout: float = 60.0,
+) -> str:
+    """把整份富文本(lab_record 数组)序列化为 JSON 上传 OSS(scene=record)，返回 public_url。
+
+    与前端 ``saveNotebookRecordApi`` 一致：文件名 ``record-{ts}.json``、``sub_path=notebookUuid``。
+    notebook/detail 的 lab_record 字段只存这个 URL，避免内联大 JSON 撑爆接口响应。
+    """
+    ts = datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")
+    filename = f"record-{ts}.json"
+    raw = json.dumps(lab_record, ensure_ascii=False).encode("utf-8")
+    data = _storage_put(
+        filename, raw, "record", "application/json", sub_path=str(uuid), timeout=timeout
+    )
+    public_url = data.get("public_url") or ""
+    if not public_url:
+        raise RuntimeError(
+            "storage token 未返回 public_url(scene=record)，无法把 lab_record 存为 URL；"
+            "请确认 record bucket/scene 为公开读。"
+        )
+    logger.info(
+        f"[notebook_client] lab_record 已上传 OSS scene=record uuid={uuid} "
+        f"blocks={len(lab_record)} bytes={len(raw)} url={public_url}"
+    )
+    return public_url
 
 
 # ---------------------------------------------------------------------------
@@ -144,11 +191,16 @@ def save_lab_record(
     uuid: str,
     lab_record: List[Dict[str, Any]],
     timeout: float = 30.0,
-) -> None:
-    """PATCH /lab/notebook/lab-record，内联数组写入并保持 editing。"""
+) -> str:
+    """保存富文本：先传 OSS(scene=record)，PATCH lab-record 只存 URL 字符串并保持 editing。
+
+    与前端一致——``lab_record`` 字段存 OSS 文件 URL 而非内联数组，避免 notebook/detail
+    响应体过大拖垮前端(同接口其它内容也渲染不出)。返回上传得到的 public_url。
+    """
+    record_url = upload_lab_record_to_oss(uuid, lab_record, timeout=timeout)
     payload = {
         "uuid": uuid,
-        "lab_record": lab_record,
+        "lab_record": record_url,
         "lab_record_status": _LAB_RECORD_STATUS_EDITING,
     }
     resp = requests.patch(
@@ -161,7 +213,52 @@ def save_lab_record(
     body = resp.json()
     if body.get("code") != 0:
         raise RuntimeError(f"保存 lab_record 失败: {body}")
-    logger.info(f"[notebook_client] lab_record 已保存 uuid={uuid} blocks={len(lab_record)}")
+    logger.info(
+        f"[notebook_client] lab_record 已保存(URL) uuid={uuid} blocks={len(lab_record)} url={record_url}"
+    )
+    return record_url
+
+
+def resolve_lab_record(existing: Any, timeout: float = 30.0) -> List[Dict[str, Any]]:
+    """把 detail.lab_record 解析回 Slate 数组(对齐前端 fetchNotebookRecord)。
+
+    兼容三种历史/当前形态：
+      - 内联数组(老 inline 格式)：直接返回；
+      - JSON 字符串字面量(数组/带引号)：剥一层后取数组；
+      - OSS URL 字符串：GET 拉取该 JSON 文件并返回数组。
+    解析不出/拉取失败时按空文档处理(记 warning)，不阻断续写。
+    """
+    if isinstance(existing, list):
+        return list(existing)
+    if not isinstance(existing, str):
+        return []
+    s = existing.strip()
+    if not s:
+        return []
+    # 先尝试剥一层 JSON 字面量(数组 / 被引号包裹的字符串)
+    if s[0] in '"[{':
+        try:
+            parsed = json.loads(s)
+        except (json.JSONDecodeError, ValueError):
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, str):
+            s = parsed.strip()
+    # OSS URL：拉取文件解析
+    if re.match(r"^https?://", s, re.IGNORECASE):
+        try:
+            resp = requests.get(s, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:  # 拉取/解析失败不阻断，按空文档续写
+            logger.warning(
+                f"[notebook_client] 拉取已有 lab_record OSS 文件失败({s})，按空文档续写: {exc}"
+            )
+            return []
+        return data if isinstance(data, list) else []
+    logger.warning(f"[notebook_client] 无法识别的 lab_record 形态，按空文档续写: {s[:80]}")
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -240,13 +337,9 @@ def append_blocks_to_notebook(uuid: str, blocks: List[Dict[str, Any]]) -> Dict[s
             f"记录本不可写: lab_record_status={status}(需为 editing)；uuid={uuid}"
         )
 
-    existing = detail.get("lab_record")
-    # lab_record 兼容：内联数组直接用；空 dict/None/字符串(OSS URL) 一律当作空文档重建
-    if isinstance(existing, list):
-        base: List[Dict[str, Any]] = list(existing)
-    else:
-        base = []
+    # 已有内容：内联数组直接用；OSS URL 则拉回解析后续写(不丢历史)
+    base = resolve_lab_record(detail.get("lab_record"))
 
     new_record = base + list(blocks)
-    save_lab_record(uuid, new_record)
-    return {"appended": len(blocks), "total": len(new_record)}
+    record_url = save_lab_record(uuid, new_record)
+    return {"appended": len(blocks), "total": len(new_record), "lab_record_url": record_url}
