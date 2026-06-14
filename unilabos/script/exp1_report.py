@@ -331,19 +331,71 @@ def _well96_sort_key(well: str) -> Tuple[int, int]:
     return (ROWS96.index(m.group(1)), int(m.group(2)))
 
 
+def build_inhibition_activity_table(result: Dict[str, Any]) -> Dict[str, Any]:
+    """从 ``compute_exp1_result`` 结果生成"抑制活性(按样本汇总)"表。
+
+    对齐参考报告『抑制活性』sheet：列 ``序列 | 质粒 | Ratio | 抑制活性 | SD``，
+    每个(非空白)样本组一行(与逐孔明细表同一 (seq,label) 分组)：
+      - 抑制活性 = 该组抑制率均值(逐孔明细里组首行的 inhibition_mean)
+      - Ratio    = 1 - 抑制活性 (= mean(样本ratio)/mean(本板空白ratio)，归一化 ratio)
+      - SD       = 该组抑制率 SD(逐孔明细里组首行的 inhibition_sd)
+    空白对照不出行。
+
+    Returns:
+        {"columns": [{"name","key"}...], "data": [行 dict...]}
+    """
+    data = result.get("data") or []
+    columns = [
+        {"name": "序列", "key": "idx"},
+        {"name": "质粒", "key": "plasmid"},
+        {"name": "Ratio", "key": "ratio"},
+        {"name": "抑制活性", "key": "inhibition"},
+        {"name": "SD", "key": "sd"},
+    ]
+    rows: List[Dict[str, Any]] = []
+    idx = 0
+    for row in data:
+        # 逐孔明细里：每个非空白样本组仅组首行带 inhibition_mean(其余为空)
+        mean_str = str(row.get("inhibition_mean", "") or "").strip()
+        if not mean_str:
+            continue
+        idx += 1
+        sample = str(row.get("sample", "") or "")
+        m = re.search(r"(\d+)", sample)
+        plasmid = m.group(1) if m else sample
+        try:
+            ratio = round(1.0 - float(mean_str), 4)
+            ratio_str = f"{ratio}"
+        except (TypeError, ValueError):
+            ratio_str = ""
+        rows.append({
+            "idx": idx,
+            "plasmid": plasmid,
+            "ratio": ratio_str,
+            "inhibition": mean_str,
+            "sd": str(row.get("inhibition_sd", "") or ""),
+        })
+    return {"columns": columns, "data": rows}
+
+
 def build_exp1_report_xlsx(
     result: Dict[str, Any],
     out_xlsx: str,
     order_id: str = "",
     stamp: str = "",
+    summary: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """把 ``compute_exp1_result`` 的结果表导出为单 sheet xlsx(供记录本可下载附件)。
+    """把 ``compute_exp1_result`` 的结果表导出为 xlsx(供记录本可下载附件)。
+
+    含两个 sheet：``实验一结果``(逐孔明细) + ``抑制活性``(按样本汇总，传入 summary 时)。
 
     Args:
         result: ``compute_exp1_result`` 返回的 ``{"columns", "data", "meta"}``。
         out_xlsx: 输出 xlsx 路径。
         order_id: 可选，写入标题行。
         stamp: 可选时间戳，写入标题行。
+        summary: 可选，``build_inhibition_activity_table`` 的返回值；
+            非空则追加 ``抑制活性`` sheet。
 
     Returns:
         out_xlsx 路径。
@@ -393,6 +445,21 @@ def build_exp1_report_xlsx(
         ws.column_dimensions[chr(64 + j) if j <= 26 else "A"].width = max(
             10, len(str(col.get("name", ""))) + 4
         )
+
+    # 抑制活性(按样本汇总) sheet：对齐参考报告『抑制活性』
+    if summary and summary.get("columns"):
+        s_cols = summary["columns"]
+        s_data = summary.get("data") or []
+        ws2 = wb.create_sheet("抑制活性")
+        for j, col in enumerate(s_cols, start=1):
+            ws2.cell(row=1, column=j, value=col.get("name", "")).font = Font(bold=True)
+        for i, row in enumerate(s_data, start=2):
+            for j, col in enumerate(s_cols, start=1):
+                ws2.cell(row=i, column=j, value=row.get(col.get("key", ""), ""))
+        for j, col in enumerate(s_cols, start=1):
+            ws2.column_dimensions[chr(64 + j) if j <= 26 else "A"].width = max(
+                10, len(str(col.get("name", ""))) + 4
+            )
 
     wb.save(out_xlsx)
     return out_xlsx

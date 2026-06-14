@@ -2040,7 +2040,6 @@ class BioyondSirnaStation(BioyondWorkstation):
         Returns:
             含 success / order_id / notebook_id / image_urls / confirmation_message 的字典。
         """
-        import tempfile
         from datetime import datetime as _dt
 
         from unilabos.devices.workstation.bioyond_studio.sirna_station import (
@@ -2094,18 +2093,17 @@ class BioyondSirnaStation(BioyondWorkstation):
             if not xml_path or not os.path.exists(xml_path):
                 raise FileNotFoundError(f"qPCR(.xml) 报告文件缺失或不存在: {xml_path}")
 
-            # 3) 生成数据/图片
+            # 3) 生成数据/图片(落盘到后端 data/实验结果/{日期}/{order_id}，永久留存 + 供 OSS 上传)
             plate_map = str(plate_map_path or "").strip() or gen_report.DEFAULT_MAP
-            out_dir = os.path.join(tempfile.gettempdir(), "sirna_exp2", normalized_order_id)
-            os.makedirs(out_dir, exist_ok=True)
+            out_dir = self._experiment_result_dir(normalized_order_id)
 
             rna = gen_report.build_rna_table(csv_path, plate_map_path=plate_map)
             qpcr_png = os.path.join(out_dir, "qpcr_amp_curves.png")
             gen_report.render_qpcr_curve_image(xml_path, qpcr_png, plate_map_path=plate_map)
-            layout_png = os.path.join(out_dir, "qpcr_plate_layout.png")
-            gen_report.render_qpcr_plate_layout_image(xml_path, layout_png, plate_map_path=plate_map)
             melt_png = os.path.join(out_dir, "qpcr_melt_curves.png")
             gen_report.render_qpcr_melt_image(xml_path, melt_png, plate_map_path=plate_map)
+            # 板排布改为数字表格(原生 table，前端展示)，不再出板排布图片
+            plate_table = gen_report.build_qpcr_plate_table(plate_map_path=plate_map)
             stats = gen_report.build_qpcr_stats_table(xml_path, plate_map_path=plate_map)
 
             # 生成完整报告 xlsx(RNA/板排布+曲线/统计 多 sheet)，作为可下载附件
@@ -2120,8 +2118,7 @@ class BioyondSirnaStation(BioyondWorkstation):
             except Exception as exc:  # 报告生成失败不阻断主流程
                 logger.warning(f"[sirna] 实验二报告 xlsx 生成失败: {exc}", exc_info=True)
 
-            # 4) 图片走 OSS(img 节点需 url)：板排布图 + 扩增曲线图 + 熔解曲线图
-            layout_meta = nbc.upload_to_oss(layout_png, scene="image", content_type="image/png")
+            # 4) 图片走 OSS(img 节点需 url)：扩增曲线图 + 熔解曲线图(板排布改数字表格，不再上传图片)
             curve_meta = nbc.upload_to_oss(qpcr_png, scene="image", content_type="image/png")
             melt_meta = nbc.upload_to_oss(melt_png, scene="image", content_type="image/png")
 
@@ -2146,8 +2143,8 @@ class BioyondSirnaStation(BioyondWorkstation):
                 nbc.text_block(f"实验二结果(自动生成 {stamp}, order_id={normalized_order_id})"),
                 nbc.text_block("一、RNA 浓度检测"),
                 nbc.build_table_node(rna["header"], rna["rows"]),
-                nbc.text_block("二、qPCR 板排布图"),
-                nbc.build_image_node(layout_meta),
+                nbc.text_block("二、qPCR 板排布(数字表格，行 A–P / 列 1–24，单元格=样本号)"),
+                nbc.build_table_node(plate_table["header"], plate_table["rows"]),
                 nbc.text_block("三、qPCR 扩增曲线"),
                 nbc.build_image_node(curve_meta),
                 nbc.text_block("四、qPCR 熔解曲线"),
@@ -2186,12 +2183,12 @@ class BioyondSirnaStation(BioyondWorkstation):
                 )
                 confirmation_message = (
                     f"实验二结果已写入记录本 {notebook_id}: RNA 表格 {len(rna['rows'])} 行 + "
-                    f"qPCR 板排布图 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
+                    f"qPCR 板排布数字表格 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
                 )
             else:
                 confirmation_message = (
                     f"实验二结果已计算(未取到 notebook_id，跳过写记录本): RNA 表格 {len(rna['rows'])} 行 + "
-                    f"qPCR 板排布图 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
+                    f"qPCR 板排布数字表格 + 扩增曲线图 + 熔解曲线图 + ΔΔCT 统计表 {len(stats['rows'])} 行"
                 )
 
             return {
@@ -2199,7 +2196,6 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "order_id": normalized_order_id,
                 "notebook_id": notebook_id,
                 "image_urls": [
-                    layout_meta.get("url", ""),
                     curve_meta.get("url", ""),
                     melt_meta.get("url", ""),
                 ],
@@ -2214,6 +2210,23 @@ class BioyondSirnaStation(BioyondWorkstation):
         """实验一细胞板名称记录目录: <repo>/data/细胞板名称记录。"""
         repo_root = Path(__file__).resolve().parents[5]
         return str(repo_root / "data" / "细胞板名称记录")
+
+    @staticmethod
+    def _experiment_result_dir(sub: str = "") -> str:
+        """实验结果落盘目录: <repo>/data/实验结果/{YYYY-MM-DD}[/{sub}]。
+
+        生成的报告 xlsx / 图片等在传 OSS 之外，同时永久留存在后端电脑，
+        按日期分类(再按 order_id 分子目录)。目录不存在则创建。
+        """
+        from datetime import datetime as _dt
+
+        repo_root = Path(__file__).resolve().parents[5]
+        date_str = _dt.now().strftime("%Y-%m-%d")
+        target = repo_root / "data" / "实验结果" / date_str
+        if sub:
+            target = target / str(sub).strip()
+        target.mkdir(parents=True, exist_ok=True)
+        return str(target)
 
     def _build_cell_plate_preintake_index(
         self,
@@ -2507,7 +2520,6 @@ class BioyondSirnaStation(BioyondWorkstation):
             含 success / order_id / notebook_id / resultTable(data+columns+tableName) /
             report_url / raw_file_urls / meta 的字典。
         """
-        import tempfile
         from datetime import datetime as _dt
 
         from unilabos.devices.workstation.bioyond_studio.sirna_station import (
@@ -2657,10 +2669,13 @@ class BioyondSirnaStation(BioyondWorkstation):
             )
 
             stamp = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
-            out_dir = os.path.join(tempfile.gettempdir(), "sirna_exp1", normalized_order_id)
-            os.makedirs(out_dir, exist_ok=True)
+            # 落盘到后端 data/实验结果/{日期}/{order_id}，永久留存 + 供 OSS 上传
+            out_dir = self._experiment_result_dir(normalized_order_id)
 
-            # 结果表导出 xlsx，作为可下载附件
+            # 抑制活性(按样本汇总)表：参考报告『抑制活性』sheet(序列/质粒/Ratio/抑制活性/SD)
+            summary = e1.build_inhibition_activity_table(result)
+
+            # 结果表导出 xlsx(逐孔明细 + 抑制活性汇总两 sheet)，作为可下载附件
             report_xlsx = ""
             try:
                 report_xlsx = e1.build_exp1_report_xlsx(
@@ -2668,6 +2683,7 @@ class BioyondSirnaStation(BioyondWorkstation):
                     os.path.join(out_dir, "实验一结果.xlsx"),
                     order_id=normalized_order_id,
                     stamp=stamp,
+                    summary=summary,
                 )
             except Exception as exc:  # 报告生成失败不阻断主流程
                 logger.warning(f"[sirna] 实验一结果 xlsx 生成失败: {exc}", exc_info=True)
@@ -2698,19 +2714,25 @@ class BioyondSirnaStation(BioyondWorkstation):
             columns = result["columns"]
             header = [c["name"] for c in columns]
             rows = [[row[c["key"]] for c in columns] for row in result["data"]]
+            summary_header = [c["name"] for c in summary["columns"]]
+            summary_rows = [
+                [row[c["key"]] for c in summary["columns"]] for row in summary["data"]
+            ]
             blocks: List[Dict[str, Any]] = [
                 nbc.text_block(
                     f"实验一结果(自动生成 {stamp}, order_id={normalized_order_id})"
                 ),
-                nbc.text_block("一、双荧光素酶报告基因检测结果"),
+                nbc.text_block("一、双荧光素酶报告基因检测结果(逐孔明细)"),
                 nbc.build_table_node(header, rows),
                 nbc.text_block(f"各板空白对照 ratio 均值: {blank_means}"),
+                nbc.text_block("二、抑制活性(按样本汇总)"),
+                nbc.build_table_node(summary_header, summary_rows),
             ]
             if report_meta.get("url"):
-                blocks.append(nbc.text_block("二、实验报告 (可下载 xlsx)"))
+                blocks.append(nbc.text_block("三、实验报告 (可下载 xlsx)"))
                 blocks.append(nbc.build_file_node(report_meta))
             if raw_file_metas:
-                blocks.append(nbc.text_block("三、原始数据附件"))
+                blocks.append(nbc.text_block("四、原始数据附件"))
                 for meta in raw_file_metas:
                     blocks.append(nbc.build_file_node(meta))
             # 末尾补空段落：table/file 后便于前端继续编辑
@@ -2725,14 +2747,16 @@ class BioyondSirnaStation(BioyondWorkstation):
                 )
                 confirmation_message = (
                     f"实验一结果已写入记录本 {notebook_id}: {len(plates_data)} 块板, "
-                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means}); "
+                    f"逐孔明细 {len(result['data'])} 行 + 抑制活性汇总 {len(summary['data'])} 行 "
+                    f"(各板空白对照 ratio 均值={blank_means}); "
                     f"已挂 xlsx{'' if report_meta.get('url') else '(失败)'} + "
                     f"{len(raw_file_metas)} 个原始 CSV 附件"
                 )
             else:
                 confirmation_message = (
                     f"实验一结果已计算(未取到 notebook_id，跳过写记录本): {len(plates_data)} 块板, "
-                    f"{len(result['data'])} 行 (各板空白对照 ratio 均值={blank_means})"
+                    f"逐孔明细 {len(result['data'])} 行 + 抑制活性汇总 {len(summary['data'])} 行 "
+                    f"(各板空白对照 ratio 均值={blank_means})"
                 )
 
             return {
@@ -2740,6 +2764,11 @@ class BioyondSirnaStation(BioyondWorkstation):
                 "order_id": normalized_order_id,
                 "notebook_id": notebook_id,
                 "resultTable": result_table,
+                "inhibitionTable": {
+                    "data": summary["data"],
+                    "columns": summary["columns"],
+                    "tableName": "experiment1_inhibition_activity",
+                },
                 "report_url": report_meta.get("url", ""),
                 "raw_file_urls": [m.get("url", "") for m in raw_file_metas],
                 "meta": result["meta"],

@@ -699,6 +699,32 @@ def render_qpcr_plate_layout_image(
     return out_png
 
 
+def build_qpcr_plate_table(plate_map_path: str = DEFAULT_MAP) -> dict:
+    """从 96 孔布局生成 384 孔板排布"数字表格"(供记录本原生 table 节点)。
+
+    替代板排布图片：行 A–P(16 行)、列 1–24，每个单元格填该 384 孔的样本编号
+    (``short_label``，如样品N->N)；空白对照孔填 ``空白``；无样本孔留空。
+
+    Returns:
+        {"header": ["", "1", ..., "24"], "rows": [["A", c1, ..., c24], ..., ["P", ...]]}
+    """
+    map96 = read_plate_map(plate_map_path)
+    meta = build_well_meta(map96)
+    header = [""] + [str(c) for c in COLS384]
+    rows: list[list[str]] = []
+    for rl in ROWS384:
+        row_cells = [rl]
+        for c in COLS384:
+            m = meta.get(f"{rl}{c}")
+            if not m:
+                row_cells.append("")
+                continue
+            sample = m.get("sample", "")
+            row_cells.append("空白" if is_blank(sample) else short_label(sample))
+        rows.append(row_cells)
+    return {"header": header, "rows": rows, "meta": {"source": os.path.basename(plate_map_path)}}
+
+
 def build_qpcr_stats_table(
     xml_path: str,
     plate_map_path: str = DEFAULT_MAP,
