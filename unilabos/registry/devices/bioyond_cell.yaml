@@ -381,7 +381,7 @@ bioyond_cell:
           title: create_conductivity_orders_from_excel参数
           type: object
         type: UniLabJsonCommand
-      auto-create_conductivity_orders_auto:
+      auto-create_conductivity_orders:
         always_free: true
         feedback: {}
         goal: {}
@@ -449,7 +449,7 @@ bioyond_cell:
             result: {}
           required:
           - goal
-          title: create_conductivity_orders_auto参数
+          title: create_conductivity_orders参数
           type: object
         type: UniLabJsonCommand
       auto-create_sample:
@@ -837,7 +837,7 @@ bioyond_cell:
         placeholder_keys: {}
         result: {}
         schema:
-          description: 持续轮询监测「3号箱手动堆栈」(手动堆栈, code=0007) 的库位占用情况，每 poll_interval 秒查一次 warehouse-info 并打印当前各库位占用物料，累计运行达到 max_duration 秒后自动停止。用途：人工盯3号箱手动堆栈的物料进出（调试/观察）。单次查询失败只告警重试，不中断监测。
+          description: 持续轮询监测3个堆栈的库位占用情况：3号箱手动堆栈(code=0007)、3号箱自动堆栈-左(code=0008)、1号2号手套箱交接堆栈(code=0016)。每 poll_interval 秒分别查一次 warehouse-info 并打印各堆栈当前各库位占用物料，累计运行达到 max_duration 秒后自动停止。用途：人工盯这三个堆栈的物料进出（调试/观察）。单次查询失败只告警重试，不中断监测。
           properties:
             feedback: {}
             goal:
