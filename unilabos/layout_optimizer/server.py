@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 import itertools
 import logging
@@ -44,8 +45,10 @@ from .device_catalog import (
 )
 from .lab_parser import parse_lab
 from .intent_interpreter import InterpretResult, interpret_intents
+from .feasibility import compute_breakdown, conflicts_to_dicts, precheck_conflicts
 from .models import Constraint, Intent
 from .optimizer import optimize
+from .parallel_optimize import run_multistart
 
 _console_level = logging.DEBUG if os.getenv("LAYOUT_DEBUG") else logging.INFO
 # root logger must be DEBUG so the file handler receives all records;
@@ -524,6 +527,10 @@ class OptimizeResponse(BaseModel):
     success: bool
     seeder_used: str = ""
     de_ran: bool = True
+    # 失败诊断（铺垫 b）：逐条约束惩罚明细、违反的硬约束、跑 DE 前的确定性冲突
+    breakdown: list[dict] = []
+    violations: list[dict] = []
+    conflicts: list[dict] = []
 
 
 @app.post("/optimize", response_model=OptimizeResponse)
@@ -668,6 +675,14 @@ async def run_optimize(request: OptimizeRequest):
         if math.isinf(user_hard_cost):
             final_cost = math.inf
 
+    # 7. 失败诊断（铺垫 b）：明细 + 违反的硬约束 + 确定性冲突预检
+    breakdown, violations = compute_breakdown(
+        devices, result_placements, lab, constraints, checker, reachability_checker,
+    )
+    conflicts = conflicts_to_dicts(
+        precheck_conflicts(devices, lab, constraints, request.arm_reach or None)
+    )
+
     return OptimizeResponse(
         placements=[
             PlacementResult(
@@ -682,6 +697,182 @@ async def run_optimize(request: OptimizeRequest):
         success=not math.isinf(final_cost),
         seeder_used=request.seeder,
         de_ran=de_ran,
+        breakdown=breakdown,
+        violations=violations,
+        conflicts=conflicts,
+    )
+
+
+# ---------- 自动布局 API（失败自愈：解析预检 + 并行多起点 DE） ----------
+
+
+class AutoOptimizeRequest(OptimizeRequest):
+    """带失败自愈的自动优化请求。
+
+    在 OptimizeRequest 基础上增加多起点网格参数。网格按"多 seed × 少量 seeder"
+    组织，maxiter 固定取较大值并依赖 early-stopping，不再作为独立网格维度。
+    """
+
+    seeds: list[int] = [42, 7, 123, 2024]
+    seeders: list[str] = ["compact_outward", "spread_inward", "workflow_cluster"]
+    maxiter: int = 400
+    max_workers: int | None = None
+
+
+class AutoOptimizeResponse(BaseModel):
+    placements: list[PlacementResult]
+    cost: float
+    success: bool
+    seeder_used: str = ""
+    de_ran: bool = True
+    # 多起点统计
+    tried: int = 0
+    total: int = 0
+    # 失败诊断：跑 DE 前的确定性冲突（情况 A）、跨 run 聚合的持续违反、可选明细
+    conflicts: list[dict] = []
+    violations: list[dict] = []
+    breakdown: list[dict] = []
+
+
+@app.post("/optimize/auto", response_model=AutoOptimizeResponse)
+async def run_optimize_auto(request: AutoOptimizeRequest):
+    """带失败自愈的自动布局优化。
+
+    流程：
+    1. 解析冲突预检 —— 命中确定性硬冲突（情况 A）立即短路返回，附 conflicts + 放宽建议。
+    2. 并行多起点 DE（seeds × seeders）—— 任一起点成功立即终止其余并返回（情况 B 自愈）。
+    3. 全部起点失败 —— 返回跨 run 聚合的 persistent 违反约束，供针对性放宽。
+    """
+    from fastapi import HTTPException
+
+    from .mock_checkers import MockCollisionChecker, MockReachabilityChecker
+    from .seeders import resolve_seeder_params, seed_layout
+
+    logger.info(
+        "Auto-optimize request: %d devices, lab %.1f×%.1f, %d constraints, seeds=%d, seeders=%s, maxiter=%d",
+        len(request.devices), request.lab.width, request.lab.depth,
+        len(request.constraints), len(request.seeds), request.seeders, request.maxiter,
+    )
+
+    # --- 校验 DE 超参 + 网格参数 ---
+    if request.angle_granularity not in (None, 4, 8, 12, 24):
+        raise HTTPException(status_code=400, detail="angle_granularity must be one of: 4, 8, 12, 24")
+    if request.strategy not in {"currenttobest1bin", "best1bin", "rand1bin"}:
+        raise HTTPException(status_code=400, detail=f"strategy must be one of: currenttobest1bin, best1bin, rand1bin (got {request.strategy!r})")
+    if request.angle_mode not in {"joint", "hybrid"}:
+        raise HTTPException(status_code=400, detail=f"angle_mode must be one of: joint, hybrid (got {request.angle_mode!r})")
+    if request.crossover_mode not in {"device", "dimension"}:
+        raise HTTPException(status_code=400, detail=f"crossover_mode must be one of: device, dimension (got {request.crossover_mode!r})")
+    if len(request.mutation) != 2 or request.mutation[0] > request.mutation[1]:
+        raise HTTPException(status_code=400, detail="mutation must be [F_min, F_max] with F_min <= F_max")
+    if not (0 <= request.recombination <= 1.0):
+        raise HTTPException(status_code=400, detail="recombination must be in [0, 1.0]")
+    if not request.seeds:
+        raise HTTPException(status_code=400, detail="seeds must not be empty")
+    if not request.seeders:
+        raise HTTPException(status_code=400, detail="seeders must not be empty")
+    for sd in request.seeders:
+        try:
+            resolve_seeder_params(sd)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # --- 构建设备 / 实验室 / 约束 ---
+    devices = create_devices_from_list([d.model_dump() for d in request.devices])
+    id_to_catalog = {dev.id: _catalog_id_from_internal(dev.id) for dev in devices}
+    id_to_uuid = {dev.id: (dev.uuid or dev.id) for dev in devices}
+    lab = parse_lab(request.lab.model_dump())
+    constraints = [
+        Constraint(type=c.type, rule_name=c.rule_name, params=c.params, weight=c.weight)
+        for c in request.constraints
+    ]
+    constraints = _expand_constraints_for_duplicates(constraints, devices)
+    constraints = _maybe_add_prefer_aligned_constraint(
+        constraints, request.seeder_overrides.get("align_weight", 0),
+    )
+
+    checker = MockCollisionChecker()
+    reach = MockReachabilityChecker(request.arm_reach or None)
+
+    def _map_placement(p: dict) -> PlacementResult:
+        return PlacementResult(
+            device_id=id_to_catalog.get(p["device_id"], p["device_id"]),
+            uuid=id_to_uuid.get(p["device_id"], p["device_id"]),
+            position=PositionXYZ(x=round(p["x"], 4), y=round(p["y"], 4), z=0.0),
+            rotation=PositionXYZ(x=0.0, y=0.0, z=round(p["theta"], 4)),
+        )
+
+    # --- 1. 解析冲突预检（情况 A 短路）---
+    conflicts = precheck_conflicts(devices, lab, constraints, request.arm_reach or None)
+    if conflicts:
+        logger.info("Auto-optimize precheck found %d deterministic conflict(s), short-circuiting", len(conflicts))
+        params = resolve_seeder_params(request.seeders[0])
+        placeholder = seed_layout(devices, lab, params, request.workflow_edges or None)
+        breakdown, violations = compute_breakdown(
+            devices, placeholder, lab, constraints, checker, reach,
+        )
+        return AutoOptimizeResponse(
+            placements=[
+                _map_placement({"device_id": p.device_id, "x": p.x, "y": p.y, "theta": p.theta})
+                for p in placeholder
+            ],
+            cost=math.inf,
+            success=False,
+            seeder_used="(precheck)",
+            de_ran=False,
+            tried=0,
+            total=0,
+            conflicts=conflicts_to_dicts(conflicts),
+            violations=violations,
+            breakdown=breakdown,
+        )
+
+    # --- 2 & 3. 并行多起点 DE（在线程里跑，避免阻塞事件循环）---
+    outcome = await asyncio.to_thread(
+        run_multistart,
+        devices,
+        lab,
+        constraints,
+        seeds=request.seeds,
+        seeders=request.seeders,
+        maxiter=request.maxiter,
+        workflow_edges=request.workflow_edges or None,
+        angle_granularity=request.angle_granularity,
+        angle_mode=request.angle_mode,
+        strategy=request.strategy,
+        mutation=request.mutation,
+        theta_mutation=request.theta_mutation,
+        recombination=request.recombination,
+        crossover_mode=request.crossover_mode,
+        snap_cardinal=request.snap_cardinal,
+        arm_reach=request.arm_reach or None,
+        seeder_overrides=request.seeder_overrides or None,
+        max_workers=request.max_workers,
+    )
+
+    winner = outcome["winner"]
+    if winner is None:
+        return AutoOptimizeResponse(
+            placements=[], cost=math.inf, success=False, seeder_used="",
+            de_ran=True, tried=outcome["tried"], total=outcome["total"],
+            conflicts=[], violations=outcome["violations"],
+        )
+
+    logger.info(
+        "Auto-optimize done: success=%s, tried=%d/%d, winner_seeder=%s, cost=%s",
+        outcome["success"], outcome["tried"], outcome["total"],
+        winner["seeder"], winner["cost"],
+    )
+    return AutoOptimizeResponse(
+        placements=[_map_placement(p) for p in winner["placements"]],
+        cost=winner["cost"],
+        success=outcome["success"],
+        seeder_used=winner["seeder"],
+        de_ran=True,
+        tried=outcome["tried"],
+        total=outcome["total"],
+        conflicts=[],
+        violations=outcome["violations"],
     )
 
 
@@ -705,9 +896,14 @@ async def get_lab_dimensions():
 
 @app.post("/scene/lab")
 async def set_lab_dimensions(dims: LabDimensions):
-    """前端在加载和尺寸变更时推送。"""
+    """前端在加载和尺寸变更时推送；agent 也可调用以改变实验室尺寸。
+
+    bump 一次 _scene_state["version"]，让前端在 1s 轮询中检测到 version 增长，
+    随响应里的 lab 字段一并同步地板尺寸（即便本次没有新的 placements）。
+    """
     _lab_state["width"] = dims.width
     _lab_state["depth"] = dims.depth
+    _scene_state["version"] += 1
     return _lab_state
 
 
@@ -730,8 +926,12 @@ async def set_scene_placements(request: ScenePlacementsRequest):
 
 @app.get("/scene/placements")
 async def get_scene_placements():
-    """前端轮询此端点，检测 version 变化后应用布局。"""
-    return _scene_state
+    """前端轮询此端点，检测 version 变化后应用布局。
+
+    响应里附带当前 lab 尺寸，使前端在同一次 version 跳变中原子地同步
+    地板尺寸与设备位置，避免「地板用旧尺寸、坐标按新尺寸换算」导致出界。
+    """
+    return {**_scene_state, "lab": _lab_state}
 
 
 @app.delete("/scene/placements")
