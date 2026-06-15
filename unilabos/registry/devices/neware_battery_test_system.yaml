@@ -650,6 +650,8 @@ neware_battery_test_system:
                         type: number
                       assembly_pressure:
                         type: number
+                      target_assembly_pressure:
+                        type: number
                       electrolyte_volume:
                         type: number
                       data_coin_type:

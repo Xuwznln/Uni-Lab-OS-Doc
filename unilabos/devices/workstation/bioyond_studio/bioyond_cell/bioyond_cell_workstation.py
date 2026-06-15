@@ -1702,11 +1702,19 @@ class BioyondCellWorkstation(BioyondWorkstation):
         - 配液仍走原 wait_for_order_finish 单值机制，路径完全不变。
         - wait_for_finish=False 时回退到 fire-and-forget 行为，仅创建不等。
 
+        2026-06-10 调整（按 5 号自动传递窗过滤）：
+        - 上游配液会把订单产出的**所有** 20ml 分液瓶板都传进 vial_plates，不区分用途。
+          真正要测电导的板 = 已转运到「5 号自动传递窗」的板。
+        - 提交前查 warehouse-info(5号自动传递窗) 按 materialId 取交集，只保留在 5 号站的板。
+          这样即使配液传了扣电/软包等非电导板，也不会误建电导单。
+        - 注意时序：要求板已转运到 5 号站后再调本 action；否则会被全部过滤而报错。
+        - temperature_points 的长度校验在过滤之后进行（按过滤后的板数）。
+
         Args:
             vial_plates: 上游配液输出的分液瓶板列表，每项需含
                 batch_id / materialId / barCode / orderCode（缺任一报错）
             temperature_points: 温度点列表（℃）。
-                长度=1 → 广播到所有分液板；长度=N（=分液板数）→ 一一对应；其他长度报错。
+                长度=1 → 广播到所有分液板；长度=N（=过滤后分液板数）→ 一一对应；其他长度报错。
                 **同一块板上的所有分液瓶共享同一温度点（一块板一个温度）。**
             validate_barcode: 提交前是否对 plateBarCode 做物料系统强校验，默认 True
             wait_for_finish: 是否阻塞等待所有 LIMS 新建电导单完成，默认 True
@@ -1733,6 +1741,36 @@ class BioyondCellWorkstation(BioyondWorkstation):
             raise ValueError("vial_plates 不能为空")
         if not temperature_points or not isinstance(temperature_points, list):
             raise ValueError("temperature_points 不能为空")
+
+        # ========== 阶段0: 只保留已转运到 5 号自动传递窗的板 ==========
+        # 上游配液会把订单产出的全部 20ml 分液瓶板都传进来（不区分用途），
+        # 真正要测电导的 = 已搬到「5 号自动传递窗」的板。查 warehouse-info(2.38) 按 materialId 取交集。
+        # whId 来源：包含库位的仓库信息0610.json，name="5号自动传递窗", code="0018"。
+        _WH_ID_TRANSFER_WINDOW_5 = "3a1c68b5-65e1-f662-93bb-3c2c5b42744d"
+        wh_resp = self._post_lims(
+            "/api/lims/storage/warehouse-info",
+            {"whId": _WH_ID_TRANSFER_WINDOW_5, "includeDetail": True},
+        )
+        if not isinstance(wh_resp, dict) or wh_resp.get("code") != 1:
+            raise BioyondException(f"查询 5 号自动传递窗失败: {wh_resp}")
+        station_mids = {
+            (loc.get("holdMId") or "").strip()
+            for loc in ((wh_resp.get("data") or {}).get("locations") or [])
+            if isinstance(loc, dict) and loc.get("holdMId")
+        }
+        kept = [
+            p for p in vial_plates
+            if isinstance(p, dict) and (p.get("materialId") or "").strip() in station_mids
+        ]
+        logger.info(
+            f"[create_conductivity_orders_auto] 5 号自动传递窗过滤: "
+            f"{len(vial_plates)} → {len(kept)} 块板（5 号站现有板 {len(station_mids)} 块）"
+        )
+        vial_plates = kept
+        if not vial_plates:
+            raise BioyondException(
+                "过滤后没有任何板在 5 号自动传递窗，请确认要测电导的板已转运到 5 号站。"
+            )
 
         # 提取 batch_id（同 batch 内所有 plate 共享同一值）
         batch_id_raw = vial_plates[0].get("batch_id") if isinstance(vial_plates[0], dict) else None
@@ -3208,6 +3246,161 @@ class BioyondCellWorkstation(BioyondWorkstation):
         
         return (x, y, z)
 
+
+    def stack_inquiry_2to1(
+        self,
+        poll_interval: float = 5.0,
+        timeout: int = 3600,
+    ) -> Dict[str, Any]:
+        """
+        轮询「1号2号手套箱交接堆栈」，直到其中没有分液瓶板为止。
+
+        用途：配液完成后，确保 1、2 号手套箱交接堆栈已被清空（分液板已转运走），
+        再放行后续步骤。堆栈里只要还有分液瓶板就阻塞轮询；清空后通过。
+
+        判定依据：查 warehouse-info(2.38) 交接堆栈，库位 holdMId 非空且
+        holdMTypeName 含「分液瓶板」即视为仍有分液板。
+
+        Args:
+            poll_interval: 轮询间隔（秒），默认 5s
+            timeout: 最长等待秒数，默认 3600s（1h）；超时抛 BioyondException
+
+        Returns:
+            { "status": "clear", "poll_count": int, "elapsed_seconds": float }
+
+        Raises:
+            BioyondException: 查询失败 / 等待超时
+        """
+        # whId 来源：包含库位的仓库信息0610.json，name="1号2号手套箱交接堆栈", code="0016"。
+        _WH_ID_TRANSFER_2TO1 = "3a1baa49-7f76-b88a-44d5-d478c48aae3e"
+        _PLATE_KEYWORD = "分液瓶板"
+
+        start = time.time()
+        poll_count = 0
+        while True:
+            resp = self._post_lims(
+                "/api/lims/storage/warehouse-info",
+                {"whId": _WH_ID_TRANSFER_2TO1, "includeDetail": True},
+            )
+            if not isinstance(resp, dict) or resp.get("code") != 1:
+                raise BioyondException(f"查询 1号2号手套箱交接堆栈失败: {resp}")
+
+            locations = (resp.get("data") or {}).get("locations") or []
+            plates = [
+                loc for loc in locations
+                if isinstance(loc, dict)
+                and (loc.get("holdMId") or "").strip()
+                and _PLATE_KEYWORD in (loc.get("holdMTypeName") or "")
+            ]
+
+            elapsed = time.time() - start
+            if not plates:
+                logger.info(
+                    f"[stack_inquiry_2to1] ✅ 1号2号交接堆栈已无分液瓶板，通过 "
+                    f"（轮询 {poll_count} 次，耗时 {elapsed:.1f}s）"
+                )
+                return {
+                    "status": "clear",
+                    "poll_count": poll_count,
+                    "elapsed_seconds": round(elapsed, 1),
+                }
+
+            if elapsed > timeout:
+                raise BioyondException(
+                    f"等待 1号2号交接堆栈清空超时（{timeout}s），仍有 {len(plates)} 块分液瓶板："
+                    + ", ".join(
+                        f"(库位{loc.get('code')}, {loc.get('holdMTypeName')})"
+                        for loc in plates
+                    )
+                )
+
+            poll_count += 1
+            logger.info(
+                f"[stack_inquiry_2to1] 交接堆栈仍有 {len(plates)} 块分液瓶板"
+                f"（库位 {[loc.get('code') for loc in plates]}），"
+                f"{poll_interval}s 后重试...（已等待 {elapsed:.1f}s）"
+            )
+            time.sleep(poll_interval)
+
+    def monitor_manual_stack_3(
+        self,
+        poll_interval: float = 5.0,
+        max_duration: int = 3600,
+    ) -> Dict[str, Any]:
+        """
+        持续轮询监测「3 号箱手动堆栈」(手动堆栈, code=0007) 的库位占用情况。
+
+        每隔 poll_interval 秒查一次 warehouse-info(2.38) 并打印当前各库位的占用物料，
+        累计运行达到 max_duration 秒后自动停止并返回最后一次快照。
+
+        用途：人工盯 3 号箱手动堆栈的物料进出（调试 / 观察）。
+        说明：UniLab 的 action 不接受前端 cancel，故用 max_duration 到点自停；
+              单次查询失败只告警重试，不中断监测。
+
+        Args:
+            poll_interval: 轮询间隔（秒），默认 5s
+            max_duration: 最长监测时长（秒），默认 3600s（1h），到点自动停止
+
+        Returns:
+            {
+                "status": "stopped",
+                "poll_count": int,
+                "elapsed_seconds": float,
+                "last_snapshot": [ {"code", "holdMName", "holdMTypeName"}, ... ],
+            }
+        """
+        # whId 来源：包含库位的仓库信息0610.json，name="手动堆栈", code="0007", frameCode=9（3号箱）。
+        _WH_ID_MANUAL_STACK_3 = "3a19deae-2c79-05a3-9c76-8e6760424841"
+
+        start = time.time()
+        poll_count = 0
+        last_snapshot: List[Dict[str, Any]] = []
+        logger.info(
+            f"[monitor_manual_stack_3] 开始监测 3 号箱手动堆栈，"
+            f"poll_interval={poll_interval}s, max_duration={max_duration}s"
+        )
+        while True:
+            resp = self._post_lims(
+                "/api/lims/storage/warehouse-info",
+                {"whId": _WH_ID_MANUAL_STACK_3, "includeDetail": True},
+            )
+            if not isinstance(resp, dict) or resp.get("code") != 1:
+                logger.warning(f"[monitor_manual_stack_3] ⚠️ 查询失败（将重试）: {resp}")
+            else:
+                data = resp.get("data") or {}
+                locations = data.get("locations") or []
+                occupied = [
+                    loc for loc in locations
+                    if isinstance(loc, dict) and (loc.get("holdMId") or "").strip()
+                ]
+                last_snapshot = [
+                    {
+                        "code": loc.get("code"),
+                        "holdMName": loc.get("holdMName"),
+                        "holdMTypeName": loc.get("holdMTypeName"),
+                    }
+                    for loc in occupied
+                ]
+                poll_count += 1
+                logger.info(
+                    f"[monitor_manual_stack_3] 第{poll_count}次：占用 "
+                    f"{len(occupied)}/{len(locations)} 库位: "
+                    f"{[(s['code'], s['holdMTypeName'] or s['holdMName']) for s in last_snapshot]}"
+                )
+
+            elapsed = time.time() - start
+            if elapsed >= max_duration:
+                logger.info(
+                    f"[monitor_manual_stack_3] 达到 max_duration={max_duration}s，停止监测"
+                    f"（共轮询 {poll_count} 次，耗时 {elapsed:.1f}s）"
+                )
+                return {
+                    "status": "stopped",
+                    "poll_count": poll_count,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "last_snapshot": last_snapshot,
+                }
+            time.sleep(poll_interval)
 
     # 2.7 启动调度
     def scheduler_start(self) -> Dict[str, Any]:

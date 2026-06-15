@@ -1654,6 +1654,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self._last_assembly_timestamp = timestamp
             #生成输出文件的变量
         self.csv_export_file = os.path.join(file_path, f"date_{time_date}.csv")   
+        # 导出目录不存在则跳过 CSV 记录：仅告警，不创建目录、不中断组装任务
+        if not os.path.isdir(file_path):
+            logger.warning(f"[CSV写入] 导出目录不存在，跳过本次CSV记录（不中断任务）: {file_path}")
+            self.success = True
+            return self.success
         #将数据存入csv文件
         if not os.path.exists(self.csv_export_file):
             #创建一个表头
@@ -1885,6 +1890,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                     "pole_weight": pole_weight,
                     "assembly_time": self.data_assembly_time,
                     "assembly_pressure": self.data_assembly_pressure,
+                    "target_assembly_pressure": getattr(self, "_target_assembly_pressure", ""),
                     "electrolyte_volume": self.data_electrolyte_volume,
                     "data_coin_type": getattr(self, "data_coin_type", 0),
                     "electrolyte_code": electrolyte_qr_code,
@@ -1899,11 +1905,14 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                 # 生成断点文件
                 # 生成包含elec_num_N、coin_num_N、timestamp的CSV文件
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                with open(summary_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(['elec_num','elec_use_num', 'elec_num_N', 'elec_use_num_N', 'coin_num_N', 'timestamp'])
-                    writer.writerow([elec_num, elec_use_num, elec_num_N, elec_use_num_N, coin_num_N, timestamp])
-                    csvfile.flush()
+                try:
+                    with open(summary_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.writer(csvfile)
+                        writer.writerow(['elec_num','elec_use_num', 'elec_num_N', 'elec_use_num_N', 'coin_num_N', 'timestamp'])
+                        writer.writerow([elec_num, elec_use_num, elec_num_N, elec_use_num_N, coin_num_N, timestamp])
+                        csvfile.flush()
+                except Exception as e:
+                    logger.warning(f"[断点文件] 写入失败，跳过（不中断任务）: {e}")
                 coin_num_N += 1
                 self.coin_num_N = coin_num_N
                 elec_use_num_N += 1
@@ -1911,7 +1920,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             elec_use_num_N = 0
 
         #循环正常结束，则删除断点文件
-        os.remove(summary_csv_file)
+        if os.path.exists(summary_csv_file):
+            os.remove(summary_csv_file)
         #全部完成后等待依华发送完成信号
         self.func_pack_send_finished_cmd()
         
@@ -2140,6 +2150,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                     "pole_weight": pole_weight,
                     "assembly_time": self.data_assembly_time,
                     "assembly_pressure": self.data_assembly_pressure,
+                    "target_assembly_pressure": getattr(self, "_target_assembly_pressure", ""),
                     "electrolyte_volume": self.data_electrolyte_volume,
                     "data_coin_type": getattr(self, "data_coin_type", 0),
                     "electrolyte_code": electrolyte_qr_code,
@@ -2152,11 +2163,14 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
 
                 # 生成断点文件
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                with open(summary_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(['elec_num','elec_use_num', 'elec_num_N', 'elec_use_num_N', 'coin_num_N', 'timestamp'])
-                    writer.writerow([elec_num, elec_use_num, elec_num_N, elec_use_num_N, coin_num_N, timestamp])
-                    csvfile.flush()
+                try:
+                    with open(summary_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.writer(csvfile)
+                        writer.writerow(['elec_num','elec_use_num', 'elec_num_N', 'elec_use_num_N', 'coin_num_N', 'timestamp'])
+                        writer.writerow([elec_num, elec_use_num, elec_num_N, elec_use_num_N, coin_num_N, timestamp])
+                        csvfile.flush()
+                except Exception as e:
+                    logger.warning(f"[断点文件] 写入失败，跳过（不中断任务）: {e}")
                 coin_num_N += 1
                 self.coin_num_N = coin_num_N
                 elec_use_num_N += 1
@@ -2164,7 +2178,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             elec_use_num_N = 0
 
         # 循环正常结束，则删除断点文件
-        os.remove(summary_csv_file)
+        if os.path.exists(summary_csv_file):
+            os.remove(summary_csv_file)
         # 全部完成后等待依华发送完成信号
         self.func_pack_send_finished_cmd()
         

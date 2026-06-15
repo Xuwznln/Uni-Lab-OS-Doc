@@ -977,6 +977,7 @@ class NewareBatteryTestSystem:
             '811_CU_AGING': gen_mod.xml_811_Cu_aging,
             '811_LI_JY': gen_mod.xml_811_Li_JY,
             'ZQXNLRMO':gen_mod.xml_ZQXNLRMO,
+            'LP_LFP': gen_mod.xml_LP_LFP,
         }
         if key not in fmap:
             raise ValueError(f"未定义电池体系映射: {key}")
@@ -1324,6 +1325,170 @@ class NewareBatteryTestSystem:
             return {
                 "return_info": error_msg, 
                 "success": False, 
+                "submitted_count": 0,
+                "total_count": 0
+            }
+
+    def submit_lp_csv_export_excel(self, csv_path: str, output_dir: str = ".") -> dict:
+        """
+        从CSV文件批量提交LP任务，备份格式为Excel（设备动作）
+
+        与 submit_from_csv_export_excel 逻辑一致，但当工步模板需要参数时，
+        容量仅由“活性物质质量mg”和“克容量mah/g”计算。
+
+        Args:
+            csv_path (str): 输入CSV文件路径
+            output_dir (str): 输出目录，用于存储XML文件和备份，默认当前目录
+
+        Returns:
+            dict: 执行结果 {"return_info": str, "success": bool, "submitted_count": int}
+        """
+        try:
+            self._ensure_local_import_path()
+            import pandas as pd
+            import generate_xml_content as gen_mod
+            from neware_driver import start_test
+
+            if self._ros_node:
+                self._ros_node.lab_logger().info(f"开始从CSV文件提交LP任务(Excel备份): {csv_path}")
+
+            if not os.path.exists(csv_path):
+                error_msg = f"CSV文件不存在: {csv_path}"
+                if self._ros_node:
+                    self._ros_node.lab_logger().error(error_msg)
+                return {"return_info": error_msg, "success": False, "submitted_count": 0, "total_count": 0}
+
+            df = pd.read_csv(csv_path, encoding='gbk')
+
+            required = ['coin_cell_code', 'electrolyte_code', '电池体系', '设备号', '排号', '通道号']
+            missing = [c for c in required if c not in df.columns]
+            if missing:
+                error_msg = f"CSV缺少必需列: {missing}"
+                if self._ros_node:
+                    self._ros_node.lab_logger().error(error_msg)
+                return {"return_info": error_msg, "success": False, "submitted_count": 0, "total_count": 0}
+
+            xml_dir = os.path.join(output_dir, 'xml_dir')
+            backup_dir = os.path.join(output_dir, 'backup_dir')
+            os.makedirs(xml_dir, exist_ok=True)
+            os.makedirs(backup_dir, exist_ok=True)
+
+            self._last_backup_dir = backup_dir
+
+            if self._ros_node:
+                self._ros_node.lab_logger().info(
+                    f"输出目录: XML={xml_dir}, 备份(Excel)={backup_dir}"
+                )
+
+            submitted_count = 0
+            results = []
+
+            for idx, row in df.iterrows():
+                try:
+                    coin_id = f"{row['coin_cell_code']}-{row['electrolyte_code']}"
+
+                    key = self._canon(row['电池体系'])
+                    builder = self._get_xml_builder(gen_mod, key)
+                    builder_required_args = self._get_builder_required_positional_count(builder)
+
+                    if builder_required_args == 0:
+                        xml_content = builder()
+                    elif builder_required_args == 2:
+                        calc_cols = ['活性物质质量mg', '克容量mah/g']
+                        missing_calc = [
+                            c for c in calc_cols
+                            if c not in df.columns or self._is_csv_value_empty(row[c])
+                        ]
+                        if missing_calc:
+                            error_msg = (
+                                f"电池体系 {key} 需要 act_mass/Cap_mAh，以下列缺失或为空: {missing_calc}, "
+                                f"CoinID={coin_id}"
+                            )
+                            if self._ros_node:
+                                self._ros_node.lab_logger().warning(error_msg)
+                            results.append(f"行{idx+1} 失败: {error_msg}")
+                            continue
+
+                        act_mass = float(row['活性物质质量mg'])
+                        specific_capacity = float(row['克容量mah/g'])
+                        cap_mAh = round(act_mass * specific_capacity / 1000.0, 3)
+                        act_mass = round(act_mass, 2)
+                        if cap_mAh < 0:
+                            error_msg = (
+                                f"容量为负数: Battery_Code={coin_id}, "
+                                f"活性物质质量mg={act_mass}, 容量mah={cap_mAh}"
+                            )
+                            if self._ros_node:
+                                self._ros_node.lab_logger().warning(error_msg)
+                            results.append(f"行{idx+1} 失败: {error_msg}")
+                            continue
+                        xml_content = builder(act_mass, cap_mAh)
+                    else:
+                        raise ValueError(
+                            f"XML生成函数参数不支持: {builder.__name__} 需要 {builder_required_args} 个必填位置参数"
+                        )
+
+                    devid = int(row['设备号'])
+                    subdevid = int(row['排号'])
+                    chlid = int(row['通道号'])
+
+                    recipe_path = os.path.join(
+                        xml_dir,
+                        f"{coin_id}_{devid}_{subdevid}_{chlid}.xml"
+                    )
+                    self._save_xml(xml_content, recipe_path)
+
+                    resp = start_test(
+                        ip=self.ip,
+                        port=self.port,
+                        devid=devid,
+                        subdevid=subdevid,
+                        chlid=chlid,
+                        CoinID=coin_id,
+                        recipe_path=recipe_path,
+                        backup_dir=backup_dir,
+                        filetype=1
+                    )
+
+                    submitted_count += 1
+                    results.append(f"行{idx+1} {coin_id}: {resp}")
+
+                    if self._ros_node:
+                        self._ros_node.lab_logger().info(
+                            f"已提交LP {coin_id} (设备{devid}-{subdevid}-{chlid}, Excel备份): {resp}"
+                        )
+
+                except Exception as e:
+                    error_msg = f"行{idx+1} 处理失败: {str(e)}"
+                    results.append(error_msg)
+                    if self._ros_node:
+                        self._ros_node.lab_logger().error(error_msg)
+
+            success_msg = (
+                f"LP批量提交完成(Excel备份): 成功{submitted_count}个，共{len(df)}行。"
+                f"\n详细结果:\n" + "\n".join(results)
+            )
+
+            if self._ros_node:
+                self._ros_node.lab_logger().info(
+                    f"LP批量提交完成(Excel备份): 成功{submitted_count}/{len(df)}"
+                )
+
+            return {
+                "return_info": success_msg,
+                "success": True,
+                "submitted_count": submitted_count,
+                "total_count": len(df),
+                "results": results
+            }
+
+        except Exception as e:
+            error_msg = f"LP批量提交失败(Excel备份): {str(e)}"
+            if self._ros_node:
+                self._ros_node.lab_logger().error(error_msg)
+            return {
+                "return_info": error_msg,
+                "success": False,
                 "submitted_count": 0,
                 "total_count": 0
             }
@@ -1936,41 +2101,33 @@ class NewareBatteryTestSystem:
 
     def mock_assembly_data(self) -> dict:
         """
-        模拟扣电组装站 auto-func_sendbottle_allpack_multi 的输出，返回固定的 2 颗电池 assembly_data。
+        模拟扣电组装站 auto-func_sendbottle_allpack_multi 的输出，返回固定的 16 颗电池 assembly_data。
         用于在没有真实扣电组装站的情况下，测试
         mock_assembly_data → manual_confirm → battery_transfer_confirm → submit_auto_export_excel
         的完整参数传递与 TCP 下发链路。
 
         Returns:
             dict: {
-                "assembly_data": list[dict],   # 9 字段 × 2 颗电池
+                "assembly_data": list[dict],   # 9 字段 × 16 颗电池
                 "success": bool,
                 "return_info": str,
             }
         """
+        # 用确定性规律生成 16 颗电池，保证每次调用结果一致，便于回归测试
         assembly_data = [
             {
-                "Time":                "20260421_143022",
-                "open_circuit_voltage": 3.721,
-                "pole_weight":          98.43,
-                "assembly_time":        120,
-                "assembly_pressure":    5.2,
-                "electrolyte_volume":   80.0,
+                "Time":                f"20260421_14{30 + i:02d}22",
+                "open_circuit_voltage": round(3.700 + (i % 5) * 0.006, 3),
+                "pole_weight":          round(97.50 + i * 0.06, 2),
+                "assembly_time":        118 + (i % 4),
+                "assembly_pressure":    round(5.0 + (i % 4) * 0.1, 1),
+                "target_assembly_pressure": 5.0,
+                "electrolyte_volume":   round(79.0 + (i % 3) * 0.5, 1),
                 "data_coin_type":       2,
-                "electrolyte_code":     "EL-2026042101",
-                "coin_cell_code":       "CC-2026042101",
-            },
-            {
-                "Time":                "20260421_143255",
-                "open_circuit_voltage": 3.698,
-                "pole_weight":          97.85,
-                "assembly_time":        118,
-                "assembly_pressure":    5.1,
-                "electrolyte_volume":   79.5,
-                "data_coin_type":       2,
-                "electrolyte_code":     "EL-2026042102",
-                "coin_cell_code":       "CC-2026042102",
-            },
+                "electrolyte_code":     f"EL-20260421{i:02d}",
+                "coin_cell_code":       f"CC-20260421{i:02d}",
+            }
+            for i in range(1, 17)
         ]
         info = f"mock_assembly_data 返回 {len(assembly_data)} 颗电池的模拟组装数据"
         if self._ros_node:
@@ -1983,68 +2140,221 @@ class NewareBatteryTestSystem:
             "return_info": info,
         }
 
+    # ─── manual_confirm 辅助：CSV 表头别名 + 三模式展开 ───────────────────────────
+
+    @staticmethod
+    def _normalize_csv_headers(df):
+        """把 CSV 中文/英文表头统一映射为内部字段名。"""
+        alias = {
+            "coin_cell_code":  "coin_cell_code",
+            "电池条码":        "coin_cell_code",
+            "电池编号":        "coin_cell_code",
+            "collector_mass":  "collector_mass",
+            "集流体质量":      "collector_mass",
+            "active_material": "active_material",
+            "活性物质含量":    "active_material",
+            "活性物质的含量":  "active_material",
+            "capacity":        "capacity",
+            "克容量":          "capacity",
+            "battery_system":  "battery_system",
+            "电池体系":        "battery_system",
+            "xml工步":         "battery_system",
+        }
+        rename_map = {c: alias[c.strip()] for c in df.columns if c.strip() in alias}
+        return df.rename(columns=rename_map)
+
+    def _expand_battery_params(
+        self,
+        mount_resource,
+        assembly_data,
+        collector_mass,
+        active_material,
+        capacity,
+        battery_system,
+        default_collector_mass,
+        default_active_material,
+        default_capacity,
+        default_battery_system,
+        param_csv_path,
+    ):
+        """按优先级 B(逐颗数组) > C(CSV) > A(标量默认) 展开为长度 N 的 4 个 list。"""
+        N = len(mount_resource) if mount_resource else 0
+        FIELDS = ("collector_mass", "active_material", "capacity", "battery_system")
+
+        # 1) 解析 CSV → coin_cell_code 索引表
+        csv_map: Dict[str, Dict[str, Any]] = {}
+        if param_csv_path:
+            if not os.path.isfile(param_csv_path):
+                raise FileNotFoundError(f"param_csv_path 不存在: {param_csv_path}")
+            import pandas as pd
+            try:
+                df = pd.read_csv(param_csv_path, encoding="utf-8-sig")
+            except UnicodeDecodeError:
+                df = pd.read_csv(param_csv_path, encoding="gbk")
+            df = self._normalize_csv_headers(df)
+            if "coin_cell_code" not in df.columns:
+                raise ValueError(
+                    f"param_csv_path 解析失败: 缺少必需列 coin_cell_code（或 电池条码 / 电池编号），实际列={list(df.columns)}"
+                )
+            for _, row in df.iterrows():
+                code = str(row["coin_cell_code"]).strip()
+                if not code or code.lower() == "nan":
+                    continue
+                csv_map[code] = {
+                    f: (row[f] if f in df.columns and not (isinstance(row[f], float) and row[f] != row[f]) else None)
+                    for f in FIELDS
+                }
+            if self._ros_node:
+                self._ros_node.lab_logger().info(
+                    f"[manual_confirm] CSV 已加载 {len(csv_map)} 行参数 from {param_csv_path}"
+                )
+
+        arr_map = {
+            "collector_mass":  collector_mass or [],
+            "active_material": active_material or [],
+            "capacity":        capacity or [],
+            "battery_system":  battery_system or [],
+        }
+        default_map = {
+            "collector_mass":  default_collector_mass,
+            "active_material": default_active_material,
+            "capacity":        default_capacity,
+            "battery_system":  default_battery_system,
+        }
+
+        out: Dict[str, list] = {f: [None] * N for f in FIELDS}
+        for i in range(N):
+            code = ""
+            if assembly_data and i < len(assembly_data):
+                code = str(assembly_data[i].get("coin_cell_code", "")).strip()
+
+            for f in FIELDS:
+                # B：逐颗数组
+                arr = arr_map[f]
+                if arr and i < len(arr) and arr[i] not in (None, ""):
+                    out[f][i] = arr[i]
+                    continue
+                # C：CSV 按 coin_cell_code
+                if code and code in csv_map:
+                    cv = csv_map[code].get(f)
+                    if cv not in (None, ""):
+                        out[f][i] = cv
+                        continue
+                # A：标量默认
+                d = default_map[f]
+                if d not in (None, ""):
+                    out[f][i] = d
+                    continue
+
+        # 缺失校验
+        missing = [(i, f) for f in FIELDS for i in range(N) if out[f][i] in (None, "")]
+        if missing:
+            raise ValueError(
+                f"battery_param 展开缺失: {missing}；请检查 A(default_*) / B(逐颗数组) / C(param_csv_path) 三种填法是否覆盖到每颗电池"
+            )
+
+        # 数值字段类型规范化（CSV 读出来可能是 numpy 类型，转回 Python 原生）
+        out["collector_mass"] = [float(v) for v in out["collector_mass"]]
+        out["capacity"]       = [float(v) for v in out["capacity"]]
+        out["active_material"] = [str(v) if not isinstance(v, str) else v for v in out["active_material"]]
+        out["battery_system"]  = [str(v) for v in out["battery_system"]]
+
+        return out["collector_mass"], out["active_material"], out["capacity"], out["battery_system"]
+
     def manual_confirm(
         self,
         resource: List[ResourceSlot],
         target_device: DeviceSlot,
         mount_resource: List[ResourceSlot],
-        collector_mass: List[float],
-        active_material: List[float],
-        capacity: List[float],
-        battery_system: List[str],
         formulations: List[Dict] = None,
         assembly_data: List[Dict] = None,
         csv_export_dir: str = "D:\\2604Agentic_test",
-        timeout_seconds: int = 3600,
+        timeout_seconds: int = 86400,
         assignee_user_ids: list[str] = None,
+        A: Dict = None,
+        B: Dict = None,
+        C: Dict = None,
         **kwargs,
     ) -> dict:
         """
         人工确认节点：
         - 上游接收 bioyond 配方（formulations）+ 扣电组装数据（assembly_data 单数组）
-        - 人工在前端填入 collector_mass / active_material / capacity / battery_system(xml工步)，
-          并选择 target_device 与 mount_resource（通道）
-        - 内部把 assembly_data 解包为 9 个并行数组，把 pole_weight 透传给下游 submit_auto_export_excel
+        - 人工在前端按 A/B/C 三种模式之一填写 4 个电池参数（collector_mass / active_material /
+          capacity / battery_system(xml工步)），并选择 target_device 与 mount_resource（通道）
+        - 后端按优先级 B > C > A 展开为长度 N 的 4 个 list；下游 submit_auto_export_excel 接口不变
+        - 内部把 assembly_data 解包为 9 个并行数组，把 pole_weight / coin_cell_code 透传给下游
         - 把所有数据整合后写入 {csv_export_dir}/{YYYYMMDD}/date_{YYYYMMDD}.csv
 
         Args:
-            timeout_seconds: 超时时间（秒），默认 3600
-            collector_mass: 极流体质量 (mg)
-            active_material: 活性物质含量 (0.97 或 "97%")
-            capacity: 克容量 (mAh/g)
-            battery_system: xml 工步标识（如 "811_LI_002"）
-            formulations: 配方信息列表（来自 bioyond mass_ratios）
-            assembly_data: 扣电组装数据列表（每颗电池一个 dict）
-            csv_export_dir: 整合 CSV 导出根目录
+            resource:        扣电组装物料系统（无需选择）—— 由系统自动管理的扣电资源列表
+            target_device:   目标新威测试柜设备
+            mount_resource:  新威测试通道 —— 选择目标新威测试柜上的测试通道（决定下游 N = len(mount_resource)）
+            formulations:    配方信息列表（来自 bioyond mass_ratios）
+            assembly_data:   扣电组装数据列表（每颗电池一个 dict）
+            csv_export_dir:  整合 CSV 导出根目录
+            timeout_seconds: 超时时间（秒），默认 86400；由 node_type=manual_confirm 的外层调度/前端等待机制处理，
+                             设备函数体内不做本地计时中断
+            assignee_user_ids: 通知人员
+            A: 模式A 参数一致（dict, 4 个 default_*）
+                {default_collector_mass, default_active_material, default_capacity, default_battery_system}
+            B: 模式B 参数不一致 数量少（dict, 4 个 list）
+                {collector_mass, active_material, capacity, battery_system}
+            C: 模式C 参数不一致 数量多（dict）
+                {param_csv_path}
+                CSV 表头需含 coin_cell_code(或 电池条码) + 集流体质量(或 collector_mass)
+                + 活性物质含量(或 active_material) + 克容量(或 capacity)
+                + 电池体系(或 xml工步 / battery_system)；行序不敏感，按 coin_cell_code 对齐
         """
+        A = A or {}
+        B = B or {}
+        C = C or {}
+
+        # 模式 A：标量默认（参数一致，整批共用）
+        default_collector_mass  = A.get("default_collector_mass")
+        default_active_material = A.get("default_active_material")
+        default_capacity        = A.get("default_capacity")
+        default_battery_system  = A.get("default_battery_system")
+
+        # 模式 B：逐颗数组（兼容老调用：若 kwargs 里平铺传入则也接受）
+        collector_mass  = B.get("collector_mass")  or kwargs.get("collector_mass")  or []
+        active_material = B.get("active_material") or kwargs.get("active_material") or []
+        capacity        = B.get("capacity")        or kwargs.get("capacity")        or []
+        battery_system  = B.get("battery_system")  or kwargs.get("battery_system")  or []
+
+        # 模式 C：CSV 路径
+        param_csv_path  = (C.get("param_csv_path") or "").strip()
+
         resource_dump = ResourceTreeSet.from_plr_resources(resource).dump()
         mount_resource_dump = ResourceTreeSet.from_plr_resources(mount_resource).dump()
 
         assembly_data = assembly_data or []
         formulations = formulations or []
 
-        # 入参诊断：定位「输出为空」时，先确认上游/人工到底传进来了什么
-        _in_msg = (
-            f"[manual_confirm] 入参 -> assembly_data={len(assembly_data)}, "
-            f"formulations={len(formulations)}, mount_resource={len(mount_resource or [])}, "
-            f"resource={len(resource or [])}, collector_mass={len(collector_mass or [])}, "
-            f"active_material={len(active_material or [])}, capacity={len(capacity or [])}, "
-            f"battery_system={len(battery_system or [])}, target_device={target_device!r}"
-        )
-        if self._ros_node:
-            self._ros_node.lab_logger().info(_in_msg)
-        else:
-            print(_in_msg)
-
         Time = [b.get("Time", "") for b in assembly_data]
         open_circuit_voltage = [b.get("open_circuit_voltage", 0.0) for b in assembly_data]
         pole_weight = [b.get("pole_weight", 0.0) for b in assembly_data]
         assembly_time = [b.get("assembly_time", 0) for b in assembly_data]
         assembly_pressure = [b.get("assembly_pressure", 0) for b in assembly_data]
+        target_assembly_pressure = [b.get("target_assembly_pressure", "") for b in assembly_data]
         electrolyte_volume = [b.get("electrolyte_volume", 0) for b in assembly_data]
         data_coin_type = [b.get("data_coin_type", 0) for b in assembly_data]
         electrolyte_code = [b.get("electrolyte_code", "") for b in assembly_data]
         coin_cell_code = [b.get("coin_cell_code", "") for b in assembly_data]
+
+        # 按优先级 B > C > A 展开为长度 N 的 4 个 list
+        collector_mass, active_material, capacity, battery_system = self._expand_battery_params(
+            mount_resource=mount_resource,
+            assembly_data=assembly_data,
+            collector_mass=collector_mass,
+            active_material=active_material,
+            capacity=capacity,
+            battery_system=battery_system,
+            default_collector_mass=default_collector_mass,
+            default_active_material=default_active_material,
+            default_capacity=default_capacity,
+            default_battery_system=default_battery_system,
+            param_csv_path=param_csv_path,
+        )
 
         try:
             self._export_manual_confirm_csv(
@@ -2057,6 +2367,7 @@ class NewareBatteryTestSystem:
                     "pole_weight": pole_weight,
                     "assembly_time": assembly_time,
                     "assembly_pressure": assembly_pressure,
+                    "target_assembly_pressure": target_assembly_pressure,
                     "electrolyte_volume": electrolyte_volume,
                     "data_coin_type": data_coin_type,
                     "electrolyte_code": electrolyte_code,
@@ -2073,7 +2384,7 @@ class NewareBatteryTestSystem:
             else:
                 print(f"[manual_confirm] 整合 CSV 导出失败: {e}")
 
-        result = {
+        return {
             "resource": resource_dump,
             "coin_cell_code": coin_cell_code,
             "electrolyte_code": electrolyte_code,
@@ -2085,20 +2396,6 @@ class NewareBatteryTestSystem:
             "battery_system": battery_system,
             "pole_weight": pole_weight,
         }
-
-        # 产出诊断：派生字段（coin_cell_code/electrolyte_code/pole_weight）只来自 assembly_data，
-        # 若 assembly_data 未接入则这三项必为空，下游 submit_auto_export_excel 会拿不到数据
-        _out_msg = (
-            f"[manual_confirm] 产出 -> coin_cell_code={coin_cell_code}, "
-            f"electrolyte_code={electrolyte_code}, pole_weight={pole_weight}, "
-            f"collector_mass={collector_mass}, battery_system={battery_system}"
-        )
-        if self._ros_node:
-            self._ros_node.lab_logger().info(_out_msg)
-        else:
-            print(_out_msg)
-
-        return result
 
     def _export_manual_confirm_csv(
         self,
@@ -2126,7 +2423,7 @@ class NewareBatteryTestSystem:
 
         header = [
             "Time", "open_circuit_voltage", "pole_weight",
-            "assembly_time", "assembly_pressure", "electrolyte_volume",
+            "assembly_time", "assembly_pressure", "target_assembly_pressure", "electrolyte_volume",
             "data_coin_type", "electrolyte_code", "coin_cell_code",
             "orderName", "prep_bottle_barcode", "vial_bottle_barcodes",
             "target_mass_ratio", "real_mass_ratio",
@@ -2146,8 +2443,29 @@ class NewareBatteryTestSystem:
                 except Exception:
                     return default
 
+            # 按 electrolyte_code 分组匹配配方：相同电解液码的电池共用同一配方；
+            # 不同电解液码按「首次出现顺序」依次对应 formulations[0], [1], ...
+            # （一瓶电解液 = 一个配方/订单，可灌装多颗扣电，故不能按行号一一对应）
+            electrolyte_codes = assembly_rows.get("electrolyte_code", [])
+            distinct_codes = []
+            for _code in electrolyte_codes:
+                _code = str(_code).strip()
+                if _code and _code not in distinct_codes:
+                    distinct_codes.append(_code)
+            code_to_formulation: Dict[str, dict] = {}
+            for _idx, _code in enumerate(distinct_codes):
+                if _idx < len(formulations) and isinstance(formulations[_idx], dict):
+                    code_to_formulation[_code] = formulations[_idx]
+
             for i in range(n):
-                form = formulations[i] if formulations and i < len(formulations) else {}
+                # 优先按电解液码取配方；无可用电解液码时回退到原有的按行号匹配
+                code_i = str(safe_get(electrolyte_codes, i, "")).strip()
+                if distinct_codes:
+                    form = code_to_formulation.get(code_i, {})
+                else:
+                    form = formulations[i] if formulations and i < len(formulations) else {}
+                if not isinstance(form, dict):
+                    form = {}
                 target_ratio = form.get("target_mass_ratio", {}) if isinstance(form, dict) else {}
                 real_ratio = form.get("real_mass_ratio", {}) if isinstance(form, dict) else {}
                 ch_name = self._extract_channel_name(mount_resource[i]) if mount_resource and i < len(mount_resource) else ""
@@ -2158,6 +2476,7 @@ class NewareBatteryTestSystem:
                     safe_get(assembly_rows["pole_weight"], i, 0.0),
                     safe_get(assembly_rows["assembly_time"], i, 0),
                     safe_get(assembly_rows["assembly_pressure"], i, 0),
+                    safe_get(assembly_rows["target_assembly_pressure"], i, ""),
                     safe_get(assembly_rows["electrolyte_volume"], i, 0),
                     safe_get(assembly_rows["data_coin_type"], i, 0),
                     safe_get(assembly_rows["electrolyte_code"], i),
@@ -2185,7 +2504,7 @@ class NewareBatteryTestSystem:
         resource: List[ResourceSlot],
         target_device: DeviceSlot,
         mount_resource: List[ResourceSlot],
-        timeout_seconds: int = 3600,
+        timeout_seconds: int = 86400,
         assignee_user_ids: list[str] = None,
         **kwargs,
     ):
@@ -2193,7 +2512,15 @@ class NewareBatteryTestSystem:
         电池装夹人工确认 + TCP 转运。
         - 该节点通过 yaml 的 node_type: manual_confirm 机制阻塞等待人工确认。
         - 人工在前端确认通道与电池对应关系（装夹就位）后，方法体才会被框架调用。
+        - timeout_seconds 由外层调度/前端等待机制处理；该方法体内不做本地计时中断。
         - 方法体执行真正的 TCP 资源转运。
+
+        Args:
+            resource:        扣电组装物料系统（无需选择）—— 由系统自动管理的扣电资源列表
+            target_device:   目标新威测试柜设备
+            mount_resource:  新威测试通道 —— 选择目标新威测试柜上的测试通道
+            timeout_seconds: 超时时间（秒），由外层调度/前端等待机制处理
+            assignee_user_ids: 通知人员
         """
         future = ROS2DeviceNode.run_async_func(
             self._ros_node.transfer_resource_to_another, True,
@@ -2297,14 +2624,14 @@ class NewareBatteryTestSystem:
         循环长度由 mount_resource 驱动（真正要下发的通道数量）。
 
         Args:
-            mount_resource:  目标通道资源列表（含 Channel_Name = devid-subdevid-chlid），循环长度来源
+            mount_resource:  新威测试通道 —— 目标通道资源列表（含 Channel_Name = devid-subdevid-chlid），循环长度来源
             collector_mass:  各电池集流体质量 (mg)
             active_material: 各电池活性物质比例（0.97 或 "97%"）
             capacity:        各电池克容量 (mAh/g)
             battery_system:  xml 工步标识（如 "811_LI_002"）
             pole_weight:     各电池极片质量 (mg)，来自上游 manual_confirm 的透传；为空时回退到从 resource 状态提取
             coin_cell_code:  各电池条码（来自上游 manual_confirm 从 assembly_data 解包）；作为 Neware 备份文件的 CoinID/barcode
-            resource:        成品电池资源列表（可选）；仅在 coin_cell_code 与 pole_weight 均未提供时作为回退
+            resource:        扣电组装物料系统（无需选择）—— 由系统自动管理的扣电资源列表；仅在 coin_cell_code 与 pole_weight 均未提供时作为回退
         """
         import importlib
         gen_mod = importlib.import_module(
