@@ -32,6 +32,8 @@ from unilabos.utils import logger
 _DEFAULT_COL_WIDTH = 160
 # 写入 lab_record 的硬约束：必须 editing 才能写
 _LAB_RECORD_STATUS_EDITING = "editing"
+# 保存后回写的状态(对齐前端归档动作)
+_LAB_RECORD_STATUS_ARCHIVED = "archived"
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +194,7 @@ def save_lab_record(
     lab_record: List[Dict[str, Any]],
     timeout: float = 30.0,
 ) -> str:
-    """保存富文本：先传 OSS(scene=record)，PATCH lab-record 只存 URL 字符串并保持 editing。
+    """保存富文本：先传 OSS(scene=record)，PATCH lab-record 只存 URL 字符串并置为 archived。
 
     与前端一致——``lab_record`` 字段存 OSS 文件 URL 而非内联数组，避免 notebook/detail
     响应体过大拖垮前端(同接口其它内容也渲染不出)。返回上传得到的 public_url。
@@ -201,7 +203,8 @@ def save_lab_record(
     payload = {
         "uuid": uuid,
         "lab_record": record_url,
-        "lab_record_status": _LAB_RECORD_STATUS_EDITING,
+        "lab_record_status": _LAB_RECORD_STATUS_ARCHIVED,
+        "status": _LAB_RECORD_STATUS_ARCHIVED,
     }
     resp = requests.patch(
         f"{_base_url()}/lab/notebook/lab-record",
