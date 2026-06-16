@@ -763,9 +763,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
     async def update_resource(self, resources: List["ResourcePLR"]):
         r = SerialCommand.Request()
         tree_set = ResourceTreeSet.from_plr_resources(resources)
+        # host_node 的根物料无父 uuid 是预期状态（归属 host_node 自身、不物理挂载），不告警/不回填；
+        # 其它设备的无父根物料才自动以当前设备为根。
+        is_host = self.device_id == "host_node"
         for tree in tree_set.trees:
             root_node = tree.root_node
-            if not root_node.res_content.uuid_parent:
+            if not root_node.res_content.uuid_parent and not is_host:
                 logger.warning(f"更新无父节点物料{root_node}，自动以当前设备作为根节点")
                 root_node.res_content.parent_uuid = self.uuid
         r.command = json.dumps({"data": {"data": tree_set.dump()}, "action": "update"})
