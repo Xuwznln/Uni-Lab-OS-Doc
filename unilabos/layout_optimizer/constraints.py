@@ -16,6 +16,7 @@ from .obb import (
     nearest_point_on_obb,
     obb_corners,
     obb_min_distance,
+    obb_overlap,
     obb_penetration_depth,
     segment_obb_intersection_length,
 )
@@ -135,6 +136,16 @@ def evaluate_default_hard_constraints(
         overshoot += max(0.0, (p.y + hd) - lab.depth)  # top wall
         cost += boundary_weight * overshoot
 
+    # Graduated wall-obstacle penalty: 每个设备 OBB vs 每面墙 OBB 的穿透深度
+    for w in lab.wall_obstacles:
+        wall_corners = obb_corners(w.cx, w.cy, w.length, w.thickness, w.yaw)
+        for p in placements:
+            dev = device_map[p.device_id]
+            dc = obb_corners(p.x, p.y, dev.bbox[0], dev.bbox[1], p.theta)
+            depth = obb_penetration_depth(dc, wall_corners)
+            if depth > 0:
+                cost += collision_weight * depth
+
     return cost
 
 
@@ -155,6 +166,19 @@ def _evaluate_hard_binary(
         oob = collision_checker.check_bounds(checker_placements, lab.width, lab.depth)
         if oob:
             return math.inf
+
+    # 墙体障碍：任一设备与任一墙 OBB 重叠 → inf
+    if lab.wall_obstacles:
+        device_map = {d.id: d for d in devices}
+        for w in lab.wall_obstacles:
+            wall_corners = obb_corners(w.cx, w.cy, w.length, w.thickness, w.yaw)
+            for p in placements:
+                dev = device_map.get(p.device_id)
+                if dev is None:
+                    continue
+                dc = obb_corners(p.x, p.y, dev.bbox[0], dev.bbox[1], p.theta)
+                if obb_overlap(dc, wall_corners):
+                    return math.inf
 
     return 0.0
 

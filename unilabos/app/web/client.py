@@ -64,6 +64,53 @@ class HTTPClient:
             logger.error(f"添加物料关系失败: {response.status_code}, {response.text}")
         return response
 
+    def material_add(
+        self, nodes: List[Dict[str, Any]], mount_uuid: str, first_add: bool = True
+    ) -> Dict[str, str]:
+        """上传 Material 模式的设备节点到云端 /edge/material（自动布局结果上传）。
+
+        与 resource_tree_add 走同一端点与鉴权，但直接接收已构造好的 Material 节点 dict 列表
+        （由 layout_optimizer 的 placements_to_graph 产出的 graph["nodes"]），不经过 ResourceTreeSet。
+
+        Args:
+            nodes: 已适配为 Material 模式的节点 dict 列表（含 uuid/id/name/type/class/pose）
+            mount_uuid: 挂载到云端资源树的目标 uuid。为空时使用云端默认根挂载
+            first_add: 首次添加用 POST，否则用 PUT
+
+        Returns:
+            Dict[str, str]: 旧UUID到云端UUID的映射 {uuid: cloud_uuid}
+        """
+        payload = {"nodes": nodes}
+        # 与 edge 启动链路保持一致：允许 mount_uuid 为空并由云端按默认根挂载处理
+        if mount_uuid:
+            payload["mount_uuid"] = mount_uuid
+        if first_add:
+            response = requests.post(
+                f"{self.remote_addr}/edge/material",
+                json=payload,
+                headers={"Authorization": f"Lab {self.auth}"},
+                timeout=60,
+            )
+        else:
+            response = requests.put(
+                f"{self.remote_addr}/edge/material",
+                json=payload,
+                headers={"Authorization": f"Lab {self.auth}"},
+                timeout=60,
+            )
+        uuid_mapping: Dict[str, str] = {}
+        if response.status_code == 200:
+            res = response.json()
+            if "code" in res and res["code"] != 0:
+                logger.error(f"上传布局设备失败: {response.text}")
+            else:
+                for i in res.get("data", []) or []:
+                    if "uuid" in i and "cloud_uuid" in i:
+                        uuid_mapping[i["uuid"]] = i["cloud_uuid"]
+        else:
+            logger.error(f"上传布局设备失败: {response.status_code}, {response.text}")
+        return uuid_mapping
+
     def resource_tree_add(self, resources: ResourceTreeSet, mount_uuid: str, first_add: bool) -> Dict[str, str]:
         """
         添加资源

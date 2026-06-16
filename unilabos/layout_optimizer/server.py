@@ -5,6 +5,8 @@
 
 运行方式：
     uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
+    # 或（推荐，支持 --config / --ak --sk --addr）
+    python -m unilabos.layout_optimizer.run_server --config layout_optimizer.config.json
 
 调试模式（启用 DEBUG 日志，含优化器逐代 cost 明细）：
     LAYOUT_DEBUG=1 uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
@@ -22,18 +24,21 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 import itertools
+import json
 import logging
 import logging.handlers
 import math
 import os
+import socket
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from .constraints import DEFAULT_WEIGHT_ANGLE  # noqa: F401 — kept for external use
 from .device_catalog import (
@@ -466,11 +471,27 @@ async def interpret_schema():
 
 
 class DeviceSpec(BaseModel):
-    id: str
+    # 允许字段名或 JSON 别名（camelCase / type）混用
+    model_config = ConfigDict(populate_by_name=True)
+
+    # type(=id，catalog/footprint id) + count 是 /optimize/scene 唯一需要的输入；
+    # 其余字段全部可选，缺省时由 OS(footprints bbox + registry model)自动补全、uuid 自动生成。
+    id: str = Field(..., alias="type")
+    count: int = 1
     name: str = ""
     size: list[float] | None = None
     device_type: str = "static"
     uuid: str = ""
+    # ---- edge Material 可选覆盖（不传则自动补全） ----
+    model: dict = {}
+    config: dict = {}
+    data: dict = {}
+    parent_uuid: str = Field("", alias="parentUuid")
+    parent: str = ""
+    parent_link: str = Field("", alias="parentLink")
+    mount_point: str = Field("", alias="mountPoint")
+    # 允许直接传 pose.extra（优先级高于 parent_link/mount_point）
+    extra: dict = {}
 
 
 class ConstraintSpec(BaseModel):
@@ -484,6 +505,8 @@ class LabSpec(BaseModel):
     width: float
     depth: float
     obstacles: list[dict] = []
+    # 墙体障碍 OBB：[{cx, cy, length, thickness, yaw}, ...]（局部帧，米/弧度）
+    wall_obstacles: list[dict] = []
 
 
 class OptimizeRequest(BaseModel):
@@ -700,6 +723,252 @@ async def run_optimize(request: OptimizeRequest):
         breakdown=breakdown,
         violations=violations,
         conflicts=conflicts,
+    )
+
+
+# ---------- 优化 -> 读 building 作分布区域 -> edge Material graph -> 上传 /edge/material ----------
+
+
+class OptimizeSceneRequest(OptimizeRequest):
+    """读 building 作分布区域 + 设备 type/count 自动排布 + 上传云端，一次调用走完。
+
+    devices 仅需 type + count，其余字段自动补全（OS：footprints bbox + registry model）；优化器只填 pose。
+    building（scene_path 优先，否则 scene）作为分布区域：取墙体/slab 包围盒为矩形区域，
+    墙体转 OBB 障碍物，设备避开墙。building 仅作输入，不并入输出。
+    输出 edge Material graph 在响应返回；默认先落盘本地再上传（可通过 saveLocal 关闭本地保存）。
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    # building 能解析出区域时用 building；否则回退请求体 lab(width/depth)
+    lab: LabSpec | None = None
+    scene_path: str = ""
+    scene: dict = {}
+    mount_uuid: str = ""
+    first_add: bool = True
+    # 本地保存：默认开启；output_path 为空时自动推导
+    save_local: bool = Field(True, alias="saveLocal")
+    output_path: str = Field("", alias="outputPath")
+
+
+class OptimizeSceneResponse(BaseModel):
+    # 仅设备的 edge Material graph {nodes:[Material...], edges:[]}（不含 building）
+    graph: dict
+    cloud_uuid_mapping: dict = {}
+    # cost 不可行时为 inf；JSON 不支持 inf，故置 None（以 success 判定可行性）
+    cost: float | None = None
+    success: bool
+    saved_local: bool = False
+    local_graph_path: str = ""
+    uploaded: bool = False
+
+
+def _check_remote_connectivity(remote_addr: str, timeout_s: float = 3.0) -> None:
+    """上传前快速检查云端网络连通性（TCP 层）。"""
+    parsed = urlparse(remote_addr)
+    if not parsed.hostname:
+        raise ValueError(f"remote_addr 无法解析主机: {remote_addr}")
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    with socket.create_connection((parsed.hostname, port), timeout=timeout_s):
+        return
+
+
+def _resolve_graph_output_path(output_path: str, scene_path: str) -> Path:
+    """决定 graph 本地保存路径。"""
+    if output_path:
+        return Path(output_path).expanduser().resolve()
+    if scene_path:
+        p = Path(scene_path)
+        return p.with_name(f"{p.stem}_layout_graph.json")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return (Path.cwd() / f"layout_graph_{ts}.json").resolve()
+
+
+def _save_graph_to_local(graph: dict, output_path: str, scene_path: str) -> str:
+    """先落盘本地 graph，再做上传。"""
+    target = _resolve_graph_output_path(output_path, scene_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8") as f:
+        json.dump(graph, f, ensure_ascii=False, indent=2)
+    return str(target)
+
+
+@app.post("/optimize/scene", response_model=OptimizeSceneResponse)
+async def run_optimize_scene(request: OptimizeSceneRequest):
+    """一次走完：读 building 作分布区域(避墙) -> 优化 -> 合成 edge Material graph -> 上传 /edge/material。
+
+    设备只需 type+count，其余从 OS 自动补；输出 graph 在响应返回，并可按请求自动本地保存。
+    上传复用 edge 的 HTTPClient + 同一个 /edge/material 端点；mount_uuid 为空时按云端默认根挂载。
+    """
+    import uuid as _uuid
+
+    from fastapi import HTTPException
+
+    from .building_region import load_scene_file, parse_building_region
+    from .device_catalog import resolve_registry_model
+    from .graph_export import placements_to_graph
+
+    # 0. 上传前置检查：云端配置 / 网络连通（避免最后一步才报错）
+    mount_uuid = request.mount_uuid or os.getenv("LAYOUT_MOUNT_UUID", "")
+    try:
+        from unilabos.app.web.client import HTTPClient
+    except Exception as e:  # pragma: no cover - 仅在缺少 unilabos 依赖时触发
+        raise HTTPException(status_code=500, detail=f"云端上传依赖不可用: {e}")
+    client = HTTPClient()
+    if not client.remote_addr or not client.auth:
+        raise HTTPException(
+            status_code=400,
+            detail="缺少云端配置：需要 HTTPConfig.remote_addr 与 ak/sk（BasicConfig.auth_secret）",
+        )
+    # 测试场景可通过 LAYOUT_SKIP_CLOUD_PREFLIGHT=1 跳过前置连通检查
+    if os.getenv("LAYOUT_SKIP_CLOUD_PREFLIGHT", "").lower() not in {"1", "true", "yes"}:
+        try:
+            _check_remote_connectivity(client.remote_addr, timeout_s=3.0)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"remote_addr 配置无效: {e}")
+        except OSError as e:
+            raise HTTPException(status_code=502, detail=f"云端网络不通: {e}")
+
+    # 1. building 输入 -> 分布区域 + 墙体障碍
+    base_scene = None
+    if request.scene_path:
+        try:
+            base_scene = load_scene_file(request.scene_path)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    elif request.scene:
+        base_scene = request.scene
+
+    region = parse_building_region(base_scene) if base_scene else None
+    origin = (0.0, 0.0)
+    wall_obstacle_dicts: list[dict] = []
+    if region is not None:
+        origin, region_w, region_d, wall_obstacles = region
+        lab_width, lab_depth = region_w, region_d
+        wall_obstacle_dicts = [
+            {"cx": w.cx, "cy": w.cy, "length": w.length, "thickness": w.thickness, "yaw": w.yaw}
+            for w in wall_obstacles
+        ]
+    elif request.lab is not None:
+        lab_width, lab_depth = request.lab.width, request.lab.depth
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="无法从 building 解析分布区域，且未提供 lab(width/depth)",
+        )
+
+    # 2. 展开 count + 自动补全（同 type 共享 model；uuid 逐实例唯一）
+    expanded_specs: list[DeviceSpec] = []
+    instance_meta: dict[str, dict] = {}
+    for d in request.devices:
+        reg_model = resolve_registry_model(d.id) or {}
+        model = d.model or reg_model
+        display_name = d.name or d.id
+        raw_extra = dict(d.extra or {})
+        parent_link = (
+            raw_extra.get("parent_link")
+            or raw_extra.get("parentLink")
+            or d.parent_link
+            or ""
+        )
+        mount_point = (
+            raw_extra.get("mount_point")
+            or raw_extra.get("mountPoint")
+            or d.mount_point
+            or ""
+        )
+        n = max(1, d.count)
+        for _ in range(n):
+            inst_uuid = d.uuid if (n == 1 and d.uuid) else str(_uuid.uuid4())
+            instance_meta[inst_uuid] = {
+                "id": d.id,
+                "display_name": display_name,
+                "model": model,
+                "config": d.config or {},
+                "data": d.data or {},
+                "parent_uuid": d.parent_uuid or "",
+                "parent": d.parent or "",
+                "extra": {
+                    "parent_link": str(parent_link),
+                    "mount_point": str(mount_point),
+                },
+            }
+            expanded_specs.append(
+                DeviceSpec(
+                    id=d.id,
+                    name=d.name,
+                    size=d.size,
+                    device_type=d.device_type,
+                    uuid=inst_uuid,
+                )
+            )
+
+    # 3. 用区域(含墙障碍)的 lab + 展开设备跑优化（复用 /optimize 全流程）
+    opt_lab = LabSpec(width=lab_width, depth=lab_depth, wall_obstacles=wall_obstacle_dicts)
+    opt_req = request.model_copy(update={"devices": expanded_specs, "lab": opt_lab})
+    opt_resp = await run_optimize(opt_req)
+
+    # 4. placements(局部帧米) -> 归一化 placed(building 世界坐标米 = origin + 局部)
+    placed: list[dict] = []
+    for pr in opt_resp.placements:
+        meta = instance_meta.get(pr.uuid, {})
+        placed.append(
+            {
+                "id": meta.get("id", pr.device_id),
+                "uuid": pr.uuid,
+                "display_name": meta.get("display_name") or pr.device_id,
+                "model": meta.get("model", {}),
+                "config": meta.get("config", {}),
+                "data": meta.get("data", {}),
+                "parent_uuid": meta.get("parent_uuid", ""),
+                "parent": meta.get("parent", ""),
+                "extra": meta.get("extra", {}),
+                "x": origin[0] + pr.position.x,
+                "y": origin[1] + pr.position.y,
+                "z": pr.position.z,
+                "theta": pr.rotation.z,
+            }
+        )
+
+    # 5. 合成 edge Material graph（响应返回 + 上传同一份；不含 building）
+    graph = placements_to_graph(placed)
+
+    # 6. 先落本地（可选），再上传云端（最后一步）
+    local_graph_path = ""
+    saved_local = False
+    if request.save_local:
+        try:
+            local_graph_path = _save_graph_to_local(graph, request.output_path, request.scene_path)
+            saved_local = True
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"本地保存 graph 失败: {e}")
+
+    # 7. 上传：复用 edge HTTPClient -> POST /edge/material（nodes 即上面的 Material 节点）
+    try:
+        cloud_uuid_mapping = client.material_add(
+            graph["nodes"], mount_uuid=mount_uuid, first_add=request.first_add,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"上传云端失败: {e}")
+
+    logger.info(
+        "optimize/scene 完成：%d 设备节点（区域 %.2f×%.2f，墙障碍 %d），已上传至 %s/edge/material",
+        len(placed),
+        lab_width,
+        lab_depth,
+        len(wall_obstacle_dicts),
+        client.remote_addr,
+    )
+
+    return OptimizeSceneResponse(
+        graph=graph,
+        cloud_uuid_mapping=cloud_uuid_mapping,
+        cost=opt_resp.cost if math.isfinite(opt_resp.cost) else None,
+        success=opt_resp.success,
+        saved_local=saved_local,
+        local_graph_path=local_graph_path,
+        uploaded=True,
     )
 
 

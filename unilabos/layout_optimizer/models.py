@@ -47,12 +47,28 @@ class Obstacle:
 
 
 @dataclass
+class WallObstacle:
+    """墙体障碍（OBB）：中心 + 长 + 厚 + 偏航角，局部帧坐标，单位：米/弧度。
+
+    作为优化器的固定障碍物，设备需避开（不与之重叠）。
+    """
+
+    cx: float
+    cy: float
+    length: float     # 沿墙方向（对应 OBB 的 width）
+    thickness: float  # 垂直墙方向（对应 OBB 的 depth）
+    yaw: float        # 弧度
+
+
+@dataclass
 class Lab:
     """实验室平面图。"""
 
     width: float  # X 方向，单位：米
     depth: float  # Y 方向，单位：米
     obstacles: list[Obstacle] = field(default_factory=list)
+    # 墙体障碍（OBB，局部帧）；设备需避开。来自 building_region.parse_building_region
+    wall_obstacles: list["WallObstacle"] = field(default_factory=list)
 
 
 @dataclass

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .models import Lab, Obstacle
+from .models import Lab, Obstacle, WallObstacle
 
 
 def parse_lab(data: dict) -> Lab:
@@ -30,10 +30,22 @@ def parse_lab(data: dict) -> Lab:
                 depth=float(obs["depth"]),
             )
         )
+    wall_obstacles = []
+    for w in data.get("wall_obstacles", []):
+        wall_obstacles.append(
+            WallObstacle(
+                cx=float(w["cx"]),
+                cy=float(w["cy"]),
+                length=float(w["length"]),
+                thickness=float(w["thickness"]),
+                yaw=float(w.get("yaw", 0.0)),
+            )
+        )
     return Lab(
         width=float(data["width"]),
         depth=float(data["depth"]),
         obstacles=obstacles,
+        wall_obstacles=wall_obstacles,
     )
 
 

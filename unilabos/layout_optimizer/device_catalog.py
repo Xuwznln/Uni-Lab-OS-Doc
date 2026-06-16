@@ -300,3 +300,102 @@ def create_devices_from_list(
             )
         )
     return devices
+
+
+# ---------- 注册表 model 块加载（edge Material 节点的 model: mesh/path/type 来源） ----------
+
+# 默认注册表目录：unilabos/registry（device_catalog 在 unilabos/layout_optimizer 下）
+_DEFAULT_REGISTRY_DIR = _THIS_DIR.parent / "registry"
+
+_registry_models_cache: dict[str, dict] | None = None
+
+
+def _model_index_keys(entry_key: str, mesh: str) -> list[str]:
+    """一个注册表条目可被哪些 type 命中：完整 key、末段、mesh 全名、mesh 首段。"""
+    keys = {entry_key}
+    if "." in entry_key:
+        keys.add(entry_key.rsplit(".", 1)[-1])
+    if mesh:
+        keys.add(mesh)
+        keys.add(mesh.split("/", 1)[0])
+    return [k for k in keys if k]
+
+
+def load_registry_models(registry_dir: str | Path | None = None) -> dict[str, dict]:
+    """扫描 registry YAML，按设备 type 索引 ``model`` 块（缓存）。
+
+    返回 ``{type: {mesh, path, type, format}}``（与 edge Material 的 model 字段一致）：
+    - ``mesh``   = 注册表 ``model.mesh``（设备为裸名，资源为 ``.../meshes/x.stl`` 路径）
+    - ``path``   = 注册表 ``model.path``（云端 OSS xacro URL）
+    - ``type``   = 注册表 ``model.type``（device / resource）
+    - ``format`` = "xacro"
+
+    yaml 不可用或目录缺失时返回空索引（优雅降级）。
+    """
+    global _registry_models_cache
+    if registry_dir is None:
+        if _registry_models_cache is not None:
+            return _registry_models_cache
+        registry_dir = _DEFAULT_REGISTRY_DIR
+
+    use_cache = registry_dir is _DEFAULT_REGISTRY_DIR or registry_dir == _DEFAULT_REGISTRY_DIR
+
+    try:
+        import yaml
+    except ImportError:
+        logger.warning("PyYAML 不可用，跳过注册表 model 解析")
+        if use_cache:
+            _registry_models_cache = {}
+        return {}
+
+    root = Path(registry_dir)
+    index: dict[str, dict] = {}
+    if not root.exists():
+        logger.warning("注册表目录不存在: %s", root)
+    else:
+        yaml_files = sorted((root / "devices").glob("*.yaml")) + sorted(
+            (root / "resources").rglob("*.yaml")
+        )
+        for yaml_path in yaml_files:
+            try:
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+            except Exception:
+                continue
+            if not isinstance(data, dict):
+                continue
+            for key, entry in data.items():
+                if not isinstance(entry, dict):
+                    continue
+                model = entry.get("model")
+                if not isinstance(model, dict) or not model.get("path"):
+                    continue
+                mesh = str(model.get("mesh", ""))
+                # 与 edge Material 的 model 字段对齐：mesh / path / type / format
+                resolved = {
+                    "mesh": mesh,
+                    "path": str(model.get("path", "")),
+                    "type": str(model.get("type", "device")),
+                    "format": "xacro",
+                }
+                for k in _model_index_keys(str(key), mesh):
+                    index.setdefault(k, resolved)
+        logger.info("Loaded %d registry model entries from %s", len(index), root)
+
+    if use_cache:
+        _registry_models_cache = index
+    return index
+
+
+def reset_registry_models_cache() -> None:
+    """清除注册表 model 缓存（测试用）。"""
+    global _registry_models_cache
+    _registry_models_cache = None
+
+
+def resolve_registry_model(type_id: str) -> dict | None:
+    """按设备 type 返回 edge Material 节点用的 ``model`` dict（缺失返回 None）。"""
+    if not type_id:
+        return None
+    found = load_registry_models().get(type_id)
+    return dict(found) if found else None

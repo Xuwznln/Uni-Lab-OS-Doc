@@ -465,7 +465,8 @@ To switch to real checkers: `LAYOUT_CHECKER_MODE=moveit` + pass MoveIt2 instance
 | File                                    | Purpose                                                                                                             |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `llm_skill/layout_intent_translator.md` | System prompt for LLM: intent schema, device resolution, translation rules, examples                                |
-| `llm_skill/demo_agent.md`               | LLM agent orchestration instructions for demo (GET /devices → intents → /interpret → /optimize → /scene/placements) |
+| `llm_skill/demo_agent.md`               | LLM demo orchestration: main path `/interpret` + `/optimize/auto` + `/scene/placements`, optional graph/cloud sync via `/optimize/scene` |
+| `llm_skill/scene_graph_converter.md`    | LLM request-conversion skill for `/optimize/scene` (`building + type/count` → edge graph pipeline request body)     |
 
 
 ### Demo / Frontend
@@ -611,6 +612,26 @@ curl -X POST http://localhost:8000/optimize \
     "maxiter": 100,
     "seed": 42
   }' | python3 -m json.tool
+
+# 5. One-call graph generation + local save + cloud upload
+#    Requires cloud config (ak/sk/addr). mount_uuid is optional (empty => root mount).
+curl -X POST http://localhost:8000/optimize/scene \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scene_path": "C:/path/to/building_scene.json",
+    "devices": [
+      {"type": "thermo_orbitor_rs2_hotel", "count": 1},
+      {"type": "arm_slider", "count": 1},
+      {"type": "opentrons_liquid_handler", "count": 1},
+      {"type": "agilent_plateloc", "count": 1},
+      {"type": "inheco_odtc_96xl", "count": 1}
+    ],
+    "mount_uuid": "lab-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "first_add": true,
+    "saveLocal": true,
+    "outputPath": "C:/path/to/scene_layout_graph.json",
+    "run_de": false
+  }' | python3 -m json.tool
 ```
 
 ---
@@ -729,15 +750,17 @@ LLM agent orchestration instructions for natural language lab layout design.
 2. Parse user natural language request
 3. Build structured intents JSON (using `layout_intent_translator.md` skill)
 4. `POST /interpret` — Translate intents to constraints
-5. `POST /optimize` — Run layout optimization
+5. `POST /optimize/auto` — Run self-healing layout optimization
 6. `POST /scene/placements` — Push results to shared scene state
-7. Frontend auto-updates via polling (no manual refresh needed)
+7. (Optional, on graph/upload request) Use `scene_graph_converter.md` then call `POST /optimize/scene` with building + `type/count` (and optional `mount_uuid`) to generate edge graph, save local, and upload cloud
+8. Frontend auto-updates via polling (no manual refresh needed)
 
 **Example user requests**:
 
 - "Design a PCR lab with robot arm automation, keep it compact"
 - "Place liquid handler, thermal cycler, and plate sealer. Arm must reach all devices."
 - "Add a plate hotel, make sure it's close to the liquid handler"
+- "Use this building file, generate edge graph, save local, and upload to cloud"
 
 ### 11.4 Running the Demo
 
@@ -749,7 +772,8 @@ uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
 # http://localhost:8000/
 
 # Use Claude Code with demo_agent.md skill to orchestrate via natural language
-# The agent will call the API endpoints and push results to /scene/placements
+# The agent will call /interpret + /optimize/auto + /scene/placements
+# If graph/cloud sync is requested, it additionally calls /optimize/scene
 # The frontend will automatically update via polling
 ```
 
@@ -758,8 +782,9 @@ uvicorn unilabos.layout_optimizer.server:app --host 0.0.0.0 --port 8000 --reload
 1. Open `http://localhost:8000/` in browser
 2. Frontend loads device catalog and displays 3D scene
 3. Use Claude Code with `demo_agent.md` skill to send natural language requests
-4. Agent translates request → intents → constraints → optimization → scene update
+4. Agent translates request → intents → constraints → `/optimize/auto` → scene update
 5. Frontend polls `/scene/placements` every 1s and animates changes
 6. User can manually add/remove devices or adjust lab size in the UI
-7. Click "Auto Layout" to re-optimize with current devices
+7. If needed, agent runs `/optimize/scene` to generate edge graph + local save + cloud upload
+8. Click "Auto Layout" to re-optimize with current devices
 
