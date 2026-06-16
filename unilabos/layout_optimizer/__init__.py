@@ -5,5 +5,32 @@
 
 from .models import Constraint, Device, Lab, Opening, Placement
 from .optimizer import optimize
+from .rail_layout import (
+    DEFAULT_PARAMS,
+    DEFAULT_WORKING_RADIUS,
+    RailLayoutResult,
+    RailParams,
+    assign_and_place_instruments,
+    check_feasibility,
+    layout_rail,
+    place_arms_and_stacks,
+    validate_placements,
+)
 
-__all__ = ["Device", "Lab", "Opening", "Placement", "Constraint", "optimize"]
+__all__ = [
+    "Device",
+    "Lab",
+    "Opening",
+    "Placement",
+    "Constraint",
+    "optimize",
+    "DEFAULT_PARAMS",
+    "DEFAULT_WORKING_RADIUS",
+    "RailParams",
+    "RailLayoutResult",
+    "check_feasibility",
+    "place_arms_and_stacks",
+    "assign_and_place_instruments",
+    "validate_placements",
+    "layout_rail",
+]

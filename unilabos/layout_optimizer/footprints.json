@@ -423,22 +423,6 @@
     ],
     "source": "assets"
   },
-  "arm_slider": {
-    "bbox": [
-      2.14,
-      0.3538
-    ],
-    "height": 0.805,
-    "origin_offset": [
-      0.912,
-      0.0781
-    ],
-    "model_file": "",
-    "model_type": "",
-    "thumbnail_file": "",
-    "openings": [],
-    "source": "registry"
-  },
   "artificial_nuvo": {
     "bbox": [
       0.24,
@@ -964,6 +948,54 @@
     "model_file": "meshes/plate.glb",
     "model_type": "gltf",
     "thumbnail_file": "plate.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "biotage_extrahera": {
+    "bbox": [
+      0.8209,
+      0.783
+    ],
+    "height": 0.368,
+    "origin_offset": [
+      -0.0004,
+      0.3915
+    ],
+    "model_file": "meshes/biotage_extrahera.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "biotage_isolera_one": {
+    "bbox": [
+      0.4701,
+      0.6
+    ],
+    "height": 0.3153,
+    "origin_offset": [
+      0.0,
+      0.3
+    ],
+    "model_file": "meshes/biotage_isolera_one.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "biotage_pressure_96": {
+    "bbox": [
+      0.3198,
+      0.39
+    ],
+    "height": 0.2275,
+    "origin_offset": [
+      -0.0002,
+      0.195
+    ],
+    "model_file": "meshes/biotage_pressure_96.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
     "openings": [],
     "source": "assets"
   },
@@ -1543,6 +1575,38 @@
     ],
     "source": "assets"
   },
+  "cem_discover_2": {
+    "bbox": [
+      0.3908,
+      0.3
+    ],
+    "height": 0.3402,
+    "origin_offset": [
+      -0.0002,
+      0.15
+    ],
+    "model_file": "meshes/cem_discover_2.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "chemspeed_swing_sp": {
+    "bbox": [
+      1.5642,
+      2.0
+    ],
+    "height": 1.3381,
+    "origin_offset": [
+      -0.0004,
+      1.0
+    ],
+    "model_file": "meshes/chemspeed_swing_sp.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "corning_falcon_15ml_tube": {
     "bbox": [
       0.0175,
@@ -1751,6 +1815,38 @@
     ],
     "source": "assets"
   },
+  "dual_channel_automated_reactor": {
+    "bbox": [
+      0.4499,
+      0.56
+    ],
+    "height": 0.4901,
+    "origin_offset": [
+      -0.0003,
+      0.28
+    ],
+    "model_file": "meshes/dual_channel_automated_reactor.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "dual_channel_parallel_synthesizer": {
+    "bbox": [
+      0.267,
+      0.38
+    ],
+    "height": 0.3801,
+    "origin_offset": [
+      -0.0002,
+      0.19
+    ],
+    "model_file": "meshes/dual_channel_parallel_synthesizer.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "dynamic_devices_lynx_1200": {
     "bbox": [
       0.8515,
@@ -1798,54 +1894,6 @@
     "thumbnail_file": "0_base.png",
     "openings": [],
     "source": "assets"
-  },
-  "elite_cs612_arm": {
-    "bbox": [
-      0.2,
-      0.2
-    ],
-    "height": 0.1,
-    "origin_offset": [
-      0.0,
-      0.0
-    ],
-    "model_file": "",
-    "model_type": "",
-    "thumbnail_file": "",
-    "openings": [],
-    "source": "manual"
-  },
-  "elite_cs66_arm": {
-    "bbox": [
-      0.2,
-      0.2
-    ],
-    "height": 0.1,
-    "origin_offset": [
-      0.0,
-      0.0
-    ],
-    "model_file": "",
-    "model_type": "",
-    "thumbnail_file": "",
-    "openings": [],
-    "source": "manual"
-  },
-  "elite_robot": {
-    "bbox": [
-      0.2,
-      0.2
-    ],
-    "height": 0.1,
-    "origin_offset": [
-      0.0,
-      0.0
-    ],
-    "model_file": "",
-    "model_type": "",
-    "thumbnail_file": "",
-    "openings": [],
-    "source": "manual"
   },
   "eppendorf_0.5ml_tube": {
     "bbox": [
@@ -2500,6 +2548,22 @@
     "model_file": "meshes/0_base.glb",
     "model_type": "gltf",
     "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "genevac_ez2": {
+    "bbox": [
+      0.6533,
+      0.56
+    ],
+    "height": 0.4953,
+    "origin_offset": [
+      -0.0003,
+      0.28
+    ],
+    "model_file": "meshes/genevac_ez2.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
     "openings": [],
     "source": "assets"
   },
@@ -3887,6 +3951,22 @@
     "openings": [],
     "source": "assets"
   },
+  "harvard_phd_syringe_pump": {
+    "bbox": [
+      0.3546,
+      0.2
+    ],
+    "height": 0.2098,
+    "origin_offset": [
+      -0.0001,
+      0.1
+    ],
+    "model_file": "meshes/harvard_phd_syringe_pump.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "hettich_rotanta_460_centrifuge": {
     "bbox": [
       0.6945,
@@ -4655,6 +4735,54 @@
     ],
     "source": "assets"
   },
+  "hplc_mass_spec": {
+    "bbox": [
+      1.9438,
+      1.2
+    ],
+    "height": 1.2839,
+    "origin_offset": [
+      -0.0009,
+      0.6
+    ],
+    "model_file": "meshes/hplc_mass_spec.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "huber_ministat_125": {
+    "bbox": [
+      0.2105,
+      0.429
+    ],
+    "height": 0.4232,
+    "origin_offset": [
+      -0.0002,
+      0.2145
+    ],
+    "model_file": "meshes/huber_ministat_125.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "ika_electrasyn_2": {
+    "bbox": [
+      0.2426,
+      0.3
+    ],
+    "height": 0.4579,
+    "origin_offset": [
+      -0.0002,
+      0.15
+    ],
+    "model_file": "meshes/ika_electrasyn_2.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "illumia_miseq_sequencer": {
     "bbox": [
       0.5639,
@@ -4895,6 +5023,22 @@
     ],
     "source": "assets"
   },
+  "justrite_safety_cabinet": {
+    "bbox": [
+      1.0634,
+      1.65
+    ],
+    "height": 0.8993,
+    "origin_offset": [
+      0.0006,
+      0.825
+    ],
+    "model_file": "meshes/justrite_safety_cabinet.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "lab_companion_microwave_oven": {
     "bbox": [
       0.478,
@@ -4917,6 +5061,22 @@
         "label": "auto_xacro"
       }
     ],
+    "source": "assets"
+  },
+  "lab_press": {
+    "bbox": [
+      0.3343,
+      0.35
+    ],
+    "height": 0.35,
+    "origin_offset": [
+      -0.0002,
+      0.175
+    ],
+    "model_file": "meshes/lab_press.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
     "source": "assets"
   },
   "liconic_str44_incubator": {
@@ -5263,6 +5423,22 @@
     "openings": [],
     "source": "assets"
   },
+  "mbraun_glovebox": {
+    "bbox": [
+      2.0348,
+      2.0
+    ],
+    "height": 1.1645,
+    "origin_offset": [
+      -0.0089,
+      1.0
+    ],
+    "model_file": "meshes/mbraun_glovebox.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "memmert_forced_air_incubator": {
     "bbox": [
       0.625,
@@ -5300,6 +5476,38 @@
     "model_file": "meshes/0_base.glb",
     "model_type": "gltf",
     "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "mettler_toledo_xp205": {
+    "bbox": [
+      0.1984,
+      0.45
+    ],
+    "height": 0.3267,
+    "origin_offset": [
+      -0.0002,
+      0.225
+    ],
+    "model_file": "meshes/mettler_toledo_xp205.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "mettler_toledo_xpr204": {
+    "bbox": [
+      0.3035,
+      0.453
+    ],
+    "height": 0.7796,
+    "origin_offset": [
+      -0.0004,
+      0.2265
+    ],
+    "model_file": "meshes/mettler_toledo_xpr204.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
     "openings": [],
     "source": "assets"
   },
@@ -6127,6 +6335,22 @@
     ],
     "source": "assets"
   },
+  "pcr_thermal_cycler": {
+    "bbox": [
+      0.2954,
+      0.35
+    ],
+    "height": 0.3567,
+    "origin_offset": [
+      -0.0002,
+      0.175
+    ],
+    "model_file": "meshes/pcr_thermal_cycler.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "perkinelmer_opera_phenix": {
     "bbox": [
       1.2916,
@@ -6319,6 +6543,22 @@
     ],
     "source": "assets"
   },
+  "polyblock_high_pressure_reactor": {
+    "bbox": [
+      0.1823,
+      0.2
+    ],
+    "height": 0.137,
+    "origin_offset": [
+      0.0002,
+      0.1
+    ],
+    "model_file": "meshes/polyblock_high_pressure_reactor.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "promega_glomax_discover_microplate_reader": {
     "bbox": [
       0.4637,
@@ -6463,6 +6703,38 @@
     "openings": [],
     "source": "assets"
   },
+  "rotary_evaporator": {
+    "bbox": [
+      0.4511,
+      0.6
+    ],
+    "height": 0.3586,
+    "origin_offset": [
+      -0.0004,
+      0.3
+    ],
+    "model_file": "meshes/rotary_evaporator.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "rotary_evaporator_set": {
+    "bbox": [
+      0.1928,
+      0.7
+    ],
+    "height": 0.2096,
+    "origin_offset": [
+      -0.0002,
+      0.35
+    ],
+    "model_file": "meshes/rotary_evaporator_set.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "sarstedt_14x200mm_tube": {
     "bbox": [
       0.014,
@@ -6575,6 +6847,54 @@
     ],
     "source": "assets"
   },
+  "short_path_distillation_1": {
+    "bbox": [
+      0.2286,
+      0.45
+    ],
+    "height": 0.2328,
+    "origin_offset": [
+      -0.0002,
+      0.225
+    ],
+    "model_file": "meshes/short_path_distillation_1.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "short_path_distillation_2": {
+    "bbox": [
+      1.2767,
+      1.2
+    ],
+    "height": 0.6175,
+    "origin_offset": [
+      -0.0007,
+      0.6
+    ],
+    "model_file": "meshes/short_path_distillation_2.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
+  "short_path_distillation_3": {
+    "bbox": [
+      2.8149,
+      1.7
+    ],
+    "height": 1.7574,
+    "origin_offset": [
+      -0.0022,
+      0.85
+    ],
+    "model_file": "meshes/short_path_distillation_3.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "southern_labware_benchtop_incubator_shaker": {
     "bbox": [
       0.44,
@@ -6597,6 +6917,22 @@
         "label": "auto_xacro"
       }
     ],
+    "source": "assets"
+  },
+  "syrris_asia_flow_chemistry": {
+    "bbox": [
+      0.2197,
+      0.3
+    ],
+    "height": 0.1872,
+    "origin_offset": [
+      -0.0004,
+      0.15
+    ],
+    "model_file": "meshes/syrris_asia_flow_chemistry.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
     "source": "assets"
   },
   "tecan_cabinet_extension_freedom_evo_carousel": {
@@ -9071,6 +9407,22 @@
     ],
     "source": "assets"
   },
+  "thalesnano_h_cube": {
+    "bbox": [
+      0.4378,
+      0.315
+    ],
+    "height": 0.3359,
+    "origin_offset": [
+      -0.0002,
+      0.1575
+    ],
+    "model_file": "meshes/thalesnano_h_cube.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "assets"
+  },
   "thermo_alps_3000": {
     "bbox": [
       0.19,
@@ -9260,6 +9612,22 @@
     "model_file": "meshes/0_base.glb",
     "model_type": "gltf",
     "thumbnail_file": "0_base.png",
+    "openings": [],
+    "source": "assets"
+  },
+  "thermo_fisher_balance": {
+    "bbox": [
+      1.6444,
+      1.8991
+    ],
+    "height": 1.8968,
+    "origin_offset": [
+      -0.0009,
+      -0.001
+    ],
+    "model_file": "meshes/thermo_fisher_balance.glb",
+    "model_type": "gltf",
+    "thumbnail_file": "",
     "openings": [],
     "source": "assets"
   },
@@ -10270,5 +10638,149 @@
       }
     ],
     "source": "assets"
+  },
+  "arm_slider": {
+    "bbox": [
+      2.14,
+      0.3538
+    ],
+    "height": 0.805,
+    "origin_offset": [
+      0.912,
+      0.0781
+    ],
+    "model_file": "meshes/arm_base.STL",
+    "model_type": "stl",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "dummy2_robot": {
+    "bbox": [
+      111.7515,
+      319.0775
+    ],
+    "height": 442.7502,
+    "origin_offset": [
+      5.9758,
+      109.2498
+    ],
+    "model_file": "meshes/J1_1.stl",
+    "model_type": "stl",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "elite_robot": {
+    "bbox": [
+      0.1142,
+      0.128
+    ],
+    "height": 0.1015,
+    "origin_offset": [
+      0.0,
+      0.028
+    ],
+    "model_file": "meshes/gripper.STL",
+    "model_type": "stl",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "hplc_station": {
+    "bbox": [
+      1.6575,
+      3.05
+    ],
+    "height": 1.5802,
+    "origin_offset": [
+      0.0788,
+      0.775
+    ],
+    "model_file": "meshes/arm_base.STL",
+    "model_type": "stl",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "liquid_transform_xyz": {
+    "bbox": [
+      0.8555,
+      0.614
+    ],
+    "height": 0.619,
+    "origin_offset": [
+      0.2467,
+      0.1468
+    ],
+    "model_file": "meshes/base_link.STL",
+    "model_type": "stl",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "slide_w140": {
+    "bbox": [
+      1.07,
+      0.2125
+    ],
+    "height": 0.074,
+    "origin_offset": [
+      0.465,
+      -0.0387
+    ],
+    "model_file": "meshes/base_link.STL",
+    "model_type": "stl",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "toyo_xyz": {
+    "bbox": [
+      1.171,
+      0.2145
+    ],
+    "height": 0.089,
+    "origin_offset": [
+      0.4145,
+      -0.0117
+    ],
+    "model_file": "meshes/base2_link.STL",
+    "model_type": "stl",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "registry"
+  },
+  "elite_cs66_arm": {
+    "bbox": [
+      0.2,
+      0.2
+    ],
+    "height": 0.1,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "",
+    "model_type": "",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "manual"
+  },
+  "elite_cs612_arm": {
+    "bbox": [
+      0.2,
+      0.2
+    ],
+    "height": 0.1,
+    "origin_offset": [
+      0.0,
+      0.0
+    ],
+    "model_file": "",
+    "model_type": "",
+    "thumbnail_file": "",
+    "openings": [],
+    "source": "manual"
   }
 }

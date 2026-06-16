@@ -54,6 +54,7 @@ from .feasibility import compute_breakdown, conflicts_to_dicts, precheck_conflic
 from .models import Constraint, Intent
 from .optimizer import optimize
 from .parallel_optimize import run_multistart
+from . import rail_layout
 
 _console_level = logging.DEBUG if os.getenv("LAYOUT_DEBUG") else logging.INFO
 # root logger must be DEBUG so the file handler receives all records;
@@ -1143,6 +1144,164 @@ async def run_optimize_auto(request: AutoOptimizeRequest):
         conflicts=[],
         violations=outcome["violations"],
     )
+
+
+# ---------- 导轨布局 API（确定性解析布局） ----------
+#
+# 与 /optimize 系列（差分进化随机寻优）不同，本组端点走确定性解析布局：
+# 距离参数定死后坐标唯一，不跑 DE。当前为阶段0（M0）骨架，核心算法在
+# rail_layout.py 的 M1~M3 填充，未实现的端点返回 501。
+
+
+class RailParamsSpec(BaseModel):
+    """导轨布局距离参数覆盖（缺省项回落 rail_layout.DEFAULT_PARAMS）。"""
+
+    a: float | None = None
+    b: float | None = None
+    c: float | None = None
+    d: float | None = None
+    e: float | None = None
+    working_radius: float | None = None
+
+
+class RailFeasibilityRequest(BaseModel):
+    devices: list[DeviceSpec]
+    ordered_instruments: list[str]
+    lab: LabSpec
+    arm_model: dict | None = None
+    params: RailParamsSpec | None = None
+    stack_model: str | dict | None = rail_layout.DEFAULT_STACK_MODEL
+
+
+class RailFeasibilityResponse(BaseModel):
+    feasible: bool
+    n_arm: int
+    n_stack: int
+    n_max: int
+    l_max: float = 0.0
+    mode_hint: str
+    reasons: list[str] = []
+    suggestions: list[str] = []
+
+
+class RailLayoutRequest(BaseModel):
+    devices: list[DeviceSpec]
+    ordered_instruments: list[str]
+    lab: LabSpec
+    arm_model: dict | None = None
+    params: RailParamsSpec | None = None
+    mode: str = "near_wall"
+    stack_model: str | dict | None = rail_layout.DEFAULT_STACK_MODEL
+
+
+class RailLayoutResponse(BaseModel):
+    placements: list[PlacementResult]
+    arms: list[dict] = []
+    stacks: list[dict] = []
+    conflicts: list[dict] = []
+
+
+class RailValidateRequest(BaseModel):
+    placements: list[PlacementResult]
+    lab: LabSpec
+    arms: list[dict] = []
+    # 用于按 device_id 反查 bbox（PlacementResult 不含 bbox）
+    devices: list[DeviceSpec] = []
+
+
+class RailValidateResponse(BaseModel):
+    conflicts: list[dict] = []
+
+
+def _rail_params(spec: RailParamsSpec | None) -> rail_layout.RailParams:
+    """将请求中的参数覆盖转为 RailParams（缺省回落默认值）。"""
+    overrides = spec.model_dump(exclude_none=True) if spec else None
+    return rail_layout.RailParams.from_overrides(overrides)
+
+
+@app.post("/rail/feasibility", response_model=RailFeasibilityResponse)
+async def run_rail_feasibility(request: RailFeasibilityRequest):
+    """阶段一：导轨布局可行性检查（M1 填充核心算法）。"""
+    from fastapi import HTTPException
+
+    devices = create_devices_from_list([d.model_dump() for d in request.devices])
+    lab = parse_lab(request.lab.model_dump())
+    params = _rail_params(request.params)
+    try:
+        report = rail_layout.check_feasibility(
+            devices, request.ordered_instruments, lab, request.arm_model, params,
+            request.stack_model,
+        )
+    except NotImplementedError as e:
+        raise HTTPException(status_code=501, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return RailFeasibilityResponse(
+        feasible=report.feasible,
+        n_arm=report.n_arm,
+        n_stack=report.n_stack,
+        n_max=report.n_max,
+        l_max=report.l_max,
+        mode_hint=report.mode_hint,
+        reasons=report.reasons,
+        suggestions=report.suggestions,
+    )
+
+
+@app.post("/rail/layout", response_model=RailLayoutResponse)
+async def run_rail_layout(request: RailLayoutRequest):
+    """阶段一~三上层编排：可行性 → 布臂/堆栈 → 布仪器 → 多退少补 → 校验。"""
+    from dataclasses import asdict
+
+    from fastapi import HTTPException
+
+    devices = create_devices_from_list([d.model_dump() for d in request.devices])
+    lab = parse_lab(request.lab.model_dump())
+    params = _rail_params(request.params)
+    mode = "centered" if request.mode == "centered" else "near_wall"
+
+    try:
+        result = rail_layout.layout_rail(
+            devices, request.ordered_instruments, lab, request.arm_model, params,
+            mode, request.stack_model,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return RailLayoutResponse(
+        placements=[
+            PlacementResult(
+                device_id=p.device_id,
+                uuid=p.device_id,
+                position=PositionXYZ(x=round(p.center[0], 4), y=round(p.center[1], 4), z=0.0),
+                rotation=PositionXYZ(x=0.0, y=0.0, z=round(p.theta, 4)),
+            )
+            for p in result.placements
+        ],
+        arms=[asdict(a) for a in result.arms],
+        stacks=[asdict(s) for s in result.stacks],
+        conflicts=rail_layout.conflicts_to_dicts(result.conflicts),
+    )
+
+
+@app.post("/rail/validate", response_model=RailValidateResponse)
+async def run_rail_validate(request: RailValidateRequest):
+    """可选：仪器布局的环境碰撞 / 越界校验守卫。"""
+    lab = parse_lab(request.lab.model_dump())
+    devices = create_devices_from_list([d.model_dump() for d in request.devices])
+    bbox_map = {d.id: (float(d.bbox[0]), float(d.bbox[1])) for d in devices}
+
+    placements = [
+        rail_layout.InstrumentPlacement(
+            device_id=p.device_id,
+            center=(p.position.x, p.position.y),
+            theta=p.rotation.z,
+            bbox=bbox_map.get(p.device_id, (0.0, 0.0)),
+        )
+        for p in request.placements
+    ]
+    conflicts = rail_layout.validate_placements(placements, lab, lab.obstacles, None)
+    return RailValidateResponse(conflicts=rail_layout.conflicts_to_dicts(conflicts))
 
 
 # ---------- 场景状态 API（演示用） ----------
