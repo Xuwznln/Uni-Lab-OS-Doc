@@ -37,6 +37,7 @@ from unilabos.registry.placeholder_type import (
 from unilabos.registry.registry import lab_registry
 from unilabos.resources.container import RegularContainer
 from unilabos.resources.graphio import initialize_resource
+from unilabos.resources.liquids import apply_substances
 from unilabos.resources.registry import add_schema
 from unilabos.resources.resource_tracker import (
     ResourceDict,
@@ -595,19 +596,9 @@ class HostNode(BaseROS2DeviceNode):
                 "z": bind_locations.z,
             },
         }
-        if len(liquid_input_slot) and liquid_input_slot[0] == -1:  # 目前container只逐个创建
-            res_creation_input.update(
-                {
-                    "data": {
-                        "liquids": [
-                            {
-                                "liquid_type": liquid_type[0] if liquid_type else None,
-                                "liquid_volume": liquid_volume[0] if liquid_volume else None,
-                            }
-                        ]
-                    }
-                }
-            )
+        # 注: 容器自身液体 (liquid_input_slot == [-1]) 不再通过 data.liquids 预埋
+        # （initialize_resource 仅按 class+name 重建，data 会被丢弃），统一由设备侧
+        # _append_resource_inner 在创建后通过 apply_substances 写入。
         init_new_res = initialize_resource(res_creation_input)  # flatten的格式
         if len(init_new_res) > 1:  # 一个物料，多个子节点
             init_new_res = [init_new_res]
@@ -1707,49 +1698,6 @@ class HostNode(BaseROS2DeviceNode):
         )
         return {"resource": tree}
 
-    def _resolve_substance_targets(self, material, slots: List[str]) -> list:
-        """
-        定位 set_substance 的设置目标。
-
-        - slots 为空：目标是物料自身（material 本身是 container / well）。
-        - slots 非空：目标是 material 的子孔位/子容器（carrier 带 container、plate 带 well）。
-          依次尝试 get_well(名称) -> __getitem__ -> children[索引] -> 按名称匹配。
-        """
-        if not slots:
-            return [material]
-        targets = []
-        for s in slots:
-            child = None
-            # plate: 按孔名/孔索引
-            if hasattr(material, "get_well"):
-                try:
-                    child = material.get_well(s)
-                except Exception:
-                    child = None
-            # carrier/plate: __getitem__（支持 int 索引 / 名称）
-            if child is None:
-                key = int(s) if isinstance(s, str) and s.isdigit() else s
-                try:
-                    child = material[key]
-                except Exception:
-                    child = None
-            # 索引回退到 children
-            if child is None and isinstance(s, str) and s.isdigit():
-                try:
-                    child = material.children[int(s)]
-                except Exception:
-                    child = None
-            # 按名称回退
-            if child is None:
-                for c in getattr(material, "children", []):
-                    if c.name == s or c.name.endswith(f"_{s}"):
-                        child = c
-                        break
-            if child is None:
-                raise ValueError(f"无法在物料 {getattr(material, 'name', material)} 中定位子孔位 {s}")
-            targets.append(child)
-        return targets
-
     @action(
         description="设置物料内容物（液体/固体，默认单位 微升/微克）；接收单个物料，设置后输出",
         always_free=True,
@@ -1800,20 +1748,8 @@ class HostNode(BaseROS2DeviceNode):
         """
         if resource is None:
             raise ValueError("设置内容物失败：未接收到物料")
-        targets = self._resolve_substance_targets(resource, slots)
-        if not (len(targets) == len(substance_names) == len(amounts)):
-            raise ValueError(
-                f"set_substance 入参长度不一致：targets={len(targets)} names={len(substance_names)} "
-                f"amounts={len(amounts)}"
-            )
-        for i, (tgt, name, amount) in enumerate(zip(targets, substance_names, amounts)):
-            if not hasattr(tgt, "set_liquids"):
-                raise ValueError(
-                    f"目标 {getattr(tgt, 'name', tgt)} 不是容器，无法设置内容物（请检查 slots 是否指向子孔位）"
-                )
-            # 单位固定默认：固体=ug（微克）、液体=ul（微升）；set_liquids 三元组 (液体/名称, 量, 单位)
-            unit = "ug" if (i < len(is_solid) and is_solid[i]) else "ul"
-            tgt.set_liquids([(name, amount, unit)])
+        # 统一走 apply_substances：目标解析 + ug/ul 单位 + set_liquids 三元组
+        apply_substances(resource, substance_names, amounts, slots=slots, is_solid=is_solid)
         # 同步整棵树到云端（含被修改的子孔位）
         await self.update_resource([resource])
         dumped = ResourceTreeSet.from_plr_resources([resource]).dump()

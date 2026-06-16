@@ -40,6 +40,7 @@ from unilabos.registry.decorators import get_topic_config
 from unilabos.utils.decorator import get_all_subscriptions
 
 from unilabos.resources.container import RegularContainer
+from unilabos.resources.liquids import apply_substances
 from unilabos.resources.graphio import (
     initialize_resources,
 )
@@ -506,7 +507,6 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         async def _append_resource_inner(req: SerialCommand_Request, res: SerialCommand_Response, _ar_tag: str = ""):
             from pylabrobot.resources.deck import Deck
             from pylabrobot.resources import Coordinate
-            from pylabrobot.resources import Plate
 
             # _t0 = time.time()
             client = self._resource_clients["c2s_update_resource_tree"]
@@ -588,6 +588,16 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             plr_instances = rts.to_plr_resources()
             for plr_instance in plr_instances:
                 self.resource_tracker.loop_update_uuid(plr_instance, uuid_maps)
+            # driver 自带 create_resource 时由 driver 负责增加液体；否则走通用 apply_substances
+            _delegates_to_driver = hasattr(self.driver_instance, "create_resource") and self.node_name != "host_node"
+            # 容器自身液体 (LIQUID_INPUT_SLOT == [-1])：在快照前写入，使其归属 created_resource_tree
+            if (
+                not _delegates_to_driver
+                and len(plr_instances) == 1
+                and ADD_LIQUID_TYPE
+                and list(LIQUID_INPUT_SLOT) == [-1]
+            ):
+                apply_substances(plr_instances[0], ADD_LIQUID_TYPE, LIQUID_VOLUME, broadcast=True)
             rts: ResourceTreeSet = ResourceTreeSet.from_plr_resources(plr_instances)
             self.lab_logger().info(f"Resource tree added. UUID mapping: {len(uuid_maps)} nodes")
             final_response = {
@@ -596,7 +606,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             }
             res.response = json.dumps(final_response)
             # 如果driver自己就有assign的方法，那就使用driver自己的assign方法
-            if hasattr(self.driver_instance, "create_resource") and self.node_name != "host_node":
+            if _delegates_to_driver:
                 create_resource_func = getattr(self.driver_instance, "create_resource")
                 try:
                     ret = create_resource_func(
@@ -619,30 +629,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             try:
                 if len(rts.root_nodes) == 1 and parent_resource is not None:
                     plr_instance = plr_instances[0]
-                    if isinstance(plr_instance, Plate):
-                        if len(ADD_LIQUID_TYPE) == 1 and len(LIQUID_VOLUME) == 1 and len(LIQUID_INPUT_SLOT) > 1:
-                            ADD_LIQUID_TYPE = ADD_LIQUID_TYPE * len(LIQUID_INPUT_SLOT)
-                            LIQUID_VOLUME = LIQUID_VOLUME * len(LIQUID_INPUT_SLOT)
-                            self.lab_logger().warning(
-                                f"增加液体资源时，数量为1，自动补全为 {len(LIQUID_INPUT_SLOT)} 个"
-                            )
-                        try:
-                            # noinspection PyProtectedMember
-                            keys = list(plr_instance._ordering.keys())
-                            for ind, r in enumerate(LIQUID_INPUT_SLOT[:]):
-                                if isinstance(r, int):
-                                    # noinspection PyTypeChecker
-                                    LIQUID_INPUT_SLOT[ind] = keys[r]
-                            input_wells = [plr_instance.get_well(r) for r in LIQUID_INPUT_SLOT]
-                        except AttributeError:
-                            # 按照id回去失败，回退到children
-                            input_wells = []
-                            for r in LIQUID_INPUT_SLOT:
-                                input_wells.append(plr_instance.children[r])
-                        for input_well, liquid_type, liquid_volume, liquid_input_slot in zip(
-                            input_wells, ADD_LIQUID_TYPE, LIQUID_VOLUME, LIQUID_INPUT_SLOT
-                        ):
-                            input_well.set_liquids([(liquid_type, liquid_volume, "ul")])
+                    # 子孔位液体 (LIQUID_INPUT_SLOT != [-1])：写入子孔位，归属 liquid_input_resource_tree。
+                    # 统一走 apply_substances：孔位解析(int→_ordering key/名称/children) + 1→N 广播 + set_liquids。
+                    if ADD_LIQUID_TYPE and list(LIQUID_INPUT_SLOT) != [-1]:
+                        input_wells = apply_substances(
+                            plr_instance, ADD_LIQUID_TYPE, LIQUID_VOLUME, slots=LIQUID_INPUT_SLOT, broadcast=True
+                        )
                         final_response["liquid_input_resource_tree"] = ResourceTreeSet.from_plr_resources(
                             input_wells
                         ).dump()
