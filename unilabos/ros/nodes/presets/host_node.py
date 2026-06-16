@@ -26,8 +26,14 @@ from unilabos_msgs.srv import (
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
 from unique_identifier_msgs.msg import UUID
 
-from unilabos.registry.decorators import device, action, NodeType
-from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
+from unilabos.registry.decorators import device, action, NodeType, ActionInputHandle, ActionOutputHandle, DataSource
+from unilabos.registry.placeholder_type import (
+    ResourceSlot,
+    DeviceSlot,
+    PLACEHOLDER_RESOURCES,
+    PLACEHOLDER_MANUAL_CONFIRM,
+    PLACEHOLDER_DEDUCT_RESOURCE,
+)
 from unilabos.registry.registry import lab_registry
 from unilabos.resources.container import RegularContainer
 from unilabos.resources.graphio import initialize_resource
@@ -68,15 +74,15 @@ class DeviceActionStatus:
 
 
 class TestResourceReturn(TypedDict):
-    resources: List[List[ResourceDict]]
-    devices: List[Dict[str, Any]]
-    # unilabos_samples: List[LabSample]
+    resources: List[List[ResourceDictType]]
+    devices: List[DeviceSlot]
+    unilabos_samples: List[LabSample]
 
 
 class CreateResourceReturn(TypedDict):
-    created_resource_tree: List[List[ResourceDict]]
+    created_resource_tree: List[List[ResourceDictType]]
     liquid_input_resource_tree: List[Dict[str, Any]]
-    # unilabos_samples: List[LabSample]
+    unilabos_samples: List[LabSample]
 
 
 class TestLatencyReturn(TypedDict):
@@ -1639,7 +1645,7 @@ class HostNode(BaseROS2DeviceNode):
         return res
 
     @action(always_free=True, node_type=NodeType.MANUAL_CONFIRM, placeholder_keys={
-        "assignee_user_ids": "unilabos_manual_confirm"
+        "assignee_user_ids": PLACEHOLDER_MANUAL_CONFIRM
     }, goal_default={
         "timeout_seconds": 3600,
         "assignee_user_ids": []
@@ -1650,6 +1656,168 @@ class HostNode(BaseROS2DeviceNode):
         修改的结果无效，是只读的
         """
         return kwargs
+
+    @action(
+        description="申请扣减物料并取出（接收服务端已扣减的单个根物料，校验+转换后输出）",
+        always_free=True,
+        placeholder_keys={"resource": PLACEHOLDER_DEDUCT_RESOURCE},
+        handles=[
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="扣减物料",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="resource",
+                data_type="resource",
+                label="取出物料",
+                data_key="resource",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    def apply_deduct_resource(self, resource: ResourceSlot) -> dict:
+        """
+        申请扣减物料并取出。
+
+        服务端已完成扣减并回传实际物料；本动作只做校验，并让物料走 unilab 资源转换后输出。
+        入参 uuid 由前端传入，框架在 send_goal 执行时已解析为单个 PLR 实例。
+        parent_uuid 保持为空即归属 host_node 自身，不在此挂载（物理落位交给后续 transfer）。
+
+        Args:
+            resource[扣减物料]: 已扣减的单个根物料（不是列表，框架已解析为实例）。
+            class_name[资源类型]: 资源注册表类型名（可选，用于标注/校验）。
+
+        Note:
+            返回的 resource 是 list[ResourceDict]（单个根物料的扁平节点列表），
+            不是 list[list[ResourceDict]]，因为只有一个根物料。
+        """
+        if resource is None:
+            raise ValueError("申请扣减失败：未接收到已扣减物料")
+        if getattr(resource, "unilabos_uuid", None) is None:
+            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 缺少 unilabos_uuid，无法取出")
+        # 走 unilab 新转换：PLR 实例 -> ResourceTreeSet -> dump，单根取 [0]
+        dumped = ResourceTreeSet.from_plr_resources([resource]).dump()
+        tree: List[Dict[str, Any]] = dumped[0] if dumped else []
+        barcode = tree[0].get("barcode", "") if tree else ""
+        self.lab_logger().info(
+            f"[apply_deduct_resource] 取出物料 name={getattr(resource, 'name', '')} barcode={barcode}"
+        )
+        return {"resource": tree}
+
+    def _resolve_substance_targets(self, material, slots: List[str]) -> list:
+        """
+        定位 set_substance 的设置目标。
+
+        - slots 为空：目标是物料自身（material 本身是 container / well）。
+        - slots 非空：目标是 material 的子孔位/子容器（carrier 带 container、plate 带 well）。
+          依次尝试 get_well(名称) -> __getitem__ -> children[索引] -> 按名称匹配。
+        """
+        if not slots:
+            return [material]
+        targets = []
+        for s in slots:
+            child = None
+            # plate: 按孔名/孔索引
+            if hasattr(material, "get_well"):
+                try:
+                    child = material.get_well(s)
+                except Exception:
+                    child = None
+            # carrier/plate: __getitem__（支持 int 索引 / 名称）
+            if child is None:
+                key = int(s) if isinstance(s, str) and s.isdigit() else s
+                try:
+                    child = material[key]
+                except Exception:
+                    child = None
+            # 索引回退到 children
+            if child is None and isinstance(s, str) and s.isdigit():
+                try:
+                    child = material.children[int(s)]
+                except Exception:
+                    child = None
+            # 按名称回退
+            if child is None:
+                for c in getattr(material, "children", []):
+                    if c.name == s or c.name.endswith(f"_{s}"):
+                        child = c
+                        break
+            if child is None:
+                raise ValueError(f"无法在物料 {getattr(material, 'name', material)} 中定位子孔位 {s}")
+            targets.append(child)
+        return targets
+
+    @action(
+        description="设置物料内容物（液体/固体，默认单位 微升/微克）；接收单个物料，设置后输出",
+        always_free=True,
+        placeholder_keys={"resource": PLACEHOLDER_RESOURCES},
+        handles=[
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="目标物料",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="resource",
+                data_type="resource",
+                label="目标物料",
+                data_key="resource",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    async def set_substance(
+        self,
+        resource: ResourceSlot,
+        substance_names: List[str],
+        amounts: List[float],
+        slots: List[str] = [],
+        is_solid: List[bool] = [],
+    ) -> dict:
+        """
+        设置单个物料的内容物（液体或固体）。
+
+        接收的物料必须是单个，且为以下之一：
+        - container：直接设置在自身的 tracker 上；
+        - well（带标号的容器）：同样设置在自身；
+        - carrier / plate 带 container：按 slots 设置在对应子容器的 tracker 上（支持 tracker 输入）。
+
+        设置目标只有两种：物料自身，或物料下面 children 的孔位。由 slots 区分（空=自身）。
+        单位固定默认：固体=微克(ug)、液体=微升(ul)，由 is_solid 区分（unilab 定制 PLR 的
+        set_liquids 仅支持 ul/ug）。底层走 set_liquids 三元组 (名称, 量, 单位)。
+
+        Args:
+            resource[目标物料]: 单个物料（container / well / 带子容器的 carrier|plate）。
+            substance_names[物质名称]: 每个目标的物质名（液体名或固体名）。
+            amounts[用量]: 每个目标的用量（液体=体积/微升，固体=质量/微克）。
+            slots[子孔位]: 子孔位 id/索引；为空=设在物料自身，非空=设在对应子容器。
+            is_solid[是否固体]: 每个目标是否固体（可选，缺省按液体处理；决定单位 ug/ul）。
+        """
+        if resource is None:
+            raise ValueError("设置内容物失败：未接收到物料")
+        targets = self._resolve_substance_targets(resource, slots)
+        if not (len(targets) == len(substance_names) == len(amounts)):
+            raise ValueError(
+                f"set_substance 入参长度不一致：targets={len(targets)} names={len(substance_names)} "
+                f"amounts={len(amounts)}"
+            )
+        for i, (tgt, name, amount) in enumerate(zip(targets, substance_names, amounts)):
+            if not hasattr(tgt, "set_liquids"):
+                raise ValueError(
+                    f"目标 {getattr(tgt, 'name', tgt)} 不是容器，无法设置内容物（请检查 slots 是否指向子孔位）"
+                )
+            # 单位固定默认：固体=ug（微克）、液体=ul（微升）；set_liquids 三元组 (液体/名称, 量, 单位)
+            unit = "ug" if (i < len(is_solid) and is_solid[i]) else "ul"
+            tgt.set_liquids([(name, amount, unit)])
+        # 同步整棵树到云端（含被修改的子孔位）
+        await self.update_resource([resource])
+        dumped = ResourceTreeSet.from_plr_resources([resource]).dump()
+        return {"resource": dumped[0] if dumped else []}
 
     def test_resource(
         self,
