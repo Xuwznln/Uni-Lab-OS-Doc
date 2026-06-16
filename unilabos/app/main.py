@@ -196,6 +196,13 @@ def parse_args():
         help="Upload registry information when starting unilab",
     )
     parser.add_argument(
+        "--upload_registry_only",
+        type=str,
+        default=None,
+        nargs="+",
+        help="仅上报 id 以这些前缀开头的设备/资源（忽略大小写）；不传则全量上报",
+    )
+    parser.add_argument(
         "--use_remote_resource",
         action="store_true",
         help="Use remote resources when starting unilab",
@@ -528,6 +535,7 @@ def main():
     BasicConfig.is_host_mode = not args_dict.get("is_slave", False)
     BasicConfig.slave_no_host = args_dict.get("slave_no_host", False)
     BasicConfig.upload_registry = args_dict.get("upload_registry", False)
+    BasicConfig.upload_registry_only = args_dict.get("upload_registry_only", None)
     BasicConfig.no_update_feedback = args_dict.get("no_update_feedback", False)
     BasicConfig.test_mode = args_dict.get("test_mode", False)
     if BasicConfig.test_mode:
@@ -636,7 +644,9 @@ def main():
         if BasicConfig.ak and BasicConfig.sk:
             # print_status("开始注册设备到服务端...", "info")
             try:
-                register_devices_and_resources(lab_registry)
+                register_devices_and_resources(
+                    lab_registry, id_prefixes=BasicConfig.upload_registry_only
+                )
                 # print_status("设备注册完成", "info")
             except Exception as e:
                 print_status(f"设备注册失败: {e}", "error")

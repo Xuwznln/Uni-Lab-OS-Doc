@@ -14,6 +14,7 @@ class BasicConfig:
     is_host_mode = True
     slave_no_host = False  # 是否跳过rclient.wait_for_service()
     upload_registry = False
+    upload_registry_only = None  # 仅上报 id 以这些前缀开头的设备/资源（忽略大小写）；None 表示全量上报
     machine_name = "undefined"
     vis_2d_enable = False
     no_update_feedback = False

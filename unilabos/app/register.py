@@ -5,9 +5,15 @@ from unilabos.utils.log import logger
 from unilabos.utils.tools import normalize_json as _normalize_device
 
 
-def register_devices_and_resources(lab_registry, gather_only=False) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+def register_devices_and_resources(
+    lab_registry, gather_only=False, id_prefixes=None
+) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
     """
     注册设备和资源到服务器（仅支持HTTP）
+
+    Args:
+        id_prefixes: 可选的 id 前缀白名单（忽略大小写）。非空时仅上报 id 以这些前缀开头的设备/资源；
+            为 None 或空时全量上报。
     """
 
     from unilabos.app.web.client import http_client
@@ -23,6 +29,21 @@ def register_devices_and_resources(lab_registry, gather_only=False) -> Optional[
     for resource_info in lab_registry.obtain_registry_resource_info():
         resources_to_register[resource_info["id"]] = resource_info
         logger.trace(f"[UniLab Register] 收集资源: {resource_info['id']}")
+
+    if id_prefixes:
+        prefixes = tuple(p.lower() for p in id_prefixes)
+
+        def _match(rid: str) -> bool:
+            return rid.lower().startswith(prefixes)
+
+        device_total, resource_total = len(devices_to_register), len(resources_to_register)
+        devices_to_register = {k: v for k, v in devices_to_register.items() if _match(k)}
+        resources_to_register = {k: v for k, v in resources_to_register.items() if _match(k)}
+        logger.info(
+            f"[UniLab Register] 上报白名单过滤(前缀={list(id_prefixes)}): "
+            f"设备 {device_total} -> {len(devices_to_register)}, "
+            f"资源 {resource_total} -> {len(resources_to_register)}"
+        )
 
     if gather_only:
         return devices_to_register, resources_to_register
