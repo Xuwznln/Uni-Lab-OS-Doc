@@ -936,6 +936,8 @@ class RailValidateRequest(BaseModel):
     placements: list[PlacementResult]
     lab: LabSpec
     arms: list[dict] = []
+    # 用于按 device_id 反查 bbox（PlacementResult 不含 bbox）
+    devices: list[DeviceSpec] = []
 
 
 class RailValidateResponse(BaseModel):
@@ -979,30 +981,24 @@ async def run_rail_feasibility(request: RailFeasibilityRequest):
 
 @app.post("/rail/layout", response_model=RailLayoutResponse)
 async def run_rail_layout(request: RailLayoutRequest):
-    """阶段二+三：串联机械臂/堆栈布局与仪器布置，返回完整 placements（M2/M3 填充）。"""
+    """阶段一~三上层编排：可行性 → 布臂/堆栈 → 布仪器 → 多退少补 → 校验。"""
+    from dataclasses import asdict
+
     from fastapi import HTTPException
 
     devices = create_devices_from_list([d.model_dump() for d in request.devices])
     lab = parse_lab(request.lab.model_dump())
     params = _rail_params(request.params)
-    from dataclasses import asdict
+    mode = "centered" if request.mode == "centered" else "near_wall"
 
     try:
-        report = rail_layout.check_feasibility(
+        result = rail_layout.layout_rail(
             devices, request.ordered_instruments, lab, request.arm_model, params,
-            request.stack_model,
+            mode, request.stack_model,
         )
-        arm_stack = rail_layout.place_arms_and_stacks(
-            lab, report.n_arm, request.arm_model, params, request.mode,
-            request.stack_model, l_max=report.l_max, devices=devices,
-        )
-        placements = rail_layout.assign_and_place_instruments(
-            arm_stack["arms"], request.ordered_instruments, params,
-        )
-    except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
     return RailLayoutResponse(
         placements=[
             PlacementResult(
@@ -1011,24 +1007,31 @@ async def run_rail_layout(request: RailLayoutRequest):
                 position=PositionXYZ(x=round(p.center[0], 4), y=round(p.center[1], 4), z=0.0),
                 rotation=PositionXYZ(x=0.0, y=0.0, z=round(p.theta, 4)),
             )
-            for p in placements
+            for p in result.placements
         ],
-        arms=[asdict(a) for a in arm_stack["arms"]],
-        stacks=[asdict(s) for s in arm_stack["stacks"]],
-        conflicts=[],
+        arms=[asdict(a) for a in result.arms],
+        stacks=[asdict(s) for s in result.stacks],
+        conflicts=rail_layout.conflicts_to_dicts(result.conflicts),
     )
 
 
 @app.post("/rail/validate", response_model=RailValidateResponse)
 async def run_rail_validate(request: RailValidateRequest):
-    """可选：仪器布局的环境碰撞 / 越界校验守卫（M3 填充）。"""
-    from fastapi import HTTPException
-
+    """可选：仪器布局的环境碰撞 / 越界校验守卫。"""
     lab = parse_lab(request.lab.model_dump())
-    try:
-        conflicts = rail_layout.validate_placements([], lab, lab.obstacles, None)
-    except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e))
+    devices = create_devices_from_list([d.model_dump() for d in request.devices])
+    bbox_map = {d.id: (float(d.bbox[0]), float(d.bbox[1])) for d in devices}
+
+    placements = [
+        rail_layout.InstrumentPlacement(
+            device_id=p.device_id,
+            center=(p.position.x, p.position.y),
+            theta=p.rotation.z,
+            bbox=bbox_map.get(p.device_id, (0.0, 0.0)),
+        )
+        for p in request.placements
+    ]
+    conflicts = rail_layout.validate_placements(placements, lab, lab.obstacles, None)
     return RailValidateResponse(conflicts=rail_layout.conflicts_to_dicts(conflicts))
 
 

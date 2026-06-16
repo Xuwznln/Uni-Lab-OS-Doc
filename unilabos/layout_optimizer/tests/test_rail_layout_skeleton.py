@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from unilabos.layout_optimizer import rail_layout as rl
 from unilabos.layout_optimizer.models import Lab
 
@@ -66,15 +64,8 @@ def test_dataclasses_constructible():
     assert report.mode_hint == "near_wall"
 
 
-@pytest.mark.parametrize(
-    "call",
-    [
-        # 阶段一/二已实现（M1/M2），此处仅校验阶段三仍为骨架。
-        lambda lab: rl.assign_and_place_instruments([], []),
-        lambda lab: rl.validate_placements([], lab),
-    ],
-)
-def test_stage_functions_not_implemented(call):
+def test_stage3_empty_inputs_return_empty():
+    # 阶段一/二/三均已实现（M1~M3）：空输入应安全返回空结果而非抛错。
     lab = Lab(width=4.0, depth=6.0)
-    with pytest.raises(NotImplementedError):
-        call(lab)
+    assert rl.assign_and_place_instruments([], []) == []
+    assert rl.validate_placements([], lab) == []

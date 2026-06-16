@@ -184,6 +184,19 @@ class InstrumentPlacement:
     theta: float  # 旋转角，弧度，使仪器开口面向导轨
     arm_id: str = ""  # 所归属的机械臂 id
     side: Literal["left", "right"] = "left"  # 位于机械臂的哪一侧
+    bbox: tuple[float, float] = (0.0, 0.0)  # 仪器原生 bbox(width, depth)，供碰撞校验/前端用
+
+
+@dataclass
+class RailLayoutResult:
+    """上层编排 :func:`layout_rail` 的完整布局结果。"""
+
+    arms: list[ArmPlacement] = field(default_factory=list)
+    stacks: list[StackPlacement] = field(default_factory=list)
+    placements: list[InstrumentPlacement] = field(default_factory=list)
+    report: FeasibilityReport | None = None
+    leftover: list[str] = field(default_factory=list)  # 未能布置的仪器 id（理论上为空）
+    conflicts: list[RailConflict] = field(default_factory=list)
 
 
 # ---------- 几何解析辅助（阶段一/二/三共用） ----------
@@ -583,21 +596,163 @@ def place_arms_and_stacks(
     return {"arms": arms, "stacks": stacks}
 
 
-# ---------- 阶段三函数骨架（M3 填充） ----------
+# ---------- 阶段三：按实验步骤顺序布置各仪器 ----------
+
+
+def _sub(p: tuple[float, float], q: tuple[float, float]) -> tuple[float, float]:
+    return (p[0] - q[0], p[1] - q[1])
+
+
+def _norm(v: tuple[float, float]) -> float:
+    return math.hypot(v[0], v[1])
+
+
+def _unit(v: tuple[float, float]) -> tuple[float, float]:
+    n = _norm(v)
+    if n <= _EPS:
+        return (0.0, 0.0)
+    return (v[0] / n, v[1] / n)
+
+
+def _theta_to(dev: "Device", target: tuple[float, float]) -> float:
+    """计算使仪器开口方向旋转到世界目标方向 ``target`` 所需的旋转角（弧度）。
+
+    仪器局部开口方向取 ``openings[0].direction``，缺省 ``(0, -1)``。
+    导轨场景里 target 为 ±u_short（朝向导轨），故结果通常是 90° 的整数倍。
+    """
+    if getattr(dev, "openings", None):
+        lx, ly = dev.openings[0].direction
+    else:
+        lx, ly = 0.0, -1.0
+    theta = math.atan2(target[1], target[0]) - math.atan2(ly, lx)
+    # 归一化到 (-pi, pi]
+    while theta <= -math.pi - _EPS:
+        theta += 2 * math.pi
+    while theta > math.pi + _EPS:
+        theta -= 2 * math.pi
+    return theta
+
+
+def _pack_side(
+    remaining: list["Device"],
+    start: int,
+    rail_len: float,
+    c: float,
+) -> list[tuple["Device", float, float]]:
+    """贪心装箱：从 ``remaining[start:]`` 取最长前缀，使其铺满单侧导轨而不超长。
+
+    判据 ``cost_w(i) = Σ W_rail + (i-1)·c ≤ L``。返回 ``[(dev, w_rail, l_out), ...]``。
+    """
+    chosen: list[tuple[Device, float, float]] = []
+    cost = 0.0
+    j = start
+    while j < len(remaining):
+        dev = remaining[j]
+        w_rail, l_out, _ = _instrument_dims(dev)
+        add = w_rail if not chosen else (c + w_rail)
+        if cost + add <= rail_len + _EPS:
+            cost += add
+            chosen.append((dev, w_rail, l_out))
+            j += 1
+        else:
+            break
+    return chosen
 
 
 def assign_and_place_instruments(
     arms: list[ArmPlacement],
-    ordered_instruments: list[Any],
+    ordered_instruments: list["Device"],
     params: RailParams | None = None,
 ) -> list[InstrumentPlacement]:
-    """阶段三：按实验步骤顺序布置各仪器（M3 实现）。
+    """阶段三：按实验步骤顺序把仪器布置到给定机械臂周围，返回坐标 + 朝向。
 
-    内部完成：① 确定性的「哪台臂哪一侧」顺序 ② 贪心装箱填满单侧
-    （``cost_w(i)=sum_W_i+(i-1)c ≤ L``）③ 用四角反推坐标 ④ 朝向 theta
-    ⑤ 多退少补（删空臂 / 末尾剩余则补臂回阶段二重排）。
+    确定性流程（不交给 agent）：
+
+    1. 「哪台臂哪一侧」顺序：从下到上遍历机械臂，每台先左侧后右侧
+       （bin 序列：臂1左、臂1右、臂2左、臂2右…）。
+    2. 贪心装箱填满单侧：``cost_w(i)=ΣW_rail+(i-1)c ≤ L``。
+    3. 四角反推坐标：左侧用左下角自下而上、右侧用右上角自上而下，
+       同侧内边缘统一距臂 ``b``（围绕单臂呈逆时针）。
+    4. 朝向 theta：据仪器 ``openings`` 使开口面向导轨（左侧朝 +u_short、右侧朝 −u_short）。
+
+    本函数只对**给定的** arms 做确定性排布；「多退少补」（删空臂 / 补臂重排）
+    由上层 :func:`layout_rail` 串联阶段二/三完成。装不下的仪器不会出现在结果里
+    （留待上层据 ``len(placements) < len(ordered_instruments)`` 触发补臂）。
+
+    Args:
+        arms: 阶段二输出的机械臂列表（每台含四个角坐标）。
+        ordered_instruments: 按实验流程排序的 :class:`Device` 列表（提供 bbox/openings）。
+        params: 距离参数；为 ``None`` 时使用默认值。
+
+    Returns:
+        :class:`InstrumentPlacement` 列表（含 center/theta/arm_id/side/bbox）。
     """
-    raise NotImplementedError("阶段三（M3）尚未实现：assign_and_place_instruments。")
+    params = params or RailParams()
+    if not arms or not ordered_instruments:
+        return []
+
+    b, c = params.b, params.c
+    placements: list[InstrumentPlacement] = []
+
+    bins: list[tuple[ArmPlacement, str]] = []
+    for arm in arms:
+        bins.append((arm, "left"))
+        bins.append((arm, "right"))
+
+    idx = 0
+    n_inst = len(ordered_instruments)
+    for arm, side in bins:
+        if idx >= n_inst:
+            break
+        lb, rb, rt, _lt = arm.corners[0], arm.corners[1], arm.corners[2], arm.corners[3]
+        u_long = _unit(_sub(arm.corners[3], lb))  # 左下 → 左上：沿导轨（从下到上）
+        u_short = _unit(_sub(rb, lb))  # 左下 → 右下：从左到右（指向右侧）
+        rail_len = _norm(_sub(arm.corners[3], lb))
+
+        chosen = _pack_side(ordered_instruments, idx, rail_len, c)
+        if not chosen:
+            # 单台仪器宽度即超过导轨长度，换臂也无济于事 → 交由上层判定 leftover
+            break
+
+        if side == "left":
+            anchor = lb  # 左下角，自下而上
+            sign_long = 1.0
+            short_sign = -1.0  # 向左远离臂
+            target = u_short  # 开口朝右（指向导轨）
+        else:  # right
+            anchor = rt  # 右上角，自上而下
+            sign_long = -1.0
+            short_sign = 1.0  # 向右远离臂
+            target = (-u_short[0], -u_short[1])  # 开口朝左（指向导轨）
+
+        cum = 0.0
+        for dev, w_rail, l_out in chosen:
+            off_long = cum + w_rail / 2.0
+            off_short = b + l_out / 2.0
+            cx = anchor[0] + sign_long * off_long * u_long[0] + short_sign * off_short * u_short[0]
+            cy = anchor[1] + sign_long * off_long * u_long[1] + short_sign * off_short * u_short[1]
+            placements.append(
+                InstrumentPlacement(
+                    device_id=dev.id,
+                    center=(cx, cy),
+                    theta=_theta_to(dev, target),
+                    arm_id=arm.id,
+                    side=side,  # type: ignore[arg-type]
+                    bbox=(float(dev.bbox[0]), float(dev.bbox[1])),
+                )
+            )
+            cum += w_rail + c
+        idx += len(chosen)
+
+    return placements
+
+
+def _rotated_half_extents(bbox: tuple[float, float], theta: float) -> tuple[float, float]:
+    """返回旋转 theta 后的 AABB 半宽/半高。"""
+    w, d = bbox
+    cos_t = abs(math.cos(theta))
+    sin_t = abs(math.sin(theta))
+    return (w * cos_t + d * sin_t) / 2.0, (w * sin_t + d * cos_t) / 2.0
 
 
 def validate_placements(
@@ -606,15 +761,178 @@ def validate_placements(
     obstacles: list[Any] | None = None,
     arms: list[ArmPlacement] | None = None,
 ) -> list[RailConflict]:
-    """阶段三：碰撞校验守卫（M3 实现）。
+    """阶段三：碰撞校验守卫。
 
-    仅做两类校验（构造上仪器互不碰，不做搜索式避碰）：
-    ① 仪器 AABB vs 环境障碍物（``obstacles``）② 越墙 / 越工作半径的后置断言。
+    构造上仪器之间、仪器与机械臂之间靠固定间隙（b/c/d）不会碰，故**不做**搜索式避碰，
+    仅做两类后置断言：
+
+    ① 仪器 AABB vs 环境障碍物（``obstacles``，缺省取 ``lab.obstacles``）。
+    ② 越墙断言：仪器 AABB 须落在房间矩形 ``[0,width]×[0,depth]`` 内。
+
+    Args:
+        placements: 阶段三输出（须含 ``bbox`` 与 ``theta`` 才能算 AABB）。
+        lab: 实验室平面图。
+        obstacles: 障碍物列表（``Obstacle``）；``None`` 时回落 ``lab.obstacles``。
+        arms: 机械臂列表（预留，当前不参与判定）。
 
     Returns:
         :class:`RailConflict` 列表，为空表示通过校验。
     """
-    raise NotImplementedError("阶段三（M3）尚未实现：validate_placements。")
+    conflicts: list[RailConflict] = []
+    obs = obstacles if obstacles is not None else list(getattr(lab, "obstacles", []) or [])
+
+    for p in placements:
+        half_w, half_h = _rotated_half_extents(p.bbox, p.theta)
+        x0, x1 = p.center[0] - half_w, p.center[0] + half_w
+        y0, y1 = p.center[1] - half_h, p.center[1] + half_h
+
+        # ② 越墙
+        if x0 < -_EPS or y0 < -_EPS or x1 > lab.width + _EPS or y1 > lab.depth + _EPS:
+            conflicts.append(
+                RailConflict(
+                    kind="out_of_bounds",
+                    message=(
+                        f"仪器 '{p.device_id}' 越界：AABB [{x0:.3f},{x1:.3f}]×"
+                        f"[{y0:.3f},{y1:.3f}] 超出房间 {lab.width:.2f}×{lab.depth:.2f}。"
+                    ),
+                    suggestion="扩大房间、减小距离参数 b/d，或更换伸出更短的仪器。",
+                )
+            )
+
+        # ① 环境障碍物碰撞
+        for ob in obs:
+            ox0 = float(getattr(ob, "x"))
+            oy0 = float(getattr(ob, "y"))
+            ox1 = ox0 + float(getattr(ob, "width"))
+            oy1 = oy0 + float(getattr(ob, "depth"))
+            if x0 < ox1 - _EPS and x1 > ox0 + _EPS and y0 < oy1 - _EPS and y1 > oy0 + _EPS:
+                conflicts.append(
+                    RailConflict(
+                        kind="obstacle_collision",
+                        message=(
+                            f"仪器 '{p.device_id}' 与环境障碍物 "
+                            f"[{ox0:.2f},{ox1:.2f}]×[{oy0:.2f},{oy1:.2f}] 重叠。"
+                        ),
+                        suggestion="移动障碍物、调整机械臂位置，或更换布局模式/参数。",
+                    )
+                )
+
+    return conflicts
+
+
+# ---------- 上层编排：串联阶段一/二/三 + 多退少补 ----------
+
+
+def layout_rail(
+    devices: list["Device"],
+    ordered_instruments: list[str],
+    lab: "Lab",
+    arm_model: dict | None = None,
+    params: RailParams | None = None,
+    mode: Literal["near_wall", "centered"] = "near_wall",
+    stack_model: str | dict | None = DEFAULT_STACK_MODEL,
+) -> RailLayoutResult:
+    """上层编排：可行性 → 布臂/堆栈 → 布仪器 → 多退少补 → 校验。
+
+    「多退少补」反馈环全部收敛在本函数（不让 agent 中途手动判断）：
+
+    - **补**：若按当前臂数装不下全部仪器，且未达长边几何上限 ``n_max``，则
+      ``n_arm += 1`` 回阶段二重排后重算仪器坐标，直到装完或触顶。
+    - **退**：装完后删除末尾「周围无仪器」的空臂（及其相邻堆栈）。
+
+    Args:
+        devices: 设备列表（含机械臂/仪器，提供 bbox/openings）。
+        ordered_instruments: 按实验流程排序的仪器 id 列表。
+        lab: 实验室平面图。
+        arm_model: 机械臂型号 ``{L, working_radius, bbox}``；``None`` 时从 devices 识别。
+        params: 距离参数；``None`` 时用默认值。
+        mode: 第一台机械臂的摆放模式（``near_wall`` / ``centered``）。
+        stack_model: 堆栈型号，默认 thermo_stacker。
+
+    Returns:
+        :class:`RailLayoutResult`。
+    """
+    params = params or RailParams()
+    report = check_feasibility(
+        devices, ordered_instruments, lab, arm_model, params, stack_model
+    )
+
+    if not ordered_instruments:
+        return RailLayoutResult(report=report)
+
+    # 不可行：返回原因（转为冲突），不强行布局
+    if not report.feasible:
+        conflicts = [
+            RailConflict(kind="infeasible", message=msg, suggestion=sug)
+            for msg, sug in zip(report.reasons, report.suggestions)
+        ]
+        return RailLayoutResult(
+            report=report, leftover=list(ordered_instruments), conflicts=conflicts
+        )
+
+    device_map = {d.id: d for d in devices}
+    ordered_devs: list[Device] = []
+    for iid in ordered_instruments:
+        dev = device_map.get(iid)
+        if dev is None:
+            raise ValueError(f"仪器 '{iid}' 不在 devices 中，无法布置。")
+        ordered_devs.append(dev)
+
+    n_cap = max(report.n_max, 1)
+    n = max(min(report.n_arm, n_cap), 1)
+    prev_placed = -1
+    arm_stack: dict[str, list] = {"arms": [], "stacks": []}
+    placements: list[InstrumentPlacement] = []
+
+    while True:
+        arm_stack = place_arms_and_stacks(
+            lab, n, arm_model, params, mode, stack_model,
+            l_max=report.l_max, devices=devices,
+        )
+        placements = assign_and_place_instruments(arm_stack["arms"], ordered_devs, params)
+        placed = len(placements)
+        if placed >= len(ordered_devs):
+            break  # 全部布置完成
+        if n >= n_cap:
+            break  # 已达长边几何上限，无法再补臂
+        if placed <= prev_placed:
+            break  # 无进展（如单台仪器宽度超过导轨长度），停止补臂
+        prev_placed = placed
+        n += 1
+
+    # 退：裁掉末尾「周围无仪器」的空臂及其相邻堆栈
+    used_arm_ids = {p.arm_id for p in placements}
+    last_used = 0
+    for i, arm in enumerate(arm_stack["arms"], start=1):
+        if arm.id in used_arm_ids:
+            last_used = i
+    arms_final = arm_stack["arms"][:last_used]
+    stacks_final = arm_stack["stacks"][: max(last_used - 1, 0)]
+
+    placed_ids = {p.device_id for p in placements}
+    leftover = [d.id for d in ordered_devs if d.id not in placed_ids]
+
+    conflicts = validate_placements(placements, lab, lab.obstacles, arms_final)
+    if leftover:
+        conflicts.append(
+            RailConflict(
+                kind="unplaced_instruments",
+                message=(
+                    f"仍有 {len(leftover)} 台仪器未能布置（{', '.join(leftover)}）："
+                    f"长边几何上限 n_max={report.n_max}，补臂后仍装不下。"
+                ),
+                suggestion="扩大房间长边、更换更短导轨/更小占地的设备，或减少仪器数量。",
+            )
+        )
+
+    return RailLayoutResult(
+        arms=arms_final,
+        stacks=stacks_final,
+        placements=placements,
+        report=report,
+        leftover=leftover,
+        conflicts=conflicts,
+    )
 
 
 # ---------- 序列化辅助 ----------
