@@ -23,6 +23,7 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -33,13 +34,41 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 3       # 缓存格式版本号，格式变更时递增
+_CACHE_VERSION = 4       # 缓存格式版本号，格式变更时递增
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
 _REGISTRY_DECORATOR_MODULE = "unilabos.registry.decorators"
 # @subscribe 订阅装饰器来源模块（区分于注册表，这是运行时，订阅回调不应被当作 action）
 _SUBSCRIBE_DECORATOR_MODULE = "unilabos.utils.decorator"
+# placeholder_keys 常量来源模块（如 PLACEHOLDER_DEDUCT_RESOURCE），值需解析成字符串字面量
+_PLACEHOLDER_MODULE = "unilabos.registry.placeholder_type"
+
+
+@lru_cache(maxsize=1)
+def _placeholder_constants() -> Dict[str, str]:
+    """静态解析同目录 ``placeholder_type.py``，提取顶层 ``NAME = "str"`` 常量映射。
+
+    让 @action 装饰器里能用 placeholder 常量替代字面量：扫描器把对应 ``ast.Name``
+    解析成常量的字符串值。值由静态 AST 解析得到（不 import 该模块，保持纯文本扫描），
+    与 ``placeholder_type.py`` 单一数据源（DRY）。
+    """
+    consts: Dict[str, str] = {}
+    try:
+        path = Path(__file__).with_name("placeholder_type.py")
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        consts[target.id] = node.value.value
+    except Exception:
+        pass
+    return consts
 
 
 def _validate_device_ids(device_ids: List[str]) -> None:
@@ -694,9 +723,18 @@ def _resolve_name(name: str, import_map: Dict[str, str]) -> str:
 
     E.g. "SendCmd" -> "unilabos_msgs.action:SendCmd"
          "True" -> True (handled by ast.Constant in Python 3.8+)
+
+    placeholder_type 常量（如 PLACEHOLDER_DEDUCT_RESOURCE）特殊处理：解析成其字符串值，
+    使装饰器 placeholder_keys 可用常量替代字面量；按导入的原始属性名取值以兼容 as 别名。
     """
-    if name in import_map:
-        return import_map[name]
+    source = import_map.get(name)
+    if source and source.startswith(_PLACEHOLDER_MODULE + ":"):
+        attr = source.split(":", 1)[1]
+        value = _placeholder_constants().get(attr)
+        if value is not None:
+            return value
+    if source is not None:
+        return source
     # Fallback: return the name as-is
     return name
 

@@ -54,7 +54,7 @@ from unilabos.registry.utils import (
     SIMPLE_TYPE_MAP,
 )
 from unilabos.resources.graphio import resource_plr_to_ulab, tree_to_list
-from unilabos.resources.resource_tracker import ResourceTreeSet
+from unilabos.resources.resource_tracker import ResourceTreeSet, RETURN_UNILABOS_SAMPLES
 from unilabos.ros.msgs.message_converter import (
     msg_converter_manager,
     ros_action_to_json_schema,
@@ -135,7 +135,7 @@ class Registry:
 
         # 3. YAML 注册表加载 (兼容旧格式) — external_only 模式下跳过
         if external_only:
-            logger.info("[UniLab Registry] external_only 模式: 跳过 YAML 注册表加载")
+            logger.info("[UniLab Registry] external_only 模式: 跳过内置 YAML 注册表加载")
         else:
             self.registry_paths = [Path(path).absolute() for path in self.registry_paths]
             for i, path in enumerate(self.registry_paths):
@@ -149,6 +149,12 @@ class Registry:
                     logger.warning(
                         "[UniLab Registry] 资源加载已禁用 (enable_resource_load=False)，跳过资源注册表加载"
                     )
+
+        # 4. --devices 目录内嵌的同构注册表 (devices/ resources/ device_comms/) — 两种模式下都加载
+        self._load_devices_dir_registries(
+            devices_dirs, upload_registry=upload_registry, complete_registry=complete_registry
+        )
+
         self._startup_executor.shutdown(wait=True)
         self._startup_executor = None
         self._setup_called = True
@@ -168,6 +174,8 @@ class Registry:
         test_latency_action = ast_actions.get("auto-test_latency", {})
         test_resource_action = ast_actions.get("auto-test_resource", {})
         manual_confirm_action = ast_actions.get("manual_confirm", {})
+        apply_deduct_resource_action = ast_actions.get("apply_deduct_resource", {})
+        set_substance_action = ast_actions.get("set_substance", {})
         test_resource_action["handles"] = {
             "input": [
                 {
@@ -246,6 +254,8 @@ class Registry:
                     "test_latency": test_latency_action,
                     "auto-test_resource": test_resource_action,
                     "manual_confirm": manual_confirm_action,
+                    "apply_deduct_resource": apply_deduct_resource_action,
+                    "set_substance": set_substance_action,
                 },
                 "init_params": {},
             },
@@ -570,6 +580,24 @@ class Registry:
         return prop_schema
 
     @staticmethod
+    def _strip_reserved_result_fields(schema: Dict[str, Any]) -> None:
+        """从已生成完整的 result schema 中就地移除保留字段 unilabos_samples。
+
+        该字段由设备返回值携带，但运行时会被 host node pop 到结果外层
+        (见 host_node 中 return_value.pop(RETURN_UNILABOS_SAMPLES))，
+        只处理顶层与 host node 行为保持一致，不属于 action result 的对外契约，
+        故从顶层 properties/required 中剔除。需在 result schema 完整生成后再调用。
+        """
+        if not isinstance(schema, dict):
+            return
+        props = schema.get("properties")
+        if isinstance(props, dict):
+            props.pop(RETURN_UNILABOS_SAMPLES, None)
+        required = schema.get("required")
+        if isinstance(required, list) and RETURN_UNILABOS_SAMPLES in required:
+            required.remove(RETURN_UNILABOS_SAMPLES)
+
+    @staticmethod
     def _apply_docstring_param_metadata(
         schema: Dict[str, Any],
         doc_info: Dict[str, Any],
@@ -886,6 +914,8 @@ class Registry:
                 result_schema = self._generate_schema_from_info(
                     "result", ret_type_str, None, imap
                 )
+                # result schema 完整生成后再剥离保留字段 unilabos_samples
+                self._strip_reserved_result_fields(result_schema)
 
             entry = {
                 "type": type_str,
@@ -1013,6 +1043,8 @@ class Registry:
                         "result", ret_type_str, None, imap
                     )
                     if ret_schema:
+                        # result schema 完整生成后再剥离保留字段 unilabos_samples
+                        self._strip_reserved_result_fields(ret_schema)
                         schema.setdefault("properties", {})["result"] = ret_schema
 
             # @action 中的显式 goal/feedback/result/goal_default 覆盖默认值
@@ -1878,6 +1910,8 @@ class Registry:
                             result_schema = self._generate_schema_from_info(
                                 "result", ret_type, None, import_map=enhanced_import_map
                             )
+                            # result schema 完整生成后再剥离保留字段 unilabos_samples
+                            self._strip_reserved_result_fields(result_schema)
                         old_cfg = old_action_configs.get(action_key) or old_action_configs.get(f"auto-{k}", {})
                         doc_info = parse_docstring(v.get("docstring"))
                         new_schema = wrap_action_schema(
@@ -1971,7 +2005,10 @@ class Registry:
                         if v.get("always_free"):
                             entry["always_free"] = True
                         old_node_type = old_cfg.get("node_type")
-                        if old_node_type in [NodeType.ILAB.value, NodeType.MANUAL_CONFIRM.value]:
+                        if old_node_type in [
+                            NodeType.ILAB.value,
+                            NodeType.MANUAL_CONFIRM.value,
+                        ]:
                             entry["node_type"] = old_node_type
                         device_config["class"]["action_value_mappings"][action_key] = entry
 
@@ -2231,6 +2268,78 @@ class Registry:
 
         if loaded_total:
             logger.info(f"[UniLab Registry] 社区包 registry.yaml 设备加载完成: 共 {loaded_total} 个")
+
+    @staticmethod
+    def _is_registry_root(p: Path) -> bool:
+        """目录是否为注册表根：含 devices/ device_comms/ resources/ 任一子目录且其中有 *.yaml。"""
+        if not p.is_dir():
+            return False
+        for sub in ("devices", "device_comms", "resources"):
+            subp = p / sub
+            if subp.is_dir() and next(subp.rglob("*.yaml"), None) is not None:
+                return True
+        return False
+
+    @staticmethod
+    def _find_package_root(start: Path, max_up: int = 6) -> Optional[Path]:
+        """从 start 起（含自身）向上最多 max_up 层，定位含 pyproject.toml 的包根。"""
+        cur = start
+        for _ in range(max_up + 1):
+            if (cur / "pyproject.toml").is_file():
+                return cur
+            if cur.parent == cur:
+                break
+            cur = cur.parent
+        return None
+
+    def _registry_root_candidates(self, base: Path) -> List[Path]:
+        """给定一个 --devices 目录，推导其内嵌注册表根的候选目录。
+
+        约定 registry 与 unilabos/registry 同构（ROOT/registry/{devices,resources,device_comms}/*.yaml）：
+        - <devices_dir>/registry：--devices 指向包根（社区包）或 registry 直接放在 --devices 下；
+        - <包根>/registry：--devices 指向 python 子包时（如模板的 device_package_example），
+          向上按 pyproject.toml 锚定 ROOT 再取 ROOT/registry；
+        - <devices_dir> 本身：--devices 直接指向 registry 根的兜底。
+        """
+        candidates = [base / "registry"]
+        pkg_root = self._find_package_root(base)
+        if pkg_root is not None:
+            candidates.append(pkg_root / "registry")
+        candidates.append(base)
+        return candidates
+
+    def _load_devices_dir_registries(self, devices_dirs=None, upload_registry=False, complete_registry=False):
+        """为每个 --devices 目录自动加载其内嵌的、与 unilabos/registry 同构的注册表。
+
+        约定：内嵌注册表与内置注册表结构一致（ROOT/registry/{devices,device_comms,resources}/*.yaml）。
+        命中即复用 load_device_types / load_resource_types 加载。external_only 模式下同样加载——
+        外部设备包自带的注册表不应被跳过。
+        """
+        if not devices_dirs:
+            return
+
+        seen: set = set()
+        for d in devices_dirs:
+            base = Path(d).resolve()
+            if not base.is_dir():
+                continue
+            for candidate in self._registry_root_candidates(base):
+                root = candidate.resolve()
+                key = str(root)
+                if key in seen or not self._is_registry_root(root):
+                    continue
+                seen.add(key)
+                logger.info(f"[UniLab Registry] 加载 --devices 内嵌注册表: {root}")
+                self.load_device_types(root, complete_registry=complete_registry)
+                if BasicConfig.enable_resource_load:
+                    self.load_resource_types(root, upload_registry, complete_registry=complete_registry)
+                else:
+                    logger.warning(
+                        "[UniLab Registry] 资源加载已禁用 (enable_resource_load=False)，"
+                        f"跳过内嵌注册表资源: {root}"
+                    )
+                if root not in self.registry_paths:
+                    self.registry_paths.append(root)
 
     # ------------------------------------------------------------------
     # 注册表信息输出
