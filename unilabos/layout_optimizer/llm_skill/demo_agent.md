@@ -157,6 +157,16 @@ Payload requirements:
 - `mount_uuid` is optional (empty/missing means default root mount)
 - default `saveLocal: true`
 - include `outputPath` when user provides a local output path
+- auto-discover and use config file (in order):
+  1. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.json`
+  2. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.example.json`
+  - when startup/restart is needed, use `python -m unilabos.layout_optimizer.run_server --config <config_path> --host 0.0.0.0 --port 8000`
+  - do not use bare `uvicorn ...server:app` for upload flow
+- before upload, validate `graph.nodes[].class` against registry YAML full keys (exact match)
+  - for `asset_model` devices, resolve class from `unilabos/registry/devices/asset_models.yaml` first
+  - e.g. for `id=mobile_cart_1_wheel`, class must be `asset_model.mobile_cart_1_wheel`
+  - never use bare ids (e.g. `mobile_cart_1_wheel`) as `class`
+  - if mismatch is found, correct class from registry before upload
 
 Print:
 
@@ -185,9 +195,11 @@ If the user gives a follow-up request, print `---` first, then:
 - Step 4 optimize failure: handled by Step 4 branches; do NOT manually re-POST with different seeds; do not apply placements while `success` is false
 - Step 6 conversion/upload failure: surface error and stop Step 6
   - missing building: `error: building(scene_path/scene) is required for graph conversion`
+  - missing config file: `error: layout optimizer config not found at unilabos/layout_optimizer/layout_optimizer.config*.json`
   - cloud preflight failed: `error: cloud connectivity precheck failed`
   - local save failed: `error: local graph save failed`
   - upload failed: `error: cloud upload failed`
+  - unresolved class/registry mismatch: `error: graph class does not match registry key`
 
 ## AskQuestion Templates (failure relaxation)
 
@@ -208,6 +220,7 @@ On `success: false`, call AskQuestion with the recommended option first (append 
 
 - Step 2 (intent translation): load `layout_intent_translator.md` and map informal names (e.g., "PCR machine", "the arm", "liquid handler") to exact `device_id`
 - Step 6 (graph/upload): load `scene_graph_converter.md`, normalize informal names into `type`, and emit `devices[{type,count}]`
+- Step 6 (graph validation): resolve full registry keys from YAML and ensure `graph.nodes[].class` matches exactly
 
 ## Example Full Output (with upload)
 

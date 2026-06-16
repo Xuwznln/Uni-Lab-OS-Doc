@@ -59,11 +59,32 @@ You MUST output a JSON object directly usable by `POST /optimize/scene`:
 - Do NOT emit bbox/model/uuid/config/data fields
 - Server fills these automatically
 
+### 2.5) `class` must exactly match registry keys (critical)
+
+- When you need to inspect, present, or upload `graph.nodes`, each node `class` must equal the full key in registry YAML.
+- Never use a bare id as `class` (for example `mobile_cart_1_wheel`).
+- For `asset_model` devices, resolve class from `unilabos/registry/devices/asset_models.yaml` first:
+  - if registry key is `asset_model.mobile_cart_1_wheel`
+  - then graph node must be `"class": "asset_model.mobile_cart_1_wheel"`
+- If not found in `asset_models.yaml`, look up an exact key in `unilabos/registry/devices/*.yaml`.
+- If no exact registry key is found, return an error and ask user to confirm the device `type`; do not upload with a wrong `class`.
+
 ### 3) save and upload
 
 - Default `saveLocal: true`
 - If user asks for a specific local file path, set `outputPath`
 - Upload is already handled by `/optimize/scene` at the final step; no extra upload call is needed
+
+### 3.5) Auto-discover and use layout_optimizer config (before upload)
+
+- Before calling `/optimize/scene`, auto-discover config files in repo (in order):
+  1. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.json`
+  2. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.example.json`
+- If service startup/restart is needed, it must use:
+  - `python -m unilabos.layout_optimizer.run_server --config <config_path> --host 0.0.0.0 --port 8000`
+- Do not start upload flow with bare `uvicorn ...server:app` (it may miss cloud config).
+- If no config file is found, stop upload step with:
+  - `error: layout optimizer config not found at unilabos/layout_optimizer/layout_optimizer.config*.json`
 
 ### 4) mount UUID
 
@@ -81,7 +102,7 @@ On success, `/optimize/scene` returns:
 - `uploaded`: cloud upload status
 - `cloud_uuid_mapping`: cloud UUID mapping
 
-Do not transform `graph` again. Pass through as-is.
+By default, pass `graph` through as-is. Exception: if node `class` does not match registry keys, correct `class` from registry before upload/display.
 
 ## Example
 
@@ -111,4 +132,6 @@ Output:
 
 - Unit and pose normalization belongs to server-side logic, not this skill
 - If a device name is ambiguous, return an error requesting explicit `type`
-- This skill is for request conversion, not post-processing graph conversion
+- `class` must exactly match registry YAML keys (full key, not bare id)
+- This skill is request conversion plus required upload-time schema consistency checks
+- Upload flow must auto-discover and use `unilabos/layout_optimizer/layout_optimizer.config*.json`

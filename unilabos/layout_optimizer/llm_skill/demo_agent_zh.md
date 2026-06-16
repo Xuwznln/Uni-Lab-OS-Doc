@@ -157,6 +157,16 @@ curl -s -X POST http://localhost:8000/optimize/scene \
 - `mount_uuid` 可选（不填时默认根挂载）
 - 默认 `saveLocal: true`
 - 有指定文件路径时传 `outputPath`
+- 自动发现并使用配置文件（按顺序）：
+  1. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.json`
+  2. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.example.json`
+  - 若需要启动/重启服务，必须用 `python -m unilabos.layout_optimizer.run_server --config <config_path> --host 0.0.0.0 --port 8000`
+  - 不要用裸 `uvicorn ...server:app` 启动上传链路
+- 上传前必须校验 `graph.nodes[].class` 与 registry YAML key **完全一致**（全名）
+  - 对 `asset_model` 设备，优先从 `unilabos/registry/devices/asset_models.yaml` 读取
+  - 例如 `id=mobile_cart_1_wheel` 时，`class` 必须是 `asset_model.mobile_cart_1_wheel`
+  - 严禁用裸 id（如 `mobile_cart_1_wheel`）作为 `class`
+  - 若不一致，先按 registry key 修正，再上传
 
 打印：
 
@@ -185,9 +195,11 @@ cloud upload: <uploaded>, mapped: M nodes
 - 步骤 4 优化失败：按 `conflicts`/`violations` 分支处理，不要自己换 seed 重试，不要在 `success=false` 时应用摆放
 - 步骤 6 转换/上传失败：直接报错并停止该步骤，不要伪造成功
   - 缺 building：`error: building(scene_path/scene) is required for graph conversion`
+  - 缺配置文件：`error: layout optimizer config not found at unilabos/layout_optimizer/layout_optimizer.config*.json`
   - 云端网络预检查失败：`error: cloud connectivity precheck failed`
   - 本地保存失败：`error: local graph save failed`
   - 上传失败：`error: cloud upload failed`
+  - `class` 与 registry key 不一致且无法修正：`error: graph class does not match registry key`
 
 ## AskQuestion 选项模板（失败放宽）
 
@@ -208,6 +220,7 @@ cloud upload: <uploaded>, mapped: M nodes
 
 - 步骤 2（意图翻译）加载 `layout_intent_translator.md`，把自然语言设备名解析为精确 `device_id`
 - 步骤 6（转换/上传）加载 `scene_graph_converter_zh.md`，把自然语言设备名归一到 `type`，生成 `devices[{type,count}]`
+- 步骤 6（graph 校验）从 registry YAML 读取完整 key，并确保 `graph.nodes[].class` 与之一致
 
 ## 完整输出示例（含上传）
 

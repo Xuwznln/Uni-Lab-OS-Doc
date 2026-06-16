@@ -31,14 +31,38 @@ Execute these steps in order. Print the status line shown after each step.
 UNI_LAB_ASSETS_DIR: <resolved-path>
 ```
 
-**0.2 Check if the server is already running:**
+**0.2 Resolve layout optimizer config path.** In `Uni-Lab-OS/unilabos/layout_optimizer/`, look for config in this order:
+1) `layout_optimizer.config.json`
+2) `layout_optimizer.config.example.json`
+
+If found, print:
+```
+LAYOUT_OPTIMIZER_CONFIG: <resolved-path>
+```
+If neither exists, print:
+```
+LAYOUT_OPTIMIZER_CONFIG: not found
+```
+
+**0.3 Check if the server is already running:**
 ```
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health
 ```
 - If it returns `200`, the server is already up. Print `server already running at localhost:8000`, then go to Step 1. Do NOT start it again and do NOT open the browser.
-- Otherwise, continue to 0.3.
+- Otherwise, continue to 0.4.
 
-**0.3 Start the server (background) in the `unilab` conda env.** Run from the `Uni-Lab-OS` repo root, with `UNI_LAB_ASSETS_DIR` set to the path resolved in 0.1. Launch it as a NON-blocking background process (do not block on it):
+**0.4 Start the server (background) in the `unilab` conda env.** Run from the `Uni-Lab-OS` repo root, with `UNI_LAB_ASSETS_DIR` set to the path resolved in 0.1.
+
+If config path from 0.2 exists, launch with `run_server --config` (preferred for cloud upload readiness):
+```
+conda run -n unilab \
+  env UNI_LAB_ASSETS_DIR=<resolved-path> \
+  python -m unilabos.layout_optimizer.run_server \
+  --config <resolved-config-path> \
+  --host 0.0.0.0 --port 8000
+```
+
+If config path is missing, fallback to:
 ```
 conda run -n unilab \
   env UNI_LAB_ASSETS_DIR=<resolved-path> \
@@ -46,13 +70,13 @@ conda run -n unilab \
 ```
 Do NOT use `--reload` for the background process. Print `starting server (conda env: unilab)...`.
 
-**0.4 Wait for readiness.** Poll `/health` until it succeeds, up to ~30 seconds:
+**0.5 Wait for readiness.** Poll `/health` until it succeeds, up to ~30 seconds:
 ```
 for i in $(seq 1 30); do curl -s http://localhost:8000/health && break; sleep 1; done
 ```
 Print `server ready at localhost:8000`. If it never becomes ready, print `error: server failed to start` and stop.
 
-**0.5 Open the viewer (first start only).** Because this skill just launched the server, open the 3D viewer ONCE:
+**0.6 Open the viewer (first start only).** Because this skill just launched the server, open the 3D viewer ONCE:
 ```
 open http://localhost:8000/
 ```
