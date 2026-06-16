@@ -11,7 +11,7 @@ from typing import Any, List, Optional, Sequence
 
 from pylabrobot.resources import ItemizedResource
 
-from unilabos.utils.log import logger
+from unilabos.utils.log import trace
 
 # 单位约定
 LIQUID_UNIT = "ul"  # 液体：微升
@@ -38,7 +38,7 @@ def set_substance_on_target(target: Any, name: str, amount: float, is_solid: boo
         raise ValueError(
             f"目标 {target_name} 不是容器，无法设置内容物（请检查 slots 是否指向子孔位）"
         )
-    logger.info(
+    trace(
         f"[set_substance] {target_name} <- {'固体' if is_solid else '液体'} "
         f"{name}={amount}{unit}"
     )
