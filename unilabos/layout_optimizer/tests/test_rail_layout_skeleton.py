@@ -69,8 +69,7 @@ def test_dataclasses_constructible():
 @pytest.mark.parametrize(
     "call",
     [
-        # 阶段一 check_feasibility 已实现（M1），此处仅校验阶段二/三仍为骨架。
-        lambda lab: rl.place_arms_and_stacks(lab, 1),
+        # 阶段一/二已实现（M1/M2），此处仅校验阶段三仍为骨架。
         lambda lab: rl.assign_and_place_instruments([], []),
         lambda lab: rl.validate_placements([], lab),
     ],

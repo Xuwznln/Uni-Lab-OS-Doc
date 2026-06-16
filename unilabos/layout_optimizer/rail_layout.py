@@ -57,8 +57,11 @@ DEFAULT_PARAMS: dict[str, float] = {
     "e": 0.2,
 }
 
-# 堆栈（机械臂间转运交接点）默认占地 bbox（米）。
-# TODO(stack model table)：正式实现应按堆栈型号查表，当前用方形占位值。
+# 默认堆栈型号：从 footprints.json 取真实 bbox/openings（见实现计划 0.3 第 2 项）。
+# 用户可通过 stack_model 入参指定其他型号；解析失败时回落 DEFAULT_STACK_BBOX。
+DEFAULT_STACK_MODEL: str = "thermo_stacker"
+
+# 堆栈占地 bbox 的最终兜底值（米），仅在 footprints 加载失败且无任何可识别堆栈时使用。
 DEFAULT_STACK_BBOX: tuple[float, float] = (0.4, 0.4)
 
 # 机械臂默认占地 bbox（米），仅在既无 arm_model 又无法从 devices 识别机械臂时回落。
@@ -142,6 +145,7 @@ class FeasibilityReport:
     n_arm: int = 0  # 粗估机械臂台数
     n_stack: int = 0  # 堆栈台数 = n_arm - 1
     n_max: int = 0  # 长边几何上限可容纳的最大臂数
+    l_max: float = 0.0  # 最长仪器的「伸出长度」L_out，供阶段二靠墙模式定位复用
     mode_hint: Literal["near_wall", "centered"] = "near_wall"
     reasons: list[str] = field(default_factory=list)  # 不可行原因
     suggestions: list[str] = field(default_factory=list)  # 放宽建议（与 reasons 对应）
@@ -238,13 +242,65 @@ def _resolve_arm(
     )
 
 
-def _resolve_stack_bbox(devices: list["Device"]) -> tuple[float, float]:
-    """从 devices 识别堆栈占地 bbox，识别不到则回落默认值。"""
-    for d in devices:
-        ident = f"{d.id} {getattr(d, 'name', '')}".lower()
-        if any(k in ident for k in _STACK_KEYWORDS):
-            return tuple(float(x) for x in d.bbox)
-    return DEFAULT_STACK_BBOX
+def _load_footprints_safe() -> dict:
+    """惰性加载 footprints.json；失败返回空 dict（保持本模块导入无副作用）。"""
+    try:
+        from .device_catalog import load_footprints
+
+        return load_footprints()
+    except Exception:  # noqa: BLE001 — footprints 不可用时降级
+        return {}
+
+
+def _resolve_stack(
+    stack_model: str | dict | None,
+    devices: list["Device"] | None,
+    footprints: dict | None = None,
+) -> tuple[tuple[float, float], list[tuple[float, float]]]:
+    """确定堆栈几何 ``(bbox, openings)``。
+
+    解析顺序（见实现计划 0.3 第 2 项）：
+    ① 显式 ``stack_model``（dict 直接给 bbox/openings，或 str 查 footprints）
+    → ② ``devices`` 中按堆栈关键词识别（兜底）
+    → ③ 默认型号 :data:`DEFAULT_STACK_MODEL`（thermo_stacker，查 footprints）
+    → ④ 最终回落 :data:`DEFAULT_STACK_BBOX`。
+    """
+
+    def _from_fp_entry(entry: dict) -> tuple[tuple[float, float], list]:
+        bbox = tuple(float(x) for x in entry.get("bbox", DEFAULT_STACK_BBOX))
+        openings = [tuple(o["direction"]) for o in entry.get("openings", [])]
+        return bbox, openings
+
+    # ① 显式 stack_model
+    if isinstance(stack_model, dict):
+        bbox = tuple(float(x) for x in stack_model.get("bbox", DEFAULT_STACK_BBOX))
+        openings = [tuple(o) for o in stack_model.get("openings", [])]
+        return bbox, openings
+    fp = footprints if footprints is not None else _load_footprints_safe()
+    if isinstance(stack_model, str) and stack_model:
+        if stack_model in fp:
+            return _from_fp_entry(fp[stack_model])
+        # stack_model 给了 id 但 footprints 没有 → 尝试在 devices 里按 id 命中
+        if devices:
+            for d in devices:
+                if d.id == stack_model:
+                    openings = [tuple(o.direction) for o in getattr(d, "openings", [])]
+                    return tuple(float(x) for x in d.bbox), openings
+
+    # ② devices 关键词识别（兜底）
+    if devices:
+        for d in devices:
+            ident = f"{d.id} {getattr(d, 'name', '')}".lower()
+            if any(k in ident for k in _STACK_KEYWORDS):
+                openings = [tuple(o.direction) for o in getattr(d, "openings", [])]
+                return tuple(float(x) for x in d.bbox), openings
+
+    # ③ 默认型号 thermo_stacker
+    if DEFAULT_STACK_MODEL in fp:
+        return _from_fp_entry(fp[DEFAULT_STACK_MODEL])
+
+    # ④ 最终兜底
+    return DEFAULT_STACK_BBOX, []
 
 
 def _instrument_dims(dev: "Device") -> tuple[float, float, float]:
@@ -278,6 +334,7 @@ def check_feasibility(
     lab: "Lab",
     arm_model: dict | None = None,
     params: RailParams | None = None,
+    stack_model: str | dict | None = DEFAULT_STACK_MODEL,
 ) -> FeasibilityReport:
     """阶段一：可行性检查。
 
@@ -292,6 +349,9 @@ def check_feasibility(
         arm_model: 机械臂型号信息 ``{L, working_radius, bbox}``；为 ``None`` 时
             从 devices 识别机械臂，工作半径回落 :data:`DEFAULT_WORKING_RADIUS`。
         params: 距离参数；为 ``None`` 时使用 :data:`DEFAULT_PARAMS`。
+        stack_model: 堆栈型号（id 或 ``{bbox, openings}``），默认
+            :data:`DEFAULT_STACK_MODEL`（thermo_stacker）。``stack_h`` 取
+            ``max(bbox)`` 作保守估计，须与阶段二一致。
 
     Returns:
         :class:`FeasibilityReport`。
@@ -308,8 +368,8 @@ def check_feasibility(
         raise ValueError(f"机械臂导轨长度 L={arm.L} 非法（须为正）。")
 
     device_map = {d.id: d for d in devices}
-    stack_bbox = _resolve_stack_bbox(devices)
-    stack_h = max(stack_bbox)  # 沿长边方向取保守（较大）尺寸
+    stack_bbox, _ = _resolve_stack(stack_model, devices)
+    stack_h = max(stack_bbox)  # 沿长边方向取保守（较大）尺寸，与阶段二一致
     stack_area = stack_bbox[0] * stack_bbox[1]
 
     a, b, c, d_param, e = (
@@ -401,13 +461,24 @@ def check_feasibility(
         n_arm=n_arm,
         n_stack=n_stack,
         n_max=n_max,
+        l_max=l_max,
         mode_hint=mode_hint,
         reasons=reasons,
         suggestions=suggestions,
     )
 
 
-# ---------- 阶段二/三函数骨架（M2~M3 填充） ----------
+# ---------- 阶段二：布局机械臂与堆栈 ----------
+
+
+def _to_xy(long_c: float, short_c: float, long_axis: str) -> tuple[float, float]:
+    """把 (长边坐标, 短边坐标) 映射为房间 (x, y)。
+
+    导轨沿房间长边摆放：``long_axis='y'`` 时长边即 Y、短边即 X；反之亦然。
+    """
+    if long_axis == "y":
+        return (short_c, long_c)
+    return (long_c, short_c)
 
 
 def place_arms_and_stacks(
@@ -416,17 +487,103 @@ def place_arms_and_stacks(
     arm_model: dict | None = None,
     params: RailParams | None = None,
     mode: Literal["near_wall", "centered"] = "near_wall",
+    stack_model: str | dict | None = DEFAULT_STACK_MODEL,
+    l_max: float = 0.0,
+    devices: list["Device"] | None = None,
 ) -> dict[str, list]:
-    """阶段二：布局机械臂与堆栈（M2 实现）。
+    """阶段二：布局机械臂与堆栈。
 
-    第一台按 ``mode`` 确定（靠墙 / 居中），后续臂/堆栈为纯几何偏移：
-    相邻臂中心间距固定为 ``L + 2e + stack_h``，堆栈中轴线对齐臂中轴线、
-    夹在相邻臂之间、距臂 ``e``。
+    导轨沿房间长边摆放（臂长边 ∥ 房间长边）。沿长边从下墙到上墙依次为：
+    下墙 — a — [臂1, 长 L] — (2e+stack_h) — [臂2] — … — [臂n] — a — 上墙。
+    第一台短边方向位置按 ``mode`` 确定，后续臂/堆栈为纯几何偏移：相邻臂中心
+    间距固定为 ``L + 2e + stack_h``；堆栈中轴线对齐臂中轴线、夹在相邻臂之间、
+    距臂 ``e``（即位于相邻两臂中点）。
+
+    Args:
+        lab: 实验室平面图。
+        n_arm: 机械臂台数（通常取自 :func:`check_feasibility` 的报告）。
+        arm_model: 机械臂型号 ``{L, working_radius, bbox}``；为 ``None`` 时从
+            ``devices`` 识别。
+        params: 距离参数；为 ``None`` 时使用默认值。
+        mode: ``near_wall``（默认，靠墙）/ ``centered``（居中，需满足短边不等式 1）。
+        stack_model: 堆栈型号，默认 thermo_stacker（见 0.3 第 2 项）。
+        l_max: 最长仪器的伸出长度 L_out（靠墙模式定位用），取自 report.l_max。
+        devices: 设备列表，供 arm_model/stack_model 缺省时识别。
 
     Returns:
-        ``{"arms": [ArmPlacement, ...], "stacks": [StackPlacement, ...]}``。
+        ``{"arms": [ArmPlacement], "stacks": [StackPlacement]}``。每台机械臂含
+        四个角坐标（[左下, 右下, 右上, 左上]），供阶段三反推仪器坐标。
+
+    Raises:
+        ValueError: 无法识别机械臂。
     """
-    raise NotImplementedError("阶段二（M2）尚未实现：place_arms_and_stacks。")
+    params = params or RailParams()
+    if n_arm < 1:
+        return {"arms": [], "stacks": []}
+
+    arm = _resolve_arm(devices or [], arm_model, params)
+    if arm.L <= _EPS:
+        raise ValueError(f"机械臂导轨长度 L={arm.L} 非法（须为正）。")
+
+    stack_bbox, _ = _resolve_stack(stack_model, devices)
+    stack_h = max(stack_bbox)  # 与阶段一保持一致（保守取较大维）
+
+    a, b, d_param, e = params.a, params.b, params.d, params.e
+    L, w_arm = arm.L, arm.width
+
+    long_len = max(lab.width, lab.depth)
+    short_len = min(lab.width, lab.depth)
+    long_axis = "y" if lab.depth >= lab.width else "x"
+
+    # 短边方向：机械臂中轴线所在的短边坐标
+    if mode == "centered":
+        arm_short = short_len / 2.0
+    else:  # near_wall：臂较长一侧到墙距离 = d + b + L_max
+        arm_short = d_param + b + l_max + w_arm / 2.0
+
+    # 朝向：使导轨长度 L 沿房间长边；native 长边与目标长边不一致则转 90°
+    native_long = "x" if arm.bbox[0] >= arm.bbox[1] else "y"
+    theta = 0.0 if native_long == long_axis else math.pi / 2.0
+
+    step = L + 2 * e + stack_h  # 相邻臂中心间距
+    short_lo, short_hi = arm_short - w_arm / 2.0, arm_short + w_arm / 2.0
+
+    arms: list[ArmPlacement] = []
+    for i in range(n_arm):
+        long_c = a + L / 2.0 + i * step
+        long_lo, long_hi = long_c - L / 2.0, long_c + L / 2.0
+        corners = [
+            _to_xy(long_lo, short_lo, long_axis),  # 左下
+            _to_xy(long_lo, short_hi, long_axis),  # 右下
+            _to_xy(long_hi, short_hi, long_axis),  # 右上
+            _to_xy(long_hi, short_lo, long_axis),  # 左上
+        ]
+        arms.append(
+            ArmPlacement(
+                id=f"arm{i + 1}",
+                center=_to_xy(long_c, arm_short, long_axis),
+                theta=theta,
+                corners=corners,
+                bbox=arm.bbox,
+            )
+        )
+
+    stacks: list[StackPlacement] = []
+    for i in range(n_arm - 1):
+        # 夹在臂 i 与臂 i+1 中点，短边坐标与臂中轴线重合
+        long_c = a + L / 2.0 + i * step + step / 2.0
+        stacks.append(
+            StackPlacement(
+                id=f"stack{i + 1}",
+                center=_to_xy(long_c, arm_short, long_axis),
+                bbox=stack_bbox,
+            )
+        )
+
+    return {"arms": arms, "stacks": stacks}
+
+
+# ---------- 阶段三函数骨架（M3 填充） ----------
 
 
 def assign_and_place_instruments(

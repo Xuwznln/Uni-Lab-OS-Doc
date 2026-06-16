@@ -901,6 +901,7 @@ class RailFeasibilityRequest(BaseModel):
     lab: LabSpec
     arm_model: dict | None = None
     params: RailParamsSpec | None = None
+    stack_model: str | dict | None = rail_layout.DEFAULT_STACK_MODEL
 
 
 class RailFeasibilityResponse(BaseModel):
@@ -908,6 +909,7 @@ class RailFeasibilityResponse(BaseModel):
     n_arm: int
     n_stack: int
     n_max: int
+    l_max: float = 0.0
     mode_hint: str
     reasons: list[str] = []
     suggestions: list[str] = []
@@ -920,6 +922,7 @@ class RailLayoutRequest(BaseModel):
     arm_model: dict | None = None
     params: RailParamsSpec | None = None
     mode: str = "near_wall"
+    stack_model: str | dict | None = rail_layout.DEFAULT_STACK_MODEL
 
 
 class RailLayoutResponse(BaseModel):
@@ -956,6 +959,7 @@ async def run_rail_feasibility(request: RailFeasibilityRequest):
     try:
         report = rail_layout.check_feasibility(
             devices, request.ordered_instruments, lab, request.arm_model, params,
+            request.stack_model,
         )
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
@@ -966,6 +970,7 @@ async def run_rail_feasibility(request: RailFeasibilityRequest):
         n_arm=report.n_arm,
         n_stack=report.n_stack,
         n_max=report.n_max,
+        l_max=report.l_max,
         mode_hint=report.mode_hint,
         reasons=report.reasons,
         suggestions=report.suggestions,
@@ -980,12 +985,16 @@ async def run_rail_layout(request: RailLayoutRequest):
     devices = create_devices_from_list([d.model_dump() for d in request.devices])
     lab = parse_lab(request.lab.model_dump())
     params = _rail_params(request.params)
+    from dataclasses import asdict
+
     try:
         report = rail_layout.check_feasibility(
             devices, request.ordered_instruments, lab, request.arm_model, params,
+            request.stack_model,
         )
         arm_stack = rail_layout.place_arms_and_stacks(
             lab, report.n_arm, request.arm_model, params, request.mode,
+            request.stack_model, l_max=report.l_max, devices=devices,
         )
         placements = rail_layout.assign_and_place_instruments(
             arm_stack["arms"], request.ordered_instruments, params,
@@ -1004,8 +1013,8 @@ async def run_rail_layout(request: RailLayoutRequest):
             )
             for p in placements
         ],
-        arms=[],
-        stacks=[],
+        arms=[asdict(a) for a in arm_stack["arms"]],
+        stacks=[asdict(s) for s in arm_stack["stacks"]],
         conflicts=[],
     )
 

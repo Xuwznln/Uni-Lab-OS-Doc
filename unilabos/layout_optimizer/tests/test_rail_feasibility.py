@@ -20,8 +20,14 @@ def _inst(dev_id: str, w: float, depth: float, direction=(0.0, -1.0)) -> Device:
     return Device(id=dev_id, name=dev_id, bbox=(w, depth), openings=[Opening(direction=direction)])
 
 
-def _check(devices, order, lab, arm=ARM, params=None):
-    return rl.check_feasibility(devices, order, lab, arm_model=arm, params=params)
+# 固定堆栈几何（stack_h=max=0.4），避免依赖 footprints.json 内容，保持测试确定性
+STACK = {"bbox": [0.4, 0.4]}
+
+
+def _check(devices, order, lab, arm=ARM, params=None, stack=STACK):
+    return rl.check_feasibility(
+        devices, order, lab, arm_model=arm, params=params, stack_model=stack,
+    )
 
 
 # ---------- 面积 ----------
