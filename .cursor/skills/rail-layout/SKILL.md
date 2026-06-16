@@ -1,11 +1,11 @@
 ---
 name: rail-layout
-description: Orchestrate deterministic rail-mounted robot-arm lab layout for linear (single-instance) experiment workflows — resolve the user's workflow devices to catalog footprints, run the feasibility check, compute arm/stack/instrument coordinates analytically, and report each device's lab position + cardinal rotation. Does NOT push to the 3D frontend. Use when the user wants to lay out a rail/gantry robot-arm workstation where instruments are arranged around arms following workflow order, or mentions 导轨机械臂/导轨布局/机械臂周围布仪器/线性流程布局/rail layout. For random constraint-satisfaction layouts use the sibling skill `lab-layout-optimizer` instead.
+description: Orchestrate deterministic rail-mounted robot-arm lab layout for linear (single-instance) experiment workflows — resolve the user's workflow devices to catalog footprints, run the feasibility check, compute arm/stack/instrument coordinates analytically, and report each device's lab position + cardinal rotation. Does NOT push to the 3D frontend. Use when the user wants to lay out a rail/gantry robot-arm workstation where instruments are arranged around arms following workflow order, or mentions 导轨机械臂/导轨布局/机械臂周围布仪器/线性流程布局/rail layout.
 ---
 
 # Rail-Mounted Robot-Arm Layout Orchestrator
 
-You orchestrate **deterministic analytical layout** for rail-mounted robot-arm labs: arms are placed along the long wall, stacks sit between adjacent arms, and instruments are packed around each arm in workflow order. Unlike `lab-layout-optimizer`, this does NOT run differential evolution — coordinates are computed exactly from distance parameters.
+You orchestrate **deterministic analytical layout** for rail-mounted robot-arm labs: arms are placed along the long wall, stacks sit between adjacent arms, and instruments are packed around each arm in workflow order. This is a fully deterministic layout — it runs NO search/optimization; coordinates are computed exactly from the distance parameters.
 
 > Scope: **linear experiment workflows with no duplicate instruments** (一种仪器只有一台). Multi-instance handling is a later phase.
 
@@ -16,7 +16,7 @@ The **final deliverable is the coordinates table** — for every instrument, arm
 ## Prerequisites
 
 - Device name resolution rules are bundled in [device_name_resolution_zh.md](device_name_resolution_zh.md). **Read it before Step 1** — it tells you how to match the user's workflow devices (informal names) to exact catalog footprint IDs, and how to split them into arm / stack / ordered instruments.
-- This skill auto-detects and, if needed, starts the layout optimizer server (compute-only; see Step 0).
+- This skill auto-detects and, if needed, starts the layout server (compute-only; see Step 0).
 
 ## CRITICAL OUTPUT RULES
 
@@ -27,14 +27,30 @@ The **final deliverable is the coordinates table** — for every instrument, arm
 - The ONE rich output allowed is the **final coordinates table** in Step 5.
 - At the END of every reply, print the stop hint (see "Stopping the server").
 
-## Default distance parameters
+## Default parameters and user overrides
 
-Defined centrally in `rail_layout.DEFAULT_PARAMS` (meters), user-overridable via the request `params` field:
+Every parameter below has a default, so the skill works with zero configuration. But **the user may override any of them** — if the user supplies their own values, pass them through in the corresponding request field; if they say nothing, omit the field and the server uses the default. Always honor user-supplied values over the defaults.
 
+Before Step 3/4, check whether the user mentioned any custom distances, a specific arm model / working radius, or a specific stack model, and route each to the right request field below.
+
+### Distance parameters → request field `params` (meters)
+
+Defaults (`rail_layout.DEFAULT_PARAMS`):
 - `a=0.5` arm short-side to wall · `b=0.2` arm long-side to instrument · `c=0.3` instrument-to-instrument · `d=0.3` instrument to wall · `e=0.2` arm to stack
-- Hard reachability convention: `b < working_radius` and `e < working_radius`.
-- Working radius defaults to `0.3m` (TODO: replace with a per-model `rail_arm_models.json` lookup).
-- Default stack model `thermo_stacker` (real bbox/openings from `footprints.json`); user may override with `stack_model`.
+
+Override only the keys the user changes, e.g. `"params": {"b": 0.25, "c": 0.4}`. Hard reachability convention: `b < working_radius` and `e < working_radius` (the feasibility check enforces this).
+
+### Arm working radius / model → request field `arm_model`
+
+- Working radius defaults to `0.3m`. Rail length `L` and bbox are otherwise inferred from `/devices`.
+- If the user gives a specific arm model, working radius, rail length, or bbox, pass `"arm_model": {"L": <m>, "working_radius": <m>, "bbox": [w, d]}` (include only the keys you know). A user-supplied `working_radius` also goes here (or into `params.working_radius`).
+- TODO: a per-model `rail_arm_models.json` lookup will replace the `0.3m` default.
+
+### Stack model → request field `stack_model`
+
+- Defaults to `thermo_stacker` (real bbox/openings from `footprints.json`).
+- If the user names a different stack, pass `"stack_model": "<footprint_id>"`, or give geometry directly as `"stack_model": {"bbox": [w, d], "openings": [...]}`.
+- Available footprint stacks include `thermo_orbitor_rs2_stack`, `hamilton_entry_exit_stacker`, `tecan_carousel_stacker_6/10/25`, `thermo_cytomat2c_stacker_15/21`, `highres_bio_random_access_stacker_12`.
 
 ## Pipeline
 
@@ -173,8 +189,7 @@ layout computed — 4 instruments, 1 arms, 0 stacks
 停止服务请运行: lsof -ti:8000 | xargs kill
 ```
 
-## Boundaries (avoid confusion with the optimizer)
+## Boundaries
 
-- Do NOT use `/optimize`, `/optimize/auto`, or any DE seeders here.
-- Reused server I/O: `GET /devices`, `GET /scene/lab`, `POST /rail/feasibility`, `POST /rail/layout`, optional `POST /rail/validate`.
-- Two skills coexist: random constraint-satisfaction → `lab-layout-optimizer`; deterministic rail linear flow → `rail-layout`.
+- This skill only uses the deterministic endpoints: `GET /devices`, `GET /scene/lab`, `POST /rail/feasibility`, `POST /rail/layout`, optional `POST /rail/validate`.
+- Do NOT call any `/optimize*` endpoints — this skill computes coordinates analytically and runs no search.

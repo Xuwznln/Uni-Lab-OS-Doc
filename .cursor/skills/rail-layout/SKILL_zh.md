@@ -1,11 +1,11 @@
 ---
 name: rail-layout
-description: 为线性（单实例）实验流程编排确定性的导轨机械臂实验室布局——把用户流程里的设备解析到目录 footprint、做可行性检查、解析式计算机械臂/堆栈/仪器坐标，并报告每台设备在实验室中的位置 + 朝向（仅 0/90/180/270）。不推送到 3D 前端。当用户想要布置导轨/龙门机械臂工作站、让仪器按工作流顺序围绕机械臂排布，或提到 导轨机械臂/导轨布局/机械臂周围布仪器/线性流程布局/rail layout 时使用。随机约束满足类布局请改用兄弟技能 `lab-layout-optimizer`。
+description: 为线性（单实例）实验流程编排确定性的导轨机械臂实验室布局——把用户流程里的设备解析到目录 footprint、做可行性检查、解析式计算机械臂/堆栈/仪器坐标，并报告每台设备在实验室中的位置 + 朝向（仅 0/90/180/270）。不推送到 3D 前端。当用户想要布置导轨/龙门机械臂工作站、让仪器按工作流顺序围绕机械臂排布，或提到 导轨机械臂/导轨布局/机械臂周围布仪器/线性流程布局/rail layout 时使用。
 ---
 
 # 导轨机械臂布局编排器
 
-你为导轨机械臂实验室编排**确定性解析布局**：机械臂沿长边墙摆放，堆栈夹在相邻机械臂之间，仪器按工作流顺序围绕每台机械臂装箱。与 `lab-layout-optimizer` 不同，本技能**不跑差分进化（DE）**——坐标完全由距离参数解析算出。
+你为导轨机械臂实验室编排**确定性解析布局**：机械臂沿长边墙摆放，堆栈夹在相邻机械臂之间，仪器按工作流顺序围绕每台机械臂装箱。这是完全确定性的布局——**不跑任何搜索/优化**，坐标完全由距离参数解析算出。
 
 > 适用范围：**无多台同类型仪器的线性实验流程**（一种仪器只有一台）。
 
@@ -16,7 +16,7 @@ description: 为线性（单实例）实验流程编排确定性的导轨机械�
 ## 前置条件
 
 - 设备名称解析规则已打包在 [device_name_resolution_zh.md](device_name_resolution_zh.md)。**在 Step 1 之前先读它**——它规定了如何把用户流程里的设备（非正式名称）匹配到精确的目录 footprint ID，以及如何把它们拆分为 机械臂 / 堆栈 / 有序仪器。
-- 本技能会自动检测，必要时启动布局优化器服务（仅用于计算，见 Step 0）。
+- 本技能会自动检测，必要时启动布局服务（仅用于计算，见 Step 0）。
 
 ## 关键输出规则
 
@@ -27,14 +27,30 @@ description: 为线性（单实例）实验流程编排确定性的导轨机械�
 - 唯一允许的丰富输出是 Step 5 的**最终坐标表**。
 - 每次回复结尾打印停止服务提示（见"停止服务"）。
 
-## 默认距离参数
+## 默认参数与用户覆盖
 
-集中定义在 `rail_layout.DEFAULT_PARAMS`（单位 m），可由请求的 `params` 字段覆盖：
+下面每个参数都有默认值，因此技能零配置即可运行。但**用户可以覆盖其中任意一个**——若用户给了自己的取值，就在对应的请求字段里透传；若用户没说，就省略该字段、由服务端使用默认值。始终以用户给出的值优先于默认值。
 
+在 Step 3/4 之前，先判断用户是否提到了自定义距离、特定机械臂型号/工作半径、或特定堆栈型号，并把它们分别路由到下面正确的请求字段。
+
+### 距离参数 → 请求字段 `params`（单位 m）
+
+默认值（`rail_layout.DEFAULT_PARAMS`）：
 - `a=0.5` 机械臂短侧到墙 · `b=0.2` 机械臂长侧到仪器 · `c=0.3` 仪器间距 · `d=0.3` 仪器到墙 · `e=0.2` 机械臂到堆栈
-- 硬性可达性约定：`b < 工作半径` 且 `e < 工作半径`。
-- 工作半径默认 `0.3m`（TODO：将来用按型号查表的 `rail_arm_models.json` 替换）。
-- 默认堆栈型号 `thermo_stacker`（真实 bbox/openings 取自 `footprints.json`）；用户可用 `stack_model` 覆盖。
+
+只覆盖用户改动的键，例如 `"params": {"b": 0.25, "c": 0.4}`。硬性可达性约定：`b < 工作半径` 且 `e < 工作半径`（可行性检查会强制校验）。
+
+### 机械臂工作半径 / 型号 → 请求字段 `arm_model`
+
+- 工作半径默认 `0.3m`；导轨长度 `L` 和 bbox 否则从 `/devices` 推断。
+- 若用户给了特定的机械臂型号、工作半径、导轨长度或 bbox，传 `"arm_model": {"L": <m>, "working_radius": <m>, "bbox": [w, d]}`（只填你知道的键）。用户给的 `working_radius` 也放这里（或放 `params.working_radius`）。
+- TODO：将来用按型号查表的 `rail_arm_models.json` 替换 `0.3m` 默认值。
+
+### 堆栈型号 → 请求字段 `stack_model`
+
+- 默认 `thermo_stacker`（真实 bbox/openings 取自 `footprints.json`）。
+- 若用户指定了别的堆栈，传 `"stack_model": "<footprint_id>"`，或直接给几何 `"stack_model": {"bbox": [w, d], "openings": [...]}`。
+- 可选的 footprint 堆栈包括 `thermo_orbitor_rs2_stack`、`hamilton_entry_exit_stacker`、`tecan_carousel_stacker_6/10/25`、`thermo_cytomat2c_stacker_15/21`、`highres_bio_random_access_stacker_12`。
 
 ## 流程
 
@@ -173,8 +189,7 @@ layout computed — 4 instruments, 1 arms, 0 stacks
 停止服务请运行: lsof -ti:8000 | xargs kill
 ```
 
-## 边界（避免与优化器混淆）
+## 边界
 
-- 这里**不要**用 `/optimize`、`/optimize/auto` 或任何 DE seeder。
-- 复用的服务 I/O：`GET /devices`、`GET /scene/lab`、`POST /rail/feasibility`、`POST /rail/layout`、可选 `POST /rail/validate`。
-- 两套技能并存：随机约束满足 → `lab-layout-optimizer`；确定性导轨线性流程 → `rail-layout`。
+- 本技能只使用确定性端点：`GET /devices`、`GET /scene/lab`、`POST /rail/feasibility`、`POST /rail/layout`、可选 `POST /rail/validate`。
+- **不要**调用任何 `/optimize*` 端点——本技能解析式计算坐标，不跑任何搜索。
