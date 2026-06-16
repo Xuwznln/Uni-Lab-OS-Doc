@@ -335,6 +335,8 @@ def build_package_info(
         "summary": project.get("summary", ""),
         "license": project.get("license", ""),
         "homepage": project.get("homepage", ""),
+        # pyproject [project].dependencies：Edge 消费侧据此安装运行依赖（不安装包体本身）
+        "dependencies": list(project.get("dependencies") or []),
         "sha256": sha256,
         "download_url": download_url,
     }
@@ -517,19 +519,25 @@ def cmd_package(args_dict: Dict[str, Any], http_client: Any = None) -> None:
 def _run_pip_install(spec: str) -> str:
     """优先 `uv pip install`、回退 `python -m pip install` 安装 spec，返回实际使用的安装器名。
 
+    与 environment_check 共用安装器选择(_installer_candidates，含 uv 可用性校验+缓存)与命令构造
+    (_install_command)：中文 locale 自动走清华源、uv 显式 --python 兼容 conda。
     失败（含找不到 uv）时切下一个；全部失败抛 PackageCLIError 并带最后一次 stderr。
     """
-    attempts: List[Tuple[str, List[str]]] = [
-        ("uv pip install", ["uv", "pip", "install", spec]),
-        ("pip install", [sys.executable, "-m", "pip", "install", spec]),
-    ]
+    from unilabos.utils.environment_check import _install_command, _installer_candidates, _is_chinese_locale
+
+    is_chinese = _is_chinese_locale()
     last_err = ""
-    for name, cmd in attempts:
+    for installer in _installer_candidates():
+        name = "uv pip install" if installer == "uv" else "pip install"
+        cmd = _install_command(installer, spec, False, is_chinese)
         print_status(f"尝试安装：{name} {spec}", "info")
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         except FileNotFoundError:
-            continue  # 未安装 uv 等，换下一个安装器
+            continue  # 安装器不可用，换下一个
+        except subprocess.TimeoutExpired:
+            last_err = "timeout after 600s"
+            continue
         if proc.returncode == 0:
             return name
         last_err = (proc.stderr or proc.stdout or "").strip()

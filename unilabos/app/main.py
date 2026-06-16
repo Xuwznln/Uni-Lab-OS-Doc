@@ -667,8 +667,18 @@ def main():
                 existing_devices_dirs = args_dict.get("devices") or []
                 args_dict["devices"] = existing_devices_dirs + community_result.devices_dirs
                 if not skip_env_check:
-                    from unilabos.utils.environment_check import check_device_package_requirements
+                    from unilabos.utils.environment_check import (
+                        check_device_package_requirements,
+                        install_requirements_list,
+                    )
 
+                    # 社区包依赖：pyproject [project].dependencies 为标准来源，只装依赖不装包体
+                    # （保持源码挂载，便于 track/卸载）；requirements.txt 作为补充兜底
+                    if community_result.dependencies and not install_requirements_list(
+                        community_result.dependencies, label="community"
+                    ):
+                        print_status("community 设备包 pyproject 依赖安装失败，程序退出", "error")
+                        os._exit(1)
                     if not check_device_package_requirements(args_dict["devices"]):
                         print_status("community 设备包依赖检查失败，程序退出", "error")
                         os._exit(1)
