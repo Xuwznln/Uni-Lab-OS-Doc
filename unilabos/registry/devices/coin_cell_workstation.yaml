@@ -86,12 +86,12 @@ coincellassemblyworkstation_device:
           elec_use_num: null
           elec_vol: 50
           file_path: /Users/sml/work
-          fujipian_juzhendianwei: 0
-          fujipian_panshu: 0
-          gemo_juzhendianwei: 0
-          gemopanshu: 0
-          lvbodian: true
-          qiangtou_juzhendianwei: 0
+          ne_plate_matrix: 0
+          ne_plate_num: 0
+          sep_plate_matrix: 0
+          sep_plate_num: 0
+          aluminum_foil: true
+          tip_box_matrix: 0
         handles: {}
         placeholder_keys: {}
         result: {}
@@ -148,27 +148,27 @@ coincellassemblyworkstation_device:
                   default: D:\UniLabdev\Uni-Lab-OS\unilabos\devices\workstation\coin_cell_assembly
                   description: 实验记录保存路径
                   type: string
-                fujipian_juzhendianwei:
+                ne_plate_matrix:
                   default: 0
                   description: 负极片矩阵点位
                   type: integer
-                fujipian_panshu:
+                ne_plate_num:
                   default: 0
                   description: 负极片盘数
                   type: integer
-                gemo_juzhendianwei:
+                sep_plate_matrix:
                   default: 0
                   description: 隔膜矩阵点位
                   type: integer
-                gemopanshu:
+                sep_plate_num:
                   default: 0
                   description: 隔膜盘数
                   type: integer
-                lvbodian:
+                aluminum_foil:
                   default: true
                   description: 是否使用铝箔垫片
                   type: boolean
-                qiangtou_juzhendianwei:
+                tip_box_matrix:
                   default: 0
                   description: 枪头盒矩阵点位
                   type: integer
@@ -245,7 +245,7 @@ coincellassemblyworkstation_device:
           title: func_pack_device_init参数
           type: object
         type: UniLabJsonCommand
-      auto-func_pack_device_init_auto_start_combined:
+      auto-coin_cell_init:
         feedback: {}
         goal: {}
         goal_default:
@@ -274,7 +274,7 @@ coincellassemblyworkstation_device:
             result: {}
           required:
           - goal
-          title: func_pack_device_init_auto_start_combined参数
+          title: coin_cell_init参数
           type: object
         type: UniLabJsonCommand
       auto-func_pack_device_start:
@@ -458,7 +458,7 @@ coincellassemblyworkstation_device:
           title: func_read_data_and_output参数
           type: object
         type: UniLabJsonCommand
-      auto-func_sendbottle_allpack_multi:
+      auto-coin_cell_start:
         feedback: {}
         goal: {}
         goal_default:
@@ -474,12 +474,12 @@ coincellassemblyworkstation_device:
           elec_use_num: null
           elec_vol: 50
           file_path: /Users/sml/work
-          fujipian_juzhendianwei: 0
-          fujipian_panshu: 0
-          gemo_juzhendianwei: 0
-          gemopanshu: 0
-          lvbodian: true
-          qiangtou_juzhendianwei: 0
+          ne_plate_matrix: 0
+          ne_plate_num: 0
+          sep_plate_matrix: 0
+          sep_plate_num: 0
+          aluminum_foil: true
+          tip_box_matrix: 0
         handles:
           input:
           - data_key: elec_num
@@ -552,27 +552,27 @@ coincellassemblyworkstation_device:
                   default: /Users/sml/work
                   description: 实验记录保存路径
                   type: string
-                fujipian_juzhendianwei:
+                ne_plate_matrix:
                   default: 0
                   description: 负极片矩阵点位
                   type: integer
-                fujipian_panshu:
+                ne_plate_num:
                   default: 0
                   description: 负极片盘数
                   type: integer
-                gemo_juzhendianwei:
+                sep_plate_matrix:
                   default: 0
                   description: 隔膜矩阵点位
                   type: integer
-                gemopanshu:
+                sep_plate_num:
                   default: 0
                   description: 隔膜盘数
                   type: integer
-                lvbodian:
+                aluminum_foil:
                   default: true
                   description: 是否使用铝箔垫片
                   type: boolean
-                qiangtou_juzhendianwei:
+                tip_box_matrix:
                   default: 0
                   description: 枪头盒矩阵点位
                   type: integer
@@ -583,7 +583,7 @@ coincellassemblyworkstation_device:
             result: {}
           required:
           - goal
-          title: func_sendbottle_allpack_multi参数
+          title: coin_cell_start参数
           type: object
         type: UniLabJsonCommand
       auto-func_stop_read_data:
@@ -655,59 +655,6 @@ coincellassemblyworkstation_device:
           required:
           - goal
           title: post_init参数
-          type: object
-        type: UniLabJsonCommand
-      auto-qiming_coin_cell_code:
-        feedback: {}
-        goal: {}
-        goal_default:
-          battery_clean_ignore: false
-          battery_pressure: 4000
-          battery_pressure_mode: true
-          fujipian_juzhendianwei: 0
-          fujipian_panshu: null
-          gemo_juzhendianwei: 0
-          gemopanshu: 0
-          lvbodian: true
-        handles: {}
-        placeholder_keys: {}
-        result: {}
-        schema:
-          description: ''
-          properties:
-            feedback: {}
-            goal:
-              properties:
-                battery_clean_ignore:
-                  default: false
-                  type: boolean
-                battery_pressure:
-                  default: 4000
-                  type: integer
-                battery_pressure_mode:
-                  default: true
-                  type: boolean
-                fujipian_juzhendianwei:
-                  default: 0
-                  type: integer
-                fujipian_panshu:
-                  type: integer
-                gemo_juzhendianwei:
-                  default: 0
-                  type: integer
-                gemopanshu:
-                  default: 0
-                  type: integer
-                lvbodian:
-                  default: true
-                  type: boolean
-              required:
-              - fujipian_panshu
-              type: object
-            result: {}
-          required:
-          - goal
-          title: qiming_coin_cell_code参数
           type: object
         type: UniLabJsonCommand
     module: unilabos.devices.workstation.coin_cell_assembly.coin_cell_assembly:CoinCellAssemblyWorkstation

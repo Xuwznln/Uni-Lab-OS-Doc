@@ -1669,7 +1669,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         }
 
     # -------------------- 2.37 5号站新建实验（自动入口，接配液 handle） --------------------
-    def create_conductivity_orders_auto(
+    def create_conductivity_orders(
         self,
         vial_plates: List[Dict[str, Any]],
         temperature_points: List[float],
@@ -1702,11 +1702,19 @@ class BioyondCellWorkstation(BioyondWorkstation):
         - 配液仍走原 wait_for_order_finish 单值机制，路径完全不变。
         - wait_for_finish=False 时回退到 fire-and-forget 行为，仅创建不等。
 
+        2026-06-10 调整（按 5 号自动传递窗过滤）：
+        - 上游配液会把订单产出的**所有** 20ml 分液瓶板都传进 vial_plates，不区分用途。
+          真正要测电导的板 = 已转运到「5 号自动传递窗」的板。
+        - 提交前查 warehouse-info(5号自动传递窗) 按 materialId 取交集，只保留在 5 号站的板。
+          这样即使配液传了扣电/软包等非电导板，也不会误建电导单。
+        - 注意时序：要求板已转运到 5 号站后再调本 action；否则会被全部过滤而报错。
+        - temperature_points 的长度校验在过滤之后进行（按过滤后的板数）。
+
         Args:
             vial_plates: 上游配液输出的分液瓶板列表，每项需含
                 batch_id / materialId / barCode / orderCode（缺任一报错）
             temperature_points: 温度点列表（℃）。
-                长度=1 → 广播到所有分液板；长度=N（=分液板数）→ 一一对应；其他长度报错。
+                长度=1 → 广播到所有分液板；长度=N（=过滤后分液板数）→ 一一对应；其他长度报错。
                 **同一块板上的所有分液瓶共享同一温度点（一块板一个温度）。**
             validate_barcode: 提交前是否对 plateBarCode 做物料系统强校验，默认 True
             wait_for_finish: 是否阻塞等待所有 LIMS 新建电导单完成，默认 True
@@ -1734,6 +1742,36 @@ class BioyondCellWorkstation(BioyondWorkstation):
         if not temperature_points or not isinstance(temperature_points, list):
             raise ValueError("temperature_points 不能为空")
 
+        # ========== 阶段0: 只保留已转运到 5 号自动传递窗的板 ==========
+        # 上游配液会把订单产出的全部 20ml 分液瓶板都传进来（不区分用途），
+        # 真正要测电导的 = 已搬到「5 号自动传递窗」的板。查 warehouse-info(2.38) 按 materialId 取交集。
+        # whId 来源：包含库位的仓库信息0610.json，name="5号自动传递窗", code="0018"。
+        _WH_ID_TRANSFER_WINDOW_5 = "3a1c68b5-65e1-f662-93bb-3c2c5b42744d"
+        wh_resp = self._post_lims(
+            "/api/lims/storage/warehouse-info",
+            {"whId": _WH_ID_TRANSFER_WINDOW_5, "includeDetail": True},
+        )
+        if not isinstance(wh_resp, dict) or wh_resp.get("code") != 1:
+            raise BioyondException(f"查询 5 号自动传递窗失败: {wh_resp}")
+        station_mids = {
+            (loc.get("holdMId") or "").strip()
+            for loc in ((wh_resp.get("data") or {}).get("locations") or [])
+            if isinstance(loc, dict) and loc.get("holdMId")
+        }
+        kept = [
+            p for p in vial_plates
+            if isinstance(p, dict) and (p.get("materialId") or "").strip() in station_mids
+        ]
+        logger.info(
+            f"[create_conductivity_orders] 5 号自动传递窗过滤: "
+            f"{len(vial_plates)} → {len(kept)} 块板（5 号站现有板 {len(station_mids)} 块）"
+        )
+        vial_plates = kept
+        if not vial_plates:
+            raise BioyondException(
+                "过滤后没有任何板在 5 号自动传递窗，请确认要测电导的板已转运到 5 号站。"
+            )
+
         # 提取 batch_id（同 batch 内所有 plate 共享同一值）
         batch_id_raw = vial_plates[0].get("batch_id") if isinstance(vial_plates[0], dict) else None
         if not batch_id_raw:
@@ -1752,7 +1790,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
 
         logger.info(
-            f"[create_conductivity_orders_auto] 开始：batch_id={batch_id}, "
+            f"[create_conductivity_orders] 开始：batch_id={batch_id}, "
             f"分液板数={n_plates}, 温度点数={n_temps}"
         )
 
@@ -1826,7 +1864,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 }
                 entries.append(entry)
                 logger.info(
-                    f"[create_conductivity_orders_auto] entry: "
+                    f"[create_conductivity_orders] entry: "
                     f"plate#{idx+1} orderId={resolved_order_code} "
                     f"(bottle.assoc={bottle_assoc[:8] if bottle_assoc else '<none>'}), "
                     f"plateBarCode={plate_barcode}, X={bottle['x']}, Y={bottle['y']}, T={plate_temp}"
@@ -1837,13 +1875,13 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         unique_barcodes = sorted({e["plateBarCode"] for e in entries})
         logger.info(
-            f"[create_conductivity_orders_auto] 共组装 {len(entries)} 条 entry，"
+            f"[create_conductivity_orders] 共组装 {len(entries)} 条 entry，"
             f"涉及 {len(unique_barcodes)} 个板条码"
         )
 
         # ========== 阶段2: 直接 POST（调度由上游/外部管理，与配液 _submit_and_wait_orders 一致）==========
         logger.info(
-            f"[create_conductivity_orders_auto] POST {len(entries)} 条 entry 到 "
+            f"[create_conductivity_orders] POST {len(entries)} 条 entry 到 "
             f"/api/lims/order/conductivity-orders ..."
         )
         response = self._post_lims("/api/lims/order/conductivity-orders", entries)
@@ -1851,7 +1889,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             response_dump = json.dumps(response, ensure_ascii=False)
         except Exception:
             response_dump = str(response)
-        logger.info(f"[create_conductivity_orders_auto] LIMS 完整返回: {response_dump}")
+        logger.info(f"[create_conductivity_orders] LIMS 完整返回: {response_dump}")
 
         # ========== 阶段3: 解析 response 算 status ==========
         # 2026-06-04 修：原先用 orderId != EMPTY_GUID 判断成功是错的——
@@ -1886,7 +1924,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
                 if error_entries:
                     logger.warning(
-                        f"[create_conductivity_orders_auto] ⚠️ {len(error_entries)} 条 entry 创建失败:"
+                        f"[create_conductivity_orders] ⚠️ {len(error_entries)} 条 entry 创建失败:"
                     )
                     for e in error_entries:
                         logger.warning(
@@ -1894,7 +1932,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                             f"orderCode={e.get('orderCode')!r}"
                         )
         logger.info(
-            f"[create_conductivity_orders_auto] 最终 status={status}, "
+            f"[create_conductivity_orders] 最终 status={status}, "
             f"LIMS 新建电导单号={new_order_codes}"
         )
 
@@ -1912,7 +1950,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # 节点会一直运行到所有电导单子收到 /report/order_finish 推送（成功/异常/超时）。
         if wait_for_finish and new_order_codes:
             logger.info(
-                f"[create_conductivity_orders_auto] 开始阻塞等待 {len(new_order_codes)} "
+                f"[create_conductivity_orders] 开始阻塞等待 {len(new_order_codes)} "
                 f"个电导单完成 (单订单 timeout={wait_timeout_seconds}s)..."
             )
             conductivity_reports: List[Dict[str, Any]] = []
@@ -1926,7 +1964,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             }
             for idx, order_code in enumerate(new_order_codes, 1):
                 logger.info(
-                    f"[create_conductivity_orders_auto] 等待第 {idx}/{len(new_order_codes)} "
+                    f"[create_conductivity_orders] 等待第 {idx}/{len(new_order_codes)} "
                     f"个电导单: {order_code}"
                 )
                 wait_result = self._wait_conductivity_finish(
@@ -1936,18 +1974,18 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 if wait_status == "success":
                     summary["success"] += 1
                     logger.info(
-                        f"[create_conductivity_orders_auto] ✓ 电导单 {order_code} 完成"
+                        f"[create_conductivity_orders] ✓ 电导单 {order_code} 完成"
                     )
                 elif wait_status in summary:
                     summary[wait_status] += 1
                     logger.warning(
-                        f"[create_conductivity_orders_auto] ⚠ 电导单 {order_code} "
+                        f"[create_conductivity_orders] ⚠ 电导单 {order_code} "
                         f"非正常结束: status={wait_status}"
                     )
                 else:
                     summary["other"] += 1
                     logger.warning(
-                        f"[create_conductivity_orders_auto] ⚠ 电导单 {order_code} "
+                        f"[create_conductivity_orders] ⚠ 电导单 {order_code} "
                         f"未知 wait status: {wait_status}"
                     )
                 conductivity_reports.append({
@@ -1967,12 +2005,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
             result["conductivity_reports"] = conductivity_reports
             result["completion_summary"] = summary
             logger.info(
-                f"[create_conductivity_orders_auto] 全部电导单等待结束："
+                f"[create_conductivity_orders] 全部电导单等待结束："
                 f"summary={summary}, final_status={result['status']}"
             )
         elif wait_for_finish and not new_order_codes:
             logger.warning(
-                "[create_conductivity_orders_auto] wait_for_finish=True 但 LIMS 未返回任何成功 orderCode，跳过等待"
+                "[create_conductivity_orders] wait_for_finish=True 但 LIMS 未返回任何成功 orderCode，跳过等待"
             )
 
         return result
@@ -3208,6 +3246,177 @@ class BioyondCellWorkstation(BioyondWorkstation):
         
         return (x, y, z)
 
+
+    def stack_inquiry_2to1(
+        self,
+        poll_interval: float = 5.0,
+        timeout: int = 3600,
+    ) -> Dict[str, Any]:
+        """
+        轮询「1号2号手套箱交接堆栈」，直到其中没有分液瓶板为止。
+
+        用途：配液完成后，确保 1、2 号手套箱交接堆栈已被清空（分液板已转运走），
+        再放行后续步骤。堆栈里只要还有分液瓶板就阻塞轮询；清空后通过。
+
+        判定依据：查 warehouse-info(2.38) 交接堆栈，库位 holdMId 非空且
+        holdMTypeName 含「分液瓶板」即视为仍有分液板。
+
+        Args:
+            poll_interval: 轮询间隔（秒），默认 5s
+            timeout: 最长等待秒数，默认 3600s（1h）；超时抛 BioyondException
+
+        Returns:
+            { "status": "clear", "poll_count": int, "elapsed_seconds": float }
+
+        Raises:
+            BioyondException: 查询失败 / 等待超时
+        """
+        # whId 来源：包含库位的仓库信息0610.json，name="1号2号手套箱交接堆栈", code="0016"。
+        _WH_ID_TRANSFER_2TO1 = "3a1baa49-7f76-b88a-44d5-d478c48aae3e"
+        _PLATE_KEYWORD = "分液瓶板"
+
+        start = time.time()
+        poll_count = 0
+        while True:
+            resp = self._post_lims(
+                "/api/lims/storage/warehouse-info",
+                {"whId": _WH_ID_TRANSFER_2TO1, "includeDetail": True},
+            )
+            if not isinstance(resp, dict) or resp.get("code") != 1:
+                raise BioyondException(f"查询 1号2号手套箱交接堆栈失败: {resp}")
+
+            locations = (resp.get("data") or {}).get("locations") or []
+            plates = [
+                loc for loc in locations
+                if isinstance(loc, dict)
+                and (loc.get("holdMId") or "").strip()
+                and _PLATE_KEYWORD in (loc.get("holdMTypeName") or "")
+            ]
+
+            elapsed = time.time() - start
+            if not plates:
+                logger.info(
+                    f"[stack_inquiry_2to1] ✅ 1号2号交接堆栈已无分液瓶板，通过 "
+                    f"（轮询 {poll_count} 次，耗时 {elapsed:.1f}s）"
+                )
+                return {
+                    "status": "clear",
+                    "poll_count": poll_count,
+                    "elapsed_seconds": round(elapsed, 1),
+                }
+
+            if elapsed > timeout:
+                raise BioyondException(
+                    f"等待 1号2号交接堆栈清空超时（{timeout}s），仍有 {len(plates)} 块分液瓶板："
+                    + ", ".join(
+                        f"(库位{loc.get('code')}, {loc.get('holdMTypeName')})"
+                        for loc in plates
+                    )
+                )
+
+            poll_count += 1
+            logger.info(
+                f"[stack_inquiry_2to1] 交接堆栈仍有 {len(plates)} 块分液瓶板"
+                f"（库位 {[loc.get('code') for loc in plates]}），"
+                f"{poll_interval}s 后重试...（已等待 {elapsed:.1f}s）"
+            )
+            time.sleep(poll_interval)
+
+    def monitor_manual_stack_3(
+        self,
+        poll_interval: float = 5.0,
+        max_duration: int = 3600,
+    ) -> Dict[str, Any]:
+        """
+        持续轮询监测 3 个堆栈的库位占用情况：
+          - 3号箱手动堆栈      (手动堆栈,           code=0007)
+          - 3号箱自动堆栈-左   (自动堆栈-左,        code=0008)
+          - 1号2号手套箱交接堆栈 (1号2号手套箱交接堆栈, code=0016)
+
+        每隔 poll_interval 秒分别查一次 warehouse-info(2.38)，打印各堆栈当前各库位的占用物料，
+        累计运行达到 max_duration 秒后自动停止并返回最后一次快照。
+
+        用途：人工盯这三个堆栈的物料进出（调试 / 观察）。
+        说明：UniLab 的 action 不接受前端 cancel，故用 max_duration 到点自停；
+              单次查询失败只告警重试，不中断监测。
+
+        Args:
+            poll_interval: 轮询间隔（秒），默认 5s（一轮内顺序查完 3 个堆栈后再 sleep）
+            max_duration: 最长监测时长（秒），默认 3600s（1h），到点自动停止
+
+        Returns:
+            {
+                "status": "stopped",
+                "poll_count": int,
+                "elapsed_seconds": float,
+                "last_snapshot": {
+                    "3号箱手动堆栈": [ {"code", "holdMName", "holdMTypeName"}, ... ],
+                    "3号箱自动堆栈-左": [...],
+                    "1号2号手套箱交接堆栈": [...],
+                },
+            }
+        """
+        # whId 来源：包含库位的仓库信息0610.json
+        _STACKS = [
+            ("3号箱手动堆栈", "3a19deae-2c79-05a3-9c76-8e6760424841"),       # 手动堆栈 code=0007
+            ("3号箱自动堆栈-左", "3a19debc-84b4-0359-e2d4-b3beea49348b"),    # 自动堆栈-左 code=0008
+            ("1号2号手套箱交接堆栈", "3a1baa49-7f76-b88a-44d5-d478c48aae3e"),  # 交接堆栈 code=0016
+        ]
+
+        start = time.time()
+        poll_count = 0
+        last_snapshot: Dict[str, Any] = {}
+        logger.info(
+            f"[monitor_3stacks] 开始监测 3 个堆栈（手动/自动堆栈-左/1-2交接），"
+            f"poll_interval={poll_interval}s, max_duration={max_duration}s"
+        )
+        while True:
+            poll_count += 1
+            snapshot: Dict[str, Any] = {}
+            for name, wh_id in _STACKS:
+                resp = self._post_lims(
+                    "/api/lims/storage/warehouse-info",
+                    {"whId": wh_id, "includeDetail": True},
+                )
+                if not isinstance(resp, dict) or resp.get("code") != 1:
+                    logger.warning(f"[monitor_3stacks] ⚠️ [{name}] 查询失败（将重试）: {resp}")
+                    snapshot[name] = None
+                    continue
+                data = resp.get("data") or {}
+                locations = data.get("locations") or []
+                occupied = [
+                    loc for loc in locations
+                    if isinstance(loc, dict) and (loc.get("holdMId") or "").strip()
+                ]
+                snap = [
+                    {
+                        "code": loc.get("code"),
+                        "holdMName": loc.get("holdMName"),
+                        "holdMTypeName": loc.get("holdMTypeName"),
+                    }
+                    for loc in occupied
+                ]
+                snapshot[name] = snap
+                logger.info(
+                    f"[monitor_3stacks] 第{poll_count}次 [{name}] 占用 "
+                    f"{len(occupied)}/{len(locations)} 库位: "
+                    f"{[(s['code'], s['holdMTypeName'] or s['holdMName']) for s in snap]}"
+                )
+            last_snapshot = snapshot
+
+            elapsed = time.time() - start
+            if elapsed >= max_duration:
+                logger.info(
+                    f"[monitor_3stacks] 达到 max_duration={max_duration}s，停止监测"
+                    f"（共轮询 {poll_count} 次，耗时 {elapsed:.1f}s）"
+                )
+                return {
+                    "status": "stopped",
+                    "poll_count": poll_count,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "last_snapshot": last_snapshot,
+                }
+            time.sleep(poll_interval)
 
     # 2.7 启动调度
     def scheduler_start(self) -> Dict[str, Any]:

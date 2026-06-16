@@ -347,8 +347,8 @@ action JSON 中 `placeholder_keys` 标记了哪些字段需要填 Slot：
 1. [配液站] scheduler_start_and_auto_feeding  → 启动调度 + 上料
 2. [配液站] create_orders_formulation          → 创建配液实验（配方输入）
 3. [配液站] transfer_3_to_2_to_1_auto         → 分液瓶板转运到扣电站
-4. [扣电站] func_pack_device_init_auto_start_combined → 初始化+自动+启动
-5. [扣电站] func_sendbottle_allpack_multi      → 发送瓶数+批量组装
+4. [扣电站] coin_cell_init                     → 初始化+自动+启动
+5. [扣电站] coin_cell_start                    → 发送瓶数+批量组装
 ```
 
 ## 云端使用心得
@@ -419,7 +419,7 @@ action JSON 中 `placeholder_keys` 标记了哪些字段需要填 Slot：
 
 - unilab 运行在本地 Windows 机器（miniforge 环境），连接云端 WebSocket
 - AI（Cursor / OpenClaw）在任意设备上，通过云端 API 操作，**不需要本地 127.0.0.1**
-- 工作流为 5 节点串联：`create_orders_formulation` → `transfer_3_to_2_to_1_auto` → `func_pack_device_init_auto_start_combined` → `func_sendbottle_allpack_multi` → `transfer_1_to_2`
+- 工作流为 5 节点串联：`create_orders_formulation` → `transfer_3_to_2_to_1_auto` → `coin_cell_init` → `coin_cell_start` → `transfer_1_to_2`
 
 ### 已知固定参数（宜宾产线）
 
@@ -436,9 +436,13 @@ workflow = 配液分液formulation全流程 (2bc59938-db79-4415-ac2d-9897ef125f2
 |------|--------|-----------|
 | Step1 | auto-create_orders_formulation | `ece6744a-81ac-4ae4-8cd1-1c8eeda1dab6` |
 | Step2 | auto-transfer_3_to_2_to_1_auto | `1c37a8dd-5ba0-413d-81db-94b9c936a171` |
-| Step3 | auto-func_pack_device_init_auto_start_combined | `97a676a2-d257-4479-9096-073b40300970` |
-| Step4 | auto-func_sendbottle_allpack_multi | `cf69017a-d29c-4aad-a63b-309d63dac2e9` |
+| Step3 | auto-coin_cell_init | `97a676a2-d257-4479-9096-073b40300970` |
+| Step4 | auto-coin_cell_start | `cf69017a-d29c-4aad-a63b-309d63dac2e9` |
 | Step5 | auto-transfer_1_to_2 | `80d1c1aa-dbc3-4601-86b7-5c22a992dd9e` |
+
+> ⚠️ 扣电站动作已由 `func_pack_device_init_auto_start_combined` / `func_sendbottle_allpack_multi`
+> 重命名为 `coin_cell_init` / `coin_cell_start`。上表 node_uuid 对应的云端工作流需用新动作名**重建**后才能正常派发；
+> 若不确定云端是否已重建，请通过 API #3 重新获取工作流详情确认各节点的 action 名与最新 node_uuid。
 
 ### 标准提示词
 

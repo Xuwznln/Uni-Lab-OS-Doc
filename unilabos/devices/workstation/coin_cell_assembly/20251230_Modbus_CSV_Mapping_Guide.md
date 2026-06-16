@@ -51,14 +51,14 @@ self.client = modbus_client.register_node_list(self.nodes)
 ### 控制铝箔垫片 (COIL_ALUMINUM_FOIL)
 
 ```python
-# 代码位置: qiming_coin_cell_code 函数 (L1048)
-self.client.use_node('COIL_ALUMINUM_FOIL').write(not lvbodian)
+# 代码位置: func_allpack_cmd_simp 函数（参数设置步骤）
+self.client.use_node('COIL_ALUMINUM_FOIL').write(not aluminum_foil)
 ```
 
 - **写入 True**: 对应 Modbus 功能码 05 (Write Single Coil)，向地址 `8340` 写入 `1` (ON)。
 - **写入 False**: 向地址 `8340` 写入 `0` (OFF)。
 
-> **注意**: 代码中使用了 `not lvbodian`，这意味着逻辑是反转的。如果 `lvbodian` 参数为 `True` (默认)，写入的是 `False` (不使用铝箔垫)。
+> **注意**: 代码中使用了 `not aluminum_foil`，这意味着逻辑是反转的。如果 `aluminum_foil` 参数为 `True` (默认)，写入的是 `False` (不使用铝箔垫)。
 
 ---
 

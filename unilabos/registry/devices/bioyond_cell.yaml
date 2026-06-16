@@ -381,7 +381,7 @@ bioyond_cell:
           title: create_conductivity_orders_from_excel参数
           type: object
         type: UniLabJsonCommand
-      auto-create_conductivity_orders_auto:
+      auto-create_conductivity_orders:
         always_free: true
         feedback: {}
         goal: {}
@@ -401,7 +401,7 @@ bioyond_cell:
         placeholder_keys: {}
         result: {}
         schema:
-          description: 5号电导工作站自动新建实验。直接接收上游配液 handle 输出的 vial_plates（含 batch_id/orderCode/barCode/materialId），通过 LIMS material-info 查每块板的真实瓶位 (X,Y)。多 order 共用同一物理板时按 bottle.associateId 反查归属 orderCode。调度状态由上游/外部管理，本 action 不切换调度。同一块板上的所有分液瓶共享同一温度点。默认 wait_for_finish=true：与配液一致，节点会阻塞到所有 LIMS 新建电导单收到 /report/order_finish 推送（数小时级），失败/超时也照样回收。
+          description: 5号电导工作站自动新建实验。直接接收上游配液 handle 输出的 vial_plates（含 batch_id/orderCode/barCode/materialId）。上游会把订单产出的全部20ml分液瓶板都传过来，本 action 提交前会查 warehouse-info(5号自动传递窗) 按 materialId 取交集，只对已转运到5号站的板建电导单（需在转运后调用）。通过 material-info 查每块板的真实瓶位 (X,Y)；多 order 共用同一物理板时按 bottle.associateId 反查归属 orderCode。同一块板上的所有分液瓶共享同一温度点。默认 wait_for_finish=true：节点会阻塞到所有 LIMS 新建电导单收到 /report/order_finish 推送（数小时级），失败/超时也照样回收。
           properties:
             feedback: {}
             goal:
@@ -449,7 +449,7 @@ bioyond_cell:
             result: {}
           required:
           - goal
-          title: create_conductivity_orders_auto参数
+          title: create_conductivity_orders参数
           type: object
         type: UniLabJsonCommand
       auto-create_sample:
@@ -794,6 +794,68 @@ bioyond_cell:
           required:
           - goal
           title: scheduler_stop参数
+          type: object
+        type: UniLabJsonCommand
+      auto-stack_inquiry_2to1:
+        feedback: {}
+        goal: {}
+        goal_default:
+          poll_interval: 5.0
+          timeout: 3600
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 轮询「1号2号手套箱交接堆栈」直到其中没有分液瓶板为止。用途：配液完成后确保交接堆栈已清空（分液板已转运走）再放行后续步骤；堆栈里只要还有分液瓶板就阻塞轮询，清空后通过。判定：查 warehouse-info 交接堆栈，库位 holdMId 非空且 holdMTypeName 含「分液瓶板」即视为仍有板。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                poll_interval:
+                  default: 5.0
+                  description: 轮询间隔（秒），默认 5 秒
+                  type: number
+                timeout:
+                  default: 3600
+                  description: 最长等待秒数，默认 3600 秒（1 小时）；超时报错
+                  type: integer
+              required: []
+              type: object
+            result: {}
+          required:
+          - goal
+          title: stack_inquiry_2to1参数
+          type: object
+        type: UniLabJsonCommand
+      auto-monitor_manual_stack_3:
+        feedback: {}
+        goal: {}
+        goal_default:
+          poll_interval: 5.0
+          max_duration: 3600
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 持续轮询监测3个堆栈的库位占用情况：3号箱手动堆栈(code=0007)、3号箱自动堆栈-左(code=0008)、1号2号手套箱交接堆栈(code=0016)。每 poll_interval 秒分别查一次 warehouse-info 并打印各堆栈当前各库位占用物料，累计运行达到 max_duration 秒后自动停止。用途：人工盯这三个堆栈的物料进出（调试/观察）。单次查询失败只告警重试，不中断监测。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                poll_interval:
+                  default: 5.0
+                  description: 轮询间隔（秒），默认5秒
+                  type: number
+                max_duration:
+                  default: 3600
+                  description: 最长监测时长（秒），默认3600秒（1小时），到点自动停止（框架不接受前端cancel，故用此参数控制停止）
+                  type: integer
+              required: []
+              type: object
+            result: {}
+          required:
+          - goal
+          title: monitor_manual_stack_3参数
           type: object
         type: UniLabJsonCommand
       auto-storage_batch_inbound:

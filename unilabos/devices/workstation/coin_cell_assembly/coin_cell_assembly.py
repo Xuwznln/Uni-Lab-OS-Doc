@@ -1062,7 +1062,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             raise RuntimeError(error_msg)
 
 
-    def func_pack_device_init_auto_start_combined(self, material_search_enable: bool = False) -> bool:
+    def coin_cell_init(self, material_search_enable: bool = False) -> bool:
         """
         组合函数：设备初始化 + 切换自动模式 + 启动
         
@@ -1335,7 +1335,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         time.sleep(1) 
         #自动按钮置False
 
-    def func_sendbottle_allpack_multi(
+    def coin_cell_start(
         self, 
         elec_num, 
         elec_use_num, 
@@ -1347,13 +1347,13 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         dual_drop_start_timing: bool = False,
         assembly_type: int = 7, 
         assembly_pressure: int = 4200,
-        # 来自原 qiming_coin_cell_code 的参数
-        fujipian_panshu: int = 0,
-        fujipian_juzhendianwei: int = 0,
-        gemopanshu: int = 0,
-        gemo_juzhendianwei: int = 0,
-        qiangtou_juzhendianwei: int = 0,
-        lvbodian: bool = True,
+        # 装配参数（负极片/隔膜/枪头盒/铝箔垫）
+        ne_plate_num: int = 0,
+        ne_plate_matrix: int = 0,
+        sep_plate_num: int = 0,
+        sep_plate_matrix: int = 0,
+        tip_box_matrix: int = 0,
+        aluminum_foil: bool = True,
         battery_pressure_mode: bool = True,
         battery_clean_ignore: bool = False,
         file_path: str = "/Users/sml/work",
@@ -1375,12 +1375,12 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             dual_drop_start_timing: 二次滴液开始滴液时机 (False=正极片前, True=正极片后)
             assembly_type: 组装类型 (7=不用铝箔垫, 8=使用铝箔垫)
             assembly_pressure: 电池压制力 (N)
-            fujipian_panshu: 负极片盘数
-            fujipian_juzhendianwei: 负极片矩阵点位
-            gemopanshu: 隔膜盘数
-            gemo_juzhendianwei: 隔膜矩阵点位
-            qiangtou_juzhendianwei: 枪头盒矩阵点位
-            lvbodian: 是否使用铝箔垫片
+            ne_plate_num: 负极片盘数
+            ne_plate_matrix: 负极片矩阵点位
+            sep_plate_num: 隔膜盘数
+            sep_plate_matrix: 隔膜矩阵点位
+            tip_box_matrix: 枪头盒矩阵点位
+            aluminum_foil: 是否使用铝箔垫片
             battery_pressure_mode: 是否启用压力模式
             battery_clean_ignore: 是否忽略电池清洁
             file_path: 实验记录保存路径
@@ -1392,7 +1392,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             dict: 包含组装结果的字典
             
         注意:
-            - 第一次启动需先调用 func_pack_device_init_auto_start_combined()
+            - 第一次启动需先调用 coin_cell_init()
             - 后续批次直接调用此函数即可
         """
         logger.info("=" * 60)
@@ -1450,12 +1450,12 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             dual_drop_start_timing=dual_drop_start_timing,
             assembly_type=assembly_type,
             assembly_pressure=assembly_pressure,
-            fujipian_panshu=fujipian_panshu,
-            fujipian_juzhendianwei=fujipian_juzhendianwei,
-            gemopanshu=gemopanshu,
-            gemo_juzhendianwei=gemo_juzhendianwei,
-            qiangtou_juzhendianwei=qiangtou_juzhendianwei,
-            lvbodian=lvbodian,
+            ne_plate_num=ne_plate_num,
+            ne_plate_matrix=ne_plate_matrix,
+            sep_plate_num=sep_plate_num,
+            sep_plate_matrix=sep_plate_matrix,
+            tip_box_matrix=tip_box_matrix,
+            aluminum_foil=aluminum_foil,
             battery_pressure_mode=battery_pressure_mode,
             battery_clean_ignore=battery_clean_ignore,
             file_path=file_path
@@ -1654,6 +1654,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self._last_assembly_timestamp = timestamp
             #生成输出文件的变量
         self.csv_export_file = os.path.join(file_path, f"date_{time_date}.csv")   
+        # 导出目录不存在则跳过 CSV 记录：仅告警，不创建目录、不中断组装任务
+        if not os.path.isdir(file_path):
+            logger.warning(f"[CSV写入] 导出目录不存在，跳过本次CSV记录（不中断任务）: {file_path}")
+            self.success = True
+            return self.success
         #将数据存入csv文件
         if not os.path.exists(self.csv_export_file):
             #创建一个表头
@@ -1760,186 +1765,6 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self.success = True
         return self.success
 
-    def qiming_coin_cell_code(self, fujipian_panshu:int, fujipian_juzhendianwei:int=0, gemopanshu:int=0, gemo_juzhendianwei:int=0, lvbodian:bool=True, battery_pressure_mode:bool=True, battery_pressure:int=4000, battery_clean_ignore:bool=False) -> bool:
-        self.success = False
-        self.client.use_node('REG_MSG_NE_PLATE_NUM').write(fujipian_panshu)
-        self.client.use_node('REG_MSG_NE_PLATE_MATRIX').write(fujipian_juzhendianwei)
-        self.client.use_node('REG_MSG_SEPARATOR_PLATE_NUM').write(gemopanshu)
-        self.client.use_node('REG_MSG_SEPARATOR_PLATE_MATRIX').write(gemo_juzhendianwei)
-        self.client.use_node('COIL_ALUMINUM_FOIL').write(not lvbodian)
-        self.client.use_node('REG_MSG_PRESS_MODE').write(not battery_pressure_mode)
-        # self.client.use_node('REG_MSG_ASSEMBLY_PRESSURE').write(battery_pressure)
-        self.client.use_node('REG_MSG_BATTERY_CLEAN_IGNORE').write(battery_clean_ignore)
-        self.success = True
-        
-        return self.success
-
-    def func_allpack_cmd(self, elec_num, elec_use_num, elec_vol:int=50, assembly_type:int=7, assembly_pressure:int=4200, file_path: str="/Users/sml/work") -> Dict[str, Any]:
-        elec_num, elec_use_num, elec_vol, assembly_type, assembly_pressure = int(elec_num), int(elec_use_num), int(elec_vol), int(assembly_type), int(assembly_pressure)
-        summary_csv_file = os.path.join(file_path, "duandian.csv")
-        
-        # 用于收集所有电池的数据
-        battery_data_list = []
-        
-        # 如果断点文件存在，先读取之前的进度
-        if os.path.exists(summary_csv_file):
-            read_status_flag = True
-            with open(summary_csv_file, 'r', newline='', encoding='utf-8') as csvfile:
-                reader = csv.reader(csvfile)
-                header = next(reader)  # 跳过标题行
-                data_row = next(reader)  # 读取数据行
-                if len(data_row) >= 2:
-                    elec_num_r = int(data_row[0])
-                    elec_use_num_r = int(data_row[1])
-                    elec_num_N = int(data_row[2])
-                    elec_use_num_N = int(data_row[3])
-                    coin_num_N = int(data_row[4])
-                    if elec_num_r == elec_num and elec_use_num_r == elec_use_num:
-                        print("断点文件与当前任务匹配，继续")
-                    else:
-                        print("断点文件中elec_num、elec_use_num与当前任务不匹配，请检查任务下发参数或修改断点文件")
-                        return {
-                            "success": False,
-                            "error": "断点文件参数不匹配",
-                            "total_batteries": 0,
-                            "batteries": []
-                        }
-                    print(f"从断点文件读取进度: elec_num_N={elec_num_N}, elec_use_num_N={elec_use_num_N}, coin_num_N={coin_num_N}")
-                     
-        else:
-            read_status_flag = False
-            print("未找到断点文件，从头开始")
-            elec_num_N = 0
-            elec_use_num_N = 0
-            coin_num_N = 0
-        for i in range(20):
-            print(f"剩余电解液瓶数: {elec_num}, 已组装电池数: {elec_use_num}")
-            print(f"剩余电解液瓶数: {type(elec_num)}, 已组装电池数: {type(elec_use_num)}")
-            print(f"剩余电解液瓶数: {type(int(elec_num))}, 已组装电池数: {type(int(elec_use_num))}")
-        
-        #如果是第一次运行，则进行初始化、切换自动、启动, 如果是断点重启则跳过。
-        if read_status_flag == False:
-            pass
-            #初始化
-            #self.func_pack_device_init()
-            #切换自动
-            #self.func_pack_device_auto()
-            #启动，小车收回
-            #self.func_pack_device_start()
-            #发送电解液瓶数量，启动搬运,多搬运没事
-            #self.func_pack_send_bottle_num(elec_num)
-        last_i = elec_num_N
-        last_j = elec_use_num_N
-        for i in range(last_i, elec_num):
-            print(f"开始第{last_i+i+1}瓶电解液的组装")
-            #第一个循环从上次断点继续，后续循环从0开始
-            j_start = last_j if i == last_i else 0
-            self.func_pack_send_msg_cmd(elec_use_num-j_start, elec_vol, assembly_type, assembly_pressure)
-
-            for j in range(j_start, elec_use_num):
-                print(f"开始第{last_i+i+1}瓶电解液的第{j+j_start+1}个电池组装")
-                
-                #读取电池组装数据并存入csv
-                self.func_pack_get_msg_cmd(file_path)
-                
-                # 收集当前电池的数据
-                # 处理电池二维码
-                try:
-                    battery_qr_code = self.data_coin_cell_code
-                except Exception as e:
-                    print(f"读取电池二维码失败: {e}")
-                    battery_qr_code = "N/A"
-                
-                # 处理电解液二维码
-                try:
-                    electrolyte_qr_code = self.data_electrolyte_code
-                except Exception as e:
-                    print(f"读取电解液二维码失败: {e}")
-                    electrolyte_qr_code = "N/A"
-                
-                # 处理开路电压 - 确保是数值类型
-                try:
-                    open_circuit_voltage = self.data_open_circuit_voltage
-                    if isinstance(open_circuit_voltage, (list, tuple)) and len(open_circuit_voltage) > 0:
-                        open_circuit_voltage = float(open_circuit_voltage[0])
-                    else:
-                        open_circuit_voltage = float(open_circuit_voltage)
-                except Exception as e:
-                    print(f"读取开路电压失败: {e}")
-                    open_circuit_voltage = 0.0
-                
-                # 处理极片质量 - 确保是数值类型
-                try:
-                    pole_weight = self.data_pole_weight
-                    if isinstance(pole_weight, (list, tuple)) and len(pole_weight) > 0:
-                        pole_weight = float(pole_weight[0])
-                    else:
-                        pole_weight = float(pole_weight)
-                except Exception as e:
-                    print(f"读取正极片重量失败: {e}")
-                    pole_weight = 0.0
-                
-                battery_info = {
-                    "Time": getattr(self, "_last_assembly_timestamp", datetime.now().strftime("%Y%m%d_%H%M%S")),
-                    "open_circuit_voltage": open_circuit_voltage,
-                    "pole_weight": pole_weight,
-                    "assembly_time": self.data_assembly_time,
-                    "assembly_pressure": self.data_assembly_pressure,
-                    "electrolyte_volume": self.data_electrolyte_volume,
-                    "data_coin_type": getattr(self, "data_coin_type", 0),
-                    "electrolyte_code": electrolyte_qr_code,
-                    "coin_cell_code": battery_qr_code,
-                }
-                battery_data_list.append(battery_info)
-                print(f"已收集第 {coin_num_N + 1} 个电池数据: 电池码={battery_info['coin_cell_code']}, 电解液码={battery_info['electrolyte_code']}")
-                
-                time.sleep(1)
-                # TODO:读完再将电池数加一还是进入循环就将电池数加一需要考虑
-
-                # 生成断点文件
-                # 生成包含elec_num_N、coin_num_N、timestamp的CSV文件
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                with open(summary_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(['elec_num','elec_use_num', 'elec_num_N', 'elec_use_num_N', 'coin_num_N', 'timestamp'])
-                    writer.writerow([elec_num, elec_use_num, elec_num_N, elec_use_num_N, coin_num_N, timestamp])
-                    csvfile.flush()
-                coin_num_N += 1
-                self.coin_num_N = coin_num_N
-                elec_use_num_N += 1
-            elec_num_N += 1
-            elec_use_num_N = 0
-
-        #循环正常结束，则删除断点文件
-        os.remove(summary_csv_file)
-        #全部完成后等待依华发送完成信号
-        self.func_pack_send_finished_cmd()
-        
-        # 返回JSON格式数据
-        result = {
-            "success": True,
-            "total_batteries": len(battery_data_list),
-            "batteries": battery_data_list,
-            "assembly_data": battery_data_list,
-            "summary": {
-                "electrolyte_bottles_used": elec_num,
-                "batteries_per_bottle": elec_use_num,
-                "electrolyte_volume": elec_vol,
-                "assembly_type": assembly_type,
-                "assembly_pressure": assembly_pressure
-            }
-        }
-        
-        print(f"\n{'='*60}")
-        print(f"组装完成统计:")
-        print(f"  总组装电池数: {result['total_batteries']}")
-        print(f"  使用电解液瓶数: {elec_num}")
-        print(f"  每瓶电池数: {elec_use_num}")
-        print(f"{'='*60}\n")
-        
-        return result
-
-
     def func_allpack_cmd_simp(
         self, 
         elec_num, 
@@ -1952,20 +1777,20 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         dual_drop_start_timing: bool = False,
         assembly_type: int = 7, 
         assembly_pressure: int = 4200,
-        # 来自原 qiming_coin_cell_code 的参数
-        fujipian_panshu: int = 0,
-        fujipian_juzhendianwei: int = 0,
-        gemopanshu: int = 0,
-        gemo_juzhendianwei: int = 0,
-        qiangtou_juzhendianwei: int = 0,
-        lvbodian: bool = True,
+        # 装配参数（负极片/隔膜/枪头盒/铝箔垫）
+        ne_plate_num: int = 0,
+        ne_plate_matrix: int = 0,
+        sep_plate_num: int = 0,
+        sep_plate_matrix: int = 0,
+        tip_box_matrix: int = 0,
+        aluminum_foil: bool = True,
         battery_pressure_mode: bool = True,
         battery_clean_ignore: bool = False,
         file_path: str = "/Users/sml/work"
     ) -> Dict[str, Any]:
         """
     
-        此函数是 func_allpack_cmd 的增强版本，自动处理以下配置：
+        简化版组装函数，自动处理以下配置：
         - 负极片和隔膜的盘数及矩阵点位
         - 枪头盒矩阵点位
         - 铝箔垫片使用设置
@@ -1982,12 +1807,12 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             dual_drop_start_timing: 二次滴液开始滴液时机 (False=正极片前, True=正极片后)
             assembly_type: 组装类型 (7=不用铝箔垫, 8=使用铝箔垫)
             assembly_pressure: 电池压制力 (N)
-            fujipian_panshu: 负极片盘数
-            fujipian_juzhendianwei: 负极片矩阵点位
-            gemopanshu: 隔膜盘数
-            gemo_juzhendianwei: 隔膜矩阵点位
-            qiangtou_juzhendianwei: 枪头盒矩阵点位
-            lvbodian: 是否使用铝箔垫片
+            ne_plate_num: 负极片盘数
+            ne_plate_matrix: 负极片矩阵点位
+            sep_plate_num: 隔膜盘数
+            sep_plate_matrix: 隔膜矩阵点位
+            tip_box_matrix: 枪头盒矩阵点位
+            aluminum_foil: 是否使用铝箔垫片
             battery_pressure_mode: 是否启用压力模式
             battery_clean_ignore: 是否忽略电池清洁
             file_path: 实验记录保存路径
@@ -2002,30 +1827,30 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         dual_drop_first_volume = int(dual_drop_first_volume)
         assembly_type = int(assembly_type)
         assembly_pressure = int(assembly_pressure)
-        fujipian_panshu = int(fujipian_panshu)
-        fujipian_juzhendianwei = int(fujipian_juzhendianwei)
-        gemopanshu = int(gemopanshu)
-        gemo_juzhendianwei = int(gemo_juzhendianwei)
-        qiangtou_juzhendianwei = int(qiangtou_juzhendianwei)
+        ne_plate_num = int(ne_plate_num)
+        ne_plate_matrix = int(ne_plate_matrix)
+        sep_plate_num = int(sep_plate_num)
+        sep_plate_matrix = int(sep_plate_matrix)
+        tip_box_matrix = int(tip_box_matrix)
         
-        # 步骤1: 设置设备参数（原 qiming_coin_cell_code 的功能）
+        # 步骤1: 设置设备参数（负极片/隔膜/枪头盒/铝箔垫/压力模式等）
         logger.info("=" * 60)
         logger.info("设置设备参数...")
-        logger.info(f"  负极片盘数: {fujipian_panshu}, 矩阵点位: {fujipian_juzhendianwei}")
-        logger.info(f"  隔膜盘数: {gemopanshu}, 矩阵点位: {gemo_juzhendianwei}")
-        logger.info(f"  枪头盒矩阵点位: {qiangtou_juzhendianwei}")
-        logger.info(f"  铝箔垫片: {lvbodian}, 压力模式: {battery_pressure_mode}")
+        logger.info(f"  负极片盘数: {ne_plate_num}, 矩阵点位: {ne_plate_matrix}")
+        logger.info(f"  隔膜盘数: {sep_plate_num}, 矩阵点位: {sep_plate_matrix}")
+        logger.info(f"  枪头盒矩阵点位: {tip_box_matrix}")
+        logger.info(f"  铝箔垫片: {aluminum_foil}, 压力模式: {battery_pressure_mode}")
         logger.info(f"  压制力: {assembly_pressure}")
         logger.info(f"  忽略电池清洁: {battery_clean_ignore}")
         logger.info("=" * 60)
         
         # 写入基础参数到PLC
-        self.client.use_node('REG_MSG_NE_PLATE_NUM').write(fujipian_panshu)
-        self.client.use_node('REG_MSG_NE_PLATE_MATRIX').write(fujipian_juzhendianwei)
-        self.client.use_node('REG_MSG_SEPARATOR_PLATE_NUM').write(gemopanshu)
-        self.client.use_node('REG_MSG_SEPARATOR_PLATE_MATRIX').write(gemo_juzhendianwei)
-        self.client.use_node('REG_MSG_TIP_BOX_MATRIX').write(qiangtou_juzhendianwei)
-        self.client.use_node('COIL_ALUMINUM_FOIL').write(not lvbodian)
+        self.client.use_node('REG_MSG_NE_PLATE_NUM').write(ne_plate_num)
+        self.client.use_node('REG_MSG_NE_PLATE_MATRIX').write(ne_plate_matrix)
+        self.client.use_node('REG_MSG_SEPARATOR_PLATE_NUM').write(sep_plate_num)
+        self.client.use_node('REG_MSG_SEPARATOR_PLATE_MATRIX').write(sep_plate_matrix)
+        self.client.use_node('REG_MSG_TIP_BOX_MATRIX').write(tip_box_matrix)
+        self.client.use_node('COIL_ALUMINUM_FOIL').write(not aluminum_foil)
         self.client.use_node('REG_MSG_PRESS_MODE').write(not battery_pressure_mode)
         self.client.use_node('REG_MSG_BATTERY_CLEAN_IGNORE').write(battery_clean_ignore)
         
@@ -2044,7 +1869,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         
         logger.info("✓ 设备参数设置完成")
         
-        # 步骤2: 执行组装流程（复用 func_allpack_cmd 的主体逻辑）
+        # 步骤2: 执行组装流程（含断点续传）
         summary_csv_file = os.path.join(file_path, "duandian.csv")
         
         # 用于收集所有电池的数据
@@ -2140,6 +1965,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                     "pole_weight": pole_weight,
                     "assembly_time": self.data_assembly_time,
                     "assembly_pressure": self.data_assembly_pressure,
+                    "target_assembly_pressure": getattr(self, "_target_assembly_pressure", ""),
                     "electrolyte_volume": self.data_electrolyte_volume,
                     "data_coin_type": getattr(self, "data_coin_type", 0),
                     "electrolyte_code": electrolyte_qr_code,
@@ -2152,11 +1978,14 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
 
                 # 生成断点文件
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                with open(summary_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(['elec_num','elec_use_num', 'elec_num_N', 'elec_use_num_N', 'coin_num_N', 'timestamp'])
-                    writer.writerow([elec_num, elec_use_num, elec_num_N, elec_use_num_N, coin_num_N, timestamp])
-                    csvfile.flush()
+                try:
+                    with open(summary_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.writer(csvfile)
+                        writer.writerow(['elec_num','elec_use_num', 'elec_num_N', 'elec_use_num_N', 'coin_num_N', 'timestamp'])
+                        writer.writerow([elec_num, elec_use_num, elec_num_N, elec_use_num_N, coin_num_N, timestamp])
+                        csvfile.flush()
+                except Exception as e:
+                    logger.warning(f"[断点文件] 写入失败，跳过（不中断任务）: {e}")
                 coin_num_N += 1
                 self.coin_num_N = coin_num_N
                 elec_use_num_N += 1
@@ -2164,7 +1993,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             elec_use_num_N = 0
 
         # 循环正常结束，则删除断点文件
-        os.remove(summary_csv_file)
+        if os.path.exists(summary_csv_file):
+            os.remove(summary_csv_file)
         # 全部完成后等待依华发送完成信号
         self.func_pack_send_finished_cmd()
         
@@ -2439,12 +2269,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
 if __name__ == "__main__":
     # 简单测试
     workstation = CoinCellAssemblyWorkstation(deck=yihua_coin_cell_deck(name="coin_cell_deck"))
-    # workstation.qiming_coin_cell_code(fujipian_panshu=1, fujipian_juzhendianwei=2, gemopanshu=3, gemo_juzhendianwei=4, lvbodian=False, battery_pressure_mode=False, battery_pressure=4200, battery_clean_ignore=False)
     # print(f"工作站创建成功: {workstation.deck.name}")
     # print(f"料盘数量: {len(workstation.deck.children)}")
-    workstation.func_pack_device_init()
-    workstation.func_pack_device_auto()
-    workstation.func_pack_device_start()
-    workstation.func_pack_send_bottle_num(16)
-    workstation.func_allpack_cmd(elec_num=16, elec_use_num=16, elec_vol=50, assembly_type=7, assembly_pressure=4200, file_path="/Users/calvincao/Desktop/work/Uni-Lab-OS-hhm")
+    workstation.coin_cell_init()
+    workstation.coin_cell_start(elec_num=16, elec_use_num=16, elec_vol=50, assembly_type=7, assembly_pressure=4200, file_path="/Users/calvincao/Desktop/work/Uni-Lab-OS-hhm")
     

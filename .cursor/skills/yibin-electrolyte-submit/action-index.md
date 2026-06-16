@@ -176,7 +176,7 @@
 
 ### 设备控制（组合操作）
 
-#### `func_pack_device_init_auto_start_combined`
+#### `coin_cell_init`
 
 **组合操作**：设备初始化 → 物料搜寻确认 → 切换自动模式 → 启动
 
@@ -184,11 +184,11 @@
 - **前置检查**: REG_UNILAB_INTERACT=False, COIL_GB_L_IGNORE_CMD=False, 所有握手寄存器无残留
 - **流程**: 手动模式 → 初始化命令 → 监测物料搜寻弹窗并自动处理 → 自动模式 → 启动
 - **返回**: `True`/`False`
-- **备注**: 第一次运行必须调用此函数；后续批次调用 `func_sendbottle_allpack_multi`
+- **备注**: 第一次运行必须调用此函数；后续批次调用 `coin_cell_start`
 
 ### 批量组装
 
-#### `func_sendbottle_allpack_multi`
+#### `coin_cell_start`
 
 **发送瓶数 + 批量组装**（适用于第二批次及后续批次）
 
@@ -196,26 +196,19 @@
 - **可选参数**:
   - 双滴模式：`dual_drop_mode`(bool), `dual_drop_first_volume`(μL), `dual_drop_suction_timing`(bool), `dual_drop_start_timing`(bool)
   - 组装参数：`assembly_type`(7=不用铝箔垫/8=用), `assembly_pressure`(N，默认 4200)
-  - 物料参数：`fujipian_panshu`, `fujipian_juzhendianwei`, `gemopanshu`, `gemo_juzhendianwei`, `qiangtou_juzhendianwei`
-  - 开关：`lvbodian`(铝箔垫片), `battery_pressure_mode`(压力模式), `battery_clean_ignore`(忽略清洁)
+  - 物料参数：`ne_plate_num`(负极片盘数), `ne_plate_matrix`(负极片矩阵点位), `sep_plate_num`(隔膜盘数), `sep_plate_matrix`(隔膜矩阵点位), `tip_box_matrix`(枪头盒矩阵点位)
+  - 开关：`aluminum_foil`(铝箔垫片), `battery_pressure_mode`(压力模式), `battery_clean_ignore`(忽略清洁)
   - 其他：`file_path`(CSV保存路径), `formulations`(配方信息，用于CSV追溯)
 - **流程**: 发送瓶数触发物料搬运 → 设置PLC参数 → 循环（等待PLC请求→下发参数→读取电池数据→写入CSV→更新资源树）→ 完成握手
 - **返回**: `{success, total_batteries, batteries, summary}`
 - **备注**: 设备已初始化后直接调用；`formulations` 来自 create_orders 的 `mass_ratios`
 
-#### `func_allpack_cmd`
-
-全套组装（基础版本，含断点续传）
-
-- **核心参数**: `elec_num`, `elec_use_num`, `elec_vol`, `assembly_type`, `assembly_pressure`, `file_path`
-- **返回**: `{success, total_batteries, batteries, summary}`
-
 #### `func_allpack_cmd_simp`
 
-增强版组装（含双滴模式 + 负极片/隔膜/枪头参数）
+简化版组装（含双滴模式 + 负极片/隔膜/枪头参数，含断点续传）
 
-- **核心参数**: 同 `func_sendbottle_allpack_multi`
-- **备注**: 被 `func_sendbottle_allpack_multi` 内部调用
+- **核心参数**: 同 `coin_cell_start`
+- **备注**: 被 `coin_cell_start` 内部调用
 
 ### 设备控制（单步操作）
 
@@ -240,15 +233,6 @@
 发送电解液瓶数（触发物料搬运）
 
 - **核心参数**: `bottle_num`（瓶数）
-
-### PLC 参数设置
-
-#### `qiming_coin_cell_code`
-
-设置组装物料参数
-
-- **核心参数**: `fujipian_panshu`（负极片盘数）
-- **可选参数**: `fujipian_juzhendianwei`, `gemopanshu`, `gemo_juzhendianwei`, `lvbodian`, `battery_pressure_mode`, `battery_pressure`, `battery_clean_ignore`
 
 ### 数据采集
 
