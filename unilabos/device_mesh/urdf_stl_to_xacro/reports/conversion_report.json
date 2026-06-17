@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-06-17T20:28:31",
+  "source_dir": "C:/Users/343/Downloads/新建文件夹",
+  "output_dir": "F:/GitHub/new/LeapLab/Uni-Lab-OS/unilabos/device_mesh/urdf_stl_to_xacro/output",
+  "summary": {
+    "attempted_total": 54,
+    "succeeded_total": 54,
+    "failed_total": 0,
+    "urdf_succeeded": 26,
+    "stl_succeeded": 28
+  },
+  "failures": []
+}

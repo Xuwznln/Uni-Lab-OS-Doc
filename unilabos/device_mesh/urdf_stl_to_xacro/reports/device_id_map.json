@@ -1,0 +1,438 @@
+{
+  "source_dir": "C:/Users/343/Downloads/新建文件夹",
+  "generated_at": "2026-06-17T20:26:25",
+  "items": [
+    {
+      "source_kind": "stl",
+      "source_path": "两重项目-urdf/DP-LZ-BZ-力学检验-硅片载具.STL",
+      "raw_name": "DP-LZ-BZ-力学检验-硅片载具",
+      "base_slug": "dp_lz_bz",
+      "device_id": "dp_lz_bz",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "两重项目-urdf/大族激光.STL",
+      "raw_name": "大族激光",
+      "base_slug": "dev_df93a64545",
+      "device_id": "dev_df93a64545",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "两重项目-urdf/热烘箱_XUDKX25219.STL",
+      "raw_name": "热烘箱_XUDKX25219",
+      "base_slug": "xudkx25219",
+      "device_id": "xudkx25219",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "两重项目-urdf/自动匀胶仪-雷博-AC200SE.STL",
+      "raw_name": "自动匀胶仪-雷博-AC200SE",
+      "base_slug": "ac200se",
+      "device_id": "ac200se",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "光源项目-urdf/力学机样品盘.STL",
+      "raw_name": "力学机样品盘",
+      "base_slug": "dev_10fd943cde",
+      "device_id": "dev_10fd943cde",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "光源项目-urdf/热分析样品盘.STL",
+      "raw_name": "热分析样品盘",
+      "base_slug": "dev_45a8f7d673",
+      "device_id": "dev_45a8f7d673",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "光源项目-urdf/紫外光-样品盘.STL",
+      "raw_name": "紫外光-样品盘",
+      "base_slug": "dev_ffab5f9ab2",
+      "device_id": "dev_ffab5f9ab2",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "光源项目-urdf/胶瓶支架.STL",
+      "raw_name": "胶瓶支架",
+      "base_slug": "dev_cb57cc8b7f",
+      "device_id": "dev_cb57cc8b7f",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "光源项目-urdf/膜厚仪.STL",
+      "raw_name": "膜厚仪",
+      "base_slug": "dev_73704d168c",
+      "device_id": "dev_73704d168c",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "光源项目-urdf/自动匀胶仪.STL",
+      "raw_name": "自动匀胶仪",
+      "base_slug": "dev_5b2d32667f",
+      "device_id": "dev_5b2d32667f",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-粉末加样-urdf/20ml试剂瓶底座.STL",
+      "raw_name": "20ml试剂瓶底座",
+      "base_slug": "dev_20ml",
+      "device_id": "dev_20ml",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-粉末加样-urdf/2ml顶空瓶底座.STL",
+      "raw_name": "2ml顶空瓶底座",
+      "base_slug": "dev_2ml",
+      "device_id": "dev_2ml",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-粉末加样-urdf/HY粉桶_Default_按加工_.STL",
+      "raw_name": "HY粉桶_Default_按加工_",
+      "base_slug": "hy_default",
+      "device_id": "hy_default",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-粉末加样-urdf/粉末加样（带称重模块）.STL",
+      "raw_name": "粉末加样（带称重模块）",
+      "base_slug": "dev_d60a6c58ce",
+      "device_id": "dev_d60a6c58ce",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-粉末加样-urdf/粉桶底座.STL",
+      "raw_name": "粉桶底座",
+      "base_slug": "dev_2a614c1c53",
+      "device_id": "dev_2a614c1c53",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-配液总装-urdf/15_15_1玻璃片载体.STL",
+      "raw_name": "15_15_1玻璃片载体",
+      "base_slug": "dev_15_15_1",
+      "device_id": "dev_15_15_1",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-配液总装-urdf/15_15_1玻璃载片.STL",
+      "raw_name": "15_15_1玻璃载片",
+      "base_slug": "dev_15_15_1",
+      "device_id": "dev_15_15_1_15ce47",
+      "note": "from_raw_name;collision_suffix"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-配液总装-urdf/1ml吸头Tecan-称重-1600.STL",
+      "raw_name": "1ml吸头Tecan-称重-1600",
+      "base_slug": "dev_1mltecan_1600",
+      "device_id": "dev_1mltecan_1600",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大手套箱改造-配液总装-urdf/匀胶仪.STL",
+      "raw_name": "匀胶仪",
+      "base_slug": "dev_33fe70e070",
+      "device_id": "dev_33fe70e070",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大晶圆转移项目-urdf/8吋晶舟盒2.STL",
+      "raw_name": "8吋晶舟盒2",
+      "base_slug": "dev_82",
+      "device_id": "dev_82",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大晶圆转移项目-urdf/回收负压管.STL",
+      "raw_name": "回收负压管",
+      "base_slug": "dev_88f741579a",
+      "device_id": "dev_88f741579a",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大晶圆转移项目-urdf/晶圆片-1.STL",
+      "raw_name": "晶圆片-1",
+      "base_slug": "dev_1",
+      "device_id": "dev_1",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大晶圆转移项目-urdf/自动匀胶仪.STL",
+      "raw_name": "自动匀胶仪",
+      "base_slug": "dev_27a349a8ff",
+      "device_id": "dev_27a349a8ff",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "北大晶圆转移项目-urdf/顶针  烤胶机-三维.STL",
+      "raw_name": "顶针  烤胶机-三维",
+      "base_slug": "dev_610fc66980",
+      "device_id": "dev_610fc66980",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "调香仪-urdf/原料瓶bot_org2.STL",
+      "raw_name": "原料瓶bot_org2",
+      "base_slug": "bot_org2",
+      "device_id": "bot_org2",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "调香仪-urdf/原料瓶架box_bot_org.STL",
+      "raw_name": "原料瓶架box_bot_org",
+      "base_slug": "box_bot_org",
+      "device_id": "box_bot_org",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "调香仪-urdf/注射泵底板.STL",
+      "raw_name": "注射泵底板",
+      "base_slug": "dev_5a2b8a630e",
+      "device_id": "dev_5a2b8a630e",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "stl",
+      "source_path": "调香仪-urdf/香氛瓶-底座.STL",
+      "raw_name": "香氛瓶-底座",
+      "base_slug": "dev_430e9eeaa9",
+      "device_id": "dev_430e9eeaa9",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "两重项目-urdf/电子拉力试验机_Tinius Olsen 50ST Tensile Tester.urdf/urdf/电子拉力试验机_Tinius Olsen 50ST Tensile Tester.urdf.urdf",
+      "raw_name": "电子拉力试验机_Tinius Olsen 50ST Tensile Tester.urdf",
+      "base_slug": "tinius_olsen_50st_tensile_tester",
+      "device_id": "tinius_olsen_50st_tensile_tester",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "两重项目-urdf/紫外可见光谱仪.urdf/urdf/紫外可见光谱仪.urdf.urdf",
+      "raw_name": "紫外可见光谱仪.urdf",
+      "base_slug": "dev_ba713fe904",
+      "device_id": "dev_ba713fe904",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/96孔板夹爪-组件.urdf/urdf/96孔板夹爪-组件.urdf.urdf",
+      "raw_name": "96孔板夹爪-组件.urdf",
+      "base_slug": "dev_96",
+      "device_id": "dev_96",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/地面机器人车.urdf/urdf/地面机器人车.urdf.urdf",
+      "raw_name": "地面机器人车.urdf",
+      "base_slug": "dev_64469463f3",
+      "device_id": "dev_64469463f3",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/小雕刻机.urdf/urdf/小雕刻机.urdf.urdf",
+      "raw_name": "小雕刻机.urdf",
+      "base_slug": "dev_e11d6bdd71",
+      "device_id": "dev_e11d6bdd71",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/撕膜机构-组件-大寰电夹爪-光源.urdf/urdf/装配体3^撕膜机构-组件-大寰电夹爪-光源.urdf.urdf",
+      "raw_name": "装配体3^撕膜机构-组件-大寰电夹爪-光源.urdf",
+      "base_slug": "dev_3",
+      "device_id": "dev_3",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/移液器-自动上胶机构-六轴.urdf/urdf/自动上胶机构-六轴.urdf.urdf",
+      "raw_name": "自动上胶机构-六轴.urdf",
+      "base_slug": "dev_b0b67560c9",
+      "device_id": "dev_b0b67560c9",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/紫外可见光谱仪.urdf/urdf/紫外可见光谱仪.urdf.urdf",
+      "raw_name": "紫外可见光谱仪.urdf",
+      "base_slug": "dev_ca6d146fe2",
+      "device_id": "dev_ca6d146fe2",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/胶瓶组件-AC411.U13.urdf/urdf/AC411.U13.urdf.urdf",
+      "raw_name": "AC411.U13.urdf",
+      "base_slug": "ac411_u13",
+      "device_id": "ac411_u13",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "光源项目-urdf/自动剥离标签机.urdf/urdf/自动剥离标签机.urdf.urdf",
+      "raw_name": "自动剥离标签机.urdf",
+      "base_slug": "dev_c239c11947",
+      "device_id": "dev_c239c11947",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-粉末加样-urdf/下料玻璃瓶_20ml_淘宝.urdf/urdf/下料玻璃瓶_20ml_淘宝.urdf.urdf",
+      "raw_name": "下料玻璃瓶_20ml_淘宝.urdf",
+      "base_slug": "dev_20ml",
+      "device_id": "dev_20ml_41019d",
+      "note": "from_raw_name;collision_suffix"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-粉末加样-urdf/拧盖模块-组件-张忠扬实验室.urdf/urdf/拧盖模块-组件-张忠扬实验室.urdf.urdf",
+      "raw_name": "拧盖模块-组件-张忠扬实验室.urdf",
+      "base_slug": "dev_7586213e9b",
+      "device_id": "dev_7586213e9b",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-粉末加样-urdf/顶空瓶-1600.urdf/urdf/顶空瓶-1600.urdf.urdf",
+      "raw_name": "顶空瓶-1600.urdf",
+      "base_slug": "dev_1600",
+      "device_id": "dev_1600",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-配液总装-urdf/TIP头架装配-称重-1600.urdf/urdf/装配体3^TIP头架装配-称重-1600.urdf.urdf",
+      "raw_name": "装配体3^TIP头架装配-称重-1600.urdf",
+      "base_slug": "dev_3_tip_1600",
+      "device_id": "dev_3_tip_1600",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-配液总装-urdf/快换夹爪-组件.urdf/urdf/快换夹爪-组件.urdf.urdf",
+      "raw_name": "快换夹爪-组件.urdf",
+      "base_slug": "dev_9f54512961",
+      "device_id": "dev_9f54512961",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-配液总装-urdf/滑台MCE-4G-150-E-O-F__________v2.0_20230725.urdf/urdf/滑台MCE-4G-150-E-O-F__________v2.0_20230725.urdf.urdf",
+      "raw_name": "滑台MCE-4G-150-E-O-F__________v2.0_20230725.urdf",
+      "base_slug": "mce_4g_150_e_o_f_v2_0_20230725",
+      "device_id": "mce_4g_150_e_o_f_v2_0_20230725",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-配液总装-urdf/物料架_配液站.urdf/urdf/物料架_配液站.urdf.urdf",
+      "raw_name": "物料架_配液站.urdf",
+      "base_slug": "dev_75f8a118a3",
+      "device_id": "dev_75f8a118a3",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大手套箱改造-配液总装-urdf/退火加热台.urdf/urdf/退火加热台.urdf.urdf",
+      "raw_name": "退火加热台.urdf",
+      "base_slug": "dev_d0bfc52c64",
+      "device_id": "dev_d0bfc52c64",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大晶圆转移项目-urdf/Awm-0608-简化装配体1-1.urdf/urdf/Awm-0608-简化装配体1-1.sldasm.urdf",
+      "raw_name": "Awm-0608-简化装配体1-1.sldasm",
+      "base_slug": "awm_0608_1_1",
+      "device_id": "awm_0608_1_1",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大晶圆转移项目-urdf/双轴机械臂TBA4040DFSD-07U-10 V1.0.urdf/urdf/双轴机械臂TBA4040DFSD-07U-10 V1.0.urdf.urdf",
+      "raw_name": "双轴机械臂TBA4040DFSD-07U-10 V1.0.urdf",
+      "base_slug": "tba4040dfsd_07u_10_v1_0",
+      "device_id": "tba4040dfsd_07u_10_v1_0",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大晶圆转移项目-urdf/晶圆片物料转盘-组件(默认-_flexible1).urdf/urdf/晶圆片物料转盘-组件(默认-_flexible1).urdf.urdf",
+      "raw_name": "晶圆片物料转盘-组件(默认-_flexible1).urdf",
+      "base_slug": "flexible1",
+      "device_id": "flexible1",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "北大晶圆转移项目-urdf/热辊压机.urdf/urdf/装配体4(2)-1.urdf.urdf",
+      "raw_name": "装配体4(2)-1.urdf",
+      "base_slug": "dev_4_2_1",
+      "device_id": "dev_4_2_1",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "调香仪-urdf/10ml香氛瓶bot_ass.urdf/urdf/10ml香氛瓶bot_ass.urdf.urdf",
+      "raw_name": "10ml香氛瓶bot_ass.urdf",
+      "base_slug": "dev_10mlbot_ass",
+      "device_id": "dev_10mlbot_ass",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "调香仪-urdf/加样头_装配.urdf/urdf/加样头_装配.urdf.urdf",
+      "raw_name": "加样头_装配.urdf",
+      "base_slug": "dev_9fd2881596",
+      "device_id": "dev_9fd2881596",
+      "note": "generic_slug_hash_fallback"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "调香仪-urdf/注射泵-5ml-润泽.urdf/urdf/注射泵-5ml.urdf.urdf",
+      "raw_name": "注射泵-5ml.urdf",
+      "base_slug": "dev_5ml",
+      "device_id": "dev_5ml",
+      "note": "from_raw_name"
+    },
+    {
+      "source_kind": "urdf",
+      "source_path": "调香仪-urdf/试管贴标机.urdf/urdf/试管贴z(1).urdf.urdf",
+      "raw_name": "试管贴z(1).urdf",
+      "base_slug": "z_1_880c54",
+      "device_id": "z_1_880c54",
+      "note": "weak_slug_hash_enhanced"
+    }
+  ]
+}
