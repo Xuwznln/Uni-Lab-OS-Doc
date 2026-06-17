@@ -1005,7 +1005,7 @@ class EVOArm:
   model={
     "type": "device",
     "mesh": "li_ha",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/li_ha/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/li_ha/macro_device.xacro",
   },
 )
 class LiHa(EVOArm):

@@ -44,7 +44,7 @@
             "description": "",
             "model": {
               "mesh": "cytomat_backend",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytomat_backend/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/cytomat_backend/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -97,7 +97,7 @@
             "description": "",
             "model": {
               "mesh": "molecular_devices_qpix_420",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/molecular_devices_qpix_420/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/molecular_devices_qpix_420/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -150,7 +150,7 @@
             "description": "",
             "model": {
               "mesh": "tecan_resolvex_a200",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/tecan_resolvex_a200/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/tecan_resolvex_a200/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -252,7 +252,7 @@
             "description": "",
             "model": {
               "mesh": "cytiva_biacore_8k_plus",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytiva_biacore_8k_plus/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/cytiva_biacore_8k_plus/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -305,7 +305,7 @@
             "description": "",
             "model": {
               "mesh": "telesis_bio_bioxp_3250",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/telesis_bio_bioxp_3250/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/telesis_bio_bioxp_3250/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -421,7 +421,7 @@
             "description": "",
             "model": {
               "mesh": "arm_slider",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/arm_slider/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/arm_slider/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -474,7 +474,7 @@
             "description": "",
             "model": {
               "mesh": "cytiva_akta_pure",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytiva_akta_pure/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/cytiva_akta_pure/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -527,7 +527,7 @@
             "description": "",
             "model": {
               "mesh": "qiagen_qiacube_connect",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/qiagen_qiacube_connect/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/qiagen_qiacube_connect/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -580,7 +580,7 @@
             "description": "",
             "model": {
               "mesh": "hettich_rotanta_460_robotic",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/hettich_rotanta_460_robotic/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/hettich_rotanta_460_robotic/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -633,7 +633,7 @@
             "description": "",
             "model": {
               "mesh": "applied_biosystems_seqstudio_genetic_analyzer",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/applied_biosystems_seqstudio_genetic_analyzer/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/applied_biosystems_seqstudio_genetic_analyzer/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -689,7 +689,7 @@
             "description": "",
             "model": {
               "mesh": "hamilton_vantage",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/hamilton_vantage/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/hamilton_vantage/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -742,7 +742,7 @@
             "description": "",
             "model": {
               "mesh": "agilent_biotek_406_fx",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/agilent_biotek_406_fx/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/agilent_biotek_406_fx/macro_device.xacro",
               "type": "device"
             },
             "position": {
@@ -795,7 +795,7 @@
             "description": "",
             "model": {
               "mesh": "bd_facsmelody",
-              "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/bd_facsmelody/macro_device.xacro",
+              "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/bd_facsmelody/macro_device.xacro",
               "type": "device"
             },
             "position": {

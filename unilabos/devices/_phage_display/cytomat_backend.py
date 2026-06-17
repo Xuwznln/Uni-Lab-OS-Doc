@@ -120,7 +120,7 @@ logger = logging.getLogger(__name__)
   model={
     "type": "device",
     "mesh": "cytomat_backend",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytomat_backend/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/cytomat_backend/macro_device.xacro",
   },
 )
 class CytomatBackend(IncubatorBackend):

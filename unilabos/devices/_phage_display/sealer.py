@@ -116,7 +116,7 @@ class MockSealerBackend(SealerBackend):
 #   model={
 #     "type": "device",
 #     "mesh": "sealer",
-#     "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/sealer/macro_device.xacro",
+#     "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/sealer/macro_device.xacro",
 #   },
 # )
 class Sealer(Machine):

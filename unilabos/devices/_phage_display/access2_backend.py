@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
   model={
     "type": "device",
     "mesh": "access2_backend",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/access2_backend/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/access2_backend/macro_device.xacro",
   },
 )
 class Access2Backend(LoaderBackend):

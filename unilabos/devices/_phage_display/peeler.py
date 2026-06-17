@@ -101,7 +101,7 @@ class MockPeelerBackend(PeelerBackend):
   model={
     "type": "device",
     "mesh": "peeler",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/peeler/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/peeler/macro_device.xacro",
   },
 )
 class Peeler(Machine):

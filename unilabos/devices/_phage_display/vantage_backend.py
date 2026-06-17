@@ -473,7 +473,7 @@ class _MockVantageIO:
   model={
     "type": "device",
     "mesh": "hamilton_vantage",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/hamilton_vantage/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/hamilton_vantage/macro_device.xacro",
   },
 )
 class VantageBackend(HamiltonLiquidHandler):

@@ -12,7 +12,7 @@ from unilabos.registry.decorators import device, action
     model={
         "type": "device",
         "mesh": "cytiva_biacore_8k_plus",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytiva_biacore_8k_plus/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/cytiva_biacore_8k_plus/macro_device.xacro",
     },
 )
 class CytivaBiacore8KPlus:

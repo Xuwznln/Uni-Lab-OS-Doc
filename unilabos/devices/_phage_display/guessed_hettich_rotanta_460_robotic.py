@@ -14,7 +14,7 @@ from unilabos.registry.decorators import action, device
     model={
         "type": "device",
         "mesh": "hettich_rotanta_460_robotic",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/hettich_rotanta_460_robotic/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/hettich_rotanta_460_robotic/macro_device.xacro",
     },
 )
 class HettichRotanta460RoboticGuessed:

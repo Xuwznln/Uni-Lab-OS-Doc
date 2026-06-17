@@ -322,7 +322,7 @@ class MolecularDevicesSettings:
   model={
     "type": "device",
     "mesh": "molecular_devices_backend",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/molecular_devices_backend/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/molecular_devices_backend/macro_device.xacro",
   },
 )
 class MolecularDevicesBackend(PlateReaderBackend, metaclass=ABCMeta):

@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
   model={
     "type": "device",
     "mesh": "plate_reader",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/plate_reader/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/plate_reader/macro_device.xacro",
   },
 )
 class PlateReader(ResourceHolder, Machine):

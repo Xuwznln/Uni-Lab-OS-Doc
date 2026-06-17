@@ -14,7 +14,7 @@ from unilabos.registry.decorators import action, device
     model={
         "type": "device",
         "mesh": "qiagen_qiacube_connect",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/qiagen_qiacube_connect/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/qiagen_qiacube_connect/macro_device.xacro",
     },
 )
 class QIAGENQIAcubeConnectGuessed:

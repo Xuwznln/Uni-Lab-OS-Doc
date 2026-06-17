@@ -12,7 +12,7 @@ from unilabos.registry.decorators import action, device
     model={
         "type": "device",
         "mesh": "agilent_biotek_406_fx",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/agilent_biotek_406_fx/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/agilent_biotek_406_fx/macro_device.xacro",
     },
 )
 class AgilentBioTek406FX:

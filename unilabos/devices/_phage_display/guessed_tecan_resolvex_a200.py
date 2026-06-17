@@ -14,7 +14,7 @@ from unilabos.registry.decorators import action, device
     model={
         "type": "device",
         "mesh": "tecan_resolvex_a200",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/tecan_resolvex_a200/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/tecan_resolvex_a200/macro_device.xacro",
     },
 )
 class TecanResolvexA200Guessed:

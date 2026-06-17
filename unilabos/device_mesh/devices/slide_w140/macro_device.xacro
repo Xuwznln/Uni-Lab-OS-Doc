@@ -131,6 +131,14 @@
       <parent link="${station_name}${device_name}base_link"/>
       <child link="${station_name}${device_name}slide_end"/>
     </joint>
+    
+    <link name="${station_name}${device_name}attach_link"/>
 
+    <joint name="${station_name}${device_name}attach_joint" type="fixed">
+      <origin rpy="0 0 0" xyz="0 0 0.015"/>
+      <parent link="${station_name}${device_name}slider"/>
+      <child link="${station_name}${device_name}attach_link"/>
+      <axis xyz="0 0 0"/>
+    </joint>
   </xacro:macro>
 </robot>

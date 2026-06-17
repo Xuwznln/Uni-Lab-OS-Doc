@@ -1231,7 +1231,7 @@ class Head96Information:
   model={
     "type": "device",
     "mesh": "star_backend",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/star_backend/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/star_backend/macro_device.xacro",
   },
 )
 class STARBackend(HamiltonLiquidHandler, HamiltonHeaterShakerInterface):

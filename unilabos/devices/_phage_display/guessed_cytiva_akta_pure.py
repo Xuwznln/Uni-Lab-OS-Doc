@@ -12,7 +12,7 @@ from unilabos.registry.decorators import device, action
     model={
         "type": "device",
         "mesh": "cytiva_akta_pure",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytiva_akta_pure/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/cytiva_akta_pure/macro_device.xacro",
     },
 )
 class CytivaAKTAPure:

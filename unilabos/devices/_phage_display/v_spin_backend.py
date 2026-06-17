@@ -247,7 +247,7 @@ bucket_1_not_set_error = RuntimeError(
   model={
     "type": "device",
     "mesh": "v_spin_backend",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/v_spin_backend/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/v_spin_backend/macro_device.xacro",
   },
 )
 class VSpinBackend(CentrifugeBackend):

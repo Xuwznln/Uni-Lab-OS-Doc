@@ -241,15 +241,15 @@ class ResourceVisualization:
                             pass
             os.makedirs(temp_mesh_dir, exist_ok=True)
 
-            elements = parse_scene(self.scene_json, temp_mesh_dir)
-            if not elements:
+            groups = parse_scene(self.scene_json, temp_mesh_dir)
+            if not groups:
                 print("[scene] 场景解析结果为空，跳过 world_scene 合并")
                 return
 
             world_scene_xacro = os.path.join(temp_mesh_dir, "world_scene.xacro")
             world_scene_srdf = os.path.join(temp_mesh_dir, "world_scene.srdf.xacro")
-            generate_world_scene_xacro(elements, str(self.mesh_path), world_scene_xacro)
-            generate_world_scene_srdf_xacro(elements, world_scene_srdf)
+            generate_world_scene_xacro(groups, str(self.mesh_path), world_scene_xacro)
+            generate_world_scene_srdf_xacro(groups, world_scene_srdf)
 
             # URDF：include + 实例化 world_scene 宏（world_base 挂到 world）
             scene_include = etree.SubElement(self.root, f"{{{xacro_uri}}}include")
@@ -265,7 +265,8 @@ class ResourceVisualization:
             srdf_include.set("filename", world_scene_srdf)
             etree.SubElement(self.root_srdf, f"{{{xacro_uri}}}world_scene_srdf")
 
-            print(f"[scene] 已合并 {len(elements)} 个建筑构件到 full_dev")
+            total = sum(len(g["elements"]) for g in groups)
+            print(f"[scene] 已合并 {total} 个建筑构件（{len(groups)} 组 level/world_base）到 full_dev")
         except Exception as scene_err:  # noqa: BLE001 - 场景失败不应阻断设备装配
             print(f"[scene] world_scene 合并失败: {scene_err}")
 

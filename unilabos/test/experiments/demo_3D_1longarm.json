@@ -44,7 +44,7 @@
       "description": "",
       "model": {
         "mesh": "agilent_biotek_406_fx",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/agilent_biotek_406_fx/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/agilent_biotek_406_fx/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },
@@ -98,7 +98,7 @@
       "description": "",
       "model": {
         "mesh": "cytomat_backend",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/cytomat_backend/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/cytomat_backend/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },
@@ -215,7 +215,7 @@
       "description": "",
       "model": {
         "mesh": "arm_slider",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/arm_slider/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/arm_slider/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },
@@ -272,7 +272,7 @@
       "description": "",
       "model": {
         "mesh": "hamilton_vantage",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/hamilton_vantage/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/hamilton_vantage/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },
@@ -375,7 +375,7 @@
       "description": "",
       "model": {
         "mesh": "tecan_resolvex_a200",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/tecan_resolvex_a200/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/tecan_resolvex_a200/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },
@@ -430,7 +430,7 @@
       "schema": null,
       "model": {
         "mesh": "peeler",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/peeler/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/peeler/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },
@@ -485,7 +485,7 @@
       "schema": null,
       "model": {
         "mesh": "sealer",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/sealer/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/sealer/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },
@@ -545,7 +545,7 @@
       "schema": null,
       "model": {
         "mesh": "thermo_orbitor_rs2_hotel",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/thermo_orbitor_rs2_hotel/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/thermo_orbitor_rs2_hotel/macro_device.xacro",
         "type": "device",
         "format": "xacro"
       },

@@ -14,7 +14,7 @@ from unilabos.registry.decorators import action, device
     model={
         "type": "device",
         "mesh": "molecular_devices_qpix_420",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/molecular_devices_qpix_420/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/molecular_devices_qpix_420/macro_device.xacro",
     },
 )
 class MolecularDevicesQPix420Guessed:

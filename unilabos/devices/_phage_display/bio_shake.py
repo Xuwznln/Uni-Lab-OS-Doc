@@ -89,7 +89,7 @@ except ImportError as e:
   model={
     "type": "device",
     "mesh": "bio_shake",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/bio_shake/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/bio_shake/macro_device.xacro",
   },
 )
 class BioShake(HeaterShakerBackend):

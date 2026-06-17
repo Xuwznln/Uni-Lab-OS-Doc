@@ -87,7 +87,7 @@ logger = logging.getLogger(__name__)
   model={
     "type": "device",
     "mesh": "bio_tek_plate_reader_backend",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/bio_tek_plate_reader_backend/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/bio_tek_plate_reader_backend/macro_device.xacro",
   },
 )
 class BioTekPlateReaderBackend(PlateReaderBackend):

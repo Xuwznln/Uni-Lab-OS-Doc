@@ -96,7 +96,7 @@ class NoFreeSiteError(Exception):
   model={
     "type": "device",
     "mesh": "incubator",
-    "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/incubator/macro_device.xacro",
+    "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/incubator/macro_device.xacro",
   },
 )
 class Incubator(Machine, Resource):

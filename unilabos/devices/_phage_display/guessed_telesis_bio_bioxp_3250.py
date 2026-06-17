@@ -12,7 +12,7 @@ from unilabos.registry.decorators import device, action
     model={
         "type": "device",
         "mesh": "telesis_bio_bioxp_3250",
-        "path": "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices/telesis_bio_bioxp_3250/macro_device.xacro",
+        "path": "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/telesis_bio_bioxp_3250/macro_device.xacro",
     },
 )
 class TelesisBioBioXp3250:

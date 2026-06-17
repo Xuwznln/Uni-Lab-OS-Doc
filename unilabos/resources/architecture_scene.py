@@ -29,6 +29,7 @@ WALL_DEFAULT_THICKNESS = 0.12
 WALL_DEFAULT_HEIGHT = 3.0
 
 Element = Dict[str, Any]
+Group = Dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +110,20 @@ def _resolve(ref: Any, nodes: Dict[str, Any]) -> Optional[dict]:
             return nodes[rid]
         return ref
     return None
+
+
+def _level_elevation(node: dict) -> float:
+    """level 的 z 标高：显式 elevation / base / z 优先，否则默认 (level - 1) * 2。"""
+    for key in ("elevation", "base", "z"):
+        if key in node:
+            try:
+                return float(node[key])
+            except (TypeError, ValueError):
+                pass
+    try:
+        return (float(node.get("level")) - 1.0) * 2.0
+    except (TypeError, ValueError):
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -280,17 +295,37 @@ def slab_to_geometry(
 # ---------------------------------------------------------------------------
 # 场景遍历
 # ---------------------------------------------------------------------------
-def parse_scene(scene: Optional[dict], temp_mesh_dir: Optional[str] = None) -> List[Element]:
-    """遍历 rootNodeIds + nodes，按 type 分流，累积 building 平移 / Z 偏航与 level 高度，
-    返回统一 element 列表（每项含 link / kind / size 或 mesh_file / xyz / rpy）。"""
+def parse_scene(scene: Optional[dict], temp_mesh_dir: Optional[str] = None) -> List[Group]:
+    """遍历 rootNodeIds + nodes，按 type 分流，按 level 分组。
+
+    每个 level 生成一个独立 link（承载祖先 building 平移 / Z 偏航 + 楼层标高），
+    其下的 wall/slab 以局部坐标挂到该 level link；不在任何 level 下的 wall/slab
+    直接挂到 world_base。返回 group 列表，每个 group：
+    ``{link, parent, is_level, xyz, rpy, elements:[...]}``。
+    """
     if not scene:
         return []
     nodes = scene.get("nodes") or {}
     roots = scene.get("rootNodeIds") or []
-    elements: List[Element] = []
+    level_groups: List[Group] = []
+    # 不在任何 level 下的构件直接挂 world_base
+    loose: Group = {
+        "link": "world_base",
+        "parent": "world_base",
+        "is_level": False,
+        "xyz": (0.0, 0.0, 0.0),
+        "rpy": (0.0, 0.0, 0.0),
+        "elements": [],
+    }
     visited: set = set()
 
-    def visit(node_ref: Any, base_xy: Tuple[float, float], base_yaw: float, z_offset: float) -> None:
+    def visit(
+        node_ref: Any,
+        base_xy: Tuple[float, float],
+        base_yaw: float,
+        base_z: float,
+        group: Optional[Group],
+    ) -> None:
         node = _resolve(node_ref, nodes)
         if not isinstance(node, dict):
             return
@@ -307,51 +342,58 @@ def parse_scene(scene: Optional[dict], temp_mesh_dir: Optional[str] = None) -> L
             _, _, rz = _xyz(node.get("rotation"))
             wx, wy = _rotate(px, py, base_yaw)
             new_base = (base_xy[0] + wx, base_xy[1] + wy)
-            new_yaw = base_yaw + rz
-            new_z = z_offset + pz
             for ch in children:
-                visit(ch, new_base, new_yaw, new_z)
+                visit(ch, new_base, base_yaw + rz, base_z + pz, group)
             return
 
         if ntype == "level":
-            lvl_z = z_offset
-            for key in ("elevation", "base", "z"):
-                if key in node:
-                    try:
-                        lvl_z = z_offset + float(node[key])
-                        break
-                    except (TypeError, ValueError):
-                        pass
+            level_z = _level_elevation(node)
+            grp: Group = {
+                "link": "level_" + _sanitize(node.get("id", "level")),
+                "parent": "world_base",
+                "is_level": True,
+                # level link 承载 building 变换与楼层标高
+                "xyz": (base_xy[0], base_xy[1], base_z + level_z),
+                "rpy": (0.0, 0.0, base_yaw),
+                "elements": [],
+            }
+            level_groups.append(grp)
+            # 其下构件用局部坐标（base 归零），绝对位姿由 level link 承载
             for ch in children:
-                visit(ch, base_xy, base_yaw, lvl_z)
+                visit(ch, (0.0, 0.0), 0.0, 0.0, grp)
             return
 
         if ntype == "wall":
-            el = wall_to_box(node, base_xy, base_yaw, z_offset)
+            el = wall_to_box(node, base_xy, base_yaw, base_z)
             if el:
-                elements.append(el)
+                (group or loose)["elements"].append(el)
         elif ntype == "slab":
-            el = slab_to_geometry(node, temp_mesh_dir, base_xy, base_yaw, z_offset)
+            el = slab_to_geometry(node, temp_mesh_dir, base_xy, base_yaw, base_z)
             if el:
-                elements.append(el)
+                (group or loose)["elements"].append(el)
         # site 仅作场地边界，不产几何；其余未知类型也继续向下遍历
         for ch in children:
-            visit(ch, base_xy, base_yaw, z_offset)
+            visit(ch, base_xy, base_yaw, base_z, group)
 
     if roots:
         for r in roots:
-            visit(r, (0.0, 0.0), 0.0, 0.0)
+            visit(r, (0.0, 0.0), 0.0, 0.0, None)
     else:
         for nid in list(nodes.keys()):
-            visit(nid, (0.0, 0.0), 0.0, 0.0)
-    return elements
+            visit(nid, (0.0, 0.0), 0.0, 0.0, None)
+
+    result: List[Group] = []
+    if loose["elements"]:
+        result.append(loose)
+    result.extend(g for g in level_groups if g["elements"])
+    return result
 
 
 # ---------------------------------------------------------------------------
 # xacro / SRDF 生成
 # ---------------------------------------------------------------------------
-def generate_world_scene_xacro(elements: List[Element], mesh_path: str, out_path: str) -> str:
-    """产出 world_scene 宏：world_base + 每个 wall/slab 的 link(box/mesh) + fixed joint。"""
+def generate_world_scene_xacro(groups: List[Group], mesh_path: str, out_path: str) -> str:
+    """产出 world_scene 宏：world_base -> 每个 level link -> 各 wall/slab link(box/mesh)。"""
     lines: List[str] = [
         '<?xml version="1.0" ?>',
         '<robot xmlns:xacro="http://ros.org/wiki/xacro" name="world_scene">',
@@ -364,34 +406,50 @@ def generate_world_scene_xacro(elements: List[Element], mesh_path: str, out_path
         '      <origin xyz="${x} ${y} ${z}" rpy="${rx} ${ry} ${r}"/>',
         "    </joint>",
     ]
-    for el in elements:
-        link = el["link"]
-        if el["kind"] == "box":
-            sx, sy, sz = el["size"]
-            geom = f'<box size="{_f(sx)} {_f(sy)} {_f(sz)}"/>'
+    for g in groups:
+        if g.get("is_level"):
+            group_link = g["link"]
+            gx, gy, gz = g["xyz"]
+            grr, gpp, gyy = g["rpy"]
+            lines += [
+                f'    <link name="{group_link}"/>',
+                f'    <joint name="{group_link}_joint" type="fixed">',
+                f'      <parent link="{g.get("parent", "world_base")}"/>',
+                f'      <child link="{group_link}"/>',
+                f'      <origin xyz="{_f(gx)} {_f(gy)} {_f(gz)}" rpy="{_f(grr)} {_f(gpp)} {_f(gyy)}"/>',
+                "    </joint>",
+            ]
+            parent_link = group_link
         else:
-            geom = f'<mesh filename="file://${{mesh_path}}/temp_mesh/{el["mesh_file"]}"/>'
-        color = "0.8 0.8 0.8 1" if el.get("category") == "wall" else "0.6 0.6 0.65 1"
-        x, y, z = el["xyz"]
-        rr, pp, yy = el["rpy"]
-        lines += [
-            f'    <link name="{link}">',
-            "      <visual>",
-            '        <origin xyz="0 0 0" rpy="0 0 0"/>',
-            f"        <geometry>{geom}</geometry>",
-            f'        <material name="{link}_mat"><color rgba="{color}"/></material>',
-            "      </visual>",
-            "      <collision>",
-            '        <origin xyz="0 0 0" rpy="0 0 0"/>',
-            f"        <geometry>{geom}</geometry>",
-            "      </collision>",
-            "    </link>",
-            f'    <joint name="{link}_joint" type="fixed">',
-            '      <parent link="world_base"/>',
-            f'      <child link="{link}"/>',
-            f'      <origin xyz="{_f(x)} {_f(y)} {_f(z)}" rpy="{_f(rr)} {_f(pp)} {_f(yy)}"/>',
-            "    </joint>",
-        ]
+            parent_link = "world_base"
+        for el in g["elements"]:
+            link = el["link"]
+            if el["kind"] == "box":
+                sx, sy, sz = el["size"]
+                geom = f'<box size="{_f(sx)} {_f(sy)} {_f(sz)}"/>'
+            else:
+                geom = f'<mesh filename="file://${{mesh_path}}/temp_mesh/{el["mesh_file"]}"/>'
+            color = "0.8 0.8 0.8 1" if el.get("category") == "wall" else "0.6 0.6 0.65 1"
+            x, y, z = el["xyz"]
+            rr, pp, yy = el["rpy"]
+            lines += [
+                f'    <link name="{link}">',
+                "      <visual>",
+                '        <origin xyz="0 0 0" rpy="0 0 0"/>',
+                f"        <geometry>{geom}</geometry>",
+                f'        <material name="{link}_mat"><color rgba="{color}"/></material>',
+                "      </visual>",
+                "      <collision>",
+                '        <origin xyz="0 0 0" rpy="0 0 0"/>',
+                f"        <geometry>{geom}</geometry>",
+                "      </collision>",
+                "    </link>",
+                f'    <joint name="{link}_joint" type="fixed">',
+                f'      <parent link="{parent_link}"/>',
+                f'      <child link="{link}"/>',
+                f'      <origin xyz="{_f(x)} {_f(y)} {_f(z)}" rpy="{_f(rr)} {_f(pp)} {_f(yy)}"/>',
+                "    </joint>",
+            ]
     lines += ["  </xacro:macro>", "</robot>", ""]
     content = "\n".join(lines)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -400,10 +458,10 @@ def generate_world_scene_xacro(elements: List[Element], mesh_path: str, out_path
     return out_path
 
 
-def generate_world_scene_srdf_xacro(elements: List[Element], out_path: str) -> str:
+def generate_world_scene_srdf_xacro(groups: List[Group], out_path: str) -> str:
     """产出 world_scene_srdf 宏：建筑 link 两两 disable_collisions（静态互不检测，
     保留 robot↔arch 碰撞用于规划）。"""
-    links = [el["link"] for el in elements]
+    links = [el["link"] for g in groups for el in g["elements"]]
     lines: List[str] = [
         '<?xml version="1.0" ?>',
         '<robot xmlns:xacro="http://ros.org/wiki/xacro" name="world_scene">',
