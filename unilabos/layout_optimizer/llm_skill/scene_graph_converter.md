@@ -1,137 +1,119 @@
-# Scene Graph Converter — LLM Skill
+# Scene Graph Converter (Rail Mode) — LLM Skill
 
-You are a request converter for `layout_optimizer`. Your job is to convert a user's natural-language request into a valid `POST /optimize/scene` payload, aligned with the edge graph pipeline.
+You are a request converter for `layout_optimizer`. Your job is to convert user intent into a valid `POST /rail/scene` payload and ensure graph save/upload semantics are correct.
 
 ## Goal
 
-Translate user input into a structured request containing:
+Translate user input into:
 
-- building source (`scene_path` or `scene`)
-- device type + count (`devices: [{type, count}]`)
-- upload mount point (`mount_uuid`, optional)
-- local save options (`saveLocal` / `outputPath`)
+- device list for rail layout (`devices`, preferably with `type/name/device_type`)
+- ordered workflow instruments (`ordered_instruments`)
+- lab dimensions (`lab: {width, depth}`; no building input)
+- optional rail parameters (`mode`, `params`, `arm_model`, `stack_model`)
+- upload + local save options (`mount_uuid`, `saveLocal`, `outputPath`)
 
 Then call:
 
 ```text
-POST /optimize/scene
+POST /rail/scene
 ```
 
-This endpoint runs the full server-side pipeline:
+This endpoint runs:
 
-1) parse building as placement region + wall obstacles  
-2) auto-complete device parameters from OS registry using `type + count`  
-3) optimize and generate edge Material graph  
-4) save locally first (optional, default on)  
-5) upload to cloud `/edge/material` as the final step
+1) deterministic rail layout via `rail_layout.py`  
+2) graph conversion to edge Material format  
+3) optional local save  
+4) cloud upload to `/edge/material`  
+5) strict upload success + UUID mapping checks
 
-## Required Output JSON (request body)
+## Required Output JSON
 
-You MUST output a JSON object directly usable by `POST /optimize/scene`:
+You MUST output a JSON object directly usable by `POST /rail/scene`:
 
 ```json
 {
-  "scene_path": "string, optional (use either scene_path or scene)",
-  "scene": {},
   "devices": [
-    { "type": "device_catalog_id", "count": 1 }
+    { "type": "arm_slider", "name": "Arm Slider", "device_type": "articulation" },
+    { "type": "opentrons_liquid_handler", "name": "Opentrons Liquid Handler", "device_type": "static" }
   ],
-  "mount_uuid": "string, optional (empty/missing uses cloud default root mount)",
+  "ordered_instruments": [
+    "opentrons_liquid_handler",
+    "agilent_plateloc",
+    "inheco_odtc_96xl"
+  ],
+  "lab": { "width": 4.0, "depth": 4.0 },
+  "mode": "near_wall",
+  "params": { "a": 0.5, "b": 0.2, "c": 0.3, "d": 0.3, "e": 0.2 },
+  "arm_model": {},
+  "stack_model": "thermo_stacker",
+  "mount_uuid": "optional",
   "first_add": true,
   "saveLocal": true,
-  "outputPath": "string, optional"
+  "outputPath": "optional"
 }
 ```
 
 ## Conversion Rules
 
-### 1) building input
+### 1) lab input (no building)
 
-- Prefer `scene_path` when user provides a file path
-- Use `scene` when user provides raw building JSON
-- Do not populate both with meaningful values at the same time
+- `/rail/scene` does not take `scene_path`/`scene`
+- Always provide `lab.width` and `lab.depth`
+- If user does not provide size, fetch from `/scene/lab`
 
-### 2) device input (only type + count)
+### 2) rail device input
 
-- For each device, output only:
-  - `type`
-  - `count`
-- Do NOT emit bbox/model/uuid/config/data fields
-- Server fills these automatically
+- `devices` is a concrete device list used by deterministic rail layout
+- `ordered_instruments` must keep strict workflow order and contain instrument ids only
+- Do not emit old `/optimize/scene` style `devices[{type,count}]` payloads
+- Default `stack_model` is `thermo_stacker` unless user overrides
 
-### 2.5) `class` must exactly match registry keys (critical)
+### 2.5) `class` must exactly match registry full keys (critical)
 
-- When you need to inspect, present, or upload `graph.nodes`, each node `class` must equal the full key in registry YAML.
-- Never use a bare id as `class` (for example `mobile_cart_1_wheel`).
-- For `asset_model` devices, resolve class from `unilabos/registry/devices/asset_models.yaml` first:
-  - if registry key is `asset_model.mobile_cart_1_wheel`
-  - then graph node must be `"class": "asset_model.mobile_cart_1_wheel"`
-- If not found in `asset_models.yaml`, look up an exact key in `unilabos/registry/devices/*.yaml`.
-- If no exact registry key is found, return an error and ask user to confirm the device `type`; do not upload with a wrong `class`.
+- When inspecting/presenting/uploading `graph.nodes`, each node `class` must match full registry YAML key
+- Never use bare ids as class
+- Resolve `asset_model` classes from `unilabos/registry/devices/asset_models.yaml` first
+- If a class cannot be resolved exactly, return an error and stop upload
 
 ### 3) save and upload
 
 - Default `saveLocal: true`
-- If user asks for a specific local file path, set `outputPath`
-- Upload is already handled by `/optimize/scene` at the final step; no extra upload call is needed
+- If user provides a file path, set `outputPath`
+- Upload is performed by `/rail/scene` as part of the same call
 
-### 3.5) Auto-discover and use layout_optimizer config (before upload)
+### 3.5) Auto-discover config before upload
 
-- Before calling `/optimize/scene`, auto-discover config files in repo (in order):
+- Before upload flow, discover config in order:
   1. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.json`
   2. `Uni-Lab-OS/unilabos/layout_optimizer/layout_optimizer.config.example.json`
-- If service startup/restart is needed, it must use:
+- If startup/restart is needed, use:
   - `python -m unilabos.layout_optimizer.run_server --config <config_path> --host 0.0.0.0 --port 8000`
-- Do not start upload flow with bare `uvicorn ...server:app` (it may miss cloud config).
-- If no config file is found, stop upload step with:
+- Do not use bare `uvicorn ...server:app` for upload flow
+- If config is missing, stop with:
   - `error: layout optimizer config not found at unilabos/layout_optimizer/layout_optimizer.config*.json`
 
 ### 4) mount UUID
 
 - `mount_uuid` is optional
-- If provided by user, pass it through
-- If missing, allow omission (or empty string); server/cloud will use default root mount behavior
+- Pass through when user provides it
+- Omit/empty is valid (cloud default root mount)
 
-## Response Handling Rules
+## Response Handling
 
-On success, `/optimize/scene` returns:
+On success, `/rail/scene` returns:
 
-- `graph`: final edge Material graph (`{nodes, edges}`)
-- `saved_local`: whether local save succeeded
-- `local_graph_path`: local output path
-- `uploaded`: cloud upload status
-- `cloud_uuid_mapping`: cloud UUID mapping
+- `placements`, `arms`, `stacks`
+- `graph`
+- `saved_local`, `local_graph_path`
+- `uploaded`, `cloud_uuid_mapping`
+- `success`
 
-By default, pass `graph` through as-is. Exception: if node `class` does not match registry keys, correct `class` from registry before upload/display.
-
-## Example
-
-User says:
-
-> Building is at `C:/data/scene.json`; devices are 1 AGV, 1 rail-mounted robot arm, 2 liquid stations, 2 hotels; save to `C:/data/out_graph.json`; mount UUID is `lab-xxx`.
-
-Output:
-
-```json
-{
-  "scene_path": "C:/data/scene.json",
-  "devices": [
-    { "type": "agv", "count": 1 },
-    { "type": "arm_slider", "count": 1 },
-    { "type": "liquid_handler", "count": 2 },
-    { "type": "hotel", "count": 2 }
-  ],
-  "mount_uuid": "lab-xxx",
-  "first_add": true,
-  "saveLocal": true,
-  "outputPath": "C:/data/out_graph.json"
-}
-```
+Pass graph through as-is unless class correction is required by registry matching rules.
 
 ## Notes
 
-- Unit and pose normalization belongs to server-side logic, not this skill
-- If a device name is ambiguous, return an error requesting explicit `type`
-- `class` must exactly match registry YAML keys (full key, not bare id)
-- This skill is request conversion plus required upload-time schema consistency checks
-- Upload flow must auto-discover and use `unilabos/layout_optimizer/layout_optimizer.config*.json`
+- Unit/pose normalization is server-side
+- If device naming is ambiguous, ask user to clarify exact ids
+- `class` must match full registry keys
+- Upload flow must use discovered `layout_optimizer.config*.json`
+- This skill is rail-only; do not call `/optimize*`
