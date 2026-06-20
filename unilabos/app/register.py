@@ -76,11 +76,29 @@ def register_devices_and_resources(lab_registry, gather_only=False) -> Optional[
     if gather_only:
         return devices_to_register, resources_to_register
 
+    # M-1 (contract C-2): best-effort collect package-bundled simulation pair hints.
+    # Non-breaking: payload only carries `simulation_pairs` when hints are present.
+    # TODO: wire `package_dirs` to the real scanned community/external package dirs
+    #       (e.g. community_packages result) once that tracking is exposed on lab_registry.
+    simulation_pairs: list = []
+    try:
+        from unilabos.sim.pairs.hints import collect_all_pair_hints
+
+        package_dirs = getattr(lab_registry, "scanned_package_dirs", None) or []
+        simulation_pairs = collect_all_pair_hints(package_dirs)
+        if simulation_pairs:
+            logger.info(f"[UniLab Register] 收集到 {len(simulation_pairs)} 条仿真配对 hints")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[UniLab Register] 收集仿真配对 hints 失败(忽略): {e}")
+
     if devices_to_register:
         try:
             start_time = time.time()
+            device_payload = {"resources": list(devices_to_register.values())}
+            if simulation_pairs:
+                device_payload["simulation_pairs"] = simulation_pairs
             response = http_client.resource_registry(
-                {"resources": list(devices_to_register.values())},
+                device_payload,
                 tag="device_registry",
             )
             cost_time = time.time() - start_time

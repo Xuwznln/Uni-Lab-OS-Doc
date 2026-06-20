@@ -1,0 +1,27 @@
+{
+  "bundle_version": "2026-06-20T00:00:00Z",
+  "pairs": [
+    {
+      "real": "dalong_heaterstirrer",
+      "virtual": "community.dalong.virtual_heaterstirrer",
+      "missing_sim_policy": "stub",
+      "twin_observed": ["temperature", "rpm"],
+      "twin_throttle_hz": 20,
+      "virtual_package": {
+        "normalized_name": "dalong-sim-drivers",
+        "version": "0.2.1",
+        "download_url": "https://example.invalid/dalong-sim-drivers-0.2.1.whl",
+        "sha256": "sha256:abc123",
+        "class_namespace": "community.dalong"
+      }
+    },
+    {
+      "real": "qone_nmr",
+      "virtual": null,
+      "missing_sim_policy": "fail"
+    }
+  ],
+  "warnings": [
+    { "real": "qone_nmr", "message": "No active virtual driver; policy=fail" }
+  ]
+}

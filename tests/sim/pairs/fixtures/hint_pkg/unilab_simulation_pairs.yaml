@@ -1,0 +1,12 @@
+# Contract C-2: package-bundled simulation pair hints.
+# Placed under a package-style dir so read_pair_hints(<pkg_dir>) finds it by the
+# canonical filename `unilab_simulation_pairs.yaml`.
+pairs:
+  - real: dalong_heaterstirrer
+    virtual: community.dalong.virtual_heaterstirrer
+    pair_type: mock
+    supported_modes: [sim, twin]
+    missing_sim_policy: stub
+    priority: 100
+    twin_observed: [temperature, rpm]
+    twin_throttle_hz: 20
