@@ -116,11 +116,21 @@ class Registry:
     # 统一入口
     # ------------------------------------------------------------------
 
-    def setup(self, devices_dirs=None, upload_registry=False, complete_registry=False, external_only=False):
-        """统一构建注册表入口。"""
+    def setup(self, devices_dirs=None, upload_registry=False, complete_registry=False, external_only=False,
+              external_registry_paths=None):
+        """统一构建注册表入口。
+
+        external_registry_paths: 外源包发现到的 registry 目录(Plan 09),会并入 YAML 加载路径。
+        """
         if self._setup_called:
             logger.critical("[UniLab Registry] setup方法已被调用过，不允许多次调用")
             return
+
+        if external_registry_paths:
+            for _p in external_registry_paths:
+                _pp = Path(_p)
+                if _pp not in self.registry_paths:
+                    self.registry_paths.append(_pp)
 
         self._startup_executor = ThreadPoolExecutor(
             max_workers=8, thread_name_prefix="RegistryStartup"
@@ -2303,6 +2313,7 @@ def build_registry(
     check_mode=False,
     complete_registry=False,
     external_only=False,
+    external_registry_paths=None,
 ):
     """
     构建或获取Registry单例实例
@@ -2322,6 +2333,7 @@ def build_registry(
         upload_registry=upload_registry,
         complete_registry=complete_registry,
         external_only=external_only,
+        external_registry_paths=external_registry_paths,
     )
 
     # 将 AST 扫描的字符串类型替换为实际 ROS2 消息类（仅查找 ROS2 类型，不 import 设备模块）

@@ -674,6 +674,19 @@ def main():
             args_dict["_community_aliases"] = community_result.aliases
             args_dict["_apply_community_aliases"] = apply_community_aliases
 
+            # Plan 09 Task 5: 从已下载的社区/外源包根目录发现 registry 目录,并入 build_registry。
+            try:
+                from unilabos.registry.external_registry_discovery import discover_registry_paths_from_project
+
+                ext_paths: list = []
+                for package_root in getattr(community_result, "package_roots", []) or []:
+                    ext_paths.extend(discover_registry_paths_from_project(package_root))
+                if ext_paths:
+                    args_dict["_external_registry_paths"] = [str(p) for p in ext_paths]
+                    print_status(f"发现 {len(ext_paths)} 个外源 registry 目录", "info")
+            except Exception as _ext_exc:  # noqa: BLE001
+                logger.warning(f"[ext-registry] 外源 registry 发现跳过: {_ext_exc}")
+
     # Step 0: AST 分析优先 + YAML 注册表加载
     # check_mode 和 upload_registry 都会执行实际 import 验证
     devices_dirs = args_dict.get("devices", None)
@@ -686,6 +699,7 @@ def main():
         check_mode=check_mode,
         complete_registry=complete_registry,
         external_only=external_only,
+        external_registry_paths=args_dict.get("_external_registry_paths"),
     )
     apply_community_aliases = args_dict.get("_apply_community_aliases")
     if apply_community_aliases:
