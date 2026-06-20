@@ -68,5 +68,22 @@ def get_pair_registry() -> PairRegistry:
     return _default_registry
 
 
+def init_pair_registry(path: str | Path, default_policy: MissingSimPolicy = "stub") -> PairRegistry:
+    """Point the global PairRegistry at a runtime-generated device_pair.yaml (M-4).
+
+    Edge calls this after compiling the cloud pair bundle, so ``lookup()`` /
+    ``initialize_device`` use the generated pairs without changing Phase 1A APIs.
+    """
+    global _default_registry
+    _default_registry = PairRegistry(path, default_policy=default_policy)
+    return _default_registry
+
+
+def reset_pair_registry() -> None:
+    """Reset the global registry (tests)."""
+    global _default_registry
+    _default_registry = None
+
+
 def lookup(real_class_name: str) -> PairEntry:
     return get_pair_registry().lookup(real_class_name)
