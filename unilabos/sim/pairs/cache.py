@@ -89,7 +89,13 @@ def _bundle_pairs_json(bundle: PairBundle) -> list[dict[str, Any]]:
     out = []
     for e in bundle.pairs:
         out.append({
-            "real": e.real, "virtual": e.virtual, "missing_sim_policy": e.missing_sim_policy,
-            "twin_observed": list(e.twin_observed), "twin_throttle_hz": e.twin_throttle_hz,
+            "real": e.real, "engine": e.engine, "virtual": e.virtual,
+            "missing_sim_policy": e.missing_sim_policy,
+            "is_default": e.is_default, "priority": e.priority,
+            "twin_capability": {
+                "enabled": e.twin_capability.enabled,
+                "observed": list(e.twin_capability.observed),
+                "throttle_hz": e.twin_capability.throttle_hz,
+            },
         })
     return out

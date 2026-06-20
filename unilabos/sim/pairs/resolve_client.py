@@ -18,13 +18,19 @@ def build_resolve_request(
     edge_uuid: str | None,
     mode: str,
     real_classes: list[str],
+    engine: str = "none",
+    real_template_uuids: list[str] | None = None,
     package_locks: list[dict[str, Any]] | None = None,
     unilabos_version: str | None = None,
 ) -> dict[str, Any]:
+    """Build the resolve request (Plan 08 v2 §7.3). ``engine`` is the unified sim
+    engine (none/isaac/gazebo/genesis/matterix/custom) used to pick the virtual driver."""
     return {
         "lab_uuid": lab_uuid,
         "edge_uuid": edge_uuid,
         "mode": mode,
+        "engine": engine,
+        "real_template_uuids": sorted(set(real_template_uuids or [])),
         "real_classes": sorted(set(real_classes)),
         "package_locks": package_locks or [],
         "unilabos_version": unilabos_version,

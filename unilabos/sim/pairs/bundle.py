@@ -34,12 +34,32 @@ class VirtualPackageRef:
 
 
 @dataclass(frozen=True)
+class TwinCapability:
+    """Whether a pair supports twin (real<->virtual state mirroring) (Plan 08 v2)."""
+    enabled: bool = False
+    observed: list[str] = field(default_factory=list)
+    throttle_hz: float = 10.0
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "TwinCapability":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            observed=[str(x) for x in (data.get("observed") or [])],
+            throttle_hz=float(data.get("throttle_hz", 10.0)),
+        )
+
+
+@dataclass(frozen=True)
 class PairBundleEntry:
     real: str
+    engine: str = "none"
     virtual: str | None = None
     missing_sim_policy: str = "stub"
-    twin_observed: list[str] = field(default_factory=list)
-    twin_throttle_hz: float = 10.0
+    is_default: bool = False
+    priority: int = 0
+    twin_capability: TwinCapability = field(default_factory=TwinCapability)
     virtual_package: VirtualPackageRef | None = None
 
     @classmethod
@@ -47,10 +67,12 @@ class PairBundleEntry:
         vp = data.get("virtual_package")
         return cls(
             real=str(data["real"]),
+            engine=str(data.get("engine", "none")),
             virtual=data.get("virtual"),
             missing_sim_policy=str(data.get("missing_sim_policy", "stub")),
-            twin_observed=[str(x) for x in (data.get("twin_observed") or [])],
-            twin_throttle_hz=float(data.get("twin_throttle_hz", 10.0)),
+            is_default=bool(data.get("is_default", False)),
+            priority=int(data.get("priority", 0)),
+            twin_capability=TwinCapability.from_dict(data.get("twin_capability")),
             virtual_package=VirtualPackageRef.from_dict(vp) if isinstance(vp, dict) else None,
         )
 
@@ -58,6 +80,7 @@ class PairBundleEntry:
 @dataclass(frozen=True)
 class PairBundle:
     bundle_version: str
+    engine: str = "none"
     pairs: list[PairBundleEntry] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)
 
@@ -69,6 +92,7 @@ def parse_bundle(data: dict[str, Any]) -> PairBundle:
     pairs = [PairBundleEntry.from_dict(p) for p in (data.get("pairs") or []) if isinstance(p, dict) and p.get("real")]
     return PairBundle(
         bundle_version=str(data.get("bundle_version", "")),
+        engine=str(data.get("engine", "none")),
         pairs=pairs,
         warnings=[dict(w) for w in (data.get("warnings") or []) if isinstance(w, dict)],
     )

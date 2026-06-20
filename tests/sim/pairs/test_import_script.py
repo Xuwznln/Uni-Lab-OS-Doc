@@ -27,20 +27,29 @@ def _write_pairs(tmp_path):
     return p
 
 
-def test_to_admin_payload_maps_fields():
-    payload = mod.to_admin_payload({"real": "x", "virtual": "vx", "missing_sim_policy": "stub", "twin_observed": ["a"]})
+def test_to_admin_payload_maps_fields_v2_twin_capability():
+    payload = mod.to_admin_payload({
+        "real": "x", "virtual": "vx", "engine": "gazebo", "missing_sim_policy": "fail",
+        "twin_capability": {"enabled": True, "observed": ["a"], "throttle_hz": 20},
+    })
     assert payload["real_class"] == "x"
     assert payload["virtual_class"] == "vx"
-    assert payload["pair_type"] == "mock"
-    assert payload["supported_modes"] == ["sim", "twin"]
-    assert payload["twin_config"]["observed"] == ["a"]
+    assert payload["engine"] == "gazebo"
+    assert payload["missing_sim_policy"] == "fail"
+    assert payload["twin_capability"] == {"enabled": True, "observed": ["a"], "throttle_hz": 20}
+
+
+def test_to_admin_payload_legacy_twin_observed():
+    payload = mod.to_admin_payload({"real": "x", "virtual": "vx", "twin_observed": ["a"]})
+    assert payload["engine"] == "none"
+    assert payload["twin_capability"]["enabled"] is True
+    assert payload["twin_capability"]["observed"] == ["a"]
 
 
 def test_to_admin_payload_stub_when_no_virtual():
     payload = mod.to_admin_payload({"real": "y", "virtual": None, "missing_sim_policy": "fail"})
-    assert payload["pair_type"] == "stub"
     assert payload["virtual_class"] is None
-    assert payload["supported_modes"] == ["sim"]
+    assert payload["twin_capability"]["enabled"] is False
 
 
 def test_import_dry_run_does_not_call(tmp_path):

@@ -29,16 +29,31 @@ def load_pairs(pair_file: Path) -> list[dict[str, Any]]:
 
 
 def to_admin_payload(pair: dict[str, Any]) -> dict[str, Any]:
+    """Map a local device_pair.yaml entry to the backend admin payload (Plan 08 v2).
+
+    Accepts both the v2 ``twin_capability`` block and the legacy
+    ``twin_observed`` / ``twin_throttle_hz`` fields.
+    """
+    tc = pair.get("twin_capability")
+    if isinstance(tc, dict):
+        twin_capability = {
+            "enabled": bool(tc.get("enabled", False)),
+            "observed": list(tc.get("observed") or []),
+            "throttle_hz": tc.get("throttle_hz", 10.0),
+        }
+    else:
+        observed = list(pair.get("twin_observed") or [])
+        twin_capability = {
+            "enabled": bool(observed),
+            "observed": observed,
+            "throttle_hz": pair.get("twin_throttle_hz", 10.0),
+        }
     return {
         "real_class": pair["real"],
         "virtual_class": pair.get("virtual"),
-        "pair_type": "stub" if pair.get("virtual") is None else "mock",
+        "engine": pair.get("engine", "none"),
         "missing_sim_policy": pair.get("missing_sim_policy", "stub"),
-        "supported_modes": ["sim", "twin"] if pair.get("twin_observed") else ["sim"],
-        "twin_config": {
-            "observed": list(pair.get("twin_observed") or []),
-            "throttle_hz": pair.get("twin_throttle_hz", 10.0),
-        },
+        "twin_capability": twin_capability,
         "source_type": "package_hint",
         "status": "draft",
     }

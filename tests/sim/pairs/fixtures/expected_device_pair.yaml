@@ -1,13 +1,17 @@
-# Contract C-3: device_pair.generated.yaml expected from bundle_ok.json
+# Contract C-3: device_pair.generated.yaml expected from bundle_ok.json (Plan 08 v2)
 # Must be parseable by unilabos.registry.pair_registry.PairRegistry (Phase 1A compatible).
 pairs:
   - real: dalong_heaterstirrer
+    engine: gazebo
     virtual: community.dalong.virtual_heaterstirrer
     missing_sim_policy: stub
-    twin_observed:
-      - temperature
-      - rpm
-    twin_throttle_hz: 20
+    twin_capability:
+      enabled: true
+      observed:
+        - temperature
+        - rpm
+      throttle_hz: 20
   - real: qone_nmr
+    engine: gazebo
     virtual: null
     missing_sim_policy: fail

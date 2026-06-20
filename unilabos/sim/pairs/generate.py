@@ -24,13 +24,17 @@ def bundle_to_pairs_dict(bundle: PairBundle) -> dict[str, Any]:
     for e in bundle.pairs:
         item: dict[str, Any] = {
             "real": e.real,
+            "engine": e.engine,
             "virtual": e.virtual,
             "missing_sim_policy": e.missing_sim_policy,
         }
-        if e.twin_observed:
-            item["twin_observed"] = list(e.twin_observed)
-        if e.twin_throttle_hz:
-            item["twin_throttle_hz"] = e.twin_throttle_hz
+        tc = e.twin_capability
+        if tc.enabled or tc.observed:
+            item["twin_capability"] = {
+                "enabled": tc.enabled,
+                "observed": list(tc.observed),
+                "throttle_hz": tc.throttle_hz,
+            }
         pairs.append(item)
     return {"pairs": pairs}
 

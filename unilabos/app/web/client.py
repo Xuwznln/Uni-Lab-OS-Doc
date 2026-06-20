@@ -44,10 +44,10 @@ class HTTPClient:
     def resolve_simulation_pairs(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Resolve the simulation pair bundle for the given graph real classes (contract C-1).
 
-        POST /lab/edge/simulation-pairs/resolve -> parsed JSON dict.
+        POST /lab/square/edge/simulation-pairs/resolve -> parsed JSON dict.
         """
         response = self._session.post(
-            f"{self.remote_addr}/lab/edge/simulation-pairs/resolve",
+            f"{self.remote_addr}/lab/square/edge/simulation-pairs/resolve",
             json=payload,
             headers={"Authorization": f"Lab {self.auth}"},
             timeout=30,

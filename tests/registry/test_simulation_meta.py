@@ -9,7 +9,7 @@ from unilabos.registry.simulation_meta import (
 
 def test_keys_order_and_membership():
     assert SIMULATION_META_KEYS == (
-        "driver_runtime_kind", "simulation_kind", "supported_modes", "sim_engine",
+        "driver_runtime_kind", "virtual_driver_kind", "sim_engine",
     )
 
 
@@ -17,17 +17,15 @@ def test_device_simulation_meta_defaults_real():
     m = device_simulation_meta()
     assert m == {
         "driver_runtime_kind": "real",
-        "simulation_kind": None,
-        "supported_modes": [],
+        "virtual_driver_kind": None,
         "sim_engine": None,
     }
 
 
 def test_device_simulation_meta_virtual():
-    m = device_simulation_meta("virtual", "mock", ["sim", "twin"], "none")
+    m = device_simulation_meta("virtual", "local_mock", "none")
     assert m["driver_runtime_kind"] == "virtual"
-    assert m["simulation_kind"] == "mock"
-    assert m["supported_modes"] == ["sim", "twin"]
+    assert m["virtual_driver_kind"] == "local_mock"
     assert m["sim_engine"] == "none"
 
 
@@ -35,14 +33,12 @@ def test_apply_writes_virtual_marks():
     entry: dict = {}
     apply_simulation_meta(entry, {
         "driver_runtime_kind": "virtual",
-        "simulation_kind": "mock",
-        "supported_modes": ["sim", "twin"],
+        "virtual_driver_kind": "local_mock",
         "sim_engine": "none",
     })
     assert entry == {
         "driver_runtime_kind": "virtual",
-        "simulation_kind": "mock",
-        "supported_modes": ["sim", "twin"],
+        "virtual_driver_kind": "local_mock",
         "sim_engine": "none",
     }
 
@@ -58,8 +54,7 @@ def test_apply_skips_empty_values():
     entry: dict = {}
     apply_simulation_meta(entry, {
         "driver_runtime_kind": "virtual",
-        "simulation_kind": None,
-        "supported_modes": [],
+        "virtual_driver_kind": None,
         "sim_engine": "",
     })
     # only the meaningful field survives

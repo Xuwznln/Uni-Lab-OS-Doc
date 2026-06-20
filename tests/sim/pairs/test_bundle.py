@@ -18,22 +18,29 @@ def test_parse_bundle_ok():
     bundle = parse_bundle(_bundle_data())
     assert isinstance(bundle, PairBundle)
     assert bundle.bundle_version == "2026-06-20T00:00:00Z"
+    assert bundle.engine == "gazebo"
     assert len(bundle.pairs) == 2
 
     first = bundle.pairs[0]
     assert first.real == "dalong_heaterstirrer"
+    assert first.engine == "gazebo"
     assert first.virtual == "community.dalong.virtual_heaterstirrer"
     assert first.missing_sim_policy == "stub"
-    assert first.twin_observed == ["temperature", "rpm"]
-    assert first.twin_throttle_hz == 20
+    assert first.is_default is True
+    assert first.priority == 100
+    assert first.twin_capability.enabled is True
+    assert first.twin_capability.observed == ["temperature", "rpm"]
+    assert first.twin_capability.throttle_hz == 20
     assert first.virtual_package is not None
     assert first.virtual_package.normalized_name == "dalong-sim-drivers"
     assert first.virtual_package.version == "0.2.1"
 
     second = bundle.pairs[1]
     assert second.real == "qone_nmr"
+    assert second.engine == "gazebo"
     assert second.virtual is None
     assert second.missing_sim_policy == "fail"
+    assert second.twin_capability.enabled is False
     assert second.virtual_package is None
 
 

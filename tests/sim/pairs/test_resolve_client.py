@@ -28,11 +28,17 @@ def _ok_response():
 def test_build_resolve_request_sorts_and_dedups_classes():
     req = build_resolve_request(
         lab_uuid="L", edge_uuid="E", mode="sim",
-        real_classes=["b", "a", "a"], unilabos_version="0.8.0",
+        real_classes=["b", "a", "a"], engine="gazebo", unilabos_version="0.8.0",
     )
     assert req["real_classes"] == ["a", "b"]
     assert req["mode"] == "sim"
+    assert req["engine"] == "gazebo"
     assert req["package_locks"] == []
+
+
+def test_build_resolve_request_engine_defaults_none():
+    req = build_resolve_request(lab_uuid=None, edge_uuid=None, mode="sim", real_classes=["a"])
+    assert req["engine"] == "none"
 
 
 def test_resolve_pairs_returns_bundle():

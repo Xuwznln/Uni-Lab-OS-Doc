@@ -45,7 +45,8 @@ def test_read_pair_hints_skips_entries_without_real(tmp_path):
 def test_read_pair_hints_from_contract_fixture():
     hints = read_pair_hints(FIXTURES / "hint_pkg")
     assert hints[0]["real"] == "dalong_heaterstirrer"
-    assert hints[0]["twin_throttle_hz"] == 20
+    assert hints[0]["engine"] == "gazebo"
+    assert hints[0]["twin_capability"]["throttle_hz"] == 20
 
 
 def test_collect_all_pair_hints_dedups_by_real_virtual(tmp_path):

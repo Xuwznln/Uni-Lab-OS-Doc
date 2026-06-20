@@ -21,12 +21,14 @@ def test_generated_yaml_loads_in_pair_registry(tmp_path):
     e = reg.lookup("dalong_heaterstirrer")
     assert e.virtual == "community.dalong.virtual_heaterstirrer"
     assert e.missing_sim_policy == "stub"
-    assert e.twin_observed == ["temperature", "rpm"]
+    assert e.engine == "gazebo"
+    assert e.twin_observed == ["temperature", "rpm"]  # from twin_capability.observed
     assert e.twin_throttle_hz == 20
 
     nmr = reg.lookup("qone_nmr")
     assert nmr.virtual is None
     assert nmr.missing_sim_policy == "fail"
+    assert nmr.twin_observed == []  # twin_capability disabled
 
 
 def test_generated_matches_expected_fixture(tmp_path):
@@ -37,8 +39,8 @@ def test_generated_matches_expected_fixture(tmp_path):
 
     for real in ("dalong_heaterstirrer", "qone_nmr"):
         g, x = gen_reg.lookup(real), exp_reg.lookup(real)
-        assert (g.virtual, g.missing_sim_policy, g.twin_observed, g.twin_throttle_hz) == (
-            x.virtual, x.missing_sim_policy, x.twin_observed, x.twin_throttle_hz
+        assert (g.virtual, g.missing_sim_policy, g.engine, g.twin_observed, g.twin_throttle_hz) == (
+            x.virtual, x.missing_sim_policy, x.engine, x.twin_observed, x.twin_throttle_hz
         )
 
 

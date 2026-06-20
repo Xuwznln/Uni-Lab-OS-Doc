@@ -262,8 +262,7 @@ def device(
     device_type: str = "python",
     hardware_interface: Optional[HardwareInterface] = None,
     driver_runtime_kind: str = "real",
-    simulation_kind: Optional[str] = None,
-    supported_modes: Optional[List[str]] = None,
+    virtual_driver_kind: Optional[str] = None,
     sim_engine: Optional[str] = None,
 ):
     """
@@ -290,9 +289,8 @@ def device(
         device_type: 设备实现类型 ("python" / "ros2")
         hardware_interface: 硬件通信接口 (HardwareInterface)
         driver_runtime_kind: 驱动运行时类型 "real" / "virtual"（默认 real，仿真驱动声明 virtual）
-        simulation_kind: 仿真级别 stub / mock / physics / digital_twin / engine_adapter
-        supported_modes: 支持的运行模式，如 ["sim"] / ["sim", "twin"]
-        sim_engine: 仿真引擎 none / gazebo / isaac / genesis / ...
+        virtual_driver_kind: 虚拟驱动类型 null_stub / local_mock / engine_adapter / remote_adapter / recorded_replay
+        sim_engine: 仿真引擎 none / isaac / gazebo / genesis / matterix / custom
     """
     # Resolve device ids
     if ids is not None:
@@ -327,7 +325,7 @@ def device(
         "model": model,
         "device_type": device_type,
         "hardware_interface": (hardware_interface.model_dump(exclude_none=True) if hardware_interface else None),
-        **device_simulation_meta(driver_runtime_kind, simulation_kind, supported_modes, sim_engine),
+        **device_simulation_meta(driver_runtime_kind, virtual_driver_kind, sim_engine),
     }
 
     def decorator(cls):
