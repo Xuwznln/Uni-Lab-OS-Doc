@@ -71,8 +71,10 @@ def _instantiate_device_node(
             from unilabos.registry.initializer import resolve_init_kwargs
 
             node_meta = {"id": device_id, "name": getattr(device_config.res_content, "name", device_id)}
+            # class.init fully defines the constructor kwargs; the raw config is only the
+            # source for ${config.*} placeholders, so it replaces (not merges into) params.
             resolved = resolve_init_kwargs({"class": device_class_config}, node=node_meta, config=effective_params or {})
-            effective_params = {**(effective_params or {}), **resolved["kwargs"]}
+            effective_params = resolved["kwargs"]
         try:
             d = DEVICE(
                 device_id=device_id,
