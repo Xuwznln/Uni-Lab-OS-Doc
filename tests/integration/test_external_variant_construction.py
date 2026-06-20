@@ -66,12 +66,12 @@ def test_class_init_via_instantiate_device_node(ros_context):
     lab_registry.device_type_registry["vendor.lh.model_a"] = dict(ENTRY)
     try:
         device_config = ResourceDictInstance.get_resource_instance_from_dict({
-            "name": "lh-runtime",
+            "name": "lh_runtime",  # ROS2 node name: no hyphens
             "type": "device",
             "class": "vendor.lh.model_a",
             "config": CONFIG,
         })
-        node = _instantiate_device_node("lh-runtime", device_config, "vendor.lh.model_a")
+        node = _instantiate_device_node("lh_runtime", device_config, "vendor.lh.model_a")
         assert node is not None
         driver = getattr(node, "driver_instance", None)
         assert driver is not None
@@ -79,5 +79,6 @@ def test_class_init_via_instantiate_device_node(ros_context):
         assert driver.backend.port == 1234
         assert driver.deck.name == "runtime-deck"
         assert driver.channels == 384
+        assert driver.name == "lh_runtime"  # ${node.id} injected
     finally:
         lab_registry.device_type_registry.pop("vendor.lh.model_a", None)
