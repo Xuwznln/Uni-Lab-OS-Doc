@@ -36,6 +36,7 @@ from unilabos.registry.decorators import (
     NodeType,
     normalize_enum_value,
 )
+from unilabos.registry.simulation_meta import apply_simulation_meta
 from unilabos.registry.utils import (
     ROSMsgNotFound,
     parse_docstring,
@@ -1097,6 +1098,9 @@ class Registry:
             if isinstance(hardware_interface, dict) and "_call" in hardware_interface:
                 hardware_interface = {k: v for k, v in hardware_interface.items() if k != "_call"}
             entry["class"]["hardware_interface"] = hardware_interface
+        # Plan 08 §6.3: emit virtual driver self-marking fields (non-empty only;
+        # real devices stay unchanged). Backend identifies virtual drivers by these.
+        apply_simulation_meta(entry, ast_meta)
         return entry
 
     def _generate_schema_from_ast_params(
