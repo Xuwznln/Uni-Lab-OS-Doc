@@ -37,6 +37,7 @@ from unilabos.registry.decorators import (
     normalize_enum_value,
 )
 from unilabos.registry.simulation_meta import apply_simulation_meta
+from unilabos.registry.yaml_ref import resolve_yaml_refs
 from unilabos.registry.utils import (
     ROSMsgNotFound,
     parse_docstring,
@@ -1770,7 +1771,10 @@ class Registry:
         """
         try:
             with open(file, encoding="utf-8", mode="r") as f:
-                data = yaml.safe_load(io.StringIO(f.read()))
+                raw_data = yaml.safe_load(io.StringIO(f.read()))
+            # Plan 09 Task 4: expand external-registry YAML $ref (shared contracts)
+            # before per-device normalization. No-op for files without $ref.
+            data = resolve_yaml_refs(raw_data, base_file=file)
         except Exception as e:
             logger.warning(f"[UniLab Registry] 读取设备文件失败: {file}, 错误: {e}")
             return {}, {}, False, []
