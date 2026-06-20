@@ -63,12 +63,22 @@ def _instantiate_device_node(
                 {"name": "hardware_interface", "write": "send_command", "read": "read_data", "extra_info": []},
             ),
         )
+        effective_params = driver_params if driver_params is not None else device_config.res_content.config
+        # Plan 09 Task 6: external variant registry entries declare class.init; resolve it
+        # (build factory objects + inject ${config.*}/${node.*}) and merge into driver_params,
+        # keeping the existing ROS2DeviceNode wrapper/creator construction path.
+        if device_class_config.get("init"):
+            from unilabos.registry.initializer import resolve_init_kwargs
+
+            node_meta = {"id": device_id, "name": getattr(device_config.res_content, "name", device_id)}
+            resolved = resolve_init_kwargs({"class": device_class_config}, node=node_meta, config=effective_params or {})
+            effective_params = {**(effective_params or {}), **resolved["kwargs"]}
         try:
             d = DEVICE(
                 device_id=device_id,
                 device_uuid=uid,
                 driver_is_ros=device_class_config["type"] == "ros2",
-                driver_params=driver_params if driver_params is not None else device_config.res_content.config,
+                driver_params=effective_params,
             )
         except DeviceInitError:
             return d

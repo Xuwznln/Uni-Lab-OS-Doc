@@ -37,6 +37,23 @@ def build_instance_from_registry_entry(entry: dict[str, Any], node: dict[str, An
     return target(*args, **kwargs)
 
 
+def resolve_init_kwargs(entry: dict[str, Any], node: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve ``class.init`` into concrete args/kwargs WITHOUT instantiating the
+    device class itself (Plan 09 Task 6).
+
+    Used by the ROS device construction path: the resolved kwargs (with factory
+    objects built and ${config.*}/${node.*} injected) are merged into driver_params
+    so the existing ROS2DeviceNode wrapper / creator still builds the device.
+    """
+    init_config = (entry.get("class", {}) or {}).get("init", {}) or {}
+    args = [_resolve_value(value, node=node, config=config) for value in init_config.get("args", [])]
+    kwargs = {
+        key: _resolve_value(value, node=node, config=config)
+        for key, value in init_config.get("kwargs", {}).items()
+    }
+    return {"args": args, "kwargs": kwargs}
+
+
 def import_ref(ref: str) -> Callable[..., Any] | type:
     if ":" not in ref:
         raise RegistryInitializerError(f"Import ref must use 'module:attr' format: {ref}")
