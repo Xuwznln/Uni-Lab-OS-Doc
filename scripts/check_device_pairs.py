@@ -18,12 +18,40 @@ def collect_registry_devices(registry_dir: Path) -> set[str]:
     return devices
 
 
+def report_bundle(bundle_path: Path) -> int:
+    """M-6: summarize a resolved pair bundle (stub/skip/fail + coverage)."""
+    import json
+
+    raw = json.loads(bundle_path.read_text(encoding="utf-8"))
+    data = raw.get("data", raw)  # accept either the full response or the data object
+    pairs = data.get("pairs", [])
+    total = len(pairs)
+    with_virtual = sum(1 for p in pairs if p.get("virtual"))
+    by_policy: dict[str, list[str]] = {"stub": [], "skip": [], "fail": []}
+    for p in pairs:
+        if not p.get("virtual"):
+            by_policy.setdefault(p.get("missing_sim_policy", "stub"), []).append(p["real"])
+    print(f"bundle_pairs={total}")
+    print(f"with_virtual={with_virtual}")
+    print(f"coverage={with_virtual}/{total}")
+    for policy in ("stub", "skip", "fail"):
+        names = sorted(by_policy.get(policy, []))
+        print(f"{policy}={len(names)}")
+        for name in names:
+            print(f"{policy.upper()} {name}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--registry-dir", type=Path, default=Path("unilabos/registry"))
     parser.add_argument("--pair-file", type=Path, default=Path("unilabos/registry/device_pair.yaml"))
+    parser.add_argument("--bundle", type=Path, default=None, help="Resolved pair bundle JSON (from backend resolve API).")
     parser.add_argument("--fail-on-stub", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.bundle is not None:
+        return report_bundle(args.bundle)
 
     devices = collect_registry_devices(args.registry_dir)
     raw = yaml.safe_load(args.pair_file.read_text(encoding="utf-8")) or {}

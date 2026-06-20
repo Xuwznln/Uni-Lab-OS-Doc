@@ -789,6 +789,25 @@ def main():
     import unilabos.resources.graphio as graph_res
 
     graph_res.physical_setup_graph = graph
+
+    # Phase 1B (08): sim/twin 模式下,从设备广场 resolve 仿真配对 bundle,
+    # 生成运行时 device_pair.yaml 并指向 PairRegistry。Guarded:任何失败不阻断启动。
+    if args_dict.get("mode") in ("sim", "twin"):
+        try:
+            from unilabos.app.web import http_client as _sim_http_client
+            from unilabos.sim.pairs.download import make_downloader
+            from unilabos.sim.pairs.edge_setup import setup_simulation_pairs
+
+            setup_simulation_pairs(
+                graph=graph,
+                mode=args_dict.get("mode"),
+                http_client=_sim_http_client,
+                cache_dir=BasicConfig.working_dir,
+                downloader=make_downloader(_sim_http_client),
+            )
+        except Exception as _sim_pair_exc:  # noqa: BLE001
+            logger.warning(f"[sim-pair] 仿真配对 resolve 跳过(用默认 device_pair.yaml): {_sim_pair_exc}")
+
     resource_edge_info = modify_to_backend_format(resource_links)
     materials = lab_registry.obtain_registry_resource_info()
     materials.extend(lab_registry.obtain_registry_device_info())
