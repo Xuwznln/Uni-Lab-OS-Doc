@@ -82,3 +82,69 @@ def test_class_init_via_instantiate_device_node(ros_context):
         assert driver.name == "lh_runtime"  # ${node.id} injected
     finally:
         lab_registry.device_type_registry.pop("vendor.lh.model_a", None)
+
+
+# --- Plan 09 T6: real pylabrobot LiquidHandler via class.init (F) -----------------
+
+PLR_ENTRY = {
+    "class": {
+        "module": "pylabrobot.liquid_handling.liquid_handler:LiquidHandler",
+        "type": "python",
+        "init": {
+            "kwargs": {
+                "backend": {
+                    "factory": "pylabrobot.liquid_handling.backends.chatterbox:LiquidHandlerChatterboxBackend",
+                    "kwargs": {"num_channels": 8},
+                },
+                "deck": {
+                    "factory": "pylabrobot.resources:Deck",
+                    "kwargs": {"size_x": 100.0, "size_y": 100.0, "size_z": 10.0},
+                },
+                "name": "${node.id}",
+            }
+        },
+        "status_types": {},
+        "action_value_mappings": {},
+    }
+}
+
+
+@pytest.mark.integration
+def test_pylabrobot_liquidhandler_built_via_class_init():
+    """Two registry entries can share pylabrobot LiquidHandler but pick different
+    backends via class.init — proven by constructing a real LiquidHandler."""
+    pytest.importorskip("pylabrobot")
+    from unilabos.registry.initializer import build_instance_from_registry_entry
+
+    lh = build_instance_from_registry_entry(PLR_ENTRY, node={"id": "lh_plr", "name": "LH"}, config={})
+
+    from pylabrobot.liquid_handling.liquid_handler import LiquidHandler
+
+    assert isinstance(lh, LiquidHandler)
+    assert lh.backend.num_channels == 8
+    assert lh.name == "lh_plr"
+
+
+@pytest.mark.integration
+def test_pylabrobot_via_instantiate_device_node(ros_context):
+    """Full edge path for a pylabrobot driver (goes through PyLabRobotCreator)."""
+    pytest.importorskip("pylabrobot")
+    from unilabos.registry.registry import lab_registry
+    from unilabos.resources.resource_tracker import ResourceDictInstance
+    from unilabos.ros.initialize_device import _instantiate_device_node
+
+    lab_registry.device_type_registry["pylabrobot.lh.chatterbox"] = dict(PLR_ENTRY)
+    try:
+        device_config = ResourceDictInstance.get_resource_instance_from_dict({
+            "name": "lh_plr_node",
+            "type": "device",
+            "class": "pylabrobot.lh.chatterbox",
+            "config": {},
+        })
+        node = _instantiate_device_node("lh_plr_node", device_config, "pylabrobot.lh.chatterbox")
+        assert node is not None
+        driver = getattr(node, "driver_instance", None)
+        assert driver is not None
+        assert driver.backend.num_channels == 8
+    finally:
+        lab_registry.device_type_registry.pop("pylabrobot.lh.chatterbox", None)
