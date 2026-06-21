@@ -6,7 +6,11 @@ from pathlib import Path
 from unilabos.registry.pair_registry import lookup, reset_pair_registry
 from unilabos.sim.pairs.bundle import parse_bundle
 from unilabos.sim.pairs.cache import PairCache, compute_graph_hash
-from unilabos.sim.pairs.edge_setup import collect_real_classes, setup_simulation_pairs
+from unilabos.sim.pairs.edge_setup import (
+    collect_real_classes,
+    setup_simulation_pairs,
+    warn_missing_virtual_classes,
+)
 from unilabos.sim.pairs.generate import bundle_to_pairs_yaml
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -28,6 +32,7 @@ class FakeClient:
 
     def resolve_simulation_pairs(self, payload):
         self.calls += 1
+        self.last_request = payload
         if self._raises:
             raise ConnectionError("backend down")
         return self._response
@@ -54,6 +59,24 @@ def test_setup_resolves_and_points_registry(tmp_path):
         assert lookup("qone_nmr").missing_sim_policy == "fail"
         # cache written
         assert PairCache(tmp_path).load_manifest() is not None
+    finally:
+        reset_pair_registry()
+
+
+def test_warn_missing_virtual_classes():
+    bundle = parse_bundle(_ok_response()["data"])
+    # registry has neither virtual; only dalong's virtual is non-null in fixture
+    missing = warn_missing_virtual_classes(bundle, device_registry={})
+    assert missing == ["community.dalong.virtual_heaterstirrer"]
+    # when present, no missing
+    assert warn_missing_virtual_classes(bundle, {"community.dalong.virtual_heaterstirrer": {}}) == []
+
+
+def test_setup_passes_engine_into_resolve(tmp_path):
+    client = FakeClient(_ok_response())
+    try:
+        setup_simulation_pairs(graph=GRAPH, mode="sim", http_client=client, cache_dir=tmp_path, engine="gazebo")
+        assert client.last_request["engine"] == "gazebo"
     finally:
         reset_pair_registry()
 
