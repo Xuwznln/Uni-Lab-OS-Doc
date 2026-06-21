@@ -28,7 +28,14 @@ def resolve_yaml_refs(data: Any, base_file: Path | str) -> Any:
 def _resolve_node(node: Any, base_file: Path, seen: set[str]) -> Any:
     if isinstance(node, dict):
         if set(node.keys()) == {"$ref"}:
-            return _resolve_ref(str(node["$ref"]), base_file, seen)
+            ref = str(node["$ref"])
+            path_part, _pointer = _split_ref(ref)
+            # Same-document refs (e.g. JSON-Schema `#/$defs/Foo` inside init_param_schema)
+            # are NOT external-registry contract refs: leave them intact for the schema
+            # consumer. Only cross-file refs (with a file path part) are expanded here.
+            if not path_part:
+                return node
+            return _resolve_ref(ref, base_file, seen)
         return {key: _resolve_node(value, base_file, seen) for key, value in node.items()}
 
     if isinstance(node, list):

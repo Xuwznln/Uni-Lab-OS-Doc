@@ -19,6 +19,21 @@ def test_resolve_yaml_refs_loads_relative_file_and_json_pointer():
     assert device["class"]["status_types"] == {"initialized": "bool"}
 
 
+def test_resolve_yaml_refs_preserves_same_document_json_schema_refs():
+    """JSON-Schema same-document refs (#/$defs/...) must be left intact, not expanded
+    or treated as file refs (regression: real registry init_param_schema uses these)."""
+    data = {
+        "init_param_schema": {
+            "type": "object",
+            "properties": {"deck": {"$ref": "#/$defs/ResourceDict"}},
+            "$defs": {"ResourceDict": {"type": "object"}},
+        }
+    }
+    resolved = resolve_yaml_refs(data, base_file="/some/registry/devices/x.yaml")
+    # untouched: the $ref dict survives verbatim (no IsADirectoryError, no inlining)
+    assert resolved["init_param_schema"]["properties"]["deck"] == {"$ref": "#/$defs/ResourceDict"}
+
+
 def test_resolve_yaml_refs_detects_cycles(tmp_path):
     cycle_file = tmp_path / "cycle.yaml"
     cycle_file.write_text("value:\n  $ref: cycle.yaml#/value\n", encoding="utf-8")
