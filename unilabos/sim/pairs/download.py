@@ -35,22 +35,31 @@ def download_virtual_packages(bundle: PairBundle, fetch_fn: FetchFn) -> list[Any
     return results
 
 
-def make_downloader(http_client: Any) -> Callable[[PairBundle], None]:
-    """Best-effort default downloader using community_packages (guarded).
+def make_downloader(http_client: Any, working_dir: Any = None) -> Callable[[PairBundle], list[Any]]:
+    """Default downloader: fetch each bundle virtual_package via the real
+    community-package download/extract mechanism (guarded, best-effort).
 
-    TODO: wire to the concrete community_packages download/cache API once stable.
+    Returns the list of extracted package dirs so the caller can mount them.
+    Refs without a ``download_url`` are skipped.
     """
     def _default_fetch(ref: VirtualPackageRef):
-        try:
-            from unilabos.app import community_packages as _cp  # noqa: F401
-        except Exception:
-            logger.warning("community_packages unavailable; skip virtual package %s", ref.normalized_name)
+        if not ref.download_url:
+            logger.info("virtual package %s has no download_url; skip", ref.normalized_name)
             return None
-        # Placeholder: real call to cp download-by-ref to be wired here.
-        logger.info("virtual package fetch requested: %s@%s (%s)", ref.normalized_name, ref.version, ref.download_url)
-        return None
+        try:
+            from unilabos.app.community_packages import _download_and_extract_package
+            from unilabos.config.config import BasicConfig
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("community_packages unavailable; skip virtual package %s: %s", ref.normalized_name, exc)
+            return None
+        wd = working_dir if working_dir is not None else getattr(BasicConfig, "working_dir", ".")
+        package_dir = _download_and_extract_package(
+            ref.download_url, wd, ref.normalized_name, ref.version, ref.sha256 or "", http_client
+        )
+        logger.info("virtual package %s@%s extracted -> %s", ref.normalized_name, ref.version, package_dir)
+        return str(package_dir)
 
-    def _download(bundle: PairBundle) -> None:
-        download_virtual_packages(bundle, _default_fetch)
+    def _download(bundle: PairBundle) -> list[Any]:
+        return download_virtual_packages(bundle, _default_fetch)
 
     return _download

@@ -43,6 +43,23 @@ def collect_real_classes(graph: Any) -> list[str]:
     return sorted(set(classes))
 
 
+def warn_missing_virtual_classes(bundle: PairBundle, device_registry: dict[str, Any]) -> list[str]:
+    """Warn for bundle virtual classes not present in the device registry (Plan §10.4 step 4).
+
+    Returns the list of missing virtual class names (also useful for tests).
+    """
+    missing: list[str] = []
+    for entry in bundle.pairs:
+        if entry.virtual and entry.virtual not in device_registry:
+            missing.append(entry.virtual)
+            logger.warning(
+                "simulation pairs: virtual class '%s' (for real '%s') not found in registry; "
+                "install its package or sim will fall back to stub/policy",
+                entry.virtual, entry.real,
+            )
+    return missing
+
+
 def setup_simulation_pairs(
     *,
     graph: Any,
@@ -55,6 +72,7 @@ def setup_simulation_pairs(
     unilabos_version: str | None = None,
     package_locks: list[dict[str, Any]] | None = None,
     downloader: Downloader | None = None,
+    device_registry: dict[str, Any] | None = None,
 ) -> Path | None:
     """Returns the device_pair.yaml path that PairRegistry was pointed at, or None
     (caller then keeps the repository default device_pair.yaml)."""
@@ -77,6 +95,8 @@ def setup_simulation_pairs(
         bundle = resolve_pairs(http_client, request)
         if downloader is not None:
             downloader(bundle)
+        if device_registry is not None:
+            warn_missing_virtual_classes(bundle, device_registry)
         yaml_text = bundle_to_pairs_yaml(bundle)
         path = cache.write(
             bundle, yaml_text, lab_uuid=lab_uuid, edge_uuid=edge_uuid,

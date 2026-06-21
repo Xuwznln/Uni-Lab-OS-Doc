@@ -30,3 +30,24 @@ def test_download_isolates_failures():
         raise RuntimeError("network")
     # must not raise
     assert download_virtual_packages(_bundle(), boom) == []
+
+
+def test_make_downloader_calls_real_extract(monkeypatch):
+    """make_downloader's default fetch calls community_packages._download_and_extract_package."""
+    import unilabos.app.community_packages as cp
+    from unilabos.sim.pairs.download import make_downloader
+
+    calls = []
+
+    def fake_extract(download_url, working_dir, normalized, version, sha256, http_client):
+        calls.append((download_url, normalized, version, sha256))
+        return f"/mnt/{normalized}"
+
+    monkeypatch.setattr(cp, "_download_and_extract_package", fake_extract)
+
+    out = make_downloader(http_client=None, working_dir="/tmp/wd")(_bundle())
+    assert out == ["/mnt/dalong-sim-drivers"]
+    assert calls == [(
+        "https://example.invalid/dalong-sim-drivers-0.2.1.whl",
+        "dalong-sim-drivers", "0.2.1", "sha256:abc123",
+    )]

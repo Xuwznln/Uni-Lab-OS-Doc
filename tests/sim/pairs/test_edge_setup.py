@@ -6,7 +6,11 @@ from pathlib import Path
 from unilabos.registry.pair_registry import lookup, reset_pair_registry
 from unilabos.sim.pairs.bundle import parse_bundle
 from unilabos.sim.pairs.cache import PairCache, compute_graph_hash
-from unilabos.sim.pairs.edge_setup import collect_real_classes, setup_simulation_pairs
+from unilabos.sim.pairs.edge_setup import (
+    collect_real_classes,
+    setup_simulation_pairs,
+    warn_missing_virtual_classes,
+)
 from unilabos.sim.pairs.generate import bundle_to_pairs_yaml
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -57,6 +61,15 @@ def test_setup_resolves_and_points_registry(tmp_path):
         assert PairCache(tmp_path).load_manifest() is not None
     finally:
         reset_pair_registry()
+
+
+def test_warn_missing_virtual_classes():
+    bundle = parse_bundle(_ok_response()["data"])
+    # registry has neither virtual; only dalong's virtual is non-null in fixture
+    missing = warn_missing_virtual_classes(bundle, device_registry={})
+    assert missing == ["community.dalong.virtual_heaterstirrer"]
+    # when present, no missing
+    assert warn_missing_virtual_classes(bundle, {"community.dalong.virtual_heaterstirrer": {}}) == []
 
 
 def test_setup_passes_engine_into_resolve(tmp_path):

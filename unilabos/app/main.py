@@ -825,7 +825,8 @@ def main():
                 http_client=_sim_http_client,
                 cache_dir=BasicConfig.working_dir,
                 engine=args_dict.get("sim_engine", "none"),
-                downloader=make_downloader(_sim_http_client),
+                downloader=make_downloader(_sim_http_client, working_dir=BasicConfig.working_dir),
+                device_registry=getattr(lab_registry, "device_type_registry", None),
             )
         except Exception as _sim_pair_exc:  # noqa: BLE001
             logger.warning(f"[sim-pair] 仿真配对 resolve 跳过(用默认 device_pair.yaml): {_sim_pair_exc}")
