@@ -18,6 +18,7 @@ class PairEntry:
     missing_sim_policy: MissingSimPolicy = "stub"
     twin_observed: list[str] = field(default_factory=list)
     twin_throttle_hz: float = 10.0
+    engine: str = "none"
     explicit: bool = True
 
 
@@ -37,12 +38,23 @@ class PairRegistry:
             if policy not in ("stub", "skip", "fail"):
                 raise ValueError(f"invalid missing_sim_policy for {item.get('real')}: {policy}")
             real = item["real"]
+            # Plan 08 v2: twin_capability {enabled, observed, throttle_hz};
+            # legacy fallback: twin_observed / twin_throttle_hz.
+            tc = item.get("twin_capability")
+            if isinstance(tc, dict):
+                enabled = bool(tc.get("enabled", False))
+                twin_observed = [str(x) for x in (tc.get("observed") or [])] if enabled else []
+                twin_throttle_hz = float(tc.get("throttle_hz", 10.0))
+            else:
+                twin_observed = [str(x) for x in (item.get("twin_observed") or [])]
+                twin_throttle_hz = float(item.get("twin_throttle_hz", 10.0))
             pairs[real] = PairEntry(
                 real=real,
                 virtual=item.get("virtual"),
                 missing_sim_policy=policy,
-                twin_observed=list(item.get("twin_observed") or []),
-                twin_throttle_hz=float(item.get("twin_throttle_hz", 10.0)),
+                twin_observed=twin_observed,
+                twin_throttle_hz=twin_throttle_hz,
+                engine=str(item.get("engine", "none")),
             )
         return pairs
 
@@ -66,6 +78,23 @@ def get_pair_registry() -> PairRegistry:
     if _default_registry is None:
         _default_registry = PairRegistry()
     return _default_registry
+
+
+def init_pair_registry(path: str | Path, default_policy: MissingSimPolicy = "stub") -> PairRegistry:
+    """Point the global PairRegistry at a runtime-generated device_pair.yaml (M-4).
+
+    Edge calls this after compiling the cloud pair bundle, so ``lookup()`` /
+    ``initialize_device`` use the generated pairs without changing Phase 1A APIs.
+    """
+    global _default_registry
+    _default_registry = PairRegistry(path, default_policy=default_policy)
+    return _default_registry
+
+
+def reset_pair_registry() -> None:
+    """Reset the global registry (tests)."""
+    global _default_registry
+    _default_registry = None
 
 
 def lookup(real_class_name: str) -> PairEntry:

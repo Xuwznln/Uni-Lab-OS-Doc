@@ -26,6 +26,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from unilabos.registry.simulation_meta import SIMULATION_META_KEYS
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -369,6 +371,9 @@ def _parse_file(
                     "handles": device_args.get("handles", []),
                     "model": device_args.get("model"),
                     "hardware_interface": device_args.get("hardware_interface"),
+                    "driver_runtime_kind": device_args.get("driver_runtime_kind", "real"),
+                    "virtual_driver_kind": device_args.get("virtual_driver_kind"),
+                    "sim_engine": device_args.get("sim_engine"),
                     "actions": class_body.get("actions", {}),
                     "status_properties": class_body.get("status_properties", {}),
                     "init_params": class_body.get("init_params", []),
@@ -380,7 +385,10 @@ def _parse_file(
                     meta = dict(base_meta)
                     meta["device_id"] = did
                     overrides = id_meta.get(did, {})
-                    for key in ("handles", "description", "display_name", "displayname", "icon", "model", "hardware_interface"):
+                    for key in (
+                        "handles", "description", "display_name", "displayname", "icon", "model",
+                        "hardware_interface", *SIMULATION_META_KEYS,
+                    ):
                         if key in overrides:
                             if key == "displayname":
                                 meta["display_name"] = overrides[key]

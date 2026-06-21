@@ -41,6 +41,22 @@ class HTTPClient:
         self._session.headers.update({"Authorization": f"Lab {self.auth}"})
         info(f"HTTPClient 初始化完成: remote_addr={self.remote_addr}")
 
+    def resolve_simulation_pairs(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Resolve the simulation pair bundle for the given graph real classes (contract C-1).
+
+        POST /lab/square/edge/simulation-pairs/resolve -> parsed JSON dict.
+        """
+        response = self._session.post(
+            f"{self.remote_addr}/lab/square/edge/simulation-pairs/resolve",
+            json=payload,
+            headers={"Authorization": f"Lab {self.auth}"},
+            timeout=30,
+        )
+        if response.status_code not in (200, 201):
+            logger.error(f"resolve simulation pairs failed: {response.status_code}, {response.text}")
+            response.raise_for_status()
+        return response.json()
+
     def resource_edge_add(self, resources: List[Dict[str, Any]]) -> requests.Response:
         """
         添加资源

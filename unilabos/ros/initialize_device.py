@@ -24,7 +24,15 @@ def _lookup_registry_class(device_id: str, class_name: str, device_config: Resou
     if len(class_name) == 0:
         raise DeviceClassInvalid(f"Device [{device_id}] class cannot be an empty string. {device_config}")
     if class_name not in lab_registry.device_type_registry:
-        raise DeviceClassInvalid(f"Device [{device_id}] class {class_name} not found. {device_config}")
+        # Plan 09 Task 7: graph may reference a community variant id (community.<id>);
+        # fall back to the normalized local id if the prefixed one isn't registered.
+        from unilabos.registry.community_alias import normalize_community_class
+
+        normalized = normalize_community_class(class_name)
+        if normalized in lab_registry.device_type_registry:
+            class_name = normalized
+        else:
+            raise DeviceClassInvalid(f"Device [{device_id}] class {class_name} not found. {device_config}")
     return lab_registry.device_type_registry[class_name]["class"]
 
 
@@ -55,12 +63,24 @@ def _instantiate_device_node(
                 {"name": "hardware_interface", "write": "send_command", "read": "read_data", "extra_info": []},
             ),
         )
+        effective_params = driver_params if driver_params is not None else device_config.res_content.config
+        # Plan 09 Task 6: external variant registry entries declare class.init; resolve it
+        # (build factory objects + inject ${config.*}/${node.*}) and merge into driver_params,
+        # keeping the existing ROS2DeviceNode wrapper/creator construction path.
+        if device_class_config.get("init"):
+            from unilabos.registry.initializer import resolve_init_kwargs
+
+            node_meta = {"id": device_id, "name": getattr(device_config.res_content, "name", device_id)}
+            # class.init fully defines the constructor kwargs; the raw config is only the
+            # source for ${config.*} placeholders, so it replaces (not merges into) params.
+            resolved = resolve_init_kwargs({"class": device_class_config}, node=node_meta, config=effective_params or {})
+            effective_params = resolved["kwargs"]
         try:
             d = DEVICE(
                 device_id=device_id,
                 device_uuid=uid,
                 driver_is_ros=device_class_config["type"] == "ros2",
-                driver_params=driver_params if driver_params is not None else device_config.res_content.config,
+                driver_params=effective_params,
             )
         except DeviceInitError:
             return d

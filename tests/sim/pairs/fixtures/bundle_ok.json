@@ -1,0 +1,38 @@
+{
+  "bundle_version": "2026-06-20T00:00:00Z",
+  "engine": "gazebo",
+  "pairs": [
+    {
+      "real": "dalong_heaterstirrer",
+      "engine": "gazebo",
+      "virtual": "community.dalong.virtual_heaterstirrer",
+      "missing_sim_policy": "stub",
+      "is_default": true,
+      "priority": 100,
+      "twin_capability": {
+        "enabled": true,
+        "observed": ["temperature", "rpm"],
+        "throttle_hz": 20
+      },
+      "virtual_package": {
+        "normalized_name": "dalong-sim-drivers",
+        "version": "0.2.1",
+        "download_url": "https://example.invalid/dalong-sim-drivers-0.2.1.whl",
+        "sha256": "sha256:abc123",
+        "class_namespace": "community.dalong"
+      }
+    },
+    {
+      "real": "qone_nmr",
+      "engine": "gazebo",
+      "virtual": null,
+      "missing_sim_policy": "fail",
+      "is_default": true,
+      "priority": 0,
+      "twin_capability": { "enabled": false }
+    }
+  ],
+  "warnings": [
+    { "real": "qone_nmr", "engine": "gazebo", "message": "No active virtual driver; policy=fail" }
+  ]
+}

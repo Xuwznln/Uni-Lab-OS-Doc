@@ -53,6 +53,8 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from unilabos.registry.simulation_meta import device_simulation_meta
+
 F = TypeVar("F", bound=Callable[..., Any])
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -259,6 +261,9 @@ def device(
     model: Optional[Dict[str, Any]] = None,
     device_type: str = "python",
     hardware_interface: Optional[HardwareInterface] = None,
+    driver_runtime_kind: str = "real",
+    virtual_driver_kind: Optional[str] = None,
+    sim_engine: Optional[str] = None,
 ):
     """
     设备类装饰器
@@ -283,6 +288,9 @@ def device(
         model: 可选的 3D 模型配置
         device_type: 设备实现类型 ("python" / "ros2")
         hardware_interface: 硬件通信接口 (HardwareInterface)
+        driver_runtime_kind: 驱动运行时类型 "real" / "virtual"（默认 real，仿真驱动声明 virtual）
+        virtual_driver_kind: 虚拟驱动类型 null_stub / local_mock / engine_adapter / remote_adapter / recorded_replay
+        sim_engine: 仿真引擎 none / isaac / gazebo / genesis / matterix / custom
     """
     # Resolve device ids
     if ids is not None:
@@ -317,6 +325,7 @@ def device(
         "model": model,
         "device_type": device_type,
         "hardware_interface": (hardware_interface.model_dump(exclude_none=True) if hardware_interface else None),
+        **device_simulation_meta(driver_runtime_kind, virtual_driver_kind, sim_engine),
     }
 
     def decorator(cls):
