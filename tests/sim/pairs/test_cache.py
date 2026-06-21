@@ -19,11 +19,14 @@ def test_write_and_load_manifest(tmp_path):
     b = _bundle()
     rc = ["dalong_heaterstirrer", "qone_nmr"]
     path = cache.write(b, bundle_to_pairs_yaml(b), lab_uuid="L", edge_uuid="E",
-                       graph_hash=compute_graph_hash(rc), real_classes=rc)
+                       graph_hash=compute_graph_hash(rc), real_classes=rc,
+                       engine="gazebo", real_template_uuids=["uuid-1"])
     assert path.is_file()
     m = cache.load_manifest()
     assert m["lab_uuid"] == "L"
     assert set(m["real_classes"]) == set(rc)
+    assert m["engine"] == "gazebo"
+    assert m["real_template_uuids"] == ["uuid-1"]
 
 
 def test_is_compatible_exact_hash(tmp_path):

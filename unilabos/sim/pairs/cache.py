@@ -44,6 +44,8 @@ class PairCache:
         edge_uuid: str | None,
         graph_hash: str,
         real_classes: list[str],
+        engine: str = "none",
+        real_template_uuids: list[str] | None = None,
     ) -> Path:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.generated_yaml_path().write_text(yaml_text, encoding="utf-8")
@@ -56,8 +58,10 @@ class PairCache:
             "bundle_version": bundle.bundle_version,
             "lab_uuid": lab_uuid,
             "edge_uuid": edge_uuid,
+            "engine": engine,
             "graph_hash": graph_hash,
             "real_classes": sorted(set(real_classes)),
+            "real_template_uuids": sorted(set(real_template_uuids or [])),
             "generated_yaml": GENERATED_YAML,
             "bundle_file": bundle_file.name,
         }

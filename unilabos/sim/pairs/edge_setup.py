@@ -100,7 +100,7 @@ def setup_simulation_pairs(
         yaml_text = bundle_to_pairs_yaml(bundle)
         path = cache.write(
             bundle, yaml_text, lab_uuid=lab_uuid, edge_uuid=edge_uuid,
-            graph_hash=graph_hash, real_classes=real_classes,
+            graph_hash=graph_hash, real_classes=real_classes, engine=engine,
         )
         logger.info(f"simulation pairs: resolved {len(bundle.pairs)} pairs -> {path}")
     except Exception as exc:  # noqa: BLE001 - network/backend errors -> offline fallback
