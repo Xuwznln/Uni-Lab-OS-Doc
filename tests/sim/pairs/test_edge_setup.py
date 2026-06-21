@@ -28,6 +28,7 @@ class FakeClient:
 
     def resolve_simulation_pairs(self, payload):
         self.calls += 1
+        self.last_request = payload
         if self._raises:
             raise ConnectionError("backend down")
         return self._response
@@ -54,6 +55,15 @@ def test_setup_resolves_and_points_registry(tmp_path):
         assert lookup("qone_nmr").missing_sim_policy == "fail"
         # cache written
         assert PairCache(tmp_path).load_manifest() is not None
+    finally:
+        reset_pair_registry()
+
+
+def test_setup_passes_engine_into_resolve(tmp_path):
+    client = FakeClient(_ok_response())
+    try:
+        setup_simulation_pairs(graph=GRAPH, mode="sim", http_client=client, cache_dir=tmp_path, engine="gazebo")
+        assert client.last_request["engine"] == "gazebo"
     finally:
         reset_pair_registry()
 

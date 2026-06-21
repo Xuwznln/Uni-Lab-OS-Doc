@@ -49,6 +49,7 @@ def setup_simulation_pairs(
     mode: str,
     http_client: Any,
     cache_dir: str | Path,
+    engine: str = "none",
     lab_uuid: str | None = None,
     edge_uuid: str | None = None,
     unilabos_version: str | None = None,
@@ -70,7 +71,7 @@ def setup_simulation_pairs(
 
     try:
         request = build_resolve_request(
-            lab_uuid=lab_uuid, edge_uuid=edge_uuid, mode=mode,
+            lab_uuid=lab_uuid, edge_uuid=edge_uuid, mode=mode, engine=engine,
             real_classes=real_classes, package_locks=package_locks, unilabos_version=unilabos_version,
         )
         bundle = resolve_pairs(http_client, request)

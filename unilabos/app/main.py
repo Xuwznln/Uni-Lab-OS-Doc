@@ -303,6 +303,13 @@ def build_argparser():
         help="Runtime mode: real hardware, full simulation, or one-way digital twin.",
     )
     parser.add_argument(
+        "--sim_engine",
+        type=str,
+        default="none",
+        help="Unified simulation engine used to pick the virtual driver in sim/twin mode "
+        "(none / isaac / gazebo / genesis / matterix / custom). Plan 08 v2.",
+    )
+    parser.add_argument(
         "--sim_rate",
         type=float,
         default=1.0,
@@ -817,6 +824,7 @@ def main():
                 mode=args_dict.get("mode"),
                 http_client=_sim_http_client,
                 cache_dir=BasicConfig.working_dir,
+                engine=args_dict.get("sim_engine", "none"),
                 downloader=make_downloader(_sim_http_client),
             )
         except Exception as _sim_pair_exc:  # noqa: BLE001
