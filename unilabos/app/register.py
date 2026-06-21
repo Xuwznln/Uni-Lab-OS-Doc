@@ -78,13 +78,13 @@ def register_devices_and_resources(lab_registry, gather_only=False) -> Optional[
 
     # M-1 (contract C-2): best-effort collect package-bundled simulation pair hints.
     # Non-breaking: payload only carries `simulation_pairs` when hints are present.
-    # TODO: wire `package_dirs` to the real scanned community/external package dirs
-    #       (e.g. community_packages result) once that tracking is exposed on lab_registry.
+    # Source = scanned registry paths + their package roots (covers built-in,
+    # external `--devices`, and downloaded community package dirs).
     simulation_pairs: list = []
     try:
-        from unilabos.sim.pairs.hints import collect_all_pair_hints
+        from unilabos.sim.pairs.hints import candidate_package_dirs, collect_all_pair_hints
 
-        package_dirs = getattr(lab_registry, "scanned_package_dirs", None) or []
+        package_dirs = candidate_package_dirs(getattr(lab_registry, "registry_paths", None) or [])
         simulation_pairs = collect_all_pair_hints(package_dirs)
         if simulation_pairs:
             logger.info(f"[UniLab Register] 收集到 {len(simulation_pairs)} 条仿真配对 hints")

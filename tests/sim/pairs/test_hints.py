@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from unilabos.sim.pairs.hints import collect_all_pair_hints, read_pair_hints
+from unilabos.sim.pairs.hints import candidate_package_dirs, collect_all_pair_hints, read_pair_hints
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -27,6 +27,24 @@ def test_read_pair_hints_from_package_dir(tmp_path):
 
 def test_read_pair_hints_absent_returns_empty(tmp_path):
     assert read_pair_hints(tmp_path) == []
+
+
+def test_candidate_package_dirs_includes_path_and_parent():
+    dirs = candidate_package_dirs(["/a/pkg/unilabos_registry", "/a/pkg/unilabos_registry"])
+    # path + parent, de-duplicated, order-preserving
+    assert dirs == ["/a/pkg/unilabos_registry", "/a/pkg"]
+
+
+def test_collect_from_registry_path_parent(tmp_path):
+    """Hints at the package root (parent of the registry dir) are discovered."""
+    pkg_root = tmp_path / "mypkg"
+    reg_dir = pkg_root / "unilabos_registry"
+    reg_dir.mkdir(parents=True)
+    (pkg_root / "unilab_simulation_pairs.yaml").write_text(
+        "pairs:\n  - real: devX\n    virtual: vX\n", encoding="utf-8"
+    )
+    hints = collect_all_pair_hints(candidate_package_dirs([str(reg_dir)]))
+    assert [h["real"] for h in hints] == ["devX"]
 
 
 def test_read_pair_hints_malformed_returns_empty(tmp_path):

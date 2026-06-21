@@ -43,6 +43,21 @@ def read_pair_hints(package_dir: str | Path) -> list[dict[str, Any]]:
     return hints
 
 
+def candidate_package_dirs(registry_paths: Iterable[str | Path]) -> list[str]:
+    """Derive candidate package dirs to scan for hints from the registry paths.
+
+    A package may keep ``unilab_simulation_pairs.yaml`` at the registry dir itself
+    or at the package root (parent of ``unilabos_registry/`` / ``registry/``), so we
+    scan both. De-duplicated, order-preserving. Missing files are no-ops downstream.
+    """
+    dirs: list[str] = []
+    for p in registry_paths or []:
+        pp = Path(p)
+        dirs.append(str(pp))
+        dirs.append(str(pp.parent))
+    return list(dict.fromkeys(dirs))
+
+
 def collect_all_pair_hints(package_dirs: Iterable[str | Path]) -> list[dict[str, Any]]:
     """Aggregate hints across multiple package dirs, de-duplicated by (real, virtual).
 
