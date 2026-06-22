@@ -54,6 +54,9 @@ def canonicalize_nodes_data(
             outer_host_node_id = idx
         if not isinstance(node.get("config"), dict):
             node["config"] = {}
+        # 前端导出的设备节点 type 为 "DeviceTemplate"，后端统一按 "device" 处理
+        if str(node.get("type", "")).strip().lower() in ("devicetemplate", "device_template"):
+            node["type"] = "device"
         if not node.get("type"):
             node["type"] = "device"
             print_status(f"Warning: Node {node.get('id', 'unknown')} missing 'type', defaulting to 'device'", "warning")

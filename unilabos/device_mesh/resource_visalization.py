@@ -123,7 +123,12 @@ class ResourceVisualization:
                         new_include = etree.SubElement(self.root, f"{{{xacro_uri}}}include")
                         new_include.set("filename", f"{str(self.mesh_path)}/devices/{model_config['mesh']}/macro_device.xacro")
                         new_dev = etree.SubElement(self.root, f"{{{xacro_uri}}}{model_config['mesh']}")
-                        new_dev.set("parent_link", "world")
+                        # 默认挂载到 world，若设备 pose.extra 指定了 parent_link 则使用指定的父 link
+                        parent_link = "world"
+                        pose_extra = node.get("pose", {}).get("extra") or {}
+                        if pose_extra.get("parent_link"):
+                            parent_link = pose_extra["parent_link"]
+                        new_dev.set("parent_link", parent_link)
                         new_dev.set("mesh_path", str(self.mesh_path))
                         new_dev.set("device_name", node["id"]+"_")
                         # if node["parent"] is not None:

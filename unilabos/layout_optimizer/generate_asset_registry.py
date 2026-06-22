@@ -20,7 +20,7 @@ REGISTRY_DIR = REPO_ROOT / "Uni-Lab-OS" / "unilabos" / "registry" / "devices"
 OUTPUT_FILE = REGISTRY_DIR / "asset_models.yaml"
 
 OSS_BASE = (
-    "https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab/devices"
+    "https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices"
 )
 CONTAINER_CLASS = (
     "unilabos.devices.resource_container.container:HotelContainer"
