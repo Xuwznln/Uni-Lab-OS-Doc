@@ -662,7 +662,7 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionOutputHandle(key="error_message", data_type="str", label="错误信息", data_key="error_message", data_source=DataSource.EXECUTOR),
         ],
     )
-    def wait_for_error_handling(
+    def wait_for_error_handling2(
         self,
         timeout_seconds: int = 36000,
         poll_mode: bool = True,
@@ -732,7 +732,7 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionInputHandle(key="error_message", data_type="text", label="错误信息", data_key="error_message", data_source=DataSource.HANDLE, io_type="source"),
         ],
     )
-    def reply_error_handling(
+    def reply_error_handling2(
         self,
         token: str = "",
         error_report: Optional[Dict[str, Any]] = None,
@@ -2294,6 +2294,7 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionInputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.HANDLE, io_type="source"),
             ActionOutputHandle(key="order_id", data_type="bioyond_order_id", label="实验ID", data_key="order_id", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="file_zip", data_type="str", label="报告 ZIP 文件", data_key="file_zip", data_source=DataSource.EXECUTOR),
+            ActionOutputHandle(key="file_pdf", data_type="str", label="报告 PDF 文件", data_key="file_pdf", data_source=DataSource.EXECUTOR),
             ActionOutputHandle(key="files", data_type="array", label="报告文件列表", data_key="files", data_source=DataSource.EXECUTOR),
         ],
     )
@@ -2305,12 +2306,14 @@ class BioyondPeptideStation(BioyondWorkstation):
         api_host = str(getattr(rpc, "host", "") or self.bioyond_config.get("api_host", "")).rstrip("/")
         file_urls = [self._join_api_url(api_host, path) for path in files]
         zip_urls = [url for url in file_urls if url.lower().endswith(".zip")]
+        pdf_urls = [url for url in file_urls if url.lower().endswith(".pdf")]
         file_zip = zip_urls[-1] if zip_urls else ""
-        return {"success": True, "order_id": resolved, "file_zip": file_zip, "files": file_urls, "file_count": len(file_urls)}
+        file_pdf = pdf_urls[-1] if pdf_urls else ""
+        return {"success": True, "order_id": resolved, "file_zip": file_zip, "file_pdf": file_pdf, "files": file_urls, "file_count": len(file_urls)}
 
     @action(
         always_free=True,
-        goal_default={"title": "", "values": None},
+        goal_default={"title": "", "values": ""},
         description="展示上游传入的任意内容",
         handles=[
             ActionInputHandle(key="values", data_type="str", label="内容", data_key="values", data_source=DataSource.HANDLE, io_type="source"),
@@ -2318,7 +2321,7 @@ class BioyondPeptideStation(BioyondWorkstation):
             ActionOutputHandle(key="values", data_type="str", label="内容", data_key="values", data_source=DataSource.EXECUTOR),
         ],
     )
-    def display_values(self, title: str = "", values: Any = None, **kwargs: Any) -> Dict[str, Any]:
+    def display_values(self, title: str = "", values: str = "", **kwargs: Any) -> Dict[str, Any]:
         """普通展示节点：透传任意上游内容。"""
         del kwargs
         return {"success": True, "title": str(title or ""), "values": self._display_text(values)}
@@ -2329,7 +2332,7 @@ class BioyondPeptideStation(BioyondWorkstation):
         placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
         goal_default={
             "title": "",
-            "values": None,
+            "values": "",
             "display_confirmed": False,
             "timeout_seconds": 3600,
             "assignee_user_ids": [],
@@ -2346,7 +2349,7 @@ class BioyondPeptideStation(BioyondWorkstation):
     def display_values_manual_confirm(
         self,
         title: str = "",
-        values: Any = None,
+        values: str = "",
         display_confirmed: bool = False,
         timeout_seconds: int = 3600,
         assignee_user_ids: Optional[List[str]] = None,
