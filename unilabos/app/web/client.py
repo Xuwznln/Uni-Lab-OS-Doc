@@ -158,6 +158,43 @@ class HTTPClient:
             logger.error(f"查询物料失败: {response.text}")
         return []
 
+    def material_bench_discard(self, uuids: List[str]) -> Dict[str, Any]:
+        """
+        台面物料废弃（Edge 端）
+
+        对应 POST /edge/material/bench/discard，按 uuid 销毁台面物料；实验室归属由认证
+        上下文确定，请求体不含 lab_uuid。
+
+        Args:
+            uuids: 台面物料 UUID 列表，1~100 个
+
+        Returns:
+            Dict: 服务端响应（成功为 {"code": 0}）；错误码 100002 节点不存在 / 100003 当前状态不允许
+        """
+        if not uuids:
+            raise ValueError("台面物料废弃失败：uuids 为空")
+        if len(uuids) > 100:
+            raise ValueError(f"台面物料废弃失败：一次最多 100 个 uuid，收到 {len(uuids)} 个")
+        payload = {"uuids": uuids}
+        work_dir = BasicConfig.working_dir
+        with open(os.path.join(work_dir, "req_material_bench_discard.json"), "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=4))
+        response = self._session.post(
+            f"{self.remote_addr}/edge/material/bench/discard",
+            json=payload,
+            headers={"Authorization": f"Lab {self.auth}"},
+            timeout=30,
+        )
+        with open(os.path.join(work_dir, "res_material_bench_discard.json"), "w", encoding="utf-8") as f:
+            f.write(f"{response.status_code}" + "\n" + response.text)
+        if response.status_code != 200:
+            logger.error(f"台面物料废弃失败: {response.status_code}, {response.text}")
+            return {"code": response.status_code, "message": response.text}
+        res = response.json()
+        if "code" in res and res["code"] != 0:
+            logger.error(f"台面物料废弃失败: {response.text}")
+        return res
+
     def resource_add(self, resources: List[Dict[str, Any]]) -> requests.Response:
         """
         添加资源

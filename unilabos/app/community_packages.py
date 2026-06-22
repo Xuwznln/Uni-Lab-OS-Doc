@@ -27,6 +27,9 @@ class CommunityPackagePrepareResult:
     aliases: Dict[str, str] = field(default_factory=dict)
     classes: List[str] = field(default_factory=list)
     dependencies: List[str] = field(default_factory=list)
+    # 已解析的包目录(resolve 后绝对路径) -> class_namespace(community.<ns>)。
+    # 注册表扫描据此把社区包内的 device/resource id 命名空间化为 community.<ns>.<id>。
+    namespaces: Dict[str, str] = field(default_factory=dict)
 
 
 def extract_community_classes(graph_data: Optional[Dict[str, Any]]) -> List[str]:
@@ -101,6 +104,7 @@ def prepare_community_packages(
     devices_dirs: List[str] = []
     aliases: Dict[str, str] = {}
     dependencies: List[str] = []
+    namespaces: Dict[str, str] = {}
     missing_namespaces = {community_namespace(class_name) for class_name in classes}
 
     for item in remote_items:
@@ -111,6 +115,8 @@ def prepare_community_packages(
         namespace = item.get("class_namespace") or (item.get("package_info") or {}).get("class_namespace")
         if namespace:
             missing_namespaces.discard(namespace)
+            if package_dir:
+                namespaces[str(Path(package_dir).resolve())] = namespace
             # 依赖直接取自 resolve 响应（命中与否都携带），避免旧 manifest 缺字段导致丢依赖
             dependencies.extend((item.get("package_info") or {}).get("dependencies") or [])
         aliases.update(_normalize_aliases(item, classes))
@@ -122,6 +128,7 @@ def prepare_community_packages(
         package_dir = Path(cached.get("package_dir", ""))
         if package_dir.is_dir():
             devices_dirs.append(str(package_dir))
+            namespaces[str(package_dir.resolve())] = namespace
             missing_namespaces.discard(namespace)
             cached_aliases = cached.get("aliases") or {}
             aliases.update({str(k): str(v) for k, v in cached_aliases.items()})
@@ -151,34 +158,14 @@ def prepare_community_packages(
         aliases=aliases,
         classes=classes,
         dependencies=_dedupe_preserve_order(dependencies),
+        namespaces=namespaces,
     )
     logger.trace(
         "[CommunityPackage] 准备完成: "
-        f"devices_dirs={result.devices_dirs} aliases={result.aliases} dependencies={result.dependencies}"
+        f"devices_dirs={result.devices_dirs} namespaces={result.namespaces} "
+        f"dependencies={result.dependencies}"
     )
     return result
-
-
-def apply_community_aliases(registry: Any, aliases: Dict[str, str]) -> None:
-    if not aliases:
-        return
-
-    logger.trace(f"[CommunityPackage] 应用 class alias 映射: {aliases}")
-    added: List[str] = []
-    for alias, target in aliases.items():
-        if alias in registry.device_type_registry or alias in registry.resource_type_registry:
-            continue
-        if target in registry.device_type_registry:
-            registry.device_type_registry[alias] = registry.device_type_registry[target]
-            added.append(alias)
-        elif target in registry.resource_type_registry:
-            registry.resource_type_registry[alias] = registry.resource_type_registry[target]
-            added.append(alias)
-        else:
-            logger.warning(f"[CommunityPackage] alias 目标不存在: {alias} -> {target}")
-
-    if added:
-        print_status(f"已注册 community class alias: {', '.join(sorted(added))}", "info")
 
 
 def _resolve_remote_packages(classes: List[str], manifest: Dict[str, Any], http_client: Any) -> List[Dict[str, Any]]:
