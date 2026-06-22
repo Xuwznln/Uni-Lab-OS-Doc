@@ -27,6 +27,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from unilabos.registry.utils import resolve_registry_displayname
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -34,7 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 4       # 缓存格式版本号，格式变更时递增
+_CACHE_VERSION = 6       # 缓存格式版本号，格式变更时递增
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
@@ -386,14 +388,14 @@ def _parse_file(
 
                 _validate_device_ids(device_ids)
                 id_meta = device_args.get("id_meta") or {}
-                display_name = device_args.get("displayname") or device_args.get("display_name", "")
+                displayname = device_args.get("displayname", "")
                 base_meta = {
                     "class_name": node.name,
                     "module": f"{module_path}:{node.name}",
                     "file_path": str(filepath).replace("\\", "/"),
                     "category": device_args.get("category", []),
                     "description": device_args.get("description", ""),
-                    "display_name": display_name,
+                    "displayname": displayname,
                     "icon": device_args.get("icon", ""),
                     "version": device_args.get("version", "1.0.0"),
                     "device_type": _detect_class_type(node, import_map),
@@ -411,12 +413,10 @@ def _parse_file(
                     meta = dict(base_meta)
                     meta["device_id"] = did
                     overrides = id_meta.get(did, {})
-                    for key in ("handles", "description", "display_name", "displayname", "icon", "model", "hardware_interface"):
+                    for key in ("handles", "description", "displayname", "icon", "model", "hardware_interface"):
                         if key in overrides:
-                            if key == "displayname":
-                                meta["display_name"] = overrides[key]
-                            else:
-                                meta[key] = overrides[key]
+                            meta[key] = overrides[key]
+                    meta["displayname"] = resolve_registry_displayname(meta.get("displayname"), did)
                     devices.append(meta)
 
             # --- @resource on classes ---
@@ -485,6 +485,7 @@ def _extract_resource_meta(
         "is_function": is_function,
         "category": res_args.get("category", []),
         "description": res_args.get("description", ""),
+        "displayname": resolve_registry_displayname(res_args.get("displayname"), resource_id),
         "icon": res_args.get("icon", ""),
         "version": res_args.get("version", "1.0.0"),
         "class_type": res_args.get("class_type", "pylabrobot"),

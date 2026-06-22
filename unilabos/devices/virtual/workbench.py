@@ -123,7 +123,7 @@ class HeatingStation:
 
 @device(
     id="virtual_workbench",
-    display_name="虚拟工作台",
+    displayname="虚拟工作台",
     category=["virtual_device"],
     description="Virtual Workbench with 1 robotic arm and 3 heating stations for concurrent material processing",
 )
