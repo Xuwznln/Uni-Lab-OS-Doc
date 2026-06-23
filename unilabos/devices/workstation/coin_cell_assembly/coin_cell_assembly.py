@@ -1148,41 +1148,52 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             
             logger.info("  ✓ COIL_GB_L_IGNORE_CMD 检查通过 (值为False，使用左手套箱)")
             
-            # 检查握手寄存器残留（正常初始状态均应为False）
-            # 若上次运行意外断网，这些Unilab侧COIL可能被遗留为True，导致PLC逻辑卡死
-            handshake_checks = [
-                ("COIL_UNILAB_SEND_MSG_SUCC_CMD",       "Unilab→PLC 配方发送完毕",     "上次配方握手未正常复位，PLC可能处于等待配方的卡死状态"),
-                ("COIL_UNILAB_REC_MSG_SUCC_CMD",        "Unilab→PLC 数据接收完毕",     "上次数据接收握手未正常复位"),
-                ("UNILAB_SEND_ELECTROLYTE_BOTTLE_NUM",  "Unilab→PLC 瓶数发送完毕",     "上次瓶数握手未正常复位"),
-                ("UNILAB_SEND_FINISHED_CMD",            "Unilab→PLC 一组完成确认",     "上次完成握手未正常复位"),
-                ("COIL_REQUEST_REC_MSG_STATUS",         "PLC→Unilab 请求接收配方",     "PLC正处于等待配方状态，设备流程已卡死，需重启PLC或手动复位握手"),
-                ("COIL_REQUEST_SEND_MSG_STATUS",        "PLC→Unilab 请求发送测试数据", "PLC正处于等待发送数据状态，设备流程已卡死"),
+            # 握手/命令线圈残留自动复位（init 前正常状态均应为 False）
+            # 说明：以下线圈物理上均可写，若上次运行意外中断残留为 True 会导致流程卡死；
+            #       此处统一尽力写回 False（best-effort，不阻断初始化）。
+            #       注意方向：8700/8720/8730/8060/8050/8040 为 PC→PLC（PC 写，复位安全）；
+            #       8500/8510/8710 为 PLC→PC（PLC 写），若 PLC 仍在主动驱动，写 False 可能被覆盖，仅告警继续。
+            coils_to_reset = [
+                ("COIL_UNILAB_SEND_MSG_SUCC_CMD",       "PC→PLC 配方发送完毕 (8700)"),
+                ("UNILAB_SEND_ELECTROLYTE_BOTTLE_NUM",  "PC→PLC 瓶数发送完毕 (8720)"),
+                ("UNILAB_SEND_FINISHED_CMD",            "PC→PLC 一组完成确认 (8730)"),
+                ("COIL_SYS_INIT_CMD",                   "PC→PLC 系统初始化命令 (8060)"),
+                ("COIL_SYS_AUTO_CMD",                   "PC→PLC 系统自动模式命令 (8050)"),
+                ("COIL_SYS_HAND_CMD",                   "PC→PLC 系统手动模式命令 (8040)"),
+                ("COIL_REQUEST_REC_MSG_STATUS",         "PLC→PC 请求接收配方 (8500)"),
+                ("COIL_REQUEST_SEND_MSG_STATUS",        "PLC→PC 请求发送测试数据 (8510)"),
+                ("COIL_UNILAB_REC_MSG_SUCC_CMD",        "PLC→PC 数据接收完毕 (8710)"),
             ]
-            for coil_name, coil_desc, stuck_reason in handshake_checks:
+            for coil_name, coil_desc in coils_to_reset:
                 try:
-                    hs_node = self.client.use_node(coil_name)
-                    hs_value, hs_err = hs_node.read(1)
-                    if hs_err:
-                        logger.warning(f"  ⚠ 无法读取 {coil_name}，跳过此项检查")
+                    cmd_node = self.client.use_node(coil_name)
+                    cmd_value, cmd_err = cmd_node.read(1)
+                    if cmd_err:
+                        logger.warning(f"  ⚠ 无法读取 {coil_name}({coil_desc})，跳过此项")
                         continue
-                    hs_actual = hs_value[0] if isinstance(hs_value, (list, tuple)) else hs_value
-                    logger.info(f"  {coil_name} 当前值: {hs_actual}")
-                    if hs_actual:
-                        error_msg = (
-                            "❌ 前置握手寄存器检查失败！\n"
-                            f"  {coil_name} = True (期望值: False)\n"
-                            f"  含义: {coil_desc}\n"
-                            f"  原因: {stuck_reason}\n"
-                            "  建议: 检查上次运行是否意外中断，手动将该寄存器置为False后重试"
-                        )
-                        logger.error(error_msg)
-                        raise RuntimeError(error_msg)
-                    logger.info(f"  ✓ {coil_name} 检查通过 (值为False)")
-                except RuntimeError:
-                    raise
-                except Exception as hs_e:
-                    logger.warning(f"  ⚠ 检查 {coil_name} 时发生异常: {hs_e}，跳过此项")
-            
+                    cmd_actual = cmd_value[0] if isinstance(cmd_value, (list, tuple)) else cmd_value
+                    logger.info(f"  {coil_name} 当前值: {cmd_actual}")
+                    if cmd_actual:
+                        logger.warning(f"  ⚠ {coil_name}({coil_desc}) = True，期望 False，正在自动复位...")
+                        cmd_node.write(False)
+                        time.sleep(0.2)
+                        # 回读确认是否复位成功
+                        verify_value, verify_err = cmd_node.read(1)
+                        verify_actual = verify_value[0] if isinstance(verify_value, (list, tuple)) else verify_value
+                        if verify_err or verify_actual:
+                            # 写不进去（多为 PLC 仍在主动驱动该状态位）：仅告警，不阻断初始化
+                            logger.warning(
+                                f"  ⚠ {coil_name} 自动复位未生效，当前值仍为 {verify_actual}"
+                                f"（{coil_desc}）。若为 PLC 主动驱动属正常，继续初始化；"
+                                "如初始化异常请检查上次运行是否意外中断或在HMI手动复位。"
+                            )
+                        else:
+                            logger.info(f"  ✓ {coil_name} 已自动复位为 False")
+                    else:
+                        logger.info(f"  ✓ {coil_name} 检查通过 (值为False)")
+                except Exception as cmd_e:
+                    logger.warning(f"  ⚠ 处理 {coil_name} 时发生异常: {cmd_e}，跳过此项")
+
             logger.info("✓ 所有前置条件检查通过！")
             
         except ValueError as e:
