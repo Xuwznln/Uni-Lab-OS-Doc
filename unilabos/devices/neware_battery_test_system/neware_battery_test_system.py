@@ -2368,7 +2368,7 @@ class NewareBatteryTestSystem:
           capacity / battery_system(xml工步)），并选择 target_device 与 mount_resource（通道）
         - 后端按优先级 B > C > A 展开为长度 N 的 4 个 list；下游 submit_auto_export_excel 接口不变
         - 内部把 assembly_data 解包为 9 个并行数组，把 pole_weight / coin_cell_code 透传给下游
-        - 把所有数据整合后写入 {csv_export_dir}/{YYYYMMDD}/date_{YYYYMMDD}.csv
+        - 把所有数据整合后写入 {csv_export_dir}/{YYYYMMDD}/battery_test_{YYYYMMDD_HHMMSS}.csv
 
         Args:
             resource:        扣电组装物料系统（无需选择）—— 由系统自动管理的扣电资源列表
@@ -2512,7 +2512,7 @@ class NewareBatteryTestSystem:
         capacity: List[float],
         battery_system: List[str],
     ) -> Optional[str]:
-        """把 manual_confirm 收集到的全部参数整合写入 CSV。路径：{csv_export_dir}/{YYYYMMDD}/date_{YYYYMMDD}.csv"""
+        """把 manual_confirm 收集到的全部参数整合写入 CSV。路径：{csv_export_dir}/{YYYYMMDD}/battery_test_{YYYYMMDD_HHMMSS}.csv"""
         n_assembly = len(assembly_rows.get("Time", []))
         n_channel = len(mount_resource) if mount_resource else 0
         n = max(n_assembly, n_channel, len(collector_mass or []), len(active_material or []),
@@ -2521,9 +2521,10 @@ class NewareBatteryTestSystem:
             return None
 
         date_str = datetime.now().strftime("%Y%m%d")
+        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_dir = os.path.join(csv_export_dir, date_str)
         os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"date_{date_str}.csv")
+        out_path = os.path.join(out_dir, f"battery_test_{datetime_str}.csv")
 
         header = [
             "Time", "open_circuit_voltage", "pole_weight",

@@ -1410,6 +1410,10 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         logger.info("开始发送瓶数+简化组装流程...")
         logger.info(f"电解液瓶数: {elec_num}, 每瓶电池数: {elec_use_num}")
         
+        # 本次组装运行的时间戳（用于 CSV 文件命名，整批电池共用同一个文件）
+        self._csv_export_run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        logger.info(f"本次组装 CSV 文件时间戳: {self._csv_export_run_timestamp}")
+        
         # 存储配方信息到设备状态（供 CSV 写入使用）
         if formulations:
             logger.info(f"接收到配方信息: {len(formulations)} 条")
@@ -1659,12 +1663,13 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self._unilab_rec_msg_succ_cmd(False)
         time.sleep(1)
         #将允许读取标志位置True
-        time_date = datetime.now().strftime("%Y%m%d")
             #秒级时间戳用于标记每一行电池数据
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._last_assembly_timestamp = timestamp
-            #生成输出文件的变量
-        self.csv_export_file = os.path.join(file_path, f"date_{time_date}.csv")   
+            #生成输出文件的变量（整批组装共用同一文件，文件名带运行时间戳）
+            #若未经 coin_cell_start 设置运行时间戳则回退到当前时间
+        run_timestamp = getattr(self, "_csv_export_run_timestamp", None) or datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.csv_export_file = os.path.join(file_path, f"coin_cell_assembly_{run_timestamp}.csv")   
         # 导出目录不存在则跳过 CSV 记录：仅告警，不创建目录、不中断组装任务
         if not os.path.isdir(file_path):
             logger.warning(f"[CSV写入] 导出目录不存在，跳过本次CSV记录（不中断任务）: {file_path}")
@@ -2091,6 +2096,9 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             os.makedirs(file_path)
             print(f"创建目录: {file_path}")
 
+        #本次读取会话的时间戳（用于 CSV 文件命名，整个会话共用同一个文件）
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         # 只要允许读取标志位为true，就持续运行该函数，直到触发停止条件
         while self.allow_data_read:
 
@@ -2101,12 +2109,10 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             while self.request_send_msg_status == False:
                 print("waiting for send_msg_status to True")
                 time.sleep(1)
-            #日期时间戳用于按天存放csv文件
-            time_date = datetime.now().strftime("%Y%m%d")
             #秒级时间戳用于标记每一行电池数据
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            #生成输出文件的变量
-            self.csv_export_file = os.path.join(file_path, f"date_{time_date}.csv")   
+            #生成输出文件的变量（整个读取会话共用同一文件，文件名带运行时间戳）
+            self.csv_export_file = os.path.join(file_path, f"coin_cell_assembly_{run_timestamp}.csv")   
             
             #接收信息
             data_open_circuit_voltage = self.data_open_circuit_voltage
