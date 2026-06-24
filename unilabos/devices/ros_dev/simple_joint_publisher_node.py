@@ -39,8 +39,8 @@ class SimpleJointPublisher(Node):
         发布频率（Hz），默认 50。
     """
 
-    def __init__(self, device_id: str, joint_names: list[str], rate: int = 50):
-        super().__init__(device_id)
+    def __init__(self, device_id: str, joint_names: list[str], rate: int = 50, node_name=None):
+        super().__init__(node_name or device_id)
 
         self.device_id = device_id
         self.rate = rate

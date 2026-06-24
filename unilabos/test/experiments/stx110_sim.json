@@ -1,0 +1,16 @@
+{
+    "nodes": [
+        {
+            "id": "liconic_stx110",
+            "name": "STX110 转盘孵育器",
+            "children": [],
+            "parent": null,
+            "type": "device",
+            "class": "incubator.liconic_stx110",
+            "position": {"x": 400, "y": 300, "z": 0},
+            "config": {"target_temperature": 37.0},
+            "data": {"status": "Ready"}
+        }
+    ],
+    "links": []
+}
