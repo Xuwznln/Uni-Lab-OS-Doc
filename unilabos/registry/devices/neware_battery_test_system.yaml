@@ -396,15 +396,15 @@ neware_battery_test_system:
           resource: resource
           target_device: target_device
           mount_resource: mount_resource
-          collector_mass: collector_mass
-          active_material: active_material
-          capacity: capacity
-          battery_system: battery_system
           formulations: formulations
           assembly_data: assembly_data
           csv_export_dir: csv_export_dir
+          # 超时由 node_type=manual_confirm 的外层调度/前端等待机制处理；设备函数体内不做本地计时中断
           timeout_seconds: timeout_seconds
           assignee_user_ids: assignee_user_ids
+          A: A
+          B: B
+          C: C
         feedback: {}
         result:
           resource: resource
@@ -430,6 +430,8 @@ neware_battery_test_system:
                   default: ''
                   description: UniLabOS设备ID，用于指定执行动作的具体设备实例
                 resource:
+                  title: 扣电组装物料系统（无需选择）
+                  description: 扣电组装物料系统资源（系统自动管理，前端无需手动选择）
                   items:
                     type: object
                     additionalProperties: false
@@ -515,6 +517,8 @@ neware_battery_test_system:
                   type: string
                   description: device reference
                 mount_resource:
+                  title: 新威测试通道
+                  description: 选择目标新威测试柜上的测试通道（决定下游 N = 通道数量）
                   items:
                     type: object
                     additionalProperties: false
@@ -596,22 +600,49 @@ neware_battery_test_system:
                         type: string
                     title: mount_resource
                   type: array
-                collector_mass:
-                  type: array
-                  items:
-                    type: number
-                active_material:
-                  type: array
-                  items:
-                    type: number
-                capacity:
-                  type: array
-                  items:
-                    type: number
-                battery_system:
-                  type: array
-                  items:
-                    type: string
+                A:
+                  description: "模式A：所有电池参数一致（仅在此区填一组标量，后端自动广播到 N 颗电池）"
+                  type: object
+                  properties:
+                    default_collector_mass:
+                      type: number
+                      description: 集流体质量 (mg)，整批共用
+                    default_active_material:
+                      type: string
+                      description: 活性物质含量（如 "0.97" 或 "97%"），整批共用
+                    default_capacity:
+                      type: number
+                      description: 克容量 (mAh/g)，整批共用
+                    default_battery_system:
+                      type: string
+                      description: xml 工步标识（如 "811_LI_002"），整批共用
+                B:
+                  description: "模式B：参数不一致 且 数量少（按上游电池数量逐颗填写 4 个数组，长度需等于 N）"
+                  type: object
+                  properties:
+                    collector_mass:
+                      type: array
+                      items:
+                        type: number
+                    active_material:
+                      type: array
+                      items:
+                        type: string
+                    capacity:
+                      type: array
+                      items:
+                        type: number
+                    battery_system:
+                      type: array
+                      items:
+                        type: string
+                C:
+                  description: "模式C：参数不一致 且 数量多（上传 CSV 文件，按 coin_cell_code 与电池对齐；CSV 表头需包含 coin_cell_code(或 电池条码) / 集流体质量(或 collector_mass) / 活性物质含量(或 active_material) / 克容量(或 capacity) / 电池体系(或 xml工步/battery_system)；行序不敏感）"
+                  type: object
+                  properties:
+                    param_csv_path:
+                      type: string
+                      description: CSV 文件绝对路径（后端可访问）
                 formulations:
                   type: array
                   description: 配方信息列表（来自 bioyond create_orders_formulation 的 mass_ratios 输出）
@@ -687,15 +718,23 @@ neware_battery_test_system:
           resource: []
           target_device: ''
           mount_resource: []
-          collector_mass: []
-          active_material: []
-          capacity: []
-          battery_system: []
           formulations: []
           assembly_data: []
           csv_export_dir: 'D:\2604Agentic_test'
-          timeout_seconds: 3600
+          timeout_seconds: 86400
           assignee_user_ids: []
+          A:
+            default_collector_mass: null
+            default_active_material: null
+            default_capacity: null
+            default_battery_system: null
+          B:
+            collector_mass: []
+            active_material: []
+            capacity: []
+            battery_system: []
+          C:
+            param_csv_path: ''
         handles:
           input:
           - handler_key: formulations
@@ -802,6 +841,8 @@ neware_battery_test_system:
                   default: ''
                   description: UniLabOS设备ID，用于指定执行动作的具体设备实例
                 resource:
+                  title: 扣电组装物料系统（无需选择）
+                  description: 扣电组装物料系统资源（系统自动管理，前端无需手动选择）
                   items:
                     type: object
                     additionalProperties: false
@@ -884,6 +925,8 @@ neware_battery_test_system:
                     title: resource
                   type: array
                 mount_resource:
+                  title: 新威测试通道
+                  description: 选择目标新威测试柜上的测试通道（决定下游 N = 通道数量）
                   items:
                     type: object
                     additionalProperties: false
@@ -1105,6 +1148,8 @@ neware_battery_test_system:
                   default: ''
                   description: UniLabOS设备ID，用于指定执行动作的具体设备实例
                 resource:
+                  title: 扣电组装物料系统（无需选择）
+                  description: 扣电组装物料系统资源（系统自动管理，前端无需手动选择）
                   items:
                     type: object
                     additionalProperties: false
@@ -1190,6 +1235,8 @@ neware_battery_test_system:
                   type: string
                   description: device reference
                 mount_resource:
+                  title: 新威测试通道
+                  description: 选择目标新威测试柜上的测试通道（决定下游 N = 通道数量）
                   items:
                     type: object
                     additionalProperties: false
