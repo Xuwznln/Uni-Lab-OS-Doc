@@ -109,6 +109,12 @@ def _build_query_static_sources(ctx) -> list:
         from unilabos.queries.physics_live_source import PhysicsLiveSource
 
         sources.append(PhysicsLiveSource(physics))
+    # RMF 调度域查询源（图驱动）：仅当 graph 含 rmf.coordinator 时，由该设备在初始化阶段
+    # 把自己的 RmfLiveSource 挂到 runtime context（ctx.rmf_live_source）。不依赖 --sim_engine。
+    rmf_source = getattr(ctx, "rmf_live_source", None)
+    if rmf_source is not None:
+        sources.append(rmf_source)
+        logger.info("Query API: registered RmfLiveSource (rmf.coordinator present)")
     sources.extend(_build_labutopia_sources(ctx))
     return sources
 
