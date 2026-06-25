@@ -13,8 +13,13 @@ from typing import Any, Dict, List
 from unilabos.sim.fleet.rmf.compiler.rmf_ir import RmfMapIR
 
 
-def build_semantic_map(ir: RmfMapIR, waypoint_device_uuid: Dict[str, str] | None = None,
-                       restricted_zones: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+def build_semantic_map(
+    ir: RmfMapIR,
+    waypoint_device_uuid: Dict[str, str] | None = None,
+    restricted_zones: List[Dict[str, Any]] | None = None,
+    waypoint_to_instance: Dict[str, str] | None = None,
+    transfer_plan_ref: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """组装 semantic_map.json 内容。
 
     Args:
@@ -40,7 +45,7 @@ def build_semantic_map(ir: RmfMapIR, waypoint_device_uuid: Dict[str, str] | None
             if v.params.get("dropoff_ingestor"):
                 dropoffs.append(v.name)
 
-    return {
+    result: Dict[str, Any] = {
         "lab_uuid": ir.lab_uuid,
         "scene_hash": ir.scene_hash,
         "building_name": ir.building_name,
@@ -52,6 +57,11 @@ def build_semantic_map(ir: RmfMapIR, waypoint_device_uuid: Dict[str, str] | None
         "dropoffs": dropoffs,
         "restricted_zones": list(restricted_zones or []),
     }
+    if waypoint_to_instance:
+        result["waypoint_to_instance"] = dict(waypoint_to_instance)
+    if transfer_plan_ref:
+        result["transfer_plan_ref"] = dict(transfer_plan_ref)
+    return result
 
 
 def dump_semantic_map_json(ir: RmfMapIR, **kwargs: Any) -> str:

@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "scale": "plate96",
+    "transfer_count": 1,
+    "makespan_min": 100,
+    "generated_by": "test"
+  },
+  "transfers": [
+    {
+      "sample_id": "test__000__product",
+      "from_device": "自动液体工作站（96孔兼容）_0",
+      "to_device": "自动固体分配/称量工作站_0",
+      "ready_time": 35,
+      "deadline": 35,
+      "task_id": "test__000__task",
+      "priority": "normal"
+    }
+  ]
+}

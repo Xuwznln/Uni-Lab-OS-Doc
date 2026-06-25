@@ -58,6 +58,7 @@ class RmfCoordinator:
         self._live_source = None
         self._last_building: Optional[Dict[str, Any]] = None
         self._last_semantic: Optional[Dict[str, Any]] = None
+        self._last_transfer_plan: Optional[Dict[str, Any]] = None
 
     async def initialize(self) -> bool:
         self._refresh_data()
@@ -87,20 +88,31 @@ class RmfCoordinator:
         robots: Optional[List[Dict[str, Any]]] = None,
         scene_hash: str = "",
         force: bool = False,
+        layout_optimizer_dir: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """编译发布版 scene → building.yaml + semantic_map.json + 诊断（#18 §4.1）。"""
-        from unilabos.sim.fleet.rmf.compiler import compile_scene
+        """编译发布版 scene 或 layout-optimizer 目录 → building.yaml + semantic_map.json + 诊断（#18 §4.1 / §9）。"""
+        from unilabos.sim.fleet.rmf.compiler import compile_layout_optimizer_dir, compile_scene
 
-        if scene is None:
-            scene = self._fetch_published_scene()
-        if scene is None:
-            return {"success": False, "artifact_id": "", "diagnostics": [{"level": "error", "code": "no_scene", "message": "无法获取发布版 scene"}]}
+        transfer_plan: Optional[Dict[str, Any]] = None
+        if layout_optimizer_dir:
+            ir, building, semantic, transfer_plan = compile_layout_optimizer_dir(
+                layout_optimizer_dir,
+                robots,
+                lab_uuid=self.lab_uuid,
+                scene_hash=scene_hash or self._scene_hash,
+            )
+        else:
+            if scene is None:
+                scene = self._fetch_published_scene()
+            if scene is None:
+                return {"success": False, "artifact_id": "", "diagnostics": [{"level": "error", "code": "no_scene", "message": "无法获取发布版 scene"}]}
 
-        ir, building, semantic = compile_scene(
-            scene, robots, lab_uuid=self.lab_uuid, scene_hash=scene_hash or self._scene_hash
-        )
+            ir, building, semantic = compile_scene(
+                scene, robots, lab_uuid=self.lab_uuid, scene_hash=scene_hash or self._scene_hash
+            )
         self._last_building = building
         self._last_semantic = semantic
+        self._last_transfer_plan = transfer_plan
         self._scene_hash = scene_hash or self._scene_hash
         self._diagnostics = ir.diagnostics_as_dicts()
         self._artifact_id = f"art-{uuid.uuid4().hex[:12]}"
@@ -110,7 +122,11 @@ class RmfCoordinator:
         success = not ir.has_errors()
         self._refresh_data()
         logger.info(f"[rmf] compile_map success={success} artifact={self._artifact_id} dir={artifact_dir}")
-        return {"success": success, "artifact_id": self._artifact_id, "diagnostics": self._diagnostics}
+        result: Dict[str, Any] = {"success": success, "artifact_id": self._artifact_id, "diagnostics": self._diagnostics}
+        if transfer_plan is not None:
+            result["transfer_plan"] = transfer_plan
+            result["transfer_count"] = len(transfer_plan.get("transfers") or [])
+        return result
 
     def start_runtime(self, mode: str = "sim", artifact_id: str = "") -> Dict[str, Any]:
         """启动 RMF runtime（gateway + reporter）。无 ProcessSpec/无 ROS 时优雅降级。"""
