@@ -1,0 +1,22 @@
+diff --git a/rmf_robot_sim_common/CMakeLists.txt b/rmf_robot_sim_common/CMakeLists.txt
+index 250bb9a..64582b8 100644
+--- a/rmf_robot_sim_common/CMakeLists.txt
++++ b/rmf_robot_sim_common/CMakeLists.txt
+@@ -18,6 +18,17 @@ endif()
+ 
+ find_package(eigen3_cmake_module REQUIRED)
+ find_package(Eigen3 REQUIRED)
++
++# conda 的 Eigen3 头文件在 $PREFIX/include/eigen3；本包多个 target 用 ${Eigen3_LIBRARIES}
++# 或 ament_target_dependencies(Eigen3)，二者在 conda 下都未把该 include 传播到编译
++# 命令（'Eigen/Geometry' file not found）。这里在 find_package 后全局补上 Eigen 的
++# include 目录并链接导入目标，覆盖本 CMakeLists 下所有 target。
++if(DEFINED EIGEN3_INCLUDE_DIRS)
++  include_directories(${EIGEN3_INCLUDE_DIRS})
++endif()
++if(TARGET Eigen3::Eigen)
++  link_libraries(Eigen3::Eigen)
++endif()
+ find_package(ament_cmake REQUIRED)
+ find_package(rclcpp REQUIRED)
+ find_package(geometry_msgs REQUIRED)

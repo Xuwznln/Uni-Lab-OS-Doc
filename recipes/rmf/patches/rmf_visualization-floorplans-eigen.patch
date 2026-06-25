@@ -1,0 +1,18 @@
+diff --git a/rmf_visualization_floorplans/CMakeLists.txt b/rmf_visualization_floorplans/CMakeLists.txt
+index 0000000..1111111 100644
+--- a/rmf_visualization_floorplans/CMakeLists.txt
++++ b/rmf_visualization_floorplans/CMakeLists.txt
+@@ -44,6 +44,13 @@
+     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+ )
+ 
++# conda 下 Eigen 头文件在 $PREFIX/include/eigen3，ament_target_dependencies(Eigen3)
++# 未把该 include 传播到编译命令（'Eigen/Geometry' file not found）；显式链接
++# conda 的 Eigen3::Eigen 导入目标，由它带上正确的 include 目录。
++if(TARGET Eigen3::Eigen)
++  target_link_libraries(floorplan_visualizer PUBLIC Eigen3::Eigen)
++endif()
++
+ target_compile_features(floorplan_visualizer INTERFACE cxx_std_17)
+ 
+ rclcpp_components_register_node(floorplan_visualizer

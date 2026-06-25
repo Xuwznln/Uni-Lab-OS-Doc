@@ -1,0 +1,308 @@
+schema_version: 1
+
+# Open-RMF (Humble) 整套从源码编译的 conda 包。
+#
+# 与早期"重打包预编译产物"的做法不同：本 recipe 把 18 个 open-rmf 上游仓库固定到
+# 一组 *已在本机 macOS arm64 验证可成功编译运行* 的 humble commit，叠加 patches/ 下
+# 的 macOS 构建补丁，然后在 rattler-build 沙箱里用 colcon 从源码整编进 $PREFIX。
+# 因此该 recipe 不依赖任何本机预编译产物，可在任意 osx-arm64 机器（含 CI runner）复现。
+#
+# 构建（base 或任意装了 rattler-build 的环境，与 CI multi-platform-build.yml 一致）：
+#   rattler-build build -r ./recipes/rmf/recipe.yaml \
+#       --target-platform osx-arm64 \
+#       -c robostack -c robostack-staging -c conda-forge
+#
+# 注意：从源码整编 ~55 个 ROS 包是一个较长（数十分钟）且依赖面很广的过程。下方
+# build/host 依赖清单以本机已验证的 humble 构建为基准给出，首次在干净 CI 上跑时
+# 可能仍需按真实编译报错增补 1~2 轮 host 依赖——这是 ROS 元构建的常态。
+
+context:
+  version: "2026.06.24"
+
+package:
+  name: ros-humble-rmf-bundle
+  version: ${{ version }}
+
+source:
+  # --- 顶层聚合 + demo ---
+  - git: https://github.com/open-rmf/rmf
+    rev: 3914da0260fa2196cd21cfcbb7c3e2463d3e0a99
+    target_directory: src/rmf
+  - git: https://github.com/open-rmf/rmf_demos
+    rev: d79ac6f03baeedbf8ee572347428b4a817098446
+    target_directory: src/rmf_demos
+  # --- 核心库 ---
+  - git: https://github.com/open-rmf/rmf_utils.git
+    rev: cf1ccbf2601d83b72899d24ddccc2be28062d04b
+    target_directory: src/rmf_utils
+    patches:
+    - patches/rmf_utils-macos-string-include.patch
+  - git: https://github.com/open-rmf/rmf_traffic.git
+    rev: 8fed6b6c12932a20415b28e03c58020dadc258db
+    target_directory: src/rmf_traffic
+    patches:
+    - patches/rmf_traffic-schedule-modular.patch
+    - patches/rmf_traffic-fcl-cassert.patch
+  - git: https://github.com/open-rmf/rmf_task.git
+    rev: 08b80b3cfaf9059493c733fd1cb85d4e8b6be32a
+    target_directory: src/rmf_task
+  - git: https://github.com/open-rmf/rmf_battery.git
+    rev: 8e2af047b849548efe859d5866f8d178273df64f
+    target_directory: src/rmf_battery
+  - git: https://github.com/open-rmf/rmf_ros2.git
+    rev: 621dfc9c16fbbfe7c31031a68a6730e1e6207889
+    target_directory: src/rmf_ros2
+    patches:
+    - patches/rmf_ros2-macos-cmake.patch
+    - patches/rmf_ros2-macos-cpp.patch
+  - git: https://github.com/open-rmf/rmf_simulation.git
+    rev: e9c0333a66d54778d4320316b340d0649977f091
+    target_directory: src/rmf_simulation
+    patches:
+    - patches/rmf_simulation-macos.patch
+    - patches/rmf_simulation-robot-sim-eigen.patch
+  - git: https://github.com/open-rmf/rmf_visualization.git
+    rev: f38aad96ecff0f3c88c6029e49b9764f4baa048d
+    target_directory: src/rmf_visualization
+    patches:
+    - patches/rmf_visualization-macos-openssl.patch
+    - patches/rmf_visualization-floorplans-eigen.patch
+  - git: https://github.com/open-rmf/rmf_traffic_editor.git
+    rev: 508ec5e8531a6f044dc5a8f4e4824abd671e8b9d
+    target_directory: src/rmf_traffic_editor
+  # --- 消息包 ---
+  - git: https://github.com/open-rmf/rmf_internal_msgs.git
+    rev: 8603b2ae1a72bc89c10b9c9d5d6aee14ca78f02f
+    target_directory: src/rmf_internal_msgs
+  - git: https://github.com/open-rmf/rmf_api_msgs.git
+    rev: af7fa758900792e2485cfcca217f8b1996a6281e
+    target_directory: src/rmf_api_msgs
+  - git: https://github.com/open-rmf/rmf_building_map_msgs.git
+    rev: 417a2c5e2a3589dd9ba6e5731971c531f4346942
+    target_directory: src/rmf_building_map_msgs
+  - git: https://github.com/open-rmf/rmf_visualization_msgs.git
+    rev: d13a1145a1fcf64c4064715d45f62e342f7f8c16
+    target_directory: src/rmf_visualization_msgs
+  # --- vendor 包（从源码拉取并编译第三方依赖）---
+  - git: https://github.com/open-rmf/ament_cmake_catch2.git
+    rev: a30a839cae73609d2bbb571906123b873f49720f
+    target_directory: src/ament_cmake_catch2
+  - git: https://github.com/open-rmf/menge_vendor.git
+    rev: 407b9446d1f676f899eef8da1a4e636b37dae31d
+    target_directory: src/menge_vendor
+  - git: https://github.com/open-rmf/nlohmann_json_schema_validator_vendor.git
+    rev: b686e6a0dc2b8a43f84fb48ae90dc0a552627d38
+    target_directory: src/nlohmann_json_schema_validator_vendor
+  - git: https://github.com/open-rmf/pybind11_json_vendor.git
+    rev: daa4371bede971b539feded839525640b3c4748d
+    target_directory: src/pybind11_json_vendor
+
+build:
+  number: 0
+  # 仅 osx-arm64：补丁与已验证构建都针对该平台。
+  skip: ${{ not (osx and arm64) }}
+  script:
+  - if: unix
+    then:
+    - cp $RECIPE_DIR/build_rmf_from_source.sh $SRC_DIR/build_rmf_from_source.sh
+    - bash $SRC_DIR/build_rmf_from_source.sh
+  - if: win
+    then:
+    - echo "ros-humble-rmf-bundle 仅支持 osx-arm64" && exit 1
+
+requirements:
+  # 在构建机上运行的工具链。
+  build:
+  - ${{ compiler('cxx') }}
+  - ${{ compiler('c') }}
+  # cmake 必须是 3.x：cmake 4.x 移除了对 cmake_minimum_required(<3.5) 的兼容
+  # （menge / nlohmann_json_schema_validator 等 vendor 项目会被直接拒），其
+  # FindPython 行为也与 ROS Humble 的 rosidl_generator_py 不兼容（找不到 Python）。
+  - cmake <4
+  - ninja
+  - pkg-config
+  - git
+  - make
+  - coreutils
+  - if: osx
+    then:
+    # tapi 提供 .tbd 处理；rmf_traffic_ros2 的 FindLibUUID 补丁链接 libSystem.tbd。
+    - tapi
+  - python ==3.11.14
+  - colcon-common-extensions
+  - robostack-staging::ros2-distro-mutex=0.7
+  # ament 构建系统与 rosidl 代码生成器（编译期生成消息绑定）。
+  - robostack-staging::ros-humble-ament-cmake
+  - robostack-staging::ros-humble-ament-cmake-python
+  - robostack-staging::ros-humble-ament-cmake-vendor-package
+  - robostack-staging::ros-humble-ros-environment
+  - robostack-staging::ros-humble-ros-workspace
+  - robostack-staging::ros-humble-rosidl-default-generators
+  - robostack-staging::ros-humble-rosidl-typesupport-c
+  - robostack-staging::ros-humble-rosidl-typesupport-cpp
+  - robostack-staging::ros-humble-rosidl-typesupport-introspection-c
+  - robostack-staging::ros-humble-rosidl-typesupport-introspection-cpp
+  # 链接进 RMF 的 ROS 库与第三方库（host = 目标平台）。
+  host:
+  - python ==3.11.14
+  - robostack-staging::ros2-distro-mutex=0.7
+  - robostack-staging::ros-humble-rclcpp
+  - robostack-staging::ros-humble-rclpy
+  - robostack-staging::ros-humble-rmw-cyclonedds-cpp
+  - robostack-staging::ros-humble-rosidl-default-runtime
+  - robostack-staging::ros-humble-builtin-interfaces
+  - robostack-staging::ros-humble-std-msgs
+  - robostack-staging::ros-humble-std-srvs
+  - robostack-staging::ros-humble-geometry-msgs
+  - robostack-staging::ros-humble-nav-msgs
+  - robostack-staging::ros-humble-sensor-msgs
+  - robostack-staging::ros-humble-visualization-msgs
+  - robostack-staging::ros-humble-tf2
+  - robostack-staging::ros-humble-tf2-ros
+  - robostack-staging::ros-humble-tf2-msgs
+  - robostack-staging::ros-humble-tf2-geometry-msgs
+  - robostack-staging::ros-humble-statistics-msgs
+  - robostack-staging::ros-humble-rosgraph-msgs
+  - robostack-staging::ros-humble-launch
+  - robostack-staging::ros-humble-launch-ros
+  - robostack-staging::ros-humble-launch-xml
+  # rmf_demos_maps 在 build 期用 `ros2 run rmf_building_map_tools building_map_generator`
+  # 离线生成 .world；运行 demo 时也要 ros2 CLI 的 run/launch verb。
+  - robostack-staging::ros-humble-ros2cli
+  - robostack-staging::ros-humble-ros2run
+  - robostack-staging::ros-humble-rviz2
+  - robostack-staging::ros-humble-rviz-common
+  - robostack-staging::ros-humble-rviz-default-plugins
+  - robostack-staging::ros-humble-rviz-rendering
+  - robostack-staging::ros-humble-ros-gz-sim
+  - robostack-staging::ros-humble-ros-gz-bridge
+  # gazebo6 6.16.0 的 h961479b_3 build 是与 libprotobuf 5.29.3 / libignition-physics5
+  # 5.3.2 共装的那一组（与本机已验证的 unilab 快照一致）；不锁版本时新解会漂到需要
+  # protobuf 5.28/6.x 的别的 build，触发与 ros2-distro-mutex 的冲突。
+  - libignition-gazebo6 6.16.0.*
+  # RMF 链接的 C/C++ 第三方库。
+  # 注意是 libccd-double（与 fcl 0.7 / gazebo 物理栈共装），不是 plain libccd——
+  # libccd-double 2.1 会约束 libccd<1，二者互斥。
+  - libccd-double
+  - fcl 0.7.0.*
+  - octomap
+  - console_bridge
+  - libopencv
+  - proj
+  - libprotobuf 5.29.3.*
+  - yaml-cpp
+  - tinyxml
+  - tinyxml2
+  - nlohmann_json
+  - websocketpp
+  - eigen
+  - libcurl
+  - openssl
+  - libboost-devel
+  - pybind11
+  # pybind11_json_vendor 在 configure 期 find_package(pybind11_vendor)，需要 ROS 的
+  # pybind11-vendor 提供 pybind11_vendorConfig.cmake（plain conda-forge pybind11 不含）。
+  - robostack-staging::ros-humble-pybind11-vendor
+  # rmf_api_msgs 在 build 期跑 generate_py_schemas.py，import jinja2 生成 py schema。
+  # （datamodel-codegen 是可选项，缺失仅告警；与已验证的 unilab 环境一致只需 jinja2。）
+  - jinja2
+  # rmf_demos_maps 在 build 期用 rmf_building_map_tools/building_map_generator 离线
+  # 生成 .world，generator import fiona/shapely/pyproj 处理楼层平面几何（与已验证的
+  # unilab 环境一致：fiona 1.10 / shapely 2.1 / pyproj 3.7，conda-forge 版本即可）。
+  - fiona
+  - shapely
+  - pyproj
+  # building_map/level.py 用 rtree（R-tree 空间索引，底层 libspatialindex）做几何查询；
+  # building_map/material_utils.py 在模块加载时 import requests（PBR 贴图下载逻辑，
+  # 即使 NO_DOWNLOAD_MODELS 也会被 import）。二者都在 world 生成链上，须在 build 期可用。
+  - rtree
+  - requests
+  - qt-main
+  - llvm-openmp
+  run:
+  # --- ROS 2 Humble 核心 / 中间件 ---
+  - ros2-distro-mutex=0.7
+  - ros-humble-rclcpp
+  - ros-humble-rclpy
+  - ros-humble-rmw-cyclonedds-cpp
+  - ros-humble-rosidl-default-runtime
+  - ros-humble-launch
+  - ros-humble-launch-ros
+  - ros-humble-launch-xml
+  - ros-humble-ros2cli
+  - ros-humble-ros2run
+  - ros-humble-tf2-ros
+  # --- RMF 链接到的消息包 ---
+  - ros-humble-builtin-interfaces
+  - ros-humble-std-msgs
+  - ros-humble-geometry-msgs
+  - ros-humble-nav-msgs
+  - ros-humble-sensor-msgs
+  - ros-humble-visualization-msgs
+  - ros-humble-tf2-msgs
+  - ros-humble-statistics-msgs
+  # --- 可视化 (RViz2) ---
+  - ros-humble-rviz2
+  - ros-humble-rviz-common
+  - ros-humble-rviz-default-plugins
+  # --- Gazebo / Ignition Fortress 仿真 + ros_gz 桥 ---
+  - ros-humble-ros-gz-sim
+  - ros-humble-ros-gz-bridge
+  - libignition-gazebo6 6.16.0.*
+  # --- RMF 依赖的 C/C++ 第三方库 ---
+  - libccd-double
+  - fcl 0.7.0.*
+  - octomap
+  - console_bridge
+  - libopencv
+  - proj
+  - libprotobuf 5.29.3.*
+  - yaml-cpp
+  - tinyxml
+  - tinyxml2
+  - nlohmann_json
+  - websocketpp
+  - eigen
+  - libcurl
+  - openssl
+  - qt-main
+  - llvm-openmp
+  # --- demo 节点运行期 python 依赖 ---
+  - python >=3.11,<3.12
+  - flask
+  - flask-cors
+  - flask-socketio
+  - python-socketio
+  - requests
+  - pyyaml
+  - websockets
+  # rmf_building_map_tools 运行期同样 import fiona/shapely/pyproj（地图/楼层处理）。
+  - fiona
+  - shapely
+  - pyproj
+  - rtree
+  - fastapi
+  - uvicorn
+
+tests:
+- script:
+  - if: unix
+    then:
+    # 编译产物落地检查：核心库 + demo 资源 + python 绑定。
+    - test -f $PREFIX/lib/librmf_traffic.dylib
+    - test -d $PREFIX/share/rmf_demos
+    - test -d $PREFIX/share/rmf_traffic_ros2
+
+about:
+  homepage: https://github.com/open-rmf/rmf
+  repository: https://github.com/open-rmf/rmf
+  license: Apache-2.0
+  summary: |
+    Open-RMF (Humble) 从源码编译的整套 conda 包：rmf_traffic / rmf_task /
+    rmf_fleet_adapter / rmf_ros2 / rmf_demos / rmf_visualization 等，含 hotel 等
+    demo、RViz2 插件与 fleet adapter（python 绑定）。固定到已验证可用的 humble
+    commit 并叠加 macOS 构建补丁，可在任意 osx-arm64 机器从源码复现。
+
+extra:
+  recipe-maintainers:
+  - LabOS
