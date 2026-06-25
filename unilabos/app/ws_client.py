@@ -86,7 +86,6 @@ class JobInfo:
     last_update_time: float = field(default_factory=time.time)
     ready_timeout: Optional[float] = None  # READY状态的超时时间
     always_free: bool = False  # 是否为永久闲置动作(不受排队限制)
-    ready_timeout_extension_applied: float = 0.0  # 已应用到该 job 的断链 READY 超时顺延总量
 
     def update_timestamp(self):
         """更新最后更新时间"""
@@ -137,37 +136,6 @@ class DeviceActionManager:
         self.active_jobs: Dict[str, JobInfo] = {}  # device_action_key -> active job
         self.all_jobs: Dict[str, JobInfo] = {}  # job_id -> job_info
         self.lock = threading.RLock()
-        self.ready_timeout_extension_total: float = 0.0
-
-    def _apply_ready_timeout_grace_locked(self, job_info: JobInfo, reason: str = "") -> bool:
-        """给 READY job 应用尚未消费的断链超时顺延量。"""
-        if job_info.status != JobStatus.READY or job_info.ready_timeout is None:
-            return False
-
-        extension_delta = self.ready_timeout_extension_total - job_info.ready_timeout_extension_applied
-        if extension_delta <= 0:
-            return False
-
-        job_info.ready_timeout += extension_delta
-        job_info.ready_timeout_extension_applied = self.ready_timeout_extension_total
-        job_info.update_timestamp()
-
-        job_log = format_job_log(
-            job_info.job_id,
-            job_info.task_id,
-            job_info.device_id,
-            job_info.action_name,
-        )
-        logger.info(
-            "[DeviceActionManager] Applied READY timeout extension for job %s by %.1fs "
-            "(total_applied=%.1fs, timeout_at=%.3f)%s",
-            job_log,
-            extension_delta,
-            job_info.ready_timeout_extension_applied,
-            job_info.ready_timeout,
-            f" ({reason})" if reason else "",
-        )
-        return True
 
     def add_queue_request(self, job_info: JobInfo) -> bool:
         """
@@ -183,6 +151,7 @@ class DeviceActionManager:
                         "[DeviceActionManager] Duplicate job_id has different task_id: "
                         f"{job_info.job_id[:8]} old={existing_job.task_id[:8]} new={job_info.task_id[:8]}"
                     )
+                    return False
                 if job_info.notebook_id and not existing_job.notebook_id:
                     existing_job.notebook_id = job_info.notebook_id
                 existing_job.update_timestamp()
@@ -200,15 +169,12 @@ class DeviceActionManager:
 
             # 总是将job添加到all_jobs中
             self.all_jobs[job_info.job_id] = job_info
-            # 新进入管理器的 job 不应消费历史断链顺延；之后发生的新断链才会影响它。
-            job_info.ready_timeout_extension_applied = self.ready_timeout_extension_total
 
             # always_free的动作不受排队限制，直接设为READY
             if job_info.always_free:
                 job_info.status = JobStatus.READY
                 job_info.update_timestamp()
                 job_info.set_ready_timeout(10)
-                self._apply_ready_timeout_grace_locked(job_info, reason="always_free ready")
                 job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
                 logger.trace(f"[DeviceActionManager] Job {job_log} always_free, start immediately")
                 return True
@@ -238,7 +204,6 @@ class DeviceActionManager:
             job_info.status = JobStatus.READY
             job_info.update_timestamp()
             job_info.set_ready_timeout(10)  # 设置10秒超时
-            self._apply_ready_timeout_grace_locked(job_info, reason="ready")
             self.active_jobs[device_key] = job_info
             job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
             logger.trace(f"[DeviceActionManager] Job {job_log} can start immediately for {device_key}")
@@ -322,7 +287,6 @@ class DeviceActionManager:
                 next_job.status = JobStatus.READY
                 next_job.update_timestamp()
                 next_job.set_ready_timeout(10)  # 设置10秒超时
-                self._apply_ready_timeout_grace_locked(next_job, reason="next job ready")
                 self.active_jobs[device_key] = next_job
                 next_job_log = format_job_log(
                     next_job.job_id, next_job.task_id, next_job.device_id, next_job.action_name
@@ -390,7 +354,6 @@ class DeviceActionManager:
                     next_job.status = JobStatus.READY
                     next_job.update_timestamp()
                     next_job.set_ready_timeout(10)
-                    self._apply_ready_timeout_grace_locked(next_job, reason="next job ready after cancel")
                     self.active_jobs[device_key] = next_job
                     next_job_log = format_job_log(
                         next_job.job_id, next_job.task_id, next_job.device_id, next_job.action_name
@@ -442,37 +405,56 @@ class DeviceActionManager:
 
         return cancelled_job_ids
 
-    def extend_ready_timeouts(self, extension_seconds: float, reason: str = "") -> int:
-        """累计断链顺延时间，并应用到当前/后续 READY 状态任务。"""
-        if extension_seconds <= 0:
+    def refresh_ready_timeouts(self, timeout_seconds: float = 10, reason: str = "") -> int:
+        """将 READY 任务的超时时间刷新到至少 now + timeout_seconds。"""
+        if timeout_seconds <= 0:
             return 0
 
-        extended_count = 0
+        refreshed_count = 0
+        now = time.time()
+        min_timeout = now + timeout_seconds
 
         with self.lock:
-            self.ready_timeout_extension_total += extension_seconds
-
             ready_candidates = list(self.active_jobs.values())
             for job in self.all_jobs.values():
                 if job.always_free and job.status == JobStatus.READY and job not in ready_candidates:
                     ready_candidates.append(job)
 
             for job_info in ready_candidates:
-                if self._apply_ready_timeout_grace_locked(job_info, reason=reason):
-                    extended_count += 1
+                if job_info.status != JobStatus.READY or job_info.ready_timeout is None:
+                    continue
+                if job_info.ready_timeout >= min_timeout:
+                    continue
+
+                old_timeout = job_info.ready_timeout
+                job_info.ready_timeout = min_timeout
+                job_info.update_timestamp()
+                refreshed_count += 1
+
+                job_log = format_job_log(
+                    job_info.job_id,
+                    job_info.task_id,
+                    job_info.device_id,
+                    job_info.action_name,
+                )
+                logger.info(
+                    "[DeviceActionManager] Refreshed READY timeout for job %s from %.3f to %.3f%s",
+                    job_log,
+                    old_timeout,
+                    job_info.ready_timeout,
+                    f" ({reason})" if reason else "",
+                )
 
             logger.info(
-                "[DeviceActionManager] Registered READY timeout extension %.1fs "
-                "(total=%.1fs); extended %s current READY job(s)%s",
-                extension_seconds,
-                self.ready_timeout_extension_total,
-                extended_count,
+                "[DeviceActionManager] READY timeout refresh window %.1fs; refreshed %s READY job(s)%s",
+                timeout_seconds,
+                refreshed_count,
                 f" ({reason})" if reason else "",
             )
 
-        return extended_count
+        return refreshed_count
 
-    def check_ready_timeouts(self) -> List[JobInfo]:
+    def check_ready_timeouts(self, is_connected: bool = True) -> List[JobInfo]:
         """检查READY状态超时的任务，仅检测不处理"""
         timeout_jobs = []
 
@@ -489,6 +471,24 @@ class DeviceActionManager:
 
             # 找到所有超时的READY任务（只检测，不处理）
             for job_info in ready_candidates:
+                if job_info.status != JobStatus.READY:
+                    continue
+                if not is_connected:
+                    min_timeout = time.time() + 10
+                    if job_info.ready_timeout is not None and job_info.ready_timeout < min_timeout:
+                        old_timeout = job_info.ready_timeout
+                        job_info.ready_timeout = min_timeout
+                        job_info.update_timestamp()
+                        job_log = format_job_log(
+                            job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name
+                        )
+                        logger.info(
+                            "[DeviceActionManager] WebSocket disconnected, keep READY job %s alive: %.3f -> %.3f",
+                            job_log,
+                            old_timeout,
+                            job_info.ready_timeout,
+                        )
+                    continue
                 if job_info.is_ready_timeout():
                     timeout_jobs.append(job_info)
                     job_log = format_job_log(
@@ -573,7 +573,6 @@ class MessageProcessor:
     async def _connection_handler(self):
         """处理WebSocket连接和重连逻辑"""
         while self.is_running:
-            was_connected = False
             try:
                 # 构建SSL上下文
                 ssl_context = None
@@ -587,8 +586,8 @@ class MessageProcessor:
                     self.websocket_url,
                     ssl=ssl_context,
                     open_timeout=20,
-                    ping_interval=WSConfig.ping_interval,
-                    ping_timeout=WSConfig.ping_timeout,
+                    ping_interval=WSConfig.ws_ping_interval,
+                    ping_timeout=WSConfig.ws_ping_timeout,
                     close_timeout=5,
                     additional_headers={
                         "Authorization": f"Lab {BasicConfig.auth_secret()}",
@@ -598,10 +597,10 @@ class MessageProcessor:
                 ) as websocket:
                     self.websocket = websocket
                     self.connected = True
-                    was_connected = True
                     self.reconnect_count = 0
 
                     logger.info(f"[MessageProcessor] 已连接到 {self.websocket_url}")
+                    self.device_manager.refresh_ready_timeouts(10, reason="websocket connected")
 
                     # 启动发送协程
                     send_task = asyncio.create_task(self._send_handler(), name="websocket-send_task")
@@ -650,11 +649,6 @@ class MessageProcessor:
             if self.reconnect_count < WSConfig.max_reconnect_attempts:
                 self.reconnect_count += 1
                 backoff = WSConfig.reconnect_interval
-                extension_seconds = getattr(WSConfig, "ready_timeout_extension", 20)
-                self.device_manager.extend_ready_timeouts(
-                    extension_seconds,
-                    reason="websocket reconnect window" if was_connected else "websocket connect retry",
-                )
                 logger.info(
                     "[MessageProcessor] 即将在 %s 秒后重连 (已尝试 %s/%s)",
                     backoff,
@@ -833,16 +827,18 @@ class MessageProcessor:
 
         job_log = format_job_log(job_id, task_id, device_id, action_name)
 
-        # 1) 该 job 仍在设备管理器中（READY/QUEUE/STARTED）：返回真实当前状态。
-        #    这是保证服务端 busy/running 节奏判断正确的关键，且不重复入队。
+        # 1) 该 job 仍在设备管理器中（READY/QUEUE/STARTED）：不重复入队。
+        #    READY/STARTED 表示同一个 job 已被本地接收/执行，断线重连后仍回复 free，
+        #    让服务端继续发送 job_start；重复 job_start 会被幂等缓存拦截或回放结果。
+        #    QUEUE 表示该 job 尚未轮到执行，仍回复 busy。
         #    完成后 end_job 会把 job 从管理器移除，故运行中的 job 一定能在此命中。
         existing_job = self.device_manager.get_job_info(job_id)
-        if existing_job and existing_job.task_id == task_id:
-            if existing_job.status == JobStatus.READY:
+        if existing_job and existing_job.job_id == job_id and existing_job.task_id == task_id:
+            if existing_job.status in (JobStatus.READY, JobStatus.STARTED):
                 response_type, free, need_more = "query_action_status", True, 0
             elif existing_job.status == JobStatus.QUEUE:
                 response_type, free, need_more = "query_action_status", False, 10
-            else:  # STARTED：正在执行
+            else:
                 response_type, free, need_more = "job_call_back_status", False, 10
             await self._send_action_state_response(
                 existing_job.device_id,
@@ -961,6 +957,15 @@ class MessageProcessor:
             # 服务端对always_free动作可能跳过query_action_state直接发job_start，
             # 此时job尚未注册，需要自动补注册
             existing_job = self.device_manager.get_job_info(req.job_id)
+            if existing_job and existing_job.task_id != req.task_id:
+                logger.warning(
+                    "[MessageProcessor] job_start job_id matched but task_id mismatched, skip start: "
+                    "job=%s old_task=%s new_task=%s",
+                    req.job_id[:8],
+                    existing_job.task_id[:8],
+                    req.task_id[:8],
+                )
+                return
             if not existing_job:
                 action_name = req.action
                 device_action_key = f"/devices/{req.device_id}/{action_name}"
@@ -1414,7 +1419,9 @@ class QueueProcessor:
         while self.is_running:
             try:
                 # 检查READY状态超时的任务
-                timeout_jobs = self.device_manager.check_ready_timeouts()
+                timeout_jobs = self.device_manager.check_ready_timeouts(
+                    is_connected=self.message_processor.is_connected()
+                )
                 if timeout_jobs:
                     logger.info(f"[QueueProcessor] Found {len(timeout_jobs)} READY jobs that timed out")
                     # 为超时的job发布失败状态，通过正常job完成流程处理
@@ -1630,23 +1637,28 @@ class WebSocketClient(BaseCommunicationClient):
         logger.info(f"[WebSocketClient] Client_id: {self.client_id}")
 
     def _build_websocket_url(self) -> Optional[str]:
-        """构建WebSocket连接URL"""
+        """构建 schedule 通道的 WebSocket 连接 URL
+
+        地址来源优先级：
+        1. HTTPConfig.schedule_addr（--schedule_addr 显式指定）→ 直接使用，不做端口偏移
+        2. HTTPConfig.remote_addr（--addr）派生：带端口则 +1，否则沿用原 netloc
+        """
+        # 1. 显式 schedule 地址
+        if HTTPConfig.schedule_addr:
+            parsed = urlparse(HTTPConfig.schedule_addr)
+            scheme = "wss" if parsed.scheme in ("https", "wss") else "ws"
+            return f"{scheme}://{parsed.netloc}/api/v1/ws/schedule"
+
+        # 2. 从 api 地址派生
         if not HTTPConfig.remote_addr:
             return None
 
         parsed = urlparse(HTTPConfig.remote_addr)
-
-        if parsed.scheme == "https":
-            scheme = "wss"
-        else:
-            scheme = "ws"
+        scheme = "wss" if parsed.scheme == "https" else "ws"
 
         if ":" in parsed.netloc and parsed.port is not None:
-            url = f"{scheme}://{parsed.hostname}:{parsed.port + 1}/api/v1/ws/schedule"
-        else:
-            url = f"{scheme}://{parsed.netloc}/api/v1/ws/schedule"
-
-        return url
+            return f"{scheme}://{parsed.hostname}:{parsed.port + 1}/api/v1/ws/schedule"
+        return f"{scheme}://{parsed.netloc}/api/v1/ws/schedule"
 
     @staticmethod
     def _job_start_cache_key(job_id: str, task_id: str) -> Optional[Tuple[str, str]]:

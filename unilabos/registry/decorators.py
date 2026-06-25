@@ -253,8 +253,8 @@ def device(
     id_meta: Optional[Dict[str, Dict[str, Any]]] = None,
     category: Optional[List[str]] = None,
     description: str = "",
-    display_name: str = "",
     displayname: str = "",
+    display_name: str = "",
     icon: str = "",
     version: str = "1.0.0",
     handles: Optional[List[_DeviceHandleBase]] = None,
@@ -318,7 +318,7 @@ def device(
     base_meta = {
         "category": category,
         "description": description,
-        "display_name": resolved_display_name,
+        "displayname": resolved_display_name,
         "icon": icon,
         "version": version,
         "handles": _device_handles_to_list(handles),
@@ -464,6 +464,7 @@ def resource(
     id: str,
     category: List[str],
     description: str = "",
+    displayname: str = "",
     icon: str = "",
     version: str = "1.0.0",
     handles: Optional[List[_DeviceHandleBase]] = None,
@@ -479,6 +480,7 @@ def resource(
         id: 注册表唯一标识 (必填, 不可重复)
         category: 资源分类标签列表 (必填)
         description: 资源描述
+        displayname: 人类可读的资源显示名称，缺失时默认使用 id
         icon: 图标路径
         version: 版本号
         handles: 端口列表 (InputHandle / OutputHandle)
@@ -491,6 +493,7 @@ def resource(
             "resource_id": id,
             "category": category,
             "description": description,
+            "displayname": displayname,
             "icon": icon,
             "version": version,
             "handles": _device_handles_to_list(handles),
@@ -528,14 +531,12 @@ def get_device_meta(cls, device_id: Optional[str] = None) -> Optional[Dict[str, 
     overrides = id_meta[device_id]
     result = dict(base)
     result["device_id"] = device_id
-    for key in ["handles", "description", "display_name", "displayname", "icon", "model"]:
+    for key in ["handles", "description", "displayname", "icon", "model"]:
         if key in overrides:
             val = overrides[key]
             if key == "handles" and isinstance(val, list):
                 # handles 必须是 Handle 对象列表
                 result[key] = [h.to_registry_dict() for h in val]
-            elif key == "displayname":
-                result["display_name"] = val
             else:
                 result[key] = val
     return result

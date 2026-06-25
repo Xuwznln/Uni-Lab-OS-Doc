@@ -53,10 +53,11 @@ from unilabos.registry.utils import (
     wrap_action_schema,
     preserve_field_descriptions,
     resolve_method_params_via_import,
+    resolve_registry_displayname,
     SIMPLE_TYPE_MAP,
 )
 from unilabos.resources.graphio import resource_plr_to_ulab, tree_to_list
-from unilabos.resources.resource_tracker import ResourceTreeSet
+from unilabos.resources.resource_tracker import ResourceTreeSet, RETURN_UNILABOS_SAMPLES
 from unilabos.ros.msgs.message_converter import (
     msg_converter_manager,
     ros_action_to_json_schema,
@@ -116,8 +117,15 @@ class Registry:
     # 统一入口
     # ------------------------------------------------------------------
 
-    def setup(self, devices_dirs=None, upload_registry=False, complete_registry=False, external_only=False,
-              external_registry_paths=None):
+    def setup(
+        self,
+        devices_dirs=None,
+        upload_registry=False,
+        complete_registry=False,
+        external_only=False,
+        community_namespaces=None,
+        external_registry_paths=None,
+    ):
         """统一构建注册表入口。
 
         external_registry_paths: 外源包发现到的 registry 目录(Plan 09),会并入 YAML 加载路径。
@@ -137,14 +145,22 @@ class Registry:
         )
 
         # 1. AST 静态扫描 (快速, 无需 import)
-        self._run_ast_scan(devices_dirs, upload_registry=upload_registry, external_only=external_only)
+        self._run_ast_scan(
+            devices_dirs,
+            upload_registry=upload_registry,
+            external_only=external_only,
+            community_namespaces=community_namespaces,
+        )
+
+        # 社区包根目录可只放一个 registry.yaml 声明设备（device_id -> 条目），
+        self._load_community_device_registries(devices_dirs)
 
         # 2. Host node 内置设备
         self._setup_host_node()
 
         # 3. YAML 注册表加载 (兼容旧格式) — external_only 模式下跳过
         if external_only:
-            logger.info("[UniLab Registry] external_only 模式: 跳过 YAML 注册表加载")
+            logger.info("[UniLab Registry] external_only 模式: 跳过内置 YAML 注册表加载")
         else:
             self.registry_paths = [Path(path).absolute() for path in self.registry_paths]
             for i, path in enumerate(self.registry_paths):
@@ -158,6 +174,12 @@ class Registry:
                     logger.warning(
                         "[UniLab Registry] 资源加载已禁用 (enable_resource_load=False)，跳过资源注册表加载"
                     )
+
+        # 4. --devices 目录内嵌的同构注册表 (devices/ resources/ device_comms/) — 两种模式下都加载
+        self._load_devices_dir_registries(
+            devices_dirs, upload_registry=upload_registry, complete_registry=complete_registry
+        )
+
         self._startup_executor.shutdown(wait=True)
         self._startup_executor = None
         self._setup_called = True
@@ -177,6 +199,9 @@ class Registry:
         test_latency_action = ast_actions.get("auto-test_latency", {})
         test_resource_action = ast_actions.get("auto-test_resource", {})
         manual_confirm_action = ast_actions.get("manual_confirm", {})
+        apply_deduct_resource_action = ast_actions.get("apply_deduct_resource", {})
+        set_substance_action = ast_actions.get("set_substance", {})
+        discard_resource_action = ast_actions.get("discard_resource", {})
         test_resource_action["handles"] = {
             "input": [
                 {
@@ -255,6 +280,9 @@ class Registry:
                     "test_latency": test_latency_action,
                     "auto-test_resource": test_resource_action,
                     "manual_confirm": manual_confirm_action,
+                    "apply_deduct_resource": apply_deduct_resource_action,
+                    "set_substance": set_substance_action,
+                    "discard_resource": discard_resource_action,
                 },
                 "init_params": {},
             },
@@ -274,14 +302,21 @@ class Registry:
     # AST 静态扫描
     # ------------------------------------------------------------------
 
-    def _run_ast_scan(self, devices_dirs=None, upload_registry=False, external_only=False):
+    def _run_ast_scan(
+        self, devices_dirs=None, upload_registry=False, external_only=False, community_namespaces=None
+    ):
         """
         执行 AST 静态扫描，从 Python 代码中提取 @device / @resource 装饰器元数据。
         无需 import 任何驱动模块，速度极快。
 
+        community_namespaces: {已解析的 --devices 绝对路径 -> community.<ns>}。命中的目录里
+        扫描到的 device/resource id 会被命名空间化为 community.<ns>.<id>，直接作为注册表 key
+        （社区包不做 alias 桥接，图引用 community.<ns>.<id> 即为实体 key）。
+
         所有缓存（AST 扫描 / build 结果 / config_info）统一存放在
         registry_cache.pkl 一个文件中，删除即可完全重置。
         """
+        community_namespaces = community_namespaces or {}
         import time as _time
         from unilabos.registry.ast_registry_scanner import _CACHE_VERSION as AST_SCAN_CACHE_VERSION
         from unilabos.registry.ast_registry_scanner import scan_directory
@@ -363,22 +398,35 @@ class Registry:
             total_stats["misses"] += extra_stats["misses"]
             total_stats["total"] += extra_stats["total"]
 
+            # 社区包目录：把扫描到的 id 命名空间化为 community.<ns>.<id>，直接作为注册表 key
+            ns = community_namespaces.get(str(d_path))
+            if ns:
+                logger.info(f"[UniLab Registry] 社区包命名空间化: {d_path} -> {ns}.<id>")
+
             for did, dmeta in extra_result.get("devices", {}).items():
-                if did in scan_result.get("devices", {}):
-                    existing = scan_result["devices"][did].get("file_path", "?")
+                key = f"{ns}.{did}" if ns else did
+                if key in scan_result.get("devices", {}):
+                    existing = scan_result["devices"][key].get("file_path", "?")
                     new_file = dmeta.get("file_path", "?")
                     raise ValueError(
-                        f"@device id 重复: '{did}' 同时出现在 {existing} 和 {new_file}"
+                        f"@device id 重复: '{key}' 同时出现在 {existing} 和 {new_file}"
                     )
-                scan_result.setdefault("devices", {})[did] = dmeta
+                if ns:
+                    dmeta = dict(dmeta)
+                    dmeta["device_id"] = key
+                scan_result.setdefault("devices", {})[key] = dmeta
             for rid, rmeta in extra_result.get("resources", {}).items():
-                if rid in scan_result.get("resources", {}):
-                    existing = scan_result["resources"][rid].get("file_path", "?")
+                key = f"{ns}.{rid}" if ns else rid
+                if key in scan_result.get("resources", {}):
+                    existing = scan_result["resources"][key].get("file_path", "?")
                     new_file = rmeta.get("file_path", "?")
                     raise ValueError(
-                        f"@resource id 重复: '{rid}' 同时出现在 {existing} 和 {new_file}"
+                        f"@resource id 重复: '{key}' 同时出现在 {existing} 和 {new_file}"
                     )
-                scan_result.setdefault("resources", {})[rid] = rmeta
+                if ns:
+                    rmeta = dict(rmeta)
+                    rmeta["resource_id"] = key
+                scan_result.setdefault("resources", {})[key] = rmeta
 
         # 缓存命中统计
         if total_stats["total"] > 0:
@@ -577,6 +625,24 @@ class Registry:
             prop_schema["default"] = param_default
 
         return prop_schema
+
+    @staticmethod
+    def _strip_reserved_result_fields(schema: Dict[str, Any]) -> None:
+        """从已生成完整的 result schema 中就地移除保留字段 unilabos_samples。
+
+        该字段由设备返回值携带，但运行时会被 host node pop 到结果外层
+        (见 host_node 中 return_value.pop(RETURN_UNILABOS_SAMPLES))，
+        只处理顶层与 host node 行为保持一致，不属于 action result 的对外契约，
+        故从顶层 properties/required 中剔除。需在 result schema 完整生成后再调用。
+        """
+        if not isinstance(schema, dict):
+            return
+        props = schema.get("properties")
+        if isinstance(props, dict):
+            props.pop(RETURN_UNILABOS_SAMPLES, None)
+        required = schema.get("required")
+        if isinstance(required, list) and RETURN_UNILABOS_SAMPLES in required:
+            required.remove(RETURN_UNILABOS_SAMPLES)
 
     @staticmethod
     def _apply_docstring_param_metadata(
@@ -895,6 +961,8 @@ class Registry:
                 result_schema = self._generate_schema_from_info(
                     "result", ret_type_str, None, imap
                 )
+                # result schema 完整生成后再剥离保留字段 unilabos_samples
+                self._strip_reserved_result_fields(result_schema)
 
             entry = {
                 "type": type_str,
@@ -1022,6 +1090,8 @@ class Registry:
                         "result", ret_type_str, None, imap
                     )
                     if ret_schema:
+                        # result schema 完整生成后再剥离保留字段 unilabos_samples
+                        self._strip_reserved_result_fields(ret_schema)
                         schema.setdefault("properties", {})["result"] = ret_schema
 
             # @action 中的显式 goal/feedback/result/goal_default 覆盖默认值
@@ -1092,6 +1162,7 @@ class Registry:
             },
             "config_info": [],
             "description": ast_meta.get("description", ""),
+            "displayname": resolve_registry_displayname(ast_meta.get("displayname"), device_id),
             "handles": handles,
             "icon": ast_meta.get("icon", ""),
             "init_param_schema": init_schema,
@@ -1189,11 +1260,7 @@ class Registry:
             },
             "config_info": [],
             "description": ast_meta.get("description", ""),
-            "handles": handles,
-            "icon": ast_meta.get("icon", ""),
-            "init_param_schema": {},
-            "version": ast_meta.get("version", "1.0.0"),
-            "registry_type": "resource",
+            "displayname": resolve_registry_displayname(ast_meta.get("displayname"), resource_id),
             "file_path": file_path,
         }
 
@@ -1245,7 +1312,7 @@ class Registry:
             return Path(BasicConfig.working_dir) / "registry_cache.pkl"
         return None
 
-    _CACHE_VERSION = 4
+    _CACHE_VERSION = 6
 
     def _load_config_cache(self) -> dict:
         import pickle
@@ -1639,6 +1706,9 @@ class Registry:
                 resource_info["handles"] = []
             if "init_param_schema" not in resource_info:
                 resource_info["init_param_schema"] = {}
+            resource_info["displayname"] = resolve_registry_displayname(
+                resource_info.get("displayname"), resource_id
+            )
             if "config_info" in resource_info:
                 del resource_info["config_info"]
             if "file_path" in resource_info:
@@ -1816,6 +1886,9 @@ class Registry:
                 device_config["config_info"] = []
             if "description" not in device_config:
                 device_config["description"] = ""
+            device_config["displayname"] = resolve_registry_displayname(
+                device_config.get("displayname"), device_id
+            )
             if "icon" not in device_config:
                 device_config["icon"] = ""
             if "handles" not in device_config:
@@ -1893,6 +1966,8 @@ class Registry:
                             result_schema = self._generate_schema_from_info(
                                 "result", ret_type, None, import_map=enhanced_import_map
                             )
+                            # result schema 完整生成后再剥离保留字段 unilabos_samples
+                            self._strip_reserved_result_fields(result_schema)
                         old_cfg = old_action_configs.get(action_key) or old_action_configs.get(f"auto-{k}", {})
                         doc_info = parse_docstring(v.get("docstring"))
                         new_schema = wrap_action_schema(
@@ -1986,7 +2061,10 @@ class Registry:
                         if v.get("always_free"):
                             entry["always_free"] = True
                         old_node_type = old_cfg.get("node_type")
-                        if old_node_type in [NodeType.ILAB.value, NodeType.MANUAL_CONFIRM.value]:
+                        if old_node_type in [
+                            NodeType.ILAB.value,
+                            NodeType.MANUAL_CONFIRM.value,
+                        ]:
                             entry["node_type"] = old_node_type
                         device_config["class"]["action_value_mappings"][action_key] = entry
 
@@ -2200,6 +2278,125 @@ class Registry:
             f"(耗时 {time.time() - t0:.2f}s){extra}"
         )
 
+    def _load_community_device_registries(self, devices_dirs=None):
+        """加载社区设备包根目录下的 registry.yaml（device_id -> 条目）。
+        """
+        if not devices_dirs:
+            return
+
+        loaded_total = 0
+        for d in devices_dirs:
+            d_path = Path(d).resolve()
+            if not d_path.is_dir():
+                continue
+            reg_file = None
+            for name in ("registry.yaml", "registry.yml"):
+                candidate = d_path / name
+                if candidate.is_file():
+                    reg_file = candidate
+                    break
+            if reg_file is None:
+                continue
+
+            try:
+                data, _complete_data, is_valid, device_ids = self._load_single_device_file(
+                    reg_file, complete_registry=False
+                )
+            except Exception as e:
+                logger.warning(f"[UniLab Registry] 社区包 registry.yaml 加载失败: {reg_file}, 错误: {e}")
+                continue
+            if not is_valid:
+                continue
+
+            runtime_data = {did: data[did] for did in device_ids if did in data}
+            for cfg in runtime_data.values():
+                # _load_single_device_file 会按 file.stem 追加分类，这里去掉无意义的 "registry"
+                category = cfg.get("category")
+                if isinstance(category, list) and reg_file.stem in category and len(category) > 1:
+                    category.remove(reg_file.stem)
+            if runtime_data:
+                self.device_type_registry.update(runtime_data)
+                loaded_total += len(runtime_data)
+                logger.info(
+                    f"[UniLab Registry] 社区包 registry.yaml 设备加载: {reg_file} -> "
+                    f"{', '.join(sorted(runtime_data))}"
+                )
+
+        if loaded_total:
+            logger.info(f"[UniLab Registry] 社区包 registry.yaml 设备加载完成: 共 {loaded_total} 个")
+
+    @staticmethod
+    def _is_registry_root(p: Path) -> bool:
+        """目录是否为注册表根：含 devices/ device_comms/ resources/ 任一子目录且其中有 *.yaml。"""
+        if not p.is_dir():
+            return False
+        for sub in ("devices", "device_comms", "resources"):
+            subp = p / sub
+            if subp.is_dir() and next(subp.rglob("*.yaml"), None) is not None:
+                return True
+        return False
+
+    @staticmethod
+    def _find_package_root(start: Path, max_up: int = 6) -> Optional[Path]:
+        """从 start 起（含自身）向上最多 max_up 层，定位含 pyproject.toml 的包根。"""
+        cur = start
+        for _ in range(max_up + 1):
+            if (cur / "pyproject.toml").is_file():
+                return cur
+            if cur.parent == cur:
+                break
+            cur = cur.parent
+        return None
+
+    def _registry_root_candidates(self, base: Path) -> List[Path]:
+        """给定一个 --devices 目录，推导其内嵌注册表根的候选目录。
+
+        约定 registry 与 unilabos/registry 同构（ROOT/registry/{devices,resources,device_comms}/*.yaml）：
+        - <devices_dir>/registry：--devices 指向包根（社区包）或 registry 直接放在 --devices 下；
+        - <包根>/registry：--devices 指向 python 子包时（如模板的 device_package_example），
+          向上按 pyproject.toml 锚定 ROOT 再取 ROOT/registry；
+        - <devices_dir> 本身：--devices 直接指向 registry 根的兜底。
+        """
+        candidates = [base / "registry"]
+        pkg_root = self._find_package_root(base)
+        if pkg_root is not None:
+            candidates.append(pkg_root / "registry")
+        candidates.append(base)
+        return candidates
+
+    def _load_devices_dir_registries(self, devices_dirs=None, upload_registry=False, complete_registry=False):
+        """为每个 --devices 目录自动加载其内嵌的、与 unilabos/registry 同构的注册表。
+
+        约定：内嵌注册表与内置注册表结构一致（ROOT/registry/{devices,device_comms,resources}/*.yaml）。
+        命中即复用 load_device_types / load_resource_types 加载。external_only 模式下同样加载——
+        外部设备包自带的注册表不应被跳过。
+        """
+        if not devices_dirs:
+            return
+
+        seen: set = set()
+        for d in devices_dirs:
+            base = Path(d).resolve()
+            if not base.is_dir():
+                continue
+            for candidate in self._registry_root_candidates(base):
+                root = candidate.resolve()
+                key = str(root)
+                if key in seen or not self._is_registry_root(root):
+                    continue
+                seen.add(key)
+                logger.info(f"[UniLab Registry] 加载 --devices 内嵌注册表: {root}")
+                self.load_device_types(root, complete_registry=complete_registry)
+                if BasicConfig.enable_resource_load:
+                    self.load_resource_types(root, upload_registry, complete_registry=complete_registry)
+                else:
+                    logger.warning(
+                        "[UniLab Registry] 资源加载已禁用 (enable_resource_load=False)，"
+                        f"跳过内嵌注册表资源: {root}"
+                    )
+                if root not in self.registry_paths:
+                    self.registry_paths.append(root)
+
     # ------------------------------------------------------------------
     # 注册表信息输出
     # ------------------------------------------------------------------
@@ -2252,6 +2449,7 @@ class Registry:
                         status_types[status_name] = status_type.__name__
 
             msg = {"id": device_id, **device_info_copy}
+            msg["displayname"] = resolve_registry_displayname(msg.get("displayname"), device_id)
             devices.append(msg)
         return devices
 
@@ -2259,6 +2457,7 @@ class Registry:
         resources = []
         for resource_id, resource_info in self.resource_type_registry.items():
             msg = {"id": resource_id, **resource_info}
+            msg["displayname"] = resolve_registry_displayname(msg.get("displayname"), resource_id)
             resources.append(msg)
         return resources
 
@@ -2313,6 +2512,7 @@ def build_registry(
     check_mode=False,
     complete_registry=False,
     external_only=False,
+    community_namespaces=None,
     external_registry_paths=None,
 ):
     """
@@ -2333,6 +2533,7 @@ def build_registry(
         upload_registry=upload_registry,
         complete_registry=complete_registry,
         external_only=external_only,
+        community_namespaces=community_namespaces,
         external_registry_paths=external_registry_paths,
     )
 

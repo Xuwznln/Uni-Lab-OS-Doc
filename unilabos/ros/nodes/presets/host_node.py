@@ -27,11 +27,20 @@ from unilabos_msgs.srv import (
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
 from unique_identifier_msgs.msg import UUID
 
-from unilabos.registry.decorators import device, action, NodeType
-from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
+from unilabos.registry.decorators import device, action, NodeType, ActionInputHandle, ActionOutputHandle, DataSource
+from unilabos.registry.placeholder_type import (
+    ResourceSlot,
+    DeviceSlot,
+    PLACEHOLDER_DEVICES,
+    PLACEHOLDER_NODES,
+    PLACEHOLDER_MANUAL_CONFIRM,
+    PLACEHOLDER_DEDUCT_RESOURCE,
+    PLACEHOLDER_DEDUCT_REAGENT,
+)
 from unilabos.registry.registry import lab_registry
 from unilabos.resources.container import RegularContainer
 from unilabos.resources.graphio import initialize_resource
+from unilabos.resources.liquids import apply_substances
 from unilabos.resources.registry import add_schema
 from unilabos.resources.resource_tracker import (
     ResourceDict,
@@ -69,15 +78,21 @@ class DeviceActionStatus:
 
 
 class TestResourceReturn(TypedDict):
-    resources: List[List[ResourceDict]]
-    devices: List[Dict[str, Any]]
-    # unilabos_samples: List[LabSample]
+    resources: List[List[ResourceDictType]]
+    devices: List[DeviceSlot]
+    unilabos_samples: List[LabSample]
 
 
 class CreateResourceReturn(TypedDict):
-    created_resource_tree: List[List[ResourceDict]]
+    created_resource_tree: List[List[ResourceDictType]]
     liquid_input_resource_tree: List[Dict[str, Any]]
-    # unilabos_samples: List[LabSample]
+    unilabos_samples: List[LabSample]
+
+
+class DeductResourceReturn(CreateResourceReturn):
+    """apply_deduct_resource 返回值：在创建结果之外，额外输出实际挂载到的目标物料树。"""
+
+    mount_resource: List[List[ResourceDictType]]
 
 
 class TestLatencyReturn(TypedDict):
@@ -594,19 +609,9 @@ class HostNode(BaseROS2DeviceNode):
                 "z": bind_locations.z,
             },
         }
-        if len(liquid_input_slot) and liquid_input_slot[0] == -1:  # 目前container只逐个创建
-            res_creation_input.update(
-                {
-                    "data": {
-                        "liquids": [
-                            {
-                                "liquid_type": liquid_type[0] if liquid_type else None,
-                                "liquid_volume": liquid_volume[0] if liquid_volume else None,
-                            }
-                        ]
-                    }
-                }
-            )
+        # 注: 容器自身液体 (liquid_input_slot == [-1]) 不再通过 data.liquids 预埋
+        # （initialize_resource 仅按 class+name 重建，data 会被丢弃），统一由设备侧
+        # _append_resource_inner 在创建后通过 apply_substances 写入。
         init_new_res = initialize_resource(res_creation_input)  # flatten的格式
         if len(init_new_res) > 1:  # 一个物料，多个子节点
             init_new_res = [init_new_res]
@@ -1817,7 +1822,7 @@ class HostNode(BaseROS2DeviceNode):
         return res
 
     @action(always_free=True, node_type=NodeType.MANUAL_CONFIRM, placeholder_keys={
-        "assignee_user_ids": "unilabos_manual_confirm"
+        "assignee_user_ids": PLACEHOLDER_MANUAL_CONFIRM
     }, goal_default={
         "timeout_seconds": 3600,
         "assignee_user_ids": []
@@ -1828,6 +1833,241 @@ class HostNode(BaseROS2DeviceNode):
         修改的结果无效，是只读的
         """
         return kwargs
+
+    @action(
+        description="申请扣减物料并挂载（接收服务端已扣减的单个根物料，挂载到目标设备的目标物料上）",
+        always_free=True,
+        placeholder_keys={
+            "resource": PLACEHOLDER_DEDUCT_RESOURCE,
+            "device_id": PLACEHOLDER_DEVICES,
+            "mount_resource": PLACEHOLDER_NODES,
+        },
+        handles=[
+            ActionInputHandle(
+                key="device_id",
+                data_type="device_id",
+                label="目标设备",
+                data_key="device_id",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="挂载目标",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="labware",
+                data_type="resource",
+                label="物料创建结果",
+                data_key="created_resource_tree.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="挂载目标",
+                data_key="mount_resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    async def apply_deduct_resource(
+        self,
+        resource: ResourceSlot,
+        device_id: DeviceSlot,
+        mount_resource: ResourceSlot,
+        bind_locations: Point,
+        slot_on_deck: str = "",
+    ) -> DeductResourceReturn:
+        """
+        申请扣减物料并挂载到目标设备的目标物料上。
+
+        服务端已完成扣减并回传实际物料（resource，框架在 send_goal 已解析为单个 PLR 实例）；
+        本动作复用 create_resource_detailed → append_resource 流程，把该已存在物料挂载到所选
+        设备的挂载目标（mount_resource）上。
+
+        与 create_resource 的区别：资源不是按 class+name 新建，而是直接 dump 已扣减实例作为
+        挂载载荷（initialize_full=False，不重建）。
+
+        输出 handle：labware = 创建/挂载得到的物料树；mount_resource = 实际挂载到的目标物料树，
+        便于下游节点继续引用挂载位置。
+
+        Args:
+            resource[扣减物料]: 已扣减的单个根物料（前端用扣减选择器选择）。
+            device_id[目标设备]: 挂载到的边缘设备 id（可由图 handle 连入）。
+            mount_resource[挂载目标]: 实际挂载到的目标物料/父节点（名称用于边缘侧 figure_resource，可由图 handle 连入）。
+            bind_locations[挂载位置]: 挂载目标坐标系下的挂载坐标。
+            slot_on_deck[Deck槽位]: 挂载目标为 Deck 时按槽位挂载（可选）。
+        """
+        if resource is None:
+            raise ValueError("申请扣减失败：未接收到已扣减物料")
+        if getattr(resource, "unilabos_uuid", None) is None:
+            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 缺少 unilabos_uuid，无法挂载")
+        # 已存在的扣减物料：dump 现有实例作为挂载载荷（不重新 initialize），单根取 [0] 的扁平节点列表
+        dumped = ResourceTreeSet.from_plr_resources([resource]).dump()
+        if not dumped:
+            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 序列化为空，无法挂载")
+        flatten_nodes: List[Dict[str, Any]] = dumped[0]
+        barcode = flatten_nodes[0].get("barcode", "") if flatten_nodes else ""
+        mount_name = mount_resource.name if hasattr(mount_resource, "name") else str(mount_resource).split("/")[-1]
+        self.lab_logger().info(
+            f"[apply_deduct_resource] 挂载物料 name={getattr(resource, 'name', '')} "
+            f"barcode={barcode} -> device={device_id} mount_resource={mount_name}"
+        )
+        # 挂载坐标归一化：@action 路径可能传 dict，ROS 路径为 Point
+        if isinstance(bind_locations, dict):
+            point = Point(
+                x=float(bind_locations.get("x", 0.0)),
+                y=float(bind_locations.get("y", 0.0)),
+                z=float(bind_locations.get("z", 0.0)),
+            )
+        else:
+            point = bind_locations
+        other_calling_param = json.dumps({"initialize_full": False, "slot": slot_on_deck})
+        responses = await self.create_resource_detailed(
+            [flatten_nodes],
+            [str(device_id).split("/")[-1]],
+            [mount_name],
+            [point],
+            [other_calling_param],
+        )
+        assert len(responses) == 1, "apply_deduct_resource 应当只返回一个结果"
+        res = json.loads(responses[0])
+        if "suc" in res and not res["suc"]:
+            raise ValueError(res.get("error", "未知错误"))
+        # 额外输出实际挂载到的目标物料树，方便下游 handle 继续引用挂载位置
+        res["mount_resource"] = (
+            ResourceTreeSet.from_plr_resources([mount_resource]).dump()
+            if not isinstance(mount_resource, str)
+            else []
+        )
+        return res
+
+    @action(
+        description="设置物料内容物（液体/固体，默认单位 微升/微克）；接收单个物料，设置后输出",
+        always_free=True,
+        placeholder_keys={"resource": PLACEHOLDER_DEDUCT_REAGENT},
+        handles=[
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="目标物料",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="resource",
+                data_type="resource",
+                label="目标物料",
+                data_key="resource",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    async def set_substance(
+        self,
+        resource: ResourceSlot,
+        substance_names: List[str],
+        amounts: List[float],
+        slots: List[str] = [],
+        is_solid: List[bool] = [],
+    ) -> dict:
+        """
+        设置单个物料的内容物（液体或固体）。
+
+        接收的物料必须是单个，且为以下之一：
+        - container：直接设置在自身的 tracker 上；
+        - well（带标号的容器）：同样设置在自身；
+        - carrier / plate 带 container：按 slots 设置在对应子容器的 tracker 上（支持 tracker 输入）。
+
+        设置目标只有两种：物料自身，或物料下面 children 的孔位。由 slots 区分（空=自身）。
+        单位固定默认：固体=微克(ug)、液体=微升(ul)，由 is_solid 区分（unilab 定制 PLR 的
+        set_liquids 仅支持 ul/ug）。底层走 set_liquids 三元组 (名称, 量, 单位)。
+
+        Args:
+            resource[目标物料]: 单个物料（container / well / 带子容器的 carrier|plate）。
+            substance_names[物质名称]: 每个目标的物质名（液体名或固体名）。
+            amounts[用量]: 每个目标的用量（液体=体积/微升，固体=质量/微克）。
+            slots[子孔位]: 子孔位 id/索引；为空=设在物料自身，非空=设在对应子容器。
+            is_solid[是否固体]: 每个目标是否固体（可选，缺省按液体处理；决定单位 ug/ul）。
+        """
+        if resource is None:
+            raise ValueError("设置内容物失败：未接收到物料")
+        # 统一走 apply_substances：目标解析 + ug/ul 单位 + set_liquids 三元组
+        apply_substances(resource, substance_names, amounts, slots=slots, is_solid=is_solid)
+        # 同步整棵树到云端（含被修改的子孔位）
+        await self.update_resource([resource])
+        dumped = ResourceTreeSet.from_plr_resources([resource]).dump()
+        return {"resource": dumped[0] if dumped else []}
+
+    @action(
+        description="废弃台面物料（指定设备 + uuid：云端销毁并通知该设备本地移除）",
+        always_free=True,
+        placeholder_keys={
+            "resource": PLACEHOLDER_NODES,
+            "device_id": PLACEHOLDER_DEVICES,
+        },
+        handles=[
+            ActionInputHandle(
+                key="device_id",
+                data_type="device_id",
+                label="所属设备",
+                data_key="device_id",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="废弃物料",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+        ],
+    )
+    async def discard_resource(self, resource: ResourceSlot, device_id: DeviceSlot) -> dict:
+        """
+        废弃单个台面物料。
+
+        与 apply_deduct_resource 对称（扣减→挂载到设备 / 废弃→从设备移除并销毁）：接收单个
+        已存在物料（前端用节点选择器选择，或图 handle 传入，框架在 send_goal 已解析为 PLR
+        实例）与所属设备，先调用云端 POST /edge/material/bench/discard 执行销毁（实验室归属
+        由认证上下文确定），成功后再通知对应边缘设备本地移除该物料。物料被销毁后无图输出 handle。
+
+        说明：物料无法从实例反查所属设备（host 仅维护 device→namespace/在线状态，云端查询
+        with_children 也不含父链/设备），故设备需显式指定，与 apply_deduct_resource 对称。
+
+        Args:
+            resource[废弃物料]: 要废弃的单个台面物料（须带 unilabos_uuid）。
+            device_id[所属设备]: 物料所在的边缘设备 id（用于通知该设备本地移除）。
+        """
+        if resource is None:
+            raise ValueError("废弃失败：未接收到物料")
+        res_uuid = getattr(resource, "unilabos_uuid", None)
+        if res_uuid is None:
+            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 缺少 unilabos_uuid，无法废弃")
+        edge_id = str(device_id).split("/")[-1]
+        dumped = ResourceTreeSet.from_plr_resources([resource]).dump()
+        barcode = dumped[0][0].get("barcode", "") if dumped and dumped[0] else ""
+        self.lab_logger().info(
+            f"[discard_resource] 废弃物料 name={getattr(resource, 'name', '')} "
+            f"barcode={barcode} uuid={res_uuid} device={edge_id}"
+        )
+        from unilabos.app.web.client import http_client
+
+        res = http_client.material_bench_discard([res_uuid])
+        code = res.get("code") if isinstance(res, dict) else None
+        if code != 0:
+            raise ValueError(f"台面物料废弃失败：{res}")
+        # 云端销毁成功后，通知对应边缘设备本地移除（卸载父节点 + tracker 移除）
+        notified = self.notify_resource_tree_update(edge_id, "remove", [res_uuid])
+        if notified is not True:
+            self.lab_logger().warning(
+                f"[discard_resource] 云端已销毁 uuid={res_uuid}，但通知设备 {edge_id} 本地移除未成功"
+                f"（notified={notified}），边缘侧将于下次同步对齐"
+            )
+        return {"code": 0, "uuids": [res_uuid], "device_id": edge_id}
 
     def test_resource(
         self,

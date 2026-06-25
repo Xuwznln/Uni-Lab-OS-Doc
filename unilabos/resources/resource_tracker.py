@@ -121,6 +121,8 @@ class ResourceDictType(TypedDict):
     data: Dict[str, Any]
     extra: Dict[str, Any]
     machine_name: str
+    barcode: str
+    barcode_symbology: str
 
 
 # 统一的资源字典模型，parent 自动序列化为 parent_uuid，children 不序列化
@@ -143,6 +145,10 @@ class ResourceDict(BaseModel):
     data: Dict[str, Any] = Field(description="Resource data, eg: container liquid data")
     extra: Dict[str, Any] = Field(description="Extra data, eg: slot index")
     machine_name: str = Field(description="Machine this resource belongs to", default="")
+    # 由pylabrobot序列化到config，由 get_resource_instance_from_dict 统一提升到此根字段并移出 config
+    barcode: str = Field(description="Material barcode", default="")  #
+    # 条码码制（PLR Barcode.symbology，如 "Code 128"）；与 barcode 一同从 config 提升，回写时组装回 PLR Barcode dict
+    barcode_symbology: str = Field(description="Barcode symbology / 码制", default="")
 
     @field_serializer("parent_uuid")
     def _serialize_parent(self, parent_uuid: Optional["ResourceDict"]):
@@ -229,6 +235,18 @@ class ResourceDictInstance(object):
             content["data"] = {}
         if not content.get("extra"):  # MagicCode
             content["extra"] = {}
+        # 条码：老物料把 barcode 落在 config 中（PLR serialize 的位置），而根字段可能为空。
+        # 统一在此漏斗里提升到根字段并移出 config：根字段已有值则以根字段为准、仅清理 config。
+        # 原生 PLR Barcode 对象序列化为 {data, symbology, position_on_resource}：data→barcode、symbology→barcode_symbology
+        # （position_on_resource 不在 ResourceDict 保留）；自定义 Bottle 则 barcode 直接是字符串。
+        config_barcode = content["config"].pop("barcode", None)
+        if isinstance(config_barcode, dict):
+            if not content.get("barcode"):
+                content["barcode"] = config_barcode.get("data", "")
+            if not content.get("barcode_symbology"):
+                content["barcode_symbology"] = config_barcode.get("symbology", "")
+        elif config_barcode and not content.get("barcode"):
+            content["barcode"] = config_barcode
         if "position" in content:
             pose = content.get("pose", {})
             if "position" not in pose:
@@ -258,12 +276,17 @@ class ResourceDictInstance(object):
             raise err
 
     def get_plr_nested_dict(self) -> Dict[str, Any]:
-        """获取资源实例的嵌套字典表示"""
+        """获取资源实例的嵌套字典表示（barcode 对齐 PLR serialize 形式）"""
         res_dict = self.res_content.model_dump(by_alias=True)
         res_dict["children"] = {child.res_content.id: child.get_plr_nested_dict() for child in self.children}
         res_dict["parent"] = self.res_content.parent_instance_name
         res_dict["position"] = self.res_content.pose.position.model_dump()
         del res_dict["pose"]
+        barcode = res_dict.pop("barcode", "")
+        symbology = res_dict.pop("barcode_symbology", "")
+        res_dict["barcode"] = (
+            {"data": barcode, "symbology": symbology or "", "position_on_resource": "front"} if barcode else None
+        )
         return res_dict
 
 
@@ -596,8 +619,18 @@ class ResourceTreeSet(object):
             if res.type not in TYPE_MAP:
                 logger.warning(f"未知类型 {res.type}")
 
+            # 反序列化方向：把根字段 barcode/barcode_symbology 组装回 config 的 barcode
+            # （PLR Barcode dict {data, symbology, position_on_resource}），与
+            # get_resource_instance_from_dict 从 config 读取的逻辑对称；position 未保留，默认兜底。
+            config = dict(res.config)
+            if res.barcode:
+                config["barcode"] = {
+                    "data": res.barcode,
+                    "symbology": res.barcode_symbology or "",
+                    "position_on_resource": "front",
+                }
             d = {
-                **res.config,
+                **config,
                 "name": res.name,
                 "type": res.config.get("type", plr_type),
                 "size_x": res.pose.size.width,
@@ -917,7 +950,7 @@ class ResourceTreeSet(object):
 
         return self
 
-    def dump(self, old_position=False) -> List[List[Dict[str, Any]]]:
+    def dump(self, old_position=False) -> List[List[ResourceDictType]]:
         """
         将 ResourceTreeSet 序列化为嵌套列表格式
 

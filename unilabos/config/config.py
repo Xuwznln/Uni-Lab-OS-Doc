@@ -41,14 +41,17 @@ class BasicConfig:
 class WSConfig:
     reconnect_interval = 5  # 重连间隔（秒）
     max_reconnect_attempts = 999  # 最大重连次数
-    ping_interval = 5  # ping间隔（秒），对齐服务端 PingPeriod
-    ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
-    ready_timeout_extension = 20  # 每次断链/重连为 READY job 增加的宽限时间（秒）
+    # 注意：字段名带 ws_ 前缀，是为了让旧客户端遗留的 local_config 中旧字段(ping_interval/ping_timeout)失效，
+    # 从而强制采用下面的新默认值。请勿改回旧名。
+    ws_ping_interval = 5  # ping间隔（秒），对齐服务端 PingPeriod
+    ws_ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
 
 
 # HTTP配置
 class HTTPConfig:
     remote_addr = "https://leap-lab.bohrium.com/api/v1"
+    # schedule 通道（WebSocket）地址；为空时从 remote_addr 派生：带端口则 +1，否则沿用原 netloc
+    schedule_addr = ""
 
 
 # ROS配置

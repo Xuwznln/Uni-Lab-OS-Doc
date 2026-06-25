@@ -6,7 +6,7 @@ HTTP客户端模块
 import gzip
 import json
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from unilabos.utils.tools import fast_dumps as _fast_dumps, fast_dumps_pretty as _fast_dumps_pretty
 
@@ -174,6 +174,43 @@ class HTTPClient:
             logger.error(f"查询物料失败: {response.text}")
         return []
 
+    def material_bench_discard(self, uuids: List[str]) -> Dict[str, Any]:
+        """
+        台面物料废弃（Edge 端）
+
+        对应 POST /edge/material/bench/discard，按 uuid 销毁台面物料；实验室归属由认证
+        上下文确定，请求体不含 lab_uuid。
+
+        Args:
+            uuids: 台面物料 UUID 列表，1~100 个
+
+        Returns:
+            Dict: 服务端响应（成功为 {"code": 0}）；错误码 100002 节点不存在 / 100003 当前状态不允许
+        """
+        if not uuids:
+            raise ValueError("台面物料废弃失败：uuids 为空")
+        if len(uuids) > 100:
+            raise ValueError(f"台面物料废弃失败：一次最多 100 个 uuid，收到 {len(uuids)} 个")
+        payload = {"uuids": uuids}
+        work_dir = BasicConfig.working_dir
+        with open(os.path.join(work_dir, "req_material_bench_discard.json"), "w", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=4))
+        response = self._session.post(
+            f"{self.remote_addr}/edge/material/bench/discard",
+            json=payload,
+            headers={"Authorization": f"Lab {self.auth}"},
+            timeout=30,
+        )
+        with open(os.path.join(work_dir, "res_material_bench_discard.json"), "w", encoding="utf-8") as f:
+            f.write(f"{response.status_code}" + "\n" + response.text)
+        if response.status_code != 200:
+            logger.error(f"台面物料废弃失败: {response.status_code}, {response.text}")
+            return {"code": response.status_code, "message": response.text}
+        res = response.json()
+        if "code" in res and res["code"] != 0:
+            logger.error(f"台面物料废弃失败: {response.text}")
+        return res
+
     def resource_add(self, resources: List[Dict[str, Any]]) -> requests.Response:
         """
         添加资源
@@ -282,29 +319,43 @@ class HTTPClient:
             logger.error(f"添加物料失败: {response.text}")
         return response.json()
 
-    def upload_file(self, file_path: str, scene: str = "models") -> requests.Response:
-        """
-        上传文件到服务器
+    def upload_file_to_oss(self, file_path: str, scene: str = "models") -> Tuple[str, str]:
+        filename = os.path.basename(file_path)
+        # 归档为 tar.gz；Content-Type 必须与签发 token 时一致，否则 OSS V1 验签 403
+        content_type = "application/gzip"
+        token_resp = self._session.get(
+            f"{self.remote_addr}/lab/storage/token",
+            params={"scene": scene, "filename": filename, "content_type": content_type},
+            headers={"Authorization": f"Lab {self.auth}"},
+            timeout=30,
+        )
+        if token_resp.status_code != 200:
+            raise RuntimeError(f"获取存储 token 失败：{token_resp.status_code} {token_resp.text}")
 
-        使用multipart/form-data格式上传文件，类似curl -F "files=@filepath"
+        payload = token_resp.json()
+        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+        put_url = str(data.get("url") or "")
+        object_key = str(data.get("path") or "")
+        public_url = str(data.get("public_url") or "")
+        signed_content_type = str(data.get("content_type") or content_type)
+        if not put_url:
+            raise RuntimeError(f"存储 token 响应缺少预签名 url：{token_resp.text}")
 
-        Args:
-            file_path: 要上传的文件路径
-            scene: 上传场景，可选值为"user"或"models"，默认为"models"
-
-        Returns:
-            Response: API响应对象
-        """
         with open(file_path, "rb") as file:
-            files = {"files": file}
-            logger.info(f"上传文件: {file_path} 到 {scene}")
-            response = self._session.post(
-                f"{self.remote_addr}/api/account/file_upload/{scene}",
-                files=files,
-                headers={"Authorization": f"Lab {self.auth}"},
-                timeout=30,  # 上传文件可能需要更长的超时时间
-            )
-        return response
+            body = file.read()
+        logger.info(f"预签名直传 OSS: {file_path} -> {object_key or public_url}")
+        # 用裸 requests 直传，避免 session 默认的 Lab Authorization 头干扰 OSS URL 签名校验
+        put_resp = requests.put(
+            put_url,
+            data=body,
+            headers={"Content-Type": signed_content_type},
+            timeout=120,
+        )
+        if put_resp.status_code not in (200, 201):
+            raise RuntimeError(f"OSS 直传失败：{put_resp.status_code} {put_resp.text}")
+        return public_url, object_key
 
     def resource_registry(
         self, registry_data: Dict[str, Any] | List[Dict[str, Any]], tag: str = "registry",
@@ -360,6 +411,53 @@ class HTTPClient:
             res = response.json()
             if "code" in res and res["code"] != 0:
                 logger.error(f"注册资源失败: {response.text}")
+        return response
+
+    def upload_package_resources(
+        self,
+        resources: List[Dict[str, Any]],
+        package_info: Dict[str, Any],
+    ) -> requests.Response:
+        """
+        上传社区设备包的 resources（带顶层 package_info）到 /lab/resource。
+
+        与 resource_registry 同端点/同压缩方式，区别是请求体包一层
+        {"package_info": <顶层>, "resources": [...]}，让后端 resolvePackageInfo
+        将 package_info（含 class_namespace/download_url/sha256）落到每个设备模板。
+        """
+        body = {"package_info": package_info, "resources": resources}
+        json_bytes = _fast_dumps(body)
+
+        req_path = os.path.join(BasicConfig.working_dir, "req_package_upload.json")
+        try:
+            os.makedirs(BasicConfig.working_dir, exist_ok=True)
+            with open(req_path, "wb") as f:
+                f.write(_fast_dumps_pretty(body))
+        except Exception as e:
+            logger.warning(f"保存包上传请求数据失败: {e}")
+
+        compressed_body = gzip.compress(json_bytes)
+        headers = {
+            "Authorization": f"Lab {self.auth}",
+            "Content-Type": "application/json",
+            "Content-Encoding": "gzip",
+        }
+        response = self._session.post(
+            f"{self.remote_addr}/lab/resource",
+            data=compressed_body,
+            headers=headers,
+            timeout=60,
+        )
+
+        res_path = os.path.join(BasicConfig.working_dir, "res_package_upload.json")
+        try:
+            with open(res_path, "w", encoding="utf-8") as f:
+                f.write(f"{response.status_code}\n{response.text}")
+        except Exception as e:
+            logger.warning(f"保存包上传响应数据失败: {e}")
+
+        if response.status_code not in [200, 201]:
+            logger.error(f"上传社区设备包失败: {response.status_code}, {response.text}")
         return response
 
     def request_startup_json(self) -> Optional[Dict[str, Any]]:
