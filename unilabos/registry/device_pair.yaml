@@ -1,4 +1,29 @@
 pairs:
+  - real: incubator.liconic_stx110
+    virtual: virtual_liconic_stx110
+    engine: rviz
+    twin_capability:
+      enabled: true
+      observed: [carousel_angle, temperature, status]
+      throttle_hz: 5
+  # RMF AGV 专用配对（#17 §8.6 / #18 §6.2-(6)）：仅 fleet 移动机器人 + 被 rmf_coordinator
+  # 管理者生效，不影响机械臂/泵/阀。engine/applies_to 为前向过滤字段（PairRegistry 补齐
+  # 该过滤前，sim 模式下 agv.SEER→agv.RMFSim 只命中 SEER AGV，本身即安全；如需更严格的
+  # managed_by 过滤，请在 graph 直接写 agv.RMFSim 规避（#17 §8.2）。
+  - real: agv.SEER
+    virtual: agv.RMFSim
+    engine: rmf
+    twin_observed: [pose, status, battery]
+    twin_throttle_hz: 10
+    applies_to:
+      category: fleet_mobile_robot
+      managed_by: rmf_coordinator
+
+  # rmf.coordinator 自配对：sim 模式不 stub，直接跑真实设备（它本身是 OS 的 RMF 控制面，
+  # 含车队主 fleet_manager 控制层；不连真实硬件，sim 即可运行）。
+  - real: rmf.coordinator
+    virtual: rmf.coordinator
+
   - real: heaterstirrer.dalong
     virtual: virtual_heatchill
     twin_observed: [temperature, rpm, status]

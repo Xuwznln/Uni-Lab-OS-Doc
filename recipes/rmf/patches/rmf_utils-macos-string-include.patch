@@ -1,0 +1,12 @@
+diff --git a/rmf_utils/include/rmf_utils/Modular.hpp b/rmf_utils/include/rmf_utils/Modular.hpp
+index c994808..c208fb3 100644
+--- a/rmf_utils/include/rmf_utils/Modular.hpp
++++ b/rmf_utils/include/rmf_utils/Modular.hpp
+@@ -21,6 +21,7 @@
+ #include <stdexcept>
+ #include <limits>
+ #include <type_traits>
++#include <string>
+ 
+ namespace rmf_utils {
+ 

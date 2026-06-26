@@ -1,0 +1,16 @@
+incubator.liconic_stx110:
+  category:
+  - incubator
+  - storage
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.virtual.virtual_liconic_stx110:VirtualLiconicStx110
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: LiCONiC STX110 转盘式板存储孵育器（真实设备模板，用于 Plan 08 v2 仿真配对解析）。
+  handles: []
+  icon: ''
+  init_param_schema: {}
+  version: 1.0.0

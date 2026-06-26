@@ -1,0 +1,328 @@
+rmf.coordinator:
+  category:
+  - robot_agv
+  class:
+    action_value_mappings:
+      compile_map:
+        feedback: {}
+        goal:
+          force: force
+          scene_hash: scene_hash
+        goal_default:
+          force: false
+          scene_hash: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 编译发布版 Pascal scene 为 RMF building.yaml + semantic_map.json，产出 artifact 与诊断。
+          properties:
+            goal:
+              properties:
+                force:
+                  default: false
+                  type: boolean
+                scene_hash:
+                  default: ''
+                  type: string
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      start_runtime:
+        feedback: {}
+        goal:
+          artifact_id: artifact_id
+          mode: mode
+        goal_default:
+          artifact_id: ''
+          mode: sim
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 启动 RMF runtime（gateway + reporter），返回 session_id。
+          properties:
+            goal:
+              properties:
+                artifact_id:
+                  default: ''
+                  type: string
+                mode:
+                  default: sim
+                  type: string
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      stop_runtime:
+        feedback: {}
+        goal:
+          session_id: session_id
+        goal_default:
+          session_id: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 停止 RMF runtime。
+          properties:
+            goal:
+              properties:
+                session_id:
+                  default: ''
+                  type: string
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      dispatch_go_to:
+        feedback: {}
+        goal:
+          orientation_deg: orientation_deg
+          place: place
+          robot_name: robot_name
+        goal_default:
+          orientation_deg: null
+          place: ''
+          robot_name: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 下发 AGV 前往某 place（compose + go_to_place 信封 → task_api_requests）。
+          properties:
+            goal:
+              properties:
+                orientation_deg:
+                  type: number
+                place:
+                  type: string
+                robot_name:
+                  default: ''
+                  type: string
+              required:
+              - place
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      dispatch_delivery:
+        feedback: {}
+        goal:
+          dropoff: dropoff
+          dropoff_handler: dropoff_handler
+          pickup: pickup
+          pickup_handler: pickup_handler
+        goal_default:
+          dropoff: ''
+          dropoff_handler: ''
+          pickup: ''
+          pickup_handler: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 下发 pickup/dropoff 运输（delivery 信封）。
+          properties:
+            goal:
+              properties:
+                dropoff:
+                  type: string
+                dropoff_handler:
+                  type: string
+                pickup:
+                  type: string
+                pickup_handler:
+                  type: string
+              required:
+              - pickup
+              - dropoff
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      cancel_task:
+        feedback: {}
+        goal:
+          task_id: task_id
+        goal_default:
+          task_id: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 取消 RMF task。
+          properties:
+            goal:
+              properties:
+                task_id:
+                  type: string
+              required:
+              - task_id
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      query_runtime:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 查询当前 robot_states / task_states / diagnostics 快照。
+          properties:
+            goal:
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+    module: unilabos.devices.agv.rmf_coordinator:RmfCoordinator
+    status_types:
+      diagnostics: str
+      map_version: str
+      runtime_status: str
+      scene_hash: str
+      robot_states: str
+      task_states: str
+    type: python
+  config_info: []
+  description: RMF 调度域协调设备（rmf.coordinator）。图驱动启用 Open-RMF：编译发布版 Pascal scene 为 building.yaml/nav_graph/fleet config，启动并守护 RMF core（含只读 rmf-web api-server），下发 go_to/delivery/patrol task，采集 fleet/robot/door/lift 运行态并归一化批量上报。workflow 只能经本设备 action 调度 RMF，不得绕过 OS 直打 RMF。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties:
+        fleet_name:
+          type: string
+        lab_uuid:
+          type: string
+        map_source:
+          type: string
+      type: object
+    data:
+      properties: {}
+      type: object
+  version: 1.0.0
+agv.RMFSim:
+  category:
+  - robot_agv
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.agv.rmf_sim_agv:RMFSimAgv
+    status_types:
+      pose: list
+      status: str
+    type: python
+  config_info: []
+  description: RMF 仿真 AGV 虚拟驱动（agv.RMFSim）。不连真实硬件，pose/status 来自 RMF fake/sim fleet，由 rmf.coordinator 喂入。pose 经 push_joint_state 高频上报。属 AGV 调度域虚拟驱动（fleet_engine=rmf），不作为全局 sim_engine 解释。
+  driver_runtime_kind: virtual
+  virtual_driver_kind: engine_adapter
+  sim_engine: rmf
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties:
+        charger_waypoint:
+          type: string
+        fleet_name:
+          type: string
+        footprint_radius:
+          type: number
+        initial_waypoint:
+          type: string
+        robot_name:
+          type: string
+      type: object
+    data:
+      properties:
+        pose:
+          type: array
+        status:
+          type: string
+      type: object
+  version: 1.0.0
+agv.SEER_RMF:
+  category:
+  - robot_agv
+  class:
+    action_value_mappings:
+      go_to_waypoint:
+        feedback: {}
+        goal:
+          operator_confirmed: operator_confirmed
+          scene_hash: scene_hash
+          waypoint: waypoint
+        goal_default:
+          operator_confirmed: false
+          scene_hash: ''
+          waypoint: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 真实 AGV 安全下发：waypoint→SEER target id，经 allow_real_motion / scene_hash / 二次确认安全闸后调用 AgvNavigator.send_nav_task。
+          properties:
+            goal:
+              properties:
+                operator_confirmed:
+                  default: false
+                  type: boolean
+                scene_hash:
+                  default: ''
+                  type: string
+                waypoint:
+                  type: string
+              required:
+              - waypoint
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+    module: unilabos.devices.agv.rmf_seer_adapter:SeerRmfAdapter
+    status_types:
+      pose: list
+      status: str
+    type: python
+  config_info: []
+  description: 真实 SEER AGV 的 RMF adapter（agv.SEER_RMF）。复用 AgvNavigator，不重写 SEER 协议；将 RMF waypoint 映射为 SEER target id，命令下发前校验 scene_hash/target_map/安全开关。
+  driver_runtime_kind: real
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties:
+        allow_real_motion:
+          type: boolean
+        fleet_name:
+          type: string
+        host:
+          type: string
+        require_operator_confirm:
+          type: boolean
+        robot_name:
+          type: string
+        target_map:
+          type: object
+      required:
+      - host
+      type: object
+    data:
+      properties:
+        pose:
+          type: array
+        status:
+          type: string
+      type: object
+  version: 1.0.0

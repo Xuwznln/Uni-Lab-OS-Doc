@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "unit": "m",
+  "lab": {
+    "width": 10.0,
+    "height": 10.0,
+    "origin": [-1.0, -2.0]
+  },
+  "_meta": {
+    "source_scene": "layout_optimizer_mini"
+  }
+}

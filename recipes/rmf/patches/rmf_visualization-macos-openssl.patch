@@ -1,0 +1,20 @@
+diff --git a/rmf_visualization_schedule/CMakeLists.txt b/rmf_visualization_schedule/CMakeLists.txt
+index 036ae74..41e15b2 100644
+--- a/rmf_visualization_schedule/CMakeLists.txt
++++ b/rmf_visualization_schedule/CMakeLists.txt
+@@ -59,6 +59,15 @@ ament_target_dependencies(rmf_visualization_schedule
+     rmf_traffic_msgs
+ )
+ 
++# ament_target_dependencies(OpenSSL) does not reliably propagate the OpenSSL
++# imported targets on macOS, leaving jwt-cpp's libcrypto symbols (BIO_*, BN_*,
++# ECDSA_*) unresolved at link time. Link the imported targets explicitly.
++target_link_libraries(rmf_visualization_schedule
++  PUBLIC
++    OpenSSL::SSL
++    OpenSSL::Crypto
++)
++
+ target_include_directories(rmf_visualization_schedule
+   PUBLIC
+     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

@@ -29,6 +29,8 @@ class RuntimeContext:
     query_labutopia_assets: Optional[str] = None
     query_labutopia_config: Optional[str] = None
     query_labutopia_usd: Optional[str] = None
+    # RMF 调度域查询源（图驱动注入：rmf.coordinator 初始化时挂载，#18 §6.2-(5)）
+    rmf_live_source: Optional[object] = None
 
     def __post_init__(self) -> None:
         if self.mode not in ("real", "sim", "twin"):

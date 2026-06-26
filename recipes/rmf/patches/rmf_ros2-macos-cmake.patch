@@ -1,0 +1,50 @@
+diff --git a/rmf_fleet_adapter_python/CMakeLists.txt b/rmf_fleet_adapter_python/CMakeLists.txt
+index 914a737..8d47e5b 100644
+--- a/rmf_fleet_adapter_python/CMakeLists.txt
++++ b/rmf_fleet_adapter_python/CMakeLists.txt
+@@ -36,7 +36,7 @@ find_package(nlohmann_json REQUIRED)
+ find_package(pybind11_json_vendor REQUIRED)
+ find_package(pybind11_json REQUIRED)
+ 
+-pybind11_add_module(rmf_adapter SHARED
++pybind11_add_module(rmf_adapter MODULE
+   src/adapter.cpp
+   src/tests.cpp
+   src/types/types.cpp
+diff --git a/rmf_traffic_ros2/cmake/FindLibUUID.cmake b/rmf_traffic_ros2/cmake/FindLibUUID.cmake
+index 9bd1663..7dd35c7 100644
+--- a/rmf_traffic_ros2/cmake/FindLibUUID.cmake
++++ b/rmf_traffic_ros2/cmake/FindLibUUID.cmake
+@@ -52,6 +52,17 @@ if(CYGWIN)
+     NAMES cyguuid-1.dll
+     )
+   set(CMAKE_FIND_LIBRARY_SUFFIXES ${old_suffixes})
++elseif(APPLE)
++  # On macOS the uuid_* functions live in libSystem (always linked) and the
++  # canonical uuid/uuid.h ships in the SDK under usr/include. We pin both the
++  # library and the include dir to the SDK explicitly: the generic find_path
++  # below would otherwise resolve uuid/uuid.h inside Kernel.framework/Headers,
++  # adding that directory to the global include path and breaking libc++
++  # (e.g. "member 'nullptr_t' declared as a template").
++  set(LibUUID_LIBRARY "${CMAKE_OSX_SYSROOT}/usr/lib/libSystem.tbd"
++    CACHE FILEPATH "Path to LibUUID (libSystem on macOS)" FORCE)
++  set(LibUUID_INCLUDE_DIR "${CMAKE_OSX_SYSROOT}/usr/include"
++    CACHE PATH "Path to uuid/uuid.h (SDK usr/include on macOS)" FORCE)
+ else()
+   find_library(LibUUID_LIBRARY
+     NAMES uuid
+@@ -59,9 +70,11 @@ else()
+ endif()
+ mark_as_advanced(LibUUID_LIBRARY)
+ 
+-find_path(LibUUID_INCLUDE_DIR
+-  NAMES uuid/uuid.h
+-  )
++if(NOT APPLE)
++  find_path(LibUUID_INCLUDE_DIR
++    NAMES uuid/uuid.h
++    )
++endif()
+ mark_as_advanced(LibUUID_INCLUDE_DIR)
+ 
+ #-----------------------------------------------------------------------------
