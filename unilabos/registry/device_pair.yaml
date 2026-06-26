@@ -24,6 +24,11 @@ pairs:
   - real: rmf.coordinator
     virtual: rmf.coordinator
 
+  # agv.RMFSim 自配对：作为 OS 内部 mock 小车的独立 root 节点（#22 §0.1），sim 模式需直接运行
+  # （__init__ 起 /agv/* mock 服务）；无自配对会被 [sim] stubbing 掉、节点不上线。
+  - real: agv.RMFSim
+    virtual: agv.RMFSim
+
   - real: heaterstirrer.dalong
     virtual: virtual_heatchill
     twin_observed: [temperature, rpm, status]

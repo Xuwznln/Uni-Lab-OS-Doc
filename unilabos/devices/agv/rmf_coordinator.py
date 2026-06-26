@@ -22,6 +22,14 @@ except Exception:  # pragma: no cover
 
     logger = logging.getLogger("rmf.coordinator")
 
+# 本地 rmf-web api-server 开发态 stub JWT（与 scripts/rmf_os_read_tasks.py 一致）；
+# OS action 下发任务时用它 POST 本地 /tasks/dispatch_task（避开 rmf_task_msgs ROS ABI，#22 §3）。
+_DEFAULT_API_JWT = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJzdWIiOiJzdHViIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiYWRtaW4iLCJpYXQiOjE1MTYyMzkwMjIsImF1ZCI6InJtZl9hcGlfc2VydmVyIiwiaXNzIjoic3R1YiIsImV4cCI6MjA1MTIyMjQwMH0."
+    "zzX3zXp467ldkzmLVIadQ_AHr8M5uWVV43n4wEB0OhE"
+)
+
 
 class RmfCoordinator:
     def __init__(
@@ -182,10 +190,16 @@ class RmfCoordinator:
         return {"success": True}
 
     def dispatch_go_to(self, place: str = "", robot_name: str = "", orientation_deg: Optional[float] = None) -> Dict[str, Any]:
-        from unilabos.sim.fleet.rmf.task_dispatcher import build_go_to_request
+        """让 AGV 前往某黑点 `place`（如 `dock_96quench_0`）。
 
-        envelope = build_go_to_request(
-            place, orientation_deg, fleet=self.fleet_name if robot_name else None, robot=robot_name or None
+        用 patrol（单点 1 轮）实现——在本联调 RMF 下经实测可执行；compose 形式的 `go_to_place`
+        Place 校验失败（RMF `No submission: invalid data type for Place`），故走 patrol。
+        `robot_name` 为空 → dispatch（竞标，分配给车队的车）；指定则直发该车。
+        """
+        from unilabos.sim.fleet.rmf.task_dispatcher import build_patrol_request
+
+        envelope = build_patrol_request(
+            [place], 1, fleet=self.fleet_name if robot_name else None, robot=robot_name or None
         )
         return self._dispatch(envelope)
 
@@ -330,13 +344,38 @@ class RmfCoordinator:
             self._reporter.enqueue(event_type, payload)
         self._refresh_data()
 
+    def _rest_publish(self, json_msg: str, request_id: str) -> None:
+        """把任务信封经 REST 下发到本地 rmf-web api-server（#22 §3.2）——避开 rmf_task_msgs ROS ABI。
+
+        dispatch_task_request → POST /tasks/dispatch_task；robot_task_request → POST /tasks/robot_task。
+        """
+        import requests
+
+        api = str(self.config.get("api_url") or os.environ.get("RMF_API_URL") or "http://localhost:8000").rstrip("/")
+        token = str(self.config.get("api_token") or _DEFAULT_API_JWT)
+        envelope = json.loads(json_msg)
+        path = "/tasks/robot_task" if envelope.get("type") == "robot_task_request" else "/tasks/dispatch_task"
+        resp = requests.post(
+            f"{api}{path}",
+            data=json_msg,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        body = resp.json() if resp.content else {}
+        tid = ""
+        if isinstance(body, dict):
+            tid = str(((body.get("state") or {}).get("booking") or {}).get("id") or "")
+        logger.info(f"[rmf] OS action 下发 → RMF task_id={tid} (HTTP {resp.status_code}) via {api}{path} req={request_id}")
+        if resp.status_code != 200:
+            raise RuntimeError(f"dispatch HTTP {resp.status_code}: {str(body)[:200]}")
+
     def _dispatch(self, envelope: Dict[str, Any]) -> Dict[str, Any]:
         try:
             if self._dispatcher is None:
                 from unilabos.sim.fleet.rmf.task_dispatcher import RmfTaskDispatcher
 
-                # 未接线 ROS 时，用日志型 publish 兜底（离线/测试）
-                self._dispatcher = RmfTaskDispatcher(publish_fn=lambda j, r: logger.info(f"[rmf] task_api_requests <- {r}: {j}"))
+                # OS action → RMF：经本地 api-server REST 真正下发（非 log-only，#22 §3.2-a）
+                self._dispatcher = RmfTaskDispatcher(publish_fn=self._rest_publish)
             rid = self._dispatcher.dispatch(envelope)
             return {"success": True, "task_id": rid}
         except Exception as e:  # noqa: BLE001
