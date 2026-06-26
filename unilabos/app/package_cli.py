@@ -233,6 +233,40 @@ def _json_schema_type(py_type: str) -> str:
     return _PY_TO_JSON_SCHEMA_TYPE.get(base, "string")
 
 
+def build_json_schema_from_params(params: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """把 AST 扫描出的函数参数列表转换为前端表单使用的 JSON Schema。"""
+    props: Dict[str, Any] = {}
+    required: List[str] = []
+    for param in params:
+        if not isinstance(param, dict):
+            continue
+        name = str(param.get("name") or "").strip()
+        if not name:
+            continue
+        props[name] = {
+            "type": _json_schema_type(str(param.get("type", ""))),
+            "title": name,
+        }
+        if param.get("required"):
+            required.append(name)
+    schema: Dict[str, Any] = {"type": "object", "properties": props}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def build_goal_default(params: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """提取参数默认值，供 action goal_default 使用。"""
+    defaults: Dict[str, Any] = {}
+    for param in params:
+        if not isinstance(param, dict):
+            continue
+        name = str(param.get("name") or "").strip()
+        if name and param.get("default") is not None:
+            defaults[name] = param.get("default")
+    return defaults
+
+
 def build_action_value_mappings(actions: Dict[str, Any]) -> Dict[str, Any]:
     """把 AST 扫描的原始 action（params/return_type）转换成前后端期望的
     """
@@ -241,39 +275,66 @@ def build_action_value_mappings(actions: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(meta, dict):
             continue
         params = meta.get("params") if isinstance(meta.get("params"), list) else []
-        goal_props: Dict[str, Any] = {}
-        required: List[str] = []
-        goal_default: Dict[str, Any] = {}
-        for param in params:
-            if not isinstance(param, dict):
-                continue
-            pname = str(param.get("name") or "").strip()
-            if not pname:
-                continue
-            goal_props[pname] = {"type": _json_schema_type(str(param.get("type", ""))), "title": pname}
-            if param.get("required"):
-                required.append(pname)
-            if param.get("default") is not None:
-                goal_default[pname] = param.get("default")
-        goal_schema: Dict[str, Any] = {"type": "object", "properties": goal_props}
-        if required:
-            goal_schema["required"] = required
+        goal_schema = build_json_schema_from_params(params)
+        goal_default = build_goal_default(params)
         action_args = meta.get("action_args") if isinstance(meta.get("action_args"), dict) else {}
         action_type_raw = action_args.get("action_type")
-        action_type = "UniLabJsonCommand"
+        action_type = "UniLabJsonCommandAsync" if meta.get("is_async") else "UniLabJsonCommand"
         if isinstance(action_type_raw, str) and action_type_raw.strip():
             action_type = action_type_raw.strip().split(":")[-1].split(".")[-1]
+        description = action_args.get("description") or meta.get("docstring") or ""
         entry: Dict[str, Any] = {
             "type": action_type,
             "goal": goal_schema,
             "result": {"type": "object", "properties": {}},
             "feedback": {"type": "object", "properties": {}},
-            "description": str(meta.get("docstring") or action_args.get("description") or ""),
+            "description": str(description),
         }
         if goal_default:
             entry["goal_default"] = goal_default
+        for key in ("placeholder_keys", "always_free", "node_type"):
+            if action_args.get(key):
+                entry[key] = action_args[key]
         result[name] = entry
     return result
+
+
+def build_status_types(status_props: Dict[str, Any]) -> Dict[str, str]:
+    """把 AST topic/status 元数据压成 registry 期望的 name -> return_type。"""
+    result: Dict[str, str] = {}
+    for name, meta in status_props.items():
+        if isinstance(meta, dict):
+            result[str(name)] = str(meta.get("return_type") or meta.get("type") or "Any")
+        else:
+            result[str(name)] = str(meta or "Any")
+    return result
+
+
+def build_init_param_schema(meta: Dict[str, Any], status_types: Dict[str, str]) -> Dict[str, Any]:
+    """根据 __init__ 参数和 status/topic 输出生成模板 init_param_schema。"""
+    init_params = meta.get("init_params") if isinstance(meta.get("init_params"), list) else []
+    data_schema: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}
+    for name, type_name in status_types.items():
+        data_schema["properties"][name] = {
+            "type": _json_schema_type(type_name),
+            "title": name,
+        }
+        data_schema["required"].append(name)
+    return {
+        "config": build_json_schema_from_params(init_params),
+        "data": data_schema,
+    }
+
+
+def _copy_model_if_present(target: Dict[str, Any], model: Any) -> None:
+    """透传 @device(model=...)，但跳过 None，避免上传 null 覆盖已有模型。"""
+    if model is not None:
+        target["model"] = model
+
+
+def _registry_displayname(device_id: str, entry: Dict[str, Any]) -> str:
+    """YAML registry 使用 canonical displayname，兼容旧 display_name。"""
+    return str(entry.get("displayname") or entry.get("display_name") or device_id)
 
 
 def build_resources(devices: Dict[str, Dict[str, Any]], package_info: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -283,14 +344,17 @@ def build_resources(devices: Dict[str, Dict[str, Any]], package_info: Dict[str, 
         actions = meta.get("actions") if isinstance(meta.get("actions"), dict) else {}
         action_value_mappings = build_action_value_mappings(actions)
         status_props = meta.get("status_properties") if isinstance(meta.get("status_properties"), dict) else {}
+        status_types = build_status_types(status_props)
         handles = meta.get("handles") if isinstance(meta.get("handles"), list) else []
 
         reg_class = {
             "module": meta.get("module", ""),
             "type": meta.get("device_type", "python"),
             "action_value_mappings": action_value_mappings,
-            "status_types": status_props,
+            "status_types": status_types,
         }
+        model = meta.get("model")
+        init_param_schema = build_init_param_schema(meta, status_types)
         # source_registry：保存设备原始注册表，供后端 BuildEffectiveTemplate 读取 class.action_value_mappings
         source_registry = {
             "class": reg_class,
@@ -300,23 +364,26 @@ def build_resources(devices: Dict[str, Dict[str, Any]], package_info: Dict[str, 
             "description": meta.get("description", ""),
             "displayname": meta.get("displayname") or device_id,
             "icon": meta.get("icon", ""),
+            "init_param_schema": init_param_schema,
         }
+        _copy_model_if_present(source_registry, model)
         category = meta.get("category") if isinstance(meta.get("category"), list) else []
-        resources.append(
-            {
-                "id": device_id,
-                "registry_type": "device",
-                "version": meta.get("version", package_info.get("version", "0.0.1")),
-                "description": meta.get("description", ""),
-                "displayname": meta.get("displayname") or device_id,
-                "icon": meta.get("icon", ""),
-                "class": reg_class,
-                "category": category,
-                "handles": _map_handles(handles),
-                "package_info": package_info,
-                "source_registry": source_registry,
-            }
-        )
+        resource_entry = {
+            "id": device_id,
+            "registry_type": "device",
+            "version": meta.get("version", package_info.get("version", "0.0.1")),
+            "description": meta.get("description", ""),
+            "displayname": meta.get("displayname") or device_id,
+            "icon": meta.get("icon", ""),
+            "class": reg_class,
+            "category": category,
+            "handles": _map_handles(handles),
+            "package_info": package_info,
+            "source_registry": source_registry,
+            "init_param_schema": init_param_schema,
+        }
+        _copy_model_if_present(resource_entry, model)
+        resources.append(resource_entry)
     return resources
 
 
@@ -336,11 +403,15 @@ def build_resources_from_registry(
         category = entry.get("category") or entry.get("tags") or []
         if isinstance(category, str):
             category = [category]
+        displayname = _registry_displayname(device_id, entry)
+        source_registry = dict(entry)
+        source_registry["displayname"] = displayname
         resource: Dict[str, Any] = {
             "id": device_id,
             "registry_type": str(entry.get("resource_type", "device")),
             "version": str(entry.get("version", package_info.get("version", "0.0.1"))),
             "description": entry.get("description", ""),
+            "displayname": displayname,
             "icon": entry.get("icon", ""),
             "class": {
                 "module": cls.get("module", ""),
@@ -356,7 +427,7 @@ def build_resources_from_registry(
             "device_params": entry.get("device_params"),
             "package_info": package_info,
             # source_registry：直接保存 YAML 原始条目（含 class.action_value_mappings）
-            "source_registry": entry,
+            "source_registry": source_registry,
         }
         if init_schema is not None:
             resource["init_param_schema"] = init_schema

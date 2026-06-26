@@ -648,7 +648,7 @@ class HTTPClient:
         return None
 
     def publish_model(
-        self, template_uuid: str, version: str, entry_file: str,
+        self, template_uuid: str, version: str, entry_file: str, encrypted: bool = False,
     ) -> dict | None:
         """确认模型上传完成，发布新版本。
 
@@ -656,6 +656,8 @@ class HTTPClient:
             template_uuid: 设备模板 UUID
             version: 模型版本
             entry_file: 入口文件名
+            encrypted: mesh 是否 XOR 加密上传 — true 时后端渲染强制走 /lab/model/proxy 自动解密；
+                       缺失/false 走 presigned 明文（与前端 useDeviceModelUpload 一致）
 
         Returns:
             {"path": "...", "oss_dir": "...", "version": "..."}
@@ -663,7 +665,7 @@ class HTTPClient:
         try:
             response = requests.post(
                 f"{self.remote_addr}/lab/square/template/{template_uuid}/model/publish",
-                json={"version": version, "entry_file": entry_file},
+                json={"version": version, "entry_file": entry_file, "encrypted": encrypted},
                 headers={"Authorization": f"Lab {self.auth}"},
                 timeout=30,
             )
@@ -673,6 +675,27 @@ class HTTPClient:
             logger.error(f"发布模型失败: {response.status_code}, {response.text}")
         except Exception as e:
             logger.error(f"发布模型异常: {e}")
+        return None
+
+    def update_template_model(
+        self, template_uuid: str, model: dict,
+    ) -> dict | None:
+        """更新设备模板的 model JSONB（如 {"format": "xacro"}）。
+
+        对齐前端 updateTemplateModel：PUT /lab/square/template/{uuid}/model
+        """
+        try:
+            response = requests.put(
+                f"{self.remote_addr}/lab/square/template/{template_uuid}/model",
+                json=model,
+                headers={"Authorization": f"Lab {self.auth}"},
+                timeout=30,
+            )
+            if response.status_code == 200:
+                return response.json().get("data")
+            logger.error(f"更新模板 model 失败: {response.status_code}, {response.text}")
+        except Exception as e:
+            logger.error(f"更新模板 model 异常: {e}")
         return None
 
 

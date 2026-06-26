@@ -82,6 +82,7 @@ self.warehouses = {
 - **尺寸单位为 mm**：`diameter`, `height`, `size_x/y/z`, `dx/dy/dz`
 - **BottleCarrier 必须设置 `num_items_x/y/z`**：用于前端渲染布局
 - **Deck 的 `__init__` 必须接受 `setup=False`**：图文件中 `config.setup=true` 触发 `setup()`
+- **类形式（class）的资源必须被实际 import**：运行时解析通过 `find_subclass(type_name, PLRResource)` 查找，它只遍历**已经 import** 的 `__subclasses__()`。AST 扫描只生成注册表条目，**不会** import 模块。因此 `class` 形式的 Deck / WareHouse / Plate 等，必须保证其模块在设备加载时被导入——最稳妥的做法是在 `resources/__init__.py` 中 eager import（见下方“类资源未导入”陷阱）。工厂函数（`def`）形式不受影响，因为它们返回的是 PLR 内置基类实例。
 - **按项目分组文件**：同一工作站的资源放在 `unilabos/resources/<project>/` 下
 - **`__init__` 必须接受 `serialize()` 输出的所有字段**：`serialize()` 输出会作为 `config` 回传到 `__init__`，因此必须通过显式参数或 `**kwargs` 接受，否则反序列化会报错
 - **持久化运行时状态用 `serialize_state()`**：通过 `_unilabos_state` 字典存储可变信息（如物料内容、液体量），只存 JSON 可序列化的基本类型
@@ -338,6 +339,46 @@ unilab -g <graph>.json
 ```
 
 仅在以下情况仍需 YAML：第三方库资源（如 pylabrobot 内置资源，无 `@resource` 装饰器）。
+
+---
+
+## 常见陷阱
+
+### 类资源未导入 → `find_subclass` 返回 None
+
+**症状**（启动日志）：
+
+```
+ERROR 转换 PLR 资源失败: 无法找到类型 <YourDeck> 对应的 PLR 资源类
+WARNING 无法导入资源类型 <module>:<YourDeck>: 无法找到类型 ...
+ERROR PyLabRobot创建实例失败: Deck.__init__() got an unexpected keyword argument 'data'
+ERROR PyLabRobot反序列化失败: 'ResourceDictInstance' object has no attribute 'copy'
+ERROR ❌ Deck 配置为空，请检查配置文件中的 deck 参数
+ValueError: Deck 配置不能为空，请在配置文件中添加正确的 deck 配置
+```
+
+**根因**：`ResourceTreeSet.to_plr_resources()` 用 `find_subclass(type_name, PLRResource)` 解析类，而它只遍历**已 import** 的 `__subclasses__()`。AST 扫描注册了条目但**不 import 模块**，图文件里记录的 `_resource_type` 路径也不会被用来主动 import。于是 `find_subclass` 返回 `None`，随后退化到 `Deck.deserialize` / `Deck(**kwargs)` 全部失败，最终 deck 为空、工作站 `__init__` 报错。
+
+> 只有 deck/某个 class 资源报错、其它 labware 正常时，几乎一定是这个原因——正常的那些类恰好被设备模块 import 链带进来了，报错的那个没有。
+
+**修复**：在 `resources/__init__.py` 中 eager import 所有 `class` 形式的资源（Deck / WareHouse / 自定义 Plate 等），确保设备模块加载时它们已注册为 PLR 子类：
+
+```python
+# resources/__init__.py
+from .warehouses import MyStation_WareHouse  # noqa: F401
+from .decks import MyStation_Deck            # noqa: F401
+```
+
+只要设备模块（或其 import 链）触及该 `resources` 包，`__init__.py` 就会执行，类即被加载。
+
+**验证**：用设备的运行时 import 路径确认能解析到类，而不仅仅是直接 import 该模块：
+
+```python
+from pylabrobot.utils.object_parsing import find_subclass
+from pylabrobot.resources import Resource as PLRResource
+import my_project.my_device  # 设备模块——和运行时一致的入口
+assert find_subclass("MyStation_Deck", PLRResource) is not None
+```
 
 ---
 
