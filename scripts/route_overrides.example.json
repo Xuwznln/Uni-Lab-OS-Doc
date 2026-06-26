@@ -1,0 +1,12 @@
+{
+  "_comment": "最小路线编辑示例（#21 §7.0 入口 B）。按 waypoint 名引用：nav_<coarse_graph 节点 id> / wp_<设备 slug>。配 scene_2026-06-16_with_turn 使用。",
+  "disableLanes": [
+    ["nav_0", "nav_17"]
+  ],
+  "setSpeedLimit": [
+    { "v1": "nav_1", "v2": "nav_18", "speedLimit": 0.2 }
+  ],
+  "addLanes": [
+    { "v1": "nav_0", "v2": "nav_34", "bidirectional": true, "speedLimit": 0.4 }
+  ]
+}

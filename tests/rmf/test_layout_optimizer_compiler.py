@@ -84,6 +84,58 @@ def test_delivery_envelope_window():
     assert len(envs) == 1
 
 
+def _mini_ir(route_overrides=None):
+    from unilabos.sim.fleet.rmf.compiler.layout_optimizer_to_rmf_ir import build_layout_optimizer_rmf_ir
+
+    artifacts = load_layout_optimizer_dir(FIXTURE_MINI)
+    return build_layout_optimizer_rmf_ir(artifacts, lab_uuid="lab-test", route_overrides=route_overrides)
+
+
+def test_route_override_disable_lane():
+    base_lanes = len(_mini_ir().levels[0].lanes)
+    ir = _mini_ir({"disableLanes": [["nav_0", "nav_1"]]})
+    level = ir.levels[0]
+    assert len(level.lanes) == base_lanes - 1
+    i0, i1 = level.index_of("nav_0"), level.index_of("nav_1")
+    assert not any({ln.v1, ln.v2} == {i0, i1} for ln in level.lanes)
+    assert any(d.code == "route_override_applied" for d in ir.diagnostics)
+
+
+def test_route_override_add_and_set_speed():
+    base = _mini_ir()
+    wp_names = [v.name for v in base.levels[0].vertices if v.name.startswith("wp_")]
+    assert len(wp_names) == 2
+    overrides = {
+        "addLanes": [{"v1": wp_names[0], "v2": wp_names[1], "bidirectional": True, "speedLimit": 0.3}],
+        "setSpeedLimit": [{"v1": "nav_0", "v2": "nav_1", "speedLimit": 0.15}],
+    }
+    ir = _mini_ir(overrides)
+    level = ir.levels[0]
+    assert len(level.lanes) == len(base.levels[0].lanes) + 1
+    ia, ib = level.index_of(wp_names[0]), level.index_of(wp_names[1])
+    added = next(ln for ln in level.lanes if {ln.v1, ln.v2} == {ia, ib})
+    assert abs(added.speed_limit - 0.3) < 1e-9
+    i0, i1 = level.index_of("nav_0"), level.index_of("nav_1")
+    nav_lane = next(ln for ln in level.lanes if {ln.v1, ln.v2} == {i0, i1})
+    assert abs(nav_lane.speed_limit - 0.15) < 1e-9
+
+
+def test_route_override_unknown_waypoint_warns():
+    ir = _mini_ir({"disableLanes": [["nav_999", "nav_0"]]})
+    assert any(d.code == "route_override_unknown_waypoint" for d in ir.diagnostics)
+
+
+def test_compile_layout_optimizer_dir_with_route_overrides():
+    ir, building, _semantic, _plan = compile_layout_optimizer_dir(
+        FIXTURE_MINI,
+        lab_uuid="lab-test",
+        route_overrides={"disableLanes": [["nav_0", "nav_1"]]},
+    )
+    assert any(d["code"] == "route_override_applied" for d in ir.diagnostics_as_dicts())
+    assert not ir.has_errors()
+    assert len(building["levels"]["L1"]["lanes"]) == 0
+
+
 @pytest.mark.skipif(not EXAMPLE_SCENE.is_dir(), reason="monorepo 示例目录不可用")
 def test_compile_real_example_scene():
     ir, building, semantic, plan = compile_layout_optimizer_dir(

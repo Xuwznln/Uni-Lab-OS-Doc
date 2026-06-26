@@ -39,7 +39,9 @@ class RmfCoordinator:
         self.fleet_name = fleet_name
         self.map_source = map_source
         self.generated_map_dir = generated_map_dir
-        self.config = config or {}
+        # graph 节点 config 的额外键经 **kwargs 传入（框架把 driver_params 展开为 kwargs），
+        # 合并进 self.config，使 fleet_manager_port / edge_url / robots 等可读。
+        self.config = {**(config or {}), **kwargs}
         self.data: Dict[str, Any] = {}
 
         # 运行态缓存（status_types 暴露）
@@ -60,6 +62,11 @@ class RmfCoordinator:
         self._last_semantic: Optional[Dict[str, Any]] = None
         self._last_transfer_plan: Optional[Dict[str, Any]] = None
 
+        # 车队主控制层（#18 §10.4）：OS 即 fleet owner，接收 RMF fleet_adapter 指令并驱动 AGV 硬件。
+        # 框架不调用 async initialize()，故在 __init__（构造时必执行）直接启动。
+        self._fleet_manager = None  # EdgeFleetManager
+        self._start_fleet_manager()
+
     async def initialize(self) -> bool:
         self._refresh_data()
         # 图驱动接线：把本设备的 RmfLiveSource 挂到 runtime context，供 query API 注册
@@ -72,9 +79,17 @@ class RmfCoordinator:
                 ctx.rmf_live_source = self.get_live_source()
         except Exception:  # noqa: BLE001
             pass
+        # 兜底：若框架未在 __init__ 后保留实例，这里再确保车队主在跑（幂等）
+        self._start_fleet_manager()
         return True
 
     async def cleanup(self) -> bool:
+        if self._fleet_manager is not None:
+            try:
+                self._fleet_manager.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._fleet_manager = None
         try:
             self.stop_runtime()
         except Exception:  # noqa: BLE001
@@ -89,8 +104,12 @@ class RmfCoordinator:
         scene_hash: str = "",
         force: bool = False,
         layout_optimizer_dir: Optional[str] = None,
+        route_overrides: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """编译发布版 scene 或 layout-optimizer 目录 → building.yaml + semantic_map.json + 诊断（#18 §4.1 / §9）。"""
+        """编译发布版 scene 或 layout-optimizer 目录 → building.yaml + semantic_map.json + 诊断（#18 §4.1 / §9）。
+
+        `route_overrides`：可选的最小路线编辑（#21 §7.0 入口 B），仅 layout-optimizer 路径生效。
+        """
         from unilabos.sim.fleet.rmf.compiler import compile_layout_optimizer_dir, compile_scene
 
         transfer_plan: Optional[Dict[str, Any]] = None
@@ -100,6 +119,7 @@ class RmfCoordinator:
                 robots,
                 lab_uuid=self.lab_uuid,
                 scene_hash=scene_hash or self._scene_hash,
+                route_overrides=route_overrides,
             )
         else:
             if scene is None:
@@ -189,10 +209,19 @@ class RmfCoordinator:
 
     def query_runtime(self) -> Dict[str, Any]:
         return {
-            "robot_states": list(self._robot_states.values()),
+            "robot_states": self._current_robot_states(),
             "task_states": list(self._task_states.values()),
             "diagnostics": self._diagnostics,
         }
+
+    def _current_robot_states(self) -> List[Dict[str, Any]]:
+        """优先取车队主控制层缓存的真实小车状态（OS 驱动的 mock AGV），否则取事件缓存。"""
+        if self._fleet_manager is not None:
+            try:
+                return self._fleet_manager.robot_states()
+            except Exception:  # noqa: BLE001
+                pass
+        return list(self._robot_states.values())
 
     # ============================================================ status_types
     @property
@@ -210,7 +239,7 @@ class RmfCoordinator:
     @property
     def robot_states(self) -> str:
         # 非标量 → 以 JSON str 暴露，规避 property_callback 标量限制（#18 §1.5/§4.4）
-        return json.dumps(list(self._robot_states.values()), ensure_ascii=False)
+        return json.dumps(self._current_robot_states(), ensure_ascii=False)
 
     @property
     def task_states(self) -> str:
@@ -228,6 +257,59 @@ class RmfCoordinator:
 
             self._live_source = RmfLiveSource()
         return self._live_source
+
+    # ============================================================ 车队主控制层（OS 接 RMF 指令 → 驱动小车）
+    def _start_fleet_manager(self) -> None:
+        """启动 OS 车队主：监听 RMF fleet_adapter 指令并驱动 mock AGV 硬件（#18 §10.4）。
+
+        config（来自 graph 节点 config）：
+          - fleet_manager_port：= fleet_config.rmf_fleet.fleet_manager.port（默认 22011）
+          - edge_url：mock AGV 硬件 HTTP 地址（默认 http://127.0.0.1:8090）
+          - robots：机器人名列表（默认 [fleet 的单车 unilab_agv1]）
+          - fleet_manager_host / nominal_velocity：可选
+        config.enable_fleet_manager=false 可关闭（纯调度、不接管小车）。
+        """
+        if str(self.config.get("enable_fleet_manager", True)).lower() in ("0", "false", "no"):
+            return
+        if self._fleet_manager is not None:
+            return
+        try:
+            from unilabos.sim.fleet.rmf.edge.fleet_manager_http import EdgeFleetManager
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[rmf] 车队主控制层不可用（导入失败）: {e}")
+            return
+
+        host = str(self.config.get("fleet_manager_host") or "127.0.0.1")
+        port = int(self.config.get("fleet_manager_port") or 22011)
+        edge_url = str(self.config.get("edge_url") or os.environ.get("RMF_EDGE_URL") or "http://127.0.0.1:8090")
+        robots = self.config.get("robots") or [self.config.get("robot_name") or "unilab_agv1"]
+        if isinstance(robots, str):
+            robots = [robots]
+        nominal_v = float(self.config.get("nominal_velocity") or 0.5)
+
+        def _os_log(msg: str, level: str = "info") -> None:
+            getattr(logger, level, logger.info)(msg)
+
+        try:
+            self._fleet_manager = EdgeFleetManager(
+                edge_url=edge_url,
+                robot_names=list(robots),
+                nominal_velocity=nominal_v,
+                log=_os_log,
+            )
+            self._fleet_manager.start(host, port)
+            logger.info(
+                f"[rmf] OS 车队主上线：RMF 指令 → 本 OS（{host}:{port}）→ 驱动小车 {edge_url}；"
+                f"robots={list(robots)}（OS 即 fleet owner，#18 §10.4）"
+            )
+        except OSError as e:
+            logger.warning(
+                f"[rmf] 车队主监听 {host}:{port} 失败（端口被占？是否已有 fleet_manager 在跑）: {e}"
+            )
+            self._fleet_manager = None
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[rmf] 车队主启动失败: {e}")
+            self._fleet_manager = None
 
     # ============================================================ internals
     def _on_event(self, event_type: str, payload: Dict[str, Any]) -> None:

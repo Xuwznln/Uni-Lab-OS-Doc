@@ -7,6 +7,8 @@ nav_graph 不在此生成——它是 RMF 官方 CLI `building_map_generator nav
 from __future__ import annotations
 
 from unilabos.sim.fleet.rmf.compiler.layout_optimizer_to_rmf_ir import (
+    apply_route_overrides,
+    build_ir_from_agv_routes,
     build_layout_optimizer_rmf_ir,
     merge_transfer_plan_into_semantic,
 )
@@ -21,6 +23,8 @@ from unilabos.sim.fleet.rmf.layout_optimizer.transfer_plan_builder import build_
 __all__ = [
     "build_rmf_map_ir",
     "build_layout_optimizer_rmf_ir",
+    "build_ir_from_agv_routes",
+    "apply_route_overrides",
     "validate_ir",
     "build_building_dict",
     "dump_building_yaml",
@@ -53,9 +57,13 @@ def compile_layout_optimizer_dir(
     scene_hash: str = "",
     include_coarse_nav: bool = True,
     snap_devices_to_nav: bool = True,
+    route_overrides=None,
     **kwargs,
 ):
-    """layout-optimizer 输出目录 → (RmfMapIR, building_dict, semantic_map_dict, transfer_plan)。"""
+    """layout-optimizer 输出目录 → (RmfMapIR, building_dict, semantic_map_dict, transfer_plan)。
+
+    `route_overrides`：可选的最小路线编辑（#21 §7.0 入口 B），形状见 `apply_route_overrides`。
+    """
     artifacts = load_layout_optimizer_dir(directory)
     transfer_plan = build_transfer_plan(artifacts)
     ir = build_layout_optimizer_rmf_ir(
@@ -64,6 +72,7 @@ def compile_layout_optimizer_dir(
         scene_hash=scene_hash,
         include_coarse_nav=include_coarse_nav,
         snap_devices_to_nav=snap_devices_to_nav,
+        route_overrides=route_overrides,
         **kwargs,
     )
     if robots:

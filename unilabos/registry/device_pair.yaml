@@ -19,6 +19,11 @@ pairs:
       category: fleet_mobile_robot
       managed_by: rmf_coordinator
 
+  # rmf.coordinator 自配对：sim 模式不 stub，直接跑真实设备（它本身是 OS 的 RMF 控制面，
+  # 含车队主 fleet_manager 控制层；不连真实硬件，sim 即可运行）。
+  - real: rmf.coordinator
+    virtual: rmf.coordinator
+
   - real: heaterstirrer.dalong
     virtual: virtual_heatchill
     twin_observed: [temperature, rpm, status]
