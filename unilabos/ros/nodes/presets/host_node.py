@@ -94,6 +94,22 @@ class DeductResourceReturn(CreateResourceReturn):
     mount_resource: List[List[ResourceDictType]]
 
 
+class TransferResourceReturn(TypedDict):
+    """transfer_resource 返回值：透传被转移物料与目标孔位，便于下游引用。"""
+
+    resource: List[List[ResourceDictType]]
+    mount_resource: List[List[ResourceDictType]]
+    result: Any
+
+
+class TransferManualReturn(TypedDict):
+    """transfer_manual 返回值：人工搬运闸门，仅透传物料/目标设备/目标孔位，不做系统转移。"""
+
+    resource: List[List[ResourceDictType]]
+    mount_resource: List[List[ResourceDictType]]
+    target_device: str
+
+
 class TestLatencyReturn(TypedDict):
     """test_latency方法的返回值类型"""
 
@@ -1698,53 +1714,73 @@ class HostNode(BaseROS2DeviceNode):
     async def apply_deduct_resource(
         self,
         resource: ResourceSlot,
-        device_id: DeviceSlot,
-        mount_resource: ResourceSlot,
-        bind_locations: Point,
+        device_id: DeviceSlot = "",
+        mount_resource: ResourceSlot = None,
+        bind_locations: Point = None,
         slot_on_deck: str = "",
     ) -> DeductResourceReturn:
         """
-        申请扣减物料并挂载到目标设备的目标物料上。
+        申请扣减物料，并可选挂载到目标设备的目标物料上。
 
-        服务端已完成扣减并回传实际物料（resource，框架在 send_goal 已解析为单个 PLR 实例）；
-        本动作复用 create_resource_detailed → append_resource 流程，把该已存在物料挂载到所选
-        设备的挂载目标（mount_resource）上。
+        服务端已完成扣减并回传实际物料（resource，框架在 send_goal 已解析为单个 PLR 实例）。
+
+        两种用法：
+        - 仅登记/透传（不传 device_id 或 mount_resource）：只校验并把已扣减物料经 labware 输出，
+          方便后续 set_substance 设置内容物、再由 transfer_resource / transfer_manual 派发。
+        - 扣减并挂载（device_id + mount_resource 都给）：复用 create_resource_detailed →
+          append_resource，把该已存在物料挂到所选设备的挂载目标（相当于从仓库放到仓储设备上）。
 
         与 create_resource 的区别：资源不是按 class+name 新建，而是直接 dump 已扣减实例作为
         挂载载荷（initialize_full=False，不重建）。
 
-        输出 handle：labware = 创建/挂载得到的物料树；mount_resource = 实际挂载到的目标物料树，
-        便于下游节点继续引用挂载位置。
+        输出 handle：labware = 已扣减/挂载得到的物料树；mount_resource = 实际挂载到的目标物料树
+        （未挂载时为空），便于下游节点继续引用挂载位置。
 
         Args:
             resource[扣减物料]: 已扣减的单个根物料（前端用扣减选择器选择）。
-            device_id[目标设备]: 挂载到的边缘设备 id（可由图 handle 连入）。
-            mount_resource[挂载目标]: 实际挂载到的目标物料/父节点（名称用于边缘侧 figure_resource，可由图 handle 连入）。
-            bind_locations[挂载位置]: 挂载目标坐标系下的挂载坐标。
+            device_id[目标设备]: 挂载到的边缘设备 id（可选；不传则仅登记/透传，可由图 handle 连入）。
+            mount_resource[挂载目标]: 实际挂载到的目标物料/父节点（可选；不传则仅登记/透传，可由图 handle 连入）。
+            bind_locations[挂载位置]: 挂载目标坐标系下的挂载坐标（挂载时使用）。
             slot_on_deck[Deck槽位]: 挂载目标为 Deck 时按槽位挂载（可选）。
         """
         if resource is None:
             raise ValueError("申请扣减失败：未接收到已扣减物料")
         if getattr(resource, "unilabos_uuid", None) is None:
-            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 缺少 unilabos_uuid，无法挂载")
-        # 已存在的扣减物料：dump 现有实例作为挂载载荷（不重新 initialize），单根取 [0] 的扁平节点列表
+            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 缺少 unilabos_uuid，无法处理")
+        # 已存在的扣减物料：dump 现有实例（不重新 initialize），单根取 [0] 的扁平节点列表
         dumped = ResourceTreeSet.from_plr_resources([resource]).dump()
         if not dumped:
-            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 序列化为空，无法挂载")
+            raise ValueError(f"物料 {getattr(resource, 'name', resource)} 序列化为空")
         flatten_nodes: List[Dict[str, Any]] = dumped[0]
         barcode = flatten_nodes[0].get("barcode", "") if flatten_nodes else ""
+        # 是否执行挂载：device_id 与 mount_resource 都给齐才挂载，否则仅登记/透传
+        do_mount = bool(str(device_id)) and mount_resource is not None and not (
+            isinstance(mount_resource, str) and not mount_resource
+        )
+        if not do_mount:
+            self.lab_logger().info(
+                f"[apply_deduct_resource] 仅登记/透传物料 name={getattr(resource, 'name', '')} "
+                f"barcode={barcode}（未指定 device_id/mount_resource，不挂载）"
+            )
+            return {
+                "created_resource_tree": dumped,
+                "liquid_input_resource_tree": [],
+                "mount_resource": [],
+            }
         mount_name = mount_resource.name if hasattr(mount_resource, "name") else str(mount_resource).split("/")[-1]
         self.lab_logger().info(
             f"[apply_deduct_resource] 挂载物料 name={getattr(resource, 'name', '')} "
             f"barcode={barcode} -> device={device_id} mount_resource={mount_name}"
         )
-        # 挂载坐标归一化：@action 路径可能传 dict，ROS 路径为 Point
+        # 挂载坐标归一化：@action 路径可能传 dict，ROS 路径为 Point；缺省取原点
         if isinstance(bind_locations, dict):
             point = Point(
                 x=float(bind_locations.get("x", 0.0)),
                 y=float(bind_locations.get("y", 0.0)),
                 z=float(bind_locations.get("z", 0.0)),
             )
+        elif bind_locations is None:
+            point = Point(x=0.0, y=0.0, z=0.0)
         else:
             point = bind_locations
         other_calling_param = json.dumps({"initialize_full": False, "slot": slot_on_deck})
@@ -1890,6 +1926,189 @@ class HostNode(BaseROS2DeviceNode):
                 f"（notified={notified}），边缘侧将于下次同步对齐"
             )
         return {"code": 0, "uuids": [res_uuid], "device_id": edge_id}
+
+    async def _do_transfer_resource(
+        self,
+        resource: List["ResourceSlot"],
+        target_device: DeviceSlot,
+        mount_resource: List["ResourceSlot"],
+    ) -> TransferResourceReturn:
+        """transfer_resource / transfer_manual 共用的转移核心：把已物理就位的物料在系统中改挂到目标设备孔位。
+
+        复用 base_device_node.transfer_resource_to_another（移除来源 → 云端改父 → 增加到目标）。
+        transfer 只负责"系统记账"，物理搬运由前序节点（manual_confirm/机械臂 pick+place）保证。
+
+        注意：底层按"运行该动作的节点"作为来源执行本地移除，host 运行时来源即 host（根节点）。
+        若物料此前已被 apply_deduct_resource 挂到某边缘设备，该设备的本地副本不会在此处被移除，
+        需依赖下次同步对齐（详见 cursor_docs 记录的源设备移除限制）。
+        """
+        if not resource:
+            raise ValueError("转移失败：未接收到待转移物料")
+        if not mount_resource:
+            raise ValueError("转移失败：未指定挂载目标孔位")
+        plr_resources = list(resource)
+        target_resources = list(mount_resource)
+        target_id = str(target_device).split("/")[-1]
+        result = await self.transfer_resource_to_another(
+            plr_resources, target_id, target_resources, [None] * len(target_resources)
+        )
+        return {
+            "resource": ResourceTreeSet.from_plr_resources(plr_resources).dump(),
+            "mount_resource": ResourceTreeSet.from_plr_resources(target_resources).dump(),
+            "result": result,
+        }
+
+    @action(
+        description="转移物料（系统派发）：把已物理就位的物料在系统中改挂到目标设备的目标孔位（人工/机械臂工作流的统一末步）",
+        always_free=True,
+        placeholder_keys={
+            "target_device": PLACEHOLDER_DEVICES,
+            "mount_resource": PLACEHOLDER_NODES,
+        },
+        handles=[
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移物料",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="resource",
+                data_type="resource",
+                label="已转移物料",
+                data_key="resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    async def transfer_resource(
+        self,
+        resource: List[ResourceSlot],
+        target_device: DeviceSlot,
+        mount_resource: List[ResourceSlot],
+    ) -> TransferResourceReturn:
+        """
+        转移物料到目标设备的目标孔位（系统记账，不含物理搬运）。物理搬运由前序节点保证：
+        - 人工：apply_deduct_resource → transfer_manual → transfer_manual → transfer_resource
+        - 机械臂：apply_deduct_resource → 机械臂 pick → 机械臂 place → transfer_resource
+
+        Args:
+            resource[待转移物料]: 待转移的物料列表（须带 unilabos_uuid，可由图 handle 连入）。
+            target_device[目标设备]: 接收物料的目标设备 id。
+            mount_resource[目标孔位]: 目标设备上的挂载孔位列表。
+        """
+        return await self._do_transfer_resource(resource, target_device, mount_resource)
+
+    @action(
+        description="人工搬运闸门：到该步暂停等人工确认（人工把物料搬运到位），仅透传物料，不做系统转移（人工工作流中间步，对应机械臂 pick/place）",
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={
+            "assignee_user_ids": PLACEHOLDER_MANUAL_CONFIRM,
+            "target_device": PLACEHOLDER_DEVICES,
+            "mount_resource": PLACEHOLDER_NODES,
+        },
+        goal_default={
+            "timeout_seconds": 3600,
+            "assignee_user_ids": [],
+        },
+        handles=[
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待搬运物料",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionOutputHandle(
+                key="resource",
+                data_type="resource",
+                label="待搬运物料",
+                data_key="resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    async def transfer_manual(
+        self,
+        resource: List[ResourceSlot],
+        target_device: DeviceSlot,
+        mount_resource: List[ResourceSlot],
+        timeout_seconds: int,
+        assignee_user_ids: list[str],
+    ) -> TransferManualReturn:
+        """
+        人工搬运闸门：工作流执行到本节点时暂停、等待人工确认（确认即表示人工已把物料搬运到位），
+        本身**只透传**物料/目标设备/目标孔位，不做任何系统转移——它是机械臂 pick/place 的人工对应物。
+
+        实际的系统转移（记账）由工作流末步 transfer_resource 统一完成（两条流一致）：
+        - 人工：apply_deduct_resource → transfer_manual → transfer_manual → transfer_resource
+        - 机械臂：apply_deduct_resource → 机械臂 pick → 机械臂 place → transfer_resource
+
+        Args:
+            resource[待搬运物料]: 待人工搬运的物料列表（须带 unilabos_uuid，可由图 handle 连入并透传）。
+            target_device[目标设备]: 物料要搬到的目标设备 id（透传给下游）。
+            mount_resource[目标孔位]: 目标设备上的目标孔位（透传给下游）。
+            timeout_seconds[超时时间]: 人工确认超时时间，单位秒，默认 3600。
+            assignee_user_ids[确认人]: 指定处理人工确认的用户 id 列表。
+        """
+        return {
+            "resource": (ResourceTreeSet.from_plr_resources(list(resource)).dump() if resource else []),
+            "mount_resource": (
+                ResourceTreeSet.from_plr_resources(list(mount_resource)).dump() if mount_resource else []
+            ),
+            "target_device": str(target_device) if target_device is not None else "",
+        }
 
     def test_resource(
         self,
