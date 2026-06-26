@@ -21,7 +21,7 @@ BMG Labtech CLARIOstar Plus 仿真 RViz Backend
 import asyncio
 import random
 import threading
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import rclpy
 
@@ -106,7 +106,7 @@ class CLARIOstarPlusRvizBackend(PlateReaderBackend):
     # PlateReaderBackend interface
     # ------------------------------------------------------------------
 
-    async def open(self) -> None:
+    async def open(self, **kwargs: Any) -> None:
         """板托伸出，等待放/取板。"""
         if self._tray_open:
             return
@@ -115,7 +115,7 @@ class CLARIOstarPlusRvizBackend(PlateReaderBackend):
         self._tray_open = True
         print(f"[{self.device_id}] Tray open.")
 
-    async def close(self, plate: Optional[object] = None) -> None:
+    async def close(self, plate: Optional[object] = None, **kwargs: Any) -> None:
         """板托缩回，板进入测量腔。"""
         if not self._tray_open:
             return
@@ -125,13 +125,20 @@ class CLARIOstarPlusRvizBackend(PlateReaderBackend):
         print(f"[{self.device_id}] Tray closed. Plate loaded.")
 
     async def read_absorbance(
-        self, plate: object, wells: List[object], wavelength: int
+        self,
+        plate: Optional[object] = None,
+        wells: Optional[List[object]] = None,
+        wavelength: int = 0,
+        report: str = "OD",
+        **kwargs: Any,
     ) -> List[Dict]:
         """模拟吸光度测量，返回随机占位数据。"""
+        wells = self._resolve_wells(plate, wells)
         await self._run_measurement("absorbance", len(wells))
         return [
             {
                 "wavelength": wavelength,
+                "report": report,
                 "time": 0.0,
                 "temperature": 25.0,
                 "data": [[round(random.uniform(0.0, 2.0), 4) for _ in range(12)] for _ in range(8)],
@@ -140,13 +147,15 @@ class CLARIOstarPlusRvizBackend(PlateReaderBackend):
 
     async def read_fluorescence(
         self,
-        plate: object,
-        wells: List[object],
-        excitation_wavelength: int,
-        emission_wavelength: int,
-        focal_height: float,
+        plate: Optional[object] = None,
+        wells: Optional[List[object]] = None,
+        excitation_wavelength: int = 0,
+        emission_wavelength: int = 0,
+        focal_height: float = 13,
+        **kwargs: Any,
     ) -> List[Dict]:
         """模拟荧光测量，返回随机占位数据。"""
+        wells = self._resolve_wells(plate, wells)
         await self._run_measurement("fluorescence", len(wells))
         return [
             {
@@ -159,9 +168,14 @@ class CLARIOstarPlusRvizBackend(PlateReaderBackend):
         ]
 
     async def read_luminescence(
-        self, plate: object, wells: List[object], focal_height: float
+        self,
+        plate: Optional[object] = None,
+        wells: Optional[List[object]] = None,
+        focal_height: float = 13,
+        **kwargs: Any,
     ) -> List[Dict]:
         """模拟化学发光测量，返回随机占位数据。"""
+        wells = self._resolve_wells(plate, wells)
         await self._run_measurement("luminescence", len(wells))
         return [
             {
@@ -170,6 +184,10 @@ class CLARIOstarPlusRvizBackend(PlateReaderBackend):
                 "data": [[round(random.uniform(0.0, 1e6), 1) for _ in range(12)] for _ in range(8)],
             }
         ]
+
+    async def get_stat(self) -> str:
+        """兼容旧的 backend-only registry；仿真后端始终返回 ready。"""
+        return "ready"
 
     def serialize(self) -> dict:
         return {"type": self.__class__.__name__, "device_id": self.device_id}
@@ -185,6 +203,15 @@ class CLARIOstarPlusRvizBackend(PlateReaderBackend):
             None,
             lambda: self._publisher.move_to({"tray_joint": target}, speed=_TRAY_SPEED),
         )
+
+    def _resolve_wells(
+        self, plate: Optional[object], wells: Optional[List[object]]
+    ) -> List[object]:
+        if wells is not None:
+            return wells
+        if plate is not None and hasattr(plate, "get_all_items"):
+            return list(plate.get_all_items())
+        return [object()] * 96
 
     async def _run_measurement(self, mode: str, num_wells: int) -> None:
         """通用测量流程：关托 → 等待 → 开托。"""

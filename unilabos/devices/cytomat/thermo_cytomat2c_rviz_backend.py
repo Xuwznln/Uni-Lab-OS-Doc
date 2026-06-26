@@ -28,10 +28,10 @@ import rclpy
 from unilabos.devices.ros_dev.simple_joint_publisher_node import SimpleJointPublisher
 
 try:
-    from pylabrobot.heating_shaking.backend import HeaterShakerBackend
+    from pylabrobot.storage.backend import IncubatorBackend
     _PLR_AVAILABLE = True
 except ImportError:
-    class HeaterShakerBackend:  # type: ignore
+    class IncubatorBackend:  # type: ignore
         async def setup(self): pass
         async def stop(self): pass
     _PLR_AVAILABLE = False
@@ -50,7 +50,7 @@ _DOOR_LIN_SPEED   = 0.03   # m/s
 _TRANSFER_DWELL   = 1.5
 
 
-class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
+class ThermoFisherCytomat2CRvizBackend(IncubatorBackend):
     """
     Thermo Fisher Cytomat 2C 孵育器仿真 Backend。
 
@@ -109,7 +109,7 @@ class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
     # Incubator operations（PLR 通过直接命令驱动，这里封装为动画操作）
     # ------------------------------------------------------------------
 
-    async def load_plate(self) -> None:
+    async def load_plate(self, *args, **backend_kwargs) -> None:
         """模拟从后传输口放入一块板。"""
         loop = asyncio.get_event_loop()
 
@@ -132,7 +132,7 @@ class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
         )
         print(f"[{self.device_id}] Plate loaded.")
 
-    async def unload_plate(self) -> None:
+    async def unload_plate(self, *args, **backend_kwargs) -> None:
         """模拟从后传输口取出一块板。"""
         loop = asyncio.get_event_loop()
 
@@ -153,7 +153,7 @@ class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
         )
         print(f"[{self.device_id}] Plate unloaded.")
 
-    async def open_door(self) -> None:
+    async def open_door(self, **backend_kwargs) -> None:
         """打开前门（人工访问/维护）。"""
         loop = asyncio.get_event_loop()
         print(f"[{self.device_id}] Opening front door...")
@@ -165,7 +165,7 @@ class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
         )
         print(f"[{self.device_id}] Front door open.")
 
-    async def close_door(self) -> None:
+    async def close_door(self, **backend_kwargs) -> None:
         """关闭前门。"""
         loop = asyncio.get_event_loop()
         print(f"[{self.device_id}] Closing front door...")
@@ -177,8 +177,16 @@ class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
         )
         print(f"[{self.device_id}] Front door closed.")
 
+    async def fetch_plate_to_loading_tray(
+        self, plate=None, plate_name=None, **backend_kwargs
+    ) -> None:
+        await self.unload_plate(plate, plate_name=plate_name, **backend_kwargs)
+
+    async def take_in_plate(self, plate=None, site="smallest", **backend_kwargs) -> None:
+        await self.load_plate(plate, site=site, **backend_kwargs)
+
     # ------------------------------------------------------------------
-    # HeaterShakerBackend interface
+    # IncubatorBackend interface
     # ------------------------------------------------------------------
 
     @property
@@ -191,11 +199,16 @@ class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
     async def unlock_plate(self) -> None:
         print(f"[{self.device_id}] Unlock plate (simulated).")
 
-    async def start_shaking(self, speed: float) -> None:
+    async def start_shaking(
+        self, frequency: Optional[float] = None, speed: Optional[float] = None, **kwargs
+    ) -> None:
+        rpm = frequency if frequency is not None else speed
+        if rpm is None:
+            rpm = 0.0
         self._shaking = True
-        print(f"[{self.device_id}] Shaking at {speed} RPM (simulated, no motion).")
+        print(f"[{self.device_id}] Shaking at {rpm} RPM (simulated, no motion).")
 
-    async def stop_shaking(self) -> None:
+    async def stop_shaking(self, **kwargs) -> None:
         self._shaking = False
         print(f"[{self.device_id}] Stop shaking.")
 
@@ -211,6 +224,9 @@ class ThermoFisherCytomat2CRvizBackend(HeaterShakerBackend):
         diff = self._target_temperature - self._current_temperature
         self._current_temperature += min(abs(diff), 0.5) * (1 if diff > 0 else -1)
         return round(self._current_temperature, 1)
+
+    async def get_temperature(self) -> float:
+        return await self.get_current_temperature()
 
     async def deactivate(self) -> None:
         self._target_temperature = 22.0

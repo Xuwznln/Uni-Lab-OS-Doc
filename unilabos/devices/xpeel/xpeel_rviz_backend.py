@@ -73,7 +73,7 @@ class XPeelRvizBackend(PeelerBackend):
     # MachineBackend interface
     # ------------------------------------------------------------------
 
-    async def setup(self) -> None:
+    async def setup(self, **kwargs) -> None:
         if not rclpy.ok():
             rclpy.init()
 
@@ -93,7 +93,7 @@ class XPeelRvizBackend(PeelerBackend):
         self._publisher.set_immediate({"feed_joint": _FEED_HOME, "peel_joint": _PEEL_UP})
         print(f"[{self.device_id}] Setup complete. Ready for plate.")
 
-    async def stop(self) -> None:
+    async def stop(self, **kwargs) -> None:
         if self._executor and self._publisher:
             self._executor.remove_node(self._publisher)
         if self._executor_thread and self._executor_thread.is_alive():
@@ -104,7 +104,13 @@ class XPeelRvizBackend(PeelerBackend):
     # PeelerBackend interface
     # ------------------------------------------------------------------
 
-    async def peel(self) -> None:
+    async def peel(
+        self,
+        begin_location: float = 0,
+        fast: bool = False,
+        adhere_time: float = 2.5,
+        **kwargs,
+    ) -> None:
         """
         执行完整揭膜流程：
         1. 推板入机
@@ -130,8 +136,9 @@ class XPeelRvizBackend(PeelerBackend):
         )
 
         # Step 3: 撕膜停顿
-        print(f"[{self.device_id}] [3/4] Holding for peel ({_PEEL_DWELL}s)...")
-        await asyncio.sleep(_PEEL_DWELL)
+        dwell = adhere_time if adhere_time is not None else _PEEL_DWELL
+        print(f"[{self.device_id}] [3/4] Holding for peel ({dwell}s)...")
+        await asyncio.sleep(dwell)
 
         # Step 4: 揭膜头抬起
         print(f"[{self.device_id}] [4/4] Peeling head lifting and plate exiting...")
@@ -144,7 +151,7 @@ class XPeelRvizBackend(PeelerBackend):
         )
         print(f"[{self.device_id}] Peel complete.")
 
-    async def restart(self) -> None:
+    async def restart(self, **kwargs) -> None:
         """复位所有关节到初始位置。"""
         loop = asyncio.get_event_loop()
         print(f"[{self.device_id}] Restarting (homing)...")

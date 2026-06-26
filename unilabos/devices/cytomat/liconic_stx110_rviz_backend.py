@@ -27,11 +27,11 @@ import rclpy
 from unilabos.devices.ros_dev.simple_joint_publisher_node import SimpleJointPublisher
 
 try:
-    from pylabrobot.heating_shaking.backend import HeaterShakerBackend
+    from pylabrobot.storage.backend import IncubatorBackend
     _PLR_AVAILABLE = True
 except ImportError:
     # 未安装 pylabrobot 时退化为哑类，方便独立测试
-    class HeaterShakerBackend:  # type: ignore
+    class IncubatorBackend:  # type: ignore
         async def setup(self): pass
         async def stop(self): pass
     _PLR_AVAILABLE = False
@@ -45,7 +45,7 @@ _TRANSFER_ANGLE = 0.0
 _CAROUSEL_SPEED = 0.8
 
 
-class LiconicStx110RvizBackend(HeaterShakerBackend):
+class LiconicStx110RvizBackend(IncubatorBackend):
     """
     LiCONiC STX110 孵育器仿真 Backend。
 
@@ -104,7 +104,20 @@ class LiconicStx110RvizBackend(HeaterShakerBackend):
     # Incubator / storage operations
     # ------------------------------------------------------------------
 
-    async def load_plate(self, slot: int) -> None:
+    def _coerce_slot(self, site=None, default: int = 1) -> int:
+        if isinstance(site, int):
+            return site
+        if isinstance(site, str) and site.isdigit():
+            return int(site)
+        for attr in ("name", "resource_name"):
+            value = getattr(site, attr, None)
+            if isinstance(value, str):
+                digits = "".join(ch for ch in value if ch.isdigit())
+                if digits:
+                    return int(digits)
+        return default
+
+    async def load_plate(self, slot: int = 1, **backend_kwargs) -> None:
         """
         将转盘旋转使 slot 对准传输窗口，模拟机器人放板。
 
@@ -126,7 +139,7 @@ class LiconicStx110RvizBackend(HeaterShakerBackend):
         )
         print(f"[{self.device_id}] Slot {slot} aligned. Ready for plate load.")
 
-    async def unload_plate(self, slot: int) -> None:
+    async def unload_plate(self, slot: int = 1, **backend_kwargs) -> None:
         """
         旋转转盘取出指定 slot 的板。
 
@@ -155,8 +168,30 @@ class LiconicStx110RvizBackend(HeaterShakerBackend):
             ),
         )
 
+    async def open_door(self, **backend_kwargs) -> None:
+        """STX110 uses a carousel transfer window; no moving door in RViz."""
+        print(f"[{self.device_id}] Open door (simulated; transfer window available).")
+
+    async def close_door(self, **backend_kwargs) -> None:
+        """STX110 uses a carousel transfer window; no moving door in RViz."""
+        print(f"[{self.device_id}] Close door (simulated; transfer window available).")
+
+    async def fetch_plate_to_loading_tray(
+        self, plate=None, plate_name=None, **backend_kwargs
+    ) -> None:
+        slot = backend_kwargs.pop("slot", None)
+        if slot is None:
+            slot = self._coerce_slot(getattr(plate, "parent", None))
+        await self.unload_plate(slot=slot, **backend_kwargs)
+
+    async def take_in_plate(self, plate=None, site="smallest", **backend_kwargs) -> None:
+        slot = backend_kwargs.pop("slot", None)
+        if slot is None:
+            slot = self._coerce_slot(site)
+        await self.load_plate(slot=slot, **backend_kwargs)
+
     # ------------------------------------------------------------------
-    # HeaterShakerBackend interface（孵育器以加热为主，振荡为辅）
+    # IncubatorBackend interface（孵育器以加热为主，振荡为辅）
     # ------------------------------------------------------------------
 
     @property
@@ -169,16 +204,21 @@ class LiconicStx110RvizBackend(HeaterShakerBackend):
     async def unlock_plate(self) -> None:
         print(f"[{self.device_id}] Unlock plate (simulated).")
 
-    async def start_shaking(self, speed: float) -> None:
+    async def start_shaking(
+        self, frequency: Optional[float] = None, speed: Optional[float] = None, **kwargs
+    ) -> None:
         """STX110 本身不振荡，此处仅打印。"""
+        rpm = frequency if frequency is not None else speed
+        if rpm is None:
+            rpm = 0.0
         self._shaking = True
-        print(f"[{self.device_id}] Start shaking at {speed} RPM (simulated, no motion).")
+        print(f"[{self.device_id}] Start shaking at {rpm} RPM (simulated, no motion).")
 
     async def shake(self, speed: float, *args, **kwargs) -> None:
         """ShakerBackend 抽象接口。STX110 不振荡，委托给 start_shaking。"""
-        await self.start_shaking(speed)
+        await self.start_shaking(speed=speed)
 
-    async def stop_shaking(self) -> None:
+    async def stop_shaking(self, **kwargs) -> None:
         self._shaking = False
         print(f"[{self.device_id}] Stop shaking (simulated).")
 
@@ -196,6 +236,9 @@ class LiconicStx110RvizBackend(HeaterShakerBackend):
         diff = self._target_temperature - self._current_temperature
         self._current_temperature += min(abs(diff), 0.5) * (1 if diff > 0 else -1)
         return round(self._current_temperature, 1)
+
+    async def get_temperature(self) -> float:
+        return await self.get_current_temperature()
 
     async def deactivate(self) -> None:
         self._target_temperature = 22.0

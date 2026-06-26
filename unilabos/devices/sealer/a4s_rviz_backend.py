@@ -78,7 +78,7 @@ class A4SSealerRvizBackend(SealerBackend):
     # MachineBackend interface
     # ------------------------------------------------------------------
 
-    async def setup(self) -> None:
+    async def setup(self, **kwargs) -> None:
         if not rclpy.ok():
             rclpy.init()
 
@@ -98,7 +98,7 @@ class A4SSealerRvizBackend(SealerBackend):
         self._tray_open = True
         print(f"[{self.device_id}] Setup complete. Ready for plate.")
 
-    async def stop(self) -> None:
+    async def stop(self, **kwargs) -> None:
         if self._executor and self._publisher:
             self._executor.remove_node(self._publisher)
         if self._executor_thread and self._executor_thread.is_alive():
@@ -109,7 +109,7 @@ class A4SSealerRvizBackend(SealerBackend):
     # SealerBackend interface
     # ------------------------------------------------------------------
 
-    async def open(self) -> None:
+    async def open(self, **kwargs) -> None:
         """板托退出，等待放/取板。"""
         if self._tray_open:
             return
@@ -122,7 +122,7 @@ class A4SSealerRvizBackend(SealerBackend):
         self._tray_open = True
         print(f"[{self.device_id}] Tray open.")
 
-    async def close(self) -> None:
+    async def close(self, **kwargs) -> None:
         """推板入封膜腔。"""
         if not self._tray_open:
             return
@@ -135,7 +135,7 @@ class A4SSealerRvizBackend(SealerBackend):
         self._tray_open = False
         print(f"[{self.device_id}] Plate loaded.")
 
-    async def seal(self, temperature: int, duration: float) -> None:
+    async def seal(self, temperature: int, duration: float, **kwargs) -> None:
         """
         执行封膜流程。
 
@@ -170,11 +170,11 @@ class A4SSealerRvizBackend(SealerBackend):
         await self.open()
         print(f"[{self.device_id}] Seal complete.")
 
-    async def set_temperature(self, temperature: float) -> None:
+    async def set_temperature(self, temperature: float, **kwargs) -> None:
         self._target_temperature = temperature
         print(f"[{self.device_id}] Set temperature → {temperature}°C (simulated).")
 
-    async def get_temperature(self) -> float:
+    async def get_temperature(self, **kwargs) -> float:
         diff = self._target_temperature - self._current_temperature
         self._current_temperature += min(abs(diff), 5.0) * (1 if diff > 0 else -1)
         return round(self._current_temperature, 1)

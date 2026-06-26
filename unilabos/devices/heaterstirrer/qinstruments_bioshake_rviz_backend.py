@@ -76,7 +76,7 @@ class QInstrumentsBioShakeRvizBackend(HeaterShakerBackend):
     # MachineBackend interface
     # ------------------------------------------------------------------
 
-    async def setup(self) -> None:
+    async def setup(self, **kwargs) -> None:
         if not rclpy.ok():
             rclpy.init()
 
@@ -95,7 +95,7 @@ class QInstrumentsBioShakeRvizBackend(HeaterShakerBackend):
         self._publisher.set_immediate({"shake_joint": 0.0})
         print(f"[{self.device_id}] Setup complete.")
 
-    async def stop(self) -> None:
+    async def stop(self, **kwargs) -> None:
         await self.stop_shaking()
         if self._executor and self._publisher:
             self._executor.remove_node(self._publisher)
@@ -111,15 +111,20 @@ class QInstrumentsBioShakeRvizBackend(HeaterShakerBackend):
     def supports_locking(self) -> bool:
         return True
 
-    async def lock_plate(self) -> None:
+    async def lock_plate(self, **kwargs) -> None:
         self._plate_locked = True
         print(f"[{self.device_id}] Plate locked (simulated).")
 
-    async def unlock_plate(self) -> None:
+    async def unlock_plate(self, **kwargs) -> None:
         self._plate_locked = False
         print(f"[{self.device_id}] Plate unlocked (simulated).")
 
-    async def start_shaking(self, speed: float) -> None:
+    async def start_shaking(
+        self,
+        speed: Optional[float] = None,
+        frequency: Optional[float] = None,
+        **kwargs,
+    ) -> None:
         """
         开始振荡。
 
@@ -128,10 +133,14 @@ class QInstrumentsBioShakeRvizBackend(HeaterShakerBackend):
         speed : float
             转速（RPM）。
         """
+        rpm = speed if speed is not None else frequency
+        if rpm is None:
+            rpm = self._rpm
+
         if self._shaking:
             await self.stop_shaking()
 
-        self._rpm = speed
+        self._rpm = float(rpm)
         self._shaking = True
         self._stop_event.clear()
 
@@ -140,9 +149,13 @@ class QInstrumentsBioShakeRvizBackend(HeaterShakerBackend):
             target=self._shake_loop, daemon=True
         )
         self._shake_thread.start()
-        print(f"[{self.device_id}] Start shaking at {speed} RPM.")
+        print(f"[{self.device_id}] Start shaking at {self._rpm} RPM.")
 
-    async def stop_shaking(self) -> None:
+    async def stop_shaking(
+        self,
+        deceleration: Optional[float] = None,
+        **kwargs,
+    ) -> None:
         self._shaking = False
         self._stop_event.set()
         if self._shake_thread and self._shake_thread.is_alive():
@@ -150,6 +163,19 @@ class QInstrumentsBioShakeRvizBackend(HeaterShakerBackend):
         if self._publisher:
             self._publisher.move_to({"shake_joint": 0.0}, speed=math.pi)
         print(f"[{self.device_id}] Stop shaking.")
+
+    async def shake(
+        self,
+        speed: float,
+        duration: Optional[float] = None,
+        acceleration: Optional[float] = None,
+        **kwargs,
+    ) -> None:
+        """Start shaking, optionally for a bounded duration."""
+        await self.start_shaking(speed=speed, **kwargs)
+        if duration is not None:
+            await asyncio.sleep(duration)
+            await self.stop_shaking(**kwargs)
 
     # ------------------------------------------------------------------
     # TemperatureControllerBackend interface
@@ -159,16 +185,41 @@ class QInstrumentsBioShakeRvizBackend(HeaterShakerBackend):
     def supports_active_cooling(self) -> bool:
         return False
 
-    async def set_temperature(self, temperature: float) -> None:
+    async def set_temperature(
+        self,
+        temperature: float,
+        passive: bool = False,
+        **kwargs,
+    ) -> None:
         self._target_temperature = temperature
         print(f"[{self.device_id}] Set temperature → {temperature}°C (simulated).")
 
-    async def get_current_temperature(self) -> float:
+    async def get_current_temperature(self, **kwargs) -> float:
         diff = self._target_temperature - self._current_temperature
         self._current_temperature += min(abs(diff), 0.3) * (1 if diff > 0 else -1)
         return round(self._current_temperature, 1)
 
-    async def deactivate(self) -> None:
+    async def get_temperature(self, **kwargs) -> float:
+        return await self.get_current_temperature(**kwargs)
+
+    async def wait_for_temperature(
+        self,
+        timeout: Optional[float] = None,
+        tolerance: Optional[float] = None,
+        **kwargs,
+    ) -> None:
+        tolerance = 0.5 if tolerance is None else tolerance
+        start_time = time.monotonic()
+
+        while True:
+            current = await self.get_current_temperature()
+            if abs(current - self._target_temperature) <= tolerance:
+                return
+            if timeout is not None and time.monotonic() - start_time >= timeout:
+                return
+            await asyncio.sleep(0.5)
+
+    async def deactivate(self, **kwargs) -> None:
         self._target_temperature = 22.0
         print(f"[{self.device_id}] Temperature deactivated.")
 
