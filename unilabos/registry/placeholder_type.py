@@ -36,3 +36,5 @@ PLACEHOLDER_CLASS = "unilabos_class"
 PLACEHOLDER_MANUAL_CONFIRM = "unilabos_manual_confirm"
 # 物料扣减：前端选择资源注册表类型 + 数量，由服务端扣减后回传实例的 uuid。
 PLACEHOLDER_DEDUCT_RESOURCE = "unilabos_deduct_resource"
+# 试剂扣减：set_substance 设置物料内容物（液体/固体）前选择试剂，由服务端扣减。
+PLACEHOLDER_DEDUCT_REAGENT = "unilabos_deduct_reagent"

@@ -147,6 +147,54 @@ def read_registry_yaml_devices(pkg_dir: Path) -> Dict[str, Dict[str, Any]]:
     return entries
 
 
+def read_external_registry_devices(pkg_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """读取包内"文件夹式"外部注册表的设备条目，返回 {device_id: entry}。
+
+    遵循 Plan 09 外部包注册表约定（与运行时 Registry.load_device_types 同构）：
+    - 注册表根来自 pyproject ``[tool.unilabos.registry] paths``，否则回退 ``unilabos_registry/``；
+    - 每个根下的 ``devices/*.yaml`` 即设备文件；
+    - 逐文件用 ``resolve_yaml_refs`` 展开跨文件 ``$ref``（共享 contracts），与运行时一致。
+
+    与根目录 ``registry.yaml`` 互补：不要求把条目摊平到包根，目录化注册表即可被纳管。
+    """
+    try:
+        import yaml
+    except ModuleNotFoundError:
+        logger.warning("[package] 未安装 pyyaml，跳过外部注册表读取")
+        return {}
+
+    from unilabos.registry.external_registry_discovery import discover_registry_paths_from_project
+    from unilabos.registry.yaml_ref import resolve_yaml_refs
+
+    registry_roots = discover_registry_paths_from_project(pkg_dir)
+    if not registry_roots:
+        return {}
+
+    entries: Dict[str, Dict[str, Any]] = {}
+    for root in registry_roots:
+        devices_dir = root / "devices"
+        if not devices_dir.is_dir():
+            continue
+        for yaml_path in sorted(list(devices_dir.glob("*.yaml")) + list(devices_dir.glob("*.yml"))):
+            try:
+                raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+                data = resolve_yaml_refs(raw, base_file=yaml_path)
+            except Exception as exc:
+                logger.warning(f"[package] 解析外部注册表 {yaml_path} 失败: {exc}")
+                continue
+            if not isinstance(data, dict):
+                continue
+            for device_id, entry in data.items():
+                if not isinstance(entry, dict):
+                    continue
+                cls = entry.get("class") if isinstance(entry.get("class"), dict) else {}
+                # devices/ 目录下条目天然是设备；接受带 class.module 或显式 resource_type=device 的条目
+                is_device = bool(cls.get("module")) or entry.get("resource_type") == "device"
+                if is_device:
+                    entries[str(device_id)] = entry
+    return entries
+
+
 def build_archive(pkg_dir: Path, archive_path: Path) -> str:
     """把包目录打包为 tar.gz，跳过缓存/版本控制目录，返回 "sha256:<hex>"。"""
     archive_path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,7 +298,7 @@ def build_resources(devices: Dict[str, Dict[str, Any]], package_info: Dict[str, 
             "device_id": device_id,
             "version": meta.get("version", package_info.get("version", "")),
             "description": meta.get("description", ""),
-            "display_name": meta.get("display_name", ""),
+            "displayname": meta.get("displayname") or device_id,
             "icon": meta.get("icon", ""),
         }
         category = meta.get("category") if isinstance(meta.get("category"), list) else []
@@ -260,6 +308,7 @@ def build_resources(devices: Dict[str, Dict[str, Any]], package_info: Dict[str, 
                 "registry_type": "device",
                 "version": meta.get("version", package_info.get("version", "0.0.1")),
                 "description": meta.get("description", ""),
+                "displayname": meta.get("displayname") or device_id,
                 "icon": meta.get("icon", ""),
                 "class": reg_class,
                 "category": category,
@@ -366,10 +415,16 @@ def inspect_package(
 
     package_info = build_package_info(project, class_namespace, sha256)
 
-    # 设备来源优先级：registry.yaml（含完整 action_value_mappings）> @device AST 扫描
+    # 设备来源优先级：根目录 registry.yaml > 文件夹式外部注册表(unilabos_registry/) > @device AST 扫描
+    # 前两者条目均自带完整 class.action_value_mappings，可直接作为 source_registry。
     yaml_entries = read_registry_yaml_devices(pkg_dir)
+    if not yaml_entries:
+        yaml_entries = read_external_registry_devices(pkg_dir)
+        registry_source = "unilabos_registry/"
+    else:
+        registry_source = "registry.yaml"
     if yaml_entries:
-        device_source = "registry.yaml"
+        device_source = registry_source
         device_ids = sorted(yaml_entries)
         resources = build_resources_from_registry(yaml_entries, package_info)
     else:
@@ -379,7 +434,7 @@ def inspect_package(
         resources = build_resources(ast_devices, package_info)
     devices = {rid: None for rid in device_ids}
     if not resources:
-        print_status(f"警告：{pkg_dir} 未发现 registry.yaml 或 @device 设备，仅生成 package_info", "warning")
+        print_status(f"警告：{pkg_dir} 未发现 registry.yaml / unilabos_registry/ 或 @device 设备，仅生成 package_info", "warning")
 
     package_info_path = out_path / "package_info.json"
     resources_path = out_path / "resources.json"

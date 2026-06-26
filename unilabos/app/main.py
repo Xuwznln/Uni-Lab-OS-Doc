@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import faulthandler
 import json
 import os
 import platform
@@ -21,6 +22,13 @@ if sys.platform == "win32":
             _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except (AttributeError, OSError):
             pass
+
+# 原生崩溃(段错误 / 0xC0000005 访问违例，常见于 C 扩展 import)发生时打印 Python 调用栈。
+# 仅在致命信号(SIGSEGV/SIGABRT/SIGFPE 等)时触发，不影响 SIGINT/SIGTERM 的正常退出流程。
+try:
+    faulthandler.enable()
+except (RuntimeError, ValueError, OSError):
+    pass
 
 # 首先添加项目根目录到路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -787,7 +795,6 @@ def main():
         if graph_preview:
             from unilabos.app.community_packages import (
                 CommunityPackageError,
-                apply_community_aliases,
                 prepare_community_packages,
             )
 
@@ -820,8 +827,31 @@ def main():
                     if not check_device_package_requirements(args_dict["devices"]):
                         print_status("community 设备包依赖检查失败，程序退出", "error")
                         os._exit(1)
-            args_dict["_community_aliases"] = community_result.aliases
-            args_dict["_apply_community_aliases"] = apply_community_aliases
+            # 社区包设备直接以 community.<ns>.<id> 注册（扫描期命名空间化），不做 alias 桥接
+            args_dict["_community_namespaces"] = community_result.namespaces
+
+    # Plan 09 Task 5: 发现外源包的 unilabos_registry/ 目录,并入 build_registry。
+    # 来源:device dirs(社区包 + 显式 --devices)各自的包根 + `unilabos.registry` entry points。
+    try:
+        from pathlib import Path as _Path
+
+        from unilabos.registry.external_registry_discovery import (
+            discover_registry_paths_from_entry_points,
+            discover_registry_paths_from_project,
+        )
+
+        _ext: list = []
+        for _d in args_dict.get("devices") or []:
+            _dp = _Path(_d)
+            _ext.extend(discover_registry_paths_from_project(_dp))
+            _ext.extend(discover_registry_paths_from_project(_dp.parent))
+        _ext.extend(discover_registry_paths_from_entry_points())
+        _ext_str = list(dict.fromkeys(str(p) for p in _ext))
+        if _ext_str:
+            args_dict["_external_registry_paths"] = _ext_str
+            print_status(f"发现 {len(_ext_str)} 个外源 registry 目录", "info")
+    except Exception as _ext_exc:  # noqa: BLE001
+        logger.warning(f"[ext-registry] 外源 registry 发现跳过: {_ext_exc}")
 
     # Step 0: AST 分析优先 + YAML 注册表加载
     # check_mode 和 upload_registry 都会执行实际 import 验证
@@ -831,14 +861,13 @@ def main():
     lab_registry = build_registry(
         registry_paths=args_dict["registry_path"],
         devices_dirs=devices_dirs,
+        community_namespaces=args_dict.get("_community_namespaces"),
         upload_registry=BasicConfig.upload_registry,
         check_mode=check_mode,
         complete_registry=complete_registry,
         external_only=external_only,
+        external_registry_paths=args_dict.get("_external_registry_paths"),
     )
-    apply_community_aliases = args_dict.get("_apply_community_aliases")
-    if apply_community_aliases:
-        apply_community_aliases(lab_registry, args_dict.get("_community_aliases") or {})
 
     # Check mode: 注册表验证完成后直接退出
     if check_mode:

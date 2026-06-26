@@ -32,6 +32,13 @@ class ROSMsgNotFound(Exception):
     pass
 
 
+def resolve_registry_displayname(displayname: Optional[str], entry_id: str) -> str:
+    """注册表 displayname：显式为空时回退为 entry id。"""
+    if displayname:
+        return displayname
+    return entry_id
+
+
 # ---------------------------------------------------------------------------
 # Docstring 解析 (Google-style)
 # ---------------------------------------------------------------------------

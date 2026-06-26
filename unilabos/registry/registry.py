@@ -36,6 +36,7 @@ from unilabos.registry.decorators import (
     NodeType,
     normalize_enum_value,
 )
+from unilabos.registry.yaml_ref import resolve_yaml_refs
 from unilabos.registry.utils import (
     ROSMsgNotFound,
     parse_docstring,
@@ -51,6 +52,7 @@ from unilabos.registry.utils import (
     wrap_action_schema,
     preserve_field_descriptions,
     resolve_method_params_via_import,
+    resolve_registry_displayname,
     SIMPLE_TYPE_MAP,
 )
 from unilabos.resources.graphio import resource_plr_to_ulab, tree_to_list
@@ -114,18 +116,40 @@ class Registry:
     # 统一入口
     # ------------------------------------------------------------------
 
-    def setup(self, devices_dirs=None, upload_registry=False, complete_registry=False, external_only=False):
-        """统一构建注册表入口。"""
+    def setup(
+        self,
+        devices_dirs=None,
+        upload_registry=False,
+        complete_registry=False,
+        external_only=False,
+        community_namespaces=None,
+        external_registry_paths=None,
+    ):
+        """统一构建注册表入口。
+
+        external_registry_paths: 外源包发现到的 registry 目录(Plan 09),会并入 YAML 加载路径。
+        """
         if self._setup_called:
             logger.critical("[UniLab Registry] setup方法已被调用过，不允许多次调用")
             return
+
+        if external_registry_paths:
+            for _p in external_registry_paths:
+                _pp = Path(_p)
+                if _pp not in self.registry_paths:
+                    self.registry_paths.append(_pp)
 
         self._startup_executor = ThreadPoolExecutor(
             max_workers=8, thread_name_prefix="RegistryStartup"
         )
 
         # 1. AST 静态扫描 (快速, 无需 import)
-        self._run_ast_scan(devices_dirs, upload_registry=upload_registry, external_only=external_only)
+        self._run_ast_scan(
+            devices_dirs,
+            upload_registry=upload_registry,
+            external_only=external_only,
+            community_namespaces=community_namespaces,
+        )
 
         # 社区包根目录可只放一个 registry.yaml 声明设备（device_id -> 条目），
         self._load_community_device_registries(devices_dirs)
@@ -176,6 +200,7 @@ class Registry:
         manual_confirm_action = ast_actions.get("manual_confirm", {})
         apply_deduct_resource_action = ast_actions.get("apply_deduct_resource", {})
         set_substance_action = ast_actions.get("set_substance", {})
+        discard_resource_action = ast_actions.get("discard_resource", {})
         test_resource_action["handles"] = {
             "input": [
                 {
@@ -256,6 +281,7 @@ class Registry:
                     "manual_confirm": manual_confirm_action,
                     "apply_deduct_resource": apply_deduct_resource_action,
                     "set_substance": set_substance_action,
+                    "discard_resource": discard_resource_action,
                 },
                 "init_params": {},
             },
@@ -275,14 +301,21 @@ class Registry:
     # AST 静态扫描
     # ------------------------------------------------------------------
 
-    def _run_ast_scan(self, devices_dirs=None, upload_registry=False, external_only=False):
+    def _run_ast_scan(
+        self, devices_dirs=None, upload_registry=False, external_only=False, community_namespaces=None
+    ):
         """
         执行 AST 静态扫描，从 Python 代码中提取 @device / @resource 装饰器元数据。
         无需 import 任何驱动模块，速度极快。
 
+        community_namespaces: {已解析的 --devices 绝对路径 -> community.<ns>}。命中的目录里
+        扫描到的 device/resource id 会被命名空间化为 community.<ns>.<id>，直接作为注册表 key
+        （社区包不做 alias 桥接，图引用 community.<ns>.<id> 即为实体 key）。
+
         所有缓存（AST 扫描 / build 结果 / config_info）统一存放在
         registry_cache.pkl 一个文件中，删除即可完全重置。
         """
+        community_namespaces = community_namespaces or {}
         import time as _time
         from unilabos.registry.ast_registry_scanner import _CACHE_VERSION as AST_SCAN_CACHE_VERSION
         from unilabos.registry.ast_registry_scanner import scan_directory
@@ -364,22 +397,35 @@ class Registry:
             total_stats["misses"] += extra_stats["misses"]
             total_stats["total"] += extra_stats["total"]
 
+            # 社区包目录：把扫描到的 id 命名空间化为 community.<ns>.<id>，直接作为注册表 key
+            ns = community_namespaces.get(str(d_path))
+            if ns:
+                logger.info(f"[UniLab Registry] 社区包命名空间化: {d_path} -> {ns}.<id>")
+
             for did, dmeta in extra_result.get("devices", {}).items():
-                if did in scan_result.get("devices", {}):
-                    existing = scan_result["devices"][did].get("file_path", "?")
+                key = f"{ns}.{did}" if ns else did
+                if key in scan_result.get("devices", {}):
+                    existing = scan_result["devices"][key].get("file_path", "?")
                     new_file = dmeta.get("file_path", "?")
                     raise ValueError(
-                        f"@device id 重复: '{did}' 同时出现在 {existing} 和 {new_file}"
+                        f"@device id 重复: '{key}' 同时出现在 {existing} 和 {new_file}"
                     )
-                scan_result.setdefault("devices", {})[did] = dmeta
+                if ns:
+                    dmeta = dict(dmeta)
+                    dmeta["device_id"] = key
+                scan_result.setdefault("devices", {})[key] = dmeta
             for rid, rmeta in extra_result.get("resources", {}).items():
-                if rid in scan_result.get("resources", {}):
-                    existing = scan_result["resources"][rid].get("file_path", "?")
+                key = f"{ns}.{rid}" if ns else rid
+                if key in scan_result.get("resources", {}):
+                    existing = scan_result["resources"][key].get("file_path", "?")
                     new_file = rmeta.get("file_path", "?")
                     raise ValueError(
-                        f"@resource id 重复: '{rid}' 同时出现在 {existing} 和 {new_file}"
+                        f"@resource id 重复: '{key}' 同时出现在 {existing} 和 {new_file}"
                     )
-                scan_result.setdefault("resources", {})[rid] = rmeta
+                if ns:
+                    rmeta = dict(rmeta)
+                    rmeta["resource_id"] = key
+                scan_result.setdefault("resources", {})[key] = rmeta
 
         # 缓存命中统计
         if total_stats["total"] > 0:
@@ -1115,6 +1161,7 @@ class Registry:
             },
             "config_info": [],
             "description": ast_meta.get("description", ""),
+            "displayname": resolve_registry_displayname(ast_meta.get("displayname"), device_id),
             "handles": handles,
             "icon": ast_meta.get("icon", ""),
             "init_param_schema": init_schema,
@@ -1209,11 +1256,7 @@ class Registry:
             },
             "config_info": [],
             "description": ast_meta.get("description", ""),
-            "handles": handles,
-            "icon": ast_meta.get("icon", ""),
-            "init_param_schema": {},
-            "version": ast_meta.get("version", "1.0.0"),
-            "registry_type": "resource",
+            "displayname": resolve_registry_displayname(ast_meta.get("displayname"), resource_id),
             "file_path": file_path,
         }
 
@@ -1265,7 +1308,7 @@ class Registry:
             return Path(BasicConfig.working_dir) / "registry_cache.pkl"
         return None
 
-    _CACHE_VERSION = 4
+    _CACHE_VERSION = 6
 
     def _load_config_cache(self) -> dict:
         import pickle
@@ -1659,6 +1702,9 @@ class Registry:
                 resource_info["handles"] = []
             if "init_param_schema" not in resource_info:
                 resource_info["init_param_schema"] = {}
+            resource_info["displayname"] = resolve_registry_displayname(
+                resource_info.get("displayname"), resource_id
+            )
             if "config_info" in resource_info:
                 del resource_info["config_info"]
             if "file_path" in resource_info:
@@ -1801,7 +1847,10 @@ class Registry:
         """
         try:
             with open(file, encoding="utf-8", mode="r") as f:
-                data = yaml.safe_load(io.StringIO(f.read()))
+                raw_data = yaml.safe_load(io.StringIO(f.read()))
+            # Plan 09 Task 4: expand external-registry YAML $ref (shared contracts)
+            # before per-device normalization. No-op for files without $ref.
+            data = resolve_yaml_refs(raw_data, base_file=file)
         except Exception as e:
             logger.warning(f"[UniLab Registry] 读取设备文件失败: {file}, 错误: {e}")
             return {}, {}, False, []
@@ -1833,6 +1882,9 @@ class Registry:
                 device_config["config_info"] = []
             if "description" not in device_config:
                 device_config["description"] = ""
+            device_config["displayname"] = resolve_registry_displayname(
+                device_config.get("displayname"), device_id
+            )
             if "icon" not in device_config:
                 device_config["icon"] = ""
             if "handles" not in device_config:
@@ -2393,6 +2445,7 @@ class Registry:
                         status_types[status_name] = status_type.__name__
 
             msg = {"id": device_id, **device_info_copy}
+            msg["displayname"] = resolve_registry_displayname(msg.get("displayname"), device_id)
             devices.append(msg)
         return devices
 
@@ -2400,6 +2453,7 @@ class Registry:
         resources = []
         for resource_id, resource_info in self.resource_type_registry.items():
             msg = {"id": resource_id, **resource_info}
+            msg["displayname"] = resolve_registry_displayname(msg.get("displayname"), resource_id)
             resources.append(msg)
         return resources
 
@@ -2454,6 +2508,8 @@ def build_registry(
     check_mode=False,
     complete_registry=False,
     external_only=False,
+    community_namespaces=None,
+    external_registry_paths=None,
 ):
     """
     构建或获取Registry单例实例
@@ -2473,6 +2529,8 @@ def build_registry(
         upload_registry=upload_registry,
         complete_registry=complete_registry,
         external_only=external_only,
+        community_namespaces=community_namespaces,
+        external_registry_paths=external_registry_paths,
     )
 
     # 将 AST 扫描的字符串类型替换为实际 ROS2 消息类（仅查找 ROS2 类型，不 import 设备模块）
