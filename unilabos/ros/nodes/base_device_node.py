@@ -37,10 +37,11 @@ from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialComma
 
 from unilabos.config.config import BasicConfig
 from unilabos.registry.decorators import get_topic_config
+from unilabos.registry.placeholder_type import ResourceSlotRawInput
 from unilabos.utils.decorator import get_all_subscriptions
 
 from unilabos.resources.container import RegularContainer
-from unilabos.resources.liquids import apply_substances
+from unilabos.resources.liquids import apply_substances, resolve_site_spot
 from unilabos.resources.graphio import (
     initialize_resources,
 )
@@ -863,10 +864,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 site = additional_add_params.get("site", None)
                 spec = inspect.signature(parent_resource.assign_child_resource)
                 if "spot" in spec.parameters:
-                    ordering_dict: Dict[str, Any] = getattr(parent_resource, "_ordering")
-                    if ordering_dict:
-                        site = list(ordering_dict.keys()).index(site)
-                    additional_params["spot"] = site
+                    # 复用 set_substance 的同一套 slot/site 解析（int 索引 / "A1" 标签 / 名称匹配）；
+                    # 解析不出（含 site 为空）则回退原始 site，由父级默认排布。
+                    spot = resolve_site_spot(parent_resource, site)
+                    additional_params["spot"] = spot if spot is not None else site
                 old_parent = plr_resource.parent
                 if old_parent is not None:
                     # plr并不支持同一个deck的加载和卸载
@@ -2310,17 +2311,22 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         self.lab_logger().debug(f"[JsonCommand] 注入 {PARAM_SAMPLE_UUIDS}: {resolved_sample_uuids}")
                     continue
 
-                # 处理单个 ResourceSlot
+                # 处理单个 ResourceSlot（单物料两种入参形态：
+                #   dict = 资源引用，按 uuid 重新 with_children 拉取；
+                #   list = 一棵树的扁平节点组（上游 handle 的 @flatten），就地装配成一个物料）
                 if arg_type == "unilabos.registry.placeholder_type:ResourceSlot":
-                    resource_data = function_args[arg_name]
-                    if isinstance(resource_data, dict) and "id" in resource_data:
-                        try:
+                    # 内部解析层：raw 值可能是 list（@flatten 节点组）或 dict（资源引用）
+                    resource_data: ResourceSlotRawInput = function_args[arg_name]
+                    try:
+                        if isinstance(resource_data, list):
+                            function_args[arg_name] = self._assemble_single_resource(resource_data)
+                        elif isinstance(resource_data, dict) and "id" in resource_data:
                             function_args[arg_name] = self._convert_resources_sync(resource_data["uuid"])[0]
-                        except Exception as e:
-                            self.lab_logger().error(
-                                f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
-                            )
-                            raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
+                    except Exception as e:
+                        self.lab_logger().error(
+                            f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
+                        )
+                        raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
 
                 # 处理 ResourceSlot 列表
                 elif isinstance(arg_type, tuple) and len(arg_type) == 2:
@@ -2418,6 +2424,28 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
         return mapped_plr_resources
 
+    def _assemble_single_resource(self, raw_nodes: List[Dict[str, Any]]) -> "ResourcePLR":
+        """把一组扁平节点 dict 装配成「单个物料」（单 ResourceSlot 的 list 输入形态）。
+
+        list 输入形态：通常来自上游 handle 的 `xxx.@flatten`（一棵树的扁平节点列表，root + children），
+        必须**恰好一个根** → 装配成一个物料；多根视为非法（一组必须变成一个物料）。
+        与 dict 形态（按 uuid 重新 with_children 拉取）相对：此处直接就地装配，不回服务端拉取。
+        """
+        if not raw_nodes:
+            raise ValueError("单物料 list 输入为空")
+        tree_set = ResourceTreeSet.from_raw_dict_list(raw_nodes)
+        if len(tree_set.trees) != 1:
+            names = [t.root_node.res_content.name for t in tree_set.trees]
+            raise ValueError(f"单物料输入要求恰好一个根物料，实际得到 {len(tree_set.trees)} 个根：{names}")
+        plr = tree_set.to_plr_resources()[0]
+        res = self.resource_tracker.figure_resource(plr, try_mode=True)
+        if len(res) == 1:
+            return res[0]
+        if len(res) > 1:
+            raise ValueError(f"单物料输入索引到多个本地实例：{res}")
+        self.lab_logger().warning(f"单物料 list 输入未索引到本地实例，使用装配实例：{getattr(plr, 'name', plr)}")
+        return plr
+
     async def _execute_driver_command_async(self, string: str):
         try:
             target = json.loads(string)
@@ -2469,19 +2497,23 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         )
                     continue
 
-                # 处理单个 ResourceSlot
+                # 处理单个 ResourceSlot（单物料两种入参形态：
+                #   dict = 资源引用，按 uuid 重新 with_children 拉取；
+                #   list = 一棵树的扁平节点组（上游 handle 的 @flatten），就地装配成一个物料）
                 _is_resource_slot = isinstance(arg_type, str) and arg_type.endswith(":ResourceSlot")
                 if _is_resource_slot:
-                    resource_data = function_args[arg_name]
-                    if isinstance(resource_data, dict) and "id" in resource_data:
-                        try:
-                            converted_resource = await self._convert_resource_async(resource_data)
-                            function_args[arg_name] = converted_resource
-                        except Exception as e:
-                            self.lab_logger().error(
-                                f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
-                            )
-                            raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
+                    # 内部解析层：raw 值可能是 list（@flatten 节点组）或 dict（资源引用）
+                    resource_data: ResourceSlotRawInput = function_args[arg_name]
+                    try:
+                        if isinstance(resource_data, list):
+                            function_args[arg_name] = self._assemble_single_resource(resource_data)
+                        elif isinstance(resource_data, dict) and "id" in resource_data:
+                            function_args[arg_name] = await self._convert_resource_async(resource_data)
+                    except Exception as e:
+                        self.lab_logger().error(
+                            f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
+                        )
+                        raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
 
                 # 处理 ResourceSlot 列表
                 elif isinstance(arg_type, tuple) and len(arg_type) == 2:
