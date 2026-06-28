@@ -868,6 +868,20 @@ class ResourceTreeSet(object):
                                 f"从远端同步了 {added_count} 个物料子树"
                             )
                     else:
+                        # 情况2: 二级节点是物料（非 device）
+                        if remote_child_name not in local_children_map:
+                            # 规则2：本地一级 device 下不存在该二级物料 → 引入整个远端子树。
+                            # 兜底必须存在：远端（云端持久化）可能有本地 graph.json 不含的设备级物料
+                            # （如运行期动态产生、被同步上云的物料），缺此分支会 KeyError 直接崩溃在启动期。
+                            remote_child.res_content.parent = local_device.res_content
+                            local_device.children.append(remote_child)
+                            local_children_map[remote_child_name] = remote_child
+                            logger.info(
+                                f"物料 '{remote_root_id}/{remote_child_name}': "
+                                f"本地不存在，从远端引入整个子树"
+                            )
+                            continue
+
                         # 二级物料已存在，比较三级子节点是否缺失
                         local_material = local_children_map[remote_child_name]
                         local_material_children_map = {child.res_content.name: child for child in

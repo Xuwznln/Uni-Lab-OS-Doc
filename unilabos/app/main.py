@@ -200,6 +200,15 @@ def parse_args():
         help="Use remote resources when starting unilab",
     )
     parser.add_argument(
+        "--no_remote_material_merge",
+        action="store_true",
+        help=(
+            "跳过启动时把后端持久化物料树合并进本地图（merge_remote_resources）。"
+            "适用于以本地 graph + 设备自同步（如奔耀全量同步）为权威物料来源的工作站，"
+            "避免后端脏数据（如设备级孤儿物料）污染/阻断启动。"
+        ),
+    )
+    parser.add_argument(
         "--config",
         type=str,
         default=None,
@@ -631,10 +640,15 @@ def main():
 
     # 如果从远端获取了物料信息，则与本地物料进行同步
     if file_path is not None and request_startup_json and "nodes" in request_startup_json:
-        print_status("开始同步远端物料到本地...", "info")
-        remote_tree_set = ResourceTreeSet.from_raw_dict_list(request_startup_json["nodes"])
-        resource_tree_set.merge_remote_resources(remote_tree_set)
-        print_status("远端物料同步完成", "info")
+        if args_dict.get("no_remote_material_merge"):
+            # 以本地 graph + 设备自同步为权威物料来源，跳过后端物料合并，
+            # 避免后端脏数据（设备级孤儿物料等）污染/阻断启动。
+            print_status("已启用 --no_remote_material_merge：跳过远端物料合并", "info")
+        else:
+            print_status("开始同步远端物料到本地...", "info")
+            remote_tree_set = ResourceTreeSet.from_raw_dict_list(request_startup_json["nodes"])
+            resource_tree_set.merge_remote_resources(remote_tree_set)
+            print_status("远端物料同步完成", "info")
 
     # 第二次设备包依赖检查：云端物料同步后，community 包可能引入新的 requirements
     # TODO: 当 community device package 功能上线后，在这里调用
