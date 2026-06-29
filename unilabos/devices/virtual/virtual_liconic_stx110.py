@@ -93,12 +93,15 @@ class VirtualLiconicStx110:
 
         if not rclpy.ok():
             rclpy.init()
+        # 用真实 ROS 节点 id 作关节前缀(否则用默认 device_id，与装配 URDF 关节名不符 -> 转盘不动)
+        did = getattr(getattr(self, "_ros_node", None), "device_id", None) or self.device_id
+        self.device_id = did
         # 独立节点名，避免与设备 ROS 节点（名为 device_id）重名
         self._publisher = SimpleJointPublisher(
-            device_id=self.device_id,
+            device_id=did,
             joint_names=[_CAROUSEL_JOINT],
             rate=50,
-            node_name=f"{self.device_id}_carousel_pub",
+            node_name=f"{did}_carousel_pub",
         )
         self._executor = rclpy.executors.MultiThreadedExecutor()
         self._executor.add_node(self._publisher)

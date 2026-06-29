@@ -1,0 +1,70 @@
+<?xml version="1.0" ?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- LiCONiC STX110 转盘孵育器：base + 可动 carousel(continuous, 绕 Z) + 5 个货架坐标系。
+       关节命名 ${station_name}${device_name}0_carousel_joint == <节点id>_0_carousel_joint，
+       与 VirtualLiconicStx110 的 SimpleJointPublisher(device_id=<节点id>) 发布的关节名一致。 -->
+  <xacro:macro name="liconic_stx110"
+    params="parent_link:='' station_name:='' device_name:='' x:=0 y:=0 z:=0 rx:=0 ry:=0 r:=0 mesh_path:=''">
+
+    <xacro:property name="P" value="${station_name}${device_name}"/>
+
+    <joint name="${P}base_link_joint" type="fixed">
+      <origin xyz="${x} ${y} ${z}" rpy="${rx} ${ry} ${r}"/>
+      <parent link="${parent_link}"/>
+      <child link="${P}0_base_link"/>
+    </joint>
+
+    <link name="${P}0_base_link">
+      <visual>
+        <geometry>
+          <mesh filename="file://${mesh_path}/devices/liconic_stx110/meshes/0_base.stl"/>
+        </geometry>
+        <material name="stx110_base"><color rgba="0.75 0.75 0.78 1"/></material>
+      </visual>
+    </link>
+
+    <link name="${P}0_carousel_link">
+      <visual>
+        <geometry>
+          <mesh filename="file://${mesh_path}/devices/liconic_stx110/meshes/0_carousel.stl"/>
+        </geometry>
+        <material name="stx110_carousel"><color rgba="0.20 0.45 0.85 1"/></material>
+      </visual>
+    </link>
+
+    <joint name="${P}0_carousel_joint" type="continuous">
+      <parent link="${P}0_base_link"/>
+      <child link="${P}0_carousel_link"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <axis xyz="0 0 1"/>
+    </joint>
+
+    <!-- 5 个货架坐标系(随 carousel 转) -->
+    <link name="${P}socket1"/>
+    <joint name="${P}socket_1" type="fixed">
+      <parent link="${P}0_carousel_link"/><child link="${P}socket1"/>
+      <origin rpy="0 0 0" xyz="0.0 -0.13 0.52"/>
+    </joint>
+    <link name="${P}socket2"/>
+    <joint name="${P}socket_2" type="fixed">
+      <parent link="${P}0_carousel_link"/><child link="${P}socket2"/>
+      <origin rpy="0 0 1.2566370614359172" xyz="0.12363734711836996 -0.04017220926874317 0.52"/>
+    </joint>
+    <link name="${P}socket3"/>
+    <joint name="${P}socket_3" type="fixed">
+      <parent link="${P}0_carousel_link"/><child link="${P}socket3"/>
+      <origin rpy="0 0 2.5132741228718345" xyz="0.07641208279802153 0.10517220926874316 0.52"/>
+    </joint>
+    <link name="${P}socket4"/>
+    <joint name="${P}socket_4" type="fixed">
+      <parent link="${P}0_carousel_link"/><child link="${P}socket4"/>
+      <origin rpy="0 0 3.7699111843077517" xyz="-0.0764120827980215 0.10517220926874318 0.52"/>
+    </joint>
+    <link name="${P}socket5"/>
+    <joint name="${P}socket_5" type="fixed">
+      <parent link="${P}0_carousel_link"/><child link="${P}socket5"/>
+      <origin rpy="0 0 5.026548245743669" xyz="-0.12363734711836998 -0.04017220926874314 0.52"/>
+    </joint>
+
+  </xacro:macro>
+</robot>

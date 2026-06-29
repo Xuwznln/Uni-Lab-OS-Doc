@@ -1,9 +1,99 @@
-incubator.liconic_stx110:
+incubator_liconic_stx110:
   category:
   - incubator
   - storage
   class:
-    action_value_mappings: {}
+    action_value_mappings:
+      load_plate:
+        type: UniLabJsonCommandAsync
+        goal:
+          slot: slot
+        feedback: {}
+        result: {}
+        schema:
+          title: load_plate参数
+          description: 存板：转盘旋转使指定货架对准传输窗口
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                slot:
+                  type: integer
+                  default: 1
+                  title: 货架编号
+                  description: 目标货架 1–5。
+              required: []
+            feedback: {}
+            result:
+              type: boolean
+          required:
+          - goal
+        goal_default:
+          slot: 1
+        handles: {}
+        placeholder_keys: {}
+        feedback_interval: 1.0
+      set_temperature:
+        type: UniLabJsonCommandAsync
+        goal:
+          temperature: temperature
+        feedback: {}
+        result: {}
+        schema:
+          title: set_temperature参数
+          description: 设置孵育温度（仿真，无运动）
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                temperature:
+                  type: number
+                  default: 37.0
+                  title: 目标温度
+                  description: 摄氏度。
+              required: []
+            feedback: {}
+            result:
+              type: boolean
+          required:
+          - goal
+        goal_default:
+          temperature: 37.0
+        handles: {}
+        placeholder_keys: {}
+        feedback_interval: 1.0
+      unload_plate:
+        type: UniLabJsonCommandAsync
+        goal:
+          slot: slot
+        feedback: {}
+        result: {}
+        schema:
+          title: unload_plate参数
+          description: 取板：转盘旋转到指定货架取出后回到出口
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                slot:
+                  type: integer
+                  default: 1
+                  title: 货架编号
+                  description: 目标货架 1–5。
+              required: []
+            feedback: {}
+            result:
+              type: boolean
+          required:
+          - goal
+        goal_default:
+          slot: 1
+        handles: {}
+        placeholder_keys: {}
+        feedback_interval: 1.0
     module: unilabos.devices.virtual.virtual_liconic_stx110:VirtualLiconicStx110
     status_types:
       status: str
@@ -14,3 +104,6 @@ incubator.liconic_stx110:
   icon: ''
   init_param_schema: {}
   version: 1.0.0
+  model:
+    type: device
+    mesh: liconic_stx110

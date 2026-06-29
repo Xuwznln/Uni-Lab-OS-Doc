@@ -1,5 +1,5 @@
 pairs:
-  - real: incubator.liconic_stx110
+  - real: incubator_liconic_stx110
     virtual: virtual_liconic_stx110
     engine: rviz
     twin_capability:
