@@ -85,7 +85,7 @@ coincellassemblyworkstation_device:
           elec_num: null
           elec_use_num: null
           elec_vol: 50
-          file_path: /Users/sml/work
+          file_path: D:\Uni-Lab-OS-Data\date
           ne_plate_matrix: 0
           ne_plate_num: 0
           sep_plate_matrix: 0
@@ -145,7 +145,7 @@ coincellassemblyworkstation_device:
                   description: 电解液吸液量 (μL)
                   type: integer
                 file_path:
-                  default: D:\UniLabdev\Uni-Lab-OS\unilabos\devices\workstation\coin_cell_assembly
+                  default: D:\Uni-Lab-OS-Data\date
                   description: 实验记录保存路径
                   type: string
                 ne_plate_matrix:
@@ -323,7 +323,7 @@ coincellassemblyworkstation_device:
         feedback: {}
         goal: {}
         goal_default:
-          file_path: D:\coin_cell_data
+          file_path: D:\Uni-Lab-OS-Data\date
         handles: {}
         placeholder_keys: {}
         result: {}
@@ -334,7 +334,7 @@ coincellassemblyworkstation_device:
             goal:
               properties:
                 file_path:
-                  default: D:\coin_cell_data
+                  default: D:\Uni-Lab-OS-Data\date
                   type: string
               required: []
               type: object
@@ -437,7 +437,7 @@ coincellassemblyworkstation_device:
         feedback: {}
         goal: {}
         goal_default:
-          file_path: /Users/sml/work
+          file_path: D:\Uni-Lab-OS-Data\date
         handles: {}
         placeholder_keys: {}
         result: {}
@@ -448,7 +448,7 @@ coincellassemblyworkstation_device:
             goal:
               properties:
                 file_path:
-                  default: /Users/sml/work
+                  default: D:\Uni-Lab-OS-Data\date
                   type: string
               required: []
               type: object
@@ -473,7 +473,7 @@ coincellassemblyworkstation_device:
           elec_num: null
           elec_use_num: null
           elec_vol: 50
-          file_path: /Users/sml/work
+          file_path: D:\Uni-Lab-OS-Data\date
           ne_plate_matrix: 0
           ne_plate_num: 0
           sep_plate_matrix: 0
@@ -549,7 +549,7 @@ coincellassemblyworkstation_device:
                   description: 电解液吸液量 (μL)
                   type: integer
                 file_path:
-                  default: /Users/sml/work
+                  default: D:\Uni-Lab-OS-Data\date
                   description: 实验记录保存路径
                   type: string
                 ne_plate_matrix:

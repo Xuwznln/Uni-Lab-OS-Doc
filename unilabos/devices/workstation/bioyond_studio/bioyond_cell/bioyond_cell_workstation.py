@@ -405,6 +405,161 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         return self._classify_finish_report(order_code, report or {})
 
+    def get_conductivity_order_result(self, order_id: str) -> Dict[str, Any]:
+        """
+        查询单条电导单的测试结果（电导率 / 温度等）。
+
+        接口：POST /api/lims/order/conductivity-order-result
+        请求体 data 直接是电导单的 orderId（GUID 字符串）。
+
+        Args:
+            order_id: 电导单 orderId（GUID）
+
+        Returns:
+            LIMS 返回的 data 对象，结构形如：
+            {
+                "orderId": "...", "bottleId": "...", "bottleBarCode": "",
+                "boardId": "...", "boardBarCode": "CD2026062613",
+                "bottleInnerX": 1, "bottleInnerY": 1, "bottleInnerZ": 1,
+                "conductivity": 10, "temperature": 10, "targetTemperature": 40
+            }
+            失败时返回 {}（并打 warning）。
+        """
+        if not order_id:
+            logger.warning("[电导结果] get_conductivity_order_result 被调用，但 order_id 为空")
+            return {}
+        resp = self._post_lims("/api/lims/order/conductivity-order-result", order_id)
+        if not isinstance(resp, dict) or resp.get("code") != 1:
+            logger.warning(
+                f"[电导结果] 查询失败 orderId={order_id}: {resp}"
+            )
+            return {}
+        return resp.get("data") or {}
+
+    def _collect_conductivity_results(
+        self, order_pairs: List[Tuple[str, str]]
+    ) -> List[Dict[str, Any]]:
+        """
+        逐个 (orderCode, orderId) 调电导结果接口，标准化成行字典列表。
+
+        Args:
+            order_pairs: [(orderCode, orderId), ...]。orderId 应为真实 GUID
+                （调用方优先用 finish 报文里的 orderId，零 GUID 时回退创建时返回的）。
+
+        Returns:
+            [{
+                "orderCode": str, "orderId": str,
+                "boardBarCode": str, "bottleBarCode": str,
+                "bottleInnerX": int, "bottleInnerY": int, "bottleInnerZ": int,
+                "conductivity": float, "temperature": float, "targetTemperature": float,
+                "report_time": "YYYY-MM-DD HH:MM:SS",
+            }, ...]
+            查询失败的订单仍保留一行（数值字段留空 / None），便于排查。
+        """
+        EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
+        results: List[Dict[str, Any]] = []
+        for order_code, order_id in order_pairs:
+            report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            if not order_id or order_id == EMPTY_GUID:
+                logger.warning(
+                    f"[电导结果] orderCode={order_code} 的 orderId 无效({order_id})，跳过结果查询"
+                )
+                results.append({
+                    "orderCode": order_code, "orderId": order_id or "",
+                    "boardBarCode": "", "bottleBarCode": "",
+                    "bottleInnerX": None, "bottleInnerY": None, "bottleInnerZ": None,
+                    "conductivity": None, "temperature": None, "targetTemperature": None,
+                    "report_time": report_time,
+                })
+                continue
+            data = self.get_conductivity_order_result(order_id)
+            results.append({
+                "orderCode": order_code,
+                "orderId": order_id,
+                "boardBarCode": data.get("boardBarCode", "") or "",
+                "bottleBarCode": data.get("bottleBarCode", "") or "",
+                "bottleInnerX": data.get("bottleInnerX"),
+                "bottleInnerY": data.get("bottleInnerY"),
+                "bottleInnerZ": data.get("bottleInnerZ"),
+                "conductivity": data.get("conductivity"),
+                "temperature": data.get("temperature"),
+                "targetTemperature": data.get("targetTemperature"),
+                "report_time": report_time,
+            })
+            logger.info(
+                f"[电导结果] orderCode={order_code} orderId={order_id[:8]}...: "
+                f"board={data.get('boardBarCode')}, bottle={data.get('bottleBarCode')}, "
+                f"X={data.get('bottleInnerX')}, Y={data.get('bottleInnerY')}, "
+                f"cond={data.get('conductivity')}, T={data.get('temperature')}/"
+                f"{data.get('targetTemperature')}"
+            )
+        return results
+
+    def _wait_conductivity_and_resolve_ids(
+        self,
+        order_pairs: List[Tuple[str, str]],
+        wait_timeout_seconds: int,
+        tag: str = "conductivity",
+    ) -> Tuple[List[Tuple[str, str]], Dict[str, int]]:
+        """
+        逐单阻塞等 /report/order_finish 推送，并回填真实 orderId。
+
+        建单返回的 orderId 可能是全 0 GUID（执行时才填），finish 报文里带的是
+        真实 orderId；这里优先用 finish 报文的 orderId，零 GUID 时回退创建时的值，
+        供后续 /conductivity-order-result 按 orderId 查询。
+
+        Args:
+            order_pairs: [(orderCode, creation_orderId), ...]
+            wait_timeout_seconds: 单个订单 wait 超时秒数
+            tag: 日志标签
+
+        Returns:
+            (resolved_pairs, summary)
+            resolved_pairs: [(orderCode, resolved_orderId), ...]
+            summary: {"success": int, "timeout": int, "abnormal_stop": int,
+                      "manual_stop": int, "mismatch": int, "other": int}
+        """
+        EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
+        summary = {
+            "success": 0, "timeout": 0, "abnormal_stop": 0,
+            "manual_stop": 0, "mismatch": 0, "other": 0,
+        }
+        resolved: List[Tuple[str, str]] = []
+        total = len(order_pairs)
+        logger.info(
+            f"[{tag}] 开始阻塞等待 {total} 个电导单完成 "
+            f"(单订单 timeout={wait_timeout_seconds}s)..."
+        )
+        for idx, (order_code, creation_oid) in enumerate(order_pairs, 1):
+            logger.info(f"[{tag}] 等待第 {idx}/{total} 个电导单: {order_code}")
+            wait_result = self._wait_conductivity_finish(
+                order_code, timeout=wait_timeout_seconds
+            )
+            wait_status = wait_result.get("status", "other")
+            if wait_status == "success":
+                summary["success"] += 1
+                logger.info(f"[{tag}] ✓ 电导单 {order_code} 完成")
+            elif wait_status in summary:
+                summary[wait_status] += 1
+                logger.warning(
+                    f"[{tag}] ⚠ 电导单 {order_code} 非正常结束: status={wait_status}"
+                )
+            else:
+                summary["other"] += 1
+                logger.warning(
+                    f"[{tag}] ⚠ 电导单 {order_code} 未知 wait status: {wait_status}"
+                )
+
+            report = wait_result.get("report") or {}
+            report_oid = (report.get("orderId") or "").strip()
+            if report_oid and report_oid != EMPTY_GUID:
+                resolved_oid = report_oid
+            else:
+                resolved_oid = creation_oid or ""
+            resolved.append((order_code, resolved_oid))
+
+        logger.info(f"[{tag}] 全部电导单等待结束: summary={summary}")
+        return resolved, summary
 
     def get_material_info(self, material_id: str) -> Dict[str, Any]:
         """查询物料详细信息（物料详情接口）
@@ -1008,23 +1163,31 @@ class BioyondCellWorkstation(BioyondWorkstation):
             f"分液瓶提取完成: {sum(len(v) for v in all_vial_bottles if isinstance(v, list))} 个"
         )
 
-        # ========== 将条码附加到 mass_ratios 中（给扣电组装站使用）==========
+        # ========== 将条码 + 类型附加到 mass_ratios 中（给扣电组装站 / 电导 inline CSV 使用）==========
+        # 2026-06-26：额外附加 prep_bottle_type / vial_bottle_types，使电导 inline 仅靠
+        # 单个 mass_ratios handle 即可生成"配液+电导"合并 CSV（含配液瓶类型 / 分液瓶类型）。
         for idx in range(len(all_mass_ratios)):
             if idx < len(all_prep_bottles) and all_prep_bottles[idx]:
                 all_mass_ratios[idx]["prep_bottle_barcode"] = all_prep_bottles[idx].get("barCode", "")
+                all_mass_ratios[idx]["prep_bottle_type"] = all_prep_bottles[idx].get("typeName", "")
             else:
                 all_mass_ratios[idx]["prep_bottle_barcode"] = ""
+                all_mass_ratios[idx]["prep_bottle_type"] = ""
                 
             if idx < len(all_vial_bottles):
                 vials = all_vial_bottles[idx]
                 if len(vials) == 0:
                     all_mass_ratios[idx]["vial_bottle_barcodes"] = ""
+                    all_mass_ratios[idx]["vial_bottle_types"] = ""
                 elif len(vials) == 1:
                     all_mass_ratios[idx]["vial_bottle_barcodes"] = vials[0].get("barCode", "")
+                    all_mass_ratios[idx]["vial_bottle_types"] = vials[0].get("typeName", "")
                 else:
                     all_mass_ratios[idx]["vial_bottle_barcodes"] = json.dumps([v.get("barCode", "") for v in vials], ensure_ascii=False)
+                    all_mass_ratios[idx]["vial_bottle_types"] = json.dumps([v.get("typeName", "") for v in vials], ensure_ascii=False)
             else:
                 all_mass_ratios[idx]["vial_bottle_barcodes"] = ""
+                all_mass_ratios[idx]["vial_bottle_types"] = ""
 
         # ========== 提取各类瓶板的源坐标（用于 321/32 任务 handles 传参）==========
         def _find_plate_xyz(plates, type_keyword):
@@ -1399,18 +1562,27 @@ class BioyondCellWorkstation(BioyondWorkstation):
             f"板条码 {barcode} 未在物料系统中找到，请先在 LIMS 建立对应的分液板物料"
         )
 
-    def create_conductivity_orders_from_excel(
+    def conductivity_test_external(
         self,
         xlsx_path: str,
         validate_barcode: bool = True,
         start_scheduler: bool = True,
+        wait_for_finish: bool = True,
+        wait_timeout_seconds: int = 36000,
+        csv_export_path: str = "",
     ) -> Dict[str, Any]:
         """
-        2.37 5号电导工作站手动新建实验（Excel 入口）。
+        2.37 5号电导工作站手动新建实验（外部进样 / Excel 入口）。
 
-        手动电导路径上没有"启动调度+上料"的前置流程（那是配液专用的
-        scheduler_start_and_auto_feeding），因此本函数会在提交订单前主动
-        调用 scheduler_start，确保订单进入队列后立即被调度消费。
+        外部进样：操作员手动填 Excel（板条码 + 瓶位 + 温控点）后提交，
+        不接配液 handle。手动电导路径上没有"启动调度+上料"的前置流程
+        （那是配液专用的 scheduler_start_and_auto_feeding），因此本函数会在
+        提交订单前主动调用 scheduler_start，确保订单进入队列后立即被调度消费。
+
+        2026-06-26 调整：POST 建单后不再立即 return，而是：
+        - wait_for_finish=True（默认）：逐单阻塞等 /report/order_finish 推送，
+          全部完成后用 /api/lims/order/conductivity-order-result 按 orderId 拉取
+          电导率/温度结果，写入 External_conductivity_*.csv 并放进 return。
 
         Excel 列（中文 / 英文均支持）：
             算法批次ID / batchId
@@ -1426,14 +1598,22 @@ class BioyondCellWorkstation(BioyondWorkstation):
             validate_barcode: 是否在提交前对 plateBarCode 做物料系统强校验，默认 True
             start_scheduler: 提交订单前是否先启动调度，默认 True。
                 调度若已 Running，再次启动是幂等的；置 False 可在外部控制时机。
+            wait_for_finish: 是否阻塞等所有电导单完成并拉取结果，默认 True。
+                False 时回退到 fire-and-forget，POST 完即返回。
+            wait_timeout_seconds: 单个电导单 wait 超时秒数，默认 36000s = 10h。
+            csv_export_path: 电导结果 CSV 导出目录，为空则不导出。
 
         Returns:
             {
-                "status": "submitted" | "partial" | "error",
+                "status": "submitted" | "partial" | "error" | "all_completed" | "partial_completed",
                 "total_entries": int,
                 "validated_barcodes": List[str],
                 "response": <LIMS 原始返回>,
                 "scheduler_start_response": <可选，调度启动返回>,
+                # 仅 wait_for_finish=True 时有：
+                "conductivity_results": List[Dict],
+                "completion_summary": {"success": int, "timeout": int, ...},
+                "csv_file": <可选，External_conductivity_*.csv 路径>,
             }
 
         Raises:
@@ -1445,13 +1625,13 @@ class BioyondCellWorkstation(BioyondWorkstation):
         if path is None or not path.exists():
             raise FileNotFoundError(f"未找到电导实验 Excel: {xlsx_path}")
 
-        logger.info(f"[create_conductivity_orders_from_excel] 读取 Excel: {path}")
+        logger.info(f"[conductivity_test_external] 读取 Excel: {path}")
         try:
             df = pd.read_excel(path, sheet_name=0, engine="openpyxl")
         except Exception as e:
             raise RuntimeError(f"读取 Excel 失败: {e}")
         logger.info(
-            f"[create_conductivity_orders_from_excel] 读取成功，行数={len(df)}, 列={list(df.columns)}"
+            f"[conductivity_test_external] 读取成功，行数={len(df)}, 列={list(df.columns)}"
         )
 
         def _pick(col_names: List[str]) -> Optional[str]:
@@ -1522,7 +1702,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             plate_barcode = _as_str(row[col_code])
             if not plate_barcode:
                 logger.warning(
-                    f"[create_conductivity_orders_from_excel] 第 {idx + 1} 行 plateBarCode 为空，跳过"
+                    f"[conductivity_test_external] 第 {idx + 1} 行 plateBarCode 为空，跳过"
                 )
                 continue
 
@@ -1530,7 +1710,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             order_id = _as_str(row[col_order])
             if not batch_id or not order_id:
                 logger.warning(
-                    f"[create_conductivity_orders_from_excel] 第 {idx + 1} 行 batchId/orderId 为空，跳过"
+                    f"[conductivity_test_external] 第 {idx + 1} 行 batchId/orderId 为空，跳过"
                 )
                 continue
 
@@ -1545,7 +1725,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             }
             entries.append(entry)
             logger.info(
-                f"[create_conductivity_orders_from_excel] 第 {idx + 1} 行: "
+                f"[conductivity_test_external] 第 {idx + 1} 行: "
                 f"orderId={entry['orderId']}, plateBarCode={entry['plateBarCode']}, "
                 f"X={entry['bottleX']}, Y={entry['bottleY']}, T={entry['temperaturePoint']}"
             )
@@ -1555,50 +1735,50 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         unique_barcodes = sorted({e["plateBarCode"] for e in entries})
         logger.info(
-            f"[create_conductivity_orders_from_excel] 共组装 {len(entries)} 条 entry，"
+            f"[conductivity_test_external] 共组装 {len(entries)} 条 entry，"
             f"涉及 {len(unique_barcodes)} 个板条码: {unique_barcodes}"
         )
 
         if validate_barcode:
             logger.info(
-                f"[create_conductivity_orders_from_excel] 开始批量校验 plateBarCode "
+                f"[conductivity_test_external] 开始批量校验 plateBarCode "
                 f"({len(unique_barcodes)} 个)..."
             )
             for bc in unique_barcodes:
                 self._validate_plate_barcode(bc)
-            logger.info("[create_conductivity_orders_from_excel] ✅ 所有 plateBarCode 校验通过")
+            logger.info("[conductivity_test_external] ✅ 所有 plateBarCode 校验通过")
         else:
             logger.warning(
-                "[create_conductivity_orders_from_excel] ⚠️ validate_barcode=False，跳过板条码校验"
+                "[conductivity_test_external] ⚠️ validate_barcode=False，跳过板条码校验"
             )
 
         scheduler_start_resp: Optional[Dict[str, Any]] = None
         if start_scheduler:
             logger.info(
-                "[create_conductivity_orders_from_excel] 启动调度（确保订单进队列后立即消费）..."
+                "[conductivity_test_external] 启动调度（确保订单进队列后立即消费）..."
             )
             try:
                 scheduler_start_resp = self.scheduler_start()
                 logger.info(
-                    f"[create_conductivity_orders_from_excel] 调度启动返回: {scheduler_start_resp}"
+                    f"[conductivity_test_external] 调度启动返回: {scheduler_start_resp}"
                 )
                 if not (isinstance(scheduler_start_resp, dict) and scheduler_start_resp.get("code") == 1):
                     logger.warning(
-                        "[create_conductivity_orders_from_excel] ⚠️ 调度启动未返回 code=1，"
+                        "[conductivity_test_external] ⚠️ 调度启动未返回 code=1，"
                         "继续提交订单，但订单可能不会被立即消费"
                     )
             except Exception as e:
                 logger.warning(
-                    f"[create_conductivity_orders_from_excel] ⚠️ 启动调度异常（继续提交订单）: {e}"
+                    f"[conductivity_test_external] ⚠️ 启动调度异常（继续提交订单）: {e}"
                 )
                 scheduler_start_resp = {"error": str(e)}
         else:
             logger.info(
-                "[create_conductivity_orders_from_excel] start_scheduler=False，跳过启动调度"
+                "[conductivity_test_external] start_scheduler=False，跳过启动调度"
             )
 
         logger.info(
-            f"[create_conductivity_orders_from_excel] 提交 {len(entries)} 条 entry 到 "
+            f"[conductivity_test_external] 提交 {len(entries)} 条 entry 到 "
             f"/api/lims/order/conductivity-orders"
         )
         response = self._post_lims("/api/lims/order/conductivity-orders", entries)
@@ -1607,24 +1787,25 @@ class BioyondCellWorkstation(BioyondWorkstation):
         except Exception:
             response_dump = str(response)
         logger.info(
-            f"[create_conductivity_orders_from_excel] LIMS 完整返回: {response_dump}"
+            f"[conductivity_test_external] LIMS 完整返回: {response_dump}"
         )
         if isinstance(response, dict):
             data_field = response.get("data")
             if not data_field:
                 logger.warning(
-                    "[create_conductivity_orders_from_excel] ⚠️ LIMS 返回中 data 为空，"
+                    "[conductivity_test_external] ⚠️ LIMS 返回中 data 为空，"
                     "奔曜软件可能没有真正建任务，请检查 createTime 格式 / orderId 是否存在 / 板条码绑定情况"
                 )
             else:
                 logger.info(
-                    f"[create_conductivity_orders_from_excel] LIMS data 含 {len(data_field) if isinstance(data_field, list) else 1} 条"
+                    f"[conductivity_test_external] LIMS data 含 {len(data_field) if isinstance(data_field, list) else 1} 条"
                 )
 
         # 2026-06-04 修：成功判据从 orderId!=EMPTY_GUID 改为 errorMessage为空+orderCode非空。
         # LIMS 创建阶段总是返回 orderId=全 0 GUID，实际执行时才填。
+        # 2026-06-26：同时收集 (orderCode, orderId) 对，结果接口要 orderId。
         status = "error"
-        new_order_codes_excel: List[str] = []
+        new_order_pairs: List[Tuple[str, str]] = []  # [(orderCode, orderId), ...]
         if isinstance(response, dict) and response.get("code") == 1:
             data_field = response.get("data") or []
             if isinstance(data_field, list) and data_field:
@@ -1635,9 +1816,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                         continue
                     err_msg = (d.get("errorMessage") or "").strip()
                     new_code = (d.get("orderCode") or "").strip()
+                    new_oid = (d.get("orderId") or "").strip()
                     if not err_msg and new_code:
                         valid_entries.append(d)
-                        new_order_codes_excel.append(new_code)
+                        new_order_pairs.append((new_code, new_oid))
                     else:
                         error_entries.append(d)
                 if len(valid_entries) == len(data_field):
@@ -1648,7 +1830,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     status = "error"
                 if error_entries:
                     logger.warning(
-                        f"[create_conductivity_orders_from_excel] ⚠️ {len(error_entries)} 条 entry 创建失败:"
+                        f"[conductivity_test_external] ⚠️ {len(error_entries)} 条 entry 创建失败:"
                     )
                     for e in error_entries:
                         logger.warning(
@@ -1656,11 +1838,13 @@ class BioyondCellWorkstation(BioyondWorkstation):
                         )
             else:
                 status = "error"
+        new_order_codes_excel = [oc for oc, _ in new_order_pairs]
         logger.info(
-            f"[create_conductivity_orders_from_excel] 最终 status={status}, "
+            f"[conductivity_test_external] 最终 status={status}, "
             f"LIMS 新建电导单号={new_order_codes_excel}"
         )
-        return {
+
+        result: Dict[str, Any] = {
             "status": status,
             "total_entries": len(entries),
             "validated_barcodes": unique_barcodes,
@@ -1668,22 +1852,55 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "scheduler_start_response": scheduler_start_resp,
         }
 
+        # ========== 等待完成 + 拉取电导结果 + 导出 CSV ==========
+        if wait_for_finish and new_order_pairs:
+            resolved_pairs, summary = self._wait_conductivity_and_resolve_ids(
+                new_order_pairs, wait_timeout_seconds, tag="conductivity_test_external"
+            )
+            if summary["success"] == len(new_order_pairs):
+                result["status"] = "all_completed"
+            elif summary["success"] > 0:
+                result["status"] = "partial_completed"
+            result["completion_summary"] = summary
+
+            conductivity_results = self._collect_conductivity_results(resolved_pairs)
+            result["conductivity_results"] = conductivity_results
+
+            if csv_export_path:
+                try:
+                    csv_file = self._export_conductivity_csv(
+                        conductivity_results, csv_export_path, "External_conductivity"
+                    )
+                    result["csv_file"] = csv_file
+                except Exception as e:
+                    logger.error(f"[conductivity_test_external] CSV 导出失败: {e}")
+        elif wait_for_finish and not new_order_pairs:
+            logger.warning(
+                "[conductivity_test_external] wait_for_finish=True 但无成功 orderCode，跳过等待"
+            )
+
+        return result
+
     # -------------------- 2.37 5号站新建实验（自动入口，接配液 handle） --------------------
-    def create_conductivity_orders(
+    def conductivity_test_inline(
         self,
         vial_plates: List[Dict[str, Any]],
         temperature_points: List[float],
+        mass_ratios: Optional[List[Dict[str, Any]]] = None,
         validate_barcode: bool = True,
         wait_for_finish: bool = True,
         wait_timeout_seconds: int = 36000,
+        csv_export_path: str = "",
         **_legacy_kwargs: Any,
     ) -> Dict[str, Any]:
         """
-        2.37 5 号电导工作站自动新建实验（接配液 output handle）。
+        2.37 5 号电导工作站自动新建实验（配液站传过来 / 接配液 output handle）。
 
-        相比手动 Excel 入口 (create_conductivity_orders_from_excel)，本函数：
+        相比外部进样入口 (conductivity_test_external)，本函数：
         - 上游 vial_plates 自带 batch_id / orderCode / barCode / materialId
         - 通过 LIMS material-info (2.4) 查每块板的 detail 拿真实瓶位 (X, Y)
+        - 额外接收配液配方信息 mass_ratios（来自配液 handle），测试完成后把
+          电导结果按"分液瓶二维码"与配方合并导出 Formulation_Conductivity_*.csv
 
         2026-06-04 调整（与配液 _submit_and_wait_orders 保持一致）：
         - 不再 scheduler_stop / scheduler_start 切换。
@@ -1716,9 +1933,14 @@ class BioyondCellWorkstation(BioyondWorkstation):
             temperature_points: 温度点列表（℃）。
                 长度=1 → 广播到所有分液板；长度=N（=过滤后分液板数）→ 一一对应；其他长度报错。
                 **同一块板上的所有分液瓶共享同一温度点（一块板一个温度）。**
+            mass_ratios: 配液配方信息列表（来自配液 auto-create_orders /
+                auto-create_orders_formulation 的 mass_ratios 输出 handle）。
+                用于测试完成后按"分液瓶二维码"合并出配液+电导报告；为空则只出电导报告。
             validate_barcode: 提交前是否对 plateBarCode 做物料系统强校验，默认 True
             wait_for_finish: 是否阻塞等待所有 LIMS 新建电导单完成，默认 True
             wait_timeout_seconds: 单个订单 wait 超时秒数，默认 36000s = 10h（与配液一致）
+            csv_export_path: CSV 导出目录，为空则不导出。非空时在同一目录生成两份：
+                Inline_conductivity_*.csv（电导-only）+ Formulation_Conductivity_*.csv（配液+电导）
 
         Returns:
             {
@@ -1729,8 +1951,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "new_order_codes": List[str],
                 "response": <LIMS POST 原始返回>,
                 # 仅当 wait_for_finish=True 时有：
-                "conductivity_reports": List[Dict],  # 每个订单的 finish 报文 / 异常状态
-                "completion_summary": {"success": int, "timeout": int, "abnormal": int, ...},
+                "completion_summary": {"success": int, "timeout": int, ...},
+                "conductivity_results": List[Dict],  # 每瓶电导结果
+                "csv_file_conductivity": <可选，Inline_conductivity_*.csv 路径>,
+                "csv_file_formulation": <可选，Formulation_Conductivity_*.csv 路径>,
             }
 
         Raises:
@@ -1763,7 +1987,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             if isinstance(p, dict) and (p.get("materialId") or "").strip() in station_mids
         ]
         logger.info(
-            f"[create_conductivity_orders] 5 号自动传递窗过滤: "
+            f"[conductivity_test_inline] 5 号自动传递窗过滤: "
             f"{len(vial_plates)} → {len(kept)} 块板（5 号站现有板 {len(station_mids)} 块）"
         )
         vial_plates = kept
@@ -1790,7 +2014,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
 
         logger.info(
-            f"[create_conductivity_orders] 开始：batch_id={batch_id}, "
+            f"[conductivity_test_inline] 开始：batch_id={batch_id}, "
             f"分液板数={n_plates}, 温度点数={n_temps}"
         )
 
@@ -1864,7 +2088,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 }
                 entries.append(entry)
                 logger.info(
-                    f"[create_conductivity_orders] entry: "
+                    f"[conductivity_test_inline] entry: "
                     f"plate#{idx+1} orderId={resolved_order_code} "
                     f"(bottle.assoc={bottle_assoc[:8] if bottle_assoc else '<none>'}), "
                     f"plateBarCode={plate_barcode}, X={bottle['x']}, Y={bottle['y']}, T={plate_temp}"
@@ -1875,13 +2099,13 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         unique_barcodes = sorted({e["plateBarCode"] for e in entries})
         logger.info(
-            f"[create_conductivity_orders] 共组装 {len(entries)} 条 entry，"
+            f"[conductivity_test_inline] 共组装 {len(entries)} 条 entry，"
             f"涉及 {len(unique_barcodes)} 个板条码"
         )
 
         # ========== 阶段2: 直接 POST（调度由上游/外部管理，与配液 _submit_and_wait_orders 一致）==========
         logger.info(
-            f"[create_conductivity_orders] POST {len(entries)} 条 entry 到 "
+            f"[conductivity_test_inline] POST {len(entries)} 条 entry 到 "
             f"/api/lims/order/conductivity-orders ..."
         )
         response = self._post_lims("/api/lims/order/conductivity-orders", entries)
@@ -1889,7 +2113,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             response_dump = json.dumps(response, ensure_ascii=False)
         except Exception:
             response_dump = str(response)
-        logger.info(f"[create_conductivity_orders] LIMS 完整返回: {response_dump}")
+        logger.info(f"[conductivity_test_inline] LIMS 完整返回: {response_dump}")
 
         # ========== 阶段3: 解析 response 算 status ==========
         # 2026-06-04 修：原先用 orderId != EMPTY_GUID 判断成功是错的——
@@ -1897,8 +2121,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # 实际可用的成功判据是 errorMessage 为空 + orderCode 非空（=LIMS 已建出新电导单号）。
         # 失败示例：errorMessage="...没有在5号手套箱仓库..." & orderCode=null & usedMaterials=[]
         # 成功示例：errorMessage=null & orderCode="BSO20260604000XX" & usedMaterials=[plate, bottle]
+        # 2026-06-26：同时收集 (orderCode, orderId) 对，结果接口要 orderId。
         status = "error"
-        new_order_codes: List[str] = []
+        new_order_pairs: List[Tuple[str, str]] = []  # [(orderCode, orderId), ...]
         if isinstance(response, dict) and response.get("code") == 1:
             data_field = response.get("data") or []
             if isinstance(data_field, list) and data_field:
@@ -1909,9 +2134,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                         continue
                     err_msg = (d.get("errorMessage") or "").strip()
                     new_code = (d.get("orderCode") or "").strip()
+                    new_oid = (d.get("orderId") or "").strip()
                     if not err_msg and new_code:
                         valid_entries.append(d)
-                        new_order_codes.append(new_code)
+                        new_order_pairs.append((new_code, new_oid))
                     else:
                         error_entries.append(d)
 
@@ -1924,15 +2150,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
                 if error_entries:
                     logger.warning(
-                        f"[create_conductivity_orders] ⚠️ {len(error_entries)} 条 entry 创建失败:"
+                        f"[conductivity_test_inline] ⚠️ {len(error_entries)} 条 entry 创建失败:"
                     )
                     for e in error_entries:
                         logger.warning(
                             f"  - errorMessage={e.get('errorMessage')!r}, "
                             f"orderCode={e.get('orderCode')!r}"
                         )
+        new_order_codes = [oc for oc, _ in new_order_pairs]
         logger.info(
-            f"[create_conductivity_orders] 最终 status={status}, "
+            f"[conductivity_test_inline] 最终 status={status}, "
             f"LIMS 新建电导单号={new_order_codes}"
         )
 
@@ -1945,72 +2172,41 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "response": response,
         }
 
-        # ========== 阶段4: （可选）阻塞等所有 LIMS 新建电导单跑完 ==========
-        # 与配液 _submit_and_wait_orders 同款 pattern：逐个 wait_for_order_finish。
-        # 节点会一直运行到所有电导单子收到 /report/order_finish 推送（成功/异常/超时）。
-        if wait_for_finish and new_order_codes:
-            logger.info(
-                f"[create_conductivity_orders] 开始阻塞等待 {len(new_order_codes)} "
-                f"个电导单完成 (单订单 timeout={wait_timeout_seconds}s)..."
+        # ========== 阶段4: （可选）阻塞等所有 LIMS 新建电导单跑完 + 拉结果 + 出两份 CSV ==========
+        # 节点会一直运行到所有电导单子收到 /report/order_finish 推送（成功/异常/超时），
+        # 然后按 orderId 调 /conductivity-order-result 拉电导率/温度，导出两份 CSV：
+        # Inline_conductivity_*.csv（电导-only）+ Formulation_Conductivity_*.csv（配液+电导）。
+        if wait_for_finish and new_order_pairs:
+            resolved_pairs, summary = self._wait_conductivity_and_resolve_ids(
+                new_order_pairs, wait_timeout_seconds, tag="conductivity_test_inline"
             )
-            conductivity_reports: List[Dict[str, Any]] = []
-            summary = {
-                "success": 0,
-                "timeout": 0,
-                "abnormal_stop": 0,
-                "manual_stop": 0,
-                "mismatch": 0,
-                "other": 0,
-            }
-            for idx, order_code in enumerate(new_order_codes, 1):
-                logger.info(
-                    f"[create_conductivity_orders] 等待第 {idx}/{len(new_order_codes)} "
-                    f"个电导单: {order_code}"
-                )
-                wait_result = self._wait_conductivity_finish(
-                    order_code, timeout=wait_timeout_seconds
-                )
-                wait_status = wait_result.get("status", "other")
-                if wait_status == "success":
-                    summary["success"] += 1
-                    logger.info(
-                        f"[create_conductivity_orders] ✓ 电导单 {order_code} 完成"
-                    )
-                elif wait_status in summary:
-                    summary[wait_status] += 1
-                    logger.warning(
-                        f"[create_conductivity_orders] ⚠ 电导单 {order_code} "
-                        f"非正常结束: status={wait_status}"
-                    )
-                else:
-                    summary["other"] += 1
-                    logger.warning(
-                        f"[create_conductivity_orders] ⚠ 电导单 {order_code} "
-                        f"未知 wait status: {wait_status}"
-                    )
-                conductivity_reports.append({
-                    "orderCode": order_code,
-                    "wait_status": wait_status,
-                    "report": wait_result.get("report"),
-                    "message": wait_result.get("message"),
-                })
-
-            # 综合 status：所有 wait_status==success → all_completed；部分成功 → partial_completed
-            if summary["success"] == len(new_order_codes):
+            if summary["success"] == len(new_order_pairs):
                 result["status"] = "all_completed"
             elif summary["success"] > 0:
                 result["status"] = "partial_completed"
-            # 其余情况保留原 status（submitted/partial/error）
-
-            result["conductivity_reports"] = conductivity_reports
             result["completion_summary"] = summary
-            logger.info(
-                f"[create_conductivity_orders] 全部电导单等待结束："
-                f"summary={summary}, final_status={result['status']}"
-            )
-        elif wait_for_finish and not new_order_codes:
+
+            conductivity_results = self._collect_conductivity_results(resolved_pairs)
+            result["conductivity_results"] = conductivity_results
+
+            if csv_export_path:
+                try:
+                    csv_file_cond = self._export_conductivity_csv(
+                        conductivity_results, csv_export_path, "Inline_conductivity"
+                    )
+                    result["csv_file_conductivity"] = csv_file_cond
+                except Exception as e:
+                    logger.error(f"[conductivity_test_inline] 电导 CSV 导出失败: {e}")
+                try:
+                    csv_file_form = self._export_conductivity_formulation_csv(
+                        conductivity_results, mass_ratios or [], csv_export_path
+                    )
+                    result["csv_file_formulation"] = csv_file_form
+                except Exception as e:
+                    logger.error(f"[conductivity_test_inline] 配液+电导 CSV 导出失败: {e}")
+        elif wait_for_finish and not new_order_pairs:
             logger.warning(
-                "[create_conductivity_orders] wait_for_finish=True 但 LIMS 未返回任何成功 orderCode，跳过等待"
+                "[conductivity_test_inline] wait_for_finish=True 但 LIMS 未返回任何成功 orderCode，跳过等待"
             )
 
         return result
@@ -2474,6 +2670,218 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         logger.info(f"[CSV导出] ✅ 导出完成: {csv_file}")
         return csv_file
+
+    def _export_conductivity_csv(
+        self,
+        results: List[Dict[str, Any]],
+        csv_export_path: str,
+        filename_prefix: str,
+    ) -> str:
+        """
+        导出电导-only CSV（external 与 inline 共用）。
+
+        Args:
+            results: _collect_conductivity_results 的返回（每瓶一条）
+            csv_export_path: 导出目录
+            filename_prefix: 文件名前缀，如 "External_conductivity" / "Inline_conductivity"
+
+        Returns:
+            生成的 CSV 文件完整路径
+
+        列：分液瓶板条码 | 分液瓶二维码 | 内部瓶位置X | 内部瓶位置Y |
+            目标温度 | 实际温度 | 电导值 | 时间
+        """
+        os.makedirs(csv_export_path, exist_ok=True)
+        time_date = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_file = os.path.join(csv_export_path, f"{filename_prefix}_{time_date}.csv")
+
+        logger.info(
+            f"[电导CSV导出] 开始导出, 行数={len(results)}, 路径={csv_file}"
+        )
+        with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "分液瓶板条码", "分液瓶二维码",
+                "内部瓶位置X", "内部瓶位置Y",
+                "目标温度", "实际温度", "电导值", "时间",
+            ])
+            for r in results:
+                writer.writerow([
+                    r.get("boardBarCode", ""),
+                    r.get("bottleBarCode", ""),
+                    r.get("bottleInnerX") if r.get("bottleInnerX") is not None else "",
+                    r.get("bottleInnerY") if r.get("bottleInnerY") is not None else "",
+                    r.get("targetTemperature") if r.get("targetTemperature") is not None else "",
+                    r.get("temperature") if r.get("temperature") is not None else "",
+                    r.get("conductivity") if r.get("conductivity") is not None else "",
+                    r.get("report_time", ""),
+                ])
+            f.flush()
+
+        logger.info(f"[电导CSV导出] ✅ 导出完成: {csv_file}")
+        return csv_file
+
+    def _export_conductivity_formulation_csv(
+        self,
+        results: List[Dict[str, Any]],
+        mass_ratios: List[Dict[str, Any]],
+        csv_export_path: str,
+    ) -> str:
+        """
+        导出配液+电导合并 CSV（inline 专用）。
+
+        按"分液瓶二维码"把电导结果与配液配方信息合并，一瓶一行（不再把多瓶
+        条码合并成数组）。bottleBarCode 为空时回退用 (boardBarCode + X + Y) 匹配。
+
+        Args:
+            results: _collect_conductivity_results 的返回（每瓶一条电导结果）
+            mass_ratios: 配液配方信息列表（来自配液 handle），每项含
+                orderCode/orderName/target_mass_ratio/real_mass_ratio/mass_tolerance/
+                total_mass_tolerance/prep_bottle_barcode/prep_bottle_type/
+                vial_bottle_barcodes/vial_bottle_types
+            csv_export_path: 导出目录
+
+        Returns:
+            生成的 CSV 文件完整路径
+
+        列：orderCode | orderName | 配液瓶类型 | 配液瓶二维码 | 分液瓶类型 |
+            分液瓶二维码 | 目标配液质量比 | 真实配液质量比 | 各试剂允差 |
+            总质量允差 | 电导值 | 目标温度 | 实际温度 | 时间
+        """
+        os.makedirs(csv_export_path, exist_ok=True)
+        time_date = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_file = os.path.join(csv_export_path, f"Formulation_Conductivity_{time_date}.csv")
+
+        mass_ratios = mass_ratios or []
+
+        def _parse_barcode_list(raw: Any) -> List[str]:
+            """vial_bottle_barcodes 可能是单串或 JSON 数组串，统一成 list[str]。"""
+            if raw is None:
+                return []
+            if isinstance(raw, list):
+                return [str(x) for x in raw if x]
+            s = str(raw).strip()
+            if not s:
+                return []
+            if s.startswith("["):
+                try:
+                    arr = json.loads(s)
+                    if isinstance(arr, list):
+                        return [str(x) for x in arr if x]
+                except Exception:
+                    pass
+            return [s]
+
+        # 建立 分液瓶二维码 → 配液配方项 的索引（按瓶条码逐个展开）
+        barcode_to_formula: Dict[str, Dict[str, Any]] = {}
+        for mr in mass_ratios:
+            if not isinstance(mr, dict):
+                continue
+            for bc in _parse_barcode_list(mr.get("vial_bottle_barcodes")):
+                barcode_to_formula[bc] = mr
+
+        logger.info(
+            f"[配液电导CSV导出] 开始导出, 电导结果={len(results)} 条, "
+            f"配方索引瓶数={len(barcode_to_formula)}, 路径={csv_file}"
+        )
+
+        export_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        matched_cnt = 0
+        with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "orderCode", "orderName",
+                "配液瓶类型", "配液瓶二维码",
+                "分液瓶类型", "分液瓶二维码",
+                "目标配液质量比", "真实配液质量比",
+                "各试剂允差", "总质量允差",
+                "电导值", "目标温度", "实际温度", "时间",
+            ])
+            for r in results:
+                bottle_barcode = r.get("bottleBarCode", "") or ""
+                # 主匹配：分液瓶二维码
+                mr = barcode_to_formula.get(bottle_barcode) if bottle_barcode else None
+                if mr is None:
+                    # 回退：bottleBarCode 为空/未命中时，按 (板码 + X + Y) 反查
+                    mr = self._match_formula_by_position(r, mass_ratios)
+                if mr is not None:
+                    matched_cnt += 1
+                mr = mr or {}
+
+                target_ratio = mr.get("target_mass_ratio", {})
+                real_ratio = mr.get("real_mass_ratio", {})
+                mass_tol = mr.get("mass_tolerance", {})
+                total_tol = mr.get("total_mass_tolerance", None)
+
+                writer.writerow([
+                    mr.get("orderCode", ""),
+                    mr.get("orderName", ""),
+                    mr.get("prep_bottle_type", ""),
+                    mr.get("prep_bottle_barcode", ""),
+                    self._pick_vial_type(mr),
+                    bottle_barcode,
+                    json.dumps(target_ratio, ensure_ascii=False) if target_ratio else "",
+                    json.dumps(real_ratio, ensure_ascii=False) if real_ratio else "",
+                    json.dumps(mass_tol, ensure_ascii=False) if mass_tol else "",
+                    "" if total_tol is None else str(total_tol),
+                    r.get("conductivity") if r.get("conductivity") is not None else "",
+                    r.get("targetTemperature") if r.get("targetTemperature") is not None else "",
+                    r.get("temperature") if r.get("temperature") is not None else "",
+                    r.get("report_time", export_time),
+                ])
+            f.flush()
+
+        logger.info(
+            f"[配液电导CSV导出] ✅ 导出完成: {csv_file} "
+            f"(电导 {len(results)} 条, 命中配方 {matched_cnt} 条)"
+        )
+        return csv_file
+
+    @staticmethod
+    def _pick_vial_type(mr: Dict[str, Any]) -> str:
+        """从配方项里取分液瓶类型；vial_bottle_types 可能是单串或 JSON 数组串。"""
+        raw = mr.get("vial_bottle_types") if isinstance(mr, dict) else None
+        if raw is None:
+            return ""
+        if isinstance(raw, list):
+            return str(raw[0]) if raw else ""
+        s = str(raw).strip()
+        if s.startswith("["):
+            try:
+                arr = json.loads(s)
+                if isinstance(arr, list) and arr:
+                    return str(arr[0])
+            except Exception:
+                pass
+        return s
+
+    @staticmethod
+    def _match_formula_by_position(
+        result_row: Dict[str, Any], mass_ratios: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        回退匹配：当电导结果的 bottleBarCode 为空/未命中时，
+        按 (boardBarCode + bottleInnerX + bottleInnerY) 反查所属配方项。
+
+        依赖配方项里的 vial_bottle_positions（建单阶段注入：板码 + X + Y → 瓶）。
+        没有该映射时返回 None。
+        """
+        board = result_row.get("boardBarCode", "") or ""
+        x = result_row.get("bottleInnerX")
+        y = result_row.get("bottleInnerY")
+        if not board or x is None or y is None:
+            return None
+        for mr in mass_ratios:
+            if not isinstance(mr, dict):
+                continue
+            for pos in (mr.get("vial_bottle_positions") or []):
+                if (
+                    str(pos.get("plateBarCode", "")) == str(board)
+                    and pos.get("x") == x
+                    and pos.get("y") == y
+                ):
+                    return mr
+        return None
 
     def _query_material_info(self, material_id: str) -> Dict:
         """
@@ -4092,9 +4500,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 
                 # 从 parent_resource 获取仓库名称
                 warehouse_name = parent_resource.name if parent_resource else "手动堆栈"
-                logger.info(f"拖拽上料: {plr_resource.name} -> {warehouse_name} / {site}")
+                barcode = plr_resource.unilabos_extra.get("barCode", "")
+                logger.info(f"拖拽上料: {plr_resource.name} -> {warehouse_name} / {site}, barCode={barcode!r}")
                 
-                self.create_sample(plr_resource.name, board_type, bottle_type, site, warehouse_name)
+                self.create_sample(plr_resource.name, board_type, bottle_type, site, warehouse_name, barcode)
                 return
         self.lab_logger().warning(f"无库位的上料，不处理，{plr_resource} 挂载到 {parent_resource}")
 
@@ -4130,10 +4539,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
         return None
     
     # 各板型对应的子位排列 (num_x, num_y)，用于构建 details
+    # 同时支持中文板名与英文 model 名作为 key，避免不同调用方传入类型不一致时查表失败
     BOARD_GRID = {
-        "配液瓶(大)板": (2, 2),
-        "配液瓶(小)板": (2, 4),
-        "5ml分液瓶板":  (2, 4),
+        "配液瓶(大)板": (2, 2), "YB_PrepBottle_60mL_Carrier": (2, 2),
+        "配液瓶(小)板": (2, 4), "YB_PrepBottle_15mL_Carrier": (2, 4),
+        "5ml分液瓶板":  (2, 4), "YB_Vial_5mL_Carrier": (2, 4),
+        "20ml分液瓶板": (2, 4), "YB_Vial_20mL_Carrier": (2, 4),
     }
 
     def create_sample(
@@ -4142,15 +4553,17 @@ class BioyondCellWorkstation(BioyondWorkstation):
         board_type: str,
         bottle_type: str,
         location_code: str,
-        warehouse_name: str = "手动堆栈"
+        warehouse_name: str = "手动传递窗右",
+        barcode: str = ""
     ) -> Dict[str, Any]:
         """创建配液板物料并自动入库。
         Args:
-            name: 物料名称
+            name: 物料名称（必填）
             board_type: 板类型，如 "5ml分液瓶板"、"配液瓶(小)板"
             bottle_type: 瓶类型，如 "5ml分液瓶"、"配液瓶(小)"
             location_code: 库位编号，例如 "A01"
-            warehouse_name: 仓库名称，默认为 "手动堆栈"，支持 "自动堆栈-左"、"自动堆栈-右" 等
+            warehouse_name: 仓库名称，默认为 "手动传递窗右"，支持 "自动堆栈-左"、"自动堆栈-右" 等
+            barcode: 物料条码（可选），填写后发给奔曜；不填则为空字符串
         """
         # 使用反向查找获取 type_id
         carrier_type_id = self._get_type_id_by_name(board_type)
@@ -4173,8 +4586,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
         location_id = self.bioyond_config['warehouse_mapping'][warehouse_name]["site_uuids"][location_code]
         logger.info(f"创建样品入库: {name} -> {warehouse_name}/{location_code} (UUID: {location_id})")
 
-        # 根据板型获取子位网格尺寸，缺省回退到 2×4
-        num_x, num_y = self.BOARD_GRID.get(board_type, (2, 4))
+        # 根据板型获取子位网格尺寸；查不到时直接报错，避免静默按错误数量建料
+        if board_type not in self.BOARD_GRID:
+            raise ValueError(
+                f"未找到板型 '{board_type}' 的子位网格配置，请在 BOARD_GRID 中补充该板型（中文板名或英文 model 名）"
+            )
+        num_x, num_y = self.BOARD_GRID[board_type]
         logger.debug(f"[create_sample] 板型 '{board_type}' 子位网格: {num_x}×{num_y}")
 
         # 新建小瓶
@@ -4196,7 +4613,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         data = {
                 "typeId": carrier_type_id,
                 "code": "",
-                "barCode": "",
+                "barCode": barcode,
                 "name": name,
                 "unit": "块",
                 "parameters": json.dumps({"unit": "块"}, ensure_ascii=False),

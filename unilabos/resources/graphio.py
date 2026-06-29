@@ -1135,6 +1135,11 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
         extra_info = getattr(resource, "unilabos_extra", {})
         update_site = extra_info.get("update_resource_site")
 
+        # 可选条码：用户在 unilabos_extra["barCode"] 中填了就带上，否则保持 ""
+        bar_code = extra_info.get("barCode", "")
+        if bar_code:
+            material["barCode"] = bar_code
+
         if update_site:
             # 情况1: 有明确的位置更新请求 (如从 A02 移动到 A03)
             # 需要从 warehouse_mapping 中查找目标库位的 UUID

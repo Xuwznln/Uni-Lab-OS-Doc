@@ -580,6 +580,11 @@ class ResourceTreeSet(object):
             name_to_extra[node.res_content.name] = node.res_content.extra
             name_to_extra[node.res_content.name][FRONTEND_POSE_EXTRA] = node.res_content.pose.extra
             name_to_extra[node.res_content.name][EXTRA_CLASS] = node.res_content.klass
+            # 前端把条码填在节点 config.barcode 中（而非 extra），这里注入到 unilabos_extra["barCode"]，
+            # 供下游 sync_to_external / resource_tree_transfer 透传给奔曜；未填则不写，保持默认 ""
+            _node_barcode = node.res_content.config.get("barcode")
+            if _node_barcode:
+                name_to_extra[node.res_content.name]["barCode"] = _node_barcode
             for child in node.children:
                 collect_node_data(child, name_to_uuid, all_states, name_to_extra)
 

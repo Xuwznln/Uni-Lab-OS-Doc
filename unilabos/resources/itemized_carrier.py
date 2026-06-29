@@ -111,6 +111,7 @@ class ItemizedCarrier(ResourcePLR):
     category: Optional[str] = "carrier",
     model: Optional[str] = None,
     invisible_slots: Optional[str] = None,
+    barcode: Optional[str] = None,
   ):
     super().__init__(
       name=name,
@@ -120,6 +121,9 @@ class ItemizedCarrier(ResourcePLR):
       category=category,
       model=model,
     )
+    # 整板条码（来自前端 config.barcode）。PLR 基类期望 barcode 是带 serialize() 的对象，
+    # 这里按字符串保存，序列化时单独处理，避免类型错误。
+    self.barcode = barcode
     self.num_items = len(sites)
     self.num_items_x, self.num_items_y, self.num_items_z = num_items_x, num_items_y, num_items_z
     self.invisible_slots = [] if invisible_slots is None else invisible_slots
@@ -466,8 +470,17 @@ class ItemizedCarrier(ResourcePLR):
     return [spot for spot, resource in self.sites.items() if resource is None]
 
   def serialize(self):
+    # PLR 基类 serialize 期望 barcode 是带 serialize() 的对象，这里是字符串，
+    # 先临时清空避免报错，super().serialize() 后再以字符串形式写回。
+    _barcode = getattr(self, "barcode", None)
+    self.barcode = None
+    try:
+      base = super().serialize()
+    finally:
+      self.barcode = _barcode
     return {
-      **super().serialize(),
+      **base,
+      "barcode": _barcode,
       "num_items_x": self.num_items_x,
       "num_items_y": self.num_items_y,
       "num_items_z": self.num_items_z,
@@ -484,6 +497,20 @@ class ItemizedCarrier(ResourcePLR):
       } for identifier, location in self.child_locations.items()]
     }
 
+  @classmethod
+  def deserialize(cls, data: dict, allow_marshal: bool = False):
+    # 先取出 barcode（字符串），避免 PLR 基类把它当作 Barcode 对象解析而报错；
+    # 反序列化完成后再以字符串形式写回。
+    barcode_data = data.pop("barcode", None)
+    instance = super().deserialize(data, allow_marshal=allow_marshal)
+    if isinstance(barcode_data, str):
+      instance.barcode = barcode_data
+    elif isinstance(barcode_data, dict):
+      instance.barcode = barcode_data.get("data", "")
+    else:
+      instance.barcode = ""
+    return instance
+
 
 class BottleCarrier(ItemizedCarrier):
     """瓶载架 - 直接继承自 TubeCarrier"""
@@ -498,6 +525,7 @@ class BottleCarrier(ItemizedCarrier):
         category: str = "bottle_carrier",
         model: Optional[str] = None,
         invisible_slots: List[str] = None,
+        barcode: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(
@@ -509,4 +537,5 @@ class BottleCarrier(ItemizedCarrier):
             category=category,
             model=model,
             invisible_slots=invisible_slots,
+            barcode=barcode,
         )
