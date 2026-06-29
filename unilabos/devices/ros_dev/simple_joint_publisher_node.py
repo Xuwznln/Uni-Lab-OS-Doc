@@ -34,29 +34,55 @@ class SimpleJointPublisher(Node):
     device_id : str
         设备 ID，也作为 ROS 节点名和关节名称前缀。
     joint_names : list[str]
-        关节名称列表（不含前缀），例如 ["tray_joint", "lid_joint"]。
+        关节名称列表。给定 ``joint_map`` 时为**语义名**（如 ["carousel"]），
+        否则为 URDF **局部名**（如 ["0_carousel_joint"]）。move_to/set_immediate/
+        get_position 的键与此一致。
     rate : int
         发布频率（Hz），默认 50。
+    joint_map : dict | None
+        语义名 → URDF 局部关节名的映射（Plan 20 关节契约，来自 registry ``model.joints``）。
+        接受 ``{语义名: "局部名"}`` 或归一化的 ``{语义名: {"urdf": "局部名", ...}}``。
+        缺省时按 identity 处理（``joint_names`` 即局部名），与旧行为完全一致。
     """
 
-    def __init__(self, device_id: str, joint_names: list[str], rate: int = 50, node_name=None):
+    def __init__(
+        self,
+        device_id: str,
+        joint_names: list[str],
+        rate: int = 50,
+        node_name=None,
+        joint_map: dict | None = None,
+    ):
         super().__init__(node_name or device_id)
 
         self.device_id = device_id
         self.rate = rate
         self._lock = threading.Lock()
+        self._joint_map = joint_map or {}
 
-        prefixed = [f"{device_id}_{name}" for name in joint_names]
+        # 发布的全名 = f"{device_id}_{局部名}"；局部名经 joint_map 归一（无 map 即 identity）。
+        local_names = [self._to_local(name) for name in joint_names]
+        prefixed = [f"{device_id}_{ln}" for ln in local_names]
         self._j_msg = JointState(
             name=prefixed,
             position=[0.0] * len(joint_names),
             velocity=[0.0] * len(joint_names),
             effort=[0.0] * len(joint_names),
         )
+        # 索引以调用方的键（有 map 时为语义名，否则为局部名）为准。
         self._joint_index = {name: i for i, name in enumerate(joint_names)}
 
         self._pub = self.create_publisher(JointState, "/joint_states", 10)
         self.create_timer(1.0 / rate, self._publish_callback)
+
+    def _to_local(self, name: str) -> str:
+        """语义名 → URDF 局部名；映射缺失按 identity 返回。"""
+        spec = self._joint_map.get(name)
+        if isinstance(spec, dict):
+            return spec.get("urdf") or name
+        if isinstance(spec, str) and spec:
+            return spec
+        return name
 
     # ------------------------------------------------------------------
     # Public API

@@ -107,3 +107,9 @@ incubator_liconic_stx110:
   model:
     type: device
     mesh: liconic_stx110
+    # Plan 20 关节契约：语义名 → URDF 局部关节名（单一真源，供仿真发布器 + 启动校验消费）。
+    joints:
+      carousel:
+        urdf: 0_carousel_joint
+        type: continuous
+        unit: rad
