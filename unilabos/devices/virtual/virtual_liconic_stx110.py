@@ -24,7 +24,10 @@ from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
 _SLOT_ANGLES = {i: math.radians((i - 1) * 72) for i in range(1, 6)}
 _TRANSFER_ANGLE = 0.0  # 出口/传输窗口角度
 _CAROUSEL_SPEED = 0.8  # rad/s
-_CAROUSEL_JOINT = "0_carousel_joint"
+# Plan 20 关节契约：逻辑只引用语义名 "carousel"；局部名由 registry model.joints 提供，
+# 仅当 registry 不可用时回退本默认（唯一 fallback，非业务逻辑重复）。
+_CAROUSEL = "carousel"  # 语义关节名
+_DEFAULT_JOINTS = {_CAROUSEL: "0_carousel_joint"}
 
 
 @device(
@@ -93,19 +96,33 @@ class VirtualLiconicStx110:
 
         if not rclpy.ok():
             rclpy.init()
+        # 用真实 ROS 节点 id 作关节前缀(否则用默认 device_id，与装配 URDF 关节名不符 -> 转盘不动)
+        did = getattr(getattr(self, "_ros_node", None), "device_id", None) or self.device_id
+        self.device_id = did
+        # Plan 20：语义名→局部名映射,registry(model.joints)为权威源,缺省回退默认。
+        joint_map = dict(_DEFAULT_JOINTS)
+        try:
+            from unilabos.device_mesh.joint_contract import get_joint_map
+
+            reg_jm = get_joint_map(did)  # 本部署 did==真实模板 class incubator_liconic_stx110
+            if reg_jm:
+                joint_map = reg_jm
+        except Exception as e:
+            self.logger.warning(f"读取 registry joints 失败,回退默认关节映射: {e}")
         # 独立节点名，避免与设备 ROS 节点（名为 device_id）重名
         self._publisher = SimpleJointPublisher(
-            device_id=self.device_id,
-            joint_names=[_CAROUSEL_JOINT],
+            device_id=did,
+            joint_names=[_CAROUSEL],
             rate=50,
-            node_name=f"{self.device_id}_carousel_pub",
+            node_name=f"{did}_carousel_pub",
+            joint_map=joint_map,
         )
         self._executor = rclpy.executors.MultiThreadedExecutor()
         self._executor.add_node(self._publisher)
         self._executor_thread = threading.Thread(target=self._executor.spin, daemon=True)
         self._executor_thread.start()
-        self._publisher.set_immediate({_CAROUSEL_JOINT: self._carousel_angle})
-        self.logger.info(f"STX110 {self.device_id} 关节发布器已启动。")
+        self._publisher.set_immediate({_CAROUSEL: self._carousel_angle})
+        self.logger.info(f"STX110 {self.device_id} 关节发布器已启动(关节映射={joint_map})。")
 
     @not_action
     def initialize(self) -> bool:
@@ -136,7 +153,7 @@ class VirtualLiconicStx110:
     async def _rotate_to(self, angle: float) -> None:
         # move_to 为阻塞插值循环；整机 action 执行上下文无运行中的 asyncio loop，直接阻塞调用。
         self._ensure_publisher()
-        self._publisher.move_to({_CAROUSEL_JOINT: angle}, _CAROUSEL_SPEED)
+        self._publisher.move_to({_CAROUSEL: angle}, _CAROUSEL_SPEED)
         self._carousel_angle = angle
         self.data["carousel_angle"] = round(math.degrees(angle), 1)
 

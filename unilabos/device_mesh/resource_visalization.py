@@ -205,6 +205,9 @@ class ResourceVisualization:
         xacro.process_doc(doc)
         self.urdf_str = doc.toxml()
 
+        # Plan 20：关节名契约校验——比对仿真发布器期望关节名与 URDF 实有可动关节。
+        self._validate_joint_contract(device)
+
 
         re_srdf = etree.tostring(self.root_srdf, encoding="unicode")
         doc_srdf = xacro.parse(re_srdf)
@@ -274,6 +277,40 @@ class ResourceVisualization:
             print(f"[scene] 已合并 {total} 个建筑构件（{len(groups)} 组 level/world_base）到 full_dev")
         except Exception as scene_err:  # noqa: BLE001 - 场景失败不应阻断设备装配
             print(f"[scene] world_scene 合并失败: {scene_err}")
+
+    def _validate_joint_contract(self, device: dict) -> None:
+        """Plan 20：校验仿真发布器关节名与装配 URDF 的可动关节是否一致。
+
+        由环境变量 ``UNILAB_JOINT_CONTRACT`` 控制：
+        - ``off``   跳过校验
+        - ``warn``  仅告警（默认，保护未登记设备/既有部署）
+        - ``error`` 不一致即抛 ``JointContractError``（demo/CI 推荐）
+        """
+        mode = os.environ.get("UNILAB_JOINT_CONTRACT", "warn").strip().lower()
+        if mode == "off":
+            return
+        from unilabos.utils.log import logger
+        from unilabos.device_mesh.joint_contract import JointContractError, validate_contract
+
+        try:
+            issues = validate_contract(self.urdf_str, device, lab_registry)
+        except Exception as e:
+            logger.warning(f"[关节契约] 校验过程异常（跳过）: {e}")
+            return
+        if not issues:
+            logger.info("[关节契约] 校验通过：所有已登记设备关节名与 URDF 一致。")
+            return
+        for issue in issues:
+            logger.error(str(issue))
+        if mode == "error":
+            raise JointContractError(
+                f"关节名契约校验失败，共 {len(issues)} 处不一致（见上方日志）。"
+                f"请对齐 registry model.joints 与设备模型 URDF，或设 UNILAB_JOINT_CONTRACT=warn 临时放行。"
+            )
+        logger.warning(
+            f"[关节契约] 共 {len(issues)} 处不一致（warn 模式放行）；"
+            f"如需开机即拦截请设 UNILAB_JOINT_CONTRACT=error。"
+        )
 
     def moveit_init(self):
 

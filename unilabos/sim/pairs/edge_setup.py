@@ -93,6 +93,9 @@ def setup_simulation_pairs(
             real_classes=real_classes, package_locks=package_locks, unilabos_version=unilabos_version,
         )
         bundle = resolve_pairs(http_client, request)
+        if not any(getattr(p, "virtual", None) for p in bundle.pairs):
+            logger.info("simulation pairs: backend returned no usable virtual driver; falling back to repository default device_pair.yaml")
+            return None
         if downloader is not None:
             downloader(bundle)
         if device_registry is not None:

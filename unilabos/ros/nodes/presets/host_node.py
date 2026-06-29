@@ -536,6 +536,16 @@ class HostNode(BaseROS2DeviceNode):
                     # })
                 except Exception as e:
                     self.lab_logger().error(f"[Host Node] Failed to create ActionClient for {action_id}: {str(e)}")
+        # 兜底:每个设备都有 _execute_driver_command(_async)(StrSingleInput)。
+        # get_action_server_names_and_types_by_node 在 host 视角/时序下可能查不到,直接按已知路径补建。
+        for _base in ("_execute_driver_command", "_execute_driver_command_async"):
+            _aid = f"{namespace}/{_base}"
+            if _aid not in self._action_clients:
+                try:
+                    self._action_clients[_aid] = ActionClient(self, StrSingleInput, _aid, callback_group=self.callback_group)
+                    self.lab_logger().info(f"[Host Node] Created base ActionClient: {_aid}")
+                except Exception as _e:
+                    self.lab_logger().error(f"[Host Node] Failed base ActionClient {_aid}: {_e}")
 
     async def create_resource_detailed(
         self,
@@ -668,6 +678,17 @@ class HostNode(BaseROS2DeviceNode):
         self.devices_instances[device_id] = d
         # noinspection PyProtectedMember
         self._action_value_mappings[device_id] = d._ros_node._action_value_mappings
+        # cloud 下发 UniLabJsonCommandAsync 走通用 _execute_driver_command_async(StrSingleInput),
+        # 它不在 action_value_mappings 里;且下方循环会 skip 掉 UniLabJsonCommand* 动作,
+        # 故在此为本地图设备显式补建基础 client,修复 cloud 下发 "ActionClient not found"。
+        for _base in ("_execute_driver_command", "_execute_driver_command_async"):
+            _aid = f"/devices/{device_id}/{_base}"
+            if _aid not in self._action_clients:
+                try:
+                    self._action_clients[_aid] = ActionClient(self, StrSingleInput, _aid)
+                    self.lab_logger().info(f"[Host Node] Created base ActionClient (Local): {_aid}")
+                except Exception as _e:
+                    self.lab_logger().error(f"[Host Node] Failed base ActionClient {_aid}: {_e}")
         # noinspection PyProtectedMember
         for action_name, action_value_mapping in d._ros_node._action_value_mappings.items():
             if action_name.startswith("auto-") or str(action_value_mapping.get("type", "")).startswith(

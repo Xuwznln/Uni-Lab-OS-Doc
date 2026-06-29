@@ -43,6 +43,10 @@ _SLOT_ANGLES = {i: math.radians((i - 1) * 72) for i in range(1, 6)}
 _TRANSFER_ANGLE = 0.0
 # 转盘旋转速度（rad/s）
 _CAROUSEL_SPEED = 0.8
+# Plan 20 关节契约：逻辑只引用语义名；局部名优先取自 registry model.joints，
+# registry 不可用时回退本默认（唯一 fallback）。
+_CAROUSEL = "carousel"
+_DEFAULT_JOINTS = {_CAROUSEL: "0_carousel_joint"}
 
 
 class LiconicStx110RvizBackend(IncubatorBackend):
@@ -77,10 +81,21 @@ class LiconicStx110RvizBackend(IncubatorBackend):
         if not rclpy.ok():
             rclpy.init()
 
+        # Plan 20：语义名→局部名映射，registry(model.joints) 为权威源，缺省回退默认。
+        joint_map = dict(_DEFAULT_JOINTS)
+        try:
+            from unilabos.device_mesh.joint_contract import get_joint_map
+
+            reg_jm = get_joint_map(self.device_id)
+            if reg_jm:
+                joint_map = reg_jm
+        except Exception:
+            pass
         self._publisher = SimpleJointPublisher(
             device_id=self.device_id,
-            joint_names=["0_carousel_joint"],
+            joint_names=[_CAROUSEL],
             rate=50,
+            joint_map=joint_map,
         )
         self._executor = rclpy.executors.MultiThreadedExecutor()
         self._executor.add_node(self._publisher)
@@ -90,7 +105,7 @@ class LiconicStx110RvizBackend(IncubatorBackend):
         self._executor_thread.start()
 
         # 复位到出口位置
-        self._publisher.set_immediate({"0_carousel_joint": _TRANSFER_ANGLE})
+        self._publisher.set_immediate({_CAROUSEL: _TRANSFER_ANGLE})
         print(f"[{self.device_id}] Setup complete. Carousel at transfer position.")
 
     async def stop(self) -> None:
@@ -134,7 +149,7 @@ class LiconicStx110RvizBackend(IncubatorBackend):
         await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: self._publisher.move_to(
-                {"0_carousel_joint": angle}, speed=_CAROUSEL_SPEED
+                {_CAROUSEL: angle}, speed=_CAROUSEL_SPEED
             ),
         )
         print(f"[{self.device_id}] Slot {slot} aligned. Ready for plate load.")
@@ -156,7 +171,7 @@ class LiconicStx110RvizBackend(IncubatorBackend):
         await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: self._publisher.move_to(
-                {"0_carousel_joint": angle}, speed=_CAROUSEL_SPEED
+                {_CAROUSEL: angle}, speed=_CAROUSEL_SPEED
             ),
         )
         print(f"[{self.device_id}] Plate unloaded from slot {slot}.")
@@ -164,7 +179,7 @@ class LiconicStx110RvizBackend(IncubatorBackend):
         await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: self._publisher.move_to(
-                {"0_carousel_joint": _TRANSFER_ANGLE}, speed=_CAROUSEL_SPEED
+                {_CAROUSEL: _TRANSFER_ANGLE}, speed=_CAROUSEL_SPEED
             ),
         )
 
