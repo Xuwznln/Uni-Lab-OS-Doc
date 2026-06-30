@@ -1,0 +1,5 @@
+{
+  "fileName": "pf_400",
+  "related": ["pf_400", "pf400", "precise_flex", "preciseflex_pf400"],
+  "description": "PreciseFlex PF400 robotic arm (SCARA + elevation + dual-finger gripper). Adapted from device_models_zup/pf_400 for device_mesh; 5 driven joints + 1 mimic right finger."
+}

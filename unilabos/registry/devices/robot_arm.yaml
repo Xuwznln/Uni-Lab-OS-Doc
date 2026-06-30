@@ -797,3 +797,131 @@ robotic_arm.elite:
     mesh: elite_robot
     type: device
   version: 1.0.0
+robotic_arm_pf400:
+  category:
+  - robot_arm
+  class:
+    action_value_mappings:
+      move_joints:
+        type: UniLabJsonCommandAsync
+        goal:
+          base: base
+          shoulder: shoulder
+          elbow: elbow
+          wrist: wrist
+          gripper: gripper
+        feedback: {}
+        result: {}
+        schema:
+          title: move_joints参数
+          description: 关节角运动：按语义名设置各关节目标值（在 URDF 限位内）
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                base:
+                  type: number
+                  default: 0.1
+                  title: 升降(m)
+                  description: 0~0.4 m（prismatic）。
+                shoulder:
+                  type: number
+                  default: 0.0
+                  title: 肩(rad)
+                  description: -1.5708~1.5708。
+                elbow:
+                  type: number
+                  default: 1.0
+                  title: 肘(rad)
+                  description: 0.21~6.07。
+                wrist:
+                  type: number
+                  default: 0.0
+                  title: 腕(rad)
+                  description: -16.93~16.93。
+                gripper:
+                  type: number
+                  default: 0.0345
+                  title: 夹爪开度(m)
+                  description: 0.0345~0.067（右指由 mimic 镜像）。
+              required: []
+            feedback: {}
+            result:
+              type: boolean
+          required:
+          - goal
+        goal_default:
+          base: 0.1
+          shoulder: 0.0
+          elbow: 1.0
+          wrist: 0.0
+          gripper: 0.0345
+        handles: {}
+        placeholder_keys: {}
+        feedback_interval: 1.0
+      set_gripper:
+        type: UniLabJsonCommandAsync
+        goal:
+          width: width
+        feedback: {}
+        result: {}
+        schema:
+          title: set_gripper参数
+          description: 设置夹爪开度（右指由 mimic 自动镜像）
+          type: object
+          properties:
+            goal:
+              type: object
+              properties:
+                width:
+                  type: number
+                  default: 0.05
+                  title: 夹爪开度(m)
+                  description: 0.0345~0.067。
+              required: []
+            feedback: {}
+            result:
+              type: boolean
+          required:
+          - goal
+        goal_default:
+          width: 0.05
+        handles: {}
+        placeholder_keys: {}
+        feedback_interval: 1.0
+    module: unilabos.devices.virtual.virtual_pf400:VirtualPf400
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: PreciseFlex PF400 机械臂（真实设备模板，用于 Plan 08 v2 仿真配对解析 / Plan 21 全流程测试）。
+  handles: []
+  icon: ''
+  init_param_schema: {}
+  version: 1.0.0
+  model:
+    type: device
+    mesh: pf_400
+    # Plan 20 关节契约：PFAxis 语义名 → URDF 局部关节名（5 条独立；右指 5_grasp_right_joint 由 RSP mimic）。
+    joints:
+      base:
+        urdf: 0_shoulder_elevation_joint
+        type: prismatic
+        unit: m
+      shoulder:
+        urdf: 1_shoulder_joint
+        type: revolute
+        unit: rad
+      elbow:
+        urdf: 2_elbow_joint
+        type: revolute
+        unit: rad
+      wrist:
+        urdf: 3_wrist_joint
+        type: revolute
+        unit: rad
+      gripper:
+        urdf: 4_grasp_left_joint
+        type: prismatic
+        unit: m

@@ -1,0 +1,22 @@
+{
+ "nodes": [
+  {
+   "id": "robotic_arm_pf400",
+   "name": "PF400 机械臂",
+   "children": [],
+   "parent": null,
+   "type": "device",
+   "class": "robotic_arm_pf400",
+   "position": {
+    "x": 400,
+    "y": 300,
+    "z": 0
+   },
+   "config": {},
+   "data": {
+    "status": "Ready"
+   }
+  }
+ ],
+ "links": []
+}

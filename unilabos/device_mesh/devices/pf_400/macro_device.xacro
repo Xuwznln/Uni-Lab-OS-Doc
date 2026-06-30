@@ -1,0 +1,123 @@
+<?xml version="1.0" ?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- PreciseFlex PF400 机械臂(SCARA + 升降 + 双指夹爪)。
+       由 uni-lab-assets/device_models_zup/pf_400/modal.xacro 适配为 device_mesh 设备宏:
+       - 加 xacro:macro 与 ${station_name}${device_name} 前缀(装配进 full_dev 不撞名);
+       - mesh 路径改 file://${mesh_path}/devices/pf_400/meshes/...;
+       - 关节名 ${P}<局部名> == <节点id>_<局部名>,与 SimpleJointPublisher(device_id=<节点id>) 一致;
+       - 右指 5_grasp_right_joint 保留 <mimic>,由 robot_state_publisher 自动镜像(Plan 21 §7 R-mimic)。 -->
+  <xacro:macro name="pf_400"
+    params="parent_link:='' station_name:='' device_name:='' x:=0 y:=0 z:=0 rx:=0 ry:=0 r:=0 mesh_path:=''">
+
+    <xacro:property name="P" value="${station_name}${device_name}"/>
+    <material name="${P}clay"><color rgba="0.55 0.45 0.40 1"/></material>
+
+    <!-- 基座固定到父 link -->
+    <joint name="${P}base_link_joint" type="fixed">
+      <origin xyz="${x} ${y} ${z}" rpy="${rx} ${ry} ${r}"/>
+      <parent link="${parent_link}"/>
+      <child link="${P}torso_link"/>
+    </joint>
+
+    <link name="${P}torso_link">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry><mesh filename="file://${mesh_path}/devices/pf_400/meshes/pf400-0.stl"/></geometry>
+        <material name="${P}clay"/>
+      </visual>
+    </link>
+    <link name="${P}shoulder_link">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry><mesh filename="file://${mesh_path}/devices/pf_400/meshes/pf400-1.stl"/></geometry>
+        <material name="${P}clay"/>
+      </visual>
+    </link>
+    <link name="${P}upper_arm_link">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry><mesh filename="file://${mesh_path}/devices/pf_400/meshes/pf400-2.stl"/></geometry>
+        <material name="${P}clay"/>
+      </visual>
+    </link>
+    <link name="${P}lower_arm_link">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry><mesh filename="file://${mesh_path}/devices/pf_400/meshes/pf400-3.stl"/></geometry>
+        <material name="${P}clay"/>
+      </visual>
+    </link>
+    <link name="${P}hand_link">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry><mesh filename="file://${mesh_path}/devices/pf_400/meshes/pf400-4.stl"/></geometry>
+        <material name="${P}clay"/>
+      </visual>
+    </link>
+    <link name="${P}finger_left_link">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry><mesh filename="file://${mesh_path}/devices/pf_400/meshes/pf400-5L.stl"/></geometry>
+        <material name="${P}clay"/>
+      </visual>
+    </link>
+    <link name="${P}finger_right_link">
+      <visual>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry><mesh filename="file://${mesh_path}/devices/pf_400/meshes/pf400-5R.stl"/></geometry>
+        <material name="${P}clay"/>
+      </visual>
+    </link>
+    <link name="${P}socketTypeGenericSbsFootprint"/>
+
+    <joint name="${P}0_shoulder_elevation_joint" type="prismatic">
+      <parent link="${P}torso_link"/>
+      <child link="${P}shoulder_link"/>
+      <origin rpy="0 0 0" xyz="0 -0.034 0.184"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="-1" lower="0" upper="0.4" velocity="-1"/>
+    </joint>
+    <joint name="${P}1_shoulder_joint" type="revolute">
+      <parent link="${P}shoulder_link"/>
+      <child link="${P}upper_arm_link"/>
+      <origin rpy="0 0 0" xyz="0 -0.068 -0.002"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="-1" lower="-1.5708" upper="1.5708" velocity="-1"/>
+    </joint>
+    <joint name="${P}2_elbow_joint" type="revolute">
+      <parent link="${P}upper_arm_link"/>
+      <child link="${P}lower_arm_link"/>
+      <origin rpy="0 0 3.14159" xyz="0 -0.2246 -0.066"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="-1" lower="0.21" upper="6.07" velocity="-1"/>
+    </joint>
+    <joint name="${P}3_wrist_joint" type="revolute">
+      <parent link="${P}lower_arm_link"/>
+      <child link="${P}hand_link"/>
+      <origin rpy="0 0 3.14159" xyz="0 0.21 -0.04"/>
+      <axis xyz="0 0 1"/>
+      <limit effort="-1" lower="-16.9297" upper="16.9297" velocity="-1"/>
+    </joint>
+    <joint name="${P}4_grasp_left_joint" type="prismatic">
+      <parent link="${P}hand_link"/>
+      <child link="${P}finger_left_link"/>
+      <origin rpy="0 0 0" xyz="-0.0345 0 0"/>
+      <axis xyz="1 0 0"/>
+      <limit effort="-1" lower="0.0345" upper="0.067" velocity="-1"/>
+    </joint>
+    <joint name="${P}5_grasp_right_joint" type="prismatic">
+      <parent link="${P}hand_link"/>
+      <child link="${P}finger_right_link"/>
+      <origin rpy="0 0 0" xyz="0.0345 0 0"/>
+      <axis xyz="-1 0 0"/>
+      <limit effort="-1" lower="0.0345" upper="0.067" velocity="-1"/>
+      <mimic joint="${P}4_grasp_left_joint" multiplier="1" offset="0"/>
+    </joint>
+    <joint name="${P}socketTypeGenericSbsFootprint__60_1" type="fixed">
+      <parent link="${P}hand_link"/>
+      <child link="${P}socketTypeGenericSbsFootprint"/>
+      <origin rpy="0 0 -1.57" xyz="0 -0.13 -0.05"/>
+    </joint>
+
+  </xacro:macro>
+</robot>

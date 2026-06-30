@@ -6,6 +6,13 @@ pairs:
       enabled: true
       observed: [carousel_angle, temperature, status]
       throttle_hz: 5
+  - real: robotic_arm_pf400
+    virtual: virtual_pf400
+    engine: rviz
+    twin_capability:
+      enabled: true
+      observed: [base, shoulder, elbow, wrist, gripper, status]
+      throttle_hz: 5
   # RMF AGV 专用配对（#17 §8.6 / #18 §6.2-(6)）：仅 fleet 移动机器人 + 被 rmf_coordinator
   # 管理者生效，不影响机械臂/泵/阀。engine/applies_to 为前向过滤字段（PairRegistry 补齐
   # 该过滤前，sim 模式下 agv.SEER→agv.RMFSim 只命中 SEER AGV，本身即安全；如需更严格的
