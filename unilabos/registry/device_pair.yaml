@@ -29,6 +29,37 @@ pairs:
   - real: agv.RMFSim
     virtual: agv.RMFSim
 
+  # layout 占位设备自配对（#24.1 §3.3）：14 个 footprint_key 类共用 DisplayDevice，仅承载位置+model
+  # 上云显示；sim 模式不 stub，直接实例化。class 名 = footprint_key。
+  - real: biotage_extrahera
+    virtual: biotage_extrahera
+  - real: biotage_pressure_96
+    virtual: biotage_pressure_96
+  - real: genevac_ez2
+    virtual: genevac_ez2
+  - real: hamilton_starlet_liquid_handler
+    virtual: hamilton_starlet_liquid_handler
+  - real: hplc_mass_spec
+    virtual: hplc_mass_spec
+  - real: huber_ministat_125
+    virtual: huber_ministat_125
+  - real: justrite_safety_cabinet
+    virtual: justrite_safety_cabinet
+  - real: mbraun_glovebox
+    virtual: mbraun_glovebox
+  - real: mettler_toledo_xpr204
+    virtual: mettler_toledo_xpr204
+  - real: opentrons_thermocycler_module
+    virtual: opentrons_thermocycler_module
+  - real: pcr_thermal_cycler
+    virtual: pcr_thermal_cycler
+  - real: syrris_asia_flow_chemistry
+    virtual: syrris_asia_flow_chemistry
+  - real: tecan_tevacs_vacuum
+    virtual: tecan_tevacs_vacuum
+  - real: thalesnano_h_cube
+    virtual: thalesnano_h_cube
+
   - real: heaterstirrer.dalong
     virtual: virtual_heatchill
     twin_observed: [temperature, rpm, status]

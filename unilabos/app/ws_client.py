@@ -10,6 +10,7 @@ WebSocket通信客户端重构版本 v2
 
 import json
 import logging
+import socket
 import time
 import uuid
 import threading
@@ -636,6 +637,9 @@ class MessageProcessor:
                 logger.warning(
                     f"[MessageProcessor] 收到服务端注册码 {e.response.status_code}, 上一进程可能还未退出"
                 )
+            except socket.gaierror as e:
+                # DNS 临时失败通常是网络抖动，按重连策略继续，不打印整段 traceback 污染日志。
+                logger.warning(f"[MessageProcessor] 解析服务端域名失败({self.websocket_url}): {str(e)}")
             except Exception as e:
                 logger.error(traceback.format_exc())
                 logger.error(f"[MessageProcessor] 尝试重连时出错 {str(e)}")

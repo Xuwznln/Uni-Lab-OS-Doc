@@ -119,6 +119,7 @@ class ResourceVisualization:
             }
         }
 
+        included_device_meshes = set()  # [AI] 去重 device macro include：重复类/占位会多次 include 同一 xacro
         # 遍历设备节点
         for node in device.values():
             if (node['type'] in self.resource_type and node['class'] != '') or (node['type'] == 'device' and node['class'] != ''):
@@ -148,9 +149,22 @@ class ResourceVisualization:
                                 }
                     elif model_config['type'] == 'device':
 
-                        new_include = etree.SubElement(self.root, f"{{{xacro_uri}}}include")
-                        new_include.set("filename", f"{str(self.mesh_path)}/devices/{model_config['mesh']}/macro_device.xacro")
-                        new_dev = etree.SubElement(self.root, f"{{{xacro_uri}}}{model_config['mesh']}")
+                        # [AI] 缺本地 macro_device.xacro（OSS-only 的 layout 占位设备）时用通用占位盒代替，
+                        # 避免 rviz xacro include 崩溃；cloud 不受影响（仍按注册表 OSS model 渲染）。
+                        mesh_name = model_config['mesh']
+                        if not os.path.exists(os.path.join(str(self.mesh_path), "devices", mesh_name, "macro_device.xacro")):
+                            mesh_name = "placeholder_device"
+                        if mesh_name not in included_device_meshes:
+                            new_include = etree.SubElement(self.root, f"{{{xacro_uri}}}include")
+                            new_include.set("filename", f"{str(self.mesh_path)}/devices/{mesh_name}/macro_device.xacro")
+                            included_device_meshes.add(mesh_name)
+                        new_dev = etree.SubElement(self.root, f"{{{xacro_uri}}}{mesh_name}")
+                        # [AI] 占位盒按设备真实 footprint（config.footprint=[w,d] 米）绘制，rviz 才贴近真实布局
+                        if mesh_name == "placeholder_device":
+                            fp = (node.get("config") or {}).get("footprint")
+                            if isinstance(fp, (list, tuple)) and len(fp) >= 2:
+                                new_dev.set("bw", str(float(fp[0])))
+                                new_dev.set("bd", str(float(fp[1])))
                         # 默认挂载到 world，若设备 pose.extra 指定了 parent_link 则使用指定的父 link
                         parent_link = "world"
                         pose_extra = node.get("pose", {}).get("extra") or {}
@@ -204,19 +218,23 @@ class ResourceVisualization:
         doc = xacro.parse(re)
         xacro.process_doc(doc)
         self.urdf_str = doc.toxml()
+        # [AI] 把无父关节的孤立 link（设备 xacro 里未连接的 label 等）挂到 world，
+        # 避免多根 URDF（multiple root links）让 robot_state_publisher / move_group 崩溃（exit -6）。
+        self.urdf_str = self._connect_orphan_links_to_world(self.urdf_str)
 
         # Plan 20：关节名契约校验——比对仿真发布器期望关节名与 URDF 实有可动关节。
         self._validate_joint_contract(device)
 
 
-        re_srdf = etree.tostring(self.root_srdf, encoding="unicode")
-        doc_srdf = xacro.parse(re_srdf)
-        xacro.process_doc(doc_srdf)
-        self.urdf_str_srdf = doc_srdf.toxml()
-
-
         if self.moveit_nodes:
+            re_srdf = etree.tostring(self.root_srdf, encoding="unicode")
+            doc_srdf = xacro.parse(re_srdf)
+            xacro.process_doc(doc_srdf)
+            self.urdf_str_srdf = doc_srdf.toxml()
             self.moveit_init()
+        else:
+            # 非 moveit 场景（如 layout 设备全景）无需 SRDF/move_group，避免大场景 SRDF 处理阻塞启动。
+            self.urdf_str_srdf = '<robot name="full_dev"/>'
 
     def _append_world_scene(self, xacro_uri: str) -> None:
         """把建筑场景生成为 world_scene 宏并 include + 实例化进 full_dev / SRDF。
@@ -311,6 +329,35 @@ class ResourceVisualization:
             f"[关节契约] 共 {len(issues)} 处不一致（warn 模式放行）；"
             f"如需开机即拦截请设 UNILAB_JOINT_CONTRACT=error。"
         )
+    def _connect_orphan_links_to_world(self, urdf_str: str) -> str:
+        """把无父关节的孤立 link（如设备 xacro 里未连接的 label）用 fixed joint 挂到 world，
+        避免 URDF 出现多个 root link 导致 robot_state_publisher 解析失败（terminate / exit -6）。"""
+        try:
+            root = etree.fromstring(urdf_str.encode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return urdf_str
+        child_links = set()
+        for j in root.findall("joint"):
+            c = j.find("child")
+            if c is not None and c.get("link"):
+                child_links.add(c.get("link"))
+        added = 0
+        for link in list(root.findall("link")):
+            name = link.get("name")
+            if not name or name == "world" or name in child_links:
+                continue
+            joint = etree.SubElement(root, "joint")
+            joint.set("name", f"{name}__orphan_to_world")
+            joint.set("type", "fixed")
+            etree.SubElement(joint, "parent").set("link", "world")
+            etree.SubElement(joint, "child").set("link", name)
+            origin = etree.SubElement(joint, "origin")
+            origin.set("xyz", "0 0 0")
+            origin.set("rpy", "0 0 0")
+            added += 1
+        if added:
+            print(f"[viz] 已把 {added} 个孤立 link 挂到 world（避免多根 URDF，RSP 才能解析）")
+        return etree.tostring(root, encoding="unicode")
 
     def moveit_init(self):
 
@@ -356,42 +403,44 @@ class ResourceVisualization:
                 "4. 或者使用 --backend simple 参数跳过ROS依赖"
             )
 
-        try:
-            moveit_configs_utils_path = Path(get_package_share_directory("moveit_configs_utils"))
-        except Exception as e:
-            raise OSError(
-                f"无法找到moveit_configs_utils包。请确保ROS 2和MoveIt 2已正确安装。\n"
-                f"原始错误: {e}"
-            )
-        default_folder = moveit_configs_utils_path / "default_configs"
-        planning_pattern = re.compile("^(.*)_planning.yaml$")
-        pipelines = []
+        planning_pipelines = {}
+        if self.moveit_nodes:
+            try:
+                moveit_configs_utils_path = Path(get_package_share_directory("moveit_configs_utils"))
+            except Exception as e:
+                raise OSError(
+                    f"无法找到moveit_configs_utils包。请确保ROS 2和MoveIt 2已正确安装。\n"
+                    f"原始错误: {e}"
+                )
+            default_folder = moveit_configs_utils_path / "default_configs"
+            planning_pattern = re.compile("^(.*)_planning.yaml$")
+            pipelines = []
 
-        for pipeline in get_pattern_matches(default_folder, planning_pattern):
-            if pipeline not in pipelines:
-                pipelines.append(pipeline)
+            for pipeline in get_pattern_matches(default_folder, planning_pattern):
+                if pipeline not in pipelines:
+                    pipelines.append(pipeline)
 
-        if "ompl" in pipelines:
-            default_planning_pipeline = "ompl"
-        else:
-            default_planning_pipeline = pipelines[0]
+            if "ompl" in pipelines:
+                default_planning_pipeline = "ompl"
+            else:
+                default_planning_pipeline = pipelines[0]
 
-        planning_pipelines = {
-            "planning_pipelines": pipelines,
-            "default_planning_pipeline": default_planning_pipeline,
-        }
+            planning_pipelines = {
+                "planning_pipelines": pipelines,
+                "default_planning_pipeline": default_planning_pipeline,
+            }
 
-        for pipeline in pipelines:
-            planning_pipelines[pipeline] = load_yaml(
-                default_folder /  f"{pipeline}_planning.yaml"
-            )
+            for pipeline in pipelines:
+                planning_pipelines[pipeline] = load_yaml(
+                    default_folder /  f"{pipeline}_planning.yaml"
+                )
 
-        if "ompl" in planning_pipelines:
-            ompl_config = planning_pipelines["ompl"]
-            if "planner_configs" not in ompl_config:
-                ompl_config.update(load_yaml(default_folder / "ompl_defaults.yaml"))
+            if "ompl" in planning_pipelines:
+                ompl_config = planning_pipelines["ompl"]
+                if "planner_configs" not in ompl_config:
+                    ompl_config.update(load_yaml(default_folder / "ompl_defaults.yaml"))
 
-        yaml.safe_dump(self.ros2_controllers_yaml, open(f"{str(self.mesh_path)}/ros2_controllers.yaml", "w"))
+            yaml.safe_dump(self.ros2_controllers_yaml, open(f"{str(self.mesh_path)}/ros2_controllers.yaml", "w"))
 
         robot_description_planning = {
             "default_velocity_scaling_factor": 0.1,
@@ -467,58 +516,63 @@ class ResourceVisualization:
         )
 
 
-        # 创建move_group节点
-        moveit_params =[{
-            'allow_trajectory_execution': True,
-            'robot_description': robot_description,
-            'robot_description_semantic': urdf_str_srdf,
-            'robot_description_kinematics': kinematics_dict,
-            'capabilities': '',
-            'disable_capabilities': '',
-            'monitor_dynamics': False,
-            'publish_monitored_planning_scene': True,
-            'publish_robot_description_semantic': True,
-            'publish_planning_scene': True,
-            'publish_geometry_updates': True,
-            'publish_state_updates': True,
-            'publish_transforms_updates': True,
-            # 'robot_description_planning': robot_description_planning,
-            },
-            robot_description_planning,
-            planning_pipelines,
-            ]
-        if self.moveit_controllers_yaml['moveit_simple_controller_manager']['controller_names']:
-            moveit_params.append(self.moveit_controllers_yaml)
-
-        move_group = nd(
-            package='moveit_ros_move_group',
-            executable='move_group',
-            output='screen',
-            parameters=moveit_params,
-            env=dict(os.environ)
-        )
-
-
         # 将节点添加到launch描述中
         self.launch_description.add_action(robot_state_publisher)
         # self.launch_description.add_action(joint_state_publisher_node)
-        self.launch_description.add_action(move_group)
+        if self.moveit_nodes:
+            # 创建move_group节点（仅 moveit 设备场景需要）
+            moveit_params =[{
+                'allow_trajectory_execution': True,
+                'robot_description': robot_description,
+                'robot_description_semantic': urdf_str_srdf,
+                'robot_description_kinematics': kinematics_dict,
+                'capabilities': '',
+                'disable_capabilities': '',
+                'monitor_dynamics': False,
+                'publish_monitored_planning_scene': True,
+                'publish_robot_description_semantic': True,
+                'publish_planning_scene': True,
+                'publish_geometry_updates': True,
+                'publish_state_updates': True,
+                'publish_transforms_updates': True,
+                # 'robot_description_planning': robot_description_planning,
+                },
+                robot_description_planning,
+                planning_pipelines,
+                ]
+            if self.moveit_controllers_yaml['moveit_simple_controller_manager']['controller_names']:
+                moveit_params.append(self.moveit_controllers_yaml)
+
+            move_group = nd(
+                package='moveit_ros_move_group',
+                executable='move_group',
+                output='screen',
+                parameters=moveit_params,
+                env=dict(os.environ)
+            )
+            self.launch_description.add_action(move_group)
 
         # 如果启用RViz,添加RViz节点
         if self.enable_rviz:
+            rviz_params = []
+            if self.moveit_nodes:
+                rviz_params = [
+                    {'robot_description_kinematics': kinematics_dict},
+                    robot_description_planning,
+                    planning_pipelines,
+                ]
+            rviz_config = (
+                f"{str(self.mesh_path)}/view_robot.rviz"
+                if self.moveit_nodes
+                else f"{str(self.mesh_path)}/view_robot_lite.rviz"
+            )
             rviz_node = nd(
                 package='rviz2',
                 executable='rviz2',
                 name='rviz2',
-                arguments=['-d', f"{str(self.mesh_path)}/view_robot.rviz"],
+                arguments=['-d', rviz_config],
                 output='screen',
-                parameters=[
-                    {'robot_description_kinematics': kinematics_dict,
-                     },
-                    robot_description_planning,
-                    planning_pipelines,
-
-                ],
+                parameters=rviz_params,
                 env=dict(os.environ)
             )
             self.launch_description.add_action(rviz_node)

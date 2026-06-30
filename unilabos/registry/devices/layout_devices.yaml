@@ -1,0 +1,298 @@
+biotage_extrahera:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=biotage_extrahera）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: biotage_extrahera
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/biotage_extrahera/macro_device.xacro
+    type: device
+  version: 1.0.0
+biotage_pressure_96:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=biotage_pressure_96）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: biotage_pressure_96
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/biotage_pressure_96/macro_device.xacro
+    type: device
+  version: 1.0.0
+genevac_ez2:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=genevac_ez2）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: genevac_ez2
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/genevac_ez2/macro_device.xacro
+    type: device
+  version: 1.0.0
+hamilton_starlet_liquid_handler:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=hamilton_starlet_liquid_handler）：layout_optimizer
+    场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: hamilton_starlet_liquid_handler
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/hamilton_starlet_liquid_handler/macro_device.xacro
+    type: device
+  version: 1.0.0
+hplc_mass_spec:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=hplc_mass_spec）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: hplc_mass_spec
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/hplc_mass_spec/macro_device.xacro
+    type: device
+  version: 1.0.0
+huber_ministat_125:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=huber_ministat_125）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: huber_ministat_125
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/huber_ministat_125/macro_device.xacro
+    type: device
+  version: 1.0.0
+justrite_safety_cabinet:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=justrite_safety_cabinet）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: justrite_safety_cabinet
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/justrite_safety_cabinet/macro_device.xacro
+    type: device
+  version: 1.0.0
+mettler_toledo_xpr204:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=mettler_toledo_xpr204）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: mettler_toledo_xpr204
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/mettler_toledo_xpr204/macro_device.xacro
+    type: device
+  version: 1.0.0
+opentrons_thermocycler_module:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=opentrons_thermocycler_module）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: opentrons_thermocycler_module
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/opentrons_thermocycler_module/macro_device.xacro
+    type: device
+  version: 1.0.0
+pcr_thermal_cycler:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=pcr_thermal_cycler）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: pcr_thermal_cycler
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/pcr_thermal_cycler/macro_device.xacro
+    type: device
+  version: 1.0.0
+syrris_asia_flow_chemistry:
+  category:
+  - layout_device
+  class:
+    action_value_mappings: {}
+    module: unilabos.devices.display_device:DisplayDevice
+    status_types:
+      status: str
+    type: python
+  config_info: []
+  description: 布局占位设备（footprint=syrris_asia_flow_chemistry）：layout_optimizer 场景设备，按真实位置上云显示，不连硬件。
+  handles: []
+  icon: ''
+  init_param_schema:
+    config:
+      properties: {}
+      type: object
+    data:
+      properties:
+        status:
+          type: string
+      type: object
+  model:
+    mesh: syrris_asia_flow_chemistry
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/syrris_asia_flow_chemistry/macro_device.xacro
+    type: device
+  version: 1.0.0
