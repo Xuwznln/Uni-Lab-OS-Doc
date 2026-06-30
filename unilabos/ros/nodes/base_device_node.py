@@ -234,14 +234,12 @@ def init_wrapper(
     action_value_mappings: Dict[str, Any],
     hardware_interface: Dict[str, Any],
     print_publish: bool,
-    driver_params: Optional[Dict[str, Any]] = None,
+    driver_params: Dict[str, Any],
     driver_is_ros: bool = False,
     *args,
     **kwargs,
 ):
     """初始化设备节点的包装函数，和ROS2DeviceNode初始化保持一致"""
-    if driver_params is None:
-        driver_params = kwargs.copy()
     kwargs["device_id"] = device_id
     kwargs["device_uuid"] = device_uuid
     kwargs["driver_class"] = driver_class

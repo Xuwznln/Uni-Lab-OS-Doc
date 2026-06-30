@@ -36,6 +36,7 @@ from unilabos.registry.decorators import (
     NodeType,
     normalize_enum_value,
 )
+from unilabos.registry.init_enforce import validate_init_param_enforce
 from unilabos.registry.yaml_ref import resolve_yaml_refs
 from unilabos.registry.utils import (
     ROSMsgNotFound,
@@ -123,21 +124,11 @@ class Registry:
         complete_registry=False,
         external_only=False,
         community_namespaces=None,
-        external_registry_paths=None,
     ):
-        """统一构建注册表入口。
-
-        external_registry_paths: 外源包发现到的 registry 目录(Plan 09),会并入 YAML 加载路径。
-        """
+        """统一构建注册表入口。"""
         if self._setup_called:
             logger.critical("[UniLab Registry] setup方法已被调用过，不允许多次调用")
             return
-
-        if external_registry_paths:
-            for _p in external_registry_paths:
-                _pp = Path(_p)
-                if _pp not in self.registry_paths:
-                    self.registry_paths.append(_pp)
 
         self._startup_executor = ThreadPoolExecutor(
             max_workers=8, thread_name_prefix="RegistryStartup"
@@ -1403,7 +1394,9 @@ class Registry:
                 res_class = import_class(module_str)
                 if callable(res_class) and not isinstance(res_class, type):
                     res_instance = res_class(res_class.__name__)
-                    tree_set = ResourceTreeSet.from_plr_resources([res_instance], known_newly_created=True, old_size=True)
+                    tree_set = ResourceTreeSet.from_plr_resources(
+                        [res_instance], known_newly_created=True, old_size=True
+                    )
                     dumped = tree_set.dump(old_position=True)
                     return resource_id, dumped[0] if dumped else []
             except Exception as e:
@@ -1907,6 +1900,11 @@ class Registry:
                     continue
 
                 # --- 正常 YAML 处理 ---
+                validate_init_param_enforce(
+                    device_id,
+                    device_config.get("init_param_schema"),
+                    device_config.get("init_param_enforce"),
+                )
                 if "status_types" not in device_config["class"] or device_config["class"]["status_types"] is None:
                     device_config["class"]["status_types"] = {}
                 if (
@@ -2351,16 +2349,18 @@ class Registry:
     def _registry_root_candidates(self, base: Path) -> List[Path]:
         """给定一个 --devices 目录，推导其内嵌注册表根的候选目录。
 
-        约定 registry 与 unilabos/registry 同构（ROOT/registry/{devices,resources,device_comms}/*.yaml）：
+        约定 registry 与 unilabos/registry 同构（ROOT/{devices,resources,device_comms}/*.yaml）：
         - <devices_dir>/registry：--devices 指向包根（社区包）或 registry 直接放在 --devices 下；
         - <包根>/registry：--devices 指向 python 子包时（如模板的 device_package_example），
           向上按 pyproject.toml 锚定 ROOT 再取 ROOT/registry；
+        - <devices_dir>/unilabos_registry 或 <包根>/unilabos_registry：目录化设备包的固定注册表目录；
         - <devices_dir> 本身：--devices 直接指向 registry 根的兜底。
         """
-        candidates = [base / "registry"]
+        candidates = [base / "registry", base / "unilabos_registry"]
         pkg_root = self._find_package_root(base)
         if pkg_root is not None:
             candidates.append(pkg_root / "registry")
+            candidates.append(pkg_root / "unilabos_registry")
         candidates.append(base)
         return candidates
 
@@ -2513,7 +2513,6 @@ def build_registry(
     complete_registry=False,
     external_only=False,
     community_namespaces=None,
-    external_registry_paths=None,
 ):
     """
     构建或获取Registry单例实例
@@ -2534,7 +2533,6 @@ def build_registry(
         complete_registry=complete_registry,
         external_only=external_only,
         community_namespaces=community_namespaces,
-        external_registry_paths=external_registry_paths,
     )
 
     # 将 AST 扫描的字符串类型替换为实际 ROS2 消息类（仅查找 ROS2 类型，不 import 设备模块）
