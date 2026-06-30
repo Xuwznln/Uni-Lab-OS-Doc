@@ -1015,10 +1015,15 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 original_parent_resource = original_instance.parent
                 original_parent_resource_uuid = getattr(original_parent_resource, "unilabos_uuid", None)
                 target_parent_resource_uuid = tree.root_node.res_content.uuid_parent
-                not_same_parent = (
-                    original_parent_resource_uuid != target_parent_resource_uuid
-                    and original_parent_resource is not None
-                )
+                if target_parent_resource_uuid == self.uuid:
+                    not_same_parent = False
+                    original_parent_resource = None
+                    original_parent_resource_uuid = self.uuid
+                else:
+                    not_same_parent = (
+                        original_parent_resource_uuid != target_parent_resource_uuid
+                        and original_parent_resource is not None
+                    )
                 old_name = original_instance.name
                 new_name = plr_resource.name
                 parent_appended = False
@@ -1055,13 +1060,13 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     # 判断是否变更了resource_site，重新登记
                     target_site = original_instance.unilabos_extra.get("update_resource_site")
                     sites = (
-                        original_instance.parent.sites
-                        if original_instance.parent is not None and hasattr(original_instance.parent, "sites")
+                        original_parent_resource.sites
+                        if original_parent_resource is not None and hasattr(original_parent_resource, "sites")
                         else None
                     )
                     site_names = (
-                        list(original_instance.parent._ordering.keys())
-                        if original_instance.parent is not None and hasattr(original_instance.parent, "sites")
+                        list(original_parent_resource._ordering.keys())
+                        if original_parent_resource is not None and hasattr(original_parent_resource, "sites")
                         else []
                     )
                     if target_site is not None and sites is not None and site_names is not None:
