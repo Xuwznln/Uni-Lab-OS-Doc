@@ -23,7 +23,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parents[5]  # .../Uni-Lab-OS
@@ -33,6 +33,9 @@ if str(ROOT) not in sys.path:
 from unilabos.sim.fleet.rmf.edge.mock_agv import MockAgvHardware
 
 _STEP_DT = 0.1
+
+if TYPE_CHECKING:
+    from unilabos.sim.clock import SimClock
 
 
 class MockAgvServer:
@@ -48,10 +51,13 @@ class MockAgvServer:
         *,
         step_dt: float = _STEP_DT,
         log: Optional[Callable[[str], None]] = None,
+        clock: Optional["SimClock"] = None,
     ) -> None:
         self.robots: Dict[str, MockAgvHardware] = {hw.robot: hw for hw in robots}
         self._step_dt = step_dt
         self._log = log
+        # 仅在 OS 进程内由 RMFSim 注入；CLI 独立运行时保持墙钟推进。
+        self._clock = clock
         self._stop = threading.Event()
         self._server: Optional[ThreadingHTTPServer] = None
         self._srv_thread: Optional[threading.Thread] = None
@@ -61,9 +67,32 @@ class MockAgvServer:
         (self._log or (lambda m: print(m, flush=True)))(msg)
 
     def _stepper(self) -> None:
+        if self._clock is None:
+            while not self._stop.is_set():
+                for hw in list(self.robots.values()):
+                    hw.step(self._step_dt)
+                self._stop.wait(self._step_dt)
+            return
+
+        # 绑定 SimClock：pause 时 now 不前进；set_rate 会改变 now 增速。
+        try:
+            last_sim_now = float(self._clock.now())
+        except Exception:  # noqa: BLE001
+            last_sim_now = time.time()
+        max_slice = max(self._step_dt, 0.02)
         while not self._stop.is_set():
-            for hw in list(self.robots.values()):
-                hw.step(self._step_dt)
+            try:
+                sim_now = float(self._clock.now())
+            except Exception:  # noqa: BLE001
+                sim_now = last_sim_now
+            dt = sim_now - last_sim_now
+            last_sim_now = sim_now
+            # 防止线程偶发卡顿导致一次性跨过过大位移，按切片推进更稳定。
+            while dt > 1e-9:
+                step_dt = min(dt, max_slice)
+                for hw in list(self.robots.values()):
+                    hw.step(step_dt)
+                dt -= step_dt
             self._stop.wait(self._step_dt)
 
     def start(self, host: str = "127.0.0.1", port: int = 8090) -> None:

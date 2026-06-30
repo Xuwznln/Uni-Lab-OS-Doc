@@ -181,9 +181,10 @@ def build_patrol_envelopes_from_paths(
     robot: Optional[str] = None,
     rounds: int = 1,
 ) -> List[Dict[str, Any]]:
-    """RmfTransferPaths → 每条 transfer 的 patrol 信封（places=[fromWaypoint, toWaypoint]）。
+    """RmfTransferPaths → 每条 transfer 的 patrol 信封（优先 navSequence）。
 
     sim 环境无真实 dispenser/ingestor，delivery 不出价；用 patrol 让 AGV **沿转运路线实际行驶**。
+    若 transfer 含 `navSequence`（例如 A->Y->Y'->B 星点中转链），优先按该序列下发。
     """
     from unilabos.sim.fleet.rmf.task_dispatcher import build_patrol_request
 
@@ -194,7 +195,8 @@ def build_patrol_envelopes_from_paths(
             continue
         if ready_min_to is not None and ready > ready_min_to:
             continue
-        places = [p for p in (transfer.get("fromWaypoint"), transfer.get("toWaypoint")) if p]
+        nav_seq = [str(p) for p in (transfer.get("navSequence") or []) if p]
+        places = nav_seq if nav_seq else [str(p) for p in (transfer.get("fromWaypoint"), transfer.get("toWaypoint")) if p]
         if len(places) < 2 or places[0] == places[1]:
             continue
         out.append(build_patrol_request(places, rounds=rounds, fleet=fleet, robot=robot))

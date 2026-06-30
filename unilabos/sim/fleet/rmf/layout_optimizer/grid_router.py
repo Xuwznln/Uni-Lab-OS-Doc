@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 import json
 import math
 import sys
@@ -129,6 +130,47 @@ class FineGridRouter:
             self._robot = robot
             self._dock_cell = dock_cell
 
+    def _nearest_free_cell(self, x: float, y: float, max_hops: int = 200) -> Optional[Tuple[int, int]]:
+        """把任意坐标吸附到最近可行驶 cell（优先原始 cell，再 BFS 扩散）。"""
+        self._build()
+        start = self._grid.world_to_cell(float(x), float(y))
+        if self._grid.is_free(start):
+            return start
+
+        visited = {start}
+        queue = deque([(start, 0)])
+        while queue:
+            cur, hops = queue.popleft()
+            if hops >= max_hops:
+                continue
+            for nxt in ((cur[0] + 1, cur[1]), (cur[0] - 1, cur[1]), (cur[0], cur[1] + 1), (cur[0], cur[1] - 1)):
+                if nxt in visited:
+                    continue
+                visited.add(nxt)
+                if not self._grid.in_bounds(nxt):
+                    continue
+                if self._grid.is_free(nxt):
+                    return nxt
+                queue.append((nxt, hops + 1))
+        return None
+
+    def _route_cells(self, src: Tuple[int, int], dst: Tuple[int, int]) -> Optional[List[Tuple[int, int]]]:
+        self._build()
+        from distance import turn_aware_path
+
+        if src == dst:
+            return [src]
+        cells = turn_aware_path(self._grid, src, dst, self._robot.turn_cost)
+        if not cells or len(cells) < 2:
+            return None
+        return cells
+
+    def _cells_to_geometry(self, cells: List[Tuple[int, int]]) -> List[List[float]]:
+        return [
+            [round(float(x), 3), round(float(y), 3)]
+            for (x, y) in (self._grid.cell_center(c) for c in cells)
+        ]
+
     def dock_xy(self, instance: str) -> Optional[Tuple[float, float]]:
         """返回设备的真实接驳点坐标（fine 网格 dock cell 中心，= agv_trajectory.png 的黑点）。"""
         self._build()
@@ -138,22 +180,67 @@ class FineGridRouter:
         x, y = self._grid.cell_center(cell)
         return (round(float(x), 3), round(float(y), 3))
 
+    def route_between_points(
+        self,
+        start_xy: Tuple[float, float],
+        end_xy: Tuple[float, float],
+    ) -> Optional[Dict[str, Any]]:
+        """任意两点之间路由（点坐标会先吸附到可行驶网格）。"""
+        self._build()
+        src = self._nearest_free_cell(start_xy[0], start_xy[1])
+        dst = self._nearest_free_cell(end_xy[0], end_xy[1])
+        if src is None or dst is None:
+            return None
+        cells = self._route_cells(src, dst)
+        if not cells:
+            return None
+        return {"geometryM": self._cells_to_geometry(cells)}
+
+    def route_via(
+        self,
+        from_instance: str,
+        to_instance: str,
+        via_points: Optional[List[Tuple[float, float]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """设备 dock -> (多个中间点) -> 设备 dock，逐段走转弯感知最短路后拼接。"""
+        self._build()
+        start = self._dock_cell.get(str(from_instance))
+        end = self._dock_cell.get(str(to_instance))
+        if start is None or end is None:
+            return None
+
+        checkpoints: List[Tuple[int, int]] = [start]
+        for point in via_points or []:
+            cell = self._nearest_free_cell(point[0], point[1])
+            if cell is None:
+                return None
+            checkpoints.append(cell)
+        checkpoints.append(end)
+
+        merged_cells: List[Tuple[int, int]] = []
+        for i in range(len(checkpoints) - 1):
+            seg = self._route_cells(checkpoints[i], checkpoints[i + 1])
+            if not seg:
+                return None
+            if merged_cells:
+                merged_cells.extend(seg[1:])
+            else:
+                merged_cells.extend(seg)
+        if len(merged_cells) < 2:
+            return None
+        return {"geometryM": self._cells_to_geometry(merged_cells)}
+
     def route(self, from_instance: str, to_instance: str) -> Optional[Dict[str, Any]]:
         """返回 {geometryM:[[x,y]...]}（lab_local_m 直角折线）；无法路由返回 None。"""
         self._build()
-        from distance import turn_aware_path
-
         ca = self._dock_cell.get(str(from_instance))
         cb = self._dock_cell.get(str(to_instance))
         if ca is None or cb is None:
             return None
-        cells = turn_aware_path(self._grid, ca, cb, self._robot.turn_cost)
-        if not cells or len(cells) < 2:
+        cells = self._route_cells(ca, cb)
+        if not cells:
             return None
-        poly: List[List[float]] = [
-            [round(float(x), 3), round(float(y), 3)] for (x, y) in (self._grid.cell_center(c) for c in cells)
-        ]
-        return {"geometryM": poly}
+        return {"geometryM": self._cells_to_geometry(cells)}
 
 
 def polyline_corners(poly: List[List[float]]) -> List[List[float]]:

@@ -18,6 +18,7 @@ class LayoutOptimizerArtifacts:
     aisle_network: Dict[str, Any] = field(default_factory=dict)
     transfers_doc: Dict[str, Any] = field(default_factory=dict)
     flow_matrix: Dict[str, Any] = field(default_factory=dict)
+    dock_and_turn: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def transfers(self) -> List[Dict[str, Any]]:
@@ -56,6 +57,7 @@ def load_layout_optimizer_dir(directory: str | Path) -> LayoutOptimizerArtifacts
     aisle_network = _read_json(root / "aisle_network.json") or {}
     transfers_doc = _read_json(root / "transfers.json") or {"meta": {}, "transfers": []}
     flow_matrix = _read_json(root / "flow_matrix.json") or {}
+    dock_and_turn = _read_json(root / "dock_and_turn.json") or {}
 
     if not isinstance(placements, list):
         raise ValueError("placements.json 必须是数组")
@@ -69,4 +71,5 @@ def load_layout_optimizer_dir(directory: str | Path) -> LayoutOptimizerArtifacts
         aisle_network=aisle_network,
         transfers_doc=transfers_doc,
         flow_matrix=flow_matrix,
+        dock_and_turn=dock_and_turn,
     )

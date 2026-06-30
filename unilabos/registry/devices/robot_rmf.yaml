@@ -84,22 +84,30 @@ rmf.coordinator:
         goal:
           orientation_deg: orientation_deg
           place: place
+          plan_mode: plan_mode
           robot_name: robot_name
         goal_default:
           orientation_deg: null
           place: ''
+          plan_mode: designer
           robot_name: ''
         handles: {}
         placeholder_keys: {}
         result: {}
         schema:
-          description: 下发 AGV 前往某 place（compose + go_to_place 信封 → task_api_requests）。
+          description: 下发 AGV 前往某黑点 place。plan_mode=designer(默认,回放 designer 设计折线,OS 直驱小车)/rmf(下发 RMF 任务,由 RMF 在 nav_graph 上规划)。
           properties:
             goal:
               properties:
                 orientation_deg:
                   type: number
                 place:
+                  type: string
+                plan_mode:
+                  default: designer
+                  enum:
+                  - designer
+                  - rmf
                   type: string
                 robot_name:
                   default: ''
@@ -147,6 +155,105 @@ rmf.coordinator:
           - goal
           type: object
         type: UniLabJsonCommand
+      run_designer_transfers:
+        feedback: {}
+        goal:
+          dry_run: dry_run
+          max_count: max_count
+          on_error: on_error
+          retry_max: retry_max
+          start_index: start_index
+          transfers_path: transfers_path
+          wait_timeout_s: wait_timeout_s
+        goal_default:
+          dry_run: false
+          max_count: 0
+          on_error: abort
+          retry_max: 1
+          start_index: 0
+          transfers_path: ''
+          wait_timeout_s: 1800
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 按 transfers.json 顺序串行下发 RMF delivery，支持后台执行、查询与恢复。
+          properties:
+            goal:
+              properties:
+                dry_run:
+                  default: false
+                  type: boolean
+                max_count:
+                  default: 0
+                  type: integer
+                on_error:
+                  default: abort
+                  enum:
+                  - abort
+                  - skip
+                  type: string
+                retry_max:
+                  default: 1
+                  type: integer
+                start_index:
+                  default: 0
+                  type: integer
+                transfers_path:
+                  default: ''
+                  type: string
+                wait_timeout_s:
+                  default: 1800
+                  type: number
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      query_designer_transfers_run:
+        feedback: {}
+        goal:
+          run_id: run_id
+        goal_default:
+          run_id: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 查询当前或指定 designer_transfers 运行状态。
+          properties:
+            goal:
+              properties:
+                run_id:
+                  default: ''
+                  type: string
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      cancel_designer_transfers_run:
+        feedback: {}
+        goal:
+          run_id: run_id
+        goal_default:
+          run_id: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 请求停止当前 designer_transfers run（在条目边界安全停止）。
+          properties:
+            goal:
+              properties:
+                run_id:
+                  default: ''
+                  type: string
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
       cancel_task:
         feedback: {}
         goal:
@@ -165,6 +272,78 @@ rmf.coordinator:
                   type: string
               required:
               - task_id
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      set_sim_rate:
+        feedback: {}
+        goal:
+          rate: rate
+        goal_default:
+          rate: 1.0
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 设置仿真时钟倍率（sim/twin 模式）。
+          properties:
+            goal:
+              properties:
+                rate:
+                  default: 1.0
+                  type: number
+              required:
+              - rate
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      pause_sim_clock:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 暂停仿真时钟（sim/twin 模式）。
+          properties:
+            goal:
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      resume_sim_clock:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 恢复仿真时钟（sim/twin 模式）。
+          properties:
+            goal:
+              type: object
+          required:
+          - goal
+          type: object
+        type: UniLabJsonCommand
+      get_sim_clock_status:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 获取仿真时钟状态（mode/rate/paused/sim_now）。
+          properties:
+            goal:
               type: object
           required:
           - goal
@@ -191,9 +370,16 @@ rmf.coordinator:
       diagnostics: str
       map_version: str
       runtime_status: str
+      runtime_mode: str
+      supports_sim_clock: bool
+      supports_robot_speed_control: bool
+      sim_rate: float
+      sim_paused: bool
       scene_hash: str
       robot_states: str
       task_states: str
+      nav_graph: str
+      designer_transfers_run: str
     type: python
   config_info: []
   description: RMF 调度域协调设备（rmf.coordinator）。图驱动启用 Open-RMF：编译发布版 Pascal scene 为 building.yaml/nav_graph/fleet config，启动并守护 RMF core（含只读 rmf-web api-server），下发 go_to/delivery/patrol task，采集 fleet/robot/door/lift 运行态并归一化批量上报。workflow 只能经本设备 action 调度 RMF，不得绕过 OS 直打 RMF。
@@ -210,7 +396,19 @@ rmf.coordinator:
           type: string
       type: object
     data:
-      properties: {}
+      properties:
+        nav_graph:
+          type: string
+        runtime_mode:
+          type: string
+        supports_sim_clock:
+          type: boolean
+        supports_robot_speed_control:
+          type: boolean
+        sim_rate:
+          type: number
+        sim_paused:
+          type: boolean
       type: object
   version: 1.0.0
 agv.RMFSim:
@@ -251,6 +449,10 @@ agv.RMFSim:
         status:
           type: string
       type: object
+  model:
+    mesh: slide_w140
+    path: https://uni-lab-test.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-test/devices/slide_w140/macro_device.xacro
+    type: device
   version: 1.0.0
 agv.SEER_RMF:
   category:
