@@ -101,9 +101,9 @@ class RclpyAsyncMutex:
 
     async def acquire(self, node: "BaseROS2DeviceNode", tag: str = ""):
         """获取锁。如果已被占用，则异步等待直到锁释放。"""
-        # t0 = time.time()
+        t0 = time.time()
         with self._lock:
-            # qlen = len(self._queue)
+            qlen = len(self._queue)
             if not self._acquired:
                 self._acquired = True
                 self._holder = tag
@@ -111,28 +111,40 @@ class RclpyAsyncMutex:
                 #     f"[Mutex:{self._name}] 获取锁 tag={tag} (无等待, queue=0)"
                 # )
                 return
+            holder = self._holder
             waiter = Future()
             self._queue.append(waiter)
-            # node.lab_logger().info(
-            #     f"[Mutex:{self._name}] 等待锁 tag={tag} "
-            #     f"(holder={self._holder}, queue={qlen + 1})"
-            # )
-        await waiter
-        # wait_ms = (time.time() - t0) * 1000
+            node.lab_logger().trace(
+                f"[Mutex:{self._name}] 进入锁等待队列 tag={tag} holder={holder} queue={qlen + 1}"
+            )
+        try:
+            await waiter
+        except BaseException:
+            with self._lock:
+                if waiter in self._queue:
+                    self._queue.remove(waiter)
+                    node.lab_logger().debug(
+                        f"[Mutex:{self._name}] 取消锁等待 tag={tag} queue={len(self._queue)}"
+                    )
+            raise
+        wait_ms = (time.time() - t0) * 1000
         self._holder = tag
-        # node.lab_logger().info(
-        #     f"[Mutex:{self._name}] 获取锁 tag={tag} (等了 {wait_ms:.0f}ms)"
-        # )
+        node.lab_logger().trace(f"[Mutex:{self._name}] 队列继续执行 tag={tag} waited={wait_ms:.0f}ms")
 
     def release(self, node: "BaseROS2DeviceNode"):
         """释放锁，通过 executor task 唤醒下一个等待者。"""
         with self._lock:
-            # old_holder = self._holder
-            if self._queue:
+            old_holder = self._holder
+            next_waiter = None
+            while self._queue:
                 next_waiter = self._queue.pop(0)
-                # node.lab_logger().debug(
-                #     f"[Mutex:{self._name}] 释放锁 holder={old_holder} → 唤醒下一个 (剩余 queue={len(self._queue)})"
-                # )
+                if not next_waiter.done():
+                    break
+                next_waiter = None
+            if next_waiter is not None:
+                node.lab_logger().trace(
+                    f"[Mutex:{self._name}] 释放锁 holder={old_holder} 唤醒队列下一个 queue={len(self._queue)}"
+                )
 
                 async def _wake():
                     if not next_waiter.done():
@@ -457,6 +469,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         )
 
         self._append_resource_lock = RclpyAsyncMutex(name=f"AR:{device_id}")
+        self._resource_tree_uuid_locks: Dict[str, RclpyAsyncMutex] = {}
+        self._resource_tree_uuid_locks_guard = threading.Lock()
 
         # 创建资源管理客户端
         self._resource_clients: Dict[str, Client] = {
@@ -901,6 +915,29 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     f"物料{plr_resource}请求挂载{tree.root_node.res_content.name}的父节点{parent_resource}[{parent_uuid}]失败！\n{traceback.format_exc()}"
                 )
 
+    async def _acquire_resource_tree_uuid_locks(self, uuids: List[str], tag: str = "") -> List[RclpyAsyncMutex]:
+        """按资源 UUID 获取本节点实例内的资源树锁。"""
+        lock_keys = sorted({str(uid) for uid in uuids if uid})
+        with self._resource_tree_uuid_locks_guard:
+            locks = [
+                self._resource_tree_uuid_locks.setdefault(uid, RclpyAsyncMutex(name=f"RT:{self.device_id}:{uid}"))
+                for uid in lock_keys
+            ]
+
+        acquired_locks = []
+        try:
+            for lock in locks:
+                await lock.acquire(self, tag=tag)
+                acquired_locks.append(lock)
+        except BaseException:
+            self._release_resource_tree_uuid_locks(acquired_locks)
+            raise
+        return acquired_locks
+
+    def _release_resource_tree_uuid_locks(self, locks: List[RclpyAsyncMutex]):
+        for lock in reversed(locks):
+            lock.release(self)
+
     async def s2c_resource_tree(self, req: SerialCommand_Request, res: SerialCommand_Response):
         """
         处理资源树更新请求
@@ -1127,56 +1164,38 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
             for i in data:
                 action = i.get("action")  # remove, add, update
-                resources_uuid: List[str] = i.get("data")  # 资源数据
+                resources_uuid: List[str] = i.get("data") or []  # 资源数据
+                if not isinstance(resources_uuid, list):
+                    resources_uuid = [resources_uuid]
                 additional_add_params = i.get("additional_add_params", {})  # 额外参数
                 self.lab_logger().trace(f"[资源同步] 处理 {action}, " f"resources count: {len(resources_uuid)}")
-                tree_set = None
-                if action in ["add", "update"]:
-                    tree_set = await self.get_resource(
-                        resources_uuid=resources_uuid, with_children=True if action == "add" else False
-                    )
+                # NOTE: 当前仅按请求中显式传入的 uuid 加锁。
+                # 如果后续操作会修改未出现在请求里的父节点或子节点，需要把这些关联 uuid 一并纳入锁集合。
+                resource_locks = await self._acquire_resource_tree_uuid_locks(
+                    resources_uuid, tag=f"{action}:{','.join(map(str, resources_uuid))}"
+                )
                 try:
-                    if action == "add":
-                        if tree_set is None:
-                            raise ValueError("tree_set不能为None")
-                        plr_resources = tree_set.to_plr_resources()
-                        result, parents = _handle_add(plr_resources, tree_set, additional_add_params)
-                        parents: List[Optional["ResourcePLR"]] = [i for i in parents if i is not None]
-                        # de_dupe_parents = list(set(parents))
-                        # Fix unhashable type error for WareHouse
-                        de_dupe_parents = []
-                        _seen_ids = set()
-                        for p in parents:
-                            if id(p) not in _seen_ids:
-                                _seen_ids.add(id(p))
-                                de_dupe_parents.append(p)
-                        new_tree_set = ResourceTreeSet.from_plr_resources(de_dupe_parents)  # 去重
-                        for tree in new_tree_set.trees:
-                            if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
-                                tree.root_node.res_content.parent_uuid = self.uuid
-                        r = SerialCommand.Request()
-                        r.command = json.dumps(
-                            {"data": {"data": new_tree_set.dump()}, "action": "update"}
-                        )  # 和Update Resource一致
-                        response: SerialCommand_Response = await self._resource_clients[
-                            "c2s_update_resource_tree"
-                        ].call_async(
-                            r
-                        )  # type: ignore
-                        self.lab_logger().trace(f"确认资源云端 Add 结果: {response.response}")
-                        results.append(result)
-                    elif action == "update":
-                        if tree_set is None:
-                            raise ValueError("tree_set不能为None")
-                        plr_resources = []
-                        for tree in tree_set.trees:
-                            if tree.root_node.res_content.type == "device":
-                                plr_resources.append(tree.root_node)
-                            else:
-                                plr_resources.append(ResourceTreeSet([tree]).to_plr_resources()[0])
-                        result, original_instances = _handle_update(plr_resources, tree_set, additional_add_params)
-                        if not BasicConfig.no_update_feedback:
-                            new_tree_set = ResourceTreeSet.from_plr_resources(original_instances)  # 去重
+                    tree_set = None
+                    if action in ["add", "update"]:
+                        tree_set = await self.get_resource(
+                            resources_uuid=resources_uuid, with_children=True if action == "add" else False
+                        )
+                    try:
+                        if action == "add":
+                            if tree_set is None:
+                                raise ValueError("tree_set不能为None")
+                            plr_resources = tree_set.to_plr_resources()
+                            result, parents = _handle_add(plr_resources, tree_set, additional_add_params)
+                            parents: List[Optional["ResourcePLR"]] = [i for i in parents if i is not None]
+                            # de_dupe_parents = list(set(parents))
+                            # Fix unhashable type error for WareHouse
+                            de_dupe_parents = []
+                            _seen_ids = set()
+                            for p in parents:
+                                if id(p) not in _seen_ids:
+                                    _seen_ids.add(id(p))
+                                    de_dupe_parents.append(p)
+                            new_tree_set = ResourceTreeSet.from_plr_resources(de_dupe_parents)  # 去重
                             for tree in new_tree_set.trees:
                                 if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
                                     tree.root_node.res_content.parent_uuid = self.uuid
@@ -1189,16 +1208,44 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             ].call_async(
                                 r
                             )  # type: ignore
-                            self.lab_logger().trace(f"确认资源云端 Update 结果: {response.response}")
-                        results.append(result)
-                    elif action == "remove":
-                        result = _handle_remove(resources_uuid)
-                        results.append(result)
-                except Exception as e:
-                    error_msg = f"Error processing {action} operation: {str(e)}"
-                    self.lab_logger().error(f"[Resource Tree Update] {error_msg}")
-                    self.lab_logger().error(traceback.format_exc())
-                    results.append({"success": False, "action": action, "error": error_msg})
+                            self.lab_logger().trace(f"确认资源云端 Add 结果: {response.response}")
+                            results.append(result)
+                        elif action == "update":
+                            if tree_set is None:
+                                raise ValueError("tree_set不能为None")
+                            plr_resources = []
+                            for tree in tree_set.trees:
+                                if tree.root_node.res_content.type == "device":
+                                    plr_resources.append(tree.root_node)
+                                else:
+                                    plr_resources.append(ResourceTreeSet([tree]).to_plr_resources()[0])
+                            result, original_instances = _handle_update(plr_resources, tree_set, additional_add_params)
+                            if not BasicConfig.no_update_feedback:
+                                new_tree_set = ResourceTreeSet.from_plr_resources(original_instances)  # 去重
+                                for tree in new_tree_set.trees:
+                                    if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
+                                        tree.root_node.res_content.parent_uuid = self.uuid
+                                r = SerialCommand.Request()
+                                r.command = json.dumps(
+                                    {"data": {"data": new_tree_set.dump()}, "action": "update"}
+                                )  # 和Update Resource一致
+                                response: SerialCommand_Response = await self._resource_clients[
+                                    "c2s_update_resource_tree"
+                                ].call_async(
+                                    r
+                                )  # type: ignore
+                                self.lab_logger().trace(f"确认资源云端 Update 结果: {response.response}")
+                            results.append(result)
+                        elif action == "remove":
+                            result = _handle_remove(resources_uuid)
+                            results.append(result)
+                    except Exception as e:
+                        error_msg = f"Error processing {action} operation: {str(e)}"
+                        self.lab_logger().error(f"[Resource Tree Update] {error_msg}")
+                        self.lab_logger().error(traceback.format_exc())
+                        results.append({"success": False, "action": action, "error": error_msg})
+                finally:
+                    self._release_resource_tree_uuid_locks(resource_locks)
 
             # 返回处理结果
             result_json = {"results": results, "total": len(data)}
