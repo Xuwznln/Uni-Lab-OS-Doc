@@ -1799,23 +1799,14 @@ class WebSocketClient(BaseCommunicationClient):
         machine_name = BasicConfig.machine_name
 
         try:
-            # 获取设备信息
+            # host_node_ready 不再上报 actions：设备可调用动作以 report_action_lock 为准
+            # (来源 _action_value_mappings，覆盖 auto-/UniLabJsonCommand 等全量动作，且借 FIFO
+            # 在本消息之前先行发送)。host_ready 仅声明设备在线与归属，避免与锁口径不一致。
             for device_id, namespace in host_node.devices_names.items():
                 device_key = (
                     f"{namespace}/{device_id}" if namespace.startswith("/") else f"/{namespace}/{device_id}"
                 )
                 is_online = device_key in host_node._online_devices
-
-                # 获取设备的动作信息
-                actions = {}
-                for action_id, client in host_node._action_clients.items():
-                    # action_id 格式: /namespace/device_id/action_name
-                    if device_id in action_id:
-                        action_name = action_id.split("/")[-1]
-                        actions[action_name] = {
-                            "action_path": action_id,
-                            "action_type": str(type(client).__name__),
-                        }
 
                 devices.append(
                     {
@@ -1824,7 +1815,6 @@ class WebSocketClient(BaseCommunicationClient):
                         "device_key": device_key,
                         "is_online": is_online,
                         "machine_name": host_node.device_machine_names.get(device_id, machine_name),
-                        "actions": actions,
                     }
                 )
 
