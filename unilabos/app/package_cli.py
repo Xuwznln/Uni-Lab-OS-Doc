@@ -371,11 +371,10 @@ def build_resources_from_registry(
     for device_id, entry in entries.items():
         cls = entry.get("class") if isinstance(entry.get("class"), dict) else {}
         init_schema = entry.get("init_param_schema") if isinstance(entry.get("init_param_schema"), dict) else None
-        init_enforce = entry.get("init_param_enforce")
-        validate_init_param_enforce(
+        init_enforce = validate_init_param_enforce(
             device_id,
             init_schema,
-            init_enforce,
+            entry.get("init_param_enforce"),
             error_factory=PackageCLIError,
         )
         category = entry.get("category") or entry.get("tags") or []
@@ -405,8 +404,7 @@ def build_resources_from_registry(
         }
         if init_schema is not None:
             resource["init_param_schema"] = init_schema
-        if "init_param_enforce" in entry:
-            resource["init_param_enforce"] = init_enforce
+        resource["init_param_enforce"] = init_enforce
         resources.append(resource)
     return resources
 

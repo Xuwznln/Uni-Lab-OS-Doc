@@ -1900,7 +1900,7 @@ class Registry:
                     continue
 
                 # --- 正常 YAML 处理 ---
-                validate_init_param_enforce(
+                device_config["init_param_enforce"] = validate_init_param_enforce(
                     device_id,
                     device_config.get("init_param_schema"),
                     device_config.get("init_param_enforce"),

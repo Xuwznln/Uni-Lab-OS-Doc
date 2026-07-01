@@ -33,38 +33,23 @@ def validate_init_param_enforce(
     init_schema: Optional[Dict[str, Any]],
     init_enforce: Any,
     error_factory: Callable[[str], Exception] = ValueError,
-) -> None:
+) -> Dict[str, Any]:
     """Validate the JSON enforced config paired with ``init_param_schema``.
 
     ``init_param_enforce`` is a plain JSON config object. It must not reintroduce
     the old ``class.init`` object factory DSL; drivers should construct rich
     objects from JSON-friendly type strings and params inside ``__init__``.
+
+    Missing or empty YAML values are normalized to an empty object because the
+    schema describes runtime config, while ``init_param_enforce`` only declares
+    registry-owned overrides.
     """
-    if not isinstance(init_schema, dict):
-        return
-
-    config_schema = init_schema.get("config")
-    if not isinstance(config_schema, dict):
-        return
-
-    required = config_schema.get("required")
-    required_fields = [str(field) for field in required] if isinstance(required, list) else []
-    properties = config_schema.get("properties")
-    has_config_contract = bool(required_fields) or (
-        isinstance(properties, dict) and bool(properties)
-    )
-    if not has_config_contract:
-        return
+    if init_enforce is None:
+        return {}
 
     if not isinstance(init_enforce, dict):
         raise error_factory(
-            f"{device_id}: init_param_schema.config 已声明参数，必须提供对象形式的 init_param_enforce"
-        )
-
-    missing = [field for field in required_fields if field not in init_enforce]
-    if missing:
-        raise error_factory(
-            f"{device_id}: init_param_enforce 缺少 required 字段: {', '.join(missing)}"
+            f"{device_id}: init_param_enforce 必须是对象形式"
         )
 
     _reject_legacy_init_enforce(
@@ -72,6 +57,7 @@ def validate_init_param_enforce(
         f"{device_id}.init_param_enforce",
         error_factory,
     )
+    return copy.deepcopy(init_enforce)
 
 
 def _reject_legacy_init_enforce(
