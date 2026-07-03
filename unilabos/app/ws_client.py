@@ -650,6 +650,8 @@ class MessageProcessor:
                 await self._handle_query_action_state(message_data)
             elif message_type == "job_start":
                 await self._handle_job_start(message_data)
+            elif message_type == "user_refuse":
+                await self._handle_user_refuse(message_data)
             elif message_type == "cancel_action" or message_type == "cancel_task":
                 await self._handle_cancel_action(message_data)
             elif message_type == "add_material":
@@ -896,6 +898,58 @@ class MessageProcessor:
                             self.queue_processor.notify_queue_update()
             else:
                 logger.warning("[MessageProcessor] Failed to publish job error status - missing req or queue_item")
+
+    async def _handle_user_refuse(self, data: Dict[str, Any]):
+        """处理 user_refuse 消息（人工确认节点被用户拒绝）。
+
+        后端 manualConfirmExecutor.sendUserRefuse 在节点被拒绝时下发该消息，payload 结构
+        与 job_start 完全一致，仅顶层 action 为 ``user_refuse``；``data.action`` 为被拒绝
+        节点的原动作名（如 ``start_experiment``）。
+
+        edge 侧约定：将原动作 ``<action>`` 映射为收尾动作 ``<action>_user_refuse``，并复用
+        job_start 执行链路下发，用于取消任务、恢复调度、清理本地 deck 等收尾工作。仅当设备
+        实现了对应的 always_free ``<action>_user_refuse`` 动作时才执行，否则忽略该消息（仅
+        记录日志），以保证对未接入该收尾约定的设备/节点安全无副作用。
+        """
+        try:
+            if not isinstance(data, dict):
+                logger.warning("[MessageProcessor] user_refuse payload is not a dict, skip")
+                return
+
+            origin_action = data.get("action", "")
+            device_id = data.get("device_id", "")
+            job_id = data.get("job_id", "")
+            if not origin_action or not device_id:
+                logger.warning(
+                    f"[MessageProcessor] user_refuse missing action/device_id, skip "
+                    f"(data keys={list(data.keys())})"
+                )
+                return
+
+            refuse_action = f"{origin_action}_user_refuse"
+
+            # 仅当设备实现了对应的 always_free 收尾动作时才执行，否则忽略（对未接入设备安全）。
+            if not self._check_action_always_free(device_id, refuse_action):
+                logger.info(
+                    f"[MessageProcessor] user_refuse: device '{device_id}' has no always_free "
+                    f"cleanup action '{refuse_action}', skip "
+                    f"(origin action='{origin_action}', job_id={job_id})"
+                )
+                return
+
+            # 复用 job_start 执行链路：仅把 action 替换为收尾动作，其余字段
+            # （action_type/action_args/job_id/task_id 等）沿用后端下发内容。
+            refuse_data = dict(data)
+            refuse_data["action"] = refuse_action
+            logger.info(
+                f"[MessageProcessor] user_refuse -> dispatch cleanup action '{refuse_action}' "
+                f"on '{device_id}' (origin action='{origin_action}', job_id={job_id})"
+            )
+            await self._handle_job_start(refuse_data)
+
+        except Exception as e:
+            logger.error(f"[MessageProcessor] Error handling user_refuse: {str(e)}")
+            logger.error(traceback.format_exc())
 
     async def _handle_cancel_action(self, data: Dict[str, Any]):
         """处理cancel_action/cancel_task消息"""
