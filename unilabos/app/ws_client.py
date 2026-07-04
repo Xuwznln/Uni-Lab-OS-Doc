@@ -829,10 +829,13 @@ class MessageProcessor:
             )
 
             # 提交给HostNode执行
-            host_node = HostNode.get_instance(0)
+            # 启动竞态：job_start 可能早于 HostNode 就绪到达，给其一定就绪等待时间，
+            # 与其他调用点(get_instance(timeout=5))保持一致。
+            host_node = HostNode.get_instance(timeout=5)
             if not host_node:
-                logger.error(f"[MessageProcessor] HostNode instance not available for job_id: {req.job_id}")
-                return
+                # 此处 job 已被置为 STARTED，若直接 return 会残留一个永久心跳的僵尸 job，
+                # 故抛异常交由下方 except 统一发布 failed 状态并结束该 job。
+                raise RuntimeError(f"HostNode instance not available for job_id: {req.job_id}")
 
             host_node.send_goal(
                 queue_item,
