@@ -2,6 +2,7 @@ import asyncio
 import collections
 from collections import OrderedDict
 import contextlib
+from enum import Enum
 import json
 import os
 import socket
@@ -73,6 +74,420 @@ class PRCXIError(RuntimeError):
     """Lilith 返回 Success=false 时抛出的业务异常"""
 
 
+# =============================================================
+# V04 协议支持：Board 数据模型 + 老版本→V04 布局/位置映射
+#
+# 说明：这些原本在独立模块 ``prcxi_v04.py``，因 V04 不再走“XML 方案写盘”，
+# XAML 生成/落盘那部分已删除，剩余仍被 ``PRCXI9300Api`` 用到的 Board 模型/映射合并至此。
+# 字段大小写严格对齐服务端：坐标类多为 camelCase（``xPosition`` / ``gripperPos`` /
+# ``xSpacing``），其余为 PascalCase；易错拼写照抄。
+# =============================================================
+def to_rpc_value(value: Any) -> Any:
+    """把 Python 对象序列化为服务端兼容的 JSON 值（枚举取 .name，对象取 to_rpc_dict）。"""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Enum):
+        return value.name
+    if isinstance(value, dict):
+        return {str(k): to_rpc_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_rpc_value(v) for v in value]
+    if hasattr(value, "to_rpc_dict"):
+        return value.to_rpc_dict()
+    if hasattr(value, "to_dict"):
+        return value.to_dict()
+    raise TypeError(f"无法序列化为 RPC 参数：{type(value)!r}")
+
+
+class PipettingPos:
+    """V04 移液位。"""
+
+    def __init__(
+        self,
+        id: Optional[str] = None,
+        create_time: Optional[str] = None,
+        update_time: Optional[str] = None,
+        board_detail_id: Optional[str] = None,
+        axis_enum: Optional[str] = None,
+        volume_enum: Optional[str] = None,
+        x_position: float = 0.0,
+        y_position: float = 0.0,
+        bottle_mouth_position: float = 0.0,
+        bottle_bottom_position: float = 0.0,
+        left_wall_distance: float = 0.0,
+        right_wall_distance: float = 0.0,
+        z_wall_distance: float = 0.0,
+        safe_altitude: float = 0.0,
+    ) -> None:
+        self.id = id
+        self.create_time = create_time
+        self.update_time = update_time
+        self.board_detail_id = board_detail_id
+        self.axis_enum = axis_enum
+        self.volume_enum = volume_enum
+        self.x_position = x_position
+        self.y_position = y_position
+        self.bottle_mouth_position = bottle_mouth_position
+        self.bottle_bottom_position = bottle_bottom_position
+        self.left_wall_distance = left_wall_distance
+        self.right_wall_distance = right_wall_distance
+        self.z_wall_distance = z_wall_distance
+        self.safe_altitude = safe_altitude
+
+    def to_rpc_dict(self) -> Dict[str, Any]:
+        return {
+            "Id": self.id,
+            "CreateTime": self.create_time,
+            "UpdateTime": self.update_time,
+            "BoardDetailId": self.board_detail_id,
+            "AxisEnum": self.axis_enum,
+            "VolumeEnum": self.volume_enum,
+            "xPosition": self.x_position,
+            "yPosition": self.y_position,
+            "bottleMouthPosition": self.bottle_mouth_position,
+            "bottleBottomPosition": self.bottle_bottom_position,
+            "leftWallDistance": self.left_wall_distance,
+            "rightWallDistance": self.right_wall_distance,
+            "zWallDistance": self.z_wall_distance,
+            "SafeAltitude": self.safe_altitude,
+        }
+
+
+class GripperPos:
+    """V04 夹爪位。"""
+
+    def __init__(
+        self,
+        id: Optional[str] = None,
+        create_time: Optional[str] = None,
+        update_time: Optional[str] = None,
+        board_detail_id: Optional[str] = None,
+        axis_enum: Optional[str] = None,
+        x_position: float = 0.0,
+        y_position: float = 0.0,
+        z_buffer_position: float = 0.0,
+        z_position: float = 0.0,
+        z2_position: float = 0.0,
+        gripper_position: float = 0.0,
+    ) -> None:
+        self.id = id
+        self.create_time = create_time
+        self.update_time = update_time
+        self.board_detail_id = board_detail_id
+        self.axis_enum = axis_enum
+        self.x_position = x_position
+        self.y_position = y_position
+        self.z_buffer_position = z_buffer_position
+        self.z_position = z_position
+        self.z2_position = z2_position
+        self.gripper_position = gripper_position
+
+    def to_rpc_dict(self) -> Dict[str, Any]:
+        return {
+            "Id": self.id,
+            "CreateTime": self.create_time,
+            "UpdateTime": self.update_time,
+            "BoardDetailId": self.board_detail_id,
+            "AxisEnum": self.axis_enum,
+            "xPosition": self.x_position,
+            "yPosition": self.y_position,
+            "zBufferPosition": self.z_buffer_position,
+            "zPosition": self.z_position,
+            "z2Position": self.z2_position,
+            "gripperPosition": self.gripper_position,
+        }
+
+
+class BoardPosition:
+    """V04 板位定位信息。"""
+
+    def __init__(
+        self,
+        id: Optional[str] = None,
+        create_time: Optional[str] = None,
+        update_time: Optional[str] = None,
+        board_detail_id: Optional[str] = None,
+        board_name: Optional[str] = None,
+        board_number: int = 0,
+        x_spacing: float = 0.0,
+        y_spacing: float = 0.0,
+    ) -> None:
+        self.id = id
+        self.create_time = create_time
+        self.update_time = update_time
+        self.board_detail_id = board_detail_id
+        self.board_name = board_name
+        self.board_number = board_number
+        self.x_spacing = x_spacing
+        self.y_spacing = y_spacing
+
+    def to_rpc_dict(self) -> Dict[str, Any]:
+        return {
+            "Id": self.id,
+            "CreateTime": self.create_time,
+            "UpdateTime": self.update_time,
+            "BoardDetailId": self.board_detail_id,
+            "BoardName": self.board_name,
+            "BoardNumber": self.board_number,
+            "xSpacing": self.x_spacing,
+            "ySpacing": self.y_spacing,
+        }
+
+
+class BoardDetail:
+    """V04 板位明细（一个槽位 / 一块耗材）。"""
+
+    def __init__(
+        self,
+        id: Optional[str] = None,
+        create_time: Optional[str] = None,
+        update_time: Optional[str] = None,
+        board_id: Optional[str] = None,
+        name: Optional[str] = None,
+        number: int = 0,
+        row: int = 0,
+        column: int = 0,
+        row_span: int = 1,
+        column_span: int = 1,
+        volume: int = 0,
+        material_id: Optional[str] = None,
+        module: Optional[str] = None,
+        position: Optional[BoardPosition] = None,
+        pipetting_pos_list: Optional[List[PipettingPos]] = None,
+        gripper_pos: Optional[GripperPos] = None,
+    ) -> None:
+        self.id = id
+        self.create_time = create_time
+        self.update_time = update_time
+        self.board_id = board_id
+        self.name = name
+        self.number = number
+        self.row = row
+        self.column = column
+        self.row_span = row_span
+        self.column_span = column_span
+        self.volume = volume
+        self.material_id = material_id
+        self.module = module
+        self.position = position
+        self.pipetting_pos_list = pipetting_pos_list or []
+        self.gripper_pos = gripper_pos
+
+    def to_rpc_dict(self) -> Dict[str, Any]:
+        return {
+            "Id": self.id,
+            "CreateTime": self.create_time,
+            "UpdateTime": self.update_time,
+            "BoardId": self.board_id,
+            "Name": self.name,
+            "Number": self.number,
+            "Row": self.row,
+            "Column": self.column,
+            "RowSpan": self.row_span,
+            "ColumnSpan": self.column_span,
+            "Volume": self.volume,
+            "MaterialId": self.material_id,
+            "Module": self.module,
+            "Position": self.position.to_rpc_dict() if self.position else None,
+            "PipettingPosList": [p.to_rpc_dict() for p in self.pipetting_pos_list],
+            "gripperPos": self.gripper_pos.to_rpc_dict() if self.gripper_pos else None,
+        }
+
+
+class Board:
+    """V04 工作台布局（IMatrix 的一个 matrix）。"""
+
+    def __init__(
+        self,
+        id: Optional[str] = None,
+        create_time: Optional[str] = None,
+        update_time: Optional[str] = None,
+        name: Optional[str] = None,
+        rows: int = 0,
+        columns: int = 0,
+        device_type: Optional[str] = None,
+        details: Optional[List[BoardDetail]] = None,
+    ) -> None:
+        self.id = id
+        self.create_time = create_time
+        self.update_time = update_time
+        self.name = name
+        self.rows = rows
+        self.columns = columns
+        self.device_type = device_type
+        self.details = details or []
+
+    def to_rpc_dict(self) -> Dict[str, Any]:
+        return {
+            "Id": self.id,
+            "CreateTime": self.create_time,
+            "UpdateTime": self.update_time,
+            "Name": self.name,
+            "Rows": self.rows,
+            "Columns": self.columns,
+            "DeviceType": self.device_type,
+            "Details": [d.to_rpc_dict() for d in self.details],
+        }
+
+
+def worktablets_to_board(
+    matrix_info: Dict[str, Any],
+    *,
+    columns: int = 4,
+    rows: Optional[int] = None,
+    device_type: str = "SC9320",
+) -> Board:
+    """把老版本 ``MatrixInfo``（``MatrixId/MatrixName/WorkTablets[...]``）映射为 V04 ``Board``。
+
+    映射规则（⚠ 需真机联调核对，见《修改计划》决策点 B）：
+    - ``MatrixId → Board.Id``，``MatrixName → Board.Name``。
+    - 每个 ``WorkTablet(Number/Code/Material) → 一个 BoardDetail``：``Number → Number``，
+      ``Code → Name``，``Material.uuid → MaterialId``，并按 ``columns`` 反算 ``Row/Column``
+      （``Number`` 从 1 开始，行优先）。
+    - 位置（``PipettingPosList`` / ``gripperPos``）此处留空，由 ``merge_positions_into_board``
+      后续填充（位置需真机标定）。
+    """
+    tablets = list(matrix_info.get("WorkTablets", []) or [])
+    if columns <= 0:
+        columns = 4
+    max_number = 0
+    details: List[BoardDetail] = []
+    for wt in tablets:
+        number = int(wt.get("Number", 0) or 0)
+        max_number = max(max_number, number)
+        material = wt.get("Material", {}) or {}
+        idx = max(number - 1, 0)
+        row = idx // columns + 1
+        col = idx % columns + 1
+        details.append(
+            BoardDetail(
+                name=wt.get("Code") or f"T{number}",
+                number=number,
+                row=row,
+                column=col,
+                material_id=material.get("uuid"),
+                volume=int(material.get("Volume", 0) or 0),
+            )
+        )
+
+    if rows is None:
+        rows = (max_number + columns - 1) // columns if max_number else 0
+
+    return Board(
+        id=matrix_info.get("MatrixId"),
+        name=matrix_info.get("MatrixName"),
+        rows=rows,
+        columns=columns,
+        device_type=device_type,
+        details=details,
+    )
+
+
+def legacy_pipetting_pos_to_v04(pos: Dict[str, Any]) -> Tuple[List[PipettingPos], List[str]]:
+    """把老版本移液位置 dict（左/右轴合一）映射为 V04 ``PipettingPos`` 列表（左、右各一）。
+
+    ⚠ ``bottleMouthPosition`` / ``SafeAltitude`` 无老版本对应字段，映射存在不确定性，
+    需真机联调定稿；这里做保守映射并把无对应字段作为 warning 返回。
+    """
+    warnings: List[str] = []
+
+    def _f(key: str) -> float:
+        try:
+            return float(pos.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    left = PipettingPos(
+        axis_enum="Left",
+        x_position=_f("XPos"),
+        y_position=_f("YPos"),
+        bottle_bottom_position=_f("ZPos"),
+        left_wall_distance=_f("X_Left"),
+        right_wall_distance=_f("X_Right"),
+        z_wall_distance=_f("ZAgainstTheWall"),
+    )
+    result = [left]
+
+    if any(k in pos for k in ("X2Pos", "Y2Pos", "Z2Pos")):
+        result.append(
+            PipettingPos(
+                axis_enum="Right",
+                x_position=_f("X2Pos"),
+                y_position=_f("Y2Pos"),
+                bottle_bottom_position=_f("Z2Pos"),
+                left_wall_distance=_f("X2_Left"),
+                right_wall_distance=_f("X2_Right"),
+                z_wall_distance=_f("ZAgainstTheWall2"),
+            )
+        )
+
+    warnings.append(
+        "PipettingPos.bottleMouthPosition/SafeAltitude 无老版本对应字段，已置 0，需真机联调核对"
+    )
+    return result, warnings
+
+
+def legacy_claw_pos_to_v04(pos: Dict[str, Any]) -> GripperPos:
+    """把老版本夹爪位置 dict（``XPos/YPos/ZPos``）映射为 V04 ``GripperPos``。"""
+
+    def _f(key: str) -> float:
+        try:
+            return float(pos.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    return GripperPos(
+        axis_enum="ClampingJaw",
+        x_position=_f("XPos"),
+        y_position=_f("YPos"),
+        z_position=_f("ZPos"),
+        z2_position=_f("Z2Pos"),
+    )
+
+
+def merge_positions_into_board(
+    board: Union[Board, Dict[str, Any]],
+    pipetting_positions: Optional[List[Dict[str, Any]]] = None,
+    claw_positions: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """把老版本位置列表按 ``Number`` 合并进 Board 的对应 ``BoardDetail``，返回 RPC dict + warnings。
+
+    ``board`` 可为 :class:`Board` 或服务端返回的 Board dict。合并后可直接作为
+    ``UpdatePosition_V04`` / ``AddWorkTabletMatrix_V04`` 入参。
+    """
+    warnings: List[str] = []
+    board_dict = board.to_rpc_dict() if isinstance(board, Board) else dict(board or {})
+    details = board_dict.get("Details") or []
+
+    pip_by_num: Dict[int, Dict[str, Any]] = {}
+    for p in pipetting_positions or []:
+        try:
+            pip_by_num[int(p.get("Number"))] = p
+        except (TypeError, ValueError):
+            continue
+    claw_by_num: Dict[int, Dict[str, Any]] = {}
+    for c in claw_positions or []:
+        try:
+            claw_by_num[int(c.get("Number"))] = c
+        except (TypeError, ValueError):
+            continue
+
+    for detail in details:
+        try:
+            number = int(detail.get("Number"))
+        except (TypeError, ValueError):
+            continue
+        if number in pip_by_num:
+            pip_list, w = legacy_pipetting_pos_to_v04(pip_by_num[number])
+            detail["PipettingPosList"] = [p.to_rpc_dict() for p in pip_list]
+            warnings.extend(w)
+        if number in claw_by_num:
+            detail["gripperPos"] = legacy_claw_pos_to_v04(claw_by_num[number]).to_rpc_dict()
+
+    board_dict["Details"] = details
+    return board_dict, sorted(set(warnings))
+
+
 class Material(TypedDict):  # 和Plate同关系
     uuid: str
     Code: Optional[str]
@@ -95,14 +510,31 @@ class MatrixInfo(TypedDict):
     WorkTablets: list[WorkTablets]
 
 
-def _get_slot_number(resource) -> Optional[int]:
-    """从 resource 的 unilabos_extra["update_resource_site"]（如 "T13"）或位置反算槽位号。"""
+def _get_slot_number(resource, deck: Optional["PRCXI9300Deck"] = None) -> Optional[int]:
+    """从 resource 的 ``update_resource_site`` 或位置反算 1-based 槽位号。"""
     extra = getattr(resource, "unilabos_extra", {}) or {}
     site = extra.get("update_resource_site", "")
     if site:
         digits = "".join(c for c in str(site) if c.isdigit())
         return int(digits) if digits else None
+
     loc = getattr(resource, "location", None)
+
+    # 优先使用 deck.sites 的真实坐标映射，兼容 9320 动态列布局。
+    deck_cls = globals().get("PRCXI9300Deck")
+    if deck is None and deck_cls is not None:
+        cur = resource
+        while cur is not None:
+            if isinstance(cur, deck_cls):
+                deck = cur
+                break
+            cur = getattr(cur, "parent", None)
+    if deck is not None and loc is not None:
+        slot_from_deck = deck.slot_from_location(loc, tolerance=1.0)
+        if slot_from_deck is not None:
+            return slot_from_deck
+
+    # 兜底：兼容历史 4×4 固定布局反算（9320 默认布局）。
     if loc is not None and loc.x is not None and loc.y is not None:
         col = round((loc.x - 5) / 137.5)
         row = round(3 - (loc.y - 13) / 96)
@@ -118,7 +550,16 @@ class PRCXI9300Deck(Deck):
     该类定义了 PRCXI 9300 的工作台布局和槽位信息。
     """
 
-    _9320_SITE_POSITIONS = [((i%4)*137.5+5, (3-int(i/4))*96+13, 0) for i in range(0, 16)]
+    _9320_ROWS = 4
+    _9320_COLUMN_RAILS = 5
+    _9320_X_OFFSET = 5.0
+    _9320_ROW_PITCH = 96.0
+    _9320_Y_OFFSET = 13.0
+    _9320_DEFAULT_RAIL_WIDTH = 27.5
+    _9320_DEFAULT_COL_PITCH = _9320_COLUMN_RAILS * _9320_DEFAULT_RAIL_WIDTH
+    # 注意：类变量推导式在 Python 作用域下无法稳定引用同级类变量，故这里保留字面值，
+    # 动态布局统一走 ``build_9320_site_positions``。
+    _9320_SITE_POSITIONS = [((i % 4) * 137.5 + 5, (3 - int(i / 4)) * 96 + 13, 0) for i in range(0, 16)]
 
 
     # 9300: 3列×2行 = 6 slots，间距与9320相同（X: 138mm, Y: 96mm）
@@ -134,24 +575,145 @@ class PRCXI9300Deck(Deck):
 
     def __init__(self, name: str, size_x: float, size_y: float, size_z: float,
                  sites: Optional[List[Dict[str, Any]]] = None, **kwargs):
-        super().__init__( size_x, size_y, size_z, name=name)
+        super().__init__(size_x, size_y, size_z, name=name)
+
+        # Deck 基类有 model 字段，PRCXI 这里保留并用于区分 9300/9320 默认布局。
+        model = kwargs.pop("model", None)
+        if model is not None:
+            self.model = model
+
+        # 记录 9320 动态布局参数（默认对齐历史 4 列、0 间隔）。
+        self._layout_column_nums: int = 4
+        self._layout_rail_interval: float = 0.0
+        self._layout_rail_width: float = self._9320_DEFAULT_RAIL_WIDTH
+        self._layout_col_pitch: float = self._9320_DEFAULT_COL_PITCH
+
         if sites is not None:
             self.sites: List[Dict[str, Any]] = [dict(s) for s in sites]
         else:
-            self.sites = []
-            for i, (x, y, z) in enumerate(self._DEFAULT_SITE_POSITIONS):
-                self.sites.append({
-                    "label": f"T{i + 1}",
-                    "visible": True,
-                    "position": {"x": x, "y": y, "z": z},
-                    "size": dict(self._DEFAULT_SITE_SIZE),
-                    "content_type": list(self._DEFAULT_CONTENT_TYPE),
-                })
+            model_name = str(getattr(self, "model", "") or "").strip().lower()
+            default_positions = (
+                self._9300_SITE_POSITIONS
+                if model_name == "9300"
+                else self._DEFAULT_SITE_POSITIONS
+            )
+            self._set_sites_from_positions(default_positions)
+
+        self._refresh_ordering()
+        self.root = self.get_root()
+
+    def _refresh_ordering(self) -> None:
         # _ordering: label -> None, 用于外部通过 list(keys()).index(site) 将 Tn 转换为 spot index
         self._ordering = collections.OrderedDict(
             (site["label"], None) for site in self.sites
         )
-        self.root = self.get_root()
+
+    def _set_sites_from_positions(self, positions: Sequence[Tuple[float, float, float]]) -> None:
+        self.sites = []
+        for i, (x, y, z) in enumerate(positions):
+            self.sites.append({
+                "label": f"T{i + 1}",
+                "visible": True,
+                "position": {"x": float(x), "y": float(y), "z": float(z)},
+                "size": dict(self._DEFAULT_SITE_SIZE),
+                "content_type": list(self._DEFAULT_CONTENT_TYPE),
+            })
+        self._refresh_ordering()
+
+    @classmethod
+    def build_9320_site_positions(
+        cls,
+        column_nums: int,
+        rail_interval: float,
+        rail_width: float,
+    ) -> List[Tuple[float, float, float]]:
+        """按 9320 规则生成 sites（4 行 × N 列）。"""
+        if column_nums <= 0:
+            raise ValueError(f"column_nums 必须 > 0，收到 {column_nums}")
+        col_pitch = (cls._9320_COLUMN_RAILS + float(rail_interval)) * float(rail_width)
+        positions: List[Tuple[float, float, float]] = []
+        for row in range(cls._9320_ROWS):
+            for col in range(column_nums):
+                x = cls._9320_X_OFFSET + col * col_pitch
+                y = (cls._9320_ROWS - 1 - row) * cls._9320_ROW_PITCH + cls._9320_Y_OFFSET
+                positions.append((x, y, 0.0))
+        return positions
+
+    @staticmethod
+    def _slot_from_sites(
+        location: Optional[Coordinate],
+        sites: Sequence[Dict[str, Any]],
+        tolerance: float = 1.0,
+    ) -> Optional[int]:
+        if location is None or location.x is None or location.y is None:
+            return None
+
+        # 优先精确匹配（assign_child_at_slot 的标准路径）。
+        for idx, site in enumerate(sites):
+            pos = site.get("position", {})
+            sx = float(pos.get("x", 0.0))
+            sy = float(pos.get("y", 0.0))
+            sz = float(pos.get("z", 0.0))
+            lz = float(location.z or 0.0)
+            if abs(location.x - sx) < 1e-6 and abs(location.y - sy) < 1e-6 and abs(lz - sz) < 1e-6:
+                return idx + 1
+
+        # 再做带阈值最近邻匹配，兼容云端坐标轻微浮点偏差。
+        nearest_idx: Optional[int] = None
+        nearest_dist_sq = float("inf")
+        for idx, site in enumerate(sites):
+            pos = site.get("position", {})
+            sx = float(pos.get("x", 0.0))
+            sy = float(pos.get("y", 0.0))
+            dist_sq = (location.x - sx) ** 2 + (location.y - sy) ** 2
+            if dist_sq < nearest_dist_sq:
+                nearest_dist_sq = dist_sq
+                nearest_idx = idx
+        if nearest_idx is not None and nearest_dist_sq <= float(tolerance) ** 2:
+            return nearest_idx + 1
+        return None
+
+    def slot_from_location(self, location: Optional[Coordinate], tolerance: float = 1.0) -> Optional[int]:
+        return self._slot_from_sites(location=location, sites=self.sites, tolerance=tolerance)
+
+    def reconfigure_9320_layout(
+        self,
+        column_nums: int,
+        rail_interval: float,
+        rail_width: float,
+        preserve_children: bool = True,
+    ) -> None:
+        """按 9320 的可变列参数重建 sites，并尽量保持已挂载子资源槽位不变。"""
+        old_sites = [dict(site) for site in self.sites]
+        child_slot_map: Dict[Resource, int] = {}
+        if preserve_children:
+            for child in list(self.children):
+                slot_no = _get_slot_number(child, deck=self)
+                if slot_no is None:
+                    slot_no = self._slot_from_sites(getattr(child, "location", None), old_sites, tolerance=1.0)
+                if slot_no is not None:
+                    child_slot_map[child] = slot_no
+
+        positions = self.build_9320_site_positions(
+            column_nums=int(column_nums),
+            rail_interval=float(rail_interval),
+            rail_width=float(rail_width),
+        )
+        self._set_sites_from_positions(positions)
+        self._layout_column_nums = int(column_nums)
+        self._layout_rail_interval = float(rail_interval)
+        self._layout_rail_width = float(rail_width)
+        self._layout_col_pitch = (self._9320_COLUMN_RAILS + self._layout_rail_interval) * self._layout_rail_width
+
+        if preserve_children:
+            for child, slot_no in child_slot_map.items():
+                if 1 <= slot_no <= len(self.sites):
+                    child.location = self.get_slot_location(slot_no)
+                else:
+                    print(
+                        f"[PRCXI9300Deck] 子资源 {getattr(child, 'name', '?')} 原槽位 T{slot_no}"
+                        f" 超出新布局范围 (1..{len(self.sites)})，保留原位置"
+                    )
 
     def _get_site_location(self, idx: int) -> Coordinate:
         pos = self.sites[idx]["position"]
@@ -830,20 +1392,23 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         matrix_id="",
         is_9320=False,
         start_rail=2,
-        rail_nums=4,
+        column_nums=4,
+        rail_nums: Optional[int] = None,
         rail_interval=0,
+        rail_width=27.5,
         x_increase = -0.003636,
         y_increase = -0.003636,
         x_offset = -1.8,
         y_offset = -37.48,
         deck_z = 235.5,
         deck_y = 400,
-        rail_width=27.5,
         xy_coupling = -0.0045,
         calibration_points: Optional[Dict[str, List[List[float]]]] = None,
         calibration_labware_type: Optional[str] = "PRCXI_300ul_Tips",
         pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
         skip_position_recalc_when_matrix_exists: bool = True,
+        protocol_version: Literal["legacy", "v04"] = "v04",
+        reset_status_inverted: Optional[bool] = None,
     ):
         # 枪头轴配置：``{"left": {"vol": 100, "channels": 8}, "right": {"vol": 1000, "channels": 1}}``
         # 代表左轴 100µL/8 通道、右轴 1000µL/1 通道。None → 走 legacy 路由（≤10µL→右单通道[1]、
@@ -859,11 +1424,22 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 for cfg in self.pip_setting.values()
             )
         )
- 
 
+        # rail_nums 是历史参数名，兼容旧配置（优先使用显式 rail_nums）。
+        if rail_nums is not None:
+            column_nums = rail_nums
+        start_rail = float(start_rail)
+        column_nums = int(column_nums)
+        rail_interval = float(rail_interval)
+        rail_width = float(rail_width)
+        if column_nums <= 0:
+            raise ValueError(f"column_nums 必须 > 0，收到 {column_nums}")
+
+        self._start_rail = start_rail
+        self._column_nums = column_nums
         self._rail_width = rail_width
         self._rail_interval = rail_interval
-        self.deck_x = (start_rail + rail_nums*5 + (rail_nums-1)*rail_interval) * rail_width
+        self.deck_x = (start_rail + column_nums * 5 + (column_nums - 1) * rail_interval) * rail_width
         self.deck_y = deck_y
         self.deck_z = deck_z
         self.x_increase = x_increase
@@ -890,7 +1466,19 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         tablets_info = []
 
         if is_9320 is None:
-            is_9320 = getattr(deck, 'model', '9300') == '9320'
+            is_9320 = str(getattr(deck, "model", "9300")).strip().lower() == "9320"
+
+        # 9320 支持按列数/轨道参数动态重建 deck 槽位布局。
+        if is_9320 and isinstance(deck, PRCXI9300Deck):
+            deck.reconfigure_9320_layout(
+                column_nums=column_nums,
+                rail_interval=rail_interval,
+                rail_width=rail_width,
+            )
+            deck._size_x = self.deck_x
+            deck._size_y = self.deck_y
+            deck._size_z = self.deck_z
+
         if is_9320:
             print("当前设备是9320")
         else:
@@ -914,6 +1502,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self._unilabos_backend = PRCXI9300Backend(
             tablets_info, host, port, timeout, channel_num, axis, setup, debug, matrix_id, is_9320,
             pip_setting=self.pip_setting,
+            protocol_version=protocol_version,
+            reset_status_inverted=reset_status_inverted,
         )
         super().__init__(backend=self._unilabos_backend, deck=deck, simulator=simulator, channel_num=channel_num)
         self._first_transfer_done = False
@@ -921,9 +1511,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self._unilabos_backend._handler = self
 
     @staticmethod
-    def _get_slot_number(resource) -> Optional[int]:
+    def _get_slot_number(resource, deck: Optional[PRCXI9300Deck] = None) -> Optional[int]:
         """从 resource 的 unilabos_extra["update_resource_site"]（如 "T13"）或位置反算槽位号。"""
-        return _get_slot_number(resource)
+        return _get_slot_number(resource, deck=deck)
 
     def _matrix_id_has_value(self) -> bool:
         """当前 backend.matrix_id 是否已有有效值。"""
@@ -1010,12 +1600,13 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 material_uuid_map[m["uuid"]] = m
 
         work_tablets = []
-        slot_none = [i for i in range(1, 17)]
+        slot_total = len(self.deck.sites) if isinstance(self.deck, PRCXI9300Deck) else 16
+        slot_none = [i for i in range(1, slot_total + 1)]
 
         for child in self.deck.children:
 
             resource = child
-            number = self._get_slot_number(resource)
+            number = self._get_slot_number(resource, deck=self.deck)
             if number is None:
                 continue
 
@@ -1024,7 +1615,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 mat_uuid = resource._unilabos_state["Material"].get("uuid")
                 if mat_uuid and mat_uuid in material_uuid_map:
                     work_tablets.append({"Number": number, "Material": material_uuid_map[mat_uuid]})
-                    slot_none.remove(number)
+                    if number in slot_none:
+                        slot_none.remove(number)
                     continue
 
             # 根据 resource 类型推断 materialEnum
@@ -1075,7 +1667,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
             if best_material:
                 work_tablets.append({"Number": number, "Material": best_material})
-                slot_none.remove(number)
+                if number in slot_none:
+                    slot_none.remove(number)
 
         if not work_tablets:
             return
@@ -1097,7 +1690,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             claw_positions = []
             seen_numbers = set()
             for child in self.deck.children:
-                number = self._get_slot_number(child)
+                number = self._get_slot_number(child, deck=self.deck)
 
                 if number is None:
                     continue
@@ -1248,9 +1841,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         current = resource
         while current is not None:
             if isinstance(current.parent, (PRCXI9300Deck, LiquidHandlerAbstract)):
-                return self._get_slot_number(current)
+                return self._get_slot_number(current, deck=self.deck)
             current = getattr(current, "parent", None)
-        return self._get_slot_number(resource)
+        return self._get_slot_number(resource, deck=self.deck)
 
     def _slot_plate_and_support(self, deck_child):
         """返回 ``(leaf_plate_or_self, support_height, support_layer)``。
@@ -1737,7 +2330,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
             change_slots_positions = []
             for slot in change_slots:
-                number = self._get_slot_number(slot)
+                number = self._get_slot_number(slot, deck=self.deck)
 
                 well = slot.children[0]
                 # 板叠放在 module/plate_adapter 上时，移液头按「无支撑基准 - support」抬高一层；
@@ -2085,16 +2678,27 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         matrix_id="",
         is_9320=False,
         pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
+        protocol_version: Literal["legacy", "v04"] = "v04",
+        reset_status_inverted: Optional[bool] = None,
+        reset_timeout: float = 120.0,
     ) -> None:
         super().__init__()
         self.tablets_info = tablets_info
         self.matrix_id = matrix_id
-        self.api_client = PRCXI9300Api(host, port, timeout, axis, debug, is_9320)
+        self.protocol_version = PRCXI9300Api._normalize_protocol_version(protocol_version)
+        self.api_client = PRCXI9300Api(
+            host, port, timeout, axis, debug, is_9320,
+            protocol_version=self.protocol_version,
+            reset_status_inverted=reset_status_inverted,
+        )
         self.host, self.port, self.timeout = host, port, timeout
         self._num_channels = channel_num
         self._execute_setup = setup
         self.debug = debug
         self.axis = "Left"
+        self.is_9320 = is_9320
+        # setup 复位等待超时上限（秒），防止 GetResetStatus 语义异常导致死循环（决策点 C）。
+        self.reset_timeout = float(reset_timeout)
         # 枪头轴配置（由 PRCXI9300Handler 透传）。None → legacy [0]→Left/[1]→Right。
         self.pip_setting: Optional[Dict[str, Dict[str, Any]]] = pip_setting
         # 当前操作选定的物理轴（"Left"/"Right"），由设备层 op override 在调用前写入。
@@ -2140,14 +2744,15 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             if digits:
                 return int(digits)
 
+        actual_deck = self._resolve_deck(plate, deck)
+
         # 2) 位置反算：优先最接近 deck 的那层（嵌套 plate 的 location 相对父级，不可信）。
         for cand in reversed(chain):
-            sn = PRCXI9300Handler._get_slot_number(cand)
+            sn = PRCXI9300Handler._get_slot_number(cand, deck=actual_deck)
             if sn is not None:
                 return sn
 
         # 3) 名字兜底：需要 deck（远端解析回来的实例与 deck 上不是同一对象时）。
-        actual_deck = self._resolve_deck(plate, deck)
         if actual_deck is not None:
             for cand in reversed(chain):
                 cname = getattr(cand, "name", None)
@@ -2240,10 +2845,6 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.steps_todo_list = []
 
         if not len(self.matrix_id):
-            # tablets_info 在 9320 下恒为空（仅非 9320 分支会 append），且历史的
-            # `tablets_info.items()` 假设 tablets_info 为 dict 已失效（实际是 list[WorkTablets]）。
-            # 统一改为复用 handler 基于 deck.children 的自动匹配建表逻辑（与首次 transfer_liquid
-            # 路径 _match_and_create_matrix 一致），由其回填 self.matrix_id。
             handler = getattr(self, "_handler", None)
             if handler is not None and hasattr(handler, "_match_and_create_matrix"):
                 handler._match_and_create_matrix()
@@ -2256,6 +2857,12 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     def run_protocol(self, protocol_id: str = None):
         assert self.is_reset_ok, "PRCXI9300Backend is not reset successfully. Please call setup() first."
+        if self.protocol_version == "v04":
+            return self._run_protocol_v04(protocol_id)
+        return self._run_protocol_legacy(protocol_id)
+
+    def _run_protocol_legacy(self, protocol_id: str = None):
+        """legacy：AddSolution(steps) → LoadSolution(guid) → Start → wait_for_finish（保持原行为）。"""
         run_time = time.time()
         if protocol_id == "" or protocol_id is None:
             solution_id = self.api_client.add_solution(
@@ -2266,6 +2873,29 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         print(f"PRCXI9300Backend created solution with ID: {solution_id}")
         self.api_client.load_solution(solution_id)
         print(json.dumps(self.steps_todo_list, indent=2))
+        if not self.api_client.start():
+            return False
+        if not self.api_client.wait_for_finish():
+            return False
+        return True
+
+
+    def _run_protocol_v04(self, protocol_id: str = None):
+        """v04：建布局已在 create_protocol 完成；这里 加载/模拟方案 → Start → wait_for_finish。
+
+        - ``protocol_id`` 非空：视为已有方案名，走真实链路 ``LoadSolution(方案名)`` → Start → wait。
+        - ``protocol_id`` 为空：V04 不再走“生成 XML 方案写盘”，改为模拟运行返回（仅输出，不联机）。
+        """
+        if not protocol_id:
+            plan_name = getattr(self, "protocol_name", "") or f"protocol_{int(time.time())}"
+            print(f"[PRCXI][v04] 模拟运行方案：{plan_name}")
+            return True
+
+        plan_name = str(protocol_id)
+        print(f"[PRCXI][v04] LoadSolution(方案名={plan_name})")
+        if not self.api_client.load_solution(plan_name):
+            print(f"[PRCXI][v04] 加载方案失败：{plan_name}（确认方案已存在于 NeonGenesis 并被识别）")
+            return False
         if not self.api_client.start():
             return False
         if not self.api_client.wait_for_finish():
@@ -2341,20 +2971,29 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                 # 清除错误代码
                 self.api_client.clear_error_code()
                 print("PRCXI9300 error code cleared.")
-                self.api_client.call("IAutomation", "Stop")
+                self.api_client.stop()
                 # 执行重置
                 print("Starting PRCXI9300 reset...")
-                self.api_client.call("IAutomation", "Reset")
+                self.api_client.reset()
 
-                # 检查重置状态并等待完成
+                # 检查重置状态并等待完成（加超时上限防死循环：GetResetStatus 取反语义
+                # 在真机上仍待核对，若语义反了这里靠超时兜底而非无限等待，见决策点 C）。
+                deadline = time.time() + self.reset_timeout
                 while not self.is_reset_ok:
+                    if time.time() >= deadline:
+                        raise RuntimeError(
+                            f"PRCXI9300 复位等待超时（{self.reset_timeout}s）。"
+                            "请检查设备复位状态；若 GetResetStatus 语义与预期相反，"
+                            "可在初始化时设置 reset_status_inverted 覆盖（protocol_version="
+                            f"{self.protocol_version}）。"
+                        )
                     print("Waiting for PRCXI9300 to reset...")
                     if hasattr(self, "_ros_node") and self._ros_node is not None:
                         await self._ros_node.sleep(1)
                     else:
                         await asyncio.sleep(1)
                 print("PRCXI9300 reset successfully.")
-                
+
                 # self.api_client.update_clamp_jaw_position(self.matrix_id, self.claw_positions)
 
         except ConnectionRefusedError as e:
@@ -2364,7 +3003,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             ) from e
 
     async def stop(self):
-        self.api_client.call("IAutomation", "Stop")
+        self.api_client.stop()
 
     async def pick_up_tips(self, ops: List[Pickup], use_channels: List[int] = None):
         """Pick up tips from the specified resource."""
@@ -2691,6 +3330,18 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
 
 class PRCXI9300Api:
+    """PRCXI 移液站 RPC 客户端，支持 legacy（旧版）与 v04（新版）双协议。
+
+    协议由构造参数 ``protocol_version`` 统一切换（唯一入口）：
+    - ``"legacy"``：旧版协议（``AddSolution``、无 ``_V04`` 后缀的 IMatrix、
+      ``AddWorkTabletMatrix``/``AddWorkTabletMatrix2``、``LoadSolution`` 传 GUID）。
+    - ``"v04"``：新版协议（IMatrix 全部 ``_V04``、方案走 XML + ``LoadSolution`` 传方案名、
+      新增 ``IClientSession.IsConnect`` / ``GetStartStatus`` / ``RemoveSolution`` 等）。
+
+    ``is_9320`` 仅保留“机型能力”语义（step_mode / 旧版建布局用 2 参版本），
+    不再承担协议判定职责（见《修改计划》决策点 D/E）。
+    """
+
     def __init__(
         self,
         host: str = "127.0.0.1",
@@ -2699,74 +3350,195 @@ class PRCXI9300Api:
         axis="Left",
         debug: bool = False,
         is_9320: bool = False,
+        protocol_version: Literal["legacy", "v04"] = "v04",
+        reset_status_inverted: Optional[bool] = None,
     ) -> None:
         self.host, self.port, self.timeout = host, port, timeout
         self.debug = debug
         self.axis = axis
         self.is_9320 = is_9320
+        self.protocol_version = self._normalize_protocol_version(protocol_version)
+        # 复位状态取反：旧版历史行为 = ``not res``；V04 协议 ``GetResetStatus`` true=已复位，
+        # 若沿用取反会导致 setup 死循环（见决策点 C）。None/空串 → 按协议给默认，可显式覆盖以便真机联调。
+        if reset_status_inverted is None or reset_status_inverted == "":
+            reset_status_inverted = self.protocol_version == "legacy"
+        self.reset_status_inverted = bool(reset_status_inverted)
+
+    @staticmethod
+    def _normalize_protocol_version(value: Optional[str]) -> str:
+        v = str(value or "v04").strip().lower()
+        if v not in {"legacy", "v04"}:
+            raise ValueError(f"不支持的 protocol_version: {value!r}（仅 'legacy' / 'v04'）")
+        return v
+
+    @property
+    def is_v04(self) -> bool:
+        return self.protocol_version == "v04"
+
+    def _matrix_method(self, base: str) -> str:
+        """IMatrix 方法名：v04 加 ``_V04`` 后缀，legacy 用原名。"""
+        return f"{base}_V04" if self.is_v04 else base
+
+    @staticmethod
+    def _as_bool(value: Any) -> bool:
+        """把服务端 Data 归一化为布尔（兼容 True/1/'true'/'1' 及带引号形式）。"""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            return value.strip().strip('"').lower() in {"true", "1"}
+        return False
 
     @staticmethod
     def _len_prefix(n: int) -> bytes:
         return bytes.fromhex(format(n, "016x"))
 
+    def _debug_response(self, payload: str) -> str:
+        """debug/仿真模式：按方法名返回可解析的模拟 JSON（含 V04 新方法）。"""
+        try:
+            req = json.loads(payload)
+            method = req.get("MethodName")
+        except Exception:
+            method = None
+
+        data: Any = True
+        if method in {"AddSolution"}:
+            data = str(uuid.uuid4())
+        elif method in {
+            "AddWorkTabletMatrix",
+            "AddWorkTabletMatrix2",
+            "AddWorkTabletMatrix_V04",
+            "RemoveWorkTabletMatrix_V04",
+            "UpdatePosition_V04",
+            "UpdateClampJawPosition",
+            "UpdatePipettingPosition",
+        }:
+            data = {"Success": True, "Message": "debug mock"}
+        elif method in {"GetErrorCode"}:
+            data = ""
+        elif method in {
+            "RemoveErrorCodet",
+            "Reset",
+            "Start",
+            "Stop",
+            "Pause",
+            "Resume",
+            "LoadSolution",
+            "RemoveSolution",
+            "IsConnect",
+        }:
+            data = True
+        elif method in {"GetStartStatus"}:
+            data = False
+        elif method in {"GetStepStateList", "GetStepStatus", "GetStepState"}:
+            data = []
+        elif method in {
+            "GetSolutionList",
+            "GetAllMaterial",
+            "GetAllMaterial_V04",
+            "GetWorkTabletMatrices",
+            "GetWorkTabletMatrices_V04",
+        }:
+            data = []
+        elif method in {
+            "GetWorkTabletMatrixById",
+            "GetWorkTabletMatrixById_V04",
+            "GetMaterialById_V04",
+        }:
+            data = {}
+        elif method in {"GetLocation"}:
+            data = {"X": 0, "Y": 0, "Z": 0}
+        elif method in {"GetResetStatus"}:
+            # V04：true=已复位；此处返回“已复位”让 setup 不死循环。
+            data = self.is_v04
+        return json.dumps({"Success": True, "Msg": "debug mock", "Data": data})
+
+    @staticmethod
+    def _recv_exact(sock: socket.socket, size: int) -> bytes:
+        """从 socket 精确读取 ``size`` 字节，读不满即报错（帧读取，不依赖对端关闭）。"""
+        chunks: List[bytes] = []
+        remaining = size
+        while remaining > 0:
+            chunk = sock.recv(remaining)
+            if not chunk:
+                raise PRCXIError(f"响应长度不完整：期望 {size} 字节，还差 {remaining} 字节")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+
     def _raw_request(self, payload: str) -> str:
         if self.debug:
             # 调试/仿真模式下直接返回可解析的模拟 JSON，避免后续 json.loads 报错
-            try:
-                req = json.loads(payload)
-                method = req.get("MethodName")
-            except Exception:
-                method = None
-
-            data: Any = True
-            if method in {"AddSolution"}:
-                data = str(uuid.uuid4())
-            elif method in {"AddWorkTabletMatrix", "AddWorkTabletMatrix2"}:
-                data = {"Success": True, "Message": "debug mock"}
-            elif method in {"GetErrorCode"}:
-                data = ""
-            elif method in {"RemoveErrorCodet", "Reset", "Start", "LoadSolution", "Pause", "Resume", "Stop"}:
-                data = True
-            elif method in {"GetStepStateList", "GetStepStatus", "GetStepState"}:
-                data = []
-            elif method in {"GetLocation"}:
-                data = {"X": 0, "Y": 0, "Z": 0}
-            elif method in {"GetResetStatus"}:
-                data = False
-
-            return json.dumps({"Success": True, "Msg": "debug mock", "Data": data})
+            return self._debug_response(payload)
         with contextlib.closing(socket.socket()) as sock:
             sock.settimeout(self.timeout)
             sock.connect((self.host, self.port))
             data = payload.encode()
             sock.sendall(self._len_prefix(len(data)) + data)
 
-            chunks, first = [], True
-            while True:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                if first:
-                    chunk, first = chunk[8:], False
-                chunks.append(chunk)
-            return b"".join(chunks).decode()
+            # 帧读取：先读 8 字节大端长度头 → 精确读 N 字节正文（不依赖对端关闭连接，更稳）。
+            header = self._recv_exact(sock, 8)
+            payload_size = int.from_bytes(header, byteorder="big", signed=False)
+            if payload_size <= 0 or payload_size > 64 * 1024 * 1024:
+                raise PRCXIError(f"响应长度非法：{payload_size}")
+            return self._recv_exact(sock, payload_size).decode()
 
     # ---------------------------------------------------- 方案相关（ISolution）
     def list_solutions(self) -> List[Dict[str, Any]]:
         """GetSolutionList"""
         return self.call("ISolution", "GetSolutionList")
 
-    def load_solution(self, solution_id: str) -> bool:
-        """LoadSolution"""
-        return self.call("ISolution", "LoadSolution", [solution_id])
+    def load_solution(self, plan_or_solution: str) -> bool:
+        """LoadSolution。
+
+        ⚠ 入参语义随协议不同：
+        - ``v04``：方案名 ``PlanName``（《调用文档》5.3 确认）。
+        - ``legacy``：方案 GUID（``solution_id``）。
+
+        RPC 方法名两者一致（``LoadSolution``），差异仅在业务语义。
+        """
+        return self.call("ISolution", "LoadSolution", [plan_or_solution])
+
+    def remove_solution(self, plan_name: str) -> bool:
+        """RemoveSolution（按方案名删除；V04 新增，legacy 服务端可能未实现）。"""
+        return self.call("ISolution", "RemoveSolution", [plan_name])
 
     def add_solution(self, name: str, matrix_id: str, steps: List[Dict[str, Any]]) -> str:
-        """AddSolution → 返回新方案 GUID"""
+        """AddSolution → 返回新方案 GUID（仅 legacy）。
+
+        V04 服务端未开放 ``AddSolution``（建方案改走 XML 生成 + ``LoadSolution(方案名)``），
+        故 v04 下调用直接抛错，避免误用（见《修改计划》决策点 A）。
+        """
+        if self.is_v04:
+            raise PRCXIError(
+                "V04 协议未开放 ISolution.AddSolution：建方案请走 XML 生成落盘 + LoadSolution(方案名)。"
+            )
         return self.call("ISolution", "AddSolution", [name, matrix_id, steps])
+
+    # ---------------------------------------------------- 连接会话（IClientSession）
+    def is_connect(self) -> bool:
+        """IClientSession.IsConnect —— V04 判定“已连接”的唯一依据。
+
+        legacy 服务端未必实现该接口，debug 下返回 True。
+        """
+        return self._as_bool(self.call("IClientSession", "IsConnect"))
 
     # ---------------------------------------------------- 自动化控制（IAutomation）
     def start(self) -> bool:
         return self.call("IAutomation", "Start")
+
+    def stop(self) -> bool:
+        """Stop"""
+        return self.call("IAutomation", "Stop")
+
+    def reset(self) -> bool:
+        """Reset（各轴回初始位置）"""
+        return self.call("IAutomation", "Reset")
+
+    def get_start_status(self) -> bool:
+        """GetStartStatus —— 是否运行中（V04 新增，轮询用，比轮询步骤更轻）。"""
+        return self._as_bool(self.call("IAutomation", "GetStartStatus"))
 
     def wait_for_finish(self) -> bool:
         success = False
@@ -2815,11 +3587,18 @@ class PRCXI9300Api:
         return self.call("IAutomation", "GetErrorCode")
 
     def get_reset_status(self) -> bool:
-        """GetErrorCode"""
+        """GetResetStatus → 返回“是否已复位完成”。
+
+        取反语义按协议/配置区分（见《修改计划》决策点 C）：
+        - ``legacy``：历史行为 = ``not res``（``reset_status_inverted=True``）。
+        - ``v04``：``GetResetStatus`` true=已复位，直接返回 ``res``（``reset_status_inverted=False``）。
+
+        真机联调可通过构造参数 ``reset_status_inverted`` 显式覆盖。
+        """
         if self.debug:
             return True
-        res = self.call("IAutomation", "GetResetStatus")
-        return not res
+        res = self._as_bool(self.call("IAutomation", "GetResetStatus"))
+        return (not res) if self.reset_status_inverted else res
 
     def clear_error_code(self) -> bool:
         """RemoveErrorCodet"""
@@ -2831,7 +3610,13 @@ class PRCXI9300Api:
         return self.call("IMachineState", "GetStepStateList")
 
     def step_status(self, seq_num: int) -> Dict[str, Any]:
-        """GetStepStatus"""
+        """GetStepStatus（单步耗时明细）。
+
+        ⛔ V04 服务端未开放（厂商 C# 文档确认），v04 下调用直接抛错，避免误依赖；
+        请改用 ``step_state_list`` 三态判断进度。
+        """
+        if self.is_v04:
+            raise PRCXIError("V04 服务端未开放 IMachineState.GetStepStatus，请改用 step_state_list。")
         return self.call("IMachineState", "GetStepStatus", [seq_num])
 
     def step_state(self, seq_num: int) -> Dict[str, Any]:
@@ -2839,48 +3624,106 @@ class PRCXI9300Api:
         return self.call("IMachineState", "GetStepState", [seq_num])
 
     def axis_location(self, axis_num: int = 1) -> Dict[str, Any]:
-        """GetLocation"""
+        """GetLocation（单轴实时坐标）。
+
+        ⛔ V04 服务端未开放（厂商 C# 文档确认），v04 下调用直接抛错。
+        """
+        if self.is_v04:
+            raise PRCXIError("V04 服务端未开放 IMachineState.GetLocation，拿不到轴实时坐标。")
         return self.call("IMachineState", "GetLocation", [axis_num])
 
     # ---------------------------------------------------- 版位矩阵（IMatrix）
     def get_all_materials(self) -> List[Dict[str, Any]]:
-        """GetAllMaterial - 返回所有已注册物料列表。
+        """GetAllMaterial（v04 用 GetAllMaterial_V04）- 返回所有已注册物料列表。
 
-        PRCXI Lilith 服务端在「无物料」或某些边界场景下可能返回非 list
+        PRCXI 服务端在「无物料」或某些边界场景下可能返回非 list
         （bool / None / dict / JSON 字面量 ``true`` / ``false``），这里
         统一归一化为 ``List[Dict]``，避免上游 ``for m in material_list``
         触发 ``TypeError: 'bool' object is not iterable`` 等。
         """
-        raw = self.call("IMatrix", "GetAllMaterial", [])
+        raw = self.call("IMatrix", self._matrix_method("GetAllMaterial"), [])
         if isinstance(raw, list):
             return raw
         return []
 
+    def get_material_by_id(self, material_id: str) -> Dict[str, Any]:
+        """GetMaterialById_V04（V04 新增，按 ID 查耗材）。"""
+        return self.call("IMatrix", self._matrix_method("GetMaterialById"), [material_id])
+
     def list_matrices(self) -> List[Dict[str, Any]]:
-        """GetWorkTabletMatrices"""
-        return self.call("IMatrix", "GetWorkTabletMatrices")
+        """GetWorkTabletMatrices（v04 用 GetWorkTabletMatrices_V04）"""
+        return self.call("IMatrix", self._matrix_method("GetWorkTabletMatrices"))
 
     def matrix_by_id(self, matrix_id: str) -> Dict[str, Any]:
-        """GetWorkTabletMatrixById"""
-        return self.call("IMatrix", "GetWorkTabletMatrixById", [matrix_id])
+        """GetWorkTabletMatrixById（v04 用 GetWorkTabletMatrixById_V04）"""
+        return self.call("IMatrix", self._matrix_method("GetWorkTabletMatrixById"), [matrix_id])
+
+    def remove_work_tablet_matrix(self, matrix_id: str):
+        """RemoveWorkTabletMatrix_V04（V04 新增，删除布局）。"""
+        return self.call("IMatrix", self._matrix_method("RemoveWorkTabletMatrix"), [matrix_id])
+
+    def update_position(self, board: Any):
+        """UpdatePosition_V04（V04：整块 Board 更新，替代旧版夹爪/移液两个更新接口）。"""
+        if not self.is_v04:
+            raise PRCXIError("update_position 仅 v04 可用；legacy 请用 update_clamp_jaw_position / update_pipetting_position。")
+        return self.call("IMatrix", "UpdatePosition_V04", [to_rpc_value(board)])
 
     def update_clamp_jaw_position(self, target_matrix_id: str, claw_positions: List[Dict[str, Any]]):
-        position_params = {
-            "MatrixId": target_matrix_id,
-            "WorkTablets": claw_positions
-        }
-        return self.call("IMatrix", "UpdateClampJawPosition", [position_params])
+        """更新夹爪板位位置。
+
+        - legacy：``UpdateClampJawPosition``（老版本 MatrixInfo 结构）。
+        - v04：无独立夹爪更新接口，改为拉取当前 Board、把老位置字段映射合并进
+          ``gripperPos`` 后调 ``UpdatePosition_V04``（字段映射见《修改计划》决策点 B，
+          需真机核对）。拉不到 Board 时记录告警并跳过，不阻断主流程。
+        """
+        if not self.is_v04:
+            position_params = {"MatrixId": target_matrix_id, "WorkTablets": claw_positions}
+            return self.call("IMatrix", "UpdateClampJawPosition", [position_params])
+        return self._v04_update_positions(target_matrix_id, claw_positions=claw_positions)
 
     def update_pipetting_position(self, target_matrix_id: str, pipetting_positions: List[Dict[str, Any]]):
-        """UpdatePipettingPosition - 更新移液位置"""
-        position_params = {
-            "MatrixId": target_matrix_id,
-            "WorkTablets": pipetting_positions
-        }
-        return self.call("IMatrix", "UpdatePipettingPosition", [position_params])
+        """更新移液位置。
+
+        - legacy：``UpdatePipettingPosition``。
+        - v04：合并进 Board 的 ``PipettingPosList`` 后调 ``UpdatePosition_V04``。
+        """
+        if not self.is_v04:
+            position_params = {"MatrixId": target_matrix_id, "WorkTablets": pipetting_positions}
+            return self.call("IMatrix", "UpdatePipettingPosition", [position_params])
+        return self._v04_update_positions(target_matrix_id, pipetting_positions=pipetting_positions)
+
+    def _v04_update_positions(
+        self,
+        matrix_id: str,
+        pipetting_positions: Optional[List[Dict[str, Any]]] = None,
+        claw_positions: Optional[List[Dict[str, Any]]] = None,
+    ):
+        """V04：拉取 Board → 合并老位置字段 → UpdatePosition_V04。"""
+        board = self.matrix_by_id(matrix_id)
+        if not isinstance(board, dict) or not board:
+            print(
+                f"[PRCXI][v04] update_position 跳过：GetWorkTabletMatrixById_V04({matrix_id}) 未返回有效 Board。"
+                "（V04 位置通常在设备侧标定，如需远程回写请确认 matrix_id 有效）"
+            )
+            return {"Success": False, "Message": "board not found"}
+        merged, warnings = merge_positions_into_board(board, pipetting_positions, claw_positions)
+        for w in warnings:
+            print(f"[PRCXI][v04][位置映射] {w}")
+        return self.call("IMatrix", "UpdatePosition_V04", [merged])
 
     def add_WorkTablet_Matrix(self, matrix: MatrixInfo):
-        return self.call("IMatrix", "AddWorkTabletMatrix2" if self.is_9320 else "AddWorkTabletMatrix", [matrix])
+        """新增布局。
+
+        - legacy：``AddWorkTabletMatrix``（9300）/ ``AddWorkTabletMatrix2``（9320），传老版本 MatrixInfo。
+        - v04：把 MatrixInfo 映射为 V04 ``Board`` 后调 ``AddWorkTabletMatrix_V04``
+          （字段映射见《修改计划》决策点 B）。
+        """
+        if not self.is_v04:
+            method = "AddWorkTabletMatrix2" if self.is_9320 else "AddWorkTabletMatrix"
+            return self.call("IMatrix", method, [matrix])
+        columns = 4 if self.is_9320 else 3
+        board = worktablets_to_board(dict(matrix), columns=columns)
+        return self.call("IMatrix", "AddWorkTabletMatrix_V04", [board.to_rpc_dict()])
 
     def Load(
         self,

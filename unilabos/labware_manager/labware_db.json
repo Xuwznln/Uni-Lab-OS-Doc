@@ -1311,6 +1311,38 @@
       "adapter": null,
       "include_in_template_matching": false,
       "template_kind": "tip_rack"
+    },
+    {
+      "id": "f9bb4938",
+      "type": "trash",
+      "function_name": "PRCXI_trash_x2",
+      "docstring": "加长废弃槽",
+      "size_x": 127.0,
+      "size_y": 180.0,
+      "size_z": 89.5,
+      "model": "PRCXI_trash_x2",
+      "category": null,
+      "plate_type": null,
+      "material_info": {
+        "uuid": "1111",
+        "Code": "1111",
+        "Name": "废弃槽X2",
+        "materialEnum": 0,
+        "SupplyType": 1
+      },
+      "registry_category": [
+        "prcxi",
+        "trash"
+      ],
+      "registry_description": "",
+      "grid": null,
+      "well": null,
+      "volume_functions": null,
+      "tip": null,
+      "tube": null,
+      "adapter": null,
+      "include_in_template_matching": false,
+      "template_kind": "trash"
     }
   ]
 }
