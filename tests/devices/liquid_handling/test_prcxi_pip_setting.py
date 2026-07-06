@@ -517,3 +517,118 @@ class TestDropTipsNoReroute:
         assert be._active_axis == "Right"
         # discard_tips 应把 [8..15] 翻译成 0-based 传给 super（PLR）
         assert captured["use_channels"] == [0, 1, 2, 3, 4, 5, 6, 7]
+
+
+# ---------------------------------------------------------------------------
+# transfer_liquid 出错自动清理残留 tip（无需重启 edge）
+# ---------------------------------------------------------------------------
+
+
+@_skip_if_no_plr
+class TestTransferCleanupOnError:
+    """``_cleanup_after_failed_transfer`` 行为 + ``transfer_liquid`` 失败时触发清理。"""
+
+    def test_cleanup_discards_and_clears_when_tip_mounted(self) -> None:
+        """有残留 tip → discard_tips（丢 trash）+ clear_head_state 都被调用。"""
+        prcxi = _make_fake_prcxi(pip_setting=PIP)
+        calls = {"discard": 0, "clear": 0}
+        prcxi.get_mounted_tips = lambda: [object(), None]  # type: ignore[assignment]
+
+        async def _discard(*a: Any, **k: Any) -> Any:
+            calls["discard"] += 1
+
+        prcxi.discard_tips = _discard  # type: ignore[assignment]
+        prcxi.clear_head_state = lambda: calls.__setitem__("clear", calls["clear"] + 1)  # type: ignore[assignment]
+
+        _run(prcxi._cleanup_after_failed_transfer())
+
+        assert calls["discard"] == 1
+        assert calls["clear"] == 1
+
+    def test_cleanup_skips_discard_when_no_tip(self) -> None:
+        """无残留 tip → 不调用 discard_tips，但仍 clear_head_state 兜底。"""
+        prcxi = _make_fake_prcxi(pip_setting=PIP)
+        calls = {"discard": 0, "clear": 0}
+        prcxi.get_mounted_tips = lambda: [None, None]  # type: ignore[assignment]
+
+        async def _discard(*a: Any, **k: Any) -> Any:
+            calls["discard"] += 1
+
+        prcxi.discard_tips = _discard  # type: ignore[assignment]
+        prcxi.clear_head_state = lambda: calls.__setitem__("clear", calls["clear"] + 1)  # type: ignore[assignment]
+
+        _run(prcxi._cleanup_after_failed_transfer())
+
+        assert calls["discard"] == 0
+        assert calls["clear"] == 1
+
+    def test_cleanup_swallows_discard_error_and_still_clears(self) -> None:
+        """物理丢弃报错（如机器实际没夹 tip）被吞掉，clear_head_state 仍执行。"""
+        prcxi = _make_fake_prcxi(pip_setting=PIP)
+        calls = {"clear": 0}
+        prcxi.get_mounted_tips = lambda: [object()]  # type: ignore[assignment]
+
+        async def _discard(*a: Any, **k: Any) -> Any:
+            raise RuntimeError("device has no physical tip")
+
+        prcxi.discard_tips = _discard  # type: ignore[assignment]
+        prcxi.clear_head_state = lambda: calls.__setitem__("clear", calls["clear"] + 1)  # type: ignore[assignment]
+
+        # 不应抛出
+        _run(prcxi._cleanup_after_failed_transfer())
+
+        assert calls["clear"] == 1
+
+    def test_cleanup_swallows_get_mounted_tips_error(self) -> None:
+        """get_mounted_tips 自身报错 → 视为无 tip，仍 clear_head_state，不抛出。"""
+        prcxi = _make_fake_prcxi(pip_setting=PIP)
+        calls = {"discard": 0, "clear": 0}
+
+        def _raise_mounted() -> Any:
+            raise RuntimeError("head not ready")
+
+        prcxi.get_mounted_tips = _raise_mounted  # type: ignore[assignment]
+
+        async def _discard(*a: Any, **k: Any) -> Any:
+            calls["discard"] += 1
+
+        prcxi.discard_tips = _discard  # type: ignore[assignment]
+        prcxi.clear_head_state = lambda: calls.__setitem__("clear", calls["clear"] + 1)  # type: ignore[assignment]
+
+        _run(prcxi._cleanup_after_failed_transfer())
+
+        assert calls["discard"] == 0
+        assert calls["clear"] == 1
+
+    def test_transfer_error_triggers_cleanup_and_reraises(self) -> None:
+        """transfer_liquid 中途异常 → _cleanup_after_failed_transfer 被调用一次且原异常透传。"""
+        prcxi = _make_fake_prcxi(pip_setting=PIP)
+        spy = {"n": 0}
+
+        async def _cleanup() -> None:
+            spy["n"] += 1
+
+        prcxi._cleanup_after_failed_transfer = _cleanup  # type: ignore[assignment]
+
+        class _Boom(Exception):
+            pass
+
+        async def _raise_super(self_: Any, *a: Any, **k: Any) -> Any:
+            raise _Boom("fail mid transfer")
+
+        sources = [_DummyWell("S0", parent=_DummyPlate("p_src"))]
+        targets = [_DummyWell("T0", parent=_DummyPlate("p_tgt"))]
+        with patch.object(LiquidHandlerAbstract, "transfer_liquid", _raise_super):
+            with pytest.raises(_Boom):
+                _run(
+                    prcxi.transfer_liquid(
+                        sources=sources,
+                        targets=targets,
+                        tip_racks=[_make_tip_rack()],
+                        use_channels=[0],
+                        asp_vols=[50.0],
+                        dis_vols=[50.0],
+                    )
+                )
+
+        assert spy["n"] == 1

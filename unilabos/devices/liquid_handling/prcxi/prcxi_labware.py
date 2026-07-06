@@ -595,6 +595,19 @@ def PRCXI_trash(name: str = "trash") -> PRCXI9300Trash:
         model="PRCXI_trash",
         material_info={"uuid": "730067cf07ae43849ddf4034299030e9", "Code": "q1", "Name": "废弃槽", "materialEnum": 0, "SupplyType": 1}
     )
+def PRCXI_trash_x2(name: str = "trash") -> PRCXI9300Trash:
+    """
+    加长废弃槽
+    """
+    return PRCXI9300Trash(
+        name="trash",
+        size_x=127.0,
+        size_y=180.0,
+        size_z=89.5,
+        category="trash",
+        model="PRCXI_trash_x2",
+        material_info={"uuid": "1111", "Code": "1111", "Name": "废弃槽X2", "materialEnum": 0, "SupplyType": 1}
+    )
 # =========================================================================
 # Tube Racks
 # =========================================================================

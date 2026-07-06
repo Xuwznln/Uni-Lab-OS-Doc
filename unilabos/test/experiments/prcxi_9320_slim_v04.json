@@ -8,7 +8,7 @@
             "parent": "",
             "pose": {
                 "size": {
-                    "width": 550,
+                    "width": 825,
                     "height": 400,
                     "depth": 0
                 }
@@ -19,26 +19,23 @@
                     "_resource_type": "unilabos.devices.liquid_handling.prcxi.prcxi:PRCXI9300Deck",
                     "_resource_child_name": "PRCXI_Deck"
                 },
-                "host": "192.168.2.54",
+                "host": "10.20.30.184",
                 "port": 9999,
                 "debug": false,
                 "setup": false,
                 "is_9320": true,
                 "timeout": 10,
-                "matrix_id": "a0b93cb0-3cf2-4d24-9fc2-bf9147a2ec08",
+                "matrix_id": "",
                 "simulator": false,
                 "channel_num": 8,
+                "protocol_version": "v04",
+                "start_rail": 0,
+                "column_nums": 6,
                 "pip_setting": {
                     "left": {"vol": 1000, "channels": 1},
                     "right": {"vol": 300, "channels": 8}
                 },
-                "step_mode": false,
-                "calibration_points": {
-                    "line_1": [[452.07,21.19], [313.88,21.19], [177.17,21.19], [39.08,21.19]],
-                    "line_2": [[451.37,116.68], [313.28,116.88], [176.58,116.69], [38.58,117.18]],
-                    "line_3": [[450.87,212.18], [312.98,212.38], [176.08,212.68], [38.08,213.18]],
-                    "line_4": [[450.08,307.68], [312.18,307.89], [175.18,308.18], [37.58,309.18]]
-                }
+                "step_mode": false
             },
             "data": {
                 "reset_ok": true
@@ -66,7 +63,7 @@
             },
             "config": {
                 "type": "PRCXI9300Deck",
-                "size_x": 550,
+                "size_x": 825,
                 "size_y": 400,
                 "size_z": 17,
                 "rotation": {

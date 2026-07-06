@@ -10447,6 +10447,9 @@ liquid_handler.prcxi:
           type: string
         port:
           type: integer
+        protocol_version:
+          default: v04
+          type: string
         rail_interval:
           default: 0
           type: string
