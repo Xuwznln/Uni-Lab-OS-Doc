@@ -1049,24 +1049,30 @@ class NewareBatteryTestSystem:
         Returns:
             callable: XML生成函数
         """
+        # 体系标识 -> generate_xml_content 中的函数名（惰性解析：仅解析实际用到的体系，
+        # 避免某个函数未实现导致整个映射构建失败，从而拖累所有电池）
         fmap = {
-            'LB6': gen_mod.xml_LB6,
-            'GR_LI': gen_mod.xml_Gr_Li,
-            'LFP_LI': gen_mod.xml_LFP_Li,
-            'LFP_GR': gen_mod.xml_LFP_Gr,
-            '811_LI_002': gen_mod.xml_811_Li_002,
-            '811_LI_005': gen_mod.xml_811_Li_005,
-            'SIGR_LI_STEP': gen_mod.xml_SiGr_Li_Step,
-            'SIGR_LI': gen_mod.xml_SiGr_Li_Step,
-            '811_SIGR': gen_mod.xml_811_SiGr,
-            '811_CU_AGING': gen_mod.xml_811_Cu_aging,
-            '811_LI_JY': gen_mod.xml_811_Li_JY,
-            'ZQXNLRMO':gen_mod.xml_ZQXNLRMO,
-            'LP_LFP': gen_mod.xml_LP_LFP,
+            'LB6': 'xml_LB6',
+            'GR_LI': 'xml_Gr_Li',
+            'LFP_GR': 'xml_LFP_Gr',
+            '811_LI_002': 'xml_811_Li_002',
+            '811_LI_005': 'xml_811_Li_005',
+            'SIGR_LI_STEP': 'xml_SiGr_Li_Step',
+            'SIGR_LI': 'xml_SiGr_Li_Step',
+            '811_SIGR': 'xml_811_SiGr',
+            '811_CU_AGING': 'xml_811_Cu_aging',
+            '811_LI_JY': 'xml_811_Li_JY',
+            'ZQXNLRMO': 'xml_ZQXNLRMO',
         }
         if key not in fmap:
-            raise ValueError(f"未定义电池体系映射: {key}")
-        return fmap[key]
+            raise ValueError(f"未定义电池体系映射: {key}，可选体系: {sorted(fmap.keys())}")
+        func_name = fmap[key]
+        builder = getattr(gen_mod, func_name, None)
+        if builder is None:
+            raise ValueError(
+                f"电池体系 {key} 对应的XML生成函数 {func_name} 尚未在 generate_xml_content.py 中实现"
+            )
+        return builder
     
     def _save_xml(self, xml: str, path: str):
         """

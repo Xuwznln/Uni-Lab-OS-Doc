@@ -617,7 +617,7 @@ neware_battery_test_system:
                       type: string
                       description: xml 工步标识（如 "811_LI_002"），整批共用
                 B:
-                  description: "模式B：参数不一致 且 数量少（按上游电池数量逐颗填写 4 个数组，长度需等于 N）"
+                  description: "模式B：参数不一致 且 数量少（按上游电池数量逐颗填写 4 个参数，长度需等于 N）"
                   type: object
                   properties:
                     collector_mass:

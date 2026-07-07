@@ -208,7 +208,7 @@ def xml_811_Li_005(act_mass, Cap_mAh):
     """
     return xml_data
 
-def xml_LFP_Li(act_mass, Cap_mAh):
+def xml_C(act_mass, Cap_mAh):
     """
     生成XML内容
     
