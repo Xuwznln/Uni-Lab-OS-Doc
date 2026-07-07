@@ -10,7 +10,7 @@ service
 temp
 # unilabos/test
 # unilabos/app/web
-unilabos/device_mesh
+# unilabos/device_mesh
 unilabos_data
 unilabos_msgs
 unilabos.egg-info

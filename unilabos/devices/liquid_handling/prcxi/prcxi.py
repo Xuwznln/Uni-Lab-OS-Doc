@@ -3241,6 +3241,20 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     async def dispense(self, ops: List[SingleChannelDispense], use_channels: List[int] = None):
         """Dispense liquid into the specified resources."""
+        # 丢弃零体积的空操作通道：8 通道整列 dispense 经 target free-volume 裁剪后会出现
+        # 形如 [250,0,0,...,0]（满孔被裁成 0）。PRCXI 八连排要求整列同量，但零体积本就是
+        # 空操作；过滤掉零体积、无吹样的通道后，按实际有量的通道执行（部分列退化为单通道），
+        # 避免误触发 "All dispense volumes must be the same"。保留带 blow_out 的零体积 op（air-gap）。
+        if ops and use_channels is not None and len(use_channels) == len(ops):
+            keep = [
+                i
+                for i, op in enumerate(ops)
+                if (getattr(op, "volume", 0) or 0) > 0
+                or (getattr(op, "blow_out_air_volume", 0) or 0)
+            ]
+            if keep and len(keep) < len(ops):
+                ops = [ops[i] for i in keep]
+                use_channels = [use_channels[i] for i in keep]
         axis = self._axis_from_channels(
             use_channels, volume=getattr(ops[0], "volume", None) if ops else None
         )
@@ -3540,7 +3554,39 @@ class PRCXI9300Api:
         """GetStartStatus —— 是否运行中（V04 新增，轮询用，比轮询步骤更轻）。"""
         return self._as_bool(self.call("IAutomation", "GetStartStatus"))
 
+    @staticmethod
+    def _normalize_step_state(value: Any) -> int:
+        """把 GetStepStateList 的 ``State`` 归一化为 0/1/2（未知返回 -1）。
+
+        兼容两种编码：
+        - legacy：数值 ``0=未执行 / 1=执行中 / 2=已完成``；
+        - v04：可能返回枚举名字符串 ``"None"/"NotStarted"/"Running"/"Completed"``
+          （见 ``prcxi_socket_client_v04.StepState.describe``），也可能是数字串。
+        """
+        if isinstance(value, bool):
+            return -1
+        if isinstance(value, (int, float)):
+            return int(value)
+        s = str(value).strip().strip('"').lower()
+        mapping = {
+            "0": 0, "none": 0, "notstarted": 0, "not_started": 0,
+            "1": 1, "running": 1,
+            "2": 2, "completed": 2, "complete": 2, "finished": 2,
+        }
+        return mapping.get(s, -1)
+
     def wait_for_finish(self) -> bool:
+        """轮询 ``IMachineState.GetStepStateList`` 直到方案执行完成。
+
+        v04 与 legacy 都以 GetStepStateList 为准（见 prcxi_socket_client_v04
+        ``machine_state_get_step_list``），差异在于 v04 的 ``State`` 可能是枚举名
+        字符串，需归一化后再判断，故 v04 走独立实现。
+        """
+        if self.is_v04:
+            return self._wait_for_finish_v04()
+        return self._wait_for_finish_legacy()
+
+    def _wait_for_finish_legacy(self) -> bool:
         success = False
         start = False
         while not success:
@@ -3556,6 +3602,33 @@ class PRCXI9300Api:
             elif status[-1]["State"] > 2:
                 break
             elif status[-1]["State"] == 0:
+                start = True
+            else:
+                time.sleep(1)
+        return success
+
+    def _wait_for_finish_v04(self) -> bool:
+        """v04：轮询 GetStepStateList，末步 ``Completed(2)`` 视为完成。
+
+        与 legacy 逻辑一致，仅把 ``State`` 通过 ``_normalize_step_state`` 归一化，
+        以兼容 v04 可能返回的枚举名字符串。
+        """
+        success = False
+        start = False
+        while not success:
+            status = self.step_state_list()
+            if status is None:
+                break
+            if len(status) == 0:
+                break
+            if len(status) == 1:
+                start = True
+            last_state = self._normalize_step_state(status[-1].get("State"))
+            if last_state == 2 and start:
+                success = True
+            elif last_state < 0 or last_state > 2:
+                break
+            elif last_state == 0:
                 start = True
             else:
                 time.sleep(1)

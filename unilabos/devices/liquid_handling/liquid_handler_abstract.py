@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from math import e
+import re
 import time
 import traceback
 from collections import Counter
@@ -251,6 +252,9 @@ class LiquidHandlerMiddleware(LiquidHandler):
             _well_current_liquid_name(res) for res in resources
         ]
 
+        # 同一 source 可能在 8 通道中重复出现（reservoir 广播），先按资源聚合总需求，
+        # 避免逐条判断时重复用同一个 ``used`` 导致补液不足。
+        required_by_res: Dict[int, Dict[str, Any]] = {}
         for i, res in enumerate(resources):
             tracker = getattr(res, "tracker", None)
             if tracker is None or getattr(tracker, "is_disabled", False):
@@ -260,32 +264,45 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 need += float(blow_out_air_volume[i] or 0.0)
             if need <= 0:
                 continue
+            key = id(res)
+            slot = required_by_res.setdefault(
+                key,
+                {"resource": res, "tracker": tracker, "need": 0.0},
+            )
+            slot["need"] = float(slot["need"]) + need
+
+        for slot in required_by_res.values():
+            res = cast(Container, slot["resource"])
+            tracker = slot["tracker"]
+            need_total = float(slot["need"] or 0.0)
+            if need_total <= 0:
+                continue
             try:
                 used = float(tracker.get_used_volume())
             except Exception:
                 used = 0.0
-            if used >= need:
+            if used >= need_total:
                 continue
             mv = float(getattr(tracker, "max_volume", 0) or 0)
             if used <= 0:
                 # 与旧逻辑一致：空孔优先加满（或极大默认），避免仅有 history 记录但 used=0 时不补液
-                fill_vol = mv if mv > 0 else max(need, 50000.0)
+                fill_vol = mv if mv > 0 else max(need_total, 50000.0)
             else:
-                fill_vol = need - used
+                fill_vol = need_total - used
                 if mv > 0:
                     fill_vol = min(fill_vol, max(0.0, mv - used))
             try:
                 tracker.add_liquid(fill_vol)
             except Exception:
                 try:
-                    tracker.add_liquid(max(need - used, 1.0))
+                    tracker.add_liquid(max(need_total - used, 1.0))
                 except Exception:
                     # P9 — 旧版 v2 tuple ``("auto_init", vol)`` 写入升级为 v3 dict，
                     # 与 ``_append_liquid_history`` 写入形态保持一致。
                     _append_liquid_history(
                         res,
                         "auto_init",
-                        float(max(fill_vol, need, 1.0)),
+                        float(max(fill_vol, need_total, 1.0)),
                         "auto_init",
                     )
 
@@ -315,7 +332,19 @@ class LiquidHandlerMiddleware(LiquidHandler):
                         f"[aspirate] volume tracker error, bypassing tracking. "
                         f"error={e}, vols={vols}, trackers={tracker_info}"
                     )
-                with no_volume_tracking():
+                disabled_trackers: List[Any] = []
+                seen_trackers: Set[int] = set()
+                for r in resources:
+                    t = getattr(r, "tracker", None)
+                    if t is None or not hasattr(t, "disable"):
+                        continue
+                    tid = id(t)
+                    if tid in seen_trackers:
+                        continue
+                    seen_trackers.add(tid)
+                    t.disable()
+                    disabled_trackers.append(t)
+                try:
                     return await self._simulate_handler.aspirate(
                         resources,
                         vols,
@@ -327,6 +356,12 @@ class LiquidHandlerMiddleware(LiquidHandler):
                         spread,
                         **backend_kwargs,
                     )
+                finally:
+                    for t in disabled_trackers:
+                        try:
+                            t.enable()
+                        except Exception:
+                            pass
         try:
             await super().aspirate(
                 resources,
@@ -358,21 +393,98 @@ class LiquidHandlerMiddleware(LiquidHandler):
                     f"[aspirate] hardware tracker shortfall, retry without volume tracking. "
                     f"error={e}, vols={vols}, trackers={tracker_info}"
                 )
-            with no_volume_tracking():
-                await super().aspirate(
-                    resources,
-                    vols,
-                    use_channels,
-                    flow_rates,
-                    offsets,
-                    liquid_height,
-                    blow_out_air_volume,
-                    spread,
-                    **backend_kwargs,
-                )
+            disabled_trackers: List[Any] = []
+            seen_trackers: Set[int] = set()
+            for r in resources:
+                t = getattr(r, "tracker", None)
+                if t is None or not hasattr(t, "disable"):
+                    continue
+                tid = id(t)
+                if tid in seen_trackers:
+                    continue
+                seen_trackers.add(tid)
+                t.disable()
+                disabled_trackers.append(t)
+            try:
+                try:
+                    await super().aspirate(
+                        resources,
+                        vols,
+                        use_channels,
+                        flow_rates,
+                        offsets,
+                        liquid_height,
+                        blow_out_air_volume,
+                        spread,
+                        **backend_kwargs,
+                    )
+                except (TooLittleLiquidError, TooLittleVolumeError) as retry_e:
+                    tip_channels = list(use_channels) if use_channels is not None else [0] * len(resources)
+                    disabled_tip_trackers: List[Any] = []
+                    seen_tip_trackers: Set[int] = set()
+                    for channel in tip_channels:
+                        try:
+                            tip = self.head[channel].get_tip()  # type: ignore[index]
+                        except Exception:
+                            tip = None
+                        tip_tracker = getattr(tip, "tracker", None) if tip is not None else None
+                        if tip_tracker is None or not hasattr(tip_tracker, "disable"):
+                            continue
+                        tid = id(tip_tracker)
+                        if tid in seen_tip_trackers:
+                            continue
+                        seen_tip_trackers.add(tid)
+                        tip_tracker.disable()
+                        disabled_tip_trackers.append(tip_tracker)
+                    if hasattr(self, "_ros_node") and self._ros_node is not None:
+                        self._ros_node.lab_logger().warning(
+                            f"[aspirate] retry with tip tracker disabled. error={retry_e}, vols={vols}"
+                        )
+                    try:
+                        try:
+                            await super().aspirate(
+                                resources,
+                                vols,
+                                use_channels,
+                                flow_rates,
+                                offsets,
+                                liquid_height,
+                                blow_out_air_volume,
+                                spread,
+                                **backend_kwargs,
+                            )
+                        except (TooLittleLiquidError, TooLittleVolumeError) as final_e:
+                            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                                self._ros_node.lab_logger().warning(
+                                    f"[aspirate] final fallback no_volume_tracking. error={final_e}, vols={vols}"
+                                )
+                            with no_volume_tracking():
+                                await super().aspirate(
+                                    resources,
+                                    vols,
+                                    use_channels,
+                                    flow_rates,
+                                    offsets,
+                                    liquid_height,
+                                    blow_out_air_volume,
+                                    spread,
+                                    **backend_kwargs,
+                                )
+                    finally:
+                        for tip_tracker in disabled_tip_trackers:
+                            try:
+                                tip_tracker.enable()
+                            except Exception:
+                                pass
+            finally:
+                for t in disabled_trackers:
+                    try:
+                        t.enable()
+                    except Exception:
+                        pass
         except ValueError as e:
             if "Resource is too small to space channels" in str(e) and spread != "custom":
-                await super().aspirate(
+                await self.aspirate(
                     resources,
                     vols,
                     use_channels,
@@ -442,7 +554,19 @@ class LiquidHandlerMiddleware(LiquidHandler):
             _patch_unknown_history_last(getattr(tip, "tracker", None), str(name_before or ""))
 
         if hasattr(self, "_ros_node") and self._ros_node is not None:
-            task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
+            unique_resources: List[Container] = []
+            seen_resource_ids: Set[int] = set()
+            for r in resources:
+                rid = id(r)
+                if rid in seen_resource_ids:
+                    continue
+                seen_resource_ids.add(rid)
+                unique_resources.append(r)
+            task = ROS2DeviceNode.run_async_func(
+                self._ros_node.update_resource,
+                True,
+                **{"resources": unique_resources},
+            )
             submit_time = time.time()
             while not task.done():
                 if time.time() - submit_time > 10:
@@ -466,28 +590,68 @@ class LiquidHandlerMiddleware(LiquidHandler):
     ) -> SimpleReturn:
         if spread == "":
             spread = "wide"
+        super_dispense = super().dispense
 
         def _safe_dispense_volumes(_resources: Sequence[Container], _vols: List[float]) -> List[float]:
             """将 dispense 体积裁剪到目标容器可用体积范围内，避免 volume tracker 报错。"""
             safe: List[float] = []
+            free_by_resource: Dict[int, float] = {}
             for res, vol in zip(_resources, _vols):
                 req = max(float(vol), 0.0)
-                free_volume = None
-                try:
-                    tracker = getattr(res, "tracker", None)
-                    get_free = getattr(tracker, "get_free_volume", None)
-                    if callable(get_free):
-                        free_volume = get_free()
-                except Exception:
+                rid = id(res)
+                if rid in free_by_resource:
+                    free_volume = free_by_resource[rid]
+                else:
                     free_volume = None
-
-
+                    try:
+                        tracker = getattr(res, "tracker", None)
+                        get_free = getattr(tracker, "get_free_volume", None)
+                        if callable(get_free):
+                            free_volume = get_free()
+                    except Exception:
+                        free_volume = None
+                    if isinstance(free_volume, (int, float)):
+                        free_by_resource[rid] = max(float(free_volume), 0.0)
                 if isinstance(free_volume, (int, float)):
                     req = min(req, max(float(free_volume), 0.0))
+                    free_by_resource[rid] = max(float(free_volume) - req, 0.0)
                 safe.append(req)
             return safe
 
         actual_vols = _safe_dispense_volumes(resources, vols)
+        if use_channels is None:
+            channels_to_use = [0] * len(resources)
+        else:
+            channels_to_use = use_channels
+
+        def _pick_seq_value(val: Any, idx: int) -> Any:
+            if val is None:
+                return None
+            if isinstance(val, (list, tuple)):
+                if len(val) == 0:
+                    return None
+                return [val[idx] if idx < len(val) else val[-1]]
+            return [val]
+
+        def _has_mixed_positive_volumes(values: List[float]) -> bool:
+            positives = [round(float(v), 6) for v in values if float(v) > 0.0]
+            return len(positives) > 1 and len(set(positives)) > 1
+
+        async def _dispense_split_single_channel() -> None:
+            for idx, (resource, vol, channel) in enumerate(zip(resources, actual_vols, channels_to_use)):
+                if float(vol) <= 0.0:
+                    continue
+                await super_dispense(
+                    [resource],
+                    [float(vol)],
+                    [channel],
+                    _pick_seq_value(flow_rates, idx),
+                    _pick_seq_value(offsets, idx),
+                    _pick_seq_value(liquid_height, idx),
+                    _pick_seq_value(blow_out_air_volume, idx),
+                    spread,
+                    **backend_kwargs,
+                )
 
         if self._simulator:
             try:
@@ -528,19 +692,13 @@ class LiquidHandlerMiddleware(LiquidHandler):
                         **backend_kwargs,
                     )
         try:
-            await super().dispense(
-                resources,
-                actual_vols,
-                use_channels,
-                flow_rates,
-                offsets,
-                liquid_height,
-                blow_out_air_volume,
-                spread,
-                **backend_kwargs,
-            )
-        except ValueError as e:
-            if "Resource is too small to space channels" in str(e) and spread != "custom":
+            if _has_mixed_positive_volumes(actual_vols):
+                if hasattr(self, "_ros_node") and self._ros_node is not None:
+                    self._ros_node.lab_logger().warning(
+                        f"[dispense] mixed per-channel volumes={actual_vols}, fallback to single-channel split."
+                    )
+                await _dispense_split_single_channel()
+            else:
                 await super().dispense(
                     resources,
                     actual_vols,
@@ -549,35 +707,139 @@ class LiquidHandlerMiddleware(LiquidHandler):
                     offsets,
                     liquid_height,
                     blow_out_air_volume,
-                    "custom",
-                    **backend_kwargs,
-                )
-            else:
-                raise
-        except TooLittleVolumeError:
-            # 再兜底一次：按实时 free volume 重新裁剪后重试，避免并发状态更新导致的瞬时超量
-            retry_vols = _safe_dispense_volumes(resources, actual_vols)
-            if any(v > 0 for v in retry_vols):
-                await super().dispense(
-                    resources,
-                    retry_vols,
-                    use_channels,
-                    flow_rates,
-                    offsets,
-                    liquid_height,
-                    blow_out_air_volume,
                     spread,
                     **backend_kwargs,
                 )
+        except ValueError as e:
+            err = str(e)
+            if "Resource is too small to space channels" in err:
+                # 先试 custom 间距；仍报"排不开"（或本就是 custom）则降级单通道串行——
+                # 单通道每次只下 1 个 tip，无需 8 道间距，从根本上规避该限制。
+                spacing_done = False
+                if spread != "custom":
+                    try:
+                        await super().dispense(
+                            resources,
+                            actual_vols,
+                            use_channels,
+                            flow_rates,
+                            offsets,
+                            liquid_height,
+                            blow_out_air_volume,
+                            "custom",
+                            **backend_kwargs,
+                        )
+                        spacing_done = True
+                    except ValueError as e2:
+                        if "Resource is too small to space channels" not in str(e2):
+                            raise
+                if not spacing_done:
+                    if hasattr(self, "_ros_node") and self._ros_node is not None:
+                        self._ros_node.lab_logger().warning(
+                            f"[dispense] cannot space 8 channels, fallback to single-channel. error={e}"
+                        )
+                    await _dispense_split_single_channel()
+            elif (
+                "All dispense volumes must be the same" in err
+                or "must be from the same tip column" in err
+            ):
+                # 非均匀体积 / 跨 tip 列：PRCXI 八连排要求整列同量同列；降级单通道串行。
+                if hasattr(self, "_ros_node") and self._ros_node is not None:
+                    self._ros_node.lab_logger().warning(
+                        f"[dispense] backend column constraint, split retry. error={e}"
+                    )
+                await _dispense_split_single_channel()
+            else:
+                raise
+        except (TooLittleLiquidError, TooLittleVolumeError):
+            # 再兜底一次：按实时 free volume 重新裁剪后重试，避免并发状态更新导致的瞬时超量
+            retry_vols = _safe_dispense_volumes(resources, actual_vols)
+            if any(v > 0 for v in retry_vols):
                 actual_vols = retry_vols
+                try:
+                    if _has_mixed_positive_volumes(retry_vols):
+                        await _dispense_split_single_channel()
+                    else:
+                        await super().dispense(
+                            resources,
+                            retry_vols,
+                            use_channels,
+                            flow_rates,
+                            offsets,
+                            liquid_height,
+                            blow_out_air_volume,
+                            spread,
+                            **backend_kwargs,
+                        )
+                except (TooLittleLiquidError, TooLittleVolumeError) as retry_e:
+                    # source/target 已做体积裁剪后仍失败，多数是 tip tracker 与实际动作短暂失配；
+                    # 只临时禁用当前通道 tip tracker，再执行一次，避免把 source/target tracker 全禁用。
+                    disabled_tip_trackers: List[Any] = []
+                    seen_tip_trackers: Set[int] = set()
+                    for channel in channels_to_use:
+                        try:
+                            tip = self.head[channel].get_tip()  # type: ignore[index]
+                        except Exception:
+                            tip = None
+                        tip_tracker = getattr(tip, "tracker", None) if tip is not None else None
+                        if tip_tracker is None or not hasattr(tip_tracker, "disable"):
+                            continue
+                        tid = id(tip_tracker)
+                        if tid in seen_tip_trackers:
+                            continue
+                        seen_tip_trackers.add(tid)
+                        tip_tracker.disable()
+                        disabled_tip_trackers.append(tip_tracker)
+                    if hasattr(self, "_ros_node") and self._ros_node is not None:
+                        self._ros_node.lab_logger().warning(
+                            f"[dispense] retry with tip tracker disabled. error={retry_e}, vols={retry_vols}"
+                        )
+                    try:
+                        try:
+                            if _has_mixed_positive_volumes(retry_vols):
+                                await _dispense_split_single_channel()
+                            else:
+                                await super().dispense(
+                                    resources,
+                                    retry_vols,
+                                    use_channels,
+                                    flow_rates,
+                                    offsets,
+                                    liquid_height,
+                                    blow_out_air_volume,
+                                    spread,
+                                    **backend_kwargs,
+                                )
+                        except (TooLittleLiquidError, TooLittleVolumeError) as final_e:
+                            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                                self._ros_node.lab_logger().warning(
+                                    f"[dispense] final fallback no_volume_tracking. error={final_e}, vols={retry_vols}"
+                                )
+                            with no_volume_tracking():
+                                if _has_mixed_positive_volumes(retry_vols):
+                                    await _dispense_split_single_channel()
+                                else:
+                                    await super().dispense(
+                                        resources,
+                                        retry_vols,
+                                        use_channels,
+                                        flow_rates,
+                                        offsets,
+                                        liquid_height,
+                                        blow_out_air_volume,
+                                        spread,
+                                        **backend_kwargs,
+                                    )
+                    finally:
+                        for tracker in disabled_tip_trackers:
+                            try:
+                                tracker.enable()
+                            except Exception:
+                                pass
             else:
                 actual_vols = retry_vols
         res_samples = []
         res_volumes = []
-        if use_channels is None:
-            channels_to_use = [0] * len(resources)
-        else:
-            channels_to_use = use_channels
         # === [D-DBG] dispense 入口逐次抓取 resources/channels（候选 C/B）===
         # 单通道每次 len(resources) 应 == 1；==2 且两通道对同 well → 候选 C；
         # 与 [T-DBG] 配对：一条 transfer 的 [D-DBG] 出现次数应 == num_targets，
@@ -659,7 +921,19 @@ class LiquidHandlerMiddleware(LiquidHandler):
                 )
             except Exception as _e:
                 self._ros_node.lab_logger().warning(f"[U-DBG] log failed (dispense): {_e}")
-            task = ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{"resources": resources})
+            unique_resources: List[Container] = []
+            seen_resource_ids: Set[int] = set()
+            for r in resources:
+                rid = id(r)
+                if rid in seen_resource_ids:
+                    continue
+                seen_resource_ids.add(rid)
+                unique_resources.append(r)
+            task = ROS2DeviceNode.run_async_func(
+                self._ros_node.update_resource,
+                True,
+                **{"resources": unique_resources},
+            )
             submit_time = time.time()
             while not task.done():
                 if time.time() - submit_time > 10:
@@ -1222,6 +1496,28 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             wells=ResourceTreeSet.from_plr_resources(wells, known_newly_created=False).dump(), volumes=res_volumes  # type: ignore
         )
 
+    @staticmethod
+    def _safe_get_well(plate, name: str):
+        """取孔；对**单行载体**（trough / reservoir，``num_items_y == 1``）做容错。
+
+        8 通道展开 / 跨板合并常把单行储液槽的孔位行扩成 A–H（如把 ``A1`` 误记成 ``F2``），
+        而 trough 物理上只有一行：此处把行夹到 ``A``、列夹到容量内再取。
+        **多行板不夹**（越界=真实错误，留给各自的几何修复，避免悄悄改写正常孔位）。
+        """
+        try:
+            return plate.get_well(name)
+        except Exception:
+            ny = int(getattr(plate, "num_items_y", 0) or 0)
+            if ny == 1:
+                m = re.match(r"^([A-Za-z]+)(\d+)$", str(name).strip())
+                if m:
+                    nx = int(getattr(plate, "num_items_x", 0) or 0)
+                    col = int(m.group(2))
+                    if nx >= 1:
+                        col = min(max(col, 1), nx)
+                    return plate.get_well(f"A{col}")
+            raise
+
     def _resolve_wells_from_plate(
         self,
         plate: Union[Plate, TubeRack, ResourceSlot],
@@ -1232,7 +1528,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             f"plate must be a Plate or TubeRack, now: {type(plate)}"
         )
         if issubclass(plate.__class__, Plate):
-            return [plate.get_well(name) for name in well_names]  # type: ignore
+            return [self._safe_get_well(plate, name) for name in well_names]  # type: ignore
         return [self._resolve_tube_compat(plate, name) for name in well_names]  # type: ignore
 
     @staticmethod
@@ -1317,7 +1613,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             return None
         try:
             if issubclass(plate.__class__, Plate):
-                return cast(Well, plate.get_well(coord))
+                return cast(Well, self._safe_get_well(plate, coord))
             if issubclass(plate.__class__, TubeRack):
                 return cast(Well, self._resolve_tube_compat(plate, coord))
         except Exception:
@@ -1556,7 +1852,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                             )
                             continue
                         if issubclass(plate_instance.__class__, Plate):
-                            resolved_cross.append(plate_instance.get_well(actual_well_name))
+                            resolved_cross.append(self._safe_get_well(plate_instance, actual_well_name))
                         else:
                             resolved_cross.append(
                                 self._resolve_tube_compat(plate_instance, actual_well_name)
@@ -2370,9 +2666,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                             self._ros_node.lab_logger().warning(
                                 "[T-DBG] 8ch spacing unsupported, fallback to single channel for this group"
                             )
-                        kwargs_sc = dict(kwargs)
-                        kwargs_sc['use_channels'] = [0]
-                        await self._transfer_base_method(**kwargs_sc)
+                        await self._transfer_group_single_channel_fallback(kwargs)
                     else:
                         raise
 
@@ -2471,6 +2765,24 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             dis_offsets = [offsets[0]] if offsets and len(offsets) > 0 else None
             mix_src_anchor = [sources[0]]
             mix_tgt_anchor = [targets[0]]
+
+        # 通道级守恒：同一轮 transfer 中每通道 aspirate 体积不应大于后续 dispense。
+        # 若 target free-volume 裁剪导致 dis_vol < asp_vol，直接把 asp_vol 同步裁剪，
+        # 避免“吸 12 只放 2”造成 tip 残液累计，后续再 aspirate 触发 tip free-volume=0 报错。
+        for i in range(min(len(asp_vols_arg), len(dis_vols_arg))):
+            try:
+                dis_v = max(float(dis_vols_arg[i]), 0.0)
+            except Exception:
+                dis_v = 0.0
+            try:
+                asp_v = max(float(asp_vols_arg[i]), 0.0)
+            except Exception:
+                asp_v = 0.0
+            if dis_v < asp_v:
+                asp_vols_arg[i] = dis_v
+            else:
+                asp_vols_arg[i] = asp_v
+            dis_vols_arg[i] = dis_v
 
         tip = []
         if pick_up:
@@ -2577,6 +2889,68 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
     # except Exception as e:
     #     traceback.print_exc()
     #     raise RuntimeError(f"Liquid addition failed: {e}") from e
+
+    async def _transfer_group_single_channel_fallback(self, kwargs: Dict[str, Any]) -> None:
+        """8ch 井距不满足时，将当前 group 按单通道顺序执行。
+
+        关键点：
+        - 使用当前 group 的首个物理通道（保持左右轴一致，避免硬切到 channel 0）；
+        - 1 个 group 的 pick_up / drop 仅在首尾子操作触发；
+        - 每次子操作只执行 1 对 source/target，避免旧逻辑只跑第一个元素或错轴。
+        """
+        sources = list(kwargs.get("sources") or [])
+        targets = list(kwargs.get("targets") or [])
+        asp_vols = list(kwargs.get("asp_vols") or [])
+        dis_vols = list(kwargs.get("dis_vols") or [])
+        n = min(len(sources), len(targets), len(asp_vols), len(dis_vols))
+        if n <= 0:
+            return
+
+        raw_channels = kwargs.get("use_channels")
+        if isinstance(raw_channels, (list, tuple)) and len(raw_channels) > 0:
+            fallback_channel = int(raw_channels[0])
+        else:
+            fallback_channel = 0
+
+        def _pick_seq_value(val: Any, idx: int) -> Any:
+            if val is None:
+                return None
+            if isinstance(val, (list, tuple)):
+                if len(val) == 0:
+                    return None
+                return [val[idx] if idx < len(val) else val[-1]]
+            return [val]
+
+        seq_keys = (
+            "asp_flow_rates",
+            "dis_flow_rates",
+            "offsets",
+            "liquid_height",
+            "blow_out_air_volume",
+            "blow_out_air_volume_before",
+            "delays",
+        )
+
+        for idx in range(n):
+            sub = dict(kwargs)
+            sub["sources"] = [sources[idx]]
+            sub["targets"] = [targets[idx]]
+            sub["asp_vols"] = [asp_vols[idx]]
+            sub["dis_vols"] = [dis_vols[idx]]
+            sub["use_channels"] = [fallback_channel]
+            sub["pick_up"] = bool(kwargs.get("pick_up", True) and idx == 0)
+            sub["drop"] = bool(kwargs.get("drop", True) and idx == (n - 1))
+
+            for key in seq_keys:
+                if key in kwargs:
+                    sub[key] = _pick_seq_value(kwargs.get(key), idx)
+
+            # group 级 mix / delay 只保留在首个子操作，避免 8 倍放大
+            if idx > 0:
+                sub["mix_stage"] = "none"
+                sub["delays"] = None
+
+            await self._transfer_base_method(**sub)
 
     # ---------------------------------------------------------------
     # Helper utilities

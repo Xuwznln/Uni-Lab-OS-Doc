@@ -73,6 +73,12 @@ target_devices:
       - { kind: tube_rack, hole_count: 8,  class_name: PRCXI_8_Reagent_Rack_10mL, notes: "8 孔 10 mL 试剂架" }
       - { kind: tube_rack, hole_count: 24, class_name: PRCXI_EP_Adapter, notes: "Eppendorf 1.5/2 mL 24 位 4×6" }
       - { kind: tube_rack, hole_count: 10, class_name: PRCXI_EP_Adapter, notes: "Falcon 4x50 + 6x15 mL（10 位兼容 4×6 适配器）" }
+      - { kind: tube_rack, hole_count: 96,  class_name: PRCXI_BioER_96_wellplate,  notes: "96 孔管架 → 96 网格 8×12（覆盖 E-H 行 / 7-12 列；避免误配 4×6 适配器）" }
+      - { kind: tube_rack, hole_count: 384, class_name: PRCXI_BioRad_384_wellplate, notes: "384 孔管架 → 384 网格 16×24" }
+      # ─ reservoir / trough（在 kind=plate 下按孔数映射） ─
+      - { kind: plate,     hole_count: 1,  class_name: PRCXI_nest_1_troughplate }
+      - { kind: plate,     hole_count: 4,  class_name: PRCXI_AGenBio_4_troughplate }
+      - { kind: plate,     hole_count: 12, class_name: PRCXI_nest_12_troughplate }
       # ─ plate ─
       - { kind: plate,     hole_count: 96,  class_name: PRCXI_BioER_96_wellplate }
       - { kind: plate,     hole_count: 384, class_name: PRCXI_BioRad_384_wellplate }
@@ -103,6 +109,12 @@ target_devices:
       - { kind: tube_rack, hole_count: 8,  class_name: PRCXI_8_Reagent_Rack_10mL, notes: "8 孔 10 mL 试剂架" }
       - { kind: tube_rack, hole_count: 24, class_name: PRCXI_EP_Adapter, notes: "Eppendorf 1.5/2 mL 24 位 4×6" }
       - { kind: tube_rack, hole_count: 10, class_name: PRCXI_EP_Adapter, notes: "Falcon 4x50 + 6x15 mL（10 位兼容 4×6 适配器）" }
+      - { kind: tube_rack, hole_count: 96,  class_name: PRCXI_BioER_96_wellplate,  notes: "96 孔管架 → 96 网格 8×12（覆盖 E-H 行 / 7-12 列；避免误配 4×6 适配器）" }
+      - { kind: tube_rack, hole_count: 384, class_name: PRCXI_BioRad_384_wellplate, notes: "384 孔管架 → 384 网格 16×24" }
+      # ─ reservoir / trough（在 kind=plate 下按孔数映射） ─
+      - { kind: plate,     hole_count: 1,  class_name: PRCXI_nest_1_troughplate }
+      - { kind: plate,     hole_count: 4,  class_name: PRCXI_AGenBio_4_troughplate }
+      - { kind: plate,     hole_count: 12, class_name: PRCXI_nest_12_troughplate }
       # ─ plate ─
       - { kind: plate,     hole_count: 96,  class_name: PRCXI_BioER_96_wellplate }
       - { kind: plate,     hole_count: 384, class_name: PRCXI_BioRad_384_wellplate }

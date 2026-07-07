@@ -208,9 +208,17 @@ def _infer_reagent_kind(labware_id: str, item: Dict[str, Any]) -> str:
     P6：转调 ``labware_mapping.infer_kind``，匹配规则由
     ``Uni-Lab-OS/labware_mapping.yaml`` 的 ``kinds`` 段声明（顺序敏感、首个命中胜出）。
     object 字段（``trash`` / ``tiprack``）优先级保留在 YAML loader 内部。
+
+    KIND 判定**只依据真实 labware 名**（``item["labware"]``），不混入 reagent 业务键
+    ``labware_id``：键里偶尔含 ``tuberack`` / ``rack`` / ``well`` 等子串（如 384b23 的
+    ``using_tuberack`` / ``tuberack_a_tubes`` 键，labware 其实是 ``6x5_half_inch`` 普通板），
+    会把板误判成 tube_rack，再经同槽归并把整槽拖到 4×6 适配器 → 行 E-H 越界。
+    仅当 labware 字段为空时才回退到合并 hint。
     """
+    lw = str(item.get("labware", "") or "").strip() if isinstance(item, dict) else ""
+    hint = lw.lower() if lw else _labware_hint_text(labware_id, item)
     return _yaml_infer_kind(
-        _labware_hint_text(labware_id, item),
+        hint,
         (item.get("object") or "") if isinstance(item, dict) else "",
     )
 
@@ -253,6 +261,28 @@ def _infer_plate_num_children_from_wells(wells: Any) -> Optional[int]:
     return 96
 
 
+def _well_grid_span(wells: Any) -> tuple[int, int]:
+    """返回已用 well 名的 (最大行序号, 最大列序号)；解析不出时返回 (0, 0)。
+
+    行号按字母进制：A=1 … Z=26、AA=27 …；列号取数字部分。用于判断一批 well 是否
+    超出某 labware 的物理行列布局（如 24 位 4×6 适配器只有 A-D 行、1-6 列）。
+    """
+    max_row = 0
+    max_col = 0
+    if isinstance(wells, list):
+        for w in wells:
+            m = re.match(r"^([A-Za-z]+)(\d+)$", str(w).strip())
+            if not m:
+                continue
+            row_s, col_s = m.group(1).upper(), m.group(2)
+            ri = 0
+            for ch in row_s:
+                ri = ri * 26 + (ord(ch) - ord("A") + 1)
+            max_row = max(max_row, ri)
+            max_col = max(max_col, int(col_s))
+    return max_row, max_col
+
+
 def _infer_plate_num_children_from_labware_hint(labware_id: str, item: Dict[str, Any]) -> Optional[int]:
     """从 labware 命名（如 custom_384_wellplate、nest_96_wellplate）解析孔数，供模板匹配。
 
@@ -269,6 +299,29 @@ def _infer_plate_num_children_from_labware_hint(labware_id: str, item: Dict[str,
     )
     if m:
         return int(m.group(1))
+    # reservoir / trough：从命名中提取通道数（如 reagent_1_reservoir_130000ul、nest_12_reservoir_15ml）。
+    # 这类载体在协议里经常只写 1 个 well（A1），若误推为 96 会把其映射到 96 孔板，
+    # 进而把 source 初始体积 clamp 到 2200uL，触发 TooLittleLiquid。
+    if "reservoir" in hint or "trough" in hint:
+        m = re.search(
+            r"(?:^|[_\s-])(\d+)(?=[_\s-]*(?:reservoir|trough))",
+            hint,
+        )
+        if not m:
+            m = re.search(
+                r"(?:reservoir|trough)[_\s-]*(\d+)(?:[_\s-]|$)",
+                hint,
+            )
+        if m:
+            try:
+                n = int(m.group(1))
+                if n > 0:
+                    return n
+            except (TypeError, ValueError):
+                pass
+        wells = item.get("well")
+        if isinstance(wells, list) and wells:
+            return len(wells)
     m = re.search(r"[_\s](1536|384|96|48|24|12|6)[_\s]", hint)
     if m and ("well" in hint or "plate" in hint):
         return int(m.group(1))
@@ -488,6 +541,13 @@ def _apply_target_labware_class_auto_match(
                 num_children = num_from_def
             elif well_n > 0:
                 num_children = well_n
+                # 若已用 well 的行/列跨度超出 24 位适配器 (4 行 A-D × 6 列) 的几何，
+                # 按真实网格档位 (96=8×12 / 384) 取容量。否则 96/384 管架会被按"已用孔数"
+                # 误配到 4×6 适配器，行 E-H 或列 7-12 越界 → pylabrobot get_item 抛
+                # "'E1' is not in list"（孔位映射类失败的根因）。
+                _mr, _mc = _well_grid_span(wells)
+                if _mr > 4 or _mc > 6:
+                    num_children = 384 if (_mr > 8 or _mc > 12) else 96
             else:
                 num_children = _infer_tube_rack_num_positions(labware_id, item)
         else:
@@ -545,6 +605,19 @@ def _apply_target_labware_class_auto_match(
             )
 
 
+def _prcxi_class_capacity(class_name: Optional[str]) -> int:
+    """估算 PRCXI labware class 的孔位容量（用于同槽位归并时挑"能装下所有 well"的最大网格）。
+
+    EP_Adapter（无数字）按 24（4×6）；其余从类名里的数字段取（96/384/12/4/1）；解析不出按 0。
+    """
+    if not class_name:
+        return -1
+    if "EP_Adapter" in class_name:
+        return 24
+    m = re.search(r"_(\d+)(?:_|$)", str(class_name))
+    return int(m.group(1)) if m else 0
+
+
 def _reconcile_slot_carrier_target_class(
     labware_info: Dict[str, Dict[str, Any]],
     *,
@@ -582,14 +655,26 @@ def _reconcile_slot_carrier_target_class(
             return priority.get(_infer_reagent_kind(p[0], p[1]), 9)
 
         pairs_sorted = sorted(pairs, key=_rank)
-        best_cls = None
-        for lid, it in pairs_sorted:
-            if preserve_tip_rack_incoming_class and _infer_reagent_kind(lid, it) == "tip_rack":
-                continue
-            c = it.get("target_class_name")
-            if c:
-                best_cls = c
-                break
+        # 候选 = 有 class 的非 tip 条目（tip 在 preserve 模式下不参与归并）
+        cand = [
+            (lid, it)
+            for lid, it in pairs_sorted
+            if it.get("target_class_name")
+            and not (preserve_tip_rack_incoming_class and _infer_reagent_kind(lid, it) == "tip_rack")
+        ]
+        if not cand:
+            continue
+        # 取优先级最高的 kind（trash<tube_rack<tip_rack<plate），在该 kind 内挑"容量最大"的 class。
+        # 原因：同一物理 labware 常被拆成多个 reagent key（well 子集不同），各自按子集几何
+        # 解析出不同 class（如 samples=A-D→EP_Adapter、samples_2=A-H→BioER_96）。必须统一到
+        # 能容纳所有 well 的最大网格，否则小网格放不下 E-H 行 → 运行时 get_item 越界报错。
+        top_kind = _infer_reagent_kind(cand[0][0], cand[0][1])
+        same_kind_classes = [
+            it.get("target_class_name")
+            for lid, it in cand
+            if _infer_reagent_kind(lid, it) == top_kind
+        ]
+        best_cls = max(same_kind_classes, key=_prcxi_class_capacity)
         if not best_cls:
             continue
         for lid, it in pairs:
@@ -818,6 +903,12 @@ def refactor_data(
 
 
 MERGED_TARGETS_SYNTHETIC_PREFIX = "_merged_targets_"
+# P2 v3：sources 端跨板/多 key 聚合的 synthetic key 前缀（与 targets 对称）。
+# 转换器的 N:N 合并会把 transfer.sources 产出成 list[str]（多个 reagent_key），而图构建的
+# 单边路径只认 str（``resource_name in dict`` 对 list 会 ``unhashable type: 'list'`` 崩溃）。
+# 这里用与 merged-targets 完全对称的 merged set_liquid_from_plate 节点把 list[str] sources
+# 收敛成一个 synthetic str source key，从而支持「合并后仍可上传」。
+MERGED_SOURCES_SYNTHETIC_PREFIX = "_merged_sources_"
 
 
 def _collect_set_liquid_coverage(
@@ -868,6 +959,9 @@ def _emit_merged_set_liquid(
     merged_index: int,
     target_device: str,
     target_model: Optional[str],
+    synthetic_prefix: str = MERGED_TARGETS_SYNTHETIC_PREFIX,
+    well_volume: float = 0,
+    kind_label: str = "Targets",
 ) -> Tuple[str, str]:
     """P2 v2：为含 ``list[str] targets`` 的 transfer_liquid 节点插入一个 merged
     ``set_liquid_from_plate`` 跨板聚合节点。
@@ -945,15 +1039,15 @@ def _emit_merged_set_liquid(
             well_names_prefixed.append("")
 
     merged_node_id = str(uuid.uuid4())
-    synthetic_key = f"{MERGED_TARGETS_SYNTHETIC_PREFIX}{merged_index}"
+    synthetic_key = f"{synthetic_prefix}{merged_index}"
 
     G.add_node(
         merged_node_id,
         template_name="set_liquid_from_plate",
         resource_name="liquid_handler.prcxi",
         name=synthetic_key,
-        display_name=f"MergedTargets({len(set(target_reagent_keys))}p×{len(merged_wells)}w)",
-        description=f"Merged set_liquid_from_plate: targets={target_reagent_keys}",
+        display_name=f"Merged{kind_label}({len(set(target_reagent_keys))}p×{len(merged_wells)}w)",
+        description=f"Merged set_liquid_from_plate: {kind_label.lower()}={target_reagent_keys}",
         lab_node_type="Reagent",
         footer="set_liquid_from_plate-liquid_handler.prcxi",
         device_name=DEVICE_NAME_DEFAULT,
@@ -963,8 +1057,9 @@ def _emit_merged_set_liquid(
         param={
             "wells": merged_wells,
             "liquid_names": liquid_names,
-            # volumes=0：target plate 不预先注入液体，仅占位（同 per-plate set_liquid 行为）。
-            "volumes": [0] * len(merged_wells),
+            # targets：well_volume=0（仅占位，不预注液）；sources：well_volume=DEFAULT_LIQUID_VOLUME
+            # （set_liquid 是绝对覆盖语义，源孔必须保留液体，否则后续 aspirate 取到空孔）。
+            "volumes": [well_volume] * len(merged_wells),
             # 兼容字段：保留 plate/well_names 让旧 runtime / 旧前端可继续解析
             "plate": [],
             # 升级：well_names 元素为 "<plate_plr_name>/<well>" 形态（含跨板 plate 定位信息），
@@ -1325,6 +1420,10 @@ def build_protocol_graph(
     # ============================================================
     merged_set_liquid_counter = 0
     step_to_merged: Dict[int, Tuple[str, str]] = {}  # step 索引 -> (synthetic_key, merged_node_id)
+    # P2 v3：sources 端同样支持 list[str] —— 转换器 N:N 合并产出的 list sources 需收敛成
+    # synthetic str，否则图构建的单边 ``resource_name in dict`` 会 ``unhashable type: 'list'`` 崩溃。
+    merged_source_counter = 0
+    step_to_merged_src: Dict[int, Tuple[str, str]] = {}
     for step_idx, step in enumerate(protocol_steps):
         if step.get("template_name") != "transfer_liquid":
             continue
@@ -1348,6 +1447,30 @@ def build_protocol_graph(
             step_to_merged[step_idx] = (synth_key, merged_node_id)
             all_set_liquid_node_ids.append(merged_node_id)
             resource_last_writer[synth_key] = f"{merged_node_id}:output_wells"
+
+        raw_sources = (step.get("param") or {}).get("sources")
+        if (
+            isinstance(raw_sources, list)
+            and len(raw_sources) > 0
+            and all(isinstance(s, str) and s for s in raw_sources)
+        ):
+            synth_src_key, merged_src_node_id = _emit_merged_set_liquid(
+                G,
+                raw_sources,
+                labware_info,
+                slot_to_create_resource,
+                set_liquid_group_id=set_liquid_group_id,
+                merged_index=merged_source_counter,
+                target_device=target_device,
+                target_model=target_model,
+                synthetic_prefix=MERGED_SOURCES_SYNTHETIC_PREFIX,
+                well_volume=DEFAULT_LIQUID_VOLUME,
+                kind_label="Sources",
+            )
+            merged_source_counter += 1
+            step_to_merged_src[step_idx] = (synth_src_key, merged_src_node_id)
+            all_set_liquid_node_ids.append(merged_src_node_id)
+            resource_last_writer[synth_src_key] = f"{merged_src_node_id}:output_wells"
 
     # transfer_liquid 之间通过 ready 串联；第一个 transfer_liquid 需要等待所有 create_resource 完成
     last_control_node_id = trash_create_node_id
@@ -1485,6 +1608,11 @@ def build_protocol_graph(
             synth_key, _merged_node_id = step_to_merged[step_idx]
             params["targets"] = synth_key
 
+        # P2 v3：list[str] sources 同样改写为 synthetic str（merged set_liquid 已预创建）。
+        if step_idx in step_to_merged_src:
+            synth_src_key, _merged_src_node_id = step_to_merged_src[step_idx]
+            params["sources"] = synth_src_key
+
         # 处理输入连接
         for param_key, target_port in INPUT_PORT_MAPPING.items():
             resource_name = params.get(param_key)
@@ -1508,6 +1636,12 @@ def build_protocol_graph(
             isinstance(targets_name, str)
             and targets_name.startswith(MERGED_TARGETS_SYNTHETIC_PREFIX)
         )
+        # P2 v3：synthetic merged sources key（_merged_sources_<idx>）同样不在 labware_info 中，
+        # wells 数量从 asp_vols 长度推断，且不打「未在 reagent 中定义」warning。
+        sources_is_synthetic = (
+            isinstance(sources_name, str)
+            and sources_name.startswith(MERGED_SOURCES_SYNTHETIC_PREFIX)
+        )
 
         if targets_name and targets_name in labware_info:
             target_wells = labware_info[targets_name].get("well", [])
@@ -1523,6 +1657,10 @@ def build_protocol_graph(
         if sources_name and sources_name in labware_info:
             source_wells = labware_info[sources_name].get("well", [])
             sources_wells_count = len(source_wells) if source_wells else 1
+        elif sources_is_synthetic:
+            asp_vols_val = params.get("asp_vols")
+            if isinstance(asp_vols_val, list) and asp_vols_val:
+                sources_wells_count = len(asp_vols_val)
         elif sources_name:
             warnings.append(f"sources={sources_name} 未在 reagent 中定义")
 
@@ -1532,6 +1670,7 @@ def build_protocol_graph(
             and targets_name
             and sources_name
             and not targets_is_synthetic
+            and not sources_is_synthetic
             and sources_wells_count not in (0, 1)
         ):
             warnings.append(f"wells 数量不匹配: sources={sources_wells_count}, targets={targets_wells_count}")
