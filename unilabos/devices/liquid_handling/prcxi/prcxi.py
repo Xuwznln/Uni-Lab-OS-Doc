@@ -116,6 +116,146 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    """把 PRCXI step 字段稳健转为 int。"""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """把 PRCXI step 字段稳健转为 float。"""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _v04_axis_type(axis: Any) -> str:
+    """旧 StepAxis -> v7 V04 AxisType。"""
+    text = str(axis or "").strip().lower()
+    return "Axis2" if text in {"right", "axis2", "2"} else "Axis1"
+
+
+def _v04_tips_type(step: Dict[str, Any]) -> str:
+    """根据旧步骤的孔号信息推断 v7 V04 Tips 枚举名。"""
+    raw = str(step.get("HoleNumbers") or "")
+    numbers = [p.strip() for p in raw.split(",") if p.strip()]
+    if len(numbers) >= 96:
+        return "Tips96"
+    if len(numbers) > 1:
+        return "Tips8"
+    return "Tips1"
+
+
+def _v04_position_fields(step: Dict[str, Any], idx: int) -> Dict[str, Any]:
+    """提取 V04 液体/枪头步骤共用位置字段。"""
+    return {
+        "DisplayName": f"T{idx + 1}",
+        "Position": str(_as_int(step.get("PlateNo"), 1)),
+        "Row": str(_as_int(step.get("HoleRow"), 1)),
+        "Col": str(_as_int(step.get("HoleCol"), 1)),
+        "AxisType": _v04_axis_type(step.get("StepAxis")),
+        "Tips": _v04_tips_type(step),
+    }
+
+
+def legacy_steps_to_v04_solution_steps(steps: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """把驱动内部旧 StepData 风格步骤转换为 V04 v7 ``AddSolution_V04`` payload。
+
+    PRCXI 驱动内部仍用历史 ``Function``/``PlateNo``/``HoleRow`` 字段积累动作；v7 服务端
+    要求传 ``Kind`` 驱动的 V04 步骤模型，因此在真正建方案前集中做一次结构转换。
+    """
+    converted: List[Dict[str, Any]] = []
+    idx = 0
+    steps_list = list(steps or [])
+    while idx < len(steps_list):
+        step = steps_list[idx]
+        if not isinstance(step, dict):
+            raise PRCXIError(f"V04 v7 方案步骤必须是 dict，实际 {type(step)!r}")
+
+        function = str(step.get("Function") or "").strip()
+        base = {
+            "Kind": "",
+            "Comment": step.get("Comment"),
+            "IsEnabled": _coerce_bool(step.get("IsEnabled"), default=True),
+        }
+
+        if function == "Load":
+            data = {**base, "Kind": "LoadTips", **_v04_position_fields(step, idx)}
+        elif function == "UnLoad":
+            data = {**base, "Kind": "UnloadTips", **_v04_position_fields(step, idx)}
+        elif function == "Imbibing":
+            data = {
+                **base,
+                "Kind": "Aspirate",
+                **_v04_position_fields(step, idx),
+                "AspirateVolume": str(_as_float(step.get("DosageNum"))),
+                "XOffset": 0.0,
+                "YOffset": 0.0,
+                "ZOffset": 0.0,
+            }
+        elif function == "Tapping":
+            data = {
+                **base,
+                "Kind": "Dispense",
+                **_v04_position_fields(step, idx),
+                "DispenseVolume": str(_as_float(step.get("DosageNum"))),
+            }
+        elif function == "Blending":
+            data = {
+                **base,
+                "Kind": "Mix",
+                **_v04_position_fields(step, idx),
+                "MixLoopVolume": _as_int(step.get("DosageNum")),
+                "MixLoopCounts": _as_int(step.get("BlendingTimes"), 1),
+            }
+        elif function == "DefectiveLift":
+            source = _as_int(step.get("PlateNo"), 1)
+            destination = source
+            put_down_position = _as_int(step.get("Hierarchy"), 1)
+            if idx + 1 < len(steps_list) and steps_list[idx + 1].get("Function") == "PutDown":
+                next_step = steps_list[idx + 1]
+                destination = _as_int(next_step.get("PlateNo"), destination)
+                put_down_position = _as_int(next_step.get("Hierarchy"), put_down_position)
+                idx += 1
+            data = {
+                **base,
+                "Kind": "MvKit",
+                "Source": source,
+                "Destination": destination,
+                "PinchItUpPosition": _as_int(step.get("Hierarchy"), 1),
+                "PutDownPosition": put_down_position,
+            }
+        elif function == "PutDown":
+            destination = _as_int(step.get("PlateNo"), 1)
+            data = {
+                **base,
+                "Kind": "MvKit",
+                "Source": destination,
+                "Destination": destination,
+                "PinchItUpPosition": _as_int(step.get("Hierarchy"), 1),
+                "PutDownPosition": _as_int(step.get("Hierarchy"), 1),
+            }
+        elif function == "Shaking":
+            data = {
+                **base,
+                "Kind": "OscSet",
+                "Number": _as_int(step.get("AssistFun2"), 1),
+                "OscTime": _as_int(step.get("AssistFun1"), 0),
+                "OscRate": _as_int(step.get("AssistFun3"), 0),
+                "IsWait": _coerce_bool(step.get("AssistFun4"), default=True),
+            }
+        else:
+            raise PRCXIError(f"暂不支持转换为 V04 v7 AddSolution_V04 的 PRCXI 步骤: {function!r}")
+
+        converted.append(data)
+        idx += 1
+
+    return converted
+
+
 class PipettingPos:
     """V04 移液位。"""
 
@@ -3128,17 +3268,28 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
 
     def _run_protocol_v04(self, protocol_id: str = None):
-        """v04：建布局已在 create_protocol 完成；这里 加载/模拟方案 → Start → wait_for_finish。
+        """v04：建布局已在 create_protocol 完成；这里 AddSolution_V04/加载方案 → Start → wait。
 
         - ``protocol_id`` 非空：视为已有方案名，走真实链路 ``LoadSolution(方案名)`` → Start → wait。
-        - ``protocol_id`` 为空：V04 不再走“生成 XML 方案写盘”，改为模拟运行返回（仅输出，不联机）。
+        - ``protocol_id`` 为空：按 v7 协议调用 ``ISolution.AddSolution_V04``，由服务端生成方案 XML。
         """
         if not protocol_id:
             plan_name = getattr(self, "protocol_name", "") or f"protocol_{int(time.time())}"
-            print(f"[PRCXI][v04] 模拟运行方案：{plan_name}")
-            return True
+            if not self.steps_todo_list:
+                print(f"[PRCXI][v04] 方案 {plan_name} 无动作步骤，按空协议完成。")
+                return True
+            print(f"[PRCXI][v04] AddSolution_V04(方案名={plan_name}, boardId={self.matrix_id})")
+            created_plan = self.api_client.add_solution_v04(
+                plan_name,
+                self.matrix_id,
+                self.steps_todo_list,
+            )
+            if isinstance(created_plan, str) and created_plan.strip():
+                plan_name = created_plan.strip()
+            print(f"[PRCXI][v04] 服务端已创建方案：{plan_name}")
+        else:
+            plan_name = str(protocol_id)
 
-        plan_name = str(protocol_id)
         print(f"[PRCXI][v04] LoadSolution(方案名={plan_name})")
         if not self.api_client.load_solution(plan_name):
             print(f"[PRCXI][v04] 加载方案失败：{plan_name}（确认方案已存在于 NeonGenesis 并被识别）")
@@ -3615,8 +3766,9 @@ class PRCXI9300Api:
     协议由构造参数 ``protocol_version`` 统一切换（唯一入口）：
     - ``"legacy"``：旧版协议（``AddSolution``、无 ``_V04`` 后缀的 IMatrix、
       ``AddWorkTabletMatrix``/``AddWorkTabletMatrix2``、``LoadSolution`` 传 GUID）。
-    - ``"v04"``：新版协议（IMatrix 全部 ``_V04``、方案走 XML + ``LoadSolution`` 传方案名、
-      新增 ``IClientSession.IsConnect`` / ``GetStartStatus`` / ``RemoveSolution`` 等）。
+    - ``"v04"``：新版协议（IMatrix 全部 ``_V04``、v7 方案走 ``AddSolution_V04`` 并由服务端
+      生成 XML，``LoadSolution`` 传方案名，新增 ``IClientSession.IsConnect`` /
+      ``GetStartStatus`` / ``RemoveSolution`` 等）。
 
     ``is_9320`` 仅保留“机型能力”语义（step_mode / 旧版建布局用 2 参版本），
     不再承担协议判定职责（见《修改计划》决策点 D/E）。
@@ -3685,6 +3837,12 @@ class PRCXI9300Api:
         data: Any = True
         if method in {"AddSolution"}:
             data = str(uuid.uuid4())
+        elif method in {"AddSolution_V04"}:
+            try:
+                params = req.get("Paramters") or []
+                data = params[0] if params else "debug_v04_plan"
+            except Exception:
+                data = "debug_v04_plan"
         elif method in {
             "AddWorkTabletMatrix",
             "AddWorkTabletMatrix2",
@@ -3787,14 +3945,28 @@ class PRCXI9300Api:
     def add_solution(self, name: str, matrix_id: str, steps: List[Dict[str, Any]]) -> str:
         """AddSolution → 返回新方案 GUID（仅 legacy）。
 
-        V04 服务端未开放 ``AddSolution``（建方案改走 XML 生成 + ``LoadSolution(方案名)``），
-        故 v04 下调用直接抛错，避免误用（见《修改计划》决策点 A）。
+        V04 v7 正式建方案请用 ``add_solution_v04`` / ``ISolution.AddSolution_V04``。
         """
         if self.is_v04:
             raise PRCXIError(
-                "V04 协议未开放 ISolution.AddSolution：建方案请走 XML 生成落盘 + LoadSolution(方案名)。"
+                "V04 v7 不支持旧 ISolution.AddSolution：请使用 ISolution.AddSolution_V04(name, boardId, steps)。"
             )
         return self.call("ISolution", "AddSolution", [name, matrix_id, steps])
+
+    def add_solution_v04(self, name: str, board_id: str, steps: Sequence[Dict[str, Any]]) -> Any:
+        """AddSolution_V04 → 服务端生成方案 XML 并返回方案名/结果（仅 V04 v7）。"""
+        if not self.is_v04:
+            raise PRCXIError("AddSolution_V04 仅 V04 协议可用；legacy 请使用 add_solution。")
+        plan_name = str(name or "").strip()
+        if not plan_name:
+            raise PRCXIError("AddSolution_V04 方案名不能为空。")
+        board_id = str(board_id or "").strip()
+        if not board_id:
+            raise PRCXIError("AddSolution_V04 需要有效 boardId；请先创建或选择 V04 Board。")
+        v04_steps = legacy_steps_to_v04_solution_steps(steps)
+        if not v04_steps:
+            raise PRCXIError("AddSolution_V04 至少需要一个方案步骤。")
+        return self.call("ISolution", "AddSolution_V04", [plan_name, board_id, v04_steps])
 
     # ---------------------------------------------------- 连接会话（IClientSession）
     def is_connect(self) -> bool:
@@ -3914,7 +4086,7 @@ class PRCXI9300Api:
         )
         resp = json.loads(self._raw_request(payload))
         if not resp.get("Success", False):
-            raise PRCXIError(resp.get("Msg", "Unknown error"))
+            raise PRCXIError(resp.get("Message") or resp.get("Msg") or "Unknown error")
         data = resp.get("Data")
         try:
             return json.loads(data)
@@ -4923,7 +5095,7 @@ if __name__ == "__main__":
                         "_resource_child_name": "PRCXI_Deck",
                         "_resource_type": "unilabos.devices.liquid_handling.prcxi.prcxi:PRCXI9300Deck",
                     },
-                    "host": "192.168.0.121",
+                    "host": "127.0.0.1",
                     "port": 9999,
                     "timeout": 10.0,
                     "axis": "Right",
@@ -4931,7 +5103,7 @@ if __name__ == "__main__":
                     "setup": False,
                     "debug": True,
                     "simulator": True,
-                    "matrix_id": "5de524d0-3f95-406c-86dd-f83626ebc7cb",
+                    "matrix_id": "e5f8fe93-cc58-4518-90f5-15682407724b",
                     "is_9320": True,
                 },
                 "data": {},
@@ -4943,12 +5115,12 @@ if __name__ == "__main__":
 
     handler = PRCXI9300Handler(
         deck=deck,
-        host="192.168.1.201",
+        host="127.0.0.1",
         port=9999,
         timeout=10.0,
         setup=True,
         debug=False,
-        matrix_id="5de524d0-3f95-406c-86dd-f83626ebc7cb",
+        matrix_id="",
         channel_num=1,
         axis="Right",
         simulator=False,
@@ -4981,7 +5153,7 @@ if __name__ == "__main__":
     time.sleep(5)
     os._exit(0)
 
-    prcxi_api = PRCXI9300Api(host="192.168.0.121", port=9999)
+    prcxi_api = PRCXI9300Api(host="127.0.0.1", port=9999)
     prcxi_api.list_matrices()
     prcxi_api.get_all_materials()
 
