@@ -2673,7 +2673,13 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     @property
     def is_reset_ok(self) -> bool:
-        self._is_reset_ok = self.api_client.get_reset_status()
+        """设备是否可执行流程（已完成复位且当前不在复位中）。"""
+        if self.debug:
+            return True
+        # GetResetStatus 语义：true=复位中。只要仍在复位中，就标记为未就绪。
+        in_reset = self.api_client.get_reset_status()
+        if in_reset:
+            self._is_reset_ok = False
         return self._is_reset_ok
 
     matrix_info: MatrixInfo
@@ -2709,6 +2715,9 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.host, self.port, self.timeout = host, port, timeout
         self._num_channels = channel_num
         self._execute_setup = setup
+        # setup=False 表示由外部流程托管复位，不应被 run_protocol 的 reset 门禁阻塞。
+        # 仍保留 is_reset_ok 对“当前是否处于复位中”的实时拦截（GetResetStatus=true 时会置 False）。
+        self._is_reset_ok = not bool(setup)
         self.debug = debug
         self.axis = "Left"
         self.is_9320 = is_9320
@@ -2871,7 +2880,10 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                 )
 
     def run_protocol(self, protocol_id: str = None):
-        assert self.is_reset_ok, "PRCXI9300Backend is not reset successfully. Please call setup() first."
+        assert self.is_reset_ok, (
+            "PRCXI9300Backend is not reset-ready. "
+            "Please call setup() first (or ensure setup=False mode device is not resetting)."
+        )
         if self.protocol_version == "v04":
             return self._run_protocol_v04(protocol_id)
         return self._run_protocol_legacy(protocol_id)
@@ -2991,18 +3003,37 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                 print("Starting PRCXI9300 reset...")
                 self.api_client.reset()
 
-                # 检查重置状态并等待完成（加超时上限防死循环：GetResetStatus 取反语义
-                # 在真机上仍待核对，若语义反了这里靠超时兜底而非无限等待，见决策点 C）。
+                # 检查重置状态并等待完成：
+                # GetResetStatus = true 表示“正在复位”，复位完成后回到 false。
                 deadline = time.time() + self.reset_timeout
-                while not self.is_reset_ok:
+                start_deadline = min(deadline, time.time() + min(5.0, max(1.0, self.reset_timeout * 0.1)))
+                seen_resetting = False
+                self._is_reset_ok = False
+
+                while True:
+                    in_reset = self.api_client.get_reset_status()
+                    if in_reset:
+                        seen_resetting = True
+                        print("Waiting for PRCXI9300 to reset...")
+                    elif seen_resetting:
+                        # 已观察到“复位中”且现在退出复位，判定复位完成。
+                        self._is_reset_ok = True
+                        break
+                    elif time.time() >= start_deadline:
+                        # 避免某些固件“瞬时复位/不上报复位中”导致一直等待启动状态。
+                        print("GetResetStatus 未观测到复位中状态，按复位已完成处理。")
+                        self._is_reset_ok = True
+                        break
+
                     if time.time() >= deadline:
                         raise RuntimeError(
                             f"PRCXI9300 复位等待超时（{self.reset_timeout}s）。"
-                            "请检查设备复位状态；若 GetResetStatus 语义与预期相反，"
+                            "请检查设备复位状态；若 GetResetStatus 语义与预期相反"
+                            "（预期: true=复位中），"
                             "可在初始化时设置 reset_status_inverted 覆盖（protocol_version="
                             f"{self.protocol_version}）。"
                         )
-                    print("Waiting for PRCXI9300 to reset...")
+
                     if hasattr(self, "_ros_node") and self._ros_node is not None:
                         await self._ros_node.sleep(1)
                     else:
@@ -3387,10 +3418,10 @@ class PRCXI9300Api:
         self.axis = axis
         self.is_9320 = is_9320
         self.protocol_version = self._normalize_protocol_version(protocol_version)
-        # 复位状态取反：旧版历史行为 = ``not res``；V04 协议 ``GetResetStatus`` true=已复位，
-        # 若沿用取反会导致 setup 死循环（见决策点 C）。None/空串 → 按协议给默认，可显式覆盖以便真机联调。
+        # GetResetStatus 原始语义：true=正在复位，false=非复位中。
+        # 若固件返回语义相反（true=非复位中），可显式传 reset_status_inverted=True 覆盖。
         if reset_status_inverted is None or reset_status_inverted == "":
-            reset_status_inverted = self.protocol_version == "legacy"
+            reset_status_inverted = False
         self.reset_status_inverted = bool(reset_status_inverted)
 
     @staticmethod
@@ -3479,8 +3510,8 @@ class PRCXI9300Api:
         elif method in {"GetLocation"}:
             data = {"X": 0, "Y": 0, "Z": 0}
         elif method in {"GetResetStatus"}:
-            # V04：true=已复位；此处返回“已复位”让 setup 不死循环。
-            data = self.is_v04
+            # true=复位中；debug 下默认返回空闲态（false）。
+            data = False
         return json.dumps({"Success": True, "Msg": "debug mock", "Data": data})
 
     @staticmethod
@@ -3675,16 +3706,13 @@ class PRCXI9300Api:
         return self.call("IAutomation", "GetErrorCode")
 
     def get_reset_status(self) -> bool:
-        """GetResetStatus → 返回“是否已复位完成”。
+        """GetResetStatus → 返回“是否处于复位中”。
 
-        取反语义按协议/配置区分（见《修改计划》决策点 C）：
-        - ``legacy``：历史行为 = ``not res``（``reset_status_inverted=True``）。
-        - ``v04``：``GetResetStatus`` true=已复位，直接返回 ``res``（``reset_status_inverted=False``）。
-
-        真机联调可通过构造参数 ``reset_status_inverted`` 显式覆盖。
+        协议语义：``true=复位中``，``false=非复位中``（未复位/已复位完成都可能为 false）。
+        若目标固件语义相反，可通过 ``reset_status_inverted=True`` 显式覆盖。
         """
         if self.debug:
-            return True
+            return False
         res = self._as_bool(self.call("IAutomation", "GetResetStatus"))
         return (not res) if self.reset_status_inverted else res
 
