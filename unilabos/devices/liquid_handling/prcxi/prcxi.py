@@ -3684,10 +3684,18 @@ class PRCXI9300Api:
 
         流程：
         1) 先等待进入运行态（短窗口，兼容 Start 后状态传播延迟）；
-        2) 一旦观测到运行态，再等待其回落到 false，判定结束。
+        2) 一旦观测到运行态，再等待其回落到 false；
+        3) 回落后用 ``GetStepStateList`` 校验末步必须为 Completed(2)。
         """
         if self.debug:
             return True
+
+        def _last_step_completed() -> Optional[bool]:
+            status = self.step_state_list()
+            if status is None or len(status) == 0:
+                return None
+            last_state = self._normalize_step_state(status[-1].get("State"))
+            return last_state == 2
 
         started = False
         start_deadline = time.time() + 5.0
@@ -3697,10 +3705,13 @@ class PRCXI9300Api:
             if running:
                 started = True
             elif started:
-                return True
+                final_ok = _last_step_completed()
+                # 兜底兼容：若瞬时结束导致取不到 step_state，则按完成处理。
+                return True if final_ok is None else final_ok
             elif time.time() >= start_deadline:
-                # 未观测到运行态：兼容“瞬时执行完成”场景，避免误判失败。
-                return True
+                # 未观测到运行态：兼容“瞬时执行完成”场景；若有步骤状态则以末步判定为准。
+                final_ok = _last_step_completed()
+                return True if final_ok is None else final_ok
 
             time.sleep(1)
 
