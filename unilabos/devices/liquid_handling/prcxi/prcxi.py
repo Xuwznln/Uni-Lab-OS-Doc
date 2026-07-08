@@ -99,6 +99,23 @@ def to_rpc_value(value: Any) -> Any:
     raise TypeError(f"无法序列化为 RPC 参数：{type(value)!r}")
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    """把配置入参稳健转换为布尔值（兼容 'false'/'0' 等字符串）。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().strip('"').lower()
+        if s in {"true", "1", "yes", "y", "on"}:
+            return True
+        if s in {"false", "0", "no", "n", "off", ""}:
+            return False
+    return bool(value)
+
+
 class PipettingPos:
     """V04 移液位。"""
 
@@ -2714,6 +2731,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         )
         self.host, self.port, self.timeout = host, port, timeout
         self._num_channels = channel_num
+        setup = _coerce_bool(setup, default=True)
         self._execute_setup = setup
         # setup=False 表示由外部流程托管复位，不应被 run_protocol 的 reset 门禁阻塞。
         # 仍保留 is_reset_ok 对“当前是否处于复位中”的实时拦截（GetResetStatus=true 时会置 False）。
@@ -2880,10 +2898,19 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                 )
 
     def run_protocol(self, protocol_id: str = None):
-        assert self.is_reset_ok, (
-            "PRCXI9300Backend is not reset-ready. "
-            "Please call setup() first (or ensure setup=False mode device is not resetting)."
-        )
+        if self._execute_setup:
+            assert self.is_reset_ok, (
+                "PRCXI9300Backend is not reset-ready. "
+                "Please call setup() first (or ensure setup=False mode device is not resetting)."
+            )
+        else:
+            # setup=False：默认信任外部流程托管复位状态，不做硬阻断。
+            # 仍触发一次实时检测，便于在日志中暴露“当前可能仍处于复位中”的风险。
+            if not self.is_reset_ok:
+                print(
+                    "[PRCXI][WARN] setup=False 且 reset 状态未就绪，按外部托管模式继续执行。"
+                    "如需严格拦截请使用 setup=True。"
+                )
         if self.protocol_version == "v04":
             return self._run_protocol_v04(protocol_id)
         return self._run_protocol_legacy(protocol_id)
