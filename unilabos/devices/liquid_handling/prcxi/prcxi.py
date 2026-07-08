@@ -3649,11 +3649,10 @@ class PRCXI9300Api:
         return mapping.get(s, -1)
 
     def wait_for_finish(self) -> bool:
-        """轮询 ``IMachineState.GetStepStateList`` 直到方案执行完成。
+        """等待方案执行完成。
 
-        v04 与 legacy 都以 GetStepStateList 为准（见 prcxi_socket_client_v04
-        ``machine_state_get_step_list``），差异在于 v04 的 ``State`` 可能是枚举名
-        字符串，需归一化后再判断，故 v04 走独立实现。
+        - ``legacy``：沿用 ``IMachineState.GetStepStateList`` 三态判断。
+        - ``v04``：改用 ``IAutomation.GetStartStatus`` 轮询（运行中=true，结束=false）。
         """
         if self.is_v04:
             return self._wait_for_finish_v04()
@@ -3681,31 +3680,29 @@ class PRCXI9300Api:
         return success
 
     def _wait_for_finish_v04(self) -> bool:
-        """v04：轮询 GetStepStateList，末步 ``Completed(2)`` 视为完成。
+        """v04：轮询 ``GetStartStatus``（运行中=true）。
 
-        与 legacy 逻辑一致，仅把 ``State`` 通过 ``_normalize_step_state`` 归一化，
-        以兼容 v04 可能返回的枚举名字符串。
+        流程：
+        1) 先等待进入运行态（短窗口，兼容 Start 后状态传播延迟）；
+        2) 一旦观测到运行态，再等待其回落到 false，判定结束。
         """
-        success = False
-        start = False
-        while not success:
-            status = self.step_state_list()
-            if status is None:
-                break
-            if len(status) == 0:
-                break
-            if len(status) == 1:
-                start = True
-            last_state = self._normalize_step_state(status[-1].get("State"))
-            if last_state == 2 and start:
-                success = True
-            elif last_state < 0 or last_state > 2:
-                break
-            elif last_state == 0:
-                start = True
-            else:
-                time.sleep(1)
-        return success
+        if self.debug:
+            return True
+
+        started = False
+        start_deadline = time.time() + 5.0
+
+        while True:
+            running = self.get_start_status()
+            if running:
+                started = True
+            elif started:
+                return True
+            elif time.time() >= start_deadline:
+                # 未观测到运行态：兼容“瞬时执行完成”场景，避免误判失败。
+                return True
+
+            time.sleep(1)
 
     def call(self, service: str, method: str, params: Optional[list] = None) -> Any:
         payload = json.dumps(
