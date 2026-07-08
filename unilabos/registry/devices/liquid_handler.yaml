@@ -10456,6 +10456,9 @@ liquid_handler.prcxi:
         channel_num:
           default: 8
           type: string
+        column_nums:
+          default: 4
+          type: string
         debug:
           default: false
           type: string
@@ -10477,6 +10480,9 @@ liquid_handler.prcxi:
           type: string
         port:
           type: integer
+        prc_sites_config:
+          default: []
+          type: array
         protocol_version:
           default: v04
           type: string
@@ -10488,6 +10494,9 @@ liquid_handler.prcxi:
           type: string
         rail_width:
           default: 27.5
+          type: string
+        row_nums:
+          default: 4
           type: string
         setup:
           default: true

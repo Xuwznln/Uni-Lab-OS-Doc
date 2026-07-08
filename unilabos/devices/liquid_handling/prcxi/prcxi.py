@@ -597,6 +597,11 @@ class PRCXI9300Deck(Deck):
             occupied = self._get_site_resource(i)
             sites_out.append({
                 "label": site["label"],
+                "number": int(site.get("number", i + 1)),
+                "row": site.get("row", -1),
+                "col": site.get("col", -1),
+                "row_span": site.get("row_span", 1),
+                "col_span": site.get("col_span", 1),
                 "visible": site.get("visible", True),
                 "occupied_by": occupied.name if occupied is not None else None,
                 "position": site["position"],
@@ -614,11 +619,16 @@ class PRCXI9300Deck(Deck):
         if model is not None:
             self.model = model
 
-        # 记录 9320 动态布局参数（默认对齐历史 4 列、0 间隔）。
+        # 记录 9320 动态布局参数（默认对齐历史 4 行 4 列、0 间隔）。
+        self._layout_row_nums: int = self._9320_ROWS
         self._layout_column_nums: int = 4
         self._layout_rail_interval: float = 0.0
         self._layout_rail_width: float = self._9320_DEFAULT_RAIL_WIDTH
         self._layout_col_pitch: float = self._9320_DEFAULT_COL_PITCH
+        # prc_sites_config：自定义板位（编号/行/列/跨行/跨列）；为空时用 origin 网格。
+        self._prc_sites_config: List[Dict[str, Any]] = []
+        # slot 号 → _sites 下标映射（支持 prc_sites_config 的显式编号）。
+        self._number_to_index: Dict[int, int] = {}
 
         if sites is not None:
             self._sites: List[Dict[str, Any]] = [dict(s) for s in sites]
@@ -637,20 +647,166 @@ class PRCXI9300Deck(Deck):
     def _refresh_ordering(self) -> None:
         # _ordering: label -> None, 用于外部通过 list(keys()).index(site) 将 Tn 转换为 spot index
         self._ordering = collections.OrderedDict(
-            (site["label"], None) for site in self.sites
+            (site["label"], None) for site in self._sites
         )
+        # 重建 slot 号 → 下标映射（origin 网格为连续 1..N；prc_sites_config 用显式编号）。
+        self._number_to_index = {}
+        for idx, site in enumerate(self._sites):
+            self._number_to_index[int(site.get("number", idx + 1))] = idx
+
+    @classmethod
+    def _make_site(
+        cls,
+        number: int,
+        label: str,
+        row: int,
+        col: int,
+        row_span: int,
+        col_span: int,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        z: float = 0.0,
+    ) -> Dict[str, Any]:
+        return {
+            "label": str(label),
+            "number": int(number),
+            "row": int(row),
+            "col": int(col),
+            "row_span": int(row_span),
+            "col_span": int(col_span),
+            "visible": True,
+            "position": {"x": float(x), "y": float(y), "z": float(z)},
+            "size": {"width": float(width), "height": float(height), "depth": 0.0},
+            "content_type": list(cls._DEFAULT_CONTENT_TYPE),
+        }
 
     def _set_sites_from_positions(self, positions: Sequence[Tuple[float, float, float]]) -> None:
         self._sites = []
         for i, (x, y, z) in enumerate(positions):
-            self._sites.append({
-                "label": f"T{i + 1}",
-                "visible": True,
-                "position": {"x": float(x), "y": float(y), "z": float(z)},
-                "size": dict(self._DEFAULT_SITE_SIZE),
-                "content_type": list(self._DEFAULT_CONTENT_TYPE),
-            })
+            self._sites.append(self._make_site(
+                number=i + 1, label=f"T{i + 1}", row=-1, col=-1,
+                row_span=1, col_span=1, x=x, y=y, z=z,
+                width=self._DEFAULT_SITE_SIZE["width"],
+                height=self._DEFAULT_SITE_SIZE["height"],
+            ))
         self._refresh_ordering()
+
+    @classmethod
+    def _entry_int(cls, entry: Dict[str, Any], keys: Sequence[str], default: Optional[int] = None,
+                   required: bool = False) -> Optional[int]:
+        """从 prc_sites_config 元素读取整数字段，兼容多种键名（含中文）。"""
+        for k in keys:
+            if k in entry and entry[k] is not None:
+                return int(entry[k])
+        if required:
+            raise ValueError(f"prc_sites_config 元素缺少必填字段 {keys[0]!r}: {entry}")
+        return default
+
+    @classmethod
+    def _span_geometry(cls, row: int, col: int, row_span: int, col_span: int,
+                       row_nums: int, col_pitch: float) -> Tuple[float, float, float, float]:
+        """跨行/跨列板位的角坐标与包围盒尺寸，返回 (x, y, width, height)。
+
+        与单格板位保持同一约定：position 为板位**左下角**（前端 y 轴向上），
+        起始格 (row,col) 位于覆盖区域左上角、末格 (row+row_span-1, col+col_span-1)
+        位于右下角。size 为覆盖这些单元格足迹的包围盒：单格用默认足迹 128×86，
+        每多跨一行/列再加一个行距/列距（不放大成整节距，避免与相邻格重叠）。
+        """
+        bottom_row = row + row_span - 1
+        x = cls._9320_X_OFFSET + col * col_pitch
+        y = (row_nums - 1 - bottom_row) * cls._9320_ROW_PITCH + cls._9320_Y_OFFSET
+        width = (col_span - 1) * col_pitch + float(cls._DEFAULT_SITE_SIZE["width"])
+        height = (row_span - 1) * cls._9320_ROW_PITCH + float(cls._DEFAULT_SITE_SIZE["height"])
+        return x, y, width, height
+
+    @classmethod
+    def _origin_site_dicts(cls, row_nums: int, column_nums: int, col_pitch: float) -> List[Dict[str, Any]]:
+        """origin 网格：row_nums × column_nums，行主序编号 T1..T(R*C)，单格默认尺寸。"""
+        sites: List[Dict[str, Any]] = []
+        for row in range(row_nums):
+            for col in range(column_nums):
+                n = row * column_nums + col + 1
+                x = cls._9320_X_OFFSET + col * col_pitch
+                y = (row_nums - 1 - row) * cls._9320_ROW_PITCH + cls._9320_Y_OFFSET
+                sites.append(cls._make_site(
+                    number=n, label=f"T{n}", row=row, col=col,
+                    row_span=1, col_span=1, x=x, y=y,
+                    width=cls._DEFAULT_SITE_SIZE["width"],
+                    height=cls._DEFAULT_SITE_SIZE["height"],
+                ))
+        return sites
+
+    @classmethod
+    def _prc_site_dicts(cls, prc_sites_config: Sequence[Dict[str, Any]], row_nums: int,
+                        column_nums: int, col_pitch: float) -> List[Dict[str, Any]]:
+        """按 prc_sites_config 生成板位；origin 网格仅用于坐标计算与占用/越界校验。
+
+        每个元素含【编号(number)、行(row)、列(col)、跨行(row_span)、跨列(col_span)】，
+        名称默认为 ``T{编号}``。坐标与尺寸与单格板位同一约定（左下角 + 足迹包围盒），
+        单格尺寸即默认足迹 128×86，跨格时按跨度扩展包围盒（见 ``_span_geometry``）。
+        """
+        occupied: Dict[Tuple[int, int], int] = {}
+        built: List[Dict[str, Any]] = []
+        for entry in prc_sites_config:
+            number = cls._entry_int(entry, ["number", "编号", "Number", "板位号"], required=True)
+            row = cls._entry_int(entry, ["row", "行", "Row"], default=0)
+            col = cls._entry_int(entry, ["col", "column", "列", "Col", "Column"], default=0)
+            row_span = cls._entry_int(entry, ["row_span", "跨行", "RowSpan", "rowspan"], default=1) or 1
+            col_span = cls._entry_int(entry, ["col_span", "跨列", "ColSpan", "colspan"], default=1) or 1
+            name = entry.get("name") or entry.get("名称") or entry.get("Name") or f"T{number}"
+
+            if row < 0 or col < 0 or row_span < 1 or col_span < 1:
+                raise ValueError(
+                    f"prc_sites_config T{number} 参数非法："
+                    f"row={row}, col={col}, row_span={row_span}, col_span={col_span}"
+                )
+            if row + row_span > row_nums or col + col_span > column_nums:
+                raise ValueError(
+                    f"prc_sites_config T{number} 覆盖区域 "
+                    f"(行{row}..{row + row_span - 1}, 列{col}..{col + col_span - 1}) "
+                    f"超出 {row_nums}×{column_nums} 网格"
+                )
+            for r in range(row, row + row_span):
+                for c in range(col, col + col_span):
+                    if (r, c) in occupied:
+                        raise ValueError(
+                            f"prc_sites_config T{number} 与 T{occupied[(r, c)]} 在格 ({r},{c}) 重叠"
+                        )
+                    occupied[(r, c)] = number
+
+            x, y, width, height = cls._span_geometry(row, col, row_span, col_span, row_nums, col_pitch)
+            built.append(cls._make_site(
+                number=number, label=str(name), row=row, col=col,
+                row_span=row_span, col_span=col_span, x=x, y=y,
+                width=width, height=height,
+            ))
+
+        numbers = [s["number"] for s in built]
+        if len(set(numbers)) != len(numbers):
+            raise ValueError(f"prc_sites_config 存在重复编号：{sorted(numbers)}")
+        built.sort(key=lambda s: s["number"])
+        return built
+
+    @staticmethod
+    def _slot_to_number(slot: Union[int, str]) -> Optional[int]:
+        """把 slot 标识（int / '3' / 'T3'）解析为槽位号。"""
+        if isinstance(slot, bool):
+            return None
+        if isinstance(slot, int):
+            return slot
+        if isinstance(slot, str):
+            digits = "".join(c for c in slot.strip() if c.isdigit())
+            return int(digits) if digits else None
+        return None
+
+    def slot_index(self, slot: Union[int, str]) -> Optional[int]:
+        """槽位号 → ``_sites`` 下标；不存在返回 None。"""
+        number = self._slot_to_number(slot)
+        if number is None:
+            return None
+        return self._number_to_index.get(number)
 
     @classmethod
     def build_9320_site_positions(
@@ -658,16 +814,20 @@ class PRCXI9300Deck(Deck):
         column_nums: int,
         rail_interval: float,
         rail_width: float,
+        row_nums: Optional[int] = None,
     ) -> List[Tuple[float, float, float]]:
-        """按 9320 规则生成 sites（4 行 × N 列）。"""
+        """按 9320 规则生成 origin 网格坐标（row_nums 行 × column_nums 列，行主序）。"""
         if column_nums <= 0:
             raise ValueError(f"column_nums 必须 > 0，收到 {column_nums}")
+        rows = int(row_nums) if row_nums is not None else cls._9320_ROWS
+        if rows <= 0:
+            raise ValueError(f"row_nums 必须 > 0，收到 {rows}")
         col_pitch = (cls._9320_COLUMN_RAILS + float(rail_interval)) * float(rail_width)
         positions: List[Tuple[float, float, float]] = []
-        for row in range(cls._9320_ROWS):
+        for row in range(rows):
             for col in range(column_nums):
                 x = cls._9320_X_OFFSET + col * col_pitch
-                y = (cls._9320_ROWS - 1 - row) * cls._9320_ROW_PITCH + cls._9320_Y_OFFSET
+                y = (rows - 1 - row) * cls._9320_ROW_PITCH + cls._9320_Y_OFFSET
                 positions.append((x, y, 0.0))
         return positions
 
@@ -688,7 +848,7 @@ class PRCXI9300Deck(Deck):
             sz = float(pos.get("z", 0.0))
             lz = float(location.z or 0.0)
             if abs(location.x - sx) < 1e-6 and abs(location.y - sy) < 1e-6 and abs(lz - sz) < 1e-6:
-                return idx + 1
+                return int(site.get("number", idx + 1))
 
         # 再做带阈值最近邻匹配，兼容云端坐标轻微浮点偏差。
         nearest_idx: Optional[int] = None
@@ -702,7 +862,7 @@ class PRCXI9300Deck(Deck):
                 nearest_dist_sq = dist_sq
                 nearest_idx = idx
         if nearest_idx is not None and nearest_dist_sq <= float(tolerance) ** 2:
-            return nearest_idx + 1
+            return int(sites[nearest_idx].get("number", nearest_idx + 1))
         return None
 
     def slot_from_location(self, location: Optional[Coordinate], tolerance: float = 1.0) -> Optional[int]:
@@ -713,9 +873,17 @@ class PRCXI9300Deck(Deck):
         column_nums: int,
         rail_interval: float,
         rail_width: float,
+        row_nums: Optional[int] = None,
+        prc_sites_config: Optional[Sequence[Dict[str, Any]]] = None,
         preserve_children: bool = True,
     ) -> None:
-        """按 9320 的可变列参数重建 sites，并尽量保持已挂载子资源槽位不变。"""
+        """按 9320 参数重建 sites，并尽量保持已挂载子资源槽位不变。
+
+        - ``row_nums`` × ``column_nums`` 定义 origin 网格（默认 4 × column_nums）。
+        - ``prc_sites_config`` 非空时：完全以其为准生成板位（origin 网格仅用于
+          按 行/列/跨度 计算坐标与占用/越界校验），未列出的 origin 格不作为板位。
+        - ``prc_sites_config`` 为空时：使用 origin 网格（行主序 T1..T(R*C)）。
+        """
         old_sites = [dict(site) for site in self.sites]
         child_slot_map: Dict[Resource, int] = {}
         if preserve_children:
@@ -726,25 +894,35 @@ class PRCXI9300Deck(Deck):
                 if slot_no is not None:
                     child_slot_map[child] = slot_no
 
-        positions = self.build_9320_site_positions(
-            column_nums=int(column_nums),
-            rail_interval=float(rail_interval),
-            rail_width=float(rail_width),
-        )
-        self._set_sites_from_positions(positions)
-        self._layout_column_nums = int(column_nums)
+        column_nums = int(column_nums)
+        rows = int(row_nums) if row_nums is not None else self._9320_ROWS
+        if column_nums <= 0 or rows <= 0:
+            raise ValueError(f"row_nums/column_nums 必须 > 0，收到 row_nums={rows}, column_nums={column_nums}")
+        col_pitch = (self._9320_COLUMN_RAILS + float(rail_interval)) * float(rail_width)
+
+        prc_sites_config = list(prc_sites_config or [])
+        if prc_sites_config:
+            self._sites = self._prc_site_dicts(prc_sites_config, rows, column_nums, col_pitch)
+        else:
+            self._sites = self._origin_site_dicts(rows, column_nums, col_pitch)
+        self._refresh_ordering()
+
+        self._layout_row_nums = rows
+        self._layout_column_nums = column_nums
         self._layout_rail_interval = float(rail_interval)
         self._layout_rail_width = float(rail_width)
-        self._layout_col_pitch = (self._9320_COLUMN_RAILS + self._layout_rail_interval) * self._layout_rail_width
+        self._layout_col_pitch = col_pitch
+        self._prc_sites_config = prc_sites_config
 
         if preserve_children:
             for child, slot_no in child_slot_map.items():
-                if 1 <= slot_no <= len(self.sites):
-                    child.location = self.get_slot_location(slot_no)
+                idx = self.slot_index(slot_no)
+                if idx is not None:
+                    child.location = self._get_site_location(idx)
                 else:
                     print(
                         f"[PRCXI9300Deck] 子资源 {getattr(child, 'name', '?')} 原槽位 T{slot_no}"
-                        f" 超出新布局范围 (1..{len(self.sites)})，保留原位置"
+                        f" 在新布局中不存在，保留原位置"
                     )
 
     def _get_site_location(self, idx: int) -> Coordinate:
@@ -761,27 +939,19 @@ class PRCXI9300Deck(Deck):
         Raises:
             ValueError: slot 解析失败或越界
         """
-        idx: Optional[int] = None
-        if isinstance(slot, int):
-            idx = slot - 1
-        elif isinstance(slot, str):
+        idx: Optional[int] = self.slot_index(slot)
+        if idx is None and isinstance(slot, str):
+            # 退而求其次：直接按 label 全等匹配
             s = slot.strip()
-            if not s:
-                raise ValueError(f"空 slot 标识")
-            digits = s[1:] if s[0].isalpha() else s
-            try:
-                idx = int(digits) - 1
-            except ValueError:
-                # 退而求其次：直接按 label 全等匹配
-                for i, site in enumerate(self.sites):
-                    if site.get("label") == s:
-                        idx = i
-                        break
+            for i, site in enumerate(self._sites):
+                if site.get("label") == s:
+                    idx = i
+                    break
         if idx is None:
             raise ValueError(f"无法解析 slot 标识: {slot!r}")
-        if idx < 0 or idx >= len(self.sites):
+        if idx < 0 or idx >= len(self._sites):
             raise ValueError(
-                f"slot {slot!r} 超出范围 [1, {len(self.sites)}] (解析为 idx={idx})"
+                f"slot {slot!r} 超出范围 (共 {len(self._sites)} 个板位，解析为 idx={idx})"
             )
         return self._get_site_location(idx)
 
@@ -834,16 +1004,24 @@ class PRCXI9300Deck(Deck):
         super().assign_child_resource(resource, location=loc, reassign=reassign)
 
     def assign_child_at_slot(self, resource: Resource, slot: int, reassign: bool = False) -> None:
-        self.assign_child_resource(resource, spot=slot - 1, reassign=reassign)
+        idx = self.slot_index(slot)
+        if idx is None:
+            raise ValueError(f"slot {slot!r} 不存在于当前布局（共 {len(self._sites)} 个板位）")
+        self.assign_child_resource(resource, spot=idx, reassign=reassign)
 
     def serialize(self) -> dict:
         data = super().serialize()
         data["model"] = self.model
         sites_out = []
-        for i, site in enumerate(self.sites):
+        for i, site in enumerate(self._sites):
             occupied = self._get_site_resource(i)
             sites_out.append({
                 "label": site["label"],
+                "number": int(site.get("number", i + 1)),
+                "row": site.get("row", -1),
+                "col": site.get("col", -1),
+                "row_span": site.get("row_span", 1),
+                "col_span": site.get("col_span", 1),
                 "visible": site.get("visible", True),
                 "occupied_by": occupied.name if occupied is not None else None,
                 "position": site["position"],
@@ -1425,9 +1603,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         is_9320=False,
         start_rail=2,
         column_nums=4,
+        row_nums=4,
         rail_nums: Optional[int] = None,
         rail_interval=0,
         rail_width=27.5,
+        prc_sites_config: Optional[List[Dict[str, Any]]] = None,
         x_increase = -0.003636,
         y_increase = -0.003636,
         x_offset = -1.8,
@@ -1462,13 +1642,20 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             column_nums = rail_nums
         start_rail = float(start_rail)
         column_nums = int(column_nums)
+        row_nums = int(row_nums)
         rail_interval = float(rail_interval)
         rail_width = float(rail_width)
         if column_nums <= 0:
             raise ValueError(f"column_nums 必须 > 0，收到 {column_nums}")
+        if row_nums <= 0:
+            raise ValueError(f"row_nums 必须 > 0，收到 {row_nums}")
+
+        # prc_sites_config：自定义板位（编号/行/列/跨行/跨列）；为空则用 origin 网格。
+        self._prc_sites_config: List[Dict[str, Any]] = list(prc_sites_config or [])
 
         self._start_rail = start_rail
         self._column_nums = column_nums
+        self._row_nums = row_nums
         self._rail_width = rail_width
         self._rail_interval = rail_interval
         self.deck_x = (start_rail + column_nums * 5 + (column_nums - 1) * rail_interval) * rail_width
@@ -1500,12 +1687,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         if is_9320 is None:
             is_9320 = str(getattr(deck, "model", "9300")).strip().lower() == "9320"
 
-        # 9320 支持按列数/轨道参数动态重建 deck 槽位布局。
+        # 9320 支持按行列/轨道参数 + prc_sites_config 动态重建 deck 槽位布局。
         if is_9320 and isinstance(deck, PRCXI9300Deck):
             deck.reconfigure_9320_layout(
                 column_nums=column_nums,
                 rail_interval=rail_interval,
                 rail_width=rail_width,
+                row_nums=row_nums,
+                prc_sites_config=self._prc_sites_config,
             )
             deck._size_x = self.deck_x
             deck._size_y = self.deck_y
@@ -1603,7 +1792,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if site:
                 digits = "".join(c for c in site if c.isdigit())
                 if digits:
-                    spot_idx = int(digits) - 1
+                    # 槽位号 → 下标（兼容 prc_sites_config 的非连续编号）。
+                    spot_idx = deck.slot_index(int(digits))
             try:
                 deck.assign_child_resource(top, spot=spot_idx, reassign=False)
                 existing_names.add(top_name)
@@ -1632,8 +1822,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 material_uuid_map[m["uuid"]] = m
 
         work_tablets = []
-        slot_total = len(self.deck.sites) if isinstance(self.deck, PRCXI9300Deck) else 16
-        slot_none = [i for i in range(1, slot_total + 1)]
+        # 空闲槽位以「实际板位号」为准（兼容 prc_sites_config 的非连续编号）。
+        if isinstance(self.deck, PRCXI9300Deck):
+            slot_none = [int(s["number"]) for s in self.deck.sites]
+        else:
+            slot_none = [i for i in range(1, 17)]
 
         for child in self.deck.children:
 
