@@ -27,19 +27,21 @@ import asyncio
 import rclpy
 import yaml
 from rclpy.node import Node
-from rclpy.action import ActionServer, ActionClient
+from rclpy.action import ActionServer, ActionClient, get_action_server_names_and_types_by_node
 from rclpy.action.server import ServerGoalHandle
 from rclpy.client import Client
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.service import Service
-from unilabos_msgs.action import SendCmd
+from unilabos_msgs.action import SendCmd, StrSingleInput
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
 
 from unilabos.config.config import BasicConfig
 from unilabos.registry.decorators import get_topic_config
+from unilabos.registry.placeholder_type import ResourceSlotRawInput
 from unilabos.utils.decorator import get_all_subscriptions
 
 from unilabos.resources.container import RegularContainer
+from unilabos.resources.liquids import apply_substances, resolve_site_spot
 from unilabos.resources.graphio import (
     initialize_resources,
 )
@@ -47,8 +49,10 @@ from unilabos.resources.plr_additional_res_reg import register
 from unilabos.ros.msgs.message_converter import (
     String,
     convert_to_ros_msg,
+    convert_from_ros_msg,
     convert_from_ros_msg_with_mapping,
     convert_to_ros_msg_with_mapping,
+    get_ros_type_by_msgname,
 )
 from unilabos_msgs.srv import (
     ResourceAdd,
@@ -74,6 +78,7 @@ from rclpy.task import Task, Future
 from unilabos.utils.import_manager import default_manager
 from unilabos.utils.log import info, debug, warning, error, critical, logger, trace
 from unilabos.utils.type_check import get_type_class, TypeEncoder, get_result_info_str
+from unilabos.utils.exception import DeviceActionError
 
 if TYPE_CHECKING:
     from pylabrobot.resources import Resource as ResourcePLR
@@ -96,9 +101,9 @@ class RclpyAsyncMutex:
 
     async def acquire(self, node: "BaseROS2DeviceNode", tag: str = ""):
         """获取锁。如果已被占用，则异步等待直到锁释放。"""
-        # t0 = time.time()
+        t0 = time.time()
         with self._lock:
-            # qlen = len(self._queue)
+            qlen = len(self._queue)
             if not self._acquired:
                 self._acquired = True
                 self._holder = tag
@@ -106,28 +111,40 @@ class RclpyAsyncMutex:
                 #     f"[Mutex:{self._name}] 获取锁 tag={tag} (无等待, queue=0)"
                 # )
                 return
+            holder = self._holder
             waiter = Future()
             self._queue.append(waiter)
-            # node.lab_logger().info(
-            #     f"[Mutex:{self._name}] 等待锁 tag={tag} "
-            #     f"(holder={self._holder}, queue={qlen + 1})"
-            # )
-        await waiter
-        # wait_ms = (time.time() - t0) * 1000
+            node.lab_logger().trace(
+                f"[Mutex:{self._name}] 进入锁等待队列 tag={tag} holder={holder} queue={qlen + 1}"
+            )
+        try:
+            await waiter
+        except BaseException:
+            with self._lock:
+                if waiter in self._queue:
+                    self._queue.remove(waiter)
+                    node.lab_logger().debug(
+                        f"[Mutex:{self._name}] 取消锁等待 tag={tag} queue={len(self._queue)}"
+                    )
+            raise
+        wait_ms = (time.time() - t0) * 1000
         self._holder = tag
-        # node.lab_logger().info(
-        #     f"[Mutex:{self._name}] 获取锁 tag={tag} (等了 {wait_ms:.0f}ms)"
-        # )
+        node.lab_logger().trace(f"[Mutex:{self._name}] 队列继续执行 tag={tag} waited={wait_ms:.0f}ms")
 
     def release(self, node: "BaseROS2DeviceNode"):
         """释放锁，通过 executor task 唤醒下一个等待者。"""
         with self._lock:
-            # old_holder = self._holder
-            if self._queue:
+            old_holder = self._holder
+            next_waiter = None
+            while self._queue:
                 next_waiter = self._queue.pop(0)
-                # node.lab_logger().debug(
-                #     f"[Mutex:{self._name}] 释放锁 holder={old_holder} → 唤醒下一个 (剩余 queue={len(self._queue)})"
-                # )
+                if not next_waiter.done():
+                    break
+                next_waiter = None
+            if next_waiter is not None:
+                node.lab_logger().trace(
+                    f"[Mutex:{self._name}] 释放锁 holder={old_holder} 唤醒队列下一个 queue={len(self._queue)}"
+                )
 
                 async def _wake():
                     if not next_waiter.done():
@@ -217,14 +234,12 @@ def init_wrapper(
     action_value_mappings: Dict[str, Any],
     hardware_interface: Dict[str, Any],
     print_publish: bool,
-    driver_params: Optional[Dict[str, Any]] = None,
+    driver_params: Dict[str, Any],
     driver_is_ros: bool = False,
     *args,
     **kwargs,
 ):
     """初始化设备节点的包装函数，和ROS2DeviceNode初始化保持一致"""
-    if driver_params is None:
-        driver_params = kwargs.copy()
     kwargs["device_id"] = device_id
     kwargs["device_uuid"] = device_uuid
     kwargs["driver_class"] = driver_class
@@ -437,7 +452,14 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
         # 创建订阅者（通过 @subscribe 装饰器）
         self._topic_subscribers: Dict[str, Any] = {}
+        self._topic_subscriber_types: Dict[str, Any] = {}  # 每个 topic 当前订阅所用的消息类型
+        self._subscriber_monitors: Dict[str, Any] = {}  # retry_interval 模式下"重试建立订阅"的定时器（建立成功即取消）
         self._setup_decorated_subscribers()
+
+        # 跨设备调用动作时复用的 ActionClient 缓存（key: action_id）
+        self._cross_device_action_clients: Dict[str, ActionClient] = {}
+        # 跨设备动作类型探测缓存（key: "<clean_device_id>/<function_name>"，value: 原生 Action 类型或 None）
+        self._remote_action_type_cache: Dict[str, Any] = {}
 
         # 创建线程池执行器
         self._executor = ThreadPoolExecutor(
@@ -445,6 +467,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         )
 
         self._append_resource_lock = RclpyAsyncMutex(name=f"AR:{device_id}")
+        self._resource_tree_uuid_locks: Dict[str, RclpyAsyncMutex] = {}
+        self._resource_tree_uuid_locks_guard = threading.Lock()
 
         # 创建资源管理客户端
         self._resource_clients: Dict[str, Client] = {
@@ -496,7 +520,6 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         async def _append_resource_inner(req: SerialCommand_Request, res: SerialCommand_Response, _ar_tag: str = ""):
             from pylabrobot.resources.deck import Deck
             from pylabrobot.resources import Coordinate
-            from pylabrobot.resources import Plate
 
             # _t0 = time.time()
             client = self._resource_clients["c2s_update_resource_tree"]
@@ -585,6 +608,16 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             plr_instances = rts.to_plr_resources()
             for plr_instance in plr_instances:
                 self.resource_tracker.loop_update_uuid(plr_instance, uuid_maps)
+            # driver 自带 create_resource 时由 driver 负责增加液体；否则走通用 apply_substances
+            _delegates_to_driver = hasattr(self.driver_instance, "create_resource") and self.node_name != "host_node"
+            # 容器自身液体 (LIQUID_INPUT_SLOT == [-1])：在快照前写入，使其归属 created_resource_tree
+            if (
+                not _delegates_to_driver
+                and len(plr_instances) == 1
+                and ADD_LIQUID_TYPE
+                and list(LIQUID_INPUT_SLOT) == [-1]
+            ):
+                apply_substances(plr_instances[0], ADD_LIQUID_TYPE, LIQUID_VOLUME, broadcast=True)
             rts: ResourceTreeSet = ResourceTreeSet.from_plr_resources(plr_instances)
             self.lab_logger().info(f"Resource tree added. UUID mapping: {len(uuid_maps)} nodes")
             final_response = {
@@ -593,7 +626,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             }
             res.response = json.dumps(final_response)
             # 如果driver自己就有assign的方法，那就使用driver自己的assign方法
-            if hasattr(self.driver_instance, "create_resource") and self.node_name != "host_node":
+            if _delegates_to_driver:
                 create_resource_func = getattr(self.driver_instance, "create_resource")
                 try:
                     ret = create_resource_func(
@@ -616,30 +649,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             try:
                 if len(rts.root_nodes) == 1 and parent_resource is not None:
                     plr_instance = plr_instances[0]
-                    if isinstance(plr_instance, Plate):
-                        if len(ADD_LIQUID_TYPE) == 1 and len(LIQUID_VOLUME) == 1 and len(LIQUID_INPUT_SLOT) > 1:
-                            ADD_LIQUID_TYPE = ADD_LIQUID_TYPE * len(LIQUID_INPUT_SLOT)
-                            LIQUID_VOLUME = LIQUID_VOLUME * len(LIQUID_INPUT_SLOT)
-                            self.lab_logger().warning(
-                                f"增加液体资源时，数量为1，自动补全为 {len(LIQUID_INPUT_SLOT)} 个"
-                            )
-                        try:
-                            # noinspection PyProtectedMember
-                            keys = list(plr_instance._ordering.keys())
-                            for ind, r in enumerate(LIQUID_INPUT_SLOT[:]):
-                                if isinstance(r, int):
-                                    # noinspection PyTypeChecker
-                                    LIQUID_INPUT_SLOT[ind] = keys[r]
-                            input_wells = [plr_instance.get_well(r) for r in LIQUID_INPUT_SLOT]
-                        except AttributeError:
-                            # 按照id回去失败，回退到children
-                            input_wells = []
-                            for r in LIQUID_INPUT_SLOT:
-                                input_wells.append(plr_instance.children[r])
-                        for input_well, liquid_type, liquid_volume, liquid_input_slot in zip(
-                            input_wells, ADD_LIQUID_TYPE, LIQUID_VOLUME, LIQUID_INPUT_SLOT
-                        ):
-                            input_well.set_liquids([(liquid_type, liquid_volume, "ul")])
+                    # 子孔位液体 (LIQUID_INPUT_SLOT != [-1])：写入子孔位，归属 liquid_input_resource_tree。
+                    # 统一走 apply_substances：孔位解析(int→_ordering key/名称/children) + 1→N 广播 + set_liquids。
+                    if ADD_LIQUID_TYPE and list(LIQUID_INPUT_SLOT) != [-1]:
+                        input_wells = apply_substances(
+                            plr_instance, ADD_LIQUID_TYPE, LIQUID_VOLUME, slots=LIQUID_INPUT_SLOT, broadcast=True
+                        )
                         final_response["liquid_input_resource_tree"] = ResourceTreeSet.from_plr_resources(
                             input_wells
                         ).dump()
@@ -760,9 +775,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
     async def update_resource(self, resources: List["ResourcePLR"]):
         r = SerialCommand.Request()
         tree_set = ResourceTreeSet.from_plr_resources(resources)
+        # host_node 的根物料无父 uuid 是预期状态（归属 host_node 自身、不物理挂载），不告警/不回填；
+        # 其它设备的无父根物料才自动以当前设备为根。
+        is_host = self.device_id == "host_node"
         for tree in tree_set.trees:
             root_node = tree.root_node
-            if not root_node.res_content.uuid_parent:
+            if not root_node.res_content.uuid_parent and not is_host:
                 logger.warning(f"更新无父节点物料{root_node}，自动以当前设备作为根节点")
                 root_node.res_content.parent_uuid = self.uuid
         r.command = json.dumps({"data": {"data": tree_set.dump()}, "action": "update"})
@@ -865,10 +883,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 site = additional_add_params.get("site", None)
                 spec = inspect.signature(parent_resource.assign_child_resource)
                 if "spot" in spec.parameters:
-                    ordering_dict: Dict[str, Any] = getattr(parent_resource, "_ordering")
-                    if ordering_dict:
-                        site = list(ordering_dict.keys()).index(site)
-                    additional_params["spot"] = site
+                    # 复用 set_substance 的同一套 slot/site 解析（int 索引 / "A1" 标签 / 名称匹配）；
+                    # 解析不出（含 site 为空）则回退原始 site，由父级默认排布。
+                    spot = resolve_site_spot(parent_resource, site)
+                    additional_params["spot"] = spot if spot is not None else site
                 old_parent = plr_resource.parent
                 if old_parent is not None:
                     # plr并不支持同一个deck的加载和卸载
@@ -901,6 +919,29 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 self.lab_logger().warning(
                     f"物料{plr_resource}请求挂载{tree.root_node.res_content.name}的父节点{parent_resource}[{parent_uuid}]失败！\n{traceback.format_exc()}"
                 )
+
+    async def _acquire_resource_tree_uuid_locks(self, uuids: List[str], tag: str = "") -> List[RclpyAsyncMutex]:
+        """按资源 UUID 获取本节点实例内的资源树锁。"""
+        lock_keys = sorted({str(uid) for uid in uuids if uid})
+        with self._resource_tree_uuid_locks_guard:
+            locks = [
+                self._resource_tree_uuid_locks.setdefault(uid, RclpyAsyncMutex(name=f"RT:{self.device_id}:{uid}"))
+                for uid in lock_keys
+            ]
+
+        acquired_locks = []
+        try:
+            for lock in locks:
+                await lock.acquire(self, tag=tag)
+                acquired_locks.append(lock)
+        except BaseException:
+            self._release_resource_tree_uuid_locks(acquired_locks)
+            raise
+        return acquired_locks
+
+    def _release_resource_tree_uuid_locks(self, locks: List[RclpyAsyncMutex]):
+        for lock in reversed(locks):
+            lock.release(self)
 
     async def s2c_resource_tree(self, req: SerialCommand_Request, res: SerialCommand_Response):
         """
@@ -1016,10 +1057,15 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 original_parent_resource = original_instance.parent
                 original_parent_resource_uuid = getattr(original_parent_resource, "unilabos_uuid", None)
                 target_parent_resource_uuid = tree.root_node.res_content.uuid_parent
-                not_same_parent = (
-                    original_parent_resource_uuid != target_parent_resource_uuid
-                    and original_parent_resource is not None
-                )
+                if target_parent_resource_uuid == self.uuid:
+                    not_same_parent = False
+                    original_parent_resource = None
+                    original_parent_resource_uuid = self.uuid
+                else:
+                    not_same_parent = (
+                        original_parent_resource_uuid != target_parent_resource_uuid
+                        and original_parent_resource is not None
+                    )
                 old_name = original_instance.name
                 new_name = plr_resource.name
                 parent_appended = False
@@ -1056,13 +1102,13 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     # 判断是否变更了resource_site，重新登记
                     target_site = original_instance.unilabos_extra.get("update_resource_site")
                     sites = (
-                        original_instance.parent.sites
-                        if original_instance.parent is not None and hasattr(original_instance.parent, "sites")
+                        original_parent_resource.sites
+                        if original_parent_resource is not None and hasattr(original_parent_resource, "sites")
                         else None
                     )
                     site_names = (
-                        list(original_instance.parent._ordering.keys())
-                        if original_instance.parent is not None and hasattr(original_instance.parent, "sites")
+                        list(original_parent_resource._ordering.keys())
+                        if original_parent_resource is not None and hasattr(original_parent_resource, "sites")
                         else []
                     )
                     if target_site is not None and sites is not None and site_names is not None:
@@ -1123,56 +1169,38 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
             for i in data:
                 action = i.get("action")  # remove, add, update
-                resources_uuid: List[str] = i.get("data")  # 资源数据
+                resources_uuid: List[str] = i.get("data") or []  # 资源数据
+                if not isinstance(resources_uuid, list):
+                    resources_uuid = [resources_uuid]
                 additional_add_params = i.get("additional_add_params", {})  # 额外参数
                 self.lab_logger().trace(f"[资源同步] 处理 {action}, " f"resources count: {len(resources_uuid)}")
-                tree_set = None
-                if action in ["add", "update"]:
-                    tree_set = await self.get_resource(
-                        resources_uuid=resources_uuid, with_children=True if action == "add" else False
-                    )
+                # NOTE: 当前仅按请求中显式传入的 uuid 加锁。
+                # 如果后续操作会修改未出现在请求里的父节点或子节点，需要把这些关联 uuid 一并纳入锁集合。
+                resource_locks = await self._acquire_resource_tree_uuid_locks(
+                    resources_uuid, tag=f"{action}:{','.join(map(str, resources_uuid))}"
+                )
                 try:
-                    if action == "add":
-                        if tree_set is None:
-                            raise ValueError("tree_set不能为None")
-                        plr_resources = tree_set.to_plr_resources()
-                        result, parents = _handle_add(plr_resources, tree_set, additional_add_params)
-                        parents: List[Optional["ResourcePLR"]] = [i for i in parents if i is not None]
-                        # de_dupe_parents = list(set(parents))
-                        # Fix unhashable type error for WareHouse
-                        de_dupe_parents = []
-                        _seen_ids = set()
-                        for p in parents:
-                            if id(p) not in _seen_ids:
-                                _seen_ids.add(id(p))
-                                de_dupe_parents.append(p)
-                        new_tree_set = ResourceTreeSet.from_plr_resources(de_dupe_parents)  # 去重
-                        for tree in new_tree_set.trees:
-                            if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
-                                tree.root_node.res_content.parent_uuid = self.uuid
-                        r = SerialCommand.Request()
-                        r.command = json.dumps(
-                            {"data": {"data": new_tree_set.dump()}, "action": "update"}
-                        )  # 和Update Resource一致
-                        response: SerialCommand_Response = await self._resource_clients[
-                            "c2s_update_resource_tree"
-                        ].call_async(
-                            r
-                        )  # type: ignore
-                        self.lab_logger().trace(f"确认资源云端 Add 结果: {response.response}")
-                        results.append(result)
-                    elif action == "update":
-                        if tree_set is None:
-                            raise ValueError("tree_set不能为None")
-                        plr_resources = []
-                        for tree in tree_set.trees:
-                            if tree.root_node.res_content.type == "device":
-                                plr_resources.append(tree.root_node)
-                            else:
-                                plr_resources.append(ResourceTreeSet([tree]).to_plr_resources()[0])
-                        result, original_instances = _handle_update(plr_resources, tree_set, additional_add_params)
-                        if not BasicConfig.no_update_feedback:
-                            new_tree_set = ResourceTreeSet.from_plr_resources(original_instances)  # 去重
+                    tree_set = None
+                    if action in ["add", "update"]:
+                        tree_set = await self.get_resource(
+                            resources_uuid=resources_uuid, with_children=True if action == "add" else False
+                        )
+                    try:
+                        if action == "add":
+                            if tree_set is None:
+                                raise ValueError("tree_set不能为None")
+                            plr_resources = tree_set.to_plr_resources()
+                            result, parents = _handle_add(plr_resources, tree_set, additional_add_params)
+                            parents: List[Optional["ResourcePLR"]] = [i for i in parents if i is not None]
+                            # de_dupe_parents = list(set(parents))
+                            # Fix unhashable type error for WareHouse
+                            de_dupe_parents = []
+                            _seen_ids = set()
+                            for p in parents:
+                                if id(p) not in _seen_ids:
+                                    _seen_ids.add(id(p))
+                                    de_dupe_parents.append(p)
+                            new_tree_set = ResourceTreeSet.from_plr_resources(de_dupe_parents)  # 去重
                             for tree in new_tree_set.trees:
                                 if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
                                     tree.root_node.res_content.parent_uuid = self.uuid
@@ -1185,16 +1213,44 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             ].call_async(
                                 r
                             )  # type: ignore
-                            self.lab_logger().trace(f"确认资源云端 Update 结果: {response.response}")
-                        results.append(result)
-                    elif action == "remove":
-                        result = _handle_remove(resources_uuid)
-                        results.append(result)
-                except Exception as e:
-                    error_msg = f"Error processing {action} operation: {str(e)}"
-                    self.lab_logger().error(f"[Resource Tree Update] {error_msg}")
-                    self.lab_logger().error(traceback.format_exc())
-                    results.append({"success": False, "action": action, "error": error_msg})
+                            self.lab_logger().trace(f"确认资源云端 Add 结果: {response.response}")
+                            results.append(result)
+                        elif action == "update":
+                            if tree_set is None:
+                                raise ValueError("tree_set不能为None")
+                            plr_resources = []
+                            for tree in tree_set.trees:
+                                if tree.root_node.res_content.type == "device":
+                                    plr_resources.append(tree.root_node)
+                                else:
+                                    plr_resources.append(ResourceTreeSet([tree]).to_plr_resources()[0])
+                            result, original_instances = _handle_update(plr_resources, tree_set, additional_add_params)
+                            if not BasicConfig.no_update_feedback:
+                                new_tree_set = ResourceTreeSet.from_plr_resources(original_instances)  # 去重
+                                for tree in new_tree_set.trees:
+                                    if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
+                                        tree.root_node.res_content.parent_uuid = self.uuid
+                                r = SerialCommand.Request()
+                                r.command = json.dumps(
+                                    {"data": {"data": new_tree_set.dump()}, "action": "update"}
+                                )  # 和Update Resource一致
+                                response: SerialCommand_Response = await self._resource_clients[
+                                    "c2s_update_resource_tree"
+                                ].call_async(
+                                    r
+                                )  # type: ignore
+                                self.lab_logger().trace(f"确认资源云端 Update 结果: {response.response}")
+                            results.append(result)
+                        elif action == "remove":
+                            result = _handle_remove(resources_uuid)
+                            results.append(result)
+                    except Exception as e:
+                        error_msg = f"Error processing {action} operation: {str(e)}"
+                        self.lab_logger().error(f"[Resource Tree Update] {error_msg}")
+                        self.lab_logger().error(traceback.format_exc())
+                        results.append({"success": False, "action": action, "error": error_msg})
+                finally:
+                    self._release_resource_tree_uuid_locks(resource_locks)
 
             # 返回处理结果
             result_json = {"results": results, "total": len(data)}
@@ -1327,6 +1383,288 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 time.sleep(0.05)
             self.lab_logger().info(f"资源本地增加到{target_device_id}结果: {response.response}")
         return "转运完成"
+
+    # ==================================================================
+    # 跨设备调用动作（便捷封装）
+    #
+    # 调用方只需提供 dict 入参，本类负责"选通道 + 转换"，逻辑与 host_node.send_goal 对齐：
+    #   - device_id     目标设备 ID（带不带 /devices/ 前缀都行）
+    #   - action_name   目标设备的函数名 / 动作名
+    #   - action_kwargs 入参 dict（调用方不要自己 dump，序列化由内部完成）
+    # 通道判定（自动）：目标若为该 action 暴露了**专用原生 action server**（即非
+    # UniLabJsonCommand / 非 auto- 动作）→ 走原生通道、按 Goal 字段"对应发"；否则
+    # 走 serial JSON 指令通道（_execute_driver_command）、把入参 json dumps 成 string。
+    # 结果解析两通道统一：先 convert_from_ros_msg 转成 dict，再按 return_info / success
+    # 提取真正的 return_value（与 host_node.get_result_callback 一致）。
+    # 远端执行失败时会把错误转成 DeviceActionError 在本函数调用处 raise。
+    # ==================================================================
+
+    def _resolve_remote_action_type(self, clean_device_id: str, function_name: str) -> Optional[Any]:
+        """从 ROS 图探测目标设备是否为 ``function_name`` 暴露了专用(原生) action server。
+
+        - 有：返回其 ROS Action 类型（走原生通道、字段映射，``unilabos command`` 之外的"其他"）。
+        - 无：返回 ``None``（说明它是 UniLabJsonCommand / auto 动作，走 ``_execute_driver_command``
+          串行 JSON 通道，str dumps）。
+
+        结果按 ``<clean_device_id>/<function_name>`` 缓存，避免每次调用都查图。
+        """
+        cache_key = f"{clean_device_id}/{function_name}"
+        if cache_key in self._remote_action_type_cache:
+            return self._remote_action_type_cache[cache_key]
+
+        node_name = clean_device_id.split("/")[-1]
+        namespace = f"/devices/{clean_device_id}"
+        target_action_id = f"{namespace}/{function_name}"
+        resolved: Optional[Any] = None
+        try:
+            for action_id, action_types in get_action_server_names_and_types_by_node(self, node_name, namespace):
+                if action_id == target_action_id and action_types:
+                    resolved = get_ros_type_by_msgname(action_types[0])
+                    break
+        except Exception as ex:  # 图查询失败不致命，回退到 serial 通道
+            self.lab_logger().trace(f"[call_device_action] 探测远端动作类型失败 {target_action_id}: {ex}")
+            return None
+
+        # 探测到原生类型才缓存（None 不缓存：目标可能晚于本次调用才上线，留待下次重探）
+        if resolved is not None:
+            self._remote_action_type_cache[cache_key] = resolved
+        return resolved
+
+    def _build_action_call(
+        self,
+        device_id: str,
+        action_name: str,
+        action_kwargs: Optional[Dict[str, Any]],
+        is_async_command: bool,
+        sample_uuids: Optional[Dict[str, str]],
+        action_type: Optional[Any] = None,
+    ) -> Tuple[str, ActionClient, Any]:
+        """构造跨设备动作调用的 ``(action_id, action_client, goal_msg)``。
+
+        ``action_kwargs`` 必须是 **dict**（``None`` 视为 ``{}``）；序列化由本函数内部完成，
+        调用方不要自己 ``json.dumps``。
+
+        通道判定与 ``host_node.send_goal`` 对齐：
+
+        - ``action_type`` 显式传入一个 ROS Action 类型：直接走**原生通道**（手动指定，跳过探测）。
+        - ``action_type is None``：自动探测目标动作类型——
+          * 探测到专用原生 action server → 原生通道 ``/devices/<id>/<action_name>``，
+            ``convert_to_ros_msg`` 按 Goal 字段"对应发"。
+          * 未探测到（UniLabJsonCommand / auto 动作）→ serial JSON 指令通道
+            ``/devices/<id>/_execute_driver_command``，把入参包成 json_command 后 ``json.dumps``
+            到 ``string`` 字段。
+        """
+        action_kwargs = action_kwargs or {}
+        if not isinstance(action_kwargs, dict):
+            raise ValueError(f"action_kwargs 必须是 dict，实际为 {type(action_kwargs).__name__}")
+
+        clean_device_id = (
+            device_id[len("/devices/"):] if device_id.startswith("/devices/") else device_id.lstrip("/")
+        )
+        namespace = f"/devices/{clean_device_id}"
+        function_name = action_name[5:] if action_name.startswith("auto-") else action_name
+
+        # 未显式指定类型时，从 ROS 图自动探测目标动作是否为原生 action
+        if action_type is None:
+            action_type = self._resolve_remote_action_type(clean_device_id, function_name)
+
+        if action_type is not None:
+            # 原生 ROS action 通道：按 Goal 字段"对应发"
+            action_id = f"{namespace}/{function_name}"
+            goal = convert_to_ros_msg(action_type.Goal(), action_kwargs)
+            client = self._cross_device_action_clients.get(action_id)
+            if client is None:
+                client = ActionClient(self, action_type, action_id, callback_group=self.callback_group)
+                self._cross_device_action_clients[action_id] = client
+            return action_id, client, goal
+
+        # serial JSON 指令通道（unilabos command）：入参 json dumps 到 string 字段
+        suffix = "_execute_driver_command_async" if is_async_command else "_execute_driver_command"
+        action_id = f"{namespace}/{suffix}"
+
+        json_command: Dict[str, Any] = {
+            "function_name": function_name,
+            "function_args": action_kwargs,
+            JSON_UNILABOS_PARAM: {
+                PARAM_SAMPLE_UUIDS: sample_uuids or {},
+            },
+        }
+        goal = convert_to_ros_msg(
+            StrSingleInput.Goal(),
+            {"string": json.dumps(json_command, ensure_ascii=False, cls=TypeEncoder)},
+        )
+
+        client = self._cross_device_action_clients.get(action_id)
+        if client is None:
+            client = ActionClient(self, StrSingleInput, action_id, callback_group=self.callback_group)
+            self._cross_device_action_clients[action_id] = client
+        return action_id, client, goal
+
+    def _parse_action_result(self, device_id: str, action_name: str, result_msg) -> Any:
+        """把动作结果消息解析成 python 值/字典（两通道统一，与 host_node.get_result_callback 一致）。
+
+        流程：
+
+        1. 先用 ``convert_from_ros_msg`` 把 ROS 结果消息**转成 dict**（与 callback 解析消息同一套）。
+        2. 若结果带 ``return_info``（serial 指令 / UniLab @action）：解析其中 JSON 的
+           ``suc / error / return_value``——失败抛 :class:`DeviceActionError`、成功返回 ``return_value``。
+        3. 若无 ``return_info``（纯原生 ROS action）：按 ``success`` 字段判定，返回整份结果 dict。
+
+        失败统一抛 :class:`DeviceActionError`，成功统一返回 dict / python 值。
+        """
+        result_data = convert_from_ros_msg(result_msg)
+        # 极少数纯标量结果（非 dict）直接返回
+        if not isinstance(result_data, dict):
+            return result_data
+
+        return_info_str = result_data.get("return_info")
+        if return_info_str is not None:
+            try:
+                info_dict = json.loads(return_info_str) if isinstance(return_info_str, str) else return_info_str
+            except (json.JSONDecodeError, TypeError) as ex:
+                raise DeviceActionError(
+                    device_id, action_name, f"无法解析远端 return_info: {ex}; 原始内容: {return_info_str}"
+                )
+            if not isinstance(info_dict, dict):
+                raise DeviceActionError(device_id, action_name, f"return_info 不是对象(dict): {info_dict}")
+            suc = info_dict.get("suc", result_data.get("success", True))
+            return_value = info_dict.get("return_value")
+            if not suc:
+                raise DeviceActionError(
+                    device_id,
+                    action_name,
+                    info_dict.get("error") or "远端返回失败 (suc=False)",
+                    return_value=return_value,
+                )
+            return return_value
+
+        # 无 return_info：纯原生 action，按 success 字段判定，返回整份结果 dict
+        if result_data.get("success") is False:
+            raise DeviceActionError(
+                device_id, action_name, "远端返回 success=False", return_value=result_data
+            )
+        return result_data
+
+    def call_device_action(
+        self,
+        device_id: str,
+        action_name: str,
+        action_kwargs: Optional[Dict[str, Any]] = None,
+        *,
+        action_type: Optional[Any] = None,
+        is_async_command: bool = False,
+        sample_uuids: Optional[Dict[str, str]] = None,
+        timeout: Optional[float] = 600.0,
+        server_wait_timeout: float = 10.0,
+        poll_interval: float = 0.05,
+    ) -> Any:
+        """同步调用另一台设备的动作并返回其结果（阻塞当前线程）。
+
+        适合在同步 action（线程池中执行）里调用其它设备。
+        依赖全局 MultiThreadedExecutor 在其它线程处理 ActionClient 回调，故阻塞安全。
+
+        通道**自动判定**（与 host_node.send_goal 对齐），调用方只管传 dict 入参：
+
+        - 目标动作有专用原生 action server（非 UniLabJsonCommand / 非 auto- 动作）→ 走**原生通道**
+          ``/devices/<id>/<action_name>``，``convert_to_ros_msg`` 按 Goal 字段填充。
+        - 否则 → 走 serial JSON 指令通道 ``_execute_driver_command``，入参 json dump 过去、
+          结果 json dump 回来。
+
+        可显式传 ``action_type``（某 ROS Action 类型）强制走原生通道、跳过自动探测。
+
+        结果解析两通道统一（``_parse_action_result``）：先 ``convert_from_ros_msg`` 转成 dict，
+        带 ``return_info`` 的（serial / UniLab @action）返回其中的 ``return_value``，
+        纯原生 action 返回整份结果 dict。
+
+        Args:
+            device_id: 目标设备 ID（可带或不带 /devices/ 前缀）。
+            action_name: 目标设备的函数名 / 动作名（auto- 前缀会自动去除）。
+            action_kwargs: 入参 **dict**（``None`` 视为 ``{}``）——序列化由本函数内部完成，
+                调用方不要自己先 ``json.dumps``（否则会被二次编码）。serial 通道需可 json 序列化；
+                原生通道按 Goal 字段填充。
+            action_type: 可选，原生 ROS Action 类型；传入则强制走原生通道并跳过自动探测。
+            is_async_command: 仅 serial 通道有效，是否走 _execute_driver_command_async。
+            sample_uuids: 可选的 unilabos 物料样本映射，一般留空。
+            timeout: 等待结果的总超时（秒），None 表示不超时。
+            server_wait_timeout: 等待目标动作服务就绪的超时（秒）。
+            poll_interval: 轮询间隔（秒）。
+
+        Returns:
+            python 值 / dict：带 return_info 时为远端 ``return_value``，纯原生 action 为结果转成的 dict。
+
+        Raises:
+            DeviceActionError: 服务不可用 / 目标被拒绝 / 超时 / 远端执行失败 / 结果解析失败。
+        """
+        action_id, client, goal = self._build_action_call(
+            device_id, action_name, action_kwargs, is_async_command, sample_uuids, action_type
+        )
+        if not client.wait_for_server(timeout_sec=server_wait_timeout):
+            raise DeviceActionError(
+                device_id, action_name, f"动作服务 {action_id} 不可用（等待 {server_wait_timeout}s 超时）"
+            )
+
+        self.lab_logger().debug(f"[call_device_action] -> {action_id}, args={str(action_kwargs)[:500]}")
+        send_future = client.send_goal_async(goal)
+        self._wait_future_blocking(send_future, timeout, device_id, action_name, "发送目标", poll_interval)
+        goal_handle = send_future.result()
+        if goal_handle is None or not goal_handle.accepted:
+            raise DeviceActionError(device_id, action_name, "目标被拒绝", rejected=True)
+
+        result_future = goal_handle.get_result_async()
+        self._wait_future_blocking(result_future, timeout, device_id, action_name, "等待结果", poll_interval)
+        result_wrap = result_future.result()
+        return self._parse_action_result(device_id, action_name, result_wrap.result)
+
+    async def call_device_action_async(
+        self,
+        device_id: str,
+        action_name: str,
+        action_kwargs: Optional[Dict[str, Any]] = None,
+        *,
+        action_type: Optional[Any] = None,
+        is_async_command: bool = False,
+        sample_uuids: Optional[Dict[str, str]] = None,
+        server_wait_timeout: float = 10.0,
+    ) -> Any:
+        """异步调用另一台设备的动作并返回其结果。
+
+        适合在 async action（运行在 rclpy executor 上）里调用其它设备，不阻塞执行线程。
+        参数语义与 :meth:`call_device_action` 一致（``action_kwargs`` 必须是 dict、通道自动判定、
+        可用 ``action_type`` 强制走原生通道）。
+
+        Raises:
+            DeviceActionError: 服务不可用 / 目标被拒绝 / 远端执行失败 / 结果解析失败。
+        """
+        action_id, client, goal = self._build_action_call(
+            device_id, action_name, action_kwargs, is_async_command, sample_uuids, action_type
+        )
+
+        waited = 0.0
+        while not client.server_is_ready():
+            if waited >= server_wait_timeout:
+                raise DeviceActionError(
+                    device_id, action_name, f"动作服务 {action_id} 不可用（等待 {server_wait_timeout}s 超时）"
+                )
+            await self.sleep(0.1)
+            waited += 0.1
+
+        self.lab_logger().debug(f"[call_device_action_async] -> {action_id}, args={str(action_kwargs)[:500]}")
+        goal_handle = await client.send_goal_async(goal)
+        if goal_handle is None or not goal_handle.accepted:
+            raise DeviceActionError(device_id, action_name, "目标被拒绝", rejected=True)
+
+        result_wrap = await goal_handle.get_result_async()
+        return self._parse_action_result(device_id, action_name, result_wrap.result)
+
+    def _wait_future_blocking(
+        self, future, timeout: Optional[float], device_id: str, action_name: str, stage: str, poll_interval: float
+    ) -> None:
+        """阻塞轮询 rclpy Future 直到完成或超时（用于同步上下文）。"""
+        start = time.time()
+        while not future.done():
+            if timeout is not None and (time.time() - start) > timeout:
+                raise DeviceActionError(device_id, action_name, f"{stage}超时（{timeout}s）")
+            time.sleep(poll_interval)
 
     def register_device(self):
         """向注册表中注册设备信息"""
@@ -1474,53 +1812,142 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             return
         self.lab_logger().trace(f"发布动作: {action_name}, 类型: {str_action_type}")
 
+    # 跨设备订阅时发布者可能尚未就绪，按该周期(秒)循环延迟重试解析消息类型，直到订上（不设上限）
+    _SUBSCRIBE_RETRY_PERIOD = 10.0
+
     def _setup_decorated_subscribers(self):
         """扫描 driver_instance 中带有 @subscribe 装饰器的方法并创建订阅者"""
-        subscriptions = get_all_subscriptions(self.driver_instance)
+        for method_name, method, config in get_all_subscriptions(self.driver_instance):
+            self._setup_one_subscriber(method_name, method, config)
 
-        for method_name, method, config in subscriptions:
-            topic_template = config.get("topic")
-            msg_type = config.get("msg_type")
-            qos = config.get("qos", 10)
+    def _setup_one_subscriber(self, method_name: str, method, config: dict):
+        """解析 @subscribe 目标并建立订阅；msg_type 未知时起定时器循环重试，建立成功即停。
 
-            if not topic_template:
-                self.lab_logger().warning(f"订阅方法 {method_name} 缺少 topic 配置，跳过")
-                continue
-
-            # 如果没有指定 msg_type，尝试从类型注解推断
-            if msg_type is None:
-                try:
-                    hints = get_type_hints(method)
-                    # 第一个参数是 self，第二个是 msg
-                    param_names = list(hints.keys())
-                    if param_names:
-                        msg_type = hints[param_names[0]]
-                except Exception:
-                    pass
-
-            if msg_type is None:
-                self.lab_logger().warning(f"订阅方法 {method_name} 缺少 msg_type 配置且无法从类型注解推断，跳过")
-                continue
-
-            # 替换 topic 模板中的占位符
-            topic = self._resolve_topic_template(topic_template)
-
-            self.create_ros_subscriber(topic, msg_type, method, qos)
-
-    def _resolve_topic_template(self, topic_template: str) -> str:
+        重试周期取 ``retry_interval``（未设置时用 ``_SUBSCRIBE_RETRY_PERIOD``，默认 10s），
+        不设上限、一直重试直到订上。订上之后不再判活/轮询——断线重连交给 DDS，真出问题等报错暴露。
         """
-        解析 topic 模板，替换占位符
+        try:
+            topic = self._resolve_subscription_target(config)
+        except Exception as ex:
+            self.lab_logger().warning(f"订阅方法 {method_name} 解析 topic 失败: {ex}，跳过")
+            return
 
-        支持的占位符:
-            - {device_id}: 设备ID
-            - {namespace}: 完整命名空间
+        # 先同步试一次，成功直接结束（无需定时器）
+        if self._ensure_subscription(method, config, topic):
+            return
+        if method_name in self._subscriber_monitors:
+            return
+
+        retry_interval = config.get("retry_interval")
+        period = float(retry_interval) if retry_interval is not None else self._SUBSCRIBE_RETRY_PERIOD
+
+        def _retry(_mn=method_name, _m=method, _cfg=config, _t=topic):
+            if self._ensure_subscription(_m, _cfg, _t):
+                self._cancel_subscriber_monitor(_mn)
+
+        self._subscriber_monitors[method_name] = self.create_timer(period, _retry)
+
+    def _cancel_subscriber_monitor(self, method_name: str):
+        """取消并移除某订阅的重试定时器（建立成功或放弃时调用）。"""
+        timer = self._subscriber_monitors.pop(method_name, None)
+        if timer is not None:
+            timer.cancel()
+
+    def _ensure_subscription(self, method, config, topic) -> bool:
+        """解析 msg_type 并在尚未建立时创建订阅；返回订阅是否已建立。
+
+        - 已建立 / 解析到类型并建好：返回 True。
+        - 当前查不到类型（发布者尚未就绪/已下线）：返回 False，等待下次重试。
         """
-        return topic_template.format(
-            device_id=self.device_id,
-            namespace=self.namespace,
+        if topic in self._topic_subscriber_types:
+            return True
+
+        msg_type = self._resolve_subscription_msg_type(config, topic, method)
+        if msg_type is None:
+            self.lab_logger().trace(f"订阅 {topic} 暂未识别消息类型，等待下个周期重试")
+            return False
+
+        sub = self.create_ros_subscriber(
+            topic,
+            msg_type,
+            method,
+            config.get("qos", 10),
+            trigger_when_change=config.get("trigger_when_change", False),
         )
+        if sub is None:
+            return False
+        self._topic_subscriber_types[topic] = msg_type
+        return True
 
-    def create_ros_subscriber(self, topic: str, msg_type, callback, qos: int = 10):
+    def _namespace_prefix(self) -> str:
+        """当前设备命名空间的前缀（如 /devices/pump_1 -> /devices）。"""
+        prefix = self.namespace.rsplit("/", 1)[0]
+        return prefix if prefix else ""
+
+    def _resolve_subscription_target(self, config: dict) -> str:
+        """解析跨设备订阅的完整 topic 路径。
+
+        仅支持两种写法（均为跨设备；订阅本设备自己的状态没有意义，直接用 getter 即可）：
+
+        - 绝对路径：``@subscribe("/devices/other/status")``
+        - 拆分写法：``@subscribe(device_id="other", status_name="status")``
+        """
+        topic = config.get("topic")
+        dev = config.get("device_id")
+        status_name = config.get("status_name")
+
+        # 拆分写法：device_id + status_name（都必填）
+        if dev or status_name:
+            if not dev or not status_name:
+                raise ValueError("拆分写法需要同时提供 device_id 和 status_name")
+            return f"{self._namespace_prefix()}/{dev}/{status_name}"
+
+        # 绝对路径
+        if not topic:
+            raise ValueError("缺少 topic（绝对路径）或 device_id + status_name")
+        if not topic.startswith("/"):
+            raise ValueError(f"topic 必须是绝对路径（以 / 开头），收到: {topic!r}")
+        return topic
+
+    def _resolve_subscription_msg_type(self, config: dict, topic: str, method):
+        """按优先级自动识别订阅消息类型：显式 > ROS 图 > 回调注解。"""
+        # 1) 显式指定
+        msg_type = config.get("msg_type")
+        if msg_type is not None:
+            return msg_type
+
+        # 2) ROS 图：读取该 topic 上已有发布者声明的类型
+        try:
+            for info in self.get_publishers_info_by_topic(topic):
+                type_str = getattr(info, "topic_type", "") or ""
+                if not type_str:
+                    continue
+                parts = type_str.split("/")
+                if len(parts) == 2:  # 兼容 'std_msgs/Int32' 旧写法
+                    type_str = f"{parts[0]}/msg/{parts[1]}"
+                return get_ros_type_by_msgname(type_str)
+        except Exception:
+            pass
+
+        # 3) 回调首个参数的类型注解（排除 self / return）
+        try:
+            hints = get_type_hints(method)
+            for key, hint in hints.items():
+                if key != "return":
+                    return hint
+        except Exception:
+            pass
+
+        return None
+
+    def create_ros_subscriber(
+        self,
+        topic: str,
+        msg_type,
+        callback,
+        qos: int = 10,
+        trigger_when_change: bool = False,
+    ):
         """
         创建ROS订阅者
 
@@ -1529,20 +1956,47 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             msg_type: ROS 消息类型
             callback: 回调方法（会自动绑定到 driver_instance）
             qos: QoS 深度配置
+            trigger_when_change: 为 True 时，仅当值相对上一次发生变化才触发回调
+
+        回调收到的值统一经 ``convert_from_ros_msg`` 转换：std_msgs 这类基础消息直接得到原生值
+        （如 ``Int32 -> int``），复合消息得到递归转换后的 dict，与全局其它通道（topic 发布、
+        call_device_action 结果解析）保持一致。
         """
         try:
+            # 用闭包保存上一次的值：既用于 trigger_when_change 边沿触发，也用于"仅变更时打印日志"
+            last_holder = {"has": False, "val": None}
+
+            def actual_cb(msg, _cb=callback):
+                value = convert_from_ros_msg(msg)
+                changed = (not last_holder["has"]) or (last_holder["val"] != value)
+                prev = last_holder["val"]
+                last_holder["has"] = True
+                last_holder["val"] = value
+                # 日志只在值发生变更时打印（与 trigger_when_change 无关），避免重复值刷屏、减少日志体积
+                if changed:
+                    self.lab_logger().trace(f"订阅触发 {topic}: 值变更 {prev} -> {value}")
+                # trigger_when_change=True 时，未变更则不触发用户回调（回调触发与日志解耦）
+                if trigger_when_change and not changed:
+                    return
+                return _cb(value)
+
             subscription = self.create_subscription(
                 msg_type,
                 topic,
-                callback,
+                actual_cb,
                 qos,
                 callback_group=self.callback_group,
             )
             self._topic_subscribers[topic] = subscription
             str_msg_type = str(msg_type)[8:-2] if str(msg_type).startswith("<class") else str(msg_type)
-            self.lab_logger().trace(f"订阅Topic: {topic}, 类型: {str_msg_type}, QoS: {qos}")
+            self.lab_logger().trace(
+                f"订阅Topic: {topic}, 类型: {str_msg_type}, QoS: {qos}, "
+                f"trigger_when_change: {trigger_when_change}"
+            )
+            return subscription
         except Exception as ex:
             self.lab_logger().error(f"创建订阅者 {topic} 失败，类型: {msg_type}，错误: {ex}\n{traceback.format_exc()}")
+            return None
 
     def get_real_function(self, instance, attr_name):
         if hasattr(instance.__class__, attr_name):
@@ -1914,11 +2368,16 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         self.lab_logger().debug(f"[JsonCommand] 注入 {PARAM_SAMPLE_UUIDS}: {resolved_sample_uuids}")
                     continue
 
-                # 处理单个 ResourceSlot
+                # 处理单个 ResourceSlot（单物料两种入参形态：
+                #   dict = 资源引用，按 uuid 重新 with_children 拉取；
+                #   list = 一棵树的扁平节点组（上游 handle 的 @flatten），就地装配成一个物料）
                 if arg_type == "unilabos.registry.placeholder_type:ResourceSlot":
-                    resource_data = function_args[arg_name]
-                    if isinstance(resource_data, dict) and "id" in resource_data:
-                        try:
+                    # 内部解析层：raw 值可能是 list（@flatten 节点组）或 dict（资源引用）
+                    resource_data: ResourceSlotRawInput = function_args[arg_name]
+                    try:
+                        if isinstance(resource_data, list):
+                            function_args[arg_name] = self._assemble_single_resource(resource_data)
+                        elif isinstance(resource_data, dict) and "id" in resource_data:
                             function_args[arg_name] = self._convert_resources_sync(resource_data["uuid"])[0]
                         except Exception as e:
                             # UUID 在资源树中不存在，尝试从传入的完整 dict 直接构建 PLR 资源
@@ -2052,6 +2511,28 @@ class BaseROS2DeviceNode(Node, Generic[T]):
 
         return mapped_plr_resources
 
+    def _assemble_single_resource(self, raw_nodes: List[Dict[str, Any]]) -> "ResourcePLR":
+        """把一组扁平节点 dict 装配成「单个物料」（单 ResourceSlot 的 list 输入形态）。
+
+        list 输入形态：通常来自上游 handle 的 `xxx.@flatten`（一棵树的扁平节点列表，root + children），
+        必须**恰好一个根** → 装配成一个物料；多根视为非法（一组必须变成一个物料）。
+        与 dict 形态（按 uuid 重新 with_children 拉取）相对：此处直接就地装配，不回服务端拉取。
+        """
+        if not raw_nodes:
+            raise ValueError("单物料 list 输入为空")
+        tree_set = ResourceTreeSet.from_raw_dict_list(raw_nodes)
+        if len(tree_set.trees) != 1:
+            names = [t.root_node.res_content.name for t in tree_set.trees]
+            raise ValueError(f"单物料输入要求恰好一个根物料，实际得到 {len(tree_set.trees)} 个根：{names}")
+        plr = tree_set.to_plr_resources()[0]
+        res = self.resource_tracker.figure_resource(plr, try_mode=True)
+        if len(res) == 1:
+            return res[0]
+        if len(res) > 1:
+            raise ValueError(f"单物料输入索引到多个本地实例：{res}")
+        self.lab_logger().warning(f"单物料 list 输入未索引到本地实例，使用装配实例：{getattr(plr, 'name', plr)}")
+        return plr
+
     async def _execute_driver_command_async(self, string: str):
         try:
             target = json.loads(string)
@@ -2103,19 +2584,23 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         )
                     continue
 
-                # 处理单个 ResourceSlot
+                # 处理单个 ResourceSlot（单物料两种入参形态：
+                #   dict = 资源引用，按 uuid 重新 with_children 拉取；
+                #   list = 一棵树的扁平节点组（上游 handle 的 @flatten），就地装配成一个物料）
                 _is_resource_slot = isinstance(arg_type, str) and arg_type.endswith(":ResourceSlot")
                 if _is_resource_slot:
-                    resource_data = function_args[arg_name]
-                    if isinstance(resource_data, dict) and "id" in resource_data:
-                        try:
-                            converted_resource = await self._convert_resource_async(resource_data)
-                            function_args[arg_name] = converted_resource
-                        except Exception as e:
-                            self.lab_logger().error(
-                                f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
-                            )
-                            raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
+                    # 内部解析层：raw 值可能是 list（@flatten 节点组）或 dict（资源引用）
+                    resource_data: ResourceSlotRawInput = function_args[arg_name]
+                    try:
+                        if isinstance(resource_data, list):
+                            function_args[arg_name] = self._assemble_single_resource(resource_data)
+                        elif isinstance(resource_data, dict) and "id" in resource_data:
+                            function_args[arg_name] = await self._convert_resource_async(resource_data)
+                    except Exception as e:
+                        self.lab_logger().error(
+                            f"转换ResourceSlot参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
+                        )
+                        raise JsonCommandInitError(f"ResourceSlot参数转换失败: {arg_name}")
 
                 # 处理 ResourceSlot 列表
                 elif isinstance(arg_type, tuple) and len(arg_type) == 2:
