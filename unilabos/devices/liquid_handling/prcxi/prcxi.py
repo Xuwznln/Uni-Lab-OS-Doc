@@ -624,9 +624,9 @@ class PRCXI9300Deck(Deck):
         )
 
     def _set_sites_from_positions(self, positions: Sequence[Tuple[float, float, float]]) -> None:
-        self.sites = []
+        self._sites = []
         for i, (x, y, z) in enumerate(positions):
-            self.sites.append({
+            self._sites.append({
                 "label": f"T{i + 1}",
                 "visible": True,
                 "position": {"x": float(x), "y": float(y), "z": float(z)},
