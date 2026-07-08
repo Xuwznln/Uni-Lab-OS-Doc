@@ -367,6 +367,30 @@ def bioyond_warehouse_liquid_and_lid_handling(name: str) -> WareHouse:
         removed_positions=None
     )
 
+def bioyond_warehouse_4x2x1(name: str) -> WareHouse:
+    """创建BioYond 4x2x1仓库（2行×4列×1层：A01-A04, B01-B04）
+
+    用于"5号右侧手动堆栈"（LIMS code=0027）。
+    使用行优先排序，前端展示为:
+    A01 | A02 | A03 | A04
+    B01 | B02 | B03 | B04
+    """
+    return warehouse_factory(
+        name=name,
+        num_items_x=4,  # 4列 (01-04)
+        num_items_y=2,  # 2行 (A-B)
+        num_items_z=1,  # 1层
+        dx=10.0,
+        dy=10.0,
+        dz=10.0,
+        item_dx=147.0,
+        item_dy=106.0,
+        item_dz=130.0,
+        category="warehouse",
+        col_offset=0,
+        layout="row-major",
+    )
+
 def bioyond_warehouse_1x8x4(name: str) -> WareHouse:
     """创建BioYond 8x4x1反应站堆栈（A01～D08）"""
     return warehouse_factory(

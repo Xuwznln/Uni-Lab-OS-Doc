@@ -78,6 +78,10 @@ coincellassemblyworkstation_device:
           assembly_type: 7
           battery_clean_ignore: false
           battery_pressure_mode: true
+          positive_plate_pick_mode: false
+          negative_plate_thickness_mode: false
+          thick_negative_plate_blow_time: 0
+          thin_negative_plate_blow_time: 0
           dual_drop_first_volume: 25
           dual_drop_mode: false
           dual_drop_start_timing: false
@@ -117,6 +121,22 @@ coincellassemblyworkstation_device:
                   default: true
                   description: 是否启用压力模式
                   type: boolean
+                positive_plate_pick_mode:
+                  default: false
+                  description: 正极片取料模式 (False=弹夹取料, True=水平取料)
+                  type: boolean
+                negative_plate_thickness_mode:
+                  default: false
+                  description: 负极片厚度模式 (False=厚负极片, True=薄负极片)
+                  type: boolean
+                thick_negative_plate_blow_time:
+                  default: 0
+                  description: 厚负极片吹气时间
+                  type: integer
+                thin_negative_plate_blow_time:
+                  default: 0
+                  description: 薄负极片吹气时间
+                  type: integer
                 dual_drop_first_volume:
                   default: 0
                   description: 二次滴液第一次排液体积(μL)
@@ -466,6 +486,10 @@ coincellassemblyworkstation_device:
           assembly_type: 7
           battery_clean_ignore: false
           battery_pressure_mode: true
+          positive_plate_pick_mode: false
+          negative_plate_thickness_mode: false
+          thick_negative_plate_blow_time: 0
+          thin_negative_plate_blow_time: 0
           dual_drop_first_volume: 25
           dual_drop_mode: false
           dual_drop_start_timing: false
@@ -522,6 +546,22 @@ coincellassemblyworkstation_device:
                   default: true
                   description: 是否启用压力模式
                   type: boolean
+                positive_plate_pick_mode:
+                  default: false
+                  description: 正极片取料模式 (False=弹夹取料, True=水平取料)
+                  type: boolean
+                negative_plate_thickness_mode:
+                  default: false
+                  description: 负极片厚度模式 (False=厚负极片, True=薄负极片)
+                  type: boolean
+                thick_negative_plate_blow_time:
+                  default: 0
+                  description: 厚负极片吹气时间
+                  type: integer
+                thin_negative_plate_blow_time:
+                  default: 0
+                  description: 薄负极片吹气时间
+                  type: integer
                 dual_drop_first_volume:
                   default: 25
                   description: 二次滴液第一次排液体积 (μL)

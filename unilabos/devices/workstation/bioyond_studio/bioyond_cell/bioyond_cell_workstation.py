@@ -421,7 +421,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "orderId": "...", "bottleId": "...", "bottleBarCode": "",
                 "boardId": "...", "boardBarCode": "CD2026062613",
                 "bottleInnerX": 1, "bottleInnerY": 1, "bottleInnerZ": 1,
-                "conductivity": 10, "temperature": 10, "targetTemperature": 40
+                "conductivity": 10, "conductivityUnit": "ms/cm",
+                "temperature": 10, "targetTemperature": 40
             }
             失败时返回 {}（并打 warning）。
         """
@@ -451,7 +452,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "orderCode": str, "orderId": str,
                 "boardBarCode": str, "bottleBarCode": str,
                 "bottleInnerX": int, "bottleInnerY": int, "bottleInnerZ": int,
-                "conductivity": float, "temperature": float, "targetTemperature": float,
+                "conductivity": float, "conductivityUnit": str,
+                "temperature": float, "targetTemperature": float,
                 "report_time": "YYYY-MM-DD HH:MM:SS",
             }, ...]
             查询失败的订单仍保留一行（数值字段留空 / None），便于排查。
@@ -468,7 +470,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     "orderCode": order_code, "orderId": order_id or "",
                     "boardBarCode": "", "bottleBarCode": "",
                     "bottleInnerX": None, "bottleInnerY": None, "bottleInnerZ": None,
-                    "conductivity": None, "temperature": None, "targetTemperature": None,
+                    "conductivity": None, "conductivityUnit": None,
+                    "temperature": None, "targetTemperature": None,
                     "report_time": report_time,
                 })
                 continue
@@ -482,6 +485,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "bottleInnerY": data.get("bottleInnerY"),
                 "bottleInnerZ": data.get("bottleInnerZ"),
                 "conductivity": data.get("conductivity"),
+                "conductivityUnit": data.get("conductivityUnit"),
                 "temperature": data.get("temperature"),
                 "targetTemperature": data.get("targetTemperature"),
                 "report_time": report_time,
@@ -2689,7 +2693,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             生成的 CSV 文件完整路径
 
         列：分液瓶板条码 | 分液瓶二维码 | 内部瓶位置X | 内部瓶位置Y |
-            目标温度 | 实际温度 | 电导值 | 时间
+            目标温度 | 实际温度 | 电导值 | 电导率单位 | 时间
         """
         os.makedirs(csv_export_path, exist_ok=True)
         time_date = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2703,7 +2707,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             writer.writerow([
                 "分液瓶板条码", "分液瓶二维码",
                 "内部瓶位置X", "内部瓶位置Y",
-                "目标温度", "实际温度", "电导值", "时间",
+                "目标温度", "实际温度", "电导值", "电导率单位", "时间",
             ])
             for r in results:
                 writer.writerow([
@@ -2714,6 +2718,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     r.get("targetTemperature") if r.get("targetTemperature") is not None else "",
                     r.get("temperature") if r.get("temperature") is not None else "",
                     r.get("conductivity") if r.get("conductivity") is not None else "",
+                    r.get("conductivityUnit") if r.get("conductivityUnit") is not None else "",
                     r.get("report_time", ""),
                 ])
             f.flush()
@@ -2746,7 +2751,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         列：orderCode | orderName | 配液瓶类型 | 配液瓶二维码 | 分液瓶类型 |
             分液瓶二维码 | 目标配液质量比 | 真实配液质量比 | 各试剂允差 |
-            总质量允差 | 电导值 | 目标温度 | 实际温度 | 时间
+            总质量允差 | 电导值 | 电导率单位 | 目标温度 | 实际温度 | 时间
         """
         os.makedirs(csv_export_path, exist_ok=True)
         time_date = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2795,7 +2800,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "分液瓶类型", "分液瓶二维码",
                 "目标配液质量比", "真实配液质量比",
                 "各试剂允差", "总质量允差",
-                "电导值", "目标温度", "实际温度", "时间",
+                "电导值", "电导率单位", "目标温度", "实际温度", "时间",
             ])
             for r in results:
                 bottle_barcode = r.get("bottleBarCode", "") or ""
@@ -2825,6 +2830,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     json.dumps(mass_tol, ensure_ascii=False) if mass_tol else "",
                     "" if total_tol is None else str(total_tol),
                     r.get("conductivity") if r.get("conductivity") is not None else "",
+                    r.get("conductivityUnit") if r.get("conductivityUnit") is not None else "",
                     r.get("targetTemperature") if r.get("targetTemperature") is not None else "",
                     r.get("temperature") if r.get("temperature") is not None else "",
                     r.get("report_time", export_time),

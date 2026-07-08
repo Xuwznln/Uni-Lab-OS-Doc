@@ -10,6 +10,7 @@ from unilabos.resources.bioyond.YB_warehouses import (
     bioyond_warehouse_2x2x1,  # 新增：321和43窗口 (2行×2列)
     bioyond_warehouse_1x3x3,
     bioyond_warehouse_5x3x1,  # 新增：手动传递窗仓库 (5行×3列)
+    bioyond_warehouse_4x2x1,  # 新增：5号右侧手动堆栈 (2行×4列)
     bioyond_warehouse_10x1x1,
     bioyond_warehouse_3x3x1,
     bioyond_warehouse_3x3x1_2,
@@ -116,6 +117,7 @@ class BioyondElectrolyteDeck(Deck):
             "自动堆栈-左": bioyond_warehouse_2x2x1("自动堆栈-左"),  # 2行×2列
             "自动堆栈-右": bioyond_warehouse_2x2x1("自动堆栈-右"),  # 2行×2列
             "手动传递窗右": bioyond_warehouse_5x3x1("手动传递窗右", row_offset=0),  # A01-E03
+            "5号右侧手动堆栈": bioyond_warehouse_4x2x1("5号右侧手动堆栈"),  # A01-A04, B01-B04
             "手动传递窗左": bioyond_warehouse_5x3x1("手动传递窗左", row_offset=5),  # F01-J03
             "加样头堆栈左": bioyond_warehouse_10x1x1("加样头堆栈左"),
             "加样头堆栈右": bioyond_warehouse_10x1x1("加样头堆栈右"),
@@ -132,6 +134,7 @@ class BioyondElectrolyteDeck(Deck):
             "自动堆栈-右": Coordinate(4160.0, 1142.0, 0.0),
             "手动传递窗左": Coordinate(-150.0, 423.0, 0.0),
             "手动传递窗右": Coordinate(4160.0, 423.0, 0.0),
+            "5号右侧手动堆栈": Coordinate(4600.0, 423.0, 0.0),  # 位于手动传递窗右的右侧
             "加样头堆栈左": Coordinate(385.0, 0, 0.0),
             "加样头堆栈右": Coordinate(2187.0, 0, 0.0),
 

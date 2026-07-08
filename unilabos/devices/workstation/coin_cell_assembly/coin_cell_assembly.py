@@ -1367,6 +1367,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         aluminum_foil: bool = True,
         battery_pressure_mode: bool = True,
         battery_clean_ignore: bool = False,
+        # 正负极片取料/负极片吹气参数
+        positive_plate_pick_mode: bool = False,
+        negative_plate_thickness_mode: bool = False,
+        thick_negative_plate_blow_time: int = 0,
+        thin_negative_plate_blow_time: int = 0,
         file_path: str = "/Users/sml/work",
         formulations: List[Dict] = None
     ) -> Dict[str, Any]:
@@ -1394,6 +1399,10 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             aluminum_foil: 是否使用铝箔垫片
             battery_pressure_mode: 是否启用压力模式
             battery_clean_ignore: 是否忽略电池清洁
+            positive_plate_pick_mode: 正极片取料模式 (False=弹夹取料, True=水平取料)
+            negative_plate_thickness_mode: 负极片厚度模式 (False=厚负极片, True=薄负极片)
+            thick_negative_plate_blow_time: 厚负极片吹气时间
+            thin_negative_plate_blow_time: 薄负极片吹气时间
             file_path: 实验记录保存路径
             formulations: 配方信息列表（从 create_orders.mass_ratios 获取）
                          包含 orderCode, target_mass_ratio, real_mass_ratio 等
@@ -1473,6 +1482,10 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             aluminum_foil=aluminum_foil,
             battery_pressure_mode=battery_pressure_mode,
             battery_clean_ignore=battery_clean_ignore,
+            positive_plate_pick_mode=positive_plate_pick_mode,
+            negative_plate_thickness_mode=negative_plate_thickness_mode,
+            thick_negative_plate_blow_time=thick_negative_plate_blow_time,
+            thin_negative_plate_blow_time=thin_negative_plate_blow_time,
             file_path=file_path
         )
         
@@ -1802,6 +1815,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         aluminum_foil: bool = True,
         battery_pressure_mode: bool = True,
         battery_clean_ignore: bool = False,
+        # 正负极片取料/负极片吹气参数
+        positive_plate_pick_mode: bool = False,
+        negative_plate_thickness_mode: bool = False,
+        thick_negative_plate_blow_time: int = 0,
+        thin_negative_plate_blow_time: int = 0,
         file_path: str = "/Users/sml/work"
     ) -> Dict[str, Any]:
         """
@@ -1831,6 +1849,10 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             aluminum_foil: 是否使用铝箔垫片
             battery_pressure_mode: 是否启用压力模式
             battery_clean_ignore: 是否忽略电池清洁
+            positive_plate_pick_mode: 正极片取料模式 (False=弹夹取料, True=水平取料)
+            negative_plate_thickness_mode: 负极片厚度模式 (False=厚负极片, True=薄负极片)
+            thick_negative_plate_blow_time: 厚负极片吹气时间
+            thin_negative_plate_blow_time: 薄负极片吹气时间
             file_path: 实验记录保存路径
         
         Returns:
@@ -1848,6 +1870,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         sep_plate_num = int(sep_plate_num)
         sep_plate_matrix = int(sep_plate_matrix)
         tip_box_matrix = int(tip_box_matrix)
+        thick_negative_plate_blow_time = int(thick_negative_plate_blow_time)
+        thin_negative_plate_blow_time = int(thin_negative_plate_blow_time)
         
         # 步骤1: 设置设备参数（负极片/隔膜/枪头盒/铝箔垫/压力模式等）
         logger.info("=" * 60)
@@ -1858,6 +1882,9 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         logger.info(f"  铝箔垫片: {aluminum_foil}, 压力模式: {battery_pressure_mode}")
         logger.info(f"  压制力: {assembly_pressure}")
         logger.info(f"  忽略电池清洁: {battery_clean_ignore}")
+        logger.info(f"  正极片取料模式: {'水平取料' if positive_plate_pick_mode else '弹夹取料'}")
+        logger.info(f"  负极片厚度模式: {'薄负极片' if negative_plate_thickness_mode else '厚负极片'}")
+        logger.info(f"  厚负极片吹气时间: {thick_negative_plate_blow_time}, 薄负极片吹气时间: {thin_negative_plate_blow_time}")
         logger.info("=" * 60)
         
         # 写入基础参数到PLC
@@ -1869,6 +1896,12 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self.client.use_node('COIL_ALUMINUM_FOIL').write(not aluminum_foil)
         self.client.use_node('REG_MSG_PRESS_MODE').write(not battery_pressure_mode)
         self.client.use_node('REG_MSG_BATTERY_CLEAN_IGNORE').write(battery_clean_ignore)
+        
+        # 正极片取料模式 / 负极片厚度模式 / 负极片吹气时间
+        self.client.use_node('COIL_POSITIVE_PLATE_PICK_MODE').write(positive_plate_pick_mode)
+        self.client.use_node('COIL_NEGATIVE_PLATE_THICKNESS_MODE').write(negative_plate_thickness_mode)
+        self.client.use_node('REG_MSG_THICK_NEGATIVE_PLATE_BLOW_TIME').write(thick_negative_plate_blow_time)
+        self.client.use_node('REG_MSG_THIN_NEGATIVE_PLATE_BLOW_TIME').write(thin_negative_plate_blow_time)
         
         # 设置电解液双滴模式参数
         self.client.use_node('COIL_ELECTROLYTE_DUAL_DROP_MODE').write(dual_drop_mode)
