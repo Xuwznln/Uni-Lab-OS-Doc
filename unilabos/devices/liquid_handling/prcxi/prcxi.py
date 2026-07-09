@@ -74,6 +74,19 @@ class PRCXIError(RuntimeError):
     """Lilith 返回 Success=false 时抛出的业务异常"""
 
 
+# 放液方式（服务端接收 LiquidDispensingMethodEnum 的枚举名字符串）：
+# NormalDispense=0（正常放液）、WallContactAfterDispense_Left=3（放液后靠左壁）、
+# WallContactAfterDispense_Right=4（放液后靠右壁）。
+LIQUID_METHOD_NORMAL = "NormalDispense"
+LIQUID_METHOD_WALL_LEFT = "WallContactAfterDispense_Left"
+LIQUID_METHOD_WALL_RIGHT = "WallContactAfterDispense_Right"
+
+# touch_tip 实现模式：native=原生放液后靠壁；software=通用软件式(孔内左右壁各 0 体积 aspirate)；
+# both=两者同时。仅在单次 transfer 的 touch_tip=True 时触发，且仅 9320 有意义。
+TOUCH_TIP_MODES = ("native", "software", "both")
+TOUCH_TIP_WALLS = ("follow_axis", "left", "right")
+
+
 # =============================================================
 # V04 协议支持：Board 数据模型 + 老版本→V04 布局/位置映射
 #
@@ -535,6 +548,73 @@ def worktablets_to_board(
         name=matrix_info.get("MatrixName"),
         rows=rows,
         columns=columns,
+        device_type=device_type,
+        details=details,
+    )
+
+
+def prc_sites_to_board(
+    row_nums: int,
+    column_nums: int,
+    prc_sites_config: Sequence[Dict[str, Any]],
+    *,
+    board_id: Optional[str] = None,
+    device_type: int = 0,
+) -> Board:
+    """把 deck 布局（``row_nums``/``column_nums`` + ``prc_sites_config``）构建为 V04 ``Board``。
+
+    结构对齐 ``boards.json``（``Rows/Columns/DeviceType/Details[...]``）。
+
+    ID/名称规则：
+    - ``board_id`` 缺省时生成 ``aoto_table_{机器时间(ms)}``；``Board.Id == Board.Name == board_id``。
+    - 每个 slot ``Number=x`` → ``Name="T{x}"``、``BoardDetail.Id = f"{board_id}T{x}"``、``BoardId=board_id``。
+
+    纯布局：点位/物料留空（``Position=None``、``PipettingPosList=[]``、``gripperPos=None``、
+    ``MaterialId=None``）。解析/校验（重复编号、越界、重叠、中文键兼容）复用
+    ``PRCXI9300Deck._prc_site_dicts``，仅取其归一化后的 number/row/col/跨度。
+    """
+    if board_id is None:
+        board_id = f"aoto_table_{int(time.time() * 1000)}"
+
+    # CreateTime 按 boards.json 的机器时间格式（本地时间 "YYYY-MM-DD HH:MM:SS"）；UpdateTime 留空。
+    create_time = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    row_nums = int(row_nums)
+    column_nums = int(column_nums)
+    # 复用 deck 的解析+校验；col_pitch 仅用于 deck 坐标计算，本函数用不到，传 1.0。
+    normalized = PRCXI9300Deck._prc_site_dicts(
+        list(prc_sites_config or []), row_nums, column_nums, col_pitch=1.0
+    )
+
+    details: List[BoardDetail] = []
+    for site in normalized:
+        number = int(site["number"])
+        details.append(
+            BoardDetail(
+                id=f"{board_id}T{number}",
+                create_time=create_time,
+                board_id=board_id,
+                name=f"T{number}",
+                number=number,
+                row=int(site["row"]),
+                column=int(site["col"]),
+                row_span=int(site["row_span"]),
+                column_span=int(site["col_span"]),
+                volume=0,
+                material_id=None,
+                module=0,
+                position=None,
+                pipetting_pos_list=[],
+                gripper_pos=None,
+            )
+        )
+
+    return Board(
+        id=board_id,
+        create_time=create_time,
+        name=board_id,
+        rows=row_nums,
+        columns=column_nums,
         device_type=device_type,
         details=details,
     )
@@ -1748,6 +1828,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         rail_interval=0,
         rail_width=27.5,
         prc_sites_config: Optional[List[Dict[str, Any]]] = None,
+        touch_tip_mode: Literal["native", "software", "both"] = "native",
+        touch_tip_wall: Literal["follow_axis", "left", "right"] = "follow_axis",
         x_increase = -0.003636,
         y_increase = -0.003636,
         x_offset = -1.8,
@@ -1792,6 +1874,20 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
         # prc_sites_config：自定义板位（编号/行/列/跨行/跨列）；为空则用 origin 网格。
         self._prc_sites_config: List[Dict[str, Any]] = list(prc_sites_config or [])
+
+        # touch_tip 模式与靠壁方向（仅单次 touch_tip=True 时生效）。
+        touch_tip_mode = str(touch_tip_mode or "native").strip().lower()
+        touch_tip_wall = str(touch_tip_wall or "follow_axis").strip().lower()
+        if touch_tip_mode not in TOUCH_TIP_MODES:
+            raise ValueError(f"touch_tip_mode 必须是 {TOUCH_TIP_MODES}，收到 {touch_tip_mode!r}")
+        if touch_tip_wall not in TOUCH_TIP_WALLS:
+            raise ValueError(f"touch_tip_wall 必须是 {TOUCH_TIP_WALLS}，收到 {touch_tip_wall!r}")
+        self.touch_tip_mode = touch_tip_mode
+        self.touch_tip_wall = touch_tip_wall
+        # software/both 才需要抽象层的软件式贴壁能力；native 走 dispense 靠壁，不用它。
+        self.support_touch_tip = touch_tip_mode in ("software", "both")
+        # 本次 transfer 是否勾选 touch_tip（由 transfer_liquid 设置、finally 清除）。
+        self._touch_tip_pending: bool = False
 
         self._start_rail = start_rail
         self._column_nums = column_nums
@@ -1940,6 +2036,33 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             except Exception as e:
                 print(f"[PRCXI] 自动挂载到 deck 失败: name={top_name}, site={site or '?'}, err={e}")
 
+    def _build_prc_sites_board(self, number_to_material: Dict[int, Dict[str, Any]]):
+        """按 prc_sites_config 构建带物料的板位（Board）+ 兼容 MatrixInfo。
+
+        - 布局（列主序/跨格/编号）来自 prc_sites_config，board_id 为 ``aoto_table_{ms}``；
+        - 每个 Detail 的 MaterialId/Volume 取自 ``number_to_material``（按板位号匹配）；
+        - 点位仍由调用方通过 ``update_pipetting_position`` 单独下发（不放进 Board）。
+        返回 ``(board, matrix_info)``。
+        """
+        board = prc_sites_to_board(
+            getattr(self, "_row_nums", 4),
+            getattr(self, "_column_nums", 6),
+            self._prc_sites_config,
+        )
+        for detail in board.details:
+            mat = number_to_material.get(int(detail.number), {}) or {}
+            detail.material_id = mat.get("uuid")
+            detail.volume = int(mat.get("Volume", 0) or 0)
+        matrix_info = {
+            "MatrixId": board.id,
+            "MatrixName": board.name,
+            "WorkTablets": [
+                {"Number": d.number, "Code": d.name, "Material": number_to_material.get(int(d.number), {})}
+                for d in board.details
+            ],
+        }
+        return board, matrix_info
+
     def _match_and_create_matrix(self):
         """首次 transfer_liquid 时，根据 deck 上的 resource 自动匹配耗材并创建 WorkTabletMatrix。"""
         backend = self._unilabos_backend
@@ -2038,14 +2161,35 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         if not work_tablets:
             return
 
-        matrix_id = str(uuid.uuid4())
-        matrix_info = {
-            "MatrixId": matrix_id,
-            "MatrixName": "matrix_" + str(time.time()),
-            "WorkTablets": work_tablets + 
-                            [{"Number": number, "Material": {"uuid": "730067cf07ae43849ddf4034299030e9"}} for number in slot_none],
+        # Number→Material 映射（含空槽默认废液槽物料）。
+        default_material = {"uuid": "730067cf07ae43849ddf4034299030e9"}
+        number_to_material: Dict[int, Dict[str, Any]] = {
+            int(wt["Number"]): (wt.get("Material") or {}) for wt in work_tablets
         }
-        res = api.add_WorkTablet_Matrix(matrix_info)
+        for number in slot_none:
+            number_to_material.setdefault(int(number), dict(default_material))
+
+        # 有 prc_sites_config（9320 + v04）时：真实下发按 prc_sites 布局构建的板位
+        # （列主序/跨格/aoto_table_ 命名），并把匹配到的物料写入各 Detail；
+        # 否则沿用原有 WorkTablets → worktablets_to_board 路径。
+        use_prc_board = (
+            bool(getattr(self, "_prc_sites_config", None))
+            and getattr(backend, "is_9320", False)
+            and getattr(api, "is_v04", False)
+        )
+        if use_prc_board:
+            board, matrix_info = self._build_prc_sites_board(number_to_material)
+            matrix_id = board.id
+            res = api.add_board_v04(board)
+        else:
+            matrix_id = str(uuid.uuid4())
+            matrix_info = {
+                "MatrixId": matrix_id,
+                "MatrixName": "matrix_" + str(time.time()),
+                "WorkTablets": work_tablets +
+                                [{"Number": number, "Material": dict(default_material)} for number in slot_none],
+            }
+            res = api.add_WorkTablet_Matrix(matrix_info)
         if res.get("Success"):
             backend.matrix_id = matrix_id
             backend.matrix_info = matrix_info
@@ -2054,6 +2198,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             pipetting_positions = []
             claw_positions = []
             seen_numbers = set()
+            skipped_uncalibrated: List[int] = []
             for child in self.deck.children:
                 number = self._get_slot_number(child, deck=self.deck)
 
@@ -2061,10 +2206,16 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     continue
                 seen_numbers.add(number)
 
+                # 该 slot 未标定（缺 calibration_points → _slot_prcxi_positions 无此号）时，
+                # 跳过点位计算；矩阵/板位照常创建，仅不下发该 slot 的移液/夹爪点位。
+                slot_pos = self._slot_prcxi_positions.get(number)
+                if slot_pos is None:
+                    skipped_uncalibrated.append(number)
+                    continue
+
                 # 若 slot 上有 module/plate_adapter，下钻到其上承载的板(leaf)并取支撑层真实高度。
                 leaf, support, support_layer = self._slot_plate_and_support(child)
                 plate_h = self._recover_height(leaf)
-                slot_pos = self._slot_prcxi_positions[number]
 
                 # 夹爪：物理基准 = 支撑层高度 + 板中心；加 claw 帧偏移后 clamp 到 max_z_claw（不截到
                 # deck_z，否则 +offset 会把所有矮板都顶到 deck_z 导致夹爪高度对板高/支撑不敏感）。
@@ -2092,14 +2243,15 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "XPos": pip_pos.x,
                     "YPos": pip_pos.y,
                     "ZPos": max(min(pip_pos.z, self.max_z_pipetting),0), 
-                    "X_Left": half_x,
-                    "X_Right": half_x,
+                    # 靠壁 XYZ 为绝对值：左/右壁 = 孔中心 X ∓ 半宽；ZAgainstTheWall 为绝对 Z。
+                    "X_Left": pip_pos.x - half_x,
+                    "X_Right": pip_pos.x + half_x,
                     "ZAgainstTheWall": pip_pos.z - z_wall,
                     "X2Pos": pip_pos.x + self.right_2_left.x,
                     "Y2Pos": pip_pos.y + self.right_2_left.y,
                     "Z2Pos": max(min((pip_pos.z + self.right_2_left.z), self.max_z_pipetting),0),
-                    "X2_Left": half_x,
-                    "X2_Right": half_x,
+                    "X2_Left": (pip_pos.x + self.right_2_left.x) - half_x,
+                    "X2_Right": (pip_pos.x + self.right_2_left.x) + half_x,
                     "ZAgainstTheWall2": pip_pos.z - z_wall,
                 })
 
@@ -2135,14 +2287,15 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "XPos": min(max(0, pip_x), self.deck_x),
                     "YPos": min(max(0, pip_y), self.deck_y),
                     "ZPos": max(min(pip_z, self.max_z_pipetting), 0),
-                    "X_Left": default_half_x,
-                    "X_Right": default_half_x,
+                    # 靠壁 XYZ 为绝对值：左/右壁 = 孔中心 X ∓ 半宽；ZAgainstTheWall 为绝对 Z。
+                    "X_Left": pip_x - default_half_x,
+                    "X_Right": pip_x + default_half_x,
                     "ZAgainstTheWall": pip_z,
                     "X2Pos": pip_x + self.right_2_left.x,
                     "Y2Pos": pip_y + self.right_2_left.y,
                     "Z2Pos": max(min((pip_z + self.right_2_left.z), self.max_z_pipetting), 0),
-                    "X2_Left": default_half_x,
-                    "X2_Right": default_half_x,
+                    "X2_Left": (pip_x + self.right_2_left.x) - default_half_x,
+                    "X2_Right": (pip_x + self.right_2_left.x) + default_half_x,
                     "ZAgainstTheWall2": pip_z,
                 })
 
@@ -2154,6 +2307,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if claw_positions:
                 api.update_clamp_jaw_position(matrix_id, claw_positions)
 
+            if skipped_uncalibrated:
+                print(
+                    f"[PRCXI] 以下板位未标定（缺 calibration_points），已跳过点位下发："
+                    f"{sorted(set(skipped_uncalibrated))}；矩阵/板位已创建 matrix_id={matrix_id}。"
+                    f"如需移液点位，请在 config 提供 calibration_points。"
+                )
 
             print(f"Auto-matched materials and created matrix: {matrix_id}")
         else:
@@ -2530,6 +2689,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         # 必须在 _match_and_create_matrix 之前判断：
         # _match_and_create_matrix 会在首次 transfer 时创建 matrix_id，若在其后判断会恒为「有值」。
         skip_pipetting_position_recalc = self._should_skip_runtime_position_recalc()
+        # 记录本次 transfer 是否需要 touch_tip，供 backend.dispense（native 靠壁）与
+        # touch_tip() 重写（software 贴壁）读取；在 finally 中清除。
+        self._touch_tip_pending = bool(touch_tip)
         if not self._first_transfer_done:
             self._match_and_create_matrix()
             self._first_transfer_done = True
@@ -2716,14 +2878,15 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "XPos": pip_pos.x,
                     "YPos": pip_pos.y,
                     "ZPos": pip_pos.z,
-                    "X_Left": half_x,
-                    "X_Right": half_x,
+                    # 靠壁 XYZ 为绝对值：左/右壁 = 孔中心 X ∓ 半宽；ZAgainstTheWall 为绝对 Z。
+                    "X_Left": pip_pos.x - half_x,
+                    "X_Right": pip_pos.x + half_x,
                     "ZAgainstTheWall": pip_pos.z - z_wall,
                     "X2Pos": pip_pos.x + self.right_2_left.x,
                     "Y2Pos": pip_pos.y + self.right_2_left.y,
                     "Z2Pos": pip_pos.z + self.right_2_left.z,
-                    "X2_Left": half_x,
-                    "X2_Right": half_x,
+                    "X2_Left": (pip_pos.x + self.right_2_left.x) - half_x,
+                    "X2_Right": (pip_pos.x + self.right_2_left.x) + half_x,
                     "ZAgainstTheWall2": pip_pos.z - z_wall,
                 })
             if change_slots_positions:
@@ -2776,12 +2939,18 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         finally:
             if _flatten_8_to_1:
                 self._tip_reuse_by_liquid_name = _prev_tip_reuse
+            self._touch_tip_pending = False
 
     async def custom_delay(self, seconds=0, msg=None):
         return await super().custom_delay(seconds, msg)
 
     async def touch_tip(self, targets: Sequence[Container]):
-        return await super().touch_tip(targets)
+        # 仅当本次 transfer 勾选 touch_tip 且模式包含软件式(software/both)时，
+        # 才执行抽象层的「孔内左右壁各做一次 0 体积 aspirate」贴壁；
+        # native 模式走 dispense 的放液后靠壁（见 backend.dispense），此处不动。
+        if self._touch_tip_pending and self.touch_tip_mode in ("software", "both"):
+            return await super().touch_tip(targets)
+        return None
 
     def _route_axis_and_channels(self, use_channels):
         """pip_setting 路由：从 use_channels 推轴写入 ``backend._active_axis``，返回 PLR 合法的
@@ -2813,9 +2982,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         use_channels: Optional[List[int]] = [0],
     ):
         use_channels = self._route_axis_and_channels(use_channels)
-        return await self._unilabos_backend.mix(
+        if self.step_mode:
+            await self.create_protocol(f"mix{time.time()}")
+        res = await self._unilabos_backend.mix(
             targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys, use_channels
         )
+        if self.step_mode:
+            await self.run_protocol()
+        return res
 
     def iter_tips(self, tip_racks: Sequence[TipRack]) -> Iterator[Resource]:
         return super().iter_tips(tip_racks)
@@ -3731,8 +3905,29 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             plate_or_hole=f"H{hole_col}-{ny},T{PlateNo}",
             hole_numbers="1,2,3,4,5,6,7,8",
             assist_fun1=assist_fun1,
+            liquid_method=self._resolve_dispense_liquid_method(axis),
         )
         self.steps_todo_list.append(step)
+
+    def _resolve_dispense_liquid_method(self, axis: str) -> str:
+        """按 handler 的 touch_tip 模式/方向决定本次放液的 LiquidDispensingMethod。
+
+        仅当本次 transfer 勾选 touch_tip（``handler._touch_tip_pending``）且模式为
+        native/both 时，返回「放液后靠壁」；否则返回正常放液（行为不变）。
+        靠壁方向：follow_axis → 左轴靠左壁、右轴靠右壁；left/right → 固定一侧。
+        """
+        handler = self._handler
+        pending = bool(getattr(handler, "_touch_tip_pending", False)) if handler else False
+        mode = str(getattr(handler, "touch_tip_mode", "native") or "native") if handler else "native"
+        wall = str(getattr(handler, "touch_tip_wall", "follow_axis") or "follow_axis") if handler else "follow_axis"
+        if not pending or mode not in ("native", "both"):
+            return LIQUID_METHOD_NORMAL
+        if wall == "left":
+            return LIQUID_METHOD_WALL_LEFT
+        if wall == "right":
+            return LIQUID_METHOD_WALL_RIGHT
+        # follow_axis
+        return LIQUID_METHOD_WALL_RIGHT if str(axis).strip().lower() == "right" else LIQUID_METHOD_WALL_LEFT
 
     async def pick_up_tips96(self, pickup: PickupTipRack):
         raise NotImplementedError("The PRCXI backend does not support the 96 head.")
@@ -4239,6 +4434,12 @@ class PRCXI9300Api:
             return self.call("IMatrix", method, [matrix])
         columns = 4 if self.is_9320 else 3
         board = worktablets_to_board(dict(matrix), columns=columns)
+        return self.call("IMatrix", "AddWorkTabletMatrix_V04", [board.to_rpc_dict()])
+
+    def add_board_v04(self, board: "Board"):
+        """v04：直接下发已构建好的 ``Board``（用于 prc_sites 自定义布局的真实下发）。"""
+        if not self.is_v04:
+            raise PRCXIError("add_board_v04 仅 v04 可用；legacy 请用 add_WorkTablet_Matrix。")
         return self.call("IMatrix", "AddWorkTabletMatrix_V04", [board.to_rpc_dict()])
 
     def Load(

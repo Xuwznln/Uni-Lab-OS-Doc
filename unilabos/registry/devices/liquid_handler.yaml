@@ -10512,6 +10512,12 @@ liquid_handler.prcxi:
           type: string
         timeout:
           type: number
+        touch_tip_mode:
+          default: native
+          type: string
+        touch_tip_wall:
+          default: follow_axis
+          type: string
         x_increase:
           default: -0.003636
           type: string

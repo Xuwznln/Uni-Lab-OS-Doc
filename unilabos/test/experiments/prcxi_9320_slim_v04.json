@@ -25,7 +25,7 @@
                 "setup": false,
                 "is_9320": true,
                 "timeout": 10,
-                "matrix_id": "e5f8fe93-cc58-4518-90f5-15682407724b",
+                "matrix_id": "aoto_table_1783588005649",
                 "simulator": false,
                 "channel_num": 8,
                 "protocol_version": "v04",
@@ -61,7 +61,9 @@
                     "left": {"vol": 1000, "channels": 1},
                     "right": {"vol": 300, "channels": 8}
                 },
-                "step_mode": false
+                "step_mode": false,
+                "touch_tip_mode": "native",
+                "touch_tip_wall": "follow_axis"
             },
             "data": {
                 "reset_ok": true

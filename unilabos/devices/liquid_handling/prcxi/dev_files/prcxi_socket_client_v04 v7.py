@@ -1236,29 +1236,32 @@ if __name__ == "__main__":
     print("错误码：", parse_data(err))
 
     # 3. 获取方案列表
-    print("\n=== 3. 获取方案列表 ===")
-    solutions_resp = sdk.solution_get_list()
-    solutions = parse_data(solutions_resp) or []
-    print(f"共 {len(solutions)} 个方案")
-    for item in solutions[:5]:
-        print("  -", item.get("PlanName"))
+    # print("\n=== 3. 获取方案列表 ===")
+    # solutions_resp = sdk.solution_get_list()
+    # solutions = parse_data(solutions_resp) or []
+    # print(f"共 {len(solutions)} 个方案")
+    # for item in solutions[:5]:
+    #     print("  -", item.get("PlanName"))
 
     # 4. 获取布局（V04 _V04 接口）
     print("\n=== 4. 获取布局 ===")
     boards_resp = sdk.matrix_get_all()
     boards = parse_data(boards_resp) or []
     print(f"共 {len(boards)} 个布局")
+    # # 把 boards 存成一个 JSON 文件
+    # with open("boards.json", "w", encoding="utf-8") as f:
+    #     json.dump(boards, f, ensure_ascii=False, indent=4)
 
     # 5. 加载方案 + 步骤状态（新版按【方案名】加载）
-    if solutions:
-        plan_name = solutions[0].get("PlanName")
-        print(f"\n=== 5. 加载方案：{plan_name} ===")
-        load_resp = sdk.solution_load(plan_name)
-        if as_bool(load_resp):
-            steps = parse_data(sdk.machine_state_get_step_list()) or []
-            for s in steps:
-                print(f"  步骤{s.get('SequenceNumber')} {s.get('Name')}："
-                      f"{StepState.describe(s.get('State'))}")
+    # if solutions:
+    #     plan_name = solutions[0].get("PlanName")
+    #     print(f"\n=== 5. 加载方案：{plan_name} ===")
+    #     load_resp = sdk.solution_load(plan_name)
+    #     if as_bool(load_resp):
+    #         steps = parse_data(sdk.machine_state_get_step_list()) or []
+    #         for s in steps:
+    #             print(f"  步骤{s.get('SequenceNumber')} {s.get('Name')}："
+    #                   f"{StepState.describe(s.get('State'))}")
 
     # 6. 运行控制（默认注释，避免误动作；确认安全后再放开）
     # print("\n=== 6. 启动 ===")
@@ -1270,14 +1273,17 @@ if __name__ == "__main__":
     # print("复位：", as_bool(sdk.automation_reset()))
 
     # 7. 布局写操作示例（默认注释）
-    # board = Board(name="SC9320", rows=4, columns=7, device_type="SC9320")
+    # board = Board(name="测试布局0709", rows=4, columns=7, device_type="SC9320")
+    # board.id = "test_board_0709"
+    # board.create_time = "2026-07-09 10:00:00"
+
     # print("新增布局：", sdk.matrix_add(board))
     # print("更新位置：", sdk.matrix_update_position(board))
     # print("删除布局：", sdk.matrix_remove("<matrix_id>"))
 
     # 8. v7 添加方案示例（默认注释；会在服务端 project 目录生成 XML）
     if boards:
-        board_id = boards[0].get("Id")
+        board_id = boards[-1].get("Id")
         add_resp = sdk.solution_add_v04(
             "python_v7_demo",
             board_id,
