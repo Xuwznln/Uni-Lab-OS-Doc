@@ -709,9 +709,24 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
         type_info = reverse_type_mapping.get(material.get("typeName"))
         className = type_info[0] if type_info else "RegularContainer"
 
-        # 为同名物料添加唯一后缀
+        # 为同名物料生成全局唯一名（方案1）：优先用 Bioyond 库位码，其次物料 id 短码，
+        # 最后回退批内计数器后缀。避免多块同名物料（如多块"细胞培养板"）在 deck 上重名，
+        # 导致跨报送逐块重放时 PLR deck 抛 "already assigned to deck"（同名物料被删后放不回）。
+        # 注意：物料身份匹配走 unilabos_extra.material_bioyond_id（见下），与此显示名解耦；
+        # 回传 Bioyond 时也优先取 material_bioyond_name（见 resource_plr_to_bioyond），
+        # 因此这里的后缀只影响 deck 上的显示名，不影响身份识别与回传原始名。
         base_name = material["name"]
-        if base_name in name_counter:
+        primary_code = ""
+        for _loc in material.get("locations") or []:
+            if isinstance(_loc, dict) and _loc.get("code"):
+                primary_code = str(_loc["code"]).strip()
+                break
+        material_id_for_name = str(material.get("id") or "").strip()
+        if primary_code:
+            unique_name = f"{base_name}@{primary_code}"
+        elif material_id_for_name:
+            unique_name = f"{base_name}#{material_id_for_name[:8]}"
+        elif base_name in name_counter:
             name_counter[base_name] += 1
             unique_name = f"{base_name}_{name_counter[base_name]}"
         else:
@@ -960,7 +975,8 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                 "typeId": type_info[1],
                 "code": "",
                 "barCode": "",
-                "name": resource.name,
+                # 回传优先用 Bioyond 原始名（避免 deck 唯一化后缀如 "@4-14" 污染奔耀物料名）
+                "name": (getattr(resource, "unilabos_extra", {}) or {}).get("material_bioyond_name") or resource.name,
                 "unit": "个",
                 "quantity": 1,
                 "details": [],
@@ -1072,8 +1088,11 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                 logger.warning(f"[PLR→Bioyond] 资源 {resource.name} 的 model '{resource.model}' 不在 type_mapping 中，使用默认烧杯类型")
                 type_id = "3a14196b-24f2-ca49-9081-0cab8021bf1a"  # 默认使用烧杯类型
 
-            # 🔥 提取物料名称：优先使用液体名称，否则使用资源名称
-            material_name = resource.name if hasattr(resource, "name") else ""
+            # 🔥 提取物料名称：优先 Bioyond 原始名（隔离 deck 唯一化后缀），其次液体名，最后资源名
+            material_name = (
+                (getattr(resource, "unilabos_extra", {}) or {}).get("material_bioyond_name")
+                or (resource.name if hasattr(resource, "name") else "")
+            )
             if hasattr(bottle, "tracker") and bottle.tracker.liquids:
                 # 如果有液体，使用液体的名称
                 first_liquid_name = bottle.tracker.liquids[0][0]
