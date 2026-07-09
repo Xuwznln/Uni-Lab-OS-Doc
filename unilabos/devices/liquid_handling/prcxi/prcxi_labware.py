@@ -38,7 +38,7 @@ def PRCXI_BioER_96_wellplate(name: str) -> PRCXI9300Plate:
         size_z=44.2,
         model="PRCXI_BioER_96_wellplate",
         category="plate",
-        material_info={"uuid": "ca877b8b114a4310b429d1de4aae96ee", "Code": "ZX-019-2.2", "Name": "2.2ml 深孔板", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "ca877b8b114a4310b429d1de4aae96ee", "id_v4": "655a416b-5cca-40ef-b027-7c88390c3226", "Code": "ZX-019-2.2", "Name": "2.2ml 深孔板", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=12,
@@ -86,7 +86,7 @@ def PRCXI_nest_1_troughplate(name: str) -> PRCXI9300Plate:
         lid=None,
         model="PRCXI_Nest_1_troughplate",
         category="plate",
-        material_info={"uuid": "04211a2dc93547fe9bf6121eac533650", "Code": "ZX-58-10000", "Name": "储液槽", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "04211a2dc93547fe9bf6121eac533650", "id_v4": "715db443-eb6a-49dc-97bc-fbd24fc87053", "Code": "ZX-58-10000", "Name": "储液槽", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=1,
@@ -111,7 +111,7 @@ def PRCXI_BioRad_384_wellplate(name: str) -> PRCXI9300Plate:
         size_z=10.4,
         model="BioRad_384_wellplate_50uL_Vb",
         category="plate",
-        material_info={"uuid": "853dcfb6226f476e8b23c250217dc7da", "Code": "q3", "Name": "384板", "SupplyType": 1},
+        material_info={"uuid": "853dcfb6226f476e8b23c250217dc7da", "id_v4": "cdb99ebd-392d-4cc7-8325-90fbed9dd1cf", "Code": "q3", "Name": "384板", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=24,
@@ -160,7 +160,7 @@ def PRCXI_AGenBio_4_troughplate(name: str) -> PRCXI9300Plate:
         lid=None,
         model="PRCXI_AGenBio_4_troughplate",
         category="plate",
-        material_info={"uuid": "01953864f6f140ccaa8ddffd4f3e46f5", "Code": "sdfrth654", "Name": "4道储液槽", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "01953864f6f140ccaa8ddffd4f3e46f5", "id_v4": "d43d5fe1-49e7-49f0-8ca0-9ccd7d5db81c", "Code": "sdfrth654", "Name": "4道储液槽", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=4,
@@ -202,7 +202,7 @@ def PRCXI_nest_12_troughplate(name: str) -> PRCXI9300Plate:
         lid=None,
         model="PRCXI_nest_12_troughplate",
         category="plate",
-        material_info={"uuid": "0f1639987b154e1fac78f4fb29a1f7c1", "Code": "12道储液槽", "Name": "12道储液槽", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "0f1639987b154e1fac78f4fb29a1f7c1", "id_v4": "4958b4b8-f9a7-40f4-83d6-38b8ec9def9c", "Code": "12道储液槽", "Name": "12道储液槽", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=12,
@@ -227,7 +227,7 @@ def PRCXI_CellTreat_96_wellplate(name: str) -> PRCXI9300Plate:
         size_z=14.3,
         model="PRCXI_CellTreat_96_wellplate",
         category="plate",
-        material_info={"uuid": "b05b3b2aafd94ec38ea0cd3215ecea8f", "Code": "ZX-78-096", "Name": "细菌培养皿", "materialEnum": 4, "SupplyType": 1},
+        material_info={"uuid": "b05b3b2aafd94ec38ea0cd3215ecea8f", "id_v4": "", "Code": "ZX-78-096", "Name": "细菌培养皿", "materialEnum": 4, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=12,
@@ -257,7 +257,7 @@ def PRCXI_PCR_Plate_200uL_nonskirted(name: str) -> PRCXI9300Plate:
         plate_type="non-skirted",
         model="PRCXI_PCR_Plate_200uL_nonskirted",
         category="plate",
-        material_info={"uuid": "73bb9b10bc394978b70e027bf45ce2d3", "Code": "ZX-023-0.2", "Name": "0.2ml PCR 板", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "73bb9b10bc394978b70e027bf45ce2d3", "id_v4": "2e92b9a1-bee6-44dc-a01b-4f5f41455411", "Code": "ZX-023-0.2", "Name": "0.2ml PCR 板", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=12,
@@ -287,7 +287,7 @@ def PRCXI_PCR_Plate_200uL_semiskirted(name: str) -> PRCXI9300Plate:
         plate_type="semi-skirted",
         model="PRCXI_PCR_Plate_200uL_semiskirted",
         category="plate",
-        material_info={"uuid": "73bb9b10bc394978b70e027bf45ce2d3", "Code": "ZX-023-0.2", "Name": "0.2ml PCR 板", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "73bb9b10bc394978b70e027bf45ce2d3", "id_v4": "2e92b9a1-bee6-44dc-a01b-4f5f41455411", "Code": "ZX-023-0.2", "Name": "0.2ml PCR 板", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=12,
@@ -317,7 +317,7 @@ def PRCXI_PCR_Plate_200uL_skirted(name: str) -> PRCXI9300Plate:
         plate_type="skirted",
         model="PRCXI_PCR_Plate_200uL_skirted",
         category="plate",
-        material_info={"uuid": "73bb9b10bc394978b70e027bf45ce2d3", "Code": "ZX-023-0.2", "Name": "0.2ml PCR 板", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "73bb9b10bc394978b70e027bf45ce2d3", "id_v4": "2e92b9a1-bee6-44dc-a01b-4f5f41455411", "Code": "ZX-023-0.2", "Name": "0.2ml PCR 板", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=12,
@@ -346,7 +346,7 @@ def PRCXI_96_DeepWell(name: str) -> PRCXI9300Plate:
         size_z=45.0,
         model="PRCXI_96_DeepWell",
         category="plate",
-        material_info={"uuid": "57b1e4711e9e4a32b529f3132fc5931f", "Code": "q2", "Name": "96深孔板", "materialEnum": 0},
+        material_info={"uuid": "57b1e4711e9e4a32b529f3132fc5931f", "id_v4": "b186e62b-8564-4313-962c-17ec53996d85", "Code": "q2", "Name": "96深孔板", "materialEnum": 0},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=12,
@@ -375,7 +375,7 @@ def PRCXI_48_DeepWell(name: str) -> PRCXI9300Plate:
         size_z=44.0,
         model="PRCXI_48_DeepWell",
         category="plate",
-        material_info={"uuid": "026c5d5cf3d94e56b4e16b7fb53a995b", "Code": "22", "Name": "48孔深孔板", "SupplyType": 1},
+        material_info={"uuid": "026c5d5cf3d94e56b4e16b7fb53a995b", "id_v4": "246f3047-9615-4ee4-90eb-14b307b0024b", "Code": "22", "Name": "48孔深孔板", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Well,
             num_items_x=6,
@@ -406,7 +406,7 @@ def PRCXI_10ul_eTips(name: str) -> PRCXI9300TipRack:
         size_y=85.48,
         size_z=58.0,
         model="PRCXI_10ul_eTips",
-        material_info={"uuid": "068b3815e36b4a72a59bae017011b29f", "Code": "ZX-001-10+", "Name": "10μL加长 Tip头", "SupplyType": 1},
+        material_info={"uuid": "068b3815e36b4a72a59bae017011b29f", "id_v4": "7ea82dbc-6549-42d0-b43d-7ef6246114f7", "Code": "ZX-001-10+", "Name": "10μL加长 Tip头", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             TipSpot,
             num_items_x=12,
@@ -433,7 +433,7 @@ def PRCXI_300ul_Tips(name: str) -> PRCXI9300TipRack:
         size_y=85.48,
         size_z=58.0,
         model="PRCXI_300ul_Tips",
-        material_info={"uuid": "076250742950465b9d6ea29a225dfb00", "Code": "ZX-001-300", "Name": "300μL Tip头", "SupplyType": 1},
+        material_info={"uuid": "076250742950465b9d6ea29a225dfb00", "id_v4": "5e655766-9888-4d7f-aa43-0a8dff606cb8", "Code": "ZX-001-300", "Name": "300μL Tip头", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             TipSpot,
             num_items_x=12,
@@ -459,7 +459,7 @@ def PRCXI_1250uL_Tips(name: str) -> PRCXI9300TipRack:
         size_y=85.48,
         size_z=98.0,
         model="PRCXI_1250uL_Tips",
-        material_info={"uuid": "7960f49ddfe9448abadda89bd1556936", "Code": "ZX-001-1250", "Name": "1250μL Tip头", "SupplyType": 1},
+        material_info={"uuid": "7960f49ddfe9448abadda89bd1556936", "id_v4": "a50356db-80ee-484d-b350-b56ad15b486c", "Code": "ZX-001-1250", "Name": "1250μL Tip头", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             TipSpot,
             num_items_x=12,
@@ -485,7 +485,7 @@ def PRCXI_10uL_Tips(name: str) -> PRCXI9300TipRack:
         size_y=85.48,
         size_z=58.0,
         model="PRCXI_10uL_Tips",
-        material_info={"uuid": "45f2ed3ad925484d96463d675a0ebf66", "Code": "ZX-001-10", "Name": "10μL Tip头", "SupplyType": 1},
+        material_info={"uuid": "45f2ed3ad925484d96463d675a0ebf66", "id_v4": "7ea82dbc-6549-42d0-b43d-7ef6246114f7", "Code": "ZX-001-10", "Name": "10μL Tip头", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             TipSpot,
             num_items_x=12,
@@ -511,7 +511,7 @@ def PRCXI_1000uL_Tips(name: str) -> PRCXI9300TipRack:
         size_y=85.48,
         size_z=98.0,
         model="PRCXI_1000uL_Tips",
-        material_info={"uuid": "80652665f6a54402b2408d50b40398df", "Code": "ZX-001-1000", "Name": "1000μL Tip头", "SupplyType": 1},
+        material_info={"uuid": "80652665f6a54402b2408d50b40398df", "id_v4": "ea707dab-b7d6-40d9-80b6-1f1167997259", "Code": "ZX-001-1000", "Name": "1000μL Tip头", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             TipSpot,
             num_items_x=12,
@@ -537,7 +537,7 @@ def PRCXI_200uL_Tips(name: str) -> PRCXI9300TipRack:
         size_y=82.12,
         size_z=66.9,
         model="PRCXI_200uL_Tips",
-        material_info={"uuid": "7a73bb9e5c264515a8fcbe88aed0e6f7", "Code": "ZX-001-200", "Name": "200μL Tip头", "SupplyType": 1},
+        material_info={"uuid": "7a73bb9e5c264515a8fcbe88aed0e6f7", "id_v4": "0ee5ccee-557f-4ecf-bc58-72460240292a", "Code": "ZX-001-200", "Name": "200μL Tip头", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             TipSpot,
             num_items_x=12,
@@ -563,7 +563,7 @@ def PRCXI_50uL_tips(name: str) -> PRCXI9300TipRack:
         size_y=85.48,
         size_z=58.0,
         model="PRCXI_50uL_tips",
-        material_info={"uuid": "", "Code": "", "Name": "", "SupplyType": 1},
+        material_info={"uuid": "", "id_v4": "32103665-0677-4004-8e43-5108c44278ff", "Code": "", "Name": "", "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             TipSpot,
             num_items_x=12,
@@ -593,7 +593,7 @@ def PRCXI_trash(name: str = "trash") -> PRCXI9300Trash:
         size_z=89.5,
         category="trash",
         model="PRCXI_trash",
-        material_info={"uuid": "730067cf07ae43849ddf4034299030e9", "Code": "q1", "Name": "废弃槽", "materialEnum": 0, "SupplyType": 1}
+        material_info={"uuid": "730067cf07ae43849ddf4034299030e9", "id_v4": "238c27e6-0ad7-4718-81cc-03f80b993de7", "Code": "q1", "Name": "废弃槽", "materialEnum": 0, "SupplyType": 1}
     )
 def PRCXI_trash_x2(name: str = "trash") -> PRCXI9300Trash:
     """
@@ -606,7 +606,7 @@ def PRCXI_trash_x2(name: str = "trash") -> PRCXI9300Trash:
         size_z=89.5,
         category="trash",
         model="PRCXI_trash_x2",
-        material_info={"uuid": "1111", "Code": "1111", "Name": "废弃槽X2", "materialEnum": 0, "SupplyType": 1}
+        material_info={"uuid": "1111", "id_v4": "238c27e6-0ad7-4718-81cc-03f80b993de7", "Code": "1111", "Name": "废弃槽X2", "materialEnum": 0, "SupplyType": 1}
     )
 # =========================================================================
 # Tube Racks
@@ -623,7 +623,7 @@ def PRCXI_EP_Adapter(name: str) -> PRCXI9300TubeRack:
         size_z=42.66,
         model="PRCXI_EP_Adapter",
         category="tube_rack",
-        material_info={"uuid": "e146697c395e4eabb3d6b74f0dd6aaf7", "Code": "1", "Name": "ep适配器", "materialEnum": 0, "SupplyType": 1},
+        material_info={"uuid": "e146697c395e4eabb3d6b74f0dd6aaf7", "id_v4": "b9bfc405-53a2-4501-84a0-06f9afc9c7d3", "Code": "1", "Name": "ep适配器", "materialEnum": 0, "SupplyType": 1},
         ordered_items=create_ordered_items_2d(
             Tube,
             num_items_x=6,
@@ -654,7 +654,7 @@ def PRCXI_2_Reagent_Rack_50mL(name: str) -> PRCXI9300TubeRack:
         model="PRCXI_2_Reagent_Rack_50mL",
         category="tube_rack",
         material_info={
-            "uuid": "094e9130a0a24913bdebb8a2bdcf457a",
+            "uuid": "094e9130a0a24913bdebb8a2bdcf457a", "id_v4": "",
             "Code": "zx-004-50",
             "SupplyType": 1,
             "Name": "试剂2",
@@ -708,7 +708,7 @@ def PRCXI_8_Reagent_Rack_10mL(name: str) -> PRCXI9300TubeRack:
         model="PRCXI_8_Reagent_Rack_10mL",
         category="tube_rack",
         material_info={
-            "uuid": "6086fe7ae1434a0e80fa4194ef3eb0e1",
+            "uuid": "6086fe7ae1434a0e80fa4194ef3eb0e1", "id_v4": "",
             "Code": "zx-003-10",
             "SupplyType": 1,
             "Name": "试剂1",
@@ -757,7 +757,7 @@ def PRCXI_Tip1250_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=128.0,
         size_y=85.0,
         size_z=20.0,
-        material_info={"uuid": "3b6f33ffbf734014bcc20e3c63e124d4", "Code": "ZX-58-1250", "Name": "Tip头适配器 1250uL", "SupplyType": 2}
+        material_info={"uuid": "3b6f33ffbf734014bcc20e3c63e124d4", "id_v4": "", "Code": "ZX-58-1250", "Name": "Tip头适配器 1250uL", "SupplyType": 2}
     )
 def PRCXI_Tip300_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ Code: ZX-58-300 """
@@ -766,7 +766,7 @@ def PRCXI_Tip300_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=127.0,
         size_y=85.0,
         size_z=81.0,
-        material_info={"uuid": "7c822592b360451fb59690e49ac6b181", "Code": "ZX-58-300", "Name": "ZHONGXI 适配器 300uL", "SupplyType": 2}
+        material_info={"uuid": "7c822592b360451fb59690e49ac6b181", "id_v4": "", "Code": "ZX-58-300", "Name": "ZHONGXI 适配器 300uL", "SupplyType": 2}
     )
 def PRCXI_Tip10_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ Code: ZX-58-10 """
@@ -775,7 +775,7 @@ def PRCXI_Tip10_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=128.0,
         size_y=85.0,
         size_z=72.3,
-        material_info={"uuid": "8cc3dce884ac41c09f4570d0bcbfb01c", "Code": "ZX-58-10", "Name": "吸头10ul 适配器", "SupplyType": 2}
+        material_info={"uuid": "8cc3dce884ac41c09f4570d0bcbfb01c", "id_v4": "", "Code": "ZX-58-10", "Name": "吸头10ul 适配器", "SupplyType": 2}
     )
 def PRCXI_PCR_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ 对应 JSON Code: ZX-58-0001 (全裙边 PCR适配器) """
@@ -785,7 +785,7 @@ def PRCXI_PCR_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_y=85.48,
         size_z=21.69,
         model="PRCXI_PCR_Adapter",
-        material_info={"uuid": "4a043a07c65a4f9bb97745e1f129b165", "Code": "ZX-58-0001", "Name": "全裙边 PCR适配器", "materialEnum": 3, "SupplyType": 2}
+        material_info={"uuid": "4a043a07c65a4f9bb97745e1f129b165", "id_v4": "", "Code": "ZX-58-0001", "Name": "全裙边 PCR适配器", "materialEnum": 3, "SupplyType": 2}
     )
 def PRCXI_Reservoir_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ Code: ZX-ADP-001 """
@@ -794,7 +794,7 @@ def PRCXI_Reservoir_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=133.0,
         size_y=91.8,
         size_z=70.0,
-        material_info={"uuid": "6bdfdd7069df453896b0806df50f2f4d", "Code": "ZX-ADP-001", "Name": "储液槽 适配器", "SupplyType": 2}
+        material_info={"uuid": "6bdfdd7069df453896b0806df50f2f4d", "id_v4": "", "Code": "ZX-ADP-001", "Name": "储液槽 适配器", "SupplyType": 2}
     )
 def PRCXI_Deep300_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ Code: ZX-002-300 """
@@ -803,7 +803,7 @@ def PRCXI_Deep300_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=136.4,
         size_y=93.8,
         size_z=96.0,
-        material_info={"uuid": "9a439bed8f3344549643d6b3bc5a5eb4", "Code": "ZX-002-300", "Name": "300ul深孔板适配器", "SupplyType": 2}
+        material_info={"uuid": "9a439bed8f3344549643d6b3bc5a5eb4", "id_v4": "", "Code": "ZX-002-300", "Name": "300ul深孔板适配器", "SupplyType": 2}
     )
 def PRCXI_Deep10_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ Code: ZX-002-10 """
@@ -812,7 +812,7 @@ def PRCXI_Deep10_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=136.5,
         size_y=93.8,
         size_z=121.5,
-        material_info={"uuid": "4dc8d6ecfd0449549683b8ef815a861b", "Code": "ZX-002-10", "Name": "10ul专用深孔板适配器", "SupplyType": 2}
+        material_info={"uuid": "4dc8d6ecfd0449549683b8ef815a861b", "id_v4": "", "Code": "ZX-002-10", "Name": "10ul专用深孔板适配器", "SupplyType": 2}
     )
 def PRCXI_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ Code: Fhh478 """
@@ -821,7 +821,7 @@ def PRCXI_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=120.0,
         size_y=90.0,
         size_z=86.0,
-        material_info={"uuid": "adfabfffa8f24af5abfbba67b8d0f973", "Code": "Fhh478", "Name": "适配器", "SupplyType": 2}
+        material_info={"uuid": "adfabfffa8f24af5abfbba67b8d0f973", "id_v4": "", "Code": "Fhh478", "Name": "适配器", "SupplyType": 2}
     )
 def PRCXI_30mm_Adapter(name: str) -> PRCXI9300PlateAdapter:
     """ Code: ZX-58-30 """
@@ -830,7 +830,7 @@ def PRCXI_30mm_Adapter(name: str) -> PRCXI9300PlateAdapter:
         size_x=132.0,
         size_y=93.5,
         size_z=30.0,
-        material_info={"uuid": "a0757a90d8e44e81a68f306a608694f2", "Code": "ZX-58-30", "Name": "30mm适配器", "SupplyType": 2}
+        material_info={"uuid": "a0757a90d8e44e81a68f306a608694f2", "id_v4": "", "Code": "ZX-58-30", "Name": "30mm适配器", "SupplyType": 2}
     )
 
 PRCXI_TEMPLATE_FACTORY_KINDS: List[Tuple[Callable[..., Any], str]] = [

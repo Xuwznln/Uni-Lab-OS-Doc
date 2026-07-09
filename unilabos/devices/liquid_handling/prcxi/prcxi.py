@@ -500,12 +500,25 @@ class Board:
         }
 
 
+def _pick_material_id(material: Dict[str, Any], is_v04: bool) -> Optional[str]:
+    """按接口版本选择 BoardDetail.MaterialId。
+
+    - v04：物料主键是 ``id_v4``（如 ``238c27e6-...``）；仅当数据缺 id_v4 时才回退 uuid 兜底。
+    - legacy(03)：只用 ``uuid``（老服务端不认 id_v4，即使物料字典里带了也不能用）。
+    """
+    material = material or {}
+    if is_v04:
+        return material.get("id_v4") or material.get("uuid")
+    return material.get("uuid")
+
+
 def worktablets_to_board(
     matrix_info: Dict[str, Any],
     *,
     columns: int = 4,
     rows: Optional[int] = None,
     device_type: str = "SC9320",
+    is_v04: bool = True,
 ) -> Board:
     """把老版本 ``MatrixInfo``（``MatrixId/MatrixName/WorkTablets[...]``）映射为 V04 ``Board``。
 
@@ -535,7 +548,8 @@ def worktablets_to_board(
                 number=number,
                 row=row,
                 column=col,
-                material_id=material.get("uuid"),
+                # 按接口版本选 id：v04 用 id_v4，legacy(03) 用 uuid。
+                material_id=_pick_material_id(material, is_v04),
                 volume=int(material.get("Volume", 0) or 0),
             )
         )
@@ -566,15 +580,16 @@ def prc_sites_to_board(
     结构对齐 ``boards.json``（``Rows/Columns/DeviceType/Details[...]``）。
 
     ID/名称规则：
-    - ``board_id`` 缺省时生成 ``aoto_table_{机器时间(ms)}``；``Board.Id == Board.Name == board_id``。
-    - 每个 slot ``Number=x`` → ``Name="T{x}"``、``BoardDetail.Id = f"{board_id}T{x}"``、``BoardId=board_id``。
+    - ``board_id`` 缺省时生成 ``auto_board_{机器时间(ms)}``；``Board.Id == Board.Name == board_id``。
+    - 每个 slot ``Number=x`` → ``Name="T{x}"``、``BoardDetail.Id = f"{board_id}_T{x}"``、``BoardId=board_id``。
+    - ``Position.Id = f"{board_id}_T{x}_pose"``。
 
     纯布局：点位/物料留空（``Position=None``、``PipettingPosList=[]``、``gripperPos=None``、
     ``MaterialId=None``）。解析/校验（重复编号、越界、重叠、中文键兼容）复用
     ``PRCXI9300Deck._prc_site_dicts``，仅取其归一化后的 number/row/col/跨度。
     """
     if board_id is None:
-        board_id = f"aoto_table_{int(time.time() * 1000)}"
+        board_id = f"auto_board_{int(time.time() * 1000)}"
 
     # CreateTime 按 boards.json 的机器时间格式（本地时间 "YYYY-MM-DD HH:MM:SS"）；UpdateTime 留空。
     create_time = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -589,9 +604,10 @@ def prc_sites_to_board(
     details: List[BoardDetail] = []
     for site in normalized:
         number = int(site["number"])
+        detail_id = f"{board_id}_T{number}"
         details.append(
             BoardDetail(
-                id=f"{board_id}T{number}",
+                id=detail_id,
                 create_time=create_time,
                 board_id=board_id,
                 name=f"T{number}",
@@ -603,7 +619,15 @@ def prc_sites_to_board(
                 volume=0,
                 material_id=None,
                 module=0,
-                position=None,
+                # Position 元数据壳（对齐 boards.json，避免 UpdatePosition 因 Position=null 异常）；
+                # 真正 XY 仍在 PipettingPosList，由 update_pipetting_position 回写。
+                position=BoardPosition(
+                    id=f"{detail_id}_pose",
+                    board_detail_id=detail_id,
+                    board_name=f"T{number}",
+                    board_number=number,
+                    create_time=create_time,
+                ),
                 pipetting_pos_list=[],
                 gripper_pos=None,
             )
@@ -620,52 +644,95 @@ def prc_sites_to_board(
     )
 
 
-def legacy_pipetting_pos_to_v04(pos: Dict[str, Any]) -> Tuple[List[PipettingPos], List[str]]:
+# AxisEnum 对齐 boards.json / AxisNum：Left=1 / Right=2 / ClampingJaw=3（int）。
+_AXIS_ENUM_INT = {"Left": 1, "Right": 2, "ClampingJaw": 3}
+
+# VolumeEnum(MaterialVolumeEnum) 不能为 null（服务端会报转换失败）；缺省用 1000（μL）。
+_DEFAULT_VOLUME_ENUM = 1000
+
+
+def _to_volume_enum(value: Any) -> int:
+    """把体积归一化为合法 MaterialVolumeEnum(int)；空/非法回退默认值，避免下发 null。"""
+    try:
+        v = int(float(value))
+    except (TypeError, ValueError):
+        return _DEFAULT_VOLUME_ENUM
+    return v if v > 0 else _DEFAULT_VOLUME_ENUM
+
+
+def legacy_pipetting_pos_to_v04(
+    pos: Dict[str, Any],
+    *,
+    create_time: Optional[str] = None,
+    board_detail_id: Optional[str] = None,
+) -> Tuple[List[PipettingPos], List[str]]:
     """把老版本移液位置 dict（左/右轴合一）映射为 V04 ``PipettingPos`` 列表（左、右各一）。
 
-    ⚠ ``bottleMouthPosition`` / ``SafeAltitude`` 无老版本对应字段，映射存在不确定性，
-    需真机联调定稿；这里做保守映射并把无对应字段作为 warning 返回。
-    """
-    warnings: List[str] = []
+    字段结构对齐 ``boards.json`` 的 ``PipettingPosList``：每条位置都带 ``Id``/``CreateTime``/
+    ``BoardDetailId``，``AxisEnum`` 用 int（Left=1/Right=2）。``bottleMouthPosition`` /
+    ``SafeAltitude`` 若入参 pos 带同名键则读取，否则置 0。
 
-    def _f(key: str) -> float:
+    靠壁三个字段 ``leftWallDistance/rightWallDistance/zWallDistance`` 恒置 0（对齐古DNA）：
+    native 贴壁由放液步骤的 ``LiquidDispensingMethod`` 控制，与板位这三个字段无关。
+    """
+    ct = create_time or time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _f(key: str, default: float = 0.0) -> float:
         try:
-            return float(pos.get(key, 0.0) or 0.0)
+            return float(pos.get(key, default) or default)
         except (TypeError, ValueError):
-            return 0.0
+            return default
 
     left = PipettingPos(
-        axis_enum="Left",
+        id=str(uuid.uuid4()),
+        create_time=ct,
+        board_detail_id=board_detail_id,
+        axis_enum=_AXIS_ENUM_INT["Left"],
+        volume_enum=_to_volume_enum(pos.get("VolumeEnum")),
         x_position=_f("XPos"),
         y_position=_f("YPos"),
+        bottle_mouth_position=_f("bottleMouthPosition"),
         bottle_bottom_position=_f("ZPos"),
-        left_wall_distance=_f("X_Left"),
-        right_wall_distance=_f("X_Right"),
-        z_wall_distance=_f("ZAgainstTheWall"),
+        left_wall_distance=0.0,
+        right_wall_distance=0.0,
+        z_wall_distance=0.0,
+        safe_altitude=_f("SafeAltitude"),
     )
     result = [left]
 
     if any(k in pos for k in ("X2Pos", "Y2Pos", "Z2Pos")):
         result.append(
             PipettingPos(
-                axis_enum="Right",
+                id=str(uuid.uuid4()),
+                create_time=ct,
+                board_detail_id=board_detail_id,
+                axis_enum=_AXIS_ENUM_INT["Right"],
+                volume_enum=_to_volume_enum(pos.get("VolumeEnum2", pos.get("VolumeEnum"))),
                 x_position=_f("X2Pos"),
                 y_position=_f("Y2Pos"),
+                bottle_mouth_position=_f("bottleMouthPosition2"),
                 bottle_bottom_position=_f("Z2Pos"),
-                left_wall_distance=_f("X2_Left"),
-                right_wall_distance=_f("X2_Right"),
-                z_wall_distance=_f("ZAgainstTheWall2"),
+                left_wall_distance=0.0,
+                right_wall_distance=0.0,
+                z_wall_distance=0.0,
+                safe_altitude=_f("SafeAltitude2"),
             )
         )
 
-    warnings.append(
-        "PipettingPos.bottleMouthPosition/SafeAltitude 无老版本对应字段，已置 0，需真机联调核对"
-    )
-    return result, warnings
+    return result, []
 
 
-def legacy_claw_pos_to_v04(pos: Dict[str, Any]) -> GripperPos:
-    """把老版本夹爪位置 dict（``XPos/YPos/ZPos``）映射为 V04 ``GripperPos``。"""
+def legacy_claw_pos_to_v04(
+    pos: Dict[str, Any],
+    *,
+    create_time: Optional[str] = None,
+    board_detail_id: Optional[str] = None,
+) -> GripperPos:
+    """把老版本夹爪位置 dict（``XPos/YPos/ZPos``）映射为 V04 ``GripperPos``。
+
+    对齐 ``boards.json`` 的 ``gripperPos``：带 ``Id``/``CreateTime``/``BoardDetailId``，
+    ``AxisEnum`` 用 int（ClampingJaw=3）。
+    """
 
     def _f(key: str) -> float:
         try:
@@ -674,7 +741,10 @@ def legacy_claw_pos_to_v04(pos: Dict[str, Any]) -> GripperPos:
             return 0.0
 
     return GripperPos(
-        axis_enum="ClampingJaw",
+        id=str(uuid.uuid4()),
+        create_time=create_time or time.strftime("%Y-%m-%d %H:%M:%S"),
+        board_detail_id=board_detail_id,
+        axis_enum=_AXIS_ENUM_INT["ClampingJaw"],
         x_position=_f("XPos"),
         y_position=_f("YPos"),
         z_position=_f("ZPos"),
@@ -715,11 +785,16 @@ def merge_positions_into_board(
         except (TypeError, ValueError):
             continue
         if number in pip_by_num:
-            pip_list, w = legacy_pipetting_pos_to_v04(pip_by_num[number])
+            # CreateTime 在此刻（输入/回写时）赋值；BoardDetailId 取该 Detail 的 Id。
+            pip_list, w = legacy_pipetting_pos_to_v04(
+                pip_by_num[number], board_detail_id=detail.get("Id")
+            )
             detail["PipettingPosList"] = [p.to_rpc_dict() for p in pip_list]
             warnings.extend(w)
         if number in claw_by_num:
-            detail["gripperPos"] = legacy_claw_pos_to_v04(claw_by_num[number]).to_rpc_dict()
+            detail["gripperPos"] = legacy_claw_pos_to_v04(
+                claw_by_num[number], board_detail_id=detail.get("Id")
+            ).to_rpc_dict()
 
     board_dict["Details"] = details
     return board_dict, sorted(set(warnings))
@@ -2036,10 +2111,66 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             except Exception as e:
                 print(f"[PRCXI] 自动挂载到 deck 失败: name={top_name}, site={site or '?'}, err={e}")
 
+    @staticmethod
+    def _is_success(res: Any) -> bool:
+        """兼容 V04/legacy 返回：``True`` 或 ``{"Success": True}`` 均视为成功。"""
+        if res is True:
+            return True
+        if isinstance(res, dict):
+            return bool(res.get("Success"))
+        return False
+
+    def _slot_prcxi_xy(self, number: int) -> Tuple[float, float]:
+        """槽位在 PRCXI 机器坐标系的 (x, y) 参考点。
+
+        有标定（``calibration_points`` → ``_slot_prcxi_positions``）时用标定值(A)；
+        否则按 deck 该槽 site 足迹中心套用 ``plr_pos_to_prcxi`` 的无标定几何公式推算(C，近似)。
+        """
+        cal = self._slot_prcxi_positions.get(number)
+        if cal is not None:
+            return cal
+        cx = cy = 0.0
+        deck = self.deck
+        if isinstance(deck, PRCXI9300Deck):
+            try:
+                loc = deck.get_slot_location(number)
+                idx = deck.slot_index(number)
+                site = deck.sites[idx] if idx is not None else None
+                w = float((site or {}).get("size", {}).get("width", 0.0))
+                h = float((site or {}).get("size", {}).get("height", 0.0))
+                cx = loc.x + w / 2.0
+                cy = loc.y + h / 2.0
+            except Exception:
+                cx = cy = 0.0
+        prcxi_x = (self.deck_x - cx) * (1 + self.x_increase) + self.x_offset + self.xy_coupling * (self.deck_y - cy)
+        prcxi_y = (self.deck_y - cy) * (1 + self.y_increase) + self.y_offset
+        return (prcxi_x, prcxi_y)
+
+    def _log_v04_board(self, matrix_id: str, tag: str = "") -> None:
+        """拉取当前板位并打印每个 Detail 的坐标写入情况（排查坐标是否已下发）。"""
+        api = self._unilabos_backend.api_client
+        if not getattr(api, "is_v04", False):
+            return
+        try:
+            board = api.matrix_by_id(matrix_id)
+        except Exception as e:
+            print(f"[PRCXI][v04][board {tag}] 拉取板位失败 matrix_id={matrix_id}: {e}")
+            return
+        if not isinstance(board, dict) or not board:
+            print(f"[PRCXI][v04][board {tag}] matrix_id={matrix_id} 未拉到有效板位")
+            return
+        details = board.get("Details") or []
+        summary = " ".join(
+            f"T{d.get('Number')}:pip={len(d.get('PipettingPosList') or [])}"
+            f",pos={'Y' if d.get('Position') else 'N'},grip={'Y' if d.get('gripperPos') else 'N'}"
+            for d in details
+        )
+        print(f"[PRCXI][v04][board {tag}] matrix_id={matrix_id} details={len(details)} | {summary}")
+
     def _build_prc_sites_board(self, number_to_material: Dict[int, Dict[str, Any]]):
         """按 prc_sites_config 构建带物料的板位（Board）+ 兼容 MatrixInfo。
 
-        - 布局（列主序/跨格/编号）来自 prc_sites_config，board_id 为 ``aoto_table_{ms}``；
+        - 布局（列主序/跨格/编号）来自 prc_sites_config，board_id 为 ``auto_board_{ms}``；
         - 每个 Detail 的 MaterialId/Volume 取自 ``number_to_material``（按板位号匹配）；
         - 点位仍由调用方通过 ``update_pipetting_position`` 单独下发（不放进 Board）。
         返回 ``(board, matrix_info)``。
@@ -2049,9 +2180,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             getattr(self, "_column_nums", 6),
             self._prc_sites_config,
         )
+        is_v04 = bool(getattr(self._unilabos_backend.api_client, "is_v04", False))
         for detail in board.details:
             mat = number_to_material.get(int(detail.number), {}) or {}
-            detail.material_id = mat.get("uuid")
+            # 按接口版本选 id：v04 用 id_v4，legacy(03) 用 uuid。
+            detail.material_id = _pick_material_id(mat, is_v04)
             detail.volume = int(mat.get("Volume", 0) or 0)
         matrix_info = {
             "MatrixId": board.id,
@@ -2078,11 +2211,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         # 按 materialEnum 分组: {enum_value: [material, ...]}
         material_dict = {}
         material_uuid_map = {}
+        material_id_v4_map = {}
         for m in material_list:
             enum_key = m.get("materialEnum")
             material_dict.setdefault(enum_key, []).append(m)
-            if "uuid" in m:
+            if m.get("uuid"):
                 material_uuid_map[m["uuid"]] = m
+            if m.get("id_v4"):
+                material_id_v4_map[m["id_v4"]] = m
 
         work_tablets = []
         # 空闲槽位以「实际板位号」为准（兼容 prc_sites_config 的非连续编号）。
@@ -2098,9 +2234,17 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if number is None:
                 continue
 
-            # 如果 resource 已有 Material UUID，直接使用
+            # 如果 resource 已声明具体物料，优先精确匹配（V04 用 id_v4，legacy 用 uuid）。
             if hasattr(resource, "_unilabos_state") and "Material" in getattr(resource, "_unilabos_state", {}):
-                mat_uuid = resource._unilabos_state["Material"].get("uuid")
+                stored_material = resource._unilabos_state["Material"] or {}
+                # V04：耗材主键是 id_v4，服务端没有 legacy uuid，必须靠 id_v4 命中。
+                mat_id_v4 = stored_material.get("id_v4")
+                if mat_id_v4 and mat_id_v4 in material_id_v4_map:
+                    work_tablets.append({"Number": number, "Material": material_id_v4_map[mat_id_v4]})
+                    if number in slot_none:
+                        slot_none.remove(number)
+                    continue
+                mat_uuid = stored_material.get("uuid")
                 if mat_uuid and mat_uuid in material_uuid_map:
                     work_tablets.append({"Number": number, "Material": material_uuid_map[mat_uuid]})
                     if number in slot_none:
@@ -2161,16 +2305,19 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         if not work_tablets:
             return
 
-        # Number→Material 映射（含空槽默认废液槽物料）。
-        default_material = {"uuid": "730067cf07ae43849ddf4034299030e9"}
+        # Number→Material 映射。
+        default_material = {"uuid": "730067cf07ae43849ddf4034299030e9", "id_v4": "238c27e6-0ad7-4718-81cc-03f80b993de7", "Code": "q1", "Name": "废弃槽", "materialEnum": 0, "SupplyType": 1}
+        is_v04 = bool(getattr(api, "is_v04", False))
         number_to_material: Dict[int, Dict[str, Any]] = {
             int(wt["Number"]): (wt.get("Material") or {}) for wt in work_tablets
         }
-        for number in slot_none:
-            number_to_material.setdefault(int(number), dict(default_material))
+        # 仅 legacy(03) 给空槽兜底废弃槽物料；V04 下空槽保持为空，不自动放 238c27e6...。
+        if not is_v04:
+            for number in slot_none:
+                number_to_material.setdefault(int(number), dict(default_material))
 
         # 有 prc_sites_config（9320 + v04）时：真实下发按 prc_sites 布局构建的板位
-        # （列主序/跨格/aoto_table_ 命名），并把匹配到的物料写入各 Detail；
+        # （列主序/跨格/auto_board_ 命名），并把匹配到的物料写入各 Detail；
         # 否则沿用原有 WorkTablets → worktablets_to_board 路径。
         use_prc_board = (
             bool(getattr(self, "_prc_sites_config", None))
@@ -2181,16 +2328,21 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             board, matrix_info = self._build_prc_sites_board(number_to_material)
             matrix_id = board.id
             res = api.add_board_v04(board)
+            self._log_v04_board(matrix_id, tag="after-create")
         else:
             matrix_id = str(uuid.uuid4())
+            # V04 下空槽用空物料（不放 238c27e6...），legacy 才兜底废弃槽物料。
+            empty_tablets = [
+                {"Number": number, "Material": ({} if is_v04 else dict(default_material))}
+                for number in slot_none
+            ]
             matrix_info = {
                 "MatrixId": matrix_id,
                 "MatrixName": "matrix_" + str(time.time()),
-                "WorkTablets": work_tablets +
-                                [{"Number": number, "Material": dict(default_material)} for number in slot_none],
+                "WorkTablets": work_tablets + empty_tablets,
             }
             res = api.add_WorkTablet_Matrix(matrix_info)
-        if res.get("Success"):
+        if self._is_success(res):
             backend.matrix_id = matrix_id
             backend.matrix_info = matrix_info
 
@@ -2198,7 +2350,10 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             pipetting_positions = []
             claw_positions = []
             seen_numbers = set()
-            skipped_uncalibrated: List[int] = []
+            # 各轴的 VolumeEnum 取自 pip_setting（left/right 的 vol）；缺省回退默认，避免下发 null。
+            _ps = getattr(self, "pip_setting", None) or {}
+            left_vol_enum = _to_volume_enum((_ps.get("left") or {}).get("vol"))
+            right_vol_enum = _to_volume_enum((_ps.get("right") or {}).get("vol"))
             for child in self.deck.children:
                 number = self._get_slot_number(child, deck=self.deck)
 
@@ -2206,12 +2361,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     continue
                 seen_numbers.add(number)
 
-                # 该 slot 未标定（缺 calibration_points → _slot_prcxi_positions 无此号）时，
-                # 跳过点位计算；矩阵/板位照常创建，仅不下发该 slot 的移液/夹爪点位。
-                slot_pos = self._slot_prcxi_positions.get(number)
-                if slot_pos is None:
-                    skipped_uncalibrated.append(number)
-                    continue
+                # 槽位机器坐标参考点：有标定→A(标定值)，否则→C(几何推算)。
+                # 移液位对带孔板走 plr_pos_to_prcxi（同样 A/C 自动），因此无标定也能出移液坐标。
+                slot_pos = self._slot_prcxi_xy(number)
 
                 # 若 slot 上有 module/plate_adapter，下钻到其上承载的板(leaf)并取支撑层真实高度。
                 leaf, support, support_layer = self._slot_plate_and_support(child)
@@ -2230,42 +2382,54 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     well = leaf.children[0]
                     pip_pos = self.plr_pos_to_prcxi(well)
                     pip_pos.z = self._support_free_prcxi_z(well, leaf, support, support_layer) - support
+                    well_depth = float(well.get_size_z() or 0.0) or plate_h
                 else:
                     pip_pos = self.plr_pos_to_prcxi(leaf)
                     pip_pos.x = slot_pos[0] - 40
                     pip_pos.y = slot_pos[1] - leaf.get_size_y() / 2
                     pip_pos.z = self.deck_z - support - 70
-                half_x = leaf.get_size_x() / 2
-                z_wall = plate_h
+                    well_depth = plate_h
+                # 孔底(bottleBottom) 约束到台面 deck_z（不再夹移液行程 max_z_pipetting）；
+                # 孔口(bottleMouth) = 孔底减孔深（prcxi z 越小越靠上），不小于 0。
+                pip_bottom = max(min(pip_pos.z, self.deck_z), 0)
+                pip_mouth = max(0.0, pip_bottom - well_depth)
+                pip2_bottom = max(min(pip_pos.z + self.right_2_left.z, self.deck_z), 0)
+                pip2_mouth = max(0.0, pip2_bottom - well_depth)
 
                 pipetting_positions.append({
                     "Number": number,
+                    "VolumeEnum": left_vol_enum,
+                    "VolumeEnum2": right_vol_enum,
                     "XPos": pip_pos.x,
                     "YPos": pip_pos.y,
-                    "ZPos": max(min(pip_pos.z, self.max_z_pipetting),0), 
-                    # 靠壁 XYZ 为绝对值：左/右壁 = 孔中心 X ∓ 半宽；ZAgainstTheWall 为绝对 Z。
-                    "X_Left": pip_pos.x - half_x,
-                    "X_Right": pip_pos.x + half_x,
-                    "ZAgainstTheWall": pip_pos.z - z_wall,
+                    "ZPos": pip_bottom,
+                    "bottleMouthPosition": pip_mouth,
                     "X2Pos": pip_pos.x + self.right_2_left.x,
                     "Y2Pos": pip_pos.y + self.right_2_left.y,
-                    "Z2Pos": max(min((pip_pos.z + self.right_2_left.z), self.max_z_pipetting),0),
-                    "X2_Left": (pip_pos.x + self.right_2_left.x) - half_x,
-                    "X2_Right": (pip_pos.x + self.right_2_left.x) + half_x,
-                    "ZAgainstTheWall2": pip_pos.z - z_wall,
+                    "Z2Pos": pip2_bottom,
+                    "bottleMouthPosition2": pip2_mouth,
                 })
 
             # 空 slot（无物料）也初始化点位：按默认 labware 足迹（标准板 128×86）+ 台面高度，
             # 镜像上面「无 children」分支的算法，保证每个已校准 slot 都有夹爪 + 移液位置。
             default_w = float(PRCXI9300Deck._DEFAULT_SITE_SIZE.get("width", 128.0))
             default_h = float(PRCXI9300Deck._DEFAULT_SITE_SIZE.get("height", 86.0))
-            default_half_x = default_w / 2
-            for number in sorted(self._slot_prcxi_positions):
+            # 空槽也初始化点位：遍历全部板位号（有标定用标定，无标定用几何），
+            # 兼容 prc_sites_config 的非连续/列主序编号。
+            if isinstance(self.deck, PRCXI9300Deck):
+                all_slot_numbers = [int(s["number"]) for s in self.deck.sites]
+            else:
+                all_slot_numbers = sorted(self._slot_prcxi_positions)
+            for number in all_slot_numbers:
                 if number in seen_numbers:
                     continue
-                if self.deck._get_site_resource(number - 1) is not None:
+                if isinstance(self.deck, PRCXI9300Deck):
+                    idx = self.deck.slot_index(number)
+                else:
+                    idx = number - 1
+                if idx is not None and self.deck._get_site_resource(idx) is not None:
                     continue
-                slot_pos = self._slot_prcxi_positions[number]
+                slot_pos = self._slot_prcxi_xy(number)
 
                 # 夹爪：台面高度（z=0 → prcxi_z=deck_z），按默认足迹居中。
                 claw_z = self.deck_z + self.left_2_claw.z
@@ -2282,21 +2446,21 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 pip_x = slot_pos[0] - 40
                 pip_y = slot_pos[1] - default_h / 2
                 pip_z = self.deck_z - 70
+                # 空槽无真实物料：bottleBottom 约束到 deck_z，bottleMouth 用孔底占位（无孔深可减）。
+                pip_bottom = max(min(pip_z, self.deck_z), 0)
+                pip2_bottom = max(min(pip_z + self.right_2_left.z, self.deck_z), 0)
                 pipetting_positions.append({
                     "Number": number,
+                    "VolumeEnum": left_vol_enum,
+                    "VolumeEnum2": right_vol_enum,
                     "XPos": min(max(0, pip_x), self.deck_x),
                     "YPos": min(max(0, pip_y), self.deck_y),
-                    "ZPos": max(min(pip_z, self.max_z_pipetting), 0),
-                    # 靠壁 XYZ 为绝对值：左/右壁 = 孔中心 X ∓ 半宽；ZAgainstTheWall 为绝对 Z。
-                    "X_Left": pip_x - default_half_x,
-                    "X_Right": pip_x + default_half_x,
-                    "ZAgainstTheWall": pip_z,
+                    "ZPos": pip_bottom,
+                    "bottleMouthPosition": pip_bottom,
                     "X2Pos": pip_x + self.right_2_left.x,
                     "Y2Pos": pip_y + self.right_2_left.y,
-                    "Z2Pos": max(min((pip_z + self.right_2_left.z), self.max_z_pipetting), 0),
-                    "X2_Left": (pip_x + self.right_2_left.x) - default_half_x,
-                    "X2_Right": (pip_x + self.right_2_left.x) + default_half_x,
-                    "ZAgainstTheWall2": pip_z,
+                    "Z2Pos": pip2_bottom,
+                    "bottleMouthPosition2": pip2_bottom,
                 })
 
             if pipetting_positions:
@@ -2307,12 +2471,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if claw_positions:
                 api.update_clamp_jaw_position(matrix_id, claw_positions)
 
-            if skipped_uncalibrated:
-                print(
-                    f"[PRCXI] 以下板位未标定（缺 calibration_points），已跳过点位下发："
-                    f"{sorted(set(skipped_uncalibrated))}；矩阵/板位已创建 matrix_id={matrix_id}。"
-                    f"如需移液点位，请在 config 提供 calibration_points。"
-                )
+            coord_mode = "A(标定)" if self._slot_prcxi_positions else "C(几何推算)"
+            print(
+                f"[PRCXI][v04] 坐标来源={coord_mode}；已下发 移液点位 {len(pipetting_positions)} 条、"
+                f"夹爪点位 {len(claw_positions)} 条 (matrix_id={matrix_id})"
+            )
+            self._log_v04_board(matrix_id, tag="after-update")
 
             print(f"Auto-matched materials and created matrix: {matrix_id}")
         else:
@@ -2870,24 +3034,28 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     support, support_layer = 0.0, None
                 pip_pos = self.plr_pos_to_prcxi(well)
                 pip_pos.z = self._support_free_prcxi_z(well, slot, support, support_layer) - support
-                half_x = well.get_size_x() / 2 * abs(1 + self.x_increase)
-                z_wall = self._recover_height(slot)
+                # 孔口(bottleMouth) = 孔底减孔深；孔深取 well 高度，为 0 回退 slot 高度。
+                well_depth = float(well.get_size_z() or 0.0) or self._recover_height(slot)
+                pip_bottom = max(min(pip_pos.z, self.deck_z), 0)
+                pip_mouth = max(0.0, pip_bottom - well_depth)
+                pip2_bottom = max(min(pip_pos.z + self.right_2_left.z, self.deck_z), 0)
+                pip2_mouth = max(0.0, pip2_bottom - well_depth)
+                _ps = getattr(self, "pip_setting", None) or {}
+                left_vol_enum = _to_volume_enum((_ps.get("left") or {}).get("vol"))
+                right_vol_enum = _to_volume_enum((_ps.get("right") or {}).get("vol"))
 
                 change_slots_positions.append({
                     "Number": number,
+                    "VolumeEnum": left_vol_enum,
+                    "VolumeEnum2": right_vol_enum,
                     "XPos": pip_pos.x,
                     "YPos": pip_pos.y,
-                    "ZPos": pip_pos.z,
-                    # 靠壁 XYZ 为绝对值：左/右壁 = 孔中心 X ∓ 半宽；ZAgainstTheWall 为绝对 Z。
-                    "X_Left": pip_pos.x - half_x,
-                    "X_Right": pip_pos.x + half_x,
-                    "ZAgainstTheWall": pip_pos.z - z_wall,
+                    "ZPos": pip_bottom,
+                    "bottleMouthPosition": pip_mouth,
                     "X2Pos": pip_pos.x + self.right_2_left.x,
                     "Y2Pos": pip_pos.y + self.right_2_left.y,
-                    "Z2Pos": pip_pos.z + self.right_2_left.z,
-                    "X2_Left": (pip_pos.x + self.right_2_left.x) - half_x,
-                    "X2_Right": (pip_pos.x + self.right_2_left.x) + half_x,
-                    "ZAgainstTheWall2": pip_pos.z - z_wall,
+                    "Z2Pos": pip2_bottom,
+                    "bottleMouthPosition2": pip2_mouth,
                 })
             if change_slots_positions:
                 self._unilabos_backend.api_client.update_pipetting_position(
@@ -4353,9 +4521,34 @@ class PRCXI9300Api:
         触发 ``TypeError: 'bool' object is not iterable`` 等。
         """
         raw = self.call("IMatrix", self._matrix_method("GetAllMaterial"), [])
-        if isinstance(raw, list):
-            return raw
-        return []
+        if not isinstance(raw, list):
+            return []
+        if self.is_v04:
+            # GetAllMaterial_V04 原始字段为 Type/Row/Col/Id，与驱动内部匹配用的
+            # materialEnum/HoleRow/HoleColum/id_v4 不一致，这里补齐别名后再返回，
+            # 否则按 materialEnum 分组会全部落到 None、耗材匹配失效。
+            return [self._normalize_v04_material(m) if isinstance(m, dict) else m for m in raw]
+        return raw
+
+    @staticmethod
+    def _normalize_v04_material(m: Dict[str, Any]) -> Dict[str, Any]:
+        """把 GetAllMaterial_V04 原始字段补齐为驱动内部匹配字段（保留原字段）。
+
+        - ``Type``  → ``materialEnum``（枚举含义一致：1=Tips/2=DeepWell/6=WasteBox…）
+        - ``Row``   → ``HoleRow``
+        - ``Col``   → ``HoleColum``
+        - ``Id``    → ``id_v4``（V04 物料主键即 id_v4）
+        """
+        out = dict(m)
+        if out.get("materialEnum") is None and out.get("Type") is not None:
+            out["materialEnum"] = out.get("Type")
+        if out.get("HoleRow") is None and out.get("Row") is not None:
+            out["HoleRow"] = out.get("Row")
+        if out.get("HoleColum") is None and out.get("Col") is not None:
+            out["HoleColum"] = out.get("Col")
+        if not out.get("id_v4") and out.get("Id"):
+            out["id_v4"] = out.get("Id")
+        return out
 
     def get_material_by_id(self, material_id: str) -> Dict[str, Any]:
         """GetMaterialById_V04（V04 新增，按 ID 查耗材）。"""
@@ -4420,7 +4613,14 @@ class PRCXI9300Api:
         merged, warnings = merge_positions_into_board(board, pipetting_positions, claw_positions)
         for w in warnings:
             print(f"[PRCXI][v04][位置映射] {w}")
-        return self.call("IMatrix", "UpdatePosition_V04", [merged])
+        merged_with_pip = sum(1 for d in (merged.get("Details") or []) if d.get("PipettingPosList"))
+        res = self.call("IMatrix", "UpdatePosition_V04", [merged])
+        print(
+            f"[PRCXI][v04] UpdatePosition_V04 matrix_id={matrix_id} "
+            f"pip_in={len(pipetting_positions or [])} claw_in={len(claw_positions or [])} "
+            f"details_with_pip={merged_with_pip} -> {res}"
+        )
+        return res
 
     def add_WorkTablet_Matrix(self, matrix: MatrixInfo):
         """新增布局。
@@ -4433,7 +4633,7 @@ class PRCXI9300Api:
             method = "AddWorkTabletMatrix2" if self.is_9320 else "AddWorkTabletMatrix"
             return self.call("IMatrix", method, [matrix])
         columns = 4 if self.is_9320 else 3
-        board = worktablets_to_board(dict(matrix), columns=columns)
+        board = worktablets_to_board(dict(matrix), columns=columns, is_v04=self.is_v04)
         return self.call("IMatrix", "AddWorkTabletMatrix_V04", [board.to_rpc_dict()])
 
     def add_board_v04(self, board: "Board"):

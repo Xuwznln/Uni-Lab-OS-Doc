@@ -1044,7 +1044,7 @@ class PrcxiSocketClientV04:
             response = json.loads(payload.decode("utf-8"))
             if self.verbose:
                 print(f"[RECV] {rpc_name} Success={response.get('Success')} "
-                      f"Msg={response.get('Message') or response.get('Msg')} Data={response.get('Data')}")
+                      f"Msg={response.get('Message') or response.get('Msg')}")
             return response
         except socket.timeout:
             return {"Success": False, "Message": f"连接超时({self.timeout}秒)", "Data": None}
@@ -1218,7 +1218,7 @@ class PrcxiSocketClientV04:
 # 八、使用示例（默认只做只读/查询，避免误触发设备动作）
 # =============================================================
 if __name__ == "__main__":
-    sdk = PrcxiSocketClientV04(host="127.0.0.1", port=9999, timeout=15)
+    sdk = PrcxiSocketClientV04(host="127.0.0.1", port=14514, timeout=15)
 
     # 1. 连接判定（新版连接语义 = IClientSession.IsConnect）
     print("\n=== 1. 判断连接 ===")
@@ -1228,13 +1228,17 @@ if __name__ == "__main__":
         raise SystemExit(1)
     print("设备已连接")
 
-    # 2. 设备状态（新版新增的三个轮询接口）
-    print("\n=== 2. 设备状态 ===")
-    print("运行中：", as_bool(sdk.automation_get_start_status()))
-    print("复位状态：", as_bool(sdk.automation_get_reset_status()))
-    err = sdk.automation_get_error_code()
-    print("错误码：", parse_data(err))
-
+    # # 2. 设备状态（新版新增的三个轮询接口）
+    # print("\n=== 2. 设备状态 ===")
+    # print("运行中：", as_bool(sdk.automation_get_start_status()))
+    # print("复位状态：", as_bool(sdk.automation_get_reset_status()))
+    # err = sdk.automation_get_error_code()
+    # print("错误码：", parse_data(err))
+    # 把耗材列表存成 json 文件
+    # materials = sdk.matrix_get_all_material().get("Data")
+    # with open("materials.json", "w", encoding="utf-8") as f:
+    #     json.dump(materials, f, ensure_ascii=False, indent=4)
+    # print("已保存耗材列表到 materials.json")
     # 3. 获取方案列表
     # print("\n=== 3. 获取方案列表 ===")
     # solutions_resp = sdk.solution_get_list()
@@ -1244,13 +1248,13 @@ if __name__ == "__main__":
     #     print("  -", item.get("PlanName"))
 
     # 4. 获取布局（V04 _V04 接口）
-    print("\n=== 4. 获取布局 ===")
+    # print("\n=== 4. 获取布局 ===")
     boards_resp = sdk.matrix_get_all()
     boards = parse_data(boards_resp) or []
     print(f"共 {len(boards)} 个布局")
-    # # 把 boards 存成一个 JSON 文件
-    # with open("boards.json", "w", encoding="utf-8") as f:
-    #     json.dump(boards, f, ensure_ascii=False, indent=4)
+    # 把 boards 存成一个 JSON 文件
+    with open("boards.json", "w", encoding="utf-8") as f:
+        json.dump(boards, f, ensure_ascii=False, indent=4)
 
     # 5. 加载方案 + 步骤状态（新版按【方案名】加载）
     # if solutions:
@@ -1282,14 +1286,14 @@ if __name__ == "__main__":
     # print("删除布局：", sdk.matrix_remove("<matrix_id>"))
 
     # 8. v7 添加方案示例（默认注释；会在服务端 project 目录生成 XML）
-    if boards:
-        board_id = boards[-1].get("Id")
-        add_resp = sdk.solution_add_v04(
-            "python_v7_demo",
-            board_id,
-            create_demo_solution_steps_v04(),
-        )
-        print("添加方案：", parse_data(add_resp))
+    # if boards:
+    #     board_id = boards[0].get("Id")
+    #     add_resp = sdk.solution_add_v04(
+    #         "python_v7_demo",
+    #         board_id,
+    #         create_demo_solution_steps_v04(),
+    #     )
+    #     print("添加方案：", parse_data(add_resp))
 
     # 9. 旧版 AddSolution（V04 v7 不推荐，仅示意，默认注释）
     # steps = [StepData(step_axis=AxisNum.Left, function=MajorFun.Load, dosage_num=20,
