@@ -260,6 +260,28 @@ def legacy_steps_to_v04_solution_steps(steps: Sequence[Dict[str, Any]]) -> List[
                 "OscRate": _as_int(step.get("AssistFun3"), 0),
                 "IsWait": _coerce_bool(step.get("AssistFun4"), default=True),
             }
+        elif function == "Shaking_Incubation":
+            # 孵育+振荡 → v7 TempAndOsc（温度 + 振荡速率）。
+            data = {
+                **base,
+                "Kind": "TempAndOsc",
+                "DisplayName": f"T{idx + 1}",
+                "Number": _as_int(step.get("AssistFun2"), 1),
+                "Temp": _as_float(step.get("AssistFun5"), 37.0),
+                "Time": _as_int(step.get("AssistFun1"), 0),
+                "OscRate": _as_int(step.get("AssistFun3"), 0),
+                "IsWait": _coerce_bool(step.get("AssistFun4"), default=True),
+            }
+        elif function == "Magnetic":
+            # 磁力架 → v7 MagneticStand。
+            data = {
+                **base,
+                "Kind": "MagneticStand",
+                "Number": _as_int(step.get("AssistFun2"), 1),
+                "Time": _as_int(step.get("AssistFun1"), 0),
+                "Height": _as_float(step.get("AssistFun3"), 0.0),
+                "IsWait": _coerce_bool(step.get("AssistFun4"), default=True),
+            }
         else:
             raise PRCXIError(f"暂不支持转换为 V04 v7 AddSolution_V04 的 PRCXI 步骤: {function!r}")
 
@@ -3256,6 +3278,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
     async def shaker_action(self, time: int, module_no: int, amplitude: int, is_wait: bool):
         return await self._unilabos_backend.shaker_action(time, module_no, amplitude, is_wait)
 
+    async def shaking_incubation_action(self, time: int, module_no: int, amplitude: int, is_wait: bool, temperature: int):
+        return await self._unilabos_backend.shaking_incubation_action(time, module_no, amplitude, is_wait, temperature)
+
+    async def magnetic_action(self, time: int, module_no: int, height: int, is_wait: bool):
+        return await self._unilabos_backend.magnetic_action(time, module_no, height, is_wait)
+
     async def heater_action(self, temperature: float, time: int):
         return await self._unilabos_backend.heater_action(temperature, time)
 
@@ -3498,6 +3526,27 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             time=time,
             module_no=module_no,
             amplitude=amplitude,
+            is_wait=is_wait,
+        )
+        self.steps_todo_list.append(step)
+        return step
+
+    async def shaking_incubation_action(self, time: int, module_no: int, amplitude: int, is_wait: bool, temperature: int):
+        step = self.api_client.shaking_incubation_action(
+            time=time,
+            module_no=module_no,
+            amplitude=amplitude,
+            is_wait=is_wait,
+            temperature=temperature,
+        )
+        self.steps_todo_list.append(step)
+        return step
+
+    async def magnetic_action(self, time: int, module_no: int, height: int, is_wait: bool):
+        step = self.api_client.magnetic_action(
+            time=time,
+            module_no=module_no,
+            height=height,
             is_wait=is_wait,
         )
         self.steps_todo_list.append(step)
@@ -4886,6 +4935,27 @@ class PRCXI9300Api:
             "AssistFun1": time,
             "AssistFun2": module_no,
             "AssistFun3": amplitude,
+            "AssistFun4": is_wait,
+        }
+
+    def shaking_incubation_action(self, time: int, module_no: int, amplitude: int, is_wait: bool, temperature: int):
+        return {
+            "StepAxis": "Left",
+            "Function": "Shaking_Incubation",
+            "AssistFun1": time,
+            "AssistFun2": module_no,
+            "AssistFun3": amplitude,
+            "AssistFun4": is_wait,
+            "AssistFun5": temperature,
+        }
+
+    def magnetic_action(self, time: int, module_no: int, height: int, is_wait: bool):
+        return {
+            "StepAxis": "Left",
+            "Function": "Magnetic",
+            "AssistFun1": time,
+            "AssistFun2": module_no,
+            "AssistFun3": height,
             "AssistFun4": is_wait,
         }
 
