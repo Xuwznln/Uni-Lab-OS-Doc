@@ -723,6 +723,7 @@ coincellassemblyworkstation_device:
       data_glove_box_water_content: float
       data_negative_shell_remaining: float
       data_open_circuit_voltage: float
+      data_order_completion_percentage: float
       data_pole_weight: float
       data_positive_shell_remaining: float
       data_spring_washer_remaining: float
@@ -802,6 +803,8 @@ coincellassemblyworkstation_device:
         data_negative_shell_remaining:
           type: number
         data_open_circuit_voltage:
+          type: number
+        data_order_completion_percentage:
           type: number
         data_pole_weight:
           type: number

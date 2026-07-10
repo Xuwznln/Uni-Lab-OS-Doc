@@ -194,6 +194,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self.csv_export_running = False
         self.csv_export_file = None
         self.coin_num_N = 0  #已组装电池数量
+        self._elec_use_num = 0  # 每瓶电池数（下单后由 coin_cell_start 更新）
+        self._elec_bottle_num = 0  # 电解液瓶数（下单后由 coin_cell_start 更新）
 
     def _ensure_modbus_connected(self) -> None:
         """检查 Modbus TCP 连接是否存活，若已断开则自动重连（防止长时间空闲后连接超时）"""
@@ -654,8 +656,12 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         """当前电解液加注量 (INT16)"""
         if self.debug_mode:
             return 0
-        vol, read_err = self.client.use_node('REG_DATA_ELECTROLYTE_VOLUME').read(1)
-        return vol
+        try:
+            vol, read_err = self.client.use_node('REG_DATA_ELECTROLYTE_VOLUME').read(1)
+            return vol or 0
+        except Exception as e:
+            logger.warning(f"读取电解液加注量失败，返回 0: {e}")
+            return 0
 
     @property
     def data_coin_type(self) -> int:
@@ -680,6 +686,29 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             return 0
         count, read_err = self.client.use_node('REG_DATA_CURRENT_COMPLETED_COUNT').read(1)
         return count
+
+    @property
+    def data_order_completion_percentage(self) -> float:
+        """电池订单任务完成百分比 (%)
+
+        分子: 当前完成组装的电池数量 (data_current_completed_count)
+        分母: 电池总数 = 电解液瓶数 (REG_MSG_ELECTROLYTE_NUM)
+              × 每瓶电池数 (REG_MSG_ELECTROLYTE_USE_NUM)
+        订单未下发（分母为 0）时返回 0.0
+        """
+        if self.debug_mode:
+            return 0.0
+        try:
+            completed = self.data_current_completed_count
+            bottle_num, _ = self.client.use_node('REG_MSG_ELECTROLYTE_NUM').read(1)
+            use_num, _ = self.client.use_node('REG_MSG_ELECTROLYTE_USE_NUM').read(1)
+            total = (bottle_num or 0) * (use_num or 0)
+            if total <= 0:
+                return 0.0
+            return round((completed or 0) / total * 100.0, 2)
+        except Exception as e:
+            logger.warning(f"读取订单完成进度失败，返回 0.0: {e}")
+            return 0.0
 
     @property
     def data_coin_cell_code(self) -> str:
@@ -1440,7 +1469,9 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         # ✅ 新增：存储每瓶电池数，用于计算当前使用的瓶号
         # ⚠️ 确保转换为整数（前端可能传递字符串）
         self._elec_use_num = int(elec_use_num) if elec_use_num else 0
-        logger.info(f"已存储参数: 每瓶电池数={self._elec_use_num}, 配方数={len(self._formulations_list)}")
+        # ✅ 新增：存储电解液瓶数，用于计算订单完成百分比（分母 = 瓶数 × 每瓶电池数）
+        self._elec_bottle_num = int(elec_num) if elec_num else 0
+        logger.info(f"已存储参数: 电解液瓶数={self._elec_bottle_num}, 每瓶电池数={self._elec_use_num}, 配方数={len(self._formulations_list)}")
         
         # ✅ 新增：软件层电池计数器（防止硬件计数器不准确）
         self._software_battery_counter = 0  # 从0开始，每写入一次CSV递增
