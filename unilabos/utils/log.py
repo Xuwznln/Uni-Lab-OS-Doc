@@ -340,6 +340,96 @@ def configure_comm_logger(working_dir=None, loglevel=None):
     return log_filepath
 
 
+# ============================================================================
+# 服务端通信(WebSocket)独立日志
+# 单独成文件、全量保留到本地、微秒级时间戳 + 线程名，便于排查通信/queue 时序问题
+# ============================================================================
+COMM_LOGGER_NAME = "unilabos.comm"
+_comm_file_handler: "logging.Handler | None" = None  # 便于重启时清理 websockets 库 handler
+
+
+def _attach_trace_method(target_logger: logging.Logger) -> logging.Logger:
+    """为指定 logger 附加 .trace 方法，行为与模块级 trace 一致。
+
+    通过 stacklevel=2 跳过本包装函数，使日志定位到真实调用处而非此处。
+    """
+    if not hasattr(target_logger, "trace"):
+        def _trace(msg, *args, _lg=target_logger, **kwargs):
+            kwargs.setdefault("stacklevel", 2)
+            _lg.log(TRACE_LEVEL, msg, *args, **kwargs)
+
+        target_logger.trace = _trace  # type: ignore[attr-defined]
+    return target_logger
+
+
+def get_comm_logger() -> logging.Logger:
+    """获取通信专用 logger。
+
+    未调用 ``configure_comm_logger`` 之前，该 logger 没有独立 handler 且
+    ``propagate=True``，会回退到根 logger，行为与现状一致（安全降级）。
+    """
+    return _attach_trace_method(logging.getLogger(COMM_LOGGER_NAME))
+
+
+def configure_comm_logger(working_dir=None, loglevel=None):
+    """为服务端通信(WebSocket)配置独立日志，复用 ``ColoredFormatter`` 逻辑。
+
+    - 独立文件：``<working_dir>/logs/ws_comm_<日期 时间>.log``，TRACE 全量落本地
+    - 微秒级时间戳 + 线程名，便于排查 queue 机制、收发时序与并发标识
+    - ``propagate=False``，与主日志解耦，避免日志混在一起
+    - 控制台仍保留实时输出（级别与主控制台一致），不丢失现有可见性
+    - 同步把 ``websockets`` 库自身的协议日志(握手/ping/pong/关闭)落到同一文件
+
+    Args:
+        working_dir: 工作目录(``unilabos_data``)，None 时不写文件
+        loglevel: 控制台日志级别，与主日志保持一致
+
+    Returns:
+        日志文件绝对路径(未配置文件时为 None)
+    """
+    global _comm_file_handler
+
+    comm_logger = get_comm_logger()
+    comm_logger.setLevel(TRACE_LEVEL)
+    comm_logger.propagate = False  # 与根 logger 解耦，单独成文件
+
+    # 移除旧 handler，支持重启重复调用
+    for handler in comm_logger.handlers[:]:
+        comm_logger.removeHandler(handler)
+        handler.close()
+
+    # 控制台 handler：保留实时可见性，带线程名便于现场观察
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(_to_numeric_level(loglevel))
+    console_handler.setFormatter(ColoredFormatter(use_colors=True, show_thread=True))
+    comm_logger.addHandler(console_handler)
+
+    log_filepath = None
+    if working_dir is not None:
+        logs_dir = os.path.join(working_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+
+        log_filename = "ws_comm_" + datetime.now().strftime("%Y-%m-%d %H-%M-%S") + ".log"
+        log_filepath = os.path.join(logs_dir, log_filename)
+
+        file_handler = logging.FileHandler(log_filepath, encoding="utf-8")
+        file_handler.setLevel(TRACE_LEVEL)  # 全量保留到本地
+        # 文件不带颜色，开启微秒精度 + 线程名
+        file_handler.setFormatter(ColoredFormatter(use_colors=False, microseconds=True, show_thread=True))
+        comm_logger.addHandler(file_handler)
+
+        # websockets 库自身日志(协议层)也归集到同一文件，方便排查链路问题；
+        # 保持其 propagate=True，不影响主日志原有行为。
+        ws_lib_logger = logging.getLogger("websockets")
+        if _comm_file_handler is not None and _comm_file_handler in ws_lib_logger.handlers:
+            ws_lib_logger.removeHandler(_comm_file_handler)
+        ws_lib_logger.addHandler(file_handler)
+        _comm_file_handler = file_handler
+
+    comm_logger.info(f"[CommLogger] 通信日志已初始化，文件: {log_filepath}")
+    return log_filepath
+
+
 # 配置日志系统
 configure_logger()
 

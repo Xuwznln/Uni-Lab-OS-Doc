@@ -8,32 +8,38 @@ from __future__ import annotations
 from typing import Dict, List, Optional, TypeVar, Union, Sequence, Tuple
 
 import pylabrobot
-
 from pylabrobot.resources import Resource as ResourcePLR
 from pylabrobot.resources import Well, ResourceHolder
 from pylabrobot.resources.coordinate import Coordinate
-
 
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 class Bottle(Well):
-    """瓶子类 - 简化版，不追踪瓶盖"""
+    """瓶子类 - 简化版，不追踪瓶盖。
+
+    serialize / deserialize 完全交给父类：
+    - barcode（须为 PLR ``Barcode`` 对象）由父类管理：``Resource.__init__`` 默认置 None，
+      反序列化时由 ``Resource.deserialize`` 经 ``Barcode.deserialize`` 还原；本类不自行初始化/赋值。
+    - diameter/height 与 size_x/size_z 等价、缺省互相回填，父类序列化的 size_* 已足够无损重建。
+    """
 
     def __init__(
         self,
         name: str,
-        diameter: float,
-        height: float,
-        max_volume: float,
+        diameter: Optional[float] = None,
+        height: Optional[float] = None,
+        max_volume: Optional[float] = None,
         size_x: float = 0.0,
         size_y: float = 0.0,
         size_z: float = 0.0,
-        barcode: Optional[str] = None,
         category: str = "container",
         model: Optional[str] = None,
         **kwargs,
     ):
+        # 反序列化时父类只回传 size_*（不含 diameter/height）；二者等价，缺一即互相回填
+        diameter = diameter if diameter is not None else size_x
+        height = height if height is not None else size_z
         super().__init__(
             name=name,
             size_x=diameter,
@@ -47,47 +53,6 @@ class Bottle(Well):
         )
         self.diameter = diameter
         self.height = height
-        self.barcode = barcode
-
-    def serialize(self) -> dict:
-        # Pylabrobot expects barcode to be an object with serialize(), but here it is a str.
-        # We temporarily unset it to avoid AttributeError in super().serialize().
-        _barcode = self.barcode
-        self.barcode = None
-        try:
-            data = super().serialize()
-        finally:
-            self.barcode = _barcode
-
-        return {
-            **data,
-            "diameter": self.diameter,
-            "height": self.height,
-        }
-
-    @classmethod
-    def deserialize(cls, data: dict, allow_marshal: bool = False):
-        # Extract barcode before calling parent deserialize to avoid type error
-        barcode_data = data.pop("barcode", None)
-
-        # Call parent deserialize
-        instance = super(Bottle, cls).deserialize(data, allow_marshal=allow_marshal)
-
-        # Set barcode as string (not as Barcode object)
-        if barcode_data:
-            if isinstance(barcode_data, str):
-                instance.barcode = barcode_data
-            elif isinstance(barcode_data, dict):
-                # If it's a dict (Barcode serialized format), extract the data field
-                instance.barcode = barcode_data.get("data", "")
-        else:
-            instance.barcode = ""
-
-        # Set additional attributes
-        instance.diameter = data.get("diameter", instance._size_x)
-        instance.height = data.get("height", instance._size_z)
-
-        return instance
 
 T = TypeVar("T", bound=ResourceHolder)
 

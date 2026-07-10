@@ -12,6 +12,7 @@ Virtual Workbench Device - 模拟工作台设备
 注意: 调用来自线程池, 使用 threading.Lock 进行同步
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -122,7 +123,7 @@ class HeatingStation:
 
 @device(
     id="virtual_workbench",
-    display_name="虚拟工作台",
+    displayname="虚拟工作台",
     category=["virtual_device"],
     description="Virtual Workbench with 1 robotic arm and 3 heating stations for concurrent material processing",
 )
@@ -197,6 +198,9 @@ class VirtualWorkbench:
         # 任务追踪
         self._active_tasks: Dict[str, Dict[str, Any]] = {}
         self._tasks_lock = Lock()
+
+        # 本地订阅演示: 自增计数器与其派生状态
+        self._start_time: float = time.time()
 
         # 处理其他kwargs参数
         skip_keys = {"arm_operation_time", "heating_time", "num_heating_stations"}
@@ -318,6 +322,322 @@ class VirtualWorkbench:
         self._arm_lock.release()
         self._update_data_status(f"机械臂已释放 (完成: {task})")
         self.logger.info(f"机械臂已释放 (完成: {task})")
+
+    # ============ 本地派生状态演示: 直接用 getter 计算 ============
+
+    @property
+    @topic_config(period=1.0)
+    def counter(self) -> int:
+        """实时增长的计数器(自启动起的秒数)，每秒发布到 /devices/<device_id>/counter。"""
+        return int(time.time() - self._start_time)
+
+    @property
+    @topic_config(period=1.0)
+    def counter_echo(self) -> int:
+        """counter 的派生状态 (= counter * 10)。本设备自己的派生态直接用 getter 计算即可，
+        无需自订阅自己的 topic（@subscribe 仅用于跨设备订阅）。"""
+        return int(time.time() - self._start_time) * 10
+
+    @action(description="跨设备调用演示: 调用目标设备的某个函数并返回其结果")
+    def call_peer(
+        self,
+        target_device: str,
+        function_name: str,
+        function_args: str = "{}",
+    ) -> dict:
+        """
+        演示通过 _ros_node 便捷函数跨设备调用动作（走 serial JSON 指令通道）。
+
+        Args:
+            target_device[目标设备]: 被调用设备的 ID（可带或不带 /devices/ 前缀）。
+            function_name[函数名]: 目标设备上要调用的函数 / 动作名。
+            function_args[入参JSON]: 入参，UI 传来的 JSON 字符串；本动作 json.loads 成 dict 后传给 call_device_action。
+
+        Note:
+            远端执行失败会以 DeviceActionError 在此处 raise，从而让本动作整体失败。
+        """
+        # call_device_action 只接受 dict 入参（序列化由其内部完成）；UI 传来的是 JSON 字符串，这里先解析成 dict
+        kwargs = json.loads(function_args) if function_args else {}
+        # 同步 action 在线程池中执行，使用同步便捷函数即可（阻塞安全）
+        return_value = self._ros_node.call_device_action(target_device, function_name, kwargs)
+        return {"success": True, "target_device": target_device, "function_name": function_name, "return_value": return_value}
+
+    @action(
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
+        goal_default={"timeout_seconds": 3600, "assignee_user_ids": []},
+        feedback_interval=300,
+        handles=[
+            ActionInputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="collector_mass",
+                data_type="collector_mass",
+                label="极流体质量",
+                data_key="collector_mass",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="active_material",
+                data_type="active_material",
+                label="活性物质含量",
+                data_key="active_material",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="capacity",
+                data_type="capacity",
+                label="克容量",
+                data_key="capacity",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="battery_system",
+                data_type="battery_system",
+                label="电池体系",
+                data_key="battery_system",
+                data_source=DataSource.HANDLE,
+            ),
+            # transfer使用
+            ActionOutputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource.@flatten",
+                data_source=DataSource.EXECUTOR,
+            ),
+            # test使用
+            ActionOutputHandle(
+                key="collector_mass",
+                data_type="collector_mass",
+                label="极流体质量",
+                data_key="collector_mass",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="active_material",
+                data_type="active_material",
+                label="活性物质含量",
+                data_key="active_material",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="capacity",
+                data_type="capacity",
+                label="克容量",
+                data_key="capacity",
+                data_source=DataSource.EXECUTOR,
+            ),
+            ActionOutputHandle(
+                key="battery_system",
+                data_type="battery_system",
+                label="电池体系",
+                data_key="battery_system",
+                data_source=DataSource.EXECUTOR,
+            ),
+        ],
+    )
+    def manual_confirm(
+        self,
+        resource: List[ResourceSlot],
+        target_device: DeviceSlot,
+        mount_resource: List[ResourceSlot],
+        collector_mass: List[float],
+        active_material: List[float],
+        capacity: List[float],
+        battery_system: List[str],
+        timeout_seconds: int,
+        assignee_user_ids: list[str],
+        **kwargs,
+    ) -> dict:
+        """
+        人工确认资源转移和扣电测试参数。
+
+        Args:
+            resource[待转移资源]: 需要人工确认的资源列表。
+            target_device[目标设备]: 资源要转移到的目标设备 ID。
+            mount_resource[目标孔位]: 资源要挂载到的目标孔位列表。
+            collector_mass[极流体质量]: 每个样品对应的极流体质量。
+            active_material[活性物质含量]: 每个样品对应的活性物质含量。
+            capacity[克容量]: 每个样品对应的克容量，单位 mAh/g。
+            battery_system[电池体系]: 每个样品对应的电池体系名称。
+            timeout_seconds[超时时间]: 人工确认超时时间，单位秒。
+            assignee_user_ids[确认人]: 指定处理人工确认任务的用户 ID 列表。
+
+        Note:
+            修改的结果无效，是只读的。
+        """
+        resource_tree = ResourceTreeSet.from_plr_resources(cast(Any, resource)).dump()
+        mount_resource_tree = ResourceTreeSet.from_plr_resources(cast(Any, mount_resource)).dump()
+        kwargs.update(locals())
+        kwargs.pop("kwargs")
+        kwargs.pop("self")
+        kwargs["resource"] = resource_tree
+        kwargs["mount_resource"] = mount_resource_tree
+        kwargs.pop("resource_tree")
+        kwargs.pop("mount_resource_tree")
+        return kwargs
+
+    @action(
+        description="转移物料",
+        handles=[
+            ActionInputHandle(
+                key="target_device",
+                data_type="device_id",
+                label="目标设备",
+                data_key="target_device",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+        ],
+    )
+    async def transfer(
+        self,
+        resource: List[ResourceSlot],
+        target_device: DeviceSlot,
+        mount_resource: List[ResourceSlot],
+    ):
+        """
+        转移资源到目标设备。
+
+        Args:
+            resource[待转移资源]: 待转移的资源列表。
+            target_device[目标设备]: 接收资源的目标设备 ID。
+            mount_resource[目标孔位]: 目标设备上的挂载孔位列表。
+        """
+        future = ROS2DeviceNode.run_async_func(
+            self._ros_node.transfer_resource_to_another,
+            True,
+            **{
+                "plr_resources": resource,
+                "target_device_id": target_device,
+                "target_resources": mount_resource,
+                "sites": [None] * len(mount_resource),
+            },
+        )
+        result = await future
+        return result
+
+    @action(
+        description="扣电测试启动",
+        handles=[
+            ActionInputHandle(
+                key="resource",
+                data_type="resource",
+                label="待转移资源",
+                data_key="resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="mount_resource",
+                data_type="resource",
+                label="目标孔位",
+                data_key="mount_resource",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="collector_mass",
+                data_type="collector_mass",
+                label="极流体质量",
+                data_key="collector_mass",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="active_material",
+                data_type="active_material",
+                label="活性物质含量",
+                data_key="active_material",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="capacity",
+                data_type="capacity",
+                label="克容量",
+                data_key="capacity",
+                data_source=DataSource.HANDLE,
+            ),
+            ActionInputHandle(
+                key="battery_system",
+                data_type="battery_system",
+                label="电池体系",
+                data_key="battery_system",
+                data_source=DataSource.HANDLE,
+            ),
+        ],
+    )
+    async def test(
+        self,
+        resource: List[ResourceSlot],
+        mount_resource: List[ResourceSlot],
+        collector_mass: List[float],
+        active_material: List[float],
+        capacity: List[float],
+        battery_system: list[str],
+    ):
+        """
+        启动扣电测试。
+
+        Args:
+            resource[待测试资源]: 需要进行扣电测试的资源列表。
+            mount_resource[测试孔位]: 扣电测试使用的目标孔位列表。
+            collector_mass[极流体质量]: 每个样品对应的极流体质量。
+            active_material[活性物质含量]: 每个样品对应的活性物质含量。
+            capacity[克容量]: 每个样品对应的克容量，单位 mAh/g。
+            battery_system[电池体系]: 每个样品对应的电池体系名称。
+        """
+        print(resource)
+        print(mount_resource)
+        print(collector_mass)
+        print(active_material)
+        print(capacity)
+        print(battery_system)
 
     @action(
         always_free=True,
