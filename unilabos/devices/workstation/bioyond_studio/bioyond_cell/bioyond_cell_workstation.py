@@ -2422,7 +2422,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     material_info = self._query_material_info(material_id)
                     type_name = material_info.get("typeName", "")
 
-                    if "配液瓶(小)" in type_name or "配液瓶(大)" in type_name:
+                    # 精确匹配配液瓶类型，避免把托板 "配液瓶(大)板"/"配液瓶(小)板"
+                    # 误判为配液瓶（子串匹配会命中 "板"）
+                    if type_name in ("配液瓶(小)", "配液瓶(大)"):
                         logger.info(
                             f"[提取配液瓶] ✅ 确认为配液瓶: orderCode={order_code}, "
                             f"typeName={type_name}, barCode={material_info.get('barCode')}"
