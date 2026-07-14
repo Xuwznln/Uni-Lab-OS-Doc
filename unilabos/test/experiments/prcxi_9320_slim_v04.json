@@ -59,7 +59,7 @@
                 ],
                 "pip_setting": {
                     "left": {"vol": 1000, "channels": 1},
-                    "right": {"vol": 300, "channels": 8}
+                    "right": {"vol": 10, "channels": 8}
                 },
                 "step_mode": false,
                 "touch_tip_mode": "native",

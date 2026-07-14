@@ -4,11 +4,13 @@ from collections import OrderedDict
 import contextlib
 from enum import Enum
 import json
+import logging
 import os
 import socket
 import time
 import uuid
-from typing import Any, List, Dict, Optional, Tuple, TypedDict, Union, Sequence, Iterator, Literal
+import warnings
+from typing import Any, List, Dict, Optional, Tuple, TypedDict, Union, Sequence, Iterator, Literal, Callable, Awaitable
 from pylabrobot.liquid_handling.standard import GripDirection
 
 from pylabrobot.liquid_handling import (
@@ -671,6 +673,106 @@ _AXIS_ENUM_INT = {"Left": 1, "Right": 2, "ClampingJaw": 3}
 
 # VolumeEnum(MaterialVolumeEnum) 不能为 null（服务端会报转换失败）；缺省用 1000（μL）。
 _DEFAULT_VOLUME_ENUM = 1000
+
+_logger = logging.getLogger(__name__)
+
+# vol(µL) → prcxi_labware tip 工厂名；长度取 tip.total_tip_length。
+# 10µL 与 eTips 长度相同，取标准 PRCXI_10uL_Tips。
+_TIP_LENGTH_CACHE: Dict[int, float] = {}
+_TIP_VOLUME_FACTORY_NAMES: Dict[int, str] = {
+    10: "PRCXI_10uL_Tips",
+    50: "PRCXI_50uL_tips",
+    200: "PRCXI_200uL_Tips",
+    300: "PRCXI_300ul_Tips",
+    1000: "PRCXI_1000uL_Tips",
+    1250: "PRCXI_1250uL_Tips",
+}
+
+
+def _tip_total_length_from_rack(rack: TipRack) -> Optional[float]:
+    """从 tip rack 首孔读取 tip 原型的 ``total_tip_length``（mm）。"""
+    children = getattr(rack, "children", None) or []
+    if not children:
+        return None
+    spot = children[0]
+    tip = None
+    tr = getattr(spot, "tracker", None)
+    if tr is not None:
+        tip = getattr(tr, "_tip", None) or getattr(tr, "tip", None)
+    if tip is None:
+        tip = getattr(spot, "tip", None)
+    length = getattr(tip, "total_tip_length", None) if tip is not None else None
+    if length is None:
+        return None
+    try:
+        return float(length)
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_tip_length_mm(vol: Any) -> float:
+    """按 ``pip_setting`` 量程(µL)解析对应枪头长度(mm)。
+
+    查表实例化 ``prcxi_labware`` tip rack 探针，读 ``total_tip_length``；
+    未知量程 warning 并回退 0（不加 tip 补偿，与历史 ``tip_height=0`` 一致）。
+    """
+    try:
+        key = int(float(vol))
+    except (TypeError, ValueError):
+        warnings.warn(f"resolve_tip_length_mm: 无法解析量程 {vol!r}，回退 tip 长度 0", stacklevel=2)
+        return 0.0
+    if key <= 0:
+        warnings.warn(f"resolve_tip_length_mm: 非法量程 {vol!r}，回退 tip 长度 0", stacklevel=2)
+        return 0.0
+    if key in _TIP_LENGTH_CACHE:
+        return _TIP_LENGTH_CACHE[key]
+
+    factory_name = _TIP_VOLUME_FACTORY_NAMES.get(key)
+    if factory_name is None:
+        warnings.warn(
+            f"resolve_tip_length_mm: 量程 {key}µL 无对应 tip 工厂，回退 tip 长度 0；"
+            f"请补到 _TIP_VOLUME_FACTORY_NAMES",
+            stacklevel=2,
+        )
+        return 0.0
+
+    try:
+        from . import prcxi_labware as _labware
+    except Exception as exc:  # pragma: no cover
+        warnings.warn(
+            f"resolve_tip_length_mm: 无法导入 prcxi_labware ({exc!r})，回退 tip 长度 0",
+            stacklevel=2,
+        )
+        return 0.0
+
+    factory = getattr(_labware, factory_name, None)
+    if not callable(factory):
+        warnings.warn(
+            f"resolve_tip_length_mm: 工厂 {factory_name} 不可用，回退 tip 长度 0",
+            stacklevel=2,
+        )
+        return 0.0
+
+    try:
+        rack = factory(f"_tip_len_probe_{key}")
+        length = _tip_total_length_from_rack(rack)
+    except Exception as exc:  # pragma: no cover
+        warnings.warn(
+            f"resolve_tip_length_mm: 探针 {factory_name} 失败 ({exc!r})，回退 tip 长度 0",
+            stacklevel=2,
+        )
+        return 0.0
+
+    if length is None:
+        warnings.warn(
+            f"resolve_tip_length_mm: {factory_name} 未读到 total_tip_length，回退 0",
+            stacklevel=2,
+        )
+        return 0.0
+
+    _TIP_LENGTH_CACHE[key] = length
+    _logger.debug("resolve_tip_length_mm: vol=%s → %s mm (%s)", key, length, factory_name)
+    return length
 
 
 def _to_volume_enum(value: Any) -> int:
@@ -1940,6 +2042,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         skip_position_recalc_when_matrix_exists: bool = True,
         protocol_version: Literal["legacy", "v04"] = "v04",
         reset_status_inverted: Optional[bool] = None,
+        wait_finish_timeout_s: Optional[float] = None,
     ):
         # 枪头轴配置：``{"left": {"vol": 100, "channels": 8}, "right": {"vol": 1000, "channels": 1}}``
         # 代表左轴 100µL/8 通道、右轴 1000µL/1 通道。None → 走 legacy 路由（≤10µL→右单通道[1]、
@@ -1955,6 +2058,16 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 for cfg in self.pip_setting.values()
             )
         )
+
+        # 左右轴枪头长度(mm)：由 pip_setting.vol → tip 原型 total_tip_length。
+        # 无 pip_setting 时为空，写板位 / 坐标转换回退到单一 self.tip_height。
+        self._tip_height_by_axis: Dict[str, float] = {}
+        if self.pip_setting is not None:
+            for _axis_key in ("left", "right"):
+                _cfg = self.pip_setting.get(_axis_key) or {}
+                self._tip_height_by_axis[_axis_key] = float(
+                    resolve_tip_length_mm(_cfg.get("vol"))
+                )
 
         # rail_nums 是历史参数名，兼容旧配置（优先使用显式 rail_nums）。
         if rail_nums is not None:
@@ -2058,6 +2171,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             pip_setting=self.pip_setting,
             protocol_version=protocol_version,
             reset_status_inverted=reset_status_inverted,
+            wait_finish_timeout_s=wait_finish_timeout_s,
         )
         super().__init__(backend=self._unilabos_backend, deck=deck, simulator=simulator, channel_num=channel_num)
         self._first_transfer_done = False
@@ -2400,23 +2514,23 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 claw_positions.append({"Number": number, "XPos": pos.x, "YPos": pos.y, "ZPos": max(min(pos.z, self.max_z_claw),0)})
 
                 # 移液：以承载板的 A1 孔为目标（孔几何完好），再按支撑层高度抬高一层。
+                # tip_height=0 求基准 z，再按 pip_setting 左右枪头长度分别补偿 ZPos/Z2Pos。
                 if getattr(leaf, "children", None):
                     well = leaf.children[0]
-                    pip_pos = self.plr_pos_to_prcxi(well)
-                    pip_pos.z = self._support_free_prcxi_z(well, leaf, support, support_layer) - support
+                    pip_pos = self.plr_pos_to_prcxi(well, tip_height=0.0)
+                    z_base = self._support_free_prcxi_z(
+                        well, leaf, support, support_layer, tip_height=0.0
+                    ) - support
                     well_depth = float(well.get_size_z() or 0.0) or plate_h
                 else:
-                    pip_pos = self.plr_pos_to_prcxi(leaf)
+                    pip_pos = self.plr_pos_to_prcxi(leaf, tip_height=0.0)
                     pip_pos.x = slot_pos[0] - 40
                     pip_pos.y = slot_pos[1] - leaf.get_size_y() / 2
-                    pip_pos.z = self.deck_z - support - 70
+                    z_base = self.deck_z - support - 70
                     well_depth = plate_h
-                # 孔底(bottleBottom) 约束到台面 deck_z（不再夹移液行程 max_z_pipetting）；
-                # 孔口(bottleMouth) = 孔底减孔深（prcxi z 越小越靠上），不小于 0。
-                pip_bottom = max(min(pip_pos.z, self.deck_z), 0)
-                pip_mouth = max(0.0, pip_bottom - well_depth)
-                pip2_bottom = max(min(pip_pos.z + self.right_2_left.z, self.deck_z), 0)
-                pip2_mouth = max(0.0, pip2_bottom - well_depth)
+                pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
+                    z_base, well_depth
+                )
 
                 pipetting_positions.append({
                     "Number": number,
@@ -2464,13 +2578,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "ZPos": max(min(claw_z, self.max_z_claw), 0),
                 })
 
-                # 移液：台面高度下探 70（与「无 children」分支一致）。
+                # 移液：台面高度下探 70（与「无 children」分支一致）；再按左右 tip 长度补偿。
                 pip_x = slot_pos[0] - 40
                 pip_y = slot_pos[1] - default_h / 2
-                pip_z = self.deck_z - 70
-                # 空槽无真实物料：bottleBottom 约束到 deck_z，bottleMouth 用孔底占位（无孔深可减）。
-                pip_bottom = max(min(pip_z, self.deck_z), 0)
-                pip2_bottom = max(min(pip_z + self.right_2_left.z, self.deck_z), 0)
+                z_base = self.deck_z - 70
+                # 空槽无真实孔深：mouth 与 bottom 同高（well_depth=0）。
+                pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
+                    z_base, 0.0
+                )
                 pipetting_positions.append({
                     "Number": number,
                     "VolumeEnum": left_vol_enum,
@@ -2478,11 +2593,11 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "XPos": min(max(0, pip_x), self.deck_x),
                     "YPos": min(max(0, pip_y), self.deck_y),
                     "ZPos": pip_bottom,
-                    "bottleMouthPosition": pip_bottom,
+                    "bottleMouthPosition": pip_mouth,
                     "X2Pos": pip_x + self.right_2_left.x,
                     "Y2Pos": pip_y + self.right_2_left.y,
                     "Z2Pos": pip2_bottom,
-                    "bottleMouthPosition2": pip2_bottom,
+                    "bottleMouthPosition2": pip2_mouth,
                 })
 
             if pipetting_positions:
@@ -2616,7 +2731,42 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                         pass
         return 0.0
 
-    def _support_free_prcxi_z(self, target, leaf, support, support_layer, offset_z: float = 0.0) -> float:
+    def _axis_tip_heights(self) -> Tuple[float, float]:
+        """返回 (left_tip_h, right_tip_h) mm。
+
+        有 ``_tip_height_by_axis``（来自 pip_setting）时按轴取；否则左右都用
+        ``self.tip_height``（legacy / 本次 tip_rack 高度）。
+        """
+        by_axis = getattr(self, "_tip_height_by_axis", None) or {}
+        if by_axis:
+            return float(by_axis.get("left", 0.0) or 0.0), float(by_axis.get("right", 0.0) or 0.0)
+        h = float(getattr(self, "tip_height", 0.0) or 0.0)
+        return h, h
+
+    def _pipetting_z_from_base(
+        self, prcxi_z_base: float, well_depth: float
+    ) -> Tuple[float, float, float, float]:
+        """由不含 tip 的基准 prcxi z 生成左右轴 bottleBottom / bottleMouth。
+
+        ``prcxi_z = deck_z - (abs_z + tip_h)`` ⇒ 在 tip_h=0 的基准上再减 tip_h。
+        右轴额外叠加 ``right_2_left.z``。
+        """
+        tip_l, tip_r = self._axis_tip_heights()
+        pip_bottom = max(min(prcxi_z_base - tip_l, self.deck_z), 0.0)
+        pip_mouth = max(0.0, pip_bottom - well_depth)
+        pip2_bottom = max(min(prcxi_z_base - tip_r + self.right_2_left.z, self.deck_z), 0.0)
+        pip2_mouth = max(0.0, pip2_bottom - well_depth)
+        return pip_bottom, pip_mouth, pip2_bottom, pip2_mouth
+
+    def _support_free_prcxi_z(
+        self,
+        target,
+        leaf,
+        support,
+        support_layer,
+        offset_z: float = 0.0,
+        tip_height: Optional[float] = None,
+    ) -> float:
         """计算 ``target`` 的「无支撑层」prcxi z（含 deck_z 顶面截断），供调用方再统一减去 support。
 
         直接用 ``get_absolute_location`` 而非 plr_pos_to_prcxi 的父链 hack，避免父链对
@@ -2624,9 +2774,13 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         时，``get_absolute_location`` 已把支撑高度算进绝对坐标，这里先剔除，得到「板若直接放
         deck 表面」的基准 z。调用方随后统一 ``- support`` 抬高一层，再各自做 max_z 截断，
         保证支撑高度不被各级 clamp 吃掉，且无支撑物料行为与历史完全一致。
+
+        ``tip_height`` 显式传入时覆盖 ``self.tip_height``（写板位时用 0 求基准，再按左右轴分别补偿）。
         """
         z_pos = 't' if isinstance(target, TipSpot) else 'c'
-        tip_h = 0 if isinstance(target, TipSpot) else self.tip_height
+        tip_h = 0.0 if isinstance(target, TipSpot) else (
+            float(self.tip_height or 0.0) if tip_height is None else float(tip_height)
+        )
         abs_z = target.get_absolute_location(x='c', y='c', z=z_pos).z + tip_h
         leaf_loc = getattr(leaf, 'location', None)
         if support_layer is not None and leaf_loc is not None and getattr(leaf_loc, 'z', 0) != 0:
@@ -2634,16 +2788,22 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         prcxi_z = self.deck_z - abs_z + offset_z
         return min(max(0, prcxi_z), self.deck_z)
 
-    def plr_pos_to_prcxi(self, resource: Resource, resource_offset: Coordinate = Coordinate(0, 0, 0), offset: Coordinate = Coordinate(0, 0, 0)):
+    def plr_pos_to_prcxi(
+        self,
+        resource: Resource,
+        resource_offset: Coordinate = Coordinate(0, 0, 0),
+        offset: Coordinate = Coordinate(0, 0, 0),
+        tip_height: Optional[float] = None,
+    ):
         z_pos = 'c'
-        tip_height = self.tip_height
+        tip_h = float(self.tip_height or 0.0) if tip_height is None else float(tip_height)
         if isinstance(resource, TipSpot):
             z_pos = 't'
-            tip_height = 0
+            tip_h = 0.0
         resource_pos = resource.get_absolute_location(x="c",y="c",z=z_pos)
         x = resource_pos.x 
         y = resource_pos.y 
-        z = resource_pos.z + tip_height
+        z = resource_pos.z + tip_h
 
         parent = resource.parent
         res_z = resource.location.z
@@ -2712,7 +2872,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self._unilabos_backend.create_protocol(protocol_name)
 
     async def run_protocol(self, protocol_id: str = None):
-        return self._unilabos_backend.run_protocol(protocol_id)
+        return await self._unilabos_backend.run_protocol_async(protocol_id)
 
     async def remove_liquid(
         self,
@@ -3016,7 +3176,13 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if small_vols and self._tip_rack_is_10ul_range(tip_rack) and not _explicit_multi:
                 use_channels = [1]
                 mix_vol = max(min(mix_vol, 10), 0) if mix_vol is not None else None
-        self.tip_height = tip_rack.children[0].get_size_z()
+        # tip 高度：有 pip_setting 时用所选轴量程对应枪头长度；否则用本次 tip_rack 孔高。
+        if _pip_setting is not None:
+            self.tip_height = float(
+                (getattr(self, "_tip_height_by_axis", None) or {}).get(_sel_axis, 0.0) or 0.0
+            )
+        else:
+            self.tip_height = tip_rack.children[0].get_size_z()
         # matrix_id 已有值时，跳过板位重算；仅在首次创建 matrix 后回写板位坐标。
         if not skip_pipetting_position_recalc:
             # P2 v2：跨板 transfer_liquid 场景下 sources / targets 列表里可能引用多个 plate
@@ -3054,14 +3220,15 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     support_layer = slot_parent
                 else:
                     support, support_layer = 0.0, None
-                pip_pos = self.plr_pos_to_prcxi(well)
-                pip_pos.z = self._support_free_prcxi_z(well, slot, support, support_layer) - support
+                pip_pos = self.plr_pos_to_prcxi(well, tip_height=0.0)
+                z_base = self._support_free_prcxi_z(
+                    well, slot, support, support_layer, tip_height=0.0
+                ) - support
                 # 孔口(bottleMouth) = 孔底减孔深；孔深取 well 高度，为 0 回退 slot 高度。
                 well_depth = float(well.get_size_z() or 0.0) or self._recover_height(slot)
-                pip_bottom = max(min(pip_pos.z, self.deck_z), 0)
-                pip_mouth = max(0.0, pip_bottom - well_depth)
-                pip2_bottom = max(min(pip_pos.z + self.right_2_left.z, self.deck_z), 0)
-                pip2_mouth = max(0.0, pip2_bottom - well_depth)
+                pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
+                    z_base, well_depth
+                )
                 _ps = getattr(self, "pip_setting", None) or {}
                 left_vol_enum = _to_volume_enum((_ps.get("left") or {}).get("vol"))
                 right_vol_enum = _to_volume_enum((_ps.get("right") or {}).get("vol"))
@@ -3422,6 +3589,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         protocol_version: Literal["legacy", "v04"] = "v04",
         reset_status_inverted: Optional[bool] = None,
         reset_timeout: float = 120.0,
+        wait_finish_timeout_s: Optional[float] = None,
     ) -> None:
         super().__init__()
         self.tablets_info = tablets_info
@@ -3444,12 +3612,26 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self.is_9320 = is_9320
         # setup 复位等待超时上限（秒），防止 GetResetStatus 语义异常导致死循环（决策点 C）。
         self.reset_timeout = float(reset_timeout)
+        # 方案执行总超时（秒）：默认 None=不设总超时，避免提前终止；仅显式配置时生效。
+        self.wait_finish_timeout_s = self._normalize_wait_finish_timeout(wait_finish_timeout_s)
         # 枪头轴配置（由 PRCXI9300Handler 透传）。None → legacy [0]→Left/[1]→Right。
         self.pip_setting: Optional[Dict[str, Dict[str, Any]]] = pip_setting
         # 当前操作选定的物理轴（"Left"/"Right"），由设备层 op override 在调用前写入。
         # pip_setting 模式下 backend 凭此判轴（而非解码通道下标），避免把右轴下标 [8..15]
         # 透传给 PLR（PLR 只接受 0..channel_num-1）。
         self._active_axis: Optional[str] = None
+
+    @staticmethod
+    def _normalize_wait_finish_timeout(value: Optional[float]) -> Optional[float]:
+        """把 wait_for_finish 超时配置规范化；None/<=0 表示不设总超时（不会提前终止）。"""
+        if value is None or value == "":
+            return None
+        try:
+            timeout_s = float(value)
+        except (TypeError, ValueError):
+            print(f"[PRCXI][WARN] wait_finish_timeout_s 配置非法（{value!r}），回退为不设超时。")
+            return None
+        return timeout_s if timeout_s > 0 else None
 
     def _resolve_deck(self, plate, deck=None) -> Optional["PRCXI9300Deck"]:
         """定位 plate 所属的 PRCXI9300Deck：按 deck 入参 → plate 的祖先链 → handler.deck 顺序回退。"""
@@ -3621,7 +3803,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                     "deck 上无可识别耗材或自动匹配失败（请确认槽位物料已挂载）。"
                 )
 
-    def run_protocol(self, protocol_id: str = None):
+    def _ensure_run_ready(self) -> None:
+        """执行前 reset 门禁检查（同步/异步 run 复用）。"""
         if self._execute_setup:
             assert self.is_reset_ok, (
                 "PRCXI9300Backend is not reset-ready. "
@@ -3635,9 +3818,59 @@ class PRCXI9300Backend(LiquidHandlerBackend):
                     "[PRCXI][WARN] setup=False 且 reset 状态未就绪，按外部托管模式继续执行。"
                     "如需严格拦截请使用 setup=True。"
                 )
+
+    async def _wait_sleep(self, seconds: float = 1.0) -> None:
+        """等待轮询间隔：优先使用 ROS 节点 sleep，避免阻塞执行器。"""
+        if hasattr(self, "_ros_node") and self._ros_node is not None:
+            await self._ros_node.sleep(seconds)
+        else:
+            await asyncio.sleep(seconds)
+
+    def _log_wait_for_finish_failure(self, reason: str) -> None:
+        """wait_for_finish 失败时输出可观测上下文。"""
+        timeout_cfg = self.wait_finish_timeout_s
+        timeout_desc = "None(不设总超时)" if timeout_cfg is None else f"{timeout_cfg:.1f}s"
+        err_code: Any = None
+        try:
+            err_code = self.api_client.get_error_code()
+        except Exception as e:
+            err_code = f"<获取失败: {e}>"
+
+        last_step: Any = None
+        try:
+            state_list = self.api_client.step_state_list()
+            if isinstance(state_list, list) and state_list:
+                tail = state_list[-1]
+                if isinstance(tail, dict):
+                    last_step = {
+                        "SequenceNumber": tail.get("SequenceNumber"),
+                        "Name": tail.get("Name"),
+                        "State": tail.get("State"),
+                    }
+                else:
+                    last_step = tail
+        except Exception as e:
+            last_step = f"<读取失败: {e}>"
+
+        timeout_hit = bool(getattr(self.api_client, "last_wait_timed_out", False))
+        print(
+            f"[PRCXI][{self.protocol_version}] wait_for_finish 失败：reason={reason} "
+            f"timeout_hit={timeout_hit} timeout_cfg={timeout_desc} "
+            f"error_code={err_code} last_step={last_step}"
+        )
+
+    def run_protocol(self, protocol_id: str = None):
+        self._ensure_run_ready()
         if self.protocol_version == "v04":
             return self._run_protocol_v04(protocol_id)
         return self._run_protocol_legacy(protocol_id)
+
+    async def run_protocol_async(self, protocol_id: str = None):
+        """异步执行方案，避免在协程里阻塞式 sleep。"""
+        self._ensure_run_ready()
+        if self.protocol_version == "v04":
+            return await self._run_protocol_v04_async(protocol_id)
+        return await self._run_protocol_legacy_async(protocol_id)
 
     def _run_protocol_legacy(self, protocol_id: str = None):
         """legacy：AddSolution(steps) → LoadSolution(guid) → Start → wait_for_finish（保持原行为）。"""
@@ -3653,7 +3886,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         print(json.dumps(self.steps_todo_list, indent=2))
         if not self.api_client.start():
             return False
-        if not self.api_client.wait_for_finish():
+        if not self.api_client.wait_for_finish(timeout_s=self.wait_finish_timeout_s):
+            self._log_wait_for_finish_failure("legacy 执行未成功完成")
             return False
         return True
 
@@ -3687,7 +3921,63 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             return False
         if not self.api_client.start():
             return False
-        if not self.api_client.wait_for_finish():
+        if not self.api_client.wait_for_finish(timeout_s=self.wait_finish_timeout_s):
+            self._log_wait_for_finish_failure("v04 执行未成功完成")
+            return False
+        return True
+
+    async def _run_protocol_legacy_async(self, protocol_id: str = None):
+        """legacy 异步执行：保留原链路，wait 阶段改为非阻塞轮询。"""
+        run_time = time.time()
+        if protocol_id == "" or protocol_id is None:
+            solution_id = self.api_client.add_solution(
+                f"protocol_{run_time}", self.matrix_id, self.steps_todo_list
+            )
+        else:
+            solution_id = protocol_id
+        print(f"PRCXI9300Backend created solution with ID: {solution_id}")
+        self.api_client.load_solution(solution_id)
+        print(json.dumps(self.steps_todo_list, indent=2))
+        if not self.api_client.start():
+            return False
+        if not await self.api_client.wait_for_finish_async(
+            sleep_coro=self._wait_sleep,
+            timeout_s=self.wait_finish_timeout_s,
+        ):
+            self._log_wait_for_finish_failure("legacy 异步执行未成功完成")
+            return False
+        return True
+
+    async def _run_protocol_v04_async(self, protocol_id: str = None):
+        """v04 异步执行：保留原判定语义（GetStartStatus + StepState），只替换阻塞等待。"""
+        if not protocol_id:
+            plan_name = getattr(self, "protocol_name", "") or f"protocol_{int(time.time())}"
+            if not self.steps_todo_list:
+                print(f"[PRCXI][v04] 方案 {plan_name} 无动作步骤，按空协议完成。")
+                return True
+            print(f"[PRCXI][v04] AddSolution_V04(方案名={plan_name}, boardId={self.matrix_id})")
+            created_plan = self.api_client.add_solution_v04(
+                plan_name,
+                self.matrix_id,
+                self.steps_todo_list,
+            )
+            if isinstance(created_plan, str) and created_plan.strip():
+                plan_name = created_plan.strip()
+            print(f"[PRCXI][v04] 服务端已创建方案：{plan_name}")
+        else:
+            plan_name = str(protocol_id)
+
+        print(f"[PRCXI][v04] LoadSolution(方案名={plan_name})")
+        if not self.api_client.load_solution(plan_name):
+            print(f"[PRCXI][v04] 加载方案失败：{plan_name}（确认方案已存在于 NeonGenesis 并被识别）")
+            return False
+        if not self.api_client.start():
+            return False
+        if not await self.api_client.wait_for_finish_async(
+            sleep_coro=self._wait_sleep,
+            timeout_s=self.wait_finish_timeout_s,
+        ):
+            self._log_wait_for_finish_failure("v04 异步执行未成功完成")
             return False
         return True
 
@@ -4207,6 +4497,7 @@ class PRCXI9300Api:
         if reset_status_inverted is None or reset_status_inverted == "":
             reset_status_inverted = False
         self.reset_status_inverted = bool(reset_status_inverted)
+        self._wait_timeout_last = False
 
     @staticmethod
     def _normalize_protocol_version(value: Optional[str]) -> str:
@@ -4425,27 +4716,72 @@ class PRCXI9300Api:
         }
         return mapping.get(s, -1)
 
-    def wait_for_finish(self) -> bool:
+    @property
+    def last_wait_timed_out(self) -> bool:
+        """最近一次 wait_for_finish 是否因「显式配置的总超时」退出。"""
+        return bool(self._wait_timeout_last)
+
+    @staticmethod
+    def _normalize_wait_timeout_seconds(timeout_s: Optional[float]) -> Optional[float]:
+        """把等待超时秒数归一化；None/<=0 表示不设总超时（不会提前终止）。"""
+        if timeout_s is None or timeout_s == "":
+            return None
+        try:
+            timeout_v = float(timeout_s)
+        except (TypeError, ValueError):
+            return None
+        return timeout_v if timeout_v > 0 else None
+
+    @staticmethod
+    async def _wait_sleep_async(
+        sleep_coro: Optional[Callable[[float], Awaitable[None]]],
+        seconds: float,
+    ) -> None:
+        if sleep_coro is not None:
+            await sleep_coro(seconds)
+        else:
+            await asyncio.sleep(seconds)
+
+    def wait_for_finish(self, timeout_s: Optional[float] = None) -> bool:
         """等待方案执行完成。
 
         - ``legacy``：沿用 ``IMachineState.GetStepStateList`` 三态判断。
         - ``v04``：改用 ``IAutomation.GetStartStatus`` 轮询（运行中=true，结束=false）。
+        - ``timeout_s`` 默认 None：不设总超时；仅显式传入正数时才可能超时返回 False。
         """
+        self._wait_timeout_last = False
         if self.is_v04:
-            return self._wait_for_finish_v04()
-        return self._wait_for_finish_legacy()
+            return self._wait_for_finish_v04(timeout_s=timeout_s)
+        return self._wait_for_finish_legacy(timeout_s=timeout_s)
 
-    def _wait_for_finish_legacy(self) -> bool:
+    async def wait_for_finish_async(
+        self,
+        *,
+        sleep_coro: Optional[Callable[[float], Awaitable[None]]] = None,
+        timeout_s: Optional[float] = None,
+    ) -> bool:
+        """异步等待方案执行完成（用于 async action，避免阻塞执行器）。"""
+        self._wait_timeout_last = False
+        if self.is_v04:
+            return await self._wait_for_finish_v04_async(sleep_coro=sleep_coro, timeout_s=timeout_s)
+        return await self._wait_for_finish_legacy_async(sleep_coro=sleep_coro, timeout_s=timeout_s)
+
+    def _wait_for_finish_legacy(self, timeout_s: Optional[float] = None) -> bool:
+        timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
+        deadline = (time.time() + timeout_s) if timeout_s is not None else None
         success = False
         start = False
         while not success:
+            if deadline is not None and time.time() >= deadline:
+                self._wait_timeout_last = True
+                return False
             status = self.step_state_list()
-            if len(status) == 1:
-                start = True
             if status is None:
                 break
             if len(status) == 0:
                 break
+            if len(status) == 1:
+                start = True
             if status[-1]["State"] == 2 and start:
                 success = True
             elif status[-1]["State"] > 2:
@@ -4456,16 +4792,52 @@ class PRCXI9300Api:
                 time.sleep(1)
         return success
 
-    def _wait_for_finish_v04(self) -> bool:
+    async def _wait_for_finish_legacy_async(
+        self,
+        *,
+        sleep_coro: Optional[Callable[[float], Awaitable[None]]] = None,
+        timeout_s: Optional[float] = None,
+    ) -> bool:
+        timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
+        deadline = (time.time() + timeout_s) if timeout_s is not None else None
+        success = False
+        start = False
+        while not success:
+            if deadline is not None and time.time() >= deadline:
+                self._wait_timeout_last = True
+                return False
+            status = self.step_state_list()
+            if status is None:
+                break
+            if len(status) == 0:
+                break
+            if len(status) == 1:
+                start = True
+            if status[-1]["State"] == 2 and start:
+                success = True
+            elif status[-1]["State"] > 2:
+                break
+            elif status[-1]["State"] == 0:
+                start = True
+            else:
+                await self._wait_sleep_async(sleep_coro, 1.0)
+        return success
+
+    def _wait_for_finish_v04(self, timeout_s: Optional[float] = None) -> bool:
         """v04：轮询 ``GetStartStatus``（运行中=true）。
 
         流程：
         1) 先等待进入运行态（短窗口，兼容 Start 后状态传播延迟）；
         2) 一旦观测到运行态，再等待其回落到 false；
         3) 回落后用 ``GetStepStateList`` 校验末步必须为 Completed(2)。
+
+        注意：``start_deadline``（5s）只用于判定「是否观测到启动」，不是总执行超时。
+        总超时仅在 ``timeout_s`` 显式传入正数时生效；默认 None 不会提前终止。
         """
         if self.debug:
             return True
+        timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
+        deadline = (time.time() + timeout_s) if timeout_s is not None else None
 
         def _last_step_completed() -> Optional[bool]:
             status = self.step_state_list()
@@ -4478,6 +4850,12 @@ class PRCXI9300Api:
         start_deadline = time.time() + 5.0
 
         while True:
+            if deadline is not None and time.time() >= deadline:
+                final_ok = _last_step_completed()
+                if final_ok:
+                    return True
+                self._wait_timeout_last = True
+                return False
             running = self.get_start_status()
             if running:
                 started = True
@@ -4491,6 +4869,47 @@ class PRCXI9300Api:
                 return True if final_ok is None else final_ok
 
             time.sleep(1)
+
+    async def _wait_for_finish_v04_async(
+        self,
+        *,
+        sleep_coro: Optional[Callable[[float], Awaitable[None]]] = None,
+        timeout_s: Optional[float] = None,
+    ) -> bool:
+        """v04 异步轮询 ``GetStartStatus``（运行中=true）。默认不设总超时。"""
+        if self.debug:
+            return True
+        timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
+        deadline = (time.time() + timeout_s) if timeout_s is not None else None
+
+        def _last_step_completed() -> Optional[bool]:
+            status = self.step_state_list()
+            if status is None or len(status) == 0:
+                return None
+            last_state = self._normalize_step_state(status[-1].get("State"))
+            return last_state == 2
+
+        started = False
+        start_deadline = time.time() + 5.0
+
+        while True:
+            if deadline is not None and time.time() >= deadline:
+                final_ok = _last_step_completed()
+                if final_ok:
+                    return True
+                self._wait_timeout_last = True
+                return False
+            running = self.get_start_status()
+            if running:
+                started = True
+            elif started:
+                final_ok = _last_step_completed()
+                return True if final_ok is None else final_ok
+            elif time.time() >= start_deadline:
+                final_ok = _last_step_completed()
+                return True if final_ok is None else final_ok
+
+            await self._wait_sleep_async(sleep_coro, 1.0)
 
     def call(self, service: str, method: str, params: Optional[list] = None) -> Any:
         payload = json.dumps(
