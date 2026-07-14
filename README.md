@@ -81,6 +81,21 @@ Please refer to [Documentation - Boot Examples](https://deepmodeling.github.io/U
 
 See [Best Practice Guide](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)
 
+## Reference Driver Implementations
+
+Two runnable example device packages are maintained as standalone GitHub repositories (generated
+from [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate)). Clone either one, load it
+with `--devices <pkg> --external_devices_only`, and read it when writing your own drivers:
+
+| Example repository | Demonstrates |
+|--------------------|--------------|
+| [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo) | Cross-device `@subscribe` + remote `call_device_action` LAN closed loop (hub/sub as two processes) |
+| [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo) | `hardware_interface` proxy — multiple sub-devices share one communication endpoint: shared serial (default IO method names) and Modbus `extra_info` (per-device `slave_id` injection) |
+
+Each repository README ships a step-by-step launch tutorial with verified output. For the underlying
+communication-sharing mechanism see [Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
+to write a new driver from scratch see [Add Device](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html).
+
 ## Message Format
 
 Uni-Lab-OS uses pre-built `unilabos_msgs` for system communication. You can find the built versions on the [GitHub Releases](https://github.com/deepmodeling/Uni-Lab-OS/releases) page.
