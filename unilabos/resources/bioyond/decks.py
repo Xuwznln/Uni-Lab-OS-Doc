@@ -127,6 +127,8 @@ class BioyondElectrolyteDeck(Deck):
             "大瓶母液堆栈左": bioyond_warehouse_5x1x1("大瓶母液堆栈左"),
             "大瓶母液堆栈右": bioyond_warehouse_5x1x1("大瓶母液堆栈右"),
             "2号手套箱内部堆栈": bioyond_warehouse_3x3x1("2号手套箱内部堆栈"),  # 新增：3行×3列 (A01-C03)
+            "大分液瓶堆栈": bioyond_warehouse_3x3x1("大分液瓶堆栈"),  # 新增：3行×3列 (A01-C03)，承接配液分液完成后的20ml分液瓶板
+            "小分液瓶堆栈": bioyond_warehouse_3x3x1("小分液瓶堆栈"),  # 新增：3行×3列 (A01-C03)，承接5ml分液瓶板
         }
         # warehouse 的位置
         self.warehouse_locations = {
@@ -143,6 +145,8 @@ class BioyondElectrolyteDeck(Deck):
             "大瓶母液堆栈左": Coordinate(1164.0, 624.0, 0.0),
             "大瓶母液堆栈右": Coordinate(2717.0, 624.0, 0.0),
             "2号手套箱内部堆栈": Coordinate(-800, 800.0, 0.0),  # 新增：位置需根据实际硬件调整
+            "大分液瓶堆栈": Coordinate(-800, 400.0, 0.0),  # 新增：位置占位值，需根据实际硬件校准
+            "小分液瓶堆栈": Coordinate(-800, 0.0, 0.0),  # 新增：位置占位值，需根据实际硬件校准
         }
 
         for warehouse_name, warehouse in self.warehouses.items():
