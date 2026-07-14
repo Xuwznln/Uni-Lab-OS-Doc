@@ -476,6 +476,33 @@ class HTTPClient:
             logger.error(f"发布工作流失败: {response.status_code}, {response.text}")
             return {"code": response.status_code, "message": response.text}
 
+    def report_gantt(self, uuid: str, data: Any) -> requests.Response:
+        """回传甘特图数据到后端 job result 接口。
+
+        Args:
+            uuid: scheduler 下发 device_info 消息里的 uuid，原样回传。
+            data: 甘特接口的原始响应，原样放入请求体 data 字段。
+
+        Returns:
+            Response: API响应对象
+        """
+        from unilabos.config.config import GanttReportConfig
+
+        url = f"{self.remote_addr}{GanttReportConfig.report_path}"
+        response = self._session.post(
+            url,
+            json={"uuid": uuid, "data": data},
+            headers={"Authorization": f"Lab {self.auth}"},
+            timeout=60,
+        )
+        if response.status_code == 200:
+            logger.info(f"甘特图回传成功: uuid={uuid}")
+        else:
+            logger.error(
+                f"甘特图回传失败: uuid={uuid} status={response.status_code} body={response.text}"
+            )
+        return response
+
 
 # 创建默认客户端实例
 http_client = HTTPClient()
