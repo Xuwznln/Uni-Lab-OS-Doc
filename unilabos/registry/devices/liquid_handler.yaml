@@ -8389,7 +8389,9 @@ liquid_handler.prcxi:
         goal:
           destination_offset: destination_offset
           drop_direction: drop_direction
+          force: force
           get_direction: get_direction
+          hierarchy: hierarchy
           intermediate_locations: intermediate_locations
           pickup_direction: pickup_direction
           pickup_distance_from_top: pickup_distance_from_top
@@ -8404,7 +8406,9 @@ liquid_handler.prcxi:
             y: 0.0
             z: 0.0
           drop_direction: ''
+          force: 1
           get_direction: ''
+          hierarchy: 1
           intermediate_locations: []
           pickup_direction: ''
           pickup_distance_from_top: 0.0
@@ -8458,8 +8462,18 @@ liquid_handler.prcxi:
                   type: object
                 drop_direction:
                   type: string
+                force:
+                  maximum: 2147483647
+                  minimum: -2147483648
+                  title: force
+                  type: integer
                 get_direction:
                   type: string
+                hierarchy:
+                  maximum: 2147483647
+                  minimum: -2147483648
+                  title: hierarchy
+                  type: integer
                 intermediate_locations:
                   items:
                     properties:

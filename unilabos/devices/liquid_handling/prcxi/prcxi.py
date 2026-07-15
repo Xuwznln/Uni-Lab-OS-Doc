@@ -230,10 +230,14 @@ def legacy_steps_to_v04_solution_steps(steps: Sequence[Dict[str, Any]]) -> List[
             source = _as_int(step.get("PlateNo"), 1)
             destination = source
             put_down_position = _as_int(step.get("Hierarchy"), 1)
+            force = _as_int(step.get("Force"), 1)
             if idx + 1 < len(steps_list) and steps_list[idx + 1].get("Function") == "PutDown":
                 next_step = steps_list[idx + 1]
                 destination = _as_int(next_step.get("PlateNo"), destination)
                 put_down_position = _as_int(next_step.get("Hierarchy"), put_down_position)
+                # 合并 PutDown 时若其带 Force 则覆盖（仍默认 1）
+                if next_step.get("Force") is not None:
+                    force = _as_int(next_step.get("Force"), force)
                 idx += 1
             data = {
                 **base,
@@ -242,6 +246,7 @@ def legacy_steps_to_v04_solution_steps(steps: Sequence[Dict[str, Any]]) -> List[
                 "Destination": destination,
                 "PinchItUpPosition": _as_int(step.get("Hierarchy"), 1),
                 "PutDownPosition": put_down_position,
+                "Force": force,
             }
         elif function == "PutDown":
             destination = _as_int(step.get("PlateNo"), 1)
@@ -252,6 +257,7 @@ def legacy_steps_to_v04_solution_steps(steps: Sequence[Dict[str, Any]]) -> List[
                 "Destination": destination,
                 "PinchItUpPosition": _as_int(step.get("Hierarchy"), 1),
                 "PutDownPosition": _as_int(step.get("Hierarchy"), 1),
+                "Force": _as_int(step.get("Force"), 1),
             }
         elif function == "Shaking":
             data = {
@@ -3481,6 +3487,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         drop_direction: GripDirection = GripDirection.FRONT,
         pickup_direction: GripDirection = GripDirection.FRONT,
         pickup_distance_from_top: float = 13.2 - 3.33,
+        hierarchy: int = 1,
+        force: int = 1,
         **backend_kwargs,
     ):
         """把 ``plate`` 搬到 ``to`` 号 slot。
@@ -3490,6 +3498,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         - 放板按 ``to`` 号位下发 pick+drop；
         - 放置后把 ``plate`` 在资源树里 reparent 到目标 slot；若该 slot 上有
           plate_adapter 或 module，则 plate 最终挂到该 adapter/module 上，并同步更新物料。
+
+        ``hierarchy``：夹爪夹取/放下高度档位，默认 1。
+        ``force``：MvKit 夹持力，默认 1。
 
         因 pylabrobot 的 ``move_plate/move_resource`` 需要 ``to`` 是 Resource/Coordinate
         来做坐标计算与 reparent，``to:int`` 时不再委托父类，由本方法直接驱动 backend +
@@ -3514,8 +3525,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         # 下发硬件 pick+drop（simulator 模式只更新物料，不产生硬件步骤）。
         step = None
         if not self._simulator:
-            pick_step = await self._unilabos_backend.pick_up_resource(None, source_plate_number=src_slot)
-            drop_step = await self._unilabos_backend.drop_resource(None, target_plate_number=to)
+            hierarchy = int(backend_kwargs.get("hierarchy", hierarchy))
+            force = int(backend_kwargs.get("force", force))
+            pick_step = await self._unilabos_backend.pick_up_resource(
+                None, source_plate_number=src_slot, hierarchy=hierarchy, force=force
+            )
+            drop_step = await self._unilabos_backend.drop_resource(
+                None, target_plate_number=to, hierarchy=hierarchy, force=force
+            )
             step = [pick_step, drop_step]
 
         # 更新物料：把 plate reparent 到目标 slot；若目标 slot 上有 plate_adapter/module 则挂到其上。
@@ -3767,8 +3784,9 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         is_whole_plate = True
         balance_height = 0
         hierarchy = int(backend_kwargs.get("hierarchy", 1))  # 夹取层级，默认 1
+        force = int(backend_kwargs.get("force", 1))  # MvKit 夹持力，默认 1
         step = self.api_client.clamp_jaw_pick_up(
-            plate_number, is_whole_plate, balance_height, hierarchy=hierarchy
+            plate_number, is_whole_plate, balance_height, hierarchy=hierarchy, force=force
         )
 
         self.steps_todo_list.append(step)
@@ -3792,8 +3810,9 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         if plate_number is None:
             raise ValueError("target_plate_number is required when dropping a resource")
         hierarchy = int(backend_kwargs.get("hierarchy", 1))  # 放下层级，默认 1
+        force = int(backend_kwargs.get("force", 1))  # MvKit 夹持力，默认 1
         step = self.api_client.clamp_jaw_drop(
-            plate_number, is_whole_plate, balance_height, hierarchy=hierarchy
+            plate_number, is_whole_plate, balance_height, hierarchy=hierarchy, force=force
         )
         self.steps_todo_list.append(step)
         return step
@@ -5328,9 +5347,11 @@ class PRCXI9300Api:
         is_whole_plate: bool,
         balance_height: int,
         hierarchy: int = 1,
+        force: int = 1,
     ) -> Dict[str, Any]:
         # ``Hierarchy``（层级）决定夹爪夹取/放下的高度档位（板位堆叠层级），与 SDK StepData
         # 的 ``hierarchy`` 字段对齐，默认 1。
+        # ``Force`` 为 MvKit 夹持力，默认 1。
         return {
             "StepAxis": "ClampingJaw",
             "Function": "DefectiveLift",
@@ -5341,6 +5362,7 @@ class PRCXI9300Api:
             "BalanceHeight": balance_height,
             "PlateOrHoleNum": f"T{plate_no}",
             "Hierarchy": hierarchy,
+            "Force": force,
         }
 
     def clamp_jaw_drop(
@@ -5349,9 +5371,11 @@ class PRCXI9300Api:
         is_whole_plate: bool,
         balance_height: int,
         hierarchy: int = 1,
+        force: int = 1,
     ) -> Dict[str, Any]:
         # ``Hierarchy``（层级）决定夹爪夹取/放下的高度档位（板位堆叠层级），与 SDK StepData
         # 的 ``hierarchy`` 字段对齐，默认 1。
+        # ``Force`` 为 MvKit 夹持力，默认 1。
         return {
             "StepAxis": "ClampingJaw",
             "Function": "PutDown",
@@ -5362,6 +5386,7 @@ class PRCXI9300Api:
             "BalanceHeight": balance_height,
             "PlateOrHoleNum": f"T{plate_no}",
             "Hierarchy": hierarchy,
+            "Force": force,
         }
 
     def shaker_action(self, time: int, module_no: int, amplitude: int, is_wait: bool):

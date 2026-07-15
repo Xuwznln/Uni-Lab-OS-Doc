@@ -692,6 +692,7 @@ class MvKitStepV04(SolutionStepV04):
         destination: int = 12,
         pinch_it_up_position: int = 1,
         put_down_position: int = 1,
+        force: int = 1,
         comment: Optional[str] = None,
         is_enabled: bool = True,
     ):
@@ -700,6 +701,7 @@ class MvKitStepV04(SolutionStepV04):
         self.destination = destination
         self.pinch_it_up_position = pinch_it_up_position
         self.put_down_position = put_down_position
+        self.force = force
 
     def to_rpc_dict(self) -> Dict[str, Any]:
         data = self._base_dict()
@@ -708,6 +710,7 @@ class MvKitStepV04(SolutionStepV04):
             "Destination": self.destination,
             "PinchItUpPosition": self.pinch_it_up_position,
             "PutDownPosition": self.put_down_position,
+            "Force": int(self.force),
         })
         return data
 
