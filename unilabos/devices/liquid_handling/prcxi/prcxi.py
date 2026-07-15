@@ -2514,22 +2514,22 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 claw_positions.append({"Number": number, "XPos": pos.x, "YPos": pos.y, "ZPos": max(min(pos.z, self.max_z_claw),0)})
 
                 # 移液：以承载板的 A1 孔为目标（孔几何完好），再按支撑层高度抬高一层。
-                # tip_height=0 求基准 z，再按 pip_setting 左右枪头长度分别补偿 ZPos/Z2Pos。
+                # mouth=z='t'、bottom=z='b'；tip_height=0 求基准后再按左右枪头长度补偿。
                 if getattr(leaf, "children", None):
                     well = leaf.children[0]
                     pip_pos = self.plr_pos_to_prcxi(well, tip_height=0.0)
-                    z_base = self._support_free_prcxi_z(
-                        well, leaf, support, support_layer, tip_height=0.0
-                    ) - support
-                    well_depth = float(well.get_size_z() or 0.0) or plate_h
+                    z_mouth, z_bottom = self._pipetting_z_anchors(
+                        well, leaf, support, support_layer
+                    )
                 else:
                     pip_pos = self.plr_pos_to_prcxi(leaf, tip_height=0.0)
                     pip_pos.x = slot_pos[0] - 40
                     pip_pos.y = slot_pos[1] - leaf.get_size_y() / 2
-                    z_base = self.deck_z - support - 70
-                    well_depth = plate_h
+                    z_mouth, z_bottom = self._pipetting_z_anchors(
+                        leaf, leaf, support, support_layer
+                    )
                 pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
-                    z_base, well_depth
+                    z_mouth, z_bottom
                 )
 
                 pipetting_positions.append({
@@ -2578,13 +2578,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "ZPos": max(min(claw_z, self.max_z_claw), 0),
                 })
 
-                # 移液：台面高度下探 70（与「无 children」分支一致）；再按左右 tip 长度补偿。
+                # 移液：台面高度下探 70（与「无 children」分支一致）；空槽无孔几何，mouth=bottom。
                 pip_x = slot_pos[0] - 40
                 pip_y = slot_pos[1] - default_h / 2
                 z_base = self.deck_z - 70
-                # 空槽无真实孔深：mouth 与 bottom 同高（well_depth=0）。
                 pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
-                    z_base, 0.0
+                    z_base, z_base
                 )
                 pipetting_positions.append({
                     "Number": number,
@@ -2744,19 +2743,32 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         return h, h
 
     def _pipetting_z_from_base(
-        self, prcxi_z_base: float, well_depth: float
+        self, prcxi_z_mouth_base: float, prcxi_z_bottom_base: float
     ) -> Tuple[float, float, float, float]:
-        """由不含 tip 的基准 prcxi z 生成左右轴 bottleBottom / bottleMouth。
+        """由不含 tip 的 mouth/bottom 基准 prcxi z 生成左右轴 bottleBottom / bottleMouth。
 
+        mouth 基准来自 ``get_absolute_location(..., z='t')``，bottom 来自 ``z='b'``。
         ``prcxi_z = deck_z - (abs_z + tip_h)`` ⇒ 在 tip_h=0 的基准上再减 tip_h。
         右轴额外叠加 ``right_2_left.z``。
         """
         tip_l, tip_r = self._axis_tip_heights()
-        pip_bottom = max(min(prcxi_z_base - tip_l, self.deck_z), 0.0)
-        pip_mouth = max(0.0, pip_bottom - well_depth)
-        pip2_bottom = max(min(prcxi_z_base - tip_r + self.right_2_left.z, self.deck_z), 0.0)
-        pip2_mouth = max(0.0, pip2_bottom - well_depth)
+        pip_bottom = max(min(prcxi_z_bottom_base - tip_l, self.deck_z), 0.0)
+        pip_mouth = max(min(prcxi_z_mouth_base - tip_l, self.deck_z), 0.0)
+        pip2_bottom = max(min(prcxi_z_bottom_base - tip_r + self.right_2_left.z, self.deck_z), 0.0)
+        pip2_mouth = max(min(prcxi_z_mouth_base - tip_r + self.right_2_left.z, self.deck_z), 0.0)
         return pip_bottom, pip_mouth, pip2_bottom, pip2_mouth
+
+    def _pipetting_z_anchors(
+        self, target, leaf, support: float, support_layer
+    ) -> Tuple[float, float]:
+        """返回 (mouth_base, bottom_base)：孔口 z='t'、孔底 z='b'，均不含 tip、已减 support。"""
+        z_mouth = self._support_free_prcxi_z(
+            target, leaf, support, support_layer, tip_height=0.0, z_anchor="t"
+        ) - support
+        z_bottom = self._support_free_prcxi_z(
+            target, leaf, support, support_layer, tip_height=0.0, z_anchor="b"
+        ) - support
+        return z_mouth, z_bottom
 
     def _support_free_prcxi_z(
         self,
@@ -2766,6 +2778,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         support_layer,
         offset_z: float = 0.0,
         tip_height: Optional[float] = None,
+        z_anchor: Optional[str] = None,
     ) -> float:
         """计算 ``target`` 的「无支撑层」prcxi z（含 deck_z 顶面截断），供调用方再统一减去 support。
 
@@ -2776,14 +2789,19 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         保证支撑高度不被各级 clamp 吃掉，且无支撑物料行为与历史完全一致。
 
         ``tip_height`` 显式传入时覆盖 ``self.tip_height``（写板位时用 0 求基准，再按左右轴分别补偿）。
+        ``z_anchor``：传给 ``get_absolute_location`` 的 z（``'t'`` 孔口 / ``'b'`` 孔底 / ``'c'`` 中心）；
+        缺省时 TipSpot 用 ``'t'``，其余用 ``'c'``。
         """
-        z_pos = 't' if isinstance(target, TipSpot) else 'c'
+        if z_anchor is None:
+            z_pos = "t" if isinstance(target, TipSpot) else "c"
+        else:
+            z_pos = z_anchor
         tip_h = 0.0 if isinstance(target, TipSpot) else (
             float(self.tip_height or 0.0) if tip_height is None else float(tip_height)
         )
-        abs_z = target.get_absolute_location(x='c', y='c', z=z_pos).z + tip_h
-        leaf_loc = getattr(leaf, 'location', None)
-        if support_layer is not None and leaf_loc is not None and getattr(leaf_loc, 'z', 0) != 0:
+        abs_z = target.get_absolute_location(x="c", y="c", z=z_pos).z + tip_h
+        leaf_loc = getattr(leaf, "location", None)
+        if support_layer is not None and leaf_loc is not None and getattr(leaf_loc, "z", 0) != 0:
             abs_z -= support
         prcxi_z = self.deck_z - abs_z + offset_z
         return min(max(0, prcxi_z), self.deck_z)
@@ -3221,13 +3239,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 else:
                     support, support_layer = 0.0, None
                 pip_pos = self.plr_pos_to_prcxi(well, tip_height=0.0)
-                z_base = self._support_free_prcxi_z(
-                    well, slot, support, support_layer, tip_height=0.0
-                ) - support
-                # 孔口(bottleMouth) = 孔底减孔深；孔深取 well 高度，为 0 回退 slot 高度。
-                well_depth = float(well.get_size_z() or 0.0) or self._recover_height(slot)
+                # 孔口 z='t'、孔底 z='b'，再按左右 tip 长度分别补偿。
+                z_mouth, z_bottom = self._pipetting_z_anchors(
+                    well, slot, support, support_layer
+                )
                 pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
-                    z_base, well_depth
+                    z_mouth, z_bottom
                 )
                 _ps = getattr(self, "pip_setting", None) or {}
                 left_vol_enum = _to_volume_enum((_ps.get("left") or {}).get("vol"))
