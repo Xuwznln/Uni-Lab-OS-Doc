@@ -1123,9 +1123,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                                 if original_instance.name == site["occupied_by"]:
                                     site_index = idx
                                     break
-                                elif (original_instance.location.x == site["position"]["x"] and original_instance.location.y == site["position"]["y"] and original_instance.location.z == site["position"]["z"]):
-                                    site_index = idx
-                                    break
+                                # 默认资源会放到000，导致匹配site，后面严格按照occupied_by来匹配
+                                # elif (original_instance.location.x == site["position"]["x"] and original_instance.location.y == site["position"]["y"] and original_instance.location.z == site["position"]["z"]):
+                                #     site_index = idx
+                                #     break
                         if site_index is None:
                             site_name = None
                         else:
