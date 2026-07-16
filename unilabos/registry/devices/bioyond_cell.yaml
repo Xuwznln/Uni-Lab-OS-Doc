@@ -1330,6 +1330,12 @@ bioyond_cell:
     module: unilabos.devices.workstation.bioyond_studio.bioyond_cell.bioyond_cell_workstation:BioyondCellWorkstation
     status_types:
       device_id: String
+      data_formulation_total_count: int
+      data_formulation_completed_count: int
+      data_formulation_completion_percentage: float
+      data_dispense_total_bottles: int
+      data_dispense_completed_bottles: int
+      data_dispense_completion_percentage: float
     type: python
   config_info: []
   description: ''
@@ -1355,6 +1361,18 @@ bioyond_cell:
       properties:
         device_id:
           type: string
+        data_formulation_total_count:
+          type: integer
+        data_formulation_completed_count:
+          type: integer
+        data_formulation_completion_percentage:
+          type: number
+        data_dispense_total_bottles:
+          type: integer
+        data_dispense_completed_bottles:
+          type: integer
+        data_dispense_completion_percentage:
+          type: number
       required:
       - device_id
       type: object

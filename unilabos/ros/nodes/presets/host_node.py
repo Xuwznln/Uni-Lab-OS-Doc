@@ -1715,8 +1715,11 @@ class HostNode(BaseROS2DeviceNode):
     })
     def manual_confirm(self, timeout_seconds: int, assignee_user_ids: list[str], **kwargs) -> dict:
         """
-        timeout_seconds: 超时时间（秒），默认3600秒
-        修改的结果无效，是只读的
+        人工确认节点：确认对话框中的数据为只读，人工修改不会生效（仅确认/放行）。
+
+        Args:
+            timeout_seconds: 超时时间（秒），默认3600秒；由外层 manual_confirm 等待机制处理
+            assignee_user_ids: 通知人员
         """
         return kwargs
 
