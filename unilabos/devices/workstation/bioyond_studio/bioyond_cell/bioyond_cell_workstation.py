@@ -1373,7 +1373,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # 物理 plate 是按 materialId 唯一的；同一块物理 plate 可能在多个 order 的
         # usedMaterials 里都被列出（例如 2 个配液 order 把瓶子分别装到同一物理板的不同孔位）。
         # 因此 all_vial_plates 必须按 materialId 去重，每个 unique plate 用 order_refs 字段
-        # 收集所有引用过它的 (orderId, orderCode) 对；下游电导用 bottle.associateId 反查归属。
+        # 收集所有引用过它的 (orderId, orderCode) 对（保留供追溯）。瓶→单归属现由
+        # vial_bottle_positions（detailMaterialId→orderCode 权威映射）承担，不再靠 associateId。
         plates_by_material: Dict[str, Dict[str, Any]] = {}
         for report in all_reports:
             plate_list = self._extract_vial_plate_from_report(report)
@@ -1409,7 +1410,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     "typeName": vial_plate_info.get("typeName") or "",
                     "barCode": vial_plate_info.get("barCode") or "",
                     "batch_id": batch_id,
-                    "order_refs": [ref_entry],            # 完整列表，下游电导按 associateId 反查
+                    "order_refs": [ref_entry],            # 完整列表，保留供追溯（归属改由 vial_bottle_positions 承担）
                 }
                 plates_by_material[material_id] = merged
 
@@ -1452,6 +1453,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
             r.get("orderCode") for r in all_reports if r.get("orderCode")
         ]
 
+        # 权威 materialId → orderCode（来自 create 响应 usedMaterials，不依赖 associateId）。
+        # 供板级兜底提取 + 分液瓶孔位映射（vial_bottle_positions）复用。
+        mat2order = self._build_vial_bottle_mat2order(data_list)
+
         all_vial_bottles: List[List[Dict]] = []
         need_plate_fallback = False
         for report in all_reports:
@@ -1471,7 +1476,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         if need_plate_fallback and all_vial_plates:
             try:
                 vials_by_order = self._extract_vial_bottles_from_plates(
-                    all_vial_plates, order_codes_for_vial
+                    all_vial_plates, order_codes_for_vial, mat2order=mat2order
                 )
             except Exception as e:
                 logger.error(f"[提取分液瓶-板级] 兜底异常: {e}")
@@ -1516,6 +1521,25 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 all_mass_ratios[idx]["vial_bottle_barcodes"] = ""
                 all_mass_ratios[idx]["vial_bottle_types"] = ""
 
+        # ========== 构建分液瓶孔位映射（vial_bottle_positions）==========
+        # 板状态干净时查每块板 detail，按 detailMaterialId 命中权威 mat2order 归属订单，
+        # 过滤空占位孔/非本批瓶。供下游电导 conductivity_test_inline 直接组装 entry
+        # （不再靠 associateId），并注入 mass_ratios 激活导出位置回退匹配。
+        all_vial_bottle_positions: List[Dict[str, Any]] = []
+        try:
+            all_vial_bottle_positions = self._build_vial_bottle_positions(all_vial_plates, mat2order)
+            # 按 orderCode 分组注入到对应 mass_ratios 项（激活 _match_formula_by_position 位置回退）
+            pos_by_order: Dict[str, List[Dict[str, Any]]] = {}
+            for pos in all_vial_bottle_positions:
+                oc = pos.get("orderCode") or ""
+                if oc:
+                    pos_by_order.setdefault(oc, []).append(pos)
+            for mr in all_mass_ratios:
+                if isinstance(mr, dict):
+                    mr["vial_bottle_positions"] = pos_by_order.get(mr.get("orderCode") or "", [])
+        except Exception as e:
+            logger.warning(f"[{tag}] 构建分液瓶孔位映射失败（不影响下单/导出）: {e}")
+
         # ========== 提取各类瓶板的源坐标（用于 321/32 任务 handles 传参）==========
         def _find_plate_xyz(plates, type_keyword):
             for p in plates:
@@ -1540,6 +1564,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "vial_plates": all_vial_plates,
             "prep_bottles": all_prep_bottles,
             "vial_bottles": all_vial_bottles,
+            "vial_bottle_positions": all_vial_bottle_positions,
             "original_response": response,
             "vial_321_source_pos": {"x": vial_321_x, "y": vial_321_y, "z": vial_321_z},
             "vial_32_source_pos": {"x": vial_32_x, "y": vial_32_y, "z": vial_32_z},
@@ -2213,6 +2238,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         self,
         vial_plates: List[Dict[str, Any]],
         temperature_points: List[float],
+        vial_bottle_positions: Optional[List[Dict[str, Any]]] = None,
         mass_ratios: Optional[List[Dict[str, Any]]] = None,
         validate_barcode: bool = True,
         wait_for_finish: bool = True,
@@ -2352,73 +2378,90 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 f"{ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}"
             )
 
-        # ========== 阶段1: 校验 + 查瓶位 + 组装 entries（调度仍 Running 时执行，安全）==========
+        # ========== 阶段1: 校验 + 按 vial_bottle_positions 组装 entries ==========
+        # 归属/瓶位来自上游配液在 create_orders 收尾（板状态干净）时构建的
+        # vial_bottle_positions（detailMaterialId→orderCode 权威映射，已过滤空占位孔）。
+        # 不再现场查 detail + associateId 反查，彻底避免串单 / 多算空孔。
+        if not vial_bottle_positions or not isinstance(vial_bottle_positions, list):
+            raise ValueError(
+                "vial_bottle_positions 为空：本 action 已改为依赖上游配液输出的"
+                "「分液瓶孔位映射」handle。请把 create_orders / create_orders_formulation 的"
+                " vial_bottle_positions 输出接到本 action 的同名入参（旧 workflow 需同步更新接线）。"
+            )
+
         EXPECTED_PLATE_TYPE = "20ml分液瓶板"
-        entries: List[Dict[str, Any]] = []
+        # 校验 kept 板 + 记录每块板的温度/条码（温度仍按 kept 板序 idx）
+        plate_temp_by_mid: Dict[str, float] = {}
+        plate_barcode_by_mid: Dict[str, str] = {}
         for idx, plate in enumerate(vial_plates):
             if not isinstance(plate, dict):
                 raise ValueError(f"vial_plates[{idx}] 不是 dict: {plate!r}")
-
             plate_barcode = plate.get("barCode")
-            fallback_order_code = plate.get("orderCode")  # 仅作 associateId 反查失败时的兜底
             material_id = plate.get("materialId")
             type_name = plate.get("typeName", "")
-            if not plate_barcode or not fallback_order_code or not material_id:
+            if not plate_barcode or not material_id:
                 raise ValueError(
                     f"vial_plates[{idx}] 缺少关键字段: "
-                    f"barCode={plate_barcode!r}, orderCode={fallback_order_code!r}, "
-                    f"materialId={material_id!r}"
+                    f"barCode={plate_barcode!r}, materialId={material_id!r}"
                 )
-            # 业务规则：电导测试只接受 20ml 分液瓶板
             if type_name and type_name != EXPECTED_PLATE_TYPE:
                 raise BioyondException(
                     f"vial_plates[{idx}] typeName={type_name!r}，电导测试要求 "
                     f"{EXPECTED_PLATE_TYPE!r}。请检查上游配液是否提取到了正确的板"
                     f"（参考 _extract_vial_plate_from_report 与 LIMS 工艺配置）。"
                 )
-
             if validate_barcode:
                 self._validate_plate_barcode(plate_barcode)
+            plate_temp_by_mid[material_id] = float(
+                temperature_points[0] if n_temps == 1 else temperature_points[idx]
+            )
+            plate_barcode_by_mid[material_id] = plate_barcode
 
-            # 该板上所有引用过它的 order 列表（去重 + 配液阶段写入）。
-            # 单 order 场景下长度 1；多 order 共用板时按 bottle.associateId 反查归属。
-            order_refs = plate.get("order_refs") or []
-            if not order_refs:
-                # 兼容上游历史 handle 数据（没注入 order_refs）—— 当作单 order
-                order_refs = [{
-                    "orderId": plate.get("orderId") or "",
-                    "orderCode": fallback_order_code,
-                }]
+        kept_mids = set(plate_temp_by_mid.keys())
+        kept_barcodes = set(plate_barcode_by_mid.values())
 
-            bottles = self._query_plate_bottle_positions(material_id)
+        # 按 plateMaterialId（兜底 plateBarCode）把 positions 归到 kept 板
+        positions_by_plate: Dict[str, List[Dict[str, Any]]] = {mid: [] for mid in kept_mids}
+        for pos in vial_bottle_positions:
+            if not isinstance(pos, dict):
+                continue
+            pmid = pos.get("plateMaterialId") or ""
+            pbar = pos.get("plateBarCode") or ""
+            if pmid in kept_mids:
+                positions_by_plate[pmid].append(pos)
+            elif pbar in kept_barcodes:
+                # 兜底：materialId 对不上但条码在 kept 中，按条码找回对应 mid
+                for mid, bc in plate_barcode_by_mid.items():
+                    if bc == pbar:
+                        positions_by_plate[mid].append(pos)
+                        break
 
-            plate_temp = float(temperature_points[0] if n_temps == 1 else temperature_points[idx])
-
-            for bottle in bottles:
-                bottle_assoc = (bottle.get("associateId") or "").strip()
-                resolved_order_code = self._resolve_order_code_for_bottle(
-                    bottle_associate_id=bottle_assoc,
-                    order_refs=order_refs,
-                    fallback=fallback_order_code,
-                    plate_barcode=plate_barcode,
-                    bottle_xy=(bottle["x"], bottle["y"]),
+        entries: List[Dict[str, Any]] = []
+        for mid in kept_mids:
+            plate_barcode = plate_barcode_by_mid[mid]
+            plate_temp = plate_temp_by_mid[mid]
+            plate_positions = positions_by_plate.get(mid, [])
+            if not plate_positions:
+                logger.warning(
+                    f"[conductivity_test_inline] ⚠️ kept 板 {plate_barcode} 在 "
+                    f"vial_bottle_positions 中无对应分液瓶，跳过（请确认瓶在转运前已入板）。"
                 )
-
+                continue
+            for pos in plate_positions:
                 entry = {
                     "batchId": batch_id,
-                    "orderId": resolved_order_code,
+                    "orderId": pos.get("orderCode") or "",
                     "createTime": _to_ymd_slash_hms(),
                     "plateBarCode": plate_barcode,
-                    "bottleX": bottle["x"],
-                    "bottleY": bottle["y"],
+                    "bottleX": pos.get("x"),
+                    "bottleY": pos.get("y"),
                     "temperaturePoint": plate_temp,
                 }
                 entries.append(entry)
                 logger.info(
-                    f"[conductivity_test_inline] entry: "
-                    f"plate#{idx+1} orderId={resolved_order_code} "
-                    f"(bottle.assoc={bottle_assoc[:8] if bottle_assoc else '<none>'}), "
-                    f"plateBarCode={plate_barcode}, X={bottle['x']}, Y={bottle['y']}, T={plate_temp}"
+                    f"[conductivity_test_inline] entry: orderId={entry['orderId']} "
+                    f"plateBarCode={plate_barcode}, X={pos.get('x')}, Y={pos.get('y')}, "
+                    f"bottle={pos.get('barCode')}, T={plate_temp}"
                 )
 
         if not entries:
@@ -2882,28 +2925,123 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         return vial_bottles
 
+    def _build_vial_bottle_mat2order(self, data_list: List[Dict[str, Any]]) -> Dict[str, str]:
+        """
+        从 create_orders 返回的 data[*].usedMaterials 构建 分液瓶 materialId → orderCode 映射。
+
+        每个分液瓶只在其归属订单的 usedMaterials 中出现一次（1:1），因此该映射权威可靠，
+        用于取代旧的 associateId 反查（associateId 属订单侧独立 GUID，恒不等于 orderId，
+        多单共板时会全部 fallback 到第一单，导致电导串单/多算空孔）。
+        """
+        VIAL_TYPES = ("5ml分液瓶", "20ml分液瓶")
+        mat2order: Dict[str, str] = {}
+        for od in data_list or []:
+            if not isinstance(od, dict):
+                continue
+            order_code = od.get("orderCode") or ""
+            if not order_code:
+                continue
+            for m in od.get("usedMaterials", []) or []:
+                if not isinstance(m, dict):
+                    continue
+                if (m.get("materialTypeName") or "") not in VIAL_TYPES:
+                    continue
+                mid = m.get("materialId") or ""
+                if mid:
+                    mat2order[mid] = order_code
+        logger.info(f"[分液瓶归属] materialId→orderCode 映射构建完成，共 {len(mat2order)} 个分液瓶")
+        return mat2order
+
+    def _build_vial_bottle_positions(
+        self,
+        vial_plates: List[Dict[str, Any]],
+        mat2order: Dict[str, str],
+    ) -> List[Dict[str, Any]]:
+        """
+        在 create_orders 收尾（板状态干净）时，查每块分液瓶板的孔位 detail，
+        用 detailMaterialId 命中 mat2order 得到归属订单，产出“分液瓶孔位映射”。
+
+        仅保留 detailMaterialId ∈ 本批 mat2order 的孔（自动过滤空占位孔/非本批瓶），
+        供下游电导 conductivity_test_inline 直接组装 entry（不再靠 associateId 反查）。
+
+        Returns:
+            [{plateBarCode, plateMaterialId, bottleMaterialId, x, y, orderCode,
+              typeName, barCode, batch_id}, ...]
+        """
+        positions: List[Dict[str, Any]] = []
+        for plate in vial_plates or []:
+            if not isinstance(plate, dict):
+                continue
+            plate_material_id = plate.get("materialId") or ""
+            plate_barcode = plate.get("barCode") or ""
+            batch_id = plate.get("batch_id") or ""
+            plate_type = plate.get("typeName") or ""
+            if not plate_material_id:
+                continue
+            vial_type = ""
+            if "5ml" in plate_type.lower():
+                vial_type = "5ml分液瓶"
+            elif "20ml" in plate_type.lower():
+                vial_type = "20ml分液瓶"
+            try:
+                bottles = self._query_plate_bottle_positions(plate_material_id)
+            except Exception as e:
+                logger.warning(
+                    f"[分液瓶孔位] ⚠️ 查询板孔位失败，跳过: "
+                    f"plate={plate_barcode or plate_material_id[:20]}, 错误={e}"
+                )
+                continue
+            kept = 0
+            for bottle in bottles:
+                bottle_mid = bottle.get("detailMaterialId") or ""
+                order_code = mat2order.get(bottle_mid)
+                if not order_code:
+                    # 空占位孔 / 非本批瓶 → 跳过（解决旧逻辑把全部孔都当瓶的多算问题）
+                    continue
+                positions.append({
+                    "plateBarCode": plate_barcode,
+                    "plateMaterialId": plate_material_id,
+                    "bottleMaterialId": bottle_mid,
+                    "x": bottle.get("x"),
+                    "y": bottle.get("y"),
+                    "orderCode": order_code,
+                    "typeName": (bottle.get("typeName") or "").strip() or vial_type,
+                    "barCode": bottle.get("code") or "",
+                    "batch_id": batch_id,
+                })
+                kept += 1
+            logger.info(
+                f"[分液瓶孔位] plate={plate_barcode}: detail {len(bottles)} 孔 → 命中本批 {kept} 瓶"
+            )
+        logger.info(f"[分液瓶孔位] 汇总：共 {len(positions)} 个分液瓶孔位映射")
+        return positions
+
     def _extract_vial_bottles_from_plates(
         self,
         vial_plates: List[Dict[str, Any]],
         order_codes: List[str],
+        mat2order: Optional[Dict[str, str]] = None,
     ) -> Dict[str, List[Dict]]:
         """
-        按物理分液瓶板提取分液瓶，并用 associateId 映射到归属订单。
+        按物理分液瓶板提取分液瓶，用 detailMaterialId → mat2order 映射到归属订单。
 
         多配液瓶板 × 多分液瓶板场景下，单瓶报文常常只含「分液瓶板」、且库位停在
         「大分液瓶堆栈」(3a19da3d-…) 而非自动堆栈，旧的逐单库位白名单会整列漏提。
-        本方法与电导路径对齐：对去重后的每块板调 `_query_plate_bottle_positions`，
-        再用 `_resolve_order_code_for_bottle` 按 associateId → order_refs 反查 orderCode。
+        本方法对去重后的每块板调 `_query_plate_bottle_positions`，再用权威的
+        `mat2order`（materialId→orderCode，来自 create 响应 usedMaterials）按孔位
+        detailMaterialId 归属；命中不到的孔（空占位/非本批）直接跳过。
 
         Args:
             vial_plates: `_submit_and_wait_orders` 去重后的 all_vial_plates
-                （含 materialId / order_refs / typeName / barCode）
+                （含 materialId / typeName / barCode）
             order_codes: 本批次全部 orderCode，用于保证返回 dict 覆盖所有订单
+            mat2order: 分液瓶 materialId → orderCode 权威映射（`_build_vial_bottle_mat2order`）
 
         Returns:
             {orderCode: [{materialId, locationId, orderCode, typeName, barCode}, ...]}
         """
         result: Dict[str, List[Dict]] = {oc: [] for oc in order_codes if oc}
+        mat2order = mat2order or {}
 
         for plate in vial_plates or []:
             if not isinstance(plate, dict):
@@ -2911,8 +3049,6 @@ class BioyondCellWorkstation(BioyondWorkstation):
             plate_material_id = plate.get("materialId") or ""
             plate_barcode = plate.get("barCode") or ""
             plate_location = plate.get("locationId") or ""
-            order_refs = plate.get("order_refs") or []
-            fallback_code = plate.get("orderCode") or ""
             if not plate_material_id:
                 continue
 
@@ -2926,16 +3062,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 continue
 
             for bottle in bottles:
-                associate_id = bottle.get("associateId") or ""
+                bottle_mid = bottle.get("detailMaterialId") or ""
                 xy = (bottle.get("x", 0), bottle.get("y", 0))
-                order_code = self._resolve_order_code_for_bottle(
-                    associate_id,
-                    order_refs,
-                    fallback=fallback_code,
-                    plate_barcode=plate_barcode,
-                    bottle_xy=xy,
-                )
+                order_code = mat2order.get(bottle_mid)
                 if not order_code:
+                    # 空占位孔 / 非本批瓶（detailMaterialId 不在权威映射中）→ 跳过
                     continue
 
                 # code 即板 detail 上的二维码；typeName 缺省时按板型推断
@@ -3364,53 +3495,6 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 f"错误类型={type(e).__name__}, 错误信息={str(e)}"
             )
             raise
-
-    def _resolve_order_code_for_bottle(
-        self,
-        bottle_associate_id: str,
-        order_refs: List[Dict[str, str]],
-        fallback: str,
-        plate_barcode: str = "",
-        bottle_xy: Tuple[int, int] = (0, 0),
-    ) -> str:
-        """
-        根据瓶子的 associateId 在板的 order_refs 中找到归属的 orderCode。
-
-        多 order 共用同一物理 plate 时（如配液 2 瓶 → 共享 2 块板交错装），
-        瓶子的 associateId（关联订单 GUID）才是判断该瓶来自哪个配液 order 的唯一可靠依据。
-
-        匹配优先级：
-        1. associateId == order_refs[i].orderId (GUID 严格相等)
-        2. associateId == order_refs[i].orderCode (兜底，万一 LIMS 用 BSO 字符串)
-        3. 都没匹配上 → 用 fallback (= 板首次出现时的 orderCode)，并打 warning
-
-        Returns:
-            最终用于 LIMS 电导 entry.orderId 字段的 BSO 形式 orderCode 字符串
-        """
-        if bottle_associate_id:
-            for ref in order_refs:
-                if ref.get("orderId") and ref["orderId"] == bottle_associate_id:
-                    return ref.get("orderCode") or fallback
-            for ref in order_refs:
-                if ref.get("orderCode") and ref["orderCode"] == bottle_associate_id:
-                    return ref["orderCode"]
-
-        # 单 order 场景：order_refs 长度=1，直接用它
-        if len(order_refs) == 1:
-            return order_refs[0].get("orderCode") or fallback
-
-        # 多 order 但 associateId 没法对上（LIMS 没填或对不上 GUID）→ fallback + warn
-        ref_summary = [
-            f"{(r.get('orderCode') or '?')}↔{(r.get('orderId') or '?')[:8]}"
-            for r in order_refs
-        ]
-        logger.warning(
-            f"[reslove_order_code] ⚠️ plate={plate_barcode}, bottle XY={bottle_xy}: "
-            f"associateId={bottle_associate_id[:8] if bottle_associate_id else '<empty>'}... "
-            f"未能在 order_refs 中匹配（refs={ref_summary}），fallback 到 {fallback}。"
-            f"这条电导 entry 的 orderId 可能不准确，请人工核对。"
-        )
-        return fallback
 
     def _query_plate_bottle_positions(
         self, plate_material_id: str
