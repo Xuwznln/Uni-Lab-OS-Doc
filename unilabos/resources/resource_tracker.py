@@ -580,12 +580,9 @@ class ResourceTreeSet(object):
             name_to_extra[node.res_content.name] = node.res_content.extra
             name_to_extra[node.res_content.name][FRONTEND_POSE_EXTRA] = node.res_content.pose.extra
             name_to_extra[node.res_content.name][EXTRA_CLASS] = node.res_content.klass
-            # 前端 init_param_data.barcode → 资源 config.barcode；入站漏斗已 pop 到根字段
-            # res.barcode，这里优先读根字段，兼容残留 config（字符串或 PLR dict），
-            # 注入到 unilabos_extra["barCode"] 供 create_sample / sync_to_external 透传奔曜。
-            _node_barcode = node.res_content.barcode or node.res_content.config.get("barcode")
-            if isinstance(_node_barcode, dict):
-                _node_barcode = _node_barcode.get("data", "") or ""
+            # 前端把条码填在节点 config.barcode 中（而非 extra），这里注入到 unilabos_extra["barCode"]，
+            # 供下游 sync_to_external / resource_tree_transfer 透传给奔曜；未填则不写，保持默认 ""
+            _node_barcode = node.res_content.config.get("barcode")
             if _node_barcode:
                 name_to_extra[node.res_content.name]["barCode"] = _node_barcode
             for child in node.children:

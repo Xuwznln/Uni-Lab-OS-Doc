@@ -5105,10 +5105,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 
                 # 从 parent_resource 获取仓库名称
                 warehouse_name = parent_resource.name if parent_resource else "手动堆栈"
-                # 优先 unilabos_extra（由 collect_node_data 注入）；回退 PLR 对象上的 barcode
-                barcode = plr_resource.unilabos_extra.get("barCode", "") or getattr(plr_resource, "barcode", "") or ""
-                if isinstance(barcode, dict):
-                    barcode = barcode.get("data", "") or ""
+                barcode = plr_resource.unilabos_extra.get("barCode", "")
                 logger.info(f"拖拽上料: {plr_resource.name} -> {warehouse_name} / {site}, barCode={barcode!r}")
                 
                 self.create_sample(plr_resource.name, board_type, bottle_type, site, warehouse_name, barcode)
