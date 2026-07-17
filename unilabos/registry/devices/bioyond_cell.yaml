@@ -179,6 +179,11 @@ bioyond_cell:
             data_type: array
             handler_key: mass_ratios_output
             label: 配方信息列表
+          - data_key: vial_bottle_positions
+            data_source: executor
+            data_type: array
+            handler_key: vial_bottle_positions_output
+            label: 分液瓶孔位映射（板/XY/归属订单）
           - data_key: vial_321_source_pos
             data_source: executor
             data_type: object
@@ -244,6 +249,11 @@ bioyond_cell:
             data_type: array
             handler_key: mass_ratios_output
             label: 配方信息列表
+          - data_key: vial_bottle_positions
+            data_source: executor
+            data_type: array
+            handler_key: vial_bottle_positions_output
+            label: 分液瓶孔位映射（板/XY/归属订单）
           - data_key: vial_321_source_pos
             data_source: executor
             data_type: object
@@ -413,6 +423,7 @@ bioyond_cell:
         goal_default:
           vial_plates: null
           temperature_points: null
+          vial_bottle_positions: null
           mass_ratios: null
           validate_barcode: true
           wait_for_finish: true
@@ -425,6 +436,11 @@ bioyond_cell:
             data_type: array
             handler_key: vial_plates_input
             label: 分液瓶板列表
+          - data_key: '@this@@@vial_bottle_positions'
+            data_source: handle
+            data_type: array
+            handler_key: vial_bottle_positions_input
+            label: 分液瓶孔位映射（板/XY/归属订单）
           - data_key: '@this@@@mass_ratios'
             data_source: handle
             data_type: array
@@ -439,7 +455,7 @@ bioyond_cell:
         placeholder_keys: {}
         result: {}
         schema:
-          description: 5号电导工作站自动新建实验（配液站传过来）。直接接收上游配液 handle 输出的 vial_plates（含 batch_id/orderCode/barCode/materialId）与 mass_ratios（配方信息）。上游会把订单产出的全部20ml分液瓶板都传过来，本 action 提交前会查 warehouse-info(5号自动传递窗) 按 materialId 取交集，只对已转运到5号站的板建电导单（需在转运后调用）。通过 material-info 查每块板的真实瓶位 (X,Y)；多 order 共用同一物理板时按 bottle.associateId 反查归属 orderCode。同一块板上的所有分液瓶共享同一温度点。默认 wait_for_finish=true：节点会阻塞到所有 LIMS 新建电导单收到 /report/order_finish 推送（数小时级），完成后按 orderId 调 conductivity-order-result 拉取结果，并在同一目录导出两份 CSV：Inline_conductivity_*.csv（电导-only）与 Formulation_Conductivity_*.csv（按分液瓶二维码合并配方信息）。
+          description: 5号电导工作站自动新建实验（配液站传过来）。直接接收上游配液 handle 输出的 vial_plates（含 batch_id/orderCode/barCode/materialId）、vial_bottle_positions（分液瓶孔位映射，板/XY/归属订单）与 mass_ratios（配方信息）。上游会把订单产出的全部20ml分液瓶板都传过来，本 action 提交前会查 warehouse-info(5号自动传递窗) 按 materialId 取交集，只对已转运到5号站的板建电导单（需在转运后调用）。每瓶的归属订单与瓶位(X,Y)直接取自 vial_bottle_positions（按 detailMaterialId→orderCode 权威映射，已过滤空占位孔），不再现场按 associateId 反查。同一块板上的所有分液瓶共享同一温度点。默认 wait_for_finish=true：节点会阻塞到所有 LIMS 新建电导单收到 /report/order_finish 推送（数小时级），完成后按 orderId 调 conductivity-order-result 拉取结果，并在同一目录导出两份 CSV：Inline_conductivity_*.csv（电导-only）与 Formulation_Conductivity_*.csv（按分液瓶二维码合并配方信息）。
           properties:
             feedback: {}
             goal:
@@ -468,6 +484,11 @@ bioyond_cell:
                   items:
                     type: number
                   type: array
+                vial_bottle_positions:
+                  description: 分液瓶孔位映射（来自配液 vial_bottle_positions 输出 handle）。每项含 plateMaterialId/plateBarCode/x/y/orderCode，按 detailMaterialId→orderCode 权威映射产出、已过滤空占位孔。本 action 据此组装电导 entry（归属与瓶位），为空则报错。
+                  items:
+                    type: object
+                  type: array
                 mass_ratios:
                   description: 配方信息列表（来自配液 mass_ratios 输出 handle）。用于测试完成后按"分液瓶二维码"合并出配液+电导报告；为空则只出电导报告。
                   items:
@@ -492,6 +513,7 @@ bioyond_cell:
               required:
               - vial_plates
               - temperature_points
+              - vial_bottle_positions
               type: object
             result: {}
           required:
