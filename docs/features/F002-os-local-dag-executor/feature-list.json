@@ -48,8 +48,8 @@
       "name": "hermetic 单元测试（AC-1~AC-5）",
       "layer": "test",
       "description": "tests/scheduler/test_dag_executor.py：fake 节点调度器（可编程 status+完成时刻）+ 可控时钟，覆盖 AC-1 并发走图、AC-2 同设备串行、AC-3 断网续跑、AC-4 重启 resume、AC-5 fail-fast 与环拒绝。不连真实设备、无 time.sleep。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "fake_scheduler.py（每设备 asyncio.Lock 建模 DeviceActionManager 串行 I3 + 手动 complete() 驱动 + settle() 零墙钟推进）+ test_dag_executor.py 8 用例。AC-1 菱形并发/恰好一次、AC-2 同 key 峰值并发=1 与 always_free=2、AC-3 on_node_terminal 抛错不打断走图、AC-4 resume 不重跑 + 游标 roundtrip、AC-5a fail-fast、AC-5b 解析期拒环。8 passed、ruff 通过。"
     },
     {
       "id": "T05",

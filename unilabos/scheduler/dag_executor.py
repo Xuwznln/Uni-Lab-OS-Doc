@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Optional
 
@@ -23,6 +24,8 @@ from unilabos.scheduler.dag_model import (
     TaskDag,
     TERMINAL_STATES,
 )
+
+logger = logging.getLogger(__name__)
 
 # 注入的节点调度器：给一个节点，返回一个 awaitable，解析为该节点终态。
 SubmitFn = Callable[["object"], Awaitable[NodeState]]
@@ -155,8 +158,7 @@ class DagExecutor:
                         self.walk.on_success(nid)
                     else:
                         self.walk.on_failed(nid)
-                    if self._on_terminal is not None:
-                        self._on_terminal(nid, status)
+                    self._notify_terminal(nid, status)
                     # fail-fast：某节点失败即取消其余在跑并停止调度
                     if status != NodeState.SUCCESS:
                         await self._cancel_inflight(inflight)
@@ -169,6 +171,15 @@ class DagExecutor:
     async def _run_node(self, node_id: str) -> tuple[str, NodeState]:
         status = await self._submit(self.dag.nodes[node_id])
         return node_id, status
+
+    def _notify_terminal(self, node_id: str, status: NodeState) -> None:
+        """触发终态回调；回调失败（如断网时上行 publish 抛错）绝不打断走图（AC-3）。"""
+        if self._on_terminal is None:
+            return
+        try:
+            self._on_terminal(node_id, status)
+        except Exception:  # noqa: BLE001 —— 上行/持久化失败不应停摆本地走图
+            logger.exception("DagExecutor on_node_terminal 回调失败，忽略并继续走图")
 
     @staticmethod
     async def _cancel_inflight(inflight: dict[str, asyncio.Task]) -> None:
