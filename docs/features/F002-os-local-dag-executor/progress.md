@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 2/8 子任务完成
-- 状态: 进行中（T02 完成，进行 T03）
+- 当前进度: 3/8 子任务完成
+- 状态: 进行中（T03 完成，进行 T04）
 
 ## 实现记录
 
@@ -23,6 +23,11 @@
 - 状态: completed
 - 文件: unilabos/scheduler/dag_executor.py
 - 说明: 分两层解耦——DagWalk 纯同步状态机（ready/mark_running/on_success/on_failed/is_done + resume via completed），是 I1/I2/I5/I6 的靶子；DagExecutor 异步驱动，每轮提交全部 ready 节点并发起跑（asyncio.ensure_future + FIRST_COMPLETED），success 递减后继入度、failed 即 fail-fast 取消在跑并停止调度。同设备互斥不在此层（交注入的调度器）。on_node_terminal 回调预留给 T03 游标。自检 AC-1 通过、ruff 通过。
+
+### T03: 本地持久化游标与 resume
+- 状态: completed
+- 文件: unilabos/scheduler/dag_persistence.py
+- 说明: DagCursor(task_id/completed/inflight/failed) + DagCursorStore（目录可注入，mkstemp+flush+fsync+os.replace 原子写，防半写）。record_terminal(task_id,node_id,status) 可直接作 DagExecutor.on_node_terminal 回调。resume：DagWalk(dag, completed=cursor.completed) 重建 ready-set。自检 AC-4：崩溃后 completed=[A,B]、resume ready=[C]、仅跑 C,D、A/B 不重复。ruff 通过。
 
 ## 遇到的问题
 

@@ -40,8 +40,8 @@
       "name": "本地持久化游标与 resume",
       "layer": "scheduler",
       "description": "执行游标 {task_id, completed, inflight, failed} 原子写本地文件；恢复时已 completed 节点视作依赖已满足、重建 ready-set，未完成从 ready 续跑；与幂等 job 缓存叠加防重复执行（I4）。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "dag_persistence.py：DagCursor + DagCursorStore（mkstemp+fsync+os.replace 原子写，目录可注入）。record_terminal 可作 on_node_terminal 回调。自检 AC-4 通过：崩溃后 completed=[A,B]，resume ready=[C]，仅跑 C,D，A/B 不重复。ruff 通过。"
     },
     {
       "id": "T04",

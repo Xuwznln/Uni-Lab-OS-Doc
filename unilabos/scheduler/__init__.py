@@ -12,6 +12,7 @@ from unilabos.scheduler.dag_model import (
     TERMINAL_STATES,
 )
 from unilabos.scheduler.dag_executor import DagExecutor, DagWalk
+from unilabos.scheduler.dag_persistence import DagCursor, DagCursorStore
 
 __all__ = [
     "DagEdge",
@@ -19,6 +20,8 @@ __all__ = [
     "DagValidationError",
     "DagExecutor",
     "DagWalk",
+    "DagCursor",
+    "DagCursorStore",
     "NodeState",
     "TaskDag",
     "TERMINAL_STATES",
