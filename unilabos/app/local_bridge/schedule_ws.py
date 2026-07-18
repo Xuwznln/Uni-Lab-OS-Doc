@@ -21,6 +21,7 @@ serve_schedule_ws 只做 websockets.serve 绑定与 send/recv 接线。
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -44,7 +45,7 @@ _STATUS_TO_NODE_STATE: dict[str, NodeState] = {
 # 视为 OS「就绪」的 action（ws_client 连上后 publish_host_ready 上报）
 _HOST_READY_ACTIONS = frozenset({"host_ready", "host_node_ready", "ready", "host_info"})
 
-JobStatusCallback = Callable[[dict[str, Any]], None]
+JobStatusCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
 def serialize_task_dag(dag: TaskDag) -> dict[str, Any]:
@@ -189,15 +190,19 @@ class ScheduleSession:
         data = message.get("data")
         data = data if isinstance(data, dict) else {}
         if action == "job_status":
-            self._on_job_status(data)
+            await self._on_job_status(data)
         elif action in _HOST_READY_ACTIONS:
             self.host_ready.set()
             logger.info("[schedule_ws] OS 已就绪 (action=%s)", action)
         else:
             logger.debug("[schedule_ws] 忽略报文 action=%s", action)
 
-    def _on_job_status(self, data: dict[str, Any]) -> None:
-        """更新逐节点状态表并触发回调。node_id == job_id（F002 §1.1）。"""
+    async def _on_job_status(self, data: dict[str, Any]) -> None:
+        """更新逐节点状态表并触发回调。node_id == job_id（F002 §1.1）。
+
+        回调可为同步或异步——异步回调（返回 awaitable）会被 await，
+        使 UI 面（如 workflow_ws）能在同一时序内 await 推送，保证测试可判定。
+        """
         task_id = data.get("task_id", "")
         node_id = data.get("job_id", "")
         status = data.get("status", "")
@@ -206,7 +211,9 @@ class ScheduleSession:
             run.apply_status(node_id, status)
         for cb in self._job_status_cbs:
             try:
-                cb(data)
+                result = cb(data)
+                if inspect.isawaitable(result):
+                    await result
             except Exception:  # noqa: BLE001 —— 单个回调异常不得中断状态收敛
                 logger.exception("[schedule_ws] job_status 回调异常")
 

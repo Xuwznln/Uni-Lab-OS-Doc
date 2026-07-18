@@ -36,11 +36,14 @@
       "description": "新增 unilabos/app/local_bridge/schedule_ws.py：在 /api/v1/ws/schedule accept OS 的 ws_client 连接；下发 task_dag、收 job_status、按 (task_id,node_id) 维护逐节点 NodeState 状态表；对内暴露 submit_dag(task_dag)->run_handle / on_job_status(cb) / cancel_task(task_id)。报文严格复用 F002 §1.1/§1.2/§1.3，不新造字段。hermetic 测（内存 fake OS 连接，按脚本回 job_status，无 time.sleep）覆盖 AC-2。",
       "status": "completed",
       "notes": "schedule_ws.py：协议逻辑集中在 ScheduleSession（传输无关，便于 hermetic 测）——submit_dag 下发 {action:task_dag,data:serialize_task_dag(dag)}（逆 build_task_dag_payload，纯 dataclass→dict，字段名严格 F002）、cancel_task 下发 {action:cancel_task,data:{task_id[,job_id]}}、on_job_status 注册回流回调、handle_incoming 喂 OS 回来报文。RunHandle 按 (task_id,node_id) 维护逐节点 NodeState（node_id==job_id），job_status.status→NodeState（running/success/failed/cancelled 同名），全终态置 done.Event；任务级幂等（同 task_id 复用句柄不重复下发）。ScheduleWSServer 薄壳：websockets.serve 绑 /api/v1/ws/schedule，延迟 import websockets（未装不影响其余桥面），json 收发接线 + EdgeSession 头取 session_id。tests/app/test_schedule_ws.py 10 用例（沿用 F002 asyncio.run 约定，不依赖 pytest-asyncio）：F002 task_dag 报文逐字段、逐节点收敛、failed 终态、回调按序、cancel 报文+标 cancelled、幂等、host_ready 置位、未知 status 忽略、serialize 往返。pytest tests/app tests/scheduler 36 passed、ruff 净、import unilabos 通过。"
+    },
+    {
+      "id": "T03",
       "name": "workflow_ws 实现 A UI 面 WS 服务器",
       "layer": "bridge/ui-a",
       "description": "新增 unilabos/app/local_bridge/workflow_ws.py：在 /ws/workflow/{uuid} accept 云端 panel；解析 WorkflowWSActionType——fetch_graph→回 demo 图（{data:{action:'fetch_graph',data:{nodes,edges}}}）；run_workflow→demo 图经 workflow_to_dag 构 TaskDag 交 schedule_ws.submit_dag；job_status→翻译成 {data:{action:'workflow_update',data:{task_status...}}} 推 panel；stop_workflow→cancel_task。hermetic 测断言下行 data.data.action 形状匹配 WorkflowDAGPanel.onMessageCallback（AC-3），含 status→task_status 映射（running→running / success|failed→end）。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "workflow_ws.py：协议翻译集中在 WorkflowSession（传输无关——注入 send 协程 + 注入已就绪 ScheduleSession，喂 handle_incoming）。fetch_graph→回 build_demo_graph()（每节点带 uuid/id/node_id 三者相等 + device_id/action/action_args + pose.position，同服务 handleNodesToWorkflowReactFlow 渲染与 workflow_to_dag 翻译）；run_workflow→demo 图经 workflow_to_task_dag 构 TaskDag 交 schedule.submit_dag（OS 面收 F002 task_dag），task_id 取 panel uuid，回 {code:0,data:{action:run_workflow,data:<task_id>}} ack；stop_workflow→schedule.cancel_task + 回 {code:0,data:{action:stop_workflow}}。回流：WorkflowSession 在 schedule 注册唯一 async 回调（按 self._task_id 动态过滤，无累积），每条 OS job_status 经纯函数 translate_job_status_to_update 译成 {code:0,data:{action:workflow_update,code:0,data:{node_uuid(==job_id),job_status,task_status,header,msg}}}——task_status 仅整张 DAG 全终态（RunHandle.finished）时为 end 否则 running（对齐 setNodeExecutedExecutor 逐节点 + task_status=end 清 taskId 语义）。为此把 schedule_ws 的 _on_job_status 改为 async 并 await awaitable 回调（向后兼容既有 sync lambda，保证下行推送时序可判定）。WorkflowWSServer 薄壳：延迟 import websockets 绑 /ws/workflow/，get_schedule_session 解析、EdgeSession/uuid 由路径取。tests/app/test_workflow_ws.py 10 用例（asyncio.run 约定）：fetch_graph 渲染就绪、run 下发 F002 task_dag+ack、job_status→workflow_update 逐字段、task_status 仅全终态为 end、failed 达 end、非本 task 忽略、stop→cancel、纯函数形状、demo 图翻译合法、_extract_uuid。pytest tests/app tests/scheduler 46 passed、ruff 净、import unilabos 通过。"
     },
     {
       "id": "T04",
