@@ -50,8 +50,8 @@
       "name": "local_api 实现 B UI 面 HTTP 服务器",
       "layer": "bridge/ui-b",
       "description": "新增 unilabos/app/local_bridge/local_api.py（FastAPI :8014）：GET /api/preset、GET /api/stack-status、POST /api/workflow/build-graph、POST /api/run（→构 TaskDag 交 submit_dag，返回 run_id）、GET /api/run/{id}（回逐节点态 + 结构化 log events 供 1s 轮询）、POST /api/run/{id}/cancel。端点集/方法/响应结构对照 unilabos_local_ui/src/main.tsx（AC-4）。hermetic 测（TestClient，不起真实 OS）。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "local_api.py：协议翻译核 LocalApiState（传输无关——注入已就绪 ScheduleSession，在其上注册唯一 job_status 回调，按 task_id(==run_id) 路由到 RunRecord 累积 log_events）。node_statuses_of/overall_status_of 为纯映射（NodeState→NodeRunStatus idle/preparing/running/success/failed/cancelled；run 态 pending/running/completed/failed/cancelled，对齐 main.tsx pollRun 终态）。build_graph 交 workflow_to_task_dag 校验+归一（含环抛 DagValidationError→路由转 400 detail）；start_run 构 TaskDag(task_id=uuid) 交 submit_dag（OS 面收 F002 task_dag）返回 RunStatus；get_run/cancel_run（cancel_task）；node_statuses 以 node.id 为键（==F002 node_id，applyNodeStatuses 命中）。build_demo_preset 与 workflow_ws.build_demo_graph 设备/动作对齐（pump_1/pump_liquid、stirrer_1/stir）；build_stack_status 空堆栈。create_app 延迟 import fastapi、6 路由只做解码+调 state+错误转码（OS 未连入→503，未知 run→404）；LocalApiServer uvicorn 薄壳。tests/app/test_local_api.py 12 用例（FastAPI TestClient + 内存 ScheduleSession→FakeTransport，请求间以 asyncio.run(handle_incoming) 喂回 job_status，无 time.sleep/网络）覆盖 AC-4：preset/stack-status 形状、build-graph 往返、含环 400 detail、run 下发 F002 task_dag + idle 态、轮询随 job_status 推进至 completed、failed 达 failed、cancel 发 cancel_task+标 cancelled、未知 run 404、OS 未连入 503、纯函数映射、demo preset 设备对齐。pytest tests/app tests/scheduler 58 passed、ruff 净、import unilabos 通过。"
     },
     {
       "id": "T05",

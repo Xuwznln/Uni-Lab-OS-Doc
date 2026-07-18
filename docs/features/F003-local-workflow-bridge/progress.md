@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 3/7 子任务完成（T01 翻译核 + T02 schedule_ws + T03 workflow_ws 已完成）
-- 状态: T01–T03 完成；T04–T07 待续（T01–T07 依已批准计划拟定）
+- 当前进度: 4/7 子任务完成（T01 翻译核 + T02 schedule_ws + T03 workflow_ws + T04 local_api 已完成）
+- 状态: T01–T04 完成；T05–T07 待续（T01–T07 依已批准计划拟定）
 
 ## 落位
 
@@ -38,6 +38,11 @@
 
 ### 修复：feature-list.json 结构损坏
 - T02 完成时的编辑误删了 T02 对象闭合与 T03 的 "id": "T03" 行，致 JSON 非法（两对象并成一个）。本轮修复：还原 T02 `},` 闭合 + T03 `{ "id":"T03" ...`（id/name/layer/description 逐字还原人类原文，未改定义），并顺带将 T03 status→completed。python json.load 校验通过，7 个任务 id 齐全。
+
+### T04: local_api 实现 B UI 面 HTTP 服务器
+- 状态: completed
+- 文件: unilabos/app/local_bridge/local_api.py, tests/app/test_local_api.py
+- 说明: 云端桥的实现 B（SZLab unilabos_local_ui）UI 面 FastAPI HTTP 服务器。协议翻译集中在 LocalApiState（传输无关——注入已就绪 ScheduleSession，在其上注册唯一 job_status 回调，把 OS 回流按 task_id(==run_id) 路由到 RunRecord 并累积结构化 log_events；RunHandle 逐节点态由 schedule_ws._on_job_status 在回调前更新，此处只追加日志）。node_statuses_of/overall_status_of 为纯映射函数：NodeState→NodeRunStatus（PENDING→idle/READY→preparing/RUNNING→running/SUCCESS→success/FAILED→failed/CANCELLED→cancelled，对齐 main.tsx NodeRunStatus 字面量）；run 整体态 pending/running/completed/failed/cancelled（未全终态有 running 则 running 否则 pending；全终态任一 failed→failed，否则任一 cancelled→cancelled，否则 completed，对齐 pollRun 终态集）。build_graph 交 workflow_to_task_dag 走 F002 解析校验（含环抛 DagValidationError→路由转 400 detail），通过则回显归一 {name,nodes,edges}；start_run 构 TaskDag(task_id=uuid4().hex) 交 submit_dag（OS 面收严格 F002 task_dag），建 RunRecord 返回 RunStatus；get_run/cancel_run（下发 cancel_task）。node_statuses 以 node.id 为键——F002 node_id==local_ui node.id，故 applyNodeStatuses 命中。build_demo_preset 与 workflow_ws.build_demo_graph 的设备/动作对齐（pump_1/pump_liquid、stirrer_1/stir），default_config 镜像 local_ui DEFAULT_CONFIG；build_stack_status 返回 success 空堆栈。create_app 延迟 import fastapi（未装不拖累其余桥面），6 路由只做请求解码+调 LocalApiState+错误转码——OS 未连入 503、未知 run 404、含环 400 detail；LocalApiServer uvicorn 薄壳（延迟 import）。tests/app/test_local_api.py 12 用例（FastAPI TestClient 同步驱动 + 内存 ScheduleSession→FakeTransport 顶替真实 WS 传输，请求之间以 asyncio.run(schedule.handle_incoming(...)) 喂回 job_status——纯内存态更新，无 time.sleep/真实 OS/网络）覆盖 AC-4：preset/stack-status 形状、build-graph 往返、含环 400 detail、run 下发 F002 task_dag + 全 idle 态、轮询随 job_status 推进至 completed、failed 达 failed、cancel 发 cancel_task+标 cancelled、未知 run 404、OS 未连入 503（preset/stack-status 仍可用）、纯函数映射、demo preset 设备对齐。pytest tests/app tests/scheduler 58 passed、ruff 净、import unilabos 通过。
 
 ## 遇到的问题
 
