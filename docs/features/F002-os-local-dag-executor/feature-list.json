@@ -72,16 +72,16 @@
       "name": "验证与评审",
       "layer": "verify",
       "description": "python -c \"import unilabos\" 通过、pytest tests/scheduler/ 通过、ruff check 通过；AC-1~AC-6 逐条确认；task_dag/job_status 契约经 contract-guardian 评审 PASS、代码经 os-reviewer 评审。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "验证全 PASS：import unilabos 通过；pytest tests/scheduler/ tests/app/ 19 passed（15 scheduler + 4 死路径回归）；ruff 于作者面（scheduler/ + tests/）全净，仅 ws_client.py:1291 既有无关 F541（HEAD 已存在）。AC-1~AC-6 逐条对照 requirement.md 通过（AC-6：_start_dag_node 复用 _handle_job_start，publish_job_status 载荷逐字段未改，前端两 panel 零改动）。代码经 python-reviewer 评审（contract-guardian/os-reviewer 本环境不可用，契约评审直接对照 interface-design.md），发现并整改 1 项 HIGH 悬挂缺陷：_handle_job_start 死路径（HostNode 不可用 / queue_item 构造前抛异常）不发 job_status → DAG 节点 future 永久悬挂、DagExecutor.run 阻塞、runner 泄漏。整改：(a) HostNode 缺失分支补发 failed 终态；(b) except 用 req/data 兜底 QueueItem 保证任一异常都发 failed（同修非 DAG 等价悬挂）；(c) _start_dag_node_guarded 包裹起跑，逃逸异常经 notify_task_dag_terminal 判 failed、正常返回不误判（保 I3 排队 pending）。回归 tests/app/test_ws_job_start_deadpaths.py 4 用例。提交 fb3ae29b。"
     },
     {
       "id": "T08",
       "name": "对端契约冻结（跨仓，不在本仓实现）",
       "layer": "verify",
       "description": "在 interface-design.md 冻结对端改动清单：backend uni-lab-backend 新增 task_dag 下发（与逐节点 job_start 并存/灰度）、不改 OnJobStatus/JobData/cancel_task；前端 Uni-Lab-Cloud 复用 WorkflowDAGPanel(workflow-dag) 与 WorkflowStepsPanel(workflow-steps)，因上行契约不变零改动。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "doc-only 冻结完成（跨仓改动不在本仓实现）：interface-design.md §三 已列对端清单——backend 新增 task_dag 序列化下发，nodes 镜像 SendActionData、edges 用 source_node_uuid/target_node_uuid，node_id 即 job_id、幂等键 (task_id, node_id)，与逐节点 job_start 并存可灰度；不改 OnJobStatus/JobData/cancel_task 契约；前端复用 workflow-dag / workflow-steps 两 panel，因上行 job_status 逐字节不变而零改动（AC-6 已由本仓 _start_dag_node 复用 _handle_job_start 保证）。"
     }
   ]
 }

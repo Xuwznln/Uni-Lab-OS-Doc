@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 6/8 子任务完成
-- 状态: 进行中（T06 完成，进行 T07）
+- 当前进度: 8/8 子任务完成
+- 状态: 完成（T07 评审 HIGH 项已整改闭环；T08 对端契约已在 interface-design.md §三 冻结）
 
 ## 实现记录
 
@@ -44,6 +44,11 @@
 - 文件: unilabos/scheduler/task_dag_runner.py, tests/scheduler/test_task_dag_runner.py, unilabos/app/ws_client.py, unilabos/scheduler/dag_executor.py（CANCELLED 修正）
 - 说明: TaskDagRunner 桥接 DagExecutor(submit->awaitable) 与生产回调/队列式执行栈——per-node asyncio.Future（node_id=job_id），_submit 先登记后触发 on_start_node 免竞态、await future；notify_terminal 经 loop.call_soon_threadsafe 跨线程解析；cancel() 停调度 + 未决 CANCELLED；run() 完成后任一非 SUCCESS 触发注入的 on_cancel_remaining 清理设备残余。ws_client 接线：分发新增 `elif message_type == "task_dag"`；_handle_task_dag 解析 TaskDag → 建 runner（loop=self._loop）→ 注册 → ensure_future 起跑（不阻塞消息循环）；_start_dag_node 把节点展开为等价 job_start payload 复用 _handle_job_start 全路径（DeviceActionManager 锁/幂等/send_goal）；_cancel_all_jobs_for_task 从原 cancel task_id 分支抽出，既服务外部 cancel_task 又作 on_cancel_remaining；publish_job_status 终态钩 notify_task_dag_terminal（非 DAG 任务 no-op，job_start 零影响）；cancel_task 命中 runner 即 runner.cancel()（设备侧由 on_cancel_remaining 统一清理，避免重复）。test_task_dag_runner.py：FakeStack 建模 ws 回调式队列栈，4 用例（菱形不同设备并发/同 device_action_key 串行/fail-fast 触发 cancel_remaining/外部 cancel 解析未决为 CANCELLED）。import unilabos 通过、pytest tests/scheduler 15 passed、ruff 净（唯一 F541 属既有无关代码）。
 
+### T07: 验证与评审
+- 状态: completed
+- 文件: unilabos/app/ws_client.py（评审整改）, tests/app/__init__.py, tests/app/test_ws_job_start_deadpaths.py
+- 说明: 验证信号全 PASS——`import unilabos` 通过；`pytest tests/scheduler/ tests/app/` 19 passed（15 scheduler + 4 死路径回归）；ruff 于本需求作者面（scheduler/ + tests/）全净，仅 ws_client.py:1291 既有无关 F541（HEAD 已存在）。AC-1~AC-6 逐条对照 requirement.md：AC-1 test_runner_diamond_concurrent + dag_executor AC-1；AC-2 test_runner_same_device_serialized + fake max_concurrent_by_key；AC-3 _notify_terminal try/except；AC-4 dag_persistence + I4；AC-5 fail-fast + 解析期拒环；AC-6 _start_dag_node 复用 _handle_job_start → publish_job_status 载荷逐字段未改（前端两 panel 零改动）。代码评审经 python-reviewer（contract-guardian/os-reviewer 在本环境不可用，契约评审直接对照 interface-design.md 完成），发现并整改 1 项 HIGH 悬挂缺陷（见下）。
+
 ## 遇到的问题
 
 <!-- 问题与决策，尤其是硬件/时序/flaky 相关 -->
@@ -57,9 +62,16 @@
 - TaskDagRunner 桥接：per-node asyncio.Future（键 = node_id = job_id），_submit 先登记 future 再触发 on_start_node（避免瞬时跨线程回流早于登记的竞态），await future；notify_terminal 经 `loop.call_soon_threadsafe` 跨线程解析。同 device_action_key 排队节点的 future 悬挂至其各自终态——与 DeviceActionManager FIFO 串行（I3）天然组合，本层不复制互斥。
 - 不阻塞消息循环：_handle_task_dag 用 `ensure_future(runner.run())` 起跑并立即返回，其间 cancel_task 仍可被 MessageProcessor 处理。
 
+### T07 评审发现并整改：job_start 死路径不发终态 → DAG 节点永久悬挂（HIGH）
+- 现象（python-reviewer/os-reviewer 视角）：`_handle_job_start` 有两条死路径提前退出且**不发 job_status**——(a) `HostNode.get_instance(0)` 为 None 时 `logger.error` 后直接 `return`；(b) 在构造 `queue_item` 之前抛异常（如 `JobAddReq` 解析或 `enqueue_job` 抛错），原 except 块 `if "req" and "queue_item" in locals()` 守卫为假 → 只 `logger.warning` 不上报。二者都使 backend/DAG 侧对应 job 永不收到终态；对 DAG 而言节点 future 永不解析 → `DagExecutor.run` 在 `asyncio.wait` 无限阻塞、`_task_dag_runners[task_id]` 泄漏。注意 line 820 的「排队」返回**不是**缺陷——该 job 稍后出队执行并正常发终态（同设备串行 I3 的 by-design pending）。
+- 修正（根因层，同时惠及非 DAG 普通 job）：(a) HostNode 不可用分支补发 `publish_job_status(queue_item,"failed")` 再返回；(b) except 块在 `queue_item` 未构造时用 `req`（或 `data`）兜底构造 `QueueItem`，保证任一异常路径都发 "failed"。
+- 修正（桥接兜底层）：`_start_dag_node` 改为 `ensure_future(_start_dag_node_guarded(...))`，包裹 `_handle_job_start`——仅当其抛出内部 try 未兜住的**逃逸异常**时才经 `notify_task_dag_terminal(...,"failed")` 判该节点失败；正常返回**不**解析（保排队节点 pending 至各自终态 = I3）。
+- 回归：tests/app/test_ws_job_start_deadpaths.py 4 用例锁死——HostNode 缺失发 failed / enqueue 抛错经 fallback 发 failed / 桥接逃逸异常判 failed / 正常返回不误判。19 passed、ruff 净。
+
 ## 下一步建议
 
 <!-- 供下一个 session 或人类参考 -->
 
-- T07：`import unilabos` + 全量 `pytest tests/scheduler/` + `ruff check`（注意 ws_client.py 存在**既有无关** F541，非本需求引入）；AC-1~AC-6 逐条对照；contract-guardian 评审 task_dag 下行契约 + os-reviewer 评审桥接层。
-- T08：interface-design.md 冻结对端清单——backend 新增 task_dag 下发（与逐节点 job_start 并存/灰度）、不改 OnJobStatus/JobData/cancel_task；前端两 panel（workflow-dag / workflow-steps）因上行契约不变零改动。
+- T07 已完成：验证信号全 PASS（import + 19 passed + ruff 作者面净）；AC-1~AC-6 逐条对照；python-reviewer 评审发现的 HIGH 悬挂缺陷已整改并加回归。契约评审直接对照 interface-design.md（contract-guardian/os-reviewer agent 本环境不可用）。
+- T08 已完成（doc-only，跨仓不在本仓实现）：interface-design.md §三 已冻结对端清单——backend 新增 task_dag 下发（与逐节点 job_start 并存/灰度）、不改 OnJobStatus/JobData/cancel_task；前端复用 WorkflowDAGPanel(workflow-dag) + WorkflowStepsPanel(workflow-steps)，因上行契约不变零改动。
+- 对端实施提醒：backend 侧新增 task_dag 序列化下发时，nodes 镜像 SendActionData、edges 用 source_node_uuid/target_node_uuid；node_id 即 job_id、幂等键 (task_id, node_id)。
