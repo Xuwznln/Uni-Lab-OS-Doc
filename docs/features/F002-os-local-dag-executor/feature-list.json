@@ -64,8 +64,8 @@
       "name": "ws_client 接入 _handle_task_dag",
       "layer": "bridge",
       "description": "unilabos/app/ws_client.py 消息分发新增 elif message_type == \"task_dag\"；_handle_task_dag 把 DAG 节点展开为等价 job_start 执行请求，复用 DeviceActionManager 锁/幂等 + send_goal + publish_job_status；cancel_task 复用 cancel_jobs_by_task_id 并停止后继调度。确保 import unilabos 通过。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "新增 task_dag_runner.py（TaskDagRunner 桥接层：per-node asyncio.Future 注册表，node_id=job_id，先登记后触发副作用避免瞬时回流竞态；notify_terminal 经 loop.call_soon_threadsafe 跨线程解析；cancel() 停调度+未决 CANCELLED；run() 完成后任一非 SUCCESS 触发 on_cancel_remaining 设备清理）+ test_task_dag_runner.py（FakeStack 建模回调式队列栈，4 用例：菱形并发/同 key 串行/fail-fast 触发 cancel_remaining/外部 cancel 解析未决）。ws_client：分发加 task_dag 分支；_handle_task_dag 解析 TaskDag 后 ensure_future 起跑不阻塞消息循环；_start_dag_node 展开为等价 job_start payload 复用 _handle_job_start 全路径（锁/幂等/send_goal）；_cancel_all_jobs_for_task 从原 cancel task_id 分支抽出、既服务外部 cancel 亦作 on_cancel_remaining；publish_job_status 终态钩 notify_task_dag_terminal（非 DAG 任务 no-op，job_start 零影响）；cancel_task 命中 runner 即 runner.cancel()。附带修正 dag_executor：CANCELLED 回流不再被误判为 on_failed(FAILED)，新增 DagWalk.cancel_remaining 收敛未决为终态。import unilabos 通过、pytest tests/scheduler 15 passed、ruff 净（唯一 F541 属既有无关代码）。"
     },
     {
       "id": "T07",

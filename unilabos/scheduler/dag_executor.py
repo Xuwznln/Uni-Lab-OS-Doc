@@ -95,6 +95,16 @@ class DagWalk:
             if nid != node_id and st in _ACTIVE_STATES:
                 self.states[nid] = NodeState.CANCELLED
 
+    def cancel_remaining(self) -> None:
+        """外部取消（cancel_task）：把所有仍非终态的节点一律标记为 CANCELLED。
+
+        与 on_failed 不同：不置 failed（非失败终止），仅停止后续并把未决节点收敛到
+        终态，避免 run() 返回含 PENDING/RUNNING 的非终态快照。
+        """
+        for nid, st in self.states.items():
+            if st in _ACTIVE_STATES:
+                self.states[nid] = NodeState.CANCELLED
+
     def is_done(self) -> bool:
         return all(st in TERMINAL_STATES for st in self.states.values())
 
@@ -156,16 +166,22 @@ class DagExecutor:
                     inflight.pop(nid, None)
                     if status == NodeState.SUCCESS:
                         self.walk.on_success(nid)
+                    elif status == NodeState.CANCELLED:
+                        # 外部取消回流：不触发 fail-fast，直接落 CANCELLED 终态
+                        self.walk.states[nid] = NodeState.CANCELLED
                     else:
                         self.walk.on_failed(nid)
                     self._notify_terminal(nid, status)
-                    # fail-fast：某节点失败即取消其余在跑并停止调度
-                    if status != NodeState.SUCCESS:
+                    # fail-fast：某节点**失败**即取消其余在跑并停止调度（取消不算失败）
+                    if status == NodeState.FAILED:
                         await self._cancel_inflight(inflight)
                         return self.walk.snapshot()
         finally:
             if inflight:
                 await self._cancel_inflight(inflight)
+        # 外部取消：把剩余未决节点收敛为 CANCELLED，返回全终态快照
+        if self._cancelled:
+            self.walk.cancel_remaining()
         return self.walk.snapshot()
 
     async def _run_node(self, node_id: str) -> tuple[str, NodeState]:
