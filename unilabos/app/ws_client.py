@@ -836,6 +836,12 @@ class MessageProcessor:
             host_node = HostNode.get_instance(0)
             if not host_node:
                 logger.error(f"[MessageProcessor] HostNode instance not available for job_id: {req.job_id}")
+                # 死路径必须回终态：否则 backend/DAG 侧的 job 将永不收到 job_status 而悬挂
+                if self.websocket_client:
+                    self.websocket_client.publish_job_status(
+                        {}, queue_item, "failed",
+                        serialize_result_info("HostNode 实例不可用，无法下发动作", False, {}),
+                    )
                 return
 
             host_node.send_goal(
@@ -850,9 +856,35 @@ class MessageProcessor:
             logger.error(f"[MessageProcessor] Error handling job start: {str(e)}")
             traceback.print_exc()
 
+            # 死路径兜底：即便 queue_item 尚未构造（如 JobAddReq 解析或 enqueue_job 抛错），
+            # 也必须回终态 job_status，否则 backend/DAG 侧对应 job 永不收到终态而悬挂。
+            if "queue_item" not in locals():
+                if "req" in locals():
+                    queue_item = QueueItem(
+                        task_type="job_call_back_status",
+                        device_id=req.device_id,
+                        action_name=req.action,
+                        task_id=req.task_id,
+                        job_id=req.job_id,
+                        notebook_id=req.notebook_id or "",
+                        device_action_key=f"/devices/{req.device_id}/{req.action}",
+                    )
+                elif data.get("job_id"):
+                    queue_item = QueueItem(
+                        task_type="job_call_back_status",
+                        device_id=data.get("device_id", ""),
+                        action_name=data.get("action", ""),
+                        task_id=data.get("task_id", ""),
+                        job_id=data["job_id"],
+                        notebook_id=data.get("notebook_id", "") or "",
+                        device_action_key=f"/devices/{data.get('device_id', '')}/{data.get('action', '')}",
+                    )
+
             # job_start出错时，需要通过正确的publish_job_status方法来处理
-            if "req" in locals() and "queue_item" in locals():
-                job_log = format_job_log(req.job_id, req.task_id, req.device_id, req.action)
+            if "queue_item" in locals():
+                job_log = format_job_log(
+                    queue_item.job_id, queue_item.task_id, queue_item.device_id, queue_item.action_name
+                )
                 logger.info(f"[MessageProcessor] Publishing failed status for job {job_log}")
 
                 if self.websocket_client:
@@ -865,11 +897,11 @@ class MessageProcessor:
                     message = {
                         "action": "job_status",
                         "data": {
-                            "job_id": req.job_id,
-                            "task_id": req.task_id,
-                            "device_id": req.device_id,
+                            "job_id": queue_item.job_id,
+                            "task_id": queue_item.task_id,
+                            "device_id": queue_item.device_id,
                             "notebook_id": queue_item.notebook_id,
-                            "action_name": req.action,
+                            "action_name": queue_item.action_name,
                             "status": "failed",
                             "feedback_data": {},
                             "return_info": serialize_result_info(traceback.format_exc(), False, {}),
@@ -880,7 +912,7 @@ class MessageProcessor:
 
                     # 手动调用job结束逻辑：出队下一个任务由客户端自行启动
                     # (该 fallback 分支无 websocket_client，无法上报锁，故忽略 lock_became_free)
-                    next_job, _lock_became_free = self.device_manager.end_job(req.job_id)
+                    next_job, _lock_became_free = self.device_manager.end_job(queue_item.job_id)
                     if next_job and self.queue_processor:
                         self.queue_processor.enqueue_pending_start(next_job)
                         next_job_log = format_job_log(
@@ -888,7 +920,7 @@ class MessageProcessor:
                         )
                         logger.info(f"[MessageProcessor] Queued next job {next_job_log} for start after error")
             else:
-                logger.warning("[MessageProcessor] Failed to publish job error status - missing req or queue_item")
+                logger.warning("[MessageProcessor] Failed to publish job error status - missing job_id in payload")
 
     async def _handle_cancel_action(self, data: Dict[str, Any]):
         """处理cancel_action/cancel_task消息"""
@@ -1060,7 +1092,22 @@ class MessageProcessor:
             "notebook_id": dag.notebook_id,
             "server_info": dag.server_info,
         }
-        asyncio.ensure_future(self._handle_job_start(payload))
+        asyncio.ensure_future(self._start_dag_node_guarded(dag.task_id, node.node_id, payload))
+
+    async def _start_dag_node_guarded(self, task_id: str, job_id: str, payload: Dict[str, Any]) -> None:
+        """包裹 _handle_job_start：兜底保证任何逃逸异常都回终态，杜绝节点 future 永久悬挂。
+
+        正常返回**不**解析该节点（入队/send_goal 是副作用，终态由 publish_job_status 回流；
+        同设备排队节点在此保持 pending 直至其各自终态——I3）；仅当 _handle_job_start 抛出
+        其内部 try 未兜住的异常时，才把该节点判为 failed，避免 DagExecutor.run 无限阻塞。
+        """
+        try:
+            await self._handle_job_start(payload)
+        except Exception:  # noqa: BLE001 —— 起跑逃逸异常兜底为节点失败，绝不悬挂走图
+            logger.exception(
+                f"[MessageProcessor] task_dag 节点起跑异常，判为 failed: task={task_id} job={job_id}"
+            )
+            self.notify_task_dag_terminal(task_id, job_id, "failed")
 
     def notify_task_dag_terminal(self, task_id: str, job_id: str, status: str) -> None:
         """由 publish_job_status 终态时**跨线程**回调：把节点终态回流对应 DAG 驱动器。
