@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 1/7 子任务完成（T01 翻译核已完成）
-- 状态: T01 完成；T02–T07 待续（T01–T07 依已批准计划拟定）
+- 当前进度: 2/7 子任务完成（T01 翻译核 + T02 schedule_ws 已完成）
+- 状态: T01–T02 完成；T03–T07 待续（T01–T07 依已批准计划拟定）
 
 ## 落位
 
@@ -25,6 +25,11 @@
 - 状态: completed
 - 文件: unilabos/app/local_bridge/__init__.py, unilabos/app/local_bridge/workflow_to_dag.py, tests/app/test_workflow_to_dag.py
 - 说明: 两套 UI 唯一共享的业务逻辑。_node_to_f002 做别名归一——扁平（云端）节点 node_id/device_id/action/action_type/action_args 直取，嵌套（SZLab）{id, data:{method, deviceId, params}} 从 data 段取；_edge_to_f002 支持 source/target 与 source_node_uuid/target_node_uuid 两种边名。build_task_dag_payload 只做归一（产出严格 F002 字段名，无 UI 别名泄漏），workflow_to_task_dag 交 TaskDag.from_message 统一判定合法性——缺字段/重复 node_id/悬空边/含环的判定与报错信息与 F002 逐字一致（不重复实现校验）。tests/app/test_workflow_to_dag.py 8 用例覆盖 AC-1：扁平/嵌套归一、载荷字段名严格 F002、含环解析期拒（match "含环"）、悬空边拒、缺 device_id/task_id 拒、空 nodes 拒。8 passed in 0.9s、ruff 净、import unilabos 通过。
+
+### T02: schedule_ws OS 面 WS 服务器
+- 状态: completed
+- 文件: unilabos/app/local_bridge/schedule_ws.py, tests/app/test_schedule_ws.py
+- 说明: 协议逻辑集中在 ScheduleSession（与真实 WS 传输解耦——send 协程注入、handle_incoming 喂入 OS 回来报文，便于 hermetic 测）。submit_dag 下发 {action:task_dag, data:serialize_task_dag(dag)}——serialize_task_dag 是 T01 build_task_dag_payload 的逆（纯 dataclass→dict，字段名严格 F002，无别名）；cancel_task 下发 {action:cancel_task, data:{task_id[,job_id]}}（对齐 ws_client._handle_cancel_action）；on_job_status 注册回流回调供 UI 面翻译；RunHandle 按 (task_id,node_id) 维护逐节点 NodeState（node_id==job_id），job_status.status→NodeState（running/success/failed/cancelled 值同名直映），全终态置 done.Event；任务级幂等（同 task_id 复用句柄、不重复下发，与 OS 侧 _handle_task_dag 一致）。ScheduleWSServer 薄壳：websockets.serve 绑 /api/v1/ws/schedule，延迟 import websockets（未装不拖累其余桥面），逐条 json.loads 喂 handle_incoming、send 经 json.dumps(ensure_ascii=False) 外发、EdgeSession 头取 session_id。tests/app/test_schedule_ws.py 10 用例覆盖 AC-2：F002 task_dag 报文逐字段、逐节点收敛、failed 终态、回调按序、cancel 报文+标 cancelled、幂等、host_ready 置位、未知 status 忽略、serialize 往返。沿用 F002 scheduler 的 asyncio.run 约定（不引 pytest-asyncio 配置）。pytest tests/app tests/scheduler 36 passed、ruff 净、import unilabos 通过。
 
 ## 遇到的问题
 
