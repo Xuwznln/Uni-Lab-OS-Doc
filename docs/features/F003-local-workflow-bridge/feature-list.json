@@ -1,0 +1,81 @@
+{
+  "$comment": [
+    "子任务清单 — 本需求的唯一进度真相来源",
+    "完整规则见 docs/agent-workflow.md 第八节 / 主仓 team_collaboration playbook",
+    "",
+    "Author: HUMAN 定义任务 / CLAUDE 仅修改 status 和 notes",
+    "",
+    "规则：",
+    "  1. CLAUDE 只能改 status 和 notes",
+    "  2. 不得改 id, name, layer, description",
+    "  3. 不得删除或新增任务条目（需人类确认）",
+    "  4. status 流转：pending -> in_progress -> completed（或 blocked）",
+    "  5. 按 id 顺序实现（小号优先）",
+    "  6. 每完成一个子任务必须 import 通过 + 相关 pytest 通过 + git commit",
+    "  7. 每完成一个子任务必须更新 progress.md",
+    "",
+    "layer 取值参考：bridge/translate, bridge/os, bridge/ui-a, bridge/ui-b, bridge/server, frontend, verify",
+    "",
+    "注：T01–T07 由 Claude 依据已批准计划拟定，等待人类确认后方可视为正式任务清单。"
+  ],
+  "feature_name": "本地工作流桥（两套前端直连 OS 本地 DAG 执行，替代 Go 后端）",
+  "created_at": "2026-07-18",
+  "tasks": [
+    {
+      "id": "T01",
+      "name": "workflow_to_dag 翻译核",
+      "layer": "bridge/translate",
+      "description": "新增 unilabos/app/local_bridge/workflow_to_dag.py：把两套 UI 的工作流图（nodes/edges）翻译为 F002 TaskDag——node→{node_id,device_id,action,action_type,action_args,sample_material,always_free}，edge→{source_node_uuid,target_node_uuid}；复用 unilabos/scheduler/dag_model.py:TaskDag.from_message 的字段约定与环校验（解析期拒环 = F002 I5）。是实现 A/B 唯一共享的业务逻辑。hermetic 单测：合法图往返 + 含环图抛 DagValidationError。",
+      "status": "completed",
+      "notes": "workflow_to_dag.py：_node_to_f002 别名归一（扁平云端 node_id/device_id/action/action_args 与嵌套 SZLab {id,data:{method,deviceId,params}} 皆支持）+ _edge_to_f002（source/target 与 source_node_uuid/target_node_uuid 皆支持）；build_task_dag_payload 只归一不校验，workflow_to_task_dag 交 TaskDag.from_message 统一判定（缺字段/悬空边/含环行为与 F002 逐字一致）。tests/app/test_workflow_to_dag.py 8 用例：扁平/嵌套归一、载荷字段名严格 F002、含环拒、悬空边拒、缺 device_id/task_id 拒、空 nodes 拒。8 passed、ruff 净、import unilabos 通过。"
+    },
+    {
+      "id": "T02",
+      "name": "schedule_ws OS 面 WS 服务器",
+      "layer": "bridge/os",
+      "description": "新增 unilabos/app/local_bridge/schedule_ws.py：在 /api/v1/ws/schedule accept OS 的 ws_client 连接；下发 task_dag、收 job_status、按 (task_id,node_id) 维护逐节点 NodeState 状态表；对内暴露 submit_dag(task_dag)->run_handle / on_job_status(cb) / cancel_task(task_id)。报文严格复用 F002 §1.1/§1.2/§1.3，不新造字段。hermetic 测（内存 fake OS 连接，按脚本回 job_status，无 time.sleep）覆盖 AC-2。",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T03",
+      "name": "workflow_ws 实现 A UI 面 WS 服务器",
+      "layer": "bridge/ui-a",
+      "description": "新增 unilabos/app/local_bridge/workflow_ws.py：在 /ws/workflow/{uuid} accept 云端 panel；解析 WorkflowWSActionType——fetch_graph→回 demo 图（{data:{action:'fetch_graph',data:{nodes,edges}}}）；run_workflow→demo 图经 workflow_to_dag 构 TaskDag 交 schedule_ws.submit_dag；job_status→翻译成 {data:{action:'workflow_update',data:{task_status...}}} 推 panel；stop_workflow→cancel_task。hermetic 测断言下行 data.data.action 形状匹配 WorkflowDAGPanel.onMessageCallback（AC-3），含 status→task_status 映射（running→running / success|failed→end）。",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T04",
+      "name": "local_api 实现 B UI 面 HTTP 服务器",
+      "layer": "bridge/ui-b",
+      "description": "新增 unilabos/app/local_bridge/local_api.py（FastAPI :8014）：GET /api/preset、GET /api/stack-status、POST /api/workflow/build-graph、POST /api/run（→构 TaskDag 交 submit_dag，返回 run_id）、GET /api/run/{id}（回逐节点态 + 结构化 log events 供 1s 轮询）、POST /api/run/{id}/cancel。端点集/方法/响应结构对照 unilabos_local_ui/src/main.tsx（AC-4）。hermetic 测（TestClient，不起真实 OS）。",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T05",
+      "name": "server.py 组合入口 + 离线执行核",
+      "layer": "bridge/server",
+      "description": "新增 unilabos/app/local_bridge/server.py：单 asyncio event loop 并起 schedule_ws(:8890)+workflow_ws(:8891)+local_api(:8014)；离线备档——无真实 OS 连入时用 F002 TaskDagRunner + 仿真节点调度器（照 tests/scheduler/fake_scheduler.py 每设备锁保 I3）在进程内跑同一 TaskDag。可选加 python -m unilabos.app.local_bridge.server 入口，不改既有启动路径（零回归）。import unilabos + pytest + ruff 全绿（AC-6）。",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T06",
+      "name": "接线 SZLab local_ui 到桥",
+      "layer": "frontend",
+      "description": "unilabos_local_ui（已从 styxhuang fork 取框架层，不取专有设备栈）接桥：确认 vite.config.ts /api→127.0.0.1:8014 代理；npm install && npm run test（其自带 workflowDraft/workflowExport 测试）通过；本地 vite dev :5174 能拉 preset/stack-status。",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T07",
+      "name": "集成验证与评审",
+      "layer": "verify",
+      "description": "tmux 起 ①桥 ②unilab --backend simple --test_mode --graph <demo>（schedule_addr 指向桥）③前端(:32234,WSS 指桥) ④local_ui(:5174)。实现 A：浏览器工作流页 FetchGraph 出图→运行→两 panel 逐节点 running→end。实现 B：:5174 build-graph→run→1s 轮询见节点日志/终态。python -c import unilabos + pytest tests/app tests/scheduler + ruff 全绿；AC-1~AC-6 逐条对照；桥三面契约在 interface-design.md 冻结、与 F002 逐字段对齐；代码经 reviewer 评审。Playwright 尽力档（chromium 1223 装不上则退 HTTP/WS 层断言 + 手动截图并如实说明）。",
+      "status": "pending",
+      "notes": ""
+    }
+  ]
+}
