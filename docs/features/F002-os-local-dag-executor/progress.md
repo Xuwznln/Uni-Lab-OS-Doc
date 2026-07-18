@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 4/8 子任务完成
-- 状态: 进行中（T04 完成，进行 T05）
+- 当前进度: 5/8 子任务完成
+- 状态: 进行中（T05 完成，进行 T06）
 
 ## 实现记录
 
@@ -33,6 +33,11 @@
 - 状态: completed
 - 文件: tests/scheduler/__init__.py, tests/scheduler/fake_scheduler.py, tests/scheduler/test_dag_executor.py
 - 说明: fake_scheduler.py 建模生产 DeviceActionManager 关键契约——同 device_action_key 非 always_free 节点经每设备 asyncio.Lock 串行、绝不重叠（I3）；完成时刻由测试手动 complete() 驱动、settle() 用 asyncio.sleep(0) 零墙钟推进，确定性无 flaky。8 用例：AC-1 菱形 A→B/C→D 并发走图 + I1 恰好一次；AC-2 同 key 峰值并发=1（串行）+ always_free 峰值=2（放行）；AC-3 on_node_terminal 抛 ConnectionError（模拟断网上行失败）不打断走图、全节点仍 SUCCESS；AC-4 resume completed=[A,B] 不重跑 + 游标 roundtrip；AC-5a 某节点 FAILED 触发 fail-fast、D 绝不起跑；AC-5b 含环解析期即抛 DagValidationError。8 passed in 0.05s、ruff 通过、无 time.sleep。
+
+### T05: property-based 不变量测试（I1~I6）
+- 状态: completed
+- 文件: tests/scheduler/test_dag_invariants.py
+- 说明: Hypothesis legal_dags 生成器随机造 1~7 节点、边只从低号指向高号（构造性无环）、随机 device/always_free；@given + st.data() 抽随机合法调度驱动纯 DagWalk。3 用例：I1/I2/I6——每节点恰好运行一次 + ready 节点全部前驱必 SUCCESS + run_order 恒为合法拓扑序 + ≤节点数轮终止；I4——取整跑拓扑序任意前缀作崩溃游标 resume，只跑未完成、已完成不重跑、合计全 SUCCESS；I5——任意 i<j 加 j→i 回边构 2-环，解析期即 DagValidationError。I3（同设备无重叠）属注入调度器层，已由 T04 fake max_concurrent_by_key 覆盖，不重复。max_examples=200，3 passed、ruff 通过。依赖 hypothesis（已 uv pip install）。
 
 ## 遇到的问题
 

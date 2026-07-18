@@ -56,8 +56,8 @@
       "name": "property-based 不变量测试（I1~I6）",
       "layer": "test",
       "description": "tests/scheduler/test_dag_invariants.py：Hypothesis 生成任意合法 DAG（随机节点/无环边/device 分配/always_free），断言 I1 恰好一次、I2 偏序遵从、I3 同设备无重叠、I4 resume 等价、I5 含环即抛、I6 有限步终止。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "legal_dags 生成器：1~7 节点、边只从低号指向高号（构造性无环）、随机 device/always_free；@given + st.data() 随机合法调度驱动纯 DagWalk。3 用例：I1/I2/I6（恰好一次+ready 前驱必 SUCCESS+run_order 为合法拓扑序+≤节点数轮终止）、I4（任意前缀游标 resume 只跑未完成、已完成不重跑、合计全 SUCCESS）、I5（任意回边构 2-环解析期即抛 DagValidationError）。I3 属调度器层，已由 T04 fake max_concurrent_by_key 覆盖。max_examples=200，3 passed、ruff 通过。"
     },
     {
       "id": "T06",
