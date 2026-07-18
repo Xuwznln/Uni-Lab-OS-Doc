@@ -32,8 +32,8 @@
       "name": "DagExecutor 本地并发走图核心",
       "layer": "scheduler",
       "description": "新增 unilabos/scheduler/dag_executor.py：in-degree/ready-set 走图，注入式节点调度器 submit(node)->awaitable 与注入式时钟；success 递减后继 in-degree、failed 走 fail-fast 取消同 task 未终态节点（I1/I2/I6）。不在此层做同设备互斥（交给 DeviceActionManager）。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "分两层：DagWalk 纯同步状态机（I1/I2/I5/I6 靶子）+ DagExecutor 异步驱动。时钟在调度器一侧注入，执行器无 time.sleep。自检 AC-1 并发/恰好一次/D 最后起跑通过；ruff 通过。"
     },
     {
       "id": "T03",

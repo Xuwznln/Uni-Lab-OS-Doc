@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 1/8 子任务完成
-- 状态: 进行中（T01 完成，进行 T02）
+- 当前进度: 2/8 子任务完成
+- 状态: 进行中（T02 完成，进行 T03）
 
 ## 实现记录
 
@@ -18,6 +18,11 @@
 - 状态: completed
 - 文件: unilabos/scheduler/dag_model.py, unilabos/scheduler/__init__.py
 - 说明: DagNode/DagEdge/TaskDag/NodeState + TERMINAL_STATES；from_message 解析并校验（缺字段/重复 node_id/悬空边/含环均拒，Kahn 拓扑消解检测环 = I5）。device_action_key 与 ws_client._handle_job_start 一致。import 通过、ruff 通过。
+
+### T02: DagExecutor 本地并发走图核心
+- 状态: completed
+- 文件: unilabos/scheduler/dag_executor.py
+- 说明: 分两层解耦——DagWalk 纯同步状态机（ready/mark_running/on_success/on_failed/is_done + resume via completed），是 I1/I2/I5/I6 的靶子；DagExecutor 异步驱动，每轮提交全部 ready 节点并发起跑（asyncio.ensure_future + FIRST_COMPLETED），success 递减后继入度、failed 即 fail-fast 取消在跑并停止调度。同设备互斥不在此层（交注入的调度器）。on_node_terminal 回调预留给 T03 游标。自检 AC-1 通过、ruff 通过。
 
 ## 遇到的问题
 

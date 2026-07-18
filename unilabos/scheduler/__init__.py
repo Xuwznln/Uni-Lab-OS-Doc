@@ -11,11 +11,14 @@ from unilabos.scheduler.dag_model import (
     TaskDag,
     TERMINAL_STATES,
 )
+from unilabos.scheduler.dag_executor import DagExecutor, DagWalk
 
 __all__ = [
     "DagEdge",
     "DagNode",
     "DagValidationError",
+    "DagExecutor",
+    "DagWalk",
     "NodeState",
     "TaskDag",
     "TERMINAL_STATES",
