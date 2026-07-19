@@ -1,0 +1,72 @@
+{
+  "$comment": [
+    "子任务清单 — 本需求的唯一进度真相来源",
+    "完整规则见 docs/agent-workflow.md 第八节 / 主仓 team_collaboration playbook",
+    "",
+    "Author: HUMAN 定义任务 / CLAUDE 仅修改 status 和 notes",
+    "",
+    "规则：",
+    "  1. CLAUDE 只能改 status 和 notes",
+    "  2. 不得改 id, name, layer, description",
+    "  3. 不得删除或新增任务条目（需人类确认）",
+    "  4. status 流转：pending -> in_progress -> completed（或 blocked）",
+    "  5. 按 id 顺序实现（小号优先）",
+    "  6. 每完成一个子任务必须 import 通过 + 相关 pytest 通过 + git commit",
+    "  7. 每完成一个子任务必须更新 progress.md",
+    "",
+    "layer 取值参考：model/schema, device, compile, scheduler, bridge, test, verify",
+    "下面是通用骨架，人类按实际功能改写任务定义"
+  ],
+  "feature_name": "",
+  "created_at": "",
+  "tasks": [
+    {
+      "id": "T01",
+      "name": "定义数据结构 / schema",
+      "layer": "model/schema",
+      "description": "定义设备状态/动作或协议 YAML schema 的数据结构",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T02",
+      "name": "实现核心逻辑",
+      "layer": "device/compile/scheduler",
+      "description": "实现驱动/协议编译/调度核心逻辑，transport 与时钟可注入",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T03",
+      "name": "hermetic 单元测试",
+      "layer": "test",
+      "description": "用 fake 硬件 + 可控时钟写单测，不连真实设备",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T04",
+      "name": "property-based 不变量测试",
+      "layer": "test",
+      "description": "对协议编译/坐标/调度不变量用 Hypothesis 覆盖（如适用）",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T05",
+      "name": "接入与集成",
+      "layer": "bridge",
+      "description": "接入通信桥/注册表，确保 import unilabos 通过",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T06",
+      "name": "验证",
+      "layer": "verify",
+      "description": "import 通过、pytest 通过、验收标准逐条确认",
+      "status": "pending",
+      "notes": ""
+    }
+  ]
+}

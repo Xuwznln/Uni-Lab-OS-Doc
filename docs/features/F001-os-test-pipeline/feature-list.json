@@ -1,0 +1,171 @@
+{
+  "$comment": [
+    "OS 自动化测试与发布门禁流水线 — 子任务清单，本需求唯一进度真相来源",
+    "规则见 docs/agent-workflow.md 第八节 / 主仓 product_designs/team_collaboration/",
+    "",
+    "Author: HUMAN 定义任务 / CLAUDE 仅修改 status 和 notes",
+    "  1. CLAUDE 只能改 status 和 notes",
+    "  2. 不得改 id, name, layer, description, phase, ac",
+    "  3. 不得删除或新增任务条目（需人类确认）",
+    "  4. status 流转：pending -> in_progress -> completed（或 blocked）",
+    "  5. 按 phase 与 id 顺序实现（小号优先）",
+    "  6. 每完成一个子任务必须 import 通过 + 相关 pytest 通过 + git commit",
+    "  7. 每完成一个子任务必须更新 progress.md",
+    "",
+    "phase 1 = 7月 止血；phase 2 = 8月 模拟锚点；phase 3 = 9月 交付/门禁"
+  ],
+  "feature_name": "OS 自动化测试与发布门禁流水线（Q3）",
+  "created_at": "2026-07-12",
+  "tasks": [
+    {
+      "id": "T1.1",
+      "phase": "1-止血",
+      "name": "引入 pytest + ruff 与测试分层约定",
+      "layer": "test-infra",
+      "description": "pyproject.toml 增加 pytest、ruff 与 pytest markers（hardware/slow/property/simulation/contract/opcua）；约定 tests/ 目录分层与运行命令；把 SZLab 的 flake8 配置迁并入 ruff，避免两套 lint",
+      "ac": "AC-1",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T1.2",
+      "phase": "1-止血",
+      "name": "新增 Linux pytest CI job（去重试掩盖）",
+      "layer": "ci",
+      "description": "在 .github/workflows/ 新增独立 Linux job 跑 pytest -m 'not hardware and not slow'；红即红，不做原生崩溃重试",
+      "ac": "AC-1",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T1.3",
+      "phase": "1-止血",
+      "name": "恢复 test_simulation_meta*.py",
+      "layer": "test",
+      "description": "从 stale .pyc 反推或重写 test_simulation_meta / _ast / _decorator，重新纳入版本管理并在 CI 运行",
+      "ac": "AC-3",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T1.4",
+      "phase": "1-止血",
+      "name": "隔离 Windows import 崩溃到 quarantine",
+      "layer": "ci",
+      "description": "保留 --check_mode 作 registry 门禁，但把偶发原生崩溃拆到 quarantine 通道，不污染主门禁的红/绿信号",
+      "ac": "AC-1",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T2.1",
+      "phase": "2-模拟锚点",
+      "name": "设备标准动作模拟冒烟 + 覆盖率看板",
+      "layer": "simulation",
+      "description": "每个注册设备须有虚拟对应体，跑其 standard actions 并断言状态转移；产出覆盖率=通过冒烟设备/注册设备，目标≥80%。参照 05_virtual_standard_actions_plan.md",
+      "ac": "AC-2",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T2.2",
+      "phase": "2-模拟锚点",
+      "name": "Protocol 黄金运行（golden run）",
+      "layer": "simulation",
+      "description": "26+ protocol 类型各选代表，编译->打到虚拟设备->断言产出，作为功能全量校验的实体，进 Tier 2 夜跑",
+      "ac": "AC-2",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T2.3",
+      "phase": "2-模拟锚点",
+      "name": "property-based 不变量（Hypothesis）",
+      "layer": "property",
+      "description": "protocol 编译往返一致、坐标往返恒等、调度无资源冲突三类不变量",
+      "ac": "AC-4",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T2.4",
+      "phase": "2-模拟锚点",
+      "name": "driver fake-transport 样板 + 模板化",
+      "layer": "device-test",
+      "description": "挑一个真实 driver（Modbus/串口类）切出可注入 transport，写 hermetic 单测作 tests/devices/ 复制模板，并被 os-reviewer 强制",
+      "ac": "AC-5",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T2.5",
+      "phase": "2-模拟锚点",
+      "name": "上收 SZLab 虚拟 OPC 三进程为内核仿真引擎",
+      "layer": "simulation",
+      "description": "把 SZLab 的虚拟 OPC-UA 服务 + 状态守护进程 + 集成 manifest 抽出到内核 unilabos/simulation/opcua/，成为 OPC-UA/PLC 设备类的标准 action 回归夹具；断言写入/等待/完成/异常（变量 begin/goal/end）；归档虚拟服务与守护进程日志。仿真引擎进内核，与设备包契约数据解耦",
+      "ac": "AC-10",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T2.6",
+      "phase": "2-模拟锚点",
+      "name": "标准化仿真契约格式 nodes.csv + flow.json",
+      "layer": "contract",
+      "description": "把 SZLab 的 *_nodes.csv（变量表）+ *_flow.json（状态规则）定为 OPC-UA 设备类的仿真契约标准格式，随设备包发布；定义 schema 与校验；文档化'新 OPC-UA 设备如何只写 csv+flow 即复用引擎'，供别的 PLC 线复用",
+      "ac": "AC-11",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T3.1",
+      "phase": "3-交付门禁",
+      "name": "内核↔应用契约测试",
+      "layer": "contract",
+      "description": "冻结 registry schema / device action 接口 / WebSocket+FastAPI bridge 的公共面，测试断言契约未破坏；这是换内核的验证器",
+      "ac": "AC-6",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T3.2",
+      "phase": "3-交付门禁",
+      "name": "测试门禁化 conda 发布",
+      "layer": "release",
+      "description": "在 conda 发布链前置 Tier 1 gate，不绿不发版",
+      "ac": "AC-7",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T3.3",
+      "phase": "3-交付门禁",
+      "name": "semver + CHANGELOG + 兼容性声明",
+      "layer": "release",
+      "description": "定版本规则；从 Conventional Commits 生成 CHANGELOG；每版声明领域开发者要不要改代码；registry schema version 号",
+      "ac": "AC-7",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T3.4",
+      "phase": "3-交付门禁",
+      "name": "启动性能基准",
+      "layer": "benchmark",
+      "description": "benchmark 测试守启动 3s 阈值，劣化即红",
+      "ac": "AC-8",
+      "status": "pending",
+      "notes": ""
+    },
+    {
+      "id": "T3.5",
+      "phase": "3-交付门禁",
+      "name": "换内核干跑演练",
+      "layer": "acceptance",
+      "description": "9 月底用东方理工或等价场景实跑'只换内核、不动前端'，作为 10 月联调前验收",
+      "ac": "AC-9",
+      "status": "pending",
+      "notes": ""
+    }
+  ]
+}
