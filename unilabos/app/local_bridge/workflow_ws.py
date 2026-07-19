@@ -161,7 +161,12 @@ class WorkflowSession:
         self._schedule = schedule_session
         self.uuid = uuid
         self._task_id = ""
+        self._run_seq = 0
         self._schedule.on_job_status(self._on_os_job_status)
+
+    def close(self) -> None:
+        """会话断开时注销 job_status 回调，避免回调在长寿命 OS 会话上累积（连接 finally 调用）。"""
+        self._schedule.off_job_status(self._on_os_job_status)
 
     async def handle_incoming(self, message: dict[str, Any]) -> None:
         """喂入一条 panel 上行报文，按 action 分发。非对象或未知 action 忽略。"""
@@ -187,10 +192,13 @@ class WorkflowSession:
     async def _on_run_workflow(self) -> RunHandle:
         """demo 图经 workflow_to_dag 构 TaskDag 交 schedule_ws 下发，并回 run_workflow ack。
 
-        task_id 取本 panel 的 uuid（一图一任务），保证回流 job_status 可按 task_id 命中。
+        每次运行铸唯一 task_id（uuid + 递增序号）：submit_dag 任务级幂等，若复用 panel 的
+        稳定 uuid 作 task_id，再次运行会命中已终态的旧句柄而静默不下发（重跑变空操作）。
+        故每次运行用新 task_id 保证真下发；self._task_id 记为当前，回流与 stop 均按此命中。
         """
         graph = build_demo_graph()
-        task_id = self.uuid or "workflow"
+        self._run_seq += 1
+        task_id = f"{self.uuid or 'workflow'}-{self._run_seq}"
         dag = workflow_to_task_dag(graph["nodes"], graph["edges"], task_id=task_id)
         self._task_id = task_id
         run = await self._schedule.submit_dag(dag)
@@ -277,6 +285,7 @@ class WorkflowWSServer:
                     continue
                 await session.handle_incoming(message)
         finally:
+            session.close()
             logger.info("[workflow_ws] panel 连接断开 (uuid=%s)", uuid or "-")
 
     async def stop(self) -> None:

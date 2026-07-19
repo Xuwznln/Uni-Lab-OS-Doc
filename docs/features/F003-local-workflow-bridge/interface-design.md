@@ -139,9 +139,24 @@ UI 工作流图（两套 UI 各自的 nodes/edges 形状）→ F002 `TaskDag`：
 - **主：真实下发**——`schedule_ws` 等真实 `unilab --backend simple --test_mode --graph <demo>`
   连入（`schedule_addr` 指向桥）。`task_dag` 走真实 F002 路径，`job_status` 真实回流。
   demo 图选 `unilabos/test/experiments/` 内含虚拟设备者。
-- **备：离线自足**——无真实 OS 时，桥内用 F002 `TaskDagRunner` + 仿真节点调度器
-  （照 `tests/scheduler/fake_scheduler.py`，每设备 `asyncio.Lock` 保 I3）跑同一 `TaskDag`，
-  UI 仍完整动。用于 hermetic 测试与无 OS 演示。
+- **备：离线自足**——无真实 OS 时，桥内 `offline_os.OfflineOS` 顶替 OS 面：其 `receive`
+  充当 `ScheduleSession.send`（收 `task_dag`/`cancel_task`），直接用 F002 `DagExecutor`
+  走同一 `TaskDag`（不复制走图逻辑），每 `device_action_key` 一把 `asyncio.Lock` 保 I3
+  （照 `tests/scheduler/fake_scheduler.py`），逐节点回发 `job_status`，UI 仍完整动。
+  用于 hermetic 测试与无 OS 演示。
+- **组合入口**：`server.py:LocalBridgeServer` 单 event loop 并起三面（:8890/:8891/:8014）；
+  `python -m unilabos.app.local_bridge.server [--offline]` 独立启动，不改既有 `unilab` 启动路径。
+
+> **契约冻结（T07 验证）**：三面契约以上表为准，与 F002 逐字段对齐（`node_id==job_id`、
+> 幂等键 `(task_id,node_id)`、`task_dag`/`job_status`/`cancel_task` 字段名严格 F002）。
+> live 验证：Impl-B 经真实 HTTP `build-graph→run→poll` 达 `completed`（逐节点 running→success、
+> 遵边序）；Impl-A 经真实 WS `fetch_graph→run_workflow` 收 `workflow_update` 流
+> （逐节点 running/success、末条 `task_status=end`）。
+> **环境说明（如实）**：本环境**主档「真实外部 OS 进程」不可拉起**——上游 `--backend simple`
+> 为未实现桩（`backend.py` simple 分支 `pass`，`main` 未绑定即崩，非本特性引入），且无 ROS2；
+> 故以**备档离线自足**达成等价 OS-DAG 端到端。离线核与真实 OS 的 `TaskDagRunner` 复用**同一**
+> F002 `DagExecutor`，执行语义一致，差异仅在进程边界/传输；OS 面 `schedule_ws` 的 F002 线格式
+> 由 T02 单测逐字段锁死，与真实 `ws_client._handle_task_dag`/`publish_job_status` 兼容。
 
 ---
 

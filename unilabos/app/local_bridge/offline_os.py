@@ -111,7 +111,10 @@ class OfflineOS:
                 continue
             status = _STATE_TO_STATUS.get(state)
             if status:
-                await self._emit(dag, dag.nodes[node_id], status)
+                try:
+                    await self._emit(dag, dag.nodes[node_id], status)
+                except Exception:  # noqa: BLE001 —— 兜底补发失败不得让后台任务异常未被回收
+                    logger.exception("[offline_os] 补发 job_status 失败（node=%s）", node_id)
 
     def _bridge_terminal(self, task_id: str, node_id: str) -> bool:
         """桥侧该节点是否已达终态（避免对已收到终态的节点重复补发）。"""

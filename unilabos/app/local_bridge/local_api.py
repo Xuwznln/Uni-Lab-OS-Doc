@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -274,7 +275,7 @@ def build_stack_status() -> dict[str, Any]:
     return {"success": True, "schema": "local_bridge", "stacks": {}}
 
 
-def create_app(get_state: Any) -> Any:
+def create_app(get_state: Callable[[], LocalApiState | None]) -> Any:
     """建 FastAPI app。get_state() 返回已就绪 LocalApiState（OS 未连入时返回 None）。
 
     延迟 import fastapi（未装不拖累其余桥面）。路由只做请求解码 + 调 LocalApiState + 错误转码。
@@ -338,7 +339,12 @@ class LocalApiServer:
     传入 get_state 解析已就绪 LocalApiState；server.py 组合入口在 OS 连入后注入。
     """
 
-    def __init__(self, get_state: Any, host: str = "127.0.0.1", port: int = 8014) -> None:
+    def __init__(
+        self,
+        get_state: Callable[[], LocalApiState | None],
+        host: str = "127.0.0.1",
+        port: int = 8014,
+    ) -> None:
         self._get_state = get_state
         self.host = host
         self.port = port

@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 6/7 子任务完成（T01–T05 + T06 接线 local_ui 已完成）
-- 状态: T01–T06 完成；T07 集成验证与评审待续（T01–T07 依已批准计划拟定）
+- 当前进度: 7/7 子任务完成（T01–T07 全部完成）
+- 状态: 完成——三面桥 + 离线执行核 + 两套前端接线 + 集成验证 + 评审整改均落地
 
 ## 落位
 
@@ -52,6 +52,20 @@
 ## 遇到的问题
 
 <!-- 问题与决策，尤其是硬件/时序/flaky 相关 -->
+
+### T07: 集成验证与评审
+- 状态: completed
+- 文件: unilabos/app/local_bridge/{schedule_ws,workflow_ws,offline_os,local_api}.py（评审整改）, tests/app/test_workflow_ws.py（+2 测）, docs/features/F003-*/{interface-design,checklist,feature-list,progress}.md
+- 说明: 静态门禁全绿（import unilabos + pytest tests/app tests/scheduler 68 passed + ruff 净）。live 冒烟（tmux `python -m unilabos.app.local_bridge.server --offline`，三面 :8890/:8891/:8014 均监听）：Impl-B 经真实 HTTP `build-graph→run→poll` 达 completed（n1/n2 both success、log_events 逐节点 running→成功、遵 n1→n2 边序）；Impl-A 经真实 WS `fetch_graph→run_workflow` 收 workflow_update 流（逐节点 running/success、末条 task_status=end），二次运行铸新 task_id 真下发。AC-1~AC-6 逐条附证据见 checklist.md §5。三面契约在 interface-design.md §一~§五 冻结、与 F002 逐字段对齐。
+- **评审整改（python-reviewer）**：
+  - #1 HIGH 回调跨会话累积——schedule_ws 增 `off_job_status`，WorkflowSession 增 `close()` 于连接 finally 注销回调（长寿命 OS 会话上每 panel 重连不再累积失效回调）。
+  - #2 MED 重跑空操作——workflow_ws `_on_run_workflow` 每次铸唯一 `task_id=f"{uuid}-{seq}"`（原复用稳定 uuid 命中已终态句柄致 submit_dag 幂等静默不下发）。
+  - #6 LOW offline_os 补发 job_status 加 try/except-log 兜底（后台任务异常不遗漏回收）。
+  - #7 NIT local_api `get_state` 类型收窄为 `Callable[[], LocalApiState | None]`。
+  - #3/#4（OS 重连孤儿 UI 会话 / 无界 run 表）：单 OS 本地联调桥可接受，记为已知限制。
+  - 新增 2 测：test_rerun_workflow_dispatches_fresh_task、test_closed_session_deregisters_callback。
+- **环境说明（如实）**：主档「真实外部 OS 进程」在本环境**不可拉起**——上游 `unilab --backend simple` 为未实现桩（`backend.py` simple 分支 `pass`，`main` 未绑定即 UnboundLocalError 崩，与 origin/dev 逐字节相同、非本特性引入）且无 ROS2。按已批准计划以**备档离线自足**达成等价 OS-DAG 端到端：OfflineOS 复用**同一** F002 `DagExecutor`（真实 OS 亦经 `TaskDagRunner` 用它），执行语义一致，差异仅进程边界/传输；OS 面 `schedule_ws` 的 F002 线格式由 T02 单测逐字段锁死，与真实 `ws_client._handle_task_dag`/`publish_job_status` 兼容。
+- **Playwright**：chromium 二进制本环境不可用（此前 VPN 限速装失败），按尽力档退 HTTP/WS 层 live 断言（已完成，见上）替代，如实说明。
 
 ### T06: 接线 SZLab local_ui 到桥
 - 状态: completed

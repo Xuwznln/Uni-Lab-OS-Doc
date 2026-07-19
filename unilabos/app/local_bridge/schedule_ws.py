@@ -144,6 +144,18 @@ class ScheduleSession:
         """注册 job_status 回调——每收到一条 OS job_status 就以其 data 段回调。"""
         self._job_status_cbs.append(cb)
 
+    def off_job_status(self, cb: JobStatusCallback) -> None:
+        """注销 job_status 回调（UI 会话断开时调用，避免回调在长寿命 OS 会话上累积）。
+
+        本 ScheduleSession 常寿命共享给多个 UI 连接；每个 UI 会话构造时注册一个回调，
+        断开时必须注销——否则回调（其 send 指向已关闭的 socket）无限累积，每条回流
+        都遍历一遍失效回调、抛异常刷屏。以身份匹配移除首个相等项。
+        """
+        try:
+            self._job_status_cbs.remove(cb)
+        except ValueError:
+            logger.debug("[schedule_ws] off_job_status: 回调未注册，忽略")
+
     def get_run(self, task_id: str) -> RunHandle | None:
         return self._runs.get(task_id)
 
