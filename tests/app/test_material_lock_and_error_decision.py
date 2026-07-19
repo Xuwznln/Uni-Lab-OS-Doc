@@ -5,12 +5,10 @@
 - 实体型物料需求（instance_uuid / barcode）自动并入锁键
 - suc_type=skip（异常后人工跳过）→ 节点算成功推进，但已消费物料 quarantined
 - JobExecutionBackend 解析 return_info.suc_type 并 4 参回调（兼容旧 3 参 listener）
-- 本地异常决策通道：publish_job_error_decision_required 暂存 →
-  list/resolve 经 REST 路由回设备节点
+- 本地异常决策通道：HostNode 持有 pending，scheduler backend 只提供
+  list/resolve REST 适配，不把决策路由回设备节点等待器
 """
 
-import threading
-import time
 from typing import Any, Dict, List, Optional
 
 from unilabos.app.scheduler.backend import (
@@ -24,6 +22,7 @@ from unilabos.app.scheduler.inventory.store import InventoryStore
 from unilabos.app.scheduler.models import WorkflowEdge, WorkflowNode, WorkflowSpec
 from unilabos.app.scheduler.service import EdgeScheduler, _extract_resource_ids
 from unilabos.app.ws_client import QueueItem
+from unilabos.registry.action_policy import ERROR_DECISION_TARGET_MICRO_BACKEND
 from unilabos.utils.type_check import serialize_result_info
 
 
@@ -182,14 +181,37 @@ class _FakeHost:
         self.suc_type = suc_type
         self.backend: Optional[JobExecutionBackend] = None
         self.devices_instances: Dict[str, Any] = {}
+        self.pending_error_decisions: List[Dict[str, Any]] = []
+        self.decisions: List[Dict[str, Any]] = []
 
     def send_goal(self, item: QueueItem, action_type, action_kwargs,
                   sample_material, server_info=None):
         assert self.backend is not None
+        assert item.error_decision_target == ERROR_DECISION_TARGET_MICRO_BACKEND
         self.backend.publish_job_status(
             {}, item, "success",
             serialize_result_info("", True, {"v": 1}, suc_type=self.suc_type),
         )
+
+    def get_pending_action_error_decisions(self, decision_target=None):
+        return [dict(report) for report in self.pending_error_decisions]
+
+    def handle_action_error_decision(
+        self, decision_id, job_id, decision, *, decision_target=None
+    ):
+        report = next(
+            (
+                item
+                for item in self.pending_error_decisions
+                if item.get("decision_id") == decision_id
+            ),
+            None,
+        )
+        if report is None:
+            return False
+        self.pending_error_decisions.remove(report)
+        self.decisions.append(dict(decision))
+        return True
 
 
 class TestBackendSucTypePropagation:
@@ -222,15 +244,6 @@ class TestBackendSucTypePropagation:
         assert received == [("job-1", True, {"v": 1})]
 
 
-class _FakeBaseNode:
-    def __init__(self):
-        self.decisions: List[Dict[str, Any]] = []
-
-    def handle_action_error_decision(self, decision_id, job_id, decision):
-        self.decisions.append(decision)
-        return True
-
-
 class _Wrapper:
     def __init__(self, node):
         self._ros_node = node
@@ -239,11 +252,9 @@ class _Wrapper:
 class TestLocalErrorDecisionChannel:
     def _make(self):
         host = _FakeHost()
-        base_node = _FakeBaseNode()
-        host.devices_instances = {"dev1": _Wrapper(base_node)}
         backend = JobExecutionBackend(host_node_getter=lambda: host)
         host.backend = backend
-        return backend, base_node
+        return backend, host
 
     def _report(self, decision_id="d-1"):
         return {
@@ -258,33 +269,25 @@ class TestLocalErrorDecisionChannel:
         }
 
     def test_store_list_resolve(self):
-        backend, base_node = self._make()
-        assert backend.publish_job_error_decision_required(self._report()) is True
+        backend, host = self._make()
+        host.pending_error_decisions.append(self._report())
         decisions = backend.list_error_decisions()
         assert len(decisions) == 1
         assert decisions[0]["decision_id"] == "d-1"
-        assert "_received_at" not in decisions[0]
 
         assert backend.resolve_error_decision("d-1", {"action": "retry"}) is True
-        assert base_node.decisions[0]["action"] == "retry"
-        assert base_node.decisions[0]["job_id"] == "job-9"
+        assert host.decisions[0]["action"] == "retry"
         assert backend.list_error_decisions() == []
 
     def test_resolve_unknown_decision(self):
         backend, _ = self._make()
         assert backend.resolve_error_decision("nope", {"action": "skip"}) is False
 
-    def test_missing_decision_id_rejected(self):
-        backend, _ = self._make()
-        assert backend.publish_job_error_decision_required({"device_id": "dev1"}) is False
-
-    def test_device_gone_keeps_report(self):
-        """设备暂不可用时审批结果不丢：报告放回，等重试。"""
-        host = _FakeHost()  # 没有 devices_instances["dev1"]
-        backend = JobExecutionBackend(host_node_getter=lambda: host)
-        backend.publish_job_error_decision_required(self._report())
+    def test_host_gone_has_no_report(self):
+        """Host 不可用时微后端不能伪造设备侧 pending。"""
+        backend = JobExecutionBackend(host_node_getter=lambda: None)
         assert backend.resolve_error_decision("d-1", {"action": "retry"}) is False
-        assert len(backend.list_error_decisions()) == 1
+        assert backend.list_error_decisions() == []
 
 
 class TestErrorDecisionRest:
@@ -294,9 +297,10 @@ class TestErrorDecisionRest:
 
         from unilabos.app.scheduler.api import create_scheduler_router
 
-        backend, base_node = TestLocalErrorDecisionChannel()._make()
-        backend.publish_job_error_decision_required(
-            TestLocalErrorDecisionChannel()._report("d-rest"))
+        backend, host = TestLocalErrorDecisionChannel()._make()
+        host.pending_error_decisions.append(
+            TestLocalErrorDecisionChannel()._report("d-rest")
+        )
 
         app = FastAPI()
         app.include_router(
@@ -309,7 +313,7 @@ class TestErrorDecisionRest:
 
         resp = client.post("/api/v1/error-decisions/d-rest", json={"action": "skip"})
         assert resp.status_code == 200
-        assert base_node.decisions[0]["action"] == "skip"
+        assert host.decisions[0]["action"] == "skip"
 
         resp = client.post("/api/v1/error-decisions/d-rest", json={"action": "skip"})
         assert resp.status_code == 404
@@ -324,74 +328,6 @@ class TestErrorDecisionRest:
         app.include_router(create_scheduler_router(lambda: None))
         client = TestClient(app)
         assert client.get("/api/v1/error-decisions").status_code == 503
-
-
-class TestDecisionChannelFallback:
-    """base_device_node._publish_error_decision_report：云端 WS 失败 → bridges 回退。"""
-
-    class _Stub:
-        def __init__(self, client=None):
-            self._client = client
-
-        def _get_communication_client(self):
-            return self._client
-
-        def lab_logger(self):
-            import logging
-
-            return logging.getLogger("stub-device")
-
-    def _publish(self, stub, report):
-        from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
-
-        return BaseROS2DeviceNode._publish_error_decision_report(stub, report)
-
-    def test_falls_back_to_backend_bridge(self, monkeypatch):
-        from unilabos.ros.nodes.presets.host_node import HostNode
-
-        backend = JobExecutionBackend(host_node_getter=lambda: None)
-
-        class _HostWithBridges:
-            bridges = [object(), backend]  # 第一个 bridge 没有决策接口 → 跳过
-
-        monkeypatch.setattr(
-            HostNode, "get_instance", classmethod(lambda cls, idx=0: _HostWithBridges())
-        )
-        stub = self._Stub(client=None)  # 云端通道不可用
-        assert self._publish(stub, {"decision_id": "d-fb", "device_id": "dev1"}) is True
-        assert backend.list_error_decisions()[0]["decision_id"] == "d-fb"
-
-    def test_cloud_client_wins_when_available(self, monkeypatch):
-        from unilabos.ros.nodes.presets.host_node import HostNode
-
-        sent: List[Dict[str, Any]] = []
-
-        class _CloudClient:
-            def publish_job_error_decision_required(self, report):
-                sent.append(report)
-                return True
-
-        backend = JobExecutionBackend(host_node_getter=lambda: None)
-
-        class _HostWithBridges:
-            bridges = [backend]
-
-        monkeypatch.setattr(
-            HostNode, "get_instance", classmethod(lambda cls, idx=0: _HostWithBridges())
-        )
-        stub = self._Stub(client=_CloudClient())
-        assert self._publish(stub, {"decision_id": "d-cloud", "device_id": "dev1"}) is True
-        assert len(sent) == 1
-        assert backend.list_error_decisions() == []  # 云端成功，不落本地
-
-    def test_all_channels_unavailable(self, monkeypatch):
-        from unilabos.ros.nodes.presets.host_node import HostNode
-
-        monkeypatch.setattr(
-            HostNode, "get_instance", classmethod(lambda cls, idx=0: None)
-        )
-        stub = self._Stub(client=None)
-        assert self._publish(stub, {"decision_id": "d-none", "device_id": "dev1"}) is False
 
 
 class TestLockResourceResolverFactory:

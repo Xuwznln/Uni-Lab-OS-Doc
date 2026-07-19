@@ -39,6 +39,7 @@ from unilabos.app.ws_client import (
     QueueItem,
     format_job_log,
 )
+from unilabos.registry.action_policy import ERROR_DECISION_TARGET_MICRO_BACKEND
 from unilabos.utils.tracing import (
     add_event,
     capture_context,
@@ -53,10 +54,6 @@ logger = logging.getLogger(__name__)
 # listener 签名：(job_id, success, ret_value, suc_type) -> None
 # suc_type 取值 normal / skip / operator_intervention（见 registry.action_policy）
 JobFinishedListener = Callable[[str, bool, Any, str], None]
-
-# 异常决策等待人工处理的保留时长（超时的设备侧早已按 default_on_decision_timeout 自决）
-_ERROR_DECISION_TTL_SECONDS = 3600.0
-
 
 class JobExecutionBackend:
     """job_start 生命周期微后端。"""
@@ -80,11 +77,6 @@ class JobExecutionBackend:
         self._running = False
         self._pending = 0
         self._pending_lock = threading.Lock()
-
-        # 等待人工决策的 action 异常（decision_id -> report）。
-        # 本地模式（无云端 WS）下由调度器 REST / 前端做审批入口。
-        self._error_decisions: Dict[str, Dict[str, Any]] = {}
-        self._error_decisions_lock = threading.Lock()
 
     # ── 生命周期 ─────────────────────────────────────────────
 
@@ -257,85 +249,41 @@ class JobExecutionBackend:
                 pass
         return changed
 
-    # ── 异常决策桥（bridge 形状：publish_job_error_decision_required） ──
-
-    def publish_job_error_decision_required(self, report: Dict[str, Any]) -> bool:
-        """接收设备侧异常决策请求（本地审批通道，云端 WS 不可用时的回退）。
-
-        base_device_node._publish_error_decision_report 会先试云端 WS，失败后
-        遍历 HostNode.bridges 找到本方法。报告存内存，等 REST / 前端审批。
-        """
-        decision_id = str(report.get("decision_id") or "")
-        if not decision_id:
-            return False
-        now = time.time()
-        with self._error_decisions_lock:
-            # 清理过期请求（设备侧超时后已按 default_on_decision_timeout 自决）
-            expired = [
-                did for did, r in self._error_decisions.items()
-                if now - r.get("_received_at", now) > _ERROR_DECISION_TTL_SECONDS
-            ]
-            for did in expired:
-                self._error_decisions.pop(did, None)
-            self._error_decisions[decision_id] = {**report, "_received_at": now}
-        logger.warning(
-            "[JobExecutionBackend] action error awaiting local decision: "
-            "decision=%s device=%s action=%s job=%s",
-            decision_id,
-            report.get("device_id", ""),
-            report.get("action_name", ""),
-            str(report.get("job_id", ""))[:8],
-        )
-        return True
+    # ── Host 异常决策状态的 REST 适配 ────────────────────────
 
     def list_error_decisions(self) -> List[Dict[str, Any]]:
-        """当前等待人工决策的异常（供 REST / 前端展示）。"""
-        with self._error_decisions_lock:
-            return [
-                {k: v for k, v in report.items() if not k.startswith("_")}
-                for report in self._error_decisions.values()
-            ]
+        """读取 HostNode 持有的本地异常决策权威列表。"""
+
+        host_node = self._host_node_getter()
+        if host_node is None:
+            return []
+        return host_node.get_pending_action_error_decisions(
+            decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
+        )
+
+    def host_ready(self) -> bool:
+        """HostNode 是否已经可以承接本地执行与异常决策。"""
+
+        return self._host_node_getter() is not None
 
     def resolve_error_decision(self, decision_id: str, decision: Dict[str, Any]) -> bool:
-        """把人工审批结果路由回挂起的设备 action（与 ws job_error_decision 同语义）。"""
-        with self._error_decisions_lock:
-            report = self._error_decisions.pop(decision_id, None)
-        if report is None:
-            return False
+        """将人工选择提交给 HostNode，不再路由到设备节点等待器。"""
 
-        device_id = str(report.get("device_id") or "")
         host_node = self._host_node_getter()
-        wrapper = getattr(host_node, "devices_instances", {}).get(device_id) if host_node else None
-        base_node = getattr(wrapper, "_ros_node", None) if wrapper is not None else None
-        if base_node is None or not hasattr(base_node, "handle_action_error_decision"):
-            logger.error(
-                "[JobExecutionBackend] device %s unavailable for error decision %s",
-                device_id,
-                decision_id,
-            )
-            # 放回去，避免审批结果丢失后设备一直挂到超时才自决
-            with self._error_decisions_lock:
-                self._error_decisions[decision_id] = report
+        if host_node is None:
             return False
-
         payload = {
             "decision_id": decision_id,
-            "job_id": str(report.get("job_id") or ""),
-            "device_id": device_id,
             **decision,
         }
-        matched = bool(
-            base_node.handle_action_error_decision(
-                decision_id, payload["job_id"], payload
+        return bool(
+            host_node.handle_action_error_decision(
+                decision_id,
+                str(payload.get("job_id") or ""),
+                payload,
+                decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
             )
         )
-        if not matched:
-            logger.warning(
-                "[JobExecutionBackend] no pending action matched decision %s "
-                "(likely already timed out)",
-                decision_id,
-            )
-        return matched
 
     # ── worker ───────────────────────────────────────────────
 
@@ -374,6 +322,7 @@ class JobExecutionBackend:
             notebook_id=job.notebook_id,
             device_action_key=job.device_action_key,
             trace_context={},
+            error_decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
         )
         inject_trace_context(queue_item.trace_context)
         host_node = self._host_node_getter()

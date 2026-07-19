@@ -2159,14 +2159,15 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         task_id: str,
         action_name: str,
         trace_context: Optional[Dict[str, str]] = None,
+        logical_job_id: str = "",
     ) -> None:
-        """Register HostNode context before the ROS goal with UUID=job_id is sent."""
+        """按 transport UUID 注册原任务上下文，供设备侧 tracing 使用。"""
 
         if not job_id:
             return
         with self._job_contexts_lock:
             context: Dict[str, Any] = {
-                "job_id": job_id,
+                "job_id": logical_job_id or job_id,
                 "task_id": task_id,
                 "action_name": action_name,
             }
@@ -2219,28 +2220,30 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             policy = action_value_mapping.get("error_policy")
         return policy, report_action_name
 
+    def _resolve_report_action_name(
+        self,
+        action_name: str,
+        action_kwargs: Dict[str, Any],
+    ) -> str:
+        """解析 JSON command 实际调用的业务动作名，供 Host 匹配注册表。"""
+
+        if action_name in {"_execute_driver_command", "_execute_driver_command_async"}:
+            try:
+                command = json.loads(action_kwargs.get("string", ""))
+                return str(command["function_name"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                pass
+        return action_name
+
     def handle_action_error_decision(
         self,
         decision_id: str,
         job_id: str,
         decision: Dict[str, Any],
     ) -> bool:
-        """Receive one backend approval result and wake the exact pending action."""
+        """兼容旧调用形状；设备节点不再接收或执行异常决策。"""
 
-        with self._pending_action_error_decisions_lock:
-            pending = self._pending_action_error_decisions.get(decision_id) if decision_id else None
-            if pending is None and job_id:
-                matches = [
-                    item
-                    for item in self._pending_action_error_decisions.values()
-                    if item.get("job_id") == job_id
-                ]
-                pending = matches[0] if len(matches) == 1 else None
-            if pending is None:
-                return False
-            pending["decision"] = decision
-            pending["event"].set()
-            return True
+        return False
 
     def _get_communication_client(self):
         from unilabos.app.communication import CommunicationClientFactory
@@ -2507,6 +2510,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             execution_success = False
             action_return_value = None
             execution_suc_type = SUCCESS_TYPE_NORMAL
+            execution_error_info = None
 
             #####    self.lab_logger().info(f"执行动作: {action_name}")
             goal = goal_handle.request
@@ -2533,22 +2537,10 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             action_kwargs = convert_from_ros_msg_with_mapping(goal, action_value_mapping["goal"])
             self.lab_logger().debug(f"任务 {ACTION.__name__} 接收到原始目标: {str(action_kwargs)[:1000]}")
             self.lab_logger().trace(f"任务 {ACTION.__name__} 接收到原始目标: {action_kwargs}")
-            error_policy, report_action_name = self._resolve_runtime_error_policy(
+            report_action_name = self._resolve_report_action_name(
                 action_name,
-                action_value_mapping,
-                ACTION,
                 action_kwargs,
             )
-
-            async def _retry_action_once():
-                if asyncio.iscoroutinefunction(ACTION):
-                    return await ACTION(**action_kwargs)
-                retry_future = submit_with_context(
-                    self._executor, ACTION, **action_kwargs
-                )
-                while not retry_future.done():
-                    await self.sleep(0.02)
-                return retry_future.result()
 
             error_skip = False
             # 向Host查询物料当前状态，如果是host本身的增加物料的请求，则直接跳过
@@ -2766,31 +2758,27 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             f"{_raw_result!r}"
                         )
 
-                if isinstance(_raw_result, BaseException) and error_policy:
-                    try:
-                        decision_outcome = await self._resolve_action_exception(
-                            _raw_result,
-                            _retry_action_once,
-                            report_action_name,
-                            job_context,
-                            error_policy,
+                if isinstance(_raw_result, BaseException):
+                    execution_error_info = {
+                        "action_name": report_action_name,
+                        "exception_type": type(_raw_result).__name__,
+                        "exception_mro": [
+                            error_class.__name__
+                            for error_class in type(_raw_result).__mro__
+                        ],
+                        "error_message": str(_raw_result),
+                        "traceback": execution_error,
+                    }
+                    category = getattr(_raw_result, "category", None)
+                    severity = getattr(_raw_result, "severity", None)
+                    if category is not None:
+                        execution_error_info["category"] = str(
+                            getattr(category, "value", category)
                         )
-                        action_return_value = decision_outcome.value
-                        execution_suc_type = decision_outcome.suc_type
-                        execution_error = ""
-                        execution_exception = None
-                        execution_success = True
-                    except Exception as resolved_exc:
-                        execution_error = "".join(
-                            traceback.format_exception(
-                                type(resolved_exc),
-                                resolved_exc,
-                                resolved_exc.__traceback__,
-                            )
+                    if severity is not None:
+                        execution_error_info["severity"] = str(
+                            getattr(severity, "value", severity)
                         )
-                        action_return_value = resolved_exc
-                        execution_exception = resolved_exc
-                        execution_success = False
 
             # 清理 feedback timer
             if _feedback_timer is not None:
@@ -2884,6 +2872,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             execution_success,
                             action_return_value,
                             suc_type=execution_suc_type,
+                            error_info=execution_error_info,
                         ),
                     )
 

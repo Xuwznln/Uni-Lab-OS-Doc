@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, Tuple
 
 from unilabos.app.model import JobAddReq, JobData
+from unilabos.registry.action_policy import ERROR_DECISION_TARGET_MICRO_BACKEND
 from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.utils import logger
 
@@ -322,6 +323,7 @@ def job_add(req: JobAddReq) -> JobData:
             job_id=job_id,
             notebook_id=req.notebook_id,
             device_action_key=device_action_key,
+            error_decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
         )
 
         host_node.send_goal(

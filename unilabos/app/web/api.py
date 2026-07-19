@@ -1308,7 +1308,8 @@ def api_get_all_actions():
 @api.get("/job/{id}/status", summary="Job status", response_model=JobStatusResp)
 def job_status(id: str):
     """获取任务状态"""
-    data = job_info(id)
+    # 前端轮询必须幂等；结果由 JobResultStore 的 TTL 统一清理。
+    data = job_info(id, remove_after_read=False)
     return JobStatusResp(data=data)
 
 

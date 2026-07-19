@@ -14,6 +14,9 @@ SUCCESS_TYPE_SKIP = "skip"
 SUCCESS_TYPE_OPERATOR_INTERVENTION = "operator_intervention"
 SuccessType = Literal["normal", "skip", "operator_intervention"]
 
+ERROR_DECISION_TARGET_BACKEND = "backend"
+ERROR_DECISION_TARGET_MICRO_BACKEND = "micro_backend"
+
 
 class FallbackAction(TypedDict):
     """Server-side single action executed after operator approval."""
@@ -42,7 +45,7 @@ class ErrorPolicy(TypedDict):
 
 @dataclass(frozen=True)
 class ActionDecisionOutcome:
-    """Internal runtime result carrying the successful resolution type."""
+    """旧设备侧决策执行器的兼容结果；新任务由 HostNode 解析决策。"""
 
     value: Any
     suc_type: SuccessType
@@ -70,12 +73,15 @@ def _normalize_option(value: Any) -> ErrorPolicyOption:
         raise TypeError("error_policy option 必须是字典")
     action = value.get("action")
     label = value.get("label")
-    if not isinstance(action, str) or not action:
+    if not isinstance(action, str) or not action.strip():
         raise ValueError("error_policy option.action 必须是非空字符串")
-    if not isinstance(label, str) or not label:
+    if not isinstance(label, str) or not label.strip():
         raise ValueError("error_policy option.label 必须是非空字符串")
 
-    option: ErrorPolicyOption = {"action": action, "label": label}
+    option: ErrorPolicyOption = {
+        "action": action.strip(),
+        "label": label.strip(),
+    }
     description = value.get("description")
     if description is not None:
         option["description"] = str(description)
@@ -111,18 +117,28 @@ def normalize_error_policy(
             raise ValueError(
                 f"error_policy.options[{error_class_name!r}] 必须是非空列表"
             )
-        options[error_class_name] = [
+        normalized_options = [
             _normalize_option(option) for option in raw_class_options
         ]
+        actions = [option["action"] for option in normalized_options]
+        if len(actions) != len(set(actions)):
+            raise ValueError(
+                f"error_policy.options[{error_class_name!r}] 包含重复 action"
+            )
+        options[error_class_name] = normalized_options
 
     normalized: Dict[str, Any] = {"options": options}
     max_retries = policy.get("max_retries", 3)
-    if not isinstance(max_retries, int) or max_retries < 0:
+    if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
         raise ValueError("error_policy.max_retries 必须是非负整数")
     normalized["max_retries"] = max_retries
 
     decision_timeout = policy.get("decision_timeout_seconds", 300.0)
-    if not isinstance(decision_timeout, (int, float)) or decision_timeout <= 0:
+    if (
+        isinstance(decision_timeout, bool)
+        or not isinstance(decision_timeout, (int, float))
+        or decision_timeout <= 0
+    ):
         raise ValueError("error_policy.decision_timeout_seconds 必须大于 0")
     normalized["decision_timeout_seconds"] = float(decision_timeout)
 
@@ -139,13 +155,27 @@ def resolve_error_options(
 ) -> List[Dict[str, Any]]:
     """Resolve options by exception MRO, then the ``*`` fallback."""
 
-    if not policy:
+    return resolve_error_options_by_names(
+        policy,
+        [error_class.__name__ for error_class in type(exc).__mro__],
+    )
+
+
+def resolve_error_options_by_names(
+    policy: Mapping[str, Any] | None,
+    error_class_names: List[str],
+) -> List[Dict[str, Any]]:
+    """Host 根据设备回传的异常 MRO 名称解析注册表策略。"""
+
+    if not isinstance(policy, Mapping):
         return []
     options = policy.get("options")
     if not isinstance(options, Mapping):
         return []
-    for error_class in type(exc).__mro__:
-        matched = options.get(error_class.__name__)
+    for error_class_name in error_class_names:
+        if not isinstance(error_class_name, str):
+            continue
+        matched = options.get(error_class_name)
         if isinstance(matched, list):
             return deepcopy(matched)
     fallback = options.get(DEFAULT_ERROR_CLASS)

@@ -27,6 +27,7 @@ from enum import Enum
 from typing_extensions import TypedDict
 
 from unilabos.app.model import JobAddReq
+from unilabos.registry.action_policy import ERROR_DECISION_TARGET_BACKEND
 from unilabos.resources.resource_tracker import ResourceDictType
 from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.scheduler.dag_model import DagNode, DagValidationError, TaskDag
@@ -93,6 +94,7 @@ class QueueItem:
     next_run_time: float = 0  # 下次执行时间戳
     retry_count: int = 0  # 重试次数
     trace_context: Optional[Dict[str, str]] = None
+    error_decision_target: str = ERROR_DECISION_TARGET_BACKEND
 
 
 @dataclass
@@ -1021,14 +1023,12 @@ class MessageProcessor:
         if host_node is None:
             logger.warning(f"[MessageProcessor] HostNode unavailable, drop error decision job={job_id[:8]}")
             return
-        wrapper = host_node.devices_instances.get(device_id)
-        base_node = getattr(wrapper, "_ros_node", None) if wrapper is not None else None
-        if base_node is None or not hasattr(base_node, "handle_action_error_decision"):
-            logger.warning(
-                f"[MessageProcessor] Device {device_id} cannot handle error decision job={job_id[:8]}"
-            )
-            return
-        if not base_node.handle_action_error_decision(decision_id, job_id, dict(data)):
+        if not host_node.handle_action_error_decision(
+            decision_id,
+            job_id,
+            dict(data),
+            decision_target=ERROR_DECISION_TARGET_BACKEND,
+        ):
             logger.warning(
                 f"[MessageProcessor] No pending error decision matched "
                 f"decision={decision_id} job={job_id[:8]} device={device_id}"

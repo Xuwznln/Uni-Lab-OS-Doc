@@ -300,8 +300,13 @@ def create_scheduler_router(
         for run in snap["workflows"].values():
             state = run.get("state", "unknown")
             workflow_states[state] = workflow_states.get(state, 0) + 1
+        backend = get_backend() if get_backend is not None else None
         return {
             "now": time.time(),
+            "host_ready": bool(backend is not None and backend.host_ready()),
+            "pending_error_decisions": (
+                backend.list_error_decisions() if backend is not None else []
+            ),
             "devices": scheduler.device_status(),
             "scheduler": {
                 "workflow_states": workflow_states,
