@@ -983,6 +983,11 @@ def _extract_class_body(
             action_args.setdefault("description", "")
             action_args.setdefault("auto_prefix", False)
             action_args.setdefault("parent", False)
+            action_args.setdefault("error_policy", None)
+            if action_args["error_policy"]:
+                from unilabos.registry.action_policy import normalize_error_policy
+
+                action_args["error_policy"] = normalize_error_policy(action_args["error_policy"])
             method_params = _extract_method_params(item, import_map)
             return_type = _get_annotation_str(item.returns, import_map)
             is_async = isinstance(item, ast.AsyncFunctionDef)
