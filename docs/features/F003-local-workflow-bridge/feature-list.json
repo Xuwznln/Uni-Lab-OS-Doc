@@ -58,8 +58,8 @@
       "name": "server.py 组合入口 + 离线执行核",
       "layer": "bridge/server",
       "description": "新增 unilabos/app/local_bridge/server.py：单 asyncio event loop 并起 schedule_ws(:8890)+workflow_ws(:8891)+local_api(:8014)；离线备档——无真实 OS 连入时用 F002 TaskDagRunner + 仿真节点调度器（照 tests/scheduler/fake_scheduler.py 每设备锁保 I3）在进程内跑同一 TaskDag。可选加 python -m unilabos.app.local_bridge.server 入口，不改既有启动路径（零回归）。import unilabos + pytest + ruff 全绿（AC-6）。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "offline_os.py：进程内仿真 OS——OfflineOS.receive 充当 ScheduleSession.send（收桥下发 task_dag/cancel_task），用 F002 DagExecutor 走同一 TaskDag（不复制走图逻辑，单一事实源），每 device_action_key 一把 asyncio.Lock 保 I3（非 always_free 串行、峰值并发==1），逐节点回发 F002 job_status（running→sleep(0)→终态，running 态可观测，无 time.sleep）经 session.handle_incoming 上行；fail-fast/取消致未 submit 的节点补发终态 job_status 令桥收敛（无悬挂）。server.py：LocalBridgeServer 组合三面服务器 + 管理「当前就绪 ScheduleSession/LocalApiState」——真实模式经 ScheduleWSServer.on_session 于 OS 连入时接管并建唯一 LocalApiState，离线模式构造即 build_offline_session 装配 session 并建 state；build_offline_session 纯装配无网络（供离线与 hermetic 测复用）；python -m unilabos.app.local_bridge.server [--offline] 独立入口，不改既有 unilab 启动路径（零回归）。tests/app/test_offline_os.py 8 用例（asyncio.run 约定，无 time.sleep/网络）覆盖 AC-6：整图跑通 SUCCESS 回流、失败 fail-fast 下游 CANCELLED 无悬挂、同设备 I3 串行（max_concurrent==1）、cancel 全 CANCELLED、build_offline_session 装配、未知下行不建任务、离线模式 state 即就绪、真实模式 OS 连入前 state=None 连入后接管。pytest tests/app tests/scheduler 66 passed、ruff 净、import unilabos 通过、python -m ... --help 正常。"
     },
     {
       "id": "T06",
