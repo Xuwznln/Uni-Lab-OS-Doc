@@ -66,8 +66,8 @@
       "name": "接线 SZLab local_ui 到桥",
       "layer": "frontend",
       "description": "unilabos_local_ui（已从 styxhuang fork 取框架层，不取专有设备栈）接桥：确认 vite.config.ts /api→127.0.0.1:8014 代理；npm install && npm run test（其自带 workflowDraft/workflowExport 测试）通过；本地 vite dev :5174 能拉 preset/stack-status。",
-      "status": "pending",
-      "notes": ""
+      "status": "completed",
+      "notes": "vite.config.ts 既有 /api→http://127.0.0.1:8014 代理与 dev :5174 恰对齐桥 local_api，无需改动。npm install（node v25.6.1/npm 11.9.0，75 包）成功；npm run test 两个自带用例 workflowDraft/workflowExport 均 exit 0（纯 node + typescript 编译 src/*.ts，无外部服务）。补 unilabos_local_ui/.gitignore 忽略 node_modules/dist/tsbuildinfo（避免误提交）。live 冒烟：tmux 起 python -m unilabos.app.local_bridge.server --offline（三面 :8890/:8891/:8014 均监听），curl 走真实 HTTP 验 GET /api/preset（demo 动作 pump_liquid/stir）、GET /api/stack-status（success 空堆栈）、POST /api/workflow/build-graph（回显 workflow json）、POST /api/run→GET /api/run/{id} 轮询达 completed（n1/n2 both success，log_events 逐节点 running→成功、遵 n1→n2 边序）——Impl-B 全链路对桥打通。"
     },
     {
       "id": "T07",

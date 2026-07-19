@@ -7,8 +7,8 @@
 
 - 开始时间: 2026-07-18
 - 最后更新: 2026-07-18
-- 当前进度: 5/7 子任务完成（T01 翻译核 + T02 schedule_ws + T03 workflow_ws + T04 local_api + T05 server/offline_os 已完成）
-- 状态: T01–T05 完成；T06–T07 待续（T01–T07 依已批准计划拟定）
+- 当前进度: 6/7 子任务完成（T01–T05 + T06 接线 local_ui 已完成）
+- 状态: T01–T06 完成；T07 集成验证与评审待续（T01–T07 依已批准计划拟定）
 
 ## 落位
 
@@ -52,6 +52,11 @@
 ## 遇到的问题
 
 <!-- 问题与决策，尤其是硬件/时序/flaky 相关 -->
+
+### T06: 接线 SZLab local_ui 到桥
+- 状态: completed
+- 文件: unilabos_local_ui/.gitignore（新增；框架层其余文件 T06 资产提交已入库）
+- 说明: vite.config.ts 既有 `/api`→`http://127.0.0.1:8014` 代理与 `dev --port 5174` 恰对齐桥 local_api，无需改动前端。npm install（node v25.6.1 / npm 11.9.0，75 包）成功；npm run test 两个自带用例（workflowDraft/workflowExport，纯 node + typescript 即时编译 src/*.ts，无外部服务依赖）均 exit 0。补 unilabos_local_ui/.gitignore 忽略 node_modules/dist/tsbuildinfo。live 冒烟（tmux 起 `python -m unilabos.app.local_bridge.server --offline`，三面 :8890/:8891/:8014 均成功监听）：curl 走真实 HTTP 打通 Impl-B 全链路——GET /api/preset（demo 动作 pump_liquid/stir）、GET /api/stack-status（success 空堆栈）、POST /api/workflow/build-graph（回显 workflow json）、POST /api/run→GET /api/run/{id} 轮询达 completed（n1/n2 both success，log_events 逐节点 running→成功、遵 n1→n2 边序）。
 
 ### 为什么需要桥（架构决策）
 - 本环境 Go 后端不可用（Redis/Nacos/MQTT/Docker 均缺），全栈 E2E 不可行。
