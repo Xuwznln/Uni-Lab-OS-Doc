@@ -1016,14 +1016,29 @@ class LiquidHandlerMiddleware(LiquidHandler):
         volume: float,
         offset: Coordinate = Coordinate.zero(),
         flow_rate: Optional[float] = None,
+        liquid_height: Optional[float] = None,
         blow_out_air_volume: Optional[float] = None,
         **backend_kwargs,
     ):
         if self._simulator:
             return await self._simulate_handler.aspirate96(
-                resource, volume, offset, flow_rate, blow_out_air_volume, **backend_kwargs
+                resource,
+                volume,
+                offset,
+                flow_rate,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                **backend_kwargs,
             )
-        return await super().aspirate96(resource, volume, offset, flow_rate, blow_out_air_volume, **backend_kwargs)
+        return await super().aspirate96(
+            resource,
+            volume,
+            offset,
+            flow_rate=flow_rate,
+            liquid_height=liquid_height,
+            blow_out_air_volume=blow_out_air_volume,
+            **backend_kwargs,
+        )
 
     async def dispense96(
         self,
@@ -1031,14 +1046,29 @@ class LiquidHandlerMiddleware(LiquidHandler):
         volume: float,
         offset: Coordinate = Coordinate.zero(),
         flow_rate: Optional[float] = None,
+        liquid_height: Optional[float] = None,
         blow_out_air_volume: Optional[float] = None,
         **backend_kwargs,
     ):
         if self._simulator:
             return await self._simulate_handler.dispense96(
-                resource, volume, offset, flow_rate, blow_out_air_volume, **backend_kwargs
+                resource,
+                volume,
+                offset,
+                flow_rate,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                **backend_kwargs,
             )
-        return await super().dispense96(resource, volume, offset, flow_rate, blow_out_air_volume, **backend_kwargs)
+        return await super().dispense96(
+            resource,
+            volume,
+            offset,
+            flow_rate=flow_rate,
+            liquid_height=liquid_height,
+            blow_out_air_volume=blow_out_air_volume,
+            **backend_kwargs,
+        )
 
     async def stamp(
         self,
@@ -2389,18 +2419,35 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                     pass
 
         if is_96_well:
-            pass  # This mode is not verified.
+            # 96 孔整板模式：走 PLR 96 头 API（pickup96 →[mix]→ asp96 → disp96 →[mix]→ drop96）。
+            return await self._transfer_liquid_96well(
+                sources,
+                targets,
+                tip_racks,
+                asp_vols=asp_vols,
+                dis_vols=dis_vols,
+                asp_flow_rates=asp_flow_rates,
+                dis_flow_rates=dis_flow_rates,
+                offsets=offsets,
+                touch_tip=touch_tip,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                mix_stage=mix_stage,
+                mix_times=mix_times,
+                mix_vol=mix_vol,
+                mix_rate=mix_rate,
+                mix_liquid_height=mix_liquid_height,
+            )
+        # 转换体积参数为列表
+        if isinstance(asp_vols, (int, float)):
+            asp_vols = [float(asp_vols)]
         else:
-            # 转换体积参数为列表
-            if isinstance(asp_vols, (int, float)):
-                asp_vols = [float(asp_vols)]
-            else:
-                asp_vols = [float(v) for v in asp_vols]
+            asp_vols = [float(v) for v in asp_vols]
 
-            if isinstance(dis_vols, (int, float)):
-                dis_vols = [float(dis_vols)]
-            else:
-                dis_vols = [float(v) for v in dis_vols]
+        if isinstance(dis_vols, (int, float)):
+            dis_vols = [float(dis_vols)]
+        else:
+            dis_vols = [float(v) for v in dis_vols]
 
         # 统一混合次数为标量，防止数组/列表与 int 比较时报错
         if mix_times is not None and not isinstance(mix_times, (int, float)):
@@ -2675,6 +2722,143 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             sources=ResourceTreeSet.from_plr_resources(list(sources), known_newly_created=False).dump(),  # type: ignore
             targets=ResourceTreeSet.from_plr_resources(list(targets), known_newly_created=False).dump(),  # type: ignore
         )
+
+    async def _transfer_liquid_96well(
+        self,
+        sources: Sequence[Container],
+        targets: Sequence[Container],
+        tip_racks: Sequence[TipRack],
+        *,
+        asp_vols: Union[List[float], float],
+        dis_vols: Union[List[float], float],
+        asp_flow_rates: Optional[List[Optional[float]]] = None,
+        dis_flow_rates: Optional[List[Optional[float]]] = None,
+        offsets: Optional[List[Coordinate]] = None,
+        touch_tip: bool = False,
+        liquid_height: Optional[List[Optional[float]]] = None,
+        blow_out_air_volume: Optional[List[Optional[float]]] = None,
+        mix_stage: Optional[Literal["none", "before", "after", "both"]] = "none",
+        mix_times: Optional[List[int]] = None,
+        mix_vol: Optional[int] = None,
+        mix_rate: Optional[int] = None,
+        mix_liquid_height: Optional[float] = None,
+    ) -> TransferLiquidReturn:
+        """96 孔整板转移：pickup96 →[mix-before]→ aspirate96 → dispense96 →[mix-after]→ drop96。
+
+        整板一次动作 = 单一体积 / 单一参数，各列表参数取首元素（``_first``）。full 参数按 96 头
+        API 能力映射（offset / flow_rate / liquid_height / blow_out_air_volume / mix / touch_tip）。
+        丢枪头优先送到 deck 上的 ``Trash``；无 trash 时回收到取头用的 tip_rack。
+        """
+
+        def _first(seq):
+            if seq is None:
+                return None
+            if isinstance(seq, (list, tuple)):
+                return seq[0] if len(seq) else None
+            return seq
+
+        def _resolve_plate(res) -> Plate:
+            if isinstance(res, Plate):
+                return res
+            parent = getattr(res, "parent", None)
+            if isinstance(parent, Plate):
+                return parent
+            return res  # 兜底：按 plate-like 处理
+
+        source_plate = _resolve_plate(sources[0])
+        target_plate = _resolve_plate(targets[0])
+        tip_rack = tip_racks[0] if isinstance(tip_racks[0], TipRack) else tip_racks[0].parent
+
+        self.set_tiprack(tip_racks)
+
+        asp_vol = float(_first(asp_vols))
+        dis_vol = float(_first(dis_vols))
+        _offset = _first(offsets) or Coordinate.zero()
+        _asp_rate = _first(asp_flow_rates)
+        _dis_rate = _first(dis_flow_rates)
+        _blow = _first(blow_out_air_volume)
+        _liquid_h = _first(liquid_height)
+
+        # mix 次数可能是 list / 标量，统一收敛为 int（0 表示不 mix）。
+        _mt = _first(mix_times)
+        try:
+            _mix_times = int(_mt) if _mt is not None else 0
+        except (TypeError, ValueError):
+            _mix_times = 0
+        _mix_vol = float(mix_vol) if mix_vol else None
+        _do_mix_before = bool(mix_stage in ("before", "both") and _mix_times > 0 and _mix_vol)
+        _do_mix_after = bool(mix_stage in ("after", "both") and _mix_times > 0 and _mix_vol)
+
+        async def _mix_plate(plate: Plate):
+            for _ in range(_mix_times):
+                await self.aspirate96(
+                    plate,
+                    _mix_vol,
+                    offset=_offset,
+                    flow_rate=mix_rate,
+                    liquid_height=mix_liquid_height,
+                )
+                await self.dispense96(
+                    plate,
+                    _mix_vol,
+                    offset=_offset,
+                    flow_rate=mix_rate,
+                    liquid_height=mix_liquid_height,
+                )
+
+        # 1) 整板取枪头
+        await self.pick_up_tips96(tip_rack, offset=_offset)
+
+        # 2) mix-before（对源板整板混匀）
+        if _do_mix_before:
+            await _mix_plate(source_plate)
+
+        # 3) 整板吸液
+        await self.aspirate96(
+            source_plate,
+            asp_vol,
+            offset=_offset,
+            flow_rate=_asp_rate,
+            liquid_height=_liquid_h,
+            blow_out_air_volume=_blow,
+        )
+
+        # 4) 整板放液
+        await self.dispense96(
+            target_plate,
+            dis_vol,
+            offset=_offset,
+            flow_rate=_dis_rate,
+            liquid_height=_liquid_h,
+            blow_out_air_volume=_blow,
+        )
+
+        # 5) mix-after（对目标板整板混匀）
+        if _do_mix_after:
+            await _mix_plate(target_plate)
+
+        # 6) touch_tip：native 靠壁由 backend 在 dispense96 内处理；此处覆盖 software/both 模式
+        #    （backend 无 software 语义时子类 touch_tip 会自行短路，安全无副作用）。
+        if touch_tip:
+            _tt_targets = [c for c in targets if isinstance(c, Well)]
+            if not _tt_targets:
+                _tt_targets = list(getattr(target_plate, "children", []) or [])
+            if _tt_targets:
+                await self.touch_tip(_tt_targets)
+
+        # 7) 丢枪头：优先 deck 上的 Trash，无 trash 回收到 tip_rack。
+        drop_target: Union[TipRack, Trash] = tip_rack
+        for child in getattr(self.deck, "children", []) or []:
+            if isinstance(child, Trash):
+                drop_target = child
+                break
+        await self.drop_tips96(drop_target)
+
+        return TransferLiquidReturn(
+            sources=ResourceTreeSet.from_plr_resources(list(sources), known_newly_created=False).dump(),  # type: ignore
+            targets=ResourceTreeSet.from_plr_resources(list(targets), known_newly_created=False).dump(),  # type: ignore
+        )
+
     async def _transfer_base_method(
         self,
         sources: Sequence[Container],

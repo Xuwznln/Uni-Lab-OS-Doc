@@ -154,7 +154,14 @@ def _v04_axis_type(axis: Any) -> str:
 
 
 def _v04_tips_type(step: Dict[str, Any]) -> str:
-    """根据旧步骤的孔号信息推断 v7 V04 Tips 枚举名。"""
+    """根据旧步骤信息推断 v7 V04 Tips 枚举名。
+
+    96 整板模式在 V03（legacy）里靠 ``IsWholePlate=True`` 标志表达；V04 没有该标志，改用
+    ``Tips=Tips96`` 表达整板。因此 V04 转换时优先看 ``IsWholePlate``：为真直接判 96 头，
+    避免整板 step 的 ``HoleNumbers`` 为空被误判成 Tips1。其余按孔号数量回退（8 连排 / 单头）。
+    """
+    if _coerce_bool(step.get("IsWholePlate")):
+        return "Tips96"
     raw = str(step.get("HoleNumbers") or "")
     numbers = [p.strip() for p in raw.split(",") if p.strip()]
     if len(numbers) >= 96:
@@ -534,7 +541,7 @@ def _pick_material_id(material: Dict[str, Any], is_v04: bool) -> Optional[str]:
     """按接口版本选择 BoardDetail.MaterialId。
 
     - v04：物料主键是 ``id_v4``（如 ``238c27e6-...``）；仅当数据缺 id_v4 时才回退 uuid 兜底。
-    - legacy(03)：只用 ``uuid``（老服务端不认 id_v4，即使物料字典里带了也不能用）。
+    - v03：只用 ``uuid``（老服务端不认 id_v4，即使物料字典里带了也不能用）。
     """
     material = material or {}
     if is_v04:
@@ -578,7 +585,7 @@ def worktablets_to_board(
                 number=number,
                 row=row,
                 column=col,
-                # 按接口版本选 id：v04 用 id_v4，legacy(03) 用 uuid。
+                # 按接口版本选 id：v04 用 id_v4，v03 用 uuid。
                 material_id=_pick_material_id(material, is_v04),
                 volume=int(material.get("Volume", 0) or 0),
             )
@@ -2046,7 +2053,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         calibration_labware_type: Optional[str] = "PRCXI_300ul_Tips",
         pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
         skip_position_recalc_when_matrix_exists: bool = True,
-        protocol_version: Literal["legacy", "v04"] = "v04",
+        protocol_version: Literal["v03", "v04"] = "v04",
         reset_status_inverted: Optional[bool] = None,
         wait_finish_timeout_s: Optional[float] = None,
     ):
@@ -2255,7 +2262,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
 
     @staticmethod
     def _is_success(res: Any) -> bool:
-        """兼容 V04/legacy 返回：``True`` 或 ``{"Success": True}`` 均视为成功。"""
+        """兼容 V04/v03 返回：``True`` 或 ``{"Success": True}`` 均视为成功。"""
         if res is True:
             return True
         if isinstance(res, dict):
@@ -2325,7 +2332,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         is_v04 = bool(getattr(self._unilabos_backend.api_client, "is_v04", False))
         for detail in board.details:
             mat = number_to_material.get(int(detail.number), {}) or {}
-            # 按接口版本选 id：v04 用 id_v4，legacy(03) 用 uuid。
+            # 按接口版本选 id：v04 用 id_v4，v03 用 uuid。
             detail.material_id = _pick_material_id(mat, is_v04)
             detail.volume = int(mat.get("Volume", 0) or 0)
         matrix_info = {
@@ -2376,10 +2383,10 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if number is None:
                 continue
 
-            # 如果 resource 已声明具体物料，优先精确匹配（V04 用 id_v4，legacy 用 uuid）。
+            # 如果 resource 已声明具体物料，优先精确匹配（V04 用 id_v4，v03 用 uuid）。
             if hasattr(resource, "_unilabos_state") and "Material" in getattr(resource, "_unilabos_state", {}):
                 stored_material = resource._unilabos_state["Material"] or {}
-                # V04：耗材主键是 id_v4，服务端没有 legacy uuid，必须靠 id_v4 命中。
+                # V04：耗材主键是 id_v4，服务端没有 v03 uuid，必须靠 id_v4 命中。
                 mat_id_v4 = stored_material.get("id_v4")
                 if mat_id_v4 and mat_id_v4 in material_id_v4_map:
                     work_tablets.append({"Number": number, "Material": material_id_v4_map[mat_id_v4]})
@@ -2453,7 +2460,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         number_to_material: Dict[int, Dict[str, Any]] = {
             int(wt["Number"]): (wt.get("Material") or {}) for wt in work_tablets
         }
-        # 仅 legacy(03) 给空槽兜底废弃槽物料；V04 下空槽保持为空，不自动放 238c27e6...。
+        # 仅 v03 给空槽兜底废弃槽物料；V04 下空槽保持为空，不自动放 238c27e6...。
         if not is_v04:
             for number in slot_none:
                 number_to_material.setdefault(int(number), dict(default_material))
@@ -2473,7 +2480,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             self._log_v04_board(matrix_id, tag="after-create")
         else:
             matrix_id = str(uuid.uuid4())
-            # V04 下空槽用空物料（不放 238c27e6...），legacy 才兜底废弃槽物料。
+            # V04 下空槽用空物料（不放 238c27e6...），v03 才兜底废弃槽物料。
             empty_tablets = [
                 {"Number": number, "Material": ({} if is_v04 else dict(default_material))}
                 for number in slot_none
@@ -3097,6 +3104,36 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         else:
             tip_rack = tip_racks[0].parent
 
+        # === 96 孔整板模式 ===
+        # is_96_well=True：选定 pip_setting 中 channels==96 的轴写入 backend._active_axis，
+        # 设定该轴 tip 高度，跳过 8 通道扁平化 / 逐列展开，直接走抽象层的整板 96 头 API。
+        if is_96_well:
+            return await self._transfer_liquid_96well_route(
+                sources,
+                targets,
+                tip_racks,
+                tip_rack,
+                skip_pipetting_position_recalc,
+                use_channels=use_channels,
+                asp_vols=asp_vols,
+                dis_vols=dis_vols,
+                asp_flow_rates=asp_flow_rates,
+                dis_flow_rates=dis_flow_rates,
+                offsets=offsets,
+                touch_tip=touch_tip,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                spread=spread,
+                mix_stage=mix_stage,
+                mix_times=mix_times,
+                mix_vol=mix_vol,
+                mix_rate=mix_rate,
+                mix_liquid_height=mix_liquid_height,
+                delays=delays,
+                pre_aspirate_from_target=pre_aspirate_from_target,
+                none_keys=none_keys,
+            )
+
         # === P1 v5：8 通道扁平化 ===
         # 设计文档：product_designs/protocol_convert/01-multi-channel-flatten.md
         #   §0   framework convention：8 通道 pipette 方向恒为 A~H column（governing rule）
@@ -3209,70 +3246,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             self.tip_height = tip_rack.children[0].get_size_z()
         # matrix_id 已有值时，跳过板位重算；仅在首次创建 matrix 后回写板位坐标。
         if not skip_pipetting_position_recalc:
-            # P2 v2：跨板 transfer_liquid 场景下 sources / targets 列表里可能引用多个 plate
-            # （v1 旧实现只取 [0] 会漏掉 slot 3/5/6 的位置同步）。这里改为遍历所有 source/target
-            # 的 parent plate，按首次出现顺序去重——既保证跨板都能 update_pipetting_position，
-            # 又避免同板多孔重复发送。详见 02-cross-slot-merge.md §3.3.2 / §9.5 step 5。
-            change_slots = []
-            seen_plates = set()
-
-            def _push_unique_plate(plate_obj):
-                if plate_obj is None:
-                    return
-                pname = getattr(plate_obj, "name", None) or id(plate_obj)
-                if pname in seen_plates:
-                    return
-                seen_plates.add(pname)
-                change_slots.append(plate_obj)
-
-            for src in sources:
-                _push_unique_plate(getattr(src, "parent", None))
-            for tgt in targets:
-                _push_unique_plate(getattr(tgt, "parent", None))
-            _push_unique_plate(tip_rack)
-
-            change_slots_positions = []
-            for slot in change_slots:
-                number = self._get_slot_number(slot, deck=self.deck)
-
-                well = slot.children[0]
-                # 板叠放在 module/plate_adapter 上时，移液头按「无支撑基准 - support」抬高一层；
-                # support 取支撑层真实高度（云端反序列化的 get_size_z 常为 0，需 _recover_height 还原）。
-                slot_parent = getattr(slot, "parent", None)
-                if isinstance(slot_parent, (PRCXI9300ModuleSite, PlateAdapter)):
-                    support = self._recover_height(slot_parent)
-                    support_layer = slot_parent
-                else:
-                    support, support_layer = 0.0, None
-                pip_pos = self.plr_pos_to_prcxi(well, tip_height=0.0)
-                # 孔口 z='t'、孔底 z='b'，再按左右 tip 长度分别补偿。
-                z_mouth, z_bottom = self._pipetting_z_anchors(
-                    well, slot, support, support_layer
-                )
-                pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
-                    z_mouth, z_bottom
-                )
-                _ps = getattr(self, "pip_setting", None) or {}
-                left_vol_enum = _to_volume_enum((_ps.get("left") or {}).get("vol"))
-                right_vol_enum = _to_volume_enum((_ps.get("right") or {}).get("vol"))
-
-                change_slots_positions.append({
-                    "Number": number,
-                    "VolumeEnum": left_vol_enum,
-                    "VolumeEnum2": right_vol_enum,
-                    "XPos": pip_pos.x,
-                    "YPos": pip_pos.y,
-                    "ZPos": pip_bottom,
-                    "bottleMouthPosition": pip_mouth,
-                    "X2Pos": pip_pos.x + self.right_2_left.x,
-                    "Y2Pos": pip_pos.y + self.right_2_left.y,
-                    "Z2Pos": pip2_bottom,
-                    "bottleMouthPosition2": pip2_mouth,
-                })
-            if change_slots_positions:
-                self._unilabos_backend.api_client.update_pipetting_position(
-                    self._unilabos_backend.matrix_id, change_slots_positions
-                )
+            self._sync_pipetting_positions(sources, targets, tip_rack)
 
 
         # P1 v5（Q6=B）：扁平化路径下调 super 时临时关 liquids-keep，防跨孔同名物料潜在污染。
@@ -3319,6 +3293,177 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         finally:
             if _flatten_8_to_1:
                 self._tip_reuse_by_liquid_name = _prev_tip_reuse
+            self._touch_tip_pending = False
+
+    def _sync_pipetting_positions(self, sources, targets, tip_rack):
+        """回写本次 transfer 涉及到的所有板位（source / target / tip_rack）的移液坐标。
+
+        P2 v2：跨板 transfer_liquid 场景下 sources / targets 列表里可能引用多个 plate
+        （v1 旧实现只取 [0] 会漏掉 slot 3/5/6 的位置同步）。这里遍历所有 source/target
+        的 parent plate，按首次出现顺序去重——既保证跨板都能 update_pipetting_position，
+        又避免同板多孔重复发送。详见 02-cross-slot-merge.md §3.3.2 / §9.5 step 5。
+        （非 96 单/8 通道路径与 96 整板路径共用此逻辑。）
+        """
+        change_slots = []
+        seen_plates = set()
+
+        def _push_unique_plate(plate_obj):
+            if plate_obj is None:
+                return
+            pname = getattr(plate_obj, "name", None) or id(plate_obj)
+            if pname in seen_plates:
+                return
+            seen_plates.add(pname)
+            change_slots.append(plate_obj)
+
+        for src in sources:
+            _push_unique_plate(getattr(src, "parent", None))
+        for tgt in targets:
+            _push_unique_plate(getattr(tgt, "parent", None))
+        _push_unique_plate(tip_rack)
+
+        change_slots_positions = []
+        for slot in change_slots:
+            number = self._get_slot_number(slot, deck=self.deck)
+
+            well = slot.children[0]
+            # 板叠放在 module/plate_adapter 上时，移液头按「无支撑基准 - support」抬高一层；
+            # support 取支撑层真实高度（云端反序列化的 get_size_z 常为 0，需 _recover_height 还原）。
+            slot_parent = getattr(slot, "parent", None)
+            if isinstance(slot_parent, (PRCXI9300ModuleSite, PlateAdapter)):
+                support = self._recover_height(slot_parent)
+                support_layer = slot_parent
+            else:
+                support, support_layer = 0.0, None
+            pip_pos = self.plr_pos_to_prcxi(well, tip_height=0.0)
+            # 孔口 z='t'、孔底 z='b'，再按左右 tip 长度分别补偿。
+            z_mouth, z_bottom = self._pipetting_z_anchors(
+                well, slot, support, support_layer
+            )
+            pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
+                z_mouth, z_bottom
+            )
+            _ps = getattr(self, "pip_setting", None) or {}
+            left_vol_enum = _to_volume_enum((_ps.get("left") or {}).get("vol"))
+            right_vol_enum = _to_volume_enum((_ps.get("right") or {}).get("vol"))
+
+            change_slots_positions.append({
+                "Number": number,
+                "VolumeEnum": left_vol_enum,
+                "VolumeEnum2": right_vol_enum,
+                "XPos": pip_pos.x,
+                "YPos": pip_pos.y,
+                "ZPos": pip_bottom,
+                "bottleMouthPosition": pip_mouth,
+                "X2Pos": pip_pos.x + self.right_2_left.x,
+                "Y2Pos": pip_pos.y + self.right_2_left.y,
+                "Z2Pos": pip2_bottom,
+                "bottleMouthPosition2": pip2_mouth,
+            })
+        if change_slots_positions:
+            self._unilabos_backend.api_client.update_pipetting_position(
+                self._unilabos_backend.matrix_id, change_slots_positions
+            )
+
+    def _select_96well_axis(self) -> str:
+        """从 ``pip_setting`` 里选出 ``channels == 96`` 的轴，返回 ``"left"`` / ``"right"``。
+
+        96 整板模式**必须**有一个 96 通道轴配置；未配置时直接抛错，不静默降级。
+        """
+        _pip_setting = getattr(self, "pip_setting", None)
+        if not _pip_setting:
+            raise ValueError(
+                "96 孔整板模式需要在 pip_setting 中配置一个 channels==96 的轴，"
+                "但当前未配置 pip_setting。"
+            )
+        for axis_key in ("left", "right"):
+            cfg = _pip_setting.get(axis_key) or {}
+            try:
+                if int(cfg.get("channels", 0)) == 96:
+                    return axis_key
+            except (TypeError, ValueError):
+                continue
+        raise ValueError(
+            "96 孔整板模式需要在 pip_setting 中配置一个 channels==96 的轴"
+            f"（当前 pip_setting={_pip_setting!r}）。"
+        )
+
+    async def _transfer_liquid_96well_route(
+        self,
+        sources: Sequence[Container],
+        targets: Sequence[Container],
+        tip_racks: Sequence[TipRack],
+        tip_rack: TipRack,
+        skip_pipetting_position_recalc: bool,
+        *,
+        use_channels: Optional[List[int]] = None,
+        asp_vols: Union[List[float], float],
+        dis_vols: Union[List[float], float],
+        asp_flow_rates: Optional[List[Optional[float]]] = None,
+        dis_flow_rates: Optional[List[Optional[float]]] = None,
+        offsets: Optional[List[Coordinate]] = None,
+        touch_tip: bool = False,
+        liquid_height: Optional[List[Optional[float]]] = None,
+        blow_out_air_volume: Optional[List[Optional[float]]] = None,
+        spread: Literal["wide", "tight", "custom"] = "wide",
+        mix_stage: Optional[Literal["none", "before", "after", "both"]] = "none",
+        mix_times: Optional[List[int]] = None,
+        mix_vol: Optional[int] = None,
+        mix_rate: Optional[int] = None,
+        mix_liquid_height: Optional[float] = None,
+        delays: Optional[List[int]] = None,
+        pre_aspirate_from_target: Optional[float] = None,
+        none_keys: List[str] = [],
+    ) -> TransferLiquidReturn:
+        """96 孔整板转移路由：选定 96 通道轴 → 板位坐标同步 → 走抽象层整板 96 头 API。
+
+        与非 96 路径共用 ``_sync_pipetting_positions`` 做板位坐标回写；不做 8 通道扁平化 /
+        逐列展开。轴信息通过 ``backend._active_axis`` 传给 backend 的 ``*96`` 方法。
+        """
+        axis96 = self._select_96well_axis()
+        # 写入 backend 选定轴（"Left"/"Right"），供 backend *96 方法下发整板指令时判轴。
+        self._unilabos_backend._active_axis = "Left" if axis96 == "left" else "Right"
+        # tip 高度：按所选 96 轴量程对应枪头长度（与非 96 路径 pip_setting 分支一致）。
+        self.tip_height = float(
+            (getattr(self, "_tip_height_by_axis", None) or {}).get(axis96, 0.0) or 0.0
+        )
+        # 整板同样需要板位坐标：首次创建 matrix 后回写 source / target / tip_rack 的坐标。
+        if not skip_pipetting_position_recalc:
+            self._sync_pipetting_positions(sources, targets, tip_rack)
+        try:
+            res = await super().transfer_liquid(
+                sources,
+                targets,
+                tip_racks,
+                use_channels=use_channels,
+                asp_vols=asp_vols,
+                dis_vols=dis_vols,
+                asp_flow_rates=asp_flow_rates,
+                dis_flow_rates=dis_flow_rates,
+                offsets=offsets,
+                touch_tip=touch_tip,
+                liquid_height=liquid_height,
+                blow_out_air_volume=blow_out_air_volume,
+                blow_out_air_volume_before=None,
+                spread=spread,
+                is_96_well=True,
+                mix_stage=mix_stage,
+                mix_times=mix_times,
+                mix_vol=mix_vol,
+                mix_rate=mix_rate,
+                mix_liquid_height=mix_liquid_height,
+                delays=delays,
+                pre_aspirate_from_target=pre_aspirate_from_target,
+                none_keys=none_keys,
+            )
+            if self.step_mode:
+                await self.run_protocol()
+            return res
+        except Exception:
+            # 中途失败：清理残留 tip + 清 head 软件状态，下次 transfer 无需重启 edge。
+            await self._cleanup_after_failed_transfer()
+            raise
+        finally:
             self._touch_tip_pending = False
 
     async def custom_delay(self, seconds=0, msg=None):
@@ -3580,6 +3725,16 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             await self.run_protocol()
         return step
 
+    async def reset(self) -> bool:
+        """复位设备（各轴回初始位置），阻塞等待复位完成。
+
+        供注册表 / 前后端调用；真正实现委托给 backend。debug / simulator 模式下
+        不触碰硬件，直接返回 True。
+        """
+        if self._unilabos_backend.debug or self._simulator:
+            return True
+        return await self._unilabos_backend.reset()
+
 
 class PRCXI9300Backend(LiquidHandlerBackend):
     """PRCXI 9300 的后端实现，继承自 LiquidHandlerBackend。
@@ -3620,7 +3775,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         matrix_id="",
         is_9320=False,
         pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
-        protocol_version: Literal["legacy", "v04"] = "v04",
+        protocol_version: Literal["v03", "v04"] = "v04",
         reset_status_inverted: Optional[bool] = None,
         reset_timeout: float = 120.0,
         wait_finish_timeout_s: Optional[float] = None,
@@ -3899,17 +4054,17 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         self._ensure_run_ready()
         if self.protocol_version == "v04":
             return self._run_protocol_v04(protocol_id)
-        return self._run_protocol_legacy(protocol_id)
+        return self._run_protocol_v03(protocol_id)
 
     async def run_protocol_async(self, protocol_id: str = None):
         """异步执行方案，避免在协程里阻塞式 sleep。"""
         self._ensure_run_ready()
         if self.protocol_version == "v04":
             return await self._run_protocol_v04_async(protocol_id)
-        return await self._run_protocol_legacy_async(protocol_id)
+        return await self._run_protocol_v03_async(protocol_id)
 
-    def _run_protocol_legacy(self, protocol_id: str = None):
-        """legacy：AddSolution(steps) → LoadSolution(guid) → Start → wait_for_finish（保持原行为）。"""
+    def _run_protocol_v03(self, protocol_id: str = None):
+        """v03：AddSolution(steps) → LoadSolution(guid) → Start → wait_for_finish（保持原行为）。"""
         run_time = time.time()
         if protocol_id == "" or protocol_id is None:
             solution_id = self.api_client.add_solution(
@@ -3923,7 +4078,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         if not self.api_client.start():
             return False
         if not self.api_client.wait_for_finish(timeout_s=self.wait_finish_timeout_s):
-            self._log_wait_for_finish_failure("legacy 执行未成功完成")
+            self._log_wait_for_finish_failure("v03 执行未成功完成")
             return False
         return True
 
@@ -3962,8 +4117,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             return False
         return True
 
-    async def _run_protocol_legacy_async(self, protocol_id: str = None):
-        """legacy 异步执行：保留原链路，wait 阶段改为非阻塞轮询。"""
+    async def _run_protocol_v03_async(self, protocol_id: str = None):
+        """v03 异步执行：保留原链路，wait 阶段改为非阻塞轮询。"""
         run_time = time.time()
         if protocol_id == "" or protocol_id is None:
             solution_id = self.api_client.add_solution(
@@ -3980,7 +4135,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             sleep_coro=self._wait_sleep,
             timeout_s=self.wait_finish_timeout_s,
         ):
-            self._log_wait_for_finish_failure("legacy 异步执行未成功完成")
+            self._log_wait_for_finish_failure("v03 异步执行未成功完成")
             return False
         return True
 
@@ -4074,59 +4229,68 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         axis_ch = int(spec.get("channels", self.num_channels))
         return min(len(chans), axis_ch) if chans else axis_ch
 
+    async def reset(self) -> bool:
+        """复位设备（各轴回初始位置），阻塞等待复位完成。
+
+        封装「获取错误码 → 清错 → stop → reset → 轮询 GetResetStatus 等待复位完成」。
+        setup 与对外 reset action 共用此方法，便于统一维护。
+        """
+        # 先获取错误代码
+        error_code = self.api_client.get_error_code()
+        if error_code:
+            print(f"PRCXI9300 error code detected: {error_code}")
+
+        # 清除错误代码
+        self.api_client.clear_error_code()
+        print("PRCXI9300 error code cleared.")
+        self.api_client.stop()
+        # 执行重置
+        print("Starting PRCXI9300 reset...")
+        self.api_client.reset()
+
+        # 检查重置状态并等待完成：
+        # GetResetStatus = true 表示“正在复位”，复位完成后回到 false。
+        deadline = time.time() + self.reset_timeout
+        start_deadline = min(deadline, time.time() + min(5.0, max(1.0, self.reset_timeout * 0.1)))
+        seen_resetting = False
+        self._is_reset_ok = False
+
+        while True:
+            in_reset = self.api_client.get_reset_status()
+            if in_reset:
+                seen_resetting = True
+                print("Waiting for PRCXI9300 to reset...")
+            elif seen_resetting:
+                # 已观察到“复位中”且现在退出复位，判定复位完成。
+                self._is_reset_ok = True
+                break
+            elif time.time() >= start_deadline:
+                # 避免某些固件“瞬时复位/不上报复位中”导致一直等待启动状态。
+                print("GetResetStatus 未观测到复位中状态，按复位已完成处理。")
+                self._is_reset_ok = True
+                break
+
+            if time.time() >= deadline:
+                raise RuntimeError(
+                    f"PRCXI9300 复位等待超时（{self.reset_timeout}s）。"
+                    "请检查设备复位状态；若 GetResetStatus 语义与预期相反"
+                    "（预期: true=复位中），"
+                    "可在初始化时设置 reset_status_inverted 覆盖（protocol_version="
+                    f"{self.protocol_version}）。"
+                )
+
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                await self._ros_node.sleep(1)
+            else:
+                await asyncio.sleep(1)
+        print("PRCXI9300 reset successfully.")
+        return True
+
     async def setup(self):
         await super().setup()
         try:
             if self._execute_setup:
-                # 先获取错误代码
-                error_code = self.api_client.get_error_code()
-                if error_code:
-                    print(f"PRCXI9300 error code detected: {error_code}")
-
-                # 清除错误代码
-                self.api_client.clear_error_code()
-                print("PRCXI9300 error code cleared.")
-                self.api_client.stop()
-                # 执行重置
-                print("Starting PRCXI9300 reset...")
-                self.api_client.reset()
-
-                # 检查重置状态并等待完成：
-                # GetResetStatus = true 表示“正在复位”，复位完成后回到 false。
-                deadline = time.time() + self.reset_timeout
-                start_deadline = min(deadline, time.time() + min(5.0, max(1.0, self.reset_timeout * 0.1)))
-                seen_resetting = False
-                self._is_reset_ok = False
-
-                while True:
-                    in_reset = self.api_client.get_reset_status()
-                    if in_reset:
-                        seen_resetting = True
-                        print("Waiting for PRCXI9300 to reset...")
-                    elif seen_resetting:
-                        # 已观察到“复位中”且现在退出复位，判定复位完成。
-                        self._is_reset_ok = True
-                        break
-                    elif time.time() >= start_deadline:
-                        # 避免某些固件“瞬时复位/不上报复位中”导致一直等待启动状态。
-                        print("GetResetStatus 未观测到复位中状态，按复位已完成处理。")
-                        self._is_reset_ok = True
-                        break
-
-                    if time.time() >= deadline:
-                        raise RuntimeError(
-                            f"PRCXI9300 复位等待超时（{self.reset_timeout}s）。"
-                            "请检查设备复位状态；若 GetResetStatus 语义与预期相反"
-                            "（预期: true=复位中），"
-                            "可在初始化时设置 reset_status_inverted 覆盖（protocol_version="
-                            f"{self.protocol_version}）。"
-                        )
-
-                    if hasattr(self, "_ros_node") and self._ros_node is not None:
-                        await self._ros_node.sleep(1)
-                    else:
-                        await asyncio.sleep(1)
-                print("PRCXI9300 reset successfully.")
+                await self.reset()
 
                 # self.api_client.update_clamp_jaw_position(self.matrix_id, self.claw_positions)
 
@@ -4472,17 +4636,97 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         # follow_axis
         return LIQUID_METHOD_WALL_RIGHT if str(axis).strip().lower() == "right" else LIQUID_METHOD_WALL_LEFT
 
+    def _whole_plate_step_kwargs(
+        self,
+        plate_no: int,
+        *,
+        dosage: float = 0,
+        balance_height: int = 0,
+        axis: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """96 整板指令的公共入参：``is_whole_plate=True`` + 整板孔位占位。
+
+        整板模式下机器忽略逐孔字段：``hole_row/hole_col`` 置 1、``plate_or_hole=f"T{plate_no}"``、
+        ``hole_numbers`` 留空。轴取入参 ``axis`` 或已由 handler 选定的 ``self._active_axis``。
+        """
+        return dict(
+            axis=axis or (self._active_axis or "Left"),
+            dosage=dosage,
+            plate_no=plate_no,
+            is_whole_plate=True,
+            hole_row=1,
+            hole_col=1,
+            blending_times=0,
+            balance_height=balance_height,
+            plate_or_hole=f"T{plate_no}",
+            hole_numbers="",
+        )
+
     async def pick_up_tips96(self, pickup: PickupTipRack):
-        raise NotImplementedError("The PRCXI backend does not support the 96 head.")
+        """整板取枪头：按选定轴（``_active_axis``）下发 ``is_whole_plate=True`` 的 Load。"""
+        rack = pickup.resource
+        PlateNo = self._deck_plate_slot_no(rack, getattr(rack, "parent", None))
+        step = self.api_client.Load(**self._whole_plate_step_kwargs(PlateNo))
+        self.steps_todo_list.append(step)
 
     async def drop_tips96(self, drop: DropTipRack):
-        raise NotImplementedError("The PRCXI backend does not support the 96 head.")
+        """整板丢枪头：trash / tip_rack 皆按 ``is_whole_plate=True`` 下发 UnLoad。"""
+        res = drop.resource
+        PlateNo = self._deck_plate_slot_no(res, getattr(res, "parent", None))
+        step = self.api_client.UnLoad(**self._whole_plate_step_kwargs(PlateNo))
+        self.steps_todo_list.append(step)
 
     async def aspirate96(self, aspiration: Union[MultiHeadAspirationPlate, MultiHeadAspirationContainer]):
-        raise NotImplementedError("The Opentrons backend does not support the 96 head.")
+        """整板吸液：按选定轴下发 ``is_whole_plate=True`` 的 Imbibing。"""
+        if isinstance(aspiration, MultiHeadAspirationPlate):
+            plate = aspiration.wells[0].parent
+        else:
+            plate = aspiration.container
+        PlateNo = self._deck_plate_slot_no(plate, getattr(plate, "parent", None))
+        axis = self._axis_from_channels(None, volume=getattr(aspiration, "volume", None))
+        raw_liquid_height = getattr(aspiration, "liquid_height", None)
+        safe_liquid_height = 0.0 if raw_liquid_height is None else float(raw_liquid_height)
+        assist_fun1 = ""
+        blow = getattr(aspiration, "blow_out_air_volume", None)
+        if blow is not None:
+            assist_fun1 = f"反向吸液({float(min(max(blow, 0), 10))}ul)"
+        step = self.api_client.Imbibing(
+            **self._whole_plate_step_kwargs(
+                PlateNo,
+                dosage=float(aspiration.volume),
+                balance_height=int(min(max(safe_liquid_height, 0), 10)),
+                axis=axis,
+            ),
+            assist_fun1=assist_fun1,
+        )
+        self.steps_todo_list.append(step)
 
     async def dispense96(self, dispense: Union[MultiHeadDispensePlate, MultiHeadDispenseContainer]):
-        raise NotImplementedError("The Opentrons backend does not support the 96 head.")
+        """整板放液：按选定轴下发 ``is_whole_plate=True`` 的 Tapping（含 touch_tip 靠壁）。"""
+        if isinstance(dispense, MultiHeadDispensePlate):
+            plate = dispense.wells[0].parent
+        else:
+            plate = dispense.container
+        PlateNo = self._deck_plate_slot_no(plate, getattr(plate, "parent", None))
+        axis = self._axis_from_channels(None, volume=getattr(dispense, "volume", None))
+        raw_liquid_height = getattr(dispense, "liquid_height", None)
+        safe_liquid_height = 0.0 if raw_liquid_height is None else float(raw_liquid_height)
+        blow = getattr(dispense, "blow_out_air_volume", None)
+        if blow is not None:
+            assist_fun1 = f"吹样({float(min(max(blow, 5), 10))}ul)"
+        else:
+            assist_fun1 = f"吹样({5.0}ul)"
+        step = self.api_client.Tapping(
+            **self._whole_plate_step_kwargs(
+                PlateNo,
+                dosage=float(dispense.volume),
+                balance_height=int(min(max(safe_liquid_height, 0), 10)),
+                axis=axis,
+            ),
+            assist_fun1=assist_fun1,
+            liquid_method=self._resolve_dispense_liquid_method(axis),
+        )
+        self.steps_todo_list.append(step)
 
     async def move_picked_up_resource(self, move: ResourceMove):
         pass
@@ -4499,11 +4743,11 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
 
 class PRCXI9300Api:
-    """PRCXI 移液站 RPC 客户端，支持 legacy（旧版）与 v04（新版）双协议。
+    """PRCXI 移液站 RPC 客户端，支持 v03（旧版，历史名 legacy）与 v04（新版）双协议。
 
     协议由构造参数 ``protocol_version`` 统一切换（唯一入口）：
-    - ``"legacy"``：旧版协议（``AddSolution``、无 ``_V04`` 后缀的 IMatrix、
-      ``AddWorkTabletMatrix``/``AddWorkTabletMatrix2``、``LoadSolution`` 传 GUID）。
+    - ``"v03"``（历史名 ``"legacy"``，仍兼容传入）：旧版协议（``AddSolution``、无 ``_V04``
+      后缀的 IMatrix、``AddWorkTabletMatrix``/``AddWorkTabletMatrix2``、``LoadSolution`` 传 GUID）。
     - ``"v04"``：新版协议（IMatrix 全部 ``_V04``、v7 方案走 ``AddSolution_V04`` 并由服务端
       生成 XML，``LoadSolution`` 传方案名，新增 ``IClientSession.IsConnect`` /
       ``GetStartStatus`` / ``RemoveSolution`` 等）。
@@ -4520,7 +4764,7 @@ class PRCXI9300Api:
         axis="Left",
         debug: bool = False,
         is_9320: bool = False,
-        protocol_version: Literal["legacy", "v04"] = "v04",
+        protocol_version: Literal["v03", "v04"] = "v04",
         reset_status_inverted: Optional[bool] = None,
     ) -> None:
         self.host, self.port, self.timeout = host, port, timeout
@@ -4538,8 +4782,11 @@ class PRCXI9300Api:
     @staticmethod
     def _normalize_protocol_version(value: Optional[str]) -> str:
         v = str(value or "v04").strip().lower()
-        if v not in {"legacy", "v04"}:
-            raise ValueError(f"不支持的 protocol_version: {value!r}（仅 'legacy' / 'v04'）")
+        # 统一口径为 v03 / v04（便于记忆）；兼容历史命名 legacy / 03 / v3 → v03。
+        if v in {"legacy", "03", "v3"}:
+            v = "v03"
+        if v not in {"v03", "v04"}:
+            raise ValueError(f"不支持的 protocol_version: {value!r}（仅 'v03' / 'v04'，兼容旧名 'legacy'）")
         return v
 
     @property
@@ -4547,7 +4794,7 @@ class PRCXI9300Api:
         return self.protocol_version == "v04"
 
     def _matrix_method(self, base: str) -> str:
-        """IMatrix 方法名：v04 加 ``_V04`` 后缀，legacy 用原名。"""
+        """IMatrix 方法名：v04 加 ``_V04`` 后缀，v03 用原名。"""
         return f"{base}_V04" if self.is_v04 else base
 
     @staticmethod
@@ -4671,18 +4918,18 @@ class PRCXI9300Api:
 
         ⚠ 入参语义随协议不同：
         - ``v04``：方案名 ``PlanName``（《调用文档》5.3 确认）。
-        - ``legacy``：方案 GUID（``solution_id``）。
+        - ``v03``：方案 GUID（``solution_id``）。
 
         RPC 方法名两者一致（``LoadSolution``），差异仅在业务语义。
         """
         return self.call("ISolution", "LoadSolution", [plan_or_solution])
 
     def remove_solution(self, plan_name: str) -> bool:
-        """RemoveSolution（按方案名删除；V04 新增，legacy 服务端可能未实现）。"""
+        """RemoveSolution（按方案名删除；V04 新增，v03 服务端可能未实现）。"""
         return self.call("ISolution", "RemoveSolution", [plan_name])
 
     def add_solution(self, name: str, matrix_id: str, steps: List[Dict[str, Any]]) -> str:
-        """AddSolution → 返回新方案 GUID（仅 legacy）。
+        """AddSolution → 返回新方案 GUID（仅 v03）。
 
         V04 v7 正式建方案请用 ``add_solution_v04`` / ``ISolution.AddSolution_V04``。
         """
@@ -4695,7 +4942,7 @@ class PRCXI9300Api:
     def add_solution_v04(self, name: str, board_id: str, steps: Sequence[Dict[str, Any]]) -> Any:
         """AddSolution_V04 → 服务端生成方案 XML 并返回方案名/结果（仅 V04 v7）。"""
         if not self.is_v04:
-            raise PRCXIError("AddSolution_V04 仅 V04 协议可用；legacy 请使用 add_solution。")
+            raise PRCXIError("AddSolution_V04 仅 V04 协议可用；v03 请使用 add_solution。")
         plan_name = str(name or "").strip()
         if not plan_name:
             raise PRCXIError("AddSolution_V04 方案名不能为空。")
@@ -4711,7 +4958,7 @@ class PRCXI9300Api:
     def is_connect(self) -> bool:
         """IClientSession.IsConnect —— V04 判定“已连接”的唯一依据。
 
-        legacy 服务端未必实现该接口，debug 下返回 True。
+        v03 服务端未必实现该接口，debug 下返回 True。
         """
         return self._as_bool(self.call("IClientSession", "IsConnect"))
 
@@ -4736,7 +4983,7 @@ class PRCXI9300Api:
         """把 GetStepStateList 的 ``State`` 归一化为 0/1/2（未知返回 -1）。
 
         兼容两种编码：
-        - legacy：数值 ``0=未执行 / 1=执行中 / 2=已完成``；
+        - v03：数值 ``0=未执行 / 1=执行中 / 2=已完成``；
         - v04：可能返回枚举名字符串 ``"None"/"NotStarted"/"Running"/"Completed"``
           （见 ``prcxi_socket_client_v04.StepState.describe``），也可能是数字串。
         """
@@ -4781,14 +5028,14 @@ class PRCXI9300Api:
     def wait_for_finish(self, timeout_s: Optional[float] = None) -> bool:
         """等待方案执行完成。
 
-        - ``legacy``：沿用 ``IMachineState.GetStepStateList`` 三态判断。
+        - ``v03``：沿用 ``IMachineState.GetStepStateList`` 三态判断。
         - ``v04``：改用 ``IAutomation.GetStartStatus`` 轮询（运行中=true，结束=false）。
         - ``timeout_s`` 默认 None：不设总超时；仅显式传入正数时才可能超时返回 False。
         """
         self._wait_timeout_last = False
         if self.is_v04:
             return self._wait_for_finish_v04(timeout_s=timeout_s)
-        return self._wait_for_finish_legacy(timeout_s=timeout_s)
+        return self._wait_for_finish_v03(timeout_s=timeout_s)
 
     async def wait_for_finish_async(
         self,
@@ -4800,9 +5047,9 @@ class PRCXI9300Api:
         self._wait_timeout_last = False
         if self.is_v04:
             return await self._wait_for_finish_v04_async(sleep_coro=sleep_coro, timeout_s=timeout_s)
-        return await self._wait_for_finish_legacy_async(sleep_coro=sleep_coro, timeout_s=timeout_s)
+        return await self._wait_for_finish_v03_async(sleep_coro=sleep_coro, timeout_s=timeout_s)
 
-    def _wait_for_finish_legacy(self, timeout_s: Optional[float] = None) -> bool:
+    def _wait_for_finish_v03(self, timeout_s: Optional[float] = None) -> bool:
         timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
         deadline = (time.time() + timeout_s) if timeout_s is not None else None
         success = False
@@ -4828,7 +5075,7 @@ class PRCXI9300Api:
                 time.sleep(1)
         return success
 
-    async def _wait_for_finish_legacy_async(
+    async def _wait_for_finish_v03_async(
         self,
         *,
         sleep_coro: Optional[Callable[[float], Awaitable[None]]] = None,
@@ -5073,13 +5320,13 @@ class PRCXI9300Api:
     def update_position(self, board: Any):
         """UpdatePosition_V04（V04：整块 Board 更新，替代旧版夹爪/移液两个更新接口）。"""
         if not self.is_v04:
-            raise PRCXIError("update_position 仅 v04 可用；legacy 请用 update_clamp_jaw_position / update_pipetting_position。")
+            raise PRCXIError("update_position 仅 v04 可用；v03 请用 update_clamp_jaw_position / update_pipetting_position。")
         return self.call("IMatrix", "UpdatePosition_V04", [to_rpc_value(board)])
 
     def update_clamp_jaw_position(self, target_matrix_id: str, claw_positions: List[Dict[str, Any]]):
         """更新夹爪板位位置。
 
-        - legacy：``UpdateClampJawPosition``（老版本 MatrixInfo 结构）。
+        - v03：``UpdateClampJawPosition``（老版本 MatrixInfo 结构）。
         - v04：无独立夹爪更新接口，改为拉取当前 Board、把老位置字段映射合并进
           ``gripperPos`` 后调 ``UpdatePosition_V04``（字段映射见《修改计划》决策点 B，
           需真机核对）。拉不到 Board 时记录告警并跳过，不阻断主流程。
@@ -5092,7 +5339,7 @@ class PRCXI9300Api:
     def update_pipetting_position(self, target_matrix_id: str, pipetting_positions: List[Dict[str, Any]]):
         """更新移液位置。
 
-        - legacy：``UpdatePipettingPosition``。
+        - v03：``UpdatePipettingPosition``。
         - v04：合并进 Board 的 ``PipettingPosList`` 后调 ``UpdatePosition_V04``。
         """
         if not self.is_v04:
@@ -5129,7 +5376,7 @@ class PRCXI9300Api:
     def add_WorkTablet_Matrix(self, matrix: MatrixInfo):
         """新增布局。
 
-        - legacy：``AddWorkTabletMatrix``（9300）/ ``AddWorkTabletMatrix2``（9320），传老版本 MatrixInfo。
+        - v03：``AddWorkTabletMatrix``（9300）/ ``AddWorkTabletMatrix2``（9320），传老版本 MatrixInfo。
         - v04：把 MatrixInfo 映射为 V04 ``Board`` 后调 ``AddWorkTabletMatrix_V04``
           （字段映射见《修改计划》决策点 B）。
         """
@@ -5143,7 +5390,7 @@ class PRCXI9300Api:
     def add_board_v04(self, board: "Board"):
         """v04：直接下发已构建好的 ``Board``（用于 prc_sites 自定义布局的真实下发）。"""
         if not self.is_v04:
-            raise PRCXIError("add_board_v04 仅 v04 可用；legacy 请用 add_WorkTablet_Matrix。")
+            raise PRCXIError("add_board_v04 仅 v04 可用；v03 请用 add_WorkTablet_Matrix。")
         return self.call("IMatrix", "AddWorkTabletMatrix_V04", [board.to_rpc_dict()])
 
     def Load(

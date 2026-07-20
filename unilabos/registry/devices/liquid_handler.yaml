@@ -9663,6 +9663,30 @@ liquid_handler.prcxi:
           title: set_liquid_from_plate参数
           type: object
         type: UniLabJsonCommand
+      reset:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        result:
+          success: success
+        schema:
+          description: 复位设备（各轴回初始位置）
+          properties:
+            feedback:
+              additionalProperties: true
+              type: object
+            goal:
+              additionalProperties: false
+              properties: {}
+              type: object
+            result:
+              properties:
+                success:
+                  type: boolean
+              type: object
+          type: object
+        type: UniLabJsonCommandAsync
       set_tiprack:
         feedback: {}
         goal:
