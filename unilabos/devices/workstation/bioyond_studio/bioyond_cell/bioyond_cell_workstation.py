@@ -128,9 +128,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # ========== 配液/分液进度统计（2026-07-15 追加）==========
         # 由 _submit_and_wait_orders 提交批次时重置，由 process_step_finish_report 累加。
         # 全部限定在本批 orderCode 集合内，避免跨批次/其他订单串入。
+        # 另存 orderCode→orderId：真机/仿真机 orderCode 可能撞号，step 带 orderId 时双字段过滤。
         self._progress_lock = threading.Lock()
         # 本批订单编号集合，以及每单预期分液瓶数（扣电?1:0 + 软包?1:0 + 电导?bottleCount:0）
         self._batch_order_codes: set = set()
+        self._batch_order_ids: Dict[str, str] = {}  # orderCode → orderId（建单返回）
         self._batch_order_dispense: Dict[str, int] = {}
         # 配液（按订单）：分母 N、已收到「开始混匀」的订单、已计完成（混匀→三轴取）的订单
         self._formulation_total: int = 0
@@ -141,6 +143,37 @@ class BioyondCellWorkstation(BioyondWorkstation):
         self._dispense_done: set = set()
 
         logger.info(f"✅ BioyondCellWorkstation 初始化完成 (debug_mode={self.debug_mode})")
+        logger.info(
+            "提示：真机与仿真机 orderCode 可能撞号；finish/进度以 orderCode+orderId 双字段判定。"
+            "真机作业时请勿让仿真机 LIMS 推送到同一 HTTP 回调。"
+        )
+
+    # 奔曜全 0 GUID：电导建单偶发占位，此时无法用 orderId 强校验
+    _EMPTY_ORDER_ID = "00000000-0000-0000-0000-000000000000"
+
+    @staticmethod
+    def _normalize_order_id(order_id: Optional[str]) -> str:
+        return (order_id or "").strip()
+
+    def _is_usable_order_id(self, order_id: Optional[str]) -> bool:
+        oid = self._normalize_order_id(order_id)
+        return bool(oid) and oid != self._EMPTY_ORDER_ID
+
+    def _report_matches_expected(
+        self,
+        order_code: str,
+        expected_order_id: Optional[str],
+        report: Optional[Dict[str, Any]],
+    ) -> bool:
+        """finish 接受条件：orderCode 必须一致；expected_order_id 可用时 orderId 也必须一致。"""
+        if not report:
+            return False
+        if (report.get("orderCode") or "") != order_code:
+            return False
+        exp = self._normalize_order_id(expected_order_id)
+        if not self._is_usable_order_id(exp):
+            return True
+        return self._normalize_order_id(report.get("orderId")) == exp
 
     # 三类分液的 step 名 → 对应订单字段（分液完成信号）
     _DISPENSE_STEP_NAMES = ("电导分液", "扣电分液", "软包分液")
@@ -165,6 +198,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 return 0.0
 
         batch_codes: set = set()
+        batch_ids: Dict[str, str] = {}
         dispense_map: Dict[str, int] = {}
         for idx, item in enumerate(data_list):
             code = item.get("orderCode")
@@ -179,10 +213,14 @@ class BioyondCellWorkstation(BioyondWorkstation):
             pouch = 1 if _num(cfg.get("pouchCellInfo")) > 0 else 0
             cond = int(_num(cfg.get("conductivityBottleCount"))) if _num(cfg.get("conductivityInfo")) > 0 else 0
             batch_codes.add(code)
+            oid = self._normalize_order_id(item.get("orderId"))
+            if self._is_usable_order_id(oid):
+                batch_ids[code] = oid
             dispense_map[code] = coin + pouch + cond
 
         with self._progress_lock:
             self._batch_order_codes = batch_codes
+            self._batch_order_ids = batch_ids
             self._batch_order_dispense = dispense_map
             self._formulation_total = len(order_codes)
             self._formulation_mixed = set()
@@ -192,7 +230,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         logger.info(
             f"[进度统计] 重置：配液分母={len(order_codes)} 单，分液分母={sum(dispense_map.values())} 瓶，"
-            f"本批订单={sorted(batch_codes)}"
+            f"本批订单={sorted(batch_codes)}, 已登记orderId={len(batch_ids)}"
         )
 
     @property
@@ -269,30 +307,42 @@ class BioyondCellWorkstation(BioyondWorkstation):
         stepId = data.get("stepId")
         stepName = data.get("stepName")
         orderCode = data.get("orderCode")
+        orderId = self._normalize_order_id(data.get("orderId"))
         logger.info(f"步骤完成: stepId: {stepId}, stepName:{stepName}")
 
-        # 仅统计本批订单，避免跨批次/其他订单串入
+        # 仅统计本批订单；有 orderId 时与建单双字段校验，挡真机/仿真撞号
         try:
             if orderCode and orderCode in self._batch_order_codes:
-                with self._progress_lock:
-                    if stepName == "开始混匀":
-                        self._formulation_mixed.add(orderCode)
-                    elif stepName == "三轴取":
-                        # 混匀完成信号：同一订单先「开始混匀」再「三轴取」
-                        if orderCode in self._formulation_mixed and orderCode not in self._formulation_completed:
-                            self._formulation_completed.add(orderCode)
-                            logger.info(
-                                f"[进度统计] 配液完成 {len(self._formulation_completed)}/{self._formulation_total} "
-                                f"({self.data_formulation_completion_percentage}%) orderCode={orderCode}"
-                            )
-                    elif stepName in self._DISPENSE_STEP_NAMES:
-                        key = (orderCode, stepId)
-                        if key not in self._dispense_done:
-                            self._dispense_done.add(key)
-                            logger.info(
-                                f"[进度统计] 分液完成 {self.data_dispense_completed_bottles}/{self._dispense_total} "
-                                f"({self.data_dispense_completion_percentage}%) orderCode={orderCode} step={stepName}"
-                            )
+                expected_oid = self._batch_order_ids.get(orderCode)
+                if (
+                    self._is_usable_order_id(expected_oid)
+                    and self._is_usable_order_id(orderId)
+                    and orderId != expected_oid
+                ):
+                    logger.warning(
+                        f"[进度统计] 忽略异 orderId 步骤: orderCode={orderCode}, "
+                        f"期望={expected_oid[:8]}..., 报文={orderId[:8]}..., step={stepName}"
+                    )
+                else:
+                    with self._progress_lock:
+                        if stepName == "开始混匀":
+                            self._formulation_mixed.add(orderCode)
+                        elif stepName == "三轴取":
+                            # 混匀完成信号：同一订单先「开始混匀」再「三轴取」
+                            if orderCode in self._formulation_mixed and orderCode not in self._formulation_completed:
+                                self._formulation_completed.add(orderCode)
+                                logger.info(
+                                    f"[进度统计] 配液完成 {len(self._formulation_completed)}/{self._formulation_total} "
+                                    f"({self.data_formulation_completion_percentage}%) orderCode={orderCode}"
+                                )
+                        elif stepName in self._DISPENSE_STEP_NAMES:
+                            key = (orderCode, stepId)
+                            if key not in self._dispense_done:
+                                self._dispense_done.add(key)
+                                logger.info(
+                                    f"[进度统计] 分液完成 {self.data_dispense_completed_bottles}/{self._dispense_total} "
+                                    f"({self.data_dispense_completion_percentage}%) orderCode={orderCode} step={stepName}"
+                                )
         except Exception as e:
             logger.warning(f"[进度统计] 更新失败（不影响报送处理）: {e}")
 
@@ -304,22 +354,24 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
     def process_order_finish_report(self, report_request, used_materials=None):
         order_code = report_request.data.get("orderCode")
+        order_id = report_request.data.get("orderId")
         status = report_request.data.get("status")
         
         # 🔍 详细调试日志
         logger.info(f"[DEBUG] ========== 收到 order_finish 报送 ==========")
         logger.info(f"[DEBUG] 报送的 orderCode: '{order_code}' (type: {type(order_code).__name__})")
+        logger.info(f"[DEBUG] 报送的 orderId: '{order_id}'")
         logger.info(f"[DEBUG] 当前等待的 last_order_code: '{self.last_order_code}' (type: {type(self.last_order_code).__name__})")
         logger.info(f"[DEBUG] 报送状态: {status}")
         logger.info(f"[DEBUG] orderCode 是否匹配: {self.last_order_code == order_code}")
         logger.info(f"[DEBUG] Event 当前状态 (触发前): is_set={self.order_finish_event.is_set()}")
         logger.info(f"report_request: {report_request}")
-        logger.info(f"任务完成: {order_code}, status={status}")
+        logger.info(f"任务完成: {order_code}, orderId={order_id}, status={status}")
 
         # 保存完整报文
         self.last_order_report = report_request.data
         
-        # 如果是当前等待的订单，触发事件
+        # 如果是当前等待的订单，触发事件（最终是否接受由 wait 侧 orderCode+orderId 双校验决定）
         if self.last_order_code == order_code:
             logger.info(f"[DEBUG] ✅ orderCode 匹配！触发 order_finish_event")
             self.order_finish_event.set()
@@ -334,6 +386,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # ========== finish 旁路缓存（配液 + 电导分库，互不 pop）==========
         # 配液 wait_for_order_finish 读 _order_finish_*；
         # 电导 _wait_conductivity_finish 读 _cond_finish_*。
+        # 注意：真机/仿真机 orderCode 可能撞号，wait 侧会再用 orderId 过滤。
         if order_code:
             with self._order_finish_lock:
                 self._order_finish_reports[order_code] = report_request.data
@@ -347,11 +400,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         return {"status": "received"}
 
-    def _classify_finish_report(self, order_code: str, report: Dict[str, Any]) -> Dict[str, Any]:
+    def _classify_finish_report(
+        self,
+        order_code: str,
+        report: Dict[str, Any],
+        expected_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         把 LIMS finish 报文按 status 字段映射为 wait 函数的统一返回格式。
         - 30 → success，-11 → abnormal_stop，-12 → manual_stop，其他 → unknown_<status>
-        - 报文 orderCode 与等待 orderCode 不一致时返回 mismatch（理论上新机制下不应再出现）
+        - 报文 orderCode 必须与等待 orderCode 一致；expected_order_id 可用时 orderId 也必须一致
         """
         if not report:
             logger.warning(f"[wait_for_order_finish] 报文为空: orderCode={order_code}")
@@ -367,8 +425,19 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
             return {"status": "mismatch", "report": report}
 
+        if not self._report_matches_expected(order_code, expected_order_id, report):
+            logger.error(
+                f"[wait_for_order_finish] 报文 orderId 与期望不一致（疑似真机/仿真撞号）: "
+                f"orderCode={order_code}, 期望={expected_order_id}, "
+                f"报文={report.get('orderId')}, orderName={report.get('orderName')}"
+            )
+            return {"status": "mismatch", "report": report}
+
         if status_raw == "30":
-            logger.info(f"[wait_for_order_finish] ✓ 任务成功 (orderCode={order_code})")
+            logger.info(
+                f"[wait_for_order_finish] ✓ 任务成功 "
+                f"(orderCode={order_code}, orderId={report.get('orderId')})"
+            )
             return {"status": "success", "report": report}
         elif status_raw == "-11":
             logger.error(f"[wait_for_order_finish] ✗ 任务异常停止 (orderCode={order_code})")
@@ -382,19 +451,22 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
             return {"status": f"unknown_{status_raw}", "report": report}
 
-    def wait_for_order_finish(self, order_code: str, timeout: int = 36000) -> Dict[str, Any]:
+    def wait_for_order_finish(
+        self,
+        order_code: str,
+        timeout: int = 36000,
+        expected_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         等待指定 orderCode 的 /report/order_finish 报送。
 
-        2026-07-15：改为复用 `_order_finish_reports` / `_order_finish_events` 并发安全缓存
-        （与 `_wait_conductivity_finish` 同一套机制），支持：
-        - 报文先于 wait 到达时直接命中缓存返回（乱序/迟到）
-        - 隔夜暂停后迟到的 finish 报文可被正确消费
-        同时仍维护 `last_order_code` / `order_finish_event`，兼容旧调试日志与轮询路径。
+        接受条件：orderCode 匹配，且（若 expected_order_id 可用）orderId 也匹配。
+        同 orderCode、异 orderId 的报文视为真机/仿真撞号，拒绝并继续等待，直到超时或命中正确单。
 
         Args:
             order_code: 任务编号
             timeout: 超时时间（秒）
+            expected_order_id: 建单返回的 orderId；可用时与 finish 双字段校验
         Returns:
             完整的报送数据 + 状态判断结果
         """
@@ -407,49 +479,73 @@ class BioyondCellWorkstation(BioyondWorkstation):
         self.last_order_report = None
         self.order_finish_event.clear()
 
-        # 注册 per-order Event + 检查是否已有缓存报文（推送先到 / 乱序场景）
-        with self._order_finish_lock:
-            cached = self._order_finish_reports.get(order_code)
-            if cached is not None:
-                logger.info(
-                    f"[配液wait] 报文已缓存，立即返回: orderCode={order_code}"
-                )
-                self._order_finish_reports.pop(order_code, None)
-                self.last_order_report = cached
-                return self._classify_finish_report(order_code, cached)
+        deadline = time.monotonic() + max(float(timeout), 0.0)
+        exp_oid = self._normalize_order_id(expected_order_id)
 
+        with self._order_finish_lock:
             ev = self._order_finish_events.get(order_code)
             if ev is None:
                 ev = threading.Event()
                 self._order_finish_events[order_code] = ev
+            else:
+                ev.clear()
 
-        logger.info(f"等待任务完成报送: orderCode={order_code} (timeout={timeout}s)")
+        logger.info(
+            f"等待任务完成报送: orderCode={order_code}, "
+            f"expected_orderId={exp_oid or '<未校验>'} (timeout={timeout}s)"
+        )
 
-        triggered = ev.wait(timeout=timeout)
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.error(f"等待任务超时: orderCode={order_code}")
+                    return {"status": "timeout", "orderCode": order_code}
 
-        with self._order_finish_lock:
-            self._order_finish_events.pop(order_code, None)
-            report = self._order_finish_reports.pop(order_code, None)
+                with self._order_finish_lock:
+                    report = self._order_finish_reports.pop(order_code, None)
 
-        if not triggered and report is None:
-            # 超时后再查一次缓存：报文可能刚好在 wait 返回与取锁之间到达
+                if report is None:
+                    triggered = ev.wait(timeout=remaining)
+                    with self._order_finish_lock:
+                        report = self._order_finish_reports.pop(order_code, None)
+                    if report is None:
+                        if not triggered:
+                            # 超时后再捞一次：报文可能刚好在 wait 返回与取锁之间到达
+                            with self._order_finish_lock:
+                                report = self._order_finish_reports.pop(order_code, None)
+                            if report is None:
+                                logger.error(f"等待任务超时: orderCode={order_code}")
+                                return {"status": "timeout", "orderCode": order_code}
+                        else:
+                            # Event 触发但缓存已被其他路径取走，继续等
+                            continue
+                    ev.clear()
+
+                if not self._report_matches_expected(order_code, exp_oid, report):
+                    logger.error(
+                        f"[配液wait] 拒绝异源/撞号 finish，继续等待: orderCode={order_code}, "
+                        f"期望orderId={exp_oid or '<未校验>'}, "
+                        f"报文orderId={report.get('orderId')}, "
+                        f"orderName={report.get('orderName')}"
+                    )
+                    continue
+
+                self.last_order_report = report
+                return self._classify_finish_report(order_code, report, expected_order_id=exp_oid)
+        finally:
             with self._order_finish_lock:
-                report = self._order_finish_reports.pop(order_code, None)
-            if report is None:
-                logger.error(f"等待任务超时: orderCode={order_code}")
-                return {"status": "timeout", "orderCode": order_code}
-            logger.info(
-                f"[配液wait] 超时后命中迟到缓存报文: orderCode={order_code}"
-            )
-        elif not triggered and report is not None:
-            logger.info(
-                f"[配液wait] 超时窗口内命中缓存报文: orderCode={order_code}"
-            )
+                cur = self._order_finish_events.get(order_code)
+                if cur is ev:
+                    self._order_finish_events.pop(order_code, None)
 
-        self.last_order_report = report or {}
-        return self._classify_finish_report(order_code, report or {})
-
-    def wait_for_order_finish_polling(self, order_code: str, timeout: int = 36000, poll_interval: float = 0.5) -> Dict[str, Any]:
+    def wait_for_order_finish_polling(
+        self,
+        order_code: str,
+        timeout: int = 36000,
+        poll_interval: float = 0.5,
+        expected_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         等待指定 orderCode 的 /report/order_finish 报送（非阻塞轮询版本）。
         
@@ -457,11 +553,13 @@ class BioyondCellWorkstation(BioyondWorkstation):
         - 使用轮询而非阻塞等待，每隔 poll_interval 秒检查一次
         - 允许 ROS2 在等待期间处理 feedback 消息
         - 适用于长时间运行的 ROS2 Action
+        - 同样要求 orderCode +（可用时）orderId 双字段匹配
         
         Args:
             order_code: 任务编号
             timeout: 超时时间（秒）
             poll_interval: 轮询间隔（秒），默认 0.5 秒
+            expected_order_id: 建单 orderId，可用时双字段校验
         Returns:
             完整的报送数据 + 状态判断结果
         """
@@ -472,124 +570,138 @@ class BioyondCellWorkstation(BioyondWorkstation):
         self.last_order_code = order_code
         self.last_order_report = None
         self.order_finish_event.clear()
+        exp_oid = self._normalize_order_id(expected_order_id)
 
-        logger.info(f"[轮询模式] 等待任务完成报送: orderCode={order_code} (timeout={timeout}s, poll_interval={poll_interval}s)")
-        logger.info(f"[轮询模式] [DEBUG] last_order_code 已设置为: '{self.last_order_code}'")
-        logger.info(f"[轮询模式] [DEBUG] Event 初始状态: is_set={self.order_finish_event.is_set()}")
+        logger.info(
+            f"[轮询模式] 等待任务完成报送: orderCode={order_code}, "
+            f"expected_orderId={exp_oid or '<未校验>'} "
+            f"(timeout={timeout}s, poll_interval={poll_interval}s)"
+        )
 
         start_time = time.time()
         poll_count = 0
-        while not self.order_finish_event.is_set():
+        while True:
             poll_count += 1
             elapsed = time.time() - start_time
-            
-            # 每 10 次轮询（约 5 秒）输出一次状态
-            if poll_count % 10 == 0:
-                logger.info(f"[轮询模式] [DEBUG] 轮询中... 已等待 {elapsed:.1f}s (第{poll_count}次检查)")
-                logger.info(f"[轮询模式] [DEBUG] Event.is_set() = {self.order_finish_event.is_set()}")
-            
-            # 检查是否超时
             if elapsed > timeout:
                 logger.error(f"[轮询模式] 等待任务超时: orderCode={order_code}")
-                logger.error(f"[轮询模式] [DEBUG] 总共轮询了 {poll_count} 次，耗时 {elapsed:.1f}s")
                 return {"status": "timeout", "orderCode": order_code}
-            
-            # 短暂 sleep，让出控制权给 ROS2 处理 feedback
+
+            report = None
+            with self._order_finish_lock:
+                report = self._order_finish_reports.pop(order_code, None)
+
+            if report is None and self.order_finish_event.is_set():
+                report = self.last_order_report
+                self.order_finish_event.clear()
+
+            if report is not None:
+                if not self._report_matches_expected(order_code, exp_oid, report):
+                    logger.error(
+                        f"[轮询模式] 拒绝异源/撞号 finish，继续等待: orderCode={order_code}, "
+                        f"期望orderId={exp_oid or '<未校验>'}, "
+                        f"报文orderId={report.get('orderId')}, "
+                        f"orderName={report.get('orderName')}"
+                    )
+                    self.last_order_report = None
+                    time.sleep(poll_interval)
+                    continue
+                self.last_order_report = report
+                return self._classify_finish_report(order_code, report, expected_order_id=exp_oid)
+
+            if poll_count % 10 == 0:
+                logger.info(f"[轮询模式] [DEBUG] 轮询中... 已等待 {elapsed:.1f}s (第{poll_count}次检查)")
             time.sleep(poll_interval)
 
-        # 事件已触发，获取报送数据
-        logger.info(f"[轮询模式] [DEBUG] ✅ Event 已触发！共轮询 {poll_count} 次")
-        report = self.last_order_report or {}
-        report_code = report.get("orderCode")
-        status = str(report.get("status", ""))
-        
-        logger.info(f"[轮询模式] [DEBUG] 报送数据: orderCode='{report_code}', status={status}")
-
-        # 报送数据匹配验证
-        if report_code != order_code:
-            logger.warning(f"[轮询模式] 收到的报送 orderCode 不匹配: {report_code} ≠ {order_code}")
-            return {"status": "mismatch", "report": report}
-
-        # 状态判断
-        if status == "30":
-            logger.info(f"[轮询模式] 任务成功完成 (orderCode={order_code})")
-            return {"status": "success", "report": report}
-        elif status == "-11":
-            logger.error(f"[轮询模式] 任务异常停止 (orderCode={order_code})")
-            return {"status": "abnormal_stop", "report": report}
-        elif status == "-12":
-            logger.warning(f"[轮询模式] 任务人工停止 (orderCode={order_code})")
-            return {"status": "manual_stop", "report": report}
-        else:
-            logger.warning(f"[轮询模式] 任务未知状态 ({status}) (orderCode={order_code})")
-            return {"status": f"unknown_{status}", "report": report}
-
-    def _wait_conductivity_finish(self, order_code: str, timeout: int = 36000) -> Dict[str, Any]:
+    def _wait_conductivity_finish(
+        self,
+        order_code: str,
+        timeout: int = 36000,
+        expected_order_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         电导专用：等待指定 orderCode 的 /report/order_finish 报送（并发安全）。
 
         与 wait_for_order_finish（配液用）的关键区别：
         - 使用独立的 _cond_finish_events / _cond_finish_reports，不与配液共享缓存
         - 推送先于 wait 调用时报文已缓存，wait 进来可直接命中
-        - 命中缓存时要求 orderId 非空且非全 0 GUID，否则丢弃并转入阻塞等待
+        - expected_order_id 可用时与 finish 双字段校验；不可用时要求报文 orderId 非空非全 0
         - 配液的 last_order_code / order_finish_event / _order_finish_* 完全不动
 
         Args:
             order_code: LIMS 电导单号 (BSO...)
             timeout: 超时时间（秒）
+            expected_order_id: 建单返回的 orderId（可能为全 0 占位）
         Returns:
             同 wait_for_order_finish 的返回格式
         """
-        EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
         if not order_code:
             logger.error("_wait_conductivity_finish() 被调用，但 order_code 为空！")
             return {"status": "error", "message": "empty order_code"}
 
-        # 注册等待 + 检查是否已有缓存报文（推送先到的场景）
-        with self._order_finish_lock:
-            cached = self._cond_finish_reports.get(order_code)
-            if cached is not None:
-                cached_oid = (cached.get("orderId") or "").strip()
-                if cached_oid and cached_oid != EMPTY_GUID:
-                    logger.info(
-                        f"[电导wait] 报文已缓存，立即返回: orderCode={order_code}"
-                    )
-                    self._cond_finish_reports.pop(order_code, None)
-                    return self._classify_finish_report(order_code, cached)
-                # orderId 无效：丢弃残留，转入阻塞等待真实推送
-                logger.warning(
-                    f"[电导wait] 缓存报文 orderId 无效({cached_oid!r})，"
-                    f"丢弃并等待真实推送: orderCode={order_code}"
-                )
-                self._cond_finish_reports.pop(order_code, None)
+        exp_oid = self._normalize_order_id(expected_order_id)
+        deadline = time.monotonic() + max(float(timeout), 0.0)
 
+        with self._order_finish_lock:
             ev = self._cond_finish_events.get(order_code)
             if ev is None:
                 ev = threading.Event()
                 self._cond_finish_events[order_code] = ev
+            else:
+                ev.clear()
 
         logger.info(
-            f"[电导wait] 等待电导单完成: orderCode={order_code} (timeout={timeout}s)"
+            f"[电导wait] 等待电导单完成: orderCode={order_code}, "
+            f"expected_orderId={exp_oid or '<未校验>'} (timeout={timeout}s)"
         )
 
-        triggered = ev.wait(timeout=timeout)
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.error(f"[电导wait] 等待电导单超时: orderCode={order_code}")
+                    return {"status": "timeout", "orderCode": order_code}
 
-        with self._order_finish_lock:
-            self._cond_finish_events.pop(order_code, None)
-            report = self._cond_finish_reports.pop(order_code, None)
+                with self._order_finish_lock:
+                    report = self._cond_finish_reports.pop(order_code, None)
 
-        if not triggered:
-            # 超时后再查一次：报文可能刚好在 wait 返回与取锁之间到达
+                if report is None:
+                    triggered = ev.wait(timeout=remaining)
+                    with self._order_finish_lock:
+                        report = self._cond_finish_reports.pop(order_code, None)
+                    if report is None:
+                        if not triggered:
+                            with self._order_finish_lock:
+                                report = self._cond_finish_reports.pop(order_code, None)
+                            if report is None:
+                                logger.error(f"[电导wait] 等待电导单超时: orderCode={order_code}")
+                                return {"status": "timeout", "orderCode": order_code}
+                        else:
+                            continue
+                    ev.clear()
+
+                cached_oid = self._normalize_order_id(report.get("orderId"))
+                if not self._is_usable_order_id(cached_oid):
+                    logger.warning(
+                        f"[电导wait] 报文 orderId 无效({cached_oid!r})，"
+                        f"丢弃并继续等待: orderCode={order_code}"
+                    )
+                    continue
+
+                if not self._report_matches_expected(order_code, exp_oid, report):
+                    logger.error(
+                        f"[电导wait] 拒绝异源/撞号 finish，继续等待: orderCode={order_code}, "
+                        f"期望orderId={exp_oid or '<未校验>'}, "
+                        f"报文orderId={cached_oid}, orderName={report.get('orderName')}"
+                    )
+                    continue
+
+                return self._classify_finish_report(order_code, report, expected_order_id=exp_oid)
+        finally:
             with self._order_finish_lock:
-                report = self._cond_finish_reports.pop(order_code, None)
-            if report is None:
-                logger.error(f"[电导wait] 等待电导单超时: orderCode={order_code}")
-                return {"status": "timeout", "orderCode": order_code}
-            logger.info(
-                f"[电导wait] 超时后命中迟到缓存报文: orderCode={order_code}"
-            )
-
-        return self._classify_finish_report(order_code, report or {})
+                cur = self._cond_finish_events.get(order_code)
+                if cur is ev:
+                    self._cond_finish_events.pop(order_code, None)
 
     def get_conductivity_order_result(self, order_id: str) -> Dict[str, Any]:
         """
@@ -771,7 +883,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
         for idx, (order_code, creation_oid) in enumerate(order_pairs, 1):
             logger.info(f"[{tag}] 等待第 {idx}/{total} 个电导单: {order_code}")
             wait_result = self._wait_conductivity_finish(
-                order_code, timeout=wait_timeout_seconds
+                order_code,
+                timeout=wait_timeout_seconds,
+                expected_order_id=creation_oid,
             )
             wait_status = wait_result.get("status", "other")
             if wait_status == "success":
@@ -806,10 +920,68 @@ class BioyondCellWorkstation(BioyondWorkstation):
             material_id: 物料 ID (GUID)
             
         Returns:
-            物料详情，包含 name, typeName, locations 等
+            物料详情，包含 name, typeName, locations 等；失败返回空 dict
         """
         result = self._post_lims("/api/lims/storage/material-info", material_id)
-        return result.get("data", {})
+        if result.get("error"):
+            logger.error(
+                f"[material-info] 请求失败: materialId={material_id}, error={result.get('error')}"
+            )
+            return {}
+        if result.get("code") != 1:
+            logger.error(
+                f"[material-info] 业务失败: materialId={material_id}, "
+                f"code={result.get('code')}, message={result.get('message')}"
+            )
+            return {}
+        data = result.get("data")
+        return data if isinstance(data, dict) else {}
+
+    def _enrich_report_materials_from_create(
+        self,
+        report: Optional[Dict[str, Any]],
+        create_entry: Optional[Dict[str, Any]],
+    ) -> None:
+        """用建单 usedMaterials 的 materialTypeName/materialName 补全 finish 报文（material-info 降级）。"""
+        if not report or not create_entry:
+            return
+        by_id = {
+            m.get("materialId"): m
+            for m in (create_entry.get("usedMaterials") or [])
+            if isinstance(m, dict) and m.get("materialId")
+        }
+        if not by_id:
+            return
+        for m in report.get("usedMaterials") or []:
+            if not isinstance(m, dict):
+                continue
+            src = by_id.get(m.get("materialId"))
+            if not src:
+                continue
+            if not m.get("materialTypeName") and src.get("materialTypeName"):
+                m["materialTypeName"] = src["materialTypeName"]
+            if not m.get("materialName") and src.get("materialName"):
+                m["materialName"] = src["materialName"]
+
+    def _resolve_material_type_info(self, material: Dict[str, Any], material_id: str) -> Dict[str, Any]:
+        """优先用报文自带类型名；否则查 material-info。失败返回空 dict。"""
+        type_name = (material.get("materialTypeName") or material.get("typeName") or "").strip()
+        bar_code = (material.get("barCode") or material.get("materialName") or "").strip()
+        if type_name:
+            return {
+                "typeName": type_name,
+                "barCode": bar_code,
+                "associateId": material.get("associateId") or "",
+                "locations": material.get("locations") or [],
+                "name": material.get("materialName") or material.get("name") or "",
+            }
+        try:
+            return self._query_material_info(material_id)
+        except Exception as e:
+            logger.warning(
+                f"[物料类型] material-info 失败且无本地类型: materialId={material_id}, 错误={e}"
+            )
+            return {}
 
     def _process_order_reagents(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """处理订单完成报文中的试剂数据，计算质量比
@@ -837,7 +1009,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "reagent_details": []
             }
         
-        # 2. 查询试剂名称
+        # 2. 查询试剂名称（material-info 失败时回退 materialName / Unknown）
         reagent_data = []
         for reagent in reagents:
             material_id = reagent.get("materialId")
@@ -846,7 +1018,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 
             try:
                 info = self.get_material_info(material_id)
-                name = info.get("name", f"Unknown_{material_id[:8]}")
+                name = (
+                    (info.get("name") if info else None)
+                    or reagent.get("materialName")
+                    or f"Unknown_{material_id[:8]}"
+                )
                 real_qty = float(reagent.get("realQuantity", 0.0))
                 used_qty = float(reagent.get("usedQuantity", 0.0))
                 
@@ -1143,12 +1319,14 @@ class BioyondCellWorkstation(BioyondWorkstation):
         if response is None:
             logger.error("上料 API 返回了空响应（None），服务端可能因入参问题返回了 null body，请检查物料条目是否合法。")
             return {"code": -1, "message": "API returned None response"}
-        order_code = (response.get("data") or {}).get("orderCode")
+        order_data = response.get("data") or {}
+        order_code = order_data.get("orderCode")
         if not order_code:
             logger.error(f"上料任务未返回有效 orderCode！完整响应：{response}")
             return response
-          # 等待完成报送
-        result = self.wait_for_order_finish(order_code)
+        result = self.wait_for_order_finish(
+            order_code, expected_order_id=order_data.get("orderId")
+        )
         print("\n" + "="*60)
         print("实验记录本结果auto_feeding4to3")
         print("="*60)
@@ -1260,18 +1438,35 @@ class BioyondCellWorkstation(BioyondWorkstation):
         except Exception as e:
             logger.warning(f"[{tag}] 重置进度统计失败（不影响下单）: {e}")
 
+        # orderCode → 建单条目（含 orderId / usedMaterials），供 wait 双字段校验与后处理降级
+        create_entry_by_code = {
+            item.get("orderCode"): item
+            for item in data_list
+            if isinstance(item, dict) and item.get("orderCode")
+        }
+
         # ========== 等待所有订单完成 ==========
         all_reports = []
         for idx, order_code in enumerate(order_codes, 1):
-            logger.info(f"[{tag}] 等待第 {idx}/{len(order_codes)} 个订单: {order_code}")
-            result = self.wait_for_order_finish(order_code)
+            create_entry = create_entry_by_code.get(order_code) or {}
+            expected_oid = self._normalize_order_id(create_entry.get("orderId"))
+            logger.info(
+                f"[{tag}] 等待第 {idx}/{len(order_codes)} 个订单: {order_code} "
+                f"(orderId={expected_oid or '<无>'})"
+            )
+            result = self.wait_for_order_finish(
+                order_code, expected_order_id=expected_oid or None
+            )
             if result.get("status") == "success":
-                all_reports.append(result.get("report", {}))
+                report = result.get("report", {})
+                self._enrich_report_materials_from_create(report, create_entry)
+                all_reports.append(report)
                 logger.info(f"[{tag}] ✓ 订单 {order_code} 完成")
             else:
                 logger.warning(f"订单 {order_code} 状态异常: {result.get('status')}")
                 all_reports.append({
                     "orderCode": order_code,
+                    "orderId": expected_oid,
                     "status": result.get("status"),
                     "error": result.get("message", "未知错误"),
                 })
@@ -1286,13 +1481,28 @@ class BioyondCellWorkstation(BioyondWorkstation):
             order_code = report.get("orderCode") or ""
             if not order_code:
                 continue
+            expected_oid = self._normalize_order_id(
+                (create_entry_by_code.get(order_code) or {}).get("orderId")
+            )
             with self._order_finish_lock:
                 cached = self._order_finish_reports.pop(order_code, None)
             if not cached:
                 continue
-            classified = self._classify_finish_report(order_code, cached)
+            if not self._report_matches_expected(order_code, expected_oid, cached):
+                logger.warning(
+                    f"[{tag}] timeout 兜底拒绝撞号报文: orderCode={order_code}, "
+                    f"期望orderId={expected_oid}, 报文orderId={cached.get('orderId')}"
+                )
+                continue
+            classified = self._classify_finish_report(
+                order_code, cached, expected_order_id=expected_oid or None
+            )
             if classified.get("status") == "success":
-                all_reports[i] = classified.get("report", cached)
+                recovered_report = classified.get("report", cached)
+                self._enrich_report_materials_from_create(
+                    recovered_report, create_entry_by_code.get(order_code)
+                )
+                all_reports[i] = recovered_report
                 recovered += 1
                 logger.info(
                     f"[{tag}] ✓ timeout 兜底恢复订单 {order_code}（命中迟到缓存报文）"
@@ -1309,11 +1519,6 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # 本地缓存里也没有迟到报文时（如隔夜暂停、进程重启导致推送彻底丢失），
         # 直接查 order-list 确认 LIMS 是否已完成；完成则用建单 usedMaterials 合成 report，
         # 让后续 prep/vial/plate 提取照常补全条码与类型。
-        create_entry_by_code = {
-            item.get("orderCode"): item
-            for item in data_list
-            if isinstance(item, dict) and item.get("orderCode")
-        }
         lims_recovered = 0
         for i, report in enumerate(all_reports):
             if "error" not in report:
@@ -2642,10 +2847,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
 
             try:
-                material_info = self._query_material_info(material_id)
+                material_info = self._resolve_material_type_info(material, material_id)
             except Exception as e:
                 logger.warning(
                     f"[提取分液瓶板] ⚠️ 查询物料详情失败: materialId={material_id}, 错误={e}"
+                )
+                continue
+
+            if not material_info:
+                logger.warning(
+                    f"[提取分液瓶板] ⚠️ 无法解析物料类型: materialId={material_id}"
                 )
                 continue
 
@@ -2771,10 +2982,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
 
             try:
-                material_info = self._query_material_info(material_id)
+                material_info = self._resolve_material_type_info(material, material_id)
             except Exception as e:
                 logger.warning(
                     f"[提取配液瓶] ⚠️ 查询物料详情失败: materialId={material_id}, 错误={e}"
+                )
+                continue
+
+            if not material_info:
+                logger.warning(
+                    f"[提取配液瓶] ⚠️ 无法解析物料类型: materialId={material_id}"
                 )
                 continue
 
@@ -2889,10 +3106,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
 
             try:
-                material_info = self._query_material_info(material_id)
+                material_info = self._resolve_material_type_info(material, material_id)
             except Exception as e:
                 logger.warning(
                     f"[提取分液瓶] ⚠️ 查询物料详情失败: materialId={material_id}, 错误={e}"
+                )
+                continue
+
+            if not material_info:
+                logger.warning(
+                    f"[提取分液瓶] ⚠️ 无法解析物料类型: materialId={material_id}"
                 )
                 continue
 
@@ -3475,6 +3698,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
         try:
             # 直接传递 material_id，_post_lims 会自动包装为 {apiKey, requestTime, data}
             response = self._post_lims("/api/lims/storage/material-info", material_id)
+
+            if response.get("error"):
+                error_msg = f"查询物料详情失败: {response.get('error')}"
+                logger.warning(f"[查询物料详情] ❌ {error_msg}")
+                raise ValueError(error_msg)
             
             logger.debug(f"[查询物料详情] API响应: code={response.get('code')}, message={response.get('message')}")
             
@@ -4535,12 +4763,14 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         response = self._post_lims("/api/lims/order/transfer-task3To2To1", payload)
         # 等待任务报送成功
-        order_code = response.get("data", {}).get("orderCode")
+        order_data = response.get("data") or {}
+        order_code = order_data.get("orderCode")
         if not order_code:
             logger.error("上料任务未返回有效 orderCode！")
             return response
-          # 等待完成报送
-        result = self.wait_for_order_finish(order_code)
+        result = self.wait_for_order_finish(
+            order_code, expected_order_id=order_data.get("orderId")
+        )
         return result
 
     def transfer_3_to_2(self,
@@ -4580,14 +4810,17 @@ class BioyondCellWorkstation(BioyondWorkstation):
         response = self._post_lims("/api/lims/order/transfer-task3To2", payload)
         
         # 等待任务报送成功
-        order_code = response.get("data", {}).get("orderCode")
+        order_data = response.get("data") or {}
+        order_code = order_data.get("orderCode") if isinstance(order_data, dict) else None
         if not order_code:
             logger.error("[transfer_3_to_2] 转运任务未返回有效 orderCode！")
             return response
         
         logger.info(f"[transfer_3_to_2] 转运任务已创建: {order_code}")
-        # 等待完成报送
-        result = self.wait_for_order_finish(order_code)
+        result = self.wait_for_order_finish(
+            order_code,
+            expected_order_id=order_data.get("orderId") if isinstance(order_data, dict) else None,
+        )
         logger.info(f"[transfer_3_to_2] 转运任务完成: {order_code}")
         return result
 
@@ -4616,9 +4849,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
             logger.error(f"[transfer_1_to_2] 转运任务未返回有效 orderCode！响应: {response}")
             return response
         
+        expected_oid = data_field.get("orderId") if isinstance(data_field, dict) else None
         logger.info(f"[transfer_1_to_2] 转运任务已创建: {order_code}")
-        # 等待完成报送
-        result = self.wait_for_order_finish(order_code)
+        result = self.wait_for_order_finish(order_code, expected_order_id=expected_oid)
         logger.info(f"[transfer_1_to_2] 转运任务完成: {order_code}")
         return result
    
@@ -4679,13 +4912,20 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         items = ((resp or {}).get("data") or {}).get("items") or []
         matched = None
+        expect_oid = self._normalize_order_id((create_entry or {}).get("orderId"))
         expect_name = (create_entry or {}).get("orderName")
-        if expect_name:
+        # 优先按 orderId 匹配，避免真机/仿真 orderCode 撞号时捞错单
+        if self._is_usable_order_id(expect_oid):
+            for it in items:
+                if self._normalize_order_id(it.get("id") or it.get("orderId")) == expect_oid:
+                    matched = it
+                    break
+        if matched is None and expect_name:
             for it in items:
                 if it.get("name") == expect_name:
                     matched = it
                     break
-        if matched is None and items:
+        if matched is None and items and not self._is_usable_order_id(expect_oid):
             matched = items[0]
         if matched is None:
             logger.warning(f"[timeout兜底] order-list 未返回订单: orderCode={order_code}")
