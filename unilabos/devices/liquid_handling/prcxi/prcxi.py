@@ -687,6 +687,10 @@ _AXIS_ENUM_INT = {"Left": 1, "Right": 2, "ClampingJaw": 3}
 # VolumeEnum(MaterialVolumeEnum) 不能为 null（服务端会报转换失败）；缺省用 1000（μL）。
 _DEFAULT_VOLUME_ENUM = 1000
 
+# trash 落枪头抬高量（mm）：trash 槽位注册移液坐标时把 Z 各分量减去此值（数值越小物理越高），
+# 避免落枪头时下探过深。抬高后统一 clamp 到 ≥ 0。
+_TRASH_Z_RAISE_MM = 100.0
+
 _logger = logging.getLogger(__name__)
 
 # vol(µL) → prcxi_labware tip 工厂名；长度取 tip.total_tip_length。
@@ -2053,7 +2057,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         calibration_labware_type: Optional[str] = "PRCXI_300ul_Tips",
         pip_setting: Optional[Dict[str, Dict[str, Any]]] = None,
         skip_position_recalc_when_matrix_exists: bool = True,
-        protocol_version: Literal["v03", "v04"] = "v04",
+        protocol_version: Literal["v03", "v04"] = "v03",
         reset_status_inverted: Optional[bool] = None,
         wait_finish_timeout_s: Optional[float] = None,
     ):
@@ -2174,6 +2178,10 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     )
         # 始终初始化 step_mode 属性
         self.step_mode = False
+        # step_mode 重入标志：复合动作（transfer_liquid 等）打开自己的 protocol 后置 True，
+        # 内部子原语（尤其 mix）据此跳过各自的 create_protocol/run_protocol，避免嵌套
+        # create_protocol 清空复合动作已累计的 pickup/aspirate/dispense 步骤。
+        self._step_protocol_open = False
         if step_mode:
             if is_9320:
                 self.step_mode = step_mode
@@ -2544,6 +2552,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 pip_bottom, pip_mouth, pip2_bottom, pip2_mouth = self._pipetting_z_from_base(
                     z_mouth, z_bottom
                 )
+
+                # trash 落枪头下探过深：整体抬高 _TRASH_Z_RAISE_MM（数值越小物理越高），
+                # 左右轴 bottom + mouth 四个分量同抬，clamp 到 ≥ 0（高度不能小于 0）。
+                if getattr(leaf, "category", "") == "trash" or getattr(child, "name", "") == "trash":
+                    pip_bottom = max(pip_bottom - _TRASH_Z_RAISE_MM, 0.0)
+                    pip_mouth = max(pip_mouth - _TRASH_Z_RAISE_MM, 0.0)
+                    pip2_bottom = max(pip2_bottom - _TRASH_Z_RAISE_MM, 0.0)
+                    pip2_mouth = max(pip2_mouth - _TRASH_Z_RAISE_MM, 0.0)
 
                 pipetting_positions.append({
                     "Number": number,
@@ -3097,6 +3113,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             raise ValueError(
                 "transfer_liquid requires at least one tip rack, but got empty tip_racks."
             )
+        # 本次 transfer 独占 protocol 生命周期：置位后内部 mix 不再各自建/跑协议，避免其
+        # create_protocol 清空本 transfer 已累计的取头/吸液/放液步骤（否则机器只执行 mix）。
+        # 置于两个提前退出（空 transfer / 空 tip_rack）之后，确保只有真正执行的 96 / 非 96
+        # 路径才置位，且它们各自的 finally 会复位，杜绝标志泄漏。
+        if self.step_mode:
+            self._step_protocol_open = True
         # 远端解析回来的 PLR 实例可能未挂到 self.deck，主动绑定一次，避免 backend 取 plate.parent==None
         self._attach_resources_to_deck_if_needed(list(sources) + list(targets) + list(tip_racks))
         if isinstance(tip_racks[0], TipRack):
@@ -3294,6 +3316,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             if _flatten_8_to_1:
                 self._tip_reuse_by_liquid_name = _prev_tip_reuse
             self._touch_tip_pending = False
+            self._step_protocol_open = False
 
     def _sync_pipetting_positions(self, sources, targets, tip_rack):
         """回写本次 transfer 涉及到的所有板位（source / target / tip_rack）的移液坐标。
@@ -3465,6 +3488,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             raise
         finally:
             self._touch_tip_pending = False
+            self._step_protocol_open = False
 
     async def custom_delay(self, seconds=0, msg=None):
         return await super().custom_delay(seconds, msg)
@@ -3507,12 +3531,15 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         use_channels: Optional[List[int]] = [0],
     ):
         use_channels = self._route_axis_and_channels(use_channels)
-        if self.step_mode:
+        # 仅当 mix 是顶层动作（无外层复合动作打开的 protocol）时，才自建/自跑协议。
+        # 若已被 transfer_liquid 等复合动作打开 protocol，则只 append，交由复合动作统一下发。
+        _own_protocol = self.step_mode and not getattr(self, "_step_protocol_open", False)
+        if _own_protocol:
             await self.create_protocol(f"mix{time.time()}")
         res = await self._unilabos_backend.mix(
             targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys, use_channels
         )
-        if self.step_mode:
+        if _own_protocol:
             await self.run_protocol()
         return res
 
@@ -3781,6 +3808,11 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         wait_finish_timeout_s: Optional[float] = None,
     ) -> None:
         super().__init__()
+        # 声明 96 头能力：PRCXI 通过“96 通道轴”整板移液（is_96_well=True）。
+        # PLR ``LiquidHandler.setup()`` 仅在 ``backend.head96_installed`` 为真时才构建 96 孔
+        # TipTracker（head96 字典）；否则 head96={}，调用 pick_up_tips96/aspirate96 会 KeyError:0。
+        # 未配置 96 轴时也无害：整板路由 ``_select_96well_axis`` 会在触达 PLR 前给出清晰报错。
+        self._head96_installed = True
         self.tablets_info = tablets_info
         self.matrix_id = matrix_id
         self.protocol_version = PRCXI9300Api._normalize_protocol_version(protocol_version)
@@ -5100,7 +5132,7 @@ class PRCXI9300Api:
                 success = True
             elif status[-1]["State"] > 2:
                 break
-            elif status[-1]["State"] == 0:
+            elif status[-1]["State"] == 0 and not start:
                 start = True
             else:
                 await self._wait_sleep_async(sleep_coro, 1.0)

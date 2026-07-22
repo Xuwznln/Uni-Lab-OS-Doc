@@ -2789,16 +2789,43 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         _do_mix_before = bool(mix_stage in ("before", "both") and _mix_times > 0 and _mix_vol)
         _do_mix_after = bool(mix_stage in ("after", "both") and _mix_times > 0 and _mix_vol)
 
+        # 整板吸/放液的体积追踪兜底：与非 96 路径一致，PLR 会对每个孔做 remove_liquid，
+        # 若源孔在 tracker 里未被 set_liquid 播种（记为 0），会抛 TooLittleLiquidError；
+        # 此时改用 no_volume_tracking() 重试（真机不依赖 tracker，追踪仅尽力而为）。
+        # aspirate/dispense 各自独立兜底：若 aspirate 走了 no_volume_tracking（tip 未记账），
+        # dispense 的 tip.remove_liquid 也会失败并同样 fallback，从而两端保持一致。
+        async def _asp96(plate: Plate, vol: float, **kw):
+            try:
+                await self.aspirate96(plate, vol, **kw)
+            except (TooLittleLiquidError, TooLittleVolumeError) as e:
+                if hasattr(self, "_ros_node") and self._ros_node is not None:
+                    self._ros_node.lab_logger().warning(
+                        f"[aspirate96] fallback no_volume_tracking. error={e}, vol={vol}"
+                    )
+                with no_volume_tracking():
+                    await self.aspirate96(plate, vol, **kw)
+
+        async def _disp96(plate: Plate, vol: float, **kw):
+            try:
+                await self.dispense96(plate, vol, **kw)
+            except (TooLittleLiquidError, TooLittleVolumeError) as e:
+                if hasattr(self, "_ros_node") and self._ros_node is not None:
+                    self._ros_node.lab_logger().warning(
+                        f"[dispense96] fallback no_volume_tracking. error={e}, vol={vol}"
+                    )
+                with no_volume_tracking():
+                    await self.dispense96(plate, vol, **kw)
+
         async def _mix_plate(plate: Plate):
             for _ in range(_mix_times):
-                await self.aspirate96(
+                await _asp96(
                     plate,
                     _mix_vol,
                     offset=_offset,
                     flow_rate=mix_rate,
                     liquid_height=mix_liquid_height,
                 )
-                await self.dispense96(
+                await _disp96(
                     plate,
                     _mix_vol,
                     offset=_offset,
@@ -2814,7 +2841,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             await _mix_plate(source_plate)
 
         # 3) 整板吸液
-        await self.aspirate96(
+        await _asp96(
             source_plate,
             asp_vol,
             offset=_offset,
@@ -2824,7 +2851,7 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
         )
 
         # 4) 整板放液
-        await self.dispense96(
+        await _disp96(
             target_plate,
             dis_vol,
             offset=_offset,
@@ -2854,10 +2881,87 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
                 break
         await self.drop_tips96(drop_target)
 
+        # 8) 同步孔板液体状态并上报 web：整板路径下 aspirate96/dispense96 不像单通道
+        #    dispense 那样回推 update_resource，且体积追踪被 no_volume_tracking 兜底关掉，
+        #    孔状态不会自动变化 → web 端看不到孔板更新。这里显式补齐（best-effort，不阻断主流程）。
+        try:
+            self._reflect_96well_transfer(source_plate, target_plate, dis_vol)
+        except Exception as _e:
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                self._ros_node.lab_logger().warning(f"[transfer96] 反映孔板状态/上报失败：{_e}")
+
         return TransferLiquidReturn(
             sources=ResourceTreeSet.from_plr_resources(list(sources), known_newly_created=False).dump(),  # type: ignore
             targets=ResourceTreeSet.from_plr_resources(list(targets), known_newly_created=False).dump(),  # type: ignore
         )
+
+    @staticmethod
+    def _plate_wells(plate) -> List[Well]:
+        """取 plate 的全部孔（get_all_items 优先，回退 children 过滤 Well）。"""
+        try:
+            items = list(plate.get_all_items())
+        except Exception:
+            items = list(getattr(plate, "children", []) or [])
+        return [w for w in items if isinstance(w, Well)]
+
+    def _push_resource_update(self, resources: Sequence[Resource]) -> None:
+        """把受影响资源（孔/板）主动上报 ROS/web；整板路径缺少单通道 dispense 的回推。"""
+        if not (hasattr(self, "_ros_node") and self._ros_node is not None):
+            return
+        uniq: List[Resource] = []
+        seen: Set[int] = set()
+        for r in resources:
+            if r is None:
+                continue
+            rid = id(r)
+            if rid in seen:
+                continue
+            seen.add(rid)
+            uniq.append(r)
+        if not uniq:
+            return
+        task = ROS2DeviceNode.run_async_func(
+            self._ros_node.update_resource, True, **{"resources": uniq}
+        )
+        submit_time = time.time()
+        while not task.done():
+            if time.time() - submit_time > 10:
+                self._ros_node.lab_logger().info(f"[transfer96] update_resource 超时 resources={uniq}")
+                break
+            time.sleep(0.01)
+
+    def _reflect_96well_transfer(self, source_plate, target_plate, volume: float) -> None:
+        """整板移液后同步孔液体状态并上报：源孔按量扣减、目标孔登记来源液体，供 web 显示。
+
+        用途仅为「让前端孔板视图反映整板结果」，非严格计量：源孔追踪为空时静默跳过扣减，
+        目标孔以 ``set_liquids`` 播种来源液体名 + 本次体积（与本文件既有 set_liquid 写法一致）。
+        """
+        src_wells = self._plate_wells(source_plate)
+        tgt_wells = self._plate_wells(target_plate)
+
+        # 解析源液体名：取首个有液体的源孔的顶层液体名。
+        liquid_name = ""
+        for w in src_wells:
+            liqs = getattr(getattr(w, "tracker", None), "liquids", None) or []
+            if liqs:
+                liquid_name = liqs[-1][0] or ""
+                break
+
+        # 源孔扣量（best-effort；追踪为空/不足则跳过，不阻断）。
+        for w in src_wells:
+            try:
+                w.tracker.remove_liquid(volume=volume)
+            except Exception:
+                pass
+
+        # 目标孔登记液体（供 web 显示 fill 结果）。
+        for w in tgt_wells:
+            try:
+                w.set_liquids([(liquid_name, float(volume))])  # type: ignore[arg-type]
+            except Exception:
+                pass
+
+        self._push_resource_update([source_plate, target_plate, *src_wells, *tgt_wells])
 
     async def _transfer_base_method(
         self,
