@@ -1062,6 +1062,7 @@ class NewareBatteryTestSystem:
             '811_SIGR': 'xml_811_SiGr',
             '811_CU_AGING': 'xml_811_Cu_aging',
             '811_LI_JY': 'xml_811_Li_JY',
+            '811_DATACORETEST': 'xml_811_datacoretest',
             'ZQXNLRMO': 'xml_ZQXNLRMO',
         }
         if key not in fmap:
