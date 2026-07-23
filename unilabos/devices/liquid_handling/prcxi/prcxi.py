@@ -689,7 +689,7 @@ _DEFAULT_VOLUME_ENUM = 1000
 
 # trash 落枪头抬高量（mm）：trash 槽位注册移液坐标时把 Z 各分量减去此值（数值越小物理越高），
 # 避免落枪头时下探过深。抬高后统一 clamp 到 ≥ 0。
-_TRASH_Z_RAISE_MM = 100.0
+_TRASH_Z_RAISE_MM = 60.0
 
 _logger = logging.getLogger(__name__)
 
@@ -2121,7 +2121,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self._row_nums = row_nums
         self._rail_width = rail_width
         self._rail_interval = rail_interval
-        self.deck_x = (start_rail + column_nums * 5 + (column_nums - 1) * rail_interval) * rail_width
+        # 这里区分两个物理量（历史上被塞进同一个 deck_x，导致绿框右侧多出 start_rail 死区宽度）：
+        # - _x_axis_span：机器 X 轴量程，含 start_rail 死区（真实行程），仅用于坐标变换与边界钳制。
+        # - deck_x：deck 物理 footprint，不含 start_rail 死区，用于可视绿框 + PLR/labware 仿真。
+        # 槽位 X 锚在 X_OFFSET（不含 start_rail），故 footprint 必须去掉死区才能与槽位对称。
+        self._x_axis_span = (start_rail + column_nums * 5 + (column_nums - 1) * rail_interval) * rail_width
+        self.deck_x = (column_nums * 5 + (column_nums - 1) * rail_interval) * rail_width
         self.deck_y = deck_y
         self.deck_z = deck_z
         self.x_increase = x_increase
@@ -2299,7 +2304,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 cy = loc.y + h / 2.0
             except Exception:
                 cx = cy = 0.0
-        prcxi_x = (self.deck_x - cx) * (1 + self.x_increase) + self.x_offset + self.xy_coupling * (self.deck_y - cy)
+        prcxi_x = (self._x_axis_span - cx) * (1 + self.x_increase) + self.x_offset + self.xy_coupling * (self.deck_y - cy)
         prcxi_y = (self.deck_y - cy) * (1 + self.y_increase) + self.y_offset
         return (prcxi_x, prcxi_y)
 
@@ -2602,7 +2607,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                 claw_y = slot_pos[1] - default_h / 2 + self.left_2_claw.y
                 claw_positions.append({
                     "Number": number,
-                    "XPos": min(max(0, claw_x), self.deck_x),
+                    "XPos": min(max(0, claw_x), self._x_axis_span),
                     "YPos": min(max(0, claw_y), self.deck_y),
                     "ZPos": max(min(claw_z, self.max_z_claw), 0),
                 })
@@ -2618,7 +2623,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
                     "Number": number,
                     "VolumeEnum": left_vol_enum,
                     "VolumeEnum2": right_vol_enum,
-                    "XPos": min(max(0, pip_x), self.deck_x),
+                    "XPos": min(max(0, pip_x), self._x_axis_span),
                     "YPos": min(max(0, pip_y), self.deck_y),
                     "ZPos": pip_bottom,
                     "bottleMouthPosition": pip_mouth,
@@ -2865,12 +2870,12 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             prcxi_x = slot_prcxi_x - resource.location.x - resource.get_size_x() / 2
             prcxi_y = slot_prcxi_y - resource.location.y - resource.get_size_y() / 2
         else:
-            prcxi_x = (self.deck_x - x)*(1+self.x_increase) + self.x_offset + self.xy_coupling * (self.deck_y - y)
+            prcxi_x = (self._x_axis_span - x)*(1+self.x_increase) + self.x_offset + self.xy_coupling * (self.deck_y - y)
             prcxi_y = (self.deck_y - y)*(1+self.y_increase) + self.y_offset
 
         prcxi_z = self.deck_z - z
 
-        prcxi_x = min(max(0, prcxi_x+resource_offset.x),self.deck_x)
+        prcxi_x = min(max(0, prcxi_x+resource_offset.x),self._x_axis_span)
         prcxi_y = min(max(0, prcxi_y+resource_offset.y),self.deck_y)
         prcxi_z = min(max(0, prcxi_z+resource_offset.z),self.deck_z)
 
@@ -3762,6 +3767,26 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             return True
         return await self._unilabos_backend.reset()
 
+    async def pause(self) -> bool:
+        """暂停当前方案执行。
+
+        供注册表 / 前后端调用；真正实现委托给 backend。debug / simulator 模式下
+        不触碰硬件，直接返回 True。
+        """
+        if self._unilabos_backend.debug or self._simulator:
+            return True
+        return await self._unilabos_backend.pause()
+
+    async def resume(self) -> bool:
+        """继续已暂停的方案执行。
+
+        供注册表 / 前后端调用；真正实现委托给 backend。debug / simulator 模式下
+        不触碰硬件，直接返回 True。
+        """
+        if self._unilabos_backend.debug or self._simulator:
+            return True
+        return await self._unilabos_backend.resume()
+
 
 class PRCXI9300Backend(LiquidHandlerBackend):
     """PRCXI 9300 的后端实现，继承自 LiquidHandlerBackend。
@@ -4335,6 +4360,14 @@ class PRCXI9300Backend(LiquidHandlerBackend):
     async def stop(self):
         self.api_client.stop()
 
+    async def pause(self) -> bool:
+        """暂停当前方案执行。"""
+        return bool(self.api_client.pause())
+
+    async def resume(self) -> bool:
+        """继续已暂停的方案执行。"""
+        return bool(self.api_client.resume())
+
     async def pick_up_tips(self, ops: List[Pickup], use_channels: List[int] = None):
         """Pick up tips from the specified resource."""
         axis = self._axis_from_channels(use_channels)
@@ -4798,6 +4831,8 @@ class PRCXI9300Api:
         is_9320: bool = False,
         protocol_version: Literal["v03", "v04"] = "v04",
         reset_status_inverted: Optional[bool] = None,
+        connect_retries: int = 10,
+        connect_retry_delay_s: float = 1.0,
     ) -> None:
         self.host, self.port, self.timeout = host, port, timeout
         self.debug = debug
@@ -4810,6 +4845,9 @@ class PRCXI9300Api:
             reset_status_inverted = False
         self.reset_status_inverted = bool(reset_status_inverted)
         self._wait_timeout_last = False
+        # RPC 短连接瞬断重试：总尝试次数（含首次）与首次退避秒数（线性封顶 5s）。
+        self.connect_retries = max(1, int(connect_retries))
+        self.connect_retry_delay_s = max(0.0, float(connect_retry_delay_s))
 
     @staticmethod
     def _normalize_protocol_version(value: Optional[str]) -> str:
@@ -4927,18 +4965,41 @@ class PRCXI9300Api:
         if self.debug:
             # 调试/仿真模式下直接返回可解析的模拟 JSON，避免后续 json.loads 报错
             return self._debug_response(payload)
-        with contextlib.closing(socket.socket()) as sock:
-            sock.settimeout(self.timeout)
-            sock.connect((self.host, self.port))
-            data = payload.encode()
-            sock.sendall(self._len_prefix(len(data)) + data)
 
-            # 帧读取：先读 8 字节大端长度头 → 精确读 N 字节正文（不依赖对端关闭连接，更稳）。
-            header = self._recv_exact(sock, 8)
-            payload_size = int.from_bytes(header, byteorder="big", signed=False)
-            if payload_size <= 0 or payload_size > 64 * 1024 * 1024:
-                raise PRCXIError(f"响应长度非法：{payload_size}")
-            return self._recv_exact(sock, payload_size).decode()
+        # 每次 RPC 新建短连接：网络抖动时整次请求重试（不中断上层 wait/transfer）。
+        # 半包（连接中断）可重试；非法长度属于协议异常，不重试。
+        last_exc: Optional[BaseException] = None
+        attempts = self.connect_retries
+        for attempt in range(1, attempts + 1):
+            try:
+                with contextlib.closing(socket.socket()) as sock:
+                    sock.settimeout(self.timeout)
+                    sock.connect((self.host, self.port))
+                    data = payload.encode()
+                    sock.sendall(self._len_prefix(len(data)) + data)
+
+                    # 帧读取：先读 8 字节大端长度头 → 精确读 N 字节正文（不依赖对端关闭连接，更稳）。
+                    header = self._recv_exact(sock, 8)
+                    payload_size = int.from_bytes(header, byteorder="big", signed=False)
+                    if payload_size <= 0 or payload_size > 64 * 1024 * 1024:
+                        raise PRCXIError(f"响应长度非法：{payload_size}")
+                    return self._recv_exact(sock, payload_size).decode()
+            except PRCXIError as e:
+                if "响应长度不完整" not in str(e):
+                    raise
+                last_exc = e
+            except (TimeoutError, ConnectionError, OSError) as e:
+                last_exc = e
+            if attempt >= attempts:
+                break
+            delay = min(self.connect_retry_delay_s * attempt, 5.0)
+            print(
+                f"[PRCXI] RPC 网络瞬断，第 {attempt}/{attempts} 次失败: {last_exc!r}；"
+                f"{delay:.1f}s 后重连…"
+            )
+            time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     # ---------------------------------------------------- 方案相关（ISolution）
     def list_solutions(self) -> List[Dict[str, Any]]:

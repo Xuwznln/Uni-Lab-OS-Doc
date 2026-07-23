@@ -9687,6 +9687,54 @@ liquid_handler.prcxi:
               type: object
           type: object
         type: UniLabJsonCommandAsync
+      pause:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        result:
+          success: success
+        schema:
+          description: 暂停当前方案执行
+          properties:
+            feedback:
+              additionalProperties: true
+              type: object
+            goal:
+              additionalProperties: false
+              properties: {}
+              type: object
+            result:
+              properties:
+                success:
+                  type: boolean
+              type: object
+          type: object
+        type: UniLabJsonCommandAsync
+      resume:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        result:
+          success: success
+        schema:
+          description: 继续已暂停的方案执行
+          properties:
+            feedback:
+              additionalProperties: true
+              type: object
+            goal:
+              additionalProperties: false
+              properties: {}
+              type: object
+            result:
+              properties:
+                success:
+                  type: boolean
+              type: object
+          type: object
+        type: UniLabJsonCommandAsync
       set_tiprack:
         feedback: {}
         goal:

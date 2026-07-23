@@ -110,6 +110,8 @@ transfer_liquid:
 - 如有问题，在 footer 中添加 [WARN: ...] 标记
 """
 
+import json
+import os
 import re
 import uuid
 import warnings
@@ -223,19 +225,116 @@ def _infer_reagent_kind(labware_id: str, item: Dict[str, Any]) -> str:
     )
 
 
-def _infer_tube_rack_num_positions(labware_id: str, item: Dict[str, Any]) -> int:
-    """从 ``24_tuberack`` 等命名中解析孔位数；解析不到则默认 24（与 PRCXI_EP_Adapter 4×6 一致）。"""
+# 源 Opentrons labware 定义孔数缓存：key=归一后的 labware 名，value=孔数(int) 或 None（查不到）。
+_SOURCE_HOLE_COUNT_CACHE: Dict[str, Optional[int]] = {}
+_OT_CUSTOM_DEFS_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _load_ot_custom_defs() -> Dict[str, Any]:
+    """加载本地 opentrons_custom_labware_defs.json（含 ordering/wells），失败返回空 dict。
+
+    与 :mod:`unilabos.resources.lab_resources` 用的是同一份定义文件；这里独立加载，
+    避免为了取孔数而 import lab_resources（后者会拉起 pylabrobot）。
+    """
+    global _OT_CUSTOM_DEFS_CACHE
+    if _OT_CUSTOM_DEFS_CACHE is None:
+        try:
+            path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                "resources",
+                "opentrons_custom_labware_defs.json",
+            )
+            with open(path, "r", encoding="utf-8") as f:
+                _OT_CUSTOM_DEFS_CACHE = json.load(f) or {}
+        except Exception:
+            _OT_CUSTOM_DEFS_CACHE = {}
+    return _OT_CUSTOM_DEFS_CACHE
+
+
+def _hole_count_from_ot_definition(defn: Any) -> Optional[int]:
+    """从一个 Opentrons labware 定义 dict 里取真实孔数：优先 wells，其次 ordering。"""
+    if not isinstance(defn, dict):
+        return None
+    wells = defn.get("wells")
+    if isinstance(wells, dict) and wells:
+        return len(wells)
+    ordering = defn.get("ordering")
+    if isinstance(ordering, list) and ordering:
+        try:
+            return sum(len(col) for col in ordering)
+        except TypeError:
+            return None
+    return None
+
+
+def _source_labware_hole_count(labware_name: str) -> Optional[int]:
+    """按源 Opentrons labware 名解析其真实物理孔数（权威真值）；解析不到返回 None。
+
+    数据源优先级：
+      1. ``opentrons_shared_data.labware.load_definition``（硬依赖，无需 pylabrobot）；
+      2. 本地 ``opentrons_custom_labware_defs.json``（非标准 labware 兜底）。
+    名字归一：先按原名（带点，如 ``1.5ml``）查；查不到再把 ``point`` 还原为 ``.`` 后重试，
+    兼容清洗过的 ``1point5ml`` 命名。所有失败一律吞掉并返回 None（最小环境 / 未知 labware
+    优雅回退到调用方的启发式），绝不因解析失败中断上传。
+    """
+    if not labware_name or not str(labware_name).strip():
+        return None
+    name = str(labware_name).strip()
+    if name in _SOURCE_HOLE_COUNT_CACHE:
+        return _SOURCE_HOLE_COUNT_CACHE[name]
+
+    # 候选名：原名 + point→. 还原名（去重、保序）
+    candidates = [name]
+    depointed = re.sub(r"(\d+)point(\d+)", r"\1.\2", name)
+    if depointed != name:
+        candidates.append(depointed)
+
+    result: Optional[int] = None
+
+    # 1) opentrons_shared_data 标准定义
+    try:
+        from opentrons_shared_data.labware import load_definition as _ot_load_definition
+
+        for cand in candidates:
+            try:
+                defn = _ot_load_definition(cand, 1)
+            except Exception:
+                continue
+            hc = _hole_count_from_ot_definition(defn)
+            if hc:
+                result = hc
+                break
+    except Exception:
+        result = result  # ImportError 等：跳过标准库路径
+
+    # 2) 本地 custom 定义兜底
+    if result is None:
+        custom = _load_ot_custom_defs()
+        if custom:
+            for cand in candidates:
+                hc = _hole_count_from_ot_definition(custom.get(cand))
+                if hc:
+                    result = hc
+                    break
+
+    _SOURCE_HOLE_COUNT_CACHE[name] = result
+    return result
+
+
+def _tube_rack_positions_from_name(labware_id: str, item: Dict[str, Any]) -> Optional[int]:
+    """从 ``24_tuberack`` 等命名中解析孔位数；**无显式数字时返回 None**（不臆造默认值）。"""
     hint = _labware_hint_text(labware_id, item)
-    m = re.search(r"(\d+)_tuberack", hint)
-    if m:
-        return int(m.group(1))
-    m = re.search(r"tuberack[_\s]*(\d+)", hint)
-    if m:
-        return int(m.group(1))
-    m = re.search(r"(\d+)\s*[-_]?\s*pos(?:ition)?s?", hint)
-    if m:
-        return int(m.group(1))
-    return 96
+    for pat in (r"(\d+)_tuberack", r"tuberack[_\s]*(\d+)", r"(\d+)\s*[-_]?\s*pos(?:ition)?s?"):
+        m = re.search(pat, hint)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _infer_tube_rack_num_positions(labware_id: str, item: Dict[str, Any]) -> int:
+    """从 ``24_tuberack`` 等命名中解析孔位数；解析不到则默认 96（历史兜底行为）。"""
+    n = _tube_rack_positions_from_name(labware_id, item)
+    return n if n is not None else 96
 
 
 def _infer_plate_num_children_from_wells(wells: Any) -> Optional[int]:
@@ -532,27 +631,44 @@ def _apply_target_labware_class_auto_match(
         well_n = len(wells) if isinstance(wells, list) else 0
         num_from_def = int(extra.get("num_wells") or extra.get("well_count") or item.get("num_wells") or 0)
 
+        # 权威信号：源 Opentrons labware 定义里的真实孔数（wells/ordering）。
+        # 优先于名字正则 / 已用孔数，避免 reagent-key 拆分把已用孔少计（如 4→2）导致选型偏小。
+        src_holes = _source_labware_hole_count(item.get("labware", ""))
+
         if kind == "trash":
             num_children = 0
         elif kind == "tip_rack":
             num_children = num_from_def if num_from_def > 0 else 96
         elif kind == "tube_rack":
-            if num_from_def > 0:
-                num_children = num_from_def
-            elif well_n > 0:
-                num_children = well_n
-                # 若已用 well 的行/列跨度超出 24 位适配器 (4 行 A-D × 6 列) 的几何，
-                # 按真实网格档位 (96=8×12 / 384) 取容量。否则 96/384 管架会被按"已用孔数"
-                # 误配到 4×6 适配器，行 E-H 或列 7-12 越界 → pylabrobot get_item 抛
-                # "'E1' is not in list"（孔位映射类失败的根因）。
-                _mr, _mc = _well_grid_span(wells)
-                if _mr > 4 or _mc > 6:
-                    num_children = 384 if (_mr > 8 or _mc > 12) else 96
+            if src_holes:
+                num_children = src_holes
             else:
-                num_children = _infer_tube_rack_num_positions(labware_id, item)
+                # 定义查不到（未知 / 自定义 labware）：取多信号最大值，宁大勿小，防「4→2」少计。
+                # 候选：定义表孔数、名字显式孔数、已用孔经行列跨度抬档。
+                _cands = []
+                if num_from_def > 0:
+                    _cands.append(num_from_def)
+                _name_n = _tube_rack_positions_from_name(labware_id, item)
+                if _name_n is not None:
+                    _cands.append(_name_n)
+                if well_n > 0:
+                    _used_n = well_n
+                    # 若已用 well 的行/列跨度超出 24 位适配器 (4 行 A-D × 6 列) 的几何，
+                    # 按真实网格档位 (96=8×12 / 384) 取容量。否则 96/384 管架会被按"已用孔数"
+                    # 误配到 4×6 适配器，行 E-H 或列 7-12 越界 → pylabrobot get_item 抛
+                    # "'E1' is not in list"（孔位映射类失败的根因）。
+                    _mr, _mc = _well_grid_span(wells)
+                    if _mr > 4 or _mc > 6:
+                        _used_n = 384 if (_mr > 8 or _mc > 12) else 96
+                    _cands.append(_used_n)
+                num_children = max(_cands) if _cands else _infer_tube_rack_num_positions(labware_id, item)
         else:
-            # plate：勿在无 labware_defs 时默认 96，否则 384 板会被错配成 96 模板
-            num_children = _infer_plate_num_children(labware_id, item, wells, num_from_def)
+            # plate：定义孔数优先；查不到再走名字→well→96 的既有启发式
+            # （勿在无 labware_defs 时默认 96，否则 384 板会被错配成 96 模板）。
+            if src_holes:
+                num_children = src_holes
+            else:
+                num_children = _infer_plate_num_children(labware_id, item, wells, num_from_def)
 
         child_max_volume = item.get("max_volume")
         if child_max_volume is None:

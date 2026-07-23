@@ -307,12 +307,26 @@ def convert_from_json(
 
     # 校验句柄配置
     if validate:
-        is_valid, errors = validate_workflow_handles(graph)
-        if not is_valid:
-            import warnings
+        # 句柄校验依赖 registry 中各设备动作的端口定义（action_value_mappings.handles）。
+        # wf / workflow_upload 走轻量 HTTP 客户端路径时从不调用 build_registry()，
+        # 此时 device_type_registry 为空表，校验只认硬加的 "ready" 端口，导致每条数据边
+        # 都误报「端口不存在，支持的端口: ['ready']」。这里按需构建一次（空表才建，幂等；
+        # 完整 unilab 启动已建表时自动跳过，避免触发 setup() 的重复调用告警）。
+        import warnings
 
-            for error in errors:
-                warnings.warn(f"句柄校验警告: {error}")
+        if not lab_registry.device_type_registry:
+            try:
+                from unilabos.registry.registry import build_registry
+
+                build_registry()
+            except Exception as exc:  # 构建失败降级为原行为，绝不让上传因建表异常而崩
+                warnings.warn(f"注册表构建失败，跳过句柄校验: {exc}")
+
+        if lab_registry.device_type_registry:
+            is_valid, errors = validate_workflow_handles(graph)
+            if not is_valid:
+                for error in errors:
+                    warnings.warn(f"句柄校验警告: {error}")
 
     return graph
 
