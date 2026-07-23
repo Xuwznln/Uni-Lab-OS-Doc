@@ -107,90 +107,112 @@ coincellassemblyworkstation_device:
               properties:
                 assembly_pressure:
                   default: 3200
-                  description: 电池压制力(N)
+                  title: 压制压力（N）
+                  description: 根据实验需求填写压制力
                   type: integer
                 assembly_type:
                   default: 7
+                  title: 组装类型
                   description: 组装类型 (7=不用铝箔垫, 8=使用铝箔垫)
                   type: integer
                 battery_clean_ignore:
                   default: false
-                  description: 是否忽略电池清洁
+                  title: 忽略电池擦拭
+                  description: false=使用，True=忽略
                   type: boolean
                 battery_pressure_mode:
                   default: true
-                  description: 是否启用压力模式
+                  title: 电池压制模式
+                  description: False=压力检测模式，True=距离模式
                   type: boolean
                 positive_plate_pick_mode:
                   default: false
-                  description: 正极片取料模式 (False=弹夹取料, True=水平取料)
+                  title: 正极片取料方式
+                  description: False=弹夹取料, True=水平取料
                   type: boolean
                 negative_plate_thickness_mode:
                   default: false
-                  description: 负极片厚度模式 (False=厚负极片, True=薄负极片)
+                  title: 负极片厚度测量模式
+                  description: False=厚负极片, True=薄负极片
                   type: boolean
                 thick_negative_plate_blow_time:
                   default: 0
+                  title: 厚负极片吹扫时间（s）
                   description: 厚负极片吹气时间
                   type: integer
                 thin_negative_plate_blow_time:
                   default: 0
+                  title: 薄负极片吹扫时间（s）
                   description: 薄负极片吹气时间
                   type: integer
                 dual_drop_first_volume:
                   default: 0
-                  description: 二次滴液第一次排液体积(μL)
+                  title: 二次滴液首次滴加体积（uL）
+                  description: 根据实验需求填写首次加液体积，保证充分浸润
                   type: integer
                 dual_drop_mode:
                   default: false
-                  description: 电解液添加模式 (False=单次滴液, True=二次滴液)
+                  title: 二次滴液模式
+                  description: False=单次滴液, True=二次滴液
                   type: boolean
                 dual_drop_start_timing:
                   default: false
-                  description: 二次滴液开始滴液时机 (False=正极片前, True=正极片后)
+                  title: 二次滴液开始滴液时机
+                  description: False=正极片前, True=正极片后
                   type: boolean
                 dual_drop_suction_timing:
                   default: false
-                  description: 二次滴液吸液时机 (False=正常吸液, True=先吸液)
+                  title: 二次滴液吸液时机
+                  description: False=正常吸液, True=先吸液
                   type: boolean
                 elec_num:
-                  description: 电解液瓶数
+                  title: 电解液瓶数
+                  description: 现场清点电解液瓶数进行填写
                   type: string
                 elec_use_num:
                   default: 5
+                  title: 每瓶电解液组装的电池颗数
                   description: 每瓶电解液组装电池数
                   type: string
                 elec_vol:
                   default: 50
-                  description: 电解液吸液量 (μL)
+                  title: 电解液体积（uL）
+                  description: 选择二次滴液则为两次滴液体积之和
                   type: integer
                 file_path:
                   default: D:\Uni-Lab-OS-Data\date
+                  title: 扣电组装实验报告文件路径
                   description: 实验记录保存路径
                   type: string
                 ne_plate_matrix:
                   default: 0
-                  description: 负极片矩阵点位
+                  title: 负极片矩阵点位
+                  description: 负极片盘为5*4方形盘，从0编号至19，0-7与12-19为摆放负极片位置，8-11（第3行）实际无法摆放负极片
                   type: integer
                 ne_plate_num:
                   default: 0
-                  description: 负极片盘数
+                  title: 负极片盘数
+                  description: 现场清点负极片盘数进行填写
                   type: integer
                 sep_plate_matrix:
                   default: 0
-                  description: 隔膜矩阵点位
+                  title: 隔膜矩阵点位
+                  description: 隔膜盘为5*4方形盘，从0编号至19，0-7与12-19为摆放隔膜位置，8-11（第3行）实际无法摆放隔膜
                   type: integer
                 sep_plate_num:
                   default: 0
-                  description: 隔膜盘数
+                  title: 隔膜盘数
+                  description: 现场清点隔膜盘数进行填写
                   type: integer
                 aluminum_foil:
                   default: true
+                  title: 铝箔
                   description: 是否使用铝箔垫片
                   type: boolean
                 tip_box_matrix:
                   default: 0
-                  description: 枪头盒矩阵点位
+                  title: 移液枪头盒矩阵点位
+                  description: 在1号箱界面-参数设定中查看
                   type: integer
               required:
               - elec_num
@@ -281,13 +303,8 @@ coincellassemblyworkstation_device:
               properties:
                 material_search_enable:
                   default: false
-                  description: '是否启用物料搜寻功能。
-
-                    设备初始化后会弹出物料搜寻确认弹窗，
-
-                    此参数控制自动点击''是''（启用）或''否''（不启用）。
-
-                    默认为False（不启用物料搜寻）。'
+                  title: 使用物料检索
+                  description: "是否启用物料搜寻功能。设备初始化后会弹出物料搜寻确认弹窗，此参数控制自动点击‘是'（启用）或‘否'（不启用）。默认为False（不启用物料搜寻）。"
                   type: boolean
               required: []
               type: object
@@ -532,89 +549,111 @@ coincellassemblyworkstation_device:
               properties:
                 assembly_pressure:
                   default: 4200
-                  description: 电池压制力 (N)
+                  title: 压制压力（N）
+                  description: 根据实验需求填写压制力
                   type: integer
                 assembly_type:
                   default: 7
+                  title: 组装类型
                   description: 组装类型 (7=不用铝箔垫, 8=使用铝箔垫)
                   type: integer
                 battery_clean_ignore:
                   default: false
-                  description: 是否忽略电池清洁
+                  title: 忽略电池擦拭
+                  description: false=使用，True=忽略
                   type: boolean
                 battery_pressure_mode:
                   default: true
-                  description: 是否启用压力模式
+                  title: 电池压制模式
+                  description: False=压力检测模式，True=距离模式
                   type: boolean
                 positive_plate_pick_mode:
                   default: false
-                  description: 正极片取料模式 (False=弹夹取料, True=水平取料)
+                  title: 正极片取料方式
+                  description: False=弹夹取料, True=水平取料
                   type: boolean
                 negative_plate_thickness_mode:
                   default: false
-                  description: 负极片厚度模式 (False=厚负极片, True=薄负极片)
+                  title: 负极片厚度测量模式
+                  description: False=厚负极片, True=薄负极片
                   type: boolean
                 thick_negative_plate_blow_time:
                   default: 0
+                  title: 厚负极片吹扫时间（s）
                   description: 厚负极片吹气时间
                   type: integer
                 thin_negative_plate_blow_time:
                   default: 0
+                  title: 薄负极片吹扫时间（s）
                   description: 薄负极片吹气时间
                   type: integer
                 dual_drop_first_volume:
                   default: 25
-                  description: 二次滴液第一次排液体积 (μL)
+                  title: 二次滴液首次滴加体积（uL）
+                  description: 根据实验需求填写首次加液体积，保证充分浸润
                   type: integer
                 dual_drop_mode:
                   default: false
-                  description: 电解液添加模式 (False=单次滴液, True=二次滴液)
+                  title: 二次滴液模式
+                  description: False=单次滴液, True=二次滴液
                   type: boolean
                 dual_drop_start_timing:
                   default: false
-                  description: 二次滴液开始滴液时机 (False=正极片前, True=正极片后)
+                  title: 二次滴液开始滴液时机
+                  description: False=正极片前, True=正极片后
                   type: boolean
                 dual_drop_suction_timing:
                   default: false
-                  description: 二次滴液吸液时机 (False=正常吸液, True=先吸液)
+                  title: 二次滴液吸液时机
+                  description: False=正常吸液, True=先吸液
                   type: boolean
                 elec_num:
-                  description: 电解液瓶数
+                  title: 电解液瓶数
+                  description: 现场清点电解液瓶数进行填写
                   type: string
                 elec_use_num:
-                  description: 每瓶电解液组装的电池数
+                  title: 每瓶电解液组装的电池颗数
+                  description: 每瓶电解液组装电池数
                   type: string
                 elec_vol:
                   default: 50
-                  description: 电解液吸液量 (μL)
+                  title: 电解液体积（uL）
+                  description: 选择二次滴液则为两次滴液体积之和
                   type: integer
                 file_path:
                   default: D:\Uni-Lab-OS-Data\date
+                  title: 扣电组装实验报告文件路径
                   description: 实验记录保存路径
                   type: string
                 ne_plate_matrix:
                   default: 0
-                  description: 负极片矩阵点位
+                  title: 负极片矩阵点位
+                  description: 负极片盘为5*4方形盘，从0编号至19，0-7与12-19为摆放负极片位置，8-11（第3行）实际无法摆放负极片
                   type: integer
                 ne_plate_num:
                   default: 0
-                  description: 负极片盘数
+                  title: 负极片盘数
+                  description: 现场清点负极片盘数进行填写
                   type: integer
                 sep_plate_matrix:
                   default: 0
-                  description: 隔膜矩阵点位
+                  title: 隔膜矩阵点位
+                  description: 隔膜盘为5*4方形盘，从0编号至19，0-7与12-19为摆放隔膜位置，8-11（第3行）实际无法摆放隔膜
                   type: integer
                 sep_plate_num:
                   default: 0
-                  description: 隔膜盘数
+                  title: 隔膜盘数
+                  description: 现场清点隔膜盘数进行填写
                   type: integer
                 aluminum_foil:
                   default: true
+                  title: 铝箔
                   description: 是否使用铝箔垫片
                   type: boolean
                 tip_box_matrix:
                   default: 0
-                  description: 枪头盒矩阵点位
+                  title: 移液枪头盒矩阵点位
+                  description: 在1号箱界面-参数设定中查看
                   type: integer
               required:
               - elec_num
