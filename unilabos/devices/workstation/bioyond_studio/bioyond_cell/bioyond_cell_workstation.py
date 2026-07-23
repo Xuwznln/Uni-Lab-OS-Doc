@@ -964,10 +964,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 m["materialName"] = src["materialName"]
 
     def _resolve_material_type_info(self, material: Dict[str, Any], material_id: str) -> Dict[str, Any]:
-        """优先用报文自带类型名；否则查 material-info。失败返回空 dict。"""
+        """解析物料类型与条码：typeName 可从报文快取，barCode 必须以真实条码为准。
+
+        finish 推送 / 建单 usedMaterials 通常无 barCode；真实条码只在 material-info。
+        禁止用 materialName（如占位名 999/888）冒充条码。
+        """
         type_name = (material.get("materialTypeName") or material.get("typeName") or "").strip()
-        bar_code = (material.get("barCode") or material.get("materialName") or "").strip()
-        if type_name:
+        bar_code = (material.get("barCode") or "").strip()  # 不再用 materialName 冒充条码
+        need_barcode = (not type_name) or ("瓶" in type_name)  # 仅瓶/板需要真实条码
+        if type_name and bar_code:
+            # 报文已含真实条码，直接用
             return {
                 "typeName": type_name,
                 "barCode": bar_code,
@@ -975,13 +981,30 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "locations": material.get("locations") or [],
                 "name": material.get("materialName") or material.get("name") or "",
             }
+        if not need_barcode and type_name:
+            # 消耗品等：只要类型名，不查接口
+            return {
+                "typeName": type_name,
+                "barCode": "",
+                "associateId": material.get("associateId") or "",
+                "locations": material.get("locations") or [],
+                "name": material.get("materialName") or material.get("name") or "",
+            }
+        # 需要补 barCode（或连 typeName 都缺）→ 查一次 material-info
         try:
-            return self._query_material_info(material_id)
+            info = self._query_material_info(material_id)
         except Exception as e:
             logger.warning(
-                f"[物料类型] material-info 失败且无本地类型: materialId={material_id}, 错误={e}"
+                f"[物料类型] material-info 失败，降级: materialId={material_id}, 错误={e}"
             )
-            return {}
+            info = {}
+        return {
+            "typeName": type_name or (info.get("typeName") or ""),
+            "barCode": bar_code or (info.get("barCode") or ""),  # 真实条码来源
+            "associateId": material.get("associateId") or info.get("associateId") or "",
+            "locations": info.get("locations") or material.get("locations") or [],
+            "name": material.get("materialName") or info.get("name") or material.get("name") or "",
+        }
 
     def _process_order_reagents(self, report: Dict[str, Any]) -> Dict[str, Any]:
         """处理订单完成报文中的试剂数据，计算质量比
@@ -4570,6 +4593,55 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     "last_snapshot": last_snapshot,
                 }
             time.sleep(poll_interval)
+
+    def multitask_probe(self, task_no: int = 1, hold_ms: int = 1000) -> Dict[str, Any]:
+        """
+        多任务调度探测动作。
+
+        对同一动作提交多个任务、分别传入不同的 task_no，根据返回的 start_time_ms
+        判断 UniLab 多任务是从前往后还是从后往前启动执行。
+
+        Args:
+            task_no: 任务编号（由调用方自定义，用于区分多任务实例）
+            hold_ms: 占用设备时长（毫秒），默认 1000，便于拉开各任务开始时间差
+
+        Returns:
+            包含 task_no、开始/结束时间（毫秒精度）等字段的字典
+        """
+        start_dt = datetime.now()
+        start_time = (
+            start_dt.strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{int(start_dt.microsecond / 1000):03d}"
+        )
+        start_time_ms = int(start_dt.timestamp() * 1000)
+
+        logger.info(
+            f"[multitask_probe] 开始执行 task_no={task_no}, "
+            f"start_time={start_time}, hold_ms={hold_ms}"
+        )
+
+        if hold_ms and hold_ms > 0:
+            time.sleep(hold_ms / 1000.0)
+
+        end_dt = datetime.now()
+        end_time = (
+            end_dt.strftime("%Y-%m-%dT%H:%M:%S.")
+            + f"{int(end_dt.microsecond / 1000):03d}"
+        )
+        end_time_ms = int(end_dt.timestamp() * 1000)
+
+        result = {
+            "success": True,
+            "task_no": task_no,
+            "start_time": start_time,
+            "start_time_ms": start_time_ms,
+            "end_time": end_time,
+            "end_time_ms": end_time_ms,
+            "hold_ms": hold_ms,
+            "message": f"task_no={task_no} 于 {start_time} 开始执行",
+        }
+        logger.info(f"[multitask_probe] 结束执行 {result}")
+        return result
 
     # 2.7 启动调度
     def scheduler_start(self) -> Dict[str, Any]:

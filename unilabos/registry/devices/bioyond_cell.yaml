@@ -203,9 +203,11 @@ bioyond_cell:
             goal:
               properties:
                 xlsx_path:
+                  title: 新建实验文件路径
                   type: string
                 csv_export_path:
                   default: ''
+                  title: "配液实验报告文件路径\n（需要主控电脑的路径）"
                   description: CSV导出目录路径，为空则不导出
                   type: string
               required:
@@ -275,25 +277,30 @@ bioyond_cell:
               properties:
                 batch_id:
                   default: ''
-                  description: 批次ID，为空则自动生成时间戳
+                  title: 批次
+                  description: 批次ID，为空则自动生成时间戳，每一个批次需要修改
                   type: string
                 order_names:
                   default: []
+                  title: 订单名称
                   description: 配方ID/订单编号列表，与formulation一一对应，用于填写DoE撒点编号等自定义标识，便于后续追溯。未填则自动生成。
                   items:
                     type: string
                   type: array
                 bottle_type:
                   default: 配液小瓶
-                  description: 配液瓶类型
+                  title: 配液瓶类型
+                  description: 填写配液小瓶/配液大瓶
                   type: string
                 conductivity_bottle_count:
                   default: 0
-                  description: 电导测试分液瓶数
+                  title: 电导测试分液瓶数
+                  description: 电导测试可选择1-4瓶
                   type: integer
                 conductivity_volume:
                   default: 0.0
-                  description: 电导率测试分液体积
+                  title: 电导测试分液体积（mL)
+                  description: 建议分8ml，匹配电导站电极插入深度
                   type: number
                 formulation:
                   description: 配方列表，每个元素代表一个订单（一瓶）
@@ -323,20 +330,24 @@ bioyond_cell:
                   type: array
                 coin_cell_volume:
                   default: 0.0
-                  description: 纽扣电池组装分液体积
+                  title: 扣电组装分液体积（mL)
+                  description: 扣电组装选择5mL分液瓶进行分液
                   type: number
                 mix_time:
                   default: []
-                  description: 混匀时间列表(秒)，与 formulation 一一对应
+                  title: 混合时间（s）
+                  description: 混匀时间列表(秒)，与formulation一一对应
                   items:
                     type: integer
                   type: array
                 pouch_cell_volume:
                   default: 0.0
+                  title: 软包组装分液体积（mL)
                   description: 软包电池注液组装分液体积
                   type: number
                 csv_export_path:
                   default: ''
+                  title: "配液实验报告文件路径\n（需要主控电脑的路径）"
                   description: CSV导出目录路径，为空则不导出
                   type: string
               required:
@@ -385,26 +396,32 @@ bioyond_cell:
             goal:
               properties:
                 xlsx_path:
+                  title: 电导实验模板路径
                   description: 电导实验模板 xlsx 路径
                   type: string
                 validate_barcode:
                   default: true
+                  title: 条码验证
                   description: 是否在提交前校验 plateBarCode 在物料系统中存在
                   type: boolean
                 start_scheduler:
                   default: true
+                  title: 启动调度
                   description: 提交订单前是否先启动调度（外部进样路径没有上游管调度，默认 true 确保订单进队列后立即消费）
                   type: boolean
                 wait_for_finish:
                   default: true
+                  title: 等待完成
                   description: 是否阻塞等所有电导单完成并拉取结果。true=节点运行到测试完成再导出 CSV；false=fire-and-forget，POST 完即返回。
                   type: boolean
                 wait_timeout_seconds:
                   default: 36000
+                  title: 等待超时时间（秒）
                   description: 单个电导单 wait 超时秒数，仅 wait_for_finish=true 时生效。默认 36000 秒（10 小时）。
                   type: integer
                 csv_export_path:
                   default: ''
+                  title: 电导结果CSV导出路径
                   description: 电导结果 CSV 导出目录（External_conductivity_年月日时分秒.csv），为空则不导出。
                   type: string
               required:
@@ -461,7 +478,8 @@ bioyond_cell:
             goal:
               properties:
                 vial_plates:
-                  description: 分液瓶板列表（来自配液输出的 handle，每项需含 batch_id/materialId/barCode/orderCode）
+                  title: 分液瓶板
+                  description: 无需填写
                   items:
                     properties:
                       barCode:
@@ -480,35 +498,42 @@ bioyond_cell:
                     type: object
                   type: array
                 temperature_points:
-                  description: 温度点列表（℃）。长度=1 时广播到所有分液板；长度=分液板数时按顺序一一对应；其他长度报错。业务规则：一块板共享一个温度，板上所有分液瓶都用该温度。
+                  title: 温度点
+                  description: "温度点列表（℃）。\n需打开温控模块提前预热。\n业务规则：一块板共享一个温度，板上所有分液瓶都用该温度。最高设置4个温度点：温控模块ABC只能做5℃以上温控，-10℃至5℃需要用温控模块D"
                   items:
                     type: number
                   type: array
                 vial_bottle_positions:
-                  description: 分液瓶孔位映射（来自配液 vial_bottle_positions 输出 handle）。每项含 plateMaterialId/plateBarCode/x/y/orderCode，按 detailMaterialId→orderCode 权威映射产出、已过滤空占位孔。本 action 据此组装电导 entry（归属与瓶位），为空则报错。
+                  title: 分液瓶位置
+                  description: 无需填写
                   items:
                     type: object
                   type: array
                 mass_ratios:
-                  description: 配方信息列表（来自配液 mass_ratios 输出 handle）。用于测试完成后按"分液瓶二维码"合并出配液+电导报告；为空则只出电导报告。
+                  title: 质量比
+                  description: 无需填写
                   items:
                     type: object
                   type: array
                 validate_barcode:
                   default: true
-                  description: 是否在提交前校验 plateBarCode 在物料系统中存在
+                  title: 条码验证
+                  description: 无需填写
                   type: boolean
                 wait_for_finish:
                   default: true
-                  description: 是否阻塞等所有 LIMS 新建电导单收到 /report/order_finish 推送。true=与配液一致，节点会一直运行到测试完成；false=fire-and-forget，POST 完即返回，剩下交给奔曜软件。
+                  title: 等待完成
+                  description: 是否阻塞等所有LIMS新建电导单收到/report/order_finish 推送。true=与配液一致，节点会一直运行到测试完成；false=fire-and-forget，POST完即返回，剩下交给奔曜软件
                   type: boolean
                 wait_timeout_seconds:
                   default: 36000
-                  description: 单个电导单 wait 超时秒数，仅 wait_for_finish=true 时生效。默认 36000 秒（10 小时），与配液一致。
+                  title: 等待超时时间（秒）
+                  description: 单个电导wait超时秒数，仅 wait_for_finish=true时生效。默认36000秒（10小时），与配液一致
                   type: integer
                 csv_export_path:
                   default: ''
-                  description: CSV 导出目录，为空则不导出。非空时在同一目录生成 Inline_conductivity_*.csv（电导-only）与 Formulation_Conductivity_*.csv（配液+电导）。
+                  title: 电导结果CSV导出路径
+                  description: 电导结果CSV导出目录
                   type: string
               required:
               - vial_plates
@@ -570,6 +595,60 @@ bioyond_cell:
           required:
           - goal
           title: create_sample参数
+          type: object
+        type: UniLabJsonCommand
+      auto-multitask_probe:
+        feedback: {}
+        goal: {}
+        goal_default:
+          hold_ms: 1000
+          task_no: 1
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 多任务调度探测。同一动作提交多个任务并填不同 task_no，用返回的 start_time_ms 判断从前往后还是从后往前执行。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                hold_ms:
+                  default: 1000
+                  description: 占用时长（毫秒），便于拉开各任务开始时间差
+                  type: integer
+                task_no:
+                  default: 1
+                  description: 任务编号，多任务时为每个实例填不同编号
+                  type: integer
+              required:
+              - task_no
+              type: object
+            result:
+              properties:
+                end_time:
+                  description: 结束时间（本地，毫秒精度）
+                  type: string
+                end_time_ms:
+                  description: 结束时间 Unix 毫秒时间戳
+                  type: integer
+                hold_ms:
+                  type: integer
+                message:
+                  type: string
+                start_time:
+                  description: 实际开始执行时间（本地，毫秒精度）
+                  type: string
+                start_time_ms:
+                  description: 开始时间 Unix 毫秒时间戳，用于比较执行顺序
+                  type: integer
+                success:
+                  type: boolean
+                task_no:
+                  type: integer
+              type: object
+          required:
+          - goal
+          title: multitask_probe参数
           type: object
         type: UniLabJsonCommand
       auto-order_list_v2:
@@ -840,6 +919,7 @@ bioyond_cell:
               properties:
                 xlsx_path:
                   default: D:\Uni-Lab-OS-Data\date\material_template.xlsx
+                  title: 入库配置文件路径
                   type: string
               required: []
               type: object
@@ -1167,15 +1247,18 @@ bioyond_cell:
             goal:
               properties:
                 target_device:
-                  default: coin_cell_assembly
-                  description: 目标设备ID
+                  default: BatteryStation
+                  title: 目标设备
+                  description: 默认：BatteryStation
                   type: string
                 target_location:
                   default: bottle_rack_6x2
-                  description: 目标资源名称
+                  title: 目标位置
+                  description: 默认：bottle_rack_6x2
                   type: string
                 vial_plates:
-                  description: 分液瓶板列表（从create_orders的vial_plates获取）
+                  title: 分液瓶板
+                  description: 自动传递参数，可忽略
                   items:
                     properties:
                       locationId:
