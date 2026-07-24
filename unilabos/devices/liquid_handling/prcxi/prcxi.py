@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import socket
+import sys
 import time
 import uuid
 import warnings
@@ -66,6 +67,7 @@ from unilabos.devices.liquid_handling.prcxi.flatten_utils import (
     axis_from_channels as _axis_from_channels_util,
     RIGHT_CHANNEL_BASE as _RIGHT_CHANNEL_BASE,
 )
+from unilabos.registry.decorators import topic_config
 from unilabos.registry.placeholder_type import ResourceSlot
 from unilabos.resources.itemized_carrier import ItemizedCarrier
 from unilabos.resources.resource_tracker import ResourceTreeSet
@@ -693,6 +695,20 @@ _TRASH_Z_RAISE_MM = 60.0
 
 _logger = logging.getLogger(__name__)
 
+
+def _safe_print(text: str, chunk_size: int = 8192) -> None:
+    """安全打印超大文本：Windows 控制台单次写入过大字符串会抛
+    ``OSError: [Errno 22] Invalid argument``（96 孔协议 steps_todo_list 序列化后可达数十 KB，
+    在 debugpy 控制台里尤其容易触发）。这里分块写入并吞掉写失败——纯调试输出，
+    不应因此中断方案执行。"""
+    try:
+        for i in range(0, len(text), chunk_size):
+            sys.stdout.write(text[i : i + chunk_size])
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    except OSError:
+        pass
+
 # vol(µL) → prcxi_labware tip 工厂名；长度取 tip.total_tip_length。
 # 10µL 与 eTips 长度相同，取标准 PRCXI_10uL_Tips。
 _TIP_LENGTH_CACHE: Dict[int, float] = {}
@@ -1289,15 +1305,20 @@ class PRCXI9300Deck(Deck):
         # 再做带阈值最近邻匹配，兼容云端坐标轻微浮点偏差。
         nearest_idx: Optional[int] = None
         nearest_dist_sq = float("inf")
+        second_dist_sq = float("inf")
         for idx, site in enumerate(sites):
             pos = site.get("position", {})
             sx = float(pos.get("x", 0.0))
             sy = float(pos.get("y", 0.0))
             dist_sq = (location.x - sx) ** 2 + (location.y - sy) ** 2
             if dist_sq < nearest_dist_sq:
+                second_dist_sq = nearest_dist_sq
                 nearest_dist_sq = dist_sq
                 nearest_idx = idx
-        if nearest_idx is not None and nearest_dist_sq <= float(tolerance) ** 2:
+            elif dist_sq < second_dist_sq:
+                second_dist_sq = dist_sq
+        _within = nearest_idx is not None and nearest_dist_sq <= float(tolerance) ** 2
+        if _within:
             return int(sites[nearest_idx].get("number", nearest_idx + 1))
         return None
 
@@ -2022,6 +2043,24 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         if self._unilabos_backend.debug:
             return True
         return self._unilabos_backend.is_reset_ok
+
+    @property
+    @topic_config(period=1.0)
+    def state_list(self) -> str:
+        """当前方案步骤进度 datakey：百分比字符串，如 ``"42.9%"``。
+
+        与 ``reset_ok`` 同款：由 PropertyPublisher 定时器（1s）驱动，是全系统唯一
+        发 RPC 刷新步骤缓存的入口；所有 ``wait_for_finish`` 方法只读该缓存。
+
+        注：host_node 的 datakey 通道仅支持 float/int/str，数组（Int64MultiArray →
+        array.array）会被丢弃，故这里以百分比字符串上报；绝对步数仍可经
+        ``backend.step_progress`` 内部读取。
+        """
+        if self._unilabos_backend.debug:
+            return "0.0%"
+        completed, total = self._unilabos_backend.step_progress
+        ratio = (completed / total) if total else 0.0
+        return f"{round(ratio * 100, 1)}%"
 
     def __init__(
         self,
@@ -3810,6 +3849,19 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             self._is_reset_ok = False
         return self._is_reset_ok
 
+    @property
+    def step_progress(self) -> List[int]:
+        """当前方案步骤进度 ``[已完成步骤, 总步骤]``（仿 ``is_reset_ok`` 的读写模式）。
+
+        这是全系统**唯一**发 RPC 并回写步骤缓存的地方：由 ``state_list`` datakey 的
+        getter 经 PropertyPublisher 定时器驱动。所有 ``wait_for_finish`` 方法只读此缓存。
+        """
+        if self.debug:
+            return [0, 0]
+        snap = self.api_client.refresh_step_snapshot()
+        prog = snap.get("progress", [0, 0])
+        return [int(prog[0]), int(prog[1])]
+
     matrix_info: MatrixInfo
     protocol_name: str
     steps_todo_list = []
@@ -3925,14 +3977,20 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             if sn is not None:
                 return sn
 
-        # 3) 名字兜底：需要 deck（远端解析回来的实例与 deck 上不是同一对象时）。
+        # 3) 名字兜底：远端解析回来的实例与 deck 上不是同一对象时，按 name 找到 deck 上
+        #    真正在位的同名子节点 c，用 c 的位置（权威坐标）反算槽位号——绝不能用
+        #    children 的数组下标 i+1，因为 deck.children 并非按槽位号 1..16 顺序排列
+        #    （实测顺序会跨运行变化，如 [slot_3, slot_13, slot_2, trash, slot_6, slot_7]），
+        #    i+1 会给出完全错误且随运行漂移的槽位（slot_6 曾被判成 5/4/2/1），即 tip 架误判成邻位。
         if actual_deck is not None:
             for cand in reversed(chain):
                 cname = getattr(cand, "name", None)
                 if cname is not None:
-                    for i, c in enumerate(actual_deck.children):
+                    for c in actual_deck.children:
                         if getattr(c, "name", None) == cname:
-                            return i + 1
+                            sn = PRCXI9300Handler._get_slot_number(c, deck=actual_deck)
+                            if sn is not None:
+                                return sn
 
         raise RuntimeError(
             f"无法定位 {getattr(plate, 'name', '?')} 所在的 PRCXI 槽位"
@@ -4131,7 +4189,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             solution_id = protocol_id
         print(f"PRCXI9300Backend created solution with ID: {solution_id}")
         self.api_client.load_solution(solution_id)
-        print(json.dumps(self.steps_todo_list, indent=2))
+        _safe_print(json.dumps(self.steps_todo_list, indent=2))
         if not self.api_client.start():
             return False
         if not self.api_client.wait_for_finish(timeout_s=self.wait_finish_timeout_s):
@@ -4185,7 +4243,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             solution_id = protocol_id
         print(f"PRCXI9300Backend created solution with ID: {solution_id}")
         self.api_client.load_solution(solution_id)
-        print(json.dumps(self.steps_todo_list, indent=2))
+        _safe_print(json.dumps(self.steps_todo_list, indent=2))
         if not self.api_client.start():
             return False
         if not await self.api_client.wait_for_finish_async(
@@ -4848,6 +4906,19 @@ class PRCXI9300Api:
         # RPC 短连接瞬断重试：总尝试次数（含首次）与首次退避秒数（线性封顶 5s）。
         self.connect_retries = max(1, int(connect_retries))
         self.connect_retry_delay_s = max(0.0, float(connect_retry_delay_s))
+        # 步骤进度缓存：唯一写入者是 refresh_step_snapshot()（由 state_list datakey 的
+        # getter 每秒驱动）。所有 wait_for_finish 方法只读该快照、循环体内不再发 RPC，
+        # 从而彻底避免阻塞事件循环 / 与 datakey 轮询并发抢占同一台设备的 RPC 服务。
+        self._step_snapshot: Dict[str, Any] = {
+            "progress": [0, 0],
+            "last_state": -1,
+            "num_steps": 0,
+            "started": False,
+            # seen_active：本轮 start() 之后是否已经**正向观测到新一轮执行开始**
+            # （步骤列表出现 last_state in {0,1} 的未完成态）。用于区分「机器尚未归零、
+            # GetStepStateList 仍返回上一轮已完成列表(last=2)」的 stale 读，避免误判完成。
+            "seen_active": False,
+        }
 
     @staticmethod
     def _normalize_protocol_version(value: Optional[str]) -> str:
@@ -5057,6 +5128,14 @@ class PRCXI9300Api:
 
     # ---------------------------------------------------- 自动化控制（IAutomation）
     def start(self) -> bool:
+        # 新方案启动前重置步骤缓存，避免 wait 方法读到上一轮的完成态而立即返回成功。
+        self._step_snapshot = {
+            "progress": [0, 0],
+            "last_state": -1,
+            "num_steps": 0,
+            "started": False,
+            "seen_active": False,
+        }
         return self.call("IAutomation", "Start")
 
     def stop(self) -> bool:
@@ -5121,9 +5200,10 @@ class PRCXI9300Api:
     def wait_for_finish(self, timeout_s: Optional[float] = None) -> bool:
         """等待方案执行完成。
 
-        - ``v03``：沿用 ``IMachineState.GetStepStateList`` 三态判断。
-        - ``v04``：改用 ``IAutomation.GetStartStatus`` 轮询（运行中=true，结束=false）。
-        - ``timeout_s`` 默认 None：不设总超时；仅显式传入正数时才可能超时返回 False。
+        v03 / v04 统一改为读步骤进度缓存 ``_step_snapshot``（唯一写入者是
+        ``refresh_step_snapshot``，由 ``state_list`` datakey 的 getter 定时驱动）：
+        末步 ``State==2`` 视为完成、``>2`` 视为报错。异步路径纯读缓存、不发 RPC；
+        同步路径自刷新缓存兜底。``timeout_s`` 默认 None：不设总超时。
         """
         self._wait_timeout_last = False
         if self.is_v04:
@@ -5142,31 +5222,55 @@ class PRCXI9300Api:
             return await self._wait_for_finish_v04_async(sleep_coro=sleep_coro, timeout_s=timeout_s)
         return await self._wait_for_finish_v03_async(sleep_coro=sleep_coro, timeout_s=timeout_s)
 
+    def _eval_wait_snapshot(
+        self, snap: Dict[str, Any], start_deadline: float
+    ) -> Optional[bool]:
+        """基于步骤缓存快照判定等待结果（v03/v04 共用，只读、不发 RPC）。
+
+        返回：``True`` 成功；``False`` 失败/报错；``None`` 继续等待。
+
+        - 末步 ``State==2`` 且**已正向观测到本轮执行开始**（``seen_active``）→ 成功；
+        - 末步 ``State>2``（报错态）→ 失败；
+        - 到 ``start_deadline`` 仍未观测到本轮执行开始：仅空协议（``num==0``）按完成兜底；
+          有步骤但尚未见到未完成态时**继续等待**（不信任上一轮遗留的 stale ``last==2``）。
+
+        关键：``start()`` 后机器的 ``GetStepStateList`` 存在数秒延迟，仍会返回上一轮
+        「已完成」列表（``last==2, completed==num``）。若沿用旧的 ``started`` 判定
+        （``num>0`` 即 latch），会读到 stale 完成态而秒回成功，导致后续动作雪崩。
+        故这里改用 ``seen_active`` —— 只有观测到本轮出现 ``last in {0,1}`` 的未完成态后，
+        才认可随后的 ``last==2`` 为真正完成。
+        """
+        last = snap.get("last_state", -1)
+        seen_active = snap.get("seen_active", False)
+        num = snap.get("num_steps", 0)
+        if seen_active and last == 2:
+            return True
+        if isinstance(last, int) and last > 2:
+            return False
+        if not seen_active and time.time() >= start_deadline:
+            # 宽限期到仍未观测到本轮执行开始：空协议按完成兜底；有步骤则继续等待，
+            # 绝不用可能是上一轮遗留的 stale last==2 判成功。
+            if num == 0:
+                return True
+        return None
+
     def _wait_for_finish_v03(self, timeout_s: Optional[float] = None) -> bool:
+        """v03：只读步骤缓存判定完成。同步路径自刷新缓存兜底（独立线程内阻塞无害，
+        兼容无 ROS datakey 定时器的直跑/测试场景）。"""
+        if self.debug:
+            return True
         timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
         deadline = (time.time() + timeout_s) if timeout_s is not None else None
-        success = False
-        start = False
-        while not success:
+        start_deadline = time.time() + 5.0
+        while True:
             if deadline is not None and time.time() >= deadline:
                 self._wait_timeout_last = True
                 return False
-            status = self.step_state_list()
-            if status is None:
-                break
-            if len(status) == 0:
-                break
-            if len(status) == 1:
-                start = True
-            if status[-1]["State"] == 2 and start:
-                success = True
-            elif status[-1]["State"] > 2:
-                break
-            elif status[-1]["State"] == 0:
-                start = True
-            else:
-                time.sleep(1)
-        return success
+            snap = self.refresh_step_snapshot()
+            result = self._eval_wait_snapshot(snap, start_deadline)
+            if result is not None:
+                return result
+            time.sleep(1)
 
     async def _wait_for_finish_v03_async(
         self,
@@ -5174,76 +5278,45 @@ class PRCXI9300Api:
         sleep_coro: Optional[Callable[[float], Awaitable[None]]] = None,
         timeout_s: Optional[float] = None,
     ) -> bool:
+        """v03 异步：循环体**只读**内存缓存 ``_step_snapshot``，绝不发 RPC，
+        故永不阻塞事件循环。缓存由 ``state_list`` datakey 的 getter 定时刷新。"""
+        if self.debug:
+            return True
         timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
         deadline = (time.time() + timeout_s) if timeout_s is not None else None
-        success = False
-        start = False
-        while not success:
+        start_deadline = time.time() + 5.0
+        while True:
             if deadline is not None and time.time() >= deadline:
                 self._wait_timeout_last = True
                 return False
-            status = self.step_state_list()
-            if status is None:
-                break
-            if len(status) == 0:
-                break
-            if len(status) == 1:
-                start = True
-            if status[-1]["State"] == 2 and start:
-                success = True
-            elif status[-1]["State"] > 2:
-                break
-            elif status[-1]["State"] == 0 and not start:
-                start = True
-            else:
-                await self._wait_sleep_async(sleep_coro, 1.0)
-        return success
+            result = self._eval_wait_snapshot(self._step_snapshot, start_deadline)
+            if result is not None:
+                return result
+            await self._wait_sleep_async(sleep_coro, 1.0)
 
     def _wait_for_finish_v04(self, timeout_s: Optional[float] = None) -> bool:
-        """v04：轮询 ``GetStartStatus``（运行中=true）。
+        """v04：完成判定统一改为读步骤缓存（末步 ``State==2``），不再单独轮询
+        ``GetStartStatus``。同步路径自刷新缓存兜底。
 
-        流程：
-        1) 先等待进入运行态（短窗口，兼容 Start 后状态传播延迟）；
-        2) 一旦观测到运行态，再等待其回落到 false；
-        3) 回落后用 ``GetStepStateList`` 校验末步必须为 Completed(2)。
-
-        注意：``start_deadline``（5s）只用于判定「是否观测到启动」，不是总执行超时。
+        ``start_deadline``（5s）仅用于判定「是否观测到启动」，不是总执行超时。
         总超时仅在 ``timeout_s`` 显式传入正数时生效；默认 None 不会提前终止。
         """
         if self.debug:
             return True
         timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
         deadline = (time.time() + timeout_s) if timeout_s is not None else None
-
-        def _last_step_completed() -> Optional[bool]:
-            status = self.step_state_list()
-            if status is None or len(status) == 0:
-                return None
-            last_state = self._normalize_step_state(status[-1].get("State"))
-            return last_state == 2
-
-        started = False
         start_deadline = time.time() + 5.0
-
         while True:
             if deadline is not None and time.time() >= deadline:
-                final_ok = _last_step_completed()
-                if final_ok:
+                snap = self.refresh_step_snapshot()
+                if snap.get("seen_active") and snap.get("last_state") == 2:
                     return True
                 self._wait_timeout_last = True
                 return False
-            running = self.get_start_status()
-            if running:
-                started = True
-            elif started:
-                final_ok = _last_step_completed()
-                # 兜底兼容：若瞬时结束导致取不到 step_state，则按完成处理。
-                return True if final_ok is None else final_ok
-            elif time.time() >= start_deadline:
-                # 未观测到运行态：兼容“瞬时执行完成”场景；若有步骤状态则以末步判定为准。
-                final_ok = _last_step_completed()
-                return True if final_ok is None else final_ok
-
+            snap = self.refresh_step_snapshot()
+            result = self._eval_wait_snapshot(snap, start_deadline)
+            if result is not None:
+                return result
             time.sleep(1)
 
     async def _wait_for_finish_v04_async(
@@ -5252,39 +5325,22 @@ class PRCXI9300Api:
         sleep_coro: Optional[Callable[[float], Awaitable[None]]] = None,
         timeout_s: Optional[float] = None,
     ) -> bool:
-        """v04 异步轮询 ``GetStartStatus``（运行中=true）。默认不设总超时。"""
+        """v04 异步：循环体**只读**内存缓存 ``_step_snapshot``，绝不发 RPC。默认不设总超时。"""
         if self.debug:
             return True
         timeout_s = self._normalize_wait_timeout_seconds(timeout_s)
         deadline = (time.time() + timeout_s) if timeout_s is not None else None
-
-        def _last_step_completed() -> Optional[bool]:
-            status = self.step_state_list()
-            if status is None or len(status) == 0:
-                return None
-            last_state = self._normalize_step_state(status[-1].get("State"))
-            return last_state == 2
-
-        started = False
         start_deadline = time.time() + 5.0
-
         while True:
             if deadline is not None and time.time() >= deadline:
-                final_ok = _last_step_completed()
-                if final_ok:
+                snap = self._step_snapshot
+                if snap.get("seen_active") and snap.get("last_state") == 2:
                     return True
                 self._wait_timeout_last = True
                 return False
-            running = self.get_start_status()
-            if running:
-                started = True
-            elif started:
-                final_ok = _last_step_completed()
-                return True if final_ok is None else final_ok
-            elif time.time() >= start_deadline:
-                final_ok = _last_step_completed()
-                return True if final_ok is None else final_ok
-
+            result = self._eval_wait_snapshot(self._step_snapshot, start_deadline)
+            if result is not None:
+                return result
             await self._wait_sleep_async(sleep_coro, 1.0)
 
     def call(self, service: str, method: str, params: Optional[list] = None) -> Any:
@@ -5331,6 +5387,46 @@ class PRCXI9300Api:
     def step_state_list(self) -> List[Dict[str, Any]]:
         """GetStepStateList"""
         return self.call("IMachineState", "GetStepStateList")
+
+    def refresh_step_snapshot(self) -> Dict[str, Any]:
+        """唯一的步骤进度 RPC 写入者：拉一次 GetStepStateList 并回写 ``_step_snapshot``。
+
+        由 ``state_list`` datakey 的 getter（经 PropertyPublisher 定时器，period≈1s）驱动，
+        以及同步 wait 方法自刷新兜底调用。异步 wait 方法**不**调用它（纯读快照，避免阻塞
+        事件循环）。异常时保留上一次快照，返回当前快照，不向上抛。
+        """
+        try:
+            status = self.step_state_list()
+            if isinstance(status, list):
+                num = len(status)
+                if num:
+                    last = self._normalize_step_state(status[-1].get("State"))
+                    completed = sum(
+                        1
+                        for s in status
+                        if isinstance(s, dict) and self._normalize_step_state(s.get("State")) == 2
+                    )
+                else:
+                    last = -1
+                    completed = 0
+                prev_started = bool(self._step_snapshot.get("started"))
+                started = prev_started or num > 0
+                # seen_active：一旦本轮观测到「有步骤且末步未完成」(last in {0,1})，即认定
+                # 本轮新执行已真正开始，之后才允许把 last==2 判为完成。start() 会把它清零，
+                # 从而屏蔽 start() 后机器尚未归零、仍返回上一轮 last==2 的 stale 读。
+                prev_seen_active = bool(self._step_snapshot.get("seen_active"))
+                seen_active = prev_seen_active or (num > 0 and last in (0, 1))
+                # 原子整体替换，保证并发读到的是一致快照。
+                self._step_snapshot = {
+                    "progress": [completed, num],
+                    "last_state": last,
+                    "num_steps": num,
+                    "started": started,
+                    "seen_active": seen_active,
+                }
+        except Exception as e:
+            print(f"[PRCXI] refresh_step_snapshot 失败，沿用旧快照: {e!r}")
+        return self._step_snapshot
 
     def step_status(self, seq_num: int) -> Dict[str, Any]:
         """GetStepStatus（单步耗时明细）。

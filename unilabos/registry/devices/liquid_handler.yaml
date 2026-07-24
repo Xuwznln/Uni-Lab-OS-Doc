@@ -10528,6 +10528,7 @@ liquid_handler.prcxi:
     module: unilabos.devices.liquid_handling.prcxi.prcxi:PRCXI9300Handler
     status_types:
       reset_ok: bool
+      state_list: str
     type: python
   config_info: []
   description: prcxi液体处理器设备，基于pylabrobot控制
@@ -10629,8 +10630,11 @@ liquid_handler.prcxi:
       properties:
         reset_ok:
           type: boolean
+        state_list:
+          type: string
       required:
       - reset_ok
+      - state_list
       type: object
   version: 1.0.0
 liquid_handler.revvity:
