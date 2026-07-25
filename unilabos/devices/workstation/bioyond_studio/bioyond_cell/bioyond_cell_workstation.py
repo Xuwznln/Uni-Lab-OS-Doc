@@ -4,6 +4,7 @@ from doctest import debug
 from typing import Dict, Any, List, Optional, Tuple, Union
 import requests
 from pylabrobot.resources.resource import Resource as ResourcePLR
+from pylabrobot.resources.carrier import ResourceHolder
 from pathlib import Path
 import pandas as pd
 import time
@@ -151,6 +152,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
     # 奔曜全 0 GUID：电导建单偶发占位，此时无法用 orderId 强校验
     _EMPTY_ORDER_ID = "00000000-0000-0000-0000-000000000000"
 
+    # 3 号箱自动堆栈-左（name="自动堆栈-左", code="0008"），即 3→2→1 / 3→2 里的 "3"。
+    # 转运接口只认这个仓库当来源，与报告 usedMaterials 里的 locationId（可能指向
+    # 配液站内的临时槽位）无关。
+    _WH_ID_AUTO_STACK_LEFT = "3a19debc-84b4-0359-e2d4-b3beea49348b"
+
     @staticmethod
     def _normalize_order_id(order_id: Optional[str]) -> str:
         return (order_id or "").strip()
@@ -176,6 +182,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         return self._normalize_order_id(report.get("orderId")) == exp
 
     # 三类分液的 step 名 → 对应订单字段（分液完成信号）
+    # 三者均已从真机日志验证：电导分液 / 扣电分液见 0714~0722 批次；
+    # 软包分液于 2026-07-23 (orderCode=BSO2026072300007) 验证命中并正确计数。
     _DISPENSE_STEP_NAMES = ("电导分液", "扣电分液", "软包分液")
 
     def _reset_progress_tracking(self, orders: List[Dict[str, Any]], order_codes: List[str], data_list: List[Dict[str, Any]]):
@@ -1637,6 +1645,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     "orderId": ref_entry["orderId"],      # 同上
                     "typeName": vial_plate_info.get("typeName") or "",
                     "barCode": vial_plate_info.get("barCode") or "",
+                    # 源坐标必须一起带过来：漏了会让下游 _find_plate_xyz / 321 转运
+                    # 拿不到坐标，退化成按槽位标签硬算（C03→(3,3,1)），指到不存在的库位
+                    "source_x": vial_plate_info.get("source_x", 1),
+                    "source_y": vial_plate_info.get("source_y", 1),
+                    "source_z": vial_plate_info.get("source_z", 1),
+                    "source_found": bool(vial_plate_info.get("source_found")),
                     "batch_id": batch_id,
                     "order_refs": [ref_entry],            # 完整列表，保留供追溯（归属改由 vial_bottle_positions 承担）
                 }
@@ -1770,8 +1784,19 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         # ========== 提取各类瓶板的源坐标（用于 321/32 任务 handles 传参）==========
         def _find_plate_xyz(plates, type_keyword):
+            """取该板型在自动堆栈-左的源坐标；未命中则返回占位 (1,1,1) 并告警。
+
+            占位值不可直接用于建单：A01 上可能是另一块板。手动调 321/32 时若发现
+            日志里是占位值，说明配液刚结束板还没进自动堆栈-左，应改用 *_auto
+            版本（转运前会实时查库定位）。
+            """
             for p in plates:
                 if p and type_keyword in p.get("typeName", ""):
+                    if not p.get("source_found"):
+                        logger.warning(
+                            f"[{tag}] ⚠️ {type_keyword} 未在自动堆栈-左命中库位，"
+                            f"源坐标输出为占位值 (1,1,1)，不可直接用于手动转运建单"
+                        )
                     return p.get("source_x", 1), p.get("source_y", 1), p.get("source_z", 1)
             return 1, 1, 1
 
@@ -2818,8 +2843,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
           按协议 3.37 示例，一个 orderId 下完全允许多块不同 plateBarCode 的板，
           配液工艺也确实会把同一 orderCode 拆到多块 20ml 分液瓶板上（电导多温度场景）。
         - 扫描所有 typemode=1 物料，逐个查 material-info（2.4 接口拿 typeName / barCode）；
-          优先收集 typeName == "20ml分液瓶板"，全部返回；
-          没有 20ml 时退回到其他 "*分液瓶板"（带 warning），保持兼容。
+          返回该单**全部** "*分液瓶板"（20ml 排在前，其它板型在后）。
+        - 2026-07-26 修正：旧实现"找到 20ml 就只返回 20ml"，会在混合实验
+          （20ml 测电导 + 5ml 供扣电）里把 5ml 板整块丢掉，导致 321 转运找不到板。
+          现改为全部返回，按板型分流交由下游负责（321 只挑 5ml、电导只挑 20ml）。
         - 不再用 locationId 前缀（"3a19debc-84b5-" 自动堆栈-左）做硬过滤，
           实测 LIMS 把 20ml 板放在 3a1c68b5-… 等其它库位，老规则会误漏。
 
@@ -2891,13 +2918,17 @@ class BioyondCellWorkstation(BioyondWorkstation):
             # 从 locations 取"自动堆栈-左"仓库的 xyz 坐标（上游 851b923 引入），
             # 用于 transfer_3_to_2_to_1 / transfer_3_to_2 通过 handle 接收源坐标。
             # 多 plate 场景下每块板独立预存自己的坐标，下游 _find_plate_xyz 仍能正确按板型选取。
-            AUTO_STACK_LEFT_WH_ID = "3a19debc-84b4-0359-e2d4-b3beea49348b"
+            # source_found 必须显式记录：未命中时的 (1,1,1) 只是占位默认值，
+            # 与"真的在 A01"无法区分。下游 321/32 若拿占位值去建单，会去搬
+            # A01 上那块**别的**板（转错板），或者坐标不存在直接建单失败。
             src_x, src_y, src_z = 1, 1, 1
+            src_found = False
             for loc in (material_info.get("locations") or []):
-                if loc.get("whid") == AUTO_STACK_LEFT_WH_ID:
+                if loc.get("whid") == self._WH_ID_AUTO_STACK_LEFT:
                     src_x = loc.get("x", 1)
                     src_y = loc.get("y", 1)
                     src_z = loc.get("z", 1)
+                    src_found = True
                     break
 
             plate_info = {
@@ -2910,21 +2941,35 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "source_x": src_x,
                 "source_y": src_y,
                 "source_z": src_z,
+                "source_found": src_found,
             }
             if type_name == PREFERRED_TYPE:
                 candidates_preferred.append(plate_info)
                 logger.info(
                     f"[提取分液瓶板] ✅ 命中 {PREFERRED_TYPE}: "
                     f"materialId={material_id}, locationId={location_id}, "
-                    f"barCode={plate_info['barCode']}, 坐标=({src_x},{src_y},{src_z})"
+                    f"barCode={plate_info['barCode']}, "
+                    f"自动堆栈-左坐标=({src_x},{src_y},{src_z})"
+                    f"{'' if src_found else ' [未在自动堆栈-左命中，为占位默认值]'}"
                 )
             else:
                 candidates_other_plate.append(plate_info)
                 logger.info(
                     f"[提取分液瓶板] 命中其它分液瓶板: typeName={type_name}, "
                     f"materialId={material_id}, barCode={plate_info['barCode']}, "
-                    f"坐标=({src_x},{src_y},{src_z})"
+                    f"自动堆栈-左坐标=({src_x},{src_y},{src_z})"
+                    f"{'' if src_found else ' [未在自动堆栈-左命中，为占位默认值]'}"
                 )
+
+        # 返回全部分液瓶板（20ml + 5ml 等），不再"有 20ml 就丢掉 5ml"。
+        # 混合实验（20ml 测电导 + 5ml 供扣电）下，旧的二选一返回会让 5ml 板
+        # 永远进不了 vial_plates，导致 321 转运找不到板。按板型分流由下游各自负责：
+        # 321 只挑 5ml、32/电导只挑 20ml（电导还会先按 5 号传递窗求交集过滤）。
+        all_plates = candidates_preferred + candidates_other_plate
+
+        if not all_plates:
+            logger.warning(f"[提取分液瓶板] ❌ 未找到任何分液瓶板: orderCode={order_code}")
+            return []
 
         if candidates_preferred:
             logger.info(
@@ -2932,19 +2977,24 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 f"{len(candidates_preferred)} 块 {PREFERRED_TYPE}: "
                 f"{[(p['barCode'] or p['materialId'][:8]) for p in candidates_preferred]}"
             )
-            return candidates_preferred
+        else:
+            # 配液+扣电 / 配液+软包 等模式本来就没有 20ml 板，属正常情况，不告警。
+            logger.info(
+                f"[提取分液瓶板] orderCode={order_code} 无 {PREFERRED_TYPE}"
+                f"（配液+扣电等模式属正常）；若本单需测电导，请检查 LIMS 工艺配置或上游入参。"
+            )
 
         if candidates_other_plate:
-            logger.warning(
-                f"[提取分液瓶板] ⚠️ orderCode={order_code} 未找到 {PREFERRED_TYPE}，"
-                f"回退到 {len(candidates_other_plate)} 块 "
-                f"{[p['typeName'] for p in candidates_other_plate]}。"
-                f"电导测试要求 {PREFERRED_TYPE}，请检查 LIMS 工艺配置或上游入参。"
+            logger.info(
+                f"[提取分液瓶板] 另含 {len(candidates_other_plate)} 块其它分液瓶板: "
+                f"{[(p['typeName'], p['barCode'] or p['materialId'][:8]) for p in candidates_other_plate]}"
+                f"（一并返回，由下游按板型分流）"
             )
-            return candidates_other_plate
 
-        logger.warning(f"[提取分液瓶板] ❌ 未找到任何分液瓶板: orderCode={order_code}")
-        return []
+        logger.info(
+            f"[提取分液瓶板] orderCode={order_code} 合计返回 {len(all_plates)} 块分液瓶板"
+        )
+        return all_plates
 
     def _extract_prep_bottle_from_report(self, report: Dict) -> Optional[Dict]:
         """
@@ -3857,15 +3907,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
         )
         
         # 1. 根据类型创建Carrier对象
+        # 命名必须含**完整** materialId：同订单多块物理板同前缀，重名会触发
+        # deck 的 "already assigned to deck"（只挂第1块，其余槽位留空 holder）。
+        # 奔曜 materialId 是顺序生成的，截断到前 8 位仍会撞
+        # （3a22ac50-2daf / 3a22ac50-879e 前 8 位相同），故不做截断。
+        plate_name = f"vial_plate_{order_code}_{material_id}"
         if "5ml" in type_name.lower() or "5mL" in type_name:
-            vial_plate_obj = YB_Vial_5mL_Carrier(
-                name=f"vial_plate_{order_code}"
-            )
+            vial_plate_obj = YB_Vial_5mL_Carrier(name=plate_name)
             logger.debug(f"[资源树] 创建 YB_Vial_5mL_Carrier: {vial_plate_obj.name}")
         elif "20ml" in type_name.lower() or "20mL" in type_name:
-            vial_plate_obj = YB_Vial_20mL_Carrier(
-                name=f"vial_plate_{order_code}"
-            )
+            vial_plate_obj = YB_Vial_20mL_Carrier(name=plate_name)
             logger.debug(f"[资源树] 创建 YB_Vial_20mL_Carrier: {vial_plate_obj.name}")
         else:
             logger.warning(
@@ -4062,45 +4113,99 @@ class BioyondCellWorkstation(BioyondWorkstation):
         for idx, plate in enumerate(vial_plates, 1):
             logger.info(
                 f"  [{idx}] orderCode={plate.get('orderCode', 'N/A')}, "
-                f"materialId={plate.get('materialId', 'N/A')[:20]}..."
+                f"materialId={plate.get('materialId', 'N/A')[:20]}..., "
+                f"typeName={plate.get('typeName', 'N/A')}"
             )
         logger.info("=" * 80)
+
+        # ========== 321 仅转运 5ml 分液瓶板（20ml 走 32 转运）==========
+        PLATE_TYPE_5ML = "5ml分液瓶板"
+        filtered_plates: List[Dict] = []
+        skip_results: List[Dict] = []
+        for idx, plate in enumerate(vial_plates, 1):
+            if not plate or not isinstance(plate, dict):
+                skip_results.append({
+                    "index": idx,
+                    "orderCode": "N/A",
+                    "materialId": "N/A",
+                    "status": "failed",
+                    "error": "分液瓶板信息无效或为空",
+                })
+                continue
+
+            type_name = (plate.get("typeName") or "").strip()
+            material_id = plate.get("materialId") or ""
+            order_code = plate.get("orderCode", "N/A")
+
+            # typeName 缺失时兜底查一次物料详情
+            if not type_name and material_id:
+                try:
+                    info = self._query_material_info(material_id)
+                    type_name = (info.get("typeName") or "").strip()
+                    plate["typeName"] = type_name
+                    logger.info(
+                        f"[批量转运] typeName 缺失，已补查: materialId={material_id[:20]}..., "
+                        f"typeName={type_name}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[批量转运] typeName 缺失且补查失败: materialId={material_id[:20]}..., "
+                        f"错误={e}，将按非5ml跳过"
+                    )
+
+            if PLATE_TYPE_5ML not in type_name:
+                logger.info(
+                    f"[批量转运] ℹ️ [{idx}/{len(vial_plates)}] 非5ml板，跳过321转运 "
+                    f"(orderCode={order_code}, typeName={type_name or '空'})"
+                )
+                skip_results.append({
+                    "index": idx,
+                    "orderCode": order_code,
+                    "materialId": material_id,
+                    "status": "skipped",
+                    "message": f"非5ml分液瓶板（typeName={type_name or '空'}），321仅转运5ml板",
+                })
+                continue
+
+            filtered_plates.append(plate)
+
+        if not filtered_plates:
+            logger.warning(
+                f"[transfer_3_to_2_to_1_auto] 过滤后无5ml分液瓶板可转运 "
+                f"（原始 {len(vial_plates)} 块，全部跳过）"
+            )
+            return {
+                "total": len(vial_plates),
+                "success": 0,
+                "failed": sum(1 for r in skip_results if r.get("status") == "failed"),
+                "results": skip_results,
+            }
+
+        logger.info(
+            f"[批量转运] 5ml过滤后保留 {len(filtered_plates)}/{len(vial_plates)} 块板"
+        )
         
         # ========== 步骤2：依次转运每个分液瓶板（去重，同一瓶板只转运一次）==========
-        results = []
+        results = list(skip_results)
         success_count = 0
-        failed_count = 0
+        failed_count = sum(1 for r in skip_results if r.get("status") == "failed")
         transferred_material_ids = set()  # ✅ 记录已转运的materialId
         
         logger.info(
-            f"[批量转运] 开始转运 {len(vial_plates)} 个订单的分液瓶板 → "
+            f"[批量转运] 开始转运 {len(filtered_plates)} 块5ml分液瓶板 → "
             f"{target_device}.{target_location}"
         )
         
-        for idx, plate_info in enumerate(vial_plates, 1):
+        for idx, plate_info in enumerate(filtered_plates, 1):
             try:
-                # ✅ 检查 plate_info 是否有效
-                if not plate_info or not isinstance(plate_info, dict):
-                    logger.error(
-                        f"[批量转运] ❌ [{idx}/{len(vial_plates)}] 分液瓶板信息无效: {plate_info}"
-                    )
-                    results.append({
-                        "index": idx,
-                        "orderCode": "N/A",
-                        "materialId": "N/A",
-                        "status": "failed",
-                        "error": "分液瓶板信息无效或为空"
-                    })
-                    failed_count += 1
-                    continue
-                
                 material_id = plate_info.get('materialId')
                 order_code = plate_info.get('orderCode', 'N/A')
                 
                 logger.info(f"\n{'='*60}")
-                logger.info(f"[批量转运] 处理 [{idx}/{len(vial_plates)}]")
+                logger.info(f"[批量转运] 处理 [{idx}/{len(filtered_plates)}]")
                 logger.info(f"  orderCode: {order_code}")
                 logger.info(f"  materialId: {material_id[:20] if material_id else 'N/A'}...")
+                logger.info(f"  typeName: {plate_info.get('typeName', 'N/A')}")
                 
                 # ✅ 检查是否已转运（同一物理瓶板只转运一次）
                 if material_id in transferred_material_ids:
@@ -4137,11 +4242,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     "result": result
                 })
                 success_count += 1
-                logger.info(f"[批量转运] ✅ [{idx}/{len(vial_plates)}] 转运成功")
+                logger.info(f"[批量转运] ✅ [{idx}/{len(filtered_plates)}] 转运成功")
                 
             except Exception as e:
                 logger.error(
-                    f"[批量转运] ❌ [{idx}/{len(vial_plates)}] 失败: {str(e)}"
+                    f"[批量转运] ❌ [{idx}/{len(filtered_plates)}] 失败: {str(e)}"
                 )
                 results.append({
                     "index": idx,
@@ -4166,7 +4271,18 @@ class BioyondCellWorkstation(BioyondWorkstation):
         logger.info(f"  成功: {summary['success']} ✅")
         logger.info(f"  失败: {summary['failed']} ❌")
         logger.info(f"{'='*60}\n")
-        
+
+        # 有板没搬成功必须让本 action 失败：否则工作流会继续往下跑
+        # transfer_1_to_2 / 扣电组装，而料根本没到位。
+        if failed_count > 0:
+            fail_details = "; ".join(
+                f"{r.get('orderCode')}/{(r.get('materialId') or '')[:8]}: {r.get('error')}"
+                for r in results if r.get("status") == "failed"
+            )
+            raise BioyondException(
+                f"3-2-1 批量转运有 {failed_count}/{len(filtered_plates)} 块板失败: {fail_details}"
+            )
+
         return summary
     
     def _transfer_single_vial_plate(
@@ -4197,29 +4313,44 @@ class BioyondCellWorkstation(BioyondWorkstation):
             raise ValueError(f"无法从 locationId 解析仓库和槽位: {location_id}")
         
         logger.info(
-            f"[自动转运] 分液瓶板位置: {wh_name}[{slot_name}], "
+            f"[自动转运] 分液瓶板资源树位置: {wh_name}[{slot_name}], "
             f"materialId={material_id}"
         )
-        
-        # 步骤2：获取 warehouse_id
-        warehouse_id = self._get_warehouse_id(wh_name)
-        
-        # 步骤3：确定坐标（优先级：vial_plate_info 预存 > source_pos_fallback > 槽位计算）
-        if all(k in vial_plate_info for k in ("source_x", "source_y", "source_z")):
+
+        # 步骤2：确定物理来源。321 的来源仓库只能是自动堆栈-左（WH3），
+        # 与 locationId 解析出的 wh_name 无关 —— 后者常是配液站内的临时槽位
+        # （如 小分液瓶堆栈[C03]），拿它的名字去查 uuid + 按槽位标签硬算坐标
+        # 会得到一个不存在的库位（C03→(3,3,1)），LIMS 直接不建单。
+        warehouse_id = self._WH_ID_AUTO_STACK_LEFT
+
+        # 步骤3：坐标优先实时查库定位（权威），失败再退到下单时的快照
+        located = self._locate_material_in_warehouse(warehouse_id, material_id)
+        if located:
+            x, y, z = located
+            logger.info(f"[自动转运] 使用实时定位坐标: ({x}, {y}, {z})")
+        elif vial_plate_info.get("source_found"):
             x = vial_plate_info["source_x"]
             y = vial_plate_info["source_y"]
             z = vial_plate_info["source_z"]
-            logger.info(f"[自动转运] 使用物料信息坐标: ({x}, {y}, {z})")
+            logger.warning(
+                f"[自动转运] 实时定位未命中，退用下单时快照坐标: ({x}, {y}, {z})"
+            )
         elif source_pos_fallback:
             x = source_pos_fallback.get("x", 1)
             y = source_pos_fallback.get("y", 1)
             z = source_pos_fallback.get("z", 1)
-            logger.info(f"[自动转运] 使用 source_pos 兜底坐标: ({x}, {y}, {z})")
+            logger.warning(f"[自动转运] 使用调用方指定的兜底坐标: ({x}, {y}, {z})")
         else:
-            x, y, z = self._slot_to_coordinates(slot_name)
-            logger.info(f"[自动转运] 按槽位计算坐标: ({x}, {y}, {z})")
-        
-        # 步骤4：调用物理转运
+            # 没有任何可信坐标时必须放弃：默认 (1,1,1) 指向 A01，
+            # 那里很可能是另一块板，搬过去就是转错板。
+            raise ValueError(
+                f"分液瓶板不在自动堆栈-左，且无可信源坐标，321 无法转运: "
+                f"materialId={material_id}, 资源树位置={wh_name}[{slot_name}]。"
+                f"请确认配液已结束且该板已转运到自动堆栈-左"
+            )
+
+        # 步骤4：调用物理转运。失败会抛异常，由调用方记为 failed；
+        # 绝不能在物理没动的情况下往下走资源树同步。
         lims_result = self.transfer_3_to_2_to_1(
             source_wh_id=warehouse_id,
             source_x=x,
@@ -4229,16 +4360,26 @@ class BioyondCellWorkstation(BioyondWorkstation):
         logger.info(f"[LIMS转运] 完成: {lims_result}")
         
         # 步骤5：资源树数字转运
+        # warehouse[slot] 语义：满槽时 sites[idx] 已被替换为瓶板对象；
+        # 空槽时仍是原始 ResourceHolder。绝不能把 holder 当瓶板转运。
         try:
-            # 获取 warehouse 对象
             warehouse = self.deck.get_resource(wh_name)
             if not warehouse:
                 raise ValueError(f"资源树中未找到仓库: {wh_name}")
-            
-            # 通过槽位名称直接访问
-            vial_plate = warehouse[slot_name]
-            
-            if vial_plate:
+
+            site_obj = warehouse[slot_name]
+            if isinstance(site_obj, ResourceHolder):
+                vial_plate = getattr(site_obj, "resource", None)
+            else:
+                vial_plate = site_obj
+
+            if vial_plate is None or getattr(vial_plate, "unilabos_uuid", None) is None:
+                logger.warning(
+                    f"[资源同步] 槽位 {wh_name}[{slot_name}] 无有效瓶板对象"
+                    f"（site={getattr(site_obj, 'name', site_obj)}, "
+                    f"plate={getattr(vial_plate, 'name', None)}），跳过资源树同步"
+                )
+            else:
                 # ========== 获取目标资源对象 ==========
                 logger.info(
                     f"[资源同步] 准备目标资源: {target_device}.{target_location}"
@@ -4271,11 +4412,6 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.info(
                     f"[资源同步] ✅ 成功: {vial_plate.name} → "
                     f"{target_device}.{target_location}"
-                )
-            else:
-                logger.warning(
-                    f"[资源同步] ⚠️ 警告: {wh_name}[{slot_name}] 槽位为空, "
-                    f"可能资源树未及时更新"
                 )
         except Exception as e:
             logger.error(f"[资源同步] ❌ 失败: {e}")
@@ -4358,29 +4494,76 @@ class BioyondCellWorkstation(BioyondWorkstation):
     def _get_warehouse_id(self, warehouse_name: str) -> str:
         """
         获取仓库的 warehouse_id (uuid)
-        
-        带降级逻辑：如果配置缺失，使用默认值（自动堆栈-左）
-        
+
+        配置缺失时返回空串。这里**不做**"回退到自动堆栈-左"的降级：
+        拿别的仓库 uuid 配上本仓库的坐标去建单，等于让机械臂去另一个仓库的
+        同名坐标取板，要么建单失败，要么直接搬走那个坐标上的别的板。
+
         Args:
             warehouse_name: 仓库名称，例如 "自动堆栈-左"
-        
+
         Returns:
-            warehouse_id
+            warehouse_id；未配置时返回 ""
         """
         warehouse_mapping = self.bioyond_config.get("warehouse_mapping", {})
         wh_data = warehouse_mapping.get(warehouse_name, {})
-        warehouse_id = wh_data.get("uuid")
-        
+        warehouse_id = wh_data.get("uuid") or ""
+
         if not warehouse_id:
-            # 降级：使用默认值
-            default_uuid = "3a19debc-84b4-0359-e2d4-b3beea49348b"
-            logger.warning(
-                f"仓库 '{warehouse_name}' 的 uuid 未配置, "
-                f"使用默认值: {default_uuid}"
+            logger.error(
+                f"仓库 '{warehouse_name}' 的 uuid 未在 warehouse_mapping 中配置，"
+                f"无法用它作为转运来源仓库"
             )
-            warehouse_id = default_uuid
-        
+
         return warehouse_id
+
+    def _locate_material_in_warehouse(
+        self, wh_id: str, material_id: str
+    ) -> Optional[Tuple[int, int, int]]:
+        """
+        查 warehouse-info(2.38)，按 holdMId 在指定仓库中定位物料，返回其 (x, y, z)。
+
+        这是转运源坐标的权威来源：配液报告里的坐标是**下单时**的快照，板子在
+        配液结束后才被搬进自动堆栈-左，快照往往对不上或压根没有该仓库的记录。
+
+        Args:
+            wh_id: 仓库 uuid
+            material_id: 物料（瓶板）的 materialId
+
+        Returns:
+            命中则返回 (x, y, z)；仓库里没有这块板或查询失败则返回 None
+        """
+        resp = self._post_lims(
+            "/api/lims/storage/warehouse-info",
+            {"whId": wh_id, "includeDetail": True},
+        )
+        if not isinstance(resp, dict) or resp.get("code") != 1:
+            logger.warning(f"[库位定位] 查询仓库 {wh_id} 失败: {resp}")
+            return None
+
+        data = resp.get("data") or {}
+        wh_display = f"{data.get('name') or wh_id}"
+        for loc in (data.get("locations") or []):
+            if loc.get("holdMId") == material_id:
+                x = int(loc.get("x") or 1)
+                y = int(loc.get("y") or 1)
+                z = int(loc.get("z") or 1)
+                logger.info(
+                    f"[库位定位] ✅ 在 {wh_display} 命中: 库位={loc.get('code')}, "
+                    f"坐标=({x},{y},{z}), 物料={loc.get('holdMName')} "
+                    f"({loc.get('holdMTypeName')})"
+                )
+                return (x, y, z)
+
+        occupied = [
+            f"{loc.get('code')}={loc.get('holdMTypeName') or '空'}"
+            for loc in (data.get("locations") or [])
+        ]
+        logger.warning(
+            f"[库位定位] ❌ {wh_display} 中未找到 materialId={material_id}；"
+            f"当前占用情况: {occupied}"
+        )
+        return None
     
     def _slot_to_coordinates(self, slot_name: str) -> Tuple[int, int, int]:
         """
@@ -4838,11 +5021,21 @@ class BioyondCellWorkstation(BioyondWorkstation):
         order_data = response.get("data") or {}
         order_code = order_data.get("orderCode")
         if not order_code:
-            logger.error("上料任务未返回有效 orderCode！")
-            return response
+            # data=None 表示 LIMS 根本没建单（常见原因：该坐标在来源仓库不存在，
+            # 或库位为空）。绝不能当成功返回，否则调用方会继续做资源树同步 / 下一步
+            # 1→2 转运，而板子其实一步都没动。
+            raise BioyondException(
+                f"3-2-1 上料任务未创建（LIMS 未返回 orderCode）: "
+                f"来源仓库={source_wh_id}, 坐标=({source_x},{source_y},{source_z}), "
+                f"响应={response}"
+            )
         result = self.wait_for_order_finish(
             order_code, expected_order_id=order_data.get("orderId")
         )
+        if result.get("status") != "success":
+            raise BioyondException(
+                f"3-2-1 上料任务未成功完成: orderCode={order_code}, 结果={result}"
+            )
         return result
 
     def transfer_3_to_2(self,
@@ -4885,14 +5078,21 @@ class BioyondCellWorkstation(BioyondWorkstation):
         order_data = response.get("data") or {}
         order_code = order_data.get("orderCode") if isinstance(order_data, dict) else None
         if not order_code:
-            logger.error("[transfer_3_to_2] 转运任务未返回有效 orderCode！")
-            return response
+            raise BioyondException(
+                f"[transfer_3_to_2] 转运任务未创建（LIMS 未返回 orderCode）: "
+                f"来源仓库={source_wh_id}, 坐标=({source_x},{source_y},{source_z}), "
+                f"响应={response}"
+            )
         
         logger.info(f"[transfer_3_to_2] 转运任务已创建: {order_code}")
         result = self.wait_for_order_finish(
             order_code,
             expected_order_id=order_data.get("orderId") if isinstance(order_data, dict) else None,
         )
+        if result.get("status") != "success":
+            raise BioyondException(
+                f"[transfer_3_to_2] 转运任务未成功完成: orderCode={order_code}, 结果={result}"
+            )
         logger.info(f"[transfer_3_to_2] 转运任务完成: {order_code}")
         return result
 
@@ -4918,12 +5118,19 @@ class BioyondCellWorkstation(BioyondWorkstation):
             order_code = data_field
         
         if not order_code:
-            logger.error(f"[transfer_1_to_2] 转运任务未返回有效 orderCode！响应: {response}")
-            return response
+            # 典型场景：上一步 321 其实没搬成功，1 号仓没有板可搬，LIMS 直接不建单。
+            raise BioyondException(
+                f"[transfer_1_to_2] 转运任务未创建（LIMS 未返回 orderCode）: 响应={response}。"
+                f"请确认 1 号仓已有待转运物料（上一步 3→2→1 是否真的成功）"
+            )
         
         expected_oid = data_field.get("orderId") if isinstance(data_field, dict) else None
         logger.info(f"[transfer_1_to_2] 转运任务已创建: {order_code}")
         result = self.wait_for_order_finish(order_code, expected_order_id=expected_oid)
+        if result.get("status") != "success":
+            raise BioyondException(
+                f"[transfer_1_to_2] 转运任务未成功完成: orderCode={order_code}, 结果={result}"
+            )
         logger.info(f"[transfer_1_to_2] 转运任务完成: {order_code}")
         return result
    
