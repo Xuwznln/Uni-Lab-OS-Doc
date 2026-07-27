@@ -159,13 +159,32 @@ _msg_converter: Dict[Type, Any] = {
             if x.get("position", None) is not None
             else Pose()
         ),
-        config=json.dumps(x.get("config", {})),
+        config=json.dumps(obtain_config_with_barcode(x)),
         data=json.dumps(obtain_data_with_uuid(x)),
     ),
 }
 
+def obtain_config_with_barcode(x: dict):
+    """Resource msg 无 barcode 字段：根字段形态（ResourceDict dump）的条码归位回 config
+    （PLR Barcode dict），否则结构化 msg 通路丢条码；老形态（config 自带）原样不动。"""
+    config = dict(x.get("config") or {})
+    barcode = x.get("barcode", "")
+    if barcode and not isinstance(barcode, dict) and "barcode" not in config:
+        config["barcode"] = {
+            "data": barcode,
+            "symbology": x.get("barcode_symbology", "") or "",
+            "position_on_resource": "front",
+        }
+    return config
+
 def obtain_data_with_uuid(x: dict):
-    data = x.get("data", {})
+    from unilabos.resources.resource_tracker import TRACKER_STATE_KEYS
+
+    # 液体状态根字段形态（liquids 等）组装回 data，msg 通路保持老完整形态；老形态原样不动
+    data = dict(x.get("data") or {})
+    for state_key in TRACKER_STATE_KEYS:
+        if x.get(state_key) is not None and state_key not in data:
+            data[state_key] = x[state_key]
     data["unilabos_uuid"] = x.get("uuid", None)
     return data
 

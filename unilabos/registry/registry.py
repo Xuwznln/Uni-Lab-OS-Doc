@@ -73,6 +73,26 @@ from msgcenterpy.instances.json_schema_instance import JSONSchemaMessageInstance
 from msgcenterpy.instances.ros2_instance import ROS2MessageInstance
 
 _module_hash_cache: Dict[str, Optional[str]] = {}
+_DEFAULT_ACTION_DURATION_SECONDS = 60.0
+
+
+def _normalize_action_extensions(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """补齐并归一化动作的物料锁与预计时长元数据。"""
+    normalized = dict(config or {})
+    raw_lock_resource = normalized.get("lock_resource")
+    if raw_lock_resource is None:
+        raw_lock_resource = normalized.get("materials_lock")
+    if raw_lock_resource is None:
+        lock_resource = []
+    elif isinstance(raw_lock_resource, str):
+        lock_resource = [raw_lock_resource]
+    else:
+        lock_resource = list(raw_lock_resource)
+    normalized["lock_resource"] = lock_resource
+    normalized.pop("materials_lock", None)
+    normalized.setdefault("estimate_duration_fixed", _DEFAULT_ACTION_DURATION_SECONDS)
+    normalized.setdefault("estimate_duration_express", "")
+    return normalized
 
 
 @singleton
@@ -781,7 +801,10 @@ class Registry:
                     tc = get_topic_config(method.fget)
                     if tc:
                         status_entry["topic_config"] = tc
-                result["status_methods"][name] = status_entry
+                status_name = status_entry.get("topic_config", {}).get("name") or name
+                status_entry["name"] = status_name
+                status_entry["method_name"] = name
+                result["status_methods"][status_name] = status_entry
 
                 if method.fset:
                     setter_info = self._analyze_method_signature(method.fset)
@@ -799,40 +822,45 @@ class Registry:
             if is_not_action(method):
                 continue
 
-            # @topic_config 装饰的非 property 方法视为状态方法，不作为 action
-            tc = get_topic_config(method)
-            if tc:
-                return_type = self._get_return_type_from_method(method)
-                prop_name = name[4:] if name.startswith("get_") else name
-                result["status_methods"][prop_name] = {
-                    "name": prop_name,
-                    "return_type": return_type,
-                    "topic_config": tc,
-                }
-                continue
-
             method_info = self._analyze_method_signature(method)
             action_meta = get_action_meta(method)
 
             if action_meta:
+                action_name = action_meta.get("action_name") or name
                 action_type = action_meta.get("action_type")
                 if action_type is not None:
-                    result["explicit_actions"][name] = {
+                    result["explicit_actions"][action_name] = {
+                        "method_name": name,
                         "method_info": method_info,
                         "action_meta": action_meta,
                     }
                 else:
-                    result["decorated_no_type_actions"][name] = {
+                    result["decorated_no_type_actions"][action_name] = {
+                        "method_name": name,
                         "method_info": method_info,
                         "action_meta": action_meta,
                     }
             elif has_action_decorator(method):
                 result["explicit_actions"][name] = {
+                    "method_name": name,
                     "method_info": method_info,
                     "action_meta": action_meta or {},
                 }
             else:
-                result["action_methods"][name] = method_info
+                # @topic_config 装饰的非 property 方法视为状态方法；显式 @action 优先。
+                tc = get_topic_config(method)
+                if tc:
+                    return_type = self._get_return_type_from_method(method)
+                    default_name = name[4:] if name.startswith("get_") else name
+                    prop_name = tc.get("name") or default_name
+                    result["status_methods"][prop_name] = {
+                        "name": prop_name,
+                        "method_name": name,
+                        "return_type": return_type,
+                        "topic_config": tc,
+                    }
+                else:
+                    result["action_methods"][name] = method_info
 
         return result
 
@@ -904,6 +932,7 @@ class Registry:
 
         def _build_json_command_entry(method_name, method_info, action_args=None):
             """构建 UniLabJsonCommand 类型的 action entry"""
+            action_extensions = _normalize_action_extensions(action_args)
             is_async = method_info.get("is_async", False)
             type_str = "UniLabJsonCommandAsync" if is_async else "UniLabJsonCommand"
             params = method_info.get("params", [])
@@ -912,7 +941,7 @@ class Registry:
             goal_schema = self._generate_schema_from_ast_params(params, method_name, method_doc, imap)
 
             if action_args is not None:
-                action_name = action_args.get("action_name", method_name)
+                action_name = action_args.get("action_name") or method_name
                 if action_args.get("auto_prefix"):
                     action_name = f"auto-{action_name}"
             else:
@@ -960,6 +989,9 @@ class Registry:
 
             entry = {
                 "type": type_str,
+                "displayname": resolve_registry_displayname(
+                    (action_args or {}).get("displayname"), action_name
+                ),
                 "goal": goal,
                 "feedback": (action_args or {}).get("feedback") or {},
                 "result": (action_args or {}).get("result") or {},
@@ -972,11 +1004,18 @@ class Registry:
                 "goal_default": goal_default,
                 "handles": handles,
                 "placeholder_keys": pk,
+                "lock_resource": action_extensions["lock_resource"],
+                "estimate_duration_fixed": action_extensions["estimate_duration_fixed"],
+                "estimate_duration_express": action_extensions["estimate_duration_express"],
             }
+            if action_name.removeprefix("auto-") != method_name:
+                entry["method_name"] = method_name
             if (action_args or {}).get("always_free") or method_info.get("always_free"):
                 entry["always_free"] = True
             _fb_iv = (action_args or {}).get("feedback_interval", method_info.get("feedback_interval", 1.0))
             entry["feedback_interval"] = _fb_iv
+            if (action_args or {}).get("error_policy"):
+                entry["error_policy"] = action_args["error_policy"]
             nt = normalize_enum_value((action_args or {}).get("node_type"), NodeType)
             if nt:
                 entry["node_type"] = nt
@@ -1001,8 +1040,9 @@ class Registry:
             action_type = action_args.get("action_type")
             if not action_type:
                 continue
+            action_extensions = _normalize_action_extensions(action_args)
 
-            action_name = action_args.get("action_name", method_name)
+            action_name = action_args.get("action_name") or method_name
             if action_args.get("auto_prefix"):
                 action_name = f"auto-{action_name}"
 
@@ -1100,6 +1140,9 @@ class Registry:
 
             action_entry = {
                 "type": action_type.split(":")[-1],
+                "displayname": resolve_registry_displayname(
+                    action_args.get("displayname"), action_name
+                ),
                 "goal": goal,
                 "feedback": feedback,
                 "result": result,
@@ -1110,11 +1153,18 @@ class Registry:
                     **detect_placeholder_keys(method_params),
                     **(action_args.get("placeholder_keys") or {}),
                 },
+                "lock_resource": action_extensions["lock_resource"],
+                "estimate_duration_fixed": action_extensions["estimate_duration_fixed"],
+                "estimate_duration_express": action_extensions["estimate_duration_express"],
             }
+            if action_name.removeprefix("auto-") != method_name:
+                action_entry["method_name"] = method_name
             if action_args.get("always_free") or method_info.get("always_free"):
                 action_entry["always_free"] = True
             _fb_iv = action_args.get("feedback_interval", method_info.get("feedback_interval", 1.0))
             action_entry["feedback_interval"] = _fb_iv
+            if action_args.get("error_policy"):
+                action_entry["error_policy"] = action_args["error_policy"]
             nt = normalize_enum_value(action_args.get("node_type"), NodeType)
             if nt:
                 action_entry["node_type"] = nt
@@ -1161,6 +1211,7 @@ class Registry:
             "icon": ast_meta.get("icon", ""),
             "init_param_schema": init_schema,
             "version": ast_meta.get("version", "1.0.0"),
+            "metadata": dict(ast_meta.get("metadata") or {}),
             "registry_type": "device",
             "file_path": file_path,
         }
@@ -1252,6 +1303,7 @@ class Registry:
             "config_info": [],
             "description": ast_meta.get("description", ""),
             "displayname": resolve_registry_displayname(ast_meta.get("displayname"), resource_id),
+            "metadata": dict(ast_meta.get("metadata") or {}),
             "file_path": file_path,
         }
 
@@ -1702,6 +1754,7 @@ class Registry:
             resource_info["displayname"] = resolve_registry_displayname(
                 resource_info.get("displayname"), resource_id
             )
+            resource_info.setdefault("metadata", {})
             if "config_info" in resource_info:
                 del resource_info["config_info"]
             if "file_path" in resource_info:
@@ -1882,6 +1935,7 @@ class Registry:
             device_config["displayname"] = resolve_registry_displayname(
                 device_config.get("displayname"), device_id
             )
+            device_config.setdefault("metadata", {})
             if "icon" not in device_config:
                 device_config["icon"] = ""
             if "handles" not in device_config:
@@ -2045,9 +2099,13 @@ class Registry:
                             else {}
                         )
                         self._apply_docstring_param_metadata(goal_schema_for_docs, doc_info, entry_goal)
+                        action_extensions = _normalize_action_extensions(old_cfg)
 
                         entry = {
                             "type": entry_type,
+                            "displayname": resolve_registry_displayname(
+                                old_cfg.get("displayname"), action_key
+                            ),
                             "goal": entry_goal,
                             "feedback": entry_feedback,
                             "result": entry_result,
@@ -2055,6 +2113,11 @@ class Registry:
                             "goal_default": entry_goal_default,
                             "handles": old_cfg.get("handles", []),
                             "placeholder_keys": merged_pk,
+                            "lock_resource": action_extensions["lock_resource"],
+                            "estimate_duration_fixed": action_extensions["estimate_duration_fixed"],
+                            "estimate_duration_express": action_extensions[
+                                "estimate_duration_express"
+                            ],
                         }
                         if v.get("always_free"):
                             entry["always_free"] = True
@@ -2096,6 +2159,12 @@ class Registry:
                     sorted(device_config["class"]["action_value_mappings"].items())
                 )
                 for action_name, action_config in device_config["class"]["action_value_mappings"].items():
+                    action_config["displayname"] = resolve_registry_displayname(
+                        action_config.get("displayname"), action_name
+                    )
+                    normalized_action_config = _normalize_action_extensions(action_config)
+                    action_config.pop("materials_lock", None)
+                    action_config.update(normalized_action_config)
                     if "handles" not in action_config:
                         action_config["handles"] = {}
                     elif isinstance(action_config["handles"], list):

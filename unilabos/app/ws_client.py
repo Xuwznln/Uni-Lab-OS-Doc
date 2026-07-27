@@ -387,6 +387,8 @@ class MessageProcessor:
         self.device_manager = device_manager
         self.queue_processor = None  # 延迟设置
         self.websocket_client = None  # 延迟设置
+        self.edge_scheduler = None  # 延迟设置(scheduler.integration 注入)：Edge 工作流整图调度器
+        self.inventory_service = None  # 延迟设置(scheduler.integration 注入)：Edge 仓储唯一事实源
         self.session_id = str(uuid.uuid4())[:6]  # 产生一个随机的session_id
 
         # WebSocket连接
@@ -641,6 +643,12 @@ class MessageProcessor:
                 await self._handle_query_action_lock(message_data)
             elif message_type == "job_start":
                 await self._handle_job_start(message_data)
+            elif message_type == "workflow_start":
+                await self._handle_workflow_start(message_data)
+            elif message_type == "workflow_cancel":
+                await self._handle_workflow_cancel(message_data)
+            elif message_type == "inventory_command":
+                await self._handle_inventory_command(message_data)
             elif message_type == "cancel_action" or message_type == "cancel_task":
                 await self._handle_cancel_action(message_data)
             elif message_type == "add_material":
@@ -661,6 +669,8 @@ class MessageProcessor:
                 await self._handle_device_manage(message_data, "remove")
             elif message_type == "request_restart":
                 await self._handle_request_restart(message_data)
+            elif message_type == "job_error_decision":
+                await self._handle_job_error_decision(message_data)
             else:
                 logger.debug(f"[MessageProcessor] Unknown message type: {message_type}")
 
@@ -752,6 +762,179 @@ class MessageProcessor:
             return
         self.websocket_client.report_all_action_locks()
         logger.trace("[MessageProcessor] query_action_lock: re-reported all action locks")
+
+    async def _handle_workflow_start(self, data: Dict[str, Any]):
+        """处理workflow_start消息：云端下发整图，交给 Edge 调度器拆解/执行。
+
+        payload 形状（EdgeScheduler spec_from_dict）:
+            workflow_id / task_id（云端 workflow_task.uuid）/ priority / lab_id
+            nodes:   [{id, device_id, action_name, action_type, param, node_type, ...}]
+                     node_type 取值对齐云端枚举 Group/ILab/py_script/tool_call/manual_confirm
+            edges:   [{source_node_id, target_node_id,
+                       source_handle_uuid, target_handle_uuid,  # 规范引用（workflow_edge 定稿）
+                       source_handle_key, target_handle_key}]   # 无 uuid 时的兼容寻址
+            handles: [{handle_key, data_source, data_key, node_id, io_type, uuid?}]
+        整图即云端 workflow_task.workflow_snapshot 的展开（任务创建时固化，不随
+        工作流编辑变化）；终态回报词汇同 workflow_task.status（success/failed/canceled）。
+        """
+        workflow_id = str(data.get("workflow_id", "") or "")
+        if self.edge_scheduler is None:
+            logger.error(
+                f"[MessageProcessor] workflow_start {workflow_id} ignored: edge scheduler not attached"
+            )
+            self._send_workflow_status(data, "failed", "edge scheduler not attached")
+            return
+
+        try:
+            from unilabos.app.scheduler.models import spec_from_dict
+
+            spec = spec_from_dict(data)
+            result = self.edge_scheduler.submit_workflow(spec)
+            logger.info(
+                f"[MessageProcessor] workflow_start {workflow_id}: "
+                f"{len(result.get('dispatched', []))} job(s) dispatched"
+            )
+        except ValueError as e:
+            # 重复提交：幂等处理，只打日志不回失败（与 job_start 幂等语义一致）
+            logger.warning(f"[MessageProcessor] workflow_start duplicate ignored: {e}")
+        except Exception as e:
+            logger.error(f"[MessageProcessor] workflow_start {workflow_id} failed: {e}")
+            logger.error(traceback.format_exc())
+            self._send_workflow_status(data, "failed", str(e))
+
+    async def _handle_workflow_cancel(self, data: Dict[str, Any]):
+        """处理workflow_cancel消息：取消 Edge 调度的工作流及其在执行的设备 job。"""
+        workflow_id = str(data.get("workflow_id", "") or "")
+        if self.edge_scheduler is None:
+            logger.error(
+                f"[MessageProcessor] workflow_cancel {workflow_id} ignored: edge scheduler not attached"
+            )
+            return
+
+        # 先取下正在执行的 job 列表，再取消调度器状态
+        snapshot = self.edge_scheduler.snapshot()
+        inflight_job_ids = [
+            job_id
+            for job_id, j in snapshot.get("inflight_jobs", {}).items()
+            if j.get("workflow_id") == workflow_id
+        ]
+        cancelled = self.edge_scheduler.cancel_workflow(workflow_id)
+        if not cancelled:
+            logger.warning(f"[MessageProcessor] workflow_cancel: workflow {workflow_id} not found")
+            return
+
+        # 取消设备侧正在执行/排队的 job（复用 cancel_action 的 HostNode 取消路径）
+        for job_id in inflight_job_ids:
+            try:
+                if self.websocket_client:
+                    self.websocket_client.cancel_goal(job_id)
+            except Exception as e:
+                logger.warning(f"[MessageProcessor] cancel inflight job {job_id[:8]} failed: {e}")
+        logger.info(
+            f"[MessageProcessor] workflow_cancel {workflow_id}: "
+            f"{len(inflight_job_ids)} inflight job(s) cancelled"
+        )
+
+    async def _handle_inventory_command(self, data: Dict[str, Any]):
+        """处理inventory_command消息：云端仓储写命令下发 Edge 幂等执行。
+
+        envelope: command_id / expected_version / warehouse_zone_id / type / actor / payload
+        （type ∈ inventory.template.upsert|template.delete|inbound|reserve|release|consume|quarantine,
+          material.deploy|move|detach|set_parent|content.set|content.clear|consume|discard|adjust；
+          set_parent 设父物料（parent_material_uuid ≡ 树父，单一父），slot_id 可选具名位）
+        Edge 回 inventory_command_result（accepted/rejected/completed）；
+        最终状态由领域事件（sync_outbox → 云端 projection）刷新，云端不直接改库存行。
+        """
+        command_id = str(data.get("command_id", "") or "")
+        if self.inventory_service is None:
+            logger.error(
+                f"[MessageProcessor] inventory_command {command_id} ignored: inventory not attached"
+            )
+            self._send_inventory_command_result(
+                {"command_id": command_id, "status": "rejected",
+                 "error": "inventory service not attached"}
+            )
+            return
+        try:
+            from unilabos.app.scheduler.inventory.commands import execute_command
+
+            response = execute_command(self.inventory_service, data)
+        except Exception as e:
+            logger.error(f"[MessageProcessor] inventory_command {command_id} failed: {e}")
+            logger.error(traceback.format_exc())
+            response = {"command_id": command_id, "status": "rejected", "error": str(e)}
+        self._send_inventory_command_result(response)
+
+    def _send_inventory_command_result(self, response: Dict[str, Any]) -> None:
+        """回报命令结果：WS 消息 + HTTP 回调双路（云端权威状态机走 HTTP 接口）。"""
+        message = {
+            "action": "inventory_command_result",
+            "data": {**response, "timestamp": time.time()},
+        }
+        self.send_message(message)
+
+        def _http_callback():
+            try:
+                from unilabos.app.web.client import http_client
+
+                http_client._session.post(
+                    f"{http_client.remote_addr}/edge/inventory/command_result",
+                    json={
+                        "command_id": response.get("command_id", ""),
+                        "status": response.get("status", ""),
+                        "result": response.get("result") or {},
+                        "error": response.get("error", ""),
+                    },
+                    timeout=15,
+                )
+            except Exception as e:  # 回调失败不影响本地执行结果（云端可轮询补偿）
+                logger.warning(f"[MessageProcessor] inventory_command_result http callback failed: {e}")
+
+        threading.Thread(target=_http_callback, daemon=True, name="inv-cmd-result").start()
+
+    def _send_workflow_status(self, data: Dict[str, Any], status: str, error: str = "") -> None:
+        """向云端回报工作流状态（workflow_status 消息）。"""
+        message = {
+            "action": "workflow_status",
+            "data": {
+                "workflow_id": data.get("workflow_id", ""),
+                "task_id": data.get("task_id", "") or data.get("workflow_id", ""),
+                "status": status,
+                "error": error,
+                "timestamp": time.time(),
+            },
+        }
+        self.send_message(message)
+
+    async def _handle_job_error_decision(self, data: Dict[str, Any]):
+        """Route one approved error option/result to the exact pending job."""
+
+        decision_id = str(data.get("decision_id") or "")
+        job_id = str(data.get("job_id") or "")
+        device_id = str(data.get("device_id") or "")
+        if not decision_id and not job_id:
+            logger.warning("[MessageProcessor] job_error_decision missing decision_id and job_id")
+            return
+        if not device_id:
+            logger.warning("[MessageProcessor] job_error_decision missing device_id")
+            return
+
+        host_node = HostNode.get_instance(0)
+        if host_node is None:
+            logger.warning(f"[MessageProcessor] HostNode unavailable, drop error decision job={job_id[:8]}")
+            return
+        wrapper = host_node.devices_instances.get(device_id)
+        base_node = getattr(wrapper, "_ros_node", None) if wrapper is not None else None
+        if base_node is None or not hasattr(base_node, "handle_action_error_decision"):
+            logger.warning(
+                f"[MessageProcessor] Device {device_id} cannot handle error decision job={job_id[:8]}"
+            )
+            return
+        if not base_node.handle_action_error_decision(decision_id, job_id, dict(data)):
+            logger.warning(
+                f"[MessageProcessor] No pending error decision matched "
+                f"decision={decision_id} job={job_id[:8]} device={device_id}"
+            )
 
     async def _handle_job_start(self, data: Dict[str, Any]):
         """处理job_start消息：服务端直接下发，本地直跑或排队(不再要求先 query_action_state)。"""
@@ -1682,6 +1865,25 @@ class WebSocketClient(BaseCommunicationClient):
         self.message_processor.send_message(message)
 
         logger.trace(f"[WebSocketClient] Job status published: {job_log} - {status}")
+
+    def publish_job_error_decision_required(self, report: Dict[str, Any]) -> bool:
+        """Send an action exception and its class-matched options for approval."""
+
+        if self.is_disabled or not self.is_connected():
+            logger.warning(
+                f"[WebSocketClient] Cannot report action error while disconnected: "
+                f"job={str(report.get('job_id', ''))[:8]} "
+                f"exception={report.get('exception_type', '')}"
+            )
+            return False
+        message = {"action": "job_error_decision_required", "data": report}
+        queued = self.message_processor.send_message(message)
+        if queued:
+            logger.info(
+                f"[WebSocketClient] Action error awaiting decision: "
+                f"decision={report.get('decision_id')} job={str(report.get('job_id', ''))[:8]}"
+            )
+        return queued
 
     def send_ping(self, ping_id: str, timestamp: float) -> None:
         """发送ping消息"""

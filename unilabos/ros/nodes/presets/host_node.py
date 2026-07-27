@@ -904,6 +904,11 @@ class HostNode(BaseROS2DeviceNode):
         action_client: ActionClient = self._action_clients[action_id]
         goal_msg = convert_to_ros_msg(action_client._action_type.Goal(), action_kwargs)
 
+        target_wrapper = self.devices_instances.get(device_id)
+        target_node = getattr(target_wrapper, "_ros_node", None) if target_wrapper is not None else None
+        if target_node is not None and hasattr(target_node, "register_job_context"):
+            target_node.register_job_context(item.job_id, item.task_id, item.action_name)
+
         # self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {str(goal_msg)[:1000]}")
         self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {action_kwargs}")
         self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {goal_msg}")
@@ -1225,6 +1230,7 @@ class HostNode(BaseROS2DeviceNode):
 
         if success:
             from unilabos.resources.graphio import physical_setup_graph
+            from unilabos.resources.resource_tracker import TRACKER_STATE_KEYS
 
             # 将资源添加到本地图中
             for node in resource_tree_set.all_nodes:
@@ -1232,14 +1238,49 @@ class HostNode(BaseROS2DeviceNode):
                 if resource_dict.get("id") not in physical_setup_graph.nodes:
                     physical_setup_graph.add_node(resource_dict["id"], **resource_dict)
                 else:
-                    physical_setup_graph.nodes[resource_dict["id"]]["data"].update(resource_dict.get("data", {}))
+                    graph_node = physical_setup_graph.nodes[resource_dict["id"]]
+                    graph_node["data"].update(resource_dict.get("data", {}))
+                    # 液体状态在根字段（与 dump 形态一致），已存在节点同步刷新，避免与 data 双真相漂移
+                    for state_key in TRACKER_STATE_KEYS:
+                        if resource_dict.get(state_key) is not None:
+                            graph_node[state_key] = resource_dict[state_key]
 
         response.response = _fast_dumps_str(uuid_mapping) if success else "FAILED"
         self.lab_logger().info(f"[Host Node-Resource] Resource tree add completed, success: {success}")
 
+    def _local_resource_nodes(
+        self, uuid: Optional[str] = None, res_id: Optional[str] = None, with_children: bool = True
+    ) -> Optional[List[dict]]:
+        """host 本地树解析（物料唯一事实源，云端物料接口已下线）；未命中返回 None。"""
+        from unilabos.hostlink.resolver import LocalResourceResolver, ResourceNotFound
+
+        if not hasattr(self, "_hostlink_resolver"):
+            self._hostlink_resolver = LocalResourceResolver(lambda: self.resources_config)
+        try:
+            return self._hostlink_resolver.resolve(uuid=uuid, res_id=res_id, with_children=with_children)
+        except ResourceNotFound:
+            return None
+
     async def _resource_tree_action_get_callback(self, data: dict, response: SerialCommand_Response):  # OK
         uuid_list: List[str] = data["data"]
         with_children: bool = data["with_children"]
+
+        # 本地树优先：全部命中直接返回；任一未命中回退旧云端接口（过渡期兜底，
+        # 云端物料下线后该兜底只会失败并抛错，行为与旧链路一致）。
+        local_nodes: List[dict] = []
+        for res_uuid in uuid_list:
+            nodes = self._local_resource_nodes(uuid=res_uuid, with_children=with_children)
+            if nodes is None:
+                local_nodes = []
+                break
+            local_nodes.extend(nodes)
+        if local_nodes:
+            response.response = json.dumps(local_nodes)
+            self.lab_logger().trace(
+                f"[Host Node-Resource] Resource tree get served locally ({len(local_nodes)} nodes)"
+            )
+            return
+
         from unilabos.app.web.client import http_client
 
         resource_response = http_client.resource_tree_get(uuid_list, with_children)
@@ -1474,15 +1515,26 @@ class HostNode(BaseROS2DeviceNode):
             响应对象，包含查询到的资源
         """
         try:
+            data = json.loads(request.command)
+            req_uuid = data.get("uuid")
+            req_id = data.get("id") if not req_uuid else None
+            if not req_uuid and not req_id:
+                raise ValueError("没有使用正确的物料 id 或 uuid")
+
+            # 本地树优先（物料唯一事实源）；未命中回退旧云端接口（过渡期兜底）
+            local_nodes = self._local_resource_nodes(
+                uuid=req_uuid, res_id=req_id, with_children=data.get("with_children", True)
+            )
+            if local_nodes is not None:
+                response.response = json.dumps(local_nodes)
+                return response
+
             from unilabos.app.web import http_client
 
-            data = json.loads(request.command)
-            if "uuid" in data and data["uuid"] is not None:
-                http_req = http_client.resource_tree_get([data["uuid"]], data["with_children"])
-            elif "id" in data:
-                http_req = http_client.resource_get(data["id"], data["with_children"])
+            if req_uuid:
+                http_req = http_client.resource_tree_get([req_uuid], data["with_children"])
             else:
-                raise ValueError("没有使用正确的物料 id 或 uuid")
+                http_req = http_client.resource_get(req_id, data["with_children"])
             response.response = json.dumps(http_req["data"])
             return response
         except Exception as e:

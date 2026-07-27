@@ -87,3 +87,63 @@ jobs:
             exit 1
           fi
           echo "检查通过：无文件变化"
+
+  networking-test:
+    # 联网测试：两个真实 unilab 进程（host + slave），ROS 层互相隔离
+    # （不同域号 + LOCALHOST 发现），slave 仍经 HostLink TCP 完成联网与物料查询；
+    # 同 job 先跑 hostlink 单元套件（协议帧/心跳/重连/doctor）。
+    name: 联网测试
+    runs-on: ubuntu-latest
+
+    env:
+      PYTHONFAULTHANDLER: "1"
+      MPLBACKEND: Agg
+      # 联网测试为进程级慢测试，显式开启（本地默认跳过）
+      UNILAB_NETWORKING_TEST: "1"
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Miniforge
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          use-mamba: true
+          channels: robostack-staging,conda-forge,uni-lab
+          channel-priority: flexible
+          activate-environment: net-env
+          auto-update-conda: false
+          show-channel-urls: true
+
+      - name: Install ROS dependencies, uv and unilabos-msgs
+        run: |
+          mamba install -n net-env --override-channels -c robostack-staging -c conda-forge -c uni-lab conda-forge::uv conda-forge::opencv robostack-staging::ros-humble-ros-core robostack-staging::ros-humble-action-msgs robostack-staging::ros-humble-std-msgs robostack-staging::ros-humble-geometry-msgs robostack-staging::ros-humble-control-msgs robostack-staging::ros-humble-nav2-msgs uni-lab::ros-humble-unilabos-msgs robostack-staging::ros-humble-cv-bridge robostack-staging::ros-humble-vision-opencv robostack-staging::ros-humble-tf-transformations robostack-staging::ros-humble-moveit-msgs robostack-staging::ros-humble-tf2-ros robostack-staging::ros-humble-tf2-ros-py conda-forge::transforms3d -y
+
+      - name: Install pip dependencies and unilabos
+        run: |
+          uv pip install -r unilabos/utils/requirements.txt
+          uv pip install pytest git+https://github.com/Xuwznln/pylabrobot.git
+          uv pip uninstall enum34 || echo "enum34 not installed, skipping"
+          uv pip install .
+
+      - name: Run hostlink unit suite
+        run: |
+          pytest tests/hostlink -v -p no:launch_testing -p no:launch_ros
+
+      - name: Run 联网测试 (two-process host/slave isolation + HostLink)
+        run: |
+          pytest tests/networking -v -p no:launch_testing -p no:launch_ros
+
+      - name: Upload process logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: networking-test-logs
+          path: /tmp/pytest-of-*/pytest-*/unilab-networking*/
+          if-no-files-found: ignore

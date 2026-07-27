@@ -123,6 +123,15 @@ class ResourceDictType(TypedDict):
     machine_name: str
     barcode: str
     barcode_symbology: str
+    liquids: Optional[List[Any]]
+    liquid_history: Optional[List[Any]]
+    unknown_counter: Optional[int]
+
+
+# 液体状态（fork VolumeTracker.serialize()）中属于物质面的键：由漏斗从 data 提升为根字段，
+# 表化映射 liquids↔current_substance、liquid_history↔substance_history、unknown_counter 随
+# 历史持久化；max_volume/thing 是规格面/冗余，留在 data。见 unilab-edge-ui/docs/protocol/cloud-mapping.md §6。
+TRACKER_STATE_KEYS = ("liquids", "liquid_history", "unknown_counter")
 
 
 # 统一的资源字典模型，parent 自动序列化为 parent_uuid，children 不序列化
@@ -149,6 +158,16 @@ class ResourceDict(BaseModel):
     barcode: str = Field(description="Material barcode", default="")  #
     # 条码码制（PLR Barcode.symbology，如 "Code 128"）；与 barcode 一同从 config 提升，回写时组装回 PLR Barcode dict
     barcode_symbology: str = Field(description="Barcode symbology / 码制", default="")
+    # 液体状态（PLR Container.serialize_state() = fork VolumeTracker.serialize()）落在 data 中，
+    # 由 get_resource_instance_from_dict 统一把物质面三键提升到根字段并移出 data（TRACKER_STATE_KEYS）；
+    # None 表示非容器/无液体状态（区别于空容器的 []/0）。回 PLR 时经 assemble_tracker_state 组装还原。
+    # liquids=当前组成（history 的派生值）；liquid_history=只追加增量记账（事实源，(name,+v) 加液、
+    # (None,-v) 按比例移除）；unknown_counter=UnknownN 命名计数器（不随历史持久化会导致重放重号）。
+    liquids: Optional[List[Any]] = Field(description="Container current liquids [(name|None, volume), ...]", default=None)
+    liquid_history: Optional[List[Any]] = Field(
+        description="Container liquid event history [(name|None, ±volume), ...]", default=None
+    )
+    unknown_counter: Optional[int] = Field(description="UnknownN naming counter for unnamed liquids", default=None)
 
     @field_serializer("parent_uuid")
     def _serialize_parent(self, parent_uuid: Optional["ResourceDict"]):
@@ -186,6 +205,29 @@ class ResourceDict(BaseModel):
     def is_root_node(self) -> bool:
         """判断资源是否为根节点"""
         return self.parent is None
+
+
+# ResourceDict 全部根级键（含别名 schema/class）。graphio 标准化白名单由此派生：
+# 新增根字段自动进入白名单，杜绝「加字段忘白名单、被搬进 config」一类漂移。
+# 守护测试：tests/resources/test_tracker_state_promotion.py::TestRootFieldContract
+RESOURCE_ROOT_FIELDS: tuple = tuple(
+    field.serialization_alias or field.alias or field_name
+    for field_name, field in ResourceDict.model_fields.items()
+)
+
+
+def assemble_tracker_state(res: "ResourceDict") -> Dict[str, Any]:
+    """把根字段液体状态组装回完整 PLR serialize_state 形态（与漏斗提升方向对称）。
+
+    根字段为 None（非容器）时不注入对应键，避免向 Plate/TipSpot 等无液体
+    追踪的资源状态里塞入未知键。
+    """
+    data = dict(res.data)
+    for state_key in TRACKER_STATE_KEYS:
+        root_val = getattr(res, state_key)
+        if root_val is not None:
+            data[state_key] = root_val
+    return data
 
 
 class GraphData(BaseModel):
@@ -247,6 +289,14 @@ class ResourceDictInstance(object):
                 content["barcode_symbology"] = config_barcode.get("symbology", "")
         elif config_barcode and not content.get("barcode"):
             content["barcode"] = config_barcode
+        # 液体状态：容器把 VolumeTracker.serialize() 落在 data 中（PLR serialize_state 的位置）。
+        # 与 barcode 同范式在此漏斗提升物质面三键到根字段并移出 data：根字段已有值则以根字段为准、
+        # 仅清理 data；data 无此键（非容器）则根字段保持 None。max_volume/thing 留在 data（规格面/冗余）。
+        for state_key in TRACKER_STATE_KEYS:
+            state_val = content["data"].pop(state_key, None)
+            if state_val is not None and content.get(state_key) is None:
+                # noinspection PyTypedDict
+                content[state_key] = state_val
         if "position" in content:
             pose = content.get("pose", {})
             if "position" not in pose:
@@ -281,6 +331,10 @@ class ResourceDictInstance(object):
         res_dict["barcode"] = (
             {"data": barcode, "symbology": symbology or "", "position_on_resource": "front"} if barcode else None
         )
+        # 液体状态根字段组装回 data（PLR serialize_state 完整形态），根键不保留在嵌套 dict 中
+        res_dict["data"] = assemble_tracker_state(self.res_content)
+        for state_key in TRACKER_STATE_KEYS:
+            res_dict.pop(state_key, None)
         return res_dict
 
 
@@ -599,7 +653,8 @@ class ResourceTreeSet(object):
         def collect_node_data(node: ResourceDictInstance, name_to_uuid: dict, all_states: dict, name_to_extra: dict):
             """一次遍历收集 name_to_uuid, all_states 和 name_to_extra"""
             name_to_uuid[node.res_content.name] = node.res_content.uuid
-            all_states[node.res_content.name] = node.res_content.data
+            # 液体状态从根字段组装回完整 serialize_state 形态，load_all_state 才能恢复 tracker
+            all_states[node.res_content.name] = assemble_tracker_state(node.res_content)
             name_to_extra[node.res_content.name] = node.res_content.extra
             name_to_extra[node.res_content.name][FRONTEND_POSE_EXTRA] = node.res_content.pose.extra
             name_to_extra[node.res_content.name][EXTRA_CLASS] = node.res_content.klass

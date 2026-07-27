@@ -4,6 +4,7 @@ import json
 import threading
 import time
 import traceback
+import uuid
 
 from unilabos.utils.tools import fast_dumps_str as _fast_dumps_str, fast_loads as _fast_loads
 from typing import (
@@ -37,6 +38,13 @@ from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialComma
 
 from unilabos.config.config import BasicConfig
 from unilabos.registry.decorators import get_topic_config
+from unilabos.registry.action_policy import (
+    ActionDecisionOutcome,
+    SUCCESS_TYPE_NORMAL,
+    SUCCESS_TYPE_OPERATOR_INTERVENTION,
+    SUCCESS_TYPE_SKIP,
+    resolve_error_options,
+)
 from unilabos.registry.placeholder_type import ResourceSlotRawInput
 from unilabos.utils.decorator import get_all_subscriptions
 
@@ -460,6 +468,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         self._cross_device_action_clients: Dict[str, ActionClient] = {}
         # 跨设备动作类型探测缓存（key: "<clean_device_id>/<function_name>"，value: 原生 Action 类型或 None）
         self._remote_action_type_cache: Dict[str, Any] = {}
+        # HostNode 在发送 goal 前按 job UUID 注入上下文；action server 消费后立即删除。
+        self._job_contexts: Dict[str, Dict[str, str]] = {}
+        self._job_contexts_lock = threading.Lock()
+        # decision_id -> {event, decision, job_id}。服务端审批结果按 decision_id 精确唤醒。
+        self._pending_action_error_decisions: Dict[str, Dict[str, Any]] = {}
+        self._pending_action_error_decisions_lock = threading.Lock()
 
         # 创建线程池执行器
         self._executor = ThreadPoolExecutor(
@@ -786,6 +800,25 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             self.lab_logger().error(traceback.format_exc())
         self.lab_logger().trace(f"资源更新结果: {response}")
 
+    def _hostlink_get_nodes(
+        self, uuid: Optional[str] = None, res_id: Optional[str] = None, with_children: bool = True
+    ) -> Optional[List[Dict[str, Any]]]:
+        """HostLink TCP 通路查询物料（云端物料已下线，事实源在 host 本地树）。
+
+        通路不可用/查询失败返回 None，由调用方回退旧 ROS service 链路——
+        host-slave 去 ROS 化过渡期的双通道策略：TCP 优先、ROS 兜底。
+        """
+        from unilabos.hostlink import get_hostlink_client
+
+        link = get_hostlink_client()
+        if link is None or not link.online:
+            return None
+        try:
+            return link.get_resource(uuid=uuid, res_id=res_id, with_children=with_children)
+        except Exception as e:  # noqa: BLE001 - 通路异常回退 ROS，不影响业务
+            self.lab_logger().warning(f"[HostLink] 物料查询失败，回退 ROS service: {e}")
+            return None
+
     async def get_resource(self, resources_uuid: List[str], with_children: bool = True) -> ResourceTreeSet:
         """
         根据资源UUID列表获取资源树
@@ -797,6 +830,22 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         Returns:
             ResourceTreeSet: 资源树集合
         """
+        # TCP 优先：HostLink 在线时逐 uuid 向 host 查询本地树
+        link_nodes: Optional[List[Dict[str, Any]]] = None
+        if resources_uuid:
+            collected: List[Dict[str, Any]] = []
+            for res_uuid in resources_uuid:
+                nodes = self._hostlink_get_nodes(uuid=res_uuid, with_children=with_children)
+                if nodes is None:
+                    collected = []
+                    break  # 任一失败整体回退 ROS，保持结果集一致性
+                collected.extend(nodes)
+            link_nodes = collected or None
+        if link_nodes is not None:
+            tree_set = ResourceTreeSet.from_raw_dict_list(link_nodes)
+            self.lab_logger().trace(f"[HostLink] 获取资源结果: {len(tree_set.trees)} 个资源树")
+            return tree_set
+
         response: SerialCommand.Response = await self._resource_clients["c2s_update_resource_tree"].call_async(
             SerialCommand.Request(
                 command=json.dumps(
@@ -823,19 +872,22 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         Returns:
             ResourcePLR: PLR资源实例
         """
-        r = SerialCommand.Request()
-        r.command = json.dumps(
-            {
-                "id": resource_id,
-                "uuid": None,
-                "with_children": with_children,
-            }
-        )
-        # 发送请求并等待响应
-        response: SerialCommand_Response = await self._resource_clients["resource_get"].call_async(r)
-        if not response.response:
-            raise ValueError(f"查询资源 {resource_id} 失败：服务端返回空响应")
-        raw_data = json.loads(response.response)
+        # TCP 优先：HostLink 在线时直接查 host 本地树
+        raw_data = self._hostlink_get_nodes(res_id=resource_id, with_children=with_children)
+        if raw_data is None:
+            r = SerialCommand.Request()
+            r.command = json.dumps(
+                {
+                    "id": resource_id,
+                    "uuid": None,
+                    "with_children": with_children,
+                }
+            )
+            # 发送请求并等待响应
+            response: SerialCommand_Response = await self._resource_clients["resource_get"].call_async(r)
+            if not response.response:
+                raise ValueError(f"查询资源 {resource_id} 失败：服务端返回空响应")
+            raw_data = json.loads(response.response)
         if not raw_data:
             raise ValueError(f"查询资源 {resource_id} 失败：返回数据为空")
 
@@ -1733,28 +1785,53 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         """创建ROS发布者。已在 status_types 中声明的属性直接创建；@topic_config 用于覆盖默认参数。"""
         topic_cfg = {}
         driver_class = type(self.driver_instance)
+        source_name = attr_name
 
-        # 区分 @property 和普通方法两种情况
-        is_prop = hasattr(driver_class, attr_name) and isinstance(
-            getattr(driver_class, attr_name), property
-        )
+        def _source_config(name):
+            class_attr = getattr(driver_class, name, None)
+            if isinstance(class_attr, property):
+                return True, get_topic_config(class_attr.fget) if class_attr.fget is not None else {}
+            if callable(class_attr):
+                return False, get_topic_config(class_attr)
+            instance_attr = getattr(self.driver_instance, name, None)
+            if callable(instance_attr):
+                return False, get_topic_config(instance_attr)
+            return False, {}
 
-        if is_prop:
-            class_attr = getattr(driver_class, attr_name)
-            if class_attr.fget is not None:
-                topic_cfg = get_topic_config(class_attr.fget)
-        else:
-            if hasattr(self.driver_instance, attr_name):
-                method = getattr(self.driver_instance, attr_name)
-                if callable(method):
-                    topic_cfg = get_topic_config(method)
+        # status_types 使用对外状态名；这里反查实际 property/getter。
+        is_prop, topic_cfg = _source_config(source_name)
+        instance_attrs = getattr(self.driver_instance, "__dict__", {})
+        source_exists = hasattr(driver_class, source_name) or source_name in instance_attrs
+        if topic_cfg.get("name") != attr_name:
+            for base in driver_class.__mro__:
+                for candidate_name, candidate in vars(base).items():
+                    if isinstance(candidate, property):
+                        candidate_cfg = get_topic_config(candidate.fget) if candidate.fget is not None else {}
+                        candidate_is_prop = True
+                    elif callable(candidate):
+                        candidate_cfg = get_topic_config(candidate)
+                        candidate_is_prop = False
+                    else:
+                        continue
+                    if candidate_cfg.get("name") == attr_name:
+                        source_name = candidate_name
+                        is_prop = candidate_is_prop
+                        topic_cfg = candidate_cfg
+                        break
+                if topic_cfg.get("name") == attr_name:
+                    break
+        if source_name == attr_name and not source_exists:
+            getter_name = f"get_{attr_name}"
+            if hasattr(driver_class, getter_name) or getter_name in instance_attrs:
+                source_name = getter_name
+                is_prop, topic_cfg = _source_config(source_name)
 
         # 发布名称优先级: @topic_config(name=...) > get_ 前缀去除 > attr_name
         cfg_name = topic_cfg.get("name")
         if cfg_name:
             publish_name = cfg_name
-        elif attr_name.startswith("get_"):
-            publish_name = attr_name[4:]
+        elif source_name.startswith("get_"):
+            publish_name = source_name[4:]
         else:
             publish_name = attr_name
 
@@ -1770,17 +1847,17 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         def get_device_attr():
             try:
                 if is_prop:
-                    return getattr(self.driver_instance, attr_name)
+                    return getattr(self.driver_instance, source_name)
                 else:
-                    return getattr(self.driver_instance, attr_name)()
+                    return getattr(self.driver_instance, source_name)()
             except AttributeError as ex:
                 if ex.args[0].startswith(f"AttributeError: '{self.driver_instance.__class__.__name__}' object"):
                     self.lab_logger().error(
-                        f"publish error, {str(type(self.driver_instance))[8:-2]} has no attribute '{attr_name}'"
+                        f"publish error, {str(type(self.driver_instance))[8:-2]} has no attribute '{source_name}'"
                     )
                 else:
                     self.lab_logger().error(
-                        f"publish error, when {str(type(self.driver_instance))[8:-2]} getting attribute '{attr_name}'"
+                        f"publish error, when {str(type(self.driver_instance))[8:-2]} getting attribute '{source_name}'"
                     )
                     self.lab_logger().error(traceback.format_exc())
 
@@ -1992,6 +2069,19 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             self.lab_logger().error(f"创建订阅者 {topic} 失败，类型: {msg_type}，错误: {ex}\n{traceback.format_exc()}")
             return None
 
+    def _resolve_driver_method_name(self, action_name: str) -> str:
+        """把注册表中的对外动作名解析为 driver 上的实际方法名。"""
+        candidates = [action_name]
+        if action_name.startswith("auto-"):
+            candidates.append(action_name[5:])
+        else:
+            candidates.append(f"auto-{action_name}")
+        for candidate in candidates:
+            mapping = self._action_value_mappings.get(candidate)
+            if isinstance(mapping, dict) and mapping.get("method_name"):
+                return mapping["method_name"]
+        return action_name[5:] if action_name.startswith("auto-") else action_name
+
     def get_real_function(self, instance, attr_name):
         if hasattr(instance.__class__, attr_name):
             obj = getattr(instance.__class__, attr_name)
@@ -2003,6 +2093,257 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             obj = getattr(instance, attr_name)
             return obj, get_type_hints(obj)
 
+    def register_job_context(self, job_id: str, task_id: str, action_name: str) -> None:
+        """Register HostNode context before the ROS goal with UUID=job_id is sent."""
+
+        if not job_id:
+            return
+        with self._job_contexts_lock:
+            self._job_contexts[job_id] = {
+                "job_id": job_id,
+                "task_id": task_id,
+                "action_name": action_name,
+            }
+
+    def _consume_job_context(self, goal_handle: ServerGoalHandle, action_name: str) -> Dict[str, str]:
+        job_id = ""
+        try:
+            job_id = str(uuid.UUID(bytes=bytes(goal_handle.goal_id.uuid)))
+        except (AttributeError, TypeError, ValueError):
+            pass
+        with self._job_contexts_lock:
+            context = self._job_contexts.pop(job_id, {}) if job_id else {}
+        return {
+            "job_id": context.get("job_id", job_id),
+            "task_id": context.get("task_id", ""),
+            "action_name": context.get("action_name", action_name),
+        }
+
+    def _resolve_runtime_error_policy(
+        self,
+        action_name: str,
+        action_value_mapping: Dict[str, Any],
+        action_func,
+        action_kwargs: Dict[str, Any],
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Resolve policy from the real business action, including JSON command routes."""
+
+        policy = getattr(action_func, "_action_error_policy", None)
+        report_action_name = action_name
+        if action_name in {"_execute_driver_command", "_execute_driver_command_async"}:
+            try:
+                command = json.loads(action_kwargs.get("string", ""))
+                report_action_name = str(command["function_name"])
+                method_name = self._resolve_driver_method_name(report_action_name)
+                real_func = getattr(self.driver_instance, method_name)
+                policy = getattr(real_func, "_action_error_policy", None)
+                if policy is None:
+                    mapping = self._action_value_mappings.get(
+                        report_action_name
+                    ) or self._action_value_mappings.get(f"auto-{report_action_name}")
+                    if isinstance(mapping, dict):
+                        policy = mapping.get("error_policy")
+            except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+                policy = None
+        if policy is None:
+            policy = action_value_mapping.get("error_policy")
+        return policy, report_action_name
+
+    def handle_action_error_decision(
+        self,
+        decision_id: str,
+        job_id: str,
+        decision: Dict[str, Any],
+    ) -> bool:
+        """Receive one backend approval result and wake the exact pending action."""
+
+        with self._pending_action_error_decisions_lock:
+            pending = self._pending_action_error_decisions.get(decision_id) if decision_id else None
+            if pending is None and job_id:
+                matches = [
+                    item
+                    for item in self._pending_action_error_decisions.values()
+                    if item.get("job_id") == job_id
+                ]
+                pending = matches[0] if len(matches) == 1 else None
+            if pending is None:
+                return False
+            pending["decision"] = decision
+            pending["event"].set()
+            return True
+
+    def _get_communication_client(self):
+        from unilabos.app.communication import CommunicationClientFactory
+
+        return CommunicationClientFactory.get_client()
+
+    def _publish_error_decision_report(self, report: Dict[str, Any]) -> bool:
+        """把异常决策请求送到任一可用的决策通道。
+
+        优先云端通信客户端（WS）；失败时回退 HostNode.bridges 中实现了
+        ``publish_job_error_decision_required`` 的桥（本地模式下是
+        JobExecutionBackend，经调度器 REST/前端人工决策）。
+        """
+        try:
+            client = self._get_communication_client()
+            if (
+                client is not None
+                and hasattr(client, "publish_job_error_decision_required")
+                and client.publish_job_error_decision_required(report)
+            ):
+                return True
+        except Exception:  # noqa: BLE001 - 通道逐个尝试，单通道失败不终止
+            self.lab_logger().warning(f"云端异常决策通道不可用\n{traceback.format_exc()}")
+
+        try:
+            from unilabos.ros.nodes.presets.host_node import HostNode
+
+            host = HostNode.get_instance(0)
+            for bridge in getattr(host, "bridges", None) or []:
+                publish = getattr(bridge, "publish_job_error_decision_required", None)
+                if callable(publish):
+                    try:
+                        if publish(report):
+                            return True
+                    except Exception:  # noqa: BLE001
+                        self.lab_logger().warning(
+                            f"bridge 异常决策通道失败: {bridge!r}\n{traceback.format_exc()}"
+                        )
+        except Exception:  # noqa: BLE001 - HostNode 不可用（独立测试等）
+            pass
+        return False
+
+    async def _request_action_error_decision(
+        self,
+        exc: BaseException,
+        action_name: str,
+        context: Dict[str, str],
+        options: List[Dict[str, Any]],
+        timeout_seconds: float,
+        default_on_timeout: str,
+    ) -> Dict[str, Any]:
+        """Report a matched exception and asynchronously wait for backend approval."""
+
+        decision_id = str(uuid.uuid4())
+        pending = {
+            "event": threading.Event(),
+            "decision": None,
+            "job_id": context.get("job_id", ""),
+        }
+        with self._pending_action_error_decisions_lock:
+            self._pending_action_error_decisions[decision_id] = pending
+
+        report = {
+            "decision_id": decision_id,
+            "device_id": self.device_id,
+            "device_uuid": self.uuid,
+            "action_name": action_name,
+            "task_id": context.get("task_id", ""),
+            "job_id": context.get("job_id", ""),
+            "exception_type": type(exc).__name__,
+            "error_message": str(exc),
+            "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            "options": options,
+            "require_confirmation": True,
+        }
+        sent = self._publish_error_decision_report(report)
+        if not sent:
+            with self._pending_action_error_decisions_lock:
+                self._pending_action_error_decisions.pop(decision_id, None)
+            raise exc
+
+        deadline = time.monotonic() + timeout_seconds
+        try:
+            while not pending["event"].is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return {
+                        "decision_id": decision_id,
+                        "job_id": context.get("job_id", ""),
+                        "action": default_on_timeout,
+                        "reason": "decision_timeout",
+                    }
+                await self.sleep(min(0.1, remaining))
+            return dict(pending["decision"] or {})
+        finally:
+            with self._pending_action_error_decisions_lock:
+                self._pending_action_error_decisions.pop(decision_id, None)
+
+    @staticmethod
+    def _approved_result_value(decision: Dict[str, Any]) -> Any:
+        """Extract the server-side fallback action result returned after approval."""
+
+        if "result" in decision:
+            result = decision["result"]
+        elif "return_value" in decision:
+            result = decision["return_value"]
+        else:
+            raise RuntimeError("operator intervention response missing result")
+        if isinstance(result, dict) and "suc" in result:
+            if not result.get("suc"):
+                raise RuntimeError(result.get("error") or "operator intervention action failed")
+            return result.get("return_value")
+        return result
+
+    async def _resolve_action_exception(
+        self,
+        initial_exc: BaseException,
+        retry_action,
+        action_name: str,
+        context: Dict[str, str],
+        policy: Dict[str, Any],
+    ) -> ActionDecisionOutcome:
+        """Resolve an action exception through retry, skip, or operator intervention."""
+
+        exc = initial_exc
+        retries = 0
+        max_retries = int(policy.get("max_retries", 3))
+        timeout_seconds = float(policy.get("decision_timeout_seconds", 300.0))
+        default_on_timeout = str(policy.get("default_on_decision_timeout", "abort"))
+        while True:
+            options = resolve_error_options(policy, exc)
+            if not options:
+                raise exc
+            decision = await self._request_action_error_decision(
+                exc,
+                action_name,
+                context,
+                options,
+                timeout_seconds,
+                default_on_timeout,
+            )
+            selected_option = decision.get("option")
+            if isinstance(selected_option, dict):
+                selected = str(selected_option.get("action") or "abort")
+                if "result" not in decision and "result" in selected_option:
+                    decision["result"] = selected_option["result"]
+            else:
+                selected = str(decision.get("action") or selected_option or "abort")
+            allowed_actions = {str(option.get("action")) for option in options}
+            if selected not in allowed_actions and decision.get("reason") != "decision_timeout":
+                raise RuntimeError(f"backend returned unconfigured error option: {selected}")
+
+            if selected == "retry":
+                if retries >= max_retries:
+                    raise RuntimeError(f"action {action_name} exceeded {max_retries} retries") from exc
+                retries += 1
+                try:
+                    return ActionDecisionOutcome(await retry_action(), SUCCESS_TYPE_NORMAL)
+                except Exception as retry_exc:
+                    exc = retry_exc
+                    continue
+            if selected == "skip":
+                return ActionDecisionOutcome(
+                    decision.get("result", decision.get("return_value")),
+                    SUCCESS_TYPE_SKIP,
+                )
+            if selected == "abort":
+                raise exc
+            return ActionDecisionOutcome(
+                self._approved_result_value(decision),
+                SUCCESS_TYPE_OPERATOR_INTERVENTION,
+            )
+
     def _create_execute_callback(self, action_name, action_value_mapping):
         """创建动作执行回调函数"""
 
@@ -2011,6 +2352,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             execution_error = ""
             execution_success = False
             action_return_value = None
+            execution_suc_type = SUCCESS_TYPE_NORMAL
 
             #####    self.lab_logger().info(f"执行动作: {action_name}")
             goal = goal_handle.request
@@ -2031,11 +2373,28 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     1
                 ]
             else:
-                ACTION, action_paramtypes = self.get_real_function(self.driver_instance, action_name)
+                method_name = action_value_mapping.get("method_name") or action_name
+                ACTION, action_paramtypes = self.get_real_function(self.driver_instance, method_name)
 
             action_kwargs = convert_from_ros_msg_with_mapping(goal, action_value_mapping["goal"])
             self.lab_logger().debug(f"任务 {ACTION.__name__} 接收到原始目标: {str(action_kwargs)[:1000]}")
             self.lab_logger().trace(f"任务 {ACTION.__name__} 接收到原始目标: {action_kwargs}")
+            job_context = self._consume_job_context(goal_handle, action_name)
+            error_policy, report_action_name = self._resolve_runtime_error_policy(
+                action_name,
+                action_value_mapping,
+                ACTION,
+                action_kwargs,
+            )
+
+            async def _retry_action_once():
+                if asyncio.iscoroutinefunction(ACTION):
+                    return await ACTION(**action_kwargs)
+                retry_future = self._executor.submit(ACTION, **action_kwargs)
+                while not retry_future.done():
+                    await self.sleep(0.02)
+                return retry_future.result()
+
             error_skip = False
             # 向Host查询物料当前状态，如果是host本身的增加物料的请求，则直接跳过
             if action_name not in ["create_resource_detailed", "create_resource"]:
@@ -2231,6 +2590,30 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     execution_success = True
                     action_return_value = _raw_result
 
+                if isinstance(_raw_result, BaseException) and error_policy:
+                    try:
+                        decision_outcome = await self._resolve_action_exception(
+                            _raw_result,
+                            _retry_action_once,
+                            report_action_name,
+                            job_context,
+                            error_policy,
+                        )
+                        action_return_value = decision_outcome.value
+                        execution_suc_type = decision_outcome.suc_type
+                        execution_error = ""
+                        execution_success = True
+                    except Exception as resolved_exc:
+                        execution_error = "".join(
+                            traceback.format_exception(
+                                type(resolved_exc),
+                                resolved_exc,
+                                resolved_exc.__traceback__,
+                            )
+                        )
+                        action_return_value = resolved_exc
+                        execution_success = False
+
             # 清理 feedback timer
             if _feedback_timer is not None:
                 _feedback_timer.cancel()
@@ -2308,7 +2691,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     setattr(
                         result_msg,
                         attr_name,
-                        get_result_info_str(execution_error, execution_success, action_return_value),
+                        get_result_info_str(
+                            execution_error,
+                            execution_success,
+                            action_return_value,
+                            suc_type=execution_suc_type,
+                        ),
                     )
 
             self.lab_logger().trace(f"动作 {action_name} 完成并返回结果")
@@ -2327,7 +2715,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     f"执行动作时JSON/YAML解析失败: \n{ex}\n{ex2}\n原内容: {string}\n{traceback.format_exc()}"
                 )
         try:
-            function_name = target["function_name"]
+            action_name = target["function_name"]
+            function_name = self._resolve_driver_method_name(action_name)
             function_args = target["function_args"]
             # 获取 unilabos 系统参数
             unilabos_param: Dict[str, Any] = target[JSON_UNILABOS_PARAM]
@@ -2508,7 +2897,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     f"执行动作时JSON/YAML解析失败: \n{ex}\n{ex2}\n原内容: {string}\n{traceback.format_exc()}"
                 )
         try:
-            function_name = target["function_name"]
+            action_name = target["function_name"]
+            function_name = self._resolve_driver_method_name(action_name)
             function_args = target["function_args"]
             # 获取 unilabos 系统参数
             unilabos_param: Dict[str, Any] = target.get(JSON_UNILABOS_PARAM, {})

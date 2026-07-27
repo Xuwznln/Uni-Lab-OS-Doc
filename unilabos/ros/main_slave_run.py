@@ -75,6 +75,9 @@ def main(
         discovery_interval,
     )
 
+    # HostLink：host 侧 TCP 通路（物料本地事实源 + slave 在线监控 + ROS 组网协助下发）
+    _start_hostlink_server(host_node)
+
     if visual != "disable":
         from unilabos.ros.nodes.presets.joint_republisher import JointRepublisher
 
@@ -106,6 +109,62 @@ def main(
         time.sleep(1)
 
 
+def _start_hostlink_server(host_node) -> None:
+    """host 侧启动 HostLink TCP 服务（enable=False 时跳过，纯 ROS 行为不变）。
+
+    物料查询以 host 内存资源树为本地事实源（云端物料接口已下线）；
+    hello 响应附带 ROS 组网协助信息，slave 可据此降级组网（静态对端/单播）。
+    """
+    from unilabos.config.config import HostLinkConfig
+
+    if not HostLinkConfig.enable:
+        return
+    try:
+        from unilabos.hostlink import (
+            HostLinkServer,
+            LocalResourceResolver,
+            build_host_ros_info,
+        )
+        from unilabos.hostlink.protocol import ActionType
+        from unilabos.hostlink.ros_assist import detect_local_ip
+
+        resolver = LocalResourceResolver(lambda: host_node.resources_config)
+        host_ip = HostLinkConfig.advertise_ip or detect_local_ip()
+        domain_raw = str(HostLinkConfig.ros_domain_id or "").strip()
+        static_peers = [p.strip() for p in HostLinkConfig.ros_static_peers.split(";") if p.strip()]
+        ros_info = build_host_ros_info(
+            host_ip=host_ip,
+            domain_id=int(domain_raw) if domain_raw.isdigit() else None,
+            discovery_range=HostLinkConfig.ros_discovery_range.strip().upper(),
+            static_peers=static_peers or None,
+            discovery_server=HostLinkConfig.ros_discovery_server.strip(),
+        )
+
+        def _material(data, peer):
+            nodes = resolver.resolve(
+                uuid=data.get("uuid") or None,
+                res_id=data.get("id") or None,
+                with_children=bool(data.get("with_children", True)),
+            )
+            return {"nodes": nodes}
+
+        server = HostLinkServer(
+            bind=HostLinkConfig.bind,
+            port=HostLinkConfig.port,
+            heartbeat_timeout=HostLinkConfig.heartbeat_timeout,
+        )
+        server.hello_payload = {"host_name": BasicConfig.machine_name, "ros": ros_info.to_dict()}
+        server.register_handler(ActionType.MATERIAL, _material)
+        server.register_handler(ActionType.ROS_INFO, lambda data, peer: {"ros": ros_info.to_dict()})
+        server.start()
+        host_node.hostlink_server = server  # 供关停
+        from unilabos.hostlink.server import set_hostlink_server
+
+        set_hostlink_server(server)  # REST 面（/api/v1/hostlink/peers）做在线监控
+    except Exception as exc:  # noqa: BLE001 - 通路失败不阻塞 ROS 主流程
+        logger.error(f"[HostLink] server start failed (ROS-only fallback): {exc}")
+
+
 def slave(
     devices_config: ResourceTreeSet,
     resources_config: ResourceTreeSet,
@@ -118,9 +177,62 @@ def slave(
     rclpy_init_args: List[str] = ["--log-level", "debug"],
 ) -> None:
     """从节点函数"""
-    # 1. 初始化 ROS2
+    # 0. HostLink 组网：先连 host 拿 ROS 组网协助（域号/静态对端/发现降级），
+    #    必须发生在 rclpy.init 之前（DDS 只在初始化时读这些环境变量）。
+    #    连不上不阻塞启动：走原纯 ROS 组播发现。
+    from unilabos.config.config import HostLinkConfig
+
+    hostlink_domain_id: Optional[int] = None  # host 下发的域号，直传 rclpy.init
+    if HostLinkConfig.enable and HostLinkConfig.host:
+        try:
+            from unilabos.hostlink import (
+                HostLinkClient,
+                apply_ros_network_env,
+                set_hostlink_client,
+            )
+
+            link_client = HostLinkClient(
+                HostLinkConfig.host,
+                HostLinkConfig.port,
+                machine_name=BasicConfig.machine_name,
+                heartbeat_interval=HostLinkConfig.heartbeat_interval,
+                connect_timeout=HostLinkConfig.connect_timeout,
+                request_timeout=HostLinkConfig.request_timeout,
+            )
+            if link_client.connect_blocking(timeout=HostLinkConfig.connect_timeout * 2):
+                if HostLinkConfig.ros_assist_apply:
+                    ros_info = link_client.hello_ros_info()
+                    # TCP 能连通的地址就是 DDS 应该单播的地址：把 HostLink 连接地址并入
+                    # static peers（实测 WSL2 同机场景 host 自测 IP 是 NAT 网卡地址，
+                    # DDS 发现耗时 ~107s；补上连接地址后走环回单播，秒级发现）
+                    if HostLinkConfig.host and HostLinkConfig.host not in ros_info.static_peers:
+                        ros_info.static_peers.append(HostLinkConfig.host)
+                    applied = apply_ros_network_env(ros_info)
+                    # 域号走两条路：env（惠及子进程/命令行工具）+ init 形参（本进程
+                    # 显式直传，不受后续环境变化影响）；发现类配置（range/peers/
+                    # discovery server）rclpy 没有形参，只能靠 init 前的环境变量。
+                    hostlink_domain_id = ros_info.domain_id
+                    if applied:
+                        logger.info(f"[HostLink] ROS 组网信息已套用: {applied}")
+                else:
+                    logger.info("[HostLink] ros_assist_apply=False：跳过组网套用，仅保留 TCP 通路")
+            else:
+                logger.warning(
+                    f"[HostLink] 无法连接 host {HostLinkConfig.host}:{HostLinkConfig.port}，"
+                    f"后台持续重连；本次启动按纯 ROS 组播发现进行"
+                )
+            # 注册进程级单例：设备节点物料查询 TCP 优先、ROS service 兜底
+            set_hostlink_client(link_client)
+        except Exception as exc:  # noqa: BLE001 - 通路失败不阻塞 ROS 启动
+            logger.error(f"[HostLink] client init failed (ROS-only fallback): {exc}")
+
+    # 1. 初始化 ROS2（domain_id=None 时 rclpy 回退环境变量/默认域）
     if not rclpy.ok():
-        rclpy.init(args=rclpy_init_args)
+        try:
+            rclpy.init(args=rclpy_init_args, domain_id=hostlink_domain_id)
+        except TypeError:
+            # 旧版 rclpy 无 domain_id 形参：环境变量路径已在上面套用
+            rclpy.init(args=rclpy_init_args)
     executor = rclpy.__executor
     if not executor:
         executor = rclpy.__executor = MultiThreadedExecutor(num_threads=max(os.cpu_count() * 4, 48))

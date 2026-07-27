@@ -36,7 +36,7 @@ from unilabos.registry.utils import resolve_registry_displayname
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 6       # 缓存格式版本号，格式变更时递增
+_CACHE_VERSION = 8       # 缓存格式版本号，格式变更时递增
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
@@ -402,6 +402,7 @@ def _parse_file(
                     "handles": device_args.get("handles", []),
                     "model": device_args.get("model"),
                     "hardware_interface": device_args.get("hardware_interface"),
+                    "metadata": device_args.get("metadata") or {},
                     "actions": class_body.get("actions", {}),
                     "status_properties": class_body.get("status_properties", {}),
                     "init_params": class_body.get("init_params", []),
@@ -413,9 +414,20 @@ def _parse_file(
                     meta = dict(base_meta)
                     meta["device_id"] = did
                     overrides = id_meta.get(did, {})
-                    for key in ("handles", "description", "displayname", "icon", "model", "hardware_interface"):
+                    for key in (
+                        "handles",
+                        "description",
+                        "displayname",
+                        "icon",
+                        "model",
+                        "hardware_interface",
+                        "metadata",
+                    ):
                         if key in overrides:
-                            meta[key] = overrides[key]
+                            if key == "metadata" and isinstance(overrides[key], dict):
+                                meta[key] = {**(base_meta.get("metadata") or {}), **overrides[key]}
+                            else:
+                                meta[key] = overrides[key]
                     meta["displayname"] = resolve_registry_displayname(meta.get("displayname"), did)
                     devices.append(meta)
 
@@ -491,6 +503,7 @@ def _extract_resource_meta(
         "class_type": res_args.get("class_type", "pylabrobot"),
         "handles": res_args.get("handles", []),
         "model": res_args.get("model"),
+        "metadata": res_args.get("metadata") or {},
         "init_params": init_params,
     }
 
@@ -853,6 +866,57 @@ def _extract_class_body(
         if _has_decorator(item, "subscribe") and _is_subscribe_decorator("subscribe", import_map):
             continue
 
+        # --- Check for @action first: explicit action always wins over get_/topic inference ---
+        action_dec = _find_method_decorator(item, "action")
+        if action_dec is not None and _is_registry_decorator("action", import_map):
+            action_args = _extract_decorator_args(action_dec, import_map)
+            # 补全 @action 装饰器的默认值（与 decorators.py 中 action() 签名一致）
+            action_args.setdefault("action_type", None)
+            action_args.setdefault("action_name", None)
+            action_args.setdefault("displayname", "")
+            action_args.setdefault("goal", {})
+            action_args.setdefault("feedback", {})
+            action_args.setdefault("result", {})
+            action_args.setdefault("handles", {})
+            action_args.setdefault("goal_default", {})
+            action_args.setdefault("placeholder_keys", {})
+            action_args.setdefault("always_free", False)
+            action_args.setdefault("is_protocol", False)
+            action_args.setdefault("feedback_interval", 1.0)
+            action_args.setdefault("description", "")
+            action_args.setdefault("auto_prefix", False)
+            action_args.setdefault("parent", False)
+            raw_lock_resource = action_args.get("lock_resource")
+            if raw_lock_resource is None:
+                raw_lock_resource = action_args.get("materials_lock")
+            if raw_lock_resource is None:
+                action_args["lock_resource"] = []
+            elif isinstance(raw_lock_resource, str):
+                action_args["lock_resource"] = [raw_lock_resource]
+            else:
+                action_args["lock_resource"] = list(raw_lock_resource)
+            action_args.pop("materials_lock", None)
+            action_args.setdefault("estimate_duration_fixed", 60.0)
+            action_args.setdefault("estimate_duration_express", "")
+            action_args.setdefault("error_policy", None)
+            if action_args["error_policy"]:
+                from unilabos.registry.action_policy import normalize_error_policy
+
+                action_args["error_policy"] = normalize_error_policy(action_args["error_policy"])
+            method_params = _extract_method_params(item, import_map)
+            return_type = _get_annotation_str(item.returns, import_map)
+            is_async = isinstance(item, ast.AsyncFunctionDef)
+            method_doc = ast.get_docstring(item)
+
+            result["actions"][method_name] = {
+                "action_args": action_args,
+                "params": method_params,
+                "return_type": return_type,
+                "is_async": is_async,
+                "docstring": method_doc,
+            }
+            continue
+
         # --- Check for @property or @topic_config → status property ---
         is_property = _has_decorator(item, "property")
         has_topic = (
@@ -867,46 +931,15 @@ def _extract_class_body(
                 topic_args = _extract_decorator_args(topic_dec, import_map)
 
             return_type = _get_annotation_str(item.returns, import_map)
-            # 非 @property 的 @topic_config 方法，用去掉 get_ 前缀的名称
-            prop_name = method_name[4:] if method_name.startswith("get_") and not is_property else method_name
+            default_name = method_name[4:] if method_name.startswith("get_") and not is_property else method_name
+            prop_name = topic_args.get("name") or default_name
 
             result["status_properties"][prop_name] = {
                 "name": prop_name,
+                "method_name": method_name,
                 "return_type": return_type,
                 "is_property": is_property,
                 "topic_config": topic_args if topic_args else None,
-            }
-            continue
-
-        # --- Check for @action ---
-        action_dec = _find_method_decorator(item, "action")
-        if action_dec is not None and _is_registry_decorator("action", import_map):
-            action_args = _extract_decorator_args(action_dec, import_map)
-            # 补全 @action 装饰器的默认值（与 decorators.py 中 action() 签名一致）
-            action_args.setdefault("action_type", None)
-            action_args.setdefault("goal", {})
-            action_args.setdefault("feedback", {})
-            action_args.setdefault("result", {})
-            action_args.setdefault("handles", {})
-            action_args.setdefault("goal_default", {})
-            action_args.setdefault("placeholder_keys", {})
-            action_args.setdefault("always_free", False)
-            action_args.setdefault("is_protocol", False)
-            action_args.setdefault("feedback_interval", 1.0)
-            action_args.setdefault("description", "")
-            action_args.setdefault("auto_prefix", False)
-            action_args.setdefault("parent", False)
-            method_params = _extract_method_params(item, import_map)
-            return_type = _get_annotation_str(item.returns, import_map)
-            is_async = isinstance(item, ast.AsyncFunctionDef)
-            method_doc = ast.get_docstring(item)
-
-            result["actions"][method_name] = {
-                "action_args": action_args,
-                "params": method_params,
-                "return_type": return_type,
-                "is_async": is_async,
-                "docstring": method_doc,
             }
             continue
 
@@ -923,6 +956,7 @@ def _extract_class_body(
                 if prop_name not in result["status_properties"]:
                     result["status_properties"][prop_name] = {
                         "name": prop_name,
+                        "method_name": method_name,
                         "return_type": return_type,
                         "is_property": False,
                         "topic_config": None,

@@ -54,6 +54,27 @@ class HTTPConfig:
     schedule_addr = ""
 
 
+# host-slave TCP 请求通路（HostLink）：物料查询走 host 本地事实源（云端物料已下线），
+# 并承载在线监控与 ROS 组网协助；是 host-slave 逐步从 ROS2 迁到 TCP/IP 组网的第一步。
+class HostLinkConfig:
+    enable = True
+    host = ""  # slave 侧：host node 的 IP（组网入口）；空 = 不启用 TCP 通路，走旧 ROS 链路
+    port = 7302  # 通路端口（host 监听 / slave 连接）
+    bind = "0.0.0.0"  # host 侧监听地址
+    advertise_ip = ""  # host 对外 IP（下发 slave 作 ROS 静态对端）；空 = 自动探测
+    heartbeat_interval = 5  # slave ping 周期（秒）
+    heartbeat_timeout = 15  # host 判离线阈值（秒）
+    connect_timeout = 5  # 连接/握手超时（秒）
+    request_timeout = 10  # 单请求超时（秒）
+    # ROS 组网协助（host 经握手下发，slave 在 rclpy.init 前套用；空 = 沿用 host 环境变量）
+    ros_assist_apply = True  # slave 是否套用 host 下发的组网信息；False = 完全用本地环境
+    # （隔离场景/联网测试/手动管理组网时关闭：HostLink 照常连接，仅不动 ROS 环境）
+    ros_domain_id = ""  # ROS_DOMAIN_ID
+    ros_discovery_range = ""  # SUBNET / LOCALHOST / OFF；OFF = 关闭组播自动发现（纯单播降级）
+    ros_static_peers = ""  # 分号分隔 ip 列表；空 = 自动用 advertise_ip
+    ros_discovery_server = ""  # Fast DDS Discovery Server 地址 ip:port
+
+
 # ROS配置
 class ROSConfig:
     modules = [

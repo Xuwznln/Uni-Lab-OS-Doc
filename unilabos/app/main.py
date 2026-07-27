@@ -189,9 +189,44 @@ def parse_args():
         help="Bridges to connect to. Now support 'websocket' and 'fastapi'.",
     )
     parser.add_argument(
+        "--edge_scheduler",
+        action="store_true",
+        help="Enable the edge workflow scheduler (DAG decomposition/rescheduling on edge).",
+    )
+    parser.add_argument(
+        "--edge_scheduler_ordering_url",
+        type=str,
+        default="",
+        help="uni-lab-scheduler base url for task ordering (e.g. http://127.0.0.1:8090); "
+        "empty = local stable ordering.",
+    )
+    parser.add_argument(
+        "--edge_inventory_db",
+        type=str,
+        default="",
+        help="SQLite path for the edge-authoritative inventory store "
+        "(e.g. ~/.unilabos/inventory.db); empty = inventory integration disabled.",
+    )
+    parser.add_argument(
         "--is_slave",
         action="store_true",
         help="Run the backend as slave node (without host privileges).",
+    )
+    parser.add_argument(
+        "--hostlink_addr",
+        type=str,
+        default="",
+        help="HostLink TCP channel address. Slave: host node 'ip[:port]' to join the "
+        "network; Host: 'bind[:port]' to listen on (default 0.0.0.0:7302). "
+        "Material queries and ROS discovery assist go through this channel.",
+    )
+    parser.add_argument(
+        "--ros_domain_id",
+        type=int,
+        default=None,
+        help="ROS_DOMAIN_ID for this process. Host: also advertised to slaves via "
+        "HostLink handshake (network-wide domain). Slave: local fallback only — "
+        "the value downloaded from host wins once connected.",
     )
     parser.add_argument(
         "--slave_no_host",
@@ -355,6 +390,49 @@ def parse_args():
         help="Workflow description, used when publishing the workflow",
     )
 
+    # doctor subcommand: host-slave 组网分层诊断（TCP 探测 / talker / listener / 假设备）
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Network diagnostics: TCP probe, ROS talker/listener pair, fake device",
+    )
+    doctor_sub = doctor_parser.add_subparsers(title="doctor subcommands", dest="doctor_command")
+
+    def _add_doctor_common(sub_parser):
+        sub_parser.add_argument(
+            "--hostlink_addr", type=str, default="",
+            help="Host ip[:port] — TCP probe target, also fetches ROS network info via handshake",
+        )
+        sub_parser.add_argument(
+            "--peer", type=str, default="",
+            help="Peer ip list (comma separated) for unicast-only diagnosis "
+            "(sets ROS_STATIC_PEERS; defaults discovery to OFF)",
+        )
+        sub_parser.add_argument("--ros_domain_id", type=int, default=None, help="ROS domain id override")
+        sub_parser.add_argument(
+            "--discovery", type=str, default="", choices=["", "OFF", "LOCALHOST", "SUBNET"],
+            help="ROS_AUTOMATIC_DISCOVERY_RANGE (default: OFF when --peer given)",
+        )
+        sub_parser.add_argument("--topic", type=str, default="/unilab_doctor", help="Probe topic")
+        sub_parser.add_argument("--rate", type=float, default=1.0, help="Publish rate Hz")
+        sub_parser.add_argument("--duration", type=float, default=0.0, help="Seconds to run, 0 = until Ctrl-C")
+
+    doctor_net = doctor_sub.add_parser("net", help="Layer 1: TCP channel probe (no ROS needed)")
+    _add_doctor_common(doctor_net)
+    doctor_net.add_argument("--count", type=int, default=5, help="Ping count")
+    doctor_talker = doctor_sub.add_parser("talker", help="Layer 2: publish probe messages")
+    _add_doctor_common(doctor_talker)
+    doctor_listener = doctor_sub.add_parser("listener", help="Layer 2: receive probes, report loss/latency")
+    _add_doctor_common(doctor_listener)
+    doctor_listener.add_argument("--quiet", action="store_true", help="Only print final summary")
+    doctor_fake = doctor_sub.add_parser(
+        "fake-device", help="Fake device: probe as a device + check host service visibility"
+    )
+    _add_doctor_common(doctor_fake)
+    doctor_fake.add_argument("--device_id", type=str, default="", help="Fake device id (default random)")
+    doctor_fake.add_argument(
+        "--no_service_check", action="store_true", help="Skip host registration service visibility check"
+    )
+
     # package subcommand: 社区设备包 inspect / upload
     package_parser = subparsers.add_parser(
         "package",
@@ -501,6 +579,12 @@ def main():
     convert_argv_dashes_to_underscores(parser)
     args = parser.parse_args()
     args_dict = vars(args)
+
+    # doctor 子命令：组网诊断，不加载完整环境（net 甚至不 import rclpy），提前处理并退出
+    if args_dict.get("command") == "doctor":
+        from unilabos.hostlink.doctor import run_doctor
+
+        sys.exit(run_doctor(args_dict))
 
     # 处理 HTTP 客户端子命令（login, logout, whoami, config, lab, material, workflow）
     # 这些命令不需要加载完整的 UniLab-OS 环境，提前处理并退出
@@ -764,6 +848,29 @@ def main():
     if BasicConfig.extra_resource:
         print_status("启用额外资源加载：将加载lab_开头的labware资源定义", "info")
     BasicConfig.communication_protocol = "websocket"
+    # HostLink：--hostlink_addr "addr[:port]"；slave 填 host 地址，host 填监听地址
+    hostlink_addr = (args_dict.get("hostlink_addr") or "").strip()
+    if hostlink_addr:
+        from unilabos.config.config import HostLinkConfig
+
+        addr, _, port_text = hostlink_addr.partition(":")
+        if port_text.strip().isdigit():
+            HostLinkConfig.port = int(port_text)
+        if BasicConfig.is_host_mode:
+            HostLinkConfig.bind = addr or HostLinkConfig.bind
+        else:
+            HostLinkConfig.host = addr or HostLinkConfig.host
+    # --ros_domain_id：写环境变量（本进程 rclpy.init 与子进程/命令行工具生效）；
+    # host 同时记入 HostLinkConfig 经握手统一下发全网；slave 连上 host 后以下发值为准
+    ros_domain_id = args_dict.get("ros_domain_id")
+    if ros_domain_id is not None:
+        from unilabos.config.config import HostLinkConfig
+
+        os.environ["ROS_DOMAIN_ID"] = str(ros_domain_id)
+        HostLinkConfig.ros_domain_id = str(ros_domain_id)
+        print_status(f"ROS_DOMAIN_ID = {ros_domain_id}"
+                     + ("（host 将经 HostLink 下发全网）" if BasicConfig.is_host_mode else "（slave 本地兜底值）"),
+                     "info")
     machine_name = platform.node()
     machine_name = "".join([c if c.isalnum() or c == "_" else "_" for c in machine_name])
     BasicConfig.machine_name = machine_name
@@ -988,6 +1095,25 @@ def main():
             signal.signal(signal.SIGINT, _exit)
             signal.signal(signal.SIGTERM, _exit)
             comm_client.start()
+
+        # Edge 工作流调度器：接收 workflow_start 整图、拆解 DAG、每个 job 完成后重排
+        if args_dict.get("edge_scheduler"):
+            from unilabos.app.scheduler.integration import setup_edge_scheduler
+
+            inventory_db = str(args_dict.get("edge_inventory_db", "") or "")
+            if inventory_db:
+                inventory_db = os.path.abspath(os.path.expanduser(inventory_db))
+                os.makedirs(os.path.dirname(inventory_db) or ".", exist_ok=True)
+            _edge_sched, edge_exec_backend = setup_edge_scheduler(
+                ws_client=comm_client if "websocket" in args_dict["app_bridges"] else None,
+                ordering_url=args_dict.get("edge_scheduler_ordering_url", ""),
+                inventory_db_path=inventory_db,
+            )
+            # backend 是 bridge 形状(publish_job_status)，注册进 HostNode.bridges 收执行回报
+            args_dict["bridges"].append(edge_exec_backend)
+            print_status("Edge 调度器已启用 (workflow_start 整图下沉执行)", "info")
+            if inventory_db:
+                print_status(f"Edge 仓储已启用 (SQLite WAL: {inventory_db})", "info")
     else:
         print_status("SlaveMode跳过Websocket连接")
 
