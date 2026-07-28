@@ -14,6 +14,11 @@ import threading
 from unilabos.utils.log import logger
 import logging
 from unilabos.registry.decorators import ActionInputHandle, DataSource, action, device, not_action
+from unilabos.devices.workstation.AI4C.bottle_carriers import (
+    AI4C_PowderCylinderCarrier,
+    AI4C_WellPlateCarrier,
+)
+from unilabos.devices.workstation.AI4C.decks import AI4C_deck
 
 # 导入通讯基类
 from unilabos.devices.workstation.AI4C.base_opcua_client import OpcUaClientWithSubscription
@@ -83,9 +88,12 @@ class AI4CDevice(OpcUaClientWithSubscription):
     def __init__(
         self, 
         url: str, 
+        url_sim: str = None,
+        deck: Optional[AI4C_deck] = None,
         csv_path: str = None, 
         username: str = None, 
         password: str = None,
+        simulator: bool = False,
         use_subscription: bool = True,
         cache_timeout: float = 5.0,
         subscription_interval: int = 500,
@@ -97,16 +105,38 @@ class AI4CDevice(OpcUaClientWithSubscription):
         
         参数:
             url: OPC UA 服务器地址
+            url_sim: 模拟 OPC UA 服务器地址
+            deck: AI4C 资源树配置
             csv_path: 节点配置 CSV 文件路径
             username: OPC UA 用户名
             password: OPC UA 密码
+            simulator: 是否使用模拟 OPC UA 服务器
             use_subscription: 是否启用订阅模式
             cache_timeout: 缓存超时时间（秒）
             subscription_interval: 订阅发布间隔（毫秒）
         """
+        test_mode = False
+        try:
+            from unilabos.config.config import BasicConfig
+
+            test_mode = bool(getattr(BasicConfig, "test_mode", False))
+        except Exception:
+            test_mode = False
+
+        use_sim_url = bool(simulator or test_mode)
+        active_url = url_sim if use_sim_url and url_sim else url
+        if use_sim_url and url_sim:
+            logger.info(f"AI4C 使用模拟 OPC UA 服务器: {active_url}")
+        elif use_sim_url:
+            logger.warning("AI4C 已启用模拟模式但未配置 url_sim，仍使用 url")
+
+        self.simulator = simulator
+        self.url = active_url
+        self.url_sim = url_sim
+
         # 调用父类构造函数
         super().__init__(
-            url=url,
+            url=active_url,
             username=username,
             password=password,
             use_subscription=use_subscription,
@@ -116,11 +146,161 @@ class AI4CDevice(OpcUaClientWithSubscription):
             **kwargs
         )
 
+        # 处理 deck 参数；graphio 反序列化前会以 dict 形式传入资源描述。
+        if deck is None or isinstance(deck.get("data") if isinstance(deck, dict) else deck, dict):
+            self.deck = AI4C_deck(setup=True)
+        else:
+            self.deck = deck.get("data") if isinstance(deck, dict) else deck
+
+        if self.deck is None:
+            raise ValueError("Deck 配置不能为空")
+
+        if hasattr(self.deck, "children"):
+            logger.info(f"Deck 初始化完成，加载 {len(self.deck.children)} 个资源")
+
         # 如果提供了 CSV 路径，则直接加载节点
         if csv_path:
             self.load_nodes_from_csv(csv_path)
 
         self.m_initialized = False
+        self._held_well_plate = None
+        self._held_powder_cylinder = None
+        self._placeholder_resource_counter = 0
+
+    @not_action
+    def post_init(self, ros_node):
+        """ROS2 节点就绪后注册 AI4C deck。"""
+        if not (hasattr(self, "deck") and self.deck):
+            return
+
+        if not (hasattr(ros_node, "resource_tracker") and ros_node.resource_tracker):
+            logger.warning("resource_tracker 不存在，无法注册 deck")
+            return
+
+        self._ros_node = ros_node
+        ros_node.resource_tracker.add_resource(self.deck)
+
+        try:
+            from unilabos.ros.nodes.base_device_node import ROS2DeviceNode
+
+            ROS2DeviceNode.run_async_func(
+                ros_node.update_resource,
+                True,
+                resources=[self.deck],
+            )
+            logger.info("Deck 已上传到云端")
+        except Exception as e:
+            logger.error(f"上传失败: {e}")
+
+    @not_action
+    def _sync_resource_to_frontend(self) -> None:
+        """将 AI4C deck 的资源状态同步到前端。"""
+        if not (hasattr(self, "_ros_node") and self._ros_node):
+            return
+
+        try:
+            from unilabos.ros.nodes.base_device_node import ROS2DeviceNode
+
+            ROS2DeviceNode.run_async_func(
+                self._ros_node.update_resource,
+                True,
+                resources=[self.deck],
+            )
+            logger.info("✓ 已同步资源更新到前端")
+        except Exception as e:
+            logger.warning(f"前端资源更新失败: {e}")
+
+    @not_action
+    def _get_warehouse_site_index(self, warehouse, site_key: str) -> int:
+        """根据仓位键名获取 ItemizedCarrier 内部序号。"""
+        keys = [str(key) for key in warehouse._ordering.keys()]
+        site_key = str(site_key)
+        if site_key not in keys:
+            raise ValueError(f"仓库 {warehouse.name} 不存在仓位 {site_key}")
+        return keys.index(site_key)
+
+    @not_action
+    def _get_warehouse_resource(self, warehouse_name: str, site_key: str):
+        """读取指定仓位上的真实资源，空位返回 None。"""
+        warehouse = self.deck.warehouses[warehouse_name]
+        site_key = str(site_key)
+        try:
+            resource = warehouse[site_key]
+        except Exception:
+            site_idx = self._get_warehouse_site_index(warehouse, site_key)
+            resource = warehouse.sites[site_idx] if warehouse.sites else None
+
+        if resource is None or type(resource).__name__ == "ResourceHolder":
+            return None
+        return resource
+
+    @not_action
+    def _create_placeholder_resource(self, resource_kind: str, warehouse_name: str, site_key: str):
+        """资源树缺少实物占位时，按硬件动作创建一个运行时占位资源。"""
+        self._placeholder_resource_counter += 1
+        safe_warehouse_name = warehouse_name.replace(" ", "_")
+        name = f"{safe_warehouse_name}_{site_key}_{resource_kind}_{self._placeholder_resource_counter}"
+        if resource_kind == "well_plate":
+            return AI4C_WellPlateCarrier(name)
+        if resource_kind == "powder_cylinder":
+            return AI4C_PowderCylinderCarrier(name)
+        raise ValueError(f"不支持的资源类型: {resource_kind}")
+
+    @not_action
+    def _pick_resource_from_warehouse(
+        self,
+        warehouse_name: str,
+        site_key: str,
+        resource_kind: str,
+        held_attr: str,
+    ) -> None:
+        """硬件取料完成后，从源仓位解绑资源并放入机械臂临时持有态。"""
+        try:
+            warehouse = self.deck.warehouses[warehouse_name]
+            site_key = str(site_key)
+            resource = self._get_warehouse_resource(warehouse_name, site_key)
+            if resource is None:
+                logger.warning(f"{warehouse_name}[{site_key}] 未找到资源，按硬件占位创建临时资源")
+                resource = self._create_placeholder_resource(resource_kind, warehouse_name, site_key)
+            else:
+                warehouse.unassign_child_resource(resource)
+                logger.info(f"✓ 已从 {warehouse_name}[{site_key}] 解绑资源 {resource.name}")
+
+            setattr(self, held_attr, resource)
+            self._sync_resource_to_frontend()
+        except Exception as e:
+            logger.warning(f"资源取料迁移失败（不影响硬件操作）: {e}")
+
+    @not_action
+    def _place_held_resource_to_warehouse(
+        self,
+        warehouse_name: str,
+        site_key: str,
+        resource_kind: str,
+        held_attr: str,
+    ) -> None:
+        """硬件放料完成后，将机械臂临时持有资源绑定到目标仓位。"""
+        try:
+            warehouse = self.deck.warehouses[warehouse_name]
+            site_key = str(site_key)
+            resource = getattr(self, held_attr, None)
+            if resource is None:
+                logger.warning(f"机械臂无持有资源，按硬件放料在 {warehouse_name}[{site_key}] 创建临时资源")
+                resource = self._create_placeholder_resource(resource_kind, warehouse_name, site_key)
+
+            stale_resource = self._get_warehouse_resource(warehouse_name, site_key)
+            if stale_resource is not None:
+                logger.warning(f"{warehouse_name}[{site_key}] 资源树已有 {stale_resource.name}，按硬件空位状态覆盖")
+                warehouse.unassign_child_resource(stale_resource)
+
+            site_idx = self._get_warehouse_site_index(warehouse, site_key)
+            location = warehouse.child_locations[site_key]
+            warehouse.assign_child_resource(resource, location=location, spot=site_idx)
+            setattr(self, held_attr, None)
+            logger.info(f"✓ 已绑定资源 {resource.name} 到 {warehouse_name}[{site_key}]")
+            self._sync_resource_to_frontend()
+        except Exception as e:
+            logger.warning(f"资源放料迁移失败（不影响硬件操作）: {e}")
 
     # 初始化工站
     @action(auto_prefix=True, description="步骤1：初始化 AI4C 工站")
@@ -384,6 +564,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从上料架抓取孔板完成"): # 等待完成状态复位
                 logger.info("从上料架抓取孔板完成")
+                self._pick_resource_from_warehouse(
+                    "孔板上料架", str(position), "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "从上料架抓取孔板完成",
@@ -436,6 +619,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从下料架抓取孔板完成"): # 等待完成状态复位
                 logger.info("从下料架抓取孔板完成")
+                self._pick_resource_from_warehouse(
+                    "孔板下料架", str(position), "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "从下料架抓取孔板完成",
@@ -471,6 +657,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将孔板放置到固态称重完成"): # 等待完成状态复位
                 logger.info("将孔板放置到固态称重完成")
+                self._place_held_resource_to_warehouse(
+                    "固态称量", "Solid_Weighing", "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "将孔板放置到固态称重完成",
@@ -525,6 +714,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从固体称量堆栈中取粉桶完成"): # 等待完成状态复位
                 logger.info("从固体称量堆栈中取粉桶完成")
+                self._pick_resource_from_warehouse(
+                    "固态称量粉桶堆栈", str(position), "powder_cylinder", "_held_powder_cylinder"
+                )
                 return {
                     "success": True,
                     "message": "从固体称量堆栈中取粉桶完成",
@@ -560,6 +752,12 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将粉桶放置到固态称量完成"): # 等待完成状态复位
                 logger.info("将粉桶放置到固态称量完成")
+                self._place_held_resource_to_warehouse(
+                    "固态称量粉桶位",
+                    "Powder_In_Solid_Weighing",
+                    "powder_cylinder",
+                    "_held_powder_cylinder",
+                )
                 return {
                     "success": True,
                     "message": "将粉桶放置到固态称量完成",
@@ -595,6 +793,12 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从固态称量中取粉桶完成"): # 等待完成状态复位
                 logger.info("从固态称量中取粉桶完成")
+                self._pick_resource_from_warehouse(
+                    "固态称量粉桶位",
+                    "Powder_In_Solid_Weighing",
+                    "powder_cylinder",
+                    "_held_powder_cylinder",
+                )
                 return {
                     "success": True,
                     "message": "从固态称量中取粉桶完成",
@@ -649,6 +853,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将粉桶放置到固态称量堆栈完成"): # 等待完成状态复位
                 logger.info("将粉桶放置到固态称量堆栈完成")
+                self._place_held_resource_to_warehouse(
+                    "固态称量粉桶堆栈", str(position), "powder_cylinder", "_held_powder_cylinder"
+                )
                 return {
                     "success": True,
                     "message": "将粉桶放置到固态称量堆栈完成",
@@ -684,6 +891,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从固态称量中取孔板完成"): # 等待完成状态复位
                 logger.info("从固态称量中取孔板完成")
+                self._pick_resource_from_warehouse(
+                    "固态称量", "Solid_Weighing", "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "从固态称量中取孔板完成",
@@ -735,6 +945,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将孔板放置到移液站完成"): # 等待完成状态复位
                 logger.info("将孔板放置到移液站完成")
+                self._place_held_resource_to_warehouse(
+                    "移液站", str(position), "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "将孔板放置到移液站完成",
@@ -786,6 +999,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从移液站取孔板完成"): # 等待完成状态复位
                 logger.info("从移液站取孔板完成")
+                self._pick_resource_from_warehouse(
+                    "移液站", str(position), "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "从移液站取孔板完成",
@@ -821,6 +1037,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将孔板放置到磁搅完成"): # 等待完成状态复位
                 logger.info("将孔板放置到磁搅完成")
+                self._place_held_resource_to_warehouse(
+                    "磁搅", "Magnetic_Stirrer", "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "将孔板放置到磁搅完成",
@@ -856,6 +1075,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从磁搅取孔板完成"): # 等待完成状态复位
                 logger.info("从磁搅取孔板完成")
+                self._pick_resource_from_warehouse(
+                    "磁搅", "Magnetic_Stirrer", "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "从磁搅取孔板完成",
@@ -891,6 +1113,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将孔板放置到 HPLC 站完成"): # 等待完成状态复位
                 logger.info("将孔板放置到 HPLC 站完成")
+                self._place_held_resource_to_warehouse(
+                    "HPLC工站", "HPLC", "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "将孔板放置到 HPLC 站完成",
@@ -926,6 +1151,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="从 HPLC 站取孔板完成"): # 等待完成状态复位
                 logger.info("从 HPLC 站取孔板完成")
+                self._pick_resource_from_warehouse(
+                    "HPLC工站", "HPLC", "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "从 HPLC 站取孔板完成",
@@ -980,6 +1208,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将孔板放置到下料架完成"): # 等待完成状态复位
                 logger.info("将孔板放置到下料架完成")
+                self._place_held_resource_to_warehouse(
+                    "孔板下料架", str(position), "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "将孔板放置到下料架完成",
@@ -1034,6 +1265,9 @@ class AI4CDevice(OpcUaClientWithSubscription):
             self.set_node_value("Robotic_Arm_Action_Trigger", False) # 复位动作触发
             if self._wait_until_false("Robotic_Arm_Action_Complete", description="将孔板放置到上料架完成"): # 等待完成状态复位
                 logger.info("将孔板放置到上料架完成")
+                self._place_held_resource_to_warehouse(
+                    "孔板上料架", str(position), "well_plate", "_held_well_plate"
+                )
                 return {
                     "success": True,
                     "message": "将孔板放置到上料架完成",

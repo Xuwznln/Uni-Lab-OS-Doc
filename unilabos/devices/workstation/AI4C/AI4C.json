@@ -3,7 +3,9 @@
         {
             "id": "AI4C_station",
             "name": "AI4C_station",
-            "children": [],
+            "children": [
+                "AI4C_deck"
+            ],
             "parent": null,
             "type": "device",
             "class": "AI4C_station",
@@ -22,7 +24,31 @@
             "config": {
                 "url": "opc.tcp://192.168.1.88:4840",
                 "csv_path": "ai4c_sim_updated.csv",
-                "use_subscription": true
+                "use_subscription": true,
+                "deck": {
+                    "data": {
+                        "_resource_child_name": "AI4C_deck",
+                        "_resource_type": "unilabos.devices.workstation.AI4C.decks:AI4C_deck"
+                    }
+                }
+            },
+            "data": {}
+        },
+        {
+            "id": "AI4C_deck",
+            "name": "AI4C_deck",
+            "sample_id": null,
+            "children": [],
+            "parent": "AI4C_station",
+            "type": "deck",
+            "class": "AI4C_deck",
+            "position": {
+                "x": 250,
+                "y": 0,
+                "z": 0
+            },
+            "config": {
+                "type": "AI4C_deck"
             },
             "data": {}
         },
