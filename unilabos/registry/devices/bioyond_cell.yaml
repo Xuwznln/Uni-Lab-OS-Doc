@@ -359,6 +359,41 @@ bioyond_cell:
           title: create_orders_formulation参数
           type: object
         type: UniLabJsonCommand
+      auto-export_order_report:
+        always_free: true
+        feedback: {}
+        goal: {}
+        goal_default:
+          order_codes: ''
+          csv_export_path: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 按 BSO 订单号现查 LIMS 导出配液实验报告 CSV，不依赖 order_finish 推送，可补历史批次
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                order_codes:
+                  title: BSO订单号
+                  description: "支持单个 BSO2026072800006；区间 BSO2026072800006-BSO2026072800029\
+                    \ 或尾号简写 BSO2026072800006-29；逗号跳选 BSO2026072800006,BSO2026072800012-15；跨批次请用逗号分开写"
+                  type: string
+                csv_export_path:
+                  title: "实验报告导出目录\n（需要主控电脑的路径）"
+                  description: CSV 导出目录，报告 Excel 存到其下 reports/ 子目录
+                  type: string
+              required:
+              - order_codes
+              - csv_export_path
+              type: object
+            result: {}
+          required:
+          - goal
+          title: export_order_report参数
+          type: object
+        type: UniLabJsonCommand
       auto-conductivity_test_external:
         always_free: true
         feedback: {}
