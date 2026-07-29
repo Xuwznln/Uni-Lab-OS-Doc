@@ -118,6 +118,8 @@ class BioyondElectrolyteDeck(Deck):
             "自动堆栈-右": bioyond_warehouse_2x2x1("自动堆栈-右"),  # 2行×2列
             "手动传递窗右": bioyond_warehouse_5x3x1("手动传递窗右", row_offset=0),  # A01-E03
             "5号右侧手动堆栈": bioyond_warehouse_4x2x1("5号右侧手动堆栈"),  # A01-A04, B01-B04
+            # LIMS code=0018，电导板配液完成后停在此处，等 conductivity_test_inline
+            "5号自动传递窗": bioyond_warehouse_2x2x1("5号自动传递窗"),  # 2行×2列
             "手动传递窗左": bioyond_warehouse_5x3x1("手动传递窗左", row_offset=5),  # F01-J03
             "加样头堆栈左": bioyond_warehouse_10x1x1("加样头堆栈左"),
             "加样头堆栈右": bioyond_warehouse_10x1x1("加样头堆栈右"),
@@ -137,6 +139,7 @@ class BioyondElectrolyteDeck(Deck):
             "手动传递窗左": Coordinate(-150.0, 423.0, 0.0),
             "手动传递窗右": Coordinate(4160.0, 423.0, 0.0),
             "5号右侧手动堆栈": Coordinate(4600.0, 423.0, 0.0),  # 位于手动传递窗右的右侧
+            "5号自动传递窗": Coordinate(4600.0, 1142.0, 0.0),  # 自动堆栈-右的右侧、5号右侧手动堆栈的上方
             "加样头堆栈左": Coordinate(385.0, 0, 0.0),
             "加样头堆栈右": Coordinate(2187.0, 0, 0.0),
 

@@ -1172,6 +1172,130 @@ bioyond_cell:
           title: transfer_3_to_2参数
           type: object
         type: UniLabJsonCommand
+      auto-transfer_3_to_2_auto:
+        feedback: {}
+        goal: {}
+        goal_default:
+          plate_type: 20ml分液瓶板
+          vial_plates: null
+        handles:
+          input:
+          - data_key: '@this@@@vial_plates'
+            data_source: handle
+            data_type: array
+            handler_key: vial_plates_input
+            label: 分液瓶板列表
+          output:
+          - data_key: total
+            data_source: executor
+            data_type: integer
+            handler_key: transfer_total
+            label: 转运总数
+          - data_key: success
+            data_source: executor
+            data_type: integer
+            handler_key: transfer_success
+            label: 成功数量
+          - data_key: failed
+            data_source: executor
+            data_type: integer
+            handler_key: transfer_failed
+            label: 失败数量
+        placeholder_keys: {}
+        result:
+          properties:
+            failed:
+              type: integer
+            results:
+              items:
+                properties:
+                  error:
+                    type: string
+                  index:
+                    type: integer
+                  materialId:
+                    type: string
+                  message:
+                    type: string
+                  orderCode:
+                    type: string
+                  result:
+                    type: object
+                  status:
+                    type: string
+                type: object
+              type: array
+            success:
+              type: integer
+            total:
+              type: integer
+          type: object
+        schema:
+          description: >-
+            自动批量 3-2 转运：只搬当前在「自动堆栈-左」的分液瓶板（软包用）。
+            电导板停在 5 号自动传递窗，会被自动跳过，无需按板型区分。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                plate_type:
+                  default: 20ml分液瓶板
+                  title: 板型关键字
+                  description: 参与 32 转运的板型，默认：20ml分液瓶板
+                  type: string
+                vial_plates:
+                  title: 分液瓶板
+                  description: 自动传递参数，可忽略
+                  items:
+                    properties:
+                      locationId:
+                        type: string
+                      materialId:
+                        type: string
+                      orderCode:
+                        type: string
+                      typeName:
+                        type: string
+                    required:
+                    - materialId
+                    type: object
+                  type: array
+              required:
+              - vial_plates
+              type: object
+            result:
+              properties:
+                failed:
+                  type: integer
+                results:
+                  items:
+                    properties:
+                      error:
+                        type: string
+                      index:
+                        type: integer
+                      materialId:
+                        type: string
+                      message:
+                        type: string
+                      orderCode:
+                        type: string
+                      result:
+                        type: object
+                      status:
+                        type: string
+                    type: object
+                  type: array
+                success:
+                  type: integer
+                total:
+                  type: integer
+              type: object
+          required:
+          - goal
+          title: transfer_3_to_2_auto参数
+          type: object
+        type: UniLabJsonCommand
       auto-transfer_3_to_2_to_1:
         always_free: true
         feedback: {}
