@@ -4961,11 +4961,30 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         return warehouse_id
 
+    def _snapshot_warehouse(self, wh_id: str) -> Optional[Dict[str, Any]]:
+        """
+        查 warehouse-info(2.38)，返回 data 段（含 name / locations）。
+
+        Args:
+            wh_id: 仓库 uuid
+
+        Returns:
+            data 字典；查询失败返回 None
+        """
+        resp = self._post_lims(
+            "/api/lims/storage/warehouse-info",
+            {"whId": wh_id, "includeDetail": True},
+        )
+        if not isinstance(resp, dict) or resp.get("code") != 1:
+            logger.warning(f"[库位定位] 查询仓库 {wh_id} 失败: {resp}")
+            return None
+        return resp.get("data") or {}
+
     def _locate_material_in_warehouse(
         self, wh_id: str, material_id: str
     ) -> Optional[Tuple[int, int, int]]:
         """
-        查 warehouse-info(2.38)，按 holdMId 在指定仓库中定位物料，返回其 (x, y, z)。
+        按 holdMId 在指定仓库中定位物料，返回其 (x, y, z)。
 
         这是转运源坐标的权威来源：配液报告里的坐标是**下单时**的快照，板子在
         配液结束后才被搬进自动堆栈-左，快照往往对不上或压根没有该仓库的记录。
@@ -4977,15 +4996,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
         Returns:
             命中则返回 (x, y, z)；仓库里没有这块板或查询失败则返回 None
         """
-        resp = self._post_lims(
-            "/api/lims/storage/warehouse-info",
-            {"whId": wh_id, "includeDetail": True},
-        )
-        if not isinstance(resp, dict) or resp.get("code") != 1:
-            logger.warning(f"[库位定位] 查询仓库 {wh_id} 失败: {resp}")
+        data = self._snapshot_warehouse(wh_id)
+        if data is None:
             return None
 
-        data = resp.get("data") or {}
         wh_display = f"{data.get('name') or wh_id}"
         for loc in (data.get("locations") or []):
             if loc.get("holdMId") == material_id:
@@ -5577,7 +5591,214 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
         logger.info(f"[transfer_1_to_2] 转运任务完成: {order_code}")
         return result
-   
+
+    def transfer_3_to_2_auto(
+        self,
+        vial_plates: List[Dict],
+        plate_type: str = "20ml分液瓶板",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        批量 3→2 转运：把**当前在自动堆栈-左**的分液瓶板逐块搬到 2 号位置。
+
+        为什么不能只按 typeName 挑板：电导+软包混合单里两类板 typeName 都是
+        "20ml分液瓶板"，靠板型无法区分谁该走 32。真正的判据是**板在哪个仓库**：
+          - 软包板：配液结束后停在自动堆栈-左，等 32 转运
+          - 电导板：配液结束后已搬到 5 号自动传递窗，等 conductivity_test_inline
+        因此这里先查一次自动堆栈-左的实时占用，只搬命中的板；不在的板直接跳过
+        （而非报错），与电导侧"按 5 号传递窗求交集过滤"正好互补。
+
+        与 transfer_3_to_2_to_1_auto 的另一个区别：3→2 的落点在 2 号手套箱，
+        当前没有对应设备节点承接，故只做物理转运，不做资源树同步。
+
+        Args:
+            vial_plates: 分液瓶板列表（上游配液输出，含全部板型）
+            plate_type: 参与 32 转运的板型关键字，默认 "20ml分液瓶板"
+
+        Returns:
+            {"total": 入参板数, "success": 成功数, "failed": 失败数, "results": [...]}
+        """
+        if kwargs:
+            logger.warning(
+                f"[transfer_3_to_2_auto] ⚠️ 检测到未识别的参数: {list(kwargs.keys())}，已忽略"
+            )
+
+        if not vial_plates:
+            raise ValueError("vial_plates 参数不能为空")
+
+        logger.info("=" * 80)
+        logger.info(f"[transfer_3_to_2_auto] 接收到 {len(vial_plates)} 个分液瓶板")
+        for idx, plate in enumerate(vial_plates, 1):
+            logger.info(
+                f"  [{idx}] orderCode={(plate or {}).get('orderCode', 'N/A')}, "
+                f"materialId={((plate or {}).get('materialId') or 'N/A')[:20]}..., "
+                f"typeName={(plate or {}).get('typeName', 'N/A')}"
+            )
+        logger.info("=" * 80)
+
+        # ========== 步骤1：查一次自动堆栈-左的实时占用 ==========
+        # 只查一次而非逐板查：固定堆栈的库位坐标不因取走某块板而变化，
+        # 一次快照既省请求又保证同批板用的是一致的库存视图。
+        wh_data = self._snapshot_warehouse(self._WH_ID_AUTO_STACK_LEFT)
+        if wh_data is None:
+            raise BioyondException(
+                "查询自动堆栈-左失败，无法确定 32 转运的源坐标"
+            )
+        wh_display = wh_data.get("name") or self._WH_ID_AUTO_STACK_LEFT
+        stack_coords: Dict[str, Tuple[int, int, int]] = {}
+        occupied: List[str] = []
+        for loc in (wh_data.get("locations") or []):
+            hold_mid = (loc.get("holdMId") or "").strip()
+            if not hold_mid:
+                continue
+            stack_coords[hold_mid] = (
+                int(loc.get("x") or 1),
+                int(loc.get("y") or 1),
+                int(loc.get("z") or 1),
+            )
+            occupied.append(f"{loc.get('code')}={loc.get('holdMTypeName')}")
+        logger.info(
+            f"[32批量转运] {wh_display} 当前有 {len(stack_coords)} 块物料: {occupied}"
+        )
+
+        # ========== 步骤2：按板型 + 是否在自动堆栈-左双重过滤 ==========
+        results: List[Dict] = []
+        pending: List[Tuple[Dict, Tuple[int, int, int]]] = []
+        seen_material_ids = set()
+
+        for idx, plate in enumerate(vial_plates, 1):
+            if not plate or not isinstance(plate, dict):
+                results.append({
+                    "index": idx, "orderCode": "N/A", "materialId": "N/A",
+                    "status": "failed", "error": "分液瓶板信息无效或为空",
+                })
+                continue
+
+            material_id = (plate.get("materialId") or "").strip()
+            order_code = plate.get("orderCode", "N/A")
+            type_name = (plate.get("typeName") or "").strip()
+
+            if not material_id:
+                results.append({
+                    "index": idx, "orderCode": order_code, "materialId": "N/A",
+                    "status": "failed", "error": "缺少 materialId",
+                })
+                continue
+
+            if plate_type not in type_name:
+                logger.info(
+                    f"[32批量转运] ℹ️ [{idx}/{len(vial_plates)}] 板型不符，跳过 "
+                    f"(orderCode={order_code}, typeName={type_name or '空'})"
+                )
+                results.append({
+                    "index": idx, "orderCode": order_code, "materialId": material_id,
+                    "status": "skipped",
+                    "message": f"非{plate_type}（typeName={type_name or '空'}）",
+                })
+                continue
+
+            if material_id in seen_material_ids:
+                logger.info(
+                    f"[32批量转运] ℹ️ [{idx}/{len(vial_plates)}] 该瓶板已排入本批，跳过"
+                    f"（多订单共用同一物理瓶板）"
+                )
+                results.append({
+                    "index": idx, "orderCode": order_code, "materialId": material_id,
+                    "status": "skipped", "message": "该瓶板已排入本批（共用瓶板）",
+                })
+                continue
+
+            coords = stack_coords.get(material_id)
+            if coords is None:
+                # 电导板停在 5 号自动传递窗，本就不该走 32；也可能是还没搬进来。
+                logger.info(
+                    f"[32批量转运] ℹ️ [{idx}/{len(vial_plates)}] 不在 {wh_display}，跳过 "
+                    f"(orderCode={order_code}, materialId={material_id[:20]}...)"
+                )
+                results.append({
+                    "index": idx, "orderCode": order_code, "materialId": material_id,
+                    "status": "skipped",
+                    "message": f"不在{wh_display}（电导板停 5 号自动传递窗，或尚未搬入）",
+                })
+                continue
+
+            seen_material_ids.add(material_id)
+            pending.append((plate, coords))
+
+        if not pending:
+            logger.warning(
+                f"[transfer_3_to_2_auto] 过滤后无可转运的 {plate_type}"
+                f"（入参 {len(vial_plates)} 块，全部跳过）"
+            )
+            return {
+                "total": len(vial_plates),
+                "success": 0,
+                "failed": sum(1 for r in results if r.get("status") == "failed"),
+                "results": results,
+            }
+
+        logger.info(
+            f"[32批量转运] 过滤后保留 {len(pending)}/{len(vial_plates)} 块板待转运"
+        )
+
+        # ========== 步骤3：逐块物理转运 ==========
+        success_count = 0
+        failed_count = sum(1 for r in results if r.get("status") == "failed")
+
+        for seq, (plate, (x, y, z)) in enumerate(pending, 1):
+            material_id = (plate.get("materialId") or "").strip()
+            order_code = plate.get("orderCode", "N/A")
+            try:
+                logger.info(f"\n{'='*60}")
+                logger.info(f"[32批量转运] 处理 [{seq}/{len(pending)}]")
+                logger.info(f"  orderCode: {order_code}")
+                logger.info(f"  materialId: {material_id[:20]}...")
+                logger.info(f"  源坐标: {wh_display}({x},{y},{z})")
+                logger.info(f"{'='*60}")
+
+                result = self.transfer_3_to_2(
+                    source_wh_id=self._WH_ID_AUTO_STACK_LEFT,
+                    source_x=x, source_y=y, source_z=z,
+                )
+                results.append({
+                    "index": seq, "orderCode": order_code, "materialId": material_id,
+                    "status": "success", "result": result,
+                })
+                success_count += 1
+                logger.info(f"[32批量转运] ✅ [{seq}/{len(pending)}] 转运成功")
+            except Exception as e:
+                logger.error(f"[32批量转运] ❌ [{seq}/{len(pending)}] 失败: {e}")
+                results.append({
+                    "index": seq, "orderCode": order_code, "materialId": material_id,
+                    "status": "failed", "error": str(e),
+                })
+                failed_count += 1
+
+        summary = {
+            "total": len(vial_plates),
+            "success": success_count,
+            "failed": failed_count,
+            "results": results,
+        }
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"[32批量转运] 完成汇总:")
+        logger.info(f"  总数: {summary['total']}")
+        logger.info(f"  成功: {summary['success']} ✅")
+        logger.info(f"  失败: {summary['failed']} ❌")
+        logger.info(f"{'='*60}\n")
+
+        if failed_count > 0:
+            fail_details = "; ".join(
+                f"{r.get('orderCode')}/{(r.get('materialId') or '')[:8]}: {r.get('error')}"
+                for r in results if r.get("status") == "failed"
+            )
+            raise BioyondException(
+                f"3-2 批量转运有 {failed_count} 块板失败: {fail_details}"
+            )
+
+        return summary
+
     # 2.5 批量查询实验报告(post过滤关键字查询)
     def order_list_v2(self,
                       timeType: str = "",
