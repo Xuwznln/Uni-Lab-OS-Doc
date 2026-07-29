@@ -3529,6 +3529,450 @@ class BioyondCellWorkstation(BioyondWorkstation):
         logger.info(f"[CSV导出] ✅ 导出完成: {csv_file}")
         return csv_file
 
+    # ==================== 按 orderCode 导出实验报告（不依赖 order_finish 推送）====================
+
+    # 与 _export_order_csv 保持同一套表头
+    _ORDER_REPORT_CSV_HEADER = (
+        "orderCode", "orderName",
+        "配液瓶类型", "配液瓶二维码",
+        "分液瓶类型", "分液瓶二维码",
+        "目标配液质量比", "真实配液质量比",
+        "各试剂允差", "总质量允差",
+        "时间",
+    )
+
+    # 报告 Excel 里三类分液小瓶二维码列，按此优先级取首个非空
+    _REPORT_VIAL_QR_COLUMNS = (
+        "电导测试任务瓶二维码",
+        "扣电组装小瓶二维码",
+        "软包组装小瓶二维码",
+    )
+
+    # orderCode 形如 BSO + 8 位日期 + 流水号
+    _ORDER_CODE_PATTERN = re.compile(r"^(?P<prefix>[A-Za-z]+)(?P<date>\d{8})(?P<serial>\d+)$")
+
+    # 区间一次最多展开多少单，防止笔误刷接口
+    _ORDER_CODE_EXPAND_LIMIT = 500
+
+    def _expand_order_codes(self, spec: str) -> List[str]:
+        """把打印机页码式的订单号写法展开成 orderCode 列表
+
+        支持三种写法，可用逗号混合：
+        - 单个：``BSO2026072800006``
+        - 全码区间：``BSO2026072800006-BSO2026072800029``
+        - 尾号简写区间：``BSO2026072800006-29``、``BSO2026072800006-00029``
+
+        Args:
+            spec: 订单号表达式，逗号（半角/全角）分隔
+
+        Returns:
+            去重保序后的 orderCode 列表
+
+        Raises:
+            BioyondException: 表达式为空、格式无法识别、区间倒置或展开数超限
+        """
+        if not spec or not str(spec).strip():
+            raise BioyondException("[导出实验报告] order_codes 不能为空")
+
+        text = str(spec).replace("，", ",").replace("－", "-").replace("~", "-")
+        codes: List[str] = []
+        for raw in text.split(","):
+            part = raw.strip()
+            if not part:
+                continue
+            if "-" in part:
+                codes.extend(self._expand_order_code_range(part))
+            else:
+                codes.append(part)
+
+        seen = set()
+        result: List[str] = []
+        for code in codes:
+            if code not in seen:
+                seen.add(code)
+                result.append(code)
+
+        if not result:
+            raise BioyondException(f"[导出实验报告] 未能从 {spec!r} 解析出任何订单号")
+        return result
+
+    def _expand_order_code_range(self, part: str) -> List[str]:
+        """展开单个区间段，如 BSO2026072800006-29"""
+        lo_text, _, hi_text = part.partition("-")
+        lo_text, hi_text = lo_text.strip(), hi_text.strip()
+
+        match_lo = self._ORDER_CODE_PATTERN.match(lo_text)
+        if not match_lo:
+            raise BioyondException(
+                f"[导出实验报告] 区间起始订单号格式无法识别: {lo_text!r}，期望形如 BSO2026072800006"
+            )
+        prefix = match_lo.group("prefix")
+        date = match_lo.group("date")
+        serial = match_lo.group("serial")
+        width = len(serial)
+        start = int(serial)
+
+        match_hi = self._ORDER_CODE_PATTERN.match(hi_text)
+        if match_hi:
+            if match_hi.group("prefix") != prefix or match_hi.group("date") != date:
+                raise BioyondException(
+                    f"[导出实验报告] 区间两端批次不一致({lo_text} ~ {hi_text})，跨批次请用逗号分开写"
+                )
+            end = int(match_hi.group("serial"))
+        elif hi_text.isdigit():
+            # 尾号简写：按右对齐塞回流水号，BSO2026072800006-29 -> 00029
+            if len(hi_text) > width:
+                raise BioyondException(
+                    f"[导出实验报告] 区间末尾 {hi_text!r} 位数超过流水号宽度 {width}"
+                )
+            end = int(serial[: width - len(hi_text)] + hi_text)
+        else:
+            raise BioyondException(f"[导出实验报告] 区间末尾格式无法识别: {hi_text!r}")
+
+        if end < start:
+            raise BioyondException(f"[导出实验报告] 区间末尾小于起始: {lo_text} ~ {hi_text}")
+        count = end - start + 1
+        if count > self._ORDER_CODE_EXPAND_LIMIT:
+            raise BioyondException(
+                f"[导出实验报告] 区间 {part} 将展开 {count} 个订单，"
+                f"超过上限 {self._ORDER_CODE_EXPAND_LIMIT}，请确认写法"
+            )
+        return [f"{prefix}{date}{str(n).zfill(width)}" for n in range(start, end + 1)]
+
+    def _resolve_order_by_code(self, order_code: str) -> Optional[Dict[str, Any]]:
+        """按 orderCode 精确定位订单摘要
+
+        2.5 order-list 的 filter 是模糊匹配，可能带回同前缀的其他单；用
+        preIntakes[*].sampleCode（形如 BSO2026072800006-00001）确认归属，
+        比多调一次 order-report 拿 code 更省。
+
+        Returns:
+            命中的 order-list item，未命中返回 None
+        """
+        try:
+            resp = self.order_list_v2(filter=order_code, pageCount=20)
+        except Exception as e:
+            logger.warning(f"[导出实验报告] order-list 查询失败: orderCode={order_code}, 错误={e}")
+            return None
+
+        items = ((resp or {}).get("data") or {}).get("items") or []
+        for item in items:
+            for pre_intake in item.get("preIntakes") or []:
+                sample_code = pre_intake.get("sampleCode") or ""
+                if sample_code == order_code or sample_code.startswith(f"{order_code}-"):
+                    return item
+        return None
+
+    def _report_bottles_by_kind(
+        self, report: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """从 order-report 的 sampleMaterials 拆出配液瓶与分液瓶（排除板）
+
+        Returns:
+            (配液瓶列表, 分液瓶列表)，元素含 typeName / barCode / materialCode
+        """
+        preps: List[Dict[str, Any]] = []
+        vials: List[Dict[str, Any]] = []
+        for pre_intake in report.get("preIntakes") or []:
+            for sample_material in pre_intake.get("sampleMaterials") or []:
+                type_name = (sample_material.get("materialTypeName") or "").strip()
+                if not type_name or "板" in type_name:
+                    continue
+                entry = {
+                    "typeName": type_name,
+                    "barCode": sample_material.get("materialBarCode") or "",
+                    "materialCode": sample_material.get("materialCode") or "",
+                }
+                if "配液瓶" in type_name:
+                    preps.append(entry)
+                elif "分液瓶" in type_name:
+                    vials.append(entry)
+        return preps, vials
+
+    def _fetch_lims_report_excel(self, rel_path: str, save_dir: str) -> Optional[str]:
+        """下载 LIMS 报告 Excel
+
+        Args:
+            rel_path: order-list 里 preIntakes[].extraProperties.reportFile 的相对路径
+            save_dir: 落盘目录（留档便于人工核对）
+
+        Returns:
+            本地文件路径，失败返回 None
+        """
+        if not rel_path:
+            return None
+        url = self._url(re.sub(r"/{2,}", "/", str(rel_path)))
+        try:
+            resp = requests.get(url, timeout=self.bioyond_config.get("timeout", 30))
+        except Exception as e:
+            logger.warning(f"[导出实验报告] 报告 Excel 下载失败: {url}, 错误={e}")
+            return None
+        if resp.status_code != 200:
+            logger.warning(f"[导出实验报告] 报告 Excel 返回 HTTP {resp.status_code}: {url}")
+            return None
+
+        os.makedirs(save_dir, exist_ok=True)
+        local_path = os.path.join(save_dir, str(rel_path).rsplit("/", 1)[-1])
+        with open(local_path, "wb") as f:
+            f.write(resp.content)
+        logger.info(f"[导出实验报告] 报告 Excel 已存: {local_path}")
+        return local_path
+
+    def _parse_lims_report_excel(self, path: str) -> Dict[str, Any]:
+        """解析 LIMS 报告 Excel
+
+        表头两行合并在同一单元格（``中文\\n英文``），取中文首行定位列；第 2 行起是数据，
+        前段字段只在首行有值，组分按行铺开在「组分ID/目标加样质量/真实加样质量/允差」。
+
+        Returns:
+            含 prep_bottle_type / prep_bottle_barcode / vial_barcode / components 的字典，
+            解析失败返回空字典
+        """
+        try:
+            df = pd.read_excel(path, sheet_name=0, header=None, engine="openpyxl")
+        except Exception as e:
+            logger.warning(f"[导出实验报告] 报告 Excel 解析失败: {path}, 错误={e}")
+            return {}
+        if df.empty or len(df) < 2:
+            logger.warning(f"[导出实验报告] 报告 Excel 内容为空: {path}")
+            return {}
+
+        header = [
+            "" if value is None or pd.isna(value) else str(value).split("\n")[0].strip()
+            for value in df.iloc[0].tolist()
+        ]
+
+        def cell(row_idx: int, col_name: str) -> Any:
+            if col_name not in header:
+                return None
+            value = df.iloc[row_idx, header.index(col_name)]
+            return None if pd.isna(value) else value
+
+        result: Dict[str, Any] = {
+            "prep_bottle_type": cell(1, "配液瓶类型"),
+            "prep_bottle_barcode": cell(1, "配液瓶二维码"),
+            "tray_barcode": cell(1, "托盘二维码"),
+            "target_total_mass": cell(1, "目标加样总质量(g)"),
+            "actual_total_mass": cell(1, "真实加样总质量(g)"),
+            "vial_barcode": "",
+            "vial_barcode_column": "",
+            "components": [],
+        }
+
+        for col_name in self._REPORT_VIAL_QR_COLUMNS:
+            value = cell(1, col_name)
+            if value not in (None, ""):
+                result["vial_barcode"] = str(value).strip()
+                result["vial_barcode_column"] = col_name
+                break
+
+        for row_idx in range(1, len(df)):
+            name = cell(row_idx, "组分ID")
+            if name in (None, ""):
+                continue
+            result["components"].append({
+                "name": str(name).strip(),
+                "target": cell(row_idx, "目标加样质量(g)"),
+                "actual": cell(row_idx, "真实加样质量(g)"),
+            })
+        return result
+
+    @staticmethod
+    def _mass_ratio_from_components(components: List[Dict[str, Any]], key: str) -> Dict[str, float]:
+        """按组分质量算质量比，口径与 _process_order_reagents 一致"""
+        values: Dict[str, float] = {}
+        for comp in components:
+            value = comp.get(key)
+            if isinstance(value, (int, float)):
+                values[comp["name"]] = float(value)
+        total = sum(values.values())
+        if not total:
+            return {}
+        return {name: round(value / total, 4) for name, value in values.items()}
+
+    @staticmethod
+    def _format_lims_time(value: Any) -> str:
+        """LIMS 的 ISO 时间转 CSV 展示格式"""
+        if not value:
+            return ""
+        try:
+            return datetime.fromisoformat(str(value)).strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            return str(value)
+
+    def export_order_report(self, order_codes: str, csv_export_path: str) -> Dict[str, Any]:
+        """按 BSO 订单号导出配液实验报告 CSV
+
+        与 create_orders 结束时的导出格式完全一致，但数据全部现查 LIMS，不依赖
+        order_finish 推送，因此可以事后补任意历史批次。取数链路：
+
+        1. 2.5 ``order-list`` 按 orderCode 查订单摘要（orderName / completeTime /
+           reportFile 相对路径）；
+        2. 2.6 ``order-report`` 按 orderId 查 sampleMaterials，取配液瓶/分液瓶的
+           规范类型名（CSV 要的是「配液瓶(小)」，报告 Excel 里写的是「15mL配液瓶」）；
+        3. 下载并解析报告 Excel，取配液瓶二维码、分液小瓶二维码，以及逐组分的目标/
+           真实加样质量，据此算质量比与允差。
+
+        真实加样质量以报告 Excel 为准：已验证它与瓶身 material-info 的 feedingHistory
+        逐位一致，比 order_finish 推送的 realQuantity 更可靠。
+
+        分液瓶二维码只从报告 Excel 取，缺失时留空并告警——查接口拿到的是瓶位当前状态，
+        会被后续批次扫码覆盖、串到别单。
+
+        Args:
+            order_codes: 订单号表达式，支持单个、区间（``BSO2026072800006-BSO2026072800029``
+                或尾号简写 ``BSO2026072800006-29``）、逗号跳选，可混写
+            csv_export_path: CSV 导出目录（报告 Excel 存到其下 reports/ 子目录）
+
+        Returns:
+            {
+                "csv_file": CSV 路径,
+                "total": 请求单数,
+                "resolved": 成功取到数据的单数,
+                "not_found": 未查到的 orderCode 列表,
+                "missing_vial_qr": 分液瓶二维码缺失的 orderCode 列表,
+                "rows": 每行数据
+            }
+        """
+        codes = self._expand_order_codes(order_codes)
+        if not csv_export_path or not str(csv_export_path).strip():
+            raise BioyondException("[导出实验报告] csv_export_path 不能为空")
+
+        csv_export_path = str(csv_export_path).strip()
+        os.makedirs(csv_export_path, exist_ok=True)
+        report_dir = os.path.join(csv_export_path, "reports")
+
+        logger.info(f"[导出实验报告] 订单号展开为 {len(codes)} 个: {codes}")
+
+        rows: List[Dict[str, str]] = []
+        not_found: List[str] = []
+        missing_vial_qr: List[str] = []
+
+        for idx, order_code in enumerate(codes, 1):
+            logger.info(f"[导出实验报告] ({idx}/{len(codes)}) 处理 orderCode={order_code}")
+            row = {key: "" for key in self._ORDER_REPORT_CSV_HEADER}
+            row["orderCode"] = order_code
+
+            summary = self._resolve_order_by_code(order_code)
+            if not summary:
+                logger.warning(f"[导出实验报告] LIMS 未查到订单: orderCode={order_code}，该行留空")
+                not_found.append(order_code)
+                rows.append(row)
+                continue
+
+            row["orderName"] = summary.get("name") or ""
+            row["时间"] = self._format_lims_time(summary.get("completeTime"))
+            if str(summary.get("status")) != "80":
+                logger.warning(
+                    f"[导出实验报告] 订单未成功完成: orderCode={order_code}, "
+                    f"status={summary.get('status')}({summary.get('statusName')})，数据可能不完整"
+                )
+
+            # 瓶子规范类型名（配液瓶条码也可从这里兜底）
+            order_id = summary.get("id") or summary.get("orderId") or ""
+            report: Dict[str, Any] = {}
+            if order_id:
+                try:
+                    report = (self.order_report_v2(order_id) or {}).get("data") or {}
+                except Exception as e:
+                    logger.warning(
+                        f"[导出实验报告] order-report 查询失败: orderCode={order_code}, 错误={e}"
+                    )
+            preps, vials = self._report_bottles_by_kind(report)
+
+            # 报告 Excel
+            excel: Dict[str, Any] = {}
+            for pre_intake in summary.get("preIntakes") or []:
+                rel_files = ((pre_intake.get("extraProperties") or {}).get("reportFile")) or []
+                for rel_path in rel_files:
+                    local_path = self._fetch_lims_report_excel(rel_path, report_dir)
+                    if local_path:
+                        excel = self._parse_lims_report_excel(local_path)
+                        break
+                if excel:
+                    break
+            if not excel:
+                logger.warning(
+                    f"[导出实验报告] 无报告 Excel: orderCode={order_code}，质量比相关列留空"
+                )
+
+            row["配液瓶类型"] = (
+                (preps[0]["typeName"] if preps else "") or str(excel.get("prep_bottle_type") or "")
+            )
+            row["配液瓶二维码"] = (
+                str(excel.get("prep_bottle_barcode") or "") or (preps[0]["barCode"] if preps else "")
+            )
+            row["分液瓶类型"] = vials[0]["typeName"] if vials else ""
+            row["分液瓶二维码"] = excel.get("vial_barcode") or ""
+            if not row["分液瓶二维码"]:
+                missing_vial_qr.append(order_code)
+                logger.warning(
+                    f"[导出实验报告] 分液瓶二维码缺失: orderCode={order_code}"
+                    f"（报告 Excel 未写入，多为工站扫码失败）；接口现值是瓶位当前状态、"
+                    f"会串到别单，故留空"
+                )
+
+            components = excel.get("components") or []
+            target_ratio = self._mass_ratio_from_components(components, "target")
+            real_ratio = self._mass_ratio_from_components(components, "actual")
+            mass_tolerance: Dict[str, Optional[float]] = {}
+            target_sum = 0.0
+            real_sum = 0.0
+            for comp in components:
+                target, actual = comp.get("target"), comp.get("actual")
+                if not isinstance(target, (int, float)) or not isinstance(actual, (int, float)):
+                    continue
+                target_sum += float(target)
+                real_sum += float(actual)
+                mass_tolerance[comp["name"]] = (
+                    round((float(actual) - float(target)) / float(target), 6) if target else None
+                )
+            total_mass_tolerance = (
+                round((real_sum - target_sum) / target_sum, 6) if target_sum else None
+            )
+
+            row["目标配液质量比"] = json.dumps(target_ratio, ensure_ascii=False) if target_ratio else ""
+            row["真实配液质量比"] = json.dumps(real_ratio, ensure_ascii=False) if real_ratio else ""
+            row["各试剂允差"] = json.dumps(mass_tolerance, ensure_ascii=False) if mass_tolerance else ""
+            row["总质量允差"] = "" if total_mass_tolerance is None else str(total_mass_tolerance)
+
+            rows.append(row)
+            logger.info(
+                f"[导出实验报告] orderCode={order_code}, orderName={row['orderName']}, "
+                f"配液瓶={row['配液瓶类型']}({row['配液瓶二维码']}), "
+                f"分液瓶={row['分液瓶类型']}({row['分液瓶二维码'] or '缺失'}), "
+                f"组分数={len(components)}"
+            )
+
+        time_date = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_file = os.path.join(csv_export_path, f"electrolyte_orders_bycode_{time_date}.csv")
+        with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+            writer.writerow(list(self._ORDER_REPORT_CSV_HEADER))
+            for row in rows:
+                writer.writerow([row.get(key, "") for key in self._ORDER_REPORT_CSV_HEADER])
+            f.flush()
+
+        resolved = len(codes) - len(not_found)
+        logger.info(
+            f"[导出实验报告] ✅ 导出完成: {csv_file}，"
+            f"共 {len(codes)} 单，成功 {resolved} 单，"
+            f"未查到 {len(not_found)} 单，分液瓶二维码缺失 {len(missing_vial_qr)} 单"
+        )
+        if not_found:
+            logger.warning(f"[导出实验报告] 未查到的订单: {not_found}")
+        if missing_vial_qr:
+            logger.warning(f"[导出实验报告] 分液瓶二维码缺失的订单: {missing_vial_qr}")
+
+        return {
+            "csv_file": csv_file,
+            "total": len(codes),
+            "resolved": resolved,
+            "not_found": not_found,
+            "missing_vial_qr": missing_vial_qr,
+            "rows": rows,
+        }
+
     def _export_conductivity_csv(
         self,
         results: List[Dict[str, Any]],
@@ -5160,6 +5604,20 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "sorting": sorting
         }
         return self._post_lims("/api/lims/order/order-list", data)
+
+    # 2.6 按 orderId 查询单个实验报告
+    def order_report_v2(self, order_id: str) -> Dict[str, Any]:
+        """查询单个订单的实验报告详情
+
+        URL: /api/lims/order/order-report
+
+        Args:
+            order_id: 订单 GUID。注意必须传 orderId，传 orderCode 接口会返回 400。
+
+        Returns:
+            接口原始响应（data 内含 code/name/preIntakes[].sampleMaterials/usedMaterials 等）
+        """
+        return self._post_lims("/api/lims/order/order-report", order_id)
 
     def _recover_timeout_order_report(
         self, order_code: str, create_entry: Optional[Dict[str, Any]]
