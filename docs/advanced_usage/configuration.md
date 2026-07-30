@@ -719,6 +719,47 @@ unilab --config base_config.py \
    ```
    **解决方案**：检查配置类名和字段名是否正确
 
+## OpenTelemetry / SigNoz 追踪
+
+Edge 追踪默认关闭；没有显式配置时不会加载 OpenTelemetry SDK，也不会发起网络请求。生产环境建议通过环境变量开启：
+
+```bash
+export UNILABOS_OTEL_ENABLED=true
+export OTEL_SERVICE_NAME=uni-lab-edge
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://signoz-otel-collector:4317
+export OTEL_EXPORTER_OTLP_INSECURE=true
+export OTEL_DEPLOYMENT_ENVIRONMENT=production
+export OTEL_TRACES_SAMPLER=parentbased_traceidratio
+export OTEL_TRACES_SAMPLER_ARG=0.25
+unilab ...
+```
+
+需要认证 header 时使用运行环境的 secret 注入 `OTEL_EXPORTER_OTLP_HEADERS`，不要写入配置文件、日志或版本控制。也可在 `local_config.py` 的 `OTelConfig` 中配置 `enabled`、`endpoint`、`service_name`、采样率和批处理参数；环境变量优先。
+
+追踪实现使用异步批量导出和有界队列。collector 不可用、SDK 缺失、队列溢出或关闭 flush 超时均 fail-open，不阻断调度和仪器控制。默认批处理参数是：
+
+- `max_queue_size = 2048`
+- `max_export_batch_size = 512`
+- `schedule_delay_ms = 5000`
+- `export_timeout_ms = 5000`
+- `shutdown_timeout_ms = 5000`
+
+链路使用 W3C `traceparent` / `tracestate` 穿过 HTTP、WebSocket、HostLink、线程队列和 inventory outbox；`trace_id` / `span_id` 只用于日志、ledger、SSE 和云端记录关联。追踪属性只记录 workflow、job、device、action、material 等标识和状态，不记录完整配方、动作参数、认证 token 或原始 payload。主要层级为：
+
+```text
+HTTP 路由模板 server span / ws.receive
+└── workflow.task.run
+    ├── workflow.task.submit / workflow.task.reconcile / workflow.job.dispatch
+    ├── material.* → inventory.ledger.append → inventory.outbox.publish
+    └── action.run
+        ├── action.queue → action.worker
+        ├── action.execute
+        │   └── action.retry / action.skipped / action.operator_intervention
+        └── action.status.publish
+```
+
+启用追踪后，现有文本日志会自动附加 `trace_id` 和 `span_id`，可直接在 SigNoz 中关联检索。
+
 ## 相关文档
 
 - [工作目录详解](working_directory.md)

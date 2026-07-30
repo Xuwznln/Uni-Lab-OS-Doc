@@ -33,6 +33,14 @@ from unilabos.utils.type_check import serialize_result_info
 from unilabos.app.communication import BaseCommunicationClient
 from unilabos.config.config import WSConfig, HTTPConfig, BasicConfig
 from unilabos.utils.log import get_comm_logger
+from unilabos.utils.tracing import (
+    capture_context,
+    extract_trace_context,
+    inject_trace_context,
+    span,
+    use_context,
+    wrap_with_current_context,
+)
 
 # 服务端通信专用 logger：独立成文件(unilabos_data/logs/ws_comm_*.log)，
 # 全量 TRACE 落本地、微秒级时间戳 + 线程名，便于排查通信/queue 时序问题。
@@ -68,6 +76,7 @@ class QueueItem:
     device_action_key: str
     next_run_time: float = 0  # 下次执行时间戳
     retry_count: int = 0  # 重试次数
+    trace_context: Optional[Dict[str, str]] = None
 
 
 @dataclass
@@ -89,6 +98,7 @@ class JobInfo:
     action_args: Dict[str, Any] = field(default_factory=dict)
     sample_material: Dict[str, Any] = field(default_factory=dict)
     server_info: Optional[Dict[str, Any]] = None
+    trace_context: Any = None
 
     def update_timestamp(self):
         """更新最后更新时间"""
@@ -558,7 +568,7 @@ class MessageProcessor:
                 message_type = data.get("action", "")
                 message_data = data.get("data")
                 if self.session_id and self.session_id == data.get("edge_session"):
-                    await self._process_message(message_type, message_data)
+                    await self._process_message(message_type, message_data, data)
                 else:
                     if message_type.endswith("_material"):
                         logger.trace(
@@ -568,7 +578,7 @@ class MessageProcessor:
                             f"[MessageProcessor] 跳过了一条归属 {data.get('edge_session')} 的旧消息: {data.get('action')}"
                         )
                     else:
-                        await self._process_message(message_type, message_data)
+                        await self._process_message(message_type, message_data, data)
             except json.JSONDecodeError:
                 logger.error(f"[MessageProcessor] Invalid JSON received: {message}")
             except Exception as e:
@@ -603,9 +613,26 @@ class MessageProcessor:
                             break
 
                         try:
-                            message_str = json.dumps(msg, ensure_ascii=False)
-                            await self.websocket.send(message_str)
-                            logger.trace(f"[WS_SEND] {message_str}")
+                            if str(msg.get("action") or "") in ("ping", "pong"):
+                                message_str = json.dumps(msg, ensure_ascii=False)
+                                await self.websocket.send(message_str)
+                                logger.trace(f"[WS_SEND] {message_str}")
+                                continue
+                            parent = extract_trace_context(msg)
+                            with span(
+                                "ws.send",
+                                kind="producer",
+                                parent_context=parent,
+                                attributes={
+                                    "messaging.system": "websocket",
+                                    "messaging.operation": "send",
+                                    "messaging.message.type": str(msg.get("action") or ""),
+                                },
+                            ):
+                                inject_trace_context(msg)
+                                message_str = json.dumps(msg, ensure_ascii=False)
+                                await self.websocket.send(message_str)
+                                logger.trace(f"[WS_SEND] {message_str}")
                         except Exception as e:
                             logger.error(f"[MessageProcessor] Failed to send message: {str(e)}")
                             logger.error(f"[WS_SEND_FAILED] {msg}")
@@ -630,7 +657,29 @@ class MessageProcessor:
         finally:
             logger.debug("[MessageProcessor] Send handler stopped")
 
-    async def _process_message(self, message_type: str, message_data: Dict[str, Any]):
+    async def _process_message(
+        self,
+        message_type: str,
+        message_data: Dict[str, Any],
+        envelope: Optional[Dict[str, Any]] = None,
+    ):
+        if message_type in ("ping", "pong"):
+            await self._process_message_inner(message_type, message_data)
+            return
+        parent = extract_trace_context(envelope or message_data)
+        with span(
+            "ws.receive",
+            kind="consumer",
+            parent_context=parent,
+            attributes={
+                "messaging.system": "websocket",
+                "messaging.operation": "receive",
+                "messaging.message.type": message_type,
+            },
+        ):
+            await self._process_message_inner(message_type, message_data)
+
+    async def _process_message_inner(self, message_type: str, message_data: Dict[str, Any]):
         """处理收到的消息"""
         logger.trace(f"[MessageProcessor] Processing message: {message_type}")
 
@@ -877,6 +926,8 @@ class MessageProcessor:
             try:
                 from unilabos.app.web.client import http_client
 
+                trace_headers: Dict[str, Any] = {}
+                inject_trace_context(trace_headers)
                 http_client._session.post(
                     f"{http_client.remote_addr}/edge/inventory/command_result",
                     json={
@@ -885,12 +936,17 @@ class MessageProcessor:
                         "result": response.get("result") or {},
                         "error": response.get("error", ""),
                     },
+                    headers=trace_headers,
                     timeout=15,
                 )
             except Exception as e:  # 回调失败不影响本地执行结果（云端可轮询补偿）
                 logger.warning(f"[MessageProcessor] inventory_command_result http callback failed: {e}")
 
-        threading.Thread(target=_http_callback, daemon=True, name="inv-cmd-result").start()
+        threading.Thread(
+            target=wrap_with_current_context(_http_callback),
+            daemon=True,
+            name="inv-cmd-result",
+        ).start()
 
     def _send_workflow_status(self, data: Dict[str, Any], status: str, error: str = "") -> None:
         """向云端回报工作流状态（workflow_status 消息）。"""
@@ -983,9 +1039,20 @@ class MessageProcessor:
                 action_args=req.action_args,
                 sample_material=req.sample_material,
                 server_info=req.server_info,
+                trace_context=None,
             )
 
-            should_start_now, lock_became_busy = self.device_manager.enqueue_job(job_info)
+            with span(
+                "action.queue",
+                attributes={
+                    "workflow.job.uuid": req.job_id,
+                    "workflow.task.uuid": req.task_id,
+                    "device.name": req.device_id,
+                    "action.name": req.action,
+                },
+            ):
+                job_info.trace_context = capture_context()
+                should_start_now, lock_became_busy = self.device_manager.enqueue_job(job_info)
 
             # free->busy 翻转：主动上报该 device+action 的锁被占用
             if lock_became_busy and self.websocket_client:
@@ -998,6 +1065,8 @@ class MessageProcessor:
             logger.info(f"[MessageProcessor] Starting job {job_log}")
 
             # 创建HostNode任务
+            trace_context: Dict[str, Any] = {}
+            inject_trace_context(trace_context, job_info.trace_context)
             queue_item = QueueItem(
                 task_type="job_call_back_status",
                 device_id=req.device_id,
@@ -1006,6 +1075,7 @@ class MessageProcessor:
                 job_id=req.job_id,
                 notebook_id=notebook_id,
                 device_action_key=device_action_key,
+                trace_context=trace_context,
             )
 
             # 提交给HostNode执行
@@ -1356,6 +1426,7 @@ class MessageProcessor:
         }
 
         try:
+            inject_trace_context(message)
             self.send_queue.put_nowait(message)
         except Exception:
             logger.warning("[MessageProcessor] Send queue full, dropping message")
@@ -1363,6 +1434,8 @@ class MessageProcessor:
     def send_message(self, message: Dict[str, Any]) -> bool:
         """发送消息到队列"""
         try:
+            message = dict(message)
+            inject_trace_context(message)
             self.send_queue.put_nowait(message)
             return True
         except Exception:
@@ -1457,11 +1530,23 @@ class QueueProcessor:
                 job = self.pending_starts.get_nowait()
             except Empty:
                 break
-            self._start_job_goal(job)
+            with use_context(job.trace_context):
+                with span(
+                    "action.worker",
+                    attributes={
+                        "action.worker.event": "start",
+                        "workflow.job.uuid": job.job_id,
+                        "device.name": job.device_id,
+                        "action.name": job.action_name,
+                    },
+                ):
+                    self._start_job_goal(job)
 
     def _start_job_goal(self, job: JobInfo) -> None:
         """用 JobInfo 保存的载荷向 HostNode 下发 goal。"""
         job_log = format_job_log(job.job_id, job.task_id, job.device_id, job.action_name)
+        trace_context: Dict[str, Any] = {}
+        inject_trace_context(trace_context)
         queue_item = QueueItem(
             task_type="job_call_back_status",
             device_id=job.device_id,
@@ -1470,6 +1555,7 @@ class QueueProcessor:
             job_id=job.job_id,
             notebook_id=job.notebook_id,
             device_action_key=job.device_action_key,
+            trace_context=trace_context,
         )
 
         host_node = HostNode.get_instance(0)
@@ -1802,6 +1888,24 @@ class WebSocketClient(BaseCommunicationClient):
         # logger.trace(f"[WebSocketClient] Device status published: {device_id}.{property_name}")
 
     def publish_job_status(
+        self, feedback_data: dict, item: QueueItem, status: str, return_info: Optional[dict] = None
+    ) -> None:
+        parent = extract_trace_context(item.trace_context)
+        with span(
+            "action.status.publish",
+            kind="producer",
+            parent_context=parent,
+            attributes={
+                "workflow.job.uuid": item.job_id,
+                "workflow.task.uuid": item.task_id,
+                "device.name": item.device_id,
+                "action.name": item.action_name,
+                "action.status": status,
+            },
+        ):
+            self._publish_job_status(feedback_data, item, status, return_info)
+
+    def _publish_job_status(
         self, feedback_data: dict, item: QueueItem, status: str, return_info: Optional[dict] = None
     ) -> None:
         """发布作业状态，拦截最终结果（给HostNode调用的接口）"""

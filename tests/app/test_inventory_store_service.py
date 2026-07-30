@@ -415,7 +415,7 @@ class TestParentAndSite:
         assert by_uuid["mi-y"]["parent_uuid"] == "mi-x"
 
 
-class TestStoreMigrationV3:
+class TestStoreMigration:
     def test_v2_database_upgrades_in_place(self, tmp_path):
         """v2 老库（无 parent_uuid 列）重开后原地升级到 v3。"""
         db = str(tmp_path / "inv.db")
@@ -427,5 +427,5 @@ class TestStoreMigrationV3:
         reopened = InventoryStore(db)
         cols = [r["name"] for r in reopened.query_all("PRAGMA table_info(material_instance)")]
         assert "parent_uuid" in cols
-        assert reopened.query_one("PRAGMA user_version")["user_version"] == 3
+        assert reopened.query_one("PRAGMA user_version")["user_version"] == 4
         reopened.close()

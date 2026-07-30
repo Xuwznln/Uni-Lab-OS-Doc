@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS resource_template (
@@ -93,7 +93,9 @@ CREATE TABLE IF NOT EXISTS inventory_ledger (
     delta_json    TEXT NOT NULL DEFAULT '{}',
     actor         TEXT NOT NULL DEFAULT '',
     reason        TEXT NOT NULL DEFAULT '',
-    causation_id  TEXT NOT NULL DEFAULT ''
+    causation_id  TEXT NOT NULL DEFAULT '',
+    trace_id      TEXT NOT NULL DEFAULT '',
+    span_id       TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS sync_outbox (
@@ -107,7 +109,11 @@ CREATE TABLE IF NOT EXISTS sync_outbox (
     event_type        TEXT NOT NULL,
     occurred_at       INTEGER NOT NULL,
     causation_id      TEXT NOT NULL DEFAULT '',
-    payload_json      TEXT NOT NULL DEFAULT '{}'
+    payload_json      TEXT NOT NULL DEFAULT '{}',
+    traceparent       TEXT NOT NULL DEFAULT '',
+    tracestate        TEXT NOT NULL DEFAULT '',
+    trace_id          TEXT NOT NULL DEFAULT '',
+    span_id           TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS processed_command (
@@ -131,6 +137,21 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 # 空串表示顶层物料；单父由列语义天然保证（树形父）。
 _SCHEMA_V3_ADD_PARENT = "ALTER TABLE material_instance ADD COLUMN parent_uuid TEXT NOT NULL DEFAULT ''"
 _SCHEMA_V3_INDEX = "CREATE INDEX IF NOT EXISTS idx_instance_parent ON material_instance(parent_uuid)"
+
+# v4：W3C Trace Context 与只读关联 ID。全部为 additive、空串兼容旧数据；
+# 不把 action/material payload 写入追踪列。
+_SCHEMA_V4_COLUMNS = {
+    "inventory_ledger": {
+        "trace_id": "TEXT NOT NULL DEFAULT ''",
+        "span_id": "TEXT NOT NULL DEFAULT ''",
+    },
+    "sync_outbox": {
+        "traceparent": "TEXT NOT NULL DEFAULT ''",
+        "tracestate": "TEXT NOT NULL DEFAULT ''",
+        "trace_id": "TEXT NOT NULL DEFAULT ''",
+        "span_id": "TEXT NOT NULL DEFAULT ''",
+    },
+}
 
 # v2：实验室操作系统布局层（元信息 / 分区 / 2D 摆放）。
 # 只增表不改旧表，v1 库可原地升级。
@@ -200,6 +221,19 @@ class InventoryStore:
                 if "parent_uuid" not in cols:
                     self._conn.execute(_SCHEMA_V3_ADD_PARENT)
                 self._conn.execute(_SCHEMA_V3_INDEX)
+            if current < 4:
+                for table, columns in _SCHEMA_V4_COLUMNS.items():
+                    existing = {
+                        row[1]
+                        for row in self._conn.execute(
+                            f"PRAGMA table_info({table})"
+                        ).fetchall()
+                    }
+                    for column, definition in columns.items():
+                        if column not in existing:
+                            self._conn.execute(
+                                f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                            )
             if current < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 self._conn.commit()
@@ -359,12 +393,16 @@ class InventoryStore:
         actor: str = "",
         reason: str = "",
         causation_id: str = "",
+        trace_id: str = "",
+        span_id: str = "",
     ) -> None:
         conn.execute(
             "INSERT INTO inventory_ledger(occurred_at, op_type, aggregate_type, aggregate_id, "
-            "delta_json, actor, reason, causation_id) VALUES (?,?,?,?,?,?,?,?)",
+            "delta_json, actor, reason, causation_id, trace_id, span_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (occurred_at, op_type, aggregate_type, aggregate_id,
-             json.dumps(delta, ensure_ascii=False), actor, reason, causation_id),
+             json.dumps(delta, ensure_ascii=False), actor, reason, causation_id,
+             trace_id, span_id),
         )
 
     @staticmethod
@@ -380,12 +418,18 @@ class InventoryStore:
         occurred_at: int,
         causation_id: str,
         payload: Dict[str, Any],
+        traceparent: str = "",
+        tracestate: str = "",
+        trace_id: str = "",
+        span_id: str = "",
     ) -> int:
         cur = conn.execute(
             "INSERT INTO sync_outbox(event_id, edge_id, lab_id, aggregate_type, aggregate_id, "
-            "aggregate_version, event_type, occurred_at, causation_id, payload_json) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "aggregate_version, event_type, occurred_at, causation_id, payload_json, "
+            "traceparent, tracestate, trace_id, span_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (event_id, edge_id, lab_id, aggregate_type, aggregate_id, aggregate_version,
-             event_type, occurred_at, causation_id, json.dumps(payload, ensure_ascii=False)),
+             event_type, occurred_at, causation_id, json.dumps(payload, ensure_ascii=False),
+             traceparent, tracestate, trace_id, span_id),
         )
         return int(cur.lastrowid or 0)

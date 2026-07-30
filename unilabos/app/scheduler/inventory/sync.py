@@ -19,6 +19,12 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from unilabos.app.scheduler.inventory.store import InventoryStore
+from unilabos.utils.tracing import (
+    add_event,
+    extract_trace_context,
+    inject_trace_context,
+    span,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +33,7 @@ SyncSender = Callable[[List[Dict[str, Any]]], int]
 
 
 def _row_to_envelope(row: Dict[str, Any]) -> Dict[str, Any]:
-    return {
+    envelope = {
         "event_id": row["event_id"],
         "edge_id": row["edge_id"],
         "lab_id": row["lab_id"],
@@ -40,6 +46,10 @@ def _row_to_envelope(row: Dict[str, Any]) -> Dict[str, Any]:
         "causation_id": row["causation_id"],
         "payload": json.loads(row["payload_json"]),
     }
+    for key in ("traceparent", "tracestate", "trace_id", "span_id"):
+        if row.get(key):
+            envelope[key] = row[key]
+    return envelope
 
 
 class OutboxWorker:
@@ -75,11 +85,44 @@ class OutboxWorker:
         if not rows:
             return 0
         envelopes = [_row_to_envelope(r) for r in rows]
-        try:
-            acked_sequence = int(self.sender(envelopes))
-        except Exception:
-            self._failures += 1
-            raise
+        first_parent = extract_trace_context(envelopes[0])
+        # 每条领域事件都从其入库时保存的 W3C 上下文继续，并把新的 producer
+        # 上下文写回 envelope；云端可直接把 ingest span 接成其子 span。
+        for envelope in envelopes:
+            parent = extract_trace_context(envelope)
+            with span(
+                "inventory.outbox.publish",
+                kind="producer",
+                parent_context=parent,
+                attributes={
+                    "inventory.event.id": envelope["event_id"],
+                    "inventory.event.type": envelope["event_type"],
+                    "inventory.aggregate.type": envelope["aggregate_type"],
+                    "inventory.aggregate.id": envelope["aggregate_id"],
+                    "inventory.outbox.sequence": envelope["sequence"],
+                },
+            ):
+                inject_trace_context(envelope)
+        with span(
+            "inventory.outbox.flush",
+            kind="producer",
+            parent_context=first_parent,
+            attributes={
+                "inventory.outbox.batch_size": len(envelopes),
+                "inventory.outbox.sequence.first": rows[0]["sequence"],
+                "inventory.outbox.sequence.last": rows[-1]["sequence"],
+            },
+        ) as flush_span:
+            try:
+                acked_sequence = int(self.sender(envelopes))
+            except Exception:
+                self._failures += 1
+                raise
+            add_event(
+                "inventory.outbox.ack",
+                {"inventory.outbox.acked_sequence": acked_sequence},
+                span=flush_span,
+            )
         self._failures = 0
         if acked_sequence > acked_from:
             self.store.set_cursor(self.cursor_name, acked_sequence, int(time.time() * 1000))

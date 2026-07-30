@@ -87,7 +87,17 @@ class ColoredFormatter(logging.Formatter):
         module_path = f"{record.name}.{filename}"
         func_line = f"{record.funcName}:{record.lineno}"
         thread_part = f" [{record.threadName}]" if self.show_thread else ""
-        return f"{thread_part} [{func_line}] [{module_path}]"
+        trace_part = ""
+        try:
+            # 延迟导入避免 logging 初始化与 tracing 可选依赖形成环。
+            from unilabos.utils.tracing import current_trace_ids
+
+            trace_id, span_id = current_trace_ids()
+            if trace_id:
+                trace_part = f" [trace_id={trace_id} span_id={span_id}]"
+        except Exception:  # noqa: BLE001 - 日志格式化不得因观测失败
+            pass
+        return f"{thread_part}{trace_part} [{func_line}] [{module_path}]"
 
     def format(self, record):
         # 检查是否有自定义堆栈信息

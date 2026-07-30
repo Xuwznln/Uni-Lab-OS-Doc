@@ -307,6 +307,14 @@ def cleanup_for_restart() -> bool:
     else:
         print_status("[Restart] All threads stopped", "info")
 
+    # exporter flush 有界且 fail-open；os._exit 前也尽量送出已结束 span。
+    try:
+        from unilabos.utils.tracing import shutdown_tracing
+
+        shutdown_tracing()
+    except Exception as e:
+        print_status(f"[Restart] Error shutting down tracing: {e}", "warning")
+
     # Step 5: Force garbage collection
     print_status("[Restart] Step 5: Running garbage collection...", "info")
     gc.collect()

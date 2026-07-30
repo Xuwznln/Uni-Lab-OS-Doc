@@ -775,6 +775,11 @@ def main():
     if comm_log_path is not None:
         logger.info(f"[COMM_LOG_FILE] {comm_log_path}")
 
+    # 配置完成后再初始化可选 OTel，避免默认配置在 env/file 覆盖前抢先生效。
+    from unilabos.utils.tracing import initialize_tracing
+
+    initialize_tracing()
+
     if args.addr != parser.get_default("addr"):
         if args.addr == "test":
             print_status("使用测试环境地址", "info")

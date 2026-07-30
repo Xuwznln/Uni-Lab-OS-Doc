@@ -62,6 +62,12 @@ from unilabos.app.scheduler.ordering import (
     TaskOrderer,
 )
 from unilabos.app.scheduler.param_resolver import ParamResolveError
+from unilabos.utils.tracing import (
+    DetachedSpan,
+    add_event,
+    span,
+    start_detached_span,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +155,9 @@ class EdgeScheduler:
         self._monitor = monitor
         # 工作流执行历史（WorkflowHistoryStore，独立 SQLite）；None = 不落盘
         self._history = history
+        # 长生命周期根 span：workflow → action/job。只保存上下文/句柄，不保存 payload。
+        self._workflow_spans: Dict[str, DetachedSpan] = {}
+        self._job_spans: Dict[str, DetachedSpan] = {}
 
     def _emit_monitor(self, channel: str, event_type: str, data: Dict[str, Any]) -> None:
         if self._monitor is None:
@@ -173,6 +182,41 @@ class EdgeScheduler:
     # ── 触发点 1：任务进来 ────────────────────────────────────
 
     def submit_workflow(self, spec: WorkflowSpec) -> Dict[str, Any]:
+        with self._lock:
+            if (
+                spec.workflow_id in self._workflows
+                or spec.workflow_id in self._workflow_spans
+            ):
+                raise ValueError(f"workflow {spec.workflow_id} already submitted")
+            workflow_trace = start_detached_span(
+                "workflow.task.run",
+                attributes={
+                    "workflow.uuid": spec.workflow_id,
+                    "workflow.task.uuid": spec.task_id,
+                    "lab.id": spec.lab_id,
+                    "workflow.plan.node_count": len(spec.nodes),
+                    "workflow.priority": str(spec.priority),
+                },
+            )
+            # 先登记 span 也充当 submit 占位，避免并发同 ID 覆盖对方的追踪句柄。
+            self._workflow_spans[spec.workflow_id] = workflow_trace
+        try:
+            with workflow_trace.activate():
+                with span(
+                    "workflow.task.submit",
+                    attributes={
+                        "workflow.uuid": spec.workflow_id,
+                        "workflow.task.uuid": spec.task_id,
+                    },
+                ):
+                    return self._submit_workflow(spec)
+        except BaseException as exc:
+            workflow_trace.fail(exc)
+            workflow_trace.end()
+            self._workflow_spans.pop(spec.workflow_id, None)
+            raise
+
+    def _submit_workflow(self, spec: WorkflowSpec) -> Dict[str, Any]:
         """提交工作流并立即重排。返回本次下发结果。
 
         带物料需求时：入队前整 DAG all-or-nothing 预留；不足则置
@@ -241,6 +285,36 @@ class EdgeScheduler:
     # ── 触发点 2：子 action 完成 ──────────────────────────────
 
     def on_job_finished(
+        self,
+        job_id: str,
+        success: bool,
+        ret_value: Any = None,
+        suc_type: str = "normal",
+    ) -> Dict[str, Any]:
+        action_trace = self._job_spans.get(job_id)
+        if action_trace is None:
+            return self._on_job_finished(job_id, success, ret_value, suc_type)
+        try:
+            with action_trace.activate():
+                add_event(
+                    "action.result",
+                    {
+                        "workflow.job.uuid": job_id,
+                        "action.success": success,
+                        "action.success.type": suc_type,
+                    },
+                    span=action_trace.span,
+                )
+                if not success:
+                    action_trace.error("action execution failed")
+                return self._on_job_finished(
+                    job_id, success, ret_value, suc_type
+                )
+        finally:
+            action_trace.end()
+            self._job_spans.pop(job_id, None)
+
+    def _on_job_finished(
         self,
         job_id: str,
         success: bool,
@@ -322,12 +396,36 @@ class EdgeScheduler:
             return self._reschedule_locked()
 
     def _reschedule_locked(self) -> List[Dict[str, Any]]:
+        with span(
+            "workflow.task.reconcile",
+            attributes={"scheduler.round": self._reschedule_count + 1},
+        ) as reschedule_span:
+            dispatched = self._reschedule_impl()
+            add_event(
+                "workflow.task.reconcile.result",
+                {"scheduler.dispatched.count": len(dispatched)},
+                span=reschedule_span,
+            )
+            return dispatched
+
+    def _reschedule_impl(self) -> List[Dict[str, Any]]:
         self._reschedule_count += 1
 
         # 等料工作流每次重排重试预留（补料后自动恢复 RUNNING）
         if self._inventory is not None:
             for run in self._workflows.values():
-                if run.state is WorkflowState.WAITING_MATERIAL and self._try_reserve(run):
+                workflow_trace = self._workflow_spans.get(run.spec.workflow_id)
+                activation = (
+                    workflow_trace.activate()
+                    if workflow_trace is not None
+                    else span("workflow.material.retry")
+                )
+                with activation:
+                    reserved = (
+                        run.state is WorkflowState.WAITING_MATERIAL
+                        and self._try_reserve(run)
+                    )
+                if reserved:
                     run.state = WorkflowState.RUNNING
                     logger.info(
                         "[EdgeScheduler] workflow %s material reserved, resume running",
@@ -401,7 +499,16 @@ class EdgeScheduler:
                 and task.node.material_requirements
             ):
                 try:
-                    self._inventory.consume_reservation(task.workflow_id, task.node.id)
+                    workflow_trace = self._workflow_spans.get(task.workflow_id)
+                    activation = (
+                        workflow_trace.activate()
+                        if workflow_trace is not None
+                        else span("workflow.material.consume")
+                    )
+                    with activation:
+                        self._inventory.consume_reservation(
+                            task.workflow_id, task.node.id
+                        )
                 except InventoryError as exc:
                     logger.error(
                         "[EdgeScheduler] material consume failed for wf=%s node=%s: %s",
@@ -426,8 +533,42 @@ class EdgeScheduler:
             # 预估基于 sjson 覆写后的 resolved 参数：父节点经 gjson/sjson 传下来的
             # 实际值（如 time）直接决定声明式预估结果
             estimated_s, estimate_source = self._estimator.estimate(key, resolved_args)
-            if not manual_confirm:
-                self._dispatcher.dispatch(payload)
+            workflow_trace = self._workflow_spans.get(task.workflow_id)
+            action_trace = start_detached_span(
+                "action.run",
+                parent_context=(
+                    workflow_trace.context if workflow_trace is not None else None
+                ),
+                attributes={
+                    "workflow.job.uuid": job_id,
+                    "workflow.uuid": task.workflow_id,
+                    "workflow.node.uuid": task.node.id,
+                    "device.name": task.node.device_id,
+                    "action.name": task.node.action_name,
+                    "action.type": task.node.action_type,
+                    "action.manual_confirm": manual_confirm,
+                },
+            )
+            self._job_spans[job_id] = action_trace
+            try:
+                with action_trace.activate():
+                    with span(
+                        "workflow.job.dispatch",
+                        attributes={
+                            "workflow.job.uuid": job_id,
+                            "workflow.uuid": task.workflow_id,
+                            "workflow.node.uuid": task.node.id,
+                            "device.name": task.node.device_id,
+                            "action.name": task.node.action_name,
+                        },
+                    ):
+                        if not manual_confirm:
+                            self._dispatcher.dispatch(payload)
+            except BaseException as exc:
+                action_trace.fail(exc)
+                action_trace.end()
+                self._job_spans.pop(job_id, None)
+                raise
             # manual_confirm 不进执行器：job 停驻在 inflight，
             # 由 POST /jobs/{job_id}/finish（人工确认）走统一完成路径
             run.mark_dispatched(task.node.id)
@@ -440,6 +581,14 @@ class EdgeScheduler:
                 action_name=task.node.action_name,
                 estimated_s=estimated_s,
                 estimate_source=estimate_source,
+            )
+            action_trace.event(
+                "action.dispatched",
+                {
+                    "workflow.job.uuid": job_id,
+                    "action.estimate.seconds": estimated_s,
+                    "action.estimate.source": estimate_source,
+                },
             )
             if not manual_confirm:
                 busy.add(key)
@@ -521,17 +670,36 @@ class EdgeScheduler:
 
     def _fire_notifications(self, notifications: List["tuple[str, str]"]) -> None:
         for wid, state in notifications:
-            # 终态工作流释放剩余 active 预留（幂等，依据 DB 状态而非内存）
-            if wid in self._material_workflows and state != WorkflowState.SUCCESS.value:
-                self._safe_inventory_call(
-                    "release_workflow", wid, reason=f"workflow_{state}",
+            workflow_trace = self._workflow_spans.get(wid)
+            activation = (
+                workflow_trace.activate()
+                if workflow_trace is not None
+                else span("workflow.task.terminal")
+            )
+            with activation:
+                add_event(
+                    "workflow.task.terminal",
+                    {"workflow.uuid": wid, "workflow.state": state},
+                    span=workflow_trace.span if workflow_trace is not None else None,
                 )
-            if self._workflow_state_listener is None:
-                continue
-            try:
-                self._workflow_state_listener(wid, state)
-            except Exception:  # noqa: BLE001 - 通知失败不影响调度
-                logger.exception("[EdgeScheduler] workflow state listener failed")
+                if (
+                    workflow_trace is not None
+                    and state != WorkflowState.SUCCESS.value
+                ):
+                    workflow_trace.error(f"workflow {state}")
+            # 终态工作流释放剩余 active 预留（幂等，依据 DB 状态而非内存）
+                if wid in self._material_workflows and state != WorkflowState.SUCCESS.value:
+                    self._safe_inventory_call(
+                        "release_workflow", wid, reason=f"workflow_{state}",
+                    )
+                if self._workflow_state_listener is not None:
+                    try:
+                        self._workflow_state_listener(wid, state)
+                    except Exception:  # noqa: BLE001 - 通知失败不影响调度
+                        logger.exception("[EdgeScheduler] workflow state listener failed")
+            if workflow_trace is not None:
+                workflow_trace.end()
+                self._workflow_spans.pop(wid, None)
 
     def _safe_inventory_call(self, method: str, *args: Any, **kwargs: Any) -> None:
         """调用 inventory（release/quarantine 等善后操作）；失败记日志不阻断调度。"""
@@ -760,6 +928,13 @@ class EdgeScheduler:
             for job_id in removed:
                 job = self._inflight.pop(job_id, None)
                 self._job_resource_locks.pop(job_id, None)
+                action_trace = self._job_spans.pop(job_id, None)
+                if action_trace is not None:
+                    action_trace.error("action canceled")
+                    action_trace.event(
+                        "action.canceled", {"workflow.job.uuid": job_id}
+                    )
+                    action_trace.end()
                 if job is not None:
                     self._record_timeline(job, success=False, state="canceled")
             notifications = self._collect_terminal_notifications()

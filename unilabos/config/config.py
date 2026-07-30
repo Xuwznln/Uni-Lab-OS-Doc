@@ -75,6 +75,28 @@ class HostLinkConfig:
     ros_discovery_server = ""  # Fast DDS Discovery Server 地址 ip:port
 
 
+# OpenTelemetry/SigNoz（默认关闭；仅显式开启时加载可选 SDK）。
+# 环境变量既可走配置映射（UNILABOS_OTELCONFIG_*），也支持标准 OTEL_*；
+# 标准变量优先级更高，见 unilabos.utils.tracing.TracingSettings。
+class OTelConfig:
+    enabled = False
+    endpoint = ""  # OTLP/gRPC，例如 http://127.0.0.1:4317
+    insecure = True
+    service_name = "uni-lab-edge"  # 对齐云端 uni-lab-http / uni-lab-scheduler
+    service_namespace = "unilab"
+    service_version = "0.11.3"
+    deployment_environment = ""
+    headers = ""  # 逗号分隔 key=value；不得写入日志
+    resource_attributes = ""  # 逗号分隔 key=value；敏感键会被过滤
+    trace_sampler = "parentbased_always_on"
+    sample_ratio = 1.0
+    max_queue_size = 2048
+    max_export_batch_size = 512
+    schedule_delay_ms = 5000
+    export_timeout_ms = 5000
+    shutdown_timeout_ms = 5000
+
+
 # ROS配置
 class ROSConfig:
     modules = [

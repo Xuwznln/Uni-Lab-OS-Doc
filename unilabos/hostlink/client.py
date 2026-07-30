@@ -31,6 +31,7 @@ from unilabos.hostlink.protocol import (
 )
 from unilabos.hostlink.ros_assist import RosNetworkInfo
 from unilabos.utils import logger
+from unilabos.utils.tracing import inject_trace_context, span
 
 
 class _Pending:
@@ -113,11 +114,34 @@ class HostLinkClient:
         key: str = "",
         timeout: Optional[float] = None,
     ) -> Any:
+        if action_type in (ActionType.PING, ActionType.HELLO):
+            return self._request(action_type, data, query_key, key, timeout)
+        with span(
+            "hostlink.request",
+            kind="client",
+            attributes={
+                "rpc.system": "hostlink",
+                "rpc.method": action_type,
+                "server.address": self.host,
+                "server.port": self.port,
+            },
+        ):
+            return self._request(action_type, data, query_key, key, timeout)
+
+    def _request(
+        self,
+        action_type: str,
+        data: Optional[Dict[str, Any]] = None,
+        query_key: str = "",
+        key: str = "",
+        timeout: Optional[float] = None,
+    ) -> Any:
         """发送请求并同步等待响应 data；离线/超时抛 LinkError，业务失败抛 RemoteError。"""
         sock = self._sock
         if sock is None or not self._online.is_set():
             raise LinkError(f"hostlink offline (host={self.host}:{self.port})")
         message = new_request(action_type, data=data, query_key=query_key, key=key)
+        inject_trace_context(message)
         pending = _Pending()
         request_id = message["id"]
         with self._pending_lock:

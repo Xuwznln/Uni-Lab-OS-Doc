@@ -32,6 +32,7 @@ from unilabos.app.scheduler.estimation import DurationEstimator
 from unilabos.app.scheduler.monitor import monitor_bus
 from unilabos.app.scheduler.ordering import HttpSchedulerOrderer, StableLocalOrderer
 from unilabos.app.scheduler.service import EdgeScheduler
+from unilabos.utils.tracing import initialize_tracing
 
 
 def build_estimator() -> DurationEstimator:
@@ -108,6 +109,7 @@ def build_scheduler(inventory=None, history=None) -> EdgeScheduler:
     )
 
 
+initialize_tracing()
 _inventory = _build_inventory()
 _history = _build_history()
 app = create_app(

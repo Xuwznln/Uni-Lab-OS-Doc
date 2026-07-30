@@ -19,6 +19,7 @@ from unilabos.app.scheduler.inventory.domain import (
     MaterialRequirement,
 )
 from unilabos.app.scheduler.inventory.service import InventoryService
+from unilabos.utils.tracing import add_event, set_error, span
 
 CommandHandler = Callable[[InventoryService, Dict[str, Any]], Dict[str, Any]]
 
@@ -263,7 +264,7 @@ COMMAND_HANDLERS: Dict[str, CommandHandler] = {
 }
 
 
-def execute_command(service: InventoryService, command: Dict[str, Any]) -> Dict[str, Any]:
+def _execute_command(service: InventoryService, command: Dict[str, Any]) -> Dict[str, Any]:
     """执行一条云端 command（幂等 + 版本校验）。永不抛领域异常，返回 status."""
     command_id = str(command.get("command_id") or "")
     if not command_id:
@@ -304,6 +305,37 @@ def execute_command(service: InventoryService, command: Dict[str, Any]) -> Dict[
 
     _record(service, command_id, "completed", _serializable(result), now_ms)
     return {"command_id": command_id, "status": "completed", "result": result}
+
+
+def execute_command(service: InventoryService, command: Dict[str, Any]) -> Dict[str, Any]:
+    """带连续追踪的 command 入口；不记录 payload/actor 等原文。"""
+
+    attributes = {
+        "inventory.command.id": str(command.get("command_id") or ""),
+        "inventory.command.type": str(command.get("type") or ""),
+        "inventory.expected_version": command.get("expected_version"),
+        "edge.uuid": service.edge_id,
+        "lab.id": service.lab_id,
+    }
+    with span(
+        "inventory.command",
+        attributes=attributes,
+        kind="consumer",
+    ) as command_span:
+        response = _execute_command(service, command)
+        status = str(response.get("status") or "")
+        add_event(
+            "inventory.command.result",
+            {
+                "inventory.command.status": status,
+                "inventory.command.replayed": bool(response.get("replayed")),
+                "error.type": response.get("error_code", ""),
+            },
+            span=command_span,
+        )
+        if status == "rejected":
+            set_error(str(response.get("error") or "command rejected"), span=command_span)
+        return response
 
 
 def _record(

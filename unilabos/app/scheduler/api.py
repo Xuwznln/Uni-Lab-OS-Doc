@@ -41,6 +41,7 @@ from unilabos.app.scheduler.dag_state import WorkflowCycleError
 from unilabos.app.scheduler.models import spec_from_dict
 from unilabos.app.scheduler.monitor import CHANNELS, monitor_bus
 from unilabos.app.scheduler.service import EdgeScheduler
+from unilabos.utils.tracing import install_http_tracing
 
 
 class HandleIn(BaseModel):
@@ -404,6 +405,7 @@ def create_app(
     history: Any = None,
 ) -> FastAPI:
     app = FastAPI(title="Uni-Lab Edge Scheduler", version="0.1.0")
+    install_http_tracing(app)
     # 静态站点（如 GitHub Pages 上的 unilab-edge-ui）直连本地端口需要跨域放行
     app.add_middleware(
         CORSMiddleware,

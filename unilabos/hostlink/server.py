@@ -29,6 +29,12 @@ from unilabos.hostlink.protocol import (
     send_message,
 )
 from unilabos.utils import logger
+from unilabos.utils.tracing import (
+    extract_trace_context,
+    inject_trace_context,
+    record_exception,
+    span,
+)
 
 #: handler 签名：(data, peer_info) -> 响应 data；抛异常 = ok=false
 Handler = Callable[[Dict[str, Any], Dict[str, Any]], Any]
@@ -97,12 +103,34 @@ class _LinkRequestHandler(socketserver.BaseRequestHandler):
         handler = link.handlers.get(action)
         if handler is None:
             return new_response(request_id, False, error=f"unknown action_type: {action}")
-        try:
-            result = handler(dict(data), peer)
-        except Exception as exc:  # noqa: BLE001 - 业务异常统一转 ok=false
-            logger.warning(f"[HostLink] handler {action} failed for {peer_key}: {exc}")
-            return new_response(request_id, False, error=str(exc))
-        return new_response(request_id, True, data=result)
+        if action in (ActionType.PING, ActionType.HELLO):
+            try:
+                result = handler(dict(data), peer)
+            except Exception as exc:  # noqa: BLE001 - 业务异常统一转 ok=false
+                logger.warning(f"[HostLink] handler {action} failed for {peer_key}: {exc}")
+                return new_response(request_id, False, error=str(exc))
+            return new_response(request_id, True, data=result)
+
+        parent = extract_trace_context(message)
+        with span(
+            "hostlink.handle",
+            kind="server",
+            parent_context=parent,
+            attributes={
+                "rpc.system": "hostlink",
+                "rpc.method": action,
+            },
+        ):
+            try:
+                result = handler(dict(data), peer)
+            except Exception as exc:  # noqa: BLE001 - 业务异常统一转 ok=false
+                record_exception(exc)
+                logger.warning(f"[HostLink] handler {action} failed for {peer_key}: {exc}")
+                response = new_response(request_id, False, error=str(exc))
+            else:
+                response = new_response(request_id, True, data=result)
+            inject_trace_context(response)
+            return response
 
 
 class HostLinkServer:

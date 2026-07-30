@@ -12,6 +12,7 @@ from starlette.responses import Response
 
 from unilabos.utils.fastapi.log_adapter import setup_fastapi_logging
 from unilabos.utils.log import info, error
+from unilabos.utils.tracing import install_http_tracing
 from unilabos.app.web.api import setup_api_routes
 from unilabos.app.web.pages import setup_web_pages
 
@@ -23,6 +24,7 @@ app = FastAPI(
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
+install_http_tracing(app)
 
 # 创建页面路由
 pages = None

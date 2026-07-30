@@ -27,6 +27,8 @@ import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 
+from unilabos.utils.tracing import current_trace_ids
+
 CHANNELS = ("material", "device", "action", "scheduler")
 
 
@@ -46,6 +48,7 @@ class MonitorBus:
     def emit(self, channel: str, event_type: str, data: Optional[Dict[str, Any]] = None) -> None:
         """发布事件；绝不阻塞、绝不抛出（监控故障不影响业务）。"""
         try:
+            trace_id, span_id = current_trace_ids()
             with self._lock:
                 self._seq += 1
                 event = {
@@ -54,6 +57,8 @@ class MonitorBus:
                     "channel": channel,
                     "type": event_type,
                     "data": data or {},
+                    "trace_id": trace_id,
+                    "span_id": span_id,
                 }
                 self._history.append(event)
                 for q, channels in self._subs.values():

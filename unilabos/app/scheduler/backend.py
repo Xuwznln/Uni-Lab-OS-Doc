@@ -39,6 +39,14 @@ from unilabos.app.ws_client import (
     QueueItem,
     format_job_log,
 )
+from unilabos.utils.tracing import (
+    add_event,
+    capture_context,
+    extract_trace_context,
+    inject_trace_context,
+    span,
+    use_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +75,7 @@ class JobExecutionBackend:
         self.device_state = device_state_store
         self._monitor = monitor
 
-        self._events: "queue.Queue[tuple]" = queue.Queue()
+        self._events: "queue.Queue[tuple[Any, tuple]]" = queue.Queue()
         self._worker: Optional[threading.Thread] = None
         self._running = False
         self._pending = 0
@@ -89,7 +97,7 @@ class JobExecutionBackend:
 
     def stop(self) -> None:
         self._running = False
-        self._events.put(("__stop__",))
+        self._events.put((None, ("__stop__",)))
         if self._worker and self._worker.is_alive():
             self._worker.join(timeout=2)
 
@@ -103,10 +111,12 @@ class JobExecutionBackend:
             time.sleep(0.01)
         return False
 
-    def _put_event(self, event: tuple) -> None:
+    def _put_event(self, event: tuple, context: Any = None) -> None:
         with self._pending_lock:
             self._pending += 1
-        self._events.put(event)
+        self._events.put(
+            (context if context is not None else capture_context(), event)
+        )
 
     # ── 调度器侧接口（Dispatcher 协议） ───────────────────────
 
@@ -125,12 +135,29 @@ class JobExecutionBackend:
             action_args=payload.get("action_args", {}) or {},
             sample_material=payload.get("sample_material", {}) or {},
             server_info=payload.get("server_info"),
+            trace_context=None,
         )
-        should_start_now, _lock_became_busy = self.device_manager.enqueue_job(job_info)
+        with span(
+            "action.queue",
+            attributes={
+                "workflow.job.uuid": job_info.job_id,
+                "workflow.task.uuid": job_info.task_id,
+                "device.name": job_info.device_id,
+                "action.name": job_info.action_name,
+            },
+        ) as queue_span:
+            # 后续 worker 以 queue span 为父；只保存 OTel context，不保存业务 payload。
+            job_info.trace_context = capture_context()
+            should_start_now, _lock_became_busy = self.device_manager.enqueue_job(job_info)
+            add_event(
+                "action.queued",
+                {"action.queue.start_immediately": should_start_now},
+                span=queue_span,
+            )
         job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
         if should_start_now:
             logger.info("[JobExecutionBackend] job %s start now", job_log)
-            self._put_event(("start", job_info))
+            self._put_event(("start", job_info), context=job_info.trace_context)
         else:
             logger.info("[JobExecutionBackend] job %s queued", job_log)
 
@@ -188,7 +215,11 @@ class JobExecutionBackend:
             # （normal / skip / operator_intervention，见 registry.action_policy）
             ret_value = return_info.get("return_value")
             suc_type = str(return_info.get("suc_type") or "normal")
-        self._put_event(("finished", item.job_id, status == "success", ret_value, suc_type))
+        parent = extract_trace_context(item.trace_context)
+        self._put_event(
+            ("finished", item.job_id, status == "success", ret_value, suc_type),
+            context=parent,
+        )
 
     # ── 设备状态桥（bridge 形状：publish_device_status） ──────
 
@@ -310,17 +341,22 @@ class JobExecutionBackend:
 
     def _run(self) -> None:
         while self._running:
-            event = self._events.get()
+            event_context, event = self._events.get()
             if event[0] == "__stop__":
                 break
             try:
-                if event[0] == "start":
-                    self._start_goal(event[1])
-                elif event[0] == "finished":
-                    suc_type = event[4] if len(event) > 4 else "normal"
-                    self._handle_finished(event[1], event[2], event[3], suc_type)
-                elif event[0] == "device_status":
-                    self._write_device_property(event[1], event[2], event[3])
+                with use_context(event_context):
+                    with span(
+                        "action.worker",
+                        attributes={"action.worker.event": event[0]},
+                    ):
+                        if event[0] == "start":
+                            self._start_goal(event[1])
+                        elif event[0] == "finished":
+                            suc_type = event[4] if len(event) > 4 else "normal"
+                            self._handle_finished(event[1], event[2], event[3], suc_type)
+                        elif event[0] == "device_status":
+                            self._write_device_property(event[1], event[2], event[3])
             except Exception:  # noqa: BLE001 - worker 不允许死
                 logger.exception("[JobExecutionBackend] event %s failed", event[0])
             finally:
@@ -337,11 +373,15 @@ class JobExecutionBackend:
             job_id=job.job_id,
             notebook_id=job.notebook_id,
             device_action_key=job.device_action_key,
+            trace_context={},
         )
+        inject_trace_context(queue_item.trace_context)
         host_node = self._host_node_getter()
         if host_node is None:
             logger.error("[JobExecutionBackend] HostNode unavailable, fail job %s", job_log)
-            self._put_event(("finished", job.job_id, False, None))
+            self._put_event(
+                ("finished", job.job_id, False, None),
+            )
             return
         try:
             host_node.send_goal(
@@ -354,15 +394,29 @@ class JobExecutionBackend:
             logger.info("[JobExecutionBackend] goal sent for job %s", job_log)
         except Exception:  # noqa: BLE001 - 启动失败必须走完结流程释放锁
             logger.exception("[JobExecutionBackend] send_goal failed for job %s", job_log)
-            self._put_event(("finished", job.job_id, False, None))
+            self._put_event(
+                ("finished", job.job_id, False, None),
+            )
 
     def _handle_finished(
         self, job_id: str, success: bool, ret_value: Any, suc_type: str = "normal"
     ) -> None:
+        finished_job = self.device_manager.get_job_info(job_id)
         # 出队下一个同设备 job 并启动（锁保持 busy）
         next_job, _lock_became_free = self.device_manager.end_job(job_id)
         if next_job is not None:
-            self._put_event(("start", next_job))
+            self._put_event(("start", next_job), context=next_job.trace_context)
+
+        add_event(
+            "action.finished",
+            {
+                "workflow.job.uuid": job_id,
+                "device.name": getattr(finished_job, "device_id", ""),
+                "action.name": getattr(finished_job, "action_name", ""),
+                "action.success": success,
+                "action.success.type": suc_type,
+            },
+        )
 
         for listener in self._listeners:
             try:

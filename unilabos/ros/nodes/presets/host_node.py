@@ -907,7 +907,12 @@ class HostNode(BaseROS2DeviceNode):
         target_wrapper = self.devices_instances.get(device_id)
         target_node = getattr(target_wrapper, "_ros_node", None) if target_wrapper is not None else None
         if target_node is not None and hasattr(target_node, "register_job_context"):
-            target_node.register_job_context(item.job_id, item.task_id, item.action_name)
+            target_node.register_job_context(
+                item.job_id,
+                item.task_id,
+                item.action_name,
+                trace_context=item.trace_context,
+            )
 
         # self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {str(goal_msg)[:1000]}")
         self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {action_kwargs}")

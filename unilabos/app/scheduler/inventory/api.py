@@ -13,6 +13,7 @@ from unilabos.app.scheduler.inventory.commands import execute_command
 from unilabos.app.scheduler.inventory.domain import InventoryError
 from unilabos.app.scheduler.inventory.service import InventoryService
 from unilabos.app.scheduler.inventory.sync import build_snapshot
+from unilabos.utils.tracing import install_http_tracing
 
 
 def create_router(service: InventoryService) -> APIRouter:
@@ -145,6 +146,7 @@ def create_app(service: Optional[InventoryService] = None) -> FastAPI:
     if service is None:
         service = InventoryService(InventoryStore(":memory:"))
     app = FastAPI(title="Uni-Lab Edge Inventory", version="0.1.0")
+    install_http_tracing(app)
     app.include_router(create_router(service))
 
     @app.exception_handler(InventoryError)

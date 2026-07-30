@@ -23,6 +23,7 @@ import urllib.request
 from typing import Any, Dict, List, Protocol, Set
 
 from unilabos.app.scheduler.models import ReadyTask
+from unilabos.utils.tracing import inject_trace_context, span
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,16 @@ class HttpSchedulerOrderer:
         if len(ready) <= 1:
             return list(ready)
         try:
-            return self._order_remote(ready)
+            with span(
+                "scheduler.order",
+                kind="client",
+                attributes={
+                    "scheduler.algorithm": self.algorithm,
+                    "scheduler.ready.count": len(ready),
+                    "lab.id": self.lab_id,
+                },
+            ):
+                return self._order_remote(ready)
         except Exception as exc:  # noqa: BLE001 - 远端排序失败必须兜底
             logger.warning("[EdgeScheduler] remote ordering failed, fallback to local: %s", exc)
             return self.fallback.order(ready, ctx)
@@ -143,10 +153,12 @@ class HttpSchedulerOrderer:
             },
         }
 
+        headers: Dict[str, Any] = {"Content-Type": "application/json"}
+        inject_trace_context(headers)
         req = urllib.request.Request(
             f"{self.base_url}/api/v1/schedule",
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:

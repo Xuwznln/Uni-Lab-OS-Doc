@@ -25,6 +25,7 @@ from typing import Any, Optional, Tuple
 from unilabos.app.scheduler.backend import JobExecutionBackend, create_edge_stack
 from unilabos.app.scheduler.ordering import HttpSchedulerOrderer, StableLocalOrderer
 from unilabos.app.scheduler.service import EdgeScheduler
+from unilabos.utils.tracing import inject_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,12 @@ def make_http_sync_sender() -> Any:
     from unilabos.app.web.client import http_client
 
     def send(events: Any) -> int:
+        trace_headers: dict[str, Any] = {}
+        inject_trace_context(trace_headers)
         resp = http_client._session.post(
             f"{http_client.remote_addr}/edge/sync/events",
             json={"edge_id": events[0]["edge_id"], "events": events},
+            headers=trace_headers,
             timeout=30,
         )
         resp.raise_for_status()
