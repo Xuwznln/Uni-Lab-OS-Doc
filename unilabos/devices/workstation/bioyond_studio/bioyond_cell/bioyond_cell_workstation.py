@@ -1433,6 +1433,113 @@ class BioyondCellWorkstation(BioyondWorkstation):
         return response
 
     # -------------------- 订单提交/等待/后处理（公共逻辑） --------------------
+    def _sum_required_reagents(self, orders: List[Dict[str, Any]]) -> Dict[str, float]:
+        """把整批订单的 materialInfos 按试剂名汇总成总需求量（g）。"""
+        required: Dict[str, float] = {}
+        for od in orders:
+            for mat in od.get("materialInfos") or []:
+                if not isinstance(mat, dict):
+                    continue
+                name = str(mat.get("name") or "").strip()
+                if not name:
+                    continue
+                try:
+                    mass = float(mat.get("mass") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if mass > 0:
+                    required[name] = required.get(name, 0.0) + mass
+        return required
+
+    def _query_reagent_stock(self) -> Optional[Dict[str, float]]:
+        """查 2.3 stock-material 取在库试剂可用量（g），按试剂名累加同名多瓶。
+
+        查询失败返回 None，由调用方决定降级策略——预检是拦截手段，
+        不能因为查询本身出问题就挡住正常建单。
+        """
+        resp = self._post_lims(
+            "/api/lims/storage/stock-material",
+            {"typeMode": 2, "includeDetail": False},
+        )
+        if not isinstance(resp, dict) or resp.get("code") != 1:
+            return None
+        data = resp.get("data")
+        if not isinstance(data, list):
+            return None
+
+        stock: Dict[str, float] = {}
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                quantity = float(item.get("quantity") or 0)
+            except (TypeError, ValueError):
+                continue
+            # lockQuantity 常为负（LIMS 记的是余量修正），只有正值才是真占用，扣掉更保守
+            try:
+                locked = max(float(item.get("lockQuantity") or 0), 0.0)
+            except (TypeError, ValueError):
+                locked = 0.0
+            stock[name] = stock.get(name, 0.0) + quantity - locked
+        return stock
+
+    def _preflight_check_reagents(self, orders: List[Dict[str, Any]], tag: str) -> None:
+        """建单前校验整批试剂需求是否够，不够就一单都不建。
+
+        LIMS 的 /order/orders 是逐单校验逐单建：某单试剂不足只有它 errorMessage
+        非空，其余单照样建出来并进调度队列，人工得去撤半批单。这里在提交前把整批
+        需求汇总跟在库量比一次，缺料直接抛错，避免产生需要善后的半批订单。
+
+        Raises:
+            BioyondException: 有任一试剂不足时抛出，附每种试剂的需求/可用/缺口
+        """
+        required = self._sum_required_reagents(orders)
+        if not required:
+            return
+
+        stock = self._query_reagent_stock()
+        if stock is None:
+            logger.warning(
+                f"[{tag}] ⚠️ 试剂库存查询失败，跳过建单前预检，改由 LIMS 逐单校验兜底"
+            )
+            return
+
+        # LIMS 里试剂名大小写偶有出入，精确匹配不中时降级按大小写不敏感再找一次
+        stock_ci = {k.casefold(): v for k, v in stock.items()}
+        shortages: List[str] = []
+        for name in sorted(required):
+            need = required[name]
+            have = stock.get(name)
+            if have is None:
+                have = stock_ci.get(name.casefold())
+            if have is None:
+                shortages.append(f"{name}: 需要 {need:.4f} g，在库无此试剂")
+            elif have < need:
+                shortages.append(
+                    f"{name}: 需要 {need:.4f} g，可用 {have:.4f} g，缺 {need - have:.4f} g"
+                )
+
+        if shortages:
+            logger.error(
+                f"[{tag}] ❌ 建单前预检未通过，{len(orders)} 单全部不下发: "
+                + "; ".join(shortages)
+            )
+            raise BioyondException(
+                f"[{tag}] 试剂余量不足，{len(orders)} 单全部未下发（避免产生半批待处置订单）。"
+                f"缺口: {'; '.join(shortages)}。请补齐试剂后重新下发。"
+            )
+
+        logger.info(
+            f"[{tag}] ✅ 建单前预检通过，{len(required)} 种试剂余量充足: "
+            + ", ".join(
+                f"{n} 需{required[n]:.4f}/余{(stock.get(n) if stock.get(n) is not None else stock_ci.get(n.casefold(), 0.0)):.4f}g"
+                for n in sorted(required)
+            )
+        )
+
     def _submit_and_wait_orders(
         self,
         orders: List[Dict[str, Any]],
@@ -1447,19 +1554,67 @@ class BioyondCellWorkstation(BioyondWorkstation):
         供下游通过 UniLab output handle 引用。
         """
         logger.info(f"[{tag}] 即将提交 {len(orders)} 个订单")
+        self._preflight_check_reagents(orders, tag)
         response = self._post_lims("/api/lims/order/orders", orders)
         logger.info(f"[{tag}] 接口返回: {response}")
 
-        # 提取 orderCode
-        data_list = response.get("data", [])
-        if not data_list:
-            logger.error("创建订单未返回有效数据！")
-            return response
+        # ========== 逐条判定建单结果 ==========
+        # 判据与 conductivity_test_inline 一致：errorMessage 为空 + orderCode 非空才算建成。
+        # LIMS 按订单全有或全无：某单试剂不够时它那条 orderCode=null、errorMessage 写明原因，
+        # 其余单照常建出来。原先只按 orderCode 真值过滤，失败条目被列表推导静默丢掉，
+        # 请求 8 单只建成 4 单也照样往下走，最后还报 all_completed。
+        data_list = response.get("data") or []
+        if not isinstance(data_list, list):
+            data_list = []
 
-        order_codes = [item.get("orderCode") for item in data_list if item.get("orderCode")]
-        if not order_codes:
-            logger.error("未找到任何有效的 orderCode！")
-            return response
+        created_entries: List[Dict[str, Any]] = []
+        failed_entries: List[Dict[str, Any]] = []
+        for item in data_list:
+            if not isinstance(item, dict):
+                continue
+            err_msg = (item.get("errorMessage") or "").strip()
+            code = (item.get("orderCode") or "").strip()
+            if code and not err_msg:
+                created_entries.append(item)
+            else:
+                failed_entries.append(item)
+
+        order_codes = [(item.get("orderCode") or "").strip() for item in created_entries]
+
+        # 数量也要对账：LIMS 可能少返条目，此时既没有 orderCode 也没有 errorMessage
+        if failed_entries or len(created_entries) != len(orders):
+            # orderName 是入参带过来的，失败条目也有，用它定位是哪一单
+            fail_desc = "; ".join(
+                f"{e.get('orderName') or '<无名>'}: "
+                f"{(e.get('errorMessage') or '').strip() or '未返回 orderCode'}"
+                for e in failed_entries
+            ) or f"LIMS 只返回 {len(data_list)} 条条目（请求 {len(orders)} 单）"
+
+            logger.error(
+                f"[{tag}] ❌ 建单未全部成功: 请求 {len(orders)} 单，建成 {len(created_entries)} 单，"
+                f"失败 {len(failed_entries)} 单 → {fail_desc}"
+            )
+
+            # 先暂停调度：已建成的单还在 LIMS 队列里，暂停后它们不会继续执行，
+            # 给人工留出补试剂或撤单的处置窗口。暂停失败不能盖掉建单失败本身，只记日志。
+            try:
+                pause_resp = self.scheduler_pause()
+                logger.warning(f"[{tag}] 已暂停调度，等待人工处置: {pause_resp}")
+                paused_hint = (
+                    "调度已暂停，请补齐试剂后调 scheduler_continue 继续，或撤单后重新下发。"
+                )
+            except Exception as e:
+                logger.error(f"[{tag}] ⚠️ 暂停调度失败，请立即人工干预: {e}")
+                paused_hint = f"调度暂停失败（{e}），已建成的订单可能仍在执行，请立即人工停机处置。"
+
+            # 必须抛：一是调度已暂停，已建成的单永远不会 finish，继续等只会挂到超时；
+            # 二是抛异常才会让 edge 把 job_status=failed + 本消息推到云端提醒人工。
+            # 订单尚未执行，也就还没产出瓶板，跳过后处理不会让资源树漂移。
+            raise BioyondException(
+                f"[{tag}] 建单未全部成功（请求 {len(orders)} 单 / 建成 {len(created_entries)} 单）。"
+                f"失败原因: {fail_desc}。"
+                f"已建成待处置的订单: {order_codes or '无'}。{paused_hint}"
+            )
 
         logger.info(f"[{tag}] 等待 {len(order_codes)} 个订单完成: {order_codes}")
 
@@ -1470,10 +1625,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
             logger.warning(f"[{tag}] 重置进度统计失败（不影响下单）: {e}")
 
         # orderCode → 建单条目（含 orderId / usedMaterials），供 wait 双字段校验与后处理降级
+        # 键取自 created_entries 并同样 strip，保证和 order_codes 对得上
         create_entry_by_code = {
-            item.get("orderCode"): item
-            for item in data_list
-            if isinstance(item, dict) and item.get("orderCode")
+            (item.get("orderCode") or "").strip(): item
+            for item in created_entries
         }
 
         # ========== 等待所有订单完成 ==========
@@ -1809,8 +1964,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         # ========== 构造最终结果 ==========
         final_result = {
+            # 走到这里说明建单数量已和请求对齐（不齐的在上面就暂停调度并抛了）。
+            # total_orders 用请求数而非建成数：拿建成数当分母，4/8 会显示成 4/4。
             "status": "all_completed",
-            "total_orders": len(order_codes),
+            "total_orders": len(orders),
             "bottle_count": len(order_codes),
             "reports": all_reports,
             "mass_ratios": all_mass_ratios,
@@ -4456,16 +4613,29 @@ class BioyondCellWorkstation(BioyondWorkstation):
         from unilabos.resources.bioyond.YB_bottles import YB_Vial_5mL
         
         created_count = 0
+        skipped_no_code = 0
         for idx, bottle_info in enumerate(bottles_detail, 1):
             try:
                 bottle_material_id = bottle_info.get("detailMaterialId")
-                bottle_code = bottle_info.get("code", f"bottle_{idx}")
+                # 用 or 而非 get 的默认值：LIMS 会把空瓶位的 code 显式返回成 null，
+                # 键存在时 get 的默认值不生效，直接拿到 None
+                bottle_code = bottle_info.get("code") or ""
                 bottle_x = bottle_info.get("x", 0)
                 bottle_y = bottle_info.get("y", 0)
                 associate_id = bottle_info.get("associateId")  # 关联订单ID
                 
                 if not bottle_material_id:
                     logger.warning(f"  瓶子[{idx}]: 缺少materialId，跳过")
+                    continue
+                
+                # 无编号的瓶位是本单没分液到的空位：LIMS 里仍有子物料记录，但没分配
+                # 编号，而下游电导/扣电是靠 barCode 认瓶的，认不出这种瓶子。给它编个
+                # 名字挂进资源树反而可能被下游取到空瓶，所以直接跳过。
+                if not bottle_code:
+                    skipped_no_code += 1
+                    logger.debug(
+                        f"  瓶子[{idx}]: 位置=({bottle_x},{bottle_y}) 无编号（空瓶位），跳过"
+                    )
                     continue
                 
                 # ✅ 创建瓶子资源（使用工厂函数）
@@ -4510,7 +4680,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 logger.warning(f"  瓶子[{idx}]: 创建失败 - {e}")
                 continue
         
-        logger.info(f"[资源树] ✅ 已创建 {created_count}/{len(bottles_detail)} 个瓶子资源")
+        logger.info(
+            f"[资源树] ✅ 已创建 {created_count}/{len(bottles_detail)} 个瓶子资源"
+            + (f"，{skipped_no_code} 个空瓶位（无编号）已跳过" if skipped_no_code else "")
+        )
     
     def transfer_3_to_2_to_1_auto(
         self,
@@ -5295,7 +5468,18 @@ class BioyondCellWorkstation(BioyondWorkstation):
         请求体只包含 apiKey 和 requestTime
         """
         return self._post_lims("/api/lims/scheduler/stop")
-         
+
+    # 2.8 暂停调度
+    def scheduler_pause(self) -> Dict[str, Any]:
+        """
+        暂停调度 (2.8)
+
+        电解液站只有这一个暂停接口，语义等同智能暂停：执行完当前动作再停，
+        不会把机械臂冻在半空。恢复用 scheduler_continue。
+        请求体只包含 apiKey 和 requestTime
+        """
+        return self._post_lims("/api/lims/scheduler/pause")
+
     # 2.9 继续调度
     def scheduler_continue(self) -> Dict[str, Any]:
         """
