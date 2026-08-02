@@ -15,6 +15,10 @@ from typing import Any, Dict, Iterator, List, Optional
 
 SCHEMA_VERSION = 4
 
+
+class InvalidCursorAdvance(ValueError):
+    """ACK cursor 试图回退、跳批或基于过期发送窗口推进."""
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS resource_template (
     template_id   TEXT PRIMARY KEY,
@@ -221,6 +225,17 @@ class InventoryStore:
                 if "parent_uuid" not in cols:
                     self._conn.execute(_SCHEMA_V3_ADD_PARENT)
                 self._conn.execute(_SCHEMA_V3_INDEX)
+                # v1/v2 只有 relation 父事实；新列为空时可确定性补齐。非空值永不
+                # 覆盖，避免在伪降版/半迁移数据库里静默猜测冲突。
+                self._conn.execute(
+                    "UPDATE material_instance SET parent_uuid = ("
+                    "SELECT r.parent_uuid FROM resource_relation r "
+                    "WHERE r.child_uuid = material_instance.edge_uuid"
+                    ") WHERE parent_uuid = '' AND EXISTS ("
+                    "SELECT 1 FROM resource_relation r "
+                    "WHERE r.child_uuid = material_instance.edge_uuid"
+                    ")"
+                )
             if current < 4:
                 for table, columns in _SCHEMA_V4_COLUMNS.items():
                     existing = {
@@ -274,8 +289,38 @@ class InventoryStore:
     def get_lot(self, lot_id: str) -> Optional[Dict[str, Any]]:
         return self.query_one("SELECT * FROM inventory_lot WHERE lot_id = ?", (lot_id,))
 
+    def list_lots(self, limit: int = 500) -> List[Dict[str, Any]]:
+        return self.query_all(
+            "SELECT * FROM inventory_lot ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (limit,),
+        )
+
+    def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
+        return self.query_one(
+            "SELECT * FROM resource_template WHERE template_id = ?",
+            (template_id,),
+        )
+
+    def list_templates(self, limit: int = 500) -> List[Dict[str, Any]]:
+        return self.query_all(
+            "SELECT * FROM resource_template ORDER BY template_id LIMIT ?",
+            (limit,),
+        )
+
     def get_instance(self, edge_uuid: str) -> Optional[Dict[str, Any]]:
         return self.query_one("SELECT * FROM material_instance WHERE edge_uuid = ?", (edge_uuid,))
+
+    def list_instances(self, status: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+        if status:
+            return self.query_all(
+                "SELECT * FROM material_instance WHERE status = ? "
+                "ORDER BY rowid DESC LIMIT ?",
+                (status, limit),
+            )
+        return self.query_all(
+            "SELECT * FROM material_instance ORDER BY rowid DESC LIMIT ?",
+            (limit,),
+        )
 
     def find_instance_by_barcode_active(self, barcode: str, active_states: tuple) -> Optional[Dict[str, Any]]:
         placeholders = ",".join("?" for _ in active_states)
@@ -307,8 +352,30 @@ class InventoryStore:
             (workflow_id,),
         )
 
+    def get_reservation_by_id(self, reservation_id: str) -> Optional[Dict[str, Any]]:
+        return self.query_one(
+            "SELECT * FROM inventory_reservation WHERE reservation_id = ?",
+            (reservation_id,),
+        )
+
+    def list_reservations(self, status: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+        if status:
+            return self.query_all(
+                "SELECT * FROM inventory_reservation WHERE status = ? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+                (status, limit),
+            )
+        return self.query_all(
+            "SELECT * FROM inventory_reservation "
+            "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (limit,),
+        )
+
     def get_relation(self, child_uuid: str) -> Optional[Dict[str, Any]]:
         return self.query_one("SELECT * FROM resource_relation WHERE child_uuid = ?", (child_uuid,))
+
+    def list_relations(self) -> List[Dict[str, Any]]:
+        return self.query_all("SELECT * FROM resource_relation ORDER BY child_uuid ASC")
 
     def children_of(self, parent_uuid: str) -> List[Dict[str, Any]]:
         return self.query_all(
@@ -317,6 +384,9 @@ class InventoryStore:
 
     def get_content(self, instance_uuid: str) -> Optional[Dict[str, Any]]:
         return self.query_one("SELECT * FROM substance_content WHERE instance_uuid = ?", (instance_uuid,))
+
+    def list_contents(self) -> List[Dict[str, Any]]:
+        return self.query_all("SELECT * FROM substance_content ORDER BY instance_uuid ASC")
 
     def component_children_of(self, parent_uuid: str) -> List[Dict[str, Any]]:
         """组成父子（material_instance.parent_uuid）下的直接子物料；与 site 放置无关."""
@@ -327,6 +397,75 @@ class InventoryStore:
 
     def get_processed_command(self, command_id: str) -> Optional[Dict[str, Any]]:
         return self.query_one("SELECT * FROM processed_command WHERE command_id = ?", (command_id,))
+
+    def list_processed_commands(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """最近的幂等命令结果（只读诊断面，不暴露任意表查询）。"""
+        return self.query_all(
+            "SELECT * FROM processed_command ORDER BY processed_at DESC, rowid DESC LIMIT ?",
+            (limit,),
+        )
+
+    def list_ledger(self, after_id: int = 0, limit: int = 200) -> List[Dict[str, Any]]:
+        return self.query_all(
+            "SELECT * FROM inventory_ledger WHERE ledger_id > ? "
+            "ORDER BY ledger_id ASC LIMIT ?",
+            (after_id, limit),
+        )
+
+    @staticmethod
+    def tx_parent_consistency_issues(
+        conn: sqlite3.Connection,
+    ) -> List[Dict[str, Any]]:
+        """Return only deterministic parent/relation inconsistencies."""
+
+        rows = conn.execute(
+            "SELECT r.child_uuid, r.parent_uuid AS relation_parent_uuid, "
+            "i.parent_uuid AS instance_parent_uuid "
+            "FROM resource_relation r "
+            "LEFT JOIN material_instance i ON i.edge_uuid = r.child_uuid "
+            "WHERE i.edge_uuid IS NULL OR i.parent_uuid <> r.parent_uuid "
+            "ORDER BY r.child_uuid ASC"
+        ).fetchall()
+        issues: List[Dict[str, Any]] = []
+        for row in rows:
+            instance_parent = row["instance_parent_uuid"]
+            issues.append(
+                {
+                    "kind": (
+                        "orphan_relation"
+                        if instance_parent is None
+                        else "parent_mismatch"
+                    ),
+                    "child_uuid": row["child_uuid"],
+                    "instance_parent_uuid": instance_parent or "",
+                    "relation_parent_uuid": row["relation_parent_uuid"] or "",
+                }
+            )
+        return issues
+
+    def parent_consistency_issues(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            return self.tx_parent_consistency_issues(self._conn)
+
+    def snapshot_rows(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Read the complete v1 snapshot collections in stable order."""
+
+        return {
+            "templates": self.query_all(
+                "SELECT * FROM resource_template ORDER BY template_id ASC"
+            ),
+            "lots": self.query_all(
+                "SELECT * FROM inventory_lot ORDER BY lot_id ASC"
+            ),
+            "instances": self.query_all(
+                "SELECT * FROM material_instance ORDER BY edge_uuid ASC"
+            ),
+            "relations": self.list_relations(),
+            "contents": self.list_contents(),
+            "reservations": self.query_all(
+                "SELECT * FROM inventory_reservation ORDER BY reservation_id ASC"
+            ),
+        }
 
     # -- 实验室布局（lab_meta / lab_zone / lab_placement） --------------------
 
@@ -363,18 +502,94 @@ class InventoryStore:
             (after_sequence, limit),
         )
 
+    def list_cursors(self) -> List[Dict[str, Any]]:
+        """列出同步游标；ACK 推进仍只能由同步协议写入。"""
+        return self.query_all(
+            "SELECT * FROM sync_cursor ORDER BY cursor_name ASC"
+        )
+
     def get_cursor(self, name: str = "cloud") -> int:
         row = self.query_one("SELECT acked_sequence FROM sync_cursor WHERE cursor_name = ?", (name,))
         return int(row["acked_sequence"]) if row else 0
 
     def set_cursor(self, name: str, acked_sequence: int, now_ms: int) -> None:
         with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT acked_sequence FROM sync_cursor WHERE cursor_name = ?",
+                (name,),
+            ).fetchone()
+            current = int(row["acked_sequence"]) if row else 0
+            if acked_sequence < current:
+                raise InvalidCursorAdvance(
+                    f"ACK regression for {name}: {acked_sequence} < {current}"
+                )
+            maximum = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) FROM sync_outbox"
+                ).fetchone()[0]
+            )
+            if acked_sequence > maximum:
+                raise InvalidCursorAdvance(
+                    f"ACK {acked_sequence} exceeds outbox sequence {maximum}"
+                )
+            if acked_sequence > current:
+                count = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM sync_outbox "
+                        "WHERE sequence > ? AND sequence <= ?",
+                        (current, acked_sequence),
+                    ).fetchone()[0]
+                )
+                if count != acked_sequence - current:
+                    raise InvalidCursorAdvance(
+                        f"ACK range {current + 1}..{acked_sequence} is not contiguous"
+                    )
             conn.execute(
                 "INSERT INTO sync_cursor(cursor_name, acked_sequence, updated_at) VALUES (?, ?, ?) "
                 "ON CONFLICT(cursor_name) DO UPDATE SET acked_sequence = excluded.acked_sequence, "
                 "updated_at = excluded.updated_at",
                 (name, acked_sequence, now_ms),
             )
+
+    def advance_cursor(
+        self,
+        name: str,
+        expected_current: int,
+        acked_sequence: int,
+        sent_through: int,
+        now_ms: int,
+    ) -> int:
+        """Atomically validate an ACK against the exact batch that was sent."""
+
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT acked_sequence FROM sync_cursor WHERE cursor_name = ?",
+                (name,),
+            ).fetchone()
+            current = int(row["acked_sequence"]) if row else 0
+            if current != expected_current:
+                raise InvalidCursorAdvance(
+                    f"stale ACK window for {name}: expected cursor "
+                    f"{expected_current}, current {current}"
+                )
+            if acked_sequence < current:
+                raise InvalidCursorAdvance(
+                    f"ACK regression for {name}: {acked_sequence} < {current}"
+                )
+            if acked_sequence > sent_through:
+                raise InvalidCursorAdvance(
+                    f"ACK {acked_sequence} exceeds sent sequence {sent_through}"
+                )
+            if acked_sequence == current:
+                return current
+            conn.execute(
+                "INSERT INTO sync_cursor(cursor_name, acked_sequence, updated_at) "
+                "VALUES (?, ?, ?) ON CONFLICT(cursor_name) DO UPDATE SET "
+                "acked_sequence = excluded.acked_sequence, "
+                "updated_at = excluded.updated_at",
+                (name, acked_sequence, now_ms),
+            )
+            return acked_sequence
 
     def max_outbox_sequence(self) -> int:
         row = self.query_one("SELECT COALESCE(MAX(sequence), 0) AS s FROM sync_outbox")

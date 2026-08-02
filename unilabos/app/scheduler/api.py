@@ -108,9 +108,9 @@ class JobFinishIn(BaseModel):
 class ErrorDecisionIn(BaseModel):
     """人工审批结果（与云端 ws job_error_decision 消息同语义）。"""
 
-    action: str = ""                        # retry / skip / abort / 其它已配置 option
+    action: str = ""  # retry / skip / abort / 其它已配置 option
     option: Optional[Dict[str, Any]] = None  # 或直接回传选中的 option 对象
-    result: Any = None                      # operator_intervention 的服务端结果
+    result: Any = None  # operator_intervention 的服务端结果
     reason: str = ""
 
 
@@ -148,18 +148,21 @@ def create_scheduler_router(
 
     @router.get("/health")
     def health() -> Dict[str, str]:
-        return {"status": "ok", "scheduler": "ready" if get_scheduler() is not None else "disabled"}
+        return {
+            "status": "ok",
+            "scheduler": "ready" if get_scheduler() is not None else "disabled",
+        }
 
     @router.get("/hostlink/peers")
     def hostlink_peers() -> Dict[str, Any]:
-        """HostLink 组网在线状态：host 侧列 slave peers；slave 侧报自身连接。"""
+        """微后端组网状态：Host 列 Slave，Slave 报连接及已接收 ROS 配置。"""
         from unilabos.hostlink.client import get_hostlink_client
         from unilabos.hostlink.server import get_hostlink_server
 
         link_server = get_hostlink_server()
         link_client = get_hostlink_client()
         role = "host" if link_server else ("slave" if link_client else "disabled")
-        return {
+        result: Dict[str, Any] = {
             "role": role,
             "peers": link_server.peers() if link_server else [],
             "client": (
@@ -167,11 +170,23 @@ def create_scheduler_router(
                     "online": link_client.online,
                     "host": link_client.host,
                     "port": link_client.port,
+                    "node_id": link_client.node_id,
+                    "device_ids": link_client.device_ids,
+                    "capabilities": link_client.capabilities,
                 }
                 if link_client
                 else None
             ),
         }
+        # 保持原 role/peers/client 形状；仅在通路存在时追加微后端职责和
+        # ROS 下发快照，旧前端可无感忽略，新前端可据此核对配置来源。
+        if role != "disabled":
+            hello = link_server.hello_payload if link_server else link_client.hello_info
+            result["owner"] = hello.get("owner")
+            result["host_id"] = hello.get("host_id") or hello.get("host_name")
+            result["protocol_version"] = hello.get("protocol_version")
+            result["ros"] = hello.get("ros")
+        return result
 
     @router.post("/workflows")
     def submit_workflow(body: WorkflowSubmitIn) -> Dict[str, Any]:
@@ -191,18 +206,24 @@ def create_scheduler_router(
     def workflow_detail(workflow_id: str) -> Dict[str, Any]:
         snap = _sched().workflow_snapshot(workflow_id)
         if snap is None:
-            raise HTTPException(status_code=404, detail=f"workflow {workflow_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"workflow {workflow_id} not found"
+            )
         return snap
 
     @router.post("/workflows/{workflow_id}/cancel")
     def cancel_workflow(workflow_id: str) -> Dict[str, Any]:
         if not _sched().cancel_workflow(workflow_id):
-            raise HTTPException(status_code=404, detail=f"workflow {workflow_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"workflow {workflow_id} not found"
+            )
         return {"workflow_id": workflow_id, "state": "canceled"}
 
     @router.post("/jobs/{job_id}/finish")
     def finish_job(job_id: str, body: JobFinishIn) -> Dict[str, Any]:
-        return _sched().on_job_finished(job_id, body.success, body.ret_value, body.suc_type)
+        return _sched().on_job_finished(
+            job_id, body.success, body.ret_value, body.suc_type
+        )
 
     @router.post("/reschedule")
     def manual_reschedule() -> Dict[str, Any]:
@@ -280,13 +301,17 @@ def create_scheduler_router(
                 "inflight": len(snap["inflight_jobs"]),
                 "reschedule_count": snap["reschedule_count"],
             },
-            "recent": {channel: monitor_bus.recent(channel, 40) for channel in CHANNELS},
+            "recent": {
+                channel: monitor_bus.recent(channel, 40) for channel in CHANNELS
+            },
         }
 
     def _backend() -> Any:
         backend = get_backend() if get_backend is not None else None
         if backend is None:
-            raise HTTPException(status_code=503, detail="edge execution backend not enabled")
+            raise HTTPException(
+                status_code=503, detail="edge execution backend not enabled"
+            )
         return backend
 
     # ── 工作流执行历史（第三个独立 SQLite，跨进程重启保留） ──
@@ -295,31 +320,58 @@ def create_scheduler_router(
         store = get_history() if get_history is not None else None
         if store is None:
             scheduler = get_scheduler()
-            store = getattr(scheduler, "_history", None) if scheduler is not None else None
+            store = (
+                getattr(scheduler, "_history", None) if scheduler is not None else None
+            )
         if store is None:
-            raise HTTPException(status_code=503, detail="workflow history store not enabled")
+            raise HTTPException(
+                status_code=503, detail="workflow history store not enabled"
+            )
         return store
 
     @router.get("/history/workflows")
-    def history_workflows(state: str = "", since: float = 0.0, limit: int = 100) -> Dict[str, Any]:
+    def history_workflows(
+        state: str = "",
+        since: float = 0.0,
+        limit: int = 100,
+        with_spec: bool = False,
+    ) -> Dict[str, Any]:
         """运行历史列表（新→旧）+ 总量统计。"""
         store = _history()
-        return {"runs": store.list_runs(state=state, since=since, limit=limit), "stats": store.stats()}
+        return {
+            "runs": store.list_runs(
+                state=state,
+                since=since,
+                limit=limit,
+                with_spec=with_spec,
+            ),
+            "stats": store.stats(),
+        }
 
     @router.get("/history/workflows/{workflow_id}")
-    def history_workflow_detail(workflow_id: str, with_spec: bool = True) -> Dict[str, Any]:
+    def history_workflow_detail(
+        workflow_id: str, with_spec: bool = True
+    ) -> Dict[str, Any]:
         """单次运行详情：run 元信息 + 提交时整图 spec + 全部 job 记录。"""
         store = _history()
         run = store.get_run(workflow_id, with_spec=with_spec)
         if run is None:
-            raise HTTPException(status_code=404, detail=f"no history for workflow {workflow_id}")
+            raise HTTPException(
+                status_code=404, detail=f"no history for workflow {workflow_id}"
+            )
         run["jobs"] = store.list_jobs(workflow_id=workflow_id, limit=2000)
         return run
 
     @router.get("/history/jobs")
-    def history_jobs(workflow_id: str = "", device_id: str = "", limit: int = 200) -> Dict[str, Any]:
+    def history_jobs(
+        workflow_id: str = "", device_id: str = "", limit: int = 200
+    ) -> Dict[str, Any]:
         """job 执行历史（新→旧；workflow_id / device_id 过滤）。"""
-        return {"jobs": _history().list_jobs(workflow_id=workflow_id, device_id=device_id, limit=limit)}
+        return {
+            "jobs": _history().list_jobs(
+                workflow_id=workflow_id, device_id=device_id, limit=limit
+            )
+        }
 
     # ── 设备状态（归微后端管；独立 SQLite，与物料/工作流库分开） ──
 
@@ -327,9 +379,13 @@ def create_scheduler_router(
         store = get_device_state() if get_device_state is not None else None
         if store is None and get_backend is not None:
             backend = get_backend()
-            store = getattr(backend, "device_state", None) if backend is not None else None
+            store = (
+                getattr(backend, "device_state", None) if backend is not None else None
+            )
         if store is None:
-            raise HTTPException(status_code=503, detail="device state store not enabled")
+            raise HTTPException(
+                status_code=503, detail="device state store not enabled"
+            )
         return store
 
     @router.get("/device-state")
@@ -337,6 +393,11 @@ def create_scheduler_router(
         """全量设备属性当前值 + 存储统计。"""
         store = _device_state()
         return {"devices": store.latest_all(), "stats": store.stats()}
+
+    @router.get("/device-state/history")
+    def device_state_history_all(since_ms: int = 0, limit: int = 500) -> Dict[str, Any]:
+        """跨设备/属性的最近变化点（新→旧）。"""
+        return {"entries": _device_state().history_all(since_ms, limit)}
 
     @router.get("/device-state/{device_id:path}/history")
     def device_state_history(
@@ -353,7 +414,9 @@ def create_scheduler_router(
     def device_state_one(device_id: str) -> Dict[str, Any]:
         properties = _device_state().latest_for(device_id)
         if not properties:
-            raise HTTPException(status_code=404, detail=f"no state for device {device_id}")
+            raise HTTPException(
+                status_code=404, detail=f"no state for device {device_id}"
+            )
         return {"device_id": device_id, "properties": properties}
 
     @router.post("/device-state/report")
@@ -381,7 +444,9 @@ def create_scheduler_router(
         return {"decisions": _backend().list_error_decisions()}
 
     @router.post("/error-decisions/{decision_id}")
-    def resolve_error_decision(decision_id: str, body: ErrorDecisionIn) -> Dict[str, Any]:
+    def resolve_error_decision(
+        decision_id: str, body: ErrorDecisionIn
+    ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"reason": body.reason}
         if body.option is not None:
             payload["option"] = body.option

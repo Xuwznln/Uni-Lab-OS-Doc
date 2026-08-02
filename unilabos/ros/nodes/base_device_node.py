@@ -812,7 +812,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
     def _hostlink_get_nodes(
         self, uuid: Optional[str] = None, res_id: Optional[str] = None, with_children: bool = True
     ) -> Optional[List[Dict[str, Any]]]:
-        """HostLink TCP 通路查询物料（云端物料已下线，事实源在 host 本地树）。
+        """HostLink TCP 通路查询 Host 持有的物料数据库服务。
 
         通路不可用/查询失败返回 None，由调用方回退旧 ROS service 链路——
         host-slave 去 ROS 化过渡期的双通道策略：TCP 优先、ROS 兜底。
@@ -839,7 +839,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         Returns:
             ResourceTreeSet: 资源树集合
         """
-        # TCP 优先：HostLink 在线时逐 uuid 向 host 查询本地树
+        # TCP 优先：HostLink 在线时逐 uuid 向 host 的物料服务查询
         link_nodes: Optional[List[Dict[str, Any]]] = None
         if resources_uuid:
             collected: List[Dict[str, Any]] = []
@@ -881,7 +881,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         Returns:
             ResourcePLR: PLR资源实例
         """
-        # TCP 优先：HostLink 在线时直接查 host 本地树
+        # TCP 优先：HostLink 在线时直接查 host 的物料服务
         raw_data = self._hostlink_get_nodes(res_id=resource_id, with_children=with_children)
         if raw_data is None:
             r = SerialCommand.Request()

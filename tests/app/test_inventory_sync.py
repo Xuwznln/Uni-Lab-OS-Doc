@@ -14,7 +14,10 @@ import pytest
 
 from unilabos.app.scheduler.inventory.domain import MaterialRequirement
 from unilabos.app.scheduler.inventory.service import InventoryService
-from unilabos.app.scheduler.inventory.store import InventoryStore
+from unilabos.app.scheduler.inventory.store import (
+    InvalidCursorAdvance,
+    InventoryStore,
+)
 from unilabos.app.scheduler.inventory.sync import (
     CloudProjectionReference,
     OutboxWorker,
@@ -125,6 +128,77 @@ class TestOutboxWorker:
         worker.flush_once()
         # 第二批从 seq=2 开始重发（seq=1 不再发）
         assert acks[1][0] == 2
+
+    def test_cloud_event_has_payload_not_payload_json_and_optional_trace(self):
+        svc = InventoryService(InventoryStore(":memory:"))
+        svc.inbound_lot("tpl-wire", 3.0, lot_id="lot-wire")
+        traceparent = (
+            "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+        )
+        with svc.store.transaction() as conn:
+            conn.execute(
+                "UPDATE sync_outbox SET traceparent = ?, tracestate = ?, "
+                "trace_id = ?, span_id = ? WHERE sequence = 1",
+                (
+                    traceparent,
+                    "vendor=value",
+                    "0123456789abcdef0123456789abcdef",
+                    "0123456789abcdef",
+                ),
+            )
+
+        sender = _CollectingSender()
+        OutboxWorker(svc.store, sender).flush_once()
+        event = sender.received[0]
+        assert "payload" in event
+        assert "payload_json" not in event
+        assert event["payload"]["quantity"] == 3.0
+        assert event["traceparent"] == traceparent
+        assert event["tracestate"] == "vendor=value"
+
+    def test_future_ack_is_rejected_without_losing_events_then_retries(self):
+        svc = InventoryService(InventoryStore(":memory:"))
+        for i in range(3):
+            svc.inbound_lot("tpl-wire", 1.0, lot_id=f"lot-future-{i}")
+        maximum = svc.store.max_outbox_sequence()
+
+        def future_sender(events):
+            return events[-1]["sequence"] + 1
+
+        worker = OutboxWorker(svc.store, future_sender)
+        with pytest.raises(InvalidCursorAdvance, match="exceeds sent"):
+            worker.flush_once()
+        assert svc.store.get_cursor() == 0
+        assert worker.backlog() == maximum
+
+        sender = _CollectingSender()
+        worker.sender = sender
+        assert worker.flush_all() == maximum
+        assert svc.store.get_cursor() == maximum
+
+    def test_regressing_ack_is_rejected_and_future_events_remain(self):
+        svc = InventoryService(InventoryStore(":memory:"))
+        for i in range(3):
+            svc.inbound_lot("tpl-wire", 1.0, lot_id=f"lot-regress-{i}")
+
+        worker = OutboxWorker(
+            svc.store,
+            lambda events: events[0]["sequence"],
+            batch_size=3,
+        )
+        assert worker.flush_once() == 1
+        assert svc.store.get_cursor() == 1
+
+        worker.sender = lambda _events: 0
+        with pytest.raises(InvalidCursorAdvance, match="regression"):
+            worker.flush_once()
+        assert svc.store.get_cursor() == 1
+        assert [row["sequence"] for row in svc.store.pending_outbox(1)] == [2, 3]
+
+        sender = _CollectingSender()
+        worker.sender = sender
+        assert worker.flush_all() == 2
+        assert svc.store.get_cursor() == 3
 
 
 class TestCloudProjectionContract:

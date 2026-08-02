@@ -24,8 +24,13 @@ def _workflow_payload(workflow_id: str = "wf-cloud") -> Dict[str, Any]:
         "task_id": f"task-{workflow_id}",
         "priority": "high",
         "nodes": [
-            {"id": "A", "device_id": "d1", "action_name": "run", "action_type": "goal",
-             "param": {"v": 1}},
+            {
+                "id": "A",
+                "device_id": "d1",
+                "action_name": "run",
+                "action_type": "goal",
+                "param": {"v": 1},
+            },
             {"id": "B", "device_id": "d1", "action_name": "run", "action_type": "goal"},
         ],
         "edges": [{"source_node_id": "A", "target_node_id": "B"}],
@@ -61,13 +66,17 @@ class TestWorkflowStart:
         asyncio.run(mp._handle_workflow_start(_workflow_payload()))
         # 第二次幂等忽略，不重复下发也不回 failed
         assert len(dispatcher.dispatched) == 1
-        statuses = [m for m in _drain(mp.send_queue) if m.get("action") == "workflow_status"]
+        statuses = [
+            m for m in _drain(mp.send_queue) if m.get("action") == "workflow_status"
+        ]
         assert statuses == []
 
     def test_no_scheduler_reports_failed(self):
         mp = _make_processor()
         asyncio.run(mp._handle_workflow_start(_workflow_payload()))
-        statuses = [m for m in _drain(mp.send_queue) if m.get("action") == "workflow_status"]
+        statuses = [
+            m for m in _drain(mp.send_queue) if m.get("action") == "workflow_status"
+        ]
         assert len(statuses) == 1
         assert statuses[0]["data"]["status"] == "failed"
         assert "not attached" in statuses[0]["data"]["error"]
@@ -78,7 +87,9 @@ class TestWorkflowStart:
         payload = _workflow_payload("wf-cycle")
         payload["edges"].append({"source_node_id": "B", "target_node_id": "A"})
         asyncio.run(mp._handle_workflow_start(payload))
-        statuses = [m for m in _drain(mp.send_queue) if m.get("action") == "workflow_status"]
+        statuses = [
+            m for m in _drain(mp.send_queue) if m.get("action") == "workflow_status"
+        ]
         assert len(statuses) == 1
         assert statuses[0]["data"]["status"] == "failed"
 
@@ -107,19 +118,44 @@ class TestIntegrationWiring:
     def teardown_method(self):
         integration.reset_for_test()
 
-    def test_setup_injects_scheduler_and_reports_state(self):
+    def test_inventory_starts_without_scheduler(self, tmp_path):
         class FakeWsClient:
             def __init__(self):
                 self.message_processor = _make_processor()
 
         ws = FakeWsClient()
+        db_path = tmp_path / "host-material.db"
+        inventory = integration.setup_edge_inventory(
+            str(db_path),
+            ws_client=ws,
+        )
+
+        assert integration.get_inventory_service() is inventory
+        assert integration.get_edge_scheduler() is None
+        assert ws.message_processor.inventory_service is inventory
+        assert db_path.exists()
+        assert integration.setup_edge_inventory(str(db_path)) is inventory
+
+    def test_setup_injects_scheduler_and_reports_state(self, tmp_path):
+        class FakeWsClient:
+            def __init__(self):
+                self.message_processor = _make_processor()
+
+        ws = FakeWsClient()
+        device_state_db = tmp_path / "device-state.db"
+        workflow_history_db = tmp_path / "workflow-history.db"
         scheduler, backend = integration.setup_edge_scheduler(
-            ws_client=ws, host_node_getter=lambda: None
+            ws_client=ws,
+            host_node_getter=lambda: None,
+            device_state_db_path=str(device_state_db),
+            workflow_history_db_path=str(workflow_history_db),
         )
         try:
             # 注入成功
             assert ws.message_processor.edge_scheduler is scheduler
             assert integration.get_edge_scheduler() is scheduler
+            assert device_state_db.exists()
+            assert workflow_history_db.exists()
 
             # 幂等：重复 setup 返回同一实例
             s2, b2 = integration.setup_edge_scheduler(ws_client=ws)
@@ -129,18 +165,27 @@ class TestIntegrationWiring:
             r = scheduler.submit_workflow(
                 __import__(
                     "unilabos.app.scheduler.models", fromlist=["spec_from_dict"]
-                ).spec_from_dict({
-                    "workflow_id": "wf-report",
-                    "nodes": [{"id": "A", "device_id": "d9", "action_name": "run",
-                               "action_type": "goal"}],
-                })
+                ).spec_from_dict(
+                    {
+                        "workflow_id": "wf-report",
+                        "nodes": [
+                            {
+                                "id": "A",
+                                "device_id": "d9",
+                                "action_name": "run",
+                                "action_type": "goal",
+                            }
+                        ],
+                    }
+                )
             )
             # host_node_getter 返回 None → send_goal 失败 → job failed → workflow failed
             deadline = time.time() + 5
             statuses = []
             while time.time() < deadline and not statuses:
                 statuses = [
-                    m for m in _drain(ws.message_processor.send_queue)
+                    m
+                    for m in _drain(ws.message_processor.send_queue)
                     if m.get("action") == "workflow_status"
                 ]
                 time.sleep(0.02)

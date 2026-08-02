@@ -104,14 +104,27 @@ class InventoryService:
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
-        """业务事务 + 监控事件缓冲：commit 成功后才把 material 事件发到总线."""
+        """业务事务 + 监控事件缓冲.
+
+        Command execution may establish one ambient transaction around a
+        service method.  Nested service calls reuse that connection, so the
+        command claim, business mutation, ledger/outbox and final result commit
+        atomically instead of opening a second crash window.
+        """
+        ambient = getattr(self._tx_local, "connection", None)
+        if ambient is not None:
+            yield ambient
+            return
+
         events: List[Dict[str, Any]] = []
         self._tx_local.events = events
         store = self.store
         try:
             with store.transaction() as conn:
+                self._tx_local.connection = conn
                 yield conn
         finally:
+            self._tx_local.connection = None
             self._tx_local.events = None
         # 到这里说明事务已提交（异常路径在 finally 清理后向上抛，不会执行到此）
         if self._monitor is not None:
@@ -120,6 +133,35 @@ class InventoryService:
                     self._monitor.emit("material", data.pop("event_type"), data)
                 except Exception:  # noqa: BLE001 - 监控故障不影响业务
                     pass
+
+    @contextmanager
+    def command_transaction(self) -> Iterator[sqlite3.Connection]:
+        """命令原子事务入口；commands.py 之外不应写 processed_command."""
+
+        with self._tx() as conn:
+            yield conn
+
+    @contextmanager
+    def command_attempt(self, conn: sqlite3.Connection) -> Iterator[None]:
+        """用 SAVEPOINT 隔离可预期拒绝，避免提交半截业务变更.
+
+        领域拒绝需要持久化为幂等结果，因此不能回滚整个命令事务；这里只回滚
+        handler 产生的业务/ledger/outbox，并同步丢弃尚未发布的监控事件。
+        """
+
+        events = getattr(self._tx_local, "events", None)
+        checkpoint = len(events) if isinstance(events, list) else 0
+        conn.execute("SAVEPOINT inventory_command_attempt")
+        try:
+            yield
+        except BaseException:
+            conn.execute("ROLLBACK TO SAVEPOINT inventory_command_attempt")
+            conn.execute("RELEASE SAVEPOINT inventory_command_attempt")
+            if isinstance(events, list):
+                del events[checkpoint:]
+            raise
+        else:
+            conn.execute("RELEASE SAVEPOINT inventory_command_attempt")
 
     # ------------------------------------------------------------------
     # 事务内公共 helper
@@ -464,18 +506,12 @@ class InventoryService:
                     raise DuplicateBarcode(f"barcode {barcode} already active on {dup['edge_uuid']}")
             conn.execute(
                 "INSERT INTO material_instance(edge_uuid, legacy_cloud_id, lot_id, template_id, "
-                "barcode, status, version) VALUES (?,?,?,?,?,?,1)",
+                "barcode, status, parent_uuid, version) VALUES (?,?,?,?,?,?,?,1)",
                 (edge_uuid, legacy_cloud_id, lot_id, template_id, barcode,
-                 InstanceState.WAREHOUSE.value),
+                 InstanceState.WAREHOUSE.value, ""),
             )
             if parent_uuid:
-                conn.execute(
-                    "INSERT INTO resource_relation(parent_uuid, slot_id, child_uuid, version) "
-                    "VALUES (?,?,?,1) ON CONFLICT(child_uuid) DO UPDATE SET "
-                    "parent_uuid = excluded.parent_uuid, slot_id = excluded.slot_id, "
-                    "version = resource_relation.version + 1",
-                    (parent_uuid, slot_id, edge_uuid),
-                )
+                self._tx_upsert_relation(conn, parent_uuid, slot_id, edge_uuid)
             self._emit(
                 conn, now, "instance", edge_uuid, 1, "instance.registered",
                 {"template_id": template_id, "lot_id": lot_id, "barcode": barcode,
@@ -852,6 +888,66 @@ class InventoryService:
             "UPDATE material_instance SET parent_uuid = ? WHERE edge_uuid = ?",
             (parent_uuid, child_uuid),
         )
+
+    def check_parent_consistency(self) -> List[Dict[str, Any]]:
+        """只读列出 parent_uuid 与 relation 的确定性冲突."""
+
+        return self.store.parent_consistency_issues()
+
+    @_traced_operation("parent.repair")
+    def repair_parent_consistency(
+        self,
+        actor: str,
+        reason: str,
+        causation_id: str = "",
+    ) -> Dict[str, Any]:
+        """只填补空 parent_uuid，不覆盖冲突值、不删除孤儿 relation.
+
+        老 v3 数据可能由早期 ``register_instance`` 写出 relation、却漏写实例
+        parent_uuid。relation 提供唯一且确定的父时可审计修复；双方非空但不一致
+        或 relation 指向不存在实例时只报告，由操作者人工裁决。
+        """
+
+        if not actor or not reason:
+            raise CommandRejected("parent consistency repair requires actor and reason")
+        now = self._now_ms()
+        repaired: List[str] = []
+        unresolved: List[Dict[str, Any]] = []
+        with self._tx() as conn:
+            for issue in InventoryStore.tx_parent_consistency_issues(conn):
+                if (
+                    issue["kind"] == "parent_mismatch"
+                    and not issue["instance_parent_uuid"]
+                    and issue["relation_parent_uuid"]
+                ):
+                    edge_uuid = issue["child_uuid"]
+                    row = self._tx_get_instance(conn, edge_uuid)
+                    version = row["version"] + 1
+                    conn.execute(
+                        "UPDATE material_instance SET parent_uuid = ?, version = ? "
+                        "WHERE edge_uuid = ? AND parent_uuid = ''",
+                        (issue["relation_parent_uuid"], version, edge_uuid),
+                    )
+                    self._emit(
+                        conn,
+                        now,
+                        "instance",
+                        edge_uuid,
+                        version,
+                        "instance.parent_repaired",
+                        {
+                            "from_parent": "",
+                            "parent_uuid": issue["relation_parent_uuid"],
+                            "repair_source": "resource_relation",
+                        },
+                        causation_id=causation_id,
+                        actor=actor,
+                        reason=reason,
+                    )
+                    repaired.append(edge_uuid)
+                else:
+                    unresolved.append(issue)
+        return {"repaired": repaired, "unresolved": unresolved}
 
     @_traced_operation("deploy")
     def deploy_instance(

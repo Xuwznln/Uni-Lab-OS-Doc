@@ -378,7 +378,10 @@ class JobExecutionBackend:
         inject_trace_context(queue_item.trace_context)
         host_node = self._host_node_getter()
         if host_node is None:
-            logger.error("[JobExecutionBackend] HostNode unavailable, fail job %s", job_log)
+            logger.error(
+                "[JobExecutionBackend] HostNode unavailable for job %s",
+                job_log,
+            )
             self._put_event(
                 ("finished", job.job_id, False, None),
             )

@@ -45,7 +45,11 @@ pytestmark = [
 ]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-EMPTY_GRAPH = REPO_ROOT / "unilabos" / "test" / "experiments" / "empty_devices.json"
+HOST_GRAPH = REPO_ROOT / "unilabos" / "test" / "experiments" / "empty_devices.json"
+SLAVE_GRAPH = (
+    REPO_ROOT / "unilabos" / "test" / "experiments" / "mock_devices" / "mock_pump.json"
+)
+SLAVE_DEVICE_ID = "MockPump1"
 
 HOST_DOMAIN = 61
 SLAVE_DOMAIN = 62
@@ -67,9 +71,20 @@ def _spawn_unilab(args: List[str], env_extra: Dict[str, str], cwd: Path, log_pat
         config_path.write_text("# 联网测试最小配置：全部走默认值\n", encoding="utf-8")
     args = ["--config", str(config_path), *args]
     env = os.environ.copy()
+    # 子进程 cwd 是隔离临时目录；显式把当前工作树置于 PYTHONPATH 首位，避免
+    # 开发机上另一个 editable install 抢先被导入，导致测试实际跑了旧代码。
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        value for value in (str(REPO_ROOT), existing_pythonpath) if value
+    )
     # 干净的 ROS 组网基线：由各进程的 env_extra 精确指定
-    for key in ("ROS_DOMAIN_ID", "ROS_AUTOMATIC_DISCOVERY_RANGE", "ROS_STATIC_PEERS",
-                "ROS_DISCOVERY_SERVER"):
+    for key in (
+        "ROS_DOMAIN_ID",
+        "ROS_AUTOMATIC_DISCOVERY_RANGE",
+        "ROS_STATIC_PEERS",
+        "ROS_DISCOVERY_SERVER",
+        "ROS_SUPER_CLIENT",
+    ):
         env.pop(key, None)
     env.update(env_extra)
     log_file = open(log_path, "w", encoding="utf-8")
@@ -171,7 +186,8 @@ def _ros_node_names(
 def duo(tmp_path_factory):
     """host + slave 双进程（ROS 隔离、HostLink 互联），module 级复用。"""
     pytest.importorskip("rclpy")
-    assert EMPTY_GRAPH.exists(), f"缺少最小设备图: {EMPTY_GRAPH}"
+    assert HOST_GRAPH.exists(), f"缺少 Host 空设备图: {HOST_GRAPH}"
+    assert SLAVE_GRAPH.exists(), f"缺少 Slave 虚拟设备图: {SLAVE_GRAPH}"
 
     link_port = _free_port()
     host_web = _free_port()
@@ -183,16 +199,30 @@ def duo(tmp_path_factory):
     slave_log = work / "slave.log"
 
     common_args = [
-        "--graph", str(EMPTY_GRAPH),
-        "--backend", "ros",
-        "--test_mode", "--skip_env_check", "--disable_browser",
-        "--app_bridges", "fastapi",
+        "--backend",
+        "ros",
+        "--test_mode",
+        "--skip_env_check",
+        "--disable_browser",
+        "--app_bridges",
+        "fastapi",
     ]
     host = _spawn_unilab(
-        [*common_args, "--hostlink_addr", f"127.0.0.1:{link_port}",
-         "--ros_domain_id", str(HOST_DOMAIN), "--port", str(host_web)],
+        [
+            *common_args,
+            "--graph",
+            str(HOST_GRAPH),
+            "--hostlink_addr",
+            f"127.0.0.1:{link_port}",
+            "--ros_domain_id",
+            str(HOST_DOMAIN),
+            "--port",
+            str(host_web),
+        ],
         env_extra={
             "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",  # 发现不出本机
+            # 本测试刻意验证 HostLink 与 ROS 隔离；不启动定向发现服务。
+            "UNILABOS_HOSTLINKCONFIG_ROS_DISCOVERY_SERVER": "off",
         },
         cwd=work / "host",
         log_path=host_log,
@@ -206,8 +236,17 @@ def duo(tmp_path_factory):
         )
 
         slave = _spawn_unilab(
-            [*common_args, "--is_slave", "--slave_no_host",
-             "--hostlink_addr", f"127.0.0.1:{link_port}", "--port", str(slave_web)],
+            [
+                *common_args,
+                "--graph",
+                str(SLAVE_GRAPH),
+                "--is_slave",
+                "--slave_no_host",
+                "--hostlink_addr",
+                f"127.0.0.1:{link_port}",
+                "--port",
+                str(slave_web),
+            ],
             env_extra={
                 "ROS_DOMAIN_ID": str(SLAVE_DOMAIN),           # 与 host 不同域（隔离核心）
                 "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",  # 发现不出本机
@@ -244,6 +283,8 @@ class TestNetworking:
         peers = _wait_for(slave_online, STARTUP_TIMEOUT_S,
                           desc=f"slave 上线（日志: {duo['slave_log']}）")
         assert peers[0]["machine_name"], "hello 应登记 slave 机器名"
+        assert peers[0]["node_id"] == f"device:{SLAVE_DEVICE_ID}"
+        assert peers[0]["device_ids"] == [SLAVE_DEVICE_ID]
         # slave 侧自证：客户端在线 + 明确跳过了组网套用（REST 比 HostLink 晚就绪，需等待）
         slave_body = _wait_for(
             lambda: _http_json(f"http://127.0.0.1:{duo['slave_web']}/api/v1/hostlink/peers"),
@@ -251,6 +292,8 @@ class TestNetworking:
         )
         assert slave_body["role"] == "slave"
         assert slave_body["client"]["online"] is True
+        assert slave_body["client"]["node_id"] == f"device:{SLAVE_DEVICE_ID}"
+        assert slave_body["client"]["device_ids"] == [SLAVE_DEVICE_ID]
         log_text = Path(duo["slave_log"]).read_text(encoding="utf-8", errors="ignore")
         assert "ros_assist_apply=False" in log_text, "隔离开关应生效（跳过组网套用）"
 

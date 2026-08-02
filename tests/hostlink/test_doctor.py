@@ -60,6 +60,16 @@ class TestResolveRosNetwork:
         assert info.static_peers == ["192.168.1.10"]
         assert source.startswith("hostlink 127.0.0.1")
 
+    def test_managed_discovery_uses_proven_hostlink_address(self, server):
+        server.hello_payload["ros"].update(
+            {
+                "discovery_server": "192.168.99.9:7302",
+                "discovery_server_managed": True,
+            }
+        )
+        info, _ = resolve_ros_network(hostlink_addr=f"127.0.0.1:{server.port}")
+        assert info.discovery_server == "127.0.0.1:7302"
+
     def test_manual_overrides_hostlink(self, server):
         info, _ = resolve_ros_network(
             hostlink_addr=f"127.0.0.1:{server.port}",

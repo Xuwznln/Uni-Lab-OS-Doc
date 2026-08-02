@@ -1,4 +1,4 @@
-"""Edge 独立调度服务。
+"""Edge 微后端（调度、数据服务与 Host/Slave 网络）。
 
 把云端 Go dagEngine 的 DAG 拆解/执行下沉到 Edge：
 
@@ -23,6 +23,9 @@
   （每个 job 完结 append，含实际/预估时长与截断返回值）；进程重启时
   把上一世代残留的非终态 run 标记 ``interrupted``；REST 面
   ``GET /api/v1/history/*``（跨重启查询）
+- Host/Slave 网络（host_network.py）：Host 微后端监听所有 Slave，维护握手、
+  心跳与物料请求，并统一下发 ROS domain / discovery / static peers；Slave
+  微后端在 ``rclpy.init`` 前应用配置。ROS HostNode 只挂接运行时资源树。
 
 三库分立：inventory.db（物料事务）/ device_state.db（高频遥测）/
 workflow_history.db（低频审计），读写模式不同互不阻塞。

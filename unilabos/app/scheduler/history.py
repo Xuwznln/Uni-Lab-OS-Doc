@@ -273,8 +273,8 @@ class WorkflowHistoryStore:
     # ── 查询（REST 面） ───────────────────────────────────────
 
     @staticmethod
-    def _run_row(row: sqlite3.Row) -> Dict[str, Any]:
-        return {
+    def _run_row(row: sqlite3.Row, with_spec: bool = False) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
             "workflow_id": row["workflow_id"],
             "task_id": row["task_id"],
             "lab_id": row["lab_id"],
@@ -286,9 +286,19 @@ class WorkflowHistoryStore:
             "finished_at": row["finished_at"],
             "duration_s": row["duration_s"],
         }
+        if with_spec:
+            try:
+                result["spec"] = json.loads(row["spec_json"])
+            except ValueError:
+                result["spec"] = {}
+        return result
 
     def list_runs(
-        self, state: str = "", since: float = 0.0, limit: int = 100
+        self,
+        state: str = "",
+        since: float = 0.0,
+        limit: int = 100,
+        with_spec: bool = False,
     ) -> List[Dict[str, Any]]:
         """运行列表（新→旧）；state 可过滤，since 是 submitted_at 下界。"""
         sql = "SELECT * FROM workflow_runs WHERE submitted_at >= ?"
@@ -300,7 +310,7 @@ class WorkflowHistoryStore:
         params.append(max(1, min(limit, 1000)))
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
-        return [self._run_row(r) for r in rows]
+        return [self._run_row(r, with_spec=with_spec) for r in rows]
 
     def get_run(self, workflow_id: str, with_spec: bool = False) -> Optional[Dict[str, Any]]:
         with self._lock:

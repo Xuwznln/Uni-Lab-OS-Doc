@@ -184,6 +184,29 @@ class DeviceStateStore:
             ).fetchall()
         return [
             {
+                "id": row["id"],
+                "device_id": row["device_id"],
+                "property": row["property"],
+                "value": _decode(row["value"], row["value_type"]),
+                "value_type": row["value_type"],
+                "recorded_at": row["recorded_at"],
+            }
+            for row in rows
+        ]
+
+    def history_all(self, since_ms: int = 0, limit: int = 500) -> List[Dict[str, Any]]:
+        """跨设备/属性的最近变化点（新→旧），供本地实体检查器使用。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM device_property_history WHERE recorded_at >= ? "
+                "ORDER BY id DESC LIMIT ?",
+                (since_ms, max(1, min(limit, 5000))),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "device_id": row["device_id"],
+                "property": row["property"],
                 "value": _decode(row["value"], row["value_type"]),
                 "value_type": row["value_type"],
                 "recorded_at": row["recorded_at"],

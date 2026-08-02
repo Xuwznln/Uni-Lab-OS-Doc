@@ -169,6 +169,12 @@ class TestDeviceStateApi:
             )
         r = client.get("/api/v1/device-state/heater-1/history?property=temp").json()
         assert [e["value"] for e in r["entries"]] == [22.0, 21.0, 20.0]
+        assert all(e["device_id"] == "heater-1" for e in r["entries"])
+        assert all(e["property"] == "temp" for e in r["entries"])
+        assert all(isinstance(e["id"], int) for e in r["entries"])
+
+        all_history = client.get("/api/v1/device-state/history?limit=2").json()
+        assert [e["value"] for e in all_history["entries"]] == [22.0, 21.0]
 
     def test_device_id_with_slash(self, client):
         """WorkstationNode 场景：device_id 本身含斜杠。"""

@@ -818,7 +818,8 @@ class MessageProcessor:
         payload 形状（EdgeScheduler spec_from_dict）:
             workflow_id / task_id（云端 workflow_task.uuid）/ priority / lab_id
             nodes:   [{id, device_id, action_name, action_type, param, node_type, ...}]
-                     node_type 取值对齐云端枚举 Group/ILab/py_script/tool_call/manual_confirm
+                     node_type 取值对齐云端枚举
+                     Group/ILab/py_script/tool_call/manual_confirm/Transfer
             edges:   [{source_node_id, target_node_id,
                        source_handle_uuid, target_handle_uuid,  # 规范引用（workflow_edge 定稿）
                        source_handle_key, target_handle_key}]   # 无 uuid 时的兼容寻址
@@ -916,29 +917,26 @@ class MessageProcessor:
 
     def _send_inventory_command_result(self, response: Dict[str, Any]) -> None:
         """回报命令结果：WS 消息 + HTTP 回调双路（云端权威状态机走 HTTP 接口）。"""
+        from unilabos.app.scheduler.inventory.schemas import (
+            CloudInventoryCommandResult,
+        )
+
+        wire_result = CloudInventoryCommandResult.model_validate(
+            {**response, "timestamp": int(time.time() * 1000)}
+        ).model_dump(mode="json", exclude_none=True)
         message = {
             "action": "inventory_command_result",
-            "data": {**response, "timestamp": time.time()},
+            "data": wire_result,
         }
         self.send_message(message)
 
         def _http_callback():
             try:
-                from unilabos.app.web.client import http_client
-
-                trace_headers: Dict[str, Any] = {}
-                inject_trace_context(trace_headers)
-                http_client._session.post(
-                    f"{http_client.remote_addr}/edge/inventory/command_result",
-                    json={
-                        "command_id": response.get("command_id", ""),
-                        "status": response.get("status", ""),
-                        "result": response.get("result") or {},
-                        "error": response.get("error", ""),
-                    },
-                    headers=trace_headers,
-                    timeout=15,
+                from unilabos.app.scheduler.integration import (
+                    report_http_inventory_command_result,
                 )
+
+                report_http_inventory_command_result(response)
             except Exception as e:  # 回调失败不影响本地执行结果（云端可轮询补偿）
                 logger.warning(f"[MessageProcessor] inventory_command_result http callback failed: {e}")
 
@@ -1397,7 +1395,7 @@ class MessageProcessor:
 
         cleanup_thread = threading.Thread(target=do_cleanup, name="RestartCleanupThread", daemon=True)
         cleanup_thread.start()
-        logger.info(f"[MessageProcessor] Restart cleanup scheduled")
+        logger.info("[MessageProcessor] Restart cleanup scheduled")
 
     async def _send_action_state_response(
         self,

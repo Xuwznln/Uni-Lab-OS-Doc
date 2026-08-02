@@ -85,7 +85,7 @@ def setup_server() -> FastAPI:
     # 设置API路由
     setup_api_routes(app)
 
-    # Edge 调度器/仓储路由（--edge_scheduler 未启用时端点返回 503/不挂载）
+    # Edge 调度器与 Host 物料路由独立挂载；默认 embedded 物料服务不要求 --edge_scheduler。
     try:
         from unilabos.app.scheduler.api import create_scheduler_router
         from unilabos.app.scheduler.integration import (
@@ -97,10 +97,14 @@ def setup_server() -> FastAPI:
         app.include_router(create_scheduler_router(get_edge_scheduler, get_edge_backend))
         inventory_service = get_inventory_service()
         if inventory_service is not None:
-            from unilabos.app.scheduler.inventory.api import create_router as create_inventory_router
+            from unilabos.app.scheduler.inventory.api import (
+                create_legacy_material_router,
+                create_router as create_inventory_router,
+            )
             from unilabos.app.scheduler.inventory.layout import create_lab_router
 
             app.include_router(create_inventory_router(inventory_service))
+            app.include_router(create_legacy_material_router(inventory_service))
             app.include_router(create_lab_router(inventory_service))
     except Exception as e:  # noqa: BLE001 - 调度器路由挂载失败不影响主服务
         error(f"[Web] 挂载 Edge 调度器路由失败: {str(e)}")

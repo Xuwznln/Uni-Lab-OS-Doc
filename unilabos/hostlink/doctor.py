@@ -41,7 +41,11 @@ from unilabos.hostlink.protocol import (
     read_message,
     send_message,
 )
-from unilabos.hostlink.ros_assist import RosNetworkInfo, apply_ros_network_env
+from unilabos.hostlink.ros_assist import (
+    RosNetworkInfo,
+    apply_ros_network_env,
+    use_connected_host,
+)
 
 DEFAULT_TOPIC = "/unilab_doctor"
 
@@ -149,6 +153,11 @@ def resolve_ros_network(
         report = probe_network(host, port, ping_count=1)
         if report["hello"]["ok"] and report["hello"].get("ros"):
             base = RosNetworkInfo.from_dict(report["hello"]["ros"])
+            if base.discovery_server and base.discovery_server_managed:
+                base.discovery_server = use_connected_host(
+                    base.discovery_server,
+                    host,
+                )
             source = f"hostlink {host}:{port}"
         else:
             source = f"hostlink {host}:{port} unreachable ({report['verdict']}), manual/env only"

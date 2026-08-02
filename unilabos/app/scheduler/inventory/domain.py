@@ -9,7 +9,16 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Mapping, TypeAlias, Union
+
+
+JsonPrimitive: TypeAlias = Union[str, int, float, bool, None]
+JsonValue: TypeAlias = Union[
+    JsonPrimitive,
+    List["JsonValue"],
+    Dict[str, "JsonValue"],
+]
+JsonObject: TypeAlias = Dict[str, JsonValue]
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +173,7 @@ class MaterialRequirement:
     def is_instance_requirement(self) -> bool:
         return bool(self.instance_uuid or self.barcode)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         return {
             "template_id": self.template_id,
             "lot_id": self.lot_id,
@@ -175,7 +184,7 @@ class MaterialRequirement:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MaterialRequirement":
+    def from_dict(cls, data: Mapping[str, object]) -> "MaterialRequirement":
         return cls(
             template_id=str(data.get("template_id") or data.get("templateId") or ""),
             lot_id=str(data.get("lot_id") or data.get("lotId") or ""),
@@ -199,10 +208,10 @@ class OutboxEvent:
     event_type: str
     occurred_at: int  # 毫秒
     causation_id: str
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: JsonObject = field(default_factory=dict)
     sequence: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> JsonObject:
         return {
             "event_id": self.event_id,
             "edge_id": self.edge_id,

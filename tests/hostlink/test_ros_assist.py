@@ -6,6 +6,9 @@ from unilabos.hostlink.ros_assist import (
     RosNetworkInfo,
     apply_ros_network_env,
     build_host_ros_info,
+    format_host_port,
+    parse_host_port,
+    use_connected_host,
 )
 
 
@@ -76,5 +79,37 @@ class TestApplyEnv:
             automatic_discovery_range="LOCALHOST",
             static_peers=["a", "b"],
             discovery_server="s:1",
+            discovery_server_managed=True,
         )
         assert RosNetworkInfo.from_dict(info.to_dict()) == info
+
+    def test_explicit_disable_removes_inherited_server(self):
+        env = {"ROS_DISCOVERY_SERVER": "old-host:11811", "KEEP": "yes"}
+        info = RosNetworkInfo(discovery_server_disabled=True)
+        assert apply_ros_network_env(info, environ=env) == {}
+        assert env == {"KEEP": "yes"}
+
+
+class TestDirectedEndpoint:
+    @pytest.mark.parametrize(
+        ("endpoint", "expected"),
+        [
+            ("host.local:7302", ("host.local", 7302)),
+            ("127.0.0.1:11811", ("127.0.0.1", 11811)),
+            ("[::1]:11811", ("::1", 11811)),
+        ],
+    )
+    def test_parse_host_port(self, endpoint, expected):
+        assert parse_host_port(endpoint) == expected
+
+    def test_format_ipv6_and_replace_advertised_host(self):
+        assert format_host_port("::1", 7302) == "[::1]:7302"
+        assert use_connected_host("192.168.50.99:7302", "10.0.0.8") == "10.0.0.8:7302"
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        ["", "host", "host:", ":7302", "host:0", "host:65536", "[::1]7302"],
+    )
+    def test_invalid_endpoint_is_rejected(self, endpoint):
+        with pytest.raises(ValueError):
+            parse_host_port(endpoint)

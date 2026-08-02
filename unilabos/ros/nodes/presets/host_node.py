@@ -1,4 +1,5 @@
 import collections
+import importlib
 import json
 import threading
 import time
@@ -7,7 +8,18 @@ import uuid
 
 from unilabos.utils.tools import fast_dumps_str as _fast_dumps_str, fast_loads as _fast_loads
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Dict, Any, List, ClassVar, Set, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Optional,
+    Dict,
+    Any,
+    Iterable,
+    List,
+    ClassVar,
+    Set,
+    Tuple,
+    Union,
+)
 
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import Point
@@ -502,6 +514,31 @@ class HostNode(BaseROS2DeviceNode):
                 self._background_threads.append(t)
                 t.start()
 
+        # Discovery Server v2 may withhold the remote node graph while still
+        # matching the Action endpoints we created from Slave registration.
+        # Keep a device online only when at least one of those ROS clients is
+        # actually ready; HostLink heartbeat alone never satisfies this test.
+        for edge_device_id, namespace in self.devices_names.items():
+            if edge_device_id == self.device_id or not namespace.startswith(
+                "/devices/"
+            ):
+                continue
+            device_key = f"{namespace}/{edge_device_id}"
+            if device_key in current_devices:
+                continue
+            action_prefix = f"{namespace}/"
+            action_clients = [
+                client
+                for action_id, client in self._action_clients.items()
+                if action_id.startswith(action_prefix)
+            ]
+            if self._has_ready_action_client(action_clients):
+                current_devices.add(device_key)
+                if device_key not in self._online_devices:
+                    self._report_action_locks_free(
+                        self._routable_reported_action_pairs(edge_device_id)
+                    )
+
         # 检测离线设备
         offline_devices = self._online_devices - current_devices
         for device_key in offline_devices:
@@ -588,6 +625,177 @@ class HostNode(BaseROS2DeviceNode):
 
         # 发现新 action 后主动上报其 free 锁状态
         self._report_action_locks_free(new_action_pairs)
+
+    @staticmethod
+    def _resolve_reported_action_type(action_type: Any) -> Any:
+        """Resolve a Slave registry's JSON-safe action type back to a ROS class."""
+
+        if isinstance(action_type, type):
+            return action_type
+        type_name = str(action_type or "").strip()
+        if type_name.startswith("<class '") and type_name.endswith("'>"):
+            type_name = type_name[8:-2]
+        if not type_name:
+            raise ValueError("empty ROS action type")
+        if "/" in type_name:
+            return get_ros_type_by_msgname(type_name)
+        if "." in type_name:
+            module_name, class_name = type_name.rsplit(".", 1)
+            return getattr(importlib.import_module(module_name), class_name)
+        # Old YAML/HTTP registries may contain only the exported class name.
+        from unilabos.config.config import ROSConfig
+
+        for module_name in ROSConfig.modules:
+            if not module_name.endswith(".action"):
+                continue
+            module = importlib.import_module(module_name)
+            resolved = getattr(module, type_name, None)
+            if resolved is not None:
+                return resolved
+        raise ValueError(f"unknown ROS action type: {type_name}")
+
+    @staticmethod
+    def _has_ready_action_client(
+        clients: Iterable[Any],
+        wait_timeout: float = 0.0,
+    ) -> bool:
+        """Return whether any ROS Action endpoint has actually matched.
+
+        ``server_is_ready`` may raise while an rclpy context is shutting down;
+        discovery polling must treat that as unavailable instead of killing its
+        timer callback.  ``wait_timeout`` is a total budget shared by every
+        client, not a per-action delay.
+        """
+
+        candidates = list(clients)
+        deadline = time.monotonic() + max(float(wait_timeout), 0.0)
+        while candidates:
+            for client in candidates:
+                try:
+                    if client.server_is_ready():
+                        return True
+                except Exception:  # noqa: BLE001 - rclpy teardown/race
+                    continue
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
+        return False
+
+    def _routable_reported_action_pairs(
+        self,
+        device_id: str,
+    ) -> List[Tuple[str, str]]:
+        """Actions with a concrete ROS client, including JSON command multiplexing."""
+
+        namespace = f"/devices/{device_id}"
+        pairs: List[Tuple[str, str]] = []
+        for action_name, mapping in self._action_value_mappings.get(device_id, {}).items():
+            if not isinstance(mapping, dict):
+                continue
+            mapping_type = str(mapping.get("type") or "")
+            if action_name.startswith("auto-") or mapping_type.startswith("UniLabJsonCommand"):
+                generic = (
+                    "_execute_driver_command_async"
+                    if mapping_type.startswith("UniLabJsonCommandAsync")
+                    else "_execute_driver_command"
+                )
+                action_id = f"{namespace}/{generic}"
+            else:
+                action_id = f"{namespace}/{action_name}"
+            if action_id in self._action_clients:
+                pairs.append((device_id, action_name))
+        return pairs
+
+    def _register_reported_remote_device(
+        self,
+        device_id: str,
+        action_mappings: Dict[str, Any],
+    ) -> None:
+        """Create matching ROS ActionClients when a Slave reports device readiness.
+
+        Discovery Server v2 intentionally forwards only matching endpoints.  The
+        Slave's ``SYNC_SLAVE_NODE_INFO`` therefore acts as the deterministic cue
+        for HostNode to create its clients; the command and result remain normal
+        ROS Action traffic.
+        """
+
+        namespace = f"/devices/{device_id}"
+        self.devices_names[device_id] = namespace
+        self._action_value_mappings[device_id] = action_mappings
+        needs_json_sync = False
+        needs_json_async = False
+
+        for action_name, mapping in action_mappings.items():
+            if not isinstance(mapping, dict):
+                continue
+            mapping_type = mapping.get("type")
+            mapping_type_name = str(mapping_type or "")
+            if action_name.startswith("auto-") or mapping_type_name.startswith(
+                "UniLabJsonCommand"
+            ):
+                if mapping_type_name.startswith("UniLabJsonCommandAsync"):
+                    needs_json_async = True
+                else:
+                    needs_json_sync = True
+                continue
+
+            action_id = f"{namespace}/{action_name}"
+            if action_id in self._action_clients:
+                continue
+            try:
+                resolved_type = self._resolve_reported_action_type(mapping_type)
+                self._action_clients[action_id] = ActionClient(
+                    self,
+                    resolved_type,
+                    action_id,
+                    callback_group=self.callback_group,
+                )
+                self.lab_logger().info(
+                    f"[Host Node] Created directed ActionClient: {action_id}"
+                )
+            except Exception as exc:
+                self.lab_logger().warning(
+                    f"[Host Node] Could not create directed ActionClient "
+                    f"{action_id}: {exc}; periodic ROS graph discovery will retry"
+                )
+
+        generic_actions = []
+        if needs_json_sync:
+            generic_actions.append("_execute_driver_command")
+        if needs_json_async:
+            generic_actions.append("_execute_driver_command_async")
+        for generic_action in generic_actions:
+            action_id = f"{namespace}/{generic_action}"
+            if action_id not in self._action_clients:
+                self._action_clients[action_id] = ActionClient(
+                    self,
+                    StrSingleInput,
+                    action_id,
+                    callback_group=self.callback_group,
+                )
+                self.lab_logger().info(
+                    f"[Host Node] Created directed ActionClient: {action_id}"
+                )
+
+        routable_action_pairs = self._routable_reported_action_pairs(device_id)
+        action_clients = [
+            client
+            for action_id, client in self._action_clients.items()
+            if action_id.startswith(f"{namespace}/")
+        ]
+        if self._has_ready_action_client(action_clients, wait_timeout=1.0):
+            device_key = f"{namespace}/{device_id}"
+            self._online_devices.add(device_key)
+            self._report_action_locks_free(routable_action_pairs)
+            self.lab_logger().info(
+                f"[Host Node] Remote device ready through ROS: {device_id} "
+                f"({len(routable_action_pairs)} actions)"
+            )
+        else:
+            self.lab_logger().info(
+                f"[Host Node] Remote device registered: {device_id}; waiting for "
+                "ROS Action endpoint matching"
+            )
 
     async def create_resource_detailed(
         self,
@@ -1256,7 +1464,7 @@ class HostNode(BaseROS2DeviceNode):
     def _local_resource_nodes(
         self, uuid: Optional[str] = None, res_id: Optional[str] = None, with_children: bool = True
     ) -> Optional[List[dict]]:
-        """host 本地树解析（物料唯一事实源，云端物料接口已下线）；未命中返回 None。"""
+        """Host 内存树兼容兜底；未命中返回 None。"""
         from unilabos.hostlink.resolver import LocalResourceResolver, ResourceNotFound
 
         if not hasattr(self, "_hostlink_resolver"):
@@ -1270,8 +1478,23 @@ class HostNode(BaseROS2DeviceNode):
         uuid_list: List[str] = data["data"]
         with_children: bool = data["with_children"]
 
-        # 本地树优先：全部命中直接返回；任一未命中回退旧云端接口（过渡期兜底，
-        # 云端物料下线后该兜底只会失败并抛错，行为与旧链路一致）。
+        # 可切换 HTTP material component 优先；微后端模式通过 localhost HTTP
+        # 与独立 scheduler 进程通信，返回形状仍是旧 ResourceDict 扁平列表。
+        from unilabos.app.web.client import http_client
+
+        resource_response = http_client.material_query(
+            uuids=uuid_list,
+            with_children=with_children,
+        )
+        if resource_response:
+            response.response = json.dumps(resource_response)
+            self.lab_logger().trace(
+                f"[Host Node-Resource] Resource tree get served by material component "
+                f"({len(resource_response)} nodes)"
+            )
+            return
+
+        # 兼容尚未导入微后端库存的本地配置树。
         local_nodes: List[dict] = []
         for res_uuid in uuid_list:
             nodes = self._local_resource_nodes(uuid=res_uuid, with_children=with_children)
@@ -1282,15 +1505,14 @@ class HostNode(BaseROS2DeviceNode):
         if local_nodes:
             response.response = json.dumps(local_nodes)
             self.lab_logger().trace(
-                f"[Host Node-Resource] Resource tree get served locally ({len(local_nodes)} nodes)"
+                f"[Host Node-Resource] Resource tree get fell back to host memory "
+                f"({len(local_nodes)} nodes)"
             )
             return
-
-        from unilabos.app.web.client import http_client
-
-        resource_response = http_client.resource_tree_get(uuid_list, with_children)
-        response.response = json.dumps(resource_response)
-        self.lab_logger().trace(f"[Host Node-Resource] Resource tree get request callback {response.response}")
+        response.response = "[]"
+        self.lab_logger().trace(
+            f"[Host Node-Resource] Resource tree get request callback {response.response}"
+        )
 
     async def _resource_tree_action_remove_callback(self, data: dict, response: SerialCommand_Response):
         """
@@ -1404,12 +1626,32 @@ class HostNode(BaseROS2DeviceNode):
                 self.device_machine_names[edge_device_id] = machine_name
 
                 # 用 registry_name 索引已存储的 registry_config,获取 action_value_mappings
-                if registry_name and registry_name in self._slave_registry_configs:
-                    action_mappings = (
-                        self._slave_registry_configs[registry_name].get("class", {}).get("action_value_mappings", {})
+                if registry_name:
+                    reported_registry = self._slave_registry_configs.get(
+                        registry_name, {}
                     )
+                    action_mappings = (
+                        reported_registry.get("class", {}).get(
+                            "action_value_mappings", {}
+                        )
+                        if isinstance(reported_registry, dict)
+                        else {}
+                    )
+                    local_registry = lab_registry.device_type_registry.get(
+                        registry_name, {}
+                    )
+                    local_mappings = (
+                        local_registry.get("class", {}).get("action_value_mappings", {})
+                        if isinstance(local_registry, dict)
+                        else {}
+                    )
+                    if local_mappings:
+                        action_mappings = local_mappings
                     if action_mappings:
-                        self._action_value_mappings[edge_device_id] = action_mappings
+                        self._register_reported_remote_device(
+                            edge_device_id,
+                            action_mappings,
+                        )
                         self.lab_logger().info(
                             f"[Host Node] Loaded {len(action_mappings)} action mappings "
                             f"for remote device {edge_device_id} (registry: {registry_name})"
@@ -1440,6 +1682,18 @@ class HostNode(BaseROS2DeviceNode):
                                     .get("class", {})
                                     .get("action_value_mappings", {})
                                 )
+                                local_registry = lab_registry.device_type_registry.get(
+                                    class_name, {}
+                                )
+                                local_mappings = (
+                                    local_registry.get("class", {}).get(
+                                        "action_value_mappings", {}
+                                    )
+                                    if isinstance(local_registry, dict)
+                                    else {}
+                                )
+                                if local_mappings:
+                                    action_mappings = local_mappings
                                 if action_mappings:
                                     self._action_value_mappings[device_id] = action_mappings
                                     self.lab_logger().info(
@@ -1526,21 +1780,28 @@ class HostNode(BaseROS2DeviceNode):
             if not req_uuid and not req_id:
                 raise ValueError("没有使用正确的物料 id 或 uuid")
 
-            # 本地树优先（物料唯一事实源）；未命中回退旧云端接口（过渡期兜底）
+            with_children = data.get("with_children", True)
+            from unilabos.app.web import http_client
+
+            remote_nodes = http_client.material_query(
+                uuids=[req_uuid] if req_uuid else None,
+                resource_id=req_id,
+                with_children=with_children,
+            )
+            if remote_nodes:
+                response.response = json.dumps(remote_nodes)
+                return response
+
+            # 兼容尚未导入微后端库存的本地配置树。
             local_nodes = self._local_resource_nodes(
-                uuid=req_uuid, res_id=req_id, with_children=data.get("with_children", True)
+                uuid=req_uuid,
+                res_id=req_id,
+                with_children=with_children,
             )
             if local_nodes is not None:
                 response.response = json.dumps(local_nodes)
                 return response
-
-            from unilabos.app.web import http_client
-
-            if req_uuid:
-                http_req = http_client.resource_tree_get([req_uuid], data["with_children"])
-            else:
-                http_req = http_client.resource_get(req_id, data["with_children"])
-            response.response = json.dumps(http_req["data"])
+            response.response = "[]"
             return response
         except Exception as e:
             self.lab_logger().error(f"[Host Node-Resource] Error retrieving from bridge: {str(e)}")

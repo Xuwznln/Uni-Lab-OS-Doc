@@ -131,6 +131,31 @@ class TestPersistenceAndRecovery:
         assert history.list_jobs(workflow_id="wf-r") == []  # 旧 job 清掉
         assert history.stats()["total_runs"] == 1
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "TODO(P0): preserve repeated workflow runs after Cloud/Edge agree "
+            "the stable run_id contract and migration"
+        ),
+    )
+    def test_resubmit_same_workflow_should_preserve_prior_run_history(self):
+        """Known P0 marker only; do not invent a destructive run_id migration here."""
+
+        history = WorkflowHistoryStore()
+        history.record_submitted(_spec("wf-run-contract"), "running")
+        history.record_job(
+            {
+                "job_id": "job-first",
+                "workflow_id": "wf-run-contract",
+                "node_id": "A",
+                "started_at": 1.0,
+                "ended_at": 2.0,
+                "state": "success",
+            }
+        )
+        history.record_submitted(_spec("wf-run-contract"), "running")
+        assert history.list_jobs(workflow_id="wf-run-contract") != []
+
     def test_prune_keeps_latest(self):
         history = WorkflowHistoryStore(max_runs=3)
         for i in range(6):
@@ -195,6 +220,12 @@ class TestHistoryApi:
         r = client.get("/api/v1/history/workflows").json()
         assert r["stats"]["total_runs"] == 1
         assert r["runs"][0]["state"] == "success"
+        assert "spec" not in r["runs"][0]
+
+        entity_rows = client.get(
+            "/api/v1/history/workflows?with_spec=true"
+        ).json()
+        assert entity_rows["runs"][0]["spec"]["nodes"][0]["id"] == "A"
 
         detail = client.get("/api/v1/history/workflows/wf-api").json()
         assert detail["spec"]["nodes"][0]["id"] == "A"

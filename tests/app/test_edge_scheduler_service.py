@@ -6,9 +6,11 @@
 from unilabos.app.scheduler.dispatch import RecordingDispatcher
 from unilabos.app.scheduler.models import (
     Handle,
+    NODE_TYPES,
     WorkflowEdge,
     WorkflowNode,
     WorkflowSpec,
+    normalize_node_type,
 )
 from unilabos.app.scheduler.ordering import OrderingContext, StableLocalOrderer
 from unilabos.app.scheduler.service import EdgeScheduler
@@ -44,6 +46,13 @@ def _make() -> "tuple[EdgeScheduler, RecordingDispatcher]":
     dispatcher = RecordingDispatcher()
     scheduler = EdgeScheduler(dispatcher=dispatcher)
     return scheduler, dispatcher
+
+
+def test_transfer_node_type_is_canonical_but_not_executable_as_ilab():
+    assert "Transfer" in NODE_TYPES
+    node = WorkflowNode(id="transfer", node_type=normalize_node_type("transfer"))
+    assert node.node_type == "Transfer"
+    assert not node.is_ilab()
 
 
 class TestTriggerOnSubmit:

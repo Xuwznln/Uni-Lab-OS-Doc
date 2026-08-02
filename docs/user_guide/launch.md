@@ -19,8 +19,30 @@ options:
                         Choose the backend to run with: 'ros', 'simple', or 'automancer'.
   --app_bridges APP_BRIDGES [APP_BRIDGES ...]
                         Bridges to connect to. Now support 'websocket' and 'fastapi'.
+  --material_source {microbackend,backend,auto}
+                        Host material query source (default: microbackend).
+  --material_service_mode {embedded,external}
+                        Start the DB in this host or use a separate microbackend process.
+  --material_microbackend_addr MATERIAL_MICROBACKEND_ADDR
+                        External microbackend API base (default external address: :8092/api/v1).
+  --edge_scheduler      Enable the host Edge workflow scheduler (default).
+  --no_edge_scheduler   Disable scheduler, device-state and workflow-history services.
+  --edge_inventory_db EDGE_INVENTORY_DB, --material_db EDGE_INVENTORY_DB
+                        Host-only SQLite path (default: ~/.unilabos/inventory.db).
+  --edge_device_state_db EDGE_DEVICE_STATE_DB, --device_state_db EDGE_DEVICE_STATE_DB
+                        Device-state SQLite path (default: ~/.unilabos/device_state.db).
+  --edge_workflow_history_db EDGE_WORKFLOW_HISTORY_DB, --workflow_history_db EDGE_WORKFLOW_HISTORY_DB
+                        Workflow-history SQLite path (default: ~/.unilabos/workflow_history.db).
   --is_slave            Run the backend as slave node (without host privileges).
-  --slave_no_host       Skip waiting for host service in slave mode
+  --hostlink_addr HOSTLINK_ADDR
+                        Slave 连接的 Host 微后端或 Host 监听地址（默认端口 7302）。
+  --ros_domain_id ROS_DOMAIN_ID
+                        Host 通过微后端握手下发给 Slave 的 ROS domain id。
+  --ros_discovery_port ROS_DISCOVERY_PORT
+                        Host 托管的 Fast DDS UDP 端口；0 表示复用 HostLink 数字端口。
+  --ros_discovery_server ROS_DISCOVERY_SERVER
+                        外部 Fast DDS ip:port；传 off 可禁用 Host 托管服务。
+  --slave_no_host       显式允许 Slave 离线启动；HostLink 仍在后台重连。
   --upload_registry     Upload registry information when starting unilab
   --config CONFIG       Configuration file path, supports .py format Python config files
   --port PORT           Port for web service information page
@@ -77,6 +99,79 @@ Uni-Lab 的启动过程分为以下几个阶段：
 - **必需参数**：`--ak` 和 `--sk` 必须同时提供
 - 命令行参数优先于配置文件中的设置
 - 未提供认证信息会导致启动失败并提示注册实验室
+
+### 5.1 Host Edge 微后端
+
+Host 默认启用完整 Edge 微后端，无需额外参数：
+
+- Edge Scheduler：DAG 拆解、锁和重排；
+- `inventory.db`：物料、关系、预留和账本；
+- `device_state.db`：设备属性当前值和变化历史；
+- `workflow_history.db`：工作流和 Job 执行审计。
+- HostLink：监听全部 Slave、维护连接与心跳、代理物料请求；
+- ROS 网络策略：由微后端在握手中统一下发 domain、发现范围、静态对端和
+  Discovery Server。
+
+微前端默认连接 Host `:8002` 即可使用调度、实体、设备状态和
+工作流历史接口：
+
+```bash
+unilab -g graph.json
+```
+
+三个数据库路径均可覆盖：
+
+```bash
+unilab -g graph.json \
+  --material_db ~/.unilabos/inventory.db \
+  --device_state_db ~/.unilabos/device_state.db \
+  --workflow_history_db ~/.unilabos/workflow_history.db
+```
+
+仅在明确需要降级运行时使用 `--no_edge_scheduler`；这会同时关闭微前端的
+调度、设备状态和工作流历史能力，物料查询服务仍可保留。
+
+查询来源和部署方式均可通过 UniLabOS 启动参数切换：
+
+```bash
+# 强制查询正式后端
+unilab -g graph.json --material_source backend
+
+# 微后端优先，未命中后查询正式后端
+unilab -g graph.json --material_source auto
+
+# 物料微后端作为独立进程运行；Host 只通过 HTTP IPC 访问
+ULAB_INVENTORY_DB=~/.unilabos/inventory.db \
+python -m unilabos.app.scheduler.main
+unilab -g graph.json --material_service_mode external \
+  --material_microbackend_addr http://127.0.0.1:8092/api/v1
+```
+
+Slave 不启动物料服务，也不会打开 `--material_db` 指定的 SQLite；它只能经
+HostLink 请求 Host 微后端持有的物料服务：
+
+```bash
+unilab --is_slave --hostlink_addr 192.168.1.10:7302 -g slave-graph.json
+```
+
+Host 微后端先于 ROS HostNode 启动并监听 `0.0.0.0:7302`。HostNode 创建后只挂接
+运行时资源树，不再创建 TCP 服务或决定 ROS 网络策略。普通 Slave 会持续等待 Host，
+在 `rclpy.init` 前完成握手并应用 Host 下发配置，因而不会出现“先按本地 ROS 启动、
+后连上 Host 却无法应用配置”的半连接状态。仅显式传入 `--slave_no_host` 时允许离线
+启动；该模式使用本地 ROS 配置，同时 HostLink 在后台持续重连。
+
+默认端口模式是定向且便于部署的：HostLink 在 TCP `7302` 监听控制面，同时 Fast DDS
+Discovery Server 在 UDP `7302` 监听 ROS 发现；Slave 只需一个
+`--hostlink_addr 192.168.1.10:7302` 即可得到 IP、端口和 domain。TCP 与 UDP 可使用
+同一数字端口。如网络策略要求分开，可在 Host 增加 `--ros_discovery_port 11811`；已有
+独立发现服务时用 `--ros_discovery_server ip:port`；排障时用
+`--ros_discovery_server off` 保留原 ROS 发现方式。
+
+Slave 会在握手中报送本次启动图里所有 `type=device` 的设备 ID。设备 ID 全网唯一，因此
+Host 以 `device_ids` 作为逻辑 Slave 身份：同一设备集合重连不会产生重复 peer，同一
+台机器启动不同设备集合则会显示为不同 Slave。运行时 Slave 的启动图至少要包含一个
+设备；空图会直接启动失败，测试应使用 `virtual_*` / `*.mock` 设备。Host 空图仍然合法，
+因为它可以只承担微后端、调度和多 Slave 管理。协议层的旧客户端才回退到机器名。
 
 ### 6. 设备图谱加载
 
@@ -150,10 +245,13 @@ unilab --config path/to/your/config.py
 
 启动 Uni-Lab 时，加入 `--is_slave` 将作为从站，不加将作为主站：
 
-- **主站 (host)**：持有物料修改权以及对云端的通信
-- **从站 (slave)**：无主机权限，可选择跳过等待主机服务 (`--slave_no_host`)
+- **主站 (host)**：Edge 微后端持有数据库、监听所有 Slave、下发 ROS 配置，同时负责对云端通信
+- **从站 (slave)**：不持有数据库文件；物料查询只能经 HostLink 访问 Host 微后端。
+  默认必须等待 Host；仅故障排查或隔离测试时用 `--slave_no_host` 离线降级
 
-局域网内分别启动的 Uni-Lab 主站/从站将自动组网，互相能访问所有设备状态、传感器信息并发送指令。
+为 Slave 配置 Host 的 `--hostlink_addr` 后，局域网内的 Host 与多个 Slave 会建立
+统一组网。HostLink 负责身份、心跳、物料查询和定向发现参数；设备指令与结果仍由
+HostNode 通过 ROS Action 收发。只有 ROS Action endpoint 已匹配的设备才会显示为在线。
 
 ## 可视化选项
 

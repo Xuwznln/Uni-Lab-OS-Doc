@@ -18,6 +18,8 @@ host-slave 共用一套语义：
     {"v": 1, "kind": "resp", "id": "...", "ok": false, "error": "<原因>"}
 
 心跳与握手也是普通请求（``ping`` / ``hello``），不额外引入帧类型。
+``hello.data.device_ids`` 是 Slave 启动图内所有 ``type=device`` 节点的全局
+唯一 ID 集合，Host 优先用它识别逻辑 Slave；旧客户端缺失时才使用 node_id / machine_name。
 """
 
 from __future__ import annotations
@@ -36,11 +38,11 @@ MAX_FRAME_BYTES = 8 * 1024 * 1024
 class ActionType:
     """内置 action_type 常量（业务方可注册任意自定义 action）。"""
 
-    HELLO = "hello"          # 握手：上报身份，取回 host 信息与 ROS 组网协助
-    PING = "ping"            # 心跳：维持在线状态
-    MATERIAL = "material"    # 物料/资源查询（query_key: uuid|id，with_children 在 data）
-    DEVICE = "device"        # 设备信息查询（预留，形状同 material）
-    ROS_INFO = "ros_info"    # 单独拉取 ROS 组网协助信息
+    HELLO = "hello"  # 握手：上报身份，取回 host 信息与 ROS 组网协助
+    PING = "ping"  # 心跳：维持在线状态
+    MATERIAL = "material"  # 物料/资源查询（query_key: uuid|id，with_children 在 data）
+    DEVICE = "device"  # 设备信息查询（预留，形状同 material）
+    ROS_INFO = "ros_info"  # 单独拉取 ROS 组网协助信息
 
 
 class LinkError(Exception):
@@ -73,7 +75,9 @@ def new_request(
     return msg
 
 
-def new_response(request_id: str, ok: bool, data: Any = None, error: str = "") -> Dict[str, Any]:
+def new_response(
+    request_id: str, ok: bool, data: Any = None, error: str = ""
+) -> Dict[str, Any]:
     msg: Dict[str, Any] = {
         "v": PROTOCOL_VERSION,
         "kind": "resp",
@@ -89,7 +93,10 @@ def new_response(request_id: str, ok: bool, data: Any = None, error: str = "") -
 
 def encode_frame(message: Dict[str, Any]) -> bytes:
     """信封 → NDJSON 帧；超限抛 LinkError（发送端自检）。"""
-    raw = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
+    raw = (
+        json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+    )
     if len(raw) > MAX_FRAME_BYTES:
         raise LinkError(f"frame too large: {len(raw)} bytes > {MAX_FRAME_BYTES}")
     return raw
@@ -115,7 +122,9 @@ class LineReader:
         self._buf = bytearray()
         self._eof = False
 
-    def readline(self, limit: int = 0) -> bytes:  # limit 兼容 file-like 签名，实际用 _max
+    def readline(
+        self, limit: int = 0
+    ) -> bytes:  # limit 兼容 file-like 签名，实际用 _max
         """读一行（含 ``\\n``）；EOF 返回 b""；空闲超时抛 socket.timeout（可重试）。"""
         while True:
             newline_at = self._buf.find(b"\n")

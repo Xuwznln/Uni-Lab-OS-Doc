@@ -1,6 +1,6 @@
 """HostLink 客户端（slave 侧）：组网、在线监控、请求通道。
 
-组网：配置 host node 的 ip:port（HostLinkConfig / --hostlink_addr），
+组网：配置 Host 微后端的 ip:port（HostLinkConfig / --hostlink_addr），
 ``start()`` 后台线程维持连接：connect → hello 握手 → 周期 ping 心跳；
 断线指数退避自动重连。``online`` 随时可查，状态变化回调 ``on_status_change``。
 
@@ -8,8 +8,8 @@
 调用）；物料查询封装为 ``get_resource()``，返回与旧云端接口一致的
 raw dict 列表，设备端零改动换源。
 
-进程级单例：slave 主流程 ``set_hostlink_client()`` 注册后，设备节点用
-``get_hostlink_client()`` 取用（TCP 优先，ROS service 兜底）。
+进程级单例：Slave 微后端 ``set_hostlink_client()`` 注册后，设备节点可用
+``get_hostlink_client()`` 查询 Host 物料；设备 Action 始终由 HostNode 走 ROS2。
 """
 
 from __future__ import annotations
@@ -18,20 +18,29 @@ import socket
 import threading
 import time
 import uuid as uuid_mod
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from unilabos.hostlink.protocol import (
     ActionType,
     LineReader,
     LinkError,
+    PROTOCOL_VERSION,
     RemoteError,
     new_request,
+    new_response,
     read_message,
     send_message,
 )
 from unilabos.hostlink.ros_assist import RosNetworkInfo
 from unilabos.utils import logger
-from unilabos.utils.tracing import inject_trace_context, span
+from unilabos.utils.tracing import (
+    extract_trace_context,
+    inject_trace_context,
+    record_exception,
+    span,
+)
+
+InboundHandler = Callable[[Dict[str, Any]], Any]
 
 
 class _Pending:
@@ -55,6 +64,9 @@ class HostLinkClient:
         request_timeout: float = 10.0,
         reconnect_max_backoff: float = 10.0,
         on_status_change: Optional[Callable[[bool], None]] = None,
+        node_id: str = "",
+        capabilities: Optional[List[str]] = None,
+        device_ids: Optional[Iterable[str]] = None,
     ):
         self.host = host
         self.port = port
@@ -64,6 +76,18 @@ class HostLinkClient:
         self.request_timeout = request_timeout
         self.reconnect_max_backoff = reconnect_max_backoff
         self.on_status_change = on_status_change
+        self._identity_lock = threading.Lock()
+        self._fallback_node_id = (
+            str(node_id or "").strip()
+            or str(machine_name or "").strip()
+            or f"slave-{uuid_mod.uuid4().hex}"
+        )
+        self.device_ids: List[str] = []
+        self.node_id = self._fallback_node_id
+        self.configure_device_ids(device_ids or [])
+        self.capabilities = list(
+            ("material-query", "ros-assist") if capabilities is None else capabilities
+        )
 
         self._sock: Optional[socket.socket] = None
         self._reader_thread: Optional[threading.Thread] = None
@@ -71,8 +95,11 @@ class HostLinkClient:
         self._write_lock = threading.Lock()
         self._pending: Dict[str, _Pending] = {}
         self._pending_lock = threading.Lock()
+        self._handlers: Dict[str, InboundHandler] = {}
+        self._handlers_lock = threading.Lock()
         self._stop = threading.Event()
         self._online = threading.Event()
+        self._status_condition = threading.Condition()
         #: hello 响应缓存（含 ros 组网协助）
         self.hello_info: Dict[str, Any] = {}
 
@@ -89,13 +116,22 @@ class HostLinkClient:
         self._manager_thread.start()
         return self
 
-    def connect_blocking(self, timeout: float = 10.0) -> bool:
-        """启动并阻塞等待首次上线（slave 启动期用：拿 ROS 组网信息再起 ROS）。"""
+    def connect_blocking(self, timeout: Optional[float] = 10.0) -> bool:
+        """启动并等待首次上线；``None`` 表示一直等到 Host 可用。"""
         self.start()
-        return self._online.wait(timeout)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._status_condition:
+            while not self._online.is_set() and not self._stop.is_set():
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    break
+                self._status_condition.wait(remaining)
+        return self._online.is_set()
 
     def close(self) -> None:
         self._stop.set()
+        with self._status_condition:
+            self._status_condition.notify_all()
         self._teardown_socket()
         if self._manager_thread is not None:
             self._manager_thread.join(timeout=3)
@@ -103,6 +139,52 @@ class HostLinkClient:
     @property
     def online(self) -> bool:
         return self._online.is_set()
+
+    def configure_device_ids(self, device_ids: Iterable[str]) -> None:
+        """Use the unique startup device IDs as this Slave's logical identity.
+
+        This is called before the connection manager starts.  Keeping the full
+        sorted set in hello lets Host distinguish multiple Slave processes on
+        one machine and recognize the same Slave after its TCP source port
+        changes.  Empty-device utility clients retain the legacy node fallback.
+        """
+
+        normalized = sorted(
+            {
+                str(device_id).strip()
+                for device_id in device_ids
+                if str(device_id).strip()
+            }
+        )
+        if not normalized:
+            return
+        with self._identity_lock:
+            self.device_ids = normalized
+            self.node_id = f"device:{normalized[0]}"
+
+    def register_handler(
+        self,
+        action_type: str,
+        handler: InboundHandler,
+        *,
+        capability: str = "",
+    ) -> None:
+        """Register a Host -> Slave RPC handler on the existing long connection.
+
+        The reverse direction is reserved for control-plane extensions.  Device
+        Action traffic deliberately remains on the HostNode/ROS2 path.
+        """
+
+        with self._handlers_lock:
+            self._handlers[action_type] = handler
+        if capability and capability not in self.capabilities:
+            self.capabilities.append(capability)
+        if self.online:
+            threading.Thread(
+                target=self._refresh_hello,
+                daemon=True,
+                name="hostlink-refresh-hello",
+            ).start()
 
     # ── 请求通道 ─────────────────────────────────────────────
 
@@ -186,6 +268,29 @@ class HostLinkClient:
         """从 hello 缓存读 ROS 组网信息（connect_blocking 成功后可用）。"""
         return RosNetworkInfo.from_dict(self.hello_info.get("ros"))
 
+    def _identity_payload(self) -> Dict[str, Any]:
+        with self._identity_lock:
+            node_id = self.node_id
+            device_ids = list(self.device_ids)
+        return {
+            "node_id": node_id,
+            "device_ids": device_ids,
+            "machine_name": self.machine_name,
+            "role": "slave",
+            "pid": None,
+            "protocol_version": PROTOCOL_VERSION,
+            "capabilities": list(self.capabilities),
+        }
+
+    def _refresh_hello(self) -> None:
+        try:
+            data = self.request(ActionType.HELLO, data=self._identity_payload())
+            self.hello_info = dict(data or {})
+        except (LinkError, RemoteError):
+            # The connection manager will send the latest capabilities on the
+            # next reconnect.  A transient refresh failure must not kill it.
+            logger.debug("[HostLink] capability hello refresh failed")
+
     # ── 内部：连接管理 ────────────────────────────────────────
 
     def _run(self) -> None:
@@ -205,7 +310,9 @@ class HostLinkClient:
             backoff = min(backoff * 2, self.reconnect_max_backoff)
 
     def _connect_once(self) -> None:
-        sock = socket.create_connection((self.host, self.port), timeout=self.connect_timeout)
+        sock = socket.create_connection(
+            (self.host, self.port), timeout=self.connect_timeout
+        )
         sock.settimeout(None)  # 读超时交给 reader 线程阻塞读
         self._sock = sock
         self._reader_thread = threading.Thread(
@@ -215,19 +322,27 @@ class HostLinkClient:
         # 握手（直接走 pending 机制之前，需要 online 未置位也能发）
         message = new_request(
             ActionType.HELLO,
-            data={"machine_name": self.machine_name, "role": "slave", "pid": None},
+            data=self._identity_payload(),
         )
         pending = _Pending()
         with self._pending_lock:
             self._pending[message["id"]] = pending
-        with self._write_lock:
-            send_message(sock, message)
-        if not pending.event.wait(self.connect_timeout):
-            raise LinkError("hello timeout")
-        response = pending.response or {}
+        try:
+            with self._write_lock:
+                send_message(sock, message)
+            if not pending.event.wait(self.connect_timeout):
+                raise LinkError("hello timeout")
+            response = pending.response or {}
+        finally:
+            with self._pending_lock:
+                self._pending.pop(message["id"], None)
         if not response.get("ok"):
             raise LinkError(f"hello rejected: {response.get('error')}")
         self.hello_info = dict(response.get("data") or {})
+        assigned_node_id = str(self.hello_info.get("assigned_node_id") or "").strip()
+        if assigned_node_id:
+            with self._identity_lock:
+                self.node_id = assigned_node_id
         self._set_online(True)
         logger.info(f"[HostLink] connected to {self.host}:{self.port}")
 
@@ -249,14 +364,21 @@ class HostLinkClient:
                 message = read_message(reader)
                 if message is None:
                     break
-                if message.get("kind") != "resp":
-                    continue
-                request_id = str(message.get("id") or "")
-                with self._pending_lock:
-                    pending = self._pending.get(request_id)
-                if pending is not None:
-                    pending.response = message
-                    pending.event.set()
+                kind = message.get("kind")
+                if kind == "resp":
+                    request_id = str(message.get("id") or "")
+                    with self._pending_lock:
+                        pending = self._pending.get(request_id)
+                    if pending is not None:
+                        pending.response = message
+                        pending.event.set()
+                elif kind == "req":
+                    threading.Thread(
+                        target=self._serve_incoming,
+                        args=(sock, message),
+                        daemon=True,
+                        name="hostlink-inbound-request",
+                    ).start()
         except (LinkError, OSError):
             pass
         finally:
@@ -268,6 +390,50 @@ class HostLinkClient:
                     if pending.response is None:
                         pending.response = {"ok": False, "error": "connection closed"}
                     pending.event.set()
+
+    def _serve_incoming(
+        self, sock: socket.socket, message: Dict[str, Any]
+    ) -> None:
+        request_id = str(message.get("id") or "")
+        action_type = str(message.get("action_type") or "")
+        raw_data = message.get("data") or {}
+        data = raw_data if isinstance(raw_data, dict) else {}
+        with self._handlers_lock:
+            handler = self._handlers.get(action_type)
+        if handler is None:
+            response = new_response(
+                request_id,
+                False,
+                error=f"unknown action_type on slave: {action_type}",
+            )
+        else:
+            parent = extract_trace_context(message)
+            with span(
+                "hostlink.handle",
+                kind="server",
+                parent_context=parent,
+                attributes={
+                    "rpc.system": "hostlink",
+                    "rpc.method": action_type,
+                },
+            ):
+                try:
+                    result = handler(dict(data))
+                except Exception as exc:  # noqa: BLE001 - wire errors use ok=false
+                    record_exception(exc)
+                    logger.exception(
+                        "[HostLink] Slave handler %s failed", action_type
+                    )
+                    response = new_response(request_id, False, error=str(exc))
+                else:
+                    response = new_response(request_id, True, data=result)
+                inject_trace_context(response)
+        try:
+            with self._write_lock:
+                if sock is self._sock:
+                    send_message(sock, response)
+        except OSError:
+            pass
 
     def _teardown_socket(self) -> None:
         sock, self._sock = self._sock, None
@@ -287,6 +453,8 @@ class HostLinkClient:
             self._online.set()
         else:
             self._online.clear()
+        with self._status_condition:
+            self._status_condition.notify_all()
         if changed and self.on_status_change is not None:
             try:
                 self.on_status_change(value)

@@ -156,8 +156,12 @@ def patch_rclpy_dll_windows():
     patched = []
 
     # 1) rclpy 自身的入口
-    rclpy_impl = os.path.join(site_packages, "rclpy", "impl", "implementation_singleton.py")
-    rclpy_pyd_matches = glob.glob(os.path.join(site_packages, "rclpy", "_rclpy_pybind11*.pyd"))
+    rclpy_impl = os.path.join(
+        site_packages, "rclpy", "impl", "implementation_singleton.py"
+    )
+    rclpy_pyd_matches = glob.glob(
+        os.path.join(site_packages, "rclpy", "_rclpy_pybind11*.pyd")
+    )
     rclpy_pyd = rclpy_pyd_matches[0] if rclpy_pyd_matches else ""
     if rclpy_pyd and _apply_dll_patch(rclpy_impl, lib_bin, preload_pyd=rclpy_pyd):
         patched.append(rclpy_impl)
@@ -229,20 +233,29 @@ def cleanup_for_restart() -> bool:
             print_status("[Restart] Background threads shutdown complete", "info")
 
             # Stop discovery timer
-            if hasattr(host_instance, "_discovery_timer") and isinstance(host_instance._discovery_timer, Timer):
+            if hasattr(host_instance, "_discovery_timer") and isinstance(
+                host_instance._discovery_timer, Timer
+            ):
                 host_instance._discovery_timer.cancel()
                 print_status("[Restart] Discovery timer cancelled", "info")
 
             # Destroy device nodes
             device_count = len(host_instance.devices_instances)
-            print_status(f"[Restart] Destroying {device_count} device instances...", "info")
+            print_status(
+                f"[Restart] Destroying {device_count} device instances...", "info"
+            )
             for device_id, device_node in list(host_instance.devices_instances.items()):
                 try:
-                    if hasattr(device_node, "ros_node_instance") and device_node.ros_node_instance is not None:
+                    if (
+                        hasattr(device_node, "ros_node_instance")
+                        and device_node.ros_node_instance is not None
+                    ):
                         device_node.ros_node_instance.destroy_node()
                         print_status(f"[Restart] Device {device_id} destroyed", "info")
                 except Exception as e:
-                    print_status(f"[Restart] Error destroying device {device_id}: {e}", "warning")
+                    print_status(
+                        f"[Restart] Error destroying device {device_id}: {e}", "warning"
+                    )
 
             # Clear devices instances
             host_instance.devices_instances.clear()
@@ -279,8 +292,20 @@ def cleanup_for_restart() -> bool:
         print_status(f"[Restart] Error in ROS cleanup: {e}", "warning")
         return False
 
-    # Step 3: Reset communication client singleton
-    print_status("[Restart] Step 3: Resetting singletons...", "info")
+    # Step 3: Stop the Edge microbackend before clearing process singletons.
+    # This closes the Host listener / Slave client as well as scheduler stores,
+    # so a restart can bind the same HostLink and SQLite resources again.
+    print_status("[Restart] Step 3: Stopping Edge microbackend...", "info")
+    try:
+        from unilabos.app.scheduler.integration import shutdown_edge_services
+
+        shutdown_edge_services()
+        print_status("[Restart] Edge microbackend stopped", "info")
+    except Exception as e:
+        print_status(f"[Restart] Error stopping Edge microbackend: {e}", "warning")
+
+    # Step 4: Reset communication client singleton
+    print_status("[Restart] Step 4: Resetting singletons...", "info")
     try:
         from unilabos.app import communication
 
@@ -288,10 +313,12 @@ def cleanup_for_restart() -> bool:
             communication._communication_client = None
             print_status("[Restart] Communication client singleton reset", "info")
     except Exception as e:
-        print_status(f"[Restart] Error resetting communication singleton: {e}", "warning")
+        print_status(
+            f"[Restart] Error resetting communication singleton: {e}", "warning"
+        )
 
-    # Step 4: Wait for threads to finish
-    print_status("[Restart] Step 4: Waiting for threads to finish...", "info")
+    # Step 5: Wait for threads to finish
+    print_status("[Restart] Step 5: Waiting for threads to finish...", "info")
     time.sleep(3)  # Give threads time to finish
 
     # Check remaining threads
@@ -302,7 +329,8 @@ def cleanup_for_restart() -> bool:
 
     if remaining_threads:
         print_status(
-            f"[Restart] Warning: {len(remaining_threads)} threads still running: {remaining_threads}", "warning"
+            f"[Restart] Warning: {len(remaining_threads)} threads still running: {remaining_threads}",
+            "warning",
         )
     else:
         print_status("[Restart] All threads stopped", "info")
@@ -315,8 +343,8 @@ def cleanup_for_restart() -> bool:
     except Exception as e:
         print_status(f"[Restart] Error shutting down tracing: {e}", "warning")
 
-    # Step 5: Force garbage collection
-    print_status("[Restart] Step 5: Running garbage collection...", "info")
+    # Step 6: Force garbage collection
+    print_status("[Restart] Step 6: Running garbage collection...", "info")
     gc.collect()
     gc.collect()  # Run twice for weak references
     print_status("[Restart] Garbage collection complete", "info")

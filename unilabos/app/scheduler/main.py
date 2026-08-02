@@ -118,10 +118,14 @@ app = create_app(
     history=_history,
 )
 if _inventory is not None:
-    from unilabos.app.scheduler.inventory.api import create_router as _create_inventory_router
+    from unilabos.app.scheduler.inventory.api import (
+        create_legacy_material_router as _create_legacy_material_router,
+        create_router as _create_inventory_router,
+    )
     from unilabos.app.scheduler.inventory.layout import create_lab_router as _create_lab_router
 
     app.include_router(_create_inventory_router(_inventory))
+    app.include_router(_create_legacy_material_router(_inventory))
     app.include_router(_create_lab_router(_inventory))
 
 

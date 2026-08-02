@@ -1,7 +1,7 @@
-"""云端 command-to-edge 幂等执行.
+"""REST/Cloud command-to-edge strict parsing and atomic execution.
 
 统一 envelope：command_id / expected_version / warehouse_zone_id / type / actor / payload。
-- processed_command 表保证 command_id 幂等（重放返回首次结果，不重复扣减）
+- 同一 SQLite 事务内完成 claim + 业务变更/ledger/outbox + completed result
 - expected_version 过期直接 rejected（禁止 Last-Write-Wins）
 - 返回 {"command_id", "status": accepted|rejected|completed, "result"|"error"}
   P0 全部同步执行：成功即 completed，领域错误即 rejected。
@@ -11,26 +11,36 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from typing import Any, Callable, Dict
 
+from pydantic import ValidationError
+
 from unilabos.app.scheduler.inventory.domain import (
-    CommandRejected,
     InventoryError,
     MaterialRequirement,
+)
+from unilabos.app.scheduler.inventory.schemas import (
+    JSON_OBJECT_ADAPTER,
+    InventoryCommandBase,
+    JsonObject,
+    parse_inventory_command,
 )
 from unilabos.app.scheduler.inventory.service import InventoryService
 from unilabos.utils.tracing import add_event, set_error, span
 
-CommandHandler = Callable[[InventoryService, Dict[str, Any]], Dict[str, Any]]
+CommandHandler = Callable[[InventoryService, JsonObject], JsonObject]
 
 
-def _serializable(value: Any) -> Any:
+def _serializable(value: Any) -> JsonObject:
     if isinstance(value, dict):
-        return value
-    return {"value": value}
+        candidate = value
+    else:
+        candidate = {"value": value}
+    return JSON_OBJECT_ADAPTER.validate_python(candidate)
 
 
-def _handle_template_upsert(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_template_upsert(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.upsert_template(
         template_id=p["template_id"],
@@ -43,7 +53,7 @@ def _handle_template_upsert(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[
     )
 
 
-def _handle_template_delete(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_template_delete(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.delete_template(
         template_id=p["template_id"],
@@ -53,7 +63,7 @@ def _handle_template_delete(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[
     )
 
 
-def _handle_inbound(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_inbound(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     if p.get("kind") == "instance":
         return svc.register_instance(
@@ -80,7 +90,7 @@ def _handle_inbound(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any
     )
 
 
-def _handle_reserve(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_reserve(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     node_requirements = {
         node_id: [MaterialRequirement.from_dict(r) for r in reqs]
@@ -95,7 +105,7 @@ def _handle_reserve(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any
     )
 
 
-def _handle_release(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_release(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     if p.get("node_id"):
         return svc.release_reservation(
@@ -115,8 +125,8 @@ def _handle_release(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any
 
 
 def _handle_consume_reservation(
-    svc: InventoryService, cmd: Dict[str, Any]
-) -> Dict[str, Any]:
+    svc: InventoryService, cmd: JsonObject
+) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.consume_reservation(
         workflow_id=p["workflow_id"],
@@ -130,8 +140,8 @@ def _handle_consume_reservation(
 
 
 def _handle_quarantine_reservation(
-    svc: InventoryService, cmd: Dict[str, Any]
-) -> Dict[str, Any]:
+    svc: InventoryService, cmd: JsonObject
+) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.quarantine_reservation(
         workflow_id=p["workflow_id"],
@@ -143,7 +153,7 @@ def _handle_quarantine_reservation(
     )
 
 
-def _handle_deploy(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_deploy(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.deploy_instance(
         edge_uuid=p["edge_uuid"],
@@ -155,7 +165,7 @@ def _handle_deploy(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]
     )
 
 
-def _handle_move(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_move(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.move_instance(
         edge_uuid=p["edge_uuid"],
@@ -167,7 +177,7 @@ def _handle_move(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
-def _handle_detach(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_detach(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.detach_instance(
         edge_uuid=p["edge_uuid"],
@@ -177,7 +187,7 @@ def _handle_detach(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]
     )
 
 
-def _handle_set_parent(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_set_parent(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     """设父物料（parent_material_uuid ≡ 树父）；slot_id 为可选具名位（PLR site 名）。"""
     p = cmd.get("payload") or {}
     return svc.set_instance_parent(
@@ -190,7 +200,7 @@ def _handle_set_parent(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, 
     )
 
 
-def _handle_content_set(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_content_set(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.update_content(
         instance_uuid=p["edge_uuid"],
@@ -201,7 +211,7 @@ def _handle_content_set(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str,
     )
 
 
-def _handle_content_clear(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_content_clear(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.clear_content(
         instance_uuid=p["edge_uuid"],
@@ -211,7 +221,7 @@ def _handle_content_clear(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[st
     )
 
 
-def _handle_consume(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_consume(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.consume_instance(
         edge_uuid=p["edge_uuid"],
@@ -221,7 +231,7 @@ def _handle_consume(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any
     )
 
 
-def _handle_discard(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_discard(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.discard_instance(
         edge_uuid=p["edge_uuid"],
@@ -232,7 +242,7 @@ def _handle_discard(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any
     )
 
 
-def _handle_adjust(svc: InventoryService, cmd: Dict[str, Any]) -> Dict[str, Any]:
+def _handle_adjust(svc: InventoryService, cmd: JsonObject) -> JsonObject:
     p = cmd.get("payload") or {}
     return svc.adjust_lot(
         lot_id=p["lot_id"],
@@ -264,56 +274,135 @@ COMMAND_HANDLERS: Dict[str, CommandHandler] = {
 }
 
 
-def _execute_command(service: InventoryService, command: Dict[str, Any]) -> Dict[str, Any]:
-    """执行一条云端 command（幂等 + 版本校验）。永不抛领域异常，返回 status."""
-    command_id = str(command.get("command_id") or "")
-    if not command_id:
-        return {"command_id": "", "status": "rejected", "error": "missing command_id"}
+def _command_metadata(command: object) -> tuple[str, str, object]:
+    if isinstance(command, InventoryCommandBase):
+        return command.command_id, command.type, command.expected_version
+    if isinstance(command, Mapping):
+        return (
+            str(command.get("command_id") or ""),
+            str(command.get("type") or ""),
+            command.get("expected_version"),
+        )
+    return "", "", None
 
-    # 幂等重放：直接返回首次处理结果
-    processed = service.store.get_processed_command(command_id)
-    if processed is not None:
+
+def _replay_response(command_id: str, processed: Mapping[str, Any]) -> JsonObject:
+    stored = JSON_OBJECT_ADAPTER.validate_python(
+        json.loads(str(processed["result_json"]))
+    )
+    status = str(processed["status"])
+    if status == "rejected":
         return {
             "command_id": command_id,
-            "status": processed["status"],
-            "result": json.loads(processed["result_json"]),
+            "status": "rejected",
+            "error": str(stored.get("error") or "command rejected"),
+            "error_code": str(stored.get("error_code") or "inventory_error"),
             "replayed": True,
         }
+    if status == "completed":
+        return {
+            "command_id": command_id,
+            "status": "completed",
+            "result": stored,
+            "replayed": True,
+        }
+    # ``accepted`` is only a transaction-local claim and must never survive a
+    # clean commit.  Fail closed rather than risking a second execution.
+    raise RuntimeError(f"incomplete persisted command claim: {command_id}")
 
-    cmd_type = str(command.get("type") or "")
-    handler = COMMAND_HANDLERS.get(cmd_type)
+
+def _execute_validated(
+    service: InventoryService,
+    parsed: InventoryCommandBase,
+) -> JsonObject:
+    """Claim, execute and persist one command in a single SQLite transaction."""
+
+    command = parsed.model_dump(mode="python", exclude_none=True)
+    command_id = parsed.command_id
+    handler = COMMAND_HANDLERS[parsed.type]
     now_ms = int(time.time() * 1000)
 
-    if handler is None:
-        response = {"command_id": command_id, "status": "rejected",
-                    "error": f"unknown command type: {cmd_type}"}
-        _record(service, command_id, "rejected", {"error": response["error"]}, now_ms)
-        return response
+    with service.command_transaction() as conn:
+        processed = conn.execute(
+            "SELECT * FROM processed_command WHERE command_id = ?",
+            (command_id,),
+        ).fetchone()
+        if processed is not None:
+            return _replay_response(command_id, dict(processed))
+
+        # The accepted claim is intentionally invisible outside this write
+        # transaction. A process crash rolls it back together with all domain
+        # rows, ledger and outbox events.
+        conn.execute(
+            "INSERT INTO processed_command(command_id, result_json, status, processed_at) "
+            "VALUES (?, '{}', 'accepted', ?)",
+            (command_id, now_ms),
+        )
+        try:
+            with service.command_attempt(conn):
+                result = _serializable(handler(service, command))
+        except InventoryError as exc:
+            error = str(exc)
+            error_code = getattr(exc, "code", "inventory_error")
+            stored: JsonObject = {"error": error, "error_code": error_code}
+            conn.execute(
+                "UPDATE processed_command SET result_json = ?, status = 'rejected', "
+                "processed_at = ? WHERE command_id = ?",
+                (json.dumps(stored, ensure_ascii=False), now_ms, command_id),
+            )
+            return {
+                "command_id": command_id,
+                "status": "rejected",
+                "error": error,
+                "error_code": error_code,
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            error = f"bad payload: {exc}"
+            stored = {"error": error, "error_code": "bad_payload"}
+            conn.execute(
+                "UPDATE processed_command SET result_json = ?, status = 'rejected', "
+                "processed_at = ? WHERE command_id = ?",
+                (json.dumps(stored, ensure_ascii=False), now_ms, command_id),
+            )
+            return {
+                "command_id": command_id,
+                "status": "rejected",
+                "error": error,
+                "error_code": "bad_payload",
+            }
+
+        conn.execute(
+            "UPDATE processed_command SET result_json = ?, status = 'completed', "
+            "processed_at = ? WHERE command_id = ?",
+            (json.dumps(result, ensure_ascii=False), now_ms, command_id),
+        )
+        return {"command_id": command_id, "status": "completed", "result": result}
+
+
+def _execute_command(service: InventoryService, command: object) -> JsonObject:
+    """Parse REST/WS input once, then execute atomically."""
 
     try:
-        result = handler(service, command)
-    except (CommandRejected, InventoryError) as exc:
-        response = {"command_id": command_id, "status": "rejected",
-                    "error": str(exc), "error_code": getattr(exc, "code", "inventory_error")}
-        _record(service, command_id, "rejected", {"error": str(exc)}, now_ms)
-        return response
-    except (KeyError, TypeError, ValueError) as exc:
-        response = {"command_id": command_id, "status": "rejected",
-                    "error": f"bad payload: {exc}"}
-        _record(service, command_id, "rejected", {"error": str(exc)}, now_ms)
-        return response
-
-    _record(service, command_id, "completed", _serializable(result), now_ms)
-    return {"command_id": command_id, "status": "completed", "result": result}
+        parsed = parse_inventory_command(command)
+    except ValidationError as exc:
+        command_id, _, _ = _command_metadata(command)
+        return {
+            "command_id": command_id,
+            "status": "rejected",
+            "error": str(exc),
+            "error_code": "validation_error",
+        }
+    return _execute_validated(service, parsed)
 
 
-def execute_command(service: InventoryService, command: Dict[str, Any]) -> Dict[str, Any]:
-    """带连续追踪的 command 入口；不记录 payload/actor 等原文。"""
+def execute_command(service: InventoryService, command: object) -> JsonObject:
+    """带连续追踪的 REST/Cloud WS 共享命令入口；不记录 payload/actor 原文."""
 
+    command_id, command_type, expected_version = _command_metadata(command)
     attributes = {
-        "inventory.command.id": str(command.get("command_id") or ""),
-        "inventory.command.type": str(command.get("type") or ""),
-        "inventory.expected_version": command.get("expected_version"),
+        "inventory.command.id": command_id,
+        "inventory.command.type": command_type,
+        "inventory.expected_version": expected_version,
         "edge.uuid": service.edge_id,
         "lab.id": service.lab_id,
     }
@@ -336,14 +425,3 @@ def execute_command(service: InventoryService, command: Dict[str, Any]) -> Dict[
         if status == "rejected":
             set_error(str(response.get("error") or "command rejected"), span=command_span)
         return response
-
-
-def _record(
-    service: InventoryService, command_id: str, status: str, result: Dict[str, Any], now_ms: int
-) -> None:
-    with service.store.transaction() as conn:
-        conn.execute(
-            "INSERT INTO processed_command(command_id, result_json, status, processed_at) "
-            "VALUES (?,?,?,?) ON CONFLICT(command_id) DO NOTHING",
-            (command_id, json.dumps(result, ensure_ascii=False, default=str), status, now_ms),
-        )

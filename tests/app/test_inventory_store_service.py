@@ -10,6 +10,7 @@
 """
 
 import json
+import sqlite3
 import threading
 
 import pytest
@@ -22,7 +23,7 @@ from unilabos.app.scheduler.inventory.domain import (
     VersionConflict,
 )
 from unilabos.app.scheduler.inventory.service import InventoryService
-from unilabos.app.scheduler.inventory.store import InventoryStore
+from unilabos.app.scheduler.inventory.store import InventoryStore, _SCHEMA
 
 
 @pytest.fixture()
@@ -318,6 +319,17 @@ class TestParentAndSite:
     """单一父不变量：parent_uuid 列（≡ 云端 parent_material_uuid ≡ 资源树父）是唯一
     父层级事实；relation 行仅在「父 + 具名位（PLR site 名）」时存在且父恒一致。"""
 
+    def test_register_initial_parent_uses_shared_relation_helper(self, svc):
+        inst = svc.register_instance(
+            edge_uuid="mi-registered",
+            parent_uuid="rack-register",
+            slot_id="A1",
+        )
+        relation = svc.store.get_relation("mi-registered")
+        assert inst["parent_uuid"] == "rack-register"
+        assert relation["parent_uuid"] == inst["parent_uuid"]
+        assert relation["slot_id"] == "A1"
+
     def test_set_and_clear_parent_without_slot(self, svc):
         svc.register_instance(edge_uuid="mi-rack")
         svc.register_instance(edge_uuid="mi-tip")
@@ -429,3 +441,110 @@ class TestStoreMigration:
         assert "parent_uuid" in cols
         assert reopened.query_one("PRAGMA user_version")["user_version"] == 4
         reopened.close()
+
+    def test_v1_database_upgrades_to_v4_and_backfills_parent(self, tmp_path):
+        """临时 v1 库只从既有 relation 确定性补 parent，不触碰用户实库。"""
+
+        db = str(tmp_path / "inventory-v1.db")
+        conn = sqlite3.connect(db)
+        conn.executescript(_SCHEMA)
+        conn.execute(
+            "INSERT INTO material_instance("
+            "edge_uuid, legacy_cloud_id, lot_id, template_id, barcode, status, version"
+            ") VALUES ('mi-v1', '', '', '', '', 'warehouse', 1)"
+        )
+        conn.execute(
+            "INSERT INTO resource_relation(parent_uuid, slot_id, child_uuid, version) "
+            "VALUES ('rack-v1', 'A1', 'mi-v1', 1)"
+        )
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.close()
+
+        reopened = InventoryStore(db)
+        assert reopened.query_one("PRAGMA user_version")["user_version"] == 4
+        assert reopened.get_instance("mi-v1")["parent_uuid"] == "rack-v1"
+        assert reopened.parent_consistency_issues() == []
+        reopened.close()
+
+    def test_v3_to_v4_parent_audit_and_only_safe_repair(self, tmp_path):
+        db = str(tmp_path / "inventory-v3.db")
+        store = InventoryStore(db)
+        service = InventoryService(store)
+        service.register_instance(
+            edge_uuid="mi-v3",
+            parent_uuid="rack-relation",
+            slot_id="A1",
+        )
+        store.close()
+
+        # 构造真实 v3 形状：parent_uuid 已有、trace 列尚未加入，并模拟旧
+        # register_instance 漏写 parent_uuid 的历史行。
+        conn = sqlite3.connect(db)
+        conn.execute(
+            "UPDATE material_instance SET parent_uuid = '' WHERE edge_uuid = 'mi-v3'"
+        )
+        for table, column in (
+            ("inventory_ledger", "trace_id"),
+            ("inventory_ledger", "span_id"),
+            ("sync_outbox", "traceparent"),
+            ("sync_outbox", "tracestate"),
+            ("sync_outbox", "trace_id"),
+            ("sync_outbox", "span_id"),
+        ):
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+        conn.close()
+
+        reopened = InventoryStore(db)
+        assert reopened.query_one("PRAGMA user_version")["user_version"] == 4
+        assert {
+            row["name"]
+            for row in reopened.query_all("PRAGMA table_info(sync_outbox)")
+        }.issuperset({"traceparent", "tracestate", "trace_id", "span_id"})
+        service = InventoryService(reopened)
+        issues = service.check_parent_consistency()
+        assert issues == [
+            {
+                "kind": "parent_mismatch",
+                "child_uuid": "mi-v3",
+                "instance_parent_uuid": "",
+                "relation_parent_uuid": "rack-relation",
+            }
+        ]
+
+        result = service.repair_parent_consistency(
+            actor="operator:audit",
+            reason="v3 register parent backfill",
+            causation_id="repair-v3",
+        )
+        assert result == {"repaired": ["mi-v3"], "unresolved": []}
+        assert reopened.get_instance("mi-v3")["parent_uuid"] == "rack-relation"
+        audit = reopened.query_one(
+            "SELECT * FROM inventory_ledger "
+            "WHERE op_type = 'instance.parent_repaired'"
+        )
+        assert audit["actor"] == "operator:audit"
+        assert audit["reason"] == "v3 register parent backfill"
+
+        # 双方非空但冲突时不猜、不覆盖，只返回待人工裁决项。
+        with reopened.transaction() as tx:
+            tx.execute(
+                "UPDATE material_instance SET parent_uuid = 'rack-other' "
+                "WHERE edge_uuid = 'mi-v3'"
+            )
+        unresolved = service.repair_parent_consistency(
+            actor="operator:audit",
+            reason="conflict check",
+        )
+        assert unresolved["repaired"] == []
+        assert unresolved["unresolved"][0]["kind"] == "parent_mismatch"
+        assert reopened.get_instance("mi-v3")["parent_uuid"] == "rack-other"
+        reopened.close()
+
+    def test_file_database_enables_wal(self, tmp_path):
+        db = str(tmp_path / "inventory-wal.db")
+        store = InventoryStore(db)
+        assert store.query_one("PRAGMA journal_mode")["journal_mode"] == "wal"
+        store.close()

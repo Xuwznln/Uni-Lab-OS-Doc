@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from unilabos.app.scheduler.inventory.domain import MaterialRequirement
 
@@ -20,7 +20,14 @@ from unilabos.app.scheduler.inventory.domain import MaterialRequirement
 DATA_KEY_SPLIT = "@@@"
 
 # 云端 workflow_node 类型枚举的规范拼写（大小写与后端模型一字不差）
-NODE_TYPES = ("Group", "ILab", "py_script", "tool_call", "manual_confirm")
+NODE_TYPES = (
+    "Group",
+    "ILab",
+    "py_script",
+    "tool_call",
+    "manual_confirm",
+    "Transfer",
+)
 _NODE_TYPE_CANONICAL = {t.lower(): t for t in NODE_TYPES}
 
 
@@ -86,7 +93,8 @@ class WorkflowNode:
     action_type: str = ""         # goal / goal_sequence 等
     param: Dict[str, Any] = field(default_factory=dict)  # action 参数（会被父节点传参覆写）
     # 与云端 workflow_node 类型枚举一致：Group / ILab / py_script / tool_call /
-    # manual_confirm（Edge 目前只执行 ILab；比较请用 is_ilab()，容忍大小写差异）
+    # manual_confirm / Transfer（Edge 目前只执行 ILab；Transfer 仅规范化/透传，
+    # 比较请用 is_ilab()，容忍大小写差异）
     node_type: str = "ILab"
     disabled: bool = False
     # 可选物料需求（向后兼容：空列表 = 无物料，行为与旧 workflow 完全一致）

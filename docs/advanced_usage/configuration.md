@@ -53,7 +53,7 @@ class BasicConfig:
     working_dir = ""  # 工作目录（通常自动设置）
     config_path = ""  # 配置文件路径（自动设置）
     is_host_mode = True  # 是否为主站模式
-    slave_no_host = False  # 从站模式下是否跳过等待主机服务
+    slave_no_host = False  # False=必须等待 Host；True=显式离线降级并后台重连
     upload_registry = False  # 是否上传注册表
     machine_name = "undefined"  # 机器名称（自动获取）
     vis_2d_enable = False  # 是否启用2D可视化
@@ -70,6 +70,22 @@ class WSConfig:
 # HTTP配置
 class HTTPConfig:
     remote_addr = "https://leap-lab.bohrium.com/api/v1"  # 远程服务器地址
+    material_source = "microbackend"  # microbackend / backend / auto
+    material_microbackend_addr = ""  # 空 = 当前主进程；独立微后端可填 http://127.0.0.1:8092/api/v1
+    material_query_timeout = 10
+
+# Host/Slave 网络服务（由 Edge 微后端拥有）
+class HostLinkConfig:
+    enable = True
+    host = ""  # Slave 填 Host 微后端 IP
+    port = 7302
+    bind = "0.0.0.0"
+    advertise_ip = ""
+    ros_assist_apply = True
+    ros_domain_id = ""
+    ros_discovery_range = ""
+    ros_static_peers = ""
+    ros_discovery_server = ""
 
 # ROS配置
 class ROSConfig:
@@ -107,7 +123,7 @@ class ROSConfig:
 | `ak` / `sk`       | `--ak` / `--sk`     | **安全考虑**：避免敏感信息泄露       |
 | `working_dir`     | `--working_dir`     | **灵活性**：不同环境可能使用不同目录 |
 | `is_host_mode`    | `--is_slave`        | **运行模式**：由启动场景决定，不固定 |
-| `slave_no_host`   | `--slave_no_host`   | **运行模式**：从站特殊配置，按需使用 |
+| `slave_no_host`   | `--slave_no_host`   | **离线降级**：仅故障排查/隔离测试时使用 |
 | `upload_registry` | `--upload_registry` | **临时操作**：仅首次启动或更新时需要 |
 | `vis_2d_enable`   | `--2d_vis`          | **调试功能**：按需临时启用           |
 | `remote_addr`     | `--addr`            | **环境切换**：测试/生产环境快速切换  |
@@ -169,7 +185,7 @@ Uni-Lab 允许通过命令行参数覆盖配置文件中的设置，提供更灵
 | `BasicConfig` | `sk`              | `--sk`              | 实验室私钥                       |
 | `BasicConfig` | `working_dir`     | `--working_dir`     | 工作目录路径                     |
 | `BasicConfig` | `is_host_mode`    | `--is_slave`        | 主站模式（参数为从站模式，取反） |
-| `BasicConfig` | `slave_no_host`   | `--slave_no_host`   | 从站模式下跳过等待主机服务       |
+| `BasicConfig` | `slave_no_host`   | `--slave_no_host`   | 允许从站离线启动并后台重连 Host  |
 | `BasicConfig` | `upload_registry` | `--upload_registry` | 启动时上传注册表信息             |
 | `BasicConfig` | `vis_2d_enable`   | `--2d_vis`          | 启用 2D 可视化                   |
 | `HTTPConfig`  | `remote_addr`     | `--addr`            | 远程服务地址                     |
@@ -195,7 +211,7 @@ unilab --ak "new_access_key" --sk "new_secret_key" -g graph.json
 # 覆盖服务器地址
 unilab --ak ak --sk sk --addr "https://custom.server.com/api/v1" -g graph.json
 
-# 启用从站模式并跳过等待主机
+# 隔离测试：允许从站不等 Host 即启动
 unilab --is_slave --slave_no_host --ak ak --sk sk
 
 # 启用上传注册表和2D可视化
@@ -227,7 +243,7 @@ unilab --ak "key" --sk "secret" --addr "test" --upload_registry --2d_vis -g grap
 | `working_dir`            | str  | `""`          | 工作目录，通常自动设置                     |
 | `config_path`            | str  | `""`          | 配置文件路径，自动设置                     |
 | `is_host_mode`           | bool | `True`        | 是否为主站模式                             |
-| `slave_no_host`          | bool | `False`       | 从站模式下是否跳过等待主机服务             |
+| `slave_no_host`          | bool | `False`       | 是否允许从站离线启动（HostLink 仍后台重连） |
 | `upload_registry`        | bool | `False`       | 启动时是否上传注册表信息                   |
 | `machine_name`           | str  | `"undefined"` | 机器名称，自动从 hostname 获取（不可配置） |
 | `vis_2d_enable`          | bool | `False`       | 是否启用 2D 可视化                         |
@@ -273,11 +289,14 @@ WebSocket 是 Uni-Lab 的主要通信方式：
 
 ### 3. HTTPConfig - HTTP 配置
 
-HTTP 客户端配置用于与云端服务通信：
+HTTP 客户端配置用于与云端服务及 Edge 物料微后端通信：
 
-| 参数          | 类型 | 默认值                                  | 说明         |
-| ------------- | ---- | --------------------------------------- | ------------ |
-| `remote_addr` | str  | `"https://leap-lab.bohrium.com/api/v1"` | 远程服务地址 |
+| 参数                         | 类型 | 默认值                                  | 说明                                                    |
+| ---------------------------- | ---- | --------------------------------------- | ------------------------------------------------------- |
+| `remote_addr`                | str  | `"https://leap-lab.bohrium.com/api/v1"` | 正式后端地址                                            |
+| `material_source`            | str  | `"microbackend"`                       | `microbackend`、`backend` 或本地未命中再查远端的 `auto` |
+| `material_microbackend_addr` | str  | `""`                                   | 空值派生当前主进程地址；独立进程通常填 `:8092/api/v1`   |
+| `material_query_timeout`     | int  | `10`                                    | 物料查询超时（秒）                                      |
 
 **预设环境地址**：
 
@@ -285,6 +304,112 @@ HTTP 客户端配置用于与云端服务通信：
 - 测试环境：`https://leap-lab.test.bohrium.com/api/v1`
 - UAT 环境：`https://leap-lab.uat.bohrium.com/api/v1`
 - 本地环境：`http://127.0.0.1:48197/api/v1`
+
+Host 微后端的 HostLink 处理器使用同一个 `HTTPClient.material_query()`。微后端暴露兼容端点
+`POST /api/v1/edge/material/query`，请求仍为 `uuids` / 可选 `id` +
+`with_children`，响应仍为 `{"code": 0, "data": {"nodes": [...]}}`；库存内部的
+模板、实例、父子关系和内容物会先转换成扁平 `ResourceDict`，现有设备调用方无需改协议。
+
+Host 默认启动完整 Edge 调度微后端，并在主进程中打开：
+
+- `~/.unilabos/inventory.db`
+- `~/.unilabos/device_state.db`
+- `~/.unilabos/workflow_history.db`
+
+因此微前端直连 Host `:8002` 时默认就能读取调度、物料实体、设备状态和
+工作流历史。推荐通过 UniLabOS 启动参数切换：
+
+```bash
+# 默认等价形式：Host 内嵌微后端
+unilab -g graph.json --material_source microbackend \
+  --material_service_mode embedded --material_db ~/.unilabos/inventory.db
+
+# 正式后端 / 自动回源
+unilab -g graph.json --material_source backend
+unilab -g graph.json --material_source auto
+
+# 显式降级：关闭调度、设备状态与工作流历史
+unilab -g graph.json --no_edge_scheduler
+
+# 覆盖三库路径；device/history 也可传 off 关闭单库落盘
+unilab -g graph.json \
+  --material_db /data/inventory.db \
+  --device_state_db /data/device_state.db \
+  --workflow_history_db /data/workflow_history.db
+```
+
+也可把仓储作为 scheduler 独立进程，通过 HTTP 做进程间通信：
+
+```bash
+ULAB_INVENTORY_DB=~/.unilabos/inventory.db \
+python -m unilabos.app.scheduler.main
+
+unilab -g graph.json --material_source microbackend \
+  --material_service_mode external \
+  --material_microbackend_addr http://127.0.0.1:8092/api/v1
+```
+
+需要强制恢复正式后端查询时，把 `material_source` 设为 `backend`；迁移期需要本地
+优先、未命中自动回源时设为 `auto`。slave 不执行 embedded/external 服务装配，
+也不打开 SQLite，只通过 HostLink 请求 Host 微后端。
+
+### 3.1 HostLinkConfig - 微后端组网配置
+
+HostLink 的服务端和客户端生命周期均属于 Edge 微后端，而不是 ROS Node：Host
+监听全部 Slave 并维护心跳，Slave 只连接 Host；HostNode 创建后仅挂接实时资源树。
+ROS domain、发现范围、静态对端与 Discovery Server 由 Host 微后端在 hello /
+`ros_info` 响应中统一下发，Slave 在 `rclpy.init` 前应用。hello 同时包含启动图中
+所有 `type=device` 节点的 `device_ids`；Host 以这些全网唯一 ID 识别 Slave，机器名
+只作兼容回退。
+
+HostLink 是控制面，不承载设备 Action。Host 默认启动 Fast DDS Discovery Server；
+`--hostlink_addr 0.0.0.0:7302` 的数字端口会同时用于 HostLink/TCP 和发现服务/UDP，
+两种传输不会冲突。Slave 使用它实际连通的 HostLink IP 替换 Host 广播地址并保留 UDP
+端口，适配多网卡；HostNode 以 Super Client 参与发现。Slave 完成设备初始化后经 ROS
+注册服务报送 `registry_name`，HostNode 据此主动创建匹配的 ROS `ActionClient`。只有
+Action endpoint 已匹配的设备才进入 `GET /api/v1/online-devices`。
+
+完整执行始终是 `EdgeScheduler -> JobExecutionBackend -> HostNode -> ROS Action -> Slave`
+并从 ROS Action result 回收。若 ROS Action 不可发现，该 Job 失败并释放锁，不自动改走
+HostLink，从而保留既有 ROS 组网语义。HostLink 的反向通用 RPC 只保留作控制面扩展，
+待后续 Python-only HostLink 协议正式切换时再启用设备命令类型。
+
+| 配置项 | 默认值 | 说明 |
+|---|---:|---|
+| `enable` | `True` | 是否启用 HostLink；关闭时保留旧 ROS 通路 |
+| `host` | `""` | Slave 要连接的 Host 微后端 IP；Host 留空 |
+| `bind` | `"0.0.0.0"` | Host 微后端监听地址 |
+| `port` | `7302` | HostLink TCP 端口；默认也作为 Fast DDS UDP 发现端口 |
+| `advertise_ip` | `""` | 下发给 Slave 的 Host IP；空值自动探测 |
+| `ros_assist_apply` | `True` | Slave 是否应用 Host 下发的 ROS 策略 |
+| `ros_domain_id` | `""` | 全网 `ROS_DOMAIN_ID`；空值继承 Host 环境 |
+| `ros_discovery_range` | `""` | `SUBNET` / `LOCALHOST` / `OFF` |
+| `ros_static_peers` | `""` | 分号分隔的静态 ROS 对端 |
+| `ros_discovery_server` | `""` | 空=Host 自动托管；`off`=禁用；`ip:port`=外部服务 |
+| `ros_discovery_port` | `0` | `0`=复用 HostLink 数字端口；非零=单独指定托管服务 UDP 端口 |
+
+CLI 推荐用 `--hostlink_addr` 和 `--ros_domain_id` 覆盖最常用字段：
+
+```bash
+# Host：TCP/UDP 都使用数字端口 7302，并把 domain 42 下发给所有 Slave
+unilab -g host.json --hostlink_addr 0.0.0.0:7302 --ros_domain_id 42
+
+# Slave：仅连接 Host 微后端；不持有任何 Host SQLite
+unilab --is_slave -g slave.json --hostlink_addr 192.168.1.10:7302
+
+# 可选：HostLink/TCP 7302，Fast DDS/UDP 11811
+unilab -g host.json --hostlink_addr 0.0.0.0:7302 --ros_discovery_port 11811
+
+# 可选：改用外部发现服务，或完全关闭托管发现
+unilab -g host.json --ros_discovery_server 192.168.1.20:11811
+unilab -g host.json --ros_discovery_server off
+```
+
+普通 Slave 会在初始化 ROS 前持续等待 HostLink 握手成功，以确保全网使用 Host 下发的
+同一 ROS 配置。`--slave_no_host` 是显式离线降级开关：它跳过首次 Host 等待和旧 ROS
+注册，按本地 ROS 配置启动，但 HostLink 连接管理器仍在后台重连。它不应作为生产
+Host + 多 Slave 拓扑的常规参数。无论是否使用该开关，Slave 启动图都必须至少包含
+一个 `type=device` 节点；空图仅允许 Host 使用，测试请加载虚拟或 mock 设备。
 
 ### 4. ROSConfig - ROS 配置
 
@@ -506,14 +631,16 @@ unilab --addr test --ak your_ak --sk your_sk -g graph.json
 ```python
 class BasicConfig:
     is_host_mode = False  # 从站模式
-    slave_no_host = True  # 不等待主机服务
+    slave_no_host = False  # 生产模式必须等待 Host
 ```
 
 **命令行方式（推荐）：**
 
 ```bash
-unilab --is_slave --slave_no_host --ak your_ak --sk your_sk
+unilab --is_slave --hostlink_addr 192.168.1.10:7302 --ak your_ak --sk your_sk
 ```
+
+只有需要在 Host 不可用时单机排查 Slave，才额外传入 `--slave_no_host`。
 
 ## 最佳实践
 

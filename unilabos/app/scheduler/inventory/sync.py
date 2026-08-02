@@ -1,11 +1,12 @@
 """Outbox 同步：批量上报云端、ACK cursor、指数退避、snapshot.
 
 协议（Edge → 云）：
-- 批量 POST /api/v1/edge/sync/events，body = {"edge_id", "lab_id", "events": [envelope...]}
+- 批量 POST /api/v1/edge/sync/events，body = {"edge_id", "events": [envelope...]}
 - 云端按 (edge_id, event_id) 去重、按 aggregate_version 防乱序覆盖
 - 响应 {"acked_sequence": N}（连续 ACK 水位）；Edge 只推进 cursor，不删除 outbox 行
 - 发送失败指数退避；未 ACK 的 outbox 永久保留在 SQLite（crash 后可回放）
-- 初次接入/缺口用 GET /api/v1/edge/sync/snapshot 全量重建
+- 初次接入/缺口用 POST /api/v1/edge/sync/snapshot，Local snapshot 先显式转换为
+  {"edge_id", "snapshot_sequence", "aggregates": {...}}
 
 sender 以 callable 注入（返回 acked_sequence），领域层不直接依赖 HTTP。
 """
@@ -16,9 +17,17 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Mapping, Optional
 
-from unilabos.app.scheduler.inventory.store import InventoryStore
+from unilabos.app.scheduler.inventory.schemas import (
+    InventoryEvent,
+    InventorySnapshotResponse,
+    JsonObject,
+)
+from unilabos.app.scheduler.inventory.store import (
+    InvalidCursorAdvance,
+    InventoryStore,
+)
 from unilabos.utils.tracing import (
     add_event,
     extract_trace_context,
@@ -29,11 +38,11 @@ from unilabos.utils.tracing import (
 logger = logging.getLogger(__name__)
 
 #: sender 签名：输入事件 envelope 列表，返回云端确认的连续 acked_sequence；失败抛异常
-SyncSender = Callable[[List[Dict[str, Any]]], int]
+SyncSender = Callable[[List[JsonObject]], int]
 
 
-def _row_to_envelope(row: Dict[str, Any]) -> Dict[str, Any]:
-    envelope = {
+def _row_to_envelope(row: Mapping[str, object]) -> InventoryEvent:
+    envelope: JsonObject = {
         "event_id": row["event_id"],
         "edge_id": row["edge_id"],
         "lab_id": row["lab_id"],
@@ -44,12 +53,12 @@ def _row_to_envelope(row: Dict[str, Any]) -> Dict[str, Any]:
         "event_type": row["event_type"],
         "occurred_at": row["occurred_at"],
         "causation_id": row["causation_id"],
-        "payload": json.loads(row["payload_json"]),
+        "payload": json.loads(str(row["payload_json"])),
     }
     for key in ("traceparent", "tracestate", "trace_id", "span_id"):
         if row.get(key):
             envelope[key] = row[key]
-    return envelope
+    return InventoryEvent.model_validate(envelope)
 
 
 class OutboxWorker:
@@ -84,7 +93,17 @@ class OutboxWorker:
         rows = self.store.pending_outbox(acked_from, self.batch_size)
         if not rows:
             return 0
-        envelopes = [_row_to_envelope(r) for r in rows]
+        sequences = [int(row["sequence"]) for row in rows]
+        expected = list(range(acked_from + 1, acked_from + 1 + len(rows)))
+        if sequences != expected:
+            self._failures += 1
+            raise InvalidCursorAdvance(
+                f"outbox batch is not contiguous after {acked_from}: {sequences}"
+            )
+        envelopes = [
+            _row_to_envelope(row).model_dump(mode="json", exclude_none=True)
+            for row in rows
+        ]
         first_parent = extract_trace_context(envelopes[0])
         # 每条领域事件都从其入库时保存的 W3C 上下文继续，并把新的 producer
         # 上下文写回 envelope；云端可直接把 ingest span 接成其子 span。
@@ -114,18 +133,32 @@ class OutboxWorker:
             },
         ) as flush_span:
             try:
+                # Injection mutates the wire dict; validate again so fake and
+                # production senders observe the exact same Cloud DTO.
+                envelopes = [
+                    InventoryEvent.model_validate(envelope).model_dump(
+                        mode="json", exclude_none=True
+                    )
+                    for envelope in envelopes
+                ]
                 acked_sequence = int(self.sender(envelopes))
+                self.store.advance_cursor(
+                    self.cursor_name,
+                    expected_current=acked_from,
+                    acked_sequence=acked_sequence,
+                    sent_through=sequences[-1],
+                    now_ms=int(time.time() * 1000),
+                )
             except Exception:
                 self._failures += 1
                 raise
-            add_event(
-                "inventory.outbox.ack",
-                {"inventory.outbox.acked_sequence": acked_sequence},
-                span=flush_span,
-            )
+            else:
+                add_event(
+                    "inventory.outbox.ack",
+                    {"inventory.outbox.acked_sequence": acked_sequence},
+                    span=flush_span,
+                )
         self._failures = 0
-        if acked_sequence > acked_from:
-            self.store.set_cursor(self.cursor_name, acked_sequence, int(time.time() * 1000))
         return sum(1 for r in rows if r["sequence"] <= acked_sequence)
 
     def flush_all(self, max_batches: int = 1000) -> int:
@@ -172,19 +205,15 @@ class OutboxWorker:
 # ---------------------------------------------------------------------------
 
 
-def build_snapshot(store: InventoryStore) -> Dict[str, Any]:
+def build_snapshot(store: InventoryStore) -> JsonObject:
     """导出 Edge 全量状态：云端可据此重建 projection，与 ledger 对账."""
-    return {
-        "snapshot_sequence": store.max_outbox_sequence(),
-        "lots": store.query_all("SELECT * FROM inventory_lot ORDER BY lot_id"),
-        "instances": store.query_all("SELECT * FROM material_instance ORDER BY edge_uuid"),
-        "relations": store.query_all("SELECT * FROM resource_relation ORDER BY child_uuid"),
-        "contents": store.query_all("SELECT * FROM substance_content ORDER BY instance_uuid"),
-        "reservations": store.query_all(
-            "SELECT * FROM inventory_reservation ORDER BY reservation_id"
-        ),
-        "templates": store.query_all("SELECT * FROM resource_template ORDER BY template_id"),
-    }
+    snapshot = InventorySnapshotResponse.model_validate(
+        {
+            "snapshot_sequence": store.max_outbox_sequence(),
+            **store.snapshot_rows(),
+        }
+    )
+    return snapshot.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------
@@ -204,11 +233,17 @@ class CloudProjectionReference:
     def __init__(self) -> None:
         self.seen: set = set()                      # (edge_id, event_id)
         self.versions: Dict[str, int] = {}          # aggregate_key -> version
-        self.state: Dict[str, Dict[str, Any]] = {}  # aggregate_key -> 最新 payload
+        self.state: Dict[str, JsonObject] = {}  # aggregate_key -> 最新 payload
         self.acked_sequence = 0
 
-    def ingest(self, events: List[Dict[str, Any]]) -> int:
-        for ev in sorted(events, key=lambda e: e["sequence"]):
+    def ingest(self, events: List[JsonObject]) -> int:
+        validated = [
+            InventoryEvent.model_validate(event).model_dump(
+                mode="json", exclude_none=True
+            )
+            for event in events
+        ]
+        for ev in sorted(validated, key=lambda e: e["sequence"]):
             dedupe_key = (ev["edge_id"], ev["event_id"])
             if dedupe_key not in self.seen:
                 self.seen.add(dedupe_key)
@@ -227,8 +262,11 @@ class CloudProjectionReference:
                 pass
         return self.acked_sequence
 
-    def load_snapshot(self, snapshot: Dict[str, Any]) -> None:
+    def load_snapshot(self, snapshot: JsonObject) -> None:
         """从 snapshot 重建投影（初次接入/缺口恢复）."""
+        snapshot = InventorySnapshotResponse.model_validate(snapshot).model_dump(
+            mode="json"
+        )
         self.state.clear()
         self.versions.clear()
         for lot in snapshot.get("lots", []):

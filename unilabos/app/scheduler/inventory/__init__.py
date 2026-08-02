@@ -2,6 +2,7 @@
 
 分层：
 - domain    —— 状态机、不变量、领域错误（零外部依赖）
+- schemas   —— REST/Cloud wire 的 Pydantic v2 模型（严格边界）
 - store     —— SQLite WAL 持久化 + 事务 API
 - service   —— 业务写操作（业务行 + ledger + outbox 同事务提交）
 - sync      —— outbox worker（批量上报云端、ACK cursor、snapshot）
@@ -24,16 +25,34 @@ from unilabos.app.scheduler.inventory.domain import (
 )
 from unilabos.app.scheduler.inventory.store import InventoryStore
 from unilabos.app.scheduler.inventory.service import InventoryService
+from unilabos.app.scheduler.inventory.schemas import (
+    CloudInventoryCommandResultRequest,
+    CloudInventoryEventBatch,
+    CloudInventorySnapshotRequest,
+    CloudResponse,
+    CloudSyncAck,
+    InventoryCommand,
+    InventoryCommandResult,
+    InventoryEvent,
+)
 from unilabos.app.scheduler.inventory.sync import OutboxWorker, build_snapshot
 from unilabos.app.scheduler.inventory.commands import execute_command
 
 __all__ = [
+    "CloudInventoryCommandResultRequest",
+    "CloudInventoryEventBatch",
+    "CloudInventorySnapshotRequest",
+    "CloudResponse",
+    "CloudSyncAck",
     "CommandRejected",
     "DuplicateBarcode",
     "InstanceState",
     "InsufficientStock",
     "InvariantViolation",
     "InventoryError",
+    "InventoryCommand",
+    "InventoryCommandResult",
+    "InventoryEvent",
     "InventoryService",
     "InventoryStore",
     "LotState",

@@ -139,6 +139,40 @@ class TestBackendAlone:
         finally:
             backend.stop()
 
+    def test_missing_ros_action_fails_without_hostlink_fallback(self):
+        class MissingRosHost:
+            def send_goal(self, *_args, **_kwargs):
+                raise ValueError("ActionClient /devices/d1/run not found.")
+
+        backend = JobExecutionBackend(host_node_getter=lambda: MissingRosHost())
+        received = []
+        done = threading.Event()
+
+        def finished(*args):
+            received.append(args)
+            done.set()
+
+        backend.add_job_finished_listener(finished)
+        backend.start()
+        try:
+            backend.dispatch(
+                build_job_start_payload(
+                    job_id="j-ros-missing",
+                    task_id="t",
+                    workflow_id="wf",
+                    node_id="A",
+                    device_id="d1",
+                    action_name="run",
+                    action_type="goal",
+                    action_args={"x": 7.5},
+                )
+            )
+            assert done.wait(3.0)
+            assert backend.wait_idle()
+            assert received == [("j-ros-missing", False, None, "normal")]
+        finally:
+            backend.stop()
+
 
 class TestEdgeStackEndToEnd:
     def _wait(self, predicate, timeout: float = 5.0) -> bool:

@@ -1,8 +1,8 @@
-"""Host 本地资源解析：物料查询的本地事实源（替代已下线的云端物料接口）。
+"""Host 本地资源解析：物料数据库未命中或不可用时的兼容兜底。
 
 原链路：slave → ROS service ``/resources/get`` → host → 云端
-``/edge/material/query``。云端物料下线后，host 内存中的 ResourceTreeSet
-（配置树 + 各设备 resource_tracker 维护的运行时状态）就是唯一事实源。
+``/edge/material/query``。现在 Host 优先查询其 Edge 物料数据库服务；尚未导入
+数据库的配置树和设备运行时资源仍由本模块兜底解析。
 
 本模块对 ResourceTreeSet 采用 duck-typing（只用 ``trees`` /
 ``tree.get_all_nodes()`` / ``node.res_content`` / ``node.children``），

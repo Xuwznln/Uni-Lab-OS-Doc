@@ -12,7 +12,9 @@ class BasicConfig:
     working_dir = ""
     config_path = ""
     is_host_mode = True
-    slave_no_host = False  # 是否跳过rclient.wait_for_service()
+    # False（默认）：Slave 必须等 HostLink/Host ROS 服务就绪后才初始化 ROS。
+    # True：显式离线降级，跳过首次 Host 等待及旧 ROS 注册，HostLink 仍后台重连。
+    slave_no_host = False
     upload_registry = False
     machine_name = "undefined"
     vis_2d_enable = False
@@ -26,7 +28,9 @@ class BasicConfig:
     test_mode = False  # 测试模式，所有动作不实际执行，返回模拟结果
     extra_resource = False  # 是否加载lab_开头的额外资源
     # 'TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
-    log_level: Literal["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
+    log_level: Literal["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
+        "DEBUG"
+    )
 
     @classmethod
     def auth_secret(cls):
@@ -52,13 +56,18 @@ class HTTPConfig:
     remote_addr = "https://leap-lab.bohrium.com/api/v1"
     # schedule 通道（WebSocket）地址；为空时从 remote_addr 派生：带端口则 +1，否则沿用原 netloc
     schedule_addr = ""
+    # Edge 微后端的物料查询来源：microbackend（默认）/ backend / auto（本地未命中再查正式后端）
+    material_source = "microbackend"
+    # 空时使用主进程 http://127.0.0.1:{BasicConfig.port}/api/v1；独立 scheduler 可填 :8092/api/v1
+    material_microbackend_addr = ""
+    material_query_timeout = 10
 
 
-# host-slave TCP 请求通路（HostLink）：物料查询走 host 本地事实源（云端物料已下线），
-# 并承载在线监控与 ROS 组网协助；是 host-slave 逐步从 ROS2 迁到 TCP/IP 组网的第一步。
+# Host-Slave TCP 请求通路（HostLink）由 Edge 微后端拥有：负责连接生命周期、
+# 在线监控、物料转发与 ROS 配置下发；HostNode 只提供运行时资源树兜底。
 class HostLinkConfig:
     enable = True
-    host = ""  # slave 侧：host node 的 IP（组网入口）；空 = 不启用 TCP 通路，走旧 ROS 链路
+    host = ""  # Slave 侧：Host 微后端 IP；空 = 不启用 TCP 通路，走旧 ROS 链路
     port = 7302  # 通路端口（host 监听 / slave 连接）
     bind = "0.0.0.0"  # host 侧监听地址
     advertise_ip = ""  # host 对外 IP（下发 slave 作 ROS 静态对端）；空 = 自动探测
@@ -67,12 +76,20 @@ class HostLinkConfig:
     connect_timeout = 5  # 连接/握手超时（秒）
     request_timeout = 10  # 单请求超时（秒）
     # ROS 组网协助（host 经握手下发，slave 在 rclpy.init 前套用；空 = 沿用 host 环境变量）
-    ros_assist_apply = True  # slave 是否套用 host 下发的组网信息；False = 完全用本地环境
+    ros_assist_apply = (
+        True  # slave 是否套用 host 下发的组网信息；False = 完全用本地环境
+    )
     # （隔离场景/联网测试/手动管理组网时关闭：HostLink 照常连接，仅不动 ROS 环境）
     ros_domain_id = ""  # ROS_DOMAIN_ID
-    ros_discovery_range = ""  # SUBNET / LOCALHOST / OFF；OFF = 关闭组播自动发现（纯单播降级）
+    ros_discovery_range = (
+        ""  # SUBNET / LOCALHOST / OFF；OFF = 关闭组播自动发现（纯单播降级）
+    )
     ros_static_peers = ""  # 分号分隔 ip 列表；空 = 自动用 advertise_ip
-    ros_discovery_server = ""  # Fast DDS Discovery Server 地址 ip:port
+    # 空 = Host 微后端自动启动 Fast DDS Discovery Server；off = 禁用；
+    # ip:port = 使用外部 Server，不由本进程管理。
+    ros_discovery_server = ""
+    # 0 = 复用 HostLink 的数字端口（HostLink/TCP + Fast DDS/UDP）；非零可分开指定。
+    ros_discovery_port = 0
 
 
 # OpenTelemetry/SigNoz（默认关闭；仅显式开启时加载可选 SDK）。
@@ -125,7 +142,7 @@ def _update_config_from_env():
         if not env_key.startswith(prefix):
             continue
         try:
-            key_path = env_key[len(prefix):]  # Remove UNILAB_ prefix
+            key_path = env_key[len(prefix) :]  # Remove UNILAB_ prefix
             class_field = key_path.upper().split("_", 1)
             if len(class_field) != 2:
                 logger.warning(f"[ENV] 环境变量格式不正确：{env_key}")
@@ -151,7 +168,9 @@ def _update_config_from_env():
                     break
 
             if matched_field is None:
-                logger.warning(f"[ENV] 类 {matched_cls.__name__} 中未找到字段：{field_key}")
+                logger.warning(
+                    f"[ENV] 类 {matched_cls.__name__} 中未找到字段：{field_key}"
+                )
                 continue
 
             current_value = getattr(matched_cls, matched_field)

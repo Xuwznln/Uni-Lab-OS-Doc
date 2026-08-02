@@ -1,11 +1,12 @@
-"""HostLink 服务端（host node 侧）：TCP 监听 + peer 注册 + 心跳在线监控。
+"""HostLink 服务端（Edge 微后端 Host 侧）：TCP 监听 + peer 注册 + 心跳在线监控。
 
 线程模型与本仓库其余部分一致（多线程、无 asyncio）：
 ``ThreadingTCPServer`` 每连接一个处理线程，逐行读请求、同步调 handler、
 写回响应。请求处理是无状态纯函数，天然支持多 slave 并发。
 
 在线监控：
-- slave 连接后先发 ``hello`` 注册身份（machine_name 等），随后按
+- slave 连接后先发 ``hello`` 注册身份（全局唯一 device_ids 优先，machine_name
+  兼容回退），随后按
   ``heartbeat_interval`` 发 ``ping``；
 - 服务端记录每个 peer 的 ``last_seen``；``peers()`` 按
   ``last_seen + heartbeat_timeout`` 现算 online（无独立清扫线程，无竞态）；
@@ -24,6 +25,8 @@ from unilabos.hostlink.protocol import (
     ActionType,
     LineReader,
     LinkError,
+    RemoteError,
+    new_request,
     new_response,
     read_message,
     send_message,
@@ -38,6 +41,79 @@ from unilabos.utils.tracing import (
 
 #: handler 签名：(data, peer_info) -> 响应 data；抛异常 = ok=false
 Handler = Callable[[Dict[str, Any], Dict[str, Any]], Any]
+
+
+class _Pending:
+    __slots__ = ("event", "response")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.response: Optional[Dict[str, Any]] = None
+
+
+class _PeerConnection:
+    """One live Slave socket, including Host -> Slave pending requests."""
+
+    def __init__(
+        self,
+        peer_key: str,
+        sock: socket.socket,
+        write_lock: threading.Lock,
+    ) -> None:
+        self.peer_key = peer_key
+        self.sock = sock
+        self.write_lock = write_lock
+        self.pending: Dict[str, _Pending] = {}
+        self.pending_lock = threading.Lock()
+        self.closed = threading.Event()
+
+    def request(
+        self,
+        action_type: str,
+        data: Optional[Dict[str, Any]],
+        timeout: Optional[float],
+    ) -> Any:
+        if self.closed.is_set():
+            raise LinkError(f"slave connection closed: {self.peer_key}")
+        message = new_request(action_type, data=data)
+        inject_trace_context(message)
+        pending = _Pending()
+        request_id = str(message["id"])
+        with self.pending_lock:
+            self.pending[request_id] = pending
+        try:
+            with self.write_lock:
+                send_message(self.sock, message)
+            if not pending.event.wait(timeout):
+                raise LinkError(
+                    f"request timeout: {action_type} ({request_id[:8]})"
+                )
+        finally:
+            with self.pending_lock:
+                self.pending.pop(request_id, None)
+        response = pending.response or {}
+        if not response.get("ok"):
+            raise RemoteError(str(response.get("error") or "remote error"))
+        return response.get("data")
+
+    def resolve(self, message: Dict[str, Any]) -> None:
+        request_id = str(message.get("id") or "")
+        with self.pending_lock:
+            pending = self.pending.get(request_id)
+        if pending is not None:
+            pending.response = message
+            pending.event.set()
+
+    def close(self) -> None:
+        self.closed.set()
+        with self.pending_lock:
+            for pending in self.pending.values():
+                if pending.response is None:
+                    pending.response = {
+                        "ok": False,
+                        "error": "slave connection closed",
+                    }
+                pending.event.set()
 
 
 class _LinkTCPServer(socketserver.ThreadingTCPServer):
@@ -60,9 +136,11 @@ class _LinkRequestHandler(socketserver.BaseRequestHandler):
         # 单连接内每请求独立线程分发：慢 handler（大物料树查询）不得阻塞
         # 后续请求——尤其是心跳 ping，否则会被误判离线。写回共用一把锁防交错。
         write_lock = threading.Lock()
+        connection = link.register_connection(peer_key, sock, write_lock)
 
         def _serve_one(message: Dict[str, Any]) -> None:
             response = self._dispatch(link, message, peer_key)
+            link.bind_connection(peer_key)
             try:
                 with write_lock:
                     send_message(sock, response)
@@ -82,14 +160,19 @@ class _LinkRequestHandler(socketserver.BaseRequestHandler):
                     break
                 if message is None:
                     break  # 对端正常关闭
-                if message.get("kind") != "req":
-                    continue  # 服务端只消费请求帧
-                threading.Thread(
-                    target=_serve_one, args=(message,), daemon=True,
-                    name=f"hostlink-req-{peer_key}",
-                ).start()
+                kind = message.get("kind")
+                if kind == "req":
+                    threading.Thread(
+                        target=_serve_one,
+                        args=(message,),
+                        daemon=True,
+                        name=f"hostlink-req-{peer_key}",
+                    ).start()
+                elif kind == "resp":
+                    connection.resolve(message)
         finally:
             reader.close()
+            link.unregister_connection(peer_key)
             link.mark_disconnected(peer_key)
 
     @staticmethod
@@ -102,12 +185,16 @@ class _LinkRequestHandler(socketserver.BaseRequestHandler):
         peer = link.touch_peer(peer_key, action, message)
         handler = link.handlers.get(action)
         if handler is None:
-            return new_response(request_id, False, error=f"unknown action_type: {action}")
+            return new_response(
+                request_id, False, error=f"unknown action_type: {action}"
+            )
         if action in (ActionType.PING, ActionType.HELLO):
             try:
                 result = handler(dict(data), peer)
             except Exception as exc:  # noqa: BLE001 - 业务异常统一转 ok=false
-                logger.warning(f"[HostLink] handler {action} failed for {peer_key}: {exc}")
+                logger.warning(
+                    f"[HostLink] handler {action} failed for {peer_key}: {exc}"
+                )
                 return new_response(request_id, False, error=str(exc))
             return new_response(request_id, True, data=result)
 
@@ -125,7 +212,9 @@ class _LinkRequestHandler(socketserver.BaseRequestHandler):
                 result = handler(dict(data), peer)
             except Exception as exc:  # noqa: BLE001 - 业务异常统一转 ok=false
                 record_exception(exc)
-                logger.warning(f"[HostLink] handler {action} failed for {peer_key}: {exc}")
+                logger.warning(
+                    f"[HostLink] handler {action} failed for {peer_key}: {exc}"
+                )
                 response = new_response(request_id, False, error=str(exc))
             else:
                 response = new_response(request_id, True, data=result)
@@ -134,7 +223,7 @@ class _LinkRequestHandler(socketserver.BaseRequestHandler):
 
 
 class HostLinkServer:
-    """host 侧通路服务。``start()`` 后台线程监听；``stop()`` 幂等关闭。"""
+    """微后端 Host 侧通路。``start()`` 后台监听；``stop()`` 幂等关闭。"""
 
     def __init__(
         self,
@@ -149,8 +238,15 @@ class HostLinkServer:
         self.socket_timeout = socket_timeout
         self.handlers: Dict[str, Handler] = {}
         self.stopping = threading.Event()
+        # Logical peers are keyed by the Slave-provided stable ``node_id``.
+        # Socket source ports change on every reconnect, so they are only a
+        # connection index and must never create duplicate Slave rows.
         self._peers: Dict[str, Dict[str, Any]] = {}
+        self._connection_nodes: Dict[str, str] = {}
         self._peers_lock = threading.Lock()
+        self._connections: Dict[str, _PeerConnection] = {}
+        self._node_connections: Dict[str, str] = {}
+        self._connections_lock = threading.Lock()
         self._tcp: Optional[_LinkTCPServer] = None
         self._thread: Optional[threading.Thread] = None
         # 内置动作：心跳与握手
@@ -175,6 +271,14 @@ class HostLinkServer:
 
     def stop(self) -> None:
         self.stopping.set()
+        with self._connections_lock:
+            connections = list(self._connections.values())
+        for connection in connections:
+            connection.close()
+            try:
+                connection.sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         if self._tcp is not None:
             self._tcp.shutdown()
             self._tcp.server_close()
@@ -189,26 +293,191 @@ class HostLinkServer:
     def register_handler(self, action_type: str, handler: Handler) -> None:
         self.handlers[action_type] = handler
 
-    def touch_peer(self, peer_key: str, action: str, message: Dict[str, Any]) -> Dict[str, Any]:
-        """任何请求都刷新 last_seen；hello 额外登记身份。"""
+    def register_connection(
+        self,
+        peer_key: str,
+        sock: socket.socket,
+        write_lock: threading.Lock,
+    ) -> _PeerConnection:
+        connection = _PeerConnection(peer_key, sock, write_lock)
+        with self._connections_lock:
+            old = self._connections.get(peer_key)
+            self._connections[peer_key] = connection
+        if old is not None:
+            old.close()
+        return connection
+
+    def bind_connection(self, peer_key: str) -> None:
+        with self._peers_lock:
+            node_id = self._connection_nodes.get(peer_key)
+        if not node_id:
+            return
+        with self._connections_lock:
+            if peer_key in self._connections:
+                self._node_connections[node_id] = peer_key
+
+    def unregister_connection(self, peer_key: str) -> None:
+        with self._connections_lock:
+            connection = self._connections.pop(peer_key, None)
+            stale_nodes = [
+                node_id
+                for node_id, connection_key in self._node_connections.items()
+                if connection_key == peer_key
+            ]
+            for node_id in stale_nodes:
+                self._node_connections.pop(node_id, None)
+        if connection is not None:
+            connection.close()
+
+    def has_device(self, device_id: str, capability: str = "") -> bool:
         now = time.time()
         with self._peers_lock:
-            peer = self._peers.setdefault(
-                peer_key,
-                {"addr": peer_key, "machine_name": "", "role": "", "connected_at": now},
+            return any(
+                peer.get("connected")
+                and now - peer.get("last_seen", 0) < self.heartbeat_timeout
+                and device_id in (peer.get("device_ids") or [])
+                and (
+                    not capability
+                    or capability in (peer.get("capabilities") or [])
+                )
+                for peer in self._peers.values()
             )
+
+    def request_device(
+        self,
+        device_id: str,
+        action_type: str,
+        data: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = 600.0,
+    ) -> Any:
+        """Route a Host request to the online Slave that reported ``device_id``."""
+
+        now = time.time()
+        node_id = ""
+        with self._peers_lock:
+            for candidate_node, peer in self._peers.items():
+                if (
+                    peer.get("connected")
+                    and now - peer.get("last_seen", 0) < self.heartbeat_timeout
+                    and device_id in (peer.get("device_ids") or [])
+                ):
+                    node_id = candidate_node
+                    break
+        if not node_id:
+            raise LinkError(f"no online Slave owns device {device_id!r}")
+        with self._connections_lock:
+            peer_key = self._node_connections.get(node_id, "")
+            connection = self._connections.get(peer_key)
+        if connection is None:
+            raise LinkError(
+                f"Slave {node_id!r} has no bidirectional HostLink connection"
+            )
+        return connection.request(action_type, data, timeout)
+
+    def touch_peer(
+        self, peer_key: str, action: str, message: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Refresh a logical peer; hello binds this socket to its stable node ID."""
+        now = time.time()
+        with self._peers_lock:
+            connection_node = self._connection_nodes.get(peer_key)
+            if action == ActionType.HELLO:
+                raw_data = message.get("data") or {}
+                data = raw_data if isinstance(raw_data, dict) else {}
+                machine_name = str(data.get("machine_name") or "")
+                raw_device_ids = data.get("device_ids")
+                device_ids = (
+                    sorted(
+                        {
+                            str(item).strip()
+                            for item in raw_device_ids
+                            if isinstance(item, str) and item.strip()
+                        }
+                    )
+                    if isinstance(raw_device_ids, list)
+                    else []
+                )
+
+                # Startup device IDs are globally unique and therefore outrank
+                # machine name / socket address for logical Slave identity.  An
+                # overlap also keeps the same peer when a Slave adds or removes
+                # one device between reconnects.
+                node_id = ""
+                if device_ids:
+                    incoming_devices = set(device_ids)
+                    for known_node_id, known_peer in self._peers.items():
+                        known_devices = set(known_peer.get("device_ids") or [])
+                        if incoming_devices.intersection(known_devices):
+                            node_id = known_node_id
+                            break
+                    if not node_id:
+                        node_id = f"device:{device_ids[0]}"
+                else:
+                    node_id = str(data.get("node_id") or machine_name or peer_key)
+
+                # A pre-hello request may have created a temporary addr-keyed
+                # record.  Migrate it once the logical identity is known.
+                if connection_node and connection_node != node_id:
+                    temporary = self._peers.get(connection_node)
+                    if temporary and temporary.get("addr") == peer_key:
+                        self._peers.pop(connection_node, None)
+
+                self._connection_nodes[peer_key] = node_id
+                peer = self._peers.get(node_id)
+                if peer is None:
+                    peer = {}
+                    self._peers[node_id] = peer
+
+                # A new socket with the same node_id supersedes the old one.
+                # The old handler can still unwind, but its later ping/close is
+                # ignored because ``addr`` no longer matches.
+                if peer.get("addr") != peer_key:
+                    peer["addr"] = peer_key
+                    peer["connected_at"] = now
+                peer["node_id"] = node_id
+                peer["device_ids"] = device_ids
+                peer["machine_name"] = machine_name
+                peer["role"] = str(data.get("role") or "slave")
+                peer["protocol_version"] = data.get(
+                    "protocol_version", message.get("v")
+                )
+                capabilities = data.get("capabilities")
+                peer["capabilities"] = (
+                    [str(item) for item in capabilities if isinstance(item, str)]
+                    if isinstance(capabilities, list)
+                    else []
+                )
+            else:
+                node_id = connection_node or peer_key
+                if connection_node is None:
+                    self._connection_nodes[peer_key] = node_id
+                peer = self._peers.setdefault(
+                    node_id,
+                    {
+                        "addr": peer_key,
+                        "node_id": node_id,
+                        "device_ids": [],
+                        "machine_name": "",
+                        "role": "",
+                        "protocol_version": message.get("v"),
+                        "capabilities": [],
+                        "connected_at": now,
+                    },
+                )
+                # This is an old socket superseded by a reconnect with the same
+                # node_id.  Do not let it steal ownership or refresh liveness.
+                if connection_node and peer.get("addr") != peer_key:
+                    return dict(peer)
+
             peer["last_seen"] = now
             peer["connected"] = True
-            if action == ActionType.HELLO:
-                data = message.get("data") or {}
-                peer["machine_name"] = str(data.get("machine_name") or "")
-                peer["role"] = str(data.get("role") or "slave")
             return dict(peer)
 
     def mark_disconnected(self, peer_key: str) -> None:
         with self._peers_lock:
-            peer = self._peers.get(peer_key)
-            if peer is not None:
+            node_id = self._connection_nodes.pop(peer_key, peer_key)
+            peer = self._peers.get(node_id)
+            if peer is not None and peer.get("addr") == peer_key:
                 peer["connected"] = False
 
     def peers(self) -> List[Dict[str, Any]]:
@@ -227,14 +496,20 @@ class HostLinkServer:
 
     # ── 内置动作 ─────────────────────────────────────────────
 
-    def _handle_ping(self, data: Dict[str, Any], peer: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_ping(
+        self, data: Dict[str, Any], peer: Dict[str, Any]
+    ) -> Dict[str, Any]:
         return {"pong": True, "server_time": time.time()}
 
-    def _handle_hello(self, data: Dict[str, Any], peer: Dict[str, Any]) -> Dict[str, Any]:
+    def _handle_hello(
+        self, data: Dict[str, Any], peer: Dict[str, Any]
+    ) -> Dict[str, Any]:
         return {
             "server_time": time.time(),
             "heartbeat_timeout": self.heartbeat_timeout,
             **self.hello_payload,
+            "assigned_node_id": peer.get("node_id"),
+            "device_ids": list(peer.get("device_ids") or []),
         }
 
 
