@@ -69,9 +69,11 @@ class TestCommandExecution:
             expected_version=2,
         ))
         assert deleted["status"] == "completed"
+        assert svc.store.get_template("tpl-reagent") is None
         assert svc.store.query_one(
-            "SELECT * FROM resource_template WHERE template_id = ?", ("tpl-reagent",)
-        ) is None
+            "SELECT deleted_at FROM resource_template WHERE uuid = ?",
+            ("tpl-reagent",),
+        )["deleted_at"] is not None
 
     def test_template_delete_rejects_referenced_template(self):
         svc = _svc()
@@ -133,7 +135,7 @@ class TestCommandExecution:
         ))
         assert resp["status"] == "rejected"
         assert resp["error_code"] == "version_conflict"
-        assert svc.store.get_relation("mi-1")["parent_uuid"] == "rack-A"  # 未被覆盖
+        assert svc.store.get_instance("mi-1")["parent_uuid"] == "rack-A"  # 未被覆盖
 
     def test_unknown_type_rejected(self):
         resp = execute_command(_svc(), _cmd("c-x", "inventory.explode", {}))

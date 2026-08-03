@@ -309,7 +309,7 @@ class InventoryService:
         now = self._now_ms()
         with self._tx() as conn:
             row = conn.execute(
-                "SELECT * FROM resource_template WHERE template_id = ?", (template_id,)
+                "SELECT * FROM inventory_resource_template WHERE template_id = ?", (template_id,)
             ).fetchone()
             if row is None:
                 if expected_version not in (None, 0):
@@ -318,7 +318,7 @@ class InventoryService:
                     )
                 version = 1
                 conn.execute(
-                    "INSERT INTO resource_template"
+                    "INSERT INTO inventory_resource_template"
                     "(template_id, name, category, spec_json, version) VALUES (?,?,?,?,?)",
                     (
                         template_id,
@@ -334,7 +334,7 @@ class InventoryService:
                 self._tx_check_version(current, expected_version)
                 version = current["version"] + 1
                 conn.execute(
-                    "UPDATE resource_template SET name = ?, category = ?, spec_json = ?, "
+                    "UPDATE inventory_resource_template SET name = ?, category = ?, spec_json = ?, "
                     "version = ? WHERE template_id = ?",
                     (
                         name if name != "" else current["name"],
@@ -349,7 +349,7 @@ class InventoryService:
                 )
                 event_type = "template.updated"
             result = conn.execute(
-                "SELECT * FROM resource_template WHERE template_id = ?", (template_id,)
+                "SELECT * FROM inventory_resource_template WHERE template_id = ?", (template_id,)
             ).fetchone()
             assert result is not None
             self._emit(
@@ -381,7 +381,7 @@ class InventoryService:
         now = self._now_ms()
         with self._tx() as conn:
             row = conn.execute(
-                "SELECT * FROM resource_template WHERE template_id = ?", (template_id,)
+                "SELECT * FROM inventory_resource_template WHERE template_id = ?", (template_id,)
             ).fetchone()
             if row is None:
                 raise NotFound(f"template {template_id} not found")
@@ -399,7 +399,7 @@ class InventoryService:
                     f"{lot_count} lot(s) and {instance_count} instance(s)"
                 )
             conn.execute(
-                "DELETE FROM resource_template WHERE template_id = ?", (template_id,)
+                "DELETE FROM inventory_resource_template WHERE template_id = ?", (template_id,)
             )
             self._emit(
                 conn,
@@ -877,12 +877,19 @@ class InventoryService:
         parent_uuid），relation 只补充「父物料的哪个具名位」（slot_id = PLR site
         名，↔ 云端 sites.label；uuid 仅后端索引）。每次 upsert 同步父列。
         """
+        current = conn.execute(
+            "SELECT version FROM resource_relation WHERE child_uuid = ?",
+            (child_uuid,),
+        ).fetchone()
+        version = int(current["version"]) + 1 if current is not None else 1
+        if current is not None:
+            conn.execute(
+                "DELETE FROM resource_relation WHERE child_uuid = ?", (child_uuid,)
+            )
         conn.execute(
             "INSERT INTO resource_relation(parent_uuid, slot_id, child_uuid, version) "
-            "VALUES (?,?,?,1) ON CONFLICT(child_uuid) DO UPDATE SET "
-            "parent_uuid = excluded.parent_uuid, slot_id = excluded.slot_id, "
-            "version = resource_relation.version + 1",
-            (parent_uuid, slot_id, child_uuid),
+            "VALUES (?,?,?,?)",
+            (parent_uuid, slot_id, child_uuid, version),
         )
         conn.execute(
             "UPDATE material_instance SET parent_uuid = ? WHERE edge_uuid = ?",
@@ -1013,11 +1020,12 @@ class InventoryService:
             old = conn.execute(
                 "SELECT * FROM resource_relation WHERE child_uuid = ?", (edge_uuid,)
             ).fetchone()
-            if old is None:
+            if old is None and not inst.get("parent_uuid"):
                 return inst
-            conn.execute(
-                "DELETE FROM resource_relation WHERE child_uuid = ?", (edge_uuid,)
-            )
+            if old is not None:
+                conn.execute(
+                    "DELETE FROM resource_relation WHERE child_uuid = ?", (edge_uuid,)
+                )
             version = inst["version"] + 1
             # 单一父不变量：取下即脱离父物料（回到顶层/未分配）
             conn.execute(
@@ -1031,7 +1039,12 @@ class InventoryService:
                 edge_uuid,
                 version,
                 "instance.detached",
-                {"from_parent": old["parent_uuid"], "from_slot": old["slot_id"]},
+                {
+                    "from_parent": (
+                        old["parent_uuid"] if old is not None else inst["parent_uuid"]
+                    ),
+                    "from_slot": old["slot_id"] if old is not None else "",
+                },
                 causation_id=causation_id,
                 actor=actor,
             )
@@ -1212,12 +1225,19 @@ class InventoryService:
             if row is not None:
                 self._tx_check_version(dict(row), expected_version)
             version = (row["version"] + 1) if row is not None else 1
-            conn.execute(
-                "INSERT INTO substance_content(instance_uuid, state_json, version) VALUES (?,?,?) "
-                "ON CONFLICT(instance_uuid) DO UPDATE SET state_json = excluded.state_json, "
-                "version = excluded.version",
-                (instance_uuid, json.dumps(state, ensure_ascii=False), version),
-            )
+            encoded_state = json.dumps(state, ensure_ascii=False)
+            if row is None:
+                conn.execute(
+                    "INSERT INTO substance_content(instance_uuid, state_json, version) "
+                    "VALUES (?,?,?)",
+                    (instance_uuid, encoded_state, version),
+                )
+            else:
+                conn.execute(
+                    "UPDATE substance_content SET state_json=?, version=? "
+                    "WHERE instance_uuid=?",
+                    (encoded_state, version, instance_uuid),
+                )
             self._emit(
                 conn, now, "content", instance_uuid, version, event_type,
                 {"state": state}, causation_id=causation_id, actor=actor,

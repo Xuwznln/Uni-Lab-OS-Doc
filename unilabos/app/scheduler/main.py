@@ -116,14 +116,37 @@ app = create_app(
     build_scheduler(inventory=_inventory, history=_history),
     device_state=_build_device_state(),
     history=_history,
+    include_execution_shaped_workflow_routes=False,
 )
+
+_workflow_history_path = os.environ.get(
+    "ULAB_WORKFLOW_HISTORY_DB", "~/.unilabos/workflow_history.db"
+).strip()
+if _workflow_history_path and _workflow_history_path.lower() != "off":
+    from unilabos.app.workflow_api import install_workflow_api
+    from unilabos.workflow.service import WorkflowService
+    from unilabos.workflow.store import WorkflowStore
+
+    install_workflow_api(
+        app,
+        WorkflowService(
+            WorkflowStore(os.path.abspath(os.path.expanduser(_workflow_history_path)))
+        ),
+    )
 if _inventory is not None:
+    from unilabos.app.scheduler.inventory.backend_api import (
+        install_backend_resource_api,
+    )
+    from unilabos.app.scheduler.inventory.backend_contract import (
+        BackendResourceService,
+    )
     from unilabos.app.scheduler.inventory.api import (
         create_legacy_material_router as _create_legacy_material_router,
         create_router as _create_inventory_router,
     )
     from unilabos.app.scheduler.inventory.layout import create_lab_router as _create_lab_router
 
+    install_backend_resource_api(app, BackendResourceService(_inventory.store))
     app.include_router(_create_inventory_router(_inventory))
     app.include_router(_create_legacy_material_router(_inventory))
     app.include_router(_create_lab_router(_inventory))

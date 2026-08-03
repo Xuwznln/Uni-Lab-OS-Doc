@@ -42,7 +42,7 @@ def build_warehouse_view(store: InventoryStore) -> Dict[str, Any]:
     """按品类（template）聚合仓储事实：批次 + 数量 + 实例 + 库位分布."""
     templates = {
         row["template_id"]: row
-        for row in store.query_all("SELECT * FROM resource_template")
+        for row in store.query_all("SELECT * FROM inventory_resource_template")
     }
     lots = store.query_all(
         "SELECT * FROM inventory_lot ORDER BY created_at ASC, rowid ASC"
@@ -136,7 +136,7 @@ def build_zone_storage_summary(store: InventoryStore) -> Dict[str, List[Dict[str
         "SELECT l.warehouse_zone_id AS zone_id, l.template_id, "
         "       SUM(l.quantity_available) AS available, COUNT(*) AS batches, "
         "       MAX(l.unit) AS unit, t.name AS tpl_name, t.spec_json AS spec_json "
-        "FROM inventory_lot l LEFT JOIN resource_template t "
+        "FROM inventory_lot l LEFT JOIN inventory_resource_template t "
         "     ON t.template_id = l.template_id "
         "WHERE l.quantity_available > 0 "
         "GROUP BY l.warehouse_zone_id, l.template_id"

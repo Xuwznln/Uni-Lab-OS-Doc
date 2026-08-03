@@ -163,7 +163,8 @@ def _template_map(store: InventoryStore, template_ids: List[str]) -> Dict[str, D
         return {}
     placeholders = ",".join("?" for _ in template_ids)
     rows = store.query_all(
-        f"SELECT * FROM resource_template WHERE template_id IN ({placeholders})",
+        f"SELECT * FROM inventory_resource_template "
+        f"WHERE template_id IN ({placeholders})",
         tuple(template_ids),
     )
     out: Dict[str, Dict[str, Any]] = {}
@@ -330,14 +331,25 @@ def seed_demo(service: InventoryService) -> Dict[str, Any]:
 
     with store.transaction() as conn:
         for template_id, name, category, spec in DEMO_TEMPLATES:
-            cur = conn.execute(
-                "INSERT INTO resource_template(template_id, name, category, spec_json, version) "
-                "VALUES (?,?,?,?,1) ON CONFLICT(template_id) DO UPDATE SET "
-                "name = excluded.name, category = excluded.category, "
-                "spec_json = excluded.spec_json",
-                (template_id, name, category, json.dumps(spec, ensure_ascii=False)),
-            )
-            created["templates"] += cur.rowcount if cur.rowcount > 0 else 0
+            encoded_spec = json.dumps(spec, ensure_ascii=False)
+            current = conn.execute(
+                "SELECT version FROM inventory_resource_template "
+                "WHERE template_id=?",
+                (template_id,),
+            ).fetchone()
+            if current is None:
+                conn.execute(
+                    "INSERT INTO inventory_resource_template("
+                    "template_id,name,category,spec_json,version) VALUES (?,?,?,?,1)",
+                    (template_id, name, category, encoded_spec),
+                )
+                created["templates"] += 1
+            else:
+                conn.execute(
+                    "UPDATE inventory_resource_template "
+                    "SET name=?,category=?,spec_json=? WHERE template_id=?",
+                    (name, category, encoded_spec, template_id),
+                )
 
     for zone in DEMO_ZONES:
         upsert_zone(store, zone)

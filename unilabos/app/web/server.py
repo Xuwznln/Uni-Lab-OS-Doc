@@ -15,6 +15,7 @@ from unilabos.utils.log import info, error
 from unilabos.utils.tracing import install_http_tracing
 from unilabos.app.web.api import setup_api_routes
 from unilabos.app.web.pages import setup_web_pages
+from unilabos.config.config import BasicConfig
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -28,6 +29,8 @@ install_http_tracing(app)
 
 # 创建页面路由
 pages = None
+workflow_routes_mounted = False
+resource_contract_routes_mounted = False
 
 # noinspection PyTypeChecker
 app.add_middleware(
@@ -35,7 +38,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Last-Event-ID"],
 )
 
 
@@ -76,7 +79,7 @@ def setup_server() -> FastAPI:
     Returns:
         FastAPI: 配置好的FastAPI应用实例
     """
-    global pages
+    global pages, resource_contract_routes_mounted, workflow_routes_mounted
 
     # 创建页面路由
     if pages is None:
@@ -84,6 +87,19 @@ def setup_server() -> FastAPI:
 
     # 设置API路由
     setup_api_routes(app)
+
+    # 共享 Workflow Interface 必须先于 Edge-only scheduler adapter 挂载，
+    # /workflows 表示定义，/workflow-tasks 表示运行。
+    if not workflow_routes_mounted and BasicConfig.working_dir:
+        try:
+            from unilabos.app.workflow_api import install_workflow_api
+            from unilabos.workflow.composition import compose_workflow_runtime
+
+            workflow_service = compose_workflow_runtime(BasicConfig.working_dir)
+            install_workflow_api(app, workflow_service)
+            workflow_routes_mounted = True
+        except Exception as e:  # noqa: BLE001 - unrelated Edge routes remain available
+            error(f"[Web] 挂载 Backend Workflow 合同失败: {str(e)}")
 
     # Edge 调度器与 Host 物料路由独立挂载；默认 embedded 物料服务不要求 --edge_scheduler。
     try:
@@ -94,15 +110,32 @@ def setup_server() -> FastAPI:
             get_inventory_service,
         )
 
-        app.include_router(create_scheduler_router(get_edge_scheduler, get_edge_backend))
+        app.include_router(
+            create_scheduler_router(
+                get_edge_scheduler,
+                get_edge_backend,
+                include_execution_shaped_workflow_routes=False,
+            )
+        )
         inventory_service = get_inventory_service()
         if inventory_service is not None:
+            from unilabos.app.scheduler.inventory.backend_api import (
+                install_backend_resource_api,
+            )
+            from unilabos.app.scheduler.inventory.backend_contract import (
+                BackendResourceService,
+            )
             from unilabos.app.scheduler.inventory.api import (
                 create_legacy_material_router,
                 create_router as create_inventory_router,
             )
             from unilabos.app.scheduler.inventory.layout import create_lab_router
 
+            if not resource_contract_routes_mounted:
+                install_backend_resource_api(
+                    app, BackendResourceService(inventory_service.store)
+                )
+                resource_contract_routes_mounted = True
             app.include_router(create_inventory_router(inventory_service))
             app.include_router(create_legacy_material_router(inventory_service))
             app.include_router(create_lab_router(inventory_service))

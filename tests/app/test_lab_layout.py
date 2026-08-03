@@ -81,8 +81,9 @@ def test_assembly_tree(service: InventoryService):
 
     with service.store.transaction() as conn:
         conn.execute(
-            "INSERT INTO resource_template(template_id, name, category, spec_json) "
-            "VALUES ('tpl-rack', '架', 'rack', ?)",
+            "INSERT INTO inventory_resource_template("
+            "template_id, name, category, spec_json, version) "
+            "VALUES ('tpl-rack', '架', 'rack', ?, 1)",
             (_json.dumps({"grid": {"rows": 2, "cols": 3}}),),
         )
     service.register_instance(template_id="tpl-rack", edge_uuid="rack-1")

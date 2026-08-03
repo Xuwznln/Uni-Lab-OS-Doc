@@ -23,7 +23,13 @@ from unilabos.app.scheduler.inventory.domain import (
     VersionConflict,
 )
 from unilabos.app.scheduler.inventory.service import InventoryService
-from unilabos.app.scheduler.inventory.store import InventoryStore, _SCHEMA
+from unilabos.app.scheduler.inventory.store import (
+    SCHEMA_VERSION,
+    InventoryStore,
+    _SCHEMA,
+    _SCHEMA_V2,
+    _SCHEMA_V3_ADD_PARENT,
+)
 
 
 @pytest.fixture()
@@ -429,20 +435,21 @@ class TestParentAndSite:
 
 class TestStoreMigration:
     def test_v2_database_upgrades_in_place(self, tmp_path):
-        """v2 老库（无 parent_uuid 列）重开后原地升级到 v3。"""
+        """真实 v2 老库（无 parent_uuid 列）原地升级到当前规范。"""
         db = str(tmp_path / "inv.db")
-        store = InventoryStore(db)
-        # 模拟 v2 老库：删列不可行，直接把 user_version 降回 2 再重开走迁移分支
-        store._conn.execute("PRAGMA user_version = 2")
-        store._conn.commit()
-        store.close()
+        connection = sqlite3.connect(db)
+        connection.executescript(_SCHEMA)
+        connection.executescript(_SCHEMA_V2)
+        connection.execute("PRAGMA user_version = 2")
+        connection.commit()
+        connection.close()
         reopened = InventoryStore(db)
         cols = [r["name"] for r in reopened.query_all("PRAGMA table_info(material_instance)")]
         assert "parent_uuid" in cols
-        assert reopened.query_one("PRAGMA user_version")["user_version"] == 4
+        assert reopened.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
         reopened.close()
 
-    def test_v1_database_upgrades_to_v4_and_backfills_parent(self, tmp_path):
+    def test_v1_database_upgrades_to_current_and_backfills_parent(self, tmp_path):
         """临时 v1 库只从既有 relation 确定性补 parent，不触碰用户实库。"""
 
         db = str(tmp_path / "inventory-v1.db")
@@ -462,27 +469,23 @@ class TestStoreMigration:
         conn.close()
 
         reopened = InventoryStore(db)
-        assert reopened.query_one("PRAGMA user_version")["user_version"] == 4
+        assert reopened.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
         assert reopened.get_instance("mi-v1")["parent_uuid"] == "rack-v1"
         assert reopened.parent_consistency_issues() == []
         reopened.close()
 
-    def test_v3_to_v4_parent_audit_and_only_safe_repair(self, tmp_path):
+    def test_v3_to_current_parent_audit_and_only_safe_repair(self, tmp_path):
         db = str(tmp_path / "inventory-v3.db")
-        store = InventoryStore(db)
-        service = InventoryService(store)
-        service.register_instance(
-            edge_uuid="mi-v3",
-            parent_uuid="rack-relation",
-            slot_id="A1",
-        )
-        store.close()
-
-        # 构造真实 v3 形状：parent_uuid 已有、trace 列尚未加入，并模拟旧
-        # register_instance 漏写 parent_uuid 的历史行。
         conn = sqlite3.connect(db)
+        conn.executescript(_SCHEMA)
+        conn.executescript(_SCHEMA_V2)
+        conn.execute(_SCHEMA_V3_ADD_PARENT)
         conn.execute(
-            "UPDATE material_instance SET parent_uuid = '' WHERE edge_uuid = 'mi-v3'"
+            "INSERT INTO material_instance(edge_uuid,parent_uuid) VALUES ('mi-v3','')"
+        )
+        conn.execute(
+            "INSERT INTO resource_relation(parent_uuid,slot_id,child_uuid,version) "
+            "VALUES ('rack-relation','A1','mi-v3',1)"
         )
         for table, column in (
             ("inventory_ledger", "trace_id"),
@@ -498,7 +501,7 @@ class TestStoreMigration:
         conn.close()
 
         reopened = InventoryStore(db)
-        assert reopened.query_one("PRAGMA user_version")["user_version"] == 4
+        assert reopened.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
         assert {
             row["name"]
             for row in reopened.query_all("PRAGMA table_info(sync_outbox)")
@@ -529,6 +532,7 @@ class TestStoreMigration:
         assert audit["reason"] == "v3 register parent backfill"
 
         # 双方非空但冲突时不猜、不覆盖，只返回待人工裁决项。
+        service.register_instance(edge_uuid="rack-other")
         with reopened.transaction() as tx:
             tx.execute(
                 "UPDATE material_instance SET parent_uuid = 'rack-other' "

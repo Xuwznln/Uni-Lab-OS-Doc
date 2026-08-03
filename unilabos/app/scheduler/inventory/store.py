@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class InvalidCursorAdvance(ValueError):
@@ -157,6 +157,731 @@ _SCHEMA_V4_COLUMNS = {
     },
 }
 
+# v5：前端共享资源合同以 Backend c35d821 的 SQLite 结构为准。
+#
+# 旧 Inventory 表不是直接删除：迁移先把事实搬入规范
+# resource_template/material/site/material_state_history，再用只承载旧字段拼写的
+# 可写视图维持 Edge 内部 Inventory 调用。这样公共接口和新写入只有一份 Material / Site
+# 事实，同时既有 lot/reservation/ledger 能继续运行。
+_SCHEMA_V5_BACKEND_CONTRACT = r"""
+BEGIN IMMEDIATE;
+
+ALTER TABLE resource_template RENAME TO resource_template_before_backend_contract;
+ALTER TABLE material_instance RENAME TO material_instance_before_backend_contract;
+ALTER TABLE resource_relation RENAME TO resource_relation_before_backend_contract;
+ALTER TABLE substance_content RENAME TO substance_content_before_backend_contract;
+
+DROP INDEX IF EXISTS idx_instance_barcode;
+DROP INDEX IF EXISTS idx_instance_legacy;
+DROP INDEX IF EXISTS idx_instance_parent;
+DROP INDEX IF EXISTS idx_relation_parent;
+
+CREATE TABLE resource_template (
+    uuid TEXT PRIMARY KEY NOT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    deleted_at DATETIME,
+    description TEXT,
+    meta_data TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_data)),
+    name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    header TEXT,
+    footer TEXT,
+    icon TEXT,
+    model TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(model)),
+    module TEXT,
+    language TEXT,
+    tags TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tags)),
+    data_schema TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(data_schema)),
+    config_schema TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(config_schema)),
+    pose TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(pose)),
+    config_info TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(config_info)),
+    cover TEXT,
+    scene TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(scene)),
+    device_params TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(device_params)),
+    manufacturer_uuid TEXT,
+    ui_overlay TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(ui_overlay))
+);
+CREATE UNIQUE INDEX ux_resource_template_name_active
+    ON resource_template (name) WHERE deleted_at IS NULL;
+CREATE INDEX idx_resource_template_type_active
+    ON resource_template (resource_type) WHERE deleted_at IS NULL;
+
+CREATE TABLE resource_handle_template (
+    uuid TEXT PRIMARY KEY NOT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    deleted_at DATETIME,
+    description TEXT,
+    meta_data TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_data)),
+    resource_template_uuid TEXT NOT NULL,
+    name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    io_type TEXT NOT NULL CHECK (
+        io_type IN ('source', 'target', 'bidirectional')
+    ),
+    source TEXT,
+    key TEXT,
+    side TEXT,
+    FOREIGN KEY (resource_template_uuid) REFERENCES resource_template (uuid)
+        ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX ux_resource_handle_business_key_active
+    ON resource_handle_template (resource_template_uuid, io_type, name)
+    WHERE deleted_at IS NULL;
+CREATE INDEX idx_resource_handle_template_active
+    ON resource_handle_template (resource_template_uuid)
+    WHERE deleted_at IS NULL;
+
+CREATE TABLE resource_template_inventory (
+    resource_template_uuid TEXT PRIMARY KEY,
+    aggregate_version INTEGER NOT NULL DEFAULT 1 CHECK (aggregate_version > 0),
+    FOREIGN KEY (resource_template_uuid) REFERENCES resource_template (uuid)
+        ON DELETE RESTRICT
+);
+
+CREATE TABLE material (
+    uuid TEXT PRIMARY KEY NOT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    deleted_at DATETIME,
+    description TEXT,
+    meta_data TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_data)),
+    resource_template_uuid TEXT NOT NULL,
+    parent_uuid TEXT,
+    class TEXT NOT NULL,
+    barcode TEXT NOT NULL,
+    name TEXT NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(config)),
+    data TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(data)),
+    CHECK (parent_uuid IS NULL OR parent_uuid <> uuid),
+    FOREIGN KEY (resource_template_uuid) REFERENCES resource_template (uuid)
+        ON DELETE RESTRICT,
+    FOREIGN KEY (parent_uuid) REFERENCES material (uuid) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX ux_barcode_active
+    ON material (LOWER(barcode))
+    WHERE deleted_at IS NULL AND barcode <> '';
+CREATE UNIQUE INDEX ux_material_root_name_active
+    ON material (LOWER(name))
+    WHERE deleted_at IS NULL AND parent_uuid IS NULL;
+CREATE INDEX idx_material_template_active
+    ON material (resource_template_uuid) WHERE deleted_at IS NULL;
+CREATE INDEX idx_material_parent_active
+    ON material (parent_uuid)
+    WHERE deleted_at IS NULL AND parent_uuid IS NOT NULL;
+
+CREATE TABLE relative_position (
+    uuid TEXT PRIMARY KEY NOT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    deleted_at DATETIME,
+    description TEXT,
+    meta_data TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_data)),
+    material_uuid TEXT NOT NULL,
+    position_x REAL NOT NULL DEFAULT 0,
+    position_y REAL NOT NULL DEFAULT 0,
+    position_z REAL NOT NULL DEFAULT 0,
+    depth REAL NOT NULL DEFAULT 0 CHECK (depth >= 0),
+    length REAL NOT NULL DEFAULT 0 CHECK (length >= 0),
+    width REAL NOT NULL DEFAULT 0 CHECK (width >= 0),
+    scale_x REAL NOT NULL DEFAULT 1 CHECK (scale_x > 0),
+    scale_y REAL NOT NULL DEFAULT 1 CHECK (scale_y > 0),
+    scale_z REAL NOT NULL DEFAULT 1 CHECK (scale_z > 0),
+    rotation_x REAL NOT NULL DEFAULT 0,
+    rotation_y REAL NOT NULL DEFAULT 0,
+    rotation_z REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (material_uuid) REFERENCES material (uuid) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX ux_relative_position_material_active
+    ON relative_position (material_uuid) WHERE deleted_at IS NULL;
+
+CREATE TABLE material_inventory (
+    material_uuid TEXT PRIMARY KEY,
+    legacy_cloud_id TEXT NOT NULL DEFAULT '',
+    legacy_template_id TEXT NOT NULL DEFAULT '',
+    lot_id TEXT NOT NULL DEFAULT '',
+    inventory_status TEXT NOT NULL DEFAULT 'warehouse',
+    disposition TEXT NOT NULL DEFAULT 'active',
+    aggregate_version INTEGER NOT NULL DEFAULT 1 CHECK (aggregate_version > 0),
+    FOREIGN KEY (material_uuid) REFERENCES material (uuid) ON DELETE RESTRICT
+);
+CREATE INDEX idx_material_inventory_legacy
+    ON material_inventory (legacy_cloud_id);
+
+CREATE TABLE material_content_version (
+    material_uuid TEXT PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    FOREIGN KEY (material_uuid) REFERENCES material (uuid) ON DELETE RESTRICT
+);
+
+CREATE TABLE site (
+    uuid TEXT PRIMARY KEY NOT NULL DEFAULT (
+        lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+        substr(hex(randomblob(2)), 2) || '-' ||
+        substr('89ab', abs(random()) % 4 + 1, 1) ||
+        substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))
+    ),
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    deleted_at DATETIME,
+    description TEXT,
+    meta_data TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_data)),
+    material_uuid TEXT NOT NULL,
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0 CHECK (sort_order >= 0),
+    allowed_resource_template_uuids TEXT NOT NULL DEFAULT '[]'
+        CHECK (
+            json_valid(allowed_resource_template_uuids)
+            AND json_type(allowed_resource_template_uuids) = 'array'
+        ),
+    occupied_material_uuid TEXT,
+    position_x REAL NOT NULL DEFAULT 0,
+    position_y REAL NOT NULL DEFAULT 0,
+    position_z REAL NOT NULL DEFAULT 0,
+    depth REAL NOT NULL DEFAULT 0 CHECK (depth >= 0),
+    length REAL NOT NULL DEFAULT 0 CHECK (length >= 0),
+    width REAL NOT NULL DEFAULT 0 CHECK (width >= 0),
+    CHECK (occupied_material_uuid IS NULL OR occupied_material_uuid <> material_uuid),
+    FOREIGN KEY (material_uuid) REFERENCES material (uuid) ON DELETE RESTRICT,
+    FOREIGN KEY (occupied_material_uuid) REFERENCES material (uuid) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX ux_site_material_name_active
+    ON site (material_uuid, LOWER(name)) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX ux_site_occupied_material_active
+    ON site (occupied_material_uuid)
+    WHERE deleted_at IS NULL AND occupied_material_uuid IS NOT NULL;
+CREATE INDEX idx_site_material_order_active
+    ON site (material_uuid, sort_order, create_time, uuid)
+    WHERE deleted_at IS NULL;
+
+CREATE TABLE material_state_history (
+    uuid TEXT PRIMARY KEY NOT NULL DEFAULT (
+        lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+        substr(hex(randomblob(2)), 2) || '-' ||
+        substr('89ab', abs(random()) % 4 + 1, 1) ||
+        substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))
+    ),
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    deleted_at DATETIME,
+    description TEXT,
+    meta_data TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta_data)),
+    material_uuid TEXT NOT NULL,
+    status TEXT,
+    state_data TEXT NOT NULL DEFAULT '{}'
+        CHECK (json_valid(state_data) AND json_type(state_data) = 'object'),
+    source TEXT,
+    observed_at DATETIME NOT NULL,
+    FOREIGN KEY (material_uuid) REFERENCES material (uuid) ON DELETE RESTRICT
+);
+CREATE INDEX idx_material_state_history_timeline
+    ON material_state_history (material_uuid, observed_at DESC, uuid DESC);
+
+INSERT INTO resource_template (
+    uuid, create_time, update_time, deleted_at, description, meta_data,
+    name, display_name, resource_type, model, tags, data_schema,
+    config_schema, pose, config_info, scene, device_params, ui_overlay
+)
+SELECT
+    template_id,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    NULL,
+    NULL,
+    '{}',
+    template_id,
+    CASE WHEN name = '' THEN template_id ELSE name END,
+    CASE WHEN category = '' THEN 'resource' ELSE category END,
+    CASE WHEN json_valid(spec_json) THEN spec_json ELSE '{}' END,
+    '[]', '{}', '{}', '{}', '[]', '[]', '{}', '{}'
+FROM resource_template_before_backend_contract;
+
+-- 旧 Edge 允许先登记实例、后同步模板。规范 Material 必须始终引用一个模板，
+-- 因此为这类引用创建“已软删除”的占位模板；后续模板同步会原位复活它。
+INSERT OR IGNORE INTO resource_template (
+    uuid, create_time, update_time, deleted_at, description, meta_data,
+    name, display_name, resource_type, model, tags, data_schema,
+    config_schema, pose, config_info, scene, device_params, ui_overlay
+)
+SELECT DISTINCT
+    CASE WHEN template_id = '' THEN '__edge_unknown_resource_template__'
+         ELSE template_id END,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    'Edge legacy placeholder; hidden from the shared Backend Interface',
+    '{"unilab_edge_placeholder":true}',
+    CASE WHEN template_id = '' THEN '__edge_unknown_resource_template__'
+         ELSE template_id END,
+    CASE WHEN template_id = '' THEN 'Unknown Edge resource'
+         ELSE template_id END,
+    'resource', '{}', '[]', '{}', '{}', '{}', '[]', '[]', '{}', '{}'
+FROM material_instance_before_backend_contract;
+
+INSERT OR IGNORE INTO resource_template (
+    uuid, create_time, update_time, deleted_at, description, meta_data,
+    name, display_name, resource_type, model, tags, data_schema,
+    config_schema, pose, config_info, scene, device_params, ui_overlay
+) VALUES (
+    '__edge_unknown_resource_template__',
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    'Edge legacy placeholder; hidden from the shared Backend Interface',
+    '{"unilab_edge_placeholder":true}',
+    '__edge_unknown_resource_template__', 'Unknown Edge resource',
+    'resource', '{}', '[]', '{}', '{}', '{}', '[]', '[]', '{}', '{}'
+);
+
+INSERT INTO resource_template_inventory(resource_template_uuid, aggregate_version)
+SELECT template_id, CASE WHEN version > 0 THEN version ELSE 1 END
+FROM resource_template_before_backend_contract;
+
+INSERT INTO material (
+    uuid, create_time, update_time, deleted_at, description, meta_data,
+    resource_template_uuid, parent_uuid, class, barcode, name, config, data
+)
+SELECT
+    legacy.edge_uuid,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    CASE legacy.status
+        WHEN 'consumed' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHEN 'discarded' THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        ELSE NULL
+    END,
+    NULL,
+    json_object(
+        'unilab_legacy',
+        json_object('barcode', legacy.barcode, 'cloud_id', legacy.legacy_cloud_id)
+    ),
+    COALESCE(NULLIF(legacy.template_id, ''), '__edge_unknown_resource_template__'),
+    NULL,
+    'resource',
+    CASE
+        WHEN legacy.barcode = '' THEN ''
+        WHEN legacy.status IN ('consumed', 'discarded') THEN legacy.barcode
+        WHEN legacy.edge_uuid = (
+            SELECT MIN(other.edge_uuid)
+            FROM material_instance_before_backend_contract AS other
+            WHERE LOWER(other.barcode) = LOWER(legacy.barcode)
+              AND other.status NOT IN ('consumed', 'discarded')
+        ) THEN legacy.barcode
+        ELSE ''
+    END,
+    legacy.edge_uuid,
+    '{}',
+    COALESCE(
+        (SELECT CASE WHEN json_valid(content.state_json) THEN content.state_json ELSE '{}' END
+         FROM substance_content_before_backend_contract AS content
+         WHERE content.instance_uuid = legacy.edge_uuid),
+        '{}'
+    )
+FROM material_instance_before_backend_contract AS legacy;
+
+-- v1-v4 接受未先登记的父容器。把这些标识提升为明确标记的规范 Material，
+-- 从而既保留旧关系，又不放宽 Backend 的外键不变量。
+INSERT OR IGNORE INTO material (
+    uuid, create_time, update_time, deleted_at, description, meta_data,
+    resource_template_uuid, parent_uuid, class, barcode, name, config, data
+)
+SELECT DISTINCT
+    parent_uuid,
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    NULL,
+    'Edge legacy parent placeholder',
+    '{"unilab_edge_placeholder":true}',
+    '__edge_unknown_resource_template__', NULL, 'resource', '',
+    '__edge_placeholder__:' || parent_uuid, '{}', '{}'
+FROM (
+    SELECT parent_uuid
+    FROM material_instance_before_backend_contract
+    WHERE parent_uuid <> ''
+    UNION
+    SELECT parent_uuid
+    FROM resource_relation_before_backend_contract
+    WHERE parent_uuid <> ''
+)
+WHERE parent_uuid NOT IN (SELECT uuid FROM material);
+
+UPDATE material
+SET parent_uuid = (
+    SELECT NULLIF(legacy.parent_uuid, '')
+    FROM material_instance_before_backend_contract AS legacy
+    WHERE legacy.edge_uuid = material.uuid
+)
+WHERE EXISTS (
+    SELECT 1
+    FROM material_instance_before_backend_contract AS legacy
+    JOIN material AS parent ON parent.uuid = legacy.parent_uuid
+    WHERE legacy.edge_uuid = material.uuid
+      AND legacy.parent_uuid <> ''
+      AND legacy.parent_uuid <> legacy.edge_uuid
+);
+
+INSERT INTO material_inventory(
+    material_uuid, legacy_cloud_id, legacy_template_id, lot_id, inventory_status,
+    disposition, aggregate_version
+)
+SELECT
+    edge_uuid,
+    legacy_cloud_id,
+    template_id,
+    lot_id,
+    status,
+    CASE status
+        WHEN 'consumed' THEN 'consumed'
+        WHEN 'discarded' THEN 'discarded'
+        WHEN 'quarantined' THEN 'quarantined'
+        ELSE 'active'
+    END,
+    CASE WHEN version > 0 THEN version ELSE 1 END
+FROM material_instance_before_backend_contract;
+
+INSERT OR IGNORE INTO material_inventory(
+    material_uuid, legacy_template_id, inventory_status, aggregate_version
+)
+SELECT material.uuid, '', 'warehouse', 1
+FROM material
+WHERE json_extract(material.meta_data, '$.unilab_edge_placeholder') = 1;
+
+INSERT INTO material_content_version(material_uuid, version)
+SELECT content.instance_uuid, CASE WHEN content.version > 0 THEN content.version ELSE 1 END
+FROM substance_content_before_backend_contract AS content
+JOIN material ON material.uuid = content.instance_uuid;
+
+INSERT INTO site (
+    create_time, update_time, deleted_at, description, meta_data,
+    material_uuid, name, sort_order, allowed_resource_template_uuids,
+    occupied_material_uuid, position_x, position_y, position_z,
+    depth, length, width
+)
+SELECT
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    NULL,
+    NULL,
+    '{}',
+    relation.parent_uuid,
+    relation.slot_id,
+    0,
+    '[]',
+    MIN(relation.child_uuid),
+    0, 0, 0, 0, 0, 0
+FROM resource_relation_before_backend_contract AS relation
+JOIN material AS owner ON owner.uuid = relation.parent_uuid
+JOIN material AS occupant ON occupant.uuid = relation.child_uuid
+WHERE relation.slot_id <> ''
+GROUP BY relation.parent_uuid, LOWER(relation.slot_id);
+
+DROP TABLE resource_relation_before_backend_contract;
+DROP TABLE material_instance_before_backend_contract;
+DROP TABLE resource_template_before_backend_contract;
+DROP TABLE substance_content_before_backend_contract;
+
+CREATE VIEW inventory_resource_template AS
+SELECT
+    template.uuid AS template_id,
+    template.display_name AS name,
+    template.resource_type AS category,
+    template.model AS spec_json,
+    inventory.aggregate_version AS version
+FROM resource_template AS template
+JOIN resource_template_inventory AS inventory
+    ON inventory.resource_template_uuid = template.uuid
+WHERE template.deleted_at IS NULL;
+
+CREATE TRIGGER inventory_resource_template_insert
+INSTEAD OF INSERT ON inventory_resource_template
+BEGIN
+    INSERT INTO resource_template (
+        uuid, create_time, update_time, deleted_at, description, meta_data,
+        name, display_name, resource_type, model, tags, data_schema,
+        config_schema, pose, config_info, scene, device_params, ui_overlay
+    ) VALUES (
+        NEW.template_id,
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        NULL, NULL, '{}',
+        NEW.template_id,
+        CASE WHEN NEW.name = '' THEN NEW.template_id ELSE NEW.name END,
+        CASE WHEN NEW.category = '' THEN 'resource' ELSE NEW.category END,
+        CASE WHEN json_valid(NEW.spec_json) THEN NEW.spec_json ELSE '{}' END,
+        '[]', '{}', '{}', '{}', '[]', '[]', '{}', '{}'
+    )
+    ON CONFLICT(uuid) DO UPDATE SET
+        update_time = excluded.update_time,
+        deleted_at = NULL,
+        display_name = excluded.display_name,
+        resource_type = excluded.resource_type,
+        model = excluded.model;
+    INSERT INTO resource_template_inventory(resource_template_uuid, aggregate_version)
+    VALUES (NEW.template_id, CASE WHEN NEW.version > 0 THEN NEW.version ELSE 1 END)
+    ON CONFLICT(resource_template_uuid) DO UPDATE SET
+        aggregate_version = excluded.aggregate_version;
+END;
+
+CREATE TRIGGER inventory_resource_template_update
+INSTEAD OF UPDATE ON inventory_resource_template
+BEGIN
+    UPDATE resource_template
+    SET display_name = CASE WHEN NEW.name = '' THEN NEW.template_id ELSE NEW.name END,
+        resource_type = CASE WHEN NEW.category = '' THEN 'resource' ELSE NEW.category END,
+        model = CASE WHEN json_valid(NEW.spec_json) THEN NEW.spec_json ELSE '{}' END,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE uuid = OLD.template_id AND deleted_at IS NULL;
+    UPDATE resource_template_inventory
+    SET aggregate_version = NEW.version
+    WHERE resource_template_uuid = OLD.template_id;
+END;
+
+CREATE TRIGGER inventory_resource_template_delete
+INSTEAD OF DELETE ON inventory_resource_template
+BEGIN
+    UPDATE resource_template
+    SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE uuid = OLD.template_id AND deleted_at IS NULL;
+    UPDATE resource_handle_template
+    SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE resource_template_uuid = OLD.template_id AND deleted_at IS NULL;
+END;
+
+CREATE VIEW material_instance AS
+SELECT
+    material.uuid AS edge_uuid,
+    inventory.legacy_cloud_id AS legacy_cloud_id,
+    inventory.lot_id AS lot_id,
+    inventory.legacy_template_id AS template_id,
+    material.barcode AS barcode,
+    inventory.inventory_status AS status,
+    inventory.aggregate_version AS version,
+    COALESCE(material.parent_uuid, '') AS parent_uuid
+FROM material AS material
+JOIN material_inventory AS inventory ON inventory.material_uuid = material.uuid
+;
+
+CREATE TRIGGER material_instance_insert
+INSTEAD OF INSERT ON material_instance
+BEGIN
+    INSERT OR IGNORE INTO resource_template (
+        uuid, create_time, update_time, deleted_at, description, meta_data,
+        name, display_name, resource_type, model, tags, data_schema,
+        config_schema, pose, config_info, scene, device_params, ui_overlay
+    ) VALUES (
+        COALESCE(NULLIF(NEW.template_id, ''), '__edge_unknown_resource_template__'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        'Edge legacy placeholder; hidden from the shared Backend Interface',
+        '{"unilab_edge_placeholder":true}',
+        COALESCE(NULLIF(NEW.template_id, ''), '__edge_unknown_resource_template__'),
+        COALESCE(NULLIF(NEW.template_id, ''), 'Unknown Edge resource'),
+        'resource', '{}', '[]', '{}', '{}', '{}', '[]', '[]', '{}', '{}'
+    );
+    INSERT OR IGNORE INTO resource_template_inventory(
+        resource_template_uuid, aggregate_version
+    ) VALUES (
+        COALESCE(NULLIF(NEW.template_id, ''), '__edge_unknown_resource_template__'), 1
+    );
+    INSERT INTO material (
+        uuid, create_time, update_time, deleted_at, description, meta_data,
+        resource_template_uuid, parent_uuid, class, barcode, name, config, data
+    ) VALUES (
+        NEW.edge_uuid,
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        NULL, NULL, '{}',
+        COALESCE(NULLIF(NEW.template_id, ''), '__edge_unknown_resource_template__'),
+        NULL,
+        'resource', NEW.barcode, NEW.edge_uuid, '{}', '{}'
+    );
+    INSERT INTO material_inventory(
+        material_uuid, legacy_cloud_id, legacy_template_id, lot_id, inventory_status,
+        disposition, aggregate_version
+    ) VALUES (
+        NEW.edge_uuid, NEW.legacy_cloud_id, NEW.template_id, NEW.lot_id, NEW.status,
+        CASE NEW.status
+            WHEN 'consumed' THEN 'consumed'
+            WHEN 'discarded' THEN 'discarded'
+            WHEN 'quarantined' THEN 'quarantined'
+            ELSE 'active'
+        END,
+        CASE WHEN NEW.version > 0 THEN NEW.version ELSE 1 END
+    );
+END;
+
+CREATE TRIGGER material_instance_update
+INSTEAD OF UPDATE ON material_instance
+BEGIN
+    UPDATE material
+    SET resource_template_uuid = COALESCE(
+            NULLIF(NEW.template_id, ''), '__edge_unknown_resource_template__'
+        ),
+        parent_uuid = NULLIF(NEW.parent_uuid, ''),
+        barcode = NEW.barcode,
+        deleted_at = CASE NEW.status
+            WHEN 'consumed' THEN COALESCE(
+                material.deleted_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            )
+            WHEN 'discarded' THEN COALESCE(
+                material.deleted_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            )
+            ELSE NULL
+        END,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE uuid = OLD.edge_uuid;
+    UPDATE material_inventory
+    SET legacy_cloud_id = NEW.legacy_cloud_id,
+        legacy_template_id = NEW.template_id,
+        lot_id = NEW.lot_id,
+        inventory_status = NEW.status,
+        disposition = CASE NEW.status
+            WHEN 'consumed' THEN 'consumed'
+            WHEN 'discarded' THEN 'discarded'
+            WHEN 'quarantined' THEN 'quarantined'
+            ELSE 'active'
+        END,
+        aggregate_version = NEW.version
+    WHERE material_uuid = OLD.edge_uuid;
+END;
+
+CREATE VIEW resource_relation AS
+SELECT
+    site.material_uuid AS parent_uuid,
+    site.name AS slot_id,
+    material.uuid AS child_uuid,
+    inventory.aggregate_version AS version
+FROM material AS material
+JOIN material_inventory AS inventory ON inventory.material_uuid = material.uuid
+LEFT JOIN site AS site
+    ON site.occupied_material_uuid = material.uuid AND site.deleted_at IS NULL
+WHERE material.deleted_at IS NULL
+  AND site.uuid IS NOT NULL;
+
+CREATE TRIGGER resource_relation_insert
+INSTEAD OF INSERT ON resource_relation
+BEGIN
+    INSERT OR IGNORE INTO resource_template (
+        uuid, create_time, update_time, deleted_at, description, meta_data,
+        name, display_name, resource_type, model, tags, data_schema,
+        config_schema, pose, config_info, scene, device_params, ui_overlay
+    ) VALUES (
+        '__edge_unknown_resource_template__',
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        'Edge legacy placeholder; hidden from the shared Backend Interface',
+        '{"unilab_edge_placeholder":true}',
+        '__edge_unknown_resource_template__', 'Unknown Edge resource',
+        'resource', '{}', '[]', '{}', '{}', '{}', '[]', '[]', '{}', '{}'
+    );
+    INSERT OR IGNORE INTO resource_template_inventory(
+        resource_template_uuid, aggregate_version
+    ) VALUES ('__edge_unknown_resource_template__', 1);
+    INSERT OR IGNORE INTO material (
+        uuid, create_time, update_time, deleted_at, description, meta_data,
+        resource_template_uuid, parent_uuid, class, barcode, name, config, data
+    ) VALUES (
+        NEW.parent_uuid,
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        NULL,
+        'Edge legacy parent placeholder',
+        '{"unilab_edge_placeholder":true}',
+        '__edge_unknown_resource_template__', NULL, 'resource', '',
+        '__edge_placeholder__:' || NEW.parent_uuid, '{}', '{}'
+    );
+    INSERT OR IGNORE INTO material_inventory(
+        material_uuid, legacy_template_id, inventory_status, aggregate_version
+    ) VALUES (NEW.parent_uuid, '', 'warehouse', 1);
+    UPDATE material
+    SET parent_uuid = NULLIF(NEW.parent_uuid, ''),
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE uuid = NEW.child_uuid AND deleted_at IS NULL;
+    UPDATE site
+    SET occupied_material_uuid = NULL,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE occupied_material_uuid = NEW.child_uuid AND deleted_at IS NULL;
+    INSERT OR IGNORE INTO site (
+        create_time, update_time, deleted_at, description, meta_data,
+        material_uuid, name, sort_order, allowed_resource_template_uuids,
+        occupied_material_uuid, position_x, position_y, position_z,
+        depth, length, width
+    )
+    SELECT
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        NULL, NULL, '{}', NEW.parent_uuid, NEW.slot_id, 0, '[]',
+        NEW.child_uuid, 0, 0, 0, 0, 0, 0
+    WHERE NEW.slot_id <> '';
+    UPDATE site
+    SET occupied_material_uuid = NEW.child_uuid,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE material_uuid = NEW.parent_uuid
+      AND LOWER(name) = LOWER(NEW.slot_id)
+      AND deleted_at IS NULL
+      AND NEW.slot_id <> '';
+END;
+
+CREATE TRIGGER resource_relation_update
+INSTEAD OF UPDATE ON resource_relation
+BEGIN
+    DELETE FROM resource_relation WHERE child_uuid = OLD.child_uuid;
+    INSERT INTO resource_relation(parent_uuid, slot_id, child_uuid, version)
+    VALUES (NEW.parent_uuid, NEW.slot_id, NEW.child_uuid, NEW.version);
+END;
+
+CREATE TRIGGER resource_relation_delete
+INSTEAD OF DELETE ON resource_relation
+BEGIN
+    UPDATE site
+    SET occupied_material_uuid = NULL,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE occupied_material_uuid = OLD.child_uuid AND deleted_at IS NULL;
+END;
+
+CREATE VIEW substance_content AS
+SELECT
+    material.uuid AS instance_uuid,
+    material.data AS state_json,
+    content.version AS version
+FROM material
+JOIN material_content_version AS content ON content.material_uuid = material.uuid
+WHERE material.deleted_at IS NULL;
+
+CREATE TRIGGER substance_content_insert
+INSTEAD OF INSERT ON substance_content
+BEGIN
+    UPDATE material
+    SET data = CASE WHEN json_valid(NEW.state_json) THEN NEW.state_json ELSE '{}' END,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE uuid = NEW.instance_uuid AND deleted_at IS NULL;
+    INSERT INTO material_content_version(material_uuid, version)
+    VALUES (NEW.instance_uuid, CASE WHEN NEW.version > 0 THEN NEW.version ELSE 1 END);
+END;
+
+CREATE TRIGGER substance_content_update
+INSTEAD OF UPDATE ON substance_content
+BEGIN
+    UPDATE material
+    SET data = CASE WHEN json_valid(NEW.state_json) THEN NEW.state_json ELSE '{}' END,
+        update_time = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE uuid = OLD.instance_uuid AND deleted_at IS NULL;
+    UPDATE material_content_version
+    SET version = NEW.version
+    WHERE material_uuid = OLD.instance_uuid;
+END;
+
+PRAGMA user_version = 5;
+COMMIT;
+"""
+
 # v2：实验室操作系统布局层（元信息 / 分区 / 2D 摆放）。
 # 只增表不改旧表，v1 库可原地升级。
 _SCHEMA_V2 = """
@@ -211,6 +936,19 @@ class InventoryStore:
     def _migrate(self) -> None:
         with self._lock:
             current = self._conn.execute("PRAGMA user_version").fetchone()[0]
+            compatibility_object = self._conn.execute(
+                "SELECT type FROM sqlite_master WHERE name='material_instance'"
+            ).fetchone()
+            # user_version 可能被备份/测试工具错误降写。规范 v5 以可写兼容视图
+            # 为结构指纹；已是 v5 时绝不能再次运行旧表 ALTER 或重命名迁移。
+            if (
+                current < SCHEMA_VERSION
+                and compatibility_object is not None
+                and compatibility_object[0] == "view"
+            ):
+                self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                self._conn.commit()
+                return
             if current < 1:
                 self._conn.executescript(_SCHEMA)
             if current < 2:
@@ -249,6 +987,12 @@ class InventoryStore:
                             self._conn.execute(
                                 f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
                             )
+            if current < 5:
+                try:
+                    self._conn.executescript(_SCHEMA_V5_BACKEND_CONTRACT)
+                except BaseException:
+                    self._conn.rollback()
+                    raise
             if current < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 self._conn.commit()
@@ -297,13 +1041,13 @@ class InventoryStore:
 
     def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
         return self.query_one(
-            "SELECT * FROM resource_template WHERE template_id = ?",
+            "SELECT * FROM inventory_resource_template WHERE template_id = ?",
             (template_id,),
         )
 
     def list_templates(self, limit: int = 500) -> List[Dict[str, Any]]:
         return self.query_all(
-            "SELECT * FROM resource_template ORDER BY template_id LIMIT ?",
+            "SELECT * FROM inventory_resource_template ORDER BY template_id LIMIT ?",
             (limit,),
         )
 
@@ -313,12 +1057,17 @@ class InventoryStore:
     def list_instances(self, status: str = "", limit: int = 500) -> List[Dict[str, Any]]:
         if status:
             return self.query_all(
-                "SELECT * FROM material_instance WHERE status = ? "
-                "ORDER BY rowid DESC LIMIT ?",
+                "SELECT * FROM material_instance WHERE status = ? AND edge_uuid NOT IN ("
+                "SELECT uuid FROM material WHERE "
+                "json_extract(meta_data, '$.unilab_edge_placeholder') = 1) "
+                "ORDER BY edge_uuid DESC LIMIT ?",
                 (status, limit),
             )
         return self.query_all(
-            "SELECT * FROM material_instance ORDER BY rowid DESC LIMIT ?",
+            "SELECT * FROM material_instance WHERE edge_uuid NOT IN ("
+            "SELECT uuid FROM material WHERE "
+            "json_extract(meta_data, '$.unilab_edge_placeholder') = 1) "
+            "ORDER BY edge_uuid DESC LIMIT ?",
             (limit,),
         )
 
@@ -452,13 +1201,16 @@ class InventoryStore:
 
         return {
             "templates": self.query_all(
-                "SELECT * FROM resource_template ORDER BY template_id ASC"
+                "SELECT * FROM inventory_resource_template ORDER BY template_id ASC"
             ),
             "lots": self.query_all(
                 "SELECT * FROM inventory_lot ORDER BY lot_id ASC"
             ),
             "instances": self.query_all(
-                "SELECT * FROM material_instance ORDER BY edge_uuid ASC"
+                "SELECT * FROM material_instance WHERE edge_uuid NOT IN ("
+                "SELECT uuid FROM material WHERE "
+                "json_extract(meta_data, '$.unilab_edge_placeholder') = 1) "
+                "ORDER BY edge_uuid ASC"
             ),
             "relations": self.list_relations(),
             "contents": self.list_contents(),

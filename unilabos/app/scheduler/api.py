@@ -126,6 +126,8 @@ def create_scheduler_router(
     get_backend: Optional[Callable[[], Any]] = None,
     get_device_state: Optional[Callable[[], Any]] = None,
     get_history: Optional[Callable[[], Any]] = None,
+    *,
+    include_execution_shaped_workflow_routes: bool = True,
 ) -> APIRouter:
     """调度器 REST 路由（可挂独立 app，也可挂主进程 web server）。
 
@@ -188,36 +190,40 @@ def create_scheduler_router(
             result["ros"] = hello.get("ros")
         return result
 
-    @router.post("/workflows")
-    def submit_workflow(body: WorkflowSubmitIn) -> Dict[str, Any]:
-        spec = spec_from_dict(body.model_dump())
-        try:
-            return _sched().submit_workflow(spec)
-        except WorkflowCycleError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # 旧接口把一次执行错误命名成 Workflow。共享前端 Interface 中 /workflows
+    # 只表示定义，执行统一由 /workflow-tasks 表示；旧形状仅供显式兼容测试。
+    if include_execution_shaped_workflow_routes:
 
-    @router.get("/workflows")
-    def all_workflows() -> Dict[str, Any]:
-        return _sched().snapshot()
+        @router.post("/workflows")
+        def submit_workflow(body: WorkflowSubmitIn) -> Dict[str, Any]:
+            spec = spec_from_dict(body.model_dump())
+            try:
+                return _sched().submit_workflow(spec)
+            except WorkflowCycleError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    @router.get("/workflows/{workflow_id}")
-    def workflow_detail(workflow_id: str) -> Dict[str, Any]:
-        snap = _sched().workflow_snapshot(workflow_id)
-        if snap is None:
-            raise HTTPException(
-                status_code=404, detail=f"workflow {workflow_id} not found"
-            )
-        return snap
+        @router.get("/workflows")
+        def all_workflows() -> Dict[str, Any]:
+            return _sched().snapshot()
 
-    @router.post("/workflows/{workflow_id}/cancel")
-    def cancel_workflow(workflow_id: str) -> Dict[str, Any]:
-        if not _sched().cancel_workflow(workflow_id):
-            raise HTTPException(
-                status_code=404, detail=f"workflow {workflow_id} not found"
-            )
-        return {"workflow_id": workflow_id, "state": "canceled"}
+        @router.get("/workflows/{workflow_id}")
+        def workflow_detail(workflow_id: str) -> Dict[str, Any]:
+            snap = _sched().workflow_snapshot(workflow_id)
+            if snap is None:
+                raise HTTPException(
+                    status_code=404, detail=f"workflow {workflow_id} not found"
+                )
+            return snap
+
+        @router.post("/workflows/{workflow_id}/cancel")
+        def cancel_workflow(workflow_id: str) -> Dict[str, Any]:
+            if not _sched().cancel_workflow(workflow_id):
+                raise HTTPException(
+                    status_code=404, detail=f"workflow {workflow_id} not found"
+                )
+            return {"workflow_id": workflow_id, "state": "canceled"}
 
     @router.post("/jobs/{job_id}/finish")
     def finish_job(job_id: str, body: JobFinishIn) -> Dict[str, Any]:
@@ -468,6 +474,8 @@ def create_app(
     scheduler: Optional[EdgeScheduler] = None,
     device_state: Any = None,
     history: Any = None,
+    *,
+    include_execution_shaped_workflow_routes: bool = True,
 ) -> FastAPI:
     app = FastAPI(title="Uni-Lab Edge Scheduler", version="0.1.0")
     install_http_tracing(app)
@@ -486,6 +494,9 @@ def create_app(
             lambda: app.state.scheduler,
             get_device_state=lambda: app.state.device_state,
             get_history=lambda: app.state.history,
+            include_execution_shaped_workflow_routes=(
+                include_execution_shaped_workflow_routes
+            ),
         )
     )
     return app
