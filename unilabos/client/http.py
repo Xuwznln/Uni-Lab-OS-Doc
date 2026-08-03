@@ -9,10 +9,12 @@
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
 from .envelope import EnvelopeError, unwrap_envelope
+from unilabos.utils.tracing import inject_trace_context, span
 
 
 @dataclass
@@ -70,33 +72,55 @@ class HTTPClient:
             EnvelopeError: 业务错误（code != 0）
             httpx.HTTPError: HTTP 错误
         """
-        headers = self._get_headers()
-        kwargs.setdefault("headers", {}).update(headers)
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers.update(self._get_headers())
+        target = urlsplit(str(self._client.base_url.join(path)))
 
-        retries = 0
-        last_error = None
+        with span(
+            "edge.http.backend.request",
+            kind="client",
+            attributes={
+                "http.request.method": method.upper(),
+                "server.address": target.hostname or "",
+                "url.scheme": target.scheme,
+                "url.path": target.path,
+            },
+        ) as request_span:
+            inject_trace_context(headers)
+            kwargs["headers"] = headers
+            retries = 0
+            last_error = None
 
-        while retries <= self.config.max_retries:
-            try:
-                response = self._client.request(method, path, **kwargs)
-                response.raise_for_status()
-                return unwrap_envelope(response.json())
+            while retries <= self.config.max_retries:
+                try:
+                    response = self._client.request(method, path, **kwargs)
+                    try:
+                        request_span.set_attribute(
+                            "http.response.status_code", response.status_code
+                        )
+                    except Exception:  # noqa: BLE001 - tracing stays fail-open
+                        pass
+                    response.raise_for_status()
+                    return unwrap_envelope(response.json())
 
-            except (httpx.HTTPError, EnvelopeError) as e:
-                last_error = e
+                except (httpx.HTTPError, EnvelopeError) as e:
+                    last_error = e
 
-                # 业务错误和 4xx 不重试
-                if isinstance(e, EnvelopeError):
-                    raise
-                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
-                    raise
+                    # 业务错误和 4xx 不重试
+                    if isinstance(e, EnvelopeError):
+                        raise
+                    if (
+                        isinstance(e, httpx.HTTPStatusError)
+                        and e.response.status_code < 500
+                    ):
+                        raise
 
-                retries += 1
-                if retries <= self.config.max_retries:
-                    sleep_time = self.config.retry_backoff * (2 ** (retries - 1))
-                    time.sleep(sleep_time)
+                    retries += 1
+                    if retries <= self.config.max_retries:
+                        sleep_time = self.config.retry_backoff * (2 ** (retries - 1))
+                        time.sleep(sleep_time)
 
-        raise last_error
+            raise last_error
 
     def get(self, path: str, **kwargs) -> Any:
         return self._request("GET", path, **kwargs)

@@ -555,6 +555,7 @@ def convert_from_ros_msg_with_mapping(ros_msg: Any, value_mapping: Dict[str, str
             if not attr_name.endswith("[]"):
                 # 处理单值映射
                 # print(f"🔍 处理单值映射")
+                field_found = True
                 for i, name in enumerate(msg_path):
                     # print(f"🔍 步骤 {i}: 获取属性 '{name}' 从 {type(current)}")
                     if hasattr(current, name):
@@ -562,7 +563,18 @@ def convert_from_ros_msg_with_mapping(ros_msg: Any, value_mapping: Dict[str, str
                         # print(f"🔍 获取到: {current} (类型: {type(current)})")
                     else:
                         # print(f"❌ 属性 '{name}' 不存在于 {type(current)}")
+                        field_found = False
                         break
+
+                # Registry 可能还保留旧版消息的字段映射。当当前 ROS
+                # Goal 不再包含该字段时必须跳过；如果继续转换 current，
+                # current 仍是整个 Goal，会把整包参数误传给驱动字段。
+                if not field_found:
+                    logger.debug(
+                        f"Mapping source field {msg_name!r} is absent; "
+                        f"skip target {attr_name!r}"
+                    )
+                    continue
 
                 converted_value = convert_from_ros_msg(current)
                 # print(f"🔍 转换后的值: {converted_value} (类型: {type(converted_value)})")

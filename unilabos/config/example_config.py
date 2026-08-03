@@ -14,6 +14,18 @@ class WSConfig:
     ws_ping_timeout = 7  # pong等待超时（秒），对齐服务端 PongWait
 
 
+# 生产环境使用 --app_bridges edge_control 时启用；api_key 建议通过
+# UNILABOS_EDGECONTROLCONFIG_API_KEY 环境变量注入。
+class EdgeControlConfig:
+    api_key = ""
+    edge_key = ""
+    instance_uuid = ""
+    capability_revision = "unilabos-edge-v1"
+    scheduler_addr = ""  # 例如 http://scheduler:8081
+    backend_addr = ""  # 例如 http://backend:8080/api/v1
+    state_db = ""  # 空 = <working_dir>/edge_control.db
+
+
 # Edge 微后端物料查询。默认查集成在主进程中的服务；若仓储随
 # scheduler 独立运行，可把地址改成 http://127.0.0.1:8092/api/v1。
 class HTTPConfig:

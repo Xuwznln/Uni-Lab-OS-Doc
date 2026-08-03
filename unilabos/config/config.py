@@ -51,6 +51,21 @@ class WSConfig:
     ws_ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
 
 
+# Uni-Lab 后端生产控制面配置。该客户端与旧 schedule WebSocket 分离，
+# 只传短通知；Job 参数、反馈和结果统一经 HTTPConfig 对应的数据面传输。
+class EdgeControlConfig:
+    api_key = ""
+    edge_key = ""
+    instance_uuid = ""
+    capability_revision = "unilabos-edge-v1"
+    scheduler_addr = ""
+    backend_addr = ""
+    state_db = ""
+    reconnect_interval = 5.0
+    request_timeout = 10.0
+    event_retry_interval = 5.0
+
+
 # HTTP配置
 class HTTPConfig:
     remote_addr = "https://leap-lab.bohrium.com/api/v1"
@@ -184,7 +199,15 @@ def _update_config_from_env():
             else:
                 value = env_value
             setattr(matched_cls, matched_field, value)
-            logger.info(f"[ENV] 设置 {matched_cls.__name__}.{matched_field} = {value}")
+            field_name = matched_field.lower()
+            sensitive = any(
+                marker in field_name
+                for marker in ("secret", "token", "password", "api_key", "headers")
+            ) or field_name in {"ak", "sk"}
+            display_value = "***" if sensitive and str(value) else value
+            logger.info(
+                f"[ENV] 设置 {matched_cls.__name__}.{matched_field} = {display_value}"
+            )
         except Exception as e:
             logger.warning(f"[ENV] 解析环境变量 {env_key} 失败: {e}")
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import itertools
+import json
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import Any, Dict, Mapping
@@ -229,6 +230,178 @@ def test_context_propagates_across_carrier_and_thread(recorder):
     assert remote_server.parent_span_id == root.span_id
 
 
+def test_edge_http_data_plane_injects_client_span_context(recorder):
+    from unilabos.app.edge_control.http import EdgeDataPlane
+    from unilabos.app.edge_control.store import StoredJob
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"code": 0, "data": {}}
+
+    class Session:
+        def __init__(self):
+            self.headers: Dict[str, str] = {}
+            self.calls: list[Dict[str, Any]] = []
+
+        def request(self, method, url, **kwargs):
+            self.calls.append({"method": method, "url": url, **kwargs})
+            return Response()
+
+    job = StoredJob(
+        job_uuid="11111111-1111-1111-1111-111111111111",
+        task_uuid="22222222-2222-2222-2222-222222222222",
+        node_uuid="33333333-3333-3333-3333-333333333333",
+        command_uuid="44444444-4444-4444-4444-444444444444",
+        job_access_token="short-token",
+        status="received",
+        feedback_sequence=0,
+    )
+    plane = EdgeDataPlane(
+        "http://backend:8080",
+        "http://scheduler:8081",
+        "edge-secret",
+    )
+    session = Session()
+    plane._session = session
+
+    with tracing.span("edge.job.dispatch") as dispatch_span:
+        plane.fetch_job(job)
+
+    request_span = _span_by_name(recorder, "edge.http.job.fetch")[0]
+    traceparent = session.calls[0]["headers"]["traceparent"]
+    parts = traceparent.split("-")
+    assert request_span.trace_id == dispatch_span.trace_id
+    assert request_span.parent_span_id == dispatch_span.span_id
+    assert int(parts[1], 16) == request_span.trace_id
+    assert int(parts[2], 16) == request_span.span_id
+
+
+def test_legacy_backend_session_injects_client_span_context(
+    recorder, monkeypatch
+):
+    import requests
+
+    from unilabos.app.web.client import TracedSession
+
+    calls: list[Dict[str, Any]] = []
+
+    class Response:
+        status_code = 200
+
+    def request(_session, method, url, **kwargs):
+        calls.append({"method": method, "url": url, **kwargs})
+        return Response()
+
+    monkeypatch.setattr(requests.Session, "request", request)
+    session = TracedSession()
+
+    with tracing.span("edge.startup") as startup_span:
+        session.get("https://backend.example/api/v1/edge/material/download")
+
+    request_span = _span_by_name(recorder, "edge.http.backend.request")[0]
+    traceparent = calls[0]["headers"]["traceparent"].split("-")
+    assert request_span.kind == "client"
+    assert request_span.trace_id == startup_span.trace_id
+    assert request_span.parent_span_id == startup_span.span_id
+    assert int(traceparent[1], 16) == request_span.trace_id
+    assert int(traceparent[2], 16) == request_span.span_id
+    assert request_span.attributes["http.response.status_code"] == 200
+
+
+def test_general_backend_httpx_client_injects_client_span_context(recorder):
+    from unilabos.client.http import HTTPClient, HTTPClientConfig
+
+    calls: list[Dict[str, Any]] = []
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def raise_for_status() -> None:
+            return
+
+        @staticmethod
+        def json() -> Dict[str, Any]:
+            return {"code": 0, "data": {"ok": True}}
+
+    client = HTTPClient(
+        HTTPClientConfig(base_url="https://backend.example/api/v1")
+    )
+
+    def request(method, path, **kwargs):
+        calls.append({"method": method, "path": path, **kwargs})
+        return Response()
+
+    client._client.request = request  # type: ignore[method-assign]
+    try:
+        with tracing.span("edge.operation") as operation_span:
+            assert client.get("/devices") == {"ok": True}
+    finally:
+        client.close()
+
+    request_span = _span_by_name(recorder, "edge.http.backend.request")[0]
+    traceparent = calls[0]["headers"]["traceparent"].split("-")
+    assert request_span.trace_id == operation_span.trace_id
+    assert request_span.parent_span_id == operation_span.span_id
+    assert int(traceparent[1], 16) == request_span.trace_id
+    assert int(traceparent[2], 16) == request_span.span_id
+
+
+def test_edge_websocket_event_injects_send_span_context(recorder, tmp_path):
+    from unilabos.app.edge_control.client import (
+        EdgeControlClient,
+        EdgeControlSettings,
+    )
+    from unilabos.app.edge_control.store import EdgeControlStore
+
+    class WebSocket:
+        def __init__(self, client):
+            self.client = client
+            self.messages = []
+
+        async def send(self, encoded):
+            self.messages.append(json.loads(encoded))
+            self.client._stopping.set()
+
+    path = tmp_path / "edge-trace.db"
+    settings = EdgeControlSettings(
+        scheduler_address="http://scheduler:8081",
+        backend_address="http://backend:8080",
+        api_key="edge-secret",
+        edge_key="edge-test",
+        capability_revision="test-v1",
+        instance_uuid="",
+        state_db=str(path),
+        reconnect_interval=0.01,
+        request_timeout=1,
+        event_retry_interval=0.01,
+    )
+    store = EdgeControlStore(str(path))
+    client = EdgeControlClient(
+        settings,
+        store=store,
+        data_plane=SimpleNamespace(),
+        host_node_provider=lambda: None,
+    )
+    with tracing.span("edge.command.receive") as receive_span:
+        client._enqueue_event("command.ack", {"command_uuid": "command-t"})
+
+    websocket = WebSocket(client)
+    asyncio.run(client._event_sender(websocket))
+
+    enqueue_span = _span_by_name(recorder, "edge.control.event.enqueue")[0]
+    send_span = _span_by_name(recorder, "edge.control.event.send")[0]
+    traceparent = websocket.messages[0]["traceparent"].split("-")
+    assert enqueue_span.parent_span_id == receive_span.span_id
+    assert send_span.parent_span_id == enqueue_span.span_id
+    assert int(traceparent[1], 16) == receive_span.trace_id
+    assert int(traceparent[2], 16) == send_span.span_id
+    store.close()
+
+
 def test_errors_and_sensitive_attributes_are_sanitized(recorder):
     with pytest.raises(RuntimeError):
         with tracing.span(
@@ -403,3 +576,50 @@ def test_action_retry_and_skip_emit_decision_events(recorder):
     assert "action.retry" in event_names
     assert "action.retry.succeeded" in event_names
     assert "action.skipped" in event_names
+
+
+def test_ros_async_driver_preserves_submit_context_and_runs_once(
+    recorder, monkeypatch
+):
+    import unilabos.ros.nodes.base_device_node as base_device_node
+
+    class ClearedContextExecutor:
+        def create_task(self, coroutine):
+            async def run_without_inherited_context():
+                token = recorder._current.set(None)
+                try:
+                    return await coroutine
+                finally:
+                    recorder._current.reset(token)
+
+            return asyncio.create_task(run_without_inherited_context())
+
+    monkeypatch.setattr(
+        base_device_node.rclpy,
+        "get_global_executor",
+        lambda: ClearedContextExecutor(),
+    )
+    calls = 0
+    callback_results = []
+
+    async def operation():
+        nonlocal calls
+        calls += 1
+        with tracing.span("driver.async"):
+            return "done"
+
+    async def scenario():
+        with tracing.span("action.execute") as action_span:
+            future = base_device_node.ROS2DeviceNode.run_async_func(
+                operation,
+                inner_trace_callback=callback_results.append,
+            )
+            assert await future == "done"
+        return action_span
+
+    action_span = asyncio.run(scenario())
+    driver_span = _span_by_name(recorder, "driver.async")[0]
+    assert calls == 1
+    assert callback_results == ["done"]
+    assert driver_span.trace_id == action_span.trace_id
+    assert driver_span.parent_span_id == action_span.span_id

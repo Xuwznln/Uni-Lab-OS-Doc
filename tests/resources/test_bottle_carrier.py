@@ -37,8 +37,8 @@ def test_bottle_carrier() -> "BottleCarrier":
 
     # 验证放置结果
     print(f"\n验证放置结果:")
-    bottle_at_0 = bottle_carrier[0].resource
-    beaker_at_0 = beaker_carrier[0].resource
+    bottle_at_0 = bottle_carrier[0]
+    beaker_at_0 = beaker_carrier[0]
 
     if bottle_at_0:
         print(f"位置 0 的瓶子: {bottle_at_0.name}")

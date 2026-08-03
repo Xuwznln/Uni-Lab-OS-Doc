@@ -1175,6 +1175,8 @@ class HostNode(BaseROS2DeviceNode):
         from unilabos.app.web.controller import store_job_result
         store_job_result(job_id, status, return_info, mock_return)
 
+        self._publish_job_started(item)
+
         # 发布状态到桥接器
         for bridge in self.bridges:
             if hasattr(bridge, "publish_job_status"):
@@ -1185,13 +1187,25 @@ class HostNode(BaseROS2DeviceNode):
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.lab_logger().warning(f"[Host Node] Goal {item.action_name} ({item.job_id}) rejected")
+            return_info = serialize_result_info("ROS goal rejected", False, {})
+            for bridge in self.bridges:
+                if hasattr(bridge, "publish_job_status"):
+                    bridge.publish_job_status({}, item, "failed", return_info)
             return
 
         self.lab_logger().info(f"[Host Node] Goal {action_id} ({item.job_id}) accepted")
+        self._publish_job_started(item)
         self._goals[item.job_id] = goal_handle
         goal_future = goal_handle.get_result_async()
         goal_future.add_done_callback(lambda f: self.get_result_callback(item, action_id, f))
         goal_future.result()
+
+    def _publish_job_started(self, item: "QueueItem") -> None:
+        """ROS 接受 Goal 后，通过支持该能力的 Bridge 发送短 started 通知。"""
+
+        for bridge in self.bridges:
+            if hasattr(bridge, "publish_job_started"):
+                bridge.publish_job_started(item)
 
     def feedback_callback(self, item: "QueueItem", action_id: str, feedback_msg) -> None:
         """反馈回调"""

@@ -1,9 +1,8 @@
-"""Plan 09 Task 5: external variant fixture registry path is discoverable (locks the
-fixture before it is wired into startup via build_registry/setup)."""
+"""外部变体 fixture 可由包管理公共入口发现。"""
 
 from pathlib import Path
 
-from unilabos.registry.external_registry_discovery import discover_registry_paths_from_project
+from unilabos.app.package_cli import discover_registry_paths_from_project
 
 
 def test_external_variant_fixture_registry_path_is_discoverable():

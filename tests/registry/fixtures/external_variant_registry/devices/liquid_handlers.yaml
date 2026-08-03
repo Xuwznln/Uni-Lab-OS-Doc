@@ -7,23 +7,14 @@ vendor.lh.model_a:
     class_ref: tests.registry.fixtures.initializer_drivers:SharedDevice
   class:
     module: tests.registry.fixtures.initializer_drivers:SharedDevice
-    init:
-      kwargs:
-        backend:
-          factory: tests.registry.fixtures.initializer_drivers:MockBackend
-          kwargs:
-            host: ${config.host}
-            port: ${config.port}
-        deck:
-          factory: tests.registry.fixtures.initializer_drivers:MockDeck
-          kwargs:
-            name: model-a-deck
-        name: ${node.id}
-        channels: 8
+    type: python
     action_value_mappings:
       $ref: ../contracts/liquid_handler.yaml#/actions
     status_types:
       $ref: ../contracts/liquid_handler.yaml#/status_types
+  init_param_enforce:
+    deck_name: model-a-deck
+    channels: 8
 
 vendor.lh.model_b:
   version: 1.0.0
@@ -34,20 +25,11 @@ vendor.lh.model_b:
     class_ref: tests.registry.fixtures.initializer_drivers:SharedDevice
   class:
     module: tests.registry.fixtures.initializer_drivers:SharedDevice
-    init:
-      kwargs:
-        backend:
-          factory: tests.registry.fixtures.initializer_drivers:MockBackend
-          kwargs:
-            host: ${config.host}
-            port: ${config.port}
-        deck:
-          factory: tests.registry.fixtures.initializer_drivers:MockDeck
-          kwargs:
-            name: model-b-deck
-        name: ${node.id}
-        channels: 96
+    type: python
     action_value_mappings:
       $ref: ../contracts/liquid_handler.yaml#/actions
     status_types:
       $ref: ../contracts/liquid_handler.yaml#/status_types
+  init_param_enforce:
+    deck_name: model-b-deck
+    channels: 96

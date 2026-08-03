@@ -1,4 +1,4 @@
-"""Plan 09 Task 3: mock drivers for initializer tests."""
+"""目录式社区注册表测试使用的轻量驱动。"""
 
 
 class MockBackend:
@@ -13,8 +13,16 @@ class MockDeck:
 
 
 class SharedDevice:
-    def __init__(self, backend: MockBackend, deck: MockDeck, name: str, channels: int):
-        self.backend = backend
-        self.deck = deck
-        self.name = name
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        deck_name: str,
+        channels: int,
+        device_id: str = "",
+        **_runtime_context,
+    ):
+        self.backend = MockBackend(host, port)
+        self.deck = MockDeck(deck_name)
+        self.name = device_id
         self.channels = channels

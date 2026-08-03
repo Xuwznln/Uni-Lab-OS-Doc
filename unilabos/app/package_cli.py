@@ -40,8 +40,8 @@ class PackageCLIError(RuntimeError):
 
 
 def normalize_name(name: str) -> str:
-    """归一化包名：小写、连字符转下划线（与 Edge _normalize_package_dir_name 取向一致）。"""
-    return name.strip().lower().replace("-", "_")
+    """归一化包名：小写，并把连续的非字母数字分隔符折叠为下划线。"""
+    return re.sub(r"[^a-z0-9]+", "_", name.strip().lower()).strip("_")
 
 
 def resolve_class_namespace(project_name: str, namespace: Optional[str]) -> str:

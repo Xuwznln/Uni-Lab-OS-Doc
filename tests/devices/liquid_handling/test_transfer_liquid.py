@@ -7,12 +7,31 @@ import pytest
 from unilabos.devices.liquid_handling.liquid_handler_abstract import LiquidHandlerAbstract
 
 
-@dataclass(frozen=True)
+@dataclass
 class DummyContainer:
     name: str
+    parent: Any = None
+    children: Tuple[Any, ...] = ()
+    unilabos_uuid: str = ""
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"DummyContainer({self.name})"
+
+    def serialize(self) -> dict:
+        return {
+            "name": self.name,
+            "children": [],
+            "parent_name": None,
+            "location": None,
+            "rotation": {"x": 0, "y": 0, "z": 0},
+            "size_x": 1,
+            "size_y": 1,
+            "size_z": 1,
+            "category": "container",
+        }
+
+    def serialize_all_state(self) -> dict:
+        return {self.name: {}}
 
 
 @dataclass(frozen=True)
@@ -502,4 +521,3 @@ def test_transfer_liquid_mode_detection_unsupported_shape_raises():
                 mix_times=0,
             )
         )
-

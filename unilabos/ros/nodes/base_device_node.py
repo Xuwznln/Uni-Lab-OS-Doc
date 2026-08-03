@@ -87,11 +87,14 @@ from unilabos.utils.import_manager import default_manager
 from unilabos.utils.log import info, debug, warning, error, critical, logger, trace
 from unilabos.utils.tracing import (
     add_event,
+    await_with_context,
+    capture_context,
     extract_trace_context,
     inject_trace_context,
     record_exception,
     set_error,
     span,
+    start_detached_span,
     submit_with_context,
 )
 from unilabos.utils.type_check import get_type_class, TypeEncoder, get_result_info_str
@@ -101,6 +104,44 @@ if TYPE_CHECKING:
     from pylabrobot.resources import Resource as ResourcePLR
 
 T = TypeVar("T")
+
+
+def _resource_lookup_identity(
+    resource_data: Dict[str, Any],
+) -> Optional[Tuple[str, str]]:
+    """Return a backend lookup identity, or None for an empty ROS placeholder."""
+
+    nested_data = resource_data.get("data")
+    unilabos_uuid = (
+        str(nested_data.get("unilabos_uuid") or "").strip()
+        if isinstance(nested_data, dict)
+        else ""
+    )
+    if unilabos_uuid:
+        return "uuid", unilabos_uuid
+    resource_id = str(resource_data.get("id") or "").strip()
+    if resource_id:
+        return "id", resource_id
+    return None
+
+
+def _is_blank_resource_placeholder(value: Any) -> bool:
+    return isinstance(value, dict) and _resource_lookup_identity(value) is None
+
+
+def _native_driver_result_failed(
+    action_name: str, action_type: Any, value: Any
+) -> bool:
+    """原生 ROS Action 的 bool/dict success 是业务成功位；JSON Command 可返回 bool 数据。"""
+
+    type_name = str(getattr(action_type, "__name__", ""))
+    if action_name.startswith("_execute_driver_command") or type_name.startswith(
+        "UniLabJsonCommand"
+    ):
+        return False
+    if value is False:
+        return True
+    return isinstance(value, dict) and value.get("success") is False
 
 
 class RclpyAsyncMutex:
@@ -2515,18 +2556,21 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             queried_resources: list = [None] * len(resource_inputs)
                             uuid_indices: list[tuple[int, str, dict]] = []  # (index, uuid, resource_data)
 
-                            # 第一遍：处理没有uuid的资源，收集有uuid的资源信息
+                            # 第一遍：空 Resource 是 ROS 为可选参数生成的占位符，
+                            # 保留原值交给驱动，不能拿空 id 请求后端。
                             for idx, resource_data in enumerate(resource_inputs):
-                                unilabos_uuid = resource_data.get("data", {}).get("unilabos_uuid")
-                                if unilabos_uuid is None:
+                                identity = _resource_lookup_identity(resource_data)
+                                if identity is None:
+                                    queried_resources[idx] = resource_data
+                                elif identity[0] == "id":
                                     plr_resource = await self.get_resource_with_dir(
-                                        resource_id=resource_data["id"], with_children=True
+                                        resource_id=identity[1], with_children=True
                                     )
                                     if "sample_id" in resource_data:
                                         plr_resource.unilabos_extra[EXTRA_SAMPLE_UUID] = resource_data["sample_id"]
                                     queried_resources[idx] = plr_resource
                                 else:
-                                    uuid_indices.append((idx, unilabos_uuid, resource_data))
+                                    uuid_indices.append((idx, identity[1], resource_data))
 
                             # 第二遍：批量查询有uuid的资源
                             if uuid_indices:
@@ -2544,20 +2588,24 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             # 通过资源跟踪器获取本地实例
                             final_resources = queried_resources if is_sequence else queried_resources[0]
                             if not is_sequence:
-                                plr = self.resource_tracker.figure_resource(
-                                    {"name": final_resources.name}, try_mode=False
-                                )
-                                # 保留unilabos_extra
-                                if hasattr(final_resources, "unilabos_extra") and hasattr(plr, "unilabos_extra"):
-                                    plr.unilabos_extra = getattr(final_resources, "unilabos_extra", {}).copy()
-                                final_resources = plr
+                                if not isinstance(final_resources, dict):
+                                    plr = self.resource_tracker.figure_resource(
+                                        {"name": final_resources.name}, try_mode=False
+                                    )
+                                    # 保留unilabos_extra
+                                    if hasattr(final_resources, "unilabos_extra") and hasattr(plr, "unilabos_extra"):
+                                        plr.unilabos_extra = getattr(final_resources, "unilabos_extra", {}).copy()
+                                    final_resources = plr
                             else:
                                 new_resources = []
                                 for res in queried_resources:
-                                    plr = self.resource_tracker.figure_resource({"name": res.name}, try_mode=False)
-                                    if hasattr(res, "unilabos_extra") and hasattr(plr, "unilabos_extra"):
-                                        plr.unilabos_extra = getattr(res, "unilabos_extra", {}).copy()
-                                    new_resources.append(plr)
+                                    if isinstance(res, dict):
+                                        new_resources.append(res)
+                                    else:
+                                        plr = self.resource_tracker.figure_resource({"name": res.name}, try_mode=False)
+                                        if hasattr(res, "unilabos_extra") and hasattr(plr, "unilabos_extra"):
+                                            plr.unilabos_extra = getattr(res, "unilabos_extra", {}).copy()
+                                        new_resources.append(plr)
                                 final_resources = new_resources
                             action_kwargs[k] = final_resources
 
@@ -2698,8 +2746,15 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     action_return_value = _raw_result
                     execution_exception = _raw_result
                 elif not execution_error:
-                    execution_success = True
                     action_return_value = _raw_result
+                    execution_success = not _native_driver_result_failed(
+                        action_name, action_type, _raw_result
+                    )
+                    if not execution_success:
+                        execution_error = (
+                            "driver returned an unsuccessful native action result: "
+                            f"{_raw_result!r}"
+                        )
 
                 if isinstance(_raw_result, BaseException) and error_policy:
                     try:
@@ -2750,6 +2805,16 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     self.lab_logger().info(f"更新资源状态: {k}")
                     # 仅当action_kwargs[k]不为None时尝试转换
                     akv = action_kwargs[k]  # 已经是完成转换的物料了
+                    if _is_blank_resource_placeholder(akv):
+                        continue
+                    if isinstance(akv, list):
+                        akv = [
+                            item
+                            for item in akv
+                            if not _is_blank_resource_placeholder(item)
+                        ]
+                        if not akv:
+                            continue
                     apv = action_paramtypes[k]
                     final_type = get_type_class(apv)
                     if final_type is None:
@@ -2841,7 +2906,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         async def execute_callback(goal_handle: ServerGoalHandle):
             job_context = self._consume_job_context(goal_handle, action_name)
             parent = extract_trace_context(job_context)
-            with span(
+            action_span = start_detached_span(
                 "action.execute",
                 kind="consumer",
                 parent_context=parent,
@@ -2851,8 +2916,17 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     "device.name": self.device_id,
                     "action.name": job_context.get("action_name", action_name),
                 },
-            ):
-                return await _execute_callback_impl(goal_handle, job_context)
+            )
+            try:
+                return await await_with_context(
+                    action_span.context,
+                    _execute_callback_impl(goal_handle, job_context),
+                )
+            except BaseException as exc:
+                action_span.fail(exc)
+                raise
+            finally:
+                action_span.end()
 
         return execute_callback
 
@@ -3204,9 +3278,10 @@ class ROS2DeviceNode:
     @staticmethod
     async def safe_task_wrapper(trace_callback, func, **kwargs):
         try:
+            result = await func(**kwargs)
             if callable(trace_callback):
-                trace_callback(await func(**kwargs))
-            return await func(**kwargs)
+                trace_callback(result)
+            return result
         except Exception as e:
             if callable(trace_callback):
                 trace_callback(e)
@@ -3223,9 +3298,19 @@ class ROS2DeviceNode:
                 error(f"异步任务 {func.__name__} 获取结果失败")
                 error(traceback.format_exc())
 
-        future = rclpy.get_global_executor().create_task(
-            ROS2DeviceNode.safe_task_wrapper(inner_trace_callback, func, **kwargs)
-        )
+        trace_context = capture_context()
+
+        async def _run_with_trace_context():
+            # rclpy executor 可能在不同 Python Context 中逐步推进同一协程；
+            # 每一步单独 attach/detach，避免跨 Context 重置 token。
+            return await await_with_context(
+                trace_context,
+                ROS2DeviceNode.safe_task_wrapper(
+                    inner_trace_callback, func, **kwargs
+                ),
+            )
+
+        future = rclpy.get_global_executor().create_task(_run_with_trace_context())
         if trace_error:
             future.add_done_callback(_handle_future_exception)
         return future

@@ -1,30 +1,15 @@
-"""Plan 09 Task 7: community alias resolution."""
+"""社区设备使用稳定完整命名空间，不再建立本地 alias。"""
 
-import pytest
-
-from unilabos.registry.community_alias import (
-    CommunityAliasError,
-    normalize_community_class,
-    resolve_community_alias,
-)
+from unilabos.app.package_cli import resolve_class_namespace
 
 
-def test_normalize_community_class_strips_prefix():
-    assert normalize_community_class("community.pylabrobot.lh.opentrons_flex") == "pylabrobot.lh.opentrons_flex"
+def test_default_community_namespace_is_derived_from_normalized_project_name():
+    assert resolve_class_namespace("Vendor Liquid-Handler", None) == "community.vendor_liquid_handler"
 
 
-def test_normalize_community_class_leaves_local_class_unchanged():
-    assert normalize_community_class("pylabrobot.lh.opentrons_flex") == "pylabrobot.lh.opentrons_flex"
+def test_explicit_namespace_gets_community_prefix():
+    assert resolve_class_namespace("ignored", "vendor.lh") == "community.vendor.lh"
 
 
-def test_resolve_community_alias_requires_registry_entry():
-    registry = {"pylabrobot.lh.opentrons_flex": {"class": {"module": "x:Y"}}}
-
-    resolved = resolve_community_alias("community.pylabrobot.lh.opentrons_flex", registry)
-
-    assert resolved == "pylabrobot.lh.opentrons_flex"
-
-
-def test_resolve_community_alias_raises_when_missing():
-    with pytest.raises(CommunityAliasError):
-        resolve_community_alias("community.unknown.device", {})
+def test_explicit_full_namespace_is_preserved():
+    assert resolve_class_namespace("ignored", "community.vendor.lh") == "community.vendor.lh"

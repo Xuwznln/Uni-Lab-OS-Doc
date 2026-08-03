@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Optional
 import networkx as nx
 import yaml
 
@@ -38,7 +38,12 @@ if unilabos_dir not in sys.path:
 
 from unilabos.app.utils import cleanup_for_restart
 from unilabos.utils.banner_print import print_status, print_unilab_banner
-from unilabos.config.config import load_config, BasicConfig, HTTPConfig
+from unilabos.config.config import (
+    load_config,
+    BasicConfig,
+    EdgeControlConfig,
+    HTTPConfig,
+)
 
 # Global restart flags (used by ws_client and web/server)
 _restart_requested: bool = False
@@ -168,8 +173,15 @@ def configure_material_startup(args_dict: Dict[str, Any]) -> str:
     """Apply material CLI overrides and resolve embedded/external host mode."""
 
     source_arg = args_dict.get("material_source")
+    production_control_enabled = "edge_control" in args_dict.get("app_bridges", [])
     source = (
-        str(source_arg or HTTPConfig.material_source or "microbackend").strip().lower()
+        str(
+            source_arg
+            or ("backend" if production_control_enabled else HTTPConfig.material_source)
+            or "microbackend"
+        )
+        .strip()
+        .lower()
     )
     aliases = {
         "edge": "microbackend",
@@ -216,9 +228,31 @@ def should_start_embedded_material_service(
 def should_start_edge_scheduler(
     args_dict: Dict[str, Any], *, is_host_mode: bool
 ) -> bool:
-    """The complete scheduler microbackend is host-owned and enabled by default."""
+    """独立运行默认启用微后端；生产控制面启用时由云端负责调度。"""
 
-    return is_host_mode and bool(args_dict.get("edge_scheduler", True))
+    production_control_enabled = "edge_control" in args_dict.get("app_bridges", [])
+    return (
+        is_host_mode
+        and bool(args_dict.get("edge_scheduler", True))
+        and not production_control_enabled
+    )
+
+
+def should_attach_legacy_http_bridge(args_dict: Dict[str, Any]) -> bool:
+    """Legacy backend callbacks must not run beside the production protocol."""
+
+    return (
+        "fastapi" in args_dict.get("app_bridges", [])
+        and "edge_control" not in args_dict.get("app_bridges", [])
+    )
+
+
+def should_request_remote_startup(
+    *, startup_json: Optional[Dict[str, Any]], graph_file_path: Optional[str]
+) -> bool:
+    """Fetch the legacy startup graph only when no graph was supplied locally."""
+
+    return startup_json is None and graph_file_path is None
 
 
 def parse_args():
@@ -260,7 +294,7 @@ def parse_args():
         "--app_bridges",
         nargs="+",
         default=["websocket", "fastapi"],
-        help="Bridges to connect to. Now support 'websocket' and 'fastapi'.",
+        help="Bridges to connect to: websocket (legacy), edge_control (production), fastapi.",
     )
     parser.add_argument(
         "--material_source",
@@ -438,6 +472,36 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--edge_api_key",
+        type=str,
+        default="",
+        help="Shared EDGE_API_KEY used by the production Edge control/data planes.",
+    )
+    parser.add_argument(
+        "--edge_key",
+        type=str,
+        default="",
+        help="Stable Edge registration key; defaults to the machine name.",
+    )
+    parser.add_argument(
+        "--edge_instance_uuid",
+        type=str,
+        default="",
+        help="Optional stable Edge instance UUID; generated in edge_state_db when empty.",
+    )
+    parser.add_argument(
+        "--edge_capability_revision",
+        type=str,
+        default="",
+        help="Edge capability revision sent during production registration.",
+    )
+    parser.add_argument(
+        "--edge_state_db",
+        type=str,
+        default="",
+        help="SQLite path for durable production Command, Job, and Event Outbox state.",
+    )
+    parser.add_argument(
         "--skip_env_check",
         action="store_true",
         help="Skip environment dependency check on startup",
@@ -488,6 +552,22 @@ def parse_args():
         type=int,
         default=500,
         help="Maximum number of automatic restarts in restart mode (default: 500)",
+    )
+    subparsers.add_parser(
+        "template-sync",
+        aliases=["template_sync"],
+        help="Collect the complete Edge Registry and transactionally sync templates",
+    )
+    instance_sync_parser = subparsers.add_parser(
+        "instance-sync",
+        aliases=["instance_sync"],
+        help="Create missing backend material instances from an Edge device graph",
+    )
+    instance_sync_parser.add_argument(
+        "--check_only",
+        dest="instance_check_only",
+        action="store_true",
+        help="Only verify that every graph node has a matching backend instance",
     )
     # workflow upload subcommand
     workflow_parser = subparsers.add_parser(
@@ -1022,6 +1102,19 @@ def main():
         HTTPConfig.schedule_addr = args_dict["schedule_addr"]
         print_status(f"使用独立 schedule 地址: {HTTPConfig.schedule_addr}", "info")
 
+    if args_dict.get("edge_api_key", ""):
+        EdgeControlConfig.api_key = args_dict["edge_api_key"]
+    if args_dict.get("edge_key", ""):
+        EdgeControlConfig.edge_key = args_dict["edge_key"]
+    if args_dict.get("edge_instance_uuid", ""):
+        EdgeControlConfig.instance_uuid = args_dict["edge_instance_uuid"]
+    if args_dict.get("edge_capability_revision", ""):
+        EdgeControlConfig.capability_revision = args_dict[
+            "edge_capability_revision"
+        ]
+    if args_dict.get("edge_state_db", ""):
+        EdgeControlConfig.state_db = args_dict["edge_state_db"]
+
     # 设置BasicConfig参数
     if args_dict.get("ak", ""):
         BasicConfig.ak = args_dict.get("ak", "")
@@ -1030,6 +1123,55 @@ def main():
         BasicConfig.sk = args_dict.get("sk", "")
         print_status("传入了sk参数，优先采用传入参数！", "info")
     BasicConfig.working_dir = working_dir
+    BasicConfig.extra_resource = bool(args_dict.get("extra_resource", False))
+
+    if args_dict.get("command") in ("template-sync", "template_sync"):
+        from unilabos.app.template_sync import (
+            TemplateSyncError,
+            run_template_sync_command,
+        )
+
+        try:
+            report = run_template_sync_command(
+                args_dict,
+                backend_address=HTTPConfig.remote_addr,
+            )
+        except TemplateSyncError as exc:
+            print_status(f"模板同步失败: {exc}", "error")
+            return 1
+        print_status(
+            "模板同步完成: "
+            f"{report.device_count} 个设备模板，"
+            f"{report.resource_count} 个器材模板",
+            "info",
+        )
+        return 0
+
+    if args_dict.get("command") in ("instance-sync", "instance_sync"):
+        from unilabos.app.instance_sync import (
+            InstanceSyncError,
+            run_instance_sync_command,
+        )
+
+        try:
+            report = run_instance_sync_command(
+                args_dict,
+                backend_address=HTTPConfig.remote_addr,
+            )
+        except InstanceSyncError as exc:
+            print_status(f"资源实例初始化失败: {exc}", "error")
+            return 1
+        print_status(
+            (
+                "资源实例启动检查完成: "
+                if args_dict.get("instance_check_only", False)
+                else "资源实例初始化完成: "
+            )
+            + f"新建 {report.created_count} 个，复用 {report.existing_count} 个",
+            "info",
+        )
+        return 0
+
     # Material client derives its embedded URL from the host web port, so
     # resolve host/slave role and port before any optional startup query.
     BasicConfig.port = args_dict["port"] if args_dict["port"] else BasicConfig.port
@@ -1246,23 +1388,12 @@ def main():
     from unilabos.app.backend import start_backend
     from unilabos.app.web import http_client
     from unilabos.app.web import start_server
-    from unilabos.app.register import register_devices_and_resources
     from unilabos.resources.resource_tracker import ResourceTreeSet, ResourceDict
 
-    # Step 1: 上传全部注册表到服务端，同步保存到 unilabos_data
+    # 模板写入只允许独立 template-sync 初始化 Job；常驻 Edge 不持有开发者身份。
     if BasicConfig.upload_registry:
-        if BasicConfig.ak and BasicConfig.sk:
-            # print_status("开始注册设备到服务端...", "info")
-            try:
-                register_devices_and_resources(lab_registry)
-                # print_status("设备注册完成", "info")
-            except Exception as e:
-                print_status(f"设备注册失败: {e}", "error")
-        else:
-            print_status("未提供 ak 和 sk，跳过设备注册", "info")
-    else:
         print_status(
-            "本次启动注册表不报送云端，如果您需要联网调试，请在启动命令增加--upload_registry",
+            "--upload_registry 已停用；请先运行独立 template-sync 初始化 Job",
             "warning",
         )
 
@@ -1278,15 +1409,17 @@ def main():
     graph: nx.Graph
     resource_tree_set: ResourceTreeSet
     resource_links: List[Dict[str, Any]]
-    request_startup_json = args_dict.get("_startup_json")
-    if request_startup_json is None:
-        request_startup_json = http_client.request_startup_json()
-
     file_path = args_dict.get("_graph_file_path")
     if file_path is None:
         file_path = _resolve_graph_file_path(
             args_dict.get("graph") or BasicConfig.startup_json_path
         )
+    request_startup_json = args_dict.get("_startup_json")
+    if should_request_remote_startup(
+        startup_json=request_startup_json,
+        graph_file_path=file_path,
+    ):
+        request_startup_json = http_client.request_startup_json()
     if file_path is None:
         if not request_startup_json:
             print_status(
@@ -1393,21 +1526,38 @@ def main():
 
     args_dict["bridges"] = []
 
-    if "fastapi" in args_dict["app_bridges"]:
+    if should_attach_legacy_http_bridge(args_dict):
         args_dict["bridges"].append(http_client)
-    # 获取通信客户端（仅支持WebSocket）
     if BasicConfig.is_host_mode:
-        comm_client = get_communication_client()
+        comm_client = None
+        edge_control_client = None
+        communication_clients = []
         if "websocket" in args_dict["app_bridges"]:
+            comm_client = get_communication_client()
             args_dict["bridges"].append(comm_client)
+            communication_clients.append(comm_client)
+            comm_client.start()
+        if "edge_control" in args_dict["app_bridges"]:
+            from unilabos.app.edge_control import EdgeControlClient
+
+            edge_control_client = EdgeControlClient()
+            args_dict["bridges"].append(edge_control_client)
+            communication_clients.append(edge_control_client)
+            edge_control_client.start()
+            print_status(
+                "Edge 生产控制面已启用（HTTP 事实数据 + WebSocket 短通知）",
+                "info",
+            )
+
+        if communication_clients:
 
             def _exit(signum, frame):
-                comm_client.stop()
+                for communication_client in communication_clients:
+                    communication_client.stop()
                 sys.exit(0)
 
             signal.signal(signal.SIGINT, _exit)
             signal.signal(signal.SIGTERM, _exit)
-            comm_client.start()
 
         # Host owns the embedded material DB even when workflow scheduling is
         # disabled.  Slaves never execute this branch and therefore never open
@@ -1430,7 +1580,9 @@ def main():
             setup_edge_inventory(
                 inventory_db,
                 ws_client=(
-                    comm_client if "websocket" in args_dict["app_bridges"] else None
+                    comm_client
+                    if "websocket" in args_dict["app_bridges"]
+                    else None
                 ),
             )
             print_status(
@@ -1451,9 +1603,11 @@ def main():
             from unilabos.app.scheduler.integration import setup_edge_scheduler
 
             _edge_sched, edge_exec_backend = setup_edge_scheduler(
-                ws_client=comm_client
-                if "websocket" in args_dict["app_bridges"]
-                else None,
+                ws_client=(
+                    comm_client
+                    if "websocket" in args_dict["app_bridges"]
+                    else None
+                ),
                 ordering_url=args_dict.get("edge_scheduler_ordering_url", ""),
                 inventory_db_path=inventory_db,
                 device_state_db_path=str(args_dict.get("edge_device_state_db") or ""),

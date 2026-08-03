@@ -2185,11 +2185,30 @@ class Registry:
                             action_str_type_mapping[action_type_str] = target_type
                             if target_type is not None:
                                 try:
-                                    action_config["goal_default"] = ROS2MessageInstance(
+                                    native_goal_fields = set(
+                                        target_type.Goal.get_fields_and_field_types()
+                                    )
+                                    action_config["goal"] = {
+                                        key: value
+                                        for key, value in action_config.get(
+                                            "goal", {}
+                                        ).items()
+                                        if key in native_goal_fields
+                                    }
+                                except Exception:
+                                    pass
+                                explicit_goal_default = copy.deepcopy(
+                                    action_config.get("goal_default", {})
+                                )
+                                try:
+                                    generated_goal_default = ROS2MessageInstance(
                                         target_type.Goal()
                                     ).get_python_dict()
                                 except Exception:
-                                    action_config["goal_default"] = {}
+                                    generated_goal_default = {}
+                                if isinstance(explicit_goal_default, dict):
+                                    generated_goal_default.update(explicit_goal_default)
+                                action_config["goal_default"] = generated_goal_default
                                 prev_schema = action_config.get("schema", {})
                                 action_config["schema"] = ros_action_to_json_schema(target_type)
                                 if prev_schema:

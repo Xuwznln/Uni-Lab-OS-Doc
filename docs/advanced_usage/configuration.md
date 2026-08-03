@@ -885,6 +885,22 @@ HTTP 路由模板 server span / ws.receive
         └── action.status.publish
 ```
 
+生产 `edge_control` 会把下行命令上下文保存到本地 SQLite；进程重启后，待拉取 Job、待提交 outcome 和 WebSocket outbox 都从该上下文继续。HTTP 事实数据面请求注入当前 client span，WebSocket 上行通知注入实际发送 span，因此后端 HTTP server span 和 `edge.event.accept` 可以与设备执行落在同一个 trace 中。下图的驱动链路适用于由当前 HostNode 实例化的本地设备节点；若设备 ActionServer 位于另一个 ROS 进程且其 Goal schema 不带 trace 字段，还需要部署侧提供 trace side-channel 才能跨过该进程边界：
+
+```text
+backend: edge.command.send
+└── edge: edge.command.receive
+    ├── edge.job.dispatch
+    │   ├── edge.http.job.fetch → backend HTTP server
+    │   └── action.execute → sync/async driver
+    ├── edge.job.feedback.publish
+    │   ├── edge.http.job.feedback.commit → backend HTTP server
+    │   └── edge.control.event.send → backend edge.event.accept
+    └── edge.job.outcome.publish
+        ├── edge.http.job.outcome.commit → backend HTTP server
+        └── edge.control.event.send → backend edge.event.accept
+```
+
 启用追踪后，现有文本日志会自动附加 `trace_id` 和 `span_id`，可直接在 SigNoz 中关联检索。
 
 ## 相关文档

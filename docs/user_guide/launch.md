@@ -43,7 +43,7 @@ options:
   --ros_discovery_server ROS_DISCOVERY_SERVER
                         外部 Fast DDS ip:port；传 off 可禁用 Host 托管服务。
   --slave_no_host       显式允许 Slave 离线启动；HostLink 仍在后台重连。
-  --upload_registry     Upload registry information when starting unilab
+  --upload_registry     已停用；模板写入请使用独立 template-sync 初始化 Job
   --config CONFIG       Configuration file path, supports .py format Python config files
   --port PORT           Port for web service information page
   --disable_browser     Disable opening information page on startup
@@ -236,10 +236,26 @@ unilab --config path/to/your/config.py
 
 ## 端云桥接 `--app_bridges`
 
-目前 Uni-Lab 提供 WebSocket、FastAPI (http) 两种端云通信方式：
+目前 Uni-Lab 提供以下端云通信方式：
 
-- **WebSocket**：负责实时通信和任务下发
+- **websocket**：旧协议和 Edge 独立运行测试使用
+- **edge_control**：生产协议；WebSocket 只传 UUID、命令类别和 ACK，HTTP 传运行参数、反馈和结果
 - **FastAPI**：负责端对云物料更新和 HTTP API
+
+生产模式使用后端调度器，不启动 Edge 内置调度微后端，示例：
+
+```bash
+unilab --graph graph.json --backend ros \
+  --app_bridges edge_control fastapi \
+  --addr http://backend:8080/api/v1 \
+  --schedule_addr http://scheduler:8081 \
+  --edge_api_key "$EDGE_API_KEY" \
+  --edge_key lab-edge-01
+```
+
+启用 `edge_control` 时，默认将物料事实来源切换到正式后端，并自动关闭本地
+`EdgeScheduler`。只有显式指定 `--material_source microbackend` 时才保留本地物料服务。
+设备根节点必须配置非空且与后端 Material 一致的 `barcode`，注册才能成功。
 
 ## 分布式组网
 
@@ -288,8 +304,18 @@ HostNode 通过 ROS Action 收发。只有 ROS Action endpoint 已匹配的设�
 以下是一些常用的启动命令示例：
 
 ```bash
-# 使用组态图启动，上传注册表
-unilab --ak your_ak --sk your_sk -g path/to/graph.json --upload_registry
+# 独立初始化步骤 1：以开发者身份事务性同步设备和器材模板
+UNILAB_TEMPLATE_SYNC_DEVELOPER_TOKEN=developer-token \
+  unilab --addr https://backend.example/api/v1 template-sync
+
+# 独立初始化步骤 2：通过正式后端接口创建组态图中的设备和器材实例
+UNILAB_INSTANCE_SYNC_TOKEN=instance-token \
+  unilab --addr https://backend.example/api/v1 \
+  --graph path/to/graph.json instance-sync
+
+# 生产 Edge 启动前只读检查实例；常驻进程不持有上述写入 Token
+unilab --addr https://backend.example/api/v1 \
+  --graph path/to/graph.json instance-sync --check_only
 
 # 使用远程资源启动
 unilab --ak your_ak --sk your_sk

@@ -19,6 +19,7 @@ import os
 import re
 import threading
 import traceback
+import types
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, Mapping, MutableMapping, Optional
 from urllib.parse import unquote
@@ -528,6 +529,36 @@ def use_context(context_value: Any) -> Iterator[None]:
         _backend.detach(token)
 
 
+def await_with_context(context_value: Any, awaitable: Any) -> Any:
+    """逐次恢复异步上下文，兼容会跨 Context 推进协程的 rclpy Task。"""
+
+    @types.coroutine
+    def _runner():
+        iterator = awaitable.__await__()
+        value = None
+        pending_error: Optional[BaseException] = None
+        while True:
+            try:
+                with use_context(context_value):
+                    if pending_error is None:
+                        yielded = iterator.send(value)
+                    else:
+                        error_value = pending_error
+                        pending_error = None
+                        yielded = iterator.throw(
+                            type(error_value), error_value, error_value.__traceback__
+                        )
+            except StopIteration as stopped:
+                return stopped.value
+            try:
+                value = yield yielded
+            except BaseException as exc:  # 由外层 Task 注入取消或等待异常
+                pending_error = exc
+                value = None
+
+    return _runner()
+
+
 def extract_trace_context(carrier: Optional[Mapping[str, Any]]) -> Any:
     if _backend is None or not carrier:
         return None
@@ -684,7 +715,13 @@ def span(
 class DetachedSpan:
     """可跨调度轮次保存的长生命周期 span（workflow/job）。"""
 
-    def __init__(self, name: str, attributes: Mapping[str, Any], parent_context: Any):
+    def __init__(
+        self,
+        name: str,
+        attributes: Mapping[str, Any],
+        parent_context: Any,
+        kind: str = "internal",
+    ):
         self.span: Any = _NULL_SPAN
         self.context: Any = None
         self._ended = False
@@ -693,7 +730,7 @@ class DetachedSpan:
                 self.span, self.context = _backend.start_span(
                     name,
                     parent_context=parent_context,
-                    kind="internal",
+                    kind=kind,
                     attributes=_safe_attributes(attributes),
                 )
             except Exception:  # noqa: BLE001
@@ -730,11 +767,13 @@ def start_detached_span(
     *,
     attributes: Optional[Mapping[str, Any]] = None,
     parent_context: Any = None,
+    kind: str = "internal",
 ) -> DetachedSpan:
     return DetachedSpan(
         name,
         _safe_attributes(attributes),
         parent_context if parent_context is not None else capture_context(),
+        kind,
     )
 
 
@@ -842,6 +881,7 @@ __all__ = [
     "TracingSettings",
     "add_event",
     "capture_context",
+    "await_with_context",
     "current_span",
     "current_trace_ids",
     "extract_trace_context",

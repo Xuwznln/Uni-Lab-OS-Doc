@@ -74,14 +74,25 @@ class VirtualHeatChill:
         self.logger.info(f"✅ 温控设备 {self.device_id} 清理完成 💤")
         return True
     
-    async def heat_chill(self, temp: float, time, stir: bool,
-                        stir_speed: float, purpose: str, vessel: dict = {}) -> bool:
+    async def heat_chill(
+        self,
+        temp: float,
+        time,
+        stir: bool,
+        stir_speed: float,
+        purpose: str,
+        vessel: dict = {},
+        temp_spec: str = "",
+        time_spec: str = "",
+        pressure: str = "",
+        reflux_solvent: str = "",
+    ) -> bool:
         """Execute heat chill action - 🔧 修复：确保参数类型正确"""
         
         # 🔧 关键修复：确保所有参数类型正确
         try:
             temp = float(temp)
-            time_value = float(time)  # 强制转换为浮点数
+            time_value = float(time or 1.0)  # 历史 ROS 零值为空串时使用安全的 1 秒
             stir_speed = float(stir_speed)
             stir = bool(stir)
             purpose = str(purpose)

@@ -8,6 +8,7 @@ import gzip
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from unilabos.utils.tools import (
     fast_dumps as _fast_dumps,
@@ -19,6 +20,35 @@ from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.utils.log import info
 from unilabos.config.config import HTTPConfig, BasicConfig
 from unilabos.utils import logger
+from unilabos.utils.tracing import inject_trace_context, span
+
+
+class TracedSession(requests.Session):
+    """为 Edge 主动 HTTP 请求统一创建 Client Span 并注入 W3C 上下文。"""
+
+    def request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        headers = dict(kwargs.pop("headers", {}) or {})
+        parsed = urlsplit(str(url))
+        with span(
+            "edge.http.backend.request",
+            kind="client",
+            attributes={
+                "http.request.method": str(method).upper(),
+                "server.address": parsed.hostname or "",
+                "url.scheme": parsed.scheme,
+                "url.path": parsed.path,
+            },
+        ) as request_span:
+            inject_trace_context(headers)
+            kwargs["headers"] = headers
+            response = super().request(method, url, **kwargs)
+            try:
+                request_span.set_attribute(
+                    "http.response.status_code", response.status_code
+                )
+            except Exception:  # noqa: BLE001 - tracing must remain fail-open
+                pass
+            return response
 
 
 class HTTPClient:
@@ -49,7 +79,7 @@ class HTTPClient:
             self.auth = auth_secret
             info(f"正在使用ak sk作为授权信息：[{auth_secret}]")
         # 复用 TCP/TLS 连接，避免每次请求重新握手
-        self._session = requests.Session()
+        self._session = TracedSession()
         self._session.headers.update({"Authorization": f"Lab {self.auth}"})
         info(f"HTTPClient 初始化完成: remote_addr={self.remote_addr}")
 
@@ -447,7 +477,7 @@ class HTTPClient:
         Returns:
             Response: API响应对象
         """
-        response = requests.delete(
+        response = self._session.delete(
             f"{self.remote_addr}/lab/resource/batch_delete/",
             params={"id": id},
             headers={"Authorization": f"Lab {self.auth}"},
@@ -797,7 +827,7 @@ class HTTPClient:
             "published": True,
         }
         logger.info(f"正在发布工作流: {workflow_uuid}")
-        response = requests.patch(
+        response = self._session.patch(
             f"{self.remote_addr}/lab/workflow/owner",
             json=payload,
             headers={"Authorization": f"Lab {self.auth}"},

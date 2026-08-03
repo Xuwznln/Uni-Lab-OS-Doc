@@ -26,9 +26,8 @@ def test_registry_loads_multiple_variants_sharing_same_class():
     assert b["class"]["module"].endswith(":SharedDevice")
     assert a["implementation"]["variant"] == "model_a"
     assert b["implementation"]["variant"] == "model_b"
-    # class.init preserved (not stripped during normalization)
-    assert a["class"]["init"]["kwargs"]["channels"] == 8
-    assert b["class"]["init"]["kwargs"]["channels"] == 96
+    assert a["init_param_enforce"] == {"deck_name": "model-a-deck", "channels": 8}
+    assert b["init_param_enforce"] == {"deck_name": "model-b-deck", "channels": 96}
     # $ref expanded into the shared contract
     assert "setup" in a["class"]["action_value_mappings"]
     assert "initialized" in b["class"]["status_types"]

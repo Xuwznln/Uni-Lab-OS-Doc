@@ -696,18 +696,23 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
     """
     plr_materials = []
 
-    # 创建反向映射: {显示名称: (model, UUID)} -> 用于从 Bioyond typeName 查找 model
-    # 如果 type_mapping 的 key 已经是显示名称,则直接使用;否则创建反向映射
+    # 统一为 {显示名称: (model, UUID)}，同时兼容历史的正向和反向配置。
+    from unilabos.registry.registry import lab_registry
+
+    known_models = set(lab_registry.resource_type_registry)
     reverse_type_mapping = {}
     for key, value in type_mapping.items():
-        # value 可能是 tuple 或 list: (显示名称, UUID) 或 [显示名称, UUID]
-        display_name = value[0] if isinstance(value, (tuple, list)) and len(value) >= 1 else None
-        if display_name:
-            # 反向映射: {显示名称: (原始key作为model, UUID)}
-            resource_uuid = value[1] if len(value) >= 2 else ""
-            # 如果已存在该显示名称,跳过(保留第一个遇到的映射)
-            if display_name not in reverse_type_mapping:
-                reverse_type_mapping[display_name] = (key, resource_uuid)
+        if not isinstance(value, (tuple, list)) or not value:
+            continue
+        first_value = value[0]
+        if not isinstance(first_value, str) or not first_value:
+            continue
+        resource_uuid = value[1] if len(value) >= 2 else ""
+        if key in known_models and first_value not in known_models:
+            display_name, model = first_value, key
+        else:
+            display_name, model = key, first_value
+        reverse_type_mapping.setdefault(display_name, (model, resource_uuid))
 
     logger.debug(f"[反向映射表] 共 {len(reverse_type_mapping)} 个条目: {list(reverse_type_mapping.keys())}")
 
@@ -718,7 +723,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
     for material in bioyond_materials:
         # 从反向映射中查找: typeName(显示名称) -> (model, UUID)
         type_info = reverse_type_mapping.get(material.get("typeName"))
-        className = type_info[0] if type_info else "RegularContainer"
+        className = type_info[0] if type_info else "container"
 
         # 为同名物料添加唯一后缀
         base_name = material["name"]
