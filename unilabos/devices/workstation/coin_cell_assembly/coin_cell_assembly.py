@@ -1091,6 +1091,87 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             raise RuntimeError(error_msg)
 
 
+    # 长时延模拟的推荐档位（对应测试方案要跑的三种时长），不是硬约束
+    SIM_DELAY_PRESETS = (3, 5, 10)
+    # 上限不是「只能这几档」，而是拦住打错字：delay_minutes=1000 会让工站空睡 16 小时，
+    # 而这个动作除了睡觉什么都不做，堵住纯属浪费
+    SIM_DELAY_MAX_MINUTES = 60
+
+    def coin_cell_sim_delay(
+        self,
+        delay_minutes: float = 3,
+        report_interval: float = 15.0,
+    ) -> Dict[str, Any]:
+        """长时延模拟：空转指定时长，用来模拟扣电组装的完整流程耗时。
+
+        用于配液↔扣电联动的时序验证：把它替换掉真实的
+        `coin_cell_init` + `coin_cell_start`，就能在不动硬件的情况下
+        观察配液工站的互锁门控是否按预期阻塞、放行。
+
+        Args:
+            delay_minutes: 模拟耗时（分钟）。推荐档位 3 / 5 / 10，但接受任意正值，
+                上限 60 分钟。不做白名单是因为快速联调时常需要 30 秒级的时长
+            report_interval: 进度上报间隔（秒）。分段 sleep 是必要的——一句
+                time.sleep(600) 会让前端十分钟毫无变化、看起来像卡死
+
+        Returns:
+            {"status": "ok", "delay_minutes": float, "delay_seconds": float,
+             "start_time": str, "start_time_ms": int,
+             "end_time": str, "end_time_ms": int, "actual_seconds": float}
+
+        Raises:
+            ValueError: delay_minutes 非正或超过 60 分钟
+        """
+        try:
+            minutes = float(delay_minutes)
+        except (TypeError, ValueError):
+            raise ValueError(f"delay_minutes 必须是数字，收到: {delay_minutes!r}")
+
+        if minutes <= 0:
+            raise ValueError(f"delay_minutes 必须为正值，收到: {minutes}")
+        if minutes > self.SIM_DELAY_MAX_MINUTES:
+            raise ValueError(
+                f"delay_minutes={minutes} 超过上限 {self.SIM_DELAY_MAX_MINUTES} 分钟。"
+                f"这个动作只是空转，睡这么久多半是填错了；"
+                f"推荐档位 {'/'.join(map(str, self.SIM_DELAY_PRESETS))} 分钟。"
+            )
+
+        total_seconds = minutes * 60.0
+        start_dt = datetime.now()
+        start_ms = int(start_dt.timestamp() * 1000)
+        logger.info(
+            f"[coin_cell_sim_delay] 开始模拟扣电组装耗时 {minutes} 分钟"
+            f"（{total_seconds:.0f}s），起始 {start_dt.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}"
+        )
+
+        deadline = time.monotonic() + total_seconds
+        step = max(float(report_interval), 1.0)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(step, remaining))
+            remaining = max(deadline - time.monotonic(), 0.0)
+            logger.info(
+                f"[coin_cell_sim_delay] 模拟中… 剩余 {remaining:.0f}s / 共 {total_seconds:.0f}s"
+            )
+
+        end_dt = datetime.now()
+        end_ms = int(end_dt.timestamp() * 1000)
+        actual = (end_ms - start_ms) / 1000.0
+        result = {
+            "status": "ok",
+            "delay_minutes": minutes,
+            "delay_seconds": round(total_seconds, 3),
+            "start_time": start_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "start_time_ms": start_ms,
+            "end_time": end_dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "end_time_ms": end_ms,
+            "actual_seconds": round(actual, 3),
+        }
+        logger.info(f"[coin_cell_sim_delay] ✅ 模拟结束，实际耗时 {actual:.1f}s: {result}")
+        return result
+
     def coin_cell_init(self, material_search_enable: bool = False) -> bool:
         """
         组合函数：设备初始化 + 切换自动模式 + 启动

@@ -287,6 +287,61 @@ coincellassemblyworkstation_device:
           title: func_pack_device_init参数
           type: object
         type: UniLabJsonCommand
+      auto-coin_cell_sim_delay:
+        feedback: {}
+        goal: {}
+        goal_default:
+          delay_minutes: 3
+          report_interval: 15.0
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 长时延模拟：空转指定时长，模拟扣电组装的完整流程耗时。用于配液↔扣电联动的时序验证——替换掉真实的 coin_cell_init + coin_cell_start，即可在不动硬件的情况下观察配液工站互锁门控是否按预期阻塞、放行。分段 sleep 并周期上报剩余时间，避免长阻塞看起来像卡死。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                delay_minutes:
+                  default: 3
+                  title: 模拟耗时（分钟）
+                  description: 模拟耗时，推荐档位 3 / 5 / 10 分钟，但接受任意正值，上限 60 分钟。不做白名单是因为快速联调常需要 30 秒级时长；上限只用于拦住打错字。
+                  type: number
+                report_interval:
+                  default: 15.0
+                  title: 进度上报间隔（秒）
+                  description: 分段 sleep 的步长，每段打一次剩余时间日志。默认 15 秒。
+                  type: number
+              required: []
+              type: object
+            result:
+              properties:
+                actual_seconds:
+                  description: 实际耗时（秒）
+                  type: number
+                delay_minutes:
+                  description: 生效的模拟时长（分钟）
+                  type: number
+                end_time:
+                  description: 结束时间（本地，毫秒精度）
+                  type: string
+                end_time_ms:
+                  description: 结束时间 Unix 毫秒时间戳
+                  type: integer
+                start_time:
+                  description: 开始时间（本地，毫秒精度）
+                  type: string
+                start_time_ms:
+                  description: 开始时间 Unix 毫秒时间戳，便于与 multitask_probe 的时序数据对齐
+                  type: integer
+                status:
+                  type: string
+              type: object
+          required:
+          - goal
+          title: coin_cell_sim_delay参数
+          type: object
+        type: UniLabJsonCommand
       auto-coin_cell_init:
         feedback: {}
         goal: {}

@@ -632,6 +632,234 @@ bioyond_cell:
           title: create_sample参数
           type: object
         type: UniLabJsonCommand
+      auto-wait_orderlist_idle:
+        feedback: {}
+        goal: {}
+        goal_default:
+          lookback_minutes: 3600
+          poll_interval: 10.0
+          timeout: 86400
+          scenario: all
+          workflow_name_keyword: ''
+          page_size: 50
+          max_pages: 40
+          check_scheduler: true
+          claim_timeout: 7200.0
+          xlsx_path: ''
+          task_hint: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 多任务互锁门控：阻塞到「本工站可以安全发起下一批配液」为止。放在 create_orders 之前，整条链路只调一次（建单后的完成等待由 create_orders 内部负责）。放行需同时满足：调度处于 Running；窗口内无失败(90)配液单；窗口内无执行中(60)配液单；上一批缓存为空或已全部到 80/100；能占据放行凭证（上一个放行者已完成建单交接）。凭证填的是门控返回到 LIMS 把订单登记成 60 之间的空窗，没有它两批会同时建单击穿 0016(1位)/0018(4位) 容量。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                lookback_minutes:
+                  default: 3600
+                  title: 回溯窗口（分钟）
+                  description: 默认 3600（60 小时），覆盖多批 1–8 瓶的长周期与隔夜任务。现场遇到旧失败单锁站时可临时调小跨过去——没有失败确认机制，一次失败会锁到该单滑出窗口为止，门控 blocked 时会打印具体滑出钟点。
+                  type: integer
+                poll_interval:
+                  default: 10.0
+                  description: 未空闲时的轮询间隔（秒）
+                  type: number
+                timeout:
+                  default: 86400
+                  description: 整次门控最长等待（秒），默认 86400（24 小时）
+                  type: integer
+                scenario:
+                  default: all
+                  title: 场景键
+                  description: "可选 all/coin/pouch/cond。⚠️ 当前只影响过滤范围与分场景统计，不收窄阻断作用域——配液共用同一台奔曜分液硬件，两批物理上不可能并行，收窄会把第二批放进去。命名陷阱：配液分液(小瓶)(电导) 其实是扣电路，名字里的「电导」是 LIMS 历史遗留。"
+                  enum:
+                  - all
+                  - coin
+                  - pouch
+                  - cond
+                  type: string
+                workflow_name_keyword:
+                  default: ''
+                  title: 显式过滤关键字
+                  description: 非空时优先于 scenario。留空则按 scenario 查表，默认「配液」。
+                  type: string
+                page_size:
+                  default: 50
+                  description: order-list 单页条数（映射到接口的 pageCount，注意它是每页条数不是页数）
+                  type: integer
+                max_pages:
+                  default: 40
+                  description: 翻页上限，防异常数据把门控拖死。命中即短路，一般翻不到上限。
+                  type: integer
+                check_scheduler:
+                  default: true
+                  title: 检查调度状态
+                  description: 进入时先查 scheduler-status。Init/Stop 与 ErrorPause/ErrorStop 直接阻断；Pause 若带建单失败标记也直接阻断（那是自动暂停的，等下去不会好），否则轮询等待。不检查的话调度没起来时建单会成功但没人消费，最后表现成「配液超时失败」，极难定位。
+                  type: boolean
+                claim_timeout:
+                  default: 7200.0
+                  title: 放行凭证兜底作废时长（秒）
+                  description: 只用于兜进程崩溃这类未知情况；预检抛错、建单失败这两条已知路径由 create_orders 主动释放。必须大于后续 stack_inquiry_window_5_free 的等待时长，因为门控排在它前面。
+                  type: number
+                xlsx_path:
+                  default: ''
+                  title: 本轮配方 Excel 路径（可选）
+                  description: 给了就顺带做一次「绝对不够」预检——只拦独占也不够的情况，不做在飞批次扣减因此不可能误拦。作用是把缺料从排队 40 分钟之后提前到排队第一分钟。主机制仍是提交前的 precheck_reagents_total。
+                  type: string
+                formulation:
+                  title: 本轮配方（可选）
+                  description: 同 xlsx_path，二选一。形状同 create_orders_formulation 的 formulation 入参。
+                  items:
+                    type: object
+                  type: array
+                task_hint:
+                  default: ''
+                  title: 任务标识
+                  description: 仅用于日志与凭证归属，便于多任务时看清是谁在持有放行权
+                  type: string
+              required: []
+              type: object
+            result:
+              properties:
+                batch:
+                  description: 放行前的互锁缓存快照（上一批 orderCode）
+                  items:
+                    type: string
+                  type: array
+                elapsed_seconds:
+                  type: number
+                failed:
+                  description: 窗口内失败(90)配液单摘要
+                  items:
+                    type: object
+                  type: array
+                lookback_minutes:
+                  type: integer
+                matched_keywords:
+                  description: 实际用于过滤的关键字
+                  items:
+                    type: string
+                  type: array
+                poll_count:
+                  type: integer
+                reason:
+                  type: string
+                running:
+                  description: 窗口内执行中(60)配液单摘要
+                  items:
+                    type: object
+                  type: array
+                scenario:
+                  type: string
+                scheduler_status:
+                  description: 本次查到的调度状态
+                  type: string
+                status:
+                  description: idle / blocked / timeout；blocked 与 timeout 会抛异常阻止后续节点
+                  type: string
+              type: object
+          required:
+          - goal
+          title: wait_orderlist_idle参数
+          type: object
+        type: UniLabJsonCommand
+      auto-precheck_reagents_total:
+        feedback: {}
+        goal: {}
+        goal_default:
+          raise_on_shortage: false
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 多批次总量预检（只读，不建单、不改调度状态）：把所有待提交轮次的试剂需求汇总一次，与在库余量比对。放在提交任何 notebook 之前——此刻没有任何在飞批次，库存不含未决占用，因此不需要扣减、也不用判断 LIMS 是建单即锁还是消耗才扣，一次「在库 ≥ 总需求」就定论。它是建议性的而非保证（从检查到最后一轮跑完，中间可能有别人提交的任务或手工取用），所以 create_orders 内的建单前预检仍是最终权威判据。多 notebook 时必须在提交第一个之前跨全部 notebook 汇总一次，每个各算各的等于没做。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                formulations:
+                  title: 多轮 formulation
+                  description: 每个元素是一轮的 formulation（形状同 create_orders_formulation 的入参）
+                  items:
+                    items:
+                      type: object
+                    type: array
+                  type: array
+                xlsx_paths:
+                  title: 多轮 Excel 路径
+                  description: 每个元素是一轮的 Excel 路径（形状同 create_orders 的入参）。与 formulations 可同时给，会一并汇总。
+                  items:
+                    type: string
+                  type: array
+                raise_on_shortage:
+                  default: false
+                  title: 缺料时抛错
+                  description: 默认 false——它是提交侧的查询，由调用方决定要不要提交。置 true 可当工作流节点用。
+                  type: boolean
+              required: []
+              type: object
+            result:
+              properties:
+                items:
+                  description: 逐试剂的 name/required/available/gap/status（status 为 ok/short/not_found/skipped_unit）
+                  items:
+                    type: object
+                  type: array
+                ok:
+                  description: 总需求是否都够
+                  type: boolean
+                rounds:
+                  description: 汇总了几轮
+                  type: integer
+                shortages:
+                  description: 缺口描述，缺料时即补料清单
+                  items:
+                    type: string
+                  type: array
+                skipped:
+                  description: 因单位非质量单位而跳过比对的项
+                  items:
+                    type: string
+                  type: array
+                stock_query_ok:
+                  description: 库存查询是否成功。false 时结论不可用，交由建单前预检兜底
+                  type: boolean
+              type: object
+          required:
+          - goal
+          title: precheck_reagents_total参数
+          type: object
+        type: UniLabJsonCommand
+      auto-clear_interlock_failure:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 清除建单失败标记。建单未全部成功时会自动 scheduler_pause() 并记下标记，门控见到「Pause + 标记」会直接阻断并报真实原因（而不是当成人工临时暂停一路轮询到 24 小时超时）。scheduler_continue / scheduler_start 内部已自动清除，这里单独暴露一个入口供调试，或人工在别处恢复调度后手动清除。
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result:
+              properties:
+                cleared:
+                  description: 被清除的失败标记内容
+                  type: object
+                status:
+                  description: cleared / noop
+                  type: string
+              type: object
+          required:
+          - goal
+          title: clear_interlock_failure参数
+          type: object
+        type: UniLabJsonCommand
       auto-multitask_probe:
         feedback: {}
         goal: {}
@@ -964,6 +1192,28 @@ bioyond_cell:
           title: scheduler_start_and_auto_feeding参数
           type: object
         type: UniLabJsonCommand
+      auto-scheduler_status:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 查询调度状态。返回 data.schedulerStatus（Init / Stop / Running / Pause / ErrorPause
+            / ErrorStop）、hasTask（是否有任务）、creationTime。
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result: {}
+          required:
+          - goal
+          title: scheduler_status参数
+          type: object
+        type: UniLabJsonCommand
       auto-scheduler_stop:
         feedback: {}
         goal: {}
@@ -991,11 +1241,14 @@ bioyond_cell:
         goal_default:
           poll_interval: 5.0
           timeout: 3600
+          type_keyword: 分液瓶板
+          match_by_material_id: true
+          target_wh_id: ''
         handles: {}
         placeholder_keys: {}
         result: {}
         schema:
-          description: 轮询「1号2号手套箱交接堆栈」直到其中没有分液瓶板为止。用途：配液完成后确保交接堆栈已清空（分液板已转运走）再放行后续步骤；堆栈里只要还有分液瓶板就阻塞轮询，清空后通过。判定：查 warehouse-info 交接堆栈，库位 holdMId 非空且 holdMTypeName 含「分液瓶板」即视为仍有板。
+          description: 321 转运的【前置】门控：确认 1号2号交接堆栈(0016) 可以放新板。必须排在 transfer_3_to_2_to_1_auto 之前——321 会把新板放进 0016，而 0016 只有 1 个库位，所以放之前必须确认它是空的；放到 321 之后就退化成一句无用查询，不会报错，只是保护静默失效。判定分两条路：0016 本就空则立即放行（快速路径，不查 0017）；0016 有板则快照这些 materialId，等它们既离开 0016、又出现在 2号内部堆栈(0017)，确认板真的回流到位而不是刚离开还在途中。
           properties:
             feedback: {}
             goal:
@@ -1008,12 +1261,109 @@ bioyond_cell:
                   default: 3600
                   description: 最长等待秒数，默认 3600 秒（1 小时）；超时报错
                   type: integer
+                type_keyword:
+                  default: 分液瓶板
+                  title: 板型关键字
+                  description: 默认「分液瓶板」会同时匹配 5ml 与 20ml。扣电路应显式传「5ml分液瓶板」——否则 0016 里若停着一块 20ml 板（它走 3→2，不经 1→2 回 0017），「到位 0017」这个判据永远不成立，只能等到超时。
+                  type: string
+                match_by_material_id:
+                  default: true
+                  title: 按 materialId 追踪回流
+                  description: 是否按 materialId 精确追踪板回流到 0017。置 false 则退化为只要 0016 腾空即放行（旧行为）。
+                  type: boolean
+                target_wh_id:
+                  default: ''
+                  title: 回流目标仓库 whId
+                  description: 留空则用 2号手套箱内部堆栈(0017)。一般不需要填。
+                  type: string
               required: []
               type: object
-            result: {}
+            result:
+              properties:
+                arrived_material_ids:
+                  description: 已确认回流到 0017 的 materialId
+                  items:
+                    type: string
+                  type: array
+                elapsed_seconds:
+                  type: number
+                fast_path:
+                  description: 是否走了快速路径（进入时 0016 本来就空）
+                  type: boolean
+                pending_material_ids:
+                  description: 进入时 0016 上待回流的 materialId 快照
+                  items:
+                    type: string
+                  type: array
+                poll_count:
+                  type: integer
+                status:
+                  type: string
+              type: object
           required:
           - goal
           title: stack_inquiry_2to1参数
+          type: object
+        type: UniLabJsonCommand
+      auto-stack_inquiry_window_5_free:
+        feedback: {}
+        goal: {}
+        goal_default:
+          required_slots: 4
+          poll_interval: 5.0
+          timeout: 36000
+          type_keyword: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 建单【前置】门控：等 5号自动传递窗(0018) 的空闲库位数 ≥ required_slots。必须排在 create_orders 之前——配液流程结束时电导板已经直接堆在 0018 上，等「到位」没有意义；真正的瓶颈是 0018 只有 4 个库位，而一块板对应一个温度点。上一轮的板测完转去 0027、腾出空位后，下一轮才能建单。放到 create_orders 之后不会报错，只是保护静默失效（门控会打 warning 提示位置可疑）。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                required_slots:
+                  default: 4
+                  title: 本轮需要的库位数
+                  description: 等于本轮温度点数（1–4），应与传给 conductivity_test_inline 的 temperature_points 长度一致。默认 4 是最保守取值（等 0018 全空），按实际温度点数传可少等。超出 1–4 直接报错，因为传递窗物理上放不下。
+                  maximum: 4
+                  minimum: 1
+                  type: integer
+                poll_interval:
+                  default: 5.0
+                  description: 轮询间隔（秒），默认 5 秒
+                  type: number
+                timeout:
+                  default: 36000
+                  description: 最长等待秒数，默认 36000 秒（10 小时），匹配电导测试时长
+                  type: integer
+                type_keyword:
+                  default: ''
+                  title: 板型关键字
+                  description: 只统计含该关键字的板占用；留空则任何物料都算占位（0018 是限量通道，默认按最保守口径算）。
+                  type: string
+              required: []
+              type: object
+            result:
+              properties:
+                elapsed_seconds:
+                  type: number
+                free_slots:
+                  description: 放行时的空闲库位数
+                  type: integer
+                poll_count:
+                  type: integer
+                required_slots:
+                  type: integer
+                status:
+                  type: string
+                total_slots:
+                  description: 传递窗总库位数
+                  type: integer
+              type: object
+          required:
+          - goal
+          title: stack_inquiry_window_5_free参数
           type: object
         type: UniLabJsonCommand
       auto-monitor_manual_stack_3:
