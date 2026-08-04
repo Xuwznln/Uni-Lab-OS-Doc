@@ -143,6 +143,21 @@ class BioyondCellWorkstation(BioyondWorkstation):
         self._dispense_total: int = 0
         self._dispense_done: set = set()
 
+        # ========== 多任务互锁（wait_orderlist_idle）==========
+        # 同一把锁保护下面四个字段，避免门控扫描与建单写缓存竞态。
+        self._interlock_lock = threading.Lock()
+        # 上一批已建成的订单：orderCode → orderId。门控核对它全部到 80/100 后才清空。
+        self._interlock_batch: Dict[str, str] = {}
+        # 本批附加信息：scenario / 写入时间 / 逐单最终状态（供下一轮 blocked 日志点名失败单）
+        self._interlock_batch_meta: Dict[str, Any] = {}
+        # 放行凭证：门控放行时占据，_submit_and_wait_orders 写缓存时接管清除。
+        # 没有它，门控 return 后到 LIMS 把订单登记成 60 之间有一段窗口，
+        # 第二个任务会看到「无 60 + 缓存空」而同样放行，两批同时建单击穿库位容量。
+        self._interlock_claim: Optional[Dict[str, Any]] = None
+        # 建单未全部成功时会主动 scheduler_pause()，这里记下原因。
+        # 否则门控看到 Pause 会当成「人工临时暂停」一路轮询到 24h 超时，掩盖真实原因。
+        self._interlock_last_failure: Optional[Dict[str, Any]] = None
+
         logger.info(f"✅ BioyondCellWorkstation 初始化完成 (debug_mode={self.debug_mode})")
         logger.info(
             "提示：真机与仿真机 orderCode 可能撞号；finish/进度以 orderCode+orderId 双字段判定。"
@@ -152,10 +167,49 @@ class BioyondCellWorkstation(BioyondWorkstation):
     # 奔曜全 0 GUID：电导建单偶发占位，此时无法用 orderId 强校验
     _EMPTY_ORDER_ID = "00000000-0000-0000-0000-000000000000"
 
+    # ========== 仓库 whId 常量（来源：包含库位的仓库信息0610.json）==========
+    # 只用 whId 定位仓库：code「0018」同时是「适配器块」的 materialTypeCode，用 code 匹配会撞。
+    #
     # 3 号箱自动堆栈-左（name="自动堆栈-左", code="0008"），即 3→2→1 / 3→2 里的 "3"。
     # 转运接口只认这个仓库当来源，与报告 usedMaterials 里的 locationId（可能指向
     # 配液站内的临时槽位）无关。
     _WH_ID_AUTO_STACK_LEFT = "3a19debc-84b4-0359-e2d4-b3beea49348b"
+    # 1号2号手套箱交接堆栈（code=0016）：**只有 1 个库位**，是 321 转运的瓶颈通道
+    _WH_ID_TRANSFER_2TO1 = "3a1baa49-7f76-b88a-44d5-d478c48aae3e"
+    # 2号手套箱内部堆栈（code=0017）：9 个库位，1→2 回流的落点，容量充足非瓶颈
+    _WH_ID_STACK_2_INNER = "3a1baa4b-393d-ed16-5758-edec5cf20749"
+    # 5号自动传递窗（code=0018）：**只有 4 个库位**，电导板一板一温度点，是限量通道
+    _WH_ID_TRANSFER_WINDOW_5 = "3a1c68b5-65e1-f662-93bb-3c2c5b42744d"
+    # 5号右侧手动堆栈（code=0027）：8 个库位，电导测完的落点，容量充足非瓶颈
+    _WH_ID_MANUAL_STACK_5_RIGHT = "3a1c7325-8998-49f6-c5a4-d20c31d132e1"
+
+    # 5 号自动传递窗物理库位数，电导一轮最多同时测这么多温度点
+    _WINDOW_5_CAPACITY = 4
+
+    # ========== 场景键 → 配液类 workflowName 关键字（子串匹配）==========
+    # ⚠️ 仅用于分场景统计/日志，**不可**用来收窄互锁的阻断范围。
+    # 配液共用同一台奔曜分液硬件，两批配液物理上不可能并行；若拿 "coin" 收窄，
+    # 扣电任务就会无视正在跑的大瓶配液单而放行，把第二批冲进同一台硬件。
+    #
+    # 命名陷阱：`配液分液(小瓶)(电导)` 里的「(电导)」是 LIMS 历史遗留，它其实是**扣电**路
+    # （源料 V05ML66 @ 小分液瓶堆栈）。而 `配液分液(大瓶)` 一对三，覆盖软包/电导/扣电+电导——
+    # 实测场景 4 的 8 单全是大瓶，一个大瓶同时分出扣电的 5ml 与电导的 20ml 瓶。
+    # 因此**不能用 workflowName 推断板型或链路**，判断是否走扣电路要看板型或 coin_cell_volume。
+    SCENARIO_ORDER_KEYWORDS: Dict[str, List[str]] = {
+        "all":   ["配液"],              # 默认：站级全局，覆盖全部配液单
+        "coin":  ["配液分液(小瓶)"],      # 场景1 配液+扣电
+        "pouch": ["配液分液(大瓶)"],      # 场景2 配液+软包
+        "cond":  ["配液分液(大瓶)"],      # 场景3 配液+电导（场景4 同此，不单列键）
+    }
+
+    # order-list **响应** items[].status：60 执行中 / 80 成功 / 90 失败 / 100 已取出
+    _ORDER_STATUS_RUNNING_CODE = 60
+    _ORDER_STATUS_FAILED_CODE = 90
+    _ORDER_TERMINAL_OK = (80, 100)
+
+    # ⚠️ order-list **请求** data.status 与上面**不是同一套枚举**：请求 60 = 未取出、
+    # 请求 100 = 已取出，两者都可能对应响应里的 80 Succeed（实测见 `_paginate_order_list`）。
+    # 故此处**故意不定义**请求侧状态常量——判状态一律请求侧传空串、只认响应 status 字段。
 
     @staticmethod
     def _normalize_order_id(order_id: Optional[str]) -> str:
@@ -1451,11 +1505,22 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     required[name] = required.get(name, 0.0) + mass
         return required
 
-    def _query_reagent_stock(self) -> Optional[Dict[str, float]]:
+    # 预检按克比对，非质量单位的试剂无法直接对比，只能跳过该项
+    _MASS_UNITS = ("g", "gram", "grams", "克")
+
+    def _query_reagent_stock(self) -> Optional[Dict[str, Any]]:
         """查 2.3 stock-material 取在库试剂可用量（g），按试剂名累加同名多瓶。
 
-        查询失败返回 None，由调用方决定降级策略——预检是拦截手段，
-        不能因为查询本身出问题就挡住正常建单。
+        typeMode=2 即「试剂」（1=样品、0=耗材），不会漏查其它 typeMode。
+
+        Returns:
+            {
+              "stock":        {试剂名: 可用量(g)},
+              "unit_skipped": {试剂名: 非质量单位},   # 这些项预检时跳过
+              "names":        [在库全部试剂名],       # 供失配时列清单排查
+            }
+            查询失败返回 None，由调用方决定降级策略——预检是拦截手段，
+            不能因为查询本身出问题就挡住正常建单。
         """
         resp = self._post_lims(
             "/api/lims/storage/stock-material",
@@ -1468,12 +1533,22 @@ class BioyondCellWorkstation(BioyondWorkstation):
             return None
 
         stock: Dict[str, float] = {}
+        unit_skipped: Dict[str, str] = {}
+        names: List[str] = []
         for item in data:
             if not isinstance(item, dict):
                 continue
             name = str(item.get("name") or "").strip()
             if not name:
                 continue
+            names.append(name)
+
+            # 单位校验：materialInfos.mass 是克，拿克跟 mL 比是静默错误，只能跳过该项
+            unit = str(item.get("unit") or "g").strip()
+            if unit.casefold() not in self._MASS_UNITS:
+                unit_skipped[name] = unit
+                continue
+
             try:
                 quantity = float(item.get("quantity") or 0)
             except (TypeError, ValueError):
@@ -1484,7 +1559,86 @@ class BioyondCellWorkstation(BioyondWorkstation):
             except (TypeError, ValueError):
                 locked = 0.0
             stock[name] = stock.get(name, 0.0) + quantity - locked
-        return stock
+
+        return {"stock": stock, "unit_skipped": unit_skipped, "names": sorted(set(names))}
+
+    def _compare_reagents(
+        self, required: Dict[str, float], snapshot: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """把需求量与在库快照逐项比对，返回结构化报告（不抛错）。
+
+        `_preflight_check_reagents`（单批建单前）与 `precheck_reagents_total`
+        （多轮提交前）共用同一套判据，避免两处口径漂移。
+
+        判据取舍：
+        - 单位非克 → 跳过该项（放行），单位对不上时无法比较，硬拦属于自伤
+        - 在库查无此名 → **硬拦**。已决策宁可误拦不漏拦；但报错里附在库试剂名清单，
+          便于一眼区分「名称失配」与「真的没有这个试剂」
+        """
+        stock: Dict[str, float] = snapshot.get("stock") or {}
+        unit_skipped: Dict[str, str] = snapshot.get("unit_skipped") or {}
+        stock_names: List[str] = snapshot.get("names") or []
+        # LIMS 里试剂名大小写偶有出入，精确匹配不中时降级按大小写不敏感再找一次
+        stock_ci = {k.casefold(): v for k, v in stock.items()}
+        skipped_ci = {k.casefold(): v for k, v in unit_skipped.items()}
+
+        items: List[Dict[str, Any]] = []
+        shortages: List[str] = []
+        skipped: List[str] = []
+        for name in sorted(required):
+            need = required[name]
+
+            bad_unit = unit_skipped.get(name) or skipped_ci.get(name.casefold())
+            if bad_unit is not None:
+                skipped.append(f"{name}（单位 {bad_unit} 非质量单位）")
+                items.append({
+                    "name": name, "required": round(need, 4),
+                    "available": None, "gap": None, "status": "skipped_unit",
+                })
+                continue
+
+            have = stock.get(name)
+            if have is None:
+                have = stock_ci.get(name.casefold())
+
+            if have is None:
+                shortages.append(f"{name}: 需要 {need:.4f} g，在库无此试剂")
+                items.append({
+                    "name": name, "required": round(need, 4),
+                    "available": None, "gap": None, "status": "not_found",
+                })
+            elif have < need:
+                shortages.append(
+                    f"{name}: 需要 {need:.4f} g，可用 {have:.4f} g，缺 {need - have:.4f} g"
+                )
+                items.append({
+                    "name": name, "required": round(need, 4),
+                    "available": round(have, 4), "gap": round(need - have, 4),
+                    "status": "short",
+                })
+            else:
+                items.append({
+                    "name": name, "required": round(need, 4),
+                    "available": round(have, 4), "gap": 0.0, "status": "ok",
+                })
+
+        return {
+            "ok": not shortages,
+            "items": items,
+            "shortages": shortages,
+            "skipped": skipped,
+            "has_not_found": any(i["status"] == "not_found" for i in items),
+            "stock_names": stock_names,
+        }
+
+    @staticmethod
+    def _format_stock_name_hint(stock_names: List[str], limit: int = 30) -> str:
+        """「在库无此试剂」时附上在库试剂名清单，用于区分名称失配与真缺料。"""
+        if not stock_names:
+            return "（在库试剂名清单为空，可能是库存查询口径有误）"
+        shown = stock_names[:limit]
+        more = f" ...等共 {len(stock_names)} 种" if len(stock_names) > limit else ""
+        return f"在库试剂名清单: {', '.join(shown)}{more}"
 
     def _preflight_check_reagents(self, orders: List[Dict[str, Any]], tag: str) -> None:
         """建单前校验整批试剂需求是否够，不够就一单都不建。
@@ -1500,47 +1654,961 @@ class BioyondCellWorkstation(BioyondWorkstation):
         if not required:
             return
 
-        stock = self._query_reagent_stock()
-        if stock is None:
+        snapshot = self._query_reagent_stock()
+        if snapshot is None:
             logger.warning(
                 f"[{tag}] ⚠️ 试剂库存查询失败，跳过建单前预检，改由 LIMS 逐单校验兜底"
             )
             return
 
-        # LIMS 里试剂名大小写偶有出入，精确匹配不中时降级按大小写不敏感再找一次
-        stock_ci = {k.casefold(): v for k, v in stock.items()}
-        shortages: List[str] = []
-        for name in sorted(required):
-            need = required[name]
-            have = stock.get(name)
-            if have is None:
-                have = stock_ci.get(name.casefold())
-            if have is None:
-                shortages.append(f"{name}: 需要 {need:.4f} g，在库无此试剂")
-            elif have < need:
-                shortages.append(
-                    f"{name}: 需要 {need:.4f} g，可用 {have:.4f} g，缺 {need - have:.4f} g"
-                )
+        report = self._compare_reagents(required, snapshot)
 
-        if shortages:
+        for note in report["skipped"]:
+            logger.warning(f"[{tag}] ⚠️ 预检跳过 {note}——无法与克数比较，该项交由 LIMS 校验")
+
+        if not report["ok"]:
+            shortage_text = "; ".join(report["shortages"])
+            # 「在库无此试剂」既可能是真缺料，也可能是名称失配，附清单让人当场分辨
+            hint = (
+                f" {self._format_stock_name_hint(report['stock_names'])}"
+                if report["has_not_found"] else ""
+            )
             logger.error(
-                f"[{tag}] ❌ 建单前预检未通过，{len(orders)} 单全部不下发: "
-                + "; ".join(shortages)
+                f"[{tag}] ❌ 建单前预检未通过，{len(orders)} 单全部不下发: {shortage_text}{hint}"
             )
             raise BioyondException(
                 f"[{tag}] 试剂余量不足，{len(orders)} 单全部未下发（避免产生半批待处置订单）。"
-                f"缺口: {'; '.join(shortages)}。请补齐试剂后重新下发。"
+                f"缺口: {shortage_text}。请补齐试剂后重新下发。{hint}"
             )
 
         logger.info(
             f"[{tag}] ✅ 建单前预检通过，{len(required)} 种试剂余量充足: "
             + ", ".join(
-                f"{n} 需{required[n]:.4f}/余{(stock.get(n) if stock.get(n) is not None else stock_ci.get(n.casefold(), 0.0)):.4f}g"
-                for n in sorted(required)
+                f"{i['name']} 需{i['required']:.4f}/余{i['available']:.4f}g"
+                for i in report["items"] if i["status"] == "ok"
             )
         )
 
+    @staticmethod
+    def _sum_formulation_reagents(formulation: List[Dict[str, Any]]) -> Dict[str, float]:
+        """把一轮 formulation（create_orders_formulation 入参形状）按试剂名汇总（g）。
+
+        形状：[{"order_name": ..., "materials": [{"name": ..., "mass": ...}]}, ...]
+        """
+        required: Dict[str, float] = {}
+        for entry in formulation or []:
+            if not isinstance(entry, dict):
+                continue
+            for mat in entry.get("materials") or []:
+                if not isinstance(mat, dict):
+                    continue
+                name = str(mat.get("name") or "").strip()
+                if not name:
+                    continue
+                try:
+                    mass = float(mat.get("mass") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if mass > 0:
+                    required[name] = required.get(name, 0.0) + mass
+        return required
+
+    def _sum_xlsx_reagents(self, xlsx_path: str) -> Dict[str, float]:
+        """把一轮 Excel（create_orders 入参）按试剂名汇总（g）。
+
+        物料列口径与 create_orders 保持一致：以「(g)」结尾且不是总质量聚合列。
+        """
+        path = Path(xlsx_path)
+        if not path.exists():
+            raise FileNotFoundError(f"未找到 Excel 文件：{path}")
+        try:
+            df = pd.read_excel(path, sheet_name=0, engine="openpyxl")
+        except Exception as e:
+            raise RuntimeError(f"读取 Excel 失败（{path}）：{e}")
+
+        _NON_MATERIAL_NAMES = {"总质量", "totalMass", "TotalMass", "total_mass"}
+        material_cols = [
+            c for c in df.columns
+            if isinstance(c, str) and c.endswith("(g)")
+            and c.replace("(g)", "").strip() not in _NON_MATERIAL_NAMES
+        ]
+        if not material_cols:
+            raise KeyError(f"{path} 中未发现任何以「(g)」结尾的物料列，请检查表头。")
+
+        required: Dict[str, float] = {}
+        for _, row in df.iterrows():
+            for mcol in material_cols:
+                val = row.get(mcol, None)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    continue
+                try:
+                    mass = float(val)
+                except (TypeError, ValueError):
+                    continue
+                if mass > 0:
+                    name = mcol.replace("(g)", "").strip()
+                    required[name] = required.get(name, 0.0) + mass
+        return required
+
+    def precheck_reagents_total(
+        self,
+        formulations: Optional[List[List[Dict[str, Any]]]] = None,
+        xlsx_paths: Optional[List[str]] = None,
+        raise_on_shortage: bool = False,
+    ) -> Dict[str, Any]:
+        """多批次总量预检：汇总所有待提交轮次的试剂需求，与在库余量比对一次。
+
+        为什么放在提交之前：此刻**没有任何在飞批次**，库存不含未决占用，
+        因此不需要扣减、也不用判断 LIMS 是建单即锁还是消耗才扣——一次
+        `在库 >= 总需求` 就定论。这是最早、也是唯一无歧义的检查点。
+
+        它是**建议性**的，不是保证：从本次检查到最后一轮跑完，中间可能有
+        别人提交的任务、手工取用、其它工站消耗使结论失效。所以
+        `create_orders` 内的建单前预检必须保留，那才是最终权威判据。
+
+        Args:
+            formulations: 多轮 formulation 列表，每个元素是一轮的 formulation
+                （形状同 create_orders_formulation 的入参）
+            xlsx_paths: 多轮 Excel 路径列表（形状同 create_orders 的入参）
+            raise_on_shortage: 缺料时是否抛错。默认 False —— 它是提交侧的查询，
+                由调用方决定要不要提交；置 True 可当工作流节点用
+
+        Returns:
+            {
+              "ok": bool,                 # 总需求是否都够
+              "rounds": int,              # 汇总了几轮
+              "items": [{name, required, available, gap, status}],
+              "shortages": [...],         # 缺口描述，缺料时即补料清单
+              "skipped": [...],           # 因单位非克而跳过的项
+              "stock_query_ok": bool,     # 库存查询是否成功
+            }
+
+        Raises:
+            BioyondException: raise_on_shortage=True 且有缺口时
+        """
+        rounds = 0
+        required: Dict[str, float] = {}
+
+        for formulation in (formulations or []):
+            part = self._sum_formulation_reagents(formulation)
+            for name, mass in part.items():
+                required[name] = required.get(name, 0.0) + mass
+            rounds += 1
+
+        for xlsx_path in (xlsx_paths or []):
+            part = self._sum_xlsx_reagents(xlsx_path)
+            for name, mass in part.items():
+                required[name] = required.get(name, 0.0) + mass
+            rounds += 1
+
+        if not required:
+            logger.warning("[总量预检] 未解析出任何试剂需求，请检查 formulations / xlsx_paths 入参")
+            return {
+                "ok": True, "rounds": rounds, "items": [], "shortages": [],
+                "skipped": [], "stock_query_ok": True,
+                "message": "未解析出任何试剂需求，跳过比对",
+            }
+
+        snapshot = self._query_reagent_stock()
+        if snapshot is None:
+            logger.warning("[总量预检] ⚠️ 试剂库存查询失败，无法给出结论，交由建单前预检兜底")
+            return {
+                "ok": True, "rounds": rounds, "items": [], "shortages": [],
+                "skipped": [], "stock_query_ok": False,
+                "message": "库存查询失败，未能比对；请依赖 create_orders 内的建单前预检",
+            }
+
+        report = self._compare_reagents(required, snapshot)
+        result = {
+            "ok": report["ok"],
+            "rounds": rounds,
+            "items": report["items"],
+            "shortages": report["shortages"],
+            "skipped": report["skipped"],
+            "stock_query_ok": True,
+        }
+
+        for note in report["skipped"]:
+            logger.warning(f"[总量预检] ⚠️ 跳过 {note}——无法与克数比较")
+
+        if report["ok"]:
+            logger.info(
+                f"[总量预检] ✅ {rounds} 轮共 {len(required)} 种试剂余量充足: "
+                + ", ".join(
+                    f"{i['name']} 需{i['required']:.4f}/余{i['available']:.4f}g"
+                    for i in report["items"] if i["status"] == "ok"
+                )
+            )
+            return result
+
+        shortage_text = "; ".join(report["shortages"])
+        hint = (
+            f" {self._format_stock_name_hint(report['stock_names'])}"
+            if report["has_not_found"] else ""
+        )
+        result["message"] = f"{rounds} 轮总需求超出在库余量。缺口: {shortage_text}。{hint}"
+        logger.error(f"[总量预检] ❌ {result['message']}")
+
+        if raise_on_shortage:
+            raise BioyondException(
+                f"[总量预检] 试剂总量不足，请勿提交这 {rounds} 轮实验。"
+                f"缺口: {shortage_text}。{hint}"
+            )
+        return result
+
+    # -------------------- 多任务互锁：order-list 门控 --------------------
+
+    @staticmethod
+    def _lims_time_window(lookback_minutes: int) -> Tuple[str, str, datetime]:
+        """构造 order-list 的时间窗，并返回**精确**的客户端截断时刻。
+
+        实测口径（2026-08-04 对 172.16.28.127 实测，勿凭直觉改）：
+
+        1. `timeType` 必须是**被过滤字段名** `"requestTime"`。填 `"beginTime"`
+           （请求参数名）会被 LIMS 静默忽略 → 时间窗完全不生效、返回全部历史单。
+           `createTime`/`startTime`/`endTime`/`finishTime` 同样是静默忽略。
+        2. 过滤粒度是**按天**，起止两端都取日期闭区间，时分秒被丢弃：
+           `[08-03T12:30, 08-03T23:59]` 与 `[08-03T00:00, 08-03T00:00]` 返回
+           完全相同的结果（含当天 11:06 的单）。所以服务端窗口只能粗筛到「天」，
+           分钟级的 lookback 必须由调用方用返回的 `requestTime` 再精确过滤一次，
+           这就是第三个返回值 `cutoff` 的用途。
+        3. 时间字面量用 ISO `T` 分隔即可，毫秒与 `Z` 后缀都可省略、结果一致；
+           但换成空格分隔 `"YYYY-MM-DD HH:MM:SS"` 会让过滤静默失效（返回全量）。
+        4. 按裸本地时间比较，Z 纯装饰——不要「顺手修正」成真 UTC，否则偏 8 小时。
+
+        Returns:
+            (beginTime 字面量, endTime 字面量, 精确截断时刻)
+        """
+        now = datetime.now()
+        cutoff = now - timedelta(minutes=lookback_minutes)
+        # 服务端按天取闭区间，故窗口起点必然放宽到 cutoff 当天 00:00，只作粗筛
+        begin = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return begin, end, cutoff
+
+    def _resolve_order_keywords(
+        self, scenario: str = "all", workflow_name_keyword: str = ""
+    ) -> List[str]:
+        """解析门控过滤关键字。
+
+        优先级：显式 workflow_name_keyword > scenario 查表 > 回落 all。
+        未知 scenario 打 warning 后回落 ["配液"]，绝不静默放宽或收紧——
+        静默收紧比报错危险，会让门控漏掉本该挡住的单。
+        """
+        kw = (workflow_name_keyword or "").strip()
+        if kw:
+            return [kw]
+        key = (scenario or "all").strip() or "all"
+        keywords = self.SCENARIO_ORDER_KEYWORDS.get(key)
+        if keywords is None:
+            logger.warning(
+                f"[互锁门控] 未知 scenario={key!r}，回落到 all（关键字「配液」）。"
+                f"可选: {list(self.SCENARIO_ORDER_KEYWORDS)}"
+            )
+            return list(self.SCENARIO_ORDER_KEYWORDS["all"])
+        return list(keywords)
+
+    def _query_scheduler_status(self) -> Optional[str]:
+        """查调度状态（2.x scheduler-status），返回 data.schedulerStatus。
+
+        取值：Init / Stop / Running / Pause / ErrorPause / ErrorStop。
+        查询失败返回 None——门控只把它当参考，不因状态查询本身失败而阻断。
+        """
+        try:
+            resp = self.scheduler_status()
+        except Exception as e:
+            logger.warning(f"[互锁门控] 调度状态查询异常: {e}")
+            return None
+        if not isinstance(resp, dict) or resp.get("code") != 1:
+            logger.warning(f"[互锁门控] 调度状态查询返回异常: {resp}")
+            return None
+        status = ((resp.get("data") or {}).get("schedulerStatus") or "").strip()
+        return status or None
+
+    @staticmethod
+    def _parse_lims_time(value: Any) -> Optional[datetime]:
+        """解析 LIMS 返回的裸本地时间（如 2026-08-03T11:06:04.565674），失败返回 None。"""
+        if not isinstance(value, str) or not value:
+            return None
+        text = value.strip().rstrip("Z")
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            return None
+
+    def _paginate_order_list(
+        self,
+        begin_time: str,
+        end_time: str,
+        keywords: List[str],
+        page_size: int = 100,
+        max_pages: int = 40,
+        cutoff: Optional[datetime] = None,
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        """分页扫窗口内命中关键字的配液单，按**响应里的** status 字段分桶返回。
+
+        ⚠️ 关键口径：**请求侧 `status` 与响应侧 `status` 不是同一套枚举**，
+        所以这里请求侧传空串（=不按状态过滤），状态判定完全交给响应字段。
+        2026-08-04 实测（近 60h 窗口）：
+
+        | 请求 status | 命中数 | 这些单响应里的 status  |
+        |-------------|--------|------------------------|
+        | ""          | 33     | 80×31, 90×2            |
+        | "60"        | 11     | **全是 80 Succeed**    |
+        | "80"        | 31     | 80×31                  |
+        | "90"        | 2      | 90×2                   |
+        | "100"       | 22     | 80×20, 90×2            |
+
+        请求 `"60"` 的 11 条**全部带 completeTime**（早已跑完），且
+        `请求60 ∩ 请求100 = 0`、`11 + 20 = 31`（成功单被二分）——可见请求侧
+        `60`/`100` 是「**未取出**/**已取出**」，而不是响应侧的「运行中/已取出」。
+        照请求侧 `status=60` 当「正在运行」用，会把「配液已完成但板子还没取出」
+        的单误判成在跑，门控就会一直空等到超时。
+
+        请求侧 `""` 实测是所有分桶的超集（`"60"/"80"/"90"/"100"` 均 ⊆ `""`），
+        所以单次扫描足够，不会漏掉真正在跑的单。窗口内总量也不大（近 60h 33 条、
+        7 天 98 条、14 天 394 条），全量翻页成本可接受。
+
+        `cutoff` 是精确的时间下界：服务端时间窗只有「天」粒度（见
+        `_lims_time_window`），会把 begin 当天 00:00 起的单全都带回来，所以这里必须
+        再按 `requestTime` 精确过滤一次，否则 lookback 会被静默放宽最多一天。
+        `requestTime` 缺失或解析失败的条目保守保留（宁可多拦不可漏拦）。
+
+        注意 pageCount 是「每页条数」而非「页数」。
+
+        Returns:
+            {响应status: [订单摘要]}，未出现的状态不建键
+        """
+        buckets: Dict[int, List[Dict[str, Any]]] = {}
+        skip = 0
+        stale = 0
+        scanned = 0
+        for page in range(max_pages):
+            try:
+                resp = self.order_list_v2(
+                    timeType="requestTime",
+                    beginTime=begin_time,
+                    endTime=end_time,
+                    status="",  # 状态判定见 docstring，一律交给响应字段
+                    skipCount=skip,
+                    pageCount=page_size,
+                )
+            except Exception as e:
+                logger.warning(f"[互锁门控] order-list 查询异常（page={page}）: {e}")
+                return buckets
+
+            data = (resp or {}).get("data") or {}
+            items = data.get("items") or []
+            total = int(data.get("totalCount") or 0)
+
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                wf_name = it.get("workflowName") or ""
+                if not any(kw in wf_name for kw in keywords):
+                    continue
+                req_dt = self._parse_lims_time(it.get("requestTime"))
+                if cutoff is not None and req_dt is not None and req_dt < cutoff:
+                    # 服务端只按天粗筛带回来的陈旧单，不计入门控
+                    stale += 1
+                    continue
+                try:
+                    st = int(it.get("status"))
+                except (TypeError, ValueError):
+                    # 状态读不出来时保守当「运行中」，宁可多拦不可漏拦
+                    logger.warning(
+                        f"[互锁门控] 订单 {it.get('name')} 的 status 无法解析"
+                        f"（原值={it.get('status')!r}），保守按运行中处理"
+                    )
+                    st = self._ORDER_STATUS_RUNNING_CODE
+                buckets.setdefault(st, []).append({
+                    "orderName": it.get("name"),
+                    "orderId": it.get("id") or it.get("orderId"),
+                    "workflowName": wf_name,
+                    "status": st,
+                    "statusName": it.get("statusName"),
+                    "requestTime": it.get("requestTime"),
+                    "completeTime": it.get("completeTime"),
+                })
+
+            scanned += len(items)
+            skip += len(items)
+            if not items or skip >= total:
+                break
+
+            if page == max_pages - 1:
+                logger.warning(
+                    f"[互锁门控] 翻页达上限 {max_pages} 页（已扫 {scanned}/{total} 条），"
+                    f"剩余未扫，门控判定可能不完整"
+                )
+
+        logger.info(
+            f"[互锁门控] 扫描窗口内 {scanned} 条订单，命中配液单按状态分桶: "
+            f"{ {k: len(v) for k, v in sorted(buckets.items())} }"
+            + (f"，另有 {stale} 条超出精确回溯窗口已忽略" if stale else "")
+        )
+        return buckets
+
+    @staticmethod
+    def _count_by_workflow(items: List[Dict[str, Any]]) -> Dict[str, int]:
+        """按 workflowName 分场景计数，供日志观测跨场景互相挡的频率。"""
+        counts: Dict[str, int] = {}
+        for it in items:
+            name = it.get("workflowName") or "<未知>"
+            counts[name] = counts.get(name, 0) + 1
+        return counts
+
+    def _scan_workflow_statuses(
+        self,
+        keywords: List[str],
+        lookback_minutes: int,
+        page_size: int = 100,
+        max_pages: int = 40,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """扫一轮窗口内的执行中(60)与失败(90)配液单。
+
+        单次分页扫描 + 按响应 status 分桶；不要改回「按请求 status 各查一次」，
+        请求侧 60 是「未取出」而非「运行中」，详见 `_paginate_order_list`。
+        """
+        begin_time, end_time, cutoff = self._lims_time_window(lookback_minutes)
+        buckets = self._paginate_order_list(
+            begin_time, end_time, keywords, page_size, max_pages, cutoff
+        )
+        return {
+            "running": buckets.get(self._ORDER_STATUS_RUNNING_CODE, []),
+            "failed": buckets.get(self._ORDER_STATUS_FAILED_CODE, []),
+            "begin_time": begin_time,
+            "end_time": end_time,
+        }
+
+    def _pick_order_by_name(
+        self,
+        items: List[Dict[str, Any]],
+        expect_name: str,
+        registered_at: Optional[float],
+        order_code: str,
+    ) -> Optional[Dict[str, Any]]:
+        """在同名多轮订单里挑出「本轮」那一个。
+
+        orderName 不唯一（见 `_check_batch_all_finished`），单纯取第一条同名的会撞到
+        上一轮。建单发生在 `register_interlock_batch` 之前几秒，所以本轮那一单的
+        requestTime 应该是**不晚于 registered_at、且离它最近**的那个。
+        """
+        candidates = [it for it in items if it.get("name") == expect_name]
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]
+
+        if registered_at is None:
+            logger.warning(
+                f"[互锁门控] {order_code}（{expect_name}）有 {len(candidates)} 个同名单，"
+                f"但缓存里没有 registered_at 可供消歧，取 requestTime 最新的一条"
+            )
+            return max(candidates, key=lambda it: it.get("requestTime") or "")
+
+        # 容忍少量时钟偏差：建单在注册之前，允许晚 60s
+        limit = datetime.fromtimestamp(registered_at) + timedelta(seconds=60)
+        in_window = [
+            it for it in candidates
+            if (dt := self._parse_lims_time(it.get("requestTime"))) is not None and dt <= limit
+        ]
+        pool = in_window or candidates
+        picked = max(pool, key=lambda it: it.get("requestTime") or "")
+        logger.info(
+            f"[互锁门控] {order_code}（{expect_name}）命中 {len(candidates)} 个同名单，"
+            f"按 registered_at={limit:%Y-%m-%d %H:%M:%S} 消歧后取 "
+            f"requestTime={picked.get('requestTime')} / orderId={picked.get('id')}"
+        )
+        if not in_window:
+            logger.warning(
+                f"[互锁门控] {order_code}（{expect_name}）的同名单 requestTime 全都晚于"
+                f" registered_at，消歧依据不可靠，请核对是否有并发建单"
+            )
+        return picked
+
+    def _check_batch_all_finished(self) -> Tuple[bool, List[Dict[str, Any]]]:
+        """核对互锁缓存里的上一批订单是否已全部到达终态（80/100）。
+
+        用 orderCode 查 order-list，再用 orderId 双字段确认，防真机/仿真机撞号。
+
+        ⚠️ orderName **不唯一**：实测同一批名字（如 DDCC1001~1008）会被多轮实验重复
+        使用，2026-08-04 的 60h 窗口里 DDCC1008 就有 3 个不同 orderId（02:02/02:13/
+        02:23 三轮）。所以 orderId 不可用时的 orderName 兜底必须再用 `registered_at`
+        挑出「本轮那一个」，否则可能匹配到上一轮早已 Succeed 的同名单，
+        把还在跑的本轮误判成已完成、提前放行下一批。
+        """
+        with self._interlock_lock:
+            batch = dict(self._interlock_batch)
+        if not batch:
+            return True, []
+
+        with self._interlock_lock:
+            meta = self._interlock_batch_meta or {}
+            name_by_code = dict(meta.get("order_name_by_code") or {})
+            registered_at = meta.get("registered_at")
+
+        pending: List[Dict[str, Any]] = []
+        for order_code, expect_oid in batch.items():
+            try:
+                resp = self.order_list_v2(filter=order_code, pageCount=20)
+            except Exception as e:
+                logger.warning(f"[互锁门控] 核对批次单 {order_code} 查询异常: {e}")
+                pending.append({"orderCode": order_code, "reason": f"查询异常: {e}"})
+                continue
+
+            items = ((resp or {}).get("data") or {}).get("items") or []
+            matched = None
+            # 优先按 orderId 匹配，避免真机/仿真机 orderCode 撞号时捞错单
+            exp = self._normalize_order_id(expect_oid)
+            if self._is_usable_order_id(exp):
+                for it in items:
+                    if self._normalize_order_id(it.get("id") or it.get("orderId")) == exp:
+                        matched = it
+                        break
+            # orderId 不可用（如电导建单偶发的全 0 占位）时退化按 orderName 匹配，
+            # 口径与 _recover_timeout_order_report 一致。没有这条兜底的话，
+            # 多行命中会一直判为「未到终态」，把门控挂到 24h 超时
+            expect_name = name_by_code.get(order_code)
+            if matched is None and expect_name:
+                matched = self._pick_order_by_name(items, expect_name, registered_at, order_code)
+            if matched is None and len(items) == 1:
+                matched = items[0]
+
+            if matched is None:
+                pending.append({"orderCode": order_code, "reason": "order-list 未查到该单"})
+                continue
+
+            st = matched.get("status")
+            if st not in self._ORDER_TERMINAL_OK:
+                pending.append({
+                    "orderCode": order_code,
+                    "status": st,
+                    "statusName": matched.get("statusName"),
+                    "reason": f"尚未到终态（status={st}）",
+                })
+        return (not pending), pending
+
+    def _acquire_interlock_claim(
+        self, scenario: str, task_hint: str, claim_timeout: float
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """尝试占据放行凭证。已有未交接凭证则占据失败（调用方继续轮询）。
+
+        凭证语义 =「本轮门控已通过、尚未建单」。它填的是门控 return 到
+        LIMS 把订单登记成 60 之间的空窗，否则第二个任务会同样看到「无 60 +
+        缓存空」而放行，两批同时建单击穿 0016(1 位)/0018(4 位) 容量。
+
+        claim_timeout 只兜进程崩溃这类未知情况；预检抛错、建单失败这两条已知路径
+        由 _submit_and_wait_orders 的 finally 主动释放，不能靠超时干等。
+        """
+        now = time.time()
+        with self._interlock_lock:
+            claim = self._interlock_claim
+            if claim is not None:
+                # granted_at 缺失/非法时按「无限旧」处理，让它立刻作废。
+                # 不能回落成 now——那样一张时间戳损坏的凭证会永远不过期，
+                # 把整站锁死，正是 claim_timeout 要防的情况。
+                granted_at = claim.get("granted_at")
+                age = now - (float(granted_at) if isinstance(granted_at, (int, float)) else 0.0)
+                if age <= claim_timeout:
+                    return False, claim
+                logger.error(
+                    f"[互锁门控] 放行凭证超时作废（已持有 {age:.0f}s > {claim_timeout:.0f}s，"
+                    f"token={claim.get('token')}, 持有者={claim.get('task_hint')}）。"
+                    f"说明拿到放行权的任务在建单前就异常退出了，请检查上一个任务的日志。"
+                )
+            token = uuid.uuid4().hex
+            self._interlock_claim = {
+                "token": token,
+                "granted_at": now,
+                "scenario": scenario,
+                "task_hint": task_hint,
+            }
+            return True, self._interlock_claim
+
+    def _release_interlock_claim(self, reason: str = "", token: Optional[str] = None) -> None:
+        """释放放行凭证（未交接给批次时的兜底路径）。
+
+        传 token 时只释放匹配的那张：万一本任务的凭证已因超时作废、且被下一个
+        任务重新占据，无差别释放会把别人的凭证抹掉。
+        """
+        with self._interlock_lock:
+            claim = self._interlock_claim
+            if claim is None:
+                return
+            if token is not None and claim.get("token") != token:
+                logger.warning(
+                    f"[互锁门控] 跳过释放：当前凭证 token={claim.get('token')} "
+                    f"不属于本任务（token={token}），可能是本任务凭证已超时作废并被他人重新占据"
+                )
+                return
+            self._interlock_claim = None
+        logger.info(f"[互锁门控] 已释放放行凭证 token={claim.get('token')}（{reason}）")
+
+    def has_interlock_claim(self) -> bool:
+        """凭证是否仍在手。
+
+        语义 =「本轮门控已通过但还没建单」。将来若把门控折进
+        create_orders 的排程专用变体，内部调用可据此跳过重复门控——
+        否则第二次门控会看到自己那张未交接的凭证而永久等待。
+        """
+        with self._interlock_lock:
+            return self._interlock_claim is not None
+
+    def register_interlock_batch(
+        self,
+        data_list: List[Dict[str, Any]],
+        scenario: str = "all",
+        tag: str = "",
+    ) -> None:
+        """建单成功后写入互锁缓存，并接管（清除）放行凭证，完成「凭证 → 批次」交接。"""
+        batch: Dict[str, str] = {}
+        name_by_code: Dict[str, str] = {}
+        for item in data_list or []:
+            if not isinstance(item, dict):
+                continue
+            code = (item.get("orderCode") or "").strip()
+            if code:
+                batch[code] = self._normalize_order_id(item.get("orderId"))
+                # orderName 是 orderId 不可用时的兜底匹配依据，见 _check_batch_all_finished
+                if item.get("orderName"):
+                    name_by_code[code] = item["orderName"]
+        if not batch:
+            logger.warning(f"[{tag}] 建单返回里没有可用 orderCode，互锁缓存未写入")
+            return
+
+        with self._interlock_lock:
+            self._interlock_batch = batch
+            self._interlock_batch_meta = {
+                "scenario": scenario,
+                "tag": tag,
+                "registered_at": time.time(),
+                "order_name_by_code": name_by_code,
+                "order_status": {},  # 逐单最终状态，由 _record_batch_order_status 补
+            }
+            claim = self._interlock_claim
+            self._interlock_claim = None
+
+        logger.info(
+            f"[{tag}] 互锁缓存已写入 {len(batch)} 单（scenario={scenario}）: {list(batch)}"
+            + (f"，并接管放行凭证 token={claim.get('token')}" if claim else "")
+        )
+
+    def _record_batch_order_status(self, order_code: str, status: str, detail: str = "") -> None:
+        """记录本批逐单最终状态，供下一轮门控 blocked 时点名失败单。"""
+        with self._interlock_lock:
+            if not self._interlock_batch_meta:
+                return
+            self._interlock_batch_meta.setdefault("order_status", {})[order_code] = {
+                "status": status,
+                "detail": detail,
+            }
+
+    def clear_interlock_failure(self) -> Dict[str, Any]:
+        """人工处置完建单失败后清除失败标记，让门控不再因 Pause 直接阻断。
+
+        `scheduler_continue` / `scheduler_start` 内部会自动调它，
+        这里单独暴露一个入口供调试或人工在别处恢复调度后手动清除。
+        """
+        with self._interlock_lock:
+            cleared = self._interlock_last_failure
+            self._interlock_last_failure = None
+        if cleared:
+            logger.info(f"[互锁门控] 已清除建单失败标记: {cleared.get('reason')}")
+            return {"status": "cleared", "cleared": cleared}
+        return {"status": "noop", "message": "当前没有建单失败标记"}
+
+    def _describe_failed_orders(
+        self, failed: List[Dict[str, Any]], lookback_minutes: int
+    ) -> str:
+        """给失败单生成可操作的说明：它什么时候滑出窗口、或该把 lookback 调到多少。
+
+        没有失败确认（ack）机制，一次失败会把工站锁到该单滑出回溯窗口为止。
+        与其让人对着「blocked」发懵，不如直接告诉他等到几点、或调成多少能立刻放行。
+        """
+        lines = []
+        oldest_age_min: Optional[float] = None
+        now = datetime.now()
+        for f in failed:
+            req = f.get("requestTime") or ""
+            expire_hint = ""
+            req_dt = self._parse_lims_time(req)
+            if req_dt is not None:
+                age_min = (now - req_dt).total_seconds() / 60.0
+                out_at = req_dt + timedelta(minutes=lookback_minutes)
+                expire_hint = f"，将于 {out_at.strftime('%Y-%m-%d %H:%M')} 滑出当前回溯窗口"
+                oldest_age_min = age_min if oldest_age_min is None else min(oldest_age_min, age_min)
+            lines.append(
+                f"{f.get('orderName')}（orderId={f.get('orderId')}, "
+                f"workflow={f.get('workflowName')}, requestTime={req}）{expire_hint}"
+            )
+
+        text = "; ".join(lines)
+        if oldest_age_min is not None and oldest_age_min > 0:
+            text += (
+                f"。若确认这些失败单已人工处置完毕，可临时把 lookback_minutes 调到 "
+                f"≤ {int(oldest_age_min)} 立即放行"
+            )
+        return text
+
+    def wait_orderlist_idle(
+        self,
+        lookback_minutes: int = 3600,
+        poll_interval: float = 10.0,
+        timeout: int = 86400,
+        scenario: str = "all",
+        workflow_name_keyword: str = "",
+        page_size: int = 100,
+        max_pages: int = 40,
+        check_scheduler: bool = True,
+        claim_timeout: float = 7200.0,
+        xlsx_path: str = "",
+        formulation: Optional[List[Dict[str, Any]]] = None,
+        task_hint: str = "",
+    ) -> Dict[str, Any]:
+        """多任务互锁门控：阻塞到「本工站可以安全发起下一批配液」为止。
+
+        放在 `create_orders` **之前**，整条链路只调一次。建单之后的完成等待由
+        `_submit_and_wait_orders` 内部负责，不需要二次门控。
+
+        放行条件（全部满足）：
+
+        1. 调度处于 Running（Init/Stop/Error* 直接阻断，Pause 视有无失败标记而定）
+        2. 窗口内没有配液单处于失败(90)
+        3. 窗口内没有配液单处于执行中(60)
+        4. 上一批缓存为空，或缓存内订单已全部到达 80/100（到达则清空缓存）
+        5. 能占据放行凭证（上一个放行者已完成建单交接）
+
+        Args:
+            lookback_minutes: 回溯窗口（分钟），默认 3600（60 小时），覆盖多批
+                1–8 瓶的长周期与隔夜任务。现场遇到旧失败单锁站时可临时调小跨过去
+            poll_interval: 未空闲时的轮询间隔（秒）
+            timeout: 整次门控最长等待（秒），默认 24 小时
+            scenario: 场景键（all/coin/pouch/cond），**当前只影响过滤范围与统计**，
+                不收窄阻断作用域——配液共用同一台硬件，收窄会放进第二批
+            workflow_name_keyword: 显式覆盖过滤关键字，非空时优先于 scenario
+            page_size: order-list 单页条数（映射到接口的 pageCount）
+            max_pages: 翻页上限，防异常数据把门控拖死
+            check_scheduler: 是否检查调度状态，调试可关
+            claim_timeout: 放行凭证的兜底作废时长（秒）。必须大于后续
+                stack_inquiry_window_5_free 的等待时长，因为门控排在它前面
+            xlsx_path / formulation: 可选的本轮配方来源。给了就顺带做一次
+                「绝对不够」预检（不做在飞批次扣减，因此不可能误拦），
+                把缺料从排队 40 分钟之后提前到排队第一分钟
+            task_hint: 调用方标识，仅用于日志和凭证归属
+
+        Returns:
+            {"status": "idle", "reason": ..., "scheduler_status": ..., "scenario": ...,
+             "matched_keywords": [...], "lookback_minutes": ..., "running": [...],
+             "failed": [...], "batch": [...], "poll_count": int, "elapsed_seconds": float}
+
+        Raises:
+            BioyondException: 阻断（blocked）或超时（timeout）
+        """
+        keywords = self._resolve_order_keywords(scenario, workflow_name_keyword)
+        hint = task_hint or "<未命名任务>"
+        start = time.time()
+        poll_count = 0
+        scheduler_status: Optional[str] = None
+
+        logger.info(
+            f"[互锁门控] 进入（任务={hint}, scenario={scenario}, 关键字={keywords}, "
+            f"回溯 {lookback_minutes} 分钟, 超时 {timeout}s）"
+        )
+
+        # 可选的「绝对不够」预检：只拦独占也不够的情况，不做扣减所以不可能误拦
+        self._gate_precheck_reagents(xlsx_path, formulation)
+
+        def _result(status: str, reason: str, scan: Dict[str, Any]) -> Dict[str, Any]:
+            with self._interlock_lock:
+                batch_snapshot = list(self._interlock_batch)
+            return {
+                "status": status,
+                "reason": reason,
+                "scheduler_status": scheduler_status,
+                "scenario": scenario,
+                "matched_keywords": keywords,
+                "lookback_minutes": lookback_minutes,
+                "running": scan.get("running", []),
+                "failed": scan.get("failed", []),
+                "batch": batch_snapshot,
+                "poll_count": poll_count,
+                "elapsed_seconds": round(time.time() - start, 1),
+            }
+
+        while True:
+            elapsed = time.time() - start
+
+            # ---------- 0. 调度状态 ----------
+            if check_scheduler:
+                scheduler_status = self._query_scheduler_status()
+                if scheduler_status in ("Init", "Stop"):
+                    raise BioyondException(
+                        f"[互锁门控] 调度未启动（schedulerStatus={scheduler_status}），拒绝下发新任务。"
+                        f"请先执行 scheduler_start_and_auto_feeding 起调度后重试。"
+                        f"（不拦的话建单会成功但没人消费，最后表现成「配液超时失败」，极难定位）"
+                    )
+                if scheduler_status in ("ErrorPause", "ErrorStop"):
+                    raise BioyondException(
+                        f"[互锁门控] 调度处于错误状态（schedulerStatus={scheduler_status}），"
+                        f"需人工在现场/LIMS 清错后再重试。"
+                    )
+                if scheduler_status == "Pause":
+                    with self._interlock_lock:
+                        last_failure = self._interlock_last_failure
+                    if last_failure:
+                        # 这不是人工临时暂停，是建单失败时自动暂停的，等下去不会好
+                        raise BioyondException(
+                            f"[互锁门控] 调度处于暂停状态，且是上一批"
+                            f"{last_failure.get('reason')}后自动暂停的，不会自行恢复。"
+                            f"详情: {last_failure.get('detail')}。"
+                            f"已建成待处置的订单: {last_failure.get('created_order_codes')}。"
+                            f"请补齐试剂后执行 scheduler_continue，或撤单后重新下发。"
+                        )
+                    logger.info(
+                        f"[互锁门控] 调度处于人工暂停（Pause，无建单失败标记），"
+                        f"等待恢复中…（已等待 {elapsed:.0f}s）"
+                    )
+                    if elapsed > timeout:
+                        raise BioyondException(
+                            f"[互锁门控] 等待调度从 Pause 恢复超时（{timeout}s）"
+                        )
+                    poll_count += 1
+                    time.sleep(poll_interval)
+                    continue
+
+            # ---------- 1. 扫 60 / 90 ----------
+            scan = self._scan_workflow_statuses(keywords, lookback_minutes, page_size, max_pages)
+            failed = scan["failed"]
+            running = scan["running"]
+
+            if failed:
+                counts = self._count_by_workflow(failed)
+                detail = self._describe_failed_orders(failed, lookback_minutes)
+                logger.error(f"[互锁门控] ❌ 窗口内存在失败配液单，分场景计数: {counts}")
+                raise BioyondException(
+                    f"[互锁门控] 窗口内存在 {len(failed)} 条失败配液单，禁止下发新任务。"
+                    f"失败单: {detail}"
+                )
+
+            if running:
+                counts = self._count_by_workflow(running)
+                if elapsed > timeout:
+                    raise BioyondException(
+                        f"[互锁门控] 等待配液空闲超时（{timeout}s），"
+                        f"仍有 {len(running)} 条执行中: {counts}"
+                    )
+                logger.info(
+                    f"[互锁门控] 仍有 {len(running)} 条配液单执行中，分场景计数: {counts}，"
+                    f"{poll_interval}s 后重试…（已等待 {elapsed:.0f}s）"
+                )
+                poll_count += 1
+                time.sleep(poll_interval)
+                continue
+
+            # ---------- 2. 核对上一批缓存 ----------
+            all_done, pending = self._check_batch_all_finished()
+            if not all_done:
+                if elapsed > timeout:
+                    raise BioyondException(
+                        f"[互锁门控] 等待上一批订单终态超时（{timeout}s），未完成: {pending}"
+                    )
+                logger.info(
+                    f"[互锁门控] 上一批仍有 {len(pending)} 单未到终态: {pending}，"
+                    f"{poll_interval}s 后重试…（已等待 {elapsed:.0f}s）"
+                )
+                poll_count += 1
+                time.sleep(poll_interval)
+                continue
+
+            with self._interlock_lock:
+                cleared_batch = list(self._interlock_batch)
+                self._interlock_batch = {}
+                self._interlock_batch_meta = {}
+            if cleared_batch:
+                logger.info(f"[互锁门控] 上一批 {len(cleared_batch)} 单已全部完成，清空缓存: {cleared_batch}")
+
+            # ---------- 3. 占据放行凭证 ----------
+            acquired, holder = self._acquire_interlock_claim(scenario, hint, claim_timeout)
+            if not acquired:
+                if elapsed > timeout:
+                    raise BioyondException(
+                        f"[互锁门控] 等待上一个放行者建单超时（{timeout}s），"
+                        f"当前凭证持有者={holder.get('task_hint')}"
+                    )
+                logger.info(
+                    f"[互锁门控] 上一个放行者（{holder.get('task_hint')}）尚未完成建单，"
+                    f"{poll_interval}s 后重试…（已等待 {elapsed:.0f}s）"
+                )
+                poll_count += 1
+                time.sleep(poll_interval)
+                continue
+
+            logger.info(
+                f"[互锁门控] ✅ 放行（任务={hint}, 轮询 {poll_count} 次, "
+                f"耗时 {time.time() - start:.1f}s, 凭证 token={holder.get('token')}）"
+            )
+            return _result("idle", "无执行中/失败配液单，上一批已完成，凭证已占据", scan)
+
+    def _gate_precheck_reagents(
+        self, xlsx_path: str = "", formulation: Optional[List[Dict[str, Any]]] = None
+    ) -> None:
+        """门控里的兜底预检：只拦「绝对不够」（独占也不够）。
+
+        主机制是提交前的 `precheck_reagents_total`（那时没有在飞批次，结论无歧义）。
+        这层只覆盖「有人绕过提交 skill 直接下发任务」的情况。
+
+        **刻意不做在飞批次扣减**：入口看到的库存不含在飞批次的消耗，扣多少取决于
+        LIMS 是建单即锁还是消耗才扣，猜错方向就会误拦——把本来能跑的批次挡住，
+        比漏拦更难接受。这里只拦「就算独占也不够」，因此不可能误拦。
+        """
+        if not xlsx_path and not formulation:
+            return
+        try:
+            report = self.precheck_reagents_total(
+                formulations=[formulation] if formulation else None,
+                xlsx_paths=[xlsx_path] if xlsx_path else None,
+                raise_on_shortage=False,
+            )
+        except Exception as e:
+            logger.warning(f"[互锁门控] 兜底预检执行异常，跳过（不阻断）: {e}")
+            return
+
+        if not report.get("ok"):
+            raise BioyondException(
+                f"[互锁门控] 本轮配方所需试剂在库余量绝对不足（就算独占整台设备也不够），"
+                f"提前拦下、一单未建。缺口: {'; '.join(report.get('shortages') or [])}"
+            )
+
     def _submit_and_wait_orders(
+        self,
+        orders: List[Dict[str, Any]],
+        tag: str = "create_orders",
+        batch_id: str = "",
+    ) -> Dict[str, Any]:
+        """公共流程的对外入口：只负责保证放行凭证一定会被释放。
+
+        本体在 `_submit_and_wait_orders_impl`。这里包一层 try/finally 是因为
+        本体有两条在 `register_interlock_batch` **之前**就抛出的路径——试剂预检
+        不通过、建单未全部成功。这两条路径下凭证没人接管，只能干等
+        claim_timeout（默认 2 小时），等于一次缺料把整站锁 2 小时，
+        比它要解决的「半批订单」更难受。claim_timeout 只用来兜进程崩溃这类
+        未知情况，已知的异常路径必须在这里主动释放。
+        """
+        with self._interlock_lock:
+            claim_token = (self._interlock_claim or {}).get("token")
+
+        try:
+            return self._submit_and_wait_orders_impl(orders, tag=tag, batch_id=batch_id)
+        finally:
+            # 建单成功时 register_interlock_batch 已把凭证接管清除，这里查不到匹配的 token；
+            # 只有异常路径才会真的释放。
+            if claim_token:
+                self._release_interlock_claim(
+                    reason=f"{tag} 未完成建单交接，异常路径兜底释放", token=claim_token
+                )
+
+    def _submit_and_wait_orders_impl(
         self,
         orders: List[Dict[str, Any]],
         tag: str = "create_orders",
@@ -1603,6 +2671,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 paused_hint = (
                     "调度已暂停，请补齐试剂后调 scheduler_continue 继续，或撤单后重新下发。"
                 )
+                # 记下「这次 Pause 是自动暂停的」。否则下一个任务的门控看到 Pause
+                # 会当成人工临时暂停一路轮询到 24h 超时，只报个「超时」把真实原因埋掉。
+                with self._interlock_lock:
+                    self._interlock_last_failure = {
+                        "reason": "建单未全部成功",
+                        "detail": fail_desc,
+                        "created_order_codes": order_codes,
+                        "paused_at": time.time(),
+                        "tag": tag,
+                    }
             except Exception as e:
                 logger.error(f"[{tag}] ⚠️ 暂停调度失败，请立即人工干预: {e}")
                 paused_hint = f"调度暂停失败（{e}），已建成的订单可能仍在执行，请立即人工停机处置。"
@@ -1617,6 +2695,14 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
 
         logger.info(f"[{tag}] 等待 {len(order_codes)} 个订单完成: {order_codes}")
+
+        # 建单数量已对账，写入互锁缓存并接管放行凭证（完成「凭证 → 批次」交接）。
+        # 必须在等待完成之前写：本批还在跑的这几十分钟里，其它任务的门控要靠
+        # 这份缓存 + order-list 的 60 才知道工站正忙。
+        try:
+            self.register_interlock_batch(created_entries, scenario="all", tag=tag)
+        except Exception as e:
+            logger.warning(f"[{tag}] 写入互锁缓存失败（不影响本批执行）: {e}")
 
         # 重置配液/分液进度统计（供前端轮询 data_*_completion_percentage 属性）
         try:
@@ -1647,6 +2733,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 report = result.get("report", {})
                 self._enrich_report_materials_from_create(report, create_entry)
                 all_reports.append(report)
+                self._record_batch_order_status(order_code, "success")
                 logger.info(f"[{tag}] ✓ 订单 {order_code} 完成")
             else:
                 logger.warning(f"订单 {order_code} 状态异常: {result.get('status')}")
@@ -1656,6 +2743,12 @@ class BioyondCellWorkstation(BioyondWorkstation):
                     "status": result.get("status"),
                     "error": result.get("message", "未知错误"),
                 })
+                # 记进批次 meta，下一轮门控 blocked 时能点名是哪一单挂的，
+                # 把定位指回配液侧（否则报错只出现在下游转运节点上）
+                self._record_batch_order_status(
+                    order_code, result.get("status") or "failed",
+                    result.get("message", "未知错误"),
+                )
 
         # ========== timeout 兜底：隔夜暂停等场景下，迟到的 finish 报文可能已被缓存 ==========
         # wait 超时后报文才到达 `_order_finish_reports`，此处再捞一次，把 timeout 升级为成功。
@@ -2728,15 +3821,21 @@ class BioyondCellWorkstation(BioyondWorkstation):
             raise ValueError("vial_plates 不能为空")
         if not temperature_points or not isinstance(temperature_points, list):
             raise ValueError("temperature_points 不能为空")
+        # 一块板一个温度点，而 5 号自动传递窗只有 4 个库位 → 一轮最多 4 个温度点。
+        # 超了必须拆轮，否则会建出永远排不进传递窗的单。
+        if len(temperature_points) > self._WINDOW_5_CAPACITY:
+            raise ValueError(
+                f"单轮温度点数为 {len(temperature_points)}，超过 5 号自动传递窗的"
+                f"{self._WINDOW_5_CAPACITY} 个库位上限（一块板对应一个温度点）。"
+                f"请拆成多轮，每轮不超过 {self._WINDOW_5_CAPACITY} 个温度点。"
+            )
 
         # ========== 阶段0: 只保留已转运到 5 号自动传递窗的板 ==========
         # 上游配液会把订单产出的全部 20ml 分液瓶板都传进来（不区分用途），
         # 真正要测电导的 = 已搬到「5 号自动传递窗」的板。查 warehouse-info(2.38) 按 materialId 取交集。
-        # whId 来源：包含库位的仓库信息0610.json，name="5号自动传递窗", code="0018"。
-        _WH_ID_TRANSFER_WINDOW_5 = "3a1c68b5-65e1-f662-93bb-3c2c5b42744d"
         wh_resp = self._post_lims(
             "/api/lims/storage/warehouse-info",
-            {"whId": _WH_ID_TRANSFER_WINDOW_5, "includeDetail": True},
+            {"whId": self._WH_ID_TRANSFER_WINDOW_5, "includeDetail": True},
         )
         if not isinstance(wh_resp, dict) or wh_resp.get("code") != 1:
             raise BioyondException(f"查询 5 号自动传递窗失败: {wh_resp}")
@@ -5237,78 +6336,365 @@ class BioyondCellWorkstation(BioyondWorkstation):
         return (x, y, z)
 
 
-    def stack_inquiry_2to1(
+    def _list_plates_in_warehouse(
+        self, wh_id: str, type_keyword: str = "分液瓶板"
+    ) -> Optional[List[Dict[str, Any]]]:
+        """列出仓库里被指定板型占用的库位。查询失败返回 None（供调用方容错重试）。
+
+        判定口径与现有代码一致：holdMId 非空 + holdMTypeName 含 type_keyword。
+        """
+        data = self._snapshot_warehouse(wh_id)
+        if data is None:
+            return None
+        return [
+            loc for loc in (data.get("locations") or [])
+            if isinstance(loc, dict)
+            and (loc.get("holdMId") or "").strip()
+            and type_keyword in (loc.get("holdMTypeName") or "")
+        ]
+
+    def _wait_stack_condition(
         self,
+        wh_id: str,
+        mode: str,
+        type_keyword: str = "分液瓶板",
+        material_ids: Optional[List[str]] = None,
+        min_count: int = 1,
         poll_interval: float = 5.0,
         timeout: int = 3600,
+        label: str = "库位门控",
     ) -> Dict[str, Any]:
-        """
-        轮询「1号2号手套箱交接堆栈」，直到其中没有分液瓶板为止。
+        """轮询 warehouse-info(2.38)，直到指定仓库满足条件；超时抛 BioyondException。
 
-        用途：配液完成后，确保 1、2 号手套箱交接堆栈已被清空（分液板已转运走），
-        再放行后续步骤。堆栈里只要还有分液瓶板就阻塞轮询；清空后通过。
-
-        判定依据：查 warehouse-info(2.38) 交接堆栈，库位 holdMId 非空且
-        holdMTypeName 含「分液瓶板」即视为仍有分液板。
+        各库位门控的共用底座，避免每个场景重复写轮询/容错/日志。
 
         Args:
-            poll_interval: 轮询间隔（秒），默认 5s
-            timeout: 最长等待秒数，默认 3600s（1h）；超时抛 BioyondException
+            wh_id: 目标仓库 uuid（只用 whId 定位，code 会与 materialTypeCode 撞）
+            mode: "empty_of" 等到该板型清空；"occupied_by" 等到命中指定物料/数量
+            type_keyword: 板型关键字
+            material_ids: 给定则按 holdMId 精确匹配（occupied_by 时要求全部到位）
+            min_count: occupied_by 且未给 material_ids 时，要求命中的最少库位数
+            poll_interval: 轮询间隔（秒）
+            timeout: 最长等待（秒）
+            label: 日志前缀
 
         Returns:
-            { "status": "clear", "poll_count": int, "elapsed_seconds": float }
-
-        Raises:
-            BioyondException: 查询失败 / 等待超时
+            {"status": "ok", "matched": [...库位摘要], "poll_count": int, "elapsed_seconds": float}
         """
-        # whId 来源：包含库位的仓库信息0610.json，name="1号2号手套箱交接堆栈", code="0016"。
-        _WH_ID_TRANSFER_2TO1 = "3a1baa49-7f76-b88a-44d5-d478c48aae3e"
-        _PLATE_KEYWORD = "分液瓶板"
-
+        want_ids = {mid for mid in (material_ids or []) if mid}
         start = time.time()
         poll_count = 0
-        while True:
-            resp = self._post_lims(
-                "/api/lims/storage/warehouse-info",
-                {"whId": _WH_ID_TRANSFER_2TO1, "includeDetail": True},
-            )
-            if not isinstance(resp, dict) or resp.get("code") != 1:
-                raise BioyondException(f"查询 1号2号手套箱交接堆栈失败: {resp}")
 
-            locations = (resp.get("data") or {}).get("locations") or []
-            plates = [
-                loc for loc in locations
-                if isinstance(loc, dict)
-                and (loc.get("holdMId") or "").strip()
-                and _PLATE_KEYWORD in (loc.get("holdMTypeName") or "")
+        while True:
+            plates = self._list_plates_in_warehouse(wh_id, type_keyword)
+            elapsed = time.time() - start
+
+            if plates is None:
+                # 单次查询失败只告警重试，不中断轮询（对齐 monitor_manual_stack_3 的容错风格）
+                if elapsed > timeout:
+                    raise BioyondException(
+                        f"[{label}] 查询仓库 {wh_id} 持续失败且已超时（{timeout}s）"
+                    )
+                logger.warning(f"[{label}] 查询仓库 {wh_id} 失败，{poll_interval}s 后重试…")
+                poll_count += 1
+                time.sleep(poll_interval)
+                continue
+
+            summary = [
+                {
+                    "code": loc.get("code"),
+                    "holdMId": loc.get("holdMId"),
+                    "holdMName": loc.get("holdMName"),
+                    "holdMTypeName": loc.get("holdMTypeName"),
+                }
+                for loc in plates
             ]
 
-            elapsed = time.time() - start
-            if not plates:
+            if mode == "empty_of":
+                satisfied = not plates
+            elif mode == "occupied_by":
+                got_ids = {(loc.get("holdMId") or "").strip() for loc in plates}
+                satisfied = want_ids <= got_ids if want_ids else len(plates) >= min_count
+            else:
+                raise ValueError(f"[{label}] 未知 mode: {mode!r}，只支持 empty_of / occupied_by")
+
+            if satisfied:
                 logger.info(
-                    f"[stack_inquiry_2to1] ✅ 1号2号交接堆栈已无分液瓶板，通过 "
-                    f"（轮询 {poll_count} 次，耗时 {elapsed:.1f}s）"
+                    f"[{label}] ✅ 条件满足（mode={mode}，轮询 {poll_count} 次，耗时 {elapsed:.1f}s）"
                 )
                 return {
-                    "status": "clear",
+                    "status": "ok",
+                    "matched": summary,
                     "poll_count": poll_count,
                     "elapsed_seconds": round(elapsed, 1),
                 }
 
             if elapsed > timeout:
                 raise BioyondException(
-                    f"等待 1号2号交接堆栈清空超时（{timeout}s），仍有 {len(plates)} 块分液瓶板："
-                    + ", ".join(
-                        f"(库位{loc.get('code')}, {loc.get('holdMTypeName')})"
-                        for loc in plates
-                    )
+                    f"[{label}] 等待超时（{timeout}s，mode={mode}）。"
+                    f"当前占用: {summary or '空'}"
+                    + (f"；期望 materialId: {sorted(want_ids)}" if want_ids else "")
                 )
 
             poll_count += 1
             logger.info(
-                f"[stack_inquiry_2to1] 交接堆栈仍有 {len(plates)} 块分液瓶板"
-                f"（库位 {[loc.get('code') for loc in plates]}），"
-                f"{poll_interval}s 后重试...（已等待 {elapsed:.1f}s）"
+                f"[{label}] 条件未满足（mode={mode}），当前占用 {len(plates)} 个库位: "
+                f"{[loc.get('code') for loc in plates]}，"
+                f"{poll_interval}s 后重试…（已等待 {elapsed:.1f}s）"
+            )
+            time.sleep(poll_interval)
+
+    def stack_inquiry_2to1(
+        self,
+        poll_interval: float = 5.0,
+        timeout: int = 3600,
+        type_keyword: str = "分液瓶板",
+        match_by_material_id: bool = True,
+        target_wh_id: str = "",
+    ) -> Dict[str, Any]:
+        """321 转运的**前置**门控：确认 1号2号交接堆栈(0016) 可以放新板。
+
+        必须放在 `transfer_3_to_2_to_1_auto` **之前**——321 会把新板放进 0016，
+        而 0016 只有 1 个库位，所以放之前必须确认它是空的。放到 321 之后就退化成
+        一句无用查询，不会报错，只是保护静默失效。
+
+        判定分两条路：
+
+        1. **0016 本就空 → 立即放行**（fast_path，不查 0017）。首轮 0016/0017 都空，
+           若强行要求「0017 必须有板」会永久阻塞
+        2. **0016 有板** → 快照这些 holdMId（这就是上一轮待回流的板），等它们既
+           离开 0016、又出现在 2号内部堆栈(0017)。「0016 腾空」与「0017 到位」是
+           同一块板的两面，用 materialId 串起来才能确认板真的回流到位，
+           而不是刚离开 0016 还在途中
+
+        Args:
+            poll_interval: 轮询间隔（秒）
+            timeout: 最长等待（秒），超时抛 BioyondException
+            type_keyword: 板型关键字。默认 `分液瓶板` 会**同时匹配 5ml 和 20ml**；
+                扣电路应显式传 `5ml分液瓶板`。否则 0016 里若停着一块 20ml 板
+                （它走 3→2，不经 1→2 回 0017），「到位 0017」这个判据永远不成立，
+                只能等到超时
+            match_by_material_id: 是否按 materialId 精确追踪回流。置 False 退化为
+                只要 0016 腾空即放行（旧行为）
+            target_wh_id: 回流目标仓库，默认 2号内部堆栈(0017)
+
+        Returns:
+            {"status": "clear", "fast_path": bool, "pending_material_ids": [...],
+             "arrived_material_ids": [...], "poll_count": int, "elapsed_seconds": float}
+
+        Raises:
+            BioyondException: 查询失败 / 等待超时
+        """
+        target_wh_id = target_wh_id or self._WH_ID_STACK_2_INNER
+        start = time.time()
+
+        plates = self._list_plates_in_warehouse(self._WH_ID_TRANSFER_2TO1, type_keyword)
+        if plates is None:
+            raise BioyondException(
+                f"查询 1号2号手套箱交接堆栈失败（whId={self._WH_ID_TRANSFER_2TO1}）"
+            )
+
+        # ---------- 快速路径：0016 本来就空 ----------
+        if not plates:
+            logger.info(
+                f"[stack_inquiry_2to1] ✅ 1号2号交接堆栈已无「{type_keyword}」，直接放行"
+                f"（快速路径，未查 0017）"
+            )
+            return {
+                "status": "clear",
+                "fast_path": True,
+                "pending_material_ids": [],
+                "arrived_material_ids": [],
+                "poll_count": 0,
+                "elapsed_seconds": round(time.time() - start, 1),
+            }
+
+        pending_ids = sorted({
+            (loc.get("holdMId") or "").strip()
+            for loc in plates if (loc.get("holdMId") or "").strip()
+        })
+        logger.info(
+            f"[stack_inquiry_2to1] 0016 仍有 {len(plates)} 块「{type_keyword}」"
+            f"（库位 {[loc.get('code') for loc in plates]}），"
+            f"快照待回流 materialId: {pending_ids}"
+        )
+
+        # ---------- 步骤 1：等 0016 腾空 ----------
+        remain = max(int(timeout - (time.time() - start)), 1)
+        self._wait_stack_condition(
+            wh_id=self._WH_ID_TRANSFER_2TO1,
+            mode="empty_of",
+            type_keyword=type_keyword,
+            poll_interval=poll_interval,
+            timeout=remain,
+            label="stack_inquiry_2to1/等 0016 腾空",
+        )
+
+        if not match_by_material_id or not pending_ids:
+            logger.info("[stack_inquiry_2to1] ✅ 0016 已腾空，未启用 materialId 追踪，放行")
+            return {
+                "status": "clear",
+                "fast_path": False,
+                "pending_material_ids": pending_ids,
+                "arrived_material_ids": [],
+                "poll_count": 0,
+                "elapsed_seconds": round(time.time() - start, 1),
+            }
+
+        # ---------- 步骤 2：等快照的板到位 0017 ----------
+        # 有的板可能被人工挪走/出库，既不在 0016 也不在 0017。这类视为已离场，
+        # 不再要求它到位，否则会白等到超时。
+        arrived_locs = self._list_plates_in_warehouse(target_wh_id, type_keyword) or []
+        arrived_ids = {(loc.get("holdMId") or "").strip() for loc in arrived_locs}
+        missing = [mid for mid in pending_ids if mid not in arrived_ids]
+
+        if missing:
+            remain = max(int(timeout - (time.time() - start)), 1)
+            try:
+                self._wait_stack_condition(
+                    wh_id=target_wh_id,
+                    mode="occupied_by",
+                    type_keyword=type_keyword,
+                    material_ids=pending_ids,
+                    poll_interval=poll_interval,
+                    timeout=remain,
+                    label="stack_inquiry_2to1/等回流到位 0017",
+                )
+            except BioyondException:
+                # 超时前再确认一次：只要 0016 已腾空、且失联的板确实哪儿都不在，
+                # 就按「已离场」放行并告警，不把流程卡死在一块被人搬走的板上
+                still_016 = self._list_plates_in_warehouse(
+                    self._WH_ID_TRANSFER_2TO1, type_keyword
+                ) or []
+                final_017 = self._list_plates_in_warehouse(target_wh_id, type_keyword) or []
+                final_ids = {(loc.get("holdMId") or "").strip() for loc in final_017}
+                lost = [mid for mid in pending_ids if mid not in final_ids]
+                if still_016 or not lost:
+                    raise
+                logger.warning(
+                    f"[stack_inquiry_2to1] ⚠️ 0016 已腾空，但 materialId {lost} 既不在 0016 "
+                    f"也不在 0017（疑似被人工挪走/出库），按已离场放行"
+                )
+
+        final_017 = self._list_plates_in_warehouse(target_wh_id, type_keyword) or []
+        arrived = sorted({
+            (loc.get("holdMId") or "").strip() for loc in final_017
+        } & set(pending_ids))
+        logger.info(
+            f"[stack_inquiry_2to1] ✅ 0016 已腾空且 {len(arrived)}/{len(pending_ids)} 块板"
+            f"已回流到 0017，放行（耗时 {time.time() - start:.1f}s）"
+        )
+        return {
+            "status": "clear",
+            "fast_path": False,
+            "pending_material_ids": pending_ids,
+            "arrived_material_ids": arrived,
+            "poll_count": 0,
+            "elapsed_seconds": round(time.time() - start, 1),
+        }
+
+    def stack_inquiry_window_5_free(
+        self,
+        required_slots: int = 4,
+        poll_interval: float = 5.0,
+        timeout: int = 36000,
+        type_keyword: str = "",
+    ) -> Dict[str, Any]:
+        """建单**前置**门控：等 5号自动传递窗(0018) 的空闲库位数 ≥ required_slots。
+
+        必须放在 `create_orders` **之前**：配液流程结束时电导板已经直接堆在 0018 上，
+        等「到位」没有意义；真正的瓶颈是 0018 只有 4 个库位，而一块板对应一个温度点。
+        上一轮的板测完转去 0027、腾出空位后，下一轮才能建单。放到 create_orders
+        之后不会报错，只是保护静默失效。
+
+        Args:
+            required_slots: 本轮需要的库位数 = 本轮温度点数（1–4），应与传给
+                `conductivity_test_inline` 的 `temperature_points` 长度一致。
+                默认 4 是最保守取值（等 0018 全空），按实际温度点数传可少等
+            poll_interval: 轮询间隔（秒）
+            timeout: 最长等待（秒），默认 10 小时，匹配电导测试时长
+            type_keyword: 只统计含该关键字的板占用；留空则任何物料都算占位
+                （0018 是限量通道，默认按最保守的口径算）
+
+        Returns:
+            {"status": "ok", "free_slots": int, "required_slots": int,
+             "total_slots": int, "poll_count": int, "elapsed_seconds": float}
+
+        Raises:
+            ValueError: required_slots 超出 1–4
+            BioyondException: 查询持续失败 / 等待超时
+        """
+        if not 1 <= required_slots <= self._WINDOW_5_CAPACITY:
+            raise ValueError(
+                f"required_slots 必须在 1–{self._WINDOW_5_CAPACITY} 之间（当前 {required_slots}）。"
+                f"5号自动传递窗只有 {self._WINDOW_5_CAPACITY} 个库位，一块板一个温度点，"
+                f"超过就得拆轮做，否则会建出永远排不进传递窗的单。"
+            )
+
+        start = time.time()
+        poll_count = 0
+        warned_misplaced = False
+
+        while True:
+            data = self._snapshot_warehouse(self._WH_ID_TRANSFER_WINDOW_5)
+            elapsed = time.time() - start
+
+            if data is None:
+                if elapsed > timeout:
+                    raise BioyondException(f"查询 5 号自动传递窗持续失败且已超时（{timeout}s）")
+                logger.warning(f"[stack_inquiry_window_5_free] 查询失败，{poll_interval}s 后重试…")
+                poll_count += 1
+                time.sleep(poll_interval)
+                continue
+
+            locations = data.get("locations") or []
+            occupied = [
+                loc for loc in locations
+                if isinstance(loc, dict) and (loc.get("holdMId") or "").strip()
+                and (not type_keyword or type_keyword in (loc.get("holdMTypeName") or ""))
+            ]
+            total_slots = len(locations) or self._WINDOW_5_CAPACITY
+            free_slots = total_slots - len(occupied)
+
+            if free_slots >= required_slots:
+                logger.info(
+                    f"[stack_inquiry_window_5_free] ✅ 5 号自动传递窗空闲 {free_slots}/{total_slots} 个库位，"
+                    f"满足本轮所需 {required_slots} 个，放行"
+                    f"（轮询 {poll_count} 次，耗时 {elapsed:.1f}s）"
+                )
+                return {
+                    "status": "ok",
+                    "free_slots": free_slots,
+                    "required_slots": required_slots,
+                    "total_slots": total_slots,
+                    "poll_count": poll_count,
+                    "elapsed_seconds": round(elapsed, 1),
+                }
+
+            # 位置可疑告警：本门控是建单前置，进来时 0018 就满说明很可能被摆到了
+            # create_orders 之后——那时板已经堆进去了，门控守了个寂寞
+            if not warned_misplaced and poll_count == 0 and free_slots == 0:
+                warned_misplaced = True
+                logger.warning(
+                    f"[stack_inquiry_window_5_free] ⚠️ 进入时 5 号自动传递窗已被占满"
+                    f"（{len(occupied)}/{total_slots}）。若本轮的电导板已经在里面，说明本门控"
+                    f"被放到了 create_orders **之后**，位置有误、保护已失效——它应当排在建单之前。"
+                )
+
+            if elapsed > timeout:
+                raise BioyondException(
+                    f"等待 5 号自动传递窗空位超时（{timeout}s）：需要 {required_slots} 个空位，"
+                    f"当前只有 {free_slots} 个（占用 "
+                    + ", ".join(
+                        f"{loc.get('code')}={loc.get('holdMTypeName')}" for loc in occupied
+                    )
+                    + "）。请确认上一轮电导板已测完并转去 5 号右侧手动堆栈。"
+                )
+
+            poll_count += 1
+            logger.info(
+                f"[stack_inquiry_window_5_free] 5 号自动传递窗空闲 {free_slots}/{total_slots}，"
+                f"不足本轮所需 {required_slots}，{poll_interval}s 后重试…（已等待 {elapsed:.1f}s）"
             )
             time.sleep(poll_interval)
 
@@ -5349,8 +6735,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # whId 来源：包含库位的仓库信息0610.json
         _STACKS = [
             ("3号箱手动堆栈", "3a19deae-2c79-05a3-9c76-8e6760424841"),       # 手动堆栈 code=0007
-            ("3号箱自动堆栈-左", "3a19debc-84b4-0359-e2d4-b3beea49348b"),    # 自动堆栈-左 code=0008
-            ("1号2号手套箱交接堆栈", "3a1baa49-7f76-b88a-44d5-d478c48aae3e"),  # 交接堆栈 code=0016
+            ("3号箱自动堆栈-左", self._WH_ID_AUTO_STACK_LEFT),               # 自动堆栈-左 code=0008
+            ("1号2号手套箱交接堆栈", self._WH_ID_TRANSFER_2TO1),              # 交接堆栈 code=0016
         ]
 
         start = time.time()
@@ -5459,6 +6845,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
     # 2.7 启动调度
     def scheduler_start(self) -> Dict[str, Any]:
+        # 人工重新起调度 = 已处置完上一批的建单失败，清掉标记，
+        # 否则门控会一直把 Pause 当成「建单失败自动暂停」而直接阻断。
+        self.clear_interlock_failure()
         return self._post_lims("/api/lims/scheduler/start")
     # 3.10 停止调度
     def scheduler_stop(self) -> Dict[str, Any]:
@@ -5486,6 +6875,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         继续调度 (2.9)
         请求体只包含 apiKey 和 requestTime
         """
+        # 人工恢复调度 = 已处置完上一批的建单失败，清掉标记（同 scheduler_start）
+        self.clear_interlock_failure()
         return self._post_lims("/api/lims/scheduler/continue")
     def scheduler_reset(self) -> Dict[str, Any]:
         """
@@ -5493,6 +6884,18 @@ class BioyondCellWorkstation(BioyondWorkstation):
         请求体只包含 apiKey 和 requestTime
         """
         return self._post_lims("/api/lims/scheduler/reset")
+
+    # 查询调度状态
+    def scheduler_status(self) -> Dict[str, Any]:
+        """
+        查询调度状态
+
+        请求体只包含 apiKey 和 requestTime，返回原始响应，其中 data 为：
+        schedulerStatus（Init / Stop / Running / Pause / ErrorPause / ErrorStop）、
+        hasTask（是否有任务）、creationTime。
+        互锁门控用的 `_query_scheduler_status` 只取 schedulerStatus 一个字段。
+        """
+        return self._post_lims("/api/lims/scheduler/scheduler-status")
 
     def scheduler_start_and_auto_feeding(
         self,
@@ -5991,12 +7394,19 @@ class BioyondCellWorkstation(BioyondWorkstation):
                       status: str = "", # 60表示正在运行,80表示完成，90表示失败
                       filter: str = "",
                       skipCount: int = 0,
-                      pageCount: int = 1, # 显示多少页数据
+                      pageCount: int = 1, # 每页条数（不是页数！实测 pageCount=10 配 totalCount=611 返回 10 条）
                       sorting: str = "") -> Dict[str, Any]:
         """
         批量查询实验报告的详细信息 (2.5)
         URL: /api/lims/order/order-list
         参数默认值和接口文档保持一致
+
+        易错口径（写错**不报错**，只是静默查错范围，实测见 `_lims_time_window`）：
+        - `timeType` 是「按哪个字段过滤」，要用时间窗只能传 `"requestTime"`。
+          传 `"beginTime"`（参数名本身）或空串都等于**不做时间过滤**，返回全部历史单
+        - 时间窗只有「天」粒度，时分秒被丢弃；分钟级精度要靠调用方按 requestTime 复筛
+        - `beginTime`/`endTime` 是**本地时间 + 假 Z 后缀**，LIMS 按裸本地时间比较，
+          改成真 UTC 会让窗口偏 8 小时。构造窗口请用 `_lims_time_window`
         """
         data: Dict[str, Any] = {
             "timeType": timeType,
@@ -6128,6 +7538,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
         返回 True 表示找到并成功完成，False 表示超时未找到
         """
         now = datetime.now()
+        # 注意：下面 timeType="" 等于不做时间过滤，这里的 begin/endTime 是死参数，
+        # 真正的筛选靠 filter=filter_text。不要「顺手」把 timeType 改成 requestTime——
+        # 这个窗口是 [now, now+5min] 的未来区间，一旦生效会把所有单都过滤掉。
         beginTime = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         endTime = (now + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
         print(beginTime, endTime)
