@@ -825,7 +825,14 @@ class MessageProcessor:
                        source_handle_key, target_handle_key}]   # 无 uuid 时的兼容寻址
             handles: [{handle_key, data_source, data_key, node_id, io_type, uuid?}]
         整图即云端 workflow_task.workflow_snapshot 的展开（任务创建时固化，不随
-        工作流编辑变化）；终态回报词汇同 workflow_task.status（success/failed/canceled）。
+        工作流编辑变化）。Backend canonical 成功终态是 `succeeded`；Edge 旧调度器
+        内部仍使用 `success`，上行 Adapter 必须先规范化，不能原样写入 Backend 表。
+
+        参数：
+            data: Backend 下发的工作流快照与 Task identity。
+
+        返回：
+            None；执行结果通过调度器状态监听器异步回报。
         """
         workflow_id = str(data.get("workflow_id", "") or "")
         if self.edge_scheduler is None:
@@ -891,9 +898,16 @@ class MessageProcessor:
         envelope: command_id / expected_version / warehouse_zone_id / type / actor / payload
         （type ∈ inventory.template.upsert|template.delete|inbound|reserve|release|consume|quarantine,
           material.deploy|move|detach|set_parent|content.set|content.clear|consume|discard|adjust；
-          set_parent 设父物料（parent_material_uuid ≡ 树父，单一父），slot_id 可选具名位）
+          set_parent 设父 Material（Backend `material.parent_uuid`，单一父），
+          slot_id 是可选 `site.name`，不是 Site UUID）
         Edge 回 inventory_command_result（accepted/rejected/completed）；
         最终状态由领域事件（sync_outbox → 云端 projection）刷新，云端不直接改库存行。
+
+        参数：
+            data: Backend 下发的库存命令 envelope。
+
+        返回：
+            None；命令结果通过 WebSocket 与 HTTP 回调上报。
         """
         command_id = str(data.get("command_id", "") or "")
         if self.inventory_service is None:

@@ -873,9 +873,18 @@ class InventoryService:
         """relation 主键是 child_uuid：transfer 时旧父关系被原子替换，源端不残留.
 
         单一父不变量：`material_instance.parent_uuid` 与 `relation.parent_uuid`
-        始终一致——云端 `parent_material_uuid` 就是资源树父物料（≡ ResourceDict
-        parent_uuid），relation 只补充「父物料的哪个具名位」（slot_id = PLR site
-        名，↔ 云端 sites.label；uuid 仅后端索引）。每次 upsert 同步父列。
+        始终一致——它映射 Backend canonical `material.parent_uuid`。relation 只补充
+        「父物料的哪个具名位」（`slot_id` = PLR site 名 = Backend `site.name`）；
+        稳定的 `site.uuid` 是身份，不能用名称替代。每次 upsert 同步父列。
+
+        参数：
+            conn: 当前 SQLite 事务连接。
+            parent_uuid: 父 Material UUID。
+            slot_id: 父 Material 内的 Site 语义名。
+            child_uuid: 子 Material UUID。
+
+        返回：
+            None；变更写入当前事务。
         """
         current = conn.execute(
             "SELECT version FROM resource_relation WHERE child_uuid = ?",
@@ -1056,10 +1065,10 @@ class InventoryService:
         self, edge_uuid: str, parent_uuid: str = "", slot_id: Optional[str] = None,
         actor: str = "", causation_id: str = "", expected_version: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """设置/清除父物料（云端 parent_material_uuid ≡ 资源树 parent_uuid，单一父）。
+        """设置或清除父 Material（映射 Backend `material.parent_uuid`，保持单一父）。
 
         资源只有一个父层级：父物料 + 可选具名位（slot_id = PLR site 名，
-        ↔ 云端 sites.label；uuid 仅后端索引）。语义：
+        ↔ Backend `site.name`）。`site.uuid` 是稳定身份，不由名称或序号替代。语义：
 
         - parent_uuid 空串：顶层——父与具名位一并清除；
         - parent_uuid 非空、slot_id 空/None：有父但不占具名位（sites 讨论稿场景
@@ -1068,6 +1077,17 @@ class InventoryService:
           （relation.parent 始终等于 parent_uuid 列）。
 
         沿 parent 链防环（云端由业务层校验，Edge 同等语义）。
+
+        参数：
+            edge_uuid: 当前 Material UUID（旧兼容列名仍为 edge_uuid）。
+            parent_uuid: 新父 Material UUID；空串表示清除父级。
+            slot_id: 可选 Site 语义名，不是 Site UUID。
+            actor: 领域操作主体。
+            causation_id: 触发本次变更的命令或事件 UUID。
+            expected_version: 可选乐观锁版本。
+
+        返回：
+            更新后的 Material 实例字典。
         """
         now = self._now_ms()
         new_slot = slot_id or ""

@@ -322,8 +322,11 @@ class TestLedgerOutboxAtomicity:
 
 
 class TestParentAndSite:
-    """单一父不变量：parent_uuid 列（≡ 云端 parent_material_uuid ≡ 资源树父）是唯一
-    父层级事实；relation 行仅在「父 + 具名位（PLR site 名）」时存在且父恒一致。"""
+    """单一父不变量：parent_uuid（映射 Backend material.parent_uuid）是唯一父层级事实。
+
+    relation 行仅在「父 + 具名位（PLR site 名 = Backend site.name）」时存在且父恒一致；
+    Site UUID 是独立稳定身份，不由名称替代。
+    """
 
     def test_register_initial_parent_uses_shared_relation_helper(self, svc):
         inst = svc.register_instance(

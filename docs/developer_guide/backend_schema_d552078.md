@@ -19,20 +19,30 @@
 
 ## 资源、物料、库位（Site）
 
-| 表 | 字段（除 Base） | FK、唯一约束和索引 | 写入权威 / 公共 API |
+| 表 | 字段（除 Base） | FK、唯一约束和索引 | Backend d552078 当前实现 / 公共 API |
 |---|---|---|---|
 | `resource_template` | `name, display_name, resource_type, header?, footer?, icon?, model JSON, module?, language?, tags JSON[], data_schema JSON, config_schema JSON, pose JSON, config_info JSON[], cover?, scene JSON[], device_params JSON, manufacturer_uuid?, ui_overlay JSON` | active unique `name`（区分大小写）；active `resource_type`、分页游标索引 | Backend 模板服务；`/api/v1/resource-templates*` |
 | `resource_handle_template` | `resource_template_uuid, name, display_name, type, io_type, source?, key?, side?`；`io_type=source/target/bidirectional` | FK template RESTRICT；active unique `(resource_template_uuid,io_type,name)` | Backend 模板服务；随模板详情公开 |
 | `material` | `resource_template_uuid, barcode, name, config JSON, data JSON, parent_uuid?, class` | FK template/self-parent RESTRICT；禁止自父；active unique `LOWER(barcode)`（非空）、根 Material 的 `LOWER(name)`；parent/template 索引 | Backend 资源服务；`/api/v1/materials*` |
 | `relative_position` | `material_uuid, position_x/y/z, depth,length,width, scale_x/y/z, rotation_x/y/z` | FK Material RESTRICT；每个 active Material 至多一行 | Material 聚合内写；Material 详情/Graph 公开 |
-| `site` | `material_uuid, name, sort_order, allowed_resource_template_uuids JSON[], occupied_material_uuid?, position_x/y/z, depth,length,width` | 两个 Material FK RESTRICT；禁止 owner=occupant；active unique `(material_uuid,LOWER(name))`；active occupant 全局唯一；owner+order 索引 | Material 聚合创建时由 Backend 分配 UUID；`/materials/{uuid}/sites`、`/sites/{uuid}`、Material Graph |
+| `site` | `material_uuid, name, sort_order, allowed_resource_template_uuids JSON[], occupied_material_uuid?, position_x/y/z, depth,length,width` | 两个 Material FK RESTRICT；禁止 owner=occupant；active unique `(material_uuid,LOWER(name))`；active occupant 全局唯一；owner+order 索引 | 当前 Backend create 路径在事务内分配 UUID；`/materials/{uuid}/sites`、`/sites/{uuid}`、Material Graph |
 | `material_state_history` | `material_uuid,status?,state_data JSON,source?,observed_at` | FK Material RESTRICT；`(material_uuid,observed_at DESC,uuid DESC)` | append-only 状态事实；`/materials/{uuid}/states*` |
-| `material_ledger_entry` | `uuid PK, material_uuid,event_type,operator_type,from_site_uuid?,to_site_uuid?,changes JSON,extension JSON,trace_id?,recorded_at`；没有 Base | `event_type=created/updated/deleted`；`operator_type=frontend/edge/system`；Site 变更前后不能相同；Trace ID 为 32 位小写 hex；FK Material/Site RESTRICT；时间线索引 | Backend 不可变操作台账；`GET /materials/{uuid}/ledger` |
+| `material_ledger_entry` | `uuid PK, material_uuid,event_type,operator_type,from_site_uuid?,to_site_uuid?,changes JSON,extension JSON,trace_id?,recorded_at`；没有 Base | `event_type=created/updated/deleted`；`operator_type=frontend/edge/system`；Site 变更前后不能相同；Trace ID 为 32 位小写 hex；FK Material/Site RESTRICT；时间线索引 | 已存在的 Backend canonical 不可变操作台账；`GET /materials/{uuid}/ledger`；Edge 接入延后 |
 | `material_warehouse` | `resource_template_uuid,name,alias?,sku?,spec?,unit,batch_no,order_no?,supplier,quantity,remaining,safety_stock,unit_price,storage_location?,operator?,inbound_at?,attachments JSON[],status` | FK template；active unique `(template,LOWER(batch_no))`；FIFO 索引 | Backend 仓储域；Edge 当前无共享实现 |
 
 `Site.uuid` 是库位（Site）本身的稳定身份；`Site.material_uuid` 是拥有该库位的
 Material；`Site.occupied_material_uuid` 是当前占用该库位的另一个 Material。三者不得互换。
 Material 的 `parent_uuid` 表示组成关系，库位占用不改变组成关系。
+
+上表描述 Backend d552078 在 `backend_controlled` 下的当前实现，不把“Backend 分配 UUID”
+提升成所有部署模式的唯一规则。在 `local_scheduler` / 默认开源 Host 模式，Host Edge 是本地
+Material/Site Authority，可在首次物化时分配并持久化稳定 Site UUID。Edge-origin 聚合上送时，
+Backend 仍缺接收外部 `material.uuid/site.uuid` 的 import/upsert 或显式 identity mapping；这是
+Backend Interface TODO，不能通过两端各自生成 UUID 或按 label/index 猜测合并来绕过。
+
+`material_ledger_entry` 已由 migration 000049 落入 Backend canonical Schema。Edge 的
+`inventory_ledger` 是不同语义的私有库存事件账，不能改名冒充；在可信
+`operator_type/user` 注入完成前，Edge 镜像/写入可以延后，但 Backend 已存在状态必须保留。
 
 ## 化学品与物质状态
 
@@ -73,6 +83,10 @@ Material 的 `parent_uuid` 表示组成关系，库位占用不改变组成关�
 | `execution_lock_lease` | `lock_key,material_uuid,workflow_task_uuid,workflow_node_job_uuid,state,acquired_at,released_at?` | state=`reserved/running/released/uncertain`；active lock key 全局唯一；`material_site` scope 目前模型预留但持久层明确拒绝 |
 
 `workflow_node_job_sample` 不存在于当前迁移；样本/物料绑定由 `material_uuid` 和节点参数表达。
+
+Backend Workflow 公共成功终态是 `succeeded`。Edge Local REST v1 若继续返回 `success`，只能由
+遗留 Adapter 执行 `succeeded → success`；Backend 表、DTO 和 Backend-shaped Interface 不得改成
+`success`。
 
 ## Backend ↔ Edge 控制面与前端事件
 

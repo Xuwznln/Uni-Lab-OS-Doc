@@ -34,7 +34,7 @@
 | `material_content_version` | `material_uuid PK,version` | Edge 私有内容 revision |
 | `inventory_lot` | `lot_id PK,template_id,batch_no,unit,quantity_total/available/reserved,expiry,quarantined,warehouse_zone_id,created_at(ms),version` | Edge 权威运行态；当前 Backend 没有同语义实体 |
 | `inventory_reservation` | `reservation_id PK,workflow_id,node_id,attempt,status,amounts_json,created_at(ms),version` | Edge 本地库存预留；不是 Backend `execution_lock_lease` |
-| `inventory_ledger` | `ledger_id INTEGER PK,occurred_at(ms),op_type,aggregate_type/id,delta_json,actor,reason,causation_id,trace_id,span_id` | Edge 私有库存事件账；不是 Backend `material_ledger_entry` |
+| `inventory_ledger` | `ledger_id INTEGER PK,occurred_at(ms),op_type,aggregate_type/id,delta_json,actor,reason,causation_id,trace_id,span_id` | Edge 私有库存事件账；Backend 000049 已有 canonical `material_ledger_entry`，两者语义不同且 Edge 接入延后，不能改名冒充 |
 | `sync_outbox` | `sequence INTEGER PK,event_id UNIQUE,edge_id,lab_id,aggregate_type/id,aggregate_version,event_type,occurred_at(ms),causation_id,payload_json,traceparent,tracestate,trace_id,span_id` | Edge 增量同步事实；`sequence` 是本 Edge 单调水位 |
 | `processed_command` | `command_id PK,result_json,status,processed_at(ms)` | 下行命令幂等 Inbox |
 | `sync_cursor` | `cursor_name PK,acked_sequence,updated_at(ms)` | 连续 ACK 水位；禁止倒退/越过空洞 |
@@ -76,8 +76,10 @@ Material 稳定身份只使用 `material.uuid`；`edge_uuid/cloud_uuid` 仅存�
   Backend 的 ad-hoc device action。
 - `workflow_node_job` 字段接近 Backend，但缺 Edge Agent/Command/Material FK、attempt 唯一、
   deadline/recovery 索引；它不持久化 result/feedback/intervention/manual-confirmation/lock lease。
-- 公共运行状态已使用 Backend 当前的 `succeeded`；老 Scheduler 内部历史仍使用 `success`，
-  只能在 adapter seam 转换。
+- Backend-shaped Workflow Store/Interface 使用 canonical `succeeded`。Edge Local REST v1、旧
+  Scheduler 快照和历史仍使用 `success`；Local v1 输出由遗留 Adapter 做
+  `succeeded → success`，进入共享模型时必须再把 `success` 规范化为 `succeeded`。当前
+  `scheduler/integration.py` 的 WebSocket 上行尚未执行该规范化，属于协议 Adapter TODO。
 - Schema 没有 `user_version`，无法证明旧库进行了有序升级。
 
 由于这些差异涉及现有工作流历史的迁移和运行职责分配，不能以一次无版本
@@ -98,7 +100,8 @@ Material 稳定身份只使用 `material.uuid`；`edge_uuid/cloud_uuid` 仅存�
 - `job_runs`：`id INTEGER PK,job_id,workflow_id,node_id,device_id,action_name,device_action_key,started_at/ended_at REAL(s),actual_s,estimated_s,estimate_source,state,suc_type,ret_json`。
 
 这是旧 Scheduler 审计/回放投影，不是 Backend-shaped Workflow Authority。`success`、
-`interrupted` 等内部词汇不得直接上送公共 API。
+`interrupted` 等内部词汇不能成为 Backend canonical；仅 Edge Local REST v1 可经明确 Adapter
+输出兼容 `success`。
 
 ## `edge_control.db`：user_version=0
 

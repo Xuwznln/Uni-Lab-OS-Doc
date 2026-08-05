@@ -188,7 +188,18 @@ def _handle_detach(svc: InventoryService, cmd: JsonObject) -> JsonObject:
 
 
 def _handle_set_parent(svc: InventoryService, cmd: JsonObject) -> JsonObject:
-    """设父物料（parent_material_uuid ≡ 树父）；slot_id 为可选具名位（PLR site 名）。"""
+    """设置父 Material；`slot_id` 是可选 Site 语义名，不是 Site UUID。
+
+    Backend canonical 父字段是 `material.parent_uuid`；Edge 旧命令仍使用
+    `payload.parent_uuid`，由 Adapter 保持同义映射。
+
+    参数：
+        svc: Edge 库存领域服务。
+        cmd: 已校验的库存命令 envelope。
+
+    返回：
+        更新后的 Material JSON 对象。
+    """
     p = cmd.get("payload") or {}
     return svc.set_instance_parent(
         edge_uuid=p["edge_uuid"],

@@ -39,11 +39,12 @@ def normalize_node_type(value: Any) -> str:
     return _NODE_TYPE_CANONICAL.get(text.lower(), text)
 
 
-# 状态词汇与新后端（Uni-Lab-OS/uni-lab-backend）表设计保持一致：
-# - workflow_task.status: pending/running/paused/success/failed/canceled/timeout
-# - workflow_node_job.status 终态同样使用 success（不是 succeeded）
-# Edge 额外扩展：ready/dispatched（节点内部推进态）、waiting_for_material（等料）、
-# interrupted（进程重启标记，仅历史库）；上报云端时终态词汇与云端枚举一字不差。
+# 本枚举服务 Edge Local REST v1/旧调度器内部兼容，不是 Backend canonical 状态目录。
+# Backend d552078 的 Workflow Task/Job 公共成功终态是 succeeded；Local v1 响应应由
+# Adapter 映射 succeeded → success，进入 Backend-shaped 共享模型时必须反向规范化。
+# 当前 WebSocket workflow_status 上行尚未集中实现该 Adapter，不能据此扩展 Backend 状态。
+# Edge 还保留 ready/dispatched（内部推进态）、waiting_for_material（等料）和
+# interrupted（仅历史库）；这些值不能直接扩展 Backend 表 CHECK 或公共 DTO。
 class NodeState(str, Enum):
     PENDING = "pending"      # 尚有未完成的前置依赖
     READY = "ready"          # 依赖已清零，等待排序/下发

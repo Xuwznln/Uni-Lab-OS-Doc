@@ -26,9 +26,9 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-# 非终态 → 终态集合（与 service._TERMINAL_STATES 口径一致，字符串解耦避免循环依赖）。
-# 词汇对齐云端 workflow_task：success/failed/canceled/timeout；
-# interrupted 是 Edge 历史库独有（进程重启标记），上报云端时映射为 failed。
+# Edge 旧历史终态集合（与 service._TERMINAL_STATES 口径一致，字符串解耦避免循环依赖）。
+# 本地保留 success/failed/canceled/timeout；Backend canonical 成功值是 succeeded，
+# 上行 Adapter 必须转换。interrupted 是 Edge 历史库独有，向 Backend 上报时映射为 failed。
 _TERMINAL = ("success", "failed", "canceled", "timeout", "interrupted")
 
 # ret_value JSON 截断上限（历史库不是数据湖，只留调试线索）

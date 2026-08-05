@@ -134,10 +134,11 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 );
 """
 
-# v3：父物料列（云端 material.parent_material_uuid ≡ 资源树 parent_uuid，单一父）。
-# 与 resource_relation 的关系：parent_uuid 列是唯一父层级事实；relation 行仅在
-# 「父 + 具名位」时存在（slot_id = PLR site 名 ↔ 云端 sites.label，uuid 仅后端索引），
-# 且 relation.parent_uuid 恒等于本列（_tx_upsert_relation 同步维护）。
+# v3：旧 material_instance.parent_uuid 在 v5 迁入 canonical material.parent_uuid（单一父）。
+# 与 resource_relation 的关系：parent_uuid 列是唯一组成父层级事实；旧 relation 行仅在
+# 「父 + 具名位」时存在（slot_id = PLR Site 名 ↔ canonical site.name）。canonical
+# site.uuid 是库位稳定身份；旧 View 不暴露它，不能把 label/index 当作 UUID。
+# relation.parent_uuid 恒等于本列（_tx_upsert_relation 同步维护）。
 # 空串表示顶层物料；单父由列语义天然保证（树形父）。
 _SCHEMA_V3_ADD_PARENT = "ALTER TABLE material_instance ADD COLUMN parent_uuid TEXT NOT NULL DEFAULT ''"
 _SCHEMA_V3_INDEX = "CREATE INDEX IF NOT EXISTS idx_instance_parent ON material_instance(parent_uuid)"
