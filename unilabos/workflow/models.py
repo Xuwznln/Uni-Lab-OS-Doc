@@ -95,7 +95,7 @@ class WorkflowNodeWrite(BaseModel):
     parent_uuid: Optional[str] = None
     material_uuid: Optional[str] = None
     name: str
-    # Backend c35d821 已移除 WorkflowNode.status；保留的默认值仅供旧本地
+    # Backend 自 c35d821 起已移除 WorkflowNode.status，d552078 仍保持该语义；保留的默认值仅供旧本地
     # Store 内部兼容，公共读写 DTO 不要求或返回该字段。
     status: str = "idle"
     type: str

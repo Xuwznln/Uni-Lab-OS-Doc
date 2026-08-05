@@ -157,7 +157,7 @@ _SCHEMA_V4_COLUMNS = {
     },
 }
 
-# v5：前端共享资源合同以 Backend c35d821 的 SQLite 结构为准。
+# v5：共享资源表以 Backend c35d821/000046 为迁移基线；复核至 d552078 时这六表结构未变。
 #
 # 旧 Inventory 表不是直接删除：迁移先把事实搬入规范
 # resource_template/material/site/material_state_history，再用只承载旧字段拼写的

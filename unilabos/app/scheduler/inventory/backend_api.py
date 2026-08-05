@@ -1,4 +1,8 @@
-"""FastAPI adapter matching Backend c35d821 resource routes and envelope."""
+"""Backend-shaped 资源路由与响应 envelope 的 FastAPI 适配器。
+
+共享资源表语义已复核至 Backend ``d552078``；新增物料台账等尚未闭环的能力不会在这里
+伪装为已支持。
+"""
 
 from __future__ import annotations
 
