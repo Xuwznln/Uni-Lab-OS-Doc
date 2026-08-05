@@ -38,6 +38,15 @@ device_property_latest, device_property_history, workflow_runs, job_runs
    读写性和最低 Schema 版本。
 3. Edge 私有同步表：`sync_outbox`、`processed_command`、`sync_cursor` 等，不进入 Backend DTO。
 
+导师后续提供但本环境仍未直接审计的微前端更新还包括：新增
+`docs/protocol/persistence-ownership.md`，并更新 README、`cloud-mapping.md`、`data-model.md`；
+导师报告 `protocol:check` 通过，计数为 53 Edge ops、5 Cloud ops、17 actions、17 typed entities。
+这些是 `local-draft` 验证记录，不是本机执行结果，也不会把 17 张 live 表自动改成 target 表。
+
+另一个独立证据源是导师提供、待实机复核的
+`/home/wz/unilab-context/leaplab designs@24fc4ce` target-design。它描述未来持久化所有权；不能把
+该设计分支写成微前端、Go Backend 或 OS 已实现 migration/API。
+
 ## Material 客户端投影
 
 私有 `uni-lab-fe` 的 `packages/material/src/types.ts` 定义 UI 投影 `MaterialAggregate`：
@@ -135,3 +144,26 @@ Backend Workflow 公共成功终态是 `succeeded`。Edge Local REST v1 当前�
 私有客户端投影不拥有 Backend/Edge 的表、FK、软删除、outbox 或 cursor，也不能要求 Edge
 为纯展示字段新增持久化列。`unilab-edge-ui` 的 catalog 则是协议与物理对象登记，但同样不拥有
 Backend 领域语义；它必须按 Backend canonical、Edge 兼容对象和 Edge 私有对象三层记录。
+
+## 前端看到的 target-design 持久化所有权
+
+浏览器在所有模式都只调用 Backend-shaped Interface，不直读 `os-local.sqlite`、
+`workspace.sqlite`、`lab-dev.sqlite` 或 PostgreSQL，也不根据 URL/部署名称猜哪个进程在调度。
+
+| 模式 | 前端 Interface 提供者 | 前端不可见的内部所有权 | Site identity |
+|---|---|---|---|
+| `os-quick-debug` | OS 本地微后端 | Active Host OS 独占本地运行存储并推进 DAG | Host Edge 首次生成并保存 |
+| `go-standalone` | Go 前端网关；运行投影来自 Active Host 事件 | Go 独占 `workspace.sqlite`，Active Host OS 独占 `os-local.sqlite` | Go 新建；Quick Debug import 接受 Edge UUID 或 mapping |
+| `go-lab-dev` | Lab Go 前端网关 | Lab Go 独占 `lab-dev.sqlite`，Active Host OS 负责实时调度 | Lab Go 生成，OS 原样 hydration |
+| `go-lab` | Lab Go 前端网关 | Lab Go 独占 PG，Active Host OS 负责实时调度 | Lab Go 生成，OS 原样 hydration |
+
+Go 不计算 `ready`、不持有活锁、不调用 Scheduler 或逐节点派发；每个 scope 只有一个 Active Host
+OS。前端状态必须来自 Go 持久投影或 OS Backend-shaped read model，不能由浏览器推进。
+
+Workspace 与 Lab-dev 通过不可变 Version Artifact 发布，不复制数据库行。Quick Debug →
+Standalone export/import 携带 `schema_version/content_hash`：同 UUID 同 hash 幂等，同 UUID 异 hash
+冲突。微前端只展示并提交该冲突，不得自行重写 UUID 或按名称合并。
+
+微前端 catalog 需要额外标注五类成熟度：`backend-implemented-candidate`、`edge-live`、
+`legacy-implemented`、`local-draft`、`target-design`。`os-local.sqlite`/Go target 表只能登记在最后一类，
+当前 17 张 Edge live 表仍保持 implemented。

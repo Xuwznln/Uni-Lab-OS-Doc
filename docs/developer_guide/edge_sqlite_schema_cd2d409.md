@@ -5,6 +5,11 @@
 `PRAGMA user_version/table_info/foreign_key_list/index_list`。`TEXT JSON` 与 Backend
 的 JSON 类型是允许的物理差异；语义、标识、约束和公开 DTO 才是对齐目标。
 
+本文主体由两类已实现证据组成：v5 shared 表和当前控制面属于 `edge-live`；v4 catalog、旧三库、
+旧 Workflow 审计表和兼容 View 属于 `legacy-implemented`。导师提供、待实机复核的
+`leaplab/designs@24fc4ce` `os-local.sqlite` v1 只在文末作为 `target-design` 登记，不会自动改名、
+合并或删除当前 17 张 Edge live 表。
+
 ## `inventory.db`：user_version=5
 
 ### Backend 共享资源表
@@ -115,3 +120,55 @@ Material 稳定身份只使用 `material.uuid`；`edge_uuid/cloud_uuid` 仅存�
 
 `traceparent/tracestate` 是跨进程传播格式；`trace_id/span_id` 是库存审计索引字段；两种形式不可
 互相替代。所有外发 Command/Event 都以 UUID 幂等，sequence 只负责有序重放。
+
+## `os-local.sqlite` v1 target-design
+
+本节来自导师提供、待实机复核的 `leaplab/designs@24fc4ce`。当前分支没有对应 migration、
+`user_version=1` 建库代码或完整 Router，不能把目标名称描述成已存在表。
+
+### OS 本地微后端职责与单写者
+
+target-design 的 Active Host OS 负责 Slave 连接、ROS/HostLink 配置、DAG/Scheduler、资源占用、
+设备动作和运行日志；每个调度作用域只能有一个 Active Host。OS 目标只打开
+`os-local.sqlite`。兼容期可由同一 OS 进程独占现有 `inventory.db`、`device_state.db`、
+`workflow_history.db`，但禁止另一个进程同时打开、禁止跨库双写，也不能据此声称已经完成合库。
+
+当前 `edge_control.db` 仍是 `edge-live` 事实；提供的 target 表清单没有给出其 Command/Outcome
+迁移落点。若目标最终要求 OS 只打开一个文件，必须先补 `edge_control.db` 的版本化迁移或替代
+协议，不能静默丢弃未 ACK 事件和执行镜像。
+
+### v1 目标逻辑表
+
+| 目标表 | 目标职责 / 不变量 |
+|---|---|
+| `local_workflow` | Quick Debug 本地 Workflow identity |
+| `local_workflow_version` | 本地不可变 Workflow version |
+| `local_resource_config` | Active Host 本地资源配置版本 |
+| `debug_task` | Quick Debug Task 持久业务记录 |
+| `debug_node_event` | 节点运行事件；`(scope_id,task_id,seq)` 唯一 |
+| `dag_cursor` | 已提交 DAG 事件位置 |
+| `event_outbox` | Runtime Event Outbox；`event_id` 唯一 |
+| `resource_snapshot_cache` | 可重建的资源快照缓存，不成为 Material/Site Authority |
+| `plan_snapshot` | 冻结执行计划，不保存 live queue |
+| `run_trace` | Task/节点/动作 Trace 关联，不承担幂等或状态权威 |
+| `local_reagent_info` | Quick Debug 本地试剂信息 |
+| `local_reagent_batch` | 本地试剂批次事实 |
+| `local_material_binding` | Task 与 Material/Site 的冻结绑定 |
+| `local_inventory_reservation` | Quick Debug 持久库存预留，不冒充活锁/Claim |
+| `local_inventory_ledger` | Quick Debug 库存台账；不同于现有 `inventory_ledger` 和 Backend `material_ledger_entry` |
+
+`dag_cursor`、终态 `debug_node_event` 和对应 `event_outbox` 必须同事务提交。活锁、lease、
+`ready/running` queue、`PlannedOccupancy`、活甘特和当前 Scheduler epoch 不是 DB 权威；重启只能从
+持久计划、事件和配置重建，不能把内存快照提升成 durable fact。
+这里的活锁/lease 是 target-design 实时调度缓存，不等于已经接受“无持久作业执行占用”。
+JobExecutionClaim/栅栏如何落入该目标仍是与 Core 持久执行安全模型的对齐 TODO。
+
+### 两类 Outbox 不合表
+
+- 库存 `sync_outbox` 以聚合 UUID、`aggregate_version` 和连续同步 cursor 表达 Inventory 增量。
+- 运行时 `event_outbox` 以唯一 `event_id` 发布 `debug_node_event`；Go `execution_event` 按
+  `(scope_id,task_id,seq)` 幂等接收。
+
+二者的聚合、顺序、ACK 和重放失败语义不同。共同使用“outbox”模式不代表应共享物理表。
+`success → succeeded` 的 Backend-shaped Adapter、可信 ledger actor 注入以及 Site import/upsert
+仍是待实现项，不因 `os-local.sqlite` target 表登记而闭合。

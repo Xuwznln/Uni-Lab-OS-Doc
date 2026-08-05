@@ -8,6 +8,10 @@
 这不是要求 Edge 把 PostgreSQL/SQLite DDL 逐字复制。它定义的是 Backend 领域语义、
 公共 JSON 字段、约束和写入权威。
 
+本文主体成熟度是 `backend-implemented-candidate`：所列对象都有 d552078 的实际 migration/model/
+Router 证据，但该分支不是默认发布基线。文末另列导师提供、待实机复核的
+`leaplab/designs@24fc4ce` `target-design`；目标表不能反向写成 d552078 已实现。
+
 ## 记号
 
 - `Base`：`uuid UUID PK`、`create_time`、`update_time`、可空 `deleted_at`、可空
@@ -101,3 +105,44 @@ Backend Workflow 公共成功终态是 `succeeded`。Edge Local REST v1 若继�
 
 Backend 没有 `device_property_latest/history`。设备高频遥测属于 Edge 投影；Backend 如需持久化，
 应另立遥测/时序契约，不能把 Edge EAV 表直接当共享领域 Schema。
+
+## Go standalone / Lab target-design 附录
+
+本节不是 d552078 migration 清单。它只登记导师提供、待实机复核的
+`leaplab/designs@24fc4ce` 目标，并与上面的 `backend-implemented-candidate` 隔离。
+
+### Go 业务后端职责
+
+target-design 中，Go 业务后端拥有 Workflow/Resource 版本、业务持久化、运行投影、发布、鉴权和
+前端网关；每个调度作用域由一个 Active Host OS 负责 DAG、就绪性、资源占用、设备动作和运行日志。
+Go 不计算 `ready`、不持有活锁、不调用 Scheduler、不逐节点派发。该角色拆分尚未落入 d552078，
+并与当前 `backend_controlled` 术语存在待版本化的迁移差异。
+
+### 目标数据库与最小逻辑表
+
+| Go target | 唯一数据库 writer | 目标最小逻辑表 |
+|---|---|---|
+| standalone | Go 进程独占 `workspace.sqlite` | `workflow`, `node`, `edge`, `version`；`resource`, `material`, `site`；`reagent_info`, `reagent`；`inventory_reservation`, `inventory_ledger`；`task`, `execution_event`, `run_trace`, `publish_record`；`local_owner`, `workspace`, `schema_migration` |
+| Lab 开发 | Lab Go 进程独占 `lab-dev.sqlite` | `lab`, `workstation`；`published_workflow_version`, `composite_capability`；`lab_workflow`, `lab_workflow_version`, `lab_task`；`resource`, `material`, `site`, `location`；`reagent`；`reservation`, `material_ledger_entry`；`execution_event`, `run_trace`, `plan_revision_metadata` |
+| Lab 生产 | Lab Go 进程独占 PostgreSQL | 与 Lab 最小逻辑模型同义，物理 DDL/类型/索引可按 PG 优化 |
+
+浏览器不直读任何数据库；OS 不打开 `workspace.sqlite`、`lab-dev.sqlite` 或 PG 业务表。以上名称尚无
+本轮可验证 migration/API，实施必须另行冻结 Base、FK、unique、软删除、时间、版本和鉴权。
+设计稿中的短名 `node/edge/version/resource/task/reservation` 也不是 d552078 现有
+`workflow_node/workflow_edge/...` 表的自动 rename；逐项映射、数据迁移和兼容 View 仍需冻结。
+
+`site` 与 `location` 是两个实体：`site.uuid` 标识 carrier 内可占用库位（Site），`location` 表达更
+宽泛空间/物流位置。二者的 FK、移动转换和生命周期仍是 Schema TODO，不能用 rename 代替。
+
+### 发布、导入与 Site identity
+
+- `os-quick-debug` 由 Host Edge 创建并持久化 Material/Site UUID。
+- `go-standalone` 新建聚合由 Go 创建 UUID；导入 Quick Debug 聚合时必须接受 Edge UUID 或使用
+  显式 identity mapping。
+- `go-lab-dev/go-lab` 由 Lab Go 创建 UUID，OS hydration 原样沿用。
+- `workspace.sqlite` 与 `lab-dev.sqlite` 不复制表行；只发布不可变版本制品。
+- Quick Debug → Standalone 逻辑 export/import 携带 `schema_version/content_hash`；同 UUID 同 hash
+  幂等，同 UUID 异 hash 冲突。
+
+外部 Site UUID import/upsert、可信 ledger `operator_type/user` 注入和冲突响应仍是 Go Interface
+TODO；不得把 d552078 当前 Backend 内部分配 UUID 的 create 路径描述成已经支持这些目标。
