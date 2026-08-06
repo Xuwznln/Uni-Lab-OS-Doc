@@ -764,6 +764,33 @@ bioyond_cell:
           title: wait_orderlist_idle参数
           type: object
         type: UniLabJsonCommand
+      auto-order_report_v2:
+        feedback: {}
+        goal: {}
+        goal_default:
+          order_id: null
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 查询单个订单的实验报告详情
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                order_id:
+                  description: 订单 GUID。注意必须传 orderId，传 orderCode 接口会返回 400。
+                  type: string
+              required:
+              - order_id
+              type: object
+            result:
+              type: object
+          required:
+          - goal
+          title: order_report_v2参数
+          type: object
+        type: UniLabJsonCommand
       auto-precheck_reagents_total:
         feedback: {}
         goal: {}
@@ -1045,6 +1072,41 @@ bioyond_cell:
           title: process_step_finish_report参数
           type: object
         type: UniLabJsonCommand
+      auto-register_interlock_batch:
+        feedback: {}
+        goal: {}
+        goal_default:
+          data_list: null
+          scenario: all
+          tag: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 建单成功后写入互锁缓存，并接管（清除）放行凭证，完成「凭证 → 批次」交接。
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                data_list:
+                  items:
+                    type: object
+                  type: array
+                scenario:
+                  default: all
+                  type: string
+                tag:
+                  default: ''
+                  type: string
+              required:
+              - data_list
+              type: object
+            result: {}
+          required:
+          - goal
+          title: register_interlock_batch参数
+          type: object
+        type: UniLabJsonCommand
       auto-report_material_change:
         feedback: {}
         goal: {}
@@ -1122,6 +1184,28 @@ bioyond_cell:
           required:
           - goal
           title: scheduler_continue参数
+          type: object
+        type: UniLabJsonCommand
+      auto-scheduler_pause:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 暂停调度 (2.8)
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result:
+              type: object
+          required:
+          - goal
+          title: scheduler_pause参数
           type: object
         type: UniLabJsonCommand
       auto-scheduler_reset:
@@ -1364,6 +1448,28 @@ bioyond_cell:
           required:
           - goal
           title: stack_inquiry_window_5_free参数
+          type: object
+        type: UniLabJsonCommand
+      auto-has_interlock_claim:
+        feedback: {}
+        goal: {}
+        goal_default: {}
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 凭证是否仍在手。
+          properties:
+            feedback: {}
+            goal:
+              properties: {}
+              required: []
+              type: object
+            result:
+              type: boolean
+          required:
+          - goal
+          title: has_interlock_claim参数
           type: object
         type: UniLabJsonCommand
       auto-monitor_manual_stack_3:

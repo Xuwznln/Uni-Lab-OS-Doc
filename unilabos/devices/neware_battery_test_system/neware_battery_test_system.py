@@ -30,6 +30,7 @@ from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.ros.nodes.base_device_node import ROS2DeviceNode
 from unilabos.ros.nodes.presets.workstation import ROS2WorkstationNode
+from unilabos.utils.datacore import push_csv_by_config
 
 # ========================
 # OSS 上传工具函数
@@ -210,91 +211,6 @@ def upload_directory_to_oss(local_dir, oss_prefix=""):
 
 
 # ========================
-# DataCore 大装置数据接入
-# ========================
-
-# 默认接入凭据（可用环境变量覆盖：DATACORE_INGEST_URL / DATACORE_DEVICE_ID / DATACORE_DEVICE_KEY）
-DATACORE_INGEST_URL = "https://datacore.dp.qifalab.cn/api/ingest/big-device-csv"
-DATACORE_DEVICE_ID = "unilab01"
-DATACORE_DEVICE_KEY = "jV7HUNzlKWvS6_C_YAnsrwBjUv4zWIVsMncU5x0rlwE"
-
-
-def push_csv_to_datacore(csv_path, url=None, device_id=None, device_key=None,
-                         timeout=20, total_timeout=60, retry_interval=5):
-    """
-    把 CSV 文件推送到 DataCore 大装置数据接入接口（HTTP Basic Auth + multipart 上传）。
-    带失败重试：在 total_timeout 的总时间预算内反复尝试，单次请求超时不超过剩余预算。
-
-    等价 curl:
-        curl -u 'unilab01:****' -F 'file=@your.csv;type=text/csv' \\
-            https://datacore.dp.qifalab.cn/api/ingest/big-device-csv
-
-    Args:
-        csv_path:       本地 CSV 文件路径
-        url:            接入地址，默认取环境变量 DATACORE_INGEST_URL 或内置常量
-        device_id:      设备号（Basic Auth 用户名），默认取环境变量 DATACORE_DEVICE_ID 或内置常量
-        device_key:     密钥（Basic Auth 密码），默认取环境变量 DATACORE_DEVICE_KEY 或内置常量
-        timeout:        单次请求超时（秒）
-        total_timeout:  失败重试的总时间预算（秒），默认 60（约 1 分钟）
-        retry_interval: 两次尝试之间的等待（秒）
-
-    Returns:
-        bool: 推送是否成功
-    """
-    url = url or os.getenv("DATACORE_INGEST_URL", DATACORE_INGEST_URL)
-    device_id = device_id or os.getenv("DATACORE_DEVICE_ID", DATACORE_DEVICE_ID)
-    device_key = device_key or os.getenv("DATACORE_DEVICE_KEY", DATACORE_DEVICE_KEY)
-
-    if not csv_path or not os.path.exists(csv_path):
-        print(f"[DataCore] 错误: CSV 文件不存在 {csv_path}")
-        return False
-
-    filename = os.path.basename(csv_path)
-    # 一次性读入内存，重试时复用，避免每次重新读盘
-    with open(csv_path, "rb") as f:
-        file_bytes = f.read()
-
-    deadline = time.monotonic() + max(1.0, float(total_timeout))
-    attempt = 0
-    last_err = None
-    while True:
-        remaining = deadline - time.monotonic()
-        # 首次必做；之后预算耗尽则停止
-        if attempt >= 1 and remaining <= 0:
-            break
-        attempt += 1
-        # 单次请求超时不超过剩余预算，保证整体不会明显超过 total_timeout
-        req_timeout = max(1.0, min(float(timeout), remaining)) if remaining > 0 else float(timeout)
-        print(f"[DataCore] 第 {attempt} 次推送 {filename} 到 {url}"
-              f"（剩余预算 {max(0.0, remaining):.0f}s，单次超时 {req_timeout:.0f}s）")
-        try:
-            response = requests.post(
-                url,
-                auth=(device_id, device_key),
-                files={"file": (filename, file_bytes, "text/csv")},
-                timeout=req_timeout,
-            )
-            response.raise_for_status()
-            print(f"[DataCore] 推送成功（第 {attempt} 次）: {filename} -> HTTP {response.status_code}")
-            return True
-        except requests.exceptions.RequestException as e:
-            last_err = e
-            resp_text = e.response.text if getattr(e, "response", None) is not None else "无响应"
-            print(f"[DataCore] 第 {attempt} 次推送失败: {e}; 服务器响应: {resp_text}")
-        except Exception as e:
-            last_err = e
-            print(f"[DataCore] 第 {attempt} 次推送异常: {e}")
-
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(float(retry_interval), remaining))
-
-    print(f"[DataCore] 推送最终失败（共 {attempt} 次，总预算 {total_timeout}s）: {filename}；最后错误: {last_err}")
-    return False
-
-
-# ========================
 # 内部数据类和结构
 # ========================
 
@@ -425,6 +341,8 @@ class NewareBatteryTestSystem:
         
         oss_upload_enabled: bool = False,
         oss_prefix: str = "neware_backup",
+
+        datacore_config: Optional[Dict[str, Any]] = None,
     ):
         """
         初始化新威电池测试系统
@@ -438,6 +356,9 @@ class NewareBatteryTestSystem:
             size_x, size_y, size_z: 设备物理尺寸
             oss_upload_enabled: 是否启用OSS上传功能，默认False
             oss_prefix: OSS对象路径前缀，默认"neware_backup"
+            datacore_config: DataCore 大装置数据接入配置（来自图 JSON），支持字段
+                enabled / ingest_url / device_id / device_key / timeout /
+                total_timeout / retry_interval；不配置则不推送
         """
         self.ip = ip or self.BTS_IP
         self.port = port or self.BTS_PORT
@@ -455,6 +376,9 @@ class NewareBatteryTestSystem:
         # OSS 上传配置
         self.oss_upload_enabled = oss_upload_enabled
         self.oss_prefix = oss_prefix
+
+        # DataCore 大装置数据接入配置
+        self.datacore_config = datacore_config or {}
         
         self._last_status_update = None
         self._cached_status = {}
@@ -1064,6 +988,8 @@ class NewareBatteryTestSystem:
             '811_LI_JY': 'xml_811_Li_JY',
             '811_DATACORETEST': 'xml_811_datacoretest',
             'ZQXNLRMO': 'xml_ZQXNLRMO',
+            'HC_LFP': 'xml_HC_LFP',
+            'HC_GR': 'xml_HC_Gr',
         }
         if key not in fmap:
             raise ValueError(f"未定义电池体系映射: {key}，可选体系: {sorted(fmap.keys())}")
@@ -2479,21 +2405,15 @@ class NewareBatteryTestSystem:
 
         # 推送整合 CSV 到 DataCore 大装置数据接入（尽力而为，失败不影响节点返回）
         if csv_out_path:
-            try:
-                ok = push_csv_to_datacore(csv_out_path)
-                msg = (
-                    f"[manual_confirm] DataCore 推送{'成功' if ok else '失败'}: {csv_out_path}"
-                )
-                if self._ros_node:
-                    (self._ros_node.lab_logger().info if ok
-                     else self._ros_node.lab_logger().warning)(msg)
-                else:
-                    print(msg)
-            except Exception as e:
-                if self._ros_node:
-                    self._ros_node.lab_logger().warning(f"[manual_confirm] DataCore 推送异常: {e}")
-                else:
-                    print(f"[manual_confirm] DataCore 推送异常: {e}")
+            lab_logger = self._ros_node.lab_logger() if self._ros_node else None
+            ok = push_csv_by_config(
+                csv_out_path,
+                self.datacore_config,
+                tag="manual_confirm",
+                log=lab_logger.info if lab_logger else print,
+            )
+            if not ok and lab_logger:
+                lab_logger.warning(f"[manual_confirm] DataCore 推送未成功: {csv_out_path}")
 
         return {
             "resource": resource_dump,

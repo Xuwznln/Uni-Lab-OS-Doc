@@ -23,6 +23,7 @@ from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondExcep
 # from unilabos.devices.workstation.bioyond_studio.config import API_CONFIG, ...
 from unilabos.devices.workstation.workstation_http_service import WorkstationHTTPService
 from unilabos.resources.bioyond.decks import BioyondElectrolyteDeck, bioyond_electrolyte_deck
+from unilabos.utils.datacore import push_csv_by_config
 from unilabos.utils.log import logger
 from unilabos.registry.registry import lab_registry
 
@@ -157,6 +158,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
         # 建单未全部成功时会主动 scheduler_pause()，这里记下原因。
         # 否则门控看到 Pause 会当成「人工临时暂停」一路轮询到 24h 超时，掩盖真实原因。
         self._interlock_last_failure: Optional[Dict[str, Any]] = None
+        # 交接堆栈预约：stack_inquiry_2to1 放行时占据，transfer_3_to_2_to_1_auto 结束时释放。
+        # 语义 =「本轮已查到 1号2号交接堆栈空、但 321 还没把板放进去」。共用 _interlock_lock。
+        # 没有它，门控 return 后到 LIMS 库存显示占用之间有一段窗口（实测 380ms），
+        # 下一轮会同样看到「物理空」而放行，其 321 必被 LIMS 拒（详见 stack_inquiry_2to1）。
+        self._handoff_claim: Optional[Dict[str, Any]] = None
 
         logger.info(f"✅ BioyondCellWorkstation 初始化完成 (debug_mode={self.debug_mode})")
         logger.info(
@@ -166,6 +172,13 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
     # 奔曜全 0 GUID：电导建单偶发占位，此时无法用 orderId 强校验
     _EMPTY_ORDER_ID = "00000000-0000-0000-0000-000000000000"
+
+    # 交接堆栈预约的兜底作废时长。预约只需覆盖「门控放行 → 321 放完板」这一段，
+    # 实测约 7s（放行 17:09:41.047 → 321 下发 17:09:41.247 → 转运完成 17:09:48.095），
+    # 10 分钟已是 80 倍余量。刻意不复用门控的 timeout(1h)：正常路径由
+    # transfer_3_to_2_to_1_auto 的 finally 主动释放，作废只兜「321 压根没被下发」这类
+    # 异常（如云端因别轮失败停发了后续节点），此时预约挂多久就白挡多久，越短越好。
+    _HANDOFF_CLAIM_TTL_SECONDS = 600.0
 
     # ========== 仓库 whId 常量（来源：包含库位的仓库信息0610.json）==========
     # 只用 whId 定位仓库：code「0018」同时是「适配器块」的 materialTypeCode，用 code 匹配会撞。
@@ -4081,6 +4094,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
                         conductivity_results, mass_ratios or [], csv_export_path
                     )
                     result["csv_file_formulation"] = csv_file_form
+                    result["datacore_push_formulation"] = self._push_csv_to_datacore(
+                        csv_file_form, tag="conductivity_test_inline"
+                    )
                 except Exception as e:
                     logger.error(f"[conductivity_test_inline] 配液+电导 CSV 导出失败: {e}")
         elif wait_for_finish and not new_order_pairs:
@@ -5397,6 +5413,15 @@ class BioyondCellWorkstation(BioyondWorkstation):
         )
         return csv_file
 
+    def _push_csv_to_datacore(self, csv_file: str, tag: str) -> bool:
+        """
+        把 CSV 推送到 DataCore 大装置数据接入，凭据取自 bioyond_config.datacore_config。
+        未配置或推送失败都只记日志，不影响主流程。
+        """
+        return push_csv_by_config(
+            csv_file, self.bioyond_config.get("datacore_config"), tag=tag, log=logger.info
+        )
+
     @staticmethod
     def _pick_vial_type(mr: Dict[str, Any]) -> str:
         """从配方项里取分液瓶类型；vial_bottle_types 可能是单串或 JSON 数组串。"""
@@ -5795,7 +5820,15 @@ class BioyondCellWorkstation(BioyondWorkstation):
     ) -> Dict[str, Any]:
         """
         自动转运（从 create_orders 结果自动定位源位置）
-        
+
+        本方法只负责在退出时释放 `stack_inquiry_2to1` 占下的交接堆栈预约，转运主体见
+        `_transfer_3_to_2_to_1_auto_impl`。
+
+        释放必须放在 `finally`：本 action 有两个出口——成功的 `return summary` 和有板搬
+        失败时的 `raise BioyondException`（2026-08-05 那次 8688 走的正是 raise）。只在
+        return 前释放的话，失败路径上预约会一直挂到兜底作废时长（小时级）到期，
+        期间每一轮的 `stack_inquiry_2to1` 都卡在开头等预约 —— 一次转运失败升级成全站停摆。
+
         Args:
             vial_plates: 分液瓶板列表
                 格式: [{"materialId": "...", "locationId": "...", "orderCode": "..."}, ...]
@@ -5804,7 +5837,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             mass_ratios: 配方信息列表（可选），用于确定瓶子在bottle_rack的位置
                 格式: [{"orderCode": "...", "real_mass_ratio": {...}, ...}, ...]
             **kwargs: 兼容性参数，用于捕获已废弃的参数（如 vial_plate_info）
-        
+
         Returns:
             {
                 "total": 转运总数,
@@ -5813,6 +5846,30 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "results": [每个转运的详细结果]
             }
         """
+        try:
+            return self._transfer_3_to_2_to_1_auto_impl(
+                vial_plates=vial_plates,
+                target_device=target_device,
+                target_location=target_location,
+                mass_ratios=mass_ratios,
+                source_pos=source_pos,
+                **kwargs,
+            )
+        finally:
+            # 到这里 321 已尘埃落定：搬成了则 0016 的占用已由 LIMS 库存如实反映，
+            # 搬失败则 0016 本就没被本轮占。两种情况都不该再挡着下一轮的门控。
+            self._release_handoff_claim(reason="321 转运结束")
+
+    def _transfer_3_to_2_to_1_auto_impl(
+        self,
+        vial_plates: List[Dict],
+        target_device: str = "BatteryStation",
+        target_location: str = "bottle_rack_6x2",
+        mass_ratios: List[Dict] = None,
+        source_pos: Optional[Dict] = None,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """`transfer_3_to_2_to_1_auto` 的转运主体，参数含义见其 docstring。"""
         # 检查是否传递了已废弃的参数
         if kwargs:
             logger.warning(
@@ -5900,7 +5957,22 @@ class BioyondCellWorkstation(BioyondWorkstation):
         logger.info(
             f"[批量转运] 5ml过滤后保留 {len(filtered_plates)}/{len(vial_plates)} 块板"
         )
-        
+
+        # ========== 一轮只能转 1 块板：0016 只有 1 个库位 ==========
+        # 下面的 for 循环形式上支持多块，实际必然在第 2 块上失败——第 1 块放进 0016 后它
+        # 就满了，LIMS 对「目标交接堆栈有物料」的 321 直接拒建（返回 data=None）。
+        # 而 0016 要等整个扣电流程走完、transfer_1_to_2 把板送回 0017 才腾空，
+        # 这个循环内根本等不到。与其让第 2 块板报一句看不懂的 data=None，不如在这里拦掉。
+        # 历史日志里 321 也确实从来只搬 1 块板（一轮 1–8 瓶正好装在同一块 8 位板上）。
+        if len(filtered_plates) > 1:
+            raise BioyondException(
+                f"3-2-1 转运一次只能搬 1 块 5ml 分液瓶板，本次收到 {len(filtered_plates)} 块"
+                f"（orderCode={[p.get('orderCode') for p in filtered_plates]}）。\n"
+                f"原因：1号2号手套箱交接堆栈只有 1 个库位，且要占用到本轮扣电结束、"
+                f"transfer_1_to_2 送回 2号手套箱内堆栈才腾空，所以第 2 块板必被 LIMS 拒建。\n"
+                f"处置：把这批拆成多轮实验提交，每轮 1 块板（≤8 瓶）。"
+            )
+
         # ========== 步骤2：依次转运每个分液瓶板（去重，同一瓶板只转运一次）==========
         results = list(skip_results)
         success_count = 0
@@ -6444,6 +6516,147 @@ class BioyondCellWorkstation(BioyondWorkstation):
             )
             time.sleep(poll_interval)
 
+    def _acquire_handoff_claim(
+        self, task_hint: str, claim_timeout: float
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """尝试占据交接堆栈预约。已有未消费的预约则占据失败（调用方继续轮询）。
+
+        预约语义 =「本轮已查到 1号2号交接堆栈空、但 321 还没把板放进去」。它填的是
+        stack_inquiry_2to1 放行到 LIMS 库存显示占用之间的空窗（2026-08-05 实测 380ms：
+        放行 17:09:40.868 → 321 开始放板 17:09:41.247），否则下一轮会同样看到「物理空」
+        而放行，其 321 必被 LIMS 拒（交接堆栈有物料时 321 直接拒建，已与 LIMS 开发者确认）。
+
+        claim_timeout 只兜进程崩溃这类未知情况；321 结束（成功或失败）由
+        transfer_3_to_2_to_1_auto 的 finally 主动释放，不能靠超时干等。
+        """
+        now = time.time()
+        with self._interlock_lock:
+            claim = self._handoff_claim
+            if claim is not None:
+                # granted_at 缺失/非法时按「无限旧」处理，让它立刻作废。
+                # 不能回落成 now——那样一张时间戳损坏的预约会永远不过期，把整站锁死。
+                granted_at = claim.get("granted_at")
+                age = now - (float(granted_at) if isinstance(granted_at, (int, float)) else 0.0)
+                if age <= claim_timeout:
+                    return False, claim
+                logger.error(
+                    f"[交接堆栈预约] 超时作废（已持有 {age:.0f}s > {claim_timeout:.0f}s，"
+                    f"token={claim.get('token')}, 持有者={claim.get('task_hint')}）。"
+                    f"说明拿到放行权的任务在 321 转运前就异常退出了，请检查上一个任务的日志。"
+                )
+            token = uuid.uuid4().hex
+            self._handoff_claim = {
+                "token": token,
+                "granted_at": now,
+                "task_hint": task_hint,
+            }
+            return True, self._handoff_claim
+
+    def _release_handoff_claim(self, reason: str = "") -> None:
+        """释放交接堆栈预约，由 transfer_3_to_2_to_1_auto 的 finally 调用。
+
+        ⚠️ 与 `_release_interlock_claim` 不同，这里**不校验 token**：那边的占与放在同一个
+        action 内、拿得到 token，而这里是 stack_inquiry_2to1 占、transfer_3_to_2_to_1_auto
+        放，后者拿不到前者的 token（两个 action 参数分开，靠工作流传 token 太丑）。
+        无条件释放可接受：321 紧跟门控执行（实测相隔数秒），而作废时长是小时级，
+        中间不可能过期后被别人重新占据。持有者打进日志，对不上便于事后对账。
+        """
+        with self._interlock_lock:
+            claim = self._handoff_claim
+            if claim is None:
+                logger.warning(
+                    f"[交接堆栈预约] 释放时发现无预约在手（{reason}）——"
+                    f"可能是工作流漏配 stack_inquiry_2to1，或预约已超时作废"
+                )
+                return
+            self._handoff_claim = None
+        logger.info(
+            f"[交接堆栈预约] 已释放 token={claim.get('token')}, "
+            f"持有者={claim.get('task_hint')}（{reason}）"
+        )
+
+    def _peek_handoff_claim(self, claim_timeout: float) -> Optional[Dict[str, Any]]:
+        """只读查看当前是否有**未过期**的交接堆栈预约在手，不占据、不清除。
+
+        与 `_acquire_handoff_claim` 的过期判定保持一致：granted_at 缺失/非法按「无限旧」
+        处理，视为已过期。过期的预约在这里只当作 None，实际作废由 acquire 负责并记日志。
+        """
+        now = time.time()
+        with self._interlock_lock:
+            claim = self._handoff_claim
+            if claim is None:
+                return None
+            granted_at = claim.get("granted_at")
+            age = now - (float(granted_at) if isinstance(granted_at, (int, float)) else 0.0)
+            return claim if age <= claim_timeout else None
+
+    def _wait_handoff_claim_free(
+        self, poll_interval: float, timeout: int, claim_timeout: float
+    ) -> None:
+        """等上一轮的交接堆栈预约被消费掉（即它的 321 已放完板）。
+
+        放在 stack_inquiry_2to1 查库存**之前**。因为 stack_inquiry_2to1 是单个 action、
+        单条 FIFO 队列，同时只有一个门控在跑（实测 8688 的门控 17:06:54 queued、
+        等 faef 的门控完成后的 17:09:41 才 started），所以此处只需防「上一轮门控已放行、
+        其 321 还没放板」这一种情况，不存在两个门控并发抢预约——也正因如此，这里
+        「先查空再占」不构成 TOCTOU：中间没有第二个门控能插进来抢。
+
+        预约只从门控放行持有到 321 放完板（实测约 7s），故这里通常只等数秒。
+        """
+        start = time.time()
+        while True:
+            holder = self._peek_handoff_claim(claim_timeout)
+            if holder is None:
+                return
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                granted_at = holder.get("granted_at")
+                held = time.time() - (
+                    float(granted_at) if isinstance(granted_at, (int, float)) else time.time()
+                )
+                raise BioyondException(
+                    f"[stack_inquiry_2to1] 等上一轮交接堆栈预约释放超时（{timeout}s）："
+                    f"持有者={holder.get('task_hint')}，已持有 {held:.0f}s。"
+                    f"说明上一轮门控已放行但 321 迟迟未完成，"
+                    f"请检查上一个任务的 transfer_3_to_2_to_1_auto 日志"
+                )
+            logger.info(
+                f"[stack_inquiry_2to1] 上一轮（{holder.get('task_hint')}）已放行但 321 尚未放完板，"
+                f"交接堆栈使用权未释放，{poll_interval}s 后重试…（已等待 {elapsed:.1f}s）"
+            )
+            time.sleep(poll_interval)
+
+    def _take_handoff_claim(
+        self, task_hint: str, poll_interval: float, timeout: int, claim_timeout: float
+    ) -> str:
+        """门控放行前占下交接堆栈预约，占不到就继续轮询。返回预约 token（仅供日志）。
+
+        正常情况下开头的 `_wait_handoff_claim_free` 已确保无人持有、这里一次即中；
+        循环只是防「查库存期间上一轮又抢到了」的理论情形，不能直接放行了事。
+        """
+        start = time.time()
+        while True:
+            ok, claim = self._acquire_handoff_claim(task_hint, claim_timeout)
+            if ok:
+                token = str((claim or {}).get("token"))
+                logger.info(
+                    f"[交接堆栈预约] 已占据 token={token}, 持有者={task_hint}"
+                    f"（放行 321，将由 transfer_3_to_2_to_1_auto 释放）"
+                )
+                return token
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                raise BioyondException(
+                    f"[stack_inquiry_2to1] 交接堆栈物理上已可用，但占据使用权超时（{timeout}s）："
+                    f"被 {(claim or {}).get('task_hint')} 持有。"
+                    f"请检查该任务的 transfer_3_to_2_to_1_auto 是否卡住"
+                )
+            logger.info(
+                f"[stack_inquiry_2to1] 交接堆栈已空但使用权被 {(claim or {}).get('task_hint')} "
+                f"抢先占据，{poll_interval}s 后重试…（已等待 {elapsed:.1f}s）"
+            )
+            time.sleep(poll_interval)
+
     def stack_inquiry_2to1(
         self,
         poll_interval: float = 5.0,
@@ -6451,8 +6664,9 @@ class BioyondCellWorkstation(BioyondWorkstation):
         type_keyword: str = "分液瓶板",
         match_by_material_id: bool = True,
         target_wh_id: str = "",
+        task_hint: str = "",
     ) -> Dict[str, Any]:
-        """321 转运的**前置**门控：确认 1号2号交接堆栈(0016) 可以放新板。
+        """321 转运的**前置**门控：确认 1号2号交接堆栈(0016) 可以放新板，并占下使用权。
 
         必须放在 `transfer_3_to_2_to_1_auto` **之前**——321 会把新板放进 0016，
         而 0016 只有 1 个库位，所以放之前必须确认它是空的。放到 321 之后就退化成
@@ -6467,9 +6681,20 @@ class BioyondCellWorkstation(BioyondWorkstation):
            同一块板的两面，用 materialId 串起来才能确认板真的回流到位，
            而不是刚离开 0016 还在途中
 
+        ⚠️ **光查物理占用不够，必须同时占下预约**（2026-08-05 实测踩过）：本函数放行到
+        321 真把板放进 0016 之间，LIMS 库存显示的还是「空」（实测 380ms：放行
+        17:09:40.868 → 321 开始放板 17:09:41.247 → 库存变占用 17:09:48.067）。那一瞬
+        下一轮的门控查到的是**过期的真话**——使用权其实已被上一轮拿走。而 321 是同一条
+        `(device, action)` FIFO 队列，下一轮的 321 必然排在上一轮之后执行（实测
+        17:09:41.309 queued → 17:09:48.172 started），届时 0016 一定已被占，
+        LIMS 直接拒建（交接堆栈有物料则拒绝 321，已与 LIMS 开发者确认）。
+        所以失败是**确定的**而非概率性的。修法：开头先等上一轮预约被消费，
+        放行时占下自己的预约，由 `transfer_3_to_2_to_1_auto` 的 finally 释放。
+
         Args:
             poll_interval: 轮询间隔（秒）
-            timeout: 最长等待（秒），超时抛 BioyondException
+            timeout: 最长等待（秒），超时抛 BioyondException。注意它**不是**交接堆栈预约的
+                作废时长，后者是固定的 `_HANDOFF_CLAIM_TTL_SECONDS`
             type_keyword: 板型关键字。默认 `分液瓶板` 会**同时匹配 5ml 和 20ml**；
                 扣电路应显式传 `5ml分液瓶板`。否则 0016 里若停着一块 20ml 板
                 （它走 3→2，不经 1→2 回 0017），「到位 0017」这个判据永远不成立，
@@ -6477,6 +6702,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             match_by_material_id: 是否按 materialId 精确追踪回流。置 False 退化为
                 只要 0016 腾空即放行（旧行为）
             target_wh_id: 回流目标仓库，默认 2号内部堆栈(0017)
+            task_hint: 调用方标识，仅用于日志和预约归属
 
         Returns:
             {"status": "clear", "fast_path": bool, "pending_material_ids": [...],
@@ -6486,7 +6712,11 @@ class BioyondCellWorkstation(BioyondWorkstation):
             BioyondException: 查询失败 / 等待超时
         """
         target_wh_id = target_wh_id or self._WH_ID_STACK_2_INNER
+        hint = task_hint or "<未命名任务>"
         start = time.time()
+
+        # 先等上一轮的预约被消费（它的 321 已放完板），否则会查到过期的「物理空」
+        self._wait_handoff_claim_free(poll_interval, timeout, self._HANDOFF_CLAIM_TTL_SECONDS)
 
         plates = self._list_plates_in_warehouse(self._WH_ID_TRANSFER_2TO1, type_keyword)
         if plates is None:
@@ -6496,6 +6726,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         # ---------- 快速路径：0016 本来就空 ----------
         if not plates:
+            remain = max(int(timeout - (time.time() - start)), 1)
+            claim_token = self._take_handoff_claim(
+                hint, poll_interval, remain, self._HANDOFF_CLAIM_TTL_SECONDS
+            )
             logger.info(
                 f"[stack_inquiry_2to1] ✅ 1号2号交接堆栈已无「{type_keyword}」，直接放行"
                 f"（快速路径，未查 0017）"
@@ -6507,6 +6741,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "arrived_material_ids": [],
                 "poll_count": 0,
                 "elapsed_seconds": round(time.time() - start, 1),
+                "claim_token": claim_token,
             }
 
         pending_ids = sorted({
@@ -6521,16 +6756,41 @@ class BioyondCellWorkstation(BioyondWorkstation):
 
         # ---------- 步骤 1：等 0016 腾空 ----------
         remain = max(int(timeout - (time.time() - start)), 1)
-        self._wait_stack_condition(
-            wh_id=self._WH_ID_TRANSFER_2TO1,
-            mode="empty_of",
-            type_keyword=type_keyword,
-            poll_interval=poll_interval,
-            timeout=remain,
-            label="stack_inquiry_2to1/等 0016 腾空",
-        )
+        try:
+            self._wait_stack_condition(
+                wh_id=self._WH_ID_TRANSFER_2TO1,
+                mode="empty_of",
+                type_keyword=type_keyword,
+                poll_interval=poll_interval,
+                timeout=remain,
+                label="stack_inquiry_2to1/等 0016 腾空",
+            )
+        except BioyondException as exc:
+            # 只有 1 个库位的交接堆栈占住不动 = 全站阻塞：后续每一轮的 321 都进不来。
+            # 底层报错只说「等待超时 + 当前占用」，这里补上「谁占的、占了多久、怎么解」，
+            # 否则值班的人拿到异常还得自己去翻 warehouse-info 才知道下一步做什么。
+            stuck = [
+                f"{loc.get('code')}(holdMId={loc.get('holdMId')}, "
+                f"名称={loc.get('holdMName')}, 类型={loc.get('holdMTypeName')})"
+                for loc in (
+                    self._list_plates_in_warehouse(self._WH_ID_TRANSFER_2TO1, type_keyword) or []
+                )
+            ]
+            raise BioyondException(
+                f"{exc}\n"
+                f"⚠️ 1号2号手套箱交接堆栈只有 1 个库位，被占住 {time.time() - start:.0f}s 未动，"
+                f"后续所有轮次的 321 转运都会被 LIMS 拒建 → 全站阻塞。\n"
+                f"当前占用: {stuck or '空（占用刚好在报错前被清掉，可直接重跑本节点）'}\n"
+                f"处置：确认上一轮扣电已完成后，手工执行 transfer_1_to_2 把该板送回"
+                f"2号手套箱内堆栈；若该板本轮无需回流（如走 3→2 的 20ml 电导板），"
+                f"应改传 type_keyword='5ml分液瓶板' 把它排除在判据外。"
+            ) from exc
 
         if not match_by_material_id or not pending_ids:
+            remain = max(int(timeout - (time.time() - start)), 1)
+            claim_token = self._take_handoff_claim(
+                hint, poll_interval, remain, self._HANDOFF_CLAIM_TTL_SECONDS
+            )
             logger.info("[stack_inquiry_2to1] ✅ 0016 已腾空，未启用 materialId 追踪，放行")
             return {
                 "status": "clear",
@@ -6539,6 +6799,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 "arrived_material_ids": [],
                 "poll_count": 0,
                 "elapsed_seconds": round(time.time() - start, 1),
+                "claim_token": claim_token,
             }
 
         # ---------- 步骤 2：等快照的板到位 0017 ----------
@@ -6580,6 +6841,10 @@ class BioyondCellWorkstation(BioyondWorkstation):
         arrived = sorted({
             (loc.get("holdMId") or "").strip() for loc in final_017
         } & set(pending_ids))
+        remain = max(int(timeout - (time.time() - start)), 1)
+        claim_token = self._take_handoff_claim(
+                hint, poll_interval, remain, self._HANDOFF_CLAIM_TTL_SECONDS
+            )
         logger.info(
             f"[stack_inquiry_2to1] ✅ 0016 已腾空且 {len(arrived)}/{len(pending_ids)} 块板"
             f"已回流到 0017，放行（耗时 {time.time() - start:.1f}s）"
@@ -6591,6 +6856,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             "arrived_material_ids": arrived,
             "poll_count": 0,
             "elapsed_seconds": round(time.time() - start, 1),
+            "claim_token": claim_token,
         }
 
     def stack_inquiry_window_5_free(
@@ -7066,13 +7332,21 @@ class BioyondCellWorkstation(BioyondWorkstation):
         order_data = response.get("data") or {}
         order_code = order_data.get("orderCode")
         if not order_code:
-            # data=None 表示 LIMS 根本没建单（常见原因：该坐标在来源仓库不存在，
-            # 或库位为空）。绝不能当成功返回，否则调用方会继续做资源树同步 / 下一步
-            # 1→2 转运，而板子其实一步都没动。
+            # data=None 表示 LIMS 根本没建单，已知三种原因：
+            #   1) 该坐标在来源仓库不存在；
+            #   2) 该库位为空（没板可搬）；
+            #   3) **目标的 1号2号手套箱交接堆栈已有物料**——它只有 1 个库位，占着时
+            #      LIMS 直接拒建（已与 LIMS 开发者确认）。2026-08-05 那次失败就是这条，
+            #      当时上一轮的板正等扣电结束后由 transfer_1_to_2 送回。
+            # 绝不能当成功返回，否则调用方会继续做资源树同步 / 下一步 1→2 转运，
+            # 而板子其实一步都没动。
             raise BioyondException(
                 f"3-2-1 上料任务未创建（LIMS 未返回 orderCode）: "
                 f"来源仓库={source_wh_id}, 坐标=({source_x},{source_y},{source_z}), "
-                f"响应={response}"
+                f"响应={response}。"
+                f"可能原因：①该坐标在来源仓库不存在；②该库位为空；"
+                f"③1号2号手套箱交接堆栈已有物料（只有 1 个库位，占着则拒建）——"
+                f"请查 warehouse-info 确认，并检查是否漏配了前置的 stack_inquiry_2to1 门控"
             )
         result = self.wait_for_order_finish(
             order_code, expected_order_id=order_data.get("orderId")
