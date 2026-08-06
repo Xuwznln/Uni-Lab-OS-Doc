@@ -68,7 +68,7 @@ class ResultInfoEncoder(json.JSONEncoder):
             return str(obj)
 
 
-def get_result_info_str(error: str, suc: bool, return_value=None) -> str:
+def get_result_info_str(error: str, suc: bool, return_value=None, suc_type=None) -> str:
     """
     序列化任务执行结果信息
 
@@ -86,6 +86,8 @@ def get_result_info_str(error: str, suc: bool, return_value=None) -> str:
     #     if "samples" in return_value and type(return_value["samples"]) in [list, tuple] and type(return_value["samples"][0]) == dict:
     #         samples = return_value.pop("samples")
     result_info = {"error": error, "suc": suc, "return_value": return_value}
+    if suc_type is not None:
+        result_info["suc_type"] = suc_type
 
     return json.dumps(result_info, ensure_ascii=False, cls=ResultInfoEncoder)
 
