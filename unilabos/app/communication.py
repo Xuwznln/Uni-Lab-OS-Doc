@@ -96,6 +96,11 @@ class BaseCommunicationClient(ABC):
         """
         pass
 
+    def publish_device_exception_alarm(self, alarm_data: dict) -> bool:
+        """上报设备 Action 异常；不支持或未连接时返回 False。"""
+
+        return False
+
     def setup_pong_subscription(self) -> None:
         """
         设置pong消息订阅（可选实现）

@@ -357,6 +357,8 @@ def action(
     parent: bool = False,
     node_type: Optional["NodeType"] = None,
     feedback_interval: Optional[float] = None,
+    timeout: Optional[float] = None,
+    exception_handling: bool = True,
 ):
     """
     动作方法装饰器
@@ -389,6 +391,8 @@ def action(
         parent: 若为 True，当方法参数为空 (*args, **kwargs) 时，通过 MRO 从父类获取真实方法参数
         node_type: 动作的节点类型 (NodeType.ILAB / NodeType.MANUAL_CONFIRM)。
                    不填写时不写入注册表。
+        timeout: 动作执行超时秒数。超时后进入异常处理流程；None 表示不限时。
+        exception_handling: 是否启用异常上报和用户决策回环，默认启用。
     """
 
     def decorator(func: F) -> F:
@@ -397,7 +401,24 @@ def action(
         if _asyncio.iscoroutinefunction(func):
             @wraps(func)
             async def wrapper(*args, **kwargs):
-                return await func(*args, **kwargs)
+                if timeout is None:
+                    return await func(*args, **kwargs)
+                try:
+                    return await _asyncio.wait_for(func(*args, **kwargs), timeout=timeout)
+                except _asyncio.TimeoutError as exc:
+                    from unilabos.utils.exception import TimeoutException
+
+                    snapshot = {}
+                    if args and hasattr(args[0], "_get_device_snapshot"):
+                        try:
+                            snapshot = args[0]._get_device_snapshot()
+                        except Exception:
+                            pass
+                    raise TimeoutException(
+                        f"动作 {func.__name__} 执行超时 (>{timeout}s)",
+                        device_snapshot=snapshot,
+                        cause=exc,
+                    ) from exc
         else:
             @wraps(func)
             def wrapper(*args, **kwargs):
@@ -424,7 +445,13 @@ def action(
             meta["feedback_interval"] = feedback_interval
         if node_type is not None:
             meta["node_type"] = node_type.value if isinstance(node_type, NodeType) else str(node_type)
+        if timeout is not None:
+            meta["timeout"] = timeout
+        if exception_handling is not True:
+            meta["exception_handling"] = exception_handling
         wrapper._action_registry_meta = meta  # type: ignore[attr-defined]
+        wrapper._action_timeout = timeout  # type: ignore[attr-defined]
+        wrapper._exception_handling = exception_handling  # type: ignore[attr-defined]
 
         # 设置 _is_always_free 保持与旧 @always_free 装饰器兼容
         if always_free:
@@ -443,6 +470,18 @@ def get_action_meta(func) -> Optional[Dict[str, Any]]:
 def has_action_decorator(func) -> bool:
     """检查函数是否带有 @action 装饰器"""
     return hasattr(func, "_action_registry_meta")
+
+
+def get_action_timeout(func) -> Optional[float]:
+    """获取动作超时秒数。"""
+
+    return getattr(func, "_action_timeout", None)
+
+
+def is_exception_handling_enabled(func) -> bool:
+    """检查动作是否启用异常决策回环。"""
+
+    return getattr(func, "_exception_handling", False)
 
 
 # ---------------------------------------------------------------------------

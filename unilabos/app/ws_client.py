@@ -661,6 +661,8 @@ class MessageProcessor:
                 await self._handle_device_manage(message_data, "remove")
             elif message_type == "request_restart":
                 await self._handle_request_restart(message_data)
+            elif message_type == "device_exception_decision":
+                await self._handle_device_exception_decision(message_data)
             else:
                 logger.debug(f"[MessageProcessor] Unknown message type: {message_type}")
 
@@ -673,6 +675,44 @@ class MessageProcessor:
         host_node = HostNode.get_instance(0)
         if host_node:
             host_node.handle_pong_response(pong_data)
+
+    async def _handle_device_exception_decision(self, data: Dict[str, Any]) -> None:
+        """按 task_id + job_id 将 Backend 决策路由到对应设备节点。"""
+
+        task_id = data.get("task_id", "")
+        job_id = data.get("job_id", "")
+        device_id = data.get("device_id", "")
+        action = data.get("action", "")
+        if not task_id or not job_id or not device_id or not action:
+            logger.warning(f"[MessageProcessor] Invalid device_exception_decision: {data}")
+            return
+
+        host_node = HostNode.get_instance(0)
+        wrapper = host_node.devices_instances.get(device_id) if host_node is not None else None
+        base_node = getattr(wrapper, "_ros_node", None) if wrapper is not None else None
+        if base_node is None or not hasattr(base_node, "handle_device_exception_decision"):
+            logger.warning(
+                f"[MessageProcessor] Device node not found for exception decision: "
+                f"task_id={task_id}, job_id={job_id}, device_id={device_id}"
+            )
+            return
+
+        decision = {
+            "action": action,
+            "reason": data.get("reason", ""),
+            "extra": data.get("extra", {}),
+        }
+        accepted = base_node.handle_device_exception_decision(
+            task_id=task_id,
+            job_id=job_id,
+            device_id=device_id,
+            decision=decision,
+        )
+        if not accepted:
+            logger.warning(
+                f"[MessageProcessor] Ignored duplicate or stale exception decision: "
+                f"task_id={task_id}, job_id={job_id}, device_id={device_id}"
+            )
 
     def _check_action_always_free(self, device_id: str, action_name: str) -> bool:
         """检查该action是否标记为always_free，通过HostNode统一的_action_value_mappings查找"""
@@ -1682,6 +1722,26 @@ class WebSocketClient(BaseCommunicationClient):
         self.message_processor.send_message(message)
 
         logger.trace(f"[WebSocketClient] Job status published: {job_log} - {status}")
+
+    def publish_device_exception_alarm(self, alarm_data: dict) -> bool:
+        """上报需要用户处理的设备异常。"""
+
+        if self.is_disabled or not self.is_connected():
+            logger.warning(
+                f"[WebSocketClient] Not connected, cannot publish device exception: "
+                f"{alarm_data.get('device_id')} - {alarm_data.get('action_name')}"
+            )
+            return False
+
+        self.message_processor.send_message(
+            {"action": "device_exception_alarm", "data": alarm_data}
+        )
+        logger.info(
+            f"[WebSocketClient] device_exception_alarm: "
+            f"task_id={alarm_data.get('task_id')}, job_id={alarm_data.get('job_id')}, "
+            f"device_id={alarm_data.get('device_id')}"
+        )
+        return True
 
     def send_ping(self, ping_id: str, timestamp: float) -> None:
         """发送ping消息"""
