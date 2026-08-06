@@ -1643,7 +1643,6 @@ def xml_811_Li_JY(act_mass=None, Cap_mAh=None):
     """
     return xml_data
 
-
 def xml_811_datacoretest(act_mass, Cap_mAh):
     """
     生成XML内容（基于 811_datacoretest 工步模板）
@@ -1858,6 +1857,312 @@ def xml_811_datacoretest(act_mass, Cap_mAh):
       </Step7>
       <Step8 Step_ID="8" Step_Type="6">
       </Step8>
+    </Step_Info>
+    <SMBUS>
+      <SMBUS_Info Num="0" AdjacentInterval="0" />
+    </SMBUS>
+  </config>
+</root>
+    """
+    return xml_data
+    
+def xml_HC_LFP(act_mass, Cap_mAh):
+    """
+    生成XML内容（HC_LFP 工步模板）
+
+    参数:
+    act_mass: 正极质量(mg)
+    Cap_mAh: 正极载量(mAh)
+    """
+    xml_data = f"""<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <config type="Step File" version="18" client_version="BTS Client 8.0.1.492(2025.01.23)(R3)" date="20260805181051" Guid="7cf28b0b-4a2b-4104-9929-1eada5809c2f">
+    <Head_Info>
+      <Operate Value="66" />
+      <Scale Value="1" />
+      <Start_Step Value="1" Hide_Ctrl_Step="0" />
+      <Remark Value="0.6V-2h" />
+      <RateType Value="304" />
+      <SCQ Value="{act_mass*1000}" />
+      <SCQ_F Value="{act_mass/100000}" />
+      <MultCap Value="{Cap_mAh*3600}" />
+    </Head_Info>
+    <Whole_Prt>
+      <Record>
+        <Main>
+          <Time Value="30000" />
+        </Main>
+      </Record>
+    </Whole_Prt>
+    <Step_Info Num="9">
+      <Step1 Step_ID="1" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="3600000" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step1>
+      <Step2 Step_ID="2" Step_Type="9">
+        <Limit>
+          <Main>
+            <Pow Value="0.44" />
+            <Stop_Volt Value="37500" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step2>
+      <Step3 Step_ID="3" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="600000" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step3>
+      <Step4 Step_ID="4" Step_Type="8">
+        <Limit>
+          <Main>
+            <Pow Value="0.44" />
+            <Stop_Volt Value="25000" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step4>
+      <Step5 Step_ID="5" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="600000" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step5>
+      <Step6 Step_ID="6" Step_Type="9">
+        <Limit>
+          <Main>
+            <Pow Value="2.15" />
+            <Stop_Volt Value="37500" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step6>
+      <Step7 Step_ID="7" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="600000" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step7>
+      <Step8 Step_ID="8" Step_Type="8">
+        <Limit>
+          <Main>
+            <Pow Value="4.3" />
+            <Stop_Volt Value="25000" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step8>
+      <Step9 Step_ID="9" Step_Type="6">
+      </Step9>
+    </Step_Info>
+    <SMBUS>
+      <SMBUS_Info Num="0" AdjacentInterval="0" />
+    </SMBUS>
+  </config>
+</root>
+    """
+    return xml_data
+
+def xml_HC_Gr(act_mass, Cap_mAh):
+    """
+    生成XML内容（HC_Gr 工步模板）
+
+    参数:
+    act_mass: 正极质量(mg)
+    Cap_mAh: 正极载量(mAh)
+    """
+    xml_data = f"""<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <config type="Step File" version="18" client_version="BTS Client 8.0.1.492(2025.01.23)(R3)" date="20260805181034" Guid="0794d91b-6115-47ee-b7bc-5819ee82f326">
+    <Head_Info>
+      <Operate Value="66" />
+      <Scale Value="1" />
+      <Start_Step Value="1" Hide_Ctrl_Step="0" />
+      <RateType Value="105" />
+      <SCQ Value="{act_mass*1000}" />
+      <SCQ_F Value="{act_mass/100000}" />
+      <MultCap Value="{Cap_mAh*3600}" />
+    </Head_Info>
+    <Whole_Prt>
+      <Protect>
+        <Main>
+          <Volt>
+            <Upper Value="50000" />
+            <Lower Value="-50000" />
+          </Volt>
+        </Main>
+      </Protect>
+      <Record>
+        <Main>
+          <Time Value="30000" />
+        </Main>
+      </Record>
+    </Whole_Prt>
+    <Step_Info Num="10">
+      <Step1 Step_ID="1" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="3600000" />
+          </Main>
+        </Limit>
+      </Step1>
+      <Step2 Step_ID="2" Step_Type="2">
+        <Limit>
+          <Main>
+            <Curr Value="{Cap_mAh*0.05}" />
+            <Rate Value="0.05" />
+            <Stop_Volt Value="50" />
+          </Main>
+        </Limit>
+      </Step2>
+      <Step3 Step_ID="3" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="600000" />
+          </Main>
+        </Limit>
+      </Step3>
+      <Step4 Step_ID="4" Step_Type="2">
+        <Limit>
+          <Main>
+            <Curr Value="{Cap_mAh*0.0086}" />
+            <Rate Value="0.0086" />
+            <Stop_Volt Value="50" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step4>
+      <Step5 Step_ID="5" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="600000" />
+          </Main>
+        </Limit>
+      </Step5>
+      <Step6 Step_ID="6" Step_Type="2">
+        <Limit>
+          <Main>
+            <Curr Value="{Cap_mAh*0.0017}" />
+            <Rate Value="0.0017" />
+            <Stop_Volt Value="50" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step6>
+      <Step7 Step_ID="7" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="600000" />
+          </Main>
+        </Limit>
+      </Step7>
+      <Step8 Step_ID="8" Step_Type="1">
+        <Limit>
+          <Main>
+            <Curr Value="{Cap_mAh*0.1}" />
+            <Rate Value="0.1" />
+            <Stop_Volt Value="20000" />
+          </Main>
+        </Limit>
+        <Protect>
+          <Main>
+            <Volt>
+              <Upper Value="50000" />
+              <Lower Value="-50000" />
+            </Volt>
+          </Main>
+        </Protect>
+      </Step8>
+      <Step9 Step_ID="9" Step_Type="4">
+        <Limit>
+          <Main>
+            <Time Value="600000" />
+          </Main>
+        </Limit>
+      </Step9>
+      <Step10 Step_ID="10" Step_Type="6">
+      </Step10>
     </Step_Info>
     <SMBUS>
       <SMBUS_Info Num="0" AdjacentInterval="0" />

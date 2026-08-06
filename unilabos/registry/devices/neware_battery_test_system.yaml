@@ -1450,6 +1450,13 @@ neware_battery_test_system:
   init_param_schema:
     config:
       properties:
+        datacore_config:
+          description: 'DataCore 大装置数据接入配置（来自图 JSON），支持字段
+
+            enabled / ingest_url / device_id / device_key / timeout /
+
+            total_timeout / retry_interval；不配置则不推送'
+          type: object
         devtype:
           description: 设备类型标识
           type: string
