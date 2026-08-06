@@ -1,15 +1,19 @@
 # Backend 当前领域 Schema 证据（d552078）
 
-本文记录 `uni-lab-backend` 的当前实现候选
-`origin/feat/workflow@d5520789975d6aa14792b8c1bde6565050b5fcf8`。证据来自按顺序执行
+本文记录 `uni-lab-backend` 的已实现基线
+`origin/main@d5520789975d6aa14792b8c1bde6565050b5fcf8`。证据来自按顺序执行
 `migrations/sqlite/000001..000049` 后的 `sqlite_master`、`PRAGMA table_info`、
 `foreign_key_list`、`index_list`，并与 Go 领域模型及 Router 交叉核对。
+
+2026-08-07 直接 fetch 还核验到未进默认分支的
+`origin/feat/workflow@d123ce0a4e3b3ff834c26f4f02e3f9f53bea3b3e`。它在 d552078 后新增
+000050..000054；本文以“d123ce0 候选增量”单独登记，不能反写成默认 main 已发布。
 
 这不是要求 Edge 把 PostgreSQL/SQLite DDL 逐字复制。它定义的是 Backend 领域语义、
 公共 JSON 字段、约束和写入权威。
 
-本文主体成熟度是 `backend-implemented-candidate`：所列对象都有 d552078 的实际 migration/model/
-Router 证据，但该分支不是默认发布基线。文末另列导师提供、待实机复核的
+本文主体成熟度是 `backend-implemented-candidate`：所列对象都有实际 migration/model/Router
+证据；具体对象是否已进默认分支由各节 Ref 明示，不能从成熟度名称推断。文末另列导师提供、待实机复核的
 `leaplab/designs@24fc4ce` `target-design`；目标表不能反向写成 d552078 已实现。
 
 ## 记号
@@ -48,6 +52,18 @@ Backend Interface TODO，不能通过两端各自生成 UUID 或按 label/index 
 `inventory_ledger` 是不同语义的私有库存事件账，不能改名冒充；在可信
 `operator_type/user` 注入完成前，Edge 镜像/写入可以延后，但 Backend 已存在状态必须保留。
 
+### d123ce0 候选资源增量
+
+| 变更 | 实际证据 | Edge / Interface 处置 |
+|---|---|---|
+| `material.type` | 000050 添加 `VARCHAR(32)/TEXT NOT NULL`；旧数据依次从模板 `config_info` 匹配组件类型、模板 `resource_type`、`resource` 回填；Go `Material.Type` 直接输出 JSON `type` | Edge v5 `material` 尚无该列。`local_scheduler` 下属于 A 类持久事实，下一 Schema 版本应 additive 增列并采用同义回填；不能用 `class` 临时代替 |
+| `idx_material_type_active` | 000051 对 `LOWER(TRIM(type)) WHERE deleted_at IS NULL` 建索引；000054 兼容曾发生的 migration 编号分叉 | Edge 新列落地时同步建 active index；SQLite/PostgreSQL 表达可不同 |
+| Material create `data` | Handler create DTO 增加 `data`，Service 写入 `material.data`；不是新列 | Edge 表已有 `data`，只需 DTO/Service parity，不需要再改表 |
+
+这组增量没有修改 `site`、`relative_position`、Site UUID 分配、`material.parent_uuid`、软删除、
+时间格式、outbox 或状态枚举。`material.type` 由服务端根据冻结模板组件派生，不是客户端可自由
+写入的新 Authority。
+
 ## 化学品与物质状态
 
 | 表 | 字段（除 Base） | 关键约束 / API |
@@ -68,6 +84,25 @@ Backend Interface TODO，不能通过两端各自生成 UUID 或按 label/index 
 | `workflow_handle_template` | `workflow_node_template_uuid,handle_key,io_type,display_name,type,data_source?,data_key?,required bool` | `io_type=source/target`；active unique `(node_template,handle_key,io_type)` | 节点 Handle 定义 |
 | `workflow_node` | `workflow_uuid,workflow_node_template_uuid?,parent_uuid?,material_uuid?,name,type,icon?,pose JSON,param JSON,footer?,action_name?,action_type?,disabled,minimized,script?,execution_policy JSON` | FK Workflow/template/self-parent/Material；禁止自父；无持久化 `status` | 图节点；`action_name/action_type` 是冻结执行身份 |
 | `workflow_edge` | `source_node_uuid,target_node_uuid,source_handle_uuid,target_handle_uuid` | 四个 FK；禁止自环；active 四元组唯一；每个 target handle 至多一条 active 边 | 没有 `workflow_uuid`；通过节点归属解析；Handle UUID 是规范引用 |
+
+### d123ce0 候选发布契约
+
+000052..000054 最终建立 `published_workflow_contract`：除 Base 外包含
+`workflow_uuid,workflow_revision,version,name,tags,node_template_uuid?,input_contract,
+output_contract,executor_requirements,executor_binding_mapping,boundary_mapping,graph_snapshot,
+source_hash,contract_digest,node_count,edge_count`。关键约束是 Workflow FK、可空 Node Template
+FK、每 Workflow 的 revision/version 唯一，以及 active latest/created 索引。
+
+候选 Router 新增：
+
+- `POST /api/v1/workflows/{uuid}/publications`
+- `GET /api/v1/published-workflow-contracts`
+- `POST /api/v1/workflows/{uuid}/composite-invocations`
+
+它是 Backend 所有的不可变版本制品，不是 Edge `workflow` 行、target
+`local_workflow_version` 或 Lab `published_workflow_version` 的自动别名。Edge 需要的是版本制品
+DTO/hydration 与 capability parity；除非本地 Quick Debug 自己拥有发布权威，否则不应复制该
+Backend 表。
 
 `workflow_node.type` 是作者图类型字符串；真正决定执行器的是 Job 的
 `executor_kind=device_action/compute/condition/script/tool_call/manual_confirm`。不要把旧的

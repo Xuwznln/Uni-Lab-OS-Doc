@@ -92,6 +92,11 @@ Backend d552078 的同路径仍接收行/聚合创建 DTO：
  relative_position?,site_placement?}
 ```
 
+Backend 候选 d123ce0 在该 DTO 上继续增加可选 `data`，并在响应 Material 中增加由服务端模板
+展开逻辑派生的 `type`。私有前端 355e2fc 的 `MaterialAggregate` 没有对应实例类型字段，且当前
+create 命令仍与 Backend DTO 不同；Adapter 必须选择是否把 `type` 投影为展示分类，并禁止把 UI
+输入当成 `material.type` 的写入权威。
+
 两者路径相同但语义不同。能力矩阵若把 `material.create` 对 Backend/Edge 宣告为可用，
 请求会不兼容；在命令 DTO 正式统一前必须 fail closed，不能由 Edge 猜字段。
 
@@ -105,6 +110,16 @@ Backend d552078 的同路径仍接收行/聚合创建 DTO：
 - 运行：`/api/v1/workflow-tasks*`、`/workflow-tasks/{uuid}/jobs`、
   `/workflow-tasks/{uuid}/commands`、`/workflow-node-jobs/{uuid}*`。
 - SSE：`/api/v1/events`；短事件只负责使 REST 投影失效，不携带整份状态。
+
+Backend 候选 d123ce0 另新增发布契约 Interface：
+
+- `POST /api/v1/workflows/{uuid}/publications`
+- `GET /api/v1/published-workflow-contracts`
+- `POST /api/v1/workflows/{uuid}/composite-invocations`
+
+私有前端 355e2fc 未登记这组 Port，导师提供的 `unilab-edge-ui` 工作区也未在本机直接复核。
+客户端只有在提供者声明完整 capability 且 DTO/错误语义通过契约测试后才能启用；不能因为
+Backend 新增了物理表，就让浏览器或 Edge 直读该表。
 
 当前 Task 状态：
 

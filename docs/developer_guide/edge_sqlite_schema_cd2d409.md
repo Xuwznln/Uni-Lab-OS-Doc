@@ -20,7 +20,9 @@
   cursor 索引，业务唯一键/类型索引一致。
 - `resource_handle_template`：字段一致；业务唯一键
   `(resource_template_uuid,io_type,name) WHERE deleted_at IS NULL` 一致。
-- `material`：字段和 self/template FK 一致；条码、根名称、parent/template 索引一致。
+- `material`：与 Backend d552078 的字段和 self/template FK 一致；条码、根名称、
+  parent/template 索引一致。Backend 候选 d123ce0 已新增实例 `type` 和 active type index，
+  当前 Edge v5 尚未包含，不能继续泛化为“与最新 Backend 完全一致”。
 - `relative_position`：字段和一 Material 一 active position 约束一致；Edge 为尺寸提供
   `0` 默认值，Backend 要求调用方给值，这是物理默认差异。
 - `site`：字段、两个 Material FK、owner/name、occupant 唯一约束、排序索引一致；
@@ -29,6 +31,22 @@
 
 公共资源 API 从这些表读写，正常查询统一过滤 `deleted_at IS NULL`。删除 Material/模板/位置
 采用软删除；历史记录不靠物理删除表达状态。
+
+### d123ce0 后的下一版缺口（未实现）
+
+- 下一 Edge Schema 版本需要给 `material` additive 增加
+  `type TEXT NOT NULL DEFAULT 'resource'`，按 Backend 同义规则从模板 `config_info` 的对应组件
+  `type`、模板 `resource_type` 回填，并增加
+  `LOWER(TRIM(type)) WHERE deleted_at IS NULL` active index。
+- Backend-shaped Material response 应输出实例 `type`；create request 不接收客户端自报
+  `type`，而由模板展开逻辑派生。
+- Backend d123ce0 的 create request 新增 `data`。Edge 表已有 `data`，但当前
+  `backend_api.MaterialRequest` 不接收、`create_material` 固定写 `{}`；这是 DTO/Service
+  Adapter 缺口，不是新增列理由。
+- `published_workflow_contract` 是 Backend 版本制品，不能为追求 DDL 同名而加入
+  `inventory.db`。Edge 仅在相应 capability 开启时实现同义 Interface/hydration。
+
+上述均是本轮审计结论，当前分支没有新增 v6 migration 或运行逻辑。
 
 ### Edge 本地运行态与同步表
 
