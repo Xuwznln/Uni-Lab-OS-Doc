@@ -104,6 +104,11 @@ FK、每 Workflow 的 revision/version 唯一，以及 active latest/created 索
 DTO/hydration 与 capability parity；除非本地 Quick Debug 自己拥有发布权威，否则不应复制该
 Backend 表。
 
+000053 还会插入 UUID 固定、立即软删除的 `resource_template` 哨兵行
+`unilab_composite_workflow_host`；模型注释明确它“不代表设备或动作”，用途只是承接模板 FK
+和渲染归属。这会把非资源身份塞入 ResourceTemplate 身份域，是候选实现的语义缺陷，合并前应以
+显式 framework owner/capability identity 或可空 FK 规则替代。Edge 不应同步或仿造该哨兵行。
+
 `workflow_node.type` 是作者图类型字符串；真正决定执行器的是 Job 的
 `executor_kind=device_action/compute/condition/script/tool_call/manual_confirm`。不要把旧的
 `Group/ILab`、PLR class 或 `host_node` 写进领域 FK。

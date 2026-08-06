@@ -321,8 +321,9 @@ Material/Site 表。后续应把它改成能力/绑定解析，但不需要为�
 `workstation_dev_YB_260711@1cc17b46` 的 12 个增量提交：改动集中在 Bioyond/Neware/DataCore
 设备驱动、设备 Registry YAML 和资源定义，没有 migration、共享 SQLite/PostgreSQL Schema、
 Edge HTTP/WS envelope 或调度 Authority 变更。新增的 `_interlock_claim`/`_handoff_claim`
-仍是进程内厂商设备互锁，不是可持久化的 `JobExecutionClaim` 或 fencing token，不能据此关闭
-对应的持久化待办。
+仍是进程内厂商设备互锁：重启后丢失，且 `_release_handoff_claim` 明确不校验 token，旧任务可能
+释放后来任务的新占用。它们不是可持久化的 `JobExecutionClaim` 或 fencing token，驱动也不应
+因此接管调度 Authority；不能据此关闭对应的持久化待办。
 
 `bbaa40e0` 对 `host_node.py::manual_confirm` 的函数签名、装饰器和返回值均未改变，只把 docstring
 说明改成“参数只读、人工修改不生效”，因此不构成 Host identity 或表设计变化。但这也不只是
