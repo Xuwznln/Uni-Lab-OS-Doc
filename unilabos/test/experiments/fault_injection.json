@@ -1,0 +1,15 @@
+{
+  "nodes": [
+    {
+      "id": "fault_injection_device",
+      "name": "fault_injection_device",
+      "type": "device",
+      "class": "fault_injection_device",
+      "parent": null,
+      "children": [],
+      "config": {},
+      "data": {}
+    }
+  ],
+  "links": []
+}
