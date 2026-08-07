@@ -609,6 +609,10 @@ def test_rest_command_replay_returns_first_result_once():
             ("cmd-replay",),
         )
     ) == 1
+    assert service.store.query_one(
+        "SELECT actor FROM inventory_ledger WHERE causation_id = ?",
+        ("cmd-replay",),
+    )["actor"] == "edge:local-api"
 
 
 def test_concurrent_same_command_executes_business_once():

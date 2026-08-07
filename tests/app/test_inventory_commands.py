@@ -286,6 +286,10 @@ class TestWsClientChannel:
         assert len(results) == 1
         assert results[0]["data"]["status"] == "completed"
         assert mp.inventory_service.store.get_lot("lot-1") is not None
+        ledger = mp.inventory_service.store.query_one(
+            "SELECT actor FROM inventory_ledger WHERE causation_id='c1'"
+        )
+        assert ledger["actor"] == "backend:cloud-user"
 
     def test_no_service_attached_rejected(self):
         mp = self._make_processor()

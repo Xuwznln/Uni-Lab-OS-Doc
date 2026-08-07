@@ -158,10 +158,10 @@ def test_instance_sync_creates_device_and_instrument_through_material_api():
         "barcode": "DEV-PUMP-01",
         "name": "模拟注射泵",
         "config": {"port": "MOCK"},
+        "data": {"status": "Idle"},
         "meta_data": {
             "edge_local_id": "pump_01",
             "edge_resource_type": "device",
-            "initial_state": {"status": "Idle"},
         },
     }
     assert all(

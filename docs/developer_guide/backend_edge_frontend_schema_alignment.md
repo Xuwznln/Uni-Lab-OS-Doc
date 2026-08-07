@@ -10,24 +10,21 @@ DDL 逐字做成一样。
 
 当前结果：
 
-1. Edge `inventory.db` v5 的六张共享资源表已经与 Backend 000046 前的领域语义对齐，
-   软删除、Site 三个 UUID、Handle、Material parent 和状态历史都已落表。
-2. Backend `main` 已从 `c35d821` 前进到 `d552078`，把物料执行锁、动作身份回填、
-   物料操作台账和 Edge Material 变更通知纳入默认分支；这些尚未完整进入 Edge 本地
-   Authority。更新后的 `feat/workflow@d123ce0` 又新增 `material.type` 和
-   `published_workflow_contract`，仍是候选增量。
-3. Edge Workflow SQLite 只是“字段相近”，缺迁移版本、关键 FK/index、ad-hoc Task、
+1. Edge `inventory.db` 已升级到 v6：六张 Backend 共享资源表、`material.type`、Site 稳定 UUID、
+   Handle、Material parent、初始状态历史和四个旧兼容 View 均已落地；碰撞的旧 Edge-local v5
+   也有保留实例类型的迁移路径。
+2. Backend `main@d552078` 与候选 `feat/workflow@d123ce0` 已按源码逐项复核。Edge 已对齐候选的
+   Material/Site CRUD 与序列化语义；`published_workflow_contract` 保持 Backend-only，不复制表、
+   不向 Edge session 广告发布能力。
+3. Edge Workflow SQLite 仍只是“字段相近”，缺迁移版本、关键 FK/index、ad-hoc Task、
    feedback/result/intervention/lock 等持久事实，不能宣称与 Backend 相同。
-4. 当前远端 Edge 195434/cd2d409 没有 `ResourceDict.sites` 根字段，PLR `sites` 仍在
-   `config`；导师提供的另一份用户本地 Edge 脏工作区证据表明该提升及测试已经实现但尚未
-   合并。两种状态必须分开描述；该 Edge 工作区的路径/ref 未在本环境提供，仍待实机复核，
-   且不能与 `/home/wz/.../unilab-edge-ui` 微前端证据混为一谈。
-5. 本轮直接审计的私有 `uni-lab-fe` 没有 `STANDARD_TABLES/DATA_ENTITIES/data-model.md`；
-   这个结论不适用于用户正在联调的 `unilab-edge-ui`。导师提供的本地微前端证据显示其
-   catalog 登记 Edge live v4 的 17 张物理表；它是 Edge 存储登记，不是 Backend Schema 标准。
-6. 导师提供的 `leaplab/designs@24fc4ce` 是新的目标设计（Target Design）证据，定义 Active Host、
-   `os-local.sqlite`、Go standalone/Lab 存储与发布边界。本环境看不到 `/home/wz`，所以这些表和
-   Interface 只能登记为 `target-design`，不能写成已经落地的 migration、Router 或运行能力。
+4. `ResourceDict.sites` 已与 barcode 一样提升为根字段；PLR 双形态输入、序列化/反序列化、
+   Host 图合并与实例 Site UUID 均有回归测试。
+5. 本地 `unilab-edge-ui` 已直接审计并更新为 26 个 v6 实体：6 张 Backend-shared 表、4 个
+   edge-compat View、Edge-private 侧表及设备/历史表；Resource HTTP client 只通过 base URL 在
+   Host 微后端与正式 Backend 间切换，并校验 HTTP 200 内的业务错误码。
+6. `leaplab/designs@24fc4ce` 仍是 Target Design，只定义未来 Active Host、`os-local.sqlite`、
+   Go standalone/Lab 存储与发布边界，不能写成已经落地的 migration 或运行能力。
 
 完整物理证据见：
 
@@ -41,10 +38,12 @@ DDL 逐字做成一样。
 |---|---|---|
 | `deepmodeling/Uni-Lab-OS` | `origin/feat/edge-networking-and-scheduler@195434ab738c1d5123e41d1ef08f2d17d30928c4` | Edge 远端契约分支；本轮 fetch 后未前进 |
 | Edge 隔离实现 | `cd2d409a007e233aec0e9422359bf85c5427e37b` | 上轮基于 195434 的 v5/API 对齐提交，完整保留 |
+| 受指导模型提交 | `origin/feat/backend-contract-d552078@92743142572fcfdc69a2424945d5dcffd846920b` | 已拉取；包含 Backend 审计、Host identity、Site/物料设计文档等 6 个提交 |
+| 本地 Edge 对齐分支 | `feat/backend-contract-local-align-20260808@102f2b85` + 当前工作树 | v6 migration、精确 Material/Site CRUD、状态/actor Adapter 正在本地验证 |
 | `Uni-Lab-OS/uni-lab-backend` 默认 `main` | `d5520789975d6aa14792b8c1bde6565050b5fcf8` | 2026-08-07 直接 fetch/`ls-remote` 核验；原 000047..000049 实现候选已进入默认分支 |
 | Backend 当前实现候选 | `origin/feat/workflow@d123ce0a4e3b3ff834c26f4f02e3f9f53bea3b3e` | 相对 d552078 有 7 个可达提交；新增 000050..000054、`material.type`、已发布工作流契约及对应 model/Router/test |
 | 私有 `Uni-Lab-OS/uni-lab-fe` | `origin/integration/fe-os-migration@355e2fc498e4d58701b71289cdd031beedef5afa` | 本轮直接审计的客户端投影证据；不是数据库标准 |
-| 本地微前端 `unilab-edge-ui` | 导师提供：`/home/wz/unilab-context/unilab-edge-ui`，`main@6c0db30e4fabfd67df5d99a1965a796e015e36e7`，dirty | 本机路径不存在，待该工作区实机复核；据提供证据含 v4 17 表 catalog 和协议文档 |
+| 本地微前端 `unilab-edge-ui` | `/home/wz/unilab-context/unilab-edge-ui`，`main@6c0db30e4fabfd67df5d99a1965a796e015e36e7`，dirty | 已直接读取并验证：68 Edge ops、5 Cloud ops、17 actions、26 typed entities、58 tests |
 | `leaplab/designs` | 导师提供：`78da9a7 → 24fc4ce`（8 个提交），原有 `uni-lab-scheduler` dirty 修改未动 | 待实机复核的 target-design；不证明 Go/OS migration、API 或进程入口已经实现 |
 
 Backend `main@d552078` 是本轮直接核验的默认分支；`feat/workflow@d123ce0` 仍未进入默认分支，
@@ -58,13 +57,13 @@ Backend `main@d552078` 是本轮直接核验的默认分支；`feat/workflow@d12
 | 成熟度 | 判定标准 | 本轮证据 |
 |---|---|---|
 | `backend-implemented-candidate` | 已有 Backend migration/model/Router/test；是否已进默认分支由 Ref 列另记，不能只凭成熟度名称推断发布状态 | 默认 `main@d552078` 基线与 `feat/workflow@d123ce0` 候选增量 |
-| `edge-live` | 当前 Edge 分支或隔离提交能实际建库、迁移并由现有 Interface 读写 | Edge 195434 + cd2d409 的 v5 shared 表、`edge_control.db` 和当前路由 |
-| `legacy-implemented` | 旧物理表、旧数据库或兼容 View 仍真实存在且可能仍可写，但不再定义 canonical target | 微前端登记的 v4 17 表、`workflow_history.db`、v5 兼容 View |
-| `local-draft` | 导师提供的脏工作区改动，尚未进入可直接审计的 clean ref | `/home/wz/.../unilab-edge-ui` catalog 更新、另一份本地 Edge `ResourceDict.sites` 提升 |
+| `edge-live` | 当前 Edge 分支或隔离提交能实际建库、迁移并由现有 Interface 读写 | Edge v6 shared 表、Backend-shaped Resource API、`edge_control.db` 和当前路由 |
+| `legacy-implemented` | 旧物理表、旧数据库或兼容 View 仍真实存在且可能仍可写，但不再定义 canonical target | `workflow_history.db`、v6 上的四个兼容 View |
+| `local-draft` | 已在本机实现并通过测试、尚未提交的改动 | Edge v6 精确语义与微前端 26 实体/Resource client |
 | `target-design` | 设计目标或迁移方向；尚不能据此声称 Schema/API/进程已落地 | 导师提供、待实机复核的 `leaplab/designs@24fc4ce` |
 
-当前 17 张 Edge live v4 表仍属于已实现事实；新增 target-design 不会自动把它们改名、合库、删表或
-改变写入者。任何迁移必须另有版本化 DDL、兼容窗口和实库验证。
+当前 v6 表/View 属于已实现事实；新增 target-design 不会自动把它们改名、合库、删表或改变写入者。
+任何后续迁移仍必须有版本化 DDL、兼容窗口和实库验证。
 
 ## OS 本地微后端、Go 业务后端与浏览器
 
@@ -91,15 +90,15 @@ Task、保存投影并提供网关，但 target-design 下不成为第二个实�
 | 证据源 | 证据状态 | 它能证明什么 | 它不能定义什么 |
 |---|---|---|---|
 | 私有 `uni-lab-fe@355e2fc` | 本轮直接审计 | `MaterialAggregate`、`WorkflowRuntimePort`、Backend wire Adapter 和状态投影 | Backend/Edge 物理表清单 |
-| 本地 `unilab-edge-ui@6c0db30e` dirty | 导师提供，待 `/home/wz` 实机复核 | `STANDARD_TABLES`、`DATA_ENTITIES`、`data-model.md`、`cloud-mapping.md` 登记 Edge live v4 的 17 表和拆装协议 | 把这 17 表提升为 Backend canonical Schema |
+| 本地 `unilab-edge-ui@6c0db30e` dirty | 本轮直接审计并运行门禁 | 26 个 v6 typed entities、对象类型/schema version/authority 分层、Backend-shaped Resource client 与 mock CRUD | Backend/Edge 领域表的写入权威本身 |
 
 本地微前端 catalog 应分三层维护，不以一层覆盖另一层：
 
 1. **Backend canonical/shared Schema**：`resource_template`、`resource_handle_template`、
    `material`、`relative_position`、`site`、`material_state_history` 及 Backend Workflow
    领域表；默认实现以 d552078 为准，d123ce0 已落 migration/model 的候选增量单独登记。
-2. **Edge 当前物理表/兼容 View**：v4 catalog 的 17 张存量物理表，以及 v5 后同名兼容 View
-   到 canonical 表的映射；catalog 必须标明对象类型、版本和是否可写。
+2. **Edge 当前物理表/兼容 View**：v6 catalog 的物理表与四个兼容 View 到 canonical 表的映射；
+   catalog 已标明 `objectKind/schemaVersion/authority` 和 CRUD disposition。
 3. **Edge 私有同步表**：`sync_outbox`、`processed_command`、`sync_cursor` 等只承担增量同步、
    幂等和恢复，不进入 Backend 公共 DTO。
 
@@ -121,6 +120,11 @@ Task、保存投影并提供网关，但 target-design 下不成为第二个实�
 | 软删除 | shared Base 表使用 `deleted_at`，普通读取排除 | Edge shared 表已支持；遥测/outbox 等不同生命周期私表不强加 Base |
 | 成功终态 | Backend Workflow 公共 wire 为 `succeeded` | Edge Local REST v1 可由 Adapter 输出 `success`；进入共享模型时必须规范化回 `succeeded` |
 
+这里的 UUID 是 canonical 新身份规则。v5 实库迁移不会静默改写既有 `tpl-*` / `demo-*`
+主键，所以 Host 微后端的 Backend-shaped 路由把 path/query/body identity 作为不透明字符串交给
+服务层校验；正式 Backend 仍可在自身入口执行 UUID 校验。这样客户端只切 base URL，不需要为
+旧 Edge 数据另写一套 DTO，也不会为了“看起来像 UUID”破坏已持久化引用。
+
 ## 三向逐表差异矩阵
 
 分类随调度权威运行模式（SchedulerAuthorityProfile）解释：A=`local_scheduler` 下 Edge
@@ -129,12 +133,12 @@ Task、保存投影并提供网关，但 target-design 下不成为第二个实�
 
 | Backend 实体 | Edge 当前映射 | 前端映射 | 差异类别 | 处置 |
 |---|---|---|---|---|
-| `resource_template` | v5 同名表 + revision sidecar | Template catalog | 同义物理差异 / A | 维持 shared 表；revision 留 sidecar |
-| `resource_handle_template` | v5 同名表 | Material Graph handles | 同义物理差异 / A | UUID、`io_type`、三元业务键一致 |
-| `material` | v5 同名表；旧 `material_instance` View；当前缺 `type` | `MaterialAggregate.material` | A+D | UUID/parent/soft delete 已对齐；d123ce0 新增实例 `type`（服务端按模板组件派生），Edge 本地 Authority 需 additive 列/索引和回填；Backend 新增 `resource` 必须有 parent，且列表默认不含 child（`with_children=false`），Edge 现有默认行为不同，不能静默切换 |
-| `relative_position` | v5 同名表 | `placement`/pose | A+B | Edge 持久化；前端只做坐标投影 |
-| `site` | v5 同名表；旧 `resource_relation` View | `MaterialAggregate.sites` | A+D | 表已对齐；身份分配/ResourceDict hydration 未闭环，见 Site 决策门 |
-| `material_state_history` | v5 同名表 | 当前无独立 UI 表 | A | append-only；状态无冻结枚举，按 DTO 透传 |
+| `resource_template` | v6 同名表 + revision sidecar | 26-entity catalog + Resource client | 同义物理差异 / A | shared 表与 CRUD DTO 已对齐；revision 留 sidecar |
+| `resource_handle_template` | v6 同名表 | 独立只读实体 + Material Graph handles | 同义物理差异 / A | UUID、`io_type`、三元业务键一致 |
+| `material` | v6 同名表；旧 `material_instance` View | 独立 C/R/U/D 实体 | A | `type`、data create、组件展开、partial update、根列表与 resource-parent 规则已对齐 |
+| `relative_position` | v6 同名表 | 独立只读实体 + Material detail | A+B | Edge 持久化；写入仍经 Material 聚合 |
+| `site` | v6 同名表；旧 `resource_relation` View | 独立只读实体 + Material Graph | A | 新实例 UUID、tag allow-list、owner/occupant 与根字段序列化已对齐 |
+| `material_state_history` | v6 同名表 | 独立 append-only 实体 | A | create 初始状态及后续 append；无冻结状态枚举，按 DTO 透传 |
 | `material_ledger_entry` | Backend 已存在；Edge 仅有不同语义 `inventory_ledger` | 私有前端当前无 port | Backend canonical / Edge 接入延后 | 不能别名；Edge 等可信 `operator_type/user` 注入后再镜像或写入 |
 | `material_warehouse` | `inventory_lot` 是不同聚合 | 当前 UI 仓储投影未冻结 | C+D | 禁止直接互相改名；先统一批次/数量领域模型 |
 | `reagent_info/reagent/sample` | 无 canonical 表 | 有部分 UI 类型 | C | Backend 专属；Edge 只在执行参数需要时用 DTO |
@@ -362,11 +366,11 @@ Registry 再用 `parse_docstring` 把首行和参数说明写入动作 JSON Sche
 | 模式 / 层 | 写入权威与 UUID 生成者 | 必须持久化 | Interface / 同步 | 下一步 |
 |---|---|---|---|---|
 | `backend_controlled` Backend | Backend；Backend 生成 Material/Site UUID | Backend canonical 资源表、`material_ledger_entry`、Workflow/Task/Job/控制与事实表；候选分支另有 `published_workflow_contract` | Backend-shaped HTTP；WS 短通知 | 保持 d552078 默认语义；评审 d123ce0 的 `material.type`/发布契约后再版本化下发 |
-| `backend_controlled` Edge | 无 Material/Workflow 第二权威；只执行 Backend Command | `edge_control.db` 的 Command/执行镜像/结果 Outbox；遥测投影；必要的只读 Material/Site 投影 | HTTP 拉参数/报结果，WS 通知；原样复用 Backend Site UUID | 补 `ResourceDict.sites` hydration 和全出口回装；禁止本地重生成 |
-| `local_scheduler` / 默认开源 Host | Host Edge；Host 首次生成并持久化本地 Material/Site UUID | `inventory.db` v5 canonical 资源六表；版本化本地 Workflow/Task/Job Authority；Edge 私有 lot/reservation/outbox/cursor | 对前端暴露 Backend-shaped DTO；Local REST v1 状态经 Adapter 兼容 | 合并本地 `ResourceDict.sites` 实现；完成 Workflow Schema 迁移 |
+| `backend_controlled` Edge | 无 Material/Workflow 第二权威；只执行 Backend Command | `edge_control.db` 的 Command/执行镜像/结果 Outbox；遥测投影；必要的只读 Material/Site 投影 | HTTP 拉参数/报结果，WS 通知；原样复用 Backend Site UUID | 保持 hydration 不重生成；补 durable JobExecutionClaim/栅栏 |
+| `local_scheduler` / 默认开源 Host | Host Edge；Host 首次生成并持久化本地 Material/Site UUID | `inventory.db` v6 canonical 资源六表；版本化本地 Workflow/Task/Job Authority；Edge 私有 lot/reservation/outbox/cursor | 对前端暴露 Backend-shaped DTO；Local REST v1 状态经 Adapter 兼容 | 完成 Workflow Schema 与 JobExecutionClaim 迁移 |
 | Edge-origin → Backend | 原 Host Authority 保留 identity；Backend 是导入后的接管方或投影方 | Backend 保存传入 UUID，或持久 identity mapping；不得生成冲突 UUID | import/upsert + event UUID + sequence + aggregate_version | 新增 Backend Material/Site import/upsert、冲突与接管协议 |
 | `offline_recovery` | 只恢复原本由 Host Edge 创建的聚合/任务 | 复用既有本地 canonical 表与执行事实 | 不接管 Backend-owned 聚合；恢复后按原权威同步 | 增加显式 Authority/profile 校验，禁止断网自动接管 |
-| 前端 / 微前端 | 无领域写入权威 | 仅客户端缓存/投影；catalog 不成为写模型 | 私有 `uni-lab-fe` 用 Adapter；`unilab-edge-ui` catalog 分三层登记 | 实机复核 `/home/wz` dirty diff，补 v4→v5 table/View 和 cloud mapping |
+| 前端 / 微前端 | 无领域写入权威 | 仅客户端缓存/投影；catalog 不成为写模型 | 私有 `uni-lab-fe` 用 Adapter；`unilab-edge-ui` 已分三层登记并用同形 Resource client | 继续补 Workflow Authority 接管后的 DTO，不复制 Backend 发布表 |
 
 三种 SQLite 私表不反向成为 Backend 标准：设备遥测投影保留
 `device_property_latest/history`；同步恢复保留 `sync_outbox/processed_command/sync_cursor`；旧
@@ -377,77 +381,52 @@ Registry 再用 `parse_docstring` 把首行和参数说明写入动作 JSON Sche
 
 ### 已确认、无需再改表
 
-- shared resource 六表在 d552078 范围内的 UUID、FK、软删除和 active unique；d123ce0
-  新增的 `material.type` 是下一版 additive 缺口，不在“无需改表”结论内。
+- shared resource 六表已覆盖 d123ce0 范围内的 UUID、FK、软删除、active unique 和
+  `material.type`；现阶段不新增第二份 Material/Site 表。
 - Site 三 UUID 的语义和公共 DTO。
 - `edge_uuid/cloud_uuid` 只能在兼容 seam，canonical Material UUID 不分本地/云端。
 - `command_id/event_id/sequence/aggregate_version/trace` 各自职责。
 - Backend 公共运行终态是 `succeeded`；Edge Local REST v1 的 `success` 是兼容输出，必须由
   Adapter 显式执行 `succeeded → success`，反向进入共享模型时规范化为 `succeeded`。
-- 当前 Edge `scheduler/integration.py::_report_workflow_state` 仍把内部 `success` 原样写入
-  `workflow_status` 上行消息；`ws_client.py::_send_workflow_status` 也没有集中规范化层。这是已确认的
-  协议 Adapter 缺口，不代表 Backend 接受 `success`。
+- 共享出入口已经集中执行状态规范化；可信 actor 由 Adapter 注入，不接受客户端 JSON 自报。
+- Material create/update/delete、组件展开、初始 state、Site tag allow-list、默认根列表以及
+  `resource` parent/root 校验已经用 Backend-shaped contract test 固化。
+- `published_workflow_contract` 与 publication/composite admin capability 保持 Backend-only；Edge
+  不复制表、不向 session 广告这些 capability。
 
-### 最小决策题
+### 仍需决策 / 尚未闭环
 
-1. **Edge `material.type` v6**：Backend d123ce0 已将实例类型落为
-   `material.type NOT NULL`，并按 active lowercase type 建索引；Edge v5 仍缺该列。下一版应
-   additive 增列、从 `resource_template.config_info` 组件/模板 `resource_type` 回填、补 active
-   index，并让 Backend-shaped response 输出 `type`。旧行无法解析时才回退 `resource`，不得把
-   `class` 或模板分类在 Adapter 中临时冒充。
-2. **Material create DTO 的 `data`**：Backend d123ce0 的 create request 已接收 `data`，Edge
-   `MaterialRequest` 仍不接收且创建时固定 `{}`。表本身已有 `data`，这里只需版本化 DTO/Service
-   写路径和契约测试，不新增第二列。
-3. **发布契约 Interface**：Backend 候选新增
-   `POST /workflows/{uuid}/publications`、`GET /published-workflow-contracts`、
-   `POST /workflows/{uuid}/composite-invocations`。前端直连 Edge 的模式若声明这些 capability，
-   OS 微后端必须提供等价 DTO/错误语义或明确 fail closed；不得为“路径一致”复制
-   `published_workflow_contract` 成第二业务权威。
-4. **Backend Site import/upsert**：为 Edge-origin Material Graph 增加外部 Material/Site UUID
+1. **Backend Site import/upsert**：为 Edge-origin Material Graph 增加外部 Material/Site UUID
    导入或显式 identity mapping；必须有幂等、版本和冲突规则。
-5. **本地 Host 提升实现合并**：在导师所指的本地 Edge 脏工作区核对
-   `ResourceDict.sites` 的唯一提升、所有回装出口和测试，再迁移到远端 Edge；该证据源不是
-   `/home/wz/.../unilab-edge-ui`，不得只复制字段声明。
-6. **Edge 本地物料台账 actor**：Edge shared route 如何可靠区分 `frontend/edge/system`？推荐由
-   已认证 adapter 在调用 Service 时注入，不接受客户端 JSON 自报。确定前不创建空壳
-   `material_ledger_entry` 或把 `inventory_ledger` 改名。
-7. **Workflow 本地 Authority 迁移**：是否继续支持 `local_scheduler` 的完整 Backend-shaped
+2. **Workflow 本地 Authority / JobExecutionClaim**：若继续支持 `local_scheduler` 的完整 Backend-shaped
    Workflow Authority？若支持，需要版本化新库/重建表并迁移现有 Task/Job；若生产只支持
-   `backend_controlled`，则本地 store 应降级为执行镜像，不能同时承诺完整 CRUD。
-8. **前端 Material create 命令**：采用 Backend 当前 DTO，还是把 Backend 升级为前端聚合命令
-   `template_id/placement/expected_revision/idempotency_key`？路径不能继续同名不同义。
-9. **Material 根列表兼容窗口**：Backend 候选分支已经令 `with_children=false` 默认只返回根
-   Material，并要求 `resource_type=resource` 的实例必须有 parent；Edge 旧客户端默认读取全部且允许
-   根 Resource。需要先冻结发布版本、兼容期和 capability，再改变 Edge 默认行为。
-10. **Workflow 终态上行 Adapter**：在唯一 Backend-shaped 边界实现
-   `success → succeeded`，并以契约测试覆盖 WebSocket `workflow_status` 与 HTTP 回调；Local REST v1
-   对旧客户端的响应才做反向 `succeeded → success`。不能在调度器、存储和传输三处各自猜状态。
-11. **SchedulerAuthorityProfile 版本化**：决定是否接受“Go 业务权威 + Active Host OS 实时调度”并
+   `backend_controlled`，则本地 store 应降级为执行镜像。两种模式都需要明确 durable claim、
+   attempt/fencing token、重启恢复与重复执行防护，不能继续只靠 `_job_resource_locks` 内存集合。
+3. **SchedulerAuthorityProfile 版本化**：决定是否接受“Go 业务权威 + Active Host OS 实时调度”并
    取代/新增于当前 `backend_controlled`；冻结 scope identity、接管和单 Active Host 失败语义。
-12. **`os-local.sqlite` v1 migration**：定义完整字段、FK、unique、索引、`user_version`、旧三库读取
+4. **`os-local.sqlite` v1 migration**：定义完整字段、FK、unique、索引、`user_version`、旧三库读取
    兼容与单进程独占升级；设计表名本身不能替代 migration。
-13. **Go standalone/Lab migration 与 Router**：分别为 `workspace.sqlite`、`lab-dev.sqlite`、PG
-    冻结物理 Schema、DTO、事务和鉴权；不能把 target 逻辑表直接当已实现接口。
-14. **Site ↔ Location 关系**：确定 FK 方向、生命周期、移动语义和投影；禁止用 rename 回避。
-15. **版本制品与 Quick Debug import**：冻结 Version Artifact、`schema_version/content_hash`、
-    同 UUID 异 hash 冲突响应，以及 Site UUID import/upsert/identity mapping。
-16. **双 Outbox 合同**：分别版本化库存 `sync_outbox` 与 runtime `event_outbox`，验证
-    `debug_node_event → execution_event` 的 `(scope_id,task_id,seq)` 幂等和终态原子提交。
+5. **Go standalone/Lab migration 与 Router**：分别为 `workspace.sqlite`、`lab-dev.sqlite`、PG
+   冻结物理 Schema、DTO、事务和鉴权；不能把 target 逻辑表直接当已实现接口。
+6. **Site ↔ Location 关系**：确定 FK 方向、生命周期、移动语义和投影；禁止用 rename 回避。
+7. **版本制品与 Quick Debug import**：冻结 Version Artifact、`schema_version/content_hash`、
+   同 UUID 异 hash 冲突响应，以及 Site UUID import/upsert/identity mapping。
+8. **双 Outbox 合同**：分别版本化库存 `sync_outbox` 与 runtime `event_outbox`，验证
+   `debug_node_event → execution_event` 的 `(scope_id,task_id,seq)` 幂等和终态原子提交。
 
 这些决策会改变 Backend 语义或旧库迁移取舍，本轮没有自行发明默认值。
 
 ## 验证证据
 
-第一轮实现提交已完成 Edge `tests/app`（`362 passed, 1 xfailed`）、Backend `go test ./...`
-以及空库/v4→v5 migration、FK、索引、软删除、Backend-shaped fixture、旧兼容 View 写路径、
-Site round-trip、Workflow/Task 状态验证。导师另行报告微前端 `protocol:check` 已通过
-（53 Edge ops、5 Cloud ops、17 actions、17 typed entities）；本环境没有直接执行该命令。
-第三轮只修订文档与说明性注释，不改变运行逻辑，未重复上述全量测试；本轮门禁是成熟度、旧名、
-错误权威/数据库断言全量扫描和 `git diff --check`。
+2026-08-08 本地门禁已直接完成：Edge `tests/app` 为 `378 passed, 1 xfailed`；聚焦
+Backend Resource/迁移/同步测试为 `56 passed`；真实旧 v5 数据库副本迁移到 v6 后
+`integrity_check=ok`、外键错误 0、13/13 Material type 与 10 Site 保留。微前端
+`protocol:check` 输出 68 Edge operations、5 Cloud operations、17 inventory actions、
+26 typed entities，`vitest` 为 58 passed，`vue-tsc + vite build` 通过。
 
 2026-08-07 增量审计将 d123ce0 用 `git archive` 解到独立临时目录，定向执行
 `go test -count=1 ./internal/infrastructure/database ./internal/domain/model
 ./internal/service/resource ./internal/service/workflow ./internal/web`，五个 package 全部通过；
 Backend d552078...d123ce0 的 `git diff --check` 通过。Uni-Lab-OS 两条 workstation 支线没有
 migration/共享 Schema 变更，但它们各自的 `git diff --check` 因历史尾随空格返回 2，因此不能把
-该静态门禁记为通过。本轮只改文档，没有实现或测试 Edge v6。
+该静态门禁记为通过；这不影响本次按显式文件范围执行的 v6 功能测试。

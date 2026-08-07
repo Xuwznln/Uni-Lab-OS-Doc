@@ -677,12 +677,11 @@ class EdgeControlClient(BaseCommunicationClient):
         job = self.store.get_job(job_uuid)
         if job is None:
             return False
-        outcome = {
-            "success": "succeeded",
-            "failed": "failed",
-            "canceled": "canceled",
-            "timeout": "timeout",
-        }.get(status, "failed")
+        from unilabos.app.scheduler.models import to_backend_workflow_status
+
+        outcome = to_backend_workflow_status(status)
+        if outcome not in {"succeeded", "failed", "canceled", "timeout"}:
+            outcome = "failed"
         if job.status == "cancel_requested" and outcome == "failed":
             outcome = "canceled"
         normalized_return = _return_info(return_info, result_data)

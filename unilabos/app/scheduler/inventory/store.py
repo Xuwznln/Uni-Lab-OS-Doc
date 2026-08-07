@@ -998,6 +998,46 @@ class InventoryStore:
             compatibility_object = self._conn.execute(
                 "SELECT type FROM sqlite_master WHERE name='material_instance'"
             ).fetchone()
+            canonical_material_object = self._conn.execute(
+                "SELECT type FROM sqlite_master WHERE name='material'"
+            ).fetchone()
+
+            # 本分支合入 canonical v5 前曾短暂发布过一版 Edge-local v5：它仍以
+            # material_instance 物理表为事实，只额外增加了 type 列。其
+            # user_version 与新的 canonical v5 撞号，不能按版本号直接跳过迁移。
+            #
+            # 先把实例 type 保存到一个可跨进程崩溃恢复的临时迁移表；canonical
+            # v5 会删除旧物理表，v6 完成 Backend 规则回填后再以旧实例事实覆盖并
+            # 删除备份表。这样即使进程在 v5 COMMIT 后退出，下次启动仍能恢复 type。
+            if (
+                current == 5
+                and compatibility_object is not None
+                and compatibility_object[0] == "table"
+                and canonical_material_object is None
+            ):
+                legacy_columns = {
+                    row[1]
+                    for row in self._conn.execute(
+                        "PRAGMA table_info(material_instance)"
+                    ).fetchall()
+                }
+                if "type" not in legacy_columns:
+                    raise RuntimeError(
+                        "unsupported inventory schema v5: physical "
+                        "material_instance table has no type column"
+                    )
+                self._conn.execute(
+                    "CREATE TABLE IF NOT EXISTS "
+                    "_edge_v5_material_type_backup ("
+                    "material_uuid TEXT PRIMARY KEY, type TEXT NOT NULL)"
+                )
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO _edge_v5_material_type_backup "
+                    "SELECT edge_uuid, type FROM material_instance"
+                )
+                self._conn.commit()
+                # 结构等价于 v4 + type；让下面的 canonical v5 迁移正常执行。
+                current = 4
             # user_version 可能被备份/测试工具错误降写。规范 v5 以可写兼容视图
             # 为结构指纹；已是 v5 时绝不能再次运行旧表 ALTER 或重命名迁移。
             if (
@@ -1084,6 +1124,25 @@ class InventoryStore:
                 self._conn.executescript(_SCHEMA_V6_MATERIAL_INSTANCE_VIEW)
                 for statement in trigger_sql:
                     self._conn.execute(statement)
+
+                type_backup = self._conn.execute(
+                    "SELECT type FROM sqlite_master "
+                    "WHERE name='_edge_v5_material_type_backup'"
+                ).fetchone()
+                if type_backup is not None:
+                    self._conn.execute(
+                        "UPDATE material SET type = ("
+                        "SELECT TRIM(backup.type) "
+                        "FROM _edge_v5_material_type_backup AS backup "
+                        "WHERE backup.material_uuid = material.uuid"
+                        ") WHERE EXISTS ("
+                        "SELECT 1 FROM _edge_v5_material_type_backup AS backup "
+                        "WHERE backup.material_uuid = material.uuid "
+                        "AND TRIM(backup.type) <> '')"
+                    )
+                    self._conn.execute(
+                        "DROP TABLE _edge_v5_material_type_backup"
+                    )
             if current < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 self._conn.commit()
@@ -1216,6 +1275,13 @@ class InventoryStore:
 
     def list_relations(self) -> List[Dict[str, Any]]:
         return self.query_all("SELECT * FROM resource_relation ORDER BY child_uuid ASC")
+
+    def list_material_sites(self, material_uuid: str) -> List[Dict[str, Any]]:
+        return self.query_all(
+            "SELECT * FROM site WHERE material_uuid = ? AND deleted_at IS NULL "
+            "ORDER BY sort_order, create_time, uuid",
+            (material_uuid,),
+        )
 
     def children_of(self, parent_uuid: str) -> List[Dict[str, Any]]:
         return self.query_all(

@@ -93,6 +93,21 @@ class TestWorkflowStart:
         assert len(statuses) == 1
         assert statuses[0]["data"]["status"] == "failed"
 
+    def test_legacy_success_is_normalized_at_backend_wire_boundary(self):
+        mp = _make_processor()
+
+        mp._send_workflow_status(
+            {"workflow_id": "wf-success", "task_id": "task-success"},
+            "success",
+        )
+
+        status = next(
+            message
+            for message in _drain(mp.send_queue)
+            if message.get("action") == "workflow_status"
+        )
+        assert status["data"]["status"] == "succeeded"
+
 
 class TestWorkflowCancel:
     def test_cancel_workflow(self):

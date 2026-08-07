@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, Response
 
 from unilabos.app.scheduler.inventory.commands import execute_command
 from unilabos.app.scheduler.inventory.domain import (
@@ -64,9 +64,14 @@ def create_router(service: InventoryService) -> APIRouter:
     def post_command(
         command: InventoryCommand,
         response: Response,
+        _request: Request,
     ) -> InventoryCommandResult:
         """统一 command 入口（与 WS 下发同一执行路径，幂等）."""
-        result = execute_command(service, command)
+        result = execute_command(
+            service,
+            command,
+            trusted_actor="edge:local-api",
+        )
         if result.get("error_code") == "version_conflict":
             response.status_code = 409
         return result

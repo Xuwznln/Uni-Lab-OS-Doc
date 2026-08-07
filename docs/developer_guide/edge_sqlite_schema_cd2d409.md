@@ -1,16 +1,17 @@
-# Edge SQLite 物理 Schema 证据（cd2d409）
+# Edge SQLite 物理 Schema 证据（v6，2026-08-08）
 
-本文记录隔离分支继承提交 `cd2d409a007e233aec0e9422359bf85c5427e37b` 后，
+本文记录隔离分支继承提交 `cd2d409a007e233aec0e9422359bf85c5427e37b`、同步受指导模型
+`92743142572fcfdc69a2424945d5dcffd846920b` 后，
 由当前源码实际建出的 SQLite 对象。证据来自空库初始化后的 `sqlite_master`、
 `PRAGMA user_version/table_info/foreign_key_list/index_list`。`TEXT JSON` 与 Backend
 的 JSON 类型是允许的物理差异；语义、标识、约束和公开 DTO 才是对齐目标。
 
-本文主体由两类已实现证据组成：v5 shared 表和当前控制面属于 `edge-live`；v4 catalog、旧三库、
+本文主体由两类已实现证据组成：v6 shared 表和当前控制面属于 `edge-live`；旧三库、
 旧 Workflow 审计表和兼容 View 属于 `legacy-implemented`。导师提供、待实机复核的
 `leaplab/designs@24fc4ce` `os-local.sqlite` v1 只在文末作为 `target-design` 登记，不会自动改名、
-合并或删除当前 17 张 Edge live 表。
+合并或删除当前 Edge 表。
 
-## `inventory.db`：user_version=5
+## `inventory.db`：user_version=6
 
 ### Backend 共享资源表
 
@@ -20,9 +21,9 @@
   cursor 索引，业务唯一键/类型索引一致。
 - `resource_handle_template`：字段一致；业务唯一键
   `(resource_template_uuid,io_type,name) WHERE deleted_at IS NULL` 一致。
-- `material`：与 Backend d552078 的字段和 self/template FK 一致；条码、根名称、
-  parent/template 索引一致。Backend 候选 d123ce0 已新增实例 `type` 和 active type index，
-  当前 Edge v5 尚未包含，不能继续泛化为“与最新 Backend 完全一致”。
+- `material`：包含 Backend d123ce0 的实例 `type`，与 template/self-parent FK、条码、根名称、
+  parent/template/type active 索引一致；旧值从组件 `config_info.type`、模板
+  `resource_type`、最终 `resource` 依次回填。
 - `relative_position`：字段和一 Material 一 active position 约束一致；Edge 为尺寸提供
   `0` 默认值，Backend 要求调用方给值，这是物理默认差异。
 - `site`：字段、两个 Material FK、owner/name、occupant 唯一约束、排序索引一致；
@@ -32,21 +33,24 @@
 公共资源 API 从这些表读写，正常查询统一过滤 `deleted_at IS NULL`。删除 Material/模板/位置
 采用软删除；历史记录不靠物理删除表达状态。
 
-### d123ce0 后的下一版缺口（未实现）
+### v6 已实现的 d123ce0 对齐
 
-- 下一 Edge Schema 版本需要给 `material` additive 增加
-  `type TEXT NOT NULL DEFAULT 'resource'`，按 Backend 同义规则从模板 `config_info` 的对应组件
-  `type`、模板 `resource_type` 回填，并增加
-  `LOWER(TRIM(type)) WHERE deleted_at IS NULL` active index。
-- Backend-shaped Material response 应输出实例 `type`；create request 不接收客户端自报
-  `type`，而由模板展开逻辑派生。
-- Backend d123ce0 的 create request 新增 `data`。Edge 表已有 `data`，但当前
-  `backend_api.MaterialRequest` 不接收、`create_material` 固定写 `{}`；这是 DTO/Service
-  Adapter 缺口，不是新增列理由。
-- `published_workflow_contract` 是 Backend 版本制品，不能为追求 DDL 同名而加入
-  `inventory.db`。Edge 仅在相应 capability 开启时实现同义 Interface/hydration。
+- `material.type` 为服务端派生事实；Material create/update DTO 不授予客户端写权。
+- create 接收 `data`，递归合并模板组件默认值和请求值，并为根与每个组件写初始
+  `material_state_history`。
+- `config_info` 第一项物化根，其余项全部作为根的直接子 Material；模板里的组件 UUID/parent
+  不复用，Site 也为每个实例分配新 UUID。
+- `site.content_type` 大小写不敏感解析 `resource_template.tags`；无法解析时整笔创建回滚。
+- Material 更新是 partial：显式 `null` 与省略均保留旧普通字段，`config` 整体替换但保护模板
+  `sites`，`data/class/type/resource_template_uuid` 不可由更新请求改变。
+- Material 列表默认 `with_children=false`；需要完整树的内部同步显式请求子组件。
+- 删除根 Material 递归软删除组件子树、其 Site/position，并清除其他 Site 对该子树的占用。
+- `published_workflow_contract` 仍是 Backend-only 管理能力，不复制进 `inventory.db`，Edge session
+  也不广告 publication capability。
 
-上述均是本轮审计结论，当前分支没有新增 v6 migration 或运行逻辑。
+迁移器还识别曾与 canonical v5 撞号的旧 Edge-local v5（物理 `material_instance` 且无
+`material`）：先保存旧 `type`，重跑 canonical v5，再执行 v6 回填并覆盖保存值。真实 v5 数据库
+副本验证结果为 13/13 Material 保留、10 个 Site 保留、外键检查 0 错误。
 
 ### Edge 本地运行态与同步表
 
@@ -73,7 +77,7 @@ Material 稳定身份只使用 `material.uuid`；`edge_uuid/cloud_uuid` 仅存�
 | View | 映射 | 写入规则 |
 |---|---|---|
 | `inventory_resource_template` | canonical template + revision sidecar → `template_id,name,category,spec_json,version` | INSTEAD OF insert/update/delete；delete 转为软删除 |
-| `material_instance` | canonical Material + inventory sidecar → `edge_uuid,legacy_cloud_id,lot_id,template_id,barcode,status,version,parent_uuid` | `edge_uuid == material.uuid`；insert/update 写 canonical 行；终态 status 转软删除 |
+| `material_instance` | canonical Material + inventory sidecar → `edge_uuid,legacy_cloud_id,lot_id,template_id,barcode,type,status,version,parent_uuid` | `edge_uuid == material.uuid`；`type` 只读投影；insert/update 写 canonical 行；终态 status 转软删除 |
 | `resource_relation` | active Site occupancy → `parent_uuid,slot_id,child_uuid,version` | `parent_uuid=site.material_uuid`、`slot_id=site.name`、`child_uuid=site.occupied_material_uuid`；insert/update/delete 改 Site 占用 |
 | `substance_content` | `material.data` + content revision → `instance_uuid,state_json,version` | insert/update 写 canonical Material data |
 
@@ -100,9 +104,8 @@ Material 稳定身份只使用 `material.uuid`；`edge_uuid/cloud_uuid` 仅存�
 - `workflow_node_job` 字段接近 Backend，但缺 Edge Agent/Command/Material FK、attempt 唯一、
   deadline/recovery 索引；它不持久化 result/feedback/intervention/manual-confirmation/lock lease。
 - Backend-shaped Workflow Store/Interface 使用 canonical `succeeded`。Edge Local REST v1、旧
-  Scheduler 快照和历史仍使用 `success`；Local v1 输出由遗留 Adapter 做
-  `succeeded → success`，进入共享模型时必须再把 `success` 规范化为 `succeeded`。当前
-  `scheduler/integration.py` 的 WebSocket 上行尚未执行该规范化，属于协议 Adapter TODO。
+  Scheduler 快照和历史仍使用 `success`；集中 Adapter 在共享出入口执行
+  `success → succeeded`，Local v1 输出才做反向兼容。
 - Schema 没有 `user_version`，无法证明旧库进行了有序升级。
 
 由于这些差异涉及现有工作流历史的迁移和运行职责分配，不能以一次无版本
@@ -188,5 +191,6 @@ JobExecutionClaim/栅栏如何落入该目标仍是与 Core 持久执行安全�
   `(scope_id,task_id,seq)` 幂等接收。
 
 二者的聚合、顺序、ACK 和重放失败语义不同。共同使用“outbox”模式不代表应共享物理表。
-`success → succeeded` 的 Backend-shaped Adapter、可信 ledger actor 注入以及 Site import/upsert
-仍是待实现项，不因 `os-local.sqlite` target 表登记而闭合。
+Backend-shaped 状态 Adapter、可信 actor 注入（local=`edge:local-api`，Backend command 使用
+`backend:<claim>`）和本地 Site 实例物化已落地。跨 Authority 的外部 Material/Site UUID
+import/upsert、持久 JobExecutionClaim/栅栏仍未闭合，不因 `os-local.sqlite` target 表登记而闭合。

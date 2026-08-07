@@ -264,7 +264,7 @@
       "tracestate": "vendor=contract"
     },
     "ledger_entry": {
-      "actor": "operator:contract",
+      "actor": "edge:local-api",
       "aggregate_id": "tpl-contract",
       "aggregate_type": "template",
       "causation_id": "cmd-success",

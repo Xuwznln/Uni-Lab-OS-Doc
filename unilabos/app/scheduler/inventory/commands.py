@@ -390,9 +390,36 @@ def _execute_validated(
         return {"command_id": command_id, "status": "completed", "result": result}
 
 
-def _execute_command(service: InventoryService, command: object) -> JsonObject:
+def _command_with_trusted_actor(command: object, trusted_actor: str) -> object:
+    """Replace a caller-claimed actor with an authenticated boundary identity."""
+
+    actor = trusted_actor.strip()
+    if not actor:
+        raise ValueError("trusted_actor must not be blank")
+    if isinstance(command, InventoryCommandBase):
+        return command.model_copy(update={"actor": actor})
+    if isinstance(command, Mapping):
+        return {**command, "actor": actor}
+    return command
+
+
+def backend_command_actor(claimed_actor: object) -> str:
+    """Namespace identity asserted by the authenticated Backend connection."""
+
+    claimed = str(claimed_actor or "").strip()
+    return f"backend:{claimed}" if claimed else "backend:system"
+
+
+def _execute_command(
+    service: InventoryService,
+    command: object,
+    *,
+    trusted_actor: str | None = None,
+) -> JsonObject:
     """Parse REST/WS input once, then execute atomically."""
 
+    if trusted_actor is not None:
+        command = _command_with_trusted_actor(command, trusted_actor)
     try:
         parsed = parse_inventory_command(command)
     except ValidationError as exc:
@@ -406,8 +433,18 @@ def _execute_command(service: InventoryService, command: object) -> JsonObject:
     return _execute_validated(service, parsed)
 
 
-def execute_command(service: InventoryService, command: object) -> JsonObject:
-    """带连续追踪的 REST/Cloud WS 共享命令入口；不记录 payload/actor 原文."""
+def execute_command(
+    service: InventoryService,
+    command: object,
+    *,
+    trusted_actor: str | None = None,
+) -> JsonObject:
+    """带连续追踪的 REST/Cloud WS 共享命令入口。
+
+    Exposed adapters must pass ``trusted_actor`` so a request-body ``actor``
+    cannot forge ledger attribution.  Direct domain/test callers may omit it
+    to retain the internal command API.
+    """
 
     command_id, command_type, expected_version = _command_metadata(command)
     attributes = {
@@ -422,7 +459,11 @@ def execute_command(service: InventoryService, command: object) -> JsonObject:
         attributes=attributes,
         kind="consumer",
     ) as command_span:
-        response = _execute_command(service, command)
+        response = _execute_command(
+            service,
+            command,
+            trusted_actor=trusted_actor,
+        )
         status = str(response.get("status") or "")
         add_event(
             "inventory.command.result",

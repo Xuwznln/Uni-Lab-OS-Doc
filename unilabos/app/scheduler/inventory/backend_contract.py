@@ -14,6 +14,12 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from unilabos.app.scheduler.inventory.material_type import material_type_from_template
+from unilabos.app.scheduler.inventory.site_spec import (
+    component_relative_position,
+    materialize_component_sites,
+    merge_json_objects,
+    template_components,
+)
 from unilabos.app.scheduler.inventory.store import InventoryStore
 
 
@@ -115,7 +121,11 @@ class BackendResourceService:
                         _dump(resource.get("model") or {}),
                         _optional(class_definition.get("module")),
                         _optional(class_definition.get("type")),
-                        _dump(resource.get("category") or []),
+                        _dump(
+                            resource.get("tags")
+                            if resource.get("tags") is not None
+                            else resource.get("category") or []
+                        ),
                         _dump(data_schema),
                         _dump(config_schema),
                         _dump({}),
@@ -274,12 +284,15 @@ class BackendResourceService:
         material_uuid = str(uuid4())
         template_uuid = str(values.get("resource_template_uuid") or "")
         parent_uuid = _optional(values.get("parent_uuid"))
-        barcode = str(values.get("barcode") or "")
+        if parent_uuid == "00000000-0000-0000-0000-000000000000":
+            parent_uuid = None
+        barcode = str(values.get("barcode") or "").strip()
         name = str(values.get("name") or "").strip()
         if not template_uuid or not name:
             raise BackendContractError(
                 INVALID_PARAMETER, "resource_template_uuid and name are required"
             )
+        material_uuids: List[str] = []
         try:
             with self.store.transaction() as conn:
                 template = conn.execute(
@@ -294,6 +307,18 @@ class BackendResourceService:
                     )
                 if parent_uuid:
                     self._require_material(conn, parent_uuid, MATERIAL_PARENT_NOT_FOUND)
+                self._validate_resource_material_root(conn, template, parent_uuid)
+
+                components = template_components(dict(template))
+                root_component = components[0] if components else {}
+                root_config = merge_json_objects(
+                    root_component.get("config"),
+                    values.get("config"),
+                    protected_fields=("sites",),
+                )
+                root_data = merge_json_objects(
+                    root_component.get("data"), values.get("data")
+                )
                 now = _now()
                 material_class = str(template["name"])
                 material_type = material_type_from_template(
@@ -302,50 +327,96 @@ class BackendResourceService:
                     material_class=material_class,
                     root=True,
                 )
-                conn.execute(
-                    """
-                    INSERT INTO material(
-                        uuid,create_time,update_time,deleted_at,description,meta_data,
-                        resource_template_uuid,parent_uuid,class,type,barcode,name,config,data
-                    ) VALUES (?,?,?,NULL,?,?,?,?,?,?,?,?,?,?)
-                    """,
-                    (
-                        material_uuid,
-                        now,
-                        now,
-                        values.get("description"),
-                        _dump(values.get("meta_data") or {}),
-                        template_uuid,
-                        parent_uuid,
-                        material_class,
-                        material_type,
-                        barcode,
-                        name,
-                        _dump(values.get("config") or {}),
-                        _dump(values.get("data") or {}),
-                    ),
+                self._insert_material_with_initial_state(
+                    conn,
+                    material_uuid=material_uuid,
+                    timestamp=now,
+                    description=values.get("description"),
+                    meta_data=values.get("meta_data") or {},
+                    template_uuid=template_uuid,
+                    parent_uuid=parent_uuid,
+                    material_class=material_class,
+                    material_type=material_type,
+                    barcode=barcode,
+                    name=name,
+                    config=root_config,
+                    data=root_data,
                 )
-                conn.execute(
-                    "INSERT INTO material_inventory(material_uuid,legacy_template_id) "
-                    "VALUES (?,?)",
-                    (material_uuid, template_uuid),
-                )
-                if values.get("relative_position") is not None:
-                    self._upsert_relative_position(
-                        conn, material_uuid, values["relative_position"]
+                material_uuids.append(material_uuid)
+
+                for ordinal, component in enumerate(components[1:], start=1):
+                    component_id = str(component["id"])
+                    child_barcode = f"{barcode}/{component_id}" if barcode else ""
+                    if len(child_barcode) > 128:
+                        raise BackendContractError(
+                            INVALID_PARAMETER,
+                            f"generated child material barcode exceeds 128 characters: {child_barcode}",
+                        )
+                    child_uuid = str(uuid4())
+                    child_type = str(
+                        component.get("type") or template["resource_type"] or "resource"
+                    ).strip()
+                    self._insert_material_with_initial_state(
+                        conn,
+                        material_uuid=child_uuid,
+                        timestamp=now,
+                        description=component.get("description"),
+                        meta_data={},
+                        template_uuid=template_uuid,
+                        parent_uuid=material_uuid,
+                        material_class=str(component.get("class") or "").strip(),
+                        material_type=child_type or "resource",
+                        barcode=child_barcode,
+                        name=str(component.get("name") or component_id),
+                        config=merge_json_objects(component.get("config"), {}),
+                        data=merge_json_objects(component.get("data"), {}),
                     )
+                    material_uuids.append(child_uuid)
+
+                for ordinal, current_uuid in enumerate(material_uuids):
+                    component = components[ordinal] if components else {}
+                    position = component_relative_position(component)
+                    if ordinal == 0 and position is None:
+                        position = values.get("relative_position")
+                    if position is not None:
+                        self._upsert_relative_position(conn, current_uuid, position)
+                    if components:
+                        materialize_component_sites(conn, current_uuid, component)
+
                 placement = values.get("site_placement")
                 if placement:
                     self._apply_site_placement(conn, material_uuid, template_uuid, placement)
         except BackendContractError:
             raise
+        except ValueError as exc:
+            raise BackendContractError(
+                INVALID_PARAMETER,
+                f"Resource template material definition is invalid: {exc}",
+            ) from exc
         except sqlite3.IntegrityError as exc:
             raise BackendContractError(
                 MATERIAL_IDENTITY_CONFLICT,
                 "Material barcode or sibling name conflicts with an existing material",
             ) from exc
         result = self.get_material(material_uuid)
-        result["children"] = []
+        result["children"] = [
+            self._material_row(
+                self.store.query_one(
+                    "SELECT * FROM material WHERE uuid=? AND deleted_at IS NULL",
+                    (child_uuid,),
+                )
+            )
+            for child_uuid in material_uuids[1:]
+        ]
+        result["sites"] = [
+            self._site_row(site)
+            for current_uuid in material_uuids
+            for site in self.store.query_all(
+                "SELECT * FROM site WHERE material_uuid=? AND deleted_at IS NULL "
+                "ORDER BY sort_order,create_time,uuid",
+                (current_uuid,),
+            )
+        ]
         return result
 
     def list_materials(
@@ -356,6 +427,7 @@ class BackendResourceService:
         name: str,
         barcode: str,
         resource_template_uuid: Optional[str],
+        with_children: bool = False,
     ) -> Dict[str, Any]:
         page = max(page, 1)
         page_size = 20 if page_size <= 0 else min(page_size, 100)
@@ -370,6 +442,8 @@ class BackendResourceService:
         if resource_template_uuid:
             where.append("resource_template_uuid = ?")
             values.append(resource_template_uuid)
+        if not with_children:
+            where.append("parent_uuid IS NULL")
         predicate = " AND ".join(where)
         total = self.store.query_one(
             f"SELECT COUNT(*) AS count FROM material WHERE {predicate}", tuple(values)
@@ -415,53 +489,104 @@ class BackendResourceService:
         try:
             with self.store.transaction() as conn:
                 current = self._require_material(conn, material_uuid)
-                template_uuid = str(values.get("resource_template_uuid") or "")
-                if template_uuid != current["resource_template_uuid"]:
+                template_uuid = str(current["resource_template_uuid"])
+                template = conn.execute(
+                    "SELECT * FROM resource_template WHERE uuid=? AND deleted_at IS NULL",
+                    (template_uuid,),
+                ).fetchone()
+                if template is None:
                     raise BackendContractError(
-                        MATERIAL_TEMPLATE_IMMUTABLE,
-                        "Resource template of an existing material cannot be changed",
+                        MATERIAL_TEMPLATE_NOT_FOUND,
+                        "Resource template associated with the material not found",
                     )
-                parent_uuid = _optional(values.get("parent_uuid"))
+
+                parent_uuid = current["parent_uuid"]
+                if "parent_uuid" in values and values["parent_uuid"] is not None:
+                    parent_uuid = _optional(values["parent_uuid"])
+                    if parent_uuid == "00000000-0000-0000-0000-000000000000":
+                        parent_uuid = None
                 if parent_uuid:
                     self._require_material(conn, parent_uuid, MATERIAL_PARENT_NOT_FOUND)
                     self._check_parent_cycle(conn, material_uuid, parent_uuid)
-                conn.execute(
-                    """
-                    UPDATE material SET parent_uuid=?,barcode=?,name=?,description=?,
-                        meta_data=?,config=?,data=?,update_time=?
-                    WHERE uuid=? AND deleted_at IS NULL
-                    """,
+                self._validate_resource_material_root(conn, template, parent_uuid)
+
+                barcode = str(current["barcode"])
+                if "barcode" in values and values["barcode"] is not None:
+                    barcode = str(values["barcode"]).strip()
+                name = str(current["name"])
+                if "name" in values and values["name"] is not None:
+                    name = str(values["name"]).strip()
+                if not name:
+                    raise BackendContractError(INVALID_PARAMETER, "name is required")
+                description = current["description"]
+                if "description" in values and values["description"] is not None:
+                    description = values["description"]
+                meta_data = _json(current["meta_data"], {})
+                if "meta_data" in values and values["meta_data"] is not None:
+                    meta_data = values["meta_data"]
+                config = _json(current["config"], {})
+                if "config" in values and values["config"] is not None:
+                    requested_config = dict(values["config"])
+                    if "sites" in config:
+                        requested_config["sites"] = config["sites"]
+                    else:
+                        requested_config.pop("sites", None)
+                    config = requested_config
+
+                material_changed = any(
                     (
-                        parent_uuid,
-                        str(values.get("barcode") or ""),
-                        str(values.get("name") or "").strip(),
-                        values.get("description"),
-                        _dump(values.get("meta_data") or {}),
-                        _dump(values.get("config") or {}),
-                        _dump(values.get("data") or {}),
-                        _now(),
-                        material_uuid,
-                    ),
+                        parent_uuid != current["parent_uuid"],
+                        barcode != current["barcode"],
+                        name != current["name"],
+                        description != current["description"],
+                        _dump(meta_data) != current["meta_data"],
+                        _dump(config) != current["config"],
+                    )
                 )
+                if material_changed:
+                    conn.execute(
+                        """
+                        UPDATE material SET parent_uuid=?,barcode=?,name=?,description=?,
+                            meta_data=?,config=?,update_time=?
+                        WHERE uuid=? AND deleted_at IS NULL
+                        """,
+                        (
+                            parent_uuid,
+                            barcode,
+                            name,
+                            description,
+                            _dump(meta_data),
+                            _dump(config),
+                            _now(),
+                            material_uuid,
+                        ),
+                    )
+
+                aggregate_changed = material_changed
                 if values.get("_relative_position_specified"):
                     if values.get("relative_position") is None:
-                        conn.execute(
+                        cursor = conn.execute(
                             "UPDATE relative_position SET deleted_at=?,update_time=? "
                             "WHERE material_uuid=? AND deleted_at IS NULL",
                             (_now(), _now(), material_uuid),
                         )
+                        aggregate_changed = aggregate_changed or cursor.rowcount > 0
                     else:
                         self._upsert_relative_position(
                             conn, material_uuid, values["relative_position"]
                         )
+                        aggregate_changed = True
                 placement = values.get("site_placement")
-                if placement:
+                if values.get("_site_placement_specified") and placement:
                     self._apply_site_placement(conn, material_uuid, template_uuid, placement)
-                conn.execute(
-                    "UPDATE material_inventory SET aggregate_version=aggregate_version+1 "
-                    "WHERE material_uuid=?",
-                    (material_uuid,),
-                )
+                    aggregate_changed = True
+                if aggregate_changed:
+                    conn.execute(
+                        "UPDATE material_inventory "
+                        "SET aggregate_version=aggregate_version+1 "
+                        "WHERE material_uuid=?",
+                        (material_uuid,),
+                    )
         except BackendContractError:
             raise
         except sqlite3.IntegrityError as exc:
@@ -474,37 +599,50 @@ class BackendResourceService:
     def delete_material(self, material_uuid: str) -> None:
         with self.store.transaction() as conn:
             self._require_material(conn, material_uuid)
-            linked = conn.execute(
+            rows = conn.execute(
                 """
-                SELECT 1 FROM material
-                WHERE parent_uuid=? AND deleted_at IS NULL
-                UNION ALL
-                SELECT 1 FROM site
-                WHERE deleted_at IS NULL
-                  AND (material_uuid=? OR occupied_material_uuid=?)
-                LIMIT 1
-                """,
-                (material_uuid, material_uuid, material_uuid),
-            ).fetchone()
-            if linked:
-                raise BackendContractError(
-                    DATABASE_CONFLICT,
-                    "Material is referenced by a child or Site",
+                WITH RECURSIVE material_tree(uuid,depth) AS (
+                    SELECT uuid,0 FROM material
+                    WHERE uuid=? AND deleted_at IS NULL
+                    UNION ALL
+                    SELECT child.uuid,material_tree.depth+1
+                    FROM material AS child
+                    JOIN material_tree ON child.parent_uuid=material_tree.uuid
+                    WHERE child.deleted_at IS NULL
                 )
+                SELECT uuid,depth FROM material_tree ORDER BY depth DESC,uuid
+                """,
+                (material_uuid,),
+            ).fetchall()
+            material_uuids = [str(row["uuid"]) for row in rows]
+            placeholders = ",".join("?" for _ in material_uuids)
             now = _now()
             conn.execute(
+                "UPDATE site SET occupied_material_uuid=NULL,update_time=? "
+                f"WHERE occupied_material_uuid IN ({placeholders}) "
+                "AND deleted_at IS NULL",
+                (now, *material_uuids),
+            )
+            conn.execute(
+                "UPDATE site SET deleted_at=?,update_time=? "
+                f"WHERE material_uuid IN ({placeholders}) AND deleted_at IS NULL",
+                (now, now, *material_uuids),
+            )
+            conn.execute(
                 "UPDATE relative_position SET deleted_at=?,update_time=? "
-                "WHERE material_uuid=? AND deleted_at IS NULL",
-                (now, now, material_uuid),
+                f"WHERE material_uuid IN ({placeholders}) AND deleted_at IS NULL",
+                (now, now, *material_uuids),
             )
             conn.execute(
-                "UPDATE material SET deleted_at=?,update_time=? WHERE uuid=?",
-                (now, now, material_uuid),
+                "UPDATE material SET deleted_at=?,update_time=? "
+                f"WHERE uuid IN ({placeholders}) AND deleted_at IS NULL",
+                (now, now, *material_uuids),
             )
             conn.execute(
-                "UPDATE material_inventory SET aggregate_version=aggregate_version+1 "
-                "WHERE material_uuid=?",
-                (material_uuid,),
+                "UPDATE material_inventory SET inventory_status='discarded',"
+                "disposition='discarded',aggregate_version=aggregate_version+1 "
+                f"WHERE material_uuid IN ({placeholders})",
+                tuple(material_uuids),
             )
 
     def material_graph(self) -> Dict[str, Any]:
@@ -643,6 +781,113 @@ class BackendResourceService:
         return self._state_row(row)
 
     # Internal invariants ----------------------------------------------
+
+    @staticmethod
+    def _insert_material_with_initial_state(
+        conn: sqlite3.Connection,
+        *,
+        material_uuid: str,
+        timestamp: str,
+        description: Optional[str],
+        meta_data: Dict[str, Any],
+        template_uuid: str,
+        parent_uuid: Optional[str],
+        material_class: str,
+        material_type: str,
+        barcode: str,
+        name: str,
+        config: Dict[str, Any],
+        data: Dict[str, Any],
+    ) -> None:
+        """Create one canonical Material and its immutable initial state."""
+
+        conn.execute(
+            """
+            INSERT INTO material(
+                uuid,create_time,update_time,deleted_at,description,meta_data,
+                resource_template_uuid,parent_uuid,class,type,barcode,name,config,data
+            ) VALUES (?,?,?,NULL,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                material_uuid,
+                timestamp,
+                timestamp,
+                description,
+                _dump(meta_data),
+                template_uuid,
+                parent_uuid,
+                material_class,
+                material_type,
+                barcode,
+                name,
+                _dump(config),
+                _dump(data),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO material_inventory(material_uuid,legacy_template_id) "
+            "VALUES (?,?)",
+            (material_uuid, template_uuid),
+        )
+        conn.execute(
+            "INSERT INTO material_content_version(material_uuid,version) VALUES (?,1)",
+            (material_uuid,),
+        )
+        conn.execute(
+            """
+            INSERT INTO material_state_history(
+                uuid,create_time,update_time,deleted_at,description,meta_data,
+                material_uuid,status,state_data,source,observed_at
+            ) VALUES (?,?,?,NULL,NULL,'{}',?,NULL,?,NULL,?)
+            """,
+            (str(uuid4()), timestamp, timestamp, material_uuid, _dump(data), timestamp),
+        )
+
+    @classmethod
+    def _validate_resource_material_root(
+        cls,
+        conn: sqlite3.Connection,
+        template: sqlite3.Row,
+        parent_uuid: Optional[str],
+    ) -> None:
+        """Require ``resource`` Materials to belong to a non-resource root."""
+
+        if str(template["resource_type"] or "").strip().casefold() != "resource":
+            return
+        if not parent_uuid:
+            raise BackendContractError(
+                INVALID_PARAMETER,
+                "parent_uuid is required when resource_type is resource",
+            )
+        cursor: Optional[str] = parent_uuid
+        seen: set[str] = set()
+        root_type = "resource"
+        while cursor:
+            if cursor in seen:
+                raise BackendContractError(
+                    MATERIAL_PARENT_CYCLE,
+                    "Material parent relationship creates a cycle",
+                )
+            seen.add(cursor)
+            row = conn.execute(
+                "SELECT material.parent_uuid,template.resource_type "
+                "FROM material AS material "
+                "JOIN resource_template AS template "
+                "ON template.uuid=material.resource_template_uuid "
+                "WHERE material.uuid=? AND material.deleted_at IS NULL",
+                (cursor,),
+            ).fetchone()
+            if row is None:
+                raise BackendContractError(
+                    MATERIAL_PARENT_NOT_FOUND, "Material parent not found"
+                )
+            root_type = str(row["resource_type"] or "").strip().casefold()
+            cursor = row["parent_uuid"]
+        if root_type == "resource":
+            raise BackendContractError(
+                INVALID_PARAMETER,
+                "resource material hierarchy root must use a non-resource template",
+            )
 
     @staticmethod
     def _reconcile_resource_handles(

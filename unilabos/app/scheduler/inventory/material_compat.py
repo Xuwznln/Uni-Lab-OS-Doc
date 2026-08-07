@@ -14,6 +14,7 @@ from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
 from unilabos.app.scheduler.inventory.store import InventoryStore
+from unilabos.app.scheduler.inventory.site_spec import template_site_specs
 
 
 _RESOURCE_FIELDS = {
@@ -90,6 +91,80 @@ def _instance_by_uuid(store: InventoryStore, value: str) -> Optional[Dict[str, A
         "ORDER BY CASE WHEN edge_uuid = ? THEN 0 ELSE 1 END LIMIT 1",
         (value, value, value),
     )
+
+
+def _instance_display_name(store: InventoryStore, instance_uuid: str) -> str:
+    instance = store.get_instance(instance_uuid)
+    if instance is None:
+        return instance_uuid
+    template = store.get_template(str(instance.get("template_id") or ""))
+    prototype = _resource_spec(template)
+    return str(
+        prototype.get("name")
+        or prototype.get("id")
+        or instance.get("barcode")
+        or instance_uuid
+    )
+
+
+def _material_sites(
+    store: InventoryStore,
+    material_uuid: str,
+    template: Optional[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    prototypes = template_site_specs(template)
+    by_name = {
+        str(site.get("label", site.get("index", ordinal))).casefold(): site
+        for ordinal, site in enumerate(prototypes)
+    }
+    rows = store.list_material_sites(material_uuid)
+    if not rows:
+        return deepcopy(prototypes) if prototypes else None
+
+    result: List[Dict[str, Any]] = []
+    for row in rows:
+        name = str(row["name"])
+        site = deepcopy(by_name.get(name.casefold(), {}))
+        occupied_uuid = str(row.get("occupied_material_uuid") or "")
+        allowed = _json_object_list(row.get("allowed_resource_template_uuids"))
+        site.update(
+            {
+                "uuid": str(row["uuid"]),
+                "index": site.get("index", int(row["sort_order"])),
+                "label": name,
+                "occupied_by": (
+                    _instance_display_name(store, occupied_uuid)
+                    if occupied_uuid
+                    else None
+                ),
+                "position": {
+                    "x": float(row["position_x"]),
+                    "y": float(row["position_y"]),
+                    "z": float(row["position_z"]),
+                },
+                "size": {
+                    "width": float(row["width"]),
+                    "height": float(row["length"]),
+                    "depth": float(row["depth"]),
+                },
+                "material_uuid": material_uuid,
+                "occupied_material_uuid": occupied_uuid or None,
+                "allowed_resource_template_uuids": allowed,
+            }
+        )
+        result.append(site)
+    return result
+
+
+def _json_object_list(value: Any) -> List[str]:
+    if isinstance(value, list):
+        values = value
+    else:
+        try:
+            values = json.loads(str(value or "[]"))
+        except (TypeError, ValueError):
+            values = []
+    return [str(item) for item in values] if isinstance(values, list) else []
 
 
 def _node_from_instance(
@@ -169,6 +244,7 @@ def _node_from_instance(
         "machine_name": str(base.get("machine_name") or ""),
         "barcode": barcode,
         "barcode_symbology": str(base.get("barcode_symbology") or ""),
+        "sites": _material_sites(store, edge_uuid, template),
     }
     return node
 

@@ -7,45 +7,35 @@
 `docs/protocol/data-model.md`；不能把它泛化成“用户当前微前端没有 catalog”。该仓库的
 可执行契约是 TypeScript Port、Adapter 和契约测试。
 
-## 本地微前端：导师提供、待实机复核
+## 本地微前端：已直接审计并更新
 
-导师提供的另一个证据源是：
+本轮直接读取并修改：
 
 - 路径：`/home/wz/unilab-context/unilab-edge-ui`
-- ref：`main@6c0db30e4fabfd67df5d99a1965a796e015e36e7`
-- 状态：dirty
+- ref：`main@6c0db30e4fabfd67df5d99a1965a796e015e36e7`（工作树仍为本地 draft）
 - 登记文件：`packages/protocol/src/catalog.ts::STANDARD_TABLES`、
-  `packages/protocol/src/entities.ts::DATA_ENTITIES`、`docs/protocol/data-model.md`、
-  `docs/protocol/cloud-mapping.md`
+  `packages/protocol/src/entities.ts::DATA_ENTITIES`、`packages/protocol/src/resource.ts`、
+  `packages/protocol/src/entity-client.ts` 与 `src/views/DataEntitiesView.vue`
 
-本机不存在 `/home/wz`，以上是导师提供的本地工作区证据，尚未在该工作区直接执行
-`git status`、读取文件或运行契约测试。根据提供的语义并与 Edge 195434 的 v4 Schema
-交叉核对，catalog 登记的是以下 17 张 Edge live v4 物理表：
+catalog 已从旧 17 项纠正为 26 个 v6 表/View，并按三层登记：
 
-```text
-resource_template, inventory_lot, material_instance, resource_relation,
-substance_content, inventory_reservation, inventory_ledger, sync_outbox,
-processed_command, sync_cursor, lab_meta, lab_zone, lab_placement,
-device_property_latest, device_property_history, workflow_runs, job_runs
-```
+1. `backend-shared`：`resource_template`、`resource_handle_template`、`material`、
+   `relative_position`、`site`、`material_state_history`。
+2. `edge-compat`：`inventory_resource_template`、`material_instance`、`resource_relation`、
+   `substance_content`；明确标成 View，不再把旧五列表误叫物理 `resource_template`。
+3. `edge-private`：aggregate version sidecar、lot/reservation/ledger/outbox/cursor、布局、设备遥测
+   与旧运行历史。
 
-具体 catalog 顺序、字段元数据和 dirty diff 必须在 `/home/wz` 实机复核后才能升级为直接证据。
-这 17 张表不能直接替换成 Backend 表，协议登记应分三层：
+每项同时登记 `objectKind`、`schemaVersion`、`authority`、主键、逐列类型和 CRUD disposition。
+Resource 客户端完整覆盖模板、Material、Graph、Site、state 路由；默认使用连接栏的 Host 微后端
+base URL，换成正式 Backend 只替换 base URL。它同时检查 HTTP status 与 `{code,data,error}`
+业务 envelope，HTTP 200 的非零 code 会抛 `BackendBusinessError`。
 
-1. Backend canonical/shared Schema：`resource_template`、`resource_handle_template`、
-   `material`、`relative_position`、`site`、`material_state_history` 和 Backend Workflow 表。
-2. Edge 当前物理表/兼容 View：注明 v4 table 与 v5 canonical table/View 的迁移映射、对象类型、
-   读写性和最低 Schema 版本。
-3. Edge 私有同步表：`sync_outbox`、`processed_command`、`sync_cursor` 等，不进入 Backend DTO。
+直接门禁结果：68 Edge ops、5 Cloud ops、17 inventory actions、26 typed entities；58 个
+Vitest 测试、`vue-tsc` 和 Vite production build 全部通过。
 
-导师后续提供但本环境仍未直接审计的微前端更新还包括：新增
-`docs/protocol/persistence-ownership.md`，并更新 README、`cloud-mapping.md`、`data-model.md`；
-导师报告 `protocol:check` 通过，计数为 53 Edge ops、5 Cloud ops、17 actions、17 typed entities。
-这些是 `local-draft` 验证记录，不是本机执行结果，也不会把 17 张 live 表自动改成 target 表。
-
-另一个独立证据源是导师提供、待实机复核的
-`/home/wz/unilab-context/leaplab designs@24fc4ce` target-design。它描述未来持久化所有权；不能把
-该设计分支写成微前端、Go Backend 或 OS 已实现 migration/API。
+`/home/wz/unilab-context/leaplab designs@24fc4ce` 仍只是 target-design；它描述未来持久化
+所有权，不能写成微前端、Go Backend 或 OS 已实现 migration/API。
 
 ## Material 客户端投影
 
@@ -75,7 +65,7 @@ UI 的 Adapter Seam：
 `material.parent_uuid`，状态事实表使用 `material_state_history`。私有前端的 camelCase/
 聚合字段保留原样，但只能通过上述 Adapter 显式转换，不能反向改 Backend 字段名。
 
-### 当前 Material API 冲突
+### 私有 `uni-lab-fe` 的 Material API 冲突
 
 读取已采用 Backend-shaped `GET /api/v1/resource-templates*`、
 `GET /api/v1/materials/graph`。但前端 `material.create` 当前发送的是聚合命令：
@@ -97,8 +87,10 @@ Backend 候选 d123ce0 在该 DTO 上继续增加可选 `data`，并在响应 Ma
 create 命令仍与 Backend DTO 不同；Adapter 必须选择是否把 `type` 投影为展示分类，并禁止把 UI
 输入当成 `material.type` 的写入权威。
 
-两者路径相同但语义不同。能力矩阵若把 `material.create` 对 Backend/Edge 宣告为可用，
-请求会不兼容；在命令 DTO 正式统一前必须 fail closed，不能由 Edge 猜字段。
+上述冲突仍适用于私有 `uni-lab-fe@355e2fc`。本地 `unilab-edge-ui` 已改为精确 Backend DTO：
+create 支持 `data` 且不发送 `type/class`，update 不发送 `data/type/class/template`，根列表默认不含
+组件、内部同步显式 `with_children=true`。同一 `createResourceClient(baseUrl)` 可直连 Host 微后端
+或正式 Backend，不再为两端维护两套调用形状。
 
 ## Workflow 客户端契约
 
@@ -117,9 +109,9 @@ Backend 候选 d123ce0 另新增发布契约 Interface：
 - `GET /api/v1/published-workflow-contracts`
 - `POST /api/v1/workflows/{uuid}/composite-invocations`
 
-私有前端 355e2fc 未登记这组 Port，导师提供的 `unilab-edge-ui` 工作区也未在本机直接复核。
-客户端只有在提供者声明完整 capability 且 DTO/错误语义通过契约测试后才能启用；不能因为
-Backend 新增了物理表，就让浏览器或 Edge 直读该表。
+私有前端 355e2fc 未登记这组 Port；`unilab-edge-ui` 也刻意没有把它们登记为 Edge capability。
+这些是 Backend 管理/发布能力，客户端只有连接正式 Backend 且提供者声明完整 capability 时才能
+启用；不能因为 Backend 新增物理表，就让浏览器或 Edge 直读/复制该表。
 
 当前 Task 状态：
 
@@ -138,11 +130,11 @@ execution_unknown / succeeded / failed / skipped / canceled / timeout
 `admission_blocked` 是前端迁移分支新增的投影状态，但 Backend d552078 的
 `workflow_task.status` CHECK 尚不接受它；这是前端登记超前，不得写入 Edge SQLite。
 
-Backend Workflow 公共成功终态是 `succeeded`。Edge Local REST v1 当前仍使用 `success` 时，
+Backend Workflow 公共成功终态是 `succeeded`。Edge Local REST v1 仍使用 `success` 时，
 它属于遗留兼容 Adapter：对 Local v1 响应执行 `succeeded → success`；接收旧 `success` 后，
 在进入 Backend-shaped 共享模型前规范化为 `succeeded`。不能把 Local v1 的 `success` 反向定义
-成 Backend canonical 状态。当前 Edge `workflow_status` WebSocket 上行仍会原样发送内部状态，
-因此 `success → succeeded` 是待实现的共享边界 Adapter，不是已经闭合的能力。
+成 Backend canonical 状态。Edge 共享 HTTP/WS 出入口已经集中执行 `success → succeeded`；
+Local v1 的反向兼容仍只存在于本地响应边界。
 
 前端 Task interface 仍声明 `input/output`，而 Backend migrations 37/40 已删除这两列；
 若 Backend 响应不提供它们，前端严格解码需要同步修订。`edge_uuid` 是 Job 的控制归属投影，
@@ -179,6 +171,5 @@ Workspace 与 Lab-dev 通过不可变 Version Artifact 发布，不复制数据�
 Standalone export/import 携带 `schema_version/content_hash`：同 UUID 同 hash 幂等，同 UUID 异 hash
 冲突。微前端只展示并提交该冲突，不得自行重写 UUID 或按名称合并。
 
-微前端 catalog 需要额外标注五类成熟度：`backend-implemented-candidate`、`edge-live`、
-`legacy-implemented`、`local-draft`、`target-design`。`os-local.sqlite`/Go target 表只能登记在最后一类，
-当前 17 张 Edge live 表仍保持 implemented。
+微前端 catalog 现以 `authority=backend-shared/edge-compat/edge-private`、`objectKind` 和
+`schemaVersion` 标注已实现对象；`os-local.sqlite`/Go target 表仍不进入 implemented catalog。

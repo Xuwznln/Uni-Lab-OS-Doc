@@ -107,10 +107,10 @@ class InstanceSynchronizer:
                         "barcode": node["barcode"],
                         "name": node["name"],
                         "config": node["config"],
+                        "data": node["data"],
                         "meta_data": {
                             "edge_local_id": local_id,
                             "edge_resource_type": node["type"],
-                            "initial_state": node["data"],
                         },
                     }
                     if parent_local_id:
@@ -215,7 +215,7 @@ class InstanceSynchronizer:
                 "GET",
                 "/materials",
                 route="/api/v1/materials",
-                params={"page": page, "page_size": 100},
+                params={"page": page, "page_size": 100, "with_children": True},
             )
             page_materials = _mapping_list(result.get("items"))
             materials.extend(page_materials)

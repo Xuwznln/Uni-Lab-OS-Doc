@@ -173,6 +173,94 @@ def test_v5_database_backfills_backend_material_type_and_rebuilds_legacy_view(
     store.close()
 
 
+def test_divergent_edge_v5_migrates_without_losing_instance_type(tmp_path):
+    """旧 Edge-local v5 与 canonical v5 版本号冲突时也必须无损升级。"""
+
+    database = tmp_path / "inventory-edge-v5.db"
+    _create_v4_database(str(database))
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "ALTER TABLE material_instance ADD COLUMN type "
+        "TEXT NOT NULL DEFAULT 'resource'"
+    )
+    connection.execute(
+        "CREATE INDEX idx_instance_type ON material_instance(type)"
+    )
+    connection.execute(
+        "UPDATE material_instance SET type='workcell' WHERE edge_uuid='owner'"
+    )
+    connection.execute(
+        "UPDATE material_instance SET type='tip' WHERE edge_uuid='occupant'"
+    )
+    connection.execute("PRAGMA user_version=5")
+    connection.commit()
+    connection.close()
+
+    store = InventoryStore(str(database))
+
+    assert store.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
+    assert store.query_one("SELECT type FROM material WHERE uuid='owner'")[
+        "type"
+    ] == "workcell"
+    assert store.query_one("SELECT type FROM material WHERE uuid='occupant'")[
+        "type"
+    ] == "tip"
+    assert store.get_instance("owner")["type"] == "workcell"
+    assert store.query_one(
+        "SELECT name FROM sqlite_master "
+        "WHERE name='_edge_v5_material_type_backup'"
+    ) is None
+    assert store.query_one("PRAGMA integrity_check")["integrity_check"] == "ok"
+    assert store.query_all("PRAGMA foreign_key_check") == []
+    store.close()
+
+
+def test_divergent_v5_type_backup_survives_restart_between_v5_and_v6(tmp_path):
+    """canonical v5 已提交后退出，下一进程仍须用持久 backup 恢复 type。"""
+
+    database = tmp_path / "inventory-edge-v5-restart.db"
+    _create_v4_database(str(database))
+    connection = sqlite3.connect(database)
+    connection.execute(
+        "ALTER TABLE material_instance ADD COLUMN type "
+        "TEXT NOT NULL DEFAULT 'resource'"
+    )
+    connection.execute(
+        "UPDATE material_instance SET type='workcell' WHERE edge_uuid='owner'"
+    )
+    connection.execute(
+        "UPDATE material_instance SET type='tip' WHERE edge_uuid='occupant'"
+    )
+    connection.execute(
+        "CREATE TABLE _edge_v5_material_type_backup ("
+        "material_uuid TEXT PRIMARY KEY, type TEXT NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO _edge_v5_material_type_backup "
+        "SELECT edge_uuid,type FROM material_instance"
+    )
+    connection.commit()
+    connection.executescript(store_module._SCHEMA_V5_BACKEND_CONTRACT)
+    connection.close()
+
+    store = InventoryStore(str(database))
+
+    assert store.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
+    assert store.query_one("SELECT type FROM material WHERE uuid='owner'")[
+        "type"
+    ] == "workcell"
+    assert store.query_one("SELECT type FROM material WHERE uuid='occupant'")[
+        "type"
+    ] == "tip"
+    assert store.query_one(
+        "SELECT name FROM sqlite_master "
+        "WHERE name='_edge_v5_material_type_backup'"
+    ) is None
+    assert store.query_one("PRAGMA integrity_check")["integrity_check"] == "ok"
+    assert store.query_all("PRAGMA foreign_key_check") == []
+    store.close()
+
+
 def test_fresh_v6_legacy_views_write_the_canonical_material_once(tmp_path):
     store = InventoryStore(str(tmp_path / "inventory.db"))
     with store.transaction() as connection:

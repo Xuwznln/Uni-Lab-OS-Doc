@@ -84,7 +84,8 @@ def _service() -> InventoryService:
 
 
 def test_legacy_query_returns_flat_resource_dict_tree() -> None:
-    client = TestClient(create_app(_service()))
+    service = _service()
+    client = TestClient(create_app(service))
 
     response = client.post(
         "/api/v1/edge/material/query",
@@ -108,16 +109,16 @@ def test_legacy_query_returns_flat_resource_dict_tree() -> None:
     assert nodes[1]["liquids"] == [["water", 1.5]]
     assert nodes[1]["liquid_history"] == [["water", 1.5]]
     assert nodes[1]["unknown_counter"] == 2
-    assert nodes[0]["sites"] == [
-        {
-            "uuid": "site-a1",
-            "index": 0,
-            "label": "A1",
-            "occupied_by": "tube-a1",
-            "position": {"x": 1, "y": 2, "z": 3},
-            "size": {"width": 10, "height": 10, "depth": 20},
-        }
-    ]
+    site = nodes[0]["sites"][0]
+    canonical = service.store.list_material_sites("edge-rack")[0]
+    assert site["uuid"] == canonical["uuid"]
+    assert site["uuid"] != "site-a1"  # template identity is never reused
+    assert site["label"] == "A1"
+    assert site["occupied_by"] == "tube-a1"
+    assert site["occupied_material_uuid"] == "edge-tube"
+    assert site["material_uuid"] == "edge-rack"
+    assert site["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert site["size"] == {"width": 10.0, "height": 10.0, "depth": 20.0}
 
     for node in nodes:
         ResourceDict.model_validate(node)

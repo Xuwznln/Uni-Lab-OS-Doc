@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from uuid import UUID
-
 from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -41,6 +39,7 @@ class ResourceTemplateUpdateRequest(BackendModel):
     handles: List[Dict[str, Any]] = Field(default_factory=list)
     init_param_schema: Optional[Dict[str, Any]] = None
     category: List[Any] = Field(default_factory=list)
+    tags: Optional[List[str]] = None
     config_info: List[Any] = Field(default_factory=list)
     cover: Optional[str] = None
     scene: List[Any] = Field(default_factory=list)
@@ -49,7 +48,7 @@ class ResourceTemplateUpdateRequest(BackendModel):
 
 class SitePlacementRequest(BackendModel):
     action: str
-    site_uuid: Optional[UUID] = None
+    site_uuid: Optional[str] = None
 
 
 class RelativePositionRequest(BackendModel):
@@ -70,14 +69,33 @@ class RelativePositionRequest(BackendModel):
 
 
 class MaterialRequest(BackendModel):
-    resource_template_uuid: UUID
-    parent_uuid: Optional[UUID] = None
+    resource_template_uuid: str
+    parent_uuid: Optional[str] = None
     barcode: str = ""
     name: str
     description: Optional[str] = None
     meta_data: Dict[str, Any] = Field(default_factory=dict)
     config: Dict[str, Any] = Field(default_factory=dict)
     data: Dict[str, Any] = Field(default_factory=dict)
+    relative_position: Optional[RelativePositionRequest] = None
+    site_placement: Optional[SitePlacementRequest] = None
+
+
+class MaterialUpdateRequest(BackendModel):
+    """Backend partial update DTO.
+
+    ``class``/``type``/``data`` intentionally do not exist here.  Unknown
+    legacy fields are ignored by ``BackendModel`` but never mutate canonical
+    Material facts.
+    """
+
+    resource_template_uuid: Optional[str] = None  # legacy, immutable
+    parent_uuid: Optional[str] = None
+    barcode: Optional[str] = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    meta_data: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None
     relative_position: Optional[RelativePositionRequest] = None
     site_placement: Optional[SitePlacementRequest] = None
 
@@ -124,28 +142,28 @@ def create_backend_resource_router(service: BackendResourceService) -> APIRouter
     @router.get("/resource-templates")
     def list_resource_templates(
         limit: int = Query(default=0),
-        cursor_uuid: Optional[UUID] = Query(default=None),
+        cursor_uuid: Optional[str] = Query(default=None),
         keyword: str = Query(default=""),
         resource_type: str = Query(default=""),
     ) -> JSONResponse:
         return _call(
             service.list_resource_templates,
             limit=limit,
-            cursor_uuid=str(cursor_uuid) if cursor_uuid else None,
+            cursor_uuid=cursor_uuid,
             keyword=keyword,
             resource_type=resource_type,
         )
 
     @router.get("/resource-templates/{template_uuid}")
-    def get_resource_template(template_uuid: UUID) -> JSONResponse:
-        return _call(service.get_resource_template, str(template_uuid))
+    def get_resource_template(template_uuid: str) -> JSONResponse:
+        return _call(service.get_resource_template, template_uuid)
 
     @router.put("/resource-templates/{template_uuid}")
     def update_resource_template(
-        template_uuid: UUID, body: ResourceTemplateUpdateRequest
+        template_uuid: str, body: ResourceTemplateUpdateRequest
     ) -> JSONResponse:
         try:
-            template_identity = str(template_uuid)
+            template_identity = template_uuid
             current = service.get_resource_template(template_identity)
             definition = body.model_dump(by_alias=True, mode="json")
             if "handles" not in body.model_fields_set:
@@ -157,8 +175,8 @@ def create_backend_resource_router(service: BackendResourceService) -> APIRouter
             return _error(error)
 
     @router.delete("/resource-templates/{template_uuid}")
-    def delete_resource_template(template_uuid: UUID) -> JSONResponse:
-        return _call(service.delete_resource_template, str(template_uuid))
+    def delete_resource_template(template_uuid: str) -> JSONResponse:
+        return _call(service.delete_resource_template, template_uuid)
 
     @router.post("/materials")
     def create_material(body: MaterialRequest) -> JSONResponse:
@@ -174,7 +192,8 @@ def create_backend_resource_router(service: BackendResourceService) -> APIRouter
         page_size: int = Query(default=0),
         name: str = Query(default=""),
         barcode: str = Query(default=""),
-        resource_template_uuid: Optional[UUID] = Query(default=None),
+        resource_template_uuid: Optional[str] = Query(default=None),
+        with_children: bool = Query(default=False),
     ) -> JSONResponse:
         return _call(
             service.list_materials,
@@ -182,9 +201,8 @@ def create_backend_resource_router(service: BackendResourceService) -> APIRouter
             page_size=page_size,
             name=name,
             barcode=barcode,
-            resource_template_uuid=(
-                str(resource_template_uuid) if resource_template_uuid else None
-            ),
+            resource_template_uuid=resource_template_uuid,
+            with_children=with_children,
         )
 
     @router.get("/materials/graph")
@@ -192,29 +210,35 @@ def create_backend_resource_router(service: BackendResourceService) -> APIRouter
         return _call(service.material_graph)
 
     @router.get("/materials/{material_uuid}")
-    def get_material(material_uuid: UUID) -> JSONResponse:
-        return _call(service.get_material, str(material_uuid))
+    def get_material(material_uuid: str) -> JSONResponse:
+        return _call(service.get_material, material_uuid)
 
     @router.put("/materials/{material_uuid}")
-    def update_material(material_uuid: UUID, body: MaterialRequest) -> JSONResponse:
-        values = body.model_dump(mode="json")
+    def update_material(
+        material_uuid: str, body: MaterialUpdateRequest
+    ) -> JSONResponse:
+        values = body.model_dump(mode="json", exclude_unset=True)
         values["_relative_position_specified"] = (
             "relative_position" in body.model_fields_set
         )
+        values["_site_placement_specified"] = (
+            "site_placement" in body.model_fields_set
+            and body.site_placement is not None
+        )
         return _call(
             service.update_material,
-            str(material_uuid),
+            material_uuid,
             values,
         )
 
     @router.delete("/materials/{material_uuid}")
-    def delete_material(material_uuid: UUID) -> JSONResponse:
-        return _call(service.delete_material, str(material_uuid))
+    def delete_material(material_uuid: str) -> JSONResponse:
+        return _call(service.delete_material, material_uuid)
 
     @router.get("/materials/{material_uuid}/sites")
-    def list_sites(material_uuid: UUID) -> JSONResponse:
+    def list_sites(material_uuid: str) -> JSONResponse:
         try:
-            material_identity = str(material_uuid)
+            material_identity = material_uuid
             service.get_material(material_identity)
             return _success(service.list_sites(material_identity))
         except BackendContractError as error:
@@ -222,41 +246,41 @@ def create_backend_resource_router(service: BackendResourceService) -> APIRouter
 
     @router.post("/materials/{material_uuid}/states")
     def append_material_state(
-        material_uuid: UUID, body: MaterialStateRequest
+        material_uuid: str, body: MaterialStateRequest
     ) -> JSONResponse:
         return _call(
             service.append_material_state,
-            str(material_uuid),
+            material_uuid,
             body.model_dump(mode="json"),
             status_code=201,
         )
 
     @router.get("/materials/{material_uuid}/states")
     def list_material_states(
-        material_uuid: UUID,
+        material_uuid: str,
         before_time: Optional[str] = Query(default=None),
         before_uuid: Optional[str] = Query(default=None),
         limit: int = Query(default=0),
     ) -> JSONResponse:
         return _call(
             service.list_material_states,
-            str(material_uuid),
+            material_uuid,
             before_time=before_time,
             before_uuid=before_uuid,
             limit=limit,
         )
 
     @router.get("/materials/{material_uuid}/states/latest")
-    def latest_material_state(material_uuid: UUID) -> JSONResponse:
-        return _call(service.latest_material_state, str(material_uuid))
+    def latest_material_state(material_uuid: str) -> JSONResponse:
+        return _call(service.latest_material_state, material_uuid)
 
     @router.get("/material-states/{state_uuid}")
-    def get_material_state(state_uuid: UUID) -> JSONResponse:
-        return _call(service.get_material_state, str(state_uuid))
+    def get_material_state(state_uuid: str) -> JSONResponse:
+        return _call(service.get_material_state, state_uuid)
 
     @router.get("/sites/{site_uuid}")
-    def get_site(site_uuid: UUID) -> JSONResponse:
-        return _call(service.get_site, str(site_uuid))
+    def get_site(site_uuid: str) -> JSONResponse:
+        return _call(service.get_site, site_uuid)
 
     return router
 

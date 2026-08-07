@@ -33,6 +33,7 @@ from unilabos.app.scheduler.inventory.domain import (
     new_event_id,
 )
 from unilabos.app.scheduler.inventory.material_type import material_type_from_template
+from unilabos.app.scheduler.inventory.site_spec import materialize_template_sites
 from unilabos.app.scheduler.inventory.store import InventoryStore
 from unilabos.utils.tracing import add_event, inject_trace_context, span
 
@@ -528,6 +529,14 @@ class InventoryService:
                 "UPDATE material SET type = ? WHERE uuid = ?",
                 (material_type, edge_uuid),
             )
+            try:
+                materialize_template_sites(
+                    conn,
+                    edge_uuid,
+                    dict(template) if template is not None else None,
+                )
+            except ValueError as exc:
+                raise CommandRejected(str(exc)) from exc
             if parent_uuid:
                 self._tx_upsert_relation(conn, parent_uuid, slot_id, edge_uuid)
             self._emit(

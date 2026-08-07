@@ -42,7 +42,8 @@ def normalize_node_type(value: Any) -> str:
 # 本枚举服务 Edge Local REST v1/旧调度器内部兼容，不是 Backend canonical 状态目录。
 # Backend d552078 的 Workflow Task/Job 公共成功终态是 succeeded；Local v1 响应应由
 # Adapter 映射 succeeded → success，进入 Backend-shaped 共享模型时必须反向规范化。
-# 当前 WebSocket workflow_status 上行尚未集中实现该 Adapter，不能据此扩展 Backend 状态。
+# WebSocket/Backend-shaped 上行统一经 ``to_backend_workflow_status`` 适配；
+# 本地快照和 Local REST 仍保留旧值，不能据此扩展 Backend 状态。
 # Edge 还保留 ready/dispatched（内部推进态）、waiting_for_material（等料）和
 # interrupted（仅历史库）；这些值不能直接扩展 Backend 表 CHECK 或公共 DTO。
 class NodeState(str, Enum):
@@ -64,6 +65,20 @@ class WorkflowState(str, Enum):
     FAILED = "failed"
     CANCELED = "canceled"
     TIMEOUT = "timeout"      # 词汇对齐云端；超时判定由云端 Cron/调度器负责
+
+
+def to_backend_workflow_status(value: Any) -> str:
+    """Normalize a local scheduler status at the Backend wire boundary."""
+
+    status = str(value.value if isinstance(value, Enum) else value or "").strip()
+    return "succeeded" if status == "success" else status
+
+
+def from_backend_workflow_status(value: Any) -> str:
+    """Project a Backend status into the explicitly legacy Local REST model."""
+
+    status = str(value.value if isinstance(value, Enum) else value or "").strip()
+    return "success" if status == "succeeded" else status
 
 
 @dataclass

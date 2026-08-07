@@ -934,9 +934,16 @@ class MessageProcessor:
             )
             return
         try:
-            from unilabos.app.scheduler.inventory.commands import execute_command
+            from unilabos.app.scheduler.inventory.commands import (
+                backend_command_actor,
+                execute_command,
+            )
 
-            response = execute_command(self.inventory_service, data)
+            response = execute_command(
+                self.inventory_service,
+                data,
+                trusted_actor=backend_command_actor(data.get("actor")),
+            )
         except Exception as e:
             logger.error(f"[MessageProcessor] inventory_command {command_id} failed: {e}")
             logger.error(traceback.format_exc())
@@ -976,12 +983,14 @@ class MessageProcessor:
 
     def _send_workflow_status(self, data: Dict[str, Any], status: str, error: str = "") -> None:
         """向云端回报工作流状态（workflow_status 消息）。"""
+        from unilabos.app.scheduler.models import to_backend_workflow_status
+
         message = {
             "action": "workflow_status",
             "data": {
                 "workflow_id": data.get("workflow_id", ""),
                 "task_id": data.get("task_id", "") or data.get("workflow_id", ""),
-                "status": status,
+                "status": to_backend_workflow_status(status),
                 "error": error,
                 "timestamp": time.time(),
             },

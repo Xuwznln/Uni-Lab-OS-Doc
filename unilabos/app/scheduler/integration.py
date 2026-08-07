@@ -23,6 +23,7 @@ import time
 from typing import Any, Optional, Tuple
 
 from unilabos.app.scheduler.backend import JobExecutionBackend, create_edge_stack
+from unilabos.app.scheduler.models import to_backend_workflow_status
 from unilabos.app.scheduler.ordering import HttpSchedulerOrderer, StableLocalOrderer
 from unilabos.app.scheduler.service import EdgeScheduler
 from unilabos.utils.tracing import inject_trace_context
@@ -368,7 +369,7 @@ def _wire_ws_client(scheduler: EdgeScheduler, ws_client: Any) -> None:
             "data": {
                 "workflow_id": workflow_id,
                 "task_id": run_snapshot.get("task_id", workflow_id),
-                "status": state,
+                "status": to_backend_workflow_status(state),
                 "timestamp": time.time(),
             },
         }
