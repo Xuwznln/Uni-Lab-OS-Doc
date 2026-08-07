@@ -1177,6 +1177,37 @@ class MessageProcessor:
         except Exception:
             logger.warning("[MessageProcessor] Send queue full, dropping message")
 
+    def enqueue_action_state(
+        self,
+        device_id: str,
+        action_name: str,
+        task_id: str,
+        job_id: str,
+        typ: str,
+        free: bool,
+        need_more: int,
+        notebook_id: str = "",
+    ) -> None:
+        """从非协程线程将动作状态放入发送队列。"""
+        message = {
+            "action": "report_action_state",
+            "data": {
+                "type": typ,
+                "device_id": device_id,
+                "action_name": action_name,
+                "task_id": task_id,
+                "job_id": job_id,
+                "notebook_id": notebook_id,
+                "free": free,
+                "need_more": need_more + 1,
+            },
+        }
+
+        try:
+            self.send_queue.put_nowait(message)
+        except Exception:
+            logger.warning("[MessageProcessor] Send queue full, dropping keepalive message")
+
     def send_message(self, message: Dict[str, Any]) -> bool:
         """发送消息到队列"""
         try:
@@ -1210,6 +1241,11 @@ class QueueProcessor:
         # 避免在 ROS 结果回调线程里直接 send_goal(wait_for_server) 阻塞 executor。
         self.pending_starts: "Queue[JobInfo]" = Queue()
 
+        # 周期续期 Backend 的 Job 等待窗口，间隔必须小于 Backend 初始窗口。
+        self.keepalive_interval_s: float = 8.0
+        self.keepalive_need_more_s: int = 20
+        self._last_keepalive_ts: float = 0.0
+
         logger.trace("[QueueProcessor] Initialized")
 
     def set_websocket_client(self, websocket_client: "WebSocketClient"):
@@ -1242,9 +1278,10 @@ class QueueProcessor:
         while self.is_running:
             try:
                 self._drain_pending_starts()
+                self._send_running_keepalives()
 
-                # 无 READY 超时/周期上报负担，事件驱动为主，10s 兜底唤醒
-                self.queue_update_event.wait(timeout=10)
+                # 事件驱动为主；定时唤醒保证运行中的 Job 能持续续期。
+                self.queue_update_event.wait(timeout=self.keepalive_interval_s)
                 self.queue_update_event.clear()  # 清除事件
 
             except Exception as e:
@@ -1253,6 +1290,32 @@ class QueueProcessor:
                 time.sleep(1)
 
         logger.debug("[QueueProcessor] Queue processor stopped")
+
+    def _send_running_keepalives(self) -> None:
+        """按固定间隔为所有 STARTED Job 上报 need_more。"""
+        now = time.monotonic()
+        if now - self._last_keepalive_ts < self.keepalive_interval_s:
+            return
+        if not self.message_processor.is_connected():
+            return
+
+        self._last_keepalive_ts = now
+
+        # 校验状态和入队必须与 end_job 串行，避免终态消息之后出现迟到的 free=false。
+        with self.device_manager.lock:
+            for job in self.device_manager.get_active_jobs():
+                if self.device_manager.all_jobs.get(job.job_id) is not job or job.status != JobStatus.STARTED:
+                    continue
+                self.message_processor.enqueue_action_state(
+                    device_id=job.device_id,
+                    action_name=job.action_name,
+                    task_id=job.task_id,
+                    job_id=job.job_id,
+                    typ="job_call_back_status",
+                    free=False,
+                    need_more=self.keepalive_need_more_s,
+                    notebook_id=job.notebook_id or "",
+                )
 
     def notify_queue_update(self):
         """通知队列有更新，触发立即检查"""
