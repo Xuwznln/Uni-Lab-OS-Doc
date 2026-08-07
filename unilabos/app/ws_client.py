@@ -811,13 +811,6 @@ class MessageProcessor:
             logger.error("[MessageProcessor] device_info 缺少 uuid，忽略")
             return
 
-        # 设备无关的同步任务：device_id 为保留字 "list_folder" 时，走通用列目录分支
-        # （实时扫描本机指定文件夹并回传，供前端节点参数的动态下拉使用），不进入甘特逻辑。
-        if str(message_data.get("device_id", "") or "").strip() == "list_folder":
-            payload = message_data.get("payload")
-            self._handle_list_folder(uuid, payload if isinstance(payload, dict) else {})
-            return
-
         # [临时调试] 甘特图回传链路耗时埋点：记录收到 device_info 的时刻（计时起点）
         try:
             from unilabos.app import gantt_timing
@@ -858,84 +851,6 @@ class MessageProcessor:
             logger.error(
                 f"[MessageProcessor] 触发甘特图回传失败 uuid={uuid}: {exc}", exc_info=True
             )
-
-    def _handle_list_folder(self, uuid: str, payload: Dict[str, Any]) -> None:
-        """通用「实时列本机目录」同步任务：起后台 daemon 线程扫描并回传，不阻塞 ws 循环。
-
-        payload: {"path": 要扫描的目录, "exts": 可选后缀白名单(默认 .xlsx/.xls)}。
-        与设备/甘特无关，纯本机文件系统读取，供前端节点参数动态下拉使用。
-        """
-        thread = threading.Thread(
-            target=self._list_folder_worker,
-            args=(uuid, dict(payload) if isinstance(payload, dict) else {}),
-            name=f"list-folder-{uuid[:8]}",
-            daemon=True,
-        )
-        thread.start()
-        logger.info(f"[list_folder] 扫描线程已启动 uuid={uuid}")
-
-    @staticmethod
-    def _list_folder_worker(uuid: str, payload: Dict[str, Any]) -> None:
-        """扫描目录 -> 过滤后缀 -> 按修改时间倒序(最新在前) -> 回传后端 edgesync 接口2。"""
-        import os
-        from datetime import datetime
-
-        from unilabos.app.web import http_client
-
-        raw_path = str((payload or {}).get("path", "") or "").strip() or r"D:\muban"
-        exts_cfg = (payload or {}).get("exts") or [".xlsx", ".xls"]
-        exts = tuple(str(e).lower() for e in exts_cfg if str(e).strip())
-
-        files: List[Dict[str, Any]] = []
-        error = ""
-        try:
-            with os.scandir(raw_path) as it:
-                for entry in it:
-                    try:
-                        if not entry.is_file():
-                            continue
-                    except OSError:
-                        continue
-                    if exts and not entry.name.lower().endswith(exts):
-                        continue
-                    try:
-                        mtime = entry.stat().st_mtime
-                    except OSError:
-                        mtime = 0.0
-                    files.append(
-                        {
-                            "name": entry.name,
-                            "path": os.path.join(raw_path, entry.name),
-                            "mtime": (
-                                datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-                                if mtime
-                                else ""
-                            ),
-                            "mtime_ts": mtime,
-                        }
-                    )
-            files.sort(key=lambda x: x.get("mtime_ts", 0.0), reverse=True)
-        except FileNotFoundError:
-            error = f"目录不存在: {raw_path}"
-        except NotADirectoryError:
-            error = f"不是目录: {raw_path}"
-        except PermissionError:
-            error = f"无权限访问: {raw_path}"
-        except Exception as exc:  # 兜底：任何异常都回传，不抛出
-            error = f"扫描目录失败: {exc}"
-
-        data: Dict[str, Any] = {"dir": raw_path, "files": files}
-        if error:
-            data["error"] = error
-            logger.warning(f"[list_folder] {error} uuid={uuid}")
-
-        try:
-            http_client.report_job_result(uuid, data)
-            logger.info(
-                f"[list_folder] 回传完成 uuid={uuid} dir={raw_path} count={len(files)}"
-            )
-        except Exception as exc:
-            logger.error(f"[list_folder] 回传失败 uuid={uuid}: {exc}", exc_info=True)
 
     @staticmethod
     def _locate_gantt_station(host_node: Any, device_id: str) -> Any:
