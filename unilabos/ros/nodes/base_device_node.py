@@ -424,7 +424,6 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         self._decision_registry = PendingDecisionRegistry()
         self._job_task_ids: Dict[str, str] = {}
         self._job_task_ids_lock = threading.Lock()
-        self._user_decision_timeout = 300.0
 
         # 创建属性发布者
         for attr_name, msg_type in self._status_types.items():
@@ -1610,7 +1609,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             job_id=job_id,
             device_id=self.device_id,
             publish=publish,
-            timeout=timeout or self._user_decision_timeout,
+            timeout=timeout,
         )
 
     def handle_device_exception_decision(

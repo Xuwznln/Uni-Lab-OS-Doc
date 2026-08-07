@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Tuple
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 from unilabos.utils.exception import BUILT_IN_DECISIONS
 
@@ -63,7 +63,7 @@ class PendingDecisionRegistry:
         job_id: str,
         device_id: str,
         publish: Callable[[], None],
-        timeout: float,
+        timeout: Optional[float] = None,
     ) -> dict:
         """先注册 Future，再发布异常并等待首个有效决策。"""
 
@@ -82,10 +82,13 @@ class PendingDecisionRegistry:
 
         try:
             publish()
-            try:
-                decision = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
-            except asyncio.TimeoutError:
-                return {"action": "abort", "reason": "user_decision_timeout"}
+            if timeout is None:
+                decision = await asyncio.shield(future)
+            else:
+                try:
+                    decision = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+                except asyncio.TimeoutError:
+                    return {"action": "abort", "reason": "user_decision_timeout"}
 
             action = decision.get("action") if isinstance(decision, dict) else None
             if action not in BUILT_IN_DECISIONS:
