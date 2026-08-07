@@ -13,7 +13,7 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class InvalidCursorAdvance(ValueError):
@@ -883,6 +883,64 @@ PRAGMA user_version = 5;
 COMMIT;
 """
 
+# v6：对齐 Backend feat/workflow 的 000050/000051。type 是 Material 实例事实，
+# 由冻结模板组件派生；兼容 material_instance View 只读投影该列，不授予旧请求写权。
+_SCHEMA_V6_MATERIAL_TYPE_BACKFILL = r"""
+UPDATE material
+SET type = COALESCE(
+    NULLIF(TRIM(
+        CASE
+            WHEN TRIM(class) = TRIM((
+                SELECT name
+                FROM resource_template
+                WHERE resource_template.uuid = material.resource_template_uuid
+            )) THEN (
+                SELECT json_extract(config_info, '$[0].type')
+                FROM resource_template
+                WHERE resource_template.uuid = material.resource_template_uuid
+            )
+            ELSE (
+                SELECT json_extract(component.value, '$.type')
+                FROM resource_template
+                JOIN json_each(resource_template.config_info) AS component
+                WHERE resource_template.uuid = material.resource_template_uuid
+                  AND TRIM(COALESCE(
+                      NULLIF(json_extract(component.value, '$.name'), ''),
+                      json_extract(component.value, '$.id'),
+                      ''
+                  )) = TRIM(material.name)
+                LIMIT 1
+            )
+        END
+    ), ''),
+    NULLIF(TRIM((
+        SELECT resource_type
+        FROM resource_template
+        WHERE resource_template.uuid = material.resource_template_uuid
+    )), ''),
+    'resource'
+);
+CREATE INDEX IF NOT EXISTS idx_material_type_active
+    ON material (LOWER(TRIM(type)))
+    WHERE deleted_at IS NULL;
+"""
+
+_SCHEMA_V6_MATERIAL_INSTANCE_VIEW = r"""
+CREATE VIEW material_instance AS
+SELECT
+    material.uuid AS edge_uuid,
+    inventory.legacy_cloud_id AS legacy_cloud_id,
+    inventory.lot_id AS lot_id,
+    inventory.legacy_template_id AS template_id,
+    material.barcode AS barcode,
+    material.type AS type,
+    inventory.inventory_status AS status,
+    inventory.aggregate_version AS version,
+    COALESCE(material.parent_uuid, '') AS parent_uuid
+FROM material AS material
+JOIN material_inventory AS inventory ON inventory.material_uuid = material.uuid;
+"""
+
 # v2：实验室操作系统布局层（元信息 / 分区 / 2D 摆放）。
 # 只增表不改旧表，v1 库可原地升级。
 _SCHEMA_V2 = """
@@ -943,13 +1001,13 @@ class InventoryStore:
             # user_version 可能被备份/测试工具错误降写。规范 v5 以可写兼容视图
             # 为结构指纹；已是 v5 时绝不能再次运行旧表 ALTER 或重命名迁移。
             if (
-                current < SCHEMA_VERSION
+                current < 5
                 and compatibility_object is not None
                 and compatibility_object[0] == "view"
             ):
-                self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                current = 5
+                self._conn.execute("PRAGMA user_version = 5")
                 self._conn.commit()
-                return
             if current < 1:
                 self._conn.executescript(_SCHEMA)
             if current < 2:
@@ -994,6 +1052,38 @@ class InventoryStore:
                 except BaseException:
                     self._conn.rollback()
                     raise
+            if current < 6:
+                material_columns = {
+                    row[1]
+                    for row in self._conn.execute(
+                        "PRAGMA table_info(material)"
+                    ).fetchall()
+                }
+                if "type" not in material_columns:
+                    self._conn.execute(
+                        "ALTER TABLE material ADD COLUMN type "
+                        "TEXT NOT NULL DEFAULT 'resource'"
+                    )
+                self._conn.executescript(_SCHEMA_V6_MATERIAL_TYPE_BACKFILL)
+
+                # SQLite cannot ALTER a View. Preserve the already-tested v5
+                # INSTEAD OF trigger bodies while replacing only its projection.
+                trigger_rows = self._conn.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type='trigger' "
+                    "AND name IN ('material_instance_insert', "
+                    "'material_instance_update') ORDER BY name"
+                ).fetchall()
+                trigger_sql = [row["sql"] for row in trigger_rows if row["sql"]]
+                if len(trigger_sql) != 2:
+                    raise RuntimeError(
+                        "material_instance compatibility triggers are incomplete"
+                    )
+                self._conn.execute("DROP TRIGGER material_instance_insert")
+                self._conn.execute("DROP TRIGGER material_instance_update")
+                self._conn.execute("DROP VIEW material_instance")
+                self._conn.executescript(_SCHEMA_V6_MATERIAL_INSTANCE_VIEW)
+                for statement in trigger_sql:
+                    self._conn.execute(statement)
             if current < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 self._conn.commit()

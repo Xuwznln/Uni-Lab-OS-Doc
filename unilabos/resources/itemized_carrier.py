@@ -5,6 +5,8 @@ Automated Liquid Handling Station Resource Classes - Simplified Version
 
 from __future__ import annotations
 
+import copy
+import uuid
 from typing import Dict, List, Optional, TypeVar, Union, Sequence, Tuple
 
 import pylabrobot
@@ -85,10 +87,17 @@ class ItemizedCarrier(ResourcePLR):
       category=category,
       model=model,
     )
+    sites = sites if sites is not None else {}
     self.num_items = len(sites)
     self.num_items_x, self.num_items_y, self.num_items_z = num_items_x, num_items_y, num_items_z
     self.invisible_slots = [] if invisible_slots is None else invisible_slots
     self.layout = "z-y" if self.num_items_z > 1 and self.num_items_x == 1 else "x-z" if self.num_items_z > 1 and self.num_items_y == 1 else "x-y"
+    # Site identity is independent from the material occupying that site.  It
+    # therefore lives on the carrier, rather than borrowing the child resource
+    # UUID.  Both maps survive serialize -> deserialize and let ResourceDict
+    # expose sites as a first-class root field.
+    self.site_uuids: Dict[str, str] = {}
+    self._site_metadata: Dict[str, dict] = {}
 
     if isinstance(sites, dict):
       sites = sites or {}
@@ -97,6 +106,13 @@ class ItemizedCarrier(ResourcePLR):
       self.child_locations: Dict[str, Coordinate] = {}
       self.child_size: Dict[str, dict] = {}
       for spot, resource in sites.items():
+        label = str(spot)
+        site_uuid = getattr(resource, "unilabos_uuid", "") if isinstance(resource, ResourceHolder) else ""
+        if not site_uuid:
+          site_uuid = str(uuid.uuid4())
+          if isinstance(resource, ResourceHolder):
+            resource.unilabos_uuid = site_uuid
+        self.site_uuids[label] = site_uuid
         if resource is not None and getattr(resource, "location", None) is None:
           raise ValueError(f"resource {resource} has no location")
         if resource is not None:
@@ -111,6 +127,11 @@ class ItemizedCarrier(ResourcePLR):
       self.child_size = {site["label"]: site["size"] for site in sites}
       self.sites = [site["occupied_by"] for site in sites]
       self._ordering = {site["label"]: site["position"] for site in sites}
+      for index, site in enumerate(sites):
+        label = str(site.get("label", index))
+        site_uuid = str(site.get("uuid") or uuid.uuid4())
+        self.site_uuids[label] = site_uuid
+        self._site_metadata[label] = copy.deepcopy(site)
     else:
       print("sites:", sites)
 
@@ -401,6 +422,14 @@ class ItemizedCarrier(ResourcePLR):
   def get_free_sites(self) -> List[int]:
     return [spot for spot, resource in self.sites.items() if resource is None]
 
+  def _get_site_uuid(self, identifier: Union[int, str]) -> str:
+    label = str(identifier)
+    site_uuid = self.site_uuids.get(label)
+    if not site_uuid:
+      site_uuid = str(uuid.uuid4())
+      self.site_uuids[label] = site_uuid
+    return site_uuid
+
   def serialize(self):
     return {
       **super().serialize(),
@@ -408,16 +437,24 @@ class ItemizedCarrier(ResourcePLR):
       "num_items_y": self.num_items_y,
       "num_items_z": self.num_items_z,
       "layout": self.layout,
-      "sites": [{
-        "label": str(identifier),
-        "visible": False if identifier in self.invisible_slots else True,
-        "occupied_by": self[identifier].name
-                        if isinstance(self[identifier], ResourcePLR) and not isinstance(self[identifier], ResourceHolder) else
-                        self[identifier] if isinstance(self[identifier], str) else None,
-        "position": {"x": location.x, "y": location.y, "z": location.z},
-        "size": self.child_size[identifier],
-        "content_type": ["bottle", "container", "tube", "bottle_carrier", "tip_rack"]
-      } for identifier, location in self.child_locations.items()]
+      "sites": [
+        {
+          **copy.deepcopy(self._site_metadata.get(str(identifier), {})),
+          "uuid": self._get_site_uuid(identifier),
+          "index": index,
+          "label": str(identifier),
+          "visible": False if identifier in self.invisible_slots else True,
+          "occupied_by": (
+            self[identifier].name
+            if isinstance(self[identifier], ResourcePLR) and not isinstance(self[identifier], ResourceHolder)
+            else self[identifier] if isinstance(self[identifier], str) else None
+          ),
+          "position": {"x": location.x, "y": location.y, "z": location.z},
+          "size": self.child_size[identifier],
+          "content_type": ["bottle", "container", "tube", "bottle_carrier", "tip_rack"]
+        }
+        for index, (identifier, location) in enumerate(self.child_locations.items())
+      ]
     }
 
 

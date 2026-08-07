@@ -186,6 +186,7 @@ def create_scheduler_router(
             hello = link_server.hello_payload if link_server else link_client.hello_info
             result["owner"] = hello.get("owner")
             result["host_id"] = hello.get("host_id") or hello.get("host_name")
+            result["host_node_id"] = hello.get("host_node_id")
             result["protocol_version"] = hello.get("protocol_version")
             result["ros"] = hello.get("ros")
         return result

@@ -26,6 +26,16 @@ def _service() -> InventoryService:
                 "type": "container",
                 "class": "",
                 "config": {"size_x": 120, "size_y": 80, "size_z": 20},
+                "sites": [
+                    {
+                        "uuid": "site-a1",
+                        "index": 0,
+                        "label": "A1",
+                        "occupied_by": "tube-a1",
+                        "position": {"x": 1, "y": 2, "z": 3},
+                        "size": {"width": 10, "height": 10, "depth": 20},
+                    }
+                ],
                 "data": {"template_state": True},
                 "extra": {"fixture": "rack"},
             },
@@ -86,6 +96,8 @@ def test_legacy_query_returns_flat_resource_dict_tree() -> None:
     nodes = response.json()["data"]["nodes"]
     assert [node["uuid"] for node in nodes] == ["edge-rack", "edge-tube"]
     assert nodes[1]["parent_uuid"] == "edge-rack"
+    assert nodes[0]["type"] == "container"
+    assert nodes[0]["extra"]["edge_inventory"]["type"] == "container"
     assert nodes[1]["extra"]["update_resource_site"] == "A1"
     assert nodes[1]["extra"]["edge_inventory"]["template_id"] == "tpl-tube"
     assert nodes[1]["data"] == {
@@ -96,6 +108,16 @@ def test_legacy_query_returns_flat_resource_dict_tree() -> None:
     assert nodes[1]["liquids"] == [["water", 1.5]]
     assert nodes[1]["liquid_history"] == [["water", 1.5]]
     assert nodes[1]["unknown_counter"] == 2
+    assert nodes[0]["sites"] == [
+        {
+            "uuid": "site-a1",
+            "index": 0,
+            "label": "A1",
+            "occupied_by": "tube-a1",
+            "position": {"x": 1, "y": 2, "z": 3},
+            "size": {"width": 10, "height": 10, "depth": 20},
+        }
+    ]
 
     for node in nodes:
         ResourceDict.model_validate(node)

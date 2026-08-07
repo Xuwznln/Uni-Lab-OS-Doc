@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
+from unilabos.app.scheduler.inventory.material_type import material_type_from_template
 from unilabos.app.scheduler.inventory.store import InventoryStore
 
 
@@ -282,7 +283,7 @@ class BackendResourceService:
         try:
             with self.store.transaction() as conn:
                 template = conn.execute(
-                    "SELECT resource_type FROM resource_template "
+                    "SELECT * FROM resource_template "
                     "WHERE uuid=? AND deleted_at IS NULL",
                     (template_uuid,),
                 ).fetchone()
@@ -294,12 +295,19 @@ class BackendResourceService:
                 if parent_uuid:
                     self._require_material(conn, parent_uuid, MATERIAL_PARENT_NOT_FOUND)
                 now = _now()
+                material_class = str(template["name"])
+                material_type = material_type_from_template(
+                    dict(template),
+                    material_name=name,
+                    material_class=material_class,
+                    root=True,
+                )
                 conn.execute(
                     """
                     INSERT INTO material(
                         uuid,create_time,update_time,deleted_at,description,meta_data,
-                        resource_template_uuid,parent_uuid,class,barcode,name,config,data
-                    ) VALUES (?,?,?,NULL,?,?,?,?,?,?,?,?,?)
+                        resource_template_uuid,parent_uuid,class,type,barcode,name,config,data
+                    ) VALUES (?,?,?,NULL,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         material_uuid,
@@ -309,11 +317,12 @@ class BackendResourceService:
                         _dump(values.get("meta_data") or {}),
                         template_uuid,
                         parent_uuid,
-                        str(template["resource_type"]),
+                        material_class,
+                        material_type,
                         barcode,
                         name,
                         _dump(values.get("config") or {}),
-                        _dump({}),
+                        _dump(values.get("data") or {}),
                     ),
                 )
                 conn.execute(
@@ -419,7 +428,7 @@ class BackendResourceService:
                 conn.execute(
                     """
                     UPDATE material SET parent_uuid=?,barcode=?,name=?,description=?,
-                        meta_data=?,config=?,update_time=?
+                        meta_data=?,config=?,data=?,update_time=?
                     WHERE uuid=? AND deleted_at IS NULL
                     """,
                     (
@@ -429,6 +438,7 @@ class BackendResourceService:
                         values.get("description"),
                         _dump(values.get("meta_data") or {}),
                         _dump(values.get("config") or {}),
+                        _dump(values.get("data") or {}),
                         _now(),
                         material_uuid,
                     ),
@@ -946,6 +956,7 @@ class BackendResourceService:
                 "resource_template_uuid": row["resource_template_uuid"],
                 "parent_uuid": row.get("parent_uuid"),
                 "class": row["class"],
+                "type": row["type"],
                 "barcode": row["barcode"],
                 "name": row["name"],
                 "config": _json(row.get("config"), {}),

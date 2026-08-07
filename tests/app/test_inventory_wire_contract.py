@@ -87,6 +87,45 @@ def test_cross_repository_fixture_matches_openapi_and_runtime():
     assert ("GET", "/api/v1/inventory/sync/cursors") in operation_paths
 
 
+def test_material_type_is_response_only_and_cannot_be_client_reported():
+    service = _service()
+    client = TestClient(create_app(service))
+    service.upsert_template(
+        "tpl-container",
+        category="fallback-category",
+        spec={"resource": {"type": "container"}},
+    )
+
+    accepted = client.post(
+        "/api/v1/inventory/commands",
+        json=_wire_command(
+            "cmd-derived-type",
+            "inventory.inbound",
+            {
+                "kind": "instance",
+                "template_id": "tpl-container",
+                "edge_uuid": "mi-derived-type",
+            },
+        ),
+    )
+    rejected = client.post(
+        "/api/v1/inventory/commands",
+        json=_wire_command(
+            "cmd-client-type",
+            "inventory.inbound",
+            {
+                "kind": "instance",
+                "edge_uuid": "mi-client-type",
+                "type": "client-controlled",
+            },
+        ),
+    )
+
+    assert accepted.status_code == 200
+    assert accepted.json()["result"]["type"] == "container"
+    assert rejected.status_code == 422
+
+
 def test_system_owned_entity_diagnostics_are_read_only_views():
     service = _service()
     client = TestClient(create_app(service))

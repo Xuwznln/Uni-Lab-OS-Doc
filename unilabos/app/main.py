@@ -39,10 +39,11 @@ if unilabos_dir not in sys.path:
 from unilabos.app.utils import cleanup_for_restart
 from unilabos.utils.banner_print import print_status, print_unilab_banner
 from unilabos.config.config import (
-    load_config,
     BasicConfig,
     EdgeControlConfig,
     HTTPConfig,
+    load_config,
+    resolve_host_node_name,
 )
 
 # Global restart flags (used by ws_client and web/server)
@@ -369,6 +370,18 @@ def parse_args():
         "--is_slave",
         action="store_true",
         help="Run the backend as slave node (without host privileges).",
+    )
+    parser.add_argument(
+        "--host_node_name",
+        "--host-node-name",
+        "--host_node_id",
+        "--host-node-id",
+        dest="host_node_name",
+        type=str,
+        default=None,
+        help="Rename the HostNode runtime instance (default: host_node). This controls "
+        "the resource root id/name and /devices/<name>/... ROS namespace; the registry "
+        "device type remains host_node.",
     )
     parser.add_argument(
         "--hostlink_addr",
@@ -1177,6 +1190,20 @@ def main():
     BasicConfig.port = args_dict["port"] if args_dict["port"] else BasicConfig.port
     BasicConfig.is_host_mode = not args_dict.get("is_slave", False)
     try:
+        BasicConfig.host_node_name = resolve_host_node_name(
+            args_dict.get("host_node_name")
+        )
+    except ValueError as exc:
+        print_status(f"HostNode 启动参数错误: {exc}", "error")
+        os._exit(2)
+    # 将配置文件/env 解析出的最终值回填 composition root，确保 backend
+    # 线程与启动前的资源查询使用同一个实例身份。
+    args_dict["host_node_name"] = BasicConfig.host_node_name
+    if BasicConfig.is_host_mode:
+        print_status(
+            f"HostNode 运行时实例名: {BasicConfig.host_node_name}", "info"
+        )
+    try:
         material_service_mode = configure_material_startup(args_dict)
     except ValueError as exc:
         print_status(f"物料服务启动参数错误: {exc}", "error")
@@ -1217,7 +1244,7 @@ def main():
         print_status("使用远程资源启动", "info")
         from unilabos.app.web import http_client
 
-        res = http_client.resource_get("host_node", False)
+        res = http_client.resource_get(BasicConfig.host_node_name, False)
         if str(res.get("code", 0)) == "0" and len(res.get("data", [])) > 0:
             print_status("远程资源已存在，使用云端物料！", "info")
             args_dict["graph"] = None

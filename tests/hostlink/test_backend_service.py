@@ -67,10 +67,10 @@ class _Tree:
 
 
 class _TreeSet:
-    def __init__(self) -> None:
+    def __init__(self, host_node_id: str = "host_node") -> None:
         plate = _Node("u-plate", "plate_1")
         self.trees = [
-            _Tree(_Node("u-host", "host_node", [plate], resource_type="device"))
+            _Tree(_Node("u-host", host_node_id, [plate], resource_type="device"))
         ]
 
     @property
@@ -103,6 +103,7 @@ def isolated_network(monkeypatch):
     monkeypatch.setattr(HostLinkConfig, "ros_discovery_server", "off")
     monkeypatch.setattr(HostLinkConfig, "ros_discovery_port", 0)
     monkeypatch.setattr(BasicConfig, "machine_name", "edge-host-test")
+    monkeypatch.setattr(BasicConfig, "host_node_name", "host_node")
     monkeypatch.setattr(BasicConfig, "is_host_mode", True)
     monkeypatch.setattr(BasicConfig, "slave_no_host", False)
     for key in (
@@ -130,7 +131,8 @@ def test_host_microbackend_owns_listener_material_and_ros(monkeypatch):
         return []
 
     monkeypatch.setattr(http_client, "material_query", empty_material_source)
-    tree = _TreeSet()
+    monkeypatch.setattr(BasicConfig, "host_node_name", "west_lab")
+    tree = _TreeSet("west_lab")
     service = setup_host_network_service(lambda: tree)
     assert service is not None
     assert get_host_network_service() is service
@@ -148,16 +150,17 @@ def test_host_microbackend_owns_listener_material_and_ros(monkeypatch):
     try:
         assert client.connect_blocking(timeout=3.0)
         assert client.hello_info["owner"] == SERVICE_OWNER
+        assert client.hello_info["host_node_id"] == "west_lab"
         assert client.hello_ros_info().domain_id == 73
         assert client.hello_ros_info().automatic_discovery_range == "OFF"
 
         # HTTP 物料组件未命中时，微后端再转到 HostNode 挂接的运行时树。
-        nodes = client.get_resource(res_id="host_node", with_children=True)
-        assert [node["id"] for node in nodes] == ["host_node", "plate_1"]
+        nodes = client.get_resource(res_id="west_lab", with_children=True)
+        assert [node["id"] for node in nodes] == ["west_lab", "plate_1"]
         assert material_calls == [
             {
                 "uuids": None,
-                "resource_id": "host_node",
+                "resource_id": "west_lab",
                 "with_children": True,
             }
         ]
@@ -170,6 +173,7 @@ def test_host_microbackend_owns_listener_material_and_ros(monkeypatch):
         assert status["role"] == "host"
         assert status["owner"] == SERVICE_OWNER
         assert status["host_id"] == "edge-host-test"
+        assert status["host_node_id"] == "west_lab"
         assert status["protocol_version"] == 1
         assert status["ros"]["domain_id"] == 73
         assert status["peers"][0]["node_id"] == "slave-a"

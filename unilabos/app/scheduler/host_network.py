@@ -65,6 +65,9 @@ class HostNetworkService:
         self.server.hello_payload = {
             "host_id": BasicConfig.machine_name,
             "host_name": BasicConfig.machine_name,
+            # Additive field: machine identity and the renameable ROS/resource
+            # HostNode identity are deliberately separate concepts.
+            "host_node_id": BasicConfig.host_node_name,
             "owner": SERVICE_OWNER,
             "protocol_version": PROTOCOL_VERSION,
             "ros": self.ros_info.to_dict(),

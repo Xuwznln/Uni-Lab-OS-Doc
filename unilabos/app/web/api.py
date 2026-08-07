@@ -55,6 +55,9 @@ def compute_host_node_diff(current: dict, previous: dict) -> dict:
     if current.get("available") != previous.get("available"):
         diff["available"] = current.get("available")
 
+    if current.get("host_node_id") != previous.get("host_node_id"):
+        diff["host_node_id"] = current.get("host_node_id")
+
     # 检查设备列表变化
     current_devices = current.get("devices", {})
     previous_devices = previous.get("devices", {})

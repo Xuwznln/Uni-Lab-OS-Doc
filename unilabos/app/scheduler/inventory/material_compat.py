@@ -35,6 +35,7 @@ _RESOURCE_FIELDS = {
     "machine_name",
     "barcode",
     "barcode_symbology",
+    "sites",
     "liquids",
     "liquid_history",
     "unknown_counter",
@@ -124,6 +125,7 @@ def _node_from_instance(
             "template_id": str(instance.get("template_id") or ""),
             "lot_id": str(instance.get("lot_id") or ""),
             "status": str(instance.get("status") or ""),
+            "type": str(instance.get("type") or "resource"),
             "version": int(instance.get("version") or 1),
             "legacy_cloud_id": str(instance.get("legacy_cloud_id") or ""),
             "slot_id": slot_id,
@@ -152,10 +154,13 @@ def _node_from_instance(
         "model": base.get("model") if isinstance(base.get("model"), dict) else {},
         "icon": str(base.get("icon") or ""),
         "parent_uuid": str(instance.get("parent_uuid") or ""),
-        # ``container`` is the safest PLR-compatible fallback for an instance
-        # whose early inventory template only carried warehouse properties.
+        # Prefer the persisted Backend-compatible type.  ``resource`` remains
+        # the deterministic fallback for older templates without a PLR type.
         "type": str(
-            base.get("type") or (template or {}).get("category") or "container"
+            instance.get("type")
+            or base.get("type")
+            or (template or {}).get("category")
+            or "resource"
         ),
         "class": str(base.get("class") or ""),
         "config": config,

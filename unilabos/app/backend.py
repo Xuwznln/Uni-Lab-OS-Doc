@@ -1,4 +1,5 @@
 import threading
+from typing import Optional
 
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.utils import logger
@@ -16,6 +17,7 @@ def start_backend(
     is_slave: bool = False,
     visual: str = "None",
     resources_mesh_config: dict = {},
+    host_node_name: Optional[str] = None,
     **kwargs,
 ):
     if backend == "ros":
@@ -31,8 +33,12 @@ def start_backend(
     else:
         raise ValueError(f"Unsupported backend: {backend}")
 
+    target = main if not is_slave else slave
+    target_kwargs = (
+        {"host_node_name": host_node_name} if not is_slave else {}
+    )
     backend_thread = threading.Thread(
-        target=main if not is_slave else slave,
+        target=target,
         args=(
             devices_config,
             resources_config,
@@ -43,6 +49,7 @@ def start_backend(
             visual,
             resources_mesh_config,
         ),
+        kwargs=target_kwargs,
         name="backend_thread",
         daemon=True,
     )

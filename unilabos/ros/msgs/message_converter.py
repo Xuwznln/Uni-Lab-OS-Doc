@@ -165,8 +165,12 @@ _msg_converter: Dict[Type, Any] = {
 }
 
 def obtain_config_with_barcode(x: dict):
-    """Resource msg 无 barcode 字段：根字段形态（ResourceDict dump）的条码归位回 config
-    （PLR Barcode dict），否则结构化 msg 通路丢条码；老形态（config 自带）原样不动。"""
+    """把 Resource msg 不支持的根字段临时归位到 config。
+
+    ``Resource`` msg 没有 barcode/sites 字段：根字段形态
+    （ResourceDict dump）的条码归位为 PLR Barcode dict，sites[] 原样归位；
+    接收端再经 ResourceDict 唯一漏斗提升。老形态（config 自带）原样不动。
+    """
     config = dict(x.get("config") or {})
     barcode = x.get("barcode", "")
     if barcode and not isinstance(barcode, dict) and "barcode" not in config:
@@ -175,6 +179,8 @@ def obtain_config_with_barcode(x: dict):
             "symbology": x.get("barcode_symbology", "") or "",
             "position_on_resource": "front",
         }
+    if x.get("sites") is not None and "sites" not in config:
+        config["sites"] = x["sites"]
     return config
 
 def obtain_data_with_uuid(x: dict):

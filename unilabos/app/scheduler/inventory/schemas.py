@@ -460,6 +460,7 @@ class MaterialInstanceResponse(WireModel):
     lot_id: str
     template_id: str
     barcode: str
+    type: NonEmptyString
     status: InstanceState
     version: PositiveInt
     parent_uuid: str

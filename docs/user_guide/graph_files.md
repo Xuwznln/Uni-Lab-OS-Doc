@@ -678,6 +678,9 @@ unilab -g workshop1.json
 
 ### 2. 层级组织
 
+下图的 `host_node` 是默认实例名；改名后以启动配置中的
+`BasicConfig.host_node_name` 为准，节点的 `class` 仍为 `host_node`。
+
 ```
 host_node (主节点)
 └── liquid_handler_1 (设备)

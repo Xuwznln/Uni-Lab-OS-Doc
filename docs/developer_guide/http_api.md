@@ -2,6 +2,11 @@
 
 本文档介绍如何通过 HTTP API 与 Uni-Lab-OS 进行交互，包括查询设备、提交任务和获取结果。
 
+> 文中的 `host_node` 是默认 HostNode **实例名**。如果启动时使用
+> `--host_node_name west_lab`（或在 `BasicConfig.host_node_name` 中配置），
+> 所有设备 ID、资源根 ID 及 `/devices/host_node/...` 路径都要把
+> `host_node` 替换为 `west_lab`；设备类型/注册表键仍叫 `host_node`。
+
 ## 概述
 
 Uni-Lab-OS 提供 RESTful HTTP API，允许外部系统通过标准 HTTP 请求控制实验室设备。API 基于 FastAPI 构建，默认运行在 `http://localhost:8002`。

@@ -1,3 +1,4 @@
+import copy
 import importlib
 import inspect
 import json
@@ -9,7 +10,11 @@ import networkx as nx
 from pylabrobot.resources import ResourceHolder
 from unilabos_msgs.msg import Resource
 
-from unilabos.config.config import BasicConfig
+from unilabos.config.config import (
+    BasicConfig,
+    DEFAULT_HOST_NODE_NAME,
+    HOST_NODE_REGISTRY_NAME,
+)
 from unilabos.resources.container import RegularContainer
 from unilabos.resources.itemized_carrier import ItemizedCarrier, BottleCarrier
 from unilabos.ros.msgs.message_converter import convert_to_ros_msg
@@ -18,6 +23,9 @@ from unilabos.resources.resource_tracker import (
     TRACKER_STATE_KEYS,
     ResourceDictInstance,
     ResourceTreeSet,
+    apply_plr_site_metadata,
+    extract_plr_sites,
+    plr_class_accepts_serialized_sites,
 )
 from unilabos.utils import logger
 from unilabos.utils.banner_print import print_status
@@ -47,13 +55,27 @@ def canonicalize_nodes_data(
     print_status(f"{len(nodes)} Resources loaded", "info")
 
     # 第一步：基本预处理（处理graphml的label字段）
-    outer_host_node_id = None
+    outer_host_node_ids: List[int] = []
     for idx, node in enumerate(nodes):
         if node.get("label") is not None:
             node_id = node.pop("label")
             node["id"] = node["name"] = node_id
-        if node["id"] == "host_node":
-            outer_host_node_id = idx
+        # HostNode 的实例 id 可配置；class 是稳定的设备类型。保留默认 id
+        # 判断是为了兼容缺失 class 的旧 graph 快照。
+        host_runtime_ids = {
+            DEFAULT_HOST_NODE_NAME,
+            BasicConfig.host_node_name,
+        }
+        node_class = node.get("class")
+        if node_class == HOST_NODE_REGISTRY_NAME or (
+            node["id"] in host_runtime_ids and not node_class
+        ):
+            outer_host_node_ids.append(idx)
+        elif node["id"] in host_runtime_ids:
+            raise ValueError(
+                f"Device/resource id '{node['id']}' conflicts with the HostNode "
+                f"runtime name but has class '{node_class}'"
+            )
         if not isinstance(node.get("config"), dict):
             node["config"] = {}
         if not node.get("type"):
@@ -82,7 +104,7 @@ def canonicalize_nodes_data(
             if k not in RESOURCE_ROOT_FIELDS and k not in ("position", "children"):
                 v = node.pop(k)
                 node["config"][k] = v
-    if outer_host_node_id is not None:
+    for outer_host_node_id in reversed(outer_host_node_ids):
         nodes.pop(outer_host_node_id)
     # 第二步：处理parent_relation
     id2idx = {node["id"]: idx for idx, node in enumerate(nodes)}
@@ -592,43 +614,56 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
                 data[state_key] = resource[state_key]
         return data
 
+    from pylabrobot.utils.object_parsing import find_subclass
+
     all_states = {resource["id"]: state_of(resource)}
+    all_sites: Dict[str, List[Dict[str, Any]]] = {}
 
     def resource_ulab_to_plr_inner(resource: dict):
         all_states[resource["name"]] = state_of(resource)
-        extra = resource.pop("extra", {})
+        config = dict(resource.get("config") or {})
+        root_sites = resource.get("sites")
+        if root_sites is None:
+            # 兼容漏斗之前的老形态；输出时仍只保留根字段这一份真相。
+            root_sites = config.get("sites")
+        config.pop("sites", None)
+        if root_sites is not None:
+            all_sites[resource["name"]] = copy.deepcopy(root_sites)
         d = {
             "name": resource["name"],
             "type": resource["type"],
-            "size_x": resource["config"].get("size_x", 0),
-            "size_y": resource["config"].get("size_y", 0),
-            "size_z": resource["config"].get("size_z", 0),
+            "size_x": config.get("size_x", 0),
+            "size_y": config.get("size_y", 0),
+            "size_z": config.get("size_z", 0),
             "location": {**resource["position"], "type": "Coordinate"},
             "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},  # Resource如果没有rotation，是plr版本太低
             "category": resource["type"],
-            "model": resource["config"].get("model", None),  # resource中deck没有model
+            "model": config.get("model", None),  # resource中deck没有model
             "children": (
                 [resource_ulab_to_plr_inner(child) for child in resource["children"]]
                 if isinstance(resource["children"], list)
                 else [resource_ulab_to_plr_inner(child) for child_id, child in resource["children"].items()]
             ),
             "parent_name": resource["parent"] if resource["parent"] is not None else None,
-            **resource["config"],
+            **config,
         }
+        if root_sites is not None:
+            site_cls = find_subclass(d["type"], ResourcePLR)
+            if site_cls is not None and plr_class_accepts_serialized_sites(site_cls):
+                d["sites"] = copy.deepcopy(root_sites)
         if not plr_model:
             d.pop("model")
         return d
 
     d = resource_ulab_to_plr_inner(resource)
     """无法通过Resource进行反序列化，例如TipSpot必须内部序列化好，直接用TipSpot序列化会多参数，导致出错"""
-    from pylabrobot.utils.object_parsing import find_subclass
-
     sub_cls = find_subclass(d["type"], ResourcePLR)
     spect = inspect.signature(sub_cls)
     if "category" not in spect.parameters:
         d.pop("category")
     resource_plr = sub_cls.deserialize(d, allow_marshal=True)
     resource_plr.load_all_state(all_states)
+    apply_plr_site_metadata(resource_plr, all_sites)
     return resource_plr
 
 
@@ -656,12 +691,16 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
                 logger.warning(f"转换pylabrobot的时候，出现未知类型: {source}")
             return source
 
-    def resource_plr_to_ulab_inner(d: dict, all_states: dict, child=True) -> dict:
+    def resource_plr_to_ulab_inner(d: dict, all_states: dict, all_sites: dict, child=True) -> dict:
         r = {
             "id": d["name"],
             "name": d["name"],
             "sample_id": None,
-            "children": [resource_plr_to_ulab_inner(child, all_states) for child in d["children"]] if child else [],
+            "children": (
+                [resource_plr_to_ulab_inner(child, all_states, all_sites) for child in d["children"]]
+                if child
+                else []
+            ),
             "parent": d["parent_name"] if d["parent_name"] else parent_name if parent_name else None,
             "type": replace_plr_type_to_ulab(d.get("category")),  # FIXME plr自带的type是python class name
             "class": d.get("class", ""),
@@ -670,14 +709,27 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
                 if d["location"]
                 else {"x": 0, "y": 0, "z": 0}
             ),
-            "config": {k: v for k, v in d.items() if k not in ["name", "children", "parent_name", "location"]},
+            "config": {
+                k: v for k, v in d.items() if k not in ["name", "children", "parent_name", "location", "sites"]
+            },
             "data": all_states[d["name"]],
+            "sites": copy.deepcopy(all_sites.get(d["name"])),
         }
         return r
 
     d = resource_plr.serialize()
     all_states = resource_plr.serialize_all_state()
-    r = resource_plr_to_ulab_inner(d, all_states, with_children)
+    all_sites: Dict[str, List[Dict[str, Any]]] = {}
+
+    def collect_sites(plr_node: "ResourcePLR", node_dict: dict):
+        site_defs = extract_plr_sites(plr_node, node_dict)
+        if site_defs is not None:
+            all_sites[plr_node.name] = site_defs
+        for child_resource, child_dict in zip(plr_node.children, node_dict["children"]):
+            collect_sites(child_resource, child_dict)
+
+    collect_sites(resource_plr, d)
+    r = resource_plr_to_ulab_inner(d, all_states, all_sites, with_children)
 
     return r
 

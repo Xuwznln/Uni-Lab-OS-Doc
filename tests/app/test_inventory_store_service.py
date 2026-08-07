@@ -211,6 +211,32 @@ class TestConcurrency:
 
 
 class TestInstance:
+    def test_type_is_derived_from_template_and_persisted(self, svc):
+        svc.upsert_template(
+            "tpl-container",
+            category="fallback-category",
+            spec={"resource": {"type": "container"}},
+        )
+        svc.upsert_template("tpl-reagent", category="reagent")
+
+        container = svc.register_instance(
+            template_id="tpl-container", edge_uuid="mi-container"
+        )
+        reagent = svc.register_instance(
+            template_id="tpl-reagent", edge_uuid="mi-reagent"
+        )
+        fallback = svc.register_instance(edge_uuid="mi-resource")
+
+        assert container["type"] == "container"
+        assert reagent["type"] == "reagent"
+        assert fallback["type"] == "resource"
+        registered_event = next(
+            row
+            for row in svc.store.pending_outbox(0, 100)
+            if row["aggregate_id"] == "mi-container"
+        )
+        assert json.loads(registered_event["payload_json"])["type"] == "container"
+
     def test_barcode_unique_among_active(self, svc):
         svc.register_instance(template_id="tpl-p", barcode="BC-1", edge_uuid="mi-1")
         with pytest.raises(DuplicateBarcode):
@@ -452,7 +478,7 @@ class TestStoreMigration:
         assert reopened.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
         reopened.close()
 
-    def test_v1_database_upgrades_to_current_and_backfills_parent(self, tmp_path):
+    def test_v1_database_upgrades_to_latest_and_backfills_parent(self, tmp_path):
         """临时 v1 库只从既有 relation 确定性补 parent，不触碰用户实库。"""
 
         db = str(tmp_path / "inventory-v1.db")
@@ -474,6 +500,7 @@ class TestStoreMigration:
         reopened = InventoryStore(db)
         assert reopened.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
         assert reopened.get_instance("mi-v1")["parent_uuid"] == "rack-v1"
+        assert reopened.get_instance("mi-v1")["type"] == "resource"
         assert reopened.parent_consistency_issues() == []
         reopened.close()
 

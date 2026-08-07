@@ -352,6 +352,9 @@ unilab --ak your_ak --sk your_sk -g test/experiments/mock_devices/mock_all.json
 
 `test_latency` 是 host_node 提供的测试方法，用于：
 
+> 此处使用默认实例名 `host_node`。若启动参数设置了
+> `--host_node_name <name>`，界面中的关联设备名称和动作路径均使用该新名称。
+
 - 测试网络延迟
 - 校准时间误差
 - 验证系统响应

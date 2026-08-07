@@ -21,7 +21,13 @@ def get_host_node_info() -> Dict[str, Any]:
     Returns:
         Dict: 包含主机节点信息的字典
     """
-    host_info = {"available": False, "devices": {}, "subscribed_topics": [], "action_clients": {}}
+    host_info = {
+        "available": False,
+        "host_node_id": BasicConfig.host_node_name,
+        "devices": {},
+        "subscribed_topics": [],
+        "action_clients": {},
+    }
     if not BasicConfig.is_host_mode:
         return host_info
     # 尝试获取HostNode实例，设置超时为0秒
@@ -29,6 +35,7 @@ def get_host_node_info() -> Dict[str, Any]:
     if not host_node:
         return host_info
     host_info["available"] = True
+    host_info["host_node_id"] = host_node.device_id
     host_info["devices"] = {
         edge_device_id: {
             "namespace": namespace,

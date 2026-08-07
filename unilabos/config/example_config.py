@@ -4,6 +4,9 @@
 class BasicConfig:
     ak = ""  # 实验室网页给您提供的ak代码，您可以在配置文件中指定，也可以通过运行unilabos时以 --ak 传入，优先按照传入参数解析
     sk = ""  # 实验室网页给您提供的sk代码，您可以在配置文件中指定，也可以通过运行unilabos时以 --sk 传入，优先按照传入参数解析
+    # HostNode 运行时实例名；同时作为资源根 id/name 与 /devices/<name>/... ROS 路径。
+    # 仅支持字母、数字、下划线，且不能以数字开头。注册表设备类型仍固定为 host_node。
+    host_node_name = "host_node"
 
 
 # WebSocket配置，一般无需调整

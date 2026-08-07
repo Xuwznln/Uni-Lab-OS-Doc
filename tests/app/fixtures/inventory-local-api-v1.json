@@ -590,7 +590,7 @@
             "event_type": "instance.registered",
             "lab_id": "lab-contract",
             "occurred_at": 1784840000000,
-            "payload_json": "{\"template_id\": \"tpl-contract\", \"lot_id\": \"lot-contract\", \"barcode\": \"BC-CONTRACT\", \"legacy_cloud_id\": \"\", \"parent_uuid\": \"rack-contract\", \"slot_id\": \"A1\"}",
+            "payload_json": "{\"template_id\": \"tpl-contract\", \"lot_id\": \"lot-contract\", \"barcode\": \"BC-CONTRACT\", \"legacy_cloud_id\": \"\", \"type\": \"reagent\", \"parent_uuid\": \"rack-contract\", \"slot_id\": \"A1\"}",
             "sequence": 3,
             "span_id": "",
             "trace_id": "",
@@ -696,6 +696,7 @@
             "parent_uuid": "rack-contract",
             "status": "warehouse",
             "template_id": "tpl-contract",
+            "type": "reagent",
             "version": 1
           }
         ],

@@ -77,7 +77,11 @@ from unilabos.utils import logger
 from unilabos.utils.exception import DeviceClassInvalid
 from unilabos.utils.log import warning
 from unilabos.utils.type_check import serialize_result_info
-from unilabos.config.config import BasicConfig
+from unilabos.config.config import (
+    BasicConfig,
+    HOST_NODE_REGISTRY_NAME,
+    resolve_host_node_name,
+)
 
 if TYPE_CHECKING:
     from unilabos.app.ws_client import QueueItem
@@ -231,6 +235,21 @@ class HostNode(BaseROS2DeviceNode):
             bridges: 桥接器列表
             discovery_interval: 设备发现间隔（秒），默认5秒
         """
+        device_id = resolve_host_node_name(device_id)
+        conflicting_node = next(
+            (
+                node
+                for node in resources_config.all_nodes
+                if node.res_content.id == device_id
+            ),
+            None,
+        )
+        if conflicting_node is not None:
+            raise ValueError(
+                f"HostNode runtime name '{device_id}' conflicts with an existing "
+                f"resource of class '{conflicting_node.res_content.klass}'"
+            )
+        BasicConfig.host_node_name = device_id
         if self._instance is not None:
             self._instance.lab_logger().critical("[Host Node] HostNode instance already exists.")
 
@@ -250,14 +269,15 @@ class HostNode(BaseROS2DeviceNode):
             bridges = []
         self.bridges = bridges
 
-        # 创建 host_node 作为一个单独的 ResourceTree
+        # 创建 HostNode 实例作为一个单独的 ResourceTree。class/registry_name
+        # 保持稳定的 host_node；id/name 使用可配置的运行时实例名。
         host_node_dict = {
-            "id": "host_node",
+            "id": device_id,
             "uuid": str(uuid.uuid4()),
             "parent_uuid": "",
-            "name": "host_node",
+            "name": device_id,
             "type": "device",
-            "class": "host_node",
+            "class": HOST_NODE_REGISTRY_NAME,
             "config": {},
             "data": {},
             "children": [],
@@ -314,10 +334,12 @@ class HostNode(BaseROS2DeviceNode):
             self,
             driver_instance=self,
             device_id=device_id,
-            registry_name="host_node",
+            registry_name=HOST_NODE_REGISTRY_NAME,
             device_uuid=host_node_dict["uuid"],
             status_types={},
-            action_value_mappings=lab_registry.device_type_registry["host_node"]["class"]["action_value_mappings"],
+            action_value_mappings=lab_registry.device_type_registry[HOST_NODE_REGISTRY_NAME]["class"][
+                "action_value_mappings"
+            ],
             hardware_interface={},
             print_publish=False,
             resource_tracker=self._resource_tracker,  # host node并不是通过initialize 包一层传进来的
@@ -329,41 +351,42 @@ class HostNode(BaseROS2DeviceNode):
         self.device_machine_names: Dict[str, str] = {
             device_id: "本地",
         }  # 存储设备ID到机器名称的映射
+        host_action_prefix = self.namespace
         self._action_clients: Dict[str, ActionClient] = {  # 为了方便了解实际的数据类型，host的默认写好
-            "/devices/host_node/create_resource": ActionClient(
+            f"{host_action_prefix}/create_resource": ActionClient(
                 self,
                 ResourceCreateFromOuterEasy,
-                "/devices/host_node/create_resource",
+                f"{host_action_prefix}/create_resource",
                 callback_group=self.callback_group,
             ),
-            "/devices/host_node/create_resource_detailed": ActionClient(
+            f"{host_action_prefix}/create_resource_detailed": ActionClient(
                 self,
                 ResourceCreateFromOuter,
-                "/devices/host_node/create_resource_detailed",
+                f"{host_action_prefix}/create_resource_detailed",
                 callback_group=self.callback_group,
             ),
-            "/devices/host_node/test_latency": ActionClient(
+            f"{host_action_prefix}/test_latency": ActionClient(
                 self,
                 EmptyIn,
-                "/devices/host_node/test_latency",
+                f"{host_action_prefix}/test_latency",
                 callback_group=self.callback_group,
             ),
-            "/devices/host_node/test_resource": ActionClient(
+            f"{host_action_prefix}/test_resource": ActionClient(
                 self,
                 EmptyIn,
-                "/devices/host_node/test_resource",
+                f"{host_action_prefix}/test_resource",
                 callback_group=self.callback_group,
             ),
-            "/devices/host_node/_execute_driver_command": ActionClient(
+            f"{host_action_prefix}/_execute_driver_command": ActionClient(
                 self,
                 StrSingleInput,
-                "/devices/host_node/_execute_driver_command",
+                f"{host_action_prefix}/_execute_driver_command",
                 callback_group=self.callback_group,
             ),
-            "/devices/host_node/_execute_driver_command_async": ActionClient(
+            f"{host_action_prefix}/_execute_driver_command_async": ActionClient(
                 self,
                 StrSingleInput,
-                "/devices/host_node/_execute_driver_command_async",
+                f"{host_action_prefix}/_execute_driver_command_async",
                 callback_group=self.callback_group,
             ),
         }  # 用来存储多个ActionClient实例
@@ -1457,7 +1480,7 @@ class HostNode(BaseROS2DeviceNode):
 
         if success:
             from unilabos.resources.graphio import physical_setup_graph
-            from unilabos.resources.resource_tracker import TRACKER_STATE_KEYS
+            from unilabos.resources.resource_tracker import PLR_CONFIG_ROOT_KEYS, TRACKER_STATE_KEYS
 
             # 将资源添加到本地图中
             for node in resource_tree_set.all_nodes:
@@ -1471,6 +1494,11 @@ class HostNode(BaseROS2DeviceNode):
                     for state_key in TRACKER_STATE_KEYS:
                         if resource_dict.get(state_key) is not None:
                             graph_node[state_key] = resource_dict[state_key]
+                    # barcode/sites 等从 PLR config 提升后的根字段也必须刷新；
+                    # 否则已存在 graph node 会保留旧位点定义，随后再次序列化丢更新。
+                    for root_key in PLR_CONFIG_ROOT_KEYS:
+                        if resource_dict.get(root_key) is not None:
+                            graph_node[root_key] = resource_dict[root_key]
 
         response.response = _fast_dumps_str(uuid_mapping) if success else "FAILED"
         self.lab_logger().info(f"[Host Node-Resource] Resource tree add completed, success: {success}")
@@ -2784,7 +2812,10 @@ class HostNode(BaseROS2DeviceNode):
             return {"success": False, "error": f"Device {device_id} not found"}
 
         if device_id == self.device_id:
-            return {"success": False, "error": "Cannot destroy host_node itself"}
+            return {
+                "success": False,
+                "error": f"Cannot destroy HostNode instance {self.device_id}",
+            }
 
         try:
             namespace = self.devices_names[device_id]

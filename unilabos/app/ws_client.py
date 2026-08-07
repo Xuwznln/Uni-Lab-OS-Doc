@@ -31,7 +31,12 @@ from unilabos.resources.resource_tracker import ResourceDictType
 from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.utils.type_check import serialize_result_info
 from unilabos.app.communication import BaseCommunicationClient
-from unilabos.config.config import WSConfig, HTTPConfig, BasicConfig
+from unilabos.config.config import (
+    BasicConfig,
+    HTTPConfig,
+    WSConfig,
+    resolve_host_node_name,
+)
 from unilabos.utils.log import get_comm_logger
 from unilabos.utils.tracing import (
     capture_context,
@@ -46,6 +51,15 @@ from unilabos.utils.tracing import (
 # 全量 TRACE 落本地、微秒级时间戳 + 线程名，便于排查通信/queue 时序问题。
 # 未调用 configure_comm_logger 时安全回退到根 logger。
 logger = get_comm_logger()
+
+
+def _current_host_node_name() -> str:
+    """Resolve the renameable HostNode instance id for protocol fallbacks."""
+
+    host_node = HostNode.get_instance(0)
+    if host_node is not None:
+        return host_node.device_id
+    return resolve_host_node_name()
 
 
 def format_job_log(job_id: str, task_id: str = "", device_id: str = "", action_name: str = "") -> str:
@@ -1252,13 +1266,13 @@ class MessageProcessor:
         for item in resource_uuid_list:
             device_id = item["device_id"]
             if not device_id:
-                device_id = "host_node"
+                device_id = _current_host_node_name()
 
             # 特殊处理update action: 检查是否设备迁移
             if action == "update":
                 device_old_id = item.get("device_old_id", "")
                 if not device_old_id:
-                    device_old_id = "host_node"
+                    device_old_id = _current_host_node_name()
 
                 # 设备迁移：device_id != device_old_id
                 if device_id != device_old_id:
@@ -1337,7 +1351,7 @@ class MessageProcessor:
             return
 
         for item in device_list:
-            target_node_id = item.get("target_node_id", "host_node")
+            target_node_id = item.get("target_node_id") or _current_host_node_name()
             if action == "add":
                 logger.info(
                     f"[DeviceManage] 在线增加设备暂不支持，跳过 add_device: {item.get('id', '')}"
@@ -2146,6 +2160,7 @@ class WebSocketClient(BaseCommunicationClient):
                 "status": "ready",
                 "timestamp": time.time(),
                 "machine_name": machine_name,
+                "host_node_id": host_node.device_id,
                 "devices": devices,
             },
         }

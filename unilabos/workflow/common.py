@@ -87,7 +87,7 @@ transfer_liquid:
 ==================== 设备名配置 (device_name) ====================
 
 每个节点都有 device_name 字段，指定在哪个设备上执行:
-- create_resource: device_name = "host_node"（固定）
+- create_resource: device_name = HostNode 运行时实例名（默认 "host_node"，可配置）
 - set_liquid_from_plate: device_name = "PRCXI"（可配置，见 DEVICE_NAME_DEFAULT）
 - transfer_liquid 等动作: device_name = "PRCXI"（可配置，见 DEVICE_NAME_DEFAULT）
 
@@ -107,13 +107,15 @@ from networkx.drawing.nx_agraph import to_agraph
 import matplotlib.pyplot as plt
 from typing import Dict, List, Any, Tuple, Optional
 
+from unilabos.config.config import DEFAULT_HOST_NODE_NAME, resolve_host_node_name
+
 Json = Dict[str, Any]
 
 
 # ==================== 默认配置 ====================
 
 # 设备名配置
-DEVICE_NAME_HOST = "host_node"  # create_resource 固定在 host_node 上执行
+DEVICE_NAME_HOST = DEFAULT_HOST_NODE_NAME  # 兼容旧调用方；运行时请使用 resolve_host_node_name
 DEVICE_NAME_DEFAULT = "PRCXI"  # transfer_liquid, set_liquid_from_plate 等动作的默认设备名
 
 # 节点类型
@@ -363,6 +365,7 @@ def build_protocol_graph(
     workstation_name: str,
     action_resource_mapping: Optional[Dict[str, str]] = None,
     labware_defs: Optional[List[Dict[str, Any]]] = None,
+    host_node_name: Optional[str] = None,
 ) -> WorkflowGraph:
     """统一的协议图构建函数，根据设备类型自动选择构建逻辑
 
@@ -372,8 +375,10 @@ def build_protocol_graph(
         workstation_name: 工作站名称
         action_resource_mapping: action 到 resource_name 的映射字典，可选
         labware_defs: labware 定义列表，格式为 [{"name": "...", "slot": "1", "type": "lab_xxx"}, ...]
+        host_node_name: HostNode 运行时实例名；None 时读取 BasicConfig
     """
     G = WorkflowGraph()
+    host_node_name = resolve_host_node_name(host_node_name)
     resource_last_writer = {}  # reagent_name -> "node_id:port"
     slot_to_create_resource = {}  # slot -> create_resource node_id
 
@@ -411,12 +416,12 @@ def build_protocol_graph(
         G.add_node(
             node_id,
             template_name="create_resource",
-            resource_name="host_node",
+            resource_name=host_node_name,
             name=lw_name,
             description=f"Create {lw_name}",
             lab_node_type="Labware",
-            footer="create_resource-host_node",
-            device_name=DEVICE_NAME_HOST,
+            footer=f"create_resource-{host_node_name}",
+            device_name=host_node_name,
             type=NODE_TYPE_DEFAULT,
             parent_uuid=group_node_id,
             minimized=True,

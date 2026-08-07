@@ -28,7 +28,7 @@ from unilabos.registry.registry import lab_registry
 from unilabos.ros.initialize_device import initialize_device_from_dict
 from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.utils import logger
-from unilabos.config.config import BasicConfig
+from unilabos.config.config import BasicConfig, resolve_host_node_name
 from unilabos.utils.type_check import TypeEncoder
 
 
@@ -61,8 +61,12 @@ def main(
     resources_mesh_config: dict = {},
     rclpy_init_args: List[str] = ["--log-level", "debug"],
     discovery_interval: float = 15.0,
+    host_node_name: Optional[str] = None,
 ) -> None:
     """主函数"""
+
+    host_node_name = resolve_host_node_name(host_node_name)
+    BasicConfig.host_node_name = host_node_name
 
     # HostLink must publish/start the directed DDS endpoint before rclpy.init;
     # direct embedders do not pass through app.main's earlier composition root.
@@ -80,7 +84,7 @@ def main(
     )
     # 创建主机节点
     host_node = HostNode(
-        "host_node",
+        host_node_name,
         devices_config,
         resources_config,
         resources_edge_config,

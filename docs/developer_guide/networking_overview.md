@@ -2,6 +2,11 @@
 
 本文档介绍 Uni-Lab-OS 的组网架构、部署方式和主从模式的详细配置。
 
+> `host_node` 是默认的 HostNode 运行时实例名，可通过
+> `--host_node_name <name>` / `BasicConfig.host_node_name` 修改。ROS 节点、
+> action 路径和资源根随实例名变化；HostLink 的机器 `host_id` 与稳定的
+> `host_node` 设备类型不随之改名。
+
 ## 目录
 
 - [架构概览](#架构概览)

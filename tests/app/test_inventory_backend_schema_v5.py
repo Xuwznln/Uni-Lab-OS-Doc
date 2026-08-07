@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from unilabos.app.scheduler.inventory import store as store_module
-from unilabos.app.scheduler.inventory.store import InventoryStore
+from unilabos.app.scheduler.inventory.store import InventoryStore, SCHEMA_VERSION
 
 
 def _create_v4_database(path: str) -> None:
@@ -72,7 +72,7 @@ def test_v4_migrates_to_backend_tables_without_losing_edge_inventory(tmp_path):
     _create_v4_database(str(database))
 
     store = InventoryStore(str(database))
-    assert store.query_one("PRAGMA user_version")["user_version"] == 5
+    assert store.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
 
     table_names = {
         row["name"]
@@ -113,11 +113,13 @@ def test_v4_migrates_to_backend_tables_without_losing_edge_inventory(tmp_path):
         "resource_template_uuid",
         "parent_uuid",
         "barcode",
+        "type",
     } <= material_columns
 
     occupant = store.query_one("SELECT * FROM material WHERE uuid='occupant'")
     assert occupant["parent_uuid"] == "owner"
     assert occupant["data"] == '{"temperature":25}'
+    assert occupant["type"] == "device"
     assert store.query_one(
         "SELECT inventory_status FROM material_inventory "
         "WHERE material_uuid='occupant'"
@@ -133,7 +135,45 @@ def test_v4_migrates_to_backend_tables_without_losing_edge_inventory(tmp_path):
     store.close()
 
 
-def test_fresh_v5_legacy_views_write_the_canonical_material_once(tmp_path):
+def test_v5_database_backfills_backend_material_type_and_rebuilds_legacy_view(
+    tmp_path,
+):
+    database = tmp_path / "inventory-v5.db"
+    _create_v4_database(str(database))
+    connection = sqlite3.connect(database)
+    connection.executescript(store_module._SCHEMA_V5_BACKEND_CONTRACT)
+    connection.execute(
+        "UPDATE resource_template SET config_info=? WHERE uuid='template-a'",
+        (
+            '[{"name":"template-a","type":"container"},'
+            '{"name":"pipette-tip","type":"tip"}]',
+        ),
+    )
+    connection.execute(
+        "UPDATE material SET class='template-a',name='template-a' WHERE uuid='owner'"
+    )
+    connection.execute(
+        "UPDATE material SET class='component',name='pipette-tip' "
+        "WHERE uuid='occupant'"
+    )
+    connection.commit()
+    connection.close()
+
+    store = InventoryStore(str(database))
+    assert store.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
+    assert store.query_one("SELECT type FROM material WHERE uuid='owner'")["type"] == "container"
+    assert store.query_one("SELECT type FROM material WHERE uuid='occupant'")["type"] == "tip"
+    assert store.get_instance("occupant")["type"] == "tip"
+    assert "type" in {
+        row["name"] for row in store.query_all("PRAGMA table_info(material_instance)")
+    }
+    assert "idx_material_type_active" in {
+        row["name"] for row in store.query_all("PRAGMA index_list(material)")
+    }
+    store.close()
+
+
+def test_fresh_v6_legacy_views_write_the_canonical_material_once(tmp_path):
     store = InventoryStore(str(tmp_path / "inventory.db"))
     with store.transaction() as connection:
         connection.execute(
@@ -154,4 +194,7 @@ def test_fresh_v5_legacy_views_write_the_canonical_material_once(tmp_path):
     assert store.query_one(
         "SELECT COUNT(*) AS n FROM material_inventory"
     )["n"] == 1
+    assert store.query_one("SELECT type FROM material WHERE uuid='material-a'")[
+        "type"
+    ] == "resource"
     store.close()

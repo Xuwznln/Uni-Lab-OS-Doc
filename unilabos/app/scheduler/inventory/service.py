@@ -32,6 +32,7 @@ from unilabos.app.scheduler.inventory.domain import (
     check_lot_invariants,
     new_event_id,
 )
+from unilabos.app.scheduler.inventory.material_type import material_type_from_template
 from unilabos.app.scheduler.inventory.store import InventoryStore
 from unilabos.utils.tracing import add_event, inject_trace_context, span
 
@@ -504,18 +505,36 @@ class InventoryService:
                 ).fetchone()
                 if dup is not None:
                     raise DuplicateBarcode(f"barcode {barcode} already active on {dup['edge_uuid']}")
+            template = conn.execute(
+                "SELECT name, resource_type, config_info, model "
+                "FROM resource_template WHERE uuid = ? AND deleted_at IS NULL",
+                (template_id,),
+            ).fetchone()
+            material_type = material_type_from_template(
+                dict(template) if template is not None else None,
+                material_name=edge_uuid,
+                root=not bool(parent_uuid),
+            )
             conn.execute(
                 "INSERT INTO material_instance(edge_uuid, legacy_cloud_id, lot_id, template_id, "
                 "barcode, status, parent_uuid, version) VALUES (?,?,?,?,?,?,?,1)",
                 (edge_uuid, legacy_cloud_id, lot_id, template_id, barcode,
                  InstanceState.WAREHOUSE.value, ""),
             )
+            # material.type is canonical and server-derived.  The legacy View
+            # deliberately has no write authority for it, so set it on the
+            # canonical row in the same transaction.
+            conn.execute(
+                "UPDATE material SET type = ? WHERE uuid = ?",
+                (material_type, edge_uuid),
+            )
             if parent_uuid:
                 self._tx_upsert_relation(conn, parent_uuid, slot_id, edge_uuid)
             self._emit(
                 conn, now, "instance", edge_uuid, 1, "instance.registered",
                 {"template_id": template_id, "lot_id": lot_id, "barcode": barcode,
-                 "legacy_cloud_id": legacy_cloud_id, "parent_uuid": parent_uuid, "slot_id": slot_id},
+                 "legacy_cloud_id": legacy_cloud_id, "type": material_type,
+                 "parent_uuid": parent_uuid, "slot_id": slot_id},
                 causation_id=causation_id, actor=actor,
             )
             inst = self._tx_get_instance(conn, edge_uuid)

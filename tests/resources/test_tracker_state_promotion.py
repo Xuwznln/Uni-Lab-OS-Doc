@@ -1,9 +1,9 @@
-"""VolumeTracker 状态提升为 ResourceDict 根字段的契约测试（barcode 范式）。
+"""ResourceDict 提升字段的契约测试（barcode / sites / VolumeTracker 范式）。
 
-覆盖：漏斗提升（get_resource_instance_from_dict）、根字段优先、非容器不受影响、
-assemble_tracker_state 回装、get_plr_nested_dict 组装形态，以及一条
+覆盖：漏斗提升（get_resource_instance_from_dict）、根字段优先、None/空值语义、
+各回装出口、sites UUID，以及
 「PLR → ResourceTreeSet → JSON（模拟 TCP/HTTP 传输）→ ResourceTreeSet → PLR」
-的 round-trip：liquid_history / unknown_counter / liquids 全等值。
+的 tracker / standard Carrier / ItemizedCarrier / PRCXI round-trip。
 """
 
 import json
@@ -11,6 +11,7 @@ import json
 import pytest
 
 from unilabos.resources.resource_tracker import (
+    PLR_CONFIG_ROOT_KEYS,
     RESOURCE_ROOT_FIELDS,
     TRACKER_STATE_KEYS,
     ResourceDict,
@@ -43,8 +44,57 @@ TRACKER_STATE = {
     "unknown_counter": 1,
 }
 
+SITES = [
+    {
+        "uuid": "site-uuid-a1",
+        "index": 3,
+        "label": "A1",
+        "visible": True,
+        "occupied_by": None,
+        "position": {"x": 1.0, "y": 2.0, "z": 3.0},
+        "size": {"width": 10.0, "height": 11.0, "depth": 12.0},
+        "content_type": ["container"],
+    }
+]
+
 
 class TestFunnelPromotion:
+    def test_promotes_sites_from_config_to_root(self):
+        res = ResourceDictInstance.get_resource_instance_from_dict(
+            make_content(config={"size_x": 10, "sites": json.loads(json.dumps(SITES))})
+        ).res_content
+        assert res.sites == SITES
+        assert "sites" not in res.config
+
+    def test_root_sites_win_over_config(self):
+        root_sites = [{**SITES[0], "uuid": "root-site-uuid"}]
+        res = ResourceDictInstance.get_resource_instance_from_dict(
+            make_content(config={"sites": SITES}, sites=root_sites)
+        ).res_content
+        assert res.sites == root_sites
+        assert "sites" not in res.config
+
+    def test_empty_sites_is_distinct_from_no_sites(self):
+        empty = ResourceDictInstance.get_resource_instance_from_dict(
+            make_content(config={"sites": SITES}, sites=[])
+        ).res_content
+        absent = ResourceDictInstance.get_resource_instance_from_dict(make_content()).res_content
+        assert empty.sites == []
+        assert absent.sites is None
+
+    def test_legacy_site_without_uuid_gets_stable_identity_on_dump(self):
+        legacy_site = {key: value for key, value in SITES[0].items() if key not in {"uuid", "index"}}
+        first = ResourceDictInstance.get_resource_instance_from_dict(
+            make_content(config={"sites": [legacy_site]})
+        ).res_content
+        assert first.sites is not None
+        assert first.sites[0]["uuid"]
+        assert first.sites[0]["index"] == 0
+
+        dumped = json.loads(json.dumps(first.model_dump(by_alias=True)))
+        second = ResourceDictInstance.get_resource_instance_from_dict(dumped).res_content
+        assert second.sites == first.sites
+
     def test_promotes_tracker_state_to_root(self):
         instance = ResourceDictInstance.get_resource_instance_from_dict(make_content(data=dict(TRACKER_STATE)))
         res = instance.res_content
@@ -95,6 +145,15 @@ class TestFunnelPromotion:
         assert second.unknown_counter == first.res_content.unknown_counter
         assert second.data == first.res_content.data
 
+    def test_site_promotion_is_idempotent_over_dump(self):
+        first = ResourceDictInstance.get_resource_instance_from_dict(
+            make_content(config={"sites": json.loads(json.dumps(SITES))})
+        )
+        dumped = json.loads(json.dumps(first.res_content.model_dump(by_alias=True)))
+        second = ResourceDictInstance.get_resource_instance_from_dict(dumped).res_content
+        assert second.sites == first.res_content.sites
+        assert "sites" not in second.config
+
 
 class TestAssemble:
     def test_assemble_restores_full_state(self):
@@ -123,6 +182,14 @@ class TestAssemble:
         for state_key in TRACKER_STATE_KEYS:
             assert state_key not in nested  # 根键不保留在 PLR 嵌套形态
 
+    def test_nested_dict_keeps_sites_at_plr_root(self):
+        instance = ResourceDictInstance.get_resource_instance_from_dict(
+            make_content(config={"sites": json.loads(json.dumps(SITES))})
+        )
+        nested = instance.get_plr_nested_dict()
+        assert nested["sites"] == SITES
+        assert "sites" not in nested["config"]
+
 
 class TestRootFieldContract:
     """根字段守护契约：新增 ResourceDict 根字段时本组用例兜底各点位不漂移。
@@ -140,6 +207,7 @@ class TestRootFieldContract:
         assert set(RESOURCE_ROOT_FIELDS) == expected
         assert {"schema", "class"} <= expected
         assert set(TRACKER_STATE_KEYS) <= expected
+        assert set(PLR_CONFIG_ROOT_KEYS) <= expected
 
     def test_dump_form_never_leaks_root_keys_into_config(self):
         # dump 形态含全部模型键（新字段的默认值也在）：任何根键被标准化搬进 config
@@ -147,7 +215,7 @@ class TestRootFieldContract:
         from unilabos.resources.graphio import canonicalize_nodes_data
 
         instance = ResourceDictInstance.get_resource_instance_from_dict(
-            make_content(data=dict(TRACKER_STATE), barcode="BC-9")
+            make_content(data=dict(TRACKER_STATE), barcode="BC-9", sites=SITES)
         )
         node = json.loads(json.dumps(instance.res_content.model_dump(by_alias=True)))
         tree_set = canonicalize_nodes_data([node])
@@ -156,6 +224,7 @@ class TestRootFieldContract:
         assert not leaked, f"根键被搬进 config：{leaked}"
         assert res.liquids == TRACKER_STATE["liquids"]
         assert res.barcode == "BC-9"
+        assert res.sites == SITES
 
 
 class TestGraphWhitelist:
@@ -169,6 +238,7 @@ class TestGraphWhitelist:
             liquid_history=[["water", 30.0]],
             unknown_counter=0,
             barcode="BC-1",
+            sites=SITES,
         )
         tree_set = canonicalize_nodes_data([node])
         res = tree_set.trees[0].root_node.res_content
@@ -176,6 +246,8 @@ class TestGraphWhitelist:
         assert res.liquid_history == [["water", 30.0]]
         assert res.unknown_counter == 0
         assert res.barcode == "BC-1"
+        assert res.sites == SITES
+        assert "sites" not in res.config
         for state_key in TRACKER_STATE_KEYS:
             assert state_key not in res.config
 
@@ -200,6 +272,7 @@ class TestRosMsgConversion:
             "unknown_counter": 0,
             "barcode": "BC-1",
             "barcode_symbology": "Code 128",
+            "sites": SITES,
         }
         back = convert_from_ros_msg(convert_to_ros_msg(Resource, dump_form))
         assert back["data"]["liquids"] == [["water", 30.0]]
@@ -210,6 +283,7 @@ class TestRosMsgConversion:
             "symbology": "Code 128",
             "position_on_resource": "front",
         }
+        assert back["config"]["sites"] == SITES
         # msg 回来的老形态再进漏斗 → 提升等值（msg 通路全链路无损）
         back.setdefault("extra", {})
         res = ResourceDictInstance.get_resource_instance_from_dict(back).res_content
@@ -217,6 +291,8 @@ class TestRosMsgConversion:
         assert res.liquid_history == [["water", 50.0], [None, -20.0]]
         assert res.unknown_counter == 0
         assert res.barcode == "BC-1"
+        assert res.sites == SITES
+        assert "sites" not in res.config
 
     def test_legacy_form_untouched(self):
         # 老形态（data/config 自带完整状态）原样透传，不重复包装
@@ -269,3 +345,91 @@ class TestPlrRoundTrip:
         assert json.loads(json.dumps(restored_state)) == json.loads(json.dumps(original_state))
         assert restored.tracker.volume == container.tracker.volume
         assert restored.tracker.current_liquids == container.tracker.current_liquids
+
+    def test_standard_carrier_sites_uuid_and_index_round_trip(self):
+        pytest.importorskip("pylabrobot")
+        from pylabrobot.resources import Carrier, Coordinate, ResourceHolder
+
+        site = ResourceHolder(name="carrier_site_A1", size_x=10, size_y=11, size_z=12)
+        site.location = Coordinate(1, 2, 3)
+        site.unilabos_uuid = "site-holder-uuid-a1"
+        carrier = Carrier(name="carrier_rt", size_x=100, size_y=80, size_z=20, sites={3: site})
+        carrier.unilabos_uuid = "carrier-uuid"
+
+        tree_set = ResourceTreeSet.from_plr_resources([carrier])
+        root = tree_set.trees[0].root_node.res_content
+        assert root.sites is not None
+        assert root.sites[0]["uuid"] == "site-holder-uuid-a1"
+        assert root.sites[0]["index"] == 3
+        assert root.sites[0]["label"] == "carrier_site_A1"
+        assert "sites" not in root.config
+
+        wire = json.loads(json.dumps([n.res_content.model_dump(by_alias=True) for n in tree_set.all_nodes]))
+        restored = ResourceTreeSet.from_raw_dict_list(wire).to_plr_resources(skip_devices=False)[0]
+        assert list(restored.sites) == [3]
+        assert restored.sites[3].unilabos_uuid == "site-holder-uuid-a1"
+
+        second_root = ResourceTreeSet.from_plr_resources([restored]).trees[0].root_node.res_content
+        assert second_root.sites == root.sites
+
+    def test_itemized_carrier_serialization_keeps_site_uuid(self):
+        pytest.importorskip("pylabrobot")
+        from pylabrobot.resources import Coordinate, ResourceHolder
+
+        from unilabos.resources.itemized_carrier import ItemizedCarrier
+
+        placeholder = ResourceHolder(name="itemized_A1", size_x=10, size_y=11, size_z=12)
+        placeholder.location = Coordinate(1, 2, 3)
+        carrier = ItemizedCarrier(
+            name="itemized_rt",
+            size_x=100,
+            size_y=80,
+            size_z=20,
+            sites={"A1": placeholder},
+        )
+        first = carrier.serialize()["sites"]
+        assert first[0]["uuid"]
+        assert first[0]["index"] == 0
+
+        restored = ItemizedCarrier.deserialize(carrier.serialize(), allow_marshal=True)
+        assert restored.serialize()["sites"][0]["uuid"] == first[0]["uuid"]
+
+    def test_non_itemized_plr_site_list_round_trip(self):
+        """PRCXI9300Deck 也是 sites[] 协议源，但不继承 ItemizedCarrier。"""
+        pytest.importorskip("pylabrobot")
+        from unilabos.devices.liquid_handling.prcxi.prcxi import PRCXI9300Deck
+
+        deck = PRCXI9300Deck(name="prcxi_sites_rt", size_x=600, size_y=400, size_z=10)
+        deck.unilabos_uuid = "prcxi-deck-uuid"
+        first_set = ResourceTreeSet.from_plr_resources([deck])
+        first_sites = first_set.trees[0].root_node.res_content.sites
+        assert first_sites is not None and len(first_sites) == 16
+        assert all(site["uuid"] for site in first_sites)
+
+        wire = json.loads(json.dumps([n.res_content.model_dump(by_alias=True) for n in first_set.all_nodes]))
+        restored = ResourceTreeSet.from_raw_dict_list(wire).to_plr_resources(skip_devices=False)[0]
+        second_sites = ResourceTreeSet.from_plr_resources([restored]).trees[0].root_node.res_content.sites
+        assert second_sites == first_sites
+
+
+class TestLegacyGraphioRoundTrip:
+    def test_standard_carrier_sites_survive_legacy_converter(self):
+        pytest.importorskip("pylabrobot")
+        from pylabrobot.resources import Carrier, Coordinate, ResourceHolder
+
+        from unilabos.resources.graphio import resource_plr_to_ulab, resource_ulab_to_plr
+
+        site = ResourceHolder(name="legacy_site_A1", size_x=10, size_y=11, size_z=12)
+        site.location = Coordinate(1, 2, 3)
+        site.unilabos_uuid = "legacy-site-uuid-a1"
+        carrier = Carrier(name="legacy_carrier", size_x=100, size_y=80, size_z=20, sites={5: site})
+        carrier.location = Coordinate.zero()
+
+        ulab = resource_plr_to_ulab(carrier)
+        assert ulab["sites"][0]["uuid"] == "legacy-site-uuid-a1"
+        assert ulab["sites"][0]["index"] == 5
+        assert "sites" not in ulab["config"]
+
+        restored = resource_ulab_to_plr(ulab, plr_model=True)
+        assert list(restored.sites) == [5]
+        assert restored.sites[5].unilabos_uuid == "legacy-site-uuid-a1"

@@ -48,7 +48,9 @@ def _sync_template(client: TestClient) -> str:
                         }
                     ],
                     "category": [],
-                    "config_info": [],
+                    "config_info": [
+                        {"name": "device.pump", "type": "pump"}
+                    ],
                     "scene": [],
                     "device_params": {},
                 }
@@ -73,6 +75,8 @@ def test_material_routes_use_backend_envelope_and_soft_delete(tmp_path):
             "name": "Pump 1",
             "meta_data": {},
             "config": {"port": "loopback"},
+            "data": {"connected": False},
+            "type": "client-forged",
         },
     )
     assert created.status_code == 201
@@ -80,6 +84,8 @@ def test_material_routes_use_backend_envelope_and_soft_delete(tmp_path):
     material = created.json()["data"]
     material_uuid = material["uuid"]
     assert material["resource_template_uuid"] == template_uuid
+    assert material["type"] == "pump"
+    assert material["data"] == {"connected": False}
     assert "deleted_at" not in material
 
     listed = client.get("/api/v1/materials").json()["data"]

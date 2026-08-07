@@ -36,7 +36,7 @@ from rclpy.service import Service
 from unilabos_msgs.action import SendCmd, StrSingleInput
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
 
-from unilabos.config.config import BasicConfig
+from unilabos.config.config import BasicConfig, HOST_NODE_REGISTRY_NAME
 from unilabos.registry.decorators import get_topic_config
 from unilabos.registry.action_policy import (
     ActionDecisionOutcome,
@@ -431,6 +431,16 @@ class BaseROS2DeviceNode(Node, Generic[T]):
     def identifier(self):
         return f"{self.namespace}/{self.device_id}"
 
+    @property
+    def is_host_node(self) -> bool:
+        """Whether this node has the stable HostNode device type.
+
+        Role checks must use the registry name, never the renameable runtime
+        ``device_id`` / ROS node name.
+        """
+
+        return self.registry_name == HOST_NODE_REGISTRY_NAME
+
     node_name: str
     namespace: str
     # 内部共享变量
@@ -666,7 +676,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             for plr_instance in plr_instances:
                 self.resource_tracker.loop_update_uuid(plr_instance, uuid_maps)
             # driver 自带 create_resource 时由 driver 负责增加液体；否则走通用 apply_substances
-            _delegates_to_driver = hasattr(self.driver_instance, "create_resource") and self.node_name != "host_node"
+            _delegates_to_driver = hasattr(self.driver_instance, "create_resource") and not self.is_host_node
             # 容器自身液体 (LIQUID_INPUT_SLOT == [-1])：在快照前写入，使其归属 created_resource_tree
             if (
                 not _delegates_to_driver
@@ -834,7 +844,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         tree_set = ResourceTreeSet.from_plr_resources(resources)
         # host_node 的根物料无父 uuid 是预期状态（归属 host_node 自身、不物理挂载），不告警/不回填；
         # 其它设备的无父根物料才自动以当前设备为根。
-        is_host = self.device_id == "host_node"
+        is_host = self.is_host_node
         for tree in tree_set.trees:
             root_node = tree.root_node
             if not root_node.res_content.uuid_parent and not is_host:
@@ -1298,7 +1308,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                                     de_dupe_parents.append(p)
                             new_tree_set = ResourceTreeSet.from_plr_resources(de_dupe_parents)  # 去重
                             for tree in new_tree_set.trees:
-                                if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
+                                if tree.root_node.res_content.uuid_parent is None and not self.is_host_node:
                                     tree.root_node.res_content.parent_uuid = self.uuid
                             r = SerialCommand.Request()
                             r.command = json.dumps(
@@ -1324,7 +1334,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             if not BasicConfig.no_update_feedback:
                                 new_tree_set = ResourceTreeSet.from_plr_resources(original_instances)  # 去重
                                 for tree in new_tree_set.trees:
-                                    if tree.root_node.res_content.uuid_parent is None and self.node_name != "host_node":
+                                    if tree.root_node.res_content.uuid_parent is None and not self.is_host_node:
                                         tree.root_node.res_content.parent_uuid = self.uuid
                                 r = SerialCommand.Request()
                                 r.command = json.dumps(

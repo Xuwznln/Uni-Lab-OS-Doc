@@ -77,6 +77,7 @@ class MaterialRequest(BackendModel):
     description: Optional[str] = None
     meta_data: Dict[str, Any] = Field(default_factory=dict)
     config: Dict[str, Any] = Field(default_factory=dict)
+    data: Dict[str, Any] = Field(default_factory=dict)
     relative_position: Optional[RelativePositionRequest] = None
     site_placement: Optional[SitePlacementRequest] = None
 

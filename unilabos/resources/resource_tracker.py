@@ -1,3 +1,4 @@
+import copy
 import inspect
 import traceback
 import uuid
@@ -7,6 +8,11 @@ from typing import List, Tuple, Any, Dict, Literal, Optional, cast, TYPE_CHECKIN
 
 from typing_extensions import TypedDict
 
+from unilabos.config.config import (
+    BasicConfig,
+    DEFAULT_HOST_NODE_NAME,
+    HOST_NODE_REGISTRY_NAME,
+)
 from unilabos.resources.plr_additional_res_reg import register
 from unilabos.utils.log import logger
 
@@ -104,6 +110,28 @@ class ResourceDictPosition(BaseModel):
     extra: Optional[Dict[str, Any]] = Field(description="Extra data", default=None)
 
 
+class ResourceSiteType(TypedDict, total=False):
+    """Carrier site metadata exposed at the ResourceDict root.
+
+    ``label`` is the cross-system semantic identity, while ``uuid`` is the
+    stable row/object identity.  ``index`` preserves the key used by PLR
+    ``Carrier.sites`` when it is not simply a contiguous zero-based range.
+    Extra site keys are accepted by :class:`ResourceDict` for forward
+    compatibility with the 2D/3D site protocol.
+    """
+
+    uuid: str
+    index: Union[int, str]
+    label: str
+    visible: bool
+    occupied_by: Optional[str]
+    position: ResourceDictPositionObjectType
+    size: ResourceDictPositionSizeType
+    content_type: List[str]
+    parent_link: str
+    rotation: ResourceDictPositionObjectType
+
+
 class ResourceDictType(TypedDict):
     id: str
     uuid: str
@@ -123,6 +151,7 @@ class ResourceDictType(TypedDict):
     machine_name: str
     barcode: str
     barcode_symbology: str
+    sites: Optional[List[ResourceSiteType]]
     liquids: Optional[List[Any]]
     liquid_history: Optional[List[Any]]
     unknown_counter: Optional[int]
@@ -130,8 +159,13 @@ class ResourceDictType(TypedDict):
 
 # 液体状态（fork VolumeTracker.serialize()）中属于物质面的键：由漏斗从 data 提升为根字段，
 # 表化映射 liquids↔current_substance、liquid_history↔substance_history、unknown_counter 随
-# 历史持久化；max_volume/thing 是规格面/冗余，留在 data。见 unilab-edge-ui/docs/protocol/cloud-mapping.md §6。
+# 历史持久化；max_volume/thing 是规格面/冗余，留在 data。见 unilab-edge-ui/docs/protocol/cloud-mapping.md §7。
 TRACKER_STATE_KEYS = ("liquids", "liquid_history", "unknown_counter")
+
+# PLR config/serialization 中需要提升为 ResourceDict 根字段的字段族。barcode 在
+# PLR 中是一个结构体，拆成两个根字段；sites 保持 sites[] 结构并从 config 移出。
+# HostNode 等只看根级 dump 的合并路径也使用这组常量刷新字段。
+PLR_CONFIG_ROOT_KEYS = ("barcode", "barcode_symbology", "sites")
 
 
 # 统一的资源字典模型，parent 自动序列化为 parent_uuid，children 不序列化
@@ -158,6 +192,11 @@ class ResourceDict(BaseModel):
     barcode: str = Field(description="Material barcode", default="")  #
     # 条码码制（PLR Barcode.symbology，如 "Code 128"）；与 barcode 一同从 config 提升，回写时组装回 PLR Barcode dict
     barcode_symbology: str = Field(description="Barcode symbology / 码制", default="")
+    # 载架位点。ItemizedCarrier.serialize() 原生输出 sites[]；标准 PLR Carrier 则把
+    # ResourceHolder 存在 Carrier.sites 中、Resource.serialize() 不会输出该属性。
+    # from_plr_resources 会统一抽取两种来源，并确保每个 site 带稳定 uuid；老形态
+    # config.sites 由唯一漏斗提升到此处。None 表示该资源没有 sites，[] 表示有定义但为空。
+    sites: Optional[List[Dict[str, Any]]] = Field(description="Carrier site definitions / 载架位点", default=None)
     # 液体状态（PLR Container.serialize_state() = fork VolumeTracker.serialize()）落在 data 中，
     # 由 get_resource_instance_from_dict 统一把物质面三键提升到根字段并移出 data（TRACKER_STATE_KEYS）；
     # None 表示非容器/无液体状态（区别于空容器的 []/0）。回 PLR 时经 assemble_tracker_state 组装还原。
@@ -168,6 +207,26 @@ class ResourceDict(BaseModel):
         description="Container liquid event history [(name|None, ±volume), ...]", default=None
     )
     unknown_counter: Optional[int] = Field(description="UnknownN naming counter for unnamed liquids", default=None)
+
+    @field_validator("sites", mode="before")
+    @classmethod
+    def _normalize_sites(cls, sites: Optional[List[Dict[str, Any]]]):
+        """Backfill identity for legacy site entries without changing known keys."""
+        if sites is None:
+            return None
+        normalized = []
+        for ordinal, raw_site in enumerate(sites):
+            if not isinstance(raw_site, dict):
+                raise ValueError(f"sites[{ordinal}] must be an object")
+            site = copy.deepcopy(raw_site)
+            site.setdefault("index", ordinal)
+            site.setdefault("label", str(site["index"]))
+            if not site.get("uuid"):
+                site["uuid"] = str(uuid.uuid4())
+            else:
+                site["uuid"] = str(site["uuid"])
+            normalized.append(site)
+        return normalized
 
     @field_serializer("parent_uuid")
     def _serialize_parent(self, parent_uuid: Optional["ResourceDict"]):
@@ -230,6 +289,160 @@ def assemble_tracker_state(res: "ResourceDict") -> Dict[str, Any]:
     return data
 
 
+def plr_class_accepts_serialized_sites(plr_cls: type) -> bool:
+    """Whether a PLR class constructor consumes the project ``sites[]`` list.
+
+    Upstream :class:`Carrier` also has a ``sites`` parameter, but it expects a
+    dict of already-created ResourceHolder objects and must be reconstructed
+    from children instead.  Project resources such as ItemizedCarrier and
+    PRCXI9300Deck serialize a list and accept that same list in ``__init__``.
+    """
+
+    from pylabrobot.resources.carrier import Carrier
+
+    return not issubclass(plr_cls, Carrier) and "sites" in inspect.signature(plr_cls).parameters
+
+
+def extract_plr_sites(
+    resource: "PLRResource", serialized: Optional[Dict[str, Any]] = None
+) -> Optional[List[Dict[str, Any]]]:
+    """Extract a normalized ``sites[]`` snapshot from a PLR resource.
+
+    Project ``ItemizedCarrier`` subclasses already serialize site metadata as
+    a list.  Upstream PLR ``Carrier`` keeps ``ResourceHolder`` objects in a
+    dict and intentionally omits the mapping from ``Resource.serialize()``.
+    This helper covers both shapes without treating unrelated driver
+    attributes named ``sites`` as material sites.
+    """
+
+    serialized_sites = (serialized or {}).get("sites")
+    if isinstance(serialized_sites, list):
+        # ItemizedCarrier owns stable UUIDs per label; keep arbitrary future
+        # site keys while filling the mandatory identity fields defensively.
+        result = copy.deepcopy(serialized_sites)
+        site_uuid_map = getattr(resource, "site_uuids", None)
+        if not isinstance(site_uuid_map, dict):
+            site_uuid_map = {}
+            resource.site_uuids = site_uuid_map
+        for ordinal, site in enumerate(result):
+            label = str(site.get("label", ordinal))
+            site["label"] = label
+            site.setdefault("index", ordinal)
+            site_uuid = site.get("uuid") or site_uuid_map.get(label)
+            if not site_uuid:
+                site_uuid = str(uuid.uuid4())
+                site_uuid_map[label] = site_uuid
+            site["uuid"] = str(site_uuid)
+        return result
+
+    plr_sites = getattr(resource, "sites", None)
+    if not isinstance(plr_sites, dict):
+        return None
+    from pylabrobot.resources.carrier import Carrier
+
+    if not isinstance(resource, Carrier):
+        return None
+
+    # Only upstream-style Carrier mappings (site objects/ResourceHolders) are
+    # promoted.  A number of drivers also expose a dict called ``sites`` with
+    # command/config values; those must remain outside the material contract.
+    site_items = list(plr_sites.items())
+    if any(site is None or not hasattr(site, "get_size_x") or not hasattr(site, "location") for _, site in site_items):
+        return None
+
+    result: List[Dict[str, Any]] = []
+    for ordinal, (site_index, site) in enumerate(site_items):
+        site_uuid = getattr(site, "unilabos_uuid", "")
+        if not site_uuid:
+            site_uuid = str(uuid.uuid4())
+            site.unilabos_uuid = site_uuid
+
+        location = getattr(site, "location", None)
+        held_resource = getattr(site, "resource", None)
+        result.append(
+            {
+                "uuid": str(site_uuid),
+                "index": site_index if isinstance(site_index, (int, str)) else ordinal,
+                "label": str(getattr(site, "name", site_index)),
+                "visible": bool(getattr(site, "visible", True)),
+                "occupied_by": getattr(held_resource, "name", None),
+                "position": {
+                    "x": getattr(location, "x", 0.0) if location is not None else 0.0,
+                    "y": getattr(location, "y", 0.0) if location is not None else 0.0,
+                    "z": getattr(location, "z", 0.0) if location is not None else 0.0,
+                },
+                "size": {
+                    "width": site.get_size_x(),
+                    "height": site.get_size_y(),
+                    "depth": site.get_size_z(),
+                },
+                "content_type": list(getattr(site, "content_type", []) or []),
+            }
+        )
+    return result
+
+
+def apply_plr_site_metadata(resource: "PLRResource", sites_by_name: Dict[str, List[Dict[str, Any]]]) -> None:
+    """Restore root ``sites[]`` metadata onto a deserialized PLR tree.
+
+    Standard PLR carriers reconstruct their holder children from ``children``
+    and therefore need a post-pass to restore non-contiguous site indexes and
+    site UUIDs.  ItemizedCarrier consumes the list in its constructor, but the
+    same pass refreshes its UUID/metadata maps so a later serialize remains
+    lossless.
+    """
+
+    site_defs = sites_by_name.get(resource.name)
+    plr_sites = getattr(resource, "sites", None)
+    if site_defs is not None and isinstance(plr_sites, dict):
+        remaining = dict(plr_sites)
+        by_name = {str(getattr(site, "name", key)): (key, site) for key, site in remaining.items()}
+        restored: Dict[Union[int, str], Any] = {}
+        used_keys = set()
+
+        for ordinal, site_def in enumerate(site_defs):
+            label = str(site_def.get("label", ordinal))
+            current_key = None
+            site = None
+            if label in by_name:
+                current_key, site = by_name[label]
+            elif site_def.get("index") in remaining:
+                current_key = site_def.get("index")
+                site = remaining[current_key]
+            elif ordinal < len(remaining):
+                current_key, site = list(remaining.items())[ordinal]
+            if site is None:
+                continue
+
+            site_uuid = site_def.get("uuid")
+            if site_uuid:
+                site.unilabos_uuid = str(site_uuid)
+            restored_index = site_def.get("index", current_key if current_key is not None else ordinal)
+            restored[restored_index] = site
+            if current_key is not None:
+                used_keys.add(current_key)
+
+        for current_key, site in remaining.items():
+            if current_key not in used_keys:
+                restored[current_key] = site
+        resource.sites = restored
+
+    elif site_defs is not None and isinstance(plr_sites, list):
+        # ItemizedCarrier stores sites as a list of occupants and keeps slot
+        # identity separately from occupant resource UUIDs.
+        resource.site_uuids = {
+            str(site.get("label", ordinal)): str(site["uuid"])
+            for ordinal, site in enumerate(site_defs)
+            if site.get("uuid")
+        }
+        resource._site_metadata = {
+            str(site.get("label", ordinal)): copy.deepcopy(site) for ordinal, site in enumerate(site_defs)
+        }
+
+    for child in resource.children:
+        apply_plr_site_metadata(child, sites_by_name)
+
+
 class GraphData(BaseModel):
     """图数据结构，包含节点和边"""
 
@@ -289,6 +502,13 @@ class ResourceDictInstance(object):
                 content["barcode_symbology"] = config_barcode.get("symbology", "")
         elif config_barcode and not content.get("barcode"):
             content["barcode"] = config_barcode
+        # 载架位点：ItemizedCarrier 的 PLR serialize 把 sites[] 放在 config，
+        # ResourceDict 协议将其提升为根字段。根字段（包括显式空列表）优先，
+        # 但无论哪边胜出都清理 config，保证只有一个真相来源。
+        config_sites = content["config"].pop("sites", None)
+        if content.get("sites") is None and config_sites is not None:
+            # noinspection PyTypedDict
+            content["sites"] = config_sites
         # 液体状态：容器把 VolumeTracker.serialize() 落在 data 中（PLR serialize_state 的位置）。
         # 与 barcode 同范式在此漏斗提升物质面三键到根字段并移出 data：根字段已有值则以根字段为准、
         # 仅清理 data；data 无此键（非容器）则根字段保持 None。max_volume/thing 留在 data（规格面/冗余）。
@@ -320,7 +540,7 @@ class ResourceDictInstance(object):
             raise err
 
     def get_plr_nested_dict(self) -> Dict[str, Any]:
-        """获取资源实例的嵌套字典表示（barcode 对齐 PLR serialize 形式）"""
+        """获取资源实例的嵌套字典表示（提升字段对齐 PLR serialize 形式）"""
         res_dict = self.res_content.model_dump(by_alias=True)
         res_dict["children"] = {child.res_content.id: child.get_plr_nested_dict() for child in self.children}
         res_dict["parent"] = self.res_content.parent_instance_name
@@ -331,6 +551,11 @@ class ResourceDictInstance(object):
         res_dict["barcode"] = (
             {"data": barcode, "symbology": symbology or "", "position_on_resource": "front"} if barcode else None
         )
+        # sites 已经是 PLR/前端共用的 sites[] 形态；非载架不向嵌套 PLR
+        # 字典注入 sites=None，载架则保留根级列表（不塞回 config）。
+        sites = res_dict.pop("sites", None)
+        if sites is not None:
+            res_dict["sites"] = sites
         # 液体状态根字段组装回 data（PLR serialize_state 完整形态），根键不保留在嵌套 dict 中
         res_dict["data"] = assemble_tracker_state(self.res_content)
         for state_key in TRACKER_STATE_KEYS:
@@ -544,7 +769,11 @@ class ResourceTreeSet(object):
                 build_uuid_mapping(child, uuid_list, uid)
 
         def resource_plr_inner(
-            d: dict, parent_resource: Optional[ResourceDict], states: dict, uuids: list
+            plr_resource: "PLRResource",
+            d: dict,
+            parent_resource: Optional[ResourceDict],
+            states: dict,
+            uuids: list,
         ) -> ResourceDictInstance:
             current_uuid, parent_uuid, extra = uuids.pop(0)
 
@@ -602,6 +831,9 @@ class ResourceTreeSet(object):
                 },
                 "data": states[d["name"]],
                 "extra": extra,
+                # 标准 Carrier 的 sites 不在 serialize() 中，ItemizedCarrier
+                # 则在 serialize() 中；统一从真实 PLR 对象抽取为根字段。
+                "sites": extract_plr_sites(plr_resource, d),
             }
 
             # 先转换为 ResourceDictInstance，获取其中的 ResourceDict
@@ -610,7 +842,8 @@ class ResourceTreeSet(object):
 
             # 递归处理子节点，传入当前节点的 ResourceDict 作为 parent
             current_instance.children = [
-                resource_plr_inner(child, current_resource, states, uuids) for child in d["children"]
+                resource_plr_inner(child_resource, child_dict, current_resource, states, uuids)
+                for child_resource, child_dict in zip(plr_resource.children, d["children"])
             ]
 
             return current_instance
@@ -625,7 +858,7 @@ class ResourceTreeSet(object):
             all_states = resource.serialize_all_state()
 
             # 根节点没有父节点，传入 None
-            root_instance = resource_plr_inner(serialized_data, None, all_states, uuid_list)
+            root_instance = resource_plr_inner(resource, serialized_data, None, all_states, uuid_list)
             tree_instance = ResourceTreeInstance(root_instance)
             trees.append(tree_instance)
         return cls(trees)
@@ -650,16 +883,24 @@ class ResourceTreeSet(object):
             "tip_spot": "TipSpot",
         }
 
-        def collect_node_data(node: ResourceDictInstance, name_to_uuid: dict, all_states: dict, name_to_extra: dict):
-            """一次遍历收集 name_to_uuid, all_states 和 name_to_extra"""
+        def collect_node_data(
+            node: ResourceDictInstance,
+            name_to_uuid: dict,
+            all_states: dict,
+            name_to_extra: dict,
+            name_to_sites: dict,
+        ):
+            """一次遍历收集 UUID、state、extra 与 sites 元数据。"""
             name_to_uuid[node.res_content.name] = node.res_content.uuid
             # 液体状态从根字段组装回完整 serialize_state 形态，load_all_state 才能恢复 tracker
             all_states[node.res_content.name] = assemble_tracker_state(node.res_content)
             name_to_extra[node.res_content.name] = node.res_content.extra
             name_to_extra[node.res_content.name][FRONTEND_POSE_EXTRA] = node.res_content.pose.extra
             name_to_extra[node.res_content.name][EXTRA_CLASS] = node.res_content.klass
+            if node.res_content.sites is not None:
+                name_to_sites[node.res_content.name] = copy.deepcopy(node.res_content.sites)
             for child in node.children:
-                collect_node_data(child, name_to_uuid, all_states, name_to_extra)
+                collect_node_data(child, name_to_uuid, all_states, name_to_extra, name_to_sites)
 
         def node_to_plr_dict(node: ResourceDictInstance, has_model: bool):
             """转换节点为 PLR 字典格式"""
@@ -672,6 +913,8 @@ class ResourceTreeSet(object):
             # （PLR Barcode dict {data, symbology, position_on_resource}），与
             # get_resource_instance_from_dict 从 config 读取的逻辑对称；position 未保留，默认兜底。
             config = dict(res.config)
+            # 漏斗已把老形态 sites 移出 config；防御性清理避免双真相。
+            config.pop("sites", None)
             if res.barcode:
                 config["barcode"] = {
                     "data": res.barcode,
@@ -698,6 +941,13 @@ class ResourceTreeSet(object):
             }
             if has_model:
                 d["model"] = res.config.get("model", None)
+            if res.sites is not None:
+                # 只有项目 ItemizedCarrier 的构造器消费 sites[]。标准 PLR
+                # Carrier 仍从 ResourceHolder children 重建，随后用 metadata
+                # post-pass 恢复 UUID/原始 index，不能把 list 直接传给它。
+                site_cls = find_subclass(d["type"], PLRResource)
+                if site_cls is not None and plr_class_accepts_serialized_sites(site_cls):
+                    d["sites"] = copy.deepcopy(res.sites)
             return d
 
         plr_resources = []
@@ -707,7 +957,8 @@ class ResourceTreeSet(object):
             name_to_uuid: Dict[str, str] = {}
             all_states: Dict[str, Any] = {}
             name_to_extra: Dict[str, dict] = {}
-            collect_node_data(tree.root_node, name_to_uuid, all_states, name_to_extra)
+            name_to_sites: Dict[str, List[Dict[str, Any]]] = {}
+            collect_node_data(tree.root_node, name_to_uuid, all_states, name_to_extra, name_to_sites)
             has_model = tree.root_node.res_content.type != "deck"
             plr_dict = node_to_plr_dict(tree.root_node, has_model)
             try:
@@ -732,6 +983,7 @@ class ResourceTreeSet(object):
                 # 使用 DeviceNodeResourceTracker 设置 UUID 和 Extra
                 tracker.loop_set_uuid(plr_resource, name_to_uuid)
                 tracker.loop_set_extra(plr_resource, name_to_extra)
+                apply_plr_site_metadata(plr_resource, name_to_sites)
                 plr_resources.append(plr_resource)
 
             except Exception as e:
@@ -904,11 +1156,16 @@ class ResourceTreeSet(object):
         for remote_root in remote_tree_set.root_nodes:
             remote_root_id = remote_root.res_content.id
             remote_root_type = remote_root.res_content.type
+            remote_root_is_host = (
+                remote_root.res_content.klass == HOST_NODE_REGISTRY_NAME
+                or remote_root_id
+                in {DEFAULT_HOST_NODE_NAME, BasicConfig.host_node_name}
+            )
 
             if remote_root_type == "device":
                 # 情况1: 一级是 device
                 if remote_root_id not in local_device_map:
-                    if remote_root_id != "host_node":
+                    if not remote_root_is_host:
                         logger.warning(f"Device '{remote_root_id}' 在本地不存在，跳过该 device 下的物料同步")
                     continue
 

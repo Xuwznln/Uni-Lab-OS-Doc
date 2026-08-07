@@ -12,13 +12,31 @@ from unilabos.app.main import (
     should_start_edge_scheduler,
     should_start_embedded_material_service,
 )
-from unilabos.config.config import HTTPConfig
+from unilabos.config.config import (
+    BasicConfig,
+    HTTPConfig,
+    resolve_host_node_name,
+)
 
 
 @pytest.fixture(autouse=True)
 def _restore_material_config(monkeypatch):
     monkeypatch.setattr(HTTPConfig, "material_source", "microbackend")
     monkeypatch.setattr(HTTPConfig, "material_microbackend_addr", "")
+    monkeypatch.setattr(BasicConfig, "host_node_name", "host_node")
+
+
+def test_host_node_runtime_name_is_configurable() -> None:
+    args = vars(parse_args().parse_args(["--host_node_name", "lab_host_a"]))
+
+    assert args["host_node_name"] == "lab_host_a"
+    assert resolve_host_node_name(args["host_node_name"]) == "lab_host_a"
+
+
+@pytest.mark.parametrize("name", ["9host", "host-node", "host/node", "主机"])
+def test_host_node_runtime_name_must_be_ros_safe(name: str) -> None:
+    with pytest.raises(ValueError, match="HostNode name"):
+        resolve_host_node_name(name)
 
 
 def test_default_starts_embedded_microbackend_with_host_db() -> None:

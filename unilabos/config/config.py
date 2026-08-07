@@ -2,8 +2,14 @@ import base64
 import traceback
 import os
 import importlib.util
+import re
 from typing import Optional, Literal
 from unilabos.utils import logger
+
+
+HOST_NODE_REGISTRY_NAME = "host_node"
+DEFAULT_HOST_NODE_NAME = HOST_NODE_REGISTRY_NAME
+_ROS_NODE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class BasicConfig:
@@ -15,6 +21,9 @@ class BasicConfig:
     # False（默认）：Slave 必须等 HostLink/Host ROS 服务就绪后才初始化 ROS。
     # True：显式离线降级，跳过首次 Host 等待及旧 ROS 注册，HostLink 仍后台重连。
     slave_no_host = False
+    # HostNode 的运行时实例名（资源根 id/name、ROS node/action namespace）。
+    # 设备类型/注册表键仍固定为 ``host_node``，两者不可混用。
+    host_node_name = DEFAULT_HOST_NODE_NAME
     upload_registry = False
     machine_name = "undefined"
     vis_2d_enable = False
@@ -39,6 +48,24 @@ class BasicConfig:
         target = f"{cls.ak}:{cls.sk}"
         base64_target = base64.b64encode(target.encode("utf-8")).decode("utf-8")
         return base64_target
+
+
+def resolve_host_node_name(value: Optional[str] = None) -> str:
+    """Return a ROS-safe HostNode runtime name.
+
+    ``host_node`` remains the stable registry/type name.  This value is only
+    the renameable instance identity used by resources and ROS endpoints.
+    """
+
+    name = str(BasicConfig.host_node_name if value is None else value).strip()
+    if not name:
+        name = DEFAULT_HOST_NODE_NAME
+    if not _ROS_NODE_NAME_PATTERN.fullmatch(name):
+        raise ValueError(
+            "HostNode name must start with a letter or underscore and contain "
+            "only ASCII letters, digits, and underscores"
+        )
+    return name
 
 
 # WebSocket配置
