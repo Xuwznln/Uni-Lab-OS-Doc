@@ -353,6 +353,13 @@ unilab -g graph.json --material_source microbackend \
 优先、未命中自动回源时设为 `auto`。slave 不执行 embedded/external 服务装配，
 也不打开 SQLite，只通过 HostLink 请求 Host 微后端。
 
+写入 Authority 不跟随查询回退：`microbackend` 和 `auto` 都不会把 HostNode 启动资源、
+Slave registry 或资源树变更隐式写入 `remote_addr`；仅显式 `backend` 模式挂接旧 Backend
+资源写入桥。微后端模式下，标准 Material CRUD 走 Backend-shaped 本地 HTTP API，台面废弃
+会转换为逐 Material 的本地 `DELETE /api/v1/materials/{uuid}`。
+同理，未指定本地图时只有显式 `backend` Authority 才读取旧远端启动图；默认 Host 以空图
+启动并等待 Slave，避免“开箱即用”路径依赖正式后端登录态。
+
 ### 3.1 HostLinkConfig - 微后端组网配置
 
 HostLink 的服务端和客户端生命周期均属于 Edge 微后端，而不是 ROS Node：Host

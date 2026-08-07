@@ -55,6 +55,7 @@ def test_default_starts_embedded_microbackend_with_host_db() -> None:
     assert not should_start_embedded_material_service(args, is_host_mode=False)
     assert should_start_edge_scheduler(args, is_host_mode=True)
     assert not should_start_edge_scheduler(args, is_host_mode=False)
+    assert not should_attach_legacy_http_bridge(args)
 
 
 def test_scheduler_can_be_explicitly_disabled() -> None:
@@ -80,10 +81,22 @@ def test_local_graph_does_not_request_legacy_remote_startup() -> None:
     assert not should_request_remote_startup(
         startup_json=None,
         graph_file_path="/config/devices.json",
+        material_source="backend",
+    )
+    assert not should_request_remote_startup(
+        startup_json=None,
+        graph_file_path=None,
+        material_source="microbackend",
+    )
+    assert not should_request_remote_startup(
+        startup_json=None,
+        graph_file_path=None,
+        material_source="auto",
     )
     assert should_request_remote_startup(
         startup_json=None,
         graph_file_path=None,
+        material_source="backend",
     )
 
 
@@ -134,6 +147,16 @@ def test_startup_arguments_switch_to_formal_backend() -> None:
     assert HTTPConfig.material_source == "backend"
     assert mode == "embedded"
     assert args["edge_inventory_db"] == "/tmp/material.db"
+    assert should_attach_legacy_http_bridge(args)
+
+
+def test_auto_material_source_does_not_enable_legacy_backend_writes() -> None:
+    args = vars(parse_args().parse_args(["--material_source", "auto"]))
+
+    configure_material_startup(args)
+
+    assert HTTPConfig.material_source == "auto"
+    assert not should_attach_legacy_http_bridge(args)
 
 
 def test_external_mode_defaults_to_standalone_scheduler_port() -> None:

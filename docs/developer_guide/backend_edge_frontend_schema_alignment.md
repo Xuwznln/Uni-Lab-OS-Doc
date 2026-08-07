@@ -39,11 +39,11 @@ DDL 逐字做成一样。
 | `deepmodeling/Uni-Lab-OS` | `origin/feat/edge-networking-and-scheduler@195434ab738c1d5123e41d1ef08f2d17d30928c4` | Edge 远端契约分支；本轮 fetch 后未前进 |
 | Edge 隔离实现 | `cd2d409a007e233aec0e9422359bf85c5427e37b` | 上轮基于 195434 的 v5/API 对齐提交，完整保留 |
 | 受指导模型提交 | `origin/feat/backend-contract-d552078@92743142572fcfdc69a2424945d5dcffd846920b` | 已拉取；包含 Backend 审计、Host identity、Site/物料设计文档等 6 个提交 |
-| 本地 Edge 对齐分支 | `feat/backend-contract-local-align-20260808@102f2b85` + 当前工作树 | v6 migration、精确 Material/Site CRUD、状态/actor Adapter 正在本地验证 |
+| 本地 Edge 对齐分支 | `feat/backend-contract-local-align-20260808`，v6 基线 `2ae63572` + 本次 Authority 修正 | v6 migration、精确 Material/Site CRUD、状态/actor Adapter 已提交并通过本地验证；默认微后端不产生旧 Backend 启动写入 |
 | `Uni-Lab-OS/uni-lab-backend` 默认 `main` | `d5520789975d6aa14792b8c1bde6565050b5fcf8` | 2026-08-07 直接 fetch/`ls-remote` 核验；原 000047..000049 实现候选已进入默认分支 |
 | Backend 当前实现候选 | `origin/feat/workflow@d123ce0a4e3b3ff834c26f4f02e3f9f53bea3b3e` | 相对 d552078 有 7 个可达提交；新增 000050..000054、`material.type`、已发布工作流契约及对应 model/Router/test |
 | 私有 `Uni-Lab-OS/uni-lab-fe` | `origin/integration/fe-os-migration@355e2fc498e4d58701b71289cdd031beedef5afa` | 本轮直接审计的客户端投影证据；不是数据库标准 |
-| 本地微前端 `unilab-edge-ui` | `/home/wz/unilab-context/unilab-edge-ui`，`main@6c0db30e4fabfd67df5d99a1965a796e015e36e7`，dirty | 已直接读取并验证：68 Edge ops、5 Cloud ops、17 actions、26 typed entities、58 tests |
+| 本地微前端 `unilab-edge-ui` | `/home/wz/unilab-context/unilab-edge-ui`，`feat/backend-resource-contract-v6@dd5337e`，clean | 已直接读取并验证：68 Edge ops、5 Cloud ops、17 actions、26 typed entities、58 tests；26/26 实体经 Vite 同源代理实连 Host 成功 |
 | `leaplab/designs` | 导师提供：`78da9a7 → 24fc4ce`（8 个提交），原有 `uni-lab-scheduler` dirty 修改未动 | 待实机复核的 target-design；不证明 Go/OS migration、API 或进程入口已经实现 |
 
 Backend `main@d552078` 是本轮直接核验的默认分支；`feat/workflow@d123ce0` 仍未进入默认分支，
@@ -59,7 +59,7 @@ Backend `main@d552078` 是本轮直接核验的默认分支；`feat/workflow@d12
 | `backend-implemented-candidate` | 已有 Backend migration/model/Router/test；是否已进默认分支由 Ref 列另记，不能只凭成熟度名称推断发布状态 | 默认 `main@d552078` 基线与 `feat/workflow@d123ce0` 候选增量 |
 | `edge-live` | 当前 Edge 分支或隔离提交能实际建库、迁移并由现有 Interface 读写 | Edge v6 shared 表、Backend-shaped Resource API、`edge_control.db` 和当前路由 |
 | `legacy-implemented` | 旧物理表、旧数据库或兼容 View 仍真实存在且可能仍可写，但不再定义 canonical target | `workflow_history.db`、v6 上的四个兼容 View |
-| `local-draft` | 已在本机实现并通过测试、尚未提交的改动 | Edge v6 精确语义与微前端 26 实体/Resource client |
+| `local-draft` | 已在本机实现并通过测试、尚未提交的改动 | 当前对齐实现已落本地提交；本轮没有把尚未提交的设计当作已实现证据 |
 | `target-design` | 设计目标或迁移方向；尚不能据此声称 Schema/API/进程已落地 | 导师提供、待实机复核的 `leaplab/designs@24fc4ce` |
 
 当前 v6 表/View 属于已实现事实；新增 target-design 不会自动把它们改名、合库、删表或改变写入者。
@@ -306,12 +306,15 @@ Material/Site import/upsert、identity mapping 与冲突响应仍是 Backend/Go 
 - 导师另行提供：用户另一份本地 Edge 脏工作区已实现根字段提升及测试；这不是
   `/home/wz/.../unilab-edge-ui` catalog 本身的实现。该 Edge 工作区的路径/ref 未在本环境提供，
   无法直接核对其 diff 和测试；它应记为“本地待合并实现”，不能写成远端已完成。
-- 当前 OS 本地微后端创建 Material 不按模板展开 child Material/Site；测试通过直接 SQL 插入 Site，
-  不能证明生产创建闭环。
+- 当前 OS 本地微后端创建 Material 已按模板递归物化 child Material/Site，并为每个实例 Site
+  生成、持久化稳定 UUID；创建、查询、更新、递归软删除和占用清理均有 HTTP/服务层回归测试。
 - `backend_controlled` 下，Edge `instance_sync` 只保留 Backend 返回的 Material UUID，没有把 Material Graph
   的 Site DTO hydration 回运行中的 `ResourceTreeSet`。
 - `local_scheduler` 下，远端代码缺“首次生成一次、事务持久化、全链路复用”的实现证据。
 - 旧 `resource_relation` View 只含 owner+label+occupant，不含 Site UUID，只能继续作为 legacy seam。
+- HostNode 的旧资源树/registry 写桥只在显式 `material_source=backend` 时启用；默认
+  `microbackend` 与 `auto` 不因 FastAPI 存在而向正式 Backend 产生启动写入。跨 Authority 的
+  Edge-origin Material/Site import/upsert 仍需独立协议，不能用旧资源树上传替代。
 
 ### HostNode 名称
 
@@ -418,11 +421,12 @@ Registry 再用 `parse_docstring` 把首行和参数说明写入动作 JSON Sche
 
 ## 验证证据
 
-2026-08-08 本地门禁已直接完成：Edge `tests/app` 为 `378 passed, 1 xfailed`；聚焦
-Backend Resource/迁移/同步测试为 `56 passed`；真实旧 v5 数据库副本迁移到 v6 后
+2026-08-08 本地门禁已直接完成：Edge `tests/app` 为 `382 passed, 1 xfailed`，HostLink
+定向 Action 为 `4 passed`；聚焦 Backend Resource/迁移/同步测试为 `56 passed`；真实旧 v5 数据库副本迁移到 v6 后
 `integrity_check=ok`、外键错误 0、13/13 Material type 与 10 Site 保留。微前端
 `protocol:check` 输出 68 Edge operations、5 Cloud operations、17 inventory actions、
-26 typed entities，`vitest` 为 58 passed，`vue-tsc + vite build` 通过。
+26 typed entities，`vitest` 为 58 passed，`vue-tsc + vite build` 通过；编译后的 Node 客户端
+经 `:5180` 同源代理访问运行中的 Host，26/26 实体查询成功。
 
 2026-08-07 增量审计将 d123ce0 用 `git archive` 解到独立临时目录，定向执行
 `go test -count=1 ./internal/infrastructure/database ./internal/domain/model

@@ -31,6 +31,10 @@ class _Session:
         self.calls.append({"method": "GET", "url": url, **kwargs})
         return self.responses.pop(0)
 
+    def delete(self, url: str, **kwargs: Any) -> _Response:
+        self.calls.append({"method": "DELETE", "url": url, **kwargs})
+        return self.responses.pop(0)
+
 
 def _client(source: str, responses: List[_Response]) -> tuple[HTTPClient, _Session]:
     client = HTTPClient(
@@ -121,6 +125,32 @@ def test_microbackend_failure_returns_empty_for_host_memory_fallback() -> None:
     )
 
     assert client.material_query(resource_id="local-rack") == []
+
+
+def test_microbackend_discard_uses_backend_shaped_local_delete(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(BasicConfig, "working_dir", str(tmp_path))
+    client, session = _client(
+        "microbackend",
+        [_Response({"code": 0}), _Response({"code": 0})],
+    )
+
+    result = client.material_bench_discard(["edge-a", "edge b"])
+
+    assert result == {"code": 0}
+    assert session.calls == [
+        {
+            "method": "DELETE",
+            "url": "http://127.0.0.1:8092/api/v1/materials/edge-a",
+            "timeout": 30,
+        },
+        {
+            "method": "DELETE",
+            "url": "http://127.0.0.1:8092/api/v1/materials/edge%20b",
+            "timeout": 30,
+        },
+    ]
 
 
 def test_default_slave_client_cannot_open_a_direct_material_channel(

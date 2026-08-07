@@ -7,6 +7,7 @@ import pytest
 from unilabos.config.config import BasicConfig, HOST_NODE_REGISTRY_NAME
 from unilabos.resources.graphio import canonicalize_nodes_data
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
+from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.workflow.common import build_protocol_graph
 
 
@@ -80,3 +81,12 @@ def test_generated_workflow_targets_renamed_host() -> None:
     assert create_node.device_name == "west_lab"
     assert create_node.resource_name == "west_lab"
     assert create_node.footer == "create_resource-west_lab"
+
+
+def test_host_side_effect_bridge_requires_the_requested_capability() -> None:
+    scheduler_bridge = SimpleNamespace(publish_host_ready=lambda: None)
+    material_bridge = SimpleNamespace(resource_tree_add=lambda *_args: {})
+    host = SimpleNamespace(bridges=[scheduler_bridge, material_bridge])
+
+    assert HostNode._bridge_for(host, "resource_tree_add") is material_bridge
+    assert HostNode._bridge_for(host, "resource_registry") is None

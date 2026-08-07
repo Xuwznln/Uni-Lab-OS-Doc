@@ -8,7 +8,7 @@ import gzip
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from unilabos.utils.tools import (
     fast_dumps as _fast_dumps,
@@ -395,6 +395,31 @@ class HTTPClient:
             encoding="utf-8",
         ) as f:
             f.write(json.dumps(payload, ensure_ascii=False, indent=4))
+        source = self._material_sources()[0]
+        if source == "microbackend":
+            responses = [
+                self._session.delete(
+                    f"{self._material_microbackend_base()}/materials/"
+                    f"{quote(material_uuid, safe='')}",
+                    timeout=30,
+                )
+                for material_uuid in uuids
+            ]
+            for response in responses:
+                if response.status_code != 200:
+                    logger.error(
+                        f"台面物料废弃失败: {response.status_code}, {response.text}"
+                    )
+                    return {
+                        "code": response.status_code,
+                        "message": response.text,
+                    }
+                result = response.json()
+                if str(result.get("code", 0)) != "0":
+                    logger.error(f"台面物料废弃失败: {response.text}")
+                    return result
+            return {"code": 0}
+
         response = self._session.post(
             f"{self.remote_addr}/edge/material/bench/discard",
             json=payload,

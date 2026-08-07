@@ -454,6 +454,23 @@ class HostNode(BaseROS2DeviceNode):
                 bridge.publish_host_ready()
                 self.lab_logger().debug(f"Host ready signal sent via {bridge.__class__.__name__}")
 
+    def _bridge_for(self, method_name: str) -> Optional[Any]:
+        """Return the explicitly configured bridge for one side effect.
+
+        Scheduler/status bridges must never make legacy material writes become
+        implicitly enabled.  Material Authority is selected in ``main.py`` by
+        deciding whether the Backend HTTP client is present in ``self.bridges``.
+        """
+
+        return next(
+            (
+                bridge
+                for bridge in self.bridges
+                if callable(getattr(bridge, method_name, None))
+            ),
+            None,
+        )
+
     def _send_re_register(self, sclient, device_namespace: str):
         """
         Send re-register command to a device. This is a one-time operation.
@@ -1465,11 +1482,12 @@ class HostNode(BaseROS2DeviceNode):
         # 处理资源添加逻辑
         success = False
         uuid_mapping = {}
-        if len(self.bridges) > 0:
-            from unilabos.app.web.client import HTTPClient, http_client
-
+        resource_bridge = self._bridge_for("resource_tree_add")
+        if resource_bridge is not None:
             resource_start_time = time.time()
-            uuid_mapping = http_client.resource_tree_add(resource_tree_set, mount_uuid, first_add)
+            uuid_mapping = resource_bridge.resource_tree_add(
+                resource_tree_set, mount_uuid, first_add
+            )
             success = True
             resource_end_time = time.time()
             self.lab_logger().info(
@@ -1575,8 +1593,7 @@ class HostNode(BaseROS2DeviceNode):
             f"{len(resource_tree_set.all_nodes)} total nodes"
         )
 
-        from unilabos.app.web.client import http_client
-
+        resource_bridge = self._bridge_for("resource_tree_add")
         uuid_to_trees: Dict[str, List[ResourceTreeInstance]] = collections.defaultdict(list)
         for tree in resource_tree_set.trees:
             uuid_to_trees[tree.root_node.res_content.parent_uuid].append(tree)
@@ -1587,7 +1604,13 @@ class HostNode(BaseROS2DeviceNode):
             self.lab_logger().info(
                 f"[Host Node-Resource] 物料 {[root_node.res_content.id for root_node in new_tree_set.root_nodes]} {uid} 挂载 {trees[0].root_node.res_content.parent_uuid} 请求更新上传"
             )
-            uuid_mapping = http_client.resource_tree_add(new_tree_set, uid, False)
+            if resource_bridge is None:
+                self.lab_logger().warning(
+                    "[Host Node-Resource] 当前 Material Authority 未配置旧资源树写入桥，拒绝隐式上传"
+                )
+                response.response = "FAILED"
+                return
+            uuid_mapping = resource_bridge.resource_tree_add(new_tree_set, uid, False)
             success = bool(uuid_mapping)
             resource_end_time = time.time()
             self.lab_logger().info(
@@ -1656,9 +1679,6 @@ class HostNode(BaseROS2DeviceNode):
         """
         self.lab_logger().trace(f"[Host Node] Node info update request received: {request}")
         try:
-            from unilabos.app.communication import get_communication_client
-            from unilabos.app.web.client import HTTPClient, http_client
-
             info = json.loads(request.command)
             if "SYNC_SLAVE_NODE_INFO" in info:
                 info = info["SYNC_SLAVE_NODE_INFO"]
@@ -1702,7 +1722,15 @@ class HostNode(BaseROS2DeviceNode):
                 devices_config = info.pop("devices_config")
                 registry_config = info.pop("registry_config")
                 if registry_config:
-                    http_client.resource_registry({"resources": registry_config})
+                    registry_bridge = self._bridge_for("resource_registry")
+                    if registry_bridge is not None:
+                        registry_bridge.resource_registry(
+                            {"resources": registry_config}
+                        )
+                    else:
+                        self.lab_logger().debug(
+                            "[Host Node] 当前 Material Authority 不使用旧 Backend registry 上传"
+                        )
 
                     # 存储 slave 的 registry_config,用于后续 SYNC_SLAVE_NODE_INFO 索引
                     for reg_name, reg_data in registry_config.items():
@@ -1779,10 +1807,9 @@ class HostNode(BaseROS2DeviceNode):
         self.lab_logger().info(f"[Host Node-Resource] Add request received: {len(resources)} resources")
 
         success = False
-        if len(self.bridges) > 0:  # 边的提交待定
-            from unilabos.app.web.client import HTTPClient, http_client
-
-            r = http_client.resource_add(add_schema(resources))
+        resource_bridge = self._bridge_for("resource_add")
+        if resource_bridge is not None:  # 边的提交待定
+            r = resource_bridge.resource_add(add_schema(resources))
             success = bool(r)
 
         response.success = success

@@ -12,7 +12,7 @@
 本轮直接读取并修改：
 
 - 路径：`/home/wz/unilab-context/unilab-edge-ui`
-- ref：`main@6c0db30e4fabfd67df5d99a1965a796e015e36e7`（工作树仍为本地 draft）
+- ref：`feat/backend-resource-contract-v6@dd5337e`（工作树 clean）
 - 登记文件：`packages/protocol/src/catalog.ts::STANDARD_TABLES`、
   `packages/protocol/src/entities.ts::DATA_ENTITIES`、`packages/protocol/src/resource.ts`、
   `packages/protocol/src/entity-client.ts` 与 `src/views/DataEntitiesView.vue`
@@ -32,7 +32,8 @@ base URL，换成正式 Backend 只替换 base URL。它同时检查 HTTP status
 业务 envelope，HTTP 200 的非零 code 会抛 `BackendBusinessError`。
 
 直接门禁结果：68 Edge ops、5 Cloud ops、17 inventory actions、26 typed entities；58 个
-Vitest 测试、`vue-tsc` 和 Vite production build 全部通过。
+Vitest 测试、`vue-tsc` 和 Vite production build 全部通过。编译产物使用 Host origin 作为
+base URL，经 Vite `/api` 同源代理逐项查询 26/26 实体成功。
 
 `/home/wz/unilab-context/leaplab designs@24fc4ce` 仍只是 target-design；它描述未来持久化
 所有权，不能写成微前端、Go Backend 或 OS 已实现 migration/API。

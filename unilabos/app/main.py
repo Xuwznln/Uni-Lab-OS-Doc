@@ -240,20 +240,35 @@ def should_start_edge_scheduler(
 
 
 def should_attach_legacy_http_bridge(args_dict: Dict[str, Any]) -> bool:
-    """Legacy backend callbacks must not run beside the production protocol."""
+    """Attach legacy material writes only when Backend owns the material API.
+
+    ``fastapi`` merely enables the local web bridge; it must not imply that
+    HostNode may upload its startup graph to ``HTTPConfig.remote_addr``.  The
+    microbackend/auto modes have a different write authority and therefore do
+    not receive the legacy Backend client as a ROS bridge.
+    """
 
     return (
         "fastapi" in args_dict.get("app_bridges", [])
         and "edge_control" not in args_dict.get("app_bridges", [])
+        and HTTPConfig.material_source == "backend"
     )
 
 
 def should_request_remote_startup(
-    *, startup_json: Optional[Dict[str, Any]], graph_file_path: Optional[str]
+    *,
+    startup_json: Optional[Dict[str, Any]],
+    graph_file_path: Optional[str],
+    material_source: Optional[str] = None,
 ) -> bool:
-    """Fetch the legacy startup graph only when no graph was supplied locally."""
+    """Fetch the legacy startup graph only for an explicit Backend authority."""
 
-    return startup_json is None and graph_file_path is None
+    source = str(material_source or HTTPConfig.material_source or "").strip().lower()
+    return (
+        startup_json is None
+        and graph_file_path is None
+        and source == "backend"
+    )
 
 
 def parse_args():
@@ -1332,7 +1347,10 @@ def main():
             from unilabos.app.web import http_client as _http_client_for_community
 
             http_client_for_community = _http_client_for_community
-            if graph_preview is None and graph_file_path is None:
+            if should_request_remote_startup(
+                startup_json=startup_json_preview,
+                graph_file_path=graph_file_path,
+            ):
                 startup_json_preview = http_client_for_community.request_startup_json()
                 args_dict["_startup_json"] = startup_json_preview
                 graph_preview = startup_json_preview
@@ -1447,6 +1465,11 @@ def main():
         graph_file_path=file_path,
     ):
         request_startup_json = http_client.request_startup_json()
+    elif request_startup_json is None and file_path is None:
+        # A local Host may intentionally own no devices yet.  Slave validation
+        # below still rejects this payload because a Slave identity is derived
+        # from its globally unique startup device IDs.
+        request_startup_json = {"nodes": [], "links": []}
     if file_path is None:
         if not request_startup_json:
             print_status(

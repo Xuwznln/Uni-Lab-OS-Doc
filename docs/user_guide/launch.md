@@ -160,6 +160,12 @@ Host 微后端先于 ROS HostNode 启动并监听 `0.0.0.0:7302`。HostNode 创�
 后连上 Host 却无法应用配置”的半连接状态。仅显式传入 `--slave_no_host` 时允许离线
 启动；该模式使用本地 ROS 配置，同时 HostLink 在后台持续重连。
 
+默认 `--material_source microbackend` 时，HostNode 的启动资源只进入本地运行时树，
+不会因为启用了 FastAPI 就上传到 `remote_addr`。`auto` 也只表示查询未命中时可回源，
+不授予旧正式后端写权限；只有显式选择 `--material_source backend` 才挂接旧资源树写入桥。
+未提供 `-g` 时，本地 Host 以合法空图启动并等待 Slave；不会为了取得启动图访问正式后端。
+Slave 仍必须报送至少一个启动设备，空图会按组网约束拒绝启动。
+
 默认端口模式是定向且便于部署的：HostLink 在 TCP `7302` 监听控制面，同时 Fast DDS
 Discovery Server 在 UDP `7302` 监听 ROS 发现；Slave 只需一个
 `--hostlink_addr 192.168.1.10:7302` 即可得到 IP、端口和 domain。TCP 与 UDP 可使用
