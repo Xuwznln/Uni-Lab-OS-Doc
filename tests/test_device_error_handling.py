@@ -53,6 +53,31 @@ class DeviceExceptionTest(unittest.TestCase):
 
 
 class PendingDecisionRegistryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_default_waits_until_matching_decision_without_timeout(self):
+        registry = PendingDecisionRegistry()
+        published = asyncio.Event()
+        waiting = asyncio.create_task(
+            registry.publish_and_wait(
+                task_id="task-1",
+                job_id="job-1",
+                device_id="robot-1",
+                publish=published.set,
+            )
+        )
+        await published.wait()
+
+        _, pending = await asyncio.wait({waiting}, timeout=0.02)
+        self.assertEqual(pending, {waiting})
+        self.assertTrue(
+            registry.resolve(
+                task_id="task-1",
+                job_id="job-1",
+                device_id="robot-1",
+                decision={"action": "retry"},
+            )
+        )
+        self.assertEqual(await waiting, {"action": "retry"})
+
     async def test_first_matching_decision_wins(self):
         registry = PendingDecisionRegistry()
         published = asyncio.Event()
