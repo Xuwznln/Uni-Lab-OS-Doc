@@ -531,6 +531,37 @@ class HTTPClient:
             )
         return response
 
+    def report_job_result(self, uuid: str, data: Any) -> requests.Response:
+        """通用：把 edge 执行结果按 uuid 回传后端 edgesync 接口2(/edge/job/result)。
+
+        供 scheduler 下发 device_info 的同步任务(如 list_folder 列目录)复用，与
+        ``report_gantt`` 走同一后端接口；区别是不受甘特开关限制，data 为任意可 JSON
+        序列化的结果对象。
+
+        Args:
+            uuid: scheduler 下发 device_info 消息里的 uuid，原样回传作为关联键。
+            data: 任意结果对象，原样放入请求体 data 字段。
+
+        Returns:
+            Response: API响应对象
+        """
+        from unilabos.config.config import GanttReportConfig
+
+        url = f"{self.remote_addr}{GanttReportConfig.report_path}"
+        response = self._session.post(
+            url,
+            json={"uuid": uuid, "data": data},
+            headers={"Authorization": f"Lab {self.auth}"},
+            timeout=60,
+        )
+        if response.status_code == 200:
+            logger.info(f"job result 回传成功: uuid={uuid}")
+        else:
+            logger.error(
+                f"job result 回传失败: uuid={uuid} status={response.status_code} body={response.text}"
+            )
+        return response
+
 
 # 创建默认客户端实例
 http_client = HTTPClient()
