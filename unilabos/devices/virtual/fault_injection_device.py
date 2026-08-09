@@ -3,11 +3,18 @@
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+import numpy as np
 
 from typing_extensions import TypedDict
 
-from unilabos.registry.decorators import action, device
+from unilabos.registry.decorators import (
+    ActionInputHandle,
+    ActionOutputHandle,
+    DataSource,
+    action,
+    device,
+)
 from unilabos.utils.exception import (
     EmergencyStopError,
     ModbusConnectionError,
@@ -19,6 +26,28 @@ from unilabos.utils.exception import (
 
 class SimpleResult(TypedDict):
     success: bool
+    message: str
+
+
+class TestParameterBundle(TypedDict):
+    text_value: str
+    integer_value: int
+    float_value: float
+    boolean_value: bool
+    list_value: List[str]
+    object_value: Dict[str, Any]
+
+
+class TestParameterInputResult(TypedDict):
+    success: bool
+    parameters: TestParameterBundle
+    message: str
+
+
+class TestParameterReceiveResult(TypedDict):
+    success: bool
+    received_parameters: TestParameterBundle
+    local_parameters: TestParameterBundle
     message: str
 
 
@@ -42,6 +71,130 @@ class FaultInjectionDevice:
         self.logger = logging.getLogger(f"FaultInjectionDevice.{self.device_id}")
         self._async_attempts = 0
         self._sync_attempts = 0
+
+    @action(
+        description="输出多种类型的参数，用于测试工作流节点间参数保持",
+        goal_default={
+            "text_value": "upstream-text",
+            "integer_value": 42,
+            "float_value": 3.125,
+            "boolean_value": True,
+            "list_value": ["alpha", "beta"],
+            "object_value": {
+                "batch": "YB-007",
+                "priority": 3,
+                "enabled": False,
+                "thresholds": [0.1, 0.2],
+            },
+        },
+        handles=[
+            ActionOutputHandle(
+                key="parameter_output",
+                data_type="test_parameter_bundle",
+                label="测试参数",
+                data_key="parameters",
+                data_source=DataSource.EXECUTOR,
+            )
+        ],
+    )
+    def test_parameter_input_node(
+        self,
+        text_value: str = "upstream-text",
+        integer_value: int = 42,
+        float_value: float = 3.125,
+        boolean_value: bool = True,
+        list_value: Optional[List[str]] = None,
+        object_value: Optional[Dict[str, Any]] = None,
+    ) -> TestParameterInputResult:
+        parameters: TestParameterBundle = {
+            "text_value": text_value,
+            "integer_value": integer_value,
+            "float_value": float_value,
+            "boolean_value": boolean_value,
+            "list_value": list(list_value or []),
+            "object_value": dict(object_value or {}),
+        }
+        return {
+            "success": True,
+            "parameters": parameters,
+            "message": "parameter bundle emitted",
+        }
+
+    @action(
+        description="接收两组参数后主动报错，用于测试异常后参数保持",
+        error_policy={"allow_retry": True, "allow_skip": False},
+        goal_default={
+            "upstream_parameters": {
+                "text_value": "waiting-for-upstream",
+                "integer_value": -1,
+                "float_value": -1.0,
+                "boolean_value": False,
+                "list_value": [],
+                "object_value": {},
+            },
+            "local_text": "downstream-local",
+            "local_integer": 7,
+            "local_float": 9.75,
+            "local_boolean": False,
+            "local_list": ["local-a", "local-b"],
+            "local_object": {
+                "operator": "yxz321",
+                "retry_limit": 2,
+                "flags": [True, False],
+            },
+        },
+        handles=[
+            ActionInputHandle(
+                key="parameter_input",
+                data_type="test_parameter_bundle",
+                label="上游测试参数",
+                data_key="upstream_parameters",
+                data_source=DataSource.HANDLE,
+            )
+        ],
+    )
+    def test_parameter_receive_node(
+        self,
+        upstream_parameters: Optional[TestParameterBundle] = None,
+        local_text: str = "downstream-local",
+        local_integer: int = 7,
+        local_float: float = 9.75,
+        local_boolean: bool = False,
+        local_list: Optional[List[str]] = None,
+        local_object: Optional[Dict[str, Any]] = None,
+    ) -> TestParameterReceiveResult:
+        source = upstream_parameters or {
+            "text_value": "waiting-for-upstream",
+            "integer_value": -1,
+            "float_value": -1.0,
+            "boolean_value": False,
+            "list_value": [],
+            "object_value": {},
+        }
+        received_parameters: TestParameterBundle = {
+            "text_value": source["text_value"],
+            "integer_value": source["integer_value"],
+            "float_value": source["float_value"],
+            "boolean_value": source["boolean_value"],
+            "list_value": list(source["list_value"]),
+            "object_value": dict(source["object_value"]),
+        }
+        local_parameters: TestParameterBundle = {
+            "text_value": local_text,
+            "integer_value": local_integer,
+            "float_value": local_float,
+            "boolean_value": local_boolean,
+            "list_value": list(local_list or []),
+            "object_value": dict(local_object or {}),
+        }
+        if np.random.rand() < 0.5:  # 随机触发报错，模拟异常场景
+            raise SensorError(
+                "参数保持测试主动报错（模拟）",
+                device_snapshot={
+                    "received_parameters": received_parameters,
+                    "local_parameters": local_parameters,
+                },
+            )
 
     @action(description="正常调用，立即返回成功")
     async def run_ok(self) -> SimpleResult:
