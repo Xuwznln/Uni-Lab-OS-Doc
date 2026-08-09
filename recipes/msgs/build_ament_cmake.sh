@@ -29,8 +29,9 @@ echo "Using site-package dir ${FIXED_SP_DIR}"
 
 # RoboStack 的 np2 CMake 导出使用 numpy/_core/include；NumPy 1.26 的实际目录仍为 numpy/core/include。
 # 仅在构建环境补兼容链接，避免它进入最终消息包。
-if [[ -d "${FIXED_SP_DIR}/numpy/core/include" && ! -e "${FIXED_SP_DIR}/numpy/_core" ]]; then
-  ln -s core "${FIXED_SP_DIR}/numpy/_core"
+if [[ -d "${FIXED_SP_DIR}/numpy/core/include" && ! -e "${FIXED_SP_DIR}/numpy/_core/include" ]]; then
+  mkdir -p "${FIXED_SP_DIR}/numpy/_core"
+  ln -s ../core/include "${FIXED_SP_DIR}/numpy/_core/include"
 fi
 
 # see https://github.com/conda-forge/cross-python-feedstock/issues/24
