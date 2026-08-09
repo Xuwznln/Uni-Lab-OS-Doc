@@ -29,6 +29,8 @@ from typing_extensions import TypedDict
 from unilabos.app.model import JobAddReq
 from unilabos.resources.resource_tracker import ResourceDictType
 from unilabos.ros.nodes.presets.host_node import HostNode
+from unilabos.scheduler.dag_model import DagNode, DagValidationError, TaskDag
+from unilabos.scheduler.task_dag_runner import TaskDagRunner
 from unilabos.utils.type_check import serialize_result_info
 from unilabos.app.communication import BaseCommunicationClient
 from unilabos.config.config import (
@@ -415,6 +417,9 @@ class MessageProcessor:
         self.inventory_service = None  # 延迟设置(scheduler.integration 注入)：Edge 仓储唯一事实源
         self.session_id = str(uuid.uuid4())[:6]  # 产生一个随机的session_id
 
+        # task_dag 驱动器注册表：task_id -> TaskDagRunner（整张 DAG 下沉本地执行）
+        self._task_dag_runners: Dict[str, TaskDagRunner] = {}
+
         # WebSocket连接
         self.websocket = None
         self.connected = False
@@ -706,6 +711,8 @@ class MessageProcessor:
                 await self._handle_query_action_lock(message_data)
             elif message_type == "job_start":
                 await self._handle_job_start(message_data)
+            elif message_type == "task_dag":
+                await self._handle_task_dag(message_data)
             elif message_type == "workflow_start":
                 await self._handle_workflow_start(message_data)
             elif message_type == "workflow_cancel":
@@ -1117,6 +1124,12 @@ class MessageProcessor:
             host_node = HostNode.get_instance(0)
             if not host_node:
                 logger.error(f"[MessageProcessor] HostNode instance not available for job_id: {req.job_id}")
+                # 死路径必须回终态：否则 backend/DAG 侧的 job 将永不收到 job_status 而悬挂
+                if self.websocket_client:
+                    self.websocket_client.publish_job_status(
+                        {}, queue_item, "failed",
+                        serialize_result_info("HostNode 实例不可用，无法下发动作", False, {}),
+                    )
                 return
 
             host_node.send_goal(
@@ -1131,9 +1144,35 @@ class MessageProcessor:
             logger.error(f"[MessageProcessor] Error handling job start: {str(e)}")
             traceback.print_exc()
 
+            # 死路径兜底：即便 queue_item 尚未构造（如 JobAddReq 解析或 enqueue_job 抛错），
+            # 也必须回终态 job_status，否则 backend/DAG 侧对应 job 永不收到终态而悬挂。
+            if "queue_item" not in locals():
+                if "req" in locals():
+                    queue_item = QueueItem(
+                        task_type="job_call_back_status",
+                        device_id=req.device_id,
+                        action_name=req.action,
+                        task_id=req.task_id,
+                        job_id=req.job_id,
+                        notebook_id=req.notebook_id or "",
+                        device_action_key=f"/devices/{req.device_id}/{req.action}",
+                    )
+                elif data.get("job_id"):
+                    queue_item = QueueItem(
+                        task_type="job_call_back_status",
+                        device_id=data.get("device_id", ""),
+                        action_name=data.get("action", ""),
+                        task_id=data.get("task_id", ""),
+                        job_id=data["job_id"],
+                        notebook_id=data.get("notebook_id", "") or "",
+                        device_action_key=f"/devices/{data.get('device_id', '')}/{data.get('action', '')}",
+                    )
+
             # job_start出错时，需要通过正确的publish_job_status方法来处理
-            if "req" in locals() and "queue_item" in locals():
-                job_log = format_job_log(req.job_id, req.task_id, req.device_id, req.action)
+            if "queue_item" in locals():
+                job_log = format_job_log(
+                    queue_item.job_id, queue_item.task_id, queue_item.device_id, queue_item.action_name
+                )
                 logger.info(f"[MessageProcessor] Publishing failed status for job {job_log}")
 
                 if self.websocket_client:
@@ -1146,11 +1185,11 @@ class MessageProcessor:
                     message = {
                         "action": "job_status",
                         "data": {
-                            "job_id": req.job_id,
-                            "task_id": req.task_id,
-                            "device_id": req.device_id,
+                            "job_id": queue_item.job_id,
+                            "task_id": queue_item.task_id,
+                            "device_id": queue_item.device_id,
                             "notebook_id": queue_item.notebook_id,
-                            "action_name": req.action,
+                            "action_name": queue_item.action_name,
                             "status": "failed",
                             "feedback_data": {},
                             "return_info": serialize_result_info(traceback.format_exc(), False, {}),
@@ -1161,7 +1200,7 @@ class MessageProcessor:
 
                     # 手动调用job结束逻辑：出队下一个任务由客户端自行启动
                     # (该 fallback 分支无 websocket_client，无法上报锁，故忽略 lock_became_free)
-                    next_job, _lock_became_free = self.device_manager.end_job(req.job_id)
+                    next_job, _lock_became_free = self.device_manager.end_job(queue_item.job_id)
                     if next_job and self.queue_processor:
                         self.queue_processor.enqueue_pending_start(next_job)
                         next_job_log = format_job_log(
@@ -1169,7 +1208,7 @@ class MessageProcessor:
                         )
                         logger.info(f"[MessageProcessor] Queued next job {next_job_log} for start after error")
             else:
-                logger.warning("[MessageProcessor] Failed to publish job error status - missing req or queue_item")
+                logger.warning("[MessageProcessor] Failed to publish job error status - missing job_id in payload")
 
     async def _handle_cancel_action(self, data: Dict[str, Any]):
         """处理cancel_action/cancel_task消息"""
@@ -1223,45 +1262,150 @@ class MessageProcessor:
                 logger.warning(f"[MessageProcessor] Failed to cancel job {job_log} from queue")
 
         elif task_id:
-            # 先通知HostNode取消所有ROS2 actions
-            # 需要先获取所有相关job_ids
-            jobs_to_cancel = []
-            with self.device_manager.lock:
-                jobs_to_cancel = [
-                    job_info for job_info in self.device_manager.all_jobs.values() if job_info.task_id == task_id
-                ]
+            # task_dag：若该 task 由本地 DAG 驱动器执行，先停止走图后继调度；
+            # 设备侧仍在运行/排队的残余由 runner 的 on_cancel_remaining 统一清理，
+            # 避免与下方逐 job 取消重复。
+            runner = self._task_dag_runners.get(task_id)
+            if runner is not None:
+                logger.info(f"[MessageProcessor] Cancel task_dag {task_id}: 停止走图并清理设备残余")
+                runner.cancel()
+                return
 
-            host_node = HostNode.get_instance(0)
-            if host_node and jobs_to_cancel:
-                ros_cancelled_count = 0
-                for job_info in jobs_to_cancel:
-                    if host_node.cancel_goal(job_info.job_id):
-                        ros_cancelled_count += 1
-                logger.info(
-                    f"[MessageProcessor] Sent ROS2 cancel for " f"{ros_cancelled_count}/{len(jobs_to_cancel)} jobs"
-                )
-
-            # 按task_id取消所有相关job（清理状态机）
-            cancelled_job_ids, next_jobs_to_start, freed_locks = self.device_manager.cancel_jobs_by_task_id(task_id)
-            if cancelled_job_ids:
-                logger.info(f"[MessageProcessor] Cancelled {len(cancelled_job_ids)} jobs for task_id: {task_id}")
-
-                # 出队被提升的任务由客户端自行启动
-                for next_job in next_jobs_to_start:
-                    if self.queue_processor:
-                        self.queue_processor.enqueue_pending_start(next_job)
-                # busy->free 翻转，主动上报锁释放
-                if self.websocket_client:
-                    for dev_id, act_name in freed_locks:
-                        self.websocket_client.publish_action_lock(dev_id, act_name, free=True)
-
-                # 通知QueueProcessor有队列更新
-                if self.queue_processor:
-                    self.queue_processor.notify_queue_update()
-            else:
-                logger.warning(f"[MessageProcessor] Failed to cancel any jobs for task_id: {task_id}")
+            self._cancel_all_jobs_for_task(task_id)
         else:
             logger.warning("[MessageProcessor] Cancel request missing both task_id and job_id")
+
+    def _cancel_all_jobs_for_task(self, task_id: str) -> None:
+        """按 task_id 取消该任务的所有 job：先取消 ROS2 action，再清理状态机并放行后继。
+
+        既服务于外部 cancel_task（非 DAG 任务），也作为 task_dag 走图终止（失败/取消）
+        后的 on_cancel_remaining 设备清理回调，复用 DeviceActionManager.cancel_jobs_by_task_id。
+        """
+        # 先通知HostNode取消所有ROS2 actions
+        # 需要先获取所有相关job_ids
+        jobs_to_cancel = []
+        with self.device_manager.lock:
+            jobs_to_cancel = [
+                job_info for job_info in self.device_manager.all_jobs.values() if job_info.task_id == task_id
+            ]
+
+        host_node = HostNode.get_instance(0)
+        if host_node and jobs_to_cancel:
+            ros_cancelled_count = 0
+            for job_info in jobs_to_cancel:
+                if host_node.cancel_goal(job_info.job_id):
+                    ros_cancelled_count += 1
+            logger.info(
+                f"[MessageProcessor] Sent ROS2 cancel for " f"{ros_cancelled_count}/{len(jobs_to_cancel)} jobs"
+            )
+
+        # 按task_id取消所有相关job（清理状态机）
+        cancelled_job_ids, next_jobs_to_start, freed_locks = self.device_manager.cancel_jobs_by_task_id(task_id)
+        if cancelled_job_ids:
+            logger.info(f"[MessageProcessor] Cancelled {len(cancelled_job_ids)} jobs for task_id: {task_id}")
+
+            # 出队被提升的任务由客户端自行启动
+            for next_job in next_jobs_to_start:
+                if self.queue_processor:
+                    self.queue_processor.enqueue_pending_start(next_job)
+            # busy->free 翻转，主动上报锁释放
+            if self.websocket_client:
+                for dev_id, act_name in freed_locks:
+                    self.websocket_client.publish_action_lock(dev_id, act_name, free=True)
+
+            # 通知QueueProcessor有队列更新
+            if self.queue_processor:
+                self.queue_processor.notify_queue_update()
+        else:
+            logger.warning(f"[MessageProcessor] Failed to cancel any jobs for task_id: {task_id}")
+
+    async def _handle_task_dag(self, data: Dict[str, Any]):
+        """处理 task_dag 消息：把整张 DAG 下沉本地执行（不 flatten，保 DAG 宽度/并发）。
+
+        解析 task_dag 载荷 -> 建 TaskDagRunner（桥接 DagExecutor 与回调式执行栈）->
+        注册后**不阻塞消息循环**地起跑（ensure_future），使其间的 cancel_task 仍可被处理。
+        每个 DAG 节点经 on_start_node 展开为等价 job_start（复用 DeviceActionManager 锁/
+        幂等 + send_goal），终态经 publish_job_status 跨线程回流 runner.notify_terminal。
+        """
+        try:
+            dag = TaskDag.from_message(data or {})
+        except DagValidationError as e:
+            logger.error(f"[MessageProcessor] 非法 task_dag，拒绝执行: {e}")
+            return
+
+        task_id = dag.task_id
+        # 任务级幂等：同 task_id 的 DAG 正在执行则忽略重复下发（断线重连/重复投递）
+        if task_id in self._task_dag_runners:
+            logger.info(f"[MessageProcessor] task_dag {task_id} 已在执行，忽略重复下发")
+            return
+
+        runner = TaskDagRunner(
+            dag,
+            lambda node: self._start_dag_node(node, dag),
+            on_cancel_remaining=lambda: self._cancel_all_jobs_for_task(task_id),
+            loop=self._loop,
+        )
+        self._task_dag_runners[task_id] = runner
+        logger.info(
+            f"[MessageProcessor] 起跑 task_dag {task_id}: {len(dag.nodes)} 节点 / {len(dag.edges)} 边"
+        )
+        asyncio.ensure_future(self._run_task_dag(task_id, runner))
+
+    async def _run_task_dag(self, task_id: str, runner: TaskDagRunner):
+        """驱动单张 DAG 走完并善后：无论成功/失败/取消，最终从注册表摘除。"""
+        try:
+            result = await runner.run()
+            summary = ", ".join(f"{nid}={st.value}" for nid, st in result.items())
+            logger.info(f"[MessageProcessor] task_dag {task_id} 走图结束: {summary}")
+        except Exception:
+            logger.exception(f"[MessageProcessor] task_dag {task_id} 走图异常")
+        finally:
+            self._task_dag_runners.pop(task_id, None)
+
+    def _start_dag_node(self, node: DagNode, dag: TaskDag) -> None:
+        """DagExecutor 起跑单节点：展开为等价 job_start 并复用 _handle_job_start 全路径。
+
+        node_id 即 job_id，幂等键 (task_id, node_id)。不 await —— 入队/send_goal 是副作用，
+        节点终态由 publish_job_status 经 notify_task_dag_terminal 回流，而非此处返回。
+        """
+        payload = {
+            "device_id": node.device_id,
+            "action": node.action,
+            "action_type": node.action_type,
+            "sample_material": node.sample_material,
+            "action_args": node.action_args,
+            "task_id": dag.task_id,
+            "job_id": node.node_id,
+            "node_id": node.node_id,
+            "notebook_id": dag.notebook_id,
+            "server_info": dag.server_info,
+        }
+        asyncio.ensure_future(self._start_dag_node_guarded(dag.task_id, node.node_id, payload))
+
+    async def _start_dag_node_guarded(self, task_id: str, job_id: str, payload: Dict[str, Any]) -> None:
+        """包裹 _handle_job_start：兜底保证任何逃逸异常都回终态，杜绝节点 future 永久悬挂。
+
+        正常返回**不**解析该节点（入队/send_goal 是副作用，终态由 publish_job_status 回流；
+        同设备排队节点在此保持 pending 直至其各自终态——I3）；仅当 _handle_job_start 抛出
+        其内部 try 未兜住的异常时，才把该节点判为 failed，避免 DagExecutor.run 无限阻塞。
+        """
+        try:
+            await self._handle_job_start(payload)
+        except Exception:  # noqa: BLE001 —— 起跑逃逸异常兜底为节点失败，绝不悬挂走图
+            logger.exception(
+                f"[MessageProcessor] task_dag 节点起跑异常，判为 failed: task={task_id} job={job_id}"
+            )
+            self.notify_task_dag_terminal(task_id, job_id, "failed")
+
+    def notify_task_dag_terminal(self, task_id: str, job_id: str, status: str) -> None:
+        """由 publish_job_status 终态时**跨线程**回调：把节点终态回流对应 DAG 驱动器。
+
+        非 task_dag 的普通 job（task_id 不在注册表）为 no-op，故对既有 job_start 路径零影响。
+        """
+        runner = self._task_dag_runners.get(task_id)
+        if runner is None:
+            return
+        runner.notify_terminal(job_id, status)
 
     async def _handle_resource_tree_update(self, resource_uuid_list: List[WSResourceChatData], action: str):
         """处理资源树更新消息（add_material/update_material/remove_material）"""
@@ -1958,6 +2102,9 @@ class WebSocketClient(BaseCommunicationClient):
                     logger.warning(f"[WebSocketClient] Failed to remove job {item.job_id} from HostNode status")
 
             self.queue_processor.handle_job_completed(item.job_id, status)
+
+            # task_dag 节点终态回流：非 DAG 任务为 no-op，故对普通 job_start 零影响
+            self.message_processor.notify_task_dag_terminal(item.task_id, item.job_id, status)
 
             cached_status = self.get_cached_job_start_response_status(item.job_id, item.task_id)
             if cached_status in ["success", "failed"]:

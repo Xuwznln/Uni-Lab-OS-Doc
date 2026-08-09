@@ -1,0 +1,403 @@
+type WorkflowDraftNode = {
+  id: string;
+  position: unknown;
+  data: {
+    deviceId?: string;
+    device_id?: string;
+    method: string;
+    label: string;
+    description: string;
+    params: Record<string, unknown>;
+    paramSpecs?: ParamSpecLike[];
+    opcVariables?: string[];
+    executionDisabled?: boolean;
+  };
+};
+
+type WorkflowDraftEdge = {
+  id: string;
+  source: string;
+  target: string;
+};
+
+type FlowNodeLike = WorkflowDraftNode & {
+  data: WorkflowDraftNode['data'] & {
+    runStatus?: unknown;
+    onPositionChange?: unknown;
+  };
+};
+
+type FlowEdgeLike = WorkflowDraftEdge;
+
+type ParamSpecLike = {
+  name?: string;
+  label?: string;
+  description?: string;
+  type?: string;
+  min?: number;
+  max?: number;
+  default?: unknown;
+};
+
+type ActionSpecLike = {
+  method: string;
+  label: string;
+  description: string;
+  device_id?: string;
+  params?: ParamSpecLike[];
+  opc_variables?: string[];
+};
+
+type ImportedDraftOptions = {
+  autoLayout?: boolean;
+};
+
+type ExecutionReason = 'willRun' | 'beforeStart' | 'disabled' | 'blockedByDisabled' | 'disconnected';
+
+const DEFAULT_START_X = 80;
+const DEFAULT_START_Y = 120;
+const LAYOUT_X_GAP = 240;
+const LAYOUT_Y_GAP = 140;
+const MAX_NODES_PER_ROW = 6;
+
+export function createWorkflowRequest(
+  name: string,
+  nodes: FlowNodeLike[],
+  edges: FlowEdgeLike[],
+) {
+  return {
+    name,
+    nodes: nodes.map((node) => {
+      const data: Record<string, unknown> = {
+        method: node.data.method,
+        label: node.data.label,
+        description: node.data.description,
+        params: node.data.params,
+      };
+      if (node.data.deviceId) {
+        data.device_id = node.data.deviceId;
+      }
+      if (node.data.executionDisabled) {
+        data.execution_disabled = true;
+      }
+      return {
+        id: node.id,
+        position: node.position,
+        data,
+      };
+    }),
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+    })),
+  };
+}
+
+export function workflowDraftKey(name: string, nodes: FlowNodeLike[], edges: FlowEdgeLike[]) {
+  return JSON.stringify(createWorkflowRequest(name, nodes, edges));
+}
+
+export function createExecutionPlan<T extends FlowNodeLike>(
+  nodes: T[],
+  edges: FlowEdgeLike[],
+  startNodeId?: string | null,
+) {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const normalizedStartNodeId = startNodeId && nodeIds.has(startNodeId) ? startNodeId : null;
+  const reachableFromStart = collectReachableNodeIds(normalizedStartNodeId, nodes, edges);
+  const disabledSeeds = new Set(nodes.filter((node) => node.data.executionDisabled).map((node) => node.id));
+  const reachableDisabledSeeds = new Set(Array.from(disabledSeeds).filter((nodeId) => reachableFromStart.has(nodeId)));
+  const blockedByDisabled = new Set<string>();
+  reachableDisabledSeeds.forEach((nodeId) => {
+    collectReachableNodeIds(nodeId, nodes, edges).forEach((blockedId) => blockedByDisabled.add(blockedId));
+  });
+
+  const nodeStates: Record<string, { reason: ExecutionReason }> = {};
+  nodes.forEach((node) => {
+    let reason: ExecutionReason = 'willRun';
+    if (!reachableFromStart.has(node.id)) {
+      reason = 'beforeStart';
+    } else if (reachableDisabledSeeds.has(node.id)) {
+      reason = 'disabled';
+    } else if (blockedByDisabled.has(node.id)) {
+      reason = 'blockedByDisabled';
+    }
+    nodeStates[node.id] = { reason };
+  });
+
+  const executableNodes = nodes.filter((node) => nodeStates[node.id]?.reason === 'willRun');
+  const executableNodeIds = new Set(executableNodes.map((node) => node.id));
+  const executableEdges = edges.filter((edge) => executableNodeIds.has(edge.source) && executableNodeIds.has(edge.target));
+  const disabledNodeId = nodes.find((node) => reachableDisabledSeeds.has(node.id))?.id || null;
+
+  return {
+    startNodeId: normalizedStartNodeId,
+    disabledNodeId,
+    executableNodes,
+    executableEdges,
+    nodeStates,
+    totalCount: nodes.length,
+    executableCount: executableNodes.length,
+  };
+}
+
+export function createImportedDraft(
+  payload: unknown,
+  actions: ActionSpecLike[],
+  options: ImportedDraftOptions = {},
+) {
+  const actionByMethod = new Map(actions.map((action) => [action.method, action]));
+  const imported = normalizeImportedPayload(payload, actionByMethod);
+  const nodes = (options.autoLayout ?? true) ? layoutFlowGraph(imported.nodes, imported.edges) : imported.nodes;
+  return { ...imported, nodes };
+}
+
+export function layoutFlowGraph<T extends { id: string; position: unknown }>(
+  nodes: T[],
+  edges: FlowEdgeLike[],
+): T[] {
+  if (!nodes.length) return nodes;
+  if (!edges.length) return applyGridLayout(nodes);
+
+  const ids = new Set(nodes.map((node) => node.id));
+  const incoming = new Map(nodes.map((node) => [node.id, 0]));
+  const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
+  edges.forEach((edge) => {
+    if (!ids.has(edge.source) || !ids.has(edge.target)) return;
+    outgoing.get(edge.source)?.push(edge.target);
+    incoming.set(edge.target, (incoming.get(edge.target) || 0) + 1);
+  });
+
+  const originalIndex = new Map(nodes.map((node, index) => [node.id, index]));
+  const columns = new Map(nodes.map((node) => [node.id, 0]));
+  const ready = nodes.filter((node) => (incoming.get(node.id) || 0) === 0).map((node) => node.id);
+  const ordered: string[] = [];
+
+  while (ready.length) {
+    ready.sort((left, right) => (originalIndex.get(left) || 0) - (originalIndex.get(right) || 0));
+    const current = ready.shift()!;
+    ordered.push(current);
+    for (const target of outgoing.get(current) || []) {
+      columns.set(target, Math.max(columns.get(target) || 0, (columns.get(current) || 0) + 1));
+      incoming.set(target, (incoming.get(target) || 0) - 1);
+      if ((incoming.get(target) || 0) === 0) ready.push(target);
+    }
+  }
+
+  if (ordered.length !== nodes.length) {
+    return applyGridLayout(nodes);
+  }
+
+  const rowsByColumn = new Map<number, number>();
+  return nodes.map((node) => {
+    const column = columns.get(node.id) || 0;
+    const wrappedColumn = column % MAX_NODES_PER_ROW;
+    const wrappedRow = Math.floor(column / MAX_NODES_PER_ROW);
+    const stackRow = rowsByColumn.get(column) || 0;
+    rowsByColumn.set(column, stackRow + 1);
+    return {
+      ...node,
+      position: {
+        x: DEFAULT_START_X + wrappedColumn * LAYOUT_X_GAP,
+        y: DEFAULT_START_Y + (wrappedRow + stackRow) * LAYOUT_Y_GAP,
+      },
+    };
+  });
+}
+
+function normalizeImportedPayload(payload: unknown, actionByMethod: Map<string, ActionSpecLike>) {
+  const data = asRecord(payload, '导入文件必须是 JSON 对象');
+  if (Array.isArray(data.rules)) {
+    return normalizePseudoFlowPayload(data, actionByMethod);
+  }
+  if (Array.isArray(data.nodes) && Array.isArray(data.edges)) {
+    return normalizeCanvasDraftPayload(data, actionByMethod);
+  }
+  throw new Error('不支持的 Flow JSON 格式，请导入 UI 导出的 Flow JSON 或画布草稿 JSON');
+}
+
+function normalizePseudoFlowPayload(data: Record<string, unknown>, actionByMethod: Map<string, ActionSpecLike>) {
+  const rules = data.rules as unknown[];
+  const firstRule = asRecord(rules[0], 'Flow JSON 缺少 rules[0]');
+  const actionItems = Array.isArray(firstRule.actions) ? firstRule.actions : [];
+  if (!actionItems.length) {
+    throw new Error('Flow JSON 中没有可导入的动作');
+  }
+
+  const nodes = actionItems.map((item, index) => {
+    const action = asRecord(asRecord(item, 'Flow JSON 动作格式错误').action, 'Flow JSON 动作格式错误');
+    const method = readRequiredString(action.method, 'Flow JSON 动作缺少 method');
+    const id = readOptionalString(action.workflow_node_id) || `node_${index + 1}_${method}`;
+    return buildFlowNode(id, method, action.params, actionByMethod);
+  });
+  const edges = nodes.slice(1).map((node, index) => ({
+    id: `${nodes[index].id}-${node.id}`,
+    source: nodes[index].id,
+    target: node.id,
+  }));
+  return {
+    name: readOptionalString(data.name) || readOptionalString(firstRule.name) || 'imported_flow',
+    nodes,
+    edges,
+  };
+}
+
+function normalizeCanvasDraftPayload(data: Record<string, unknown>, actionByMethod: Map<string, ActionSpecLike>) {
+  const nodes = (data.nodes as unknown[]).map((item, index) => {
+    const node = asRecord(item, '画布草稿节点格式错误');
+    const nodeData = asRecord(node.data, '画布草稿节点缺少 data');
+    const method = readRequiredString(nodeData.method, '画布草稿节点缺少 method');
+    const id = readOptionalString(node.id) || `node_${index + 1}_${method}`;
+    return {
+      ...buildFlowNode(
+        id,
+        method,
+        nodeData.params,
+        actionByMethod,
+        Boolean(nodeData.execution_disabled || nodeData.executionDisabled),
+      ),
+      position: normalizePosition(node.position),
+    };
+  });
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = (data.edges as unknown[]).flatMap((item, index) => {
+    const edge = asRecord(item, '画布草稿连线格式错误');
+    const source = readOptionalString(edge.source);
+    const target = readOptionalString(edge.target);
+    if (!source || !target || !nodeIds.has(source) || !nodeIds.has(target)) {
+      return [];
+    }
+    return [{
+      id: readOptionalString(edge.id) || `${source}-${target}-${index}`,
+      source,
+      target,
+    }];
+  });
+  return {
+    name: readOptionalString(data.name) || 'imported_flow',
+    nodes,
+    edges,
+  };
+}
+
+function buildFlowNode(
+  id: string,
+  method: string,
+  importedParams: unknown,
+  actionByMethod: Map<string, ActionSpecLike>,
+  executionDisabled = false,
+) {
+  const action = actionByMethod.get(method);
+  if (!action) {
+    throw new Error(`导入失败：当前 preset 不包含动作 ${method}`);
+  }
+  const params = {
+    ...buildDefaultParams(action.params || []),
+    ...normalizeParams(importedParams),
+  };
+  return {
+    id,
+    type: 'actionNode',
+    position: { x: DEFAULT_START_X, y: DEFAULT_START_Y },
+    data: {
+      deviceId: action.device_id,
+      method,
+      label: action.label,
+      description: action.description,
+      params,
+      paramSpecs: action.params || [],
+      opcVariables: action.opc_variables || [],
+      runStatus: 'idle',
+        executionDisabled,
+    },
+  };
+}
+
+function collectReachableNodeIds(
+  startNodeId: string | null,
+  nodes: Array<{ id: string }>,
+  edges: FlowEdgeLike[],
+) {
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  if (!startNodeId || !nodeIds.has(startNodeId)) {
+    return nodeIds;
+  }
+  const outgoing = new Map(nodes.map((node) => [node.id, [] as string[]]));
+  edges.forEach((edge) => {
+    if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+      outgoing.get(edge.source)?.push(edge.target);
+    }
+  });
+  const reachable = new Set<string>();
+  const pending = [startNodeId];
+  while (pending.length) {
+    const current = pending.shift()!;
+    if (reachable.has(current)) continue;
+    reachable.add(current);
+    pending.push(...(outgoing.get(current) || []));
+  }
+  return reachable;
+}
+
+function buildDefaultParams(params: ParamSpecLike[]) {
+  return params.reduce<Record<string, unknown>>((defaults, param) => {
+    const name = param.name || '';
+    if (!name) return defaults;
+    if ('default' in param) {
+      defaults[name] = param.default;
+    } else if (param.type === 'boolean') {
+      defaults[name] = false;
+    } else if (param.type === 'integer' || param.type === 'number') {
+      defaults[name] = param.min ?? 0;
+    } else {
+      defaults[name] = '';
+    }
+    return defaults;
+  }, {});
+}
+
+function applyGridLayout<T extends { position: unknown }>(nodes: T[]): T[] {
+  return nodes.map((node, index) => ({
+    ...node,
+    position: {
+      x: DEFAULT_START_X + (index % MAX_NODES_PER_ROW) * LAYOUT_X_GAP,
+      y: DEFAULT_START_Y + Math.floor(index / MAX_NODES_PER_ROW) * LAYOUT_Y_GAP,
+    },
+  }));
+}
+
+function normalizePosition(position: unknown) {
+  const value = asOptionalRecord(position);
+  const x = typeof value?.x === 'number' ? value.x : DEFAULT_START_X;
+  const y = typeof value?.y === 'number' ? value.y : DEFAULT_START_Y;
+  return { x, y };
+}
+
+function normalizeParams(params: unknown) {
+  const value = asOptionalRecord(params);
+  return value ? { ...value } : {};
+}
+
+function asRecord(value: unknown, message: string): Record<string, unknown> {
+  const record = asOptionalRecord(value);
+  if (!record) throw new Error(message);
+  return record;
+}
+
+function asOptionalRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readRequiredString(value: unknown, message: string) {
+  const text = readOptionalString(value);
+  if (!text) throw new Error(message);
+  return text;
+}
+
+function readOptionalString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}

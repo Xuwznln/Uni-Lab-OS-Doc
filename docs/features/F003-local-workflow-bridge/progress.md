@@ -1,0 +1,86 @@
+# 实现进度: 本地工作流桥（两套前端直连 OS 本地 DAG 执行，替代 Go 后端）
+
+> **Author: CLAUDE** | 每完成一个子任务更新
+> 行为规则见 docs/agent-workflow.md（退出协议 + 提交纪律）
+
+## 当前状态
+
+- 开始时间: 2026-07-18
+- 最后更新: 2026-07-18
+- 当前进度: 7/7 子任务完成（T01–T07 全部完成）
+- 状态: 完成——三面桥 + 离线执行核 + 两套前端接线 + 集成验证 + 评审整改均落地
+
+## 落位
+
+- 特性目录: docs/features/F003-local-workflow-bridge/
+- 桥代码: unilabos/app/local_bridge/（待建）
+- 实现 B 前端: unilabos_local_ui/（已从 styxhuang fork 取框架层）
+- 复用 F002: unilabos/scheduler/{dag_model,dag_executor,task_dag_runner}.py（不重写）
+
+## 实现记录
+
+<!-- 每完成一个子任务在此追加 -->
+
+### T01: workflow_to_dag 翻译核
+- 状态: completed
+- 文件: unilabos/app/local_bridge/__init__.py, unilabos/app/local_bridge/workflow_to_dag.py, tests/app/test_workflow_to_dag.py
+- 说明: 两套 UI 唯一共享的业务逻辑。_node_to_f002 做别名归一——扁平（云端）节点 node_id/device_id/action/action_type/action_args 直取，嵌套（SZLab）{id, data:{method, deviceId, params}} 从 data 段取；_edge_to_f002 支持 source/target 与 source_node_uuid/target_node_uuid 两种边名。build_task_dag_payload 只做归一（产出严格 F002 字段名，无 UI 别名泄漏），workflow_to_task_dag 交 TaskDag.from_message 统一判定合法性——缺字段/重复 node_id/悬空边/含环的判定与报错信息与 F002 逐字一致（不重复实现校验）。tests/app/test_workflow_to_dag.py 8 用例覆盖 AC-1：扁平/嵌套归一、载荷字段名严格 F002、含环解析期拒（match "含环"）、悬空边拒、缺 device_id/task_id 拒、空 nodes 拒。8 passed in 0.9s、ruff 净、import unilabos 通过。
+
+### T02: schedule_ws OS 面 WS 服务器
+- 状态: completed
+- 文件: unilabos/app/local_bridge/schedule_ws.py, tests/app/test_schedule_ws.py
+- 说明: 协议逻辑集中在 ScheduleSession（与真实 WS 传输解耦——send 协程注入、handle_incoming 喂入 OS 回来报文，便于 hermetic 测）。submit_dag 下发 {action:task_dag, data:serialize_task_dag(dag)}——serialize_task_dag 是 T01 build_task_dag_payload 的逆（纯 dataclass→dict，字段名严格 F002，无别名）；cancel_task 下发 {action:cancel_task, data:{task_id[,job_id]}}（对齐 ws_client._handle_cancel_action）；on_job_status 注册回流回调供 UI 面翻译；RunHandle 按 (task_id,node_id) 维护逐节点 NodeState（node_id==job_id），job_status.status→NodeState（running/success/failed/cancelled 值同名直映），全终态置 done.Event；任务级幂等（同 task_id 复用句柄、不重复下发，与 OS 侧 _handle_task_dag 一致）。ScheduleWSServer 薄壳：websockets.serve 绑 /api/v1/ws/schedule，延迟 import websockets（未装不拖累其余桥面），逐条 json.loads 喂 handle_incoming、send 经 json.dumps(ensure_ascii=False) 外发、EdgeSession 头取 session_id。tests/app/test_schedule_ws.py 覆盖 AC-2：F002 task_dag 报文逐字段、逐节点收敛、failed 终态、回调按序、cancel 报文+标 cancelled、幂等、host_ready 置位、未知 status 忽略、serialize 往返。沿用 F002 scheduler 的 asyncio.run 约定（不引 pytest-asyncio 配置）。
+
+### T03: workflow_ws 实现 A UI 面 WS 服务器
+- 状态: completed
+- 文件: unilabos/app/local_bridge/workflow_ws.py, tests/app/test_workflow_ws.py, unilabos/app/local_bridge/schedule_ws.py（回调改 async）
+- 说明: 云端 panel（WorkflowDAGPanel/WorkflowStepsPanel）UI 面 WS 服务器。协议翻译集中在 WorkflowSession（传输无关——注入 send 协程 + 注入已就绪 ScheduleSession，喂 handle_incoming）。fetch_graph→回 build_demo_graph()：每节点带 uuid/id/node_id（三者相等，保证 job_id==node_id==panel node.id）+ device_id/action/action_type/action_args（供 workflow_to_dag 翻译）+ pose.position（供 handleNodesToWorkflowReactFlow 渲染），边用 source_node_uuid/target_node_uuid（同服务翻译与渲染）。run_workflow→demo 图经 workflow_to_task_dag 构 TaskDag 交 schedule.submit_dag（OS 面收严格 F002 task_dag），task_id 取 panel uuid（一图一任务，回流可按 task_id 命中），回 {code:0,data:{action:run_workflow,data:<task_id>}} ack。stop_workflow→schedule.cancel_task，回 {code:0,data:{action:stop_workflow}}。回流：WorkflowSession 于 schedule 注册唯一 async 回调 _on_os_job_status（按 self._task_id 动态过滤，避免多次运行累积回调），每条 OS job_status 经纯函数 translate_job_status_to_update 译成 {code:0,data:{action:workflow_update,code:0,data:{node_uuid(==job_id),job_status,task_status,header,msg}}}——task_status 仅当整张 DAG 全终态（RunHandle.finished，回调在 apply_status 后触发故末条已 True）时为 end 否则 running，对齐 panel setNodeExecutedExecutor 逐节点更新 + task_status=end 清 taskId 的语义。为使下行推送时序可判定（而非 asyncio.ensure_future 的非确定序），把 schedule_ws._on_job_status 改为 async 并 await inspect.isawaitable 回调结果（向后兼容既有 sync lambda——T02 用例仍全绿）。WorkflowWSServer 薄壳：延迟 import websockets 绑 /ws/workflow/，get_schedule_session 解析已就绪 ScheduleSession、路径取 uuid。tests/app/test_workflow_ws.py 10 用例覆盖 AC-3：fetch_graph 渲染就绪（uuid/pose.position/边名）、run 下发逐字段 F002 task_dag + ack、job_status→workflow_update 逐字段（node_uuid==job_id）、task_status 仅全终态为 end、failed 达 end、非本会话 task_id 忽略、stop→cancel_task+确认、纯函数形状（running/end 切换）、demo 图翻译合法 TaskDag、_extract_uuid 路径解析。pytest tests/app tests/scheduler 46 passed、ruff 净、import unilabos 通过。
+
+### 修复：feature-list.json 结构损坏
+- T02 完成时的编辑误删了 T02 对象闭合与 T03 的 "id": "T03" 行，致 JSON 非法（两对象并成一个）。本轮修复：还原 T02 `},` 闭合 + T03 `{ "id":"T03" ...`（id/name/layer/description 逐字还原人类原文，未改定义），并顺带将 T03 status→completed。python json.load 校验通过，7 个任务 id 齐全。
+
+### T04: local_api 实现 B UI 面 HTTP 服务器
+- 状态: completed
+- 文件: unilabos/app/local_bridge/local_api.py, tests/app/test_local_api.py
+- 说明: 云端桥的实现 B（SZLab unilabos_local_ui）UI 面 FastAPI HTTP 服务器。协议翻译集中在 LocalApiState（传输无关——注入已就绪 ScheduleSession，在其上注册唯一 job_status 回调，把 OS 回流按 task_id(==run_id) 路由到 RunRecord 并累积结构化 log_events；RunHandle 逐节点态由 schedule_ws._on_job_status 在回调前更新，此处只追加日志）。node_statuses_of/overall_status_of 为纯映射函数：NodeState→NodeRunStatus（PENDING→idle/READY→preparing/RUNNING→running/SUCCESS→success/FAILED→failed/CANCELLED→cancelled，对齐 main.tsx NodeRunStatus 字面量）；run 整体态 pending/running/completed/failed/cancelled（未全终态有 running 则 running 否则 pending；全终态任一 failed→failed，否则任一 cancelled→cancelled，否则 completed，对齐 pollRun 终态集）。build_graph 交 workflow_to_task_dag 走 F002 解析校验（含环抛 DagValidationError→路由转 400 detail），通过则回显归一 {name,nodes,edges}；start_run 构 TaskDag(task_id=uuid4().hex) 交 submit_dag（OS 面收严格 F002 task_dag），建 RunRecord 返回 RunStatus；get_run/cancel_run（下发 cancel_task）。node_statuses 以 node.id 为键——F002 node_id==local_ui node.id，故 applyNodeStatuses 命中。build_demo_preset 与 workflow_ws.build_demo_graph 的设备/动作对齐（pump_1/pump_liquid、stirrer_1/stir），default_config 镜像 local_ui DEFAULT_CONFIG；build_stack_status 返回 success 空堆栈。create_app 延迟 import fastapi（未装不拖累其余桥面），6 路由只做请求解码+调 LocalApiState+错误转码——OS 未连入 503、未知 run 404、含环 400 detail；LocalApiServer uvicorn 薄壳（延迟 import）。tests/app/test_local_api.py 12 用例（FastAPI TestClient 同步驱动 + 内存 ScheduleSession→FakeTransport 顶替真实 WS 传输，请求之间以 asyncio.run(schedule.handle_incoming(...)) 喂回 job_status——纯内存态更新，无 time.sleep/真实 OS/网络）覆盖 AC-4：preset/stack-status 形状、build-graph 往返、含环 400 detail、run 下发 F002 task_dag + 全 idle 态、轮询随 job_status 推进至 completed、failed 达 failed、cancel 发 cancel_task+标 cancelled、未知 run 404、OS 未连入 503（preset/stack-status 仍可用）、纯函数映射、demo preset 设备对齐。pytest tests/app tests/scheduler 58 passed、ruff 净、import unilabos 通过。
+
+### T05: server 组合入口 + offline_os 离线执行核
+- 状态: completed
+- 文件: unilabos/app/local_bridge/offline_os.py, unilabos/app/local_bridge/server.py, tests/app/test_offline_os.py
+- 说明: 离线自足档 + 三面组合入口。offline_os.py：进程内仿真 OS——OfflineOS.receive 充当 ScheduleSession.send（收桥下发 task_dag/cancel_task），用 F002 DagExecutor 走同一 TaskDag（不复制走图逻辑，单一事实源），每 device_action_key 一把 asyncio.Lock 保 I3（非 always_free 串行、峰值并发==1，观测量 max_concurrent_by_key 供断言），逐节点回发 F002 job_status（running→asyncio.sleep(0)→终态，running 态可观测且无 time.sleep）经 session.handle_incoming 上行驱动 UI；fail-fast/取消致未经 submit 即落终态的节点由 _run 补发 job_status 令桥收敛（无 PENDING 悬挂）。server.py：LocalBridgeServer 组合 schedule_ws(:8890)+workflow_ws(:8891)+local_api(:8014) 于单 event loop（asyncio.gather），管理「当前就绪 ScheduleSession/LocalApiState」——真实模式经 ScheduleWSServer.on_session 于 OS 连入时 _adopt_session 接管并建唯一 LocalApiState，离线模式构造即 build_offline_session 装配 session 并建 state（OS 面 WS 仍监听，允许真实 OS 之后接管）；build_offline_session 为纯装配（ScheduleSession(send→OfflineOS.receive)+offline.bind(session)），无网络，供离线与 hermetic 测复用；python -m unilabos.app.local_bridge.server [--offline] 独立入口，不改既有 unilab 启动路径（零回归）。tests/app/test_offline_os.py 8 用例（asyncio.run 约定，无 time.sleep/网络）覆盖 AC-6：整图跑通逐节点 SUCCESS 回流+OfflineOS 确收 F002 task_dag、编程失败 fail-fast 下游 CANCELLED 无悬挂、同设备 I3 串行（max_concurrent_by_key==1）、cancel_task 全 CANCELLED、build_offline_session 装配正确、未知下行不建任务不抛错、离线模式 state 即就绪、真实模式 OS 连入前 state=None 连入后 _adopt_session 接管。pytest tests/app tests/scheduler 66 passed、ruff 净、import unilabos 通过、python -m ... --help 正常。
+
+## 遇到的问题
+
+<!-- 问题与决策，尤其是硬件/时序/flaky 相关 -->
+
+### T07: 集成验证与评审
+- 状态: completed
+- 文件: unilabos/app/local_bridge/{schedule_ws,workflow_ws,offline_os,local_api}.py（评审整改）, tests/app/test_workflow_ws.py（+2 测）, docs/features/F003-*/{interface-design,checklist,feature-list,progress}.md
+- 说明: 静态门禁全绿（import unilabos + pytest tests/app tests/scheduler 68 passed + ruff 净）。live 冒烟（tmux `python -m unilabos.app.local_bridge.server --offline`，三面 :8890/:8891/:8014 均监听）：Impl-B 经真实 HTTP `build-graph→run→poll` 达 completed（n1/n2 both success、log_events 逐节点 running→成功、遵 n1→n2 边序）；Impl-A 经真实 WS `fetch_graph→run_workflow` 收 workflow_update 流（逐节点 running/success、末条 task_status=end），二次运行铸新 task_id 真下发。AC-1~AC-6 逐条附证据见 checklist.md §5。三面契约在 interface-design.md §一~§五 冻结、与 F002 逐字段对齐。
+- **评审整改（python-reviewer）**：
+  - #1 HIGH 回调跨会话累积——schedule_ws 增 `off_job_status`，WorkflowSession 增 `close()` 于连接 finally 注销回调（长寿命 OS 会话上每 panel 重连不再累积失效回调）。
+  - #2 MED 重跑空操作——workflow_ws `_on_run_workflow` 每次铸唯一 `task_id=f"{uuid}-{seq}"`（原复用稳定 uuid 命中已终态句柄致 submit_dag 幂等静默不下发）。
+  - #6 LOW offline_os 补发 job_status 加 try/except-log 兜底（后台任务异常不遗漏回收）。
+  - #7 NIT local_api `get_state` 类型收窄为 `Callable[[], LocalApiState | None]`。
+  - #3/#4（OS 重连孤儿 UI 会话 / 无界 run 表）：单 OS 本地联调桥可接受，记为已知限制。
+  - 新增 2 测：test_rerun_workflow_dispatches_fresh_task、test_closed_session_deregisters_callback。
+- **环境说明（如实）**：主档「真实外部 OS 进程」在本环境**不可拉起**——上游 `unilab --backend simple` 为未实现桩（`backend.py` simple 分支 `pass`，`main` 未绑定即 UnboundLocalError 崩，与 origin/dev 逐字节相同、非本特性引入）且无 ROS2。按已批准计划以**备档离线自足**达成等价 OS-DAG 端到端：OfflineOS 复用**同一** F002 `DagExecutor`（真实 OS 亦经 `TaskDagRunner` 用它），执行语义一致，差异仅进程边界/传输；OS 面 `schedule_ws` 的 F002 线格式由 T02 单测逐字段锁死，与真实 `ws_client._handle_task_dag`/`publish_job_status` 兼容。
+- **Playwright**：chromium 二进制本环境不可用（此前 VPN 限速装失败），按尽力档退 HTTP/WS 层 live 断言（已完成，见上）替代，如实说明。
+
+### T06: 接线 SZLab local_ui 到桥
+- 状态: completed
+- 文件: unilabos_local_ui/.gitignore（新增；框架层其余文件 T06 资产提交已入库）
+- 说明: vite.config.ts 既有 `/api`→`http://127.0.0.1:8014` 代理与 `dev --port 5174` 恰对齐桥 local_api，无需改动前端。npm install（node v25.6.1 / npm 11.9.0，75 包）成功；npm run test 两个自带用例（workflowDraft/workflowExport，纯 node + typescript 即时编译 src/*.ts，无外部服务依赖）均 exit 0。补 unilabos_local_ui/.gitignore 忽略 node_modules/dist/tsbuildinfo。live 冒烟（tmux 起 `python -m unilabos.app.local_bridge.server --offline`，三面 :8890/:8891/:8014 均成功监听）：curl 走真实 HTTP 打通 Impl-B 全链路——GET /api/preset（demo 动作 pump_liquid/stir）、GET /api/stack-status（success 空堆栈）、POST /api/workflow/build-graph（回显 workflow json）、POST /api/run→GET /api/run/{id} 轮询达 completed（n1/n2 both success，log_events 逐节点 running→成功、遵 n1→n2 边序）。
+
+### 为什么需要桥（架构决策）
+- 本环境 Go 后端不可用（Redis/Nacos/MQTT/Docker 均缺），全栈 E2E 不可行。
+- OS 的 ws_client 主动外拨 ws(s)://<host>/api/v1/ws/schedule 连后端；桥只需当此路径的 WS 服务器让 OS 连入。
+- 两套前端协议（云端 /ws/workflow 与 SZLab /api/*）都不被上游 OS + F002 原生服务，故都需桥翻译。
+- 桥不复制执行逻辑：翻译协议 → 交 F002 真实 task_dag 路径 → 翻译回流 job_status。单一事实源。
+
+## 下一步建议
+
+<!-- 供下一个 session 或人类参考 -->
+
+- 待人类确认 feature-list.json 的 T01–T07（Claude 依批准计划拟定，按 harness 规则新增任务条目需人类确认）。
+- 确认后按 id 序开工：T01 workflow_to_dag 翻译核（复用 F002 环校验）→ T02 schedule_ws → T03 workflow_ws → T04 local_api → T05 server.py → T06 接线 local_ui → T07 集成验证。

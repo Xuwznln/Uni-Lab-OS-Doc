@@ -1,0 +1,87 @@
+{
+  "$comment": [
+    "子任务清单 — 本需求的唯一进度真相来源",
+    "完整规则见 docs/agent-workflow.md 第八节 / 主仓 team_collaboration playbook",
+    "",
+    "Author: HUMAN 定义任务 / CLAUDE 仅修改 status 和 notes",
+    "",
+    "规则：",
+    "  1. CLAUDE 只能改 status 和 notes",
+    "  2. 不得改 id, name, layer, description",
+    "  3. 不得删除或新增任务条目（需人类确认）",
+    "  4. status 流转：pending -> in_progress -> completed（或 blocked）",
+    "  5. 按 id 顺序实现（小号优先）",
+    "  6. 每完成一个子任务必须 import 通过 + 相关 pytest 通过 + git commit",
+    "  7. 每完成一个子任务必须更新 progress.md",
+    "",
+    "layer 取值参考：model/schema, device, compile, scheduler, bridge, test, verify"
+  ],
+  "feature_name": "OS 本地 DAG 执行器（整张工作流下沉边缘执行）",
+  "created_at": "2026-07-18",
+  "tasks": [
+    {
+      "id": "T01",
+      "name": "DAG 数据结构与 task_dag 解析",
+      "layer": "model/schema",
+      "description": "新增 unilabos/scheduler/dag_model.py：DagNode / DagEdge / TaskDag / NodeState；TaskDag.from_message(data) 解析 task_dag 载荷（字段镜像 backend SendActionData + WorkflowEdge），构建 in-degree 表，解析期即检测并拒绝环（I5）。",
+      "status": "completed",
+      "notes": "dag_model.py 已实现；import 通过、ruff 通过；快速自检 in-degree 正确、环被 Kahn 拒绝。悬空边/重复 node_id 亦拒。"
+    },
+    {
+      "id": "T02",
+      "name": "DagExecutor 本地并发走图核心",
+      "layer": "scheduler",
+      "description": "新增 unilabos/scheduler/dag_executor.py：in-degree/ready-set 走图，注入式节点调度器 submit(node)->awaitable 与注入式时钟；success 递减后继 in-degree、failed 走 fail-fast 取消同 task 未终态节点（I1/I2/I6）。不在此层做同设备互斥（交给 DeviceActionManager）。",
+      "status": "completed",
+      "notes": "分两层：DagWalk 纯同步状态机（I1/I2/I5/I6 靶子）+ DagExecutor 异步驱动。时钟在调度器一侧注入，执行器无 time.sleep。自检 AC-1 并发/恰好一次/D 最后起跑通过；ruff 通过。"
+    },
+    {
+      "id": "T03",
+      "name": "本地持久化游标与 resume",
+      "layer": "scheduler",
+      "description": "执行游标 {task_id, completed, inflight, failed} 原子写本地文件；恢复时已 completed 节点视作依赖已满足、重建 ready-set，未完成从 ready 续跑；与幂等 job 缓存叠加防重复执行（I4）。",
+      "status": "completed",
+      "notes": "dag_persistence.py：DagCursor + DagCursorStore（mkstemp+fsync+os.replace 原子写，目录可注入）。record_terminal 可作 on_node_terminal 回调。自检 AC-4 通过：崩溃后 completed=[A,B]，resume ready=[C]，仅跑 C,D，A/B 不重复。ruff 通过。"
+    },
+    {
+      "id": "T04",
+      "name": "hermetic 单元测试（AC-1~AC-5）",
+      "layer": "test",
+      "description": "tests/scheduler/test_dag_executor.py：fake 节点调度器（可编程 status+完成时刻）+ 可控时钟，覆盖 AC-1 并发走图、AC-2 同设备串行、AC-3 断网续跑、AC-4 重启 resume、AC-5 fail-fast 与环拒绝。不连真实设备、无 time.sleep。",
+      "status": "completed",
+      "notes": "fake_scheduler.py（每设备 asyncio.Lock 建模 DeviceActionManager 串行 I3 + 手动 complete() 驱动 + settle() 零墙钟推进）+ test_dag_executor.py 8 用例。AC-1 菱形并发/恰好一次、AC-2 同 key 峰值并发=1 与 always_free=2、AC-3 on_node_terminal 抛错不打断走图、AC-4 resume 不重跑 + 游标 roundtrip、AC-5a fail-fast、AC-5b 解析期拒环。8 passed、ruff 通过。"
+    },
+    {
+      "id": "T05",
+      "name": "property-based 不变量测试（I1~I6）",
+      "layer": "test",
+      "description": "tests/scheduler/test_dag_invariants.py：Hypothesis 生成任意合法 DAG（随机节点/无环边/device 分配/always_free），断言 I1 恰好一次、I2 偏序遵从、I3 同设备无重叠、I4 resume 等价、I5 含环即抛、I6 有限步终止。",
+      "status": "completed",
+      "notes": "legal_dags 生成器：1~7 节点、边只从低号指向高号（构造性无环）、随机 device/always_free；@given + st.data() 随机合法调度驱动纯 DagWalk。3 用例：I1/I2/I6（恰好一次+ready 前驱必 SUCCESS+run_order 为合法拓扑序+≤节点数轮终止）、I4（任意前缀游标 resume 只跑未完成、已完成不重跑、合计全 SUCCESS）、I5（任意回边构 2-环解析期即抛 DagValidationError）。I3 属调度器层，已由 T04 fake max_concurrent_by_key 覆盖。max_examples=200，3 passed、ruff 通过。"
+    },
+    {
+      "id": "T06",
+      "name": "ws_client 接入 _handle_task_dag",
+      "layer": "bridge",
+      "description": "unilabos/app/ws_client.py 消息分发新增 elif message_type == \"task_dag\"；_handle_task_dag 把 DAG 节点展开为等价 job_start 执行请求，复用 DeviceActionManager 锁/幂等 + send_goal + publish_job_status；cancel_task 复用 cancel_jobs_by_task_id 并停止后继调度。确保 import unilabos 通过。",
+      "status": "completed",
+      "notes": "新增 task_dag_runner.py（TaskDagRunner 桥接层：per-node asyncio.Future 注册表，node_id=job_id，先登记后触发副作用避免瞬时回流竞态；notify_terminal 经 loop.call_soon_threadsafe 跨线程解析；cancel() 停调度+未决 CANCELLED；run() 完成后任一非 SUCCESS 触发 on_cancel_remaining 设备清理）+ test_task_dag_runner.py（FakeStack 建模回调式队列栈，4 用例：菱形并发/同 key 串行/fail-fast 触发 cancel_remaining/外部 cancel 解析未决）。ws_client：分发加 task_dag 分支；_handle_task_dag 解析 TaskDag 后 ensure_future 起跑不阻塞消息循环；_start_dag_node 展开为等价 job_start payload 复用 _handle_job_start 全路径（锁/幂等/send_goal）；_cancel_all_jobs_for_task 从原 cancel task_id 分支抽出、既服务外部 cancel 亦作 on_cancel_remaining；publish_job_status 终态钩 notify_task_dag_terminal（非 DAG 任务 no-op，job_start 零影响）；cancel_task 命中 runner 即 runner.cancel()。附带修正 dag_executor：CANCELLED 回流不再被误判为 on_failed(FAILED)，新增 DagWalk.cancel_remaining 收敛未决为终态。import unilabos 通过、pytest tests/scheduler 15 passed、ruff 净（唯一 F541 属既有无关代码）。"
+    },
+    {
+      "id": "T07",
+      "name": "验证与评审",
+      "layer": "verify",
+      "description": "python -c \"import unilabos\" 通过、pytest tests/scheduler/ 通过、ruff check 通过；AC-1~AC-6 逐条确认；task_dag/job_status 契约经 contract-guardian 评审 PASS、代码经 os-reviewer 评审。",
+      "status": "completed",
+      "notes": "验证全 PASS：import unilabos 通过；pytest tests/scheduler/ tests/app/ 19 passed（15 scheduler + 4 死路径回归）；ruff 于作者面（scheduler/ + tests/）全净，仅 ws_client.py:1291 既有无关 F541（HEAD 已存在）。AC-1~AC-6 逐条对照 requirement.md 通过（AC-6：_start_dag_node 复用 _handle_job_start，publish_job_status 载荷逐字段未改，前端两 panel 零改动）。代码经 python-reviewer 评审（contract-guardian/os-reviewer 本环境不可用，契约评审直接对照 interface-design.md），发现并整改 1 项 HIGH 悬挂缺陷：_handle_job_start 死路径（HostNode 不可用 / queue_item 构造前抛异常）不发 job_status → DAG 节点 future 永久悬挂、DagExecutor.run 阻塞、runner 泄漏。整改：(a) HostNode 缺失分支补发 failed 终态；(b) except 用 req/data 兜底 QueueItem 保证任一异常都发 failed（同修非 DAG 等价悬挂）；(c) _start_dag_node_guarded 包裹起跑，逃逸异常经 notify_task_dag_terminal 判 failed、正常返回不误判（保 I3 排队 pending）。回归 tests/app/test_ws_job_start_deadpaths.py 4 用例。提交 fb3ae29b。"
+    },
+    {
+      "id": "T08",
+      "name": "对端契约冻结（跨仓，不在本仓实现）",
+      "layer": "verify",
+      "description": "在 interface-design.md 冻结对端改动清单：backend uni-lab-backend 新增 task_dag 下发（与逐节点 job_start 并存/灰度）、不改 OnJobStatus/JobData/cancel_task；前端 Uni-Lab-Cloud 复用 WorkflowDAGPanel(workflow-dag) 与 WorkflowStepsPanel(workflow-steps)，因上行契约不变零改动。",
+      "status": "completed",
+      "notes": "doc-only 冻结完成（跨仓改动不在本仓实现）：interface-design.md §三 已列对端清单——backend 新增 task_dag 序列化下发，nodes 镜像 SendActionData、edges 用 source_node_uuid/target_node_uuid，node_id 即 job_id、幂等键 (task_id, node_id)，与逐节点 job_start 并存可灰度；不改 OnJobStatus/JobData/cancel_task 契约；前端复用 workflow-dag / workflow-steps 两 panel，因上行 job_status 逐字节不变而零改动（AC-6 已由本仓 _start_dag_node 复用 _handle_job_start 保证）。"
+    }
+  ]
+}
