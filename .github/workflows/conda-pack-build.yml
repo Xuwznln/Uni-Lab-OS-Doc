@@ -84,6 +84,16 @@ jobs:
           ref: ${{ github.event.inputs.branch || github.event.workflow_run.head_sha || github.ref }}
           fetch-depth: 0
 
+      - name: Create artifact label
+        if: steps.should_build.outputs.should_build == 'true'
+        id: artifact_label
+        shell: bash
+        env:
+          RAW_PACKAGE_REF: ${{ env.PACKAGE_REF }}
+        run: |
+          SAFE_REF="${RAW_PACKAGE_REF//\//-}"
+          echo "value=$SAFE_REF" >> "$GITHUB_OUTPUT"
+
       - name: Setup Miniforge (with mamba)
         if: steps.should_build.outputs.should_build == 'true'
         uses: conda-incubator/setup-miniconda@v4
@@ -333,7 +343,7 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: unilab-pack-${{ matrix.platform }}-${{ env.PACKAGE_REF }}
+          name: unilab-pack-${{ matrix.platform }}-${{ steps.artifact_label.outputs.value }}
           path: dist-package/
           retention-days: 90
           if-no-files-found: error
@@ -356,7 +366,7 @@ jobs:
           echo Distribution package contents:
           dir dist-package
           echo.
-          echo Artifact name: unilab-pack-${{ matrix.platform }}-${{ env.PACKAGE_REF }}
+          echo Artifact name: unilab-pack-${{ matrix.platform }}-${{ steps.artifact_label.outputs.value }}
           echo.
           echo After download, extract the ZIP and run:
           echo   install_unilab.bat
@@ -381,7 +391,7 @@ jobs:
           echo "Distribution package contents:"
           ls -lh dist-package/
           echo ""
-          echo "Artifact name: unilab-pack-${{ matrix.platform }}-${{ env.PACKAGE_REF }}"
+          echo "Artifact name: unilab-pack-${{ matrix.platform }}-${{ steps.artifact_label.outputs.value }}"
           echo ""
           echo "After download:"
           echo "  install_unilab.sh"
