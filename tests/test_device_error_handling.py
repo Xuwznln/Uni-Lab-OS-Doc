@@ -1,6 +1,9 @@
 import asyncio
+import traceback
 import unittest
 
+from unilabos.registry.decorators import action, get_action_error_policy
+from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
 from unilabos.utils.action_decision import (
     PendingDecisionRegistry,
     run_action_with_decisions,
@@ -9,6 +12,7 @@ from unilabos.utils.exception import (
     DeviceException,
     EmergencyStopError,
     UserAction,
+    apply_builtin_error_policy_to_alarm,
 )
 
 
@@ -50,6 +54,89 @@ class DeviceExceptionTest(unittest.TestCase):
     def test_custom_action_is_rejected_in_phase_one(self):
         with self.assertRaisesRegex(ValueError, "不支持"):
             UserAction("manual_fix", "人工修复")
+
+    def test_action_error_policy_overrides_plain_exception_alarm(self):
+        @action(error_policy={"allow_retry": True, "allow_skip": False})
+        def fail_with_name_error():
+            raise NameError("missing_parameter")
+
+        try:
+            fail_with_name_error()
+        except NameError as exc:
+            traceback_text = "".join(
+                traceback.format_exception(
+                    type(exc),
+                    exc,
+                    exc.__traceback__,
+                )
+            )
+            alarm = {
+                "exception_type": type(exc).__name__,
+                "error_message": f"{type(exc).__name__}: {exc}",
+                "traceback": traceback_text,
+                "suggested_actions": [
+                    {"action": "retry", "label": "重试", "description": "重新执行"},
+                    {"action": "skip", "label": "跳过", "description": "跳过操作"},
+                    {"action": "abort", "label": "终止任务", "description": "停止任务"},
+                ],
+            }
+        else:
+            self.fail("fail_with_name_error should raise NameError")
+
+        result = apply_builtin_error_policy_to_alarm(
+            alarm,
+            get_action_error_policy(fail_with_name_error),
+        )
+
+        self.assertEqual(result["exception_type"], "NameError")
+        self.assertEqual(result["error_message"], "NameError: missing_parameter")
+        self.assertEqual(result["traceback"], traceback_text)
+        self.assertIn("fail_with_name_error", result["traceback"])
+        self.assertEqual([item["action"] for item in result["suggested_actions"]], ["retry", "abort"])
+
+
+class ActionErrorPolicyAlarmTest(unittest.IsolatedAsyncioTestCase):
+    async def test_plain_exception_policy_is_applied_at_alarm_boundary(self):
+        node = BaseROS2DeviceNode.__new__(BaseROS2DeviceNode)
+        node.device_id = "robot-1"
+        node.uuid = "device-uuid"
+        published_alarms = []
+
+        class Logger:
+            def error(self, _message):
+                return None
+
+        node.lab_logger = lambda: Logger()
+
+        async def publish_and_abort(*, alarm_data, task_id, job_id):
+            published_alarms.append(alarm_data)
+            self.assertEqual((task_id, job_id), ("task-1", "job-1"))
+            return {"action": "abort"}
+
+        node._publish_and_wait_for_decision = publish_and_abort
+
+        async def fail_with_name_error(**_kwargs):
+            raise NameError("missing_parameter")
+
+        with self.assertRaisesRegex(NameError, "missing_parameter"):
+            await node._run_action_with_decision_loop(
+                action_func=fail_with_name_error,
+                action_name="fail_with_name_error",
+                task_id="task-1",
+                job_id="job-1",
+                action_kwargs={"preserved": 42},
+                error_policy={"allow_retry": True, "allow_skip": False},
+            )
+
+        self.assertEqual(len(published_alarms), 1)
+        alarm = published_alarms[0]
+        self.assertEqual(alarm["exception_type"], "NameError")
+        self.assertEqual(alarm["error_message"], "NameError: missing_parameter")
+        self.assertIn("fail_with_name_error", alarm["traceback"])
+        self.assertEqual(
+            [item["action"] for item in alarm["suggested_actions"]],
+            ["retry", "abort"],
+        )
 
 
 class PendingDecisionRegistryTest(unittest.IsolatedAsyncioTestCase):

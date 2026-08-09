@@ -38,6 +38,7 @@ from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialComma
 
 from unilabos.config.config import BasicConfig
 from unilabos.registry.decorators import (
+    get_action_error_policy,
     get_action_timeout,
     get_topic_config,
     is_exception_handling_enabled,
@@ -80,7 +81,11 @@ from unilabos.utils.import_manager import default_manager
 from unilabos.utils.log import info, debug, warning, error, critical, logger, trace
 from unilabos.utils.type_check import get_type_class, TypeEncoder, get_result_info_str
 from unilabos.utils.action_decision import PendingDecisionRegistry, run_action_with_decisions
-from unilabos.utils.exception import DeviceActionError, DeviceException
+from unilabos.utils.exception import (
+    DeviceActionError,
+    DeviceException,
+    apply_builtin_error_policy_to_alarm,
+)
 
 if TYPE_CHECKING:
     from pylabrobot.resources import Resource as ResourcePLR
@@ -1638,6 +1643,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         job_id: str,
         action_kwargs: dict,
         max_iterations: int = 10,
+        error_policy: Optional[Dict[str, bool]] = None,
     ) -> Any:
         """执行 Action，并仅处理框架内置的 retry / skip / abort。"""
 
@@ -1684,6 +1690,8 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     "traceback": traceback_text,
                     "require_confirmation": True,
                 }
+
+            alarm_data = apply_builtin_error_policy_to_alarm(alarm_data, error_policy)
 
             self.lab_logger().error(f"动作 {action_name} 抛出 {type(exc).__name__}: {exc}")
             return await self._publish_and_wait_for_decision(
@@ -1859,6 +1867,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                             task_id=task_id,
                             job_id=job_id,
                             action_kwargs=action_kwargs,
+                            error_policy=get_action_error_policy(ACTION),
                         ),
                         target_loop,
                     )
@@ -2207,6 +2216,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         task_id=task_id,
                         job_id=job_id,
                         action_kwargs=function_args,
+                        error_policy=get_action_error_policy(function),
                     ),
                     target_loop,
                 )
@@ -2389,6 +2399,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         task_id=task_id,
                         job_id=job_id,
                         action_kwargs=function_args,
+                        error_policy=get_action_error_policy(function),
                     ),
                     target_loop,
                 )

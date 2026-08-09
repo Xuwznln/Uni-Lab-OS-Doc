@@ -78,6 +78,34 @@ class UserAction:
             raise ValueError(f"不支持的异常处理操作: {self.action}")
 
 
+def apply_builtin_error_policy_to_alarm(alarm_data: dict, error_policy: Optional[dict]) -> dict:
+    """将 Action 的内置错误策略应用到最终上报数据，abort 始终保留。"""
+    if error_policy is None:
+        return alarm_data
+
+    existing_actions = {
+        item.get("action"): item
+        for item in alarm_data.get("suggested_actions", [])
+        if isinstance(item, dict) and item.get("action") in BUILT_IN_DECISIONS
+    }
+    fallback_actions = {
+        "retry": {"action": "retry", "label": "重试", "description": "重新执行当前操作"},
+        "skip": {"action": "skip", "label": "跳过", "description": "跳过当前操作继续执行"},
+        "abort": {"action": "abort", "label": "终止任务", "description": "停止当前任务"},
+    }
+
+    selected_actions = []
+    if bool(error_policy.get("allow_retry", True)):
+        selected_actions.append(existing_actions.get("retry", fallback_actions["retry"]))
+    if bool(error_policy.get("allow_skip", True)):
+        selected_actions.append(existing_actions.get("skip", fallback_actions["skip"]))
+    selected_actions.append(existing_actions.get("abort", fallback_actions["abort"]))
+
+    result = dict(alarm_data)
+    result["suggested_actions"] = selected_actions
+    return result
+
+
 class DeviceException(Exception):
     """设备驱动主动抛出的结构化异常基类。"""
 
