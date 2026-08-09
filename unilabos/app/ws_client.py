@@ -56,6 +56,10 @@ class JobStatus(Enum):
     ENDED = "ended"  # 已结束
 
 
+TERMINAL_JOB_RESULT_STATUSES = frozenset({"success", "failed", "skipped"})
+NON_ERROR_TERMINAL_JOB_RESULT_STATUSES = frozenset({"success", "skipped"})
+
+
 @dataclass
 class QueueItem:
     """队列项数据结构"""
@@ -2001,7 +2005,7 @@ class WebSocketClient(BaseCommunicationClient):
         job_log = format_job_log(item.job_id, item.task_id, item.device_id, item.action_name)
 
         # 拦截最终结果状态，与原版本逻辑一致
-        if status in ["success", "failed"]:
+        if status in TERMINAL_JOB_RESULT_STATUSES:
             self._job_running_last_sent.pop(item.job_id, None)
 
             host_node = HostNode.get_instance(0)
@@ -2014,10 +2018,10 @@ class WebSocketClient(BaseCommunicationClient):
             self.queue_processor.handle_job_completed(item.job_id, status)
 
             cached_status = self.get_cached_job_start_response_status(item.job_id, item.task_id)
-            if cached_status in ["success", "failed"]:
+            if cached_status in TERMINAL_JOB_RESULT_STATUSES:
                 # 断线重连时，旧 READY 占位可能在结果已回放后触发 timeout failed。
-                # 已有终态时不允许重复终态覆盖缓存或再次发送，success 也不允许被 failed 降级。
-                if cached_status == "success" or cached_status == status:
+                # 已有非错误终态时不允许迟到失败覆盖缓存或再次发送。
+                if cached_status in NON_ERROR_TERMINAL_JOB_RESULT_STATUSES or cached_status == status:
                     logger.warning(
                         f"[WebSocketClient] Skipped duplicate terminal job status for {job_log}: "
                         f"cached={cached_status}, incoming={status}"

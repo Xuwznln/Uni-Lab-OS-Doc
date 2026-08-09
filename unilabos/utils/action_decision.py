@@ -13,6 +13,13 @@ from unilabos.utils.exception import BUILT_IN_DECISIONS
 DecisionKey = Tuple[str, str]
 
 
+class SkippedActionResult(dict[str, Any]):
+    """框架恢复决策产生的跳过结果；普通 Action 返回字典不具备该身份。"""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(status="skipped", reason=reason)
+
+
 async def run_action_with_decisions(
     *,
     invoke: Callable[[], Awaitable[Any]],
@@ -32,10 +39,7 @@ async def run_action_with_decisions(
             if action == "retry":
                 continue
             if action == "skip":
-                return {
-                    "status": "skipped",
-                    "reason": decision.get("reason", "user_skip"),
-                }
+                return SkippedActionResult(decision.get("reason", "user_skip"))
             raise
 
     raise RuntimeError(f"Action 已连续重试 {max_iterations} 次") from last_exception

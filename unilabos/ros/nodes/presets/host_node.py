@@ -1112,6 +1112,14 @@ class HostNode(BaseROS2DeviceNode):
                         return_info = json.loads(return_info_str)
                         # 适配后端的一些额外处理
                         return_value = return_info.get("return_value")
+                        suc = return_info.get("suc", False)
+                        if (
+                            suc
+                            and return_info.get("suc_type") == "user_bypass_error"
+                            and isinstance(return_value, dict)
+                            and return_value.get("status") == "skipped"
+                        ):
+                            status = "skipped"
                         if isinstance(return_value, dict):
                             unilabos_samples = return_value.pop(RETURN_UNILABOS_SAMPLES, None)
                             if isinstance(unilabos_samples, list) and unilabos_samples:
@@ -1121,8 +1129,7 @@ class HostNode(BaseROS2DeviceNode):
                                     f"{'...' if len(unilabos_samples) > 5 else ''}"
                                 )
                                 return_info["samples"] = unilabos_samples
-                        suc = return_info.get("suc", False)
-                        if not suc:
+                        if not suc and status == "success":
                             status = "failed"
                         if return_info.get("suc_type") == "user_bypass_error":
                             self.lab_logger().warning(
