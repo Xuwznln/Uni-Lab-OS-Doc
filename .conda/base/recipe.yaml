@@ -30,12 +30,13 @@ build:
 
 requirements:
   host:
-  - python ==3.11.14
+  - python ==3.12.13
   - pip
   - setuptools
   - zstd
   - zstandard
   run:
+  - python >=3.12,<3.13
   - zstd
   - zstandard
   - networkx
@@ -59,4 +60,4 @@ requirements:
 about:
   repository: https://github.com/deepmodeling/Uni-Lab-OS
   license: GPL-3.0-only
-  description: "UniLabOS - Production package with minimal ROS2 dependencies"
+  description: "UniLabOS - Production package for ROS 2 Jazzy and CPython 3.12"

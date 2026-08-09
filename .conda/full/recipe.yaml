@@ -24,19 +24,19 @@ requirements:
   - jupyros
   - colcon-common-extensions
   # ROS2 full desktop (includes rviz2, gazebo, etc.)
-  - robostack-staging::ros-humble-desktop-full
+  - robostack-jazzy::ros-jazzy-desktop-full
   # Navigation and motion control
-  - ros-humble-navigation2
-  - ros-humble-ros2-control
-  - ros-humble-robot-state-publisher
-  - ros-humble-joint-state-publisher
+  - ros-jazzy-navigation2
+  - ros-jazzy-ros2-control
+  - ros-jazzy-robot-state-publisher
+  - ros-jazzy-joint-state-publisher
   # MoveIt motion planning
-  - ros-humble-moveit
-  - ros-humble-moveit-servo
+  - ros-jazzy-moveit
+  - ros-jazzy-moveit-servo
   # Simulation
-  - ros-humble-simulation
+  - ros-jazzy-simulation
 
 about:
   repository: https://github.com/deepmodeling/Uni-Lab-OS
   license: GPL-3.0-only
-  description: "UniLabOS Full - Complete package with ROS2 Desktop, MoveIt, Navigation2, Gazebo, Jupyter"
+  description: "UniLabOS Full - ROS 2 Jazzy Desktop, MoveIt, Navigation2, Gazebo, and Jupyter"

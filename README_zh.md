@@ -43,21 +43,21 @@ Uni-Lab-OS 建议使用 `mamba` 管理环境。根据您的需求选择合适的
 
 ```bash
 # 创建新环境
-mamba create -n unilab python=3.11.14
+mamba create -n unilab python=3.12.13
 mamba activate unilab
 
 # 方案 A：标准安装（推荐大多数用户）
-mamba install uni-lab::unilabos -c robostack-staging -c conda-forge
+mamba install uni-lab::unilabos -c conda-forge -c robostack-jazzy
 
 # 方案 B：开发者环境（可编辑模式开发）
-mamba install uni-lab::unilabos-env -c robostack-staging -c conda-forge
+mamba install uni-lab::unilabos-env -c conda-forge -c robostack-jazzy
 # 然后安装 unilabos 和依赖：
 git clone https://github.com/deepmodeling/Uni-Lab-OS.git && cd Uni-Lab-OS
 pip install -e .
 uv pip install -r unilabos/utils/requirements.txt
 
 # 方案 C：完整安装（仿真/可视化）
-mamba install uni-lab::unilabos-full -c robostack-staging -c conda-forge
+mamba install uni-lab::unilabos-full -c conda-forge -c robostack-jazzy
 ```
 
 **如何选择？**
