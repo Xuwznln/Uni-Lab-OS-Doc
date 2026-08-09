@@ -49,9 +49,7 @@ def _sync_template(client: TestClient) -> str:
                         }
                     ],
                     "category": [],
-                    "config_info": [
-                        {"name": "device.pump", "type": "pump"}
-                    ],
+                    "config_info": [{"name": "device.pump", "type": "pump"}],
                     "scene": [],
                     "device_params": {},
                 }
@@ -143,9 +141,12 @@ def test_material_routes_use_backend_envelope_and_soft_delete(tmp_path):
     assert deleted.status_code == 200
     assert deleted.json() == {"code": 0}
     assert client.get(f"/api/v1/materials/{material_uuid}").json()["code"] == 6000
-    assert store.query_one(
-        "SELECT deleted_at FROM material WHERE uuid=?", (material_uuid,)
-    )["deleted_at"] is not None
+    assert (
+        store.query_one(
+            "SELECT deleted_at FROM material WHERE uuid=?", (material_uuid,)
+        )["deleted_at"]
+        is not None
+    )
     store.close()
 
 
@@ -228,21 +229,30 @@ def test_material_delete_soft_deletes_component_tree_and_clears_site_occupancy(
     assert deleted.json() == {"code": 0}
     assert client.get(f"/api/v1/materials/{root['uuid']}").json()["code"] == 6000
     assert client.get(f"/api/v1/materials/{child['uuid']}").json()["code"] == 6000
-    assert store.query_one(
-        "SELECT COUNT(*) AS n FROM site "
-        "WHERE material_uuid IN (?,?) AND deleted_at IS NOT NULL",
-        (root["uuid"], child["uuid"]),
-    )["n"] == 2
-    assert store.query_one(
-        "SELECT COUNT(*) AS n FROM relative_position "
-        "WHERE material_uuid IN (?,?) AND deleted_at IS NOT NULL",
-        (root["uuid"], child["uuid"]),
-    )["n"] == 2
-    assert store.query_one(
-        "SELECT occupied_material_uuid FROM site "
-        "WHERE material_uuid=? AND name='external-site'",
-        (external["uuid"],),
-    )["occupied_material_uuid"] is None
+    assert (
+        store.query_one(
+            "SELECT COUNT(*) AS n FROM site "
+            "WHERE material_uuid IN (?,?) AND deleted_at IS NOT NULL",
+            (root["uuid"], child["uuid"]),
+        )["n"]
+        == 2
+    )
+    assert (
+        store.query_one(
+            "SELECT COUNT(*) AS n FROM relative_position "
+            "WHERE material_uuid IN (?,?) AND deleted_at IS NOT NULL",
+            (root["uuid"], child["uuid"]),
+        )["n"]
+        == 2
+    )
+    assert (
+        store.query_one(
+            "SELECT occupied_material_uuid FROM site "
+            "WHERE material_uuid=? AND name='external-site'",
+            (external["uuid"],),
+        )["occupied_material_uuid"]
+        is None
+    )
     statuses = store.query_all(
         "SELECT inventory_status,disposition FROM material_inventory "
         "WHERE material_uuid IN (?,?) ORDER BY material_uuid",
@@ -258,9 +268,7 @@ def test_material_delete_soft_deletes_component_tree_and_clears_site_occupancy(
 def test_resource_handle_uuid_is_stable_and_omitted_update_preserves_it(tmp_path):
     client, store = _client(tmp_path)
     template_uuid = _sync_template(client)
-    detail = client.get(f"/api/v1/resource-templates/{template_uuid}").json()[
-        "data"
-    ]
+    detail = client.get(f"/api/v1/resource-templates/{template_uuid}").json()["data"]
     assert len(detail["handles"]) == 1
     handle = detail["handles"][0]
     assert handle["resource_template_uuid"] == template_uuid
@@ -325,9 +333,7 @@ def test_site_uuid_is_position_identity_and_state_updates_material_projection(
                 1,
             ),
         )
-    site = client.get(f"/api/v1/materials/{owner['uuid']}/sites").json()[
-        "data"
-    ][0]
+    site = client.get(f"/api/v1/materials/{owner['uuid']}/sites").json()["data"][0]
     assert site["uuid"] not in {owner["uuid"], occupant["uuid"]}
     assert site["material_uuid"] == owner["uuid"]
     assert site["occupied_material_uuid"] == occupant["uuid"]
@@ -375,10 +381,13 @@ def test_relative_position_round_trips_and_explicit_null_soft_deletes(tmp_path):
     updated = client.put(f"/api/v1/materials/{material['uuid']}", json=payload)
     assert updated.status_code == 200
     assert updated.json()["data"]["relative_position"] is None
-    assert store.query_one(
-        "SELECT deleted_at FROM relative_position WHERE material_uuid=?",
-        (material["uuid"],),
-    )["deleted_at"] is not None
+    assert (
+        store.query_one(
+            "SELECT deleted_at FROM relative_position WHERE material_uuid=?",
+            (material["uuid"],),
+        )["deleted_at"]
+        is not None
+    )
     store.close()
 
 
@@ -562,18 +571,36 @@ def test_material_create_expands_components_defaults_positions_and_allowed_sites
     assert len(root["sites"]) == 1
     site = root["sites"][0]
     assert site["material_uuid"] == root["uuid"]
-    assert site["allowed_resource_template_uuids"] == [allowed]
+    assert site["allowed_resource_template_uuids"] == []
+    assert site["content_type"] == ["tube"]
     assert site["occupied_material_uuid"] is None
-    assert store.query_one(
-        "SELECT COUNT(*) AS n FROM material_state_history"
-    )["n"] == 2
-    assert client.get(
-        f"/api/v1/materials/{child['uuid']}/states/latest"
-    ).json()["data"]["state_data"] == {"volume": 1}
+    tube = client.post(
+        "/api/v1/materials",
+        json={
+            "resource_template_uuid": allowed,
+            "parent_uuid": root["uuid"],
+            "name": "Tube in slot 1",
+            "site_placement": {"action": "place", "site_uuid": site["uuid"]},
+        },
+    )
+    assert tube.status_code == 201
+    assert (
+        store.query_one(
+            "SELECT occupied_material_uuid FROM site WHERE uuid=?", (site["uuid"],)
+        )["occupied_material_uuid"]
+        == tube.json()["data"]["uuid"]
+    )
+    assert store.query_one("SELECT COUNT(*) AS n FROM material_state_history")["n"] == 3
+    assert client.get(f"/api/v1/materials/{child['uuid']}/states/latest").json()[
+        "data"
+    ]["state_data"] == {"volume": 1}
     assert client.get("/api/v1/materials").json()["data"]["total"] == 1
-    assert client.get(
-        "/api/v1/materials", params={"with_children": True}
-    ).json()["data"]["total"] == 2
+    assert (
+        client.get("/api/v1/materials", params={"with_children": True}).json()["data"][
+            "total"
+        ]
+        == 3
+    )
     store.close()
 
 
@@ -677,14 +704,19 @@ def test_material_update_is_partial_preserves_sites_and_rejects_data_authority(
         f"/api/v1/materials/{material['uuid']}", json={"name": None}
     ).json()["data"]
     assert ignored_null["name"] == "After"
-    assert store.query_one(
-        "SELECT COUNT(*) AS n FROM material_state_history WHERE material_uuid=?",
-        (material["uuid"],),
-    )["n"] == 1
+    assert (
+        store.query_one(
+            "SELECT COUNT(*) AS n FROM material_state_history WHERE material_uuid=?",
+            (material["uuid"],),
+        )["n"]
+        == 1
+    )
     store.close()
 
 
-def test_unmatched_site_content_type_rolls_back_material_graph(tmp_path):
+def test_unmatched_site_content_type_is_persisted_without_registered_candidate(
+    tmp_path,
+):
     client, store = _client(tmp_path)
     template_uuid = client.post(
         "/api/v1/resource-templates",
@@ -714,10 +746,87 @@ def test_unmatched_site_content_type_rolls_back_material_graph(tmp_path):
         "/api/v1/materials",
         json={"resource_template_uuid": template_uuid, "name": "Invalid"},
     )
-    assert response.status_code == 200
-    assert response.json()["code"] == 1000
-    assert store.query_one("SELECT COUNT(*) AS n FROM material")["n"] == 0
-    assert store.query_one("SELECT COUNT(*) AS n FROM site")["n"] == 0
+    assert response.status_code == 201
+    site = response.json()["data"]["sites"][0]
+    assert site["allowed_resource_template_uuids"] == []
+    assert site["content_type"] == ["missing-tag"]
+    assert (
+        store.query_one("SELECT content_type FROM site WHERE uuid=?", (site["uuid"],))[
+            "content_type"
+        ]
+        == '["missing-tag"]'
+    )
+    store.close()
+
+
+def test_site_content_type_alias_is_resolved_when_material_is_placed(tmp_path):
+    client, store = _client(tmp_path)
+    bottle_template_uuid = client.post(
+        "/api/v1/resource-templates",
+        json={
+            "resources": [
+                {
+                    "id": "bottle.template",
+                    "registry_type": "resource",
+                    "tags": ["bottle"],
+                }
+            ]
+        },
+    ).json()["data"]["templates"][0]["uuid"]
+    carrier_template_uuid = client.post(
+        "/api/v1/resource-templates",
+        json={
+            "resources": [
+                {
+                    "id": "carrier.template",
+                    "registry_type": "device",
+                    "config_info": [
+                        {
+                            "id": "root",
+                            "config": {
+                                "sites": [{"label": "A1", "content_type": ["bottles"]}]
+                            },
+                        }
+                    ],
+                }
+            ]
+        },
+    ).json()["data"]["templates"][0]["uuid"]
+    carrier = client.post(
+        "/api/v1/materials",
+        json={"resource_template_uuid": carrier_template_uuid, "name": "Carrier"},
+    ).json()["data"]
+    site = carrier["sites"][0]
+
+    incompatible_template_uuid = _sync_template(client)
+    rejected = client.post(
+        "/api/v1/materials",
+        json={
+            "resource_template_uuid": incompatible_template_uuid,
+            "parent_uuid": carrier["uuid"],
+            "name": "Not a bottle",
+            "site_placement": {"action": "place", "site_uuid": site["uuid"]},
+        },
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["code"] == 6008
+
+    bottle = client.post(
+        "/api/v1/materials",
+        json={
+            "resource_template_uuid": bottle_template_uuid,
+            "parent_uuid": carrier["uuid"],
+            "name": "Bottle",
+            "site_placement": {"action": "place", "site_uuid": site["uuid"]},
+        },
+    )
+    assert bottle.status_code == 201
+    assert (
+        store.query_one(
+            "SELECT occupied_material_uuid FROM site WHERE uuid=?", (site["uuid"],)
+        )["occupied_material_uuid"]
+        == bottle.json()["data"]["uuid"]
+    )
     store.close()
 
 

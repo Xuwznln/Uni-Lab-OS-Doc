@@ -13,11 +13,12 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Optional
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class InvalidCursorAdvance(ValueError):
     """ACK cursor 试图回退、跳批或基于过期发送窗口推进."""
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS resource_template (
@@ -140,8 +141,12 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
 # site.uuid 是库位稳定身份；旧 View 不暴露它，不能把 label/index 当作 UUID。
 # relation.parent_uuid 恒等于本列（_tx_upsert_relation 同步维护）。
 # 空串表示顶层物料；单父由列语义天然保证（树形父）。
-_SCHEMA_V3_ADD_PARENT = "ALTER TABLE material_instance ADD COLUMN parent_uuid TEXT NOT NULL DEFAULT ''"
-_SCHEMA_V3_INDEX = "CREATE INDEX IF NOT EXISTS idx_instance_parent ON material_instance(parent_uuid)"
+_SCHEMA_V3_ADD_PARENT = (
+    "ALTER TABLE material_instance ADD COLUMN parent_uuid TEXT NOT NULL DEFAULT ''"
+)
+_SCHEMA_V3_INDEX = (
+    "CREATE INDEX IF NOT EXISTS idx_instance_parent ON material_instance(parent_uuid)"
+)
 
 # v4：W3C Trace Context 与只读关联 ID。全部为 additive、空串兼容旧数据；
 # 不把 action/material payload 写入追踪列。
@@ -941,6 +946,15 @@ FROM material AS material
 JOIN material_inventory AS inventory ON inventory.material_uuid = material.uuid;
 """
 
+# v7: Backend persists Site content types independently from the currently
+# registered Resource Templates. Admission resolves these semantic tags only
+# when a Material is placed, so later template registration remains effective.
+_SCHEMA_V7_SITE_CONTENT_TYPE = (
+    "ALTER TABLE site ADD COLUMN content_type "
+    "TEXT NOT NULL DEFAULT '[]' "
+    "CHECK (json_valid(content_type) AND json_type(content_type) = 'array')"
+)
+
 # v2：实验室操作系统布局层（元信息 / 分区 / 2D 摆放）。
 # 只增表不改旧表，v1 库可原地升级。
 _SCHEMA_V2 = """
@@ -1055,7 +1069,8 @@ class InventoryStore:
             if current < 3:
                 # ALTER 前先查列（半途中断的迁移可安全重放）
                 cols = {
-                    r[1] for r in self._conn.execute(
+                    r[1]
+                    for r in self._conn.execute(
                         "PRAGMA table_info(material_instance)"
                     ).fetchall()
                 }
@@ -1140,9 +1155,14 @@ class InventoryStore:
                         "WHERE backup.material_uuid = material.uuid "
                         "AND TRIM(backup.type) <> '')"
                     )
-                    self._conn.execute(
-                        "DROP TABLE _edge_v5_material_type_backup"
-                    )
+                    self._conn.execute("DROP TABLE _edge_v5_material_type_backup")
+            if current < 7:
+                site_columns = {
+                    row[1]
+                    for row in self._conn.execute("PRAGMA table_info(site)").fetchall()
+                }
+                if "content_type" not in site_columns:
+                    self._conn.execute(_SCHEMA_V7_SITE_CONTENT_TYPE)
             if current < SCHEMA_VERSION:
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 self._conn.commit()
@@ -1202,9 +1222,13 @@ class InventoryStore:
         )
 
     def get_instance(self, edge_uuid: str) -> Optional[Dict[str, Any]]:
-        return self.query_one("SELECT * FROM material_instance WHERE edge_uuid = ?", (edge_uuid,))
+        return self.query_one(
+            "SELECT * FROM material_instance WHERE edge_uuid = ?", (edge_uuid,)
+        )
 
-    def list_instances(self, status: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+    def list_instances(
+        self, status: str = "", limit: int = 500
+    ) -> List[Dict[str, Any]]:
         if status:
             return self.query_all(
                 "SELECT * FROM material_instance WHERE status = ? AND edge_uuid NOT IN ("
@@ -1221,15 +1245,21 @@ class InventoryStore:
             (limit,),
         )
 
-    def find_instance_by_barcode_active(self, barcode: str, active_states: tuple) -> Optional[Dict[str, Any]]:
+    def find_instance_by_barcode_active(
+        self, barcode: str, active_states: tuple
+    ) -> Optional[Dict[str, Any]]:
         placeholders = ",".join("?" for _ in active_states)
         return self.query_one(
             f"SELECT * FROM material_instance WHERE barcode = ? AND status IN ({placeholders})",
             (barcode, *active_states),
         )
 
-    def find_instance_by_legacy_cloud_id(self, cloud_id: str) -> Optional[Dict[str, Any]]:
-        return self.query_one("SELECT * FROM material_instance WHERE legacy_cloud_id = ?", (cloud_id,))
+    def find_instance_by_legacy_cloud_id(
+        self, cloud_id: str
+    ) -> Optional[Dict[str, Any]]:
+        return self.query_one(
+            "SELECT * FROM material_instance WHERE legacy_cloud_id = ?", (cloud_id,)
+        )
 
     def lots_by_template_fifo(self, template_id: str) -> List[Dict[str, Any]]:
         """FIFO：按 created_at 升序（同毫秒按 rowid 插入序）返回可用批次."""
@@ -1239,7 +1269,9 @@ class InventoryStore:
             (template_id,),
         )
 
-    def get_reservation(self, workflow_id: str, node_id: str, attempt: int) -> Optional[Dict[str, Any]]:
+    def get_reservation(
+        self, workflow_id: str, node_id: str, attempt: int
+    ) -> Optional[Dict[str, Any]]:
         return self.query_one(
             "SELECT * FROM inventory_reservation WHERE workflow_id = ? AND node_id = ? AND attempt = ?",
             (workflow_id, node_id, attempt),
@@ -1257,7 +1289,9 @@ class InventoryStore:
             (reservation_id,),
         )
 
-    def list_reservations(self, status: str = "", limit: int = 500) -> List[Dict[str, Any]]:
+    def list_reservations(
+        self, status: str = "", limit: int = 500
+    ) -> List[Dict[str, Any]]:
         if status:
             return self.query_all(
                 "SELECT * FROM inventory_reservation WHERE status = ? "
@@ -1271,7 +1305,9 @@ class InventoryStore:
         )
 
     def get_relation(self, child_uuid: str) -> Optional[Dict[str, Any]]:
-        return self.query_one("SELECT * FROM resource_relation WHERE child_uuid = ?", (child_uuid,))
+        return self.query_one(
+            "SELECT * FROM resource_relation WHERE child_uuid = ?", (child_uuid,)
+        )
 
     def list_relations(self) -> List[Dict[str, Any]]:
         return self.query_all("SELECT * FROM resource_relation ORDER BY child_uuid ASC")
@@ -1285,14 +1321,19 @@ class InventoryStore:
 
     def children_of(self, parent_uuid: str) -> List[Dict[str, Any]]:
         return self.query_all(
-            "SELECT * FROM resource_relation WHERE parent_uuid = ? ORDER BY slot_id ASC", (parent_uuid,)
+            "SELECT * FROM resource_relation WHERE parent_uuid = ? ORDER BY slot_id ASC",
+            (parent_uuid,),
         )
 
     def get_content(self, instance_uuid: str) -> Optional[Dict[str, Any]]:
-        return self.query_one("SELECT * FROM substance_content WHERE instance_uuid = ?", (instance_uuid,))
+        return self.query_one(
+            "SELECT * FROM substance_content WHERE instance_uuid = ?", (instance_uuid,)
+        )
 
     def list_contents(self) -> List[Dict[str, Any]]:
-        return self.query_all("SELECT * FROM substance_content ORDER BY instance_uuid ASC")
+        return self.query_all(
+            "SELECT * FROM substance_content ORDER BY instance_uuid ASC"
+        )
 
     def component_children_of(self, parent_uuid: str) -> List[Dict[str, Any]]:
         """组成父子（material_instance.parent_uuid）下的直接子物料；与 site 放置无关."""
@@ -1302,7 +1343,9 @@ class InventoryStore:
         )
 
     def get_processed_command(self, command_id: str) -> Optional[Dict[str, Any]]:
-        return self.query_one("SELECT * FROM processed_command WHERE command_id = ?", (command_id,))
+        return self.query_one(
+            "SELECT * FROM processed_command WHERE command_id = ?", (command_id,)
+        )
 
     def list_processed_commands(self, limit: int = 200) -> List[Dict[str, Any]]:
         """最近的幂等命令结果（只读诊断面，不暴露任意表查询）。"""
@@ -1360,9 +1403,7 @@ class InventoryStore:
             "templates": self.query_all(
                 "SELECT * FROM inventory_resource_template ORDER BY template_id ASC"
             ),
-            "lots": self.query_all(
-                "SELECT * FROM inventory_lot ORDER BY lot_id ASC"
-            ),
+            "lots": self.query_all("SELECT * FROM inventory_lot ORDER BY lot_id ASC"),
             "instances": self.query_all(
                 "SELECT * FROM material_instance WHERE edge_uuid NOT IN ("
                 "SELECT uuid FROM material WHERE "
@@ -1379,7 +1420,9 @@ class InventoryStore:
     # -- 实验室布局（lab_meta / lab_zone / lab_placement） --------------------
 
     def get_meta(self, key: str, default: str = "") -> str:
-        row = self.query_one("SELECT meta_value FROM lab_meta WHERE meta_key = ?", (key,))
+        row = self.query_one(
+            "SELECT meta_value FROM lab_meta WHERE meta_key = ?", (key,)
+        )
         return str(row["meta_value"]) if row else default
 
     def set_meta(self, key: str, value: str) -> None:
@@ -1396,16 +1439,21 @@ class InventoryStore:
     def list_placements(self, zone_id: str = "") -> List[Dict[str, Any]]:
         if zone_id:
             return self.query_all(
-                "SELECT * FROM lab_placement WHERE zone_id = ? ORDER BY subject_id ASC", (zone_id,)
+                "SELECT * FROM lab_placement WHERE zone_id = ? ORDER BY subject_id ASC",
+                (zone_id,),
             )
         return self.query_all("SELECT * FROM lab_placement ORDER BY subject_id ASC")
 
     def get_placement(self, subject_id: str) -> Optional[Dict[str, Any]]:
-        return self.query_one("SELECT * FROM lab_placement WHERE subject_id = ?", (subject_id,))
+        return self.query_one(
+            "SELECT * FROM lab_placement WHERE subject_id = ?", (subject_id,)
+        )
 
     # -- outbox / cursor -----------------------------------------------------
 
-    def pending_outbox(self, after_sequence: int, limit: int = 100) -> List[Dict[str, Any]]:
+    def pending_outbox(
+        self, after_sequence: int, limit: int = 100
+    ) -> List[Dict[str, Any]]:
         return self.query_all(
             "SELECT * FROM sync_outbox WHERE sequence > ? ORDER BY sequence ASC LIMIT ?",
             (after_sequence, limit),
@@ -1413,12 +1461,12 @@ class InventoryStore:
 
     def list_cursors(self) -> List[Dict[str, Any]]:
         """列出同步游标；ACK 推进仍只能由同步协议写入。"""
-        return self.query_all(
-            "SELECT * FROM sync_cursor ORDER BY cursor_name ASC"
-        )
+        return self.query_all("SELECT * FROM sync_cursor ORDER BY cursor_name ASC")
 
     def get_cursor(self, name: str = "cloud") -> int:
-        row = self.query_one("SELECT acked_sequence FROM sync_cursor WHERE cursor_name = ?", (name,))
+        row = self.query_one(
+            "SELECT acked_sequence FROM sync_cursor WHERE cursor_name = ?", (name,)
+        )
         return int(row["acked_sequence"]) if row else 0
 
     def set_cursor(self, name: str, acked_sequence: int, now_ms: int) -> None:
@@ -1524,9 +1572,18 @@ class InventoryStore:
             "INSERT INTO inventory_ledger(occurred_at, op_type, aggregate_type, aggregate_id, "
             "delta_json, actor, reason, causation_id, trace_id, span_id) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (occurred_at, op_type, aggregate_type, aggregate_id,
-             json.dumps(delta, ensure_ascii=False), actor, reason, causation_id,
-             trace_id, span_id),
+            (
+                occurred_at,
+                op_type,
+                aggregate_type,
+                aggregate_id,
+                json.dumps(delta, ensure_ascii=False),
+                actor,
+                reason,
+                causation_id,
+                trace_id,
+                span_id,
+            ),
         )
 
     @staticmethod
@@ -1552,8 +1609,21 @@ class InventoryStore:
             "aggregate_version, event_type, occurred_at, causation_id, payload_json, "
             "traceparent, tracestate, trace_id, span_id) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (event_id, edge_id, lab_id, aggregate_type, aggregate_id, aggregate_version,
-             event_type, occurred_at, causation_id, json.dumps(payload, ensure_ascii=False),
-             traceparent, tracestate, trace_id, span_id),
+            (
+                event_id,
+                edge_id,
+                lab_id,
+                aggregate_type,
+                aggregate_id,
+                aggregate_version,
+                event_type,
+                occurred_at,
+                causation_id,
+                json.dumps(payload, ensure_ascii=False),
+                traceparent,
+                tracestate,
+                trace_id,
+                span_id,
+            ),
         )
         return int(cur.lastrowid or 0)

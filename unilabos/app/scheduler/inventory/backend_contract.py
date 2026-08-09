@@ -49,9 +49,21 @@ MATERIAL_SITE_CYCLE = 6009
 MATERIAL_IDENTITY_CONFLICT = 6010
 
 
+_SITE_CONTENT_TYPE_TAG_ALIASES = {
+    "bottle": {"bottle", "bottles"},
+    "bottles": {"bottle", "bottles"},
+    "bottle_carrier": {"bottle_carrier", "bottle_carriers"},
+    "bottle_carriers": {"bottle_carrier", "bottle_carriers"},
+    "tip_rack": {"tip_rack", "tip_racks"},
+    "tip_racks": {"tip_rack", "tip_racks"},
+}
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
-        "+00:00", "Z"
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
     )
 
 
@@ -82,15 +94,19 @@ class BackendResourceService:
 
     # Resource Template -------------------------------------------------
 
-    def sync_resource_templates(self, resources: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def sync_resource_templates(
+        self, resources: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         if not resources:
             raise BackendContractError(
                 TEMPLATE_DEFINITION_INVALID, "resources is required"
             )
-        normalized_names = [str(resource.get("id") or "").strip() for resource in resources]
-        if any(not name for name in normalized_names) or len(set(normalized_names)) != len(
-            normalized_names
-        ):
+        normalized_names = [
+            str(resource.get("id") or "").strip() for resource in resources
+        ]
+        if any(not name for name in normalized_names) or len(
+            set(normalized_names)
+        ) != len(normalized_names):
             raise BackendContractError(
                 TEMPLATE_DEFINITION_INVALID,
                 "resource names are required and must be unique",
@@ -106,8 +122,8 @@ class BackendResourceService:
                     template_uuid = str(existing["uuid"]) if existing else str(uuid4())
                     class_definition = resource.get("class") or {}
                     schema = resource.get("init_param_schema") or {}
-                    data_schema = ((schema.get("data") or {}).get("properties") or {})
-                    config_schema = ((schema.get("config") or {}).get("properties") or {})
+                    data_schema = (schema.get("data") or {}).get("properties") or {}
+                    config_schema = (schema.get("config") or {}).get("properties") or {}
                     values = (
                         template_uuid,
                         _now(),
@@ -385,7 +401,9 @@ class BackendResourceService:
 
                 placement = values.get("site_placement")
                 if placement:
-                    self._apply_site_placement(conn, material_uuid, template_uuid, placement)
+                    self._apply_site_placement(
+                        conn, material_uuid, template_uuid, placement
+                    )
         except BackendContractError:
             raise
         except ValueError as exc:
@@ -478,14 +496,15 @@ class BackendResourceService:
         )
         result["sites"] = self.list_sites(material_uuid)
         current_site = self.store.query_one(
-            "SELECT * FROM site WHERE occupied_material_uuid=? "
-            "AND deleted_at IS NULL",
+            "SELECT * FROM site WHERE occupied_material_uuid=? AND deleted_at IS NULL",
             (material_uuid,),
         )
         result["current_site"] = self._site_row(current_site) if current_site else None
         return result
 
-    def update_material(self, material_uuid: str, values: Dict[str, Any]) -> Dict[str, Any]:
+    def update_material(
+        self, material_uuid: str, values: Dict[str, Any]
+    ) -> Dict[str, Any]:
         try:
             with self.store.transaction() as conn:
                 current = self._require_material(conn, material_uuid)
@@ -578,7 +597,9 @@ class BackendResourceService:
                         aggregate_changed = True
                 placement = values.get("site_placement")
                 if values.get("_site_placement_specified") and placement:
-                    self._apply_site_placement(conn, material_uuid, template_uuid, placement)
+                    self._apply_site_placement(
+                        conn, material_uuid, template_uuid, placement
+                    )
                     aggregate_changed = True
                 if aggregate_changed:
                     conn.execute(
@@ -687,7 +708,9 @@ class BackendResourceService:
             "SELECT * FROM site WHERE uuid=? AND deleted_at IS NULL", (site_uuid,)
         )
         if row is None:
-            raise BackendContractError(MATERIAL_SITE_NOT_FOUND, "Material site not found")
+            raise BackendContractError(
+                MATERIAL_SITE_NOT_FOUND, "Material site not found"
+            )
         return self._site_row(row)
 
     def append_material_state(
@@ -1065,7 +1088,8 @@ class BackendResourceService:
         while cursor:
             if cursor in seen:
                 raise BackendContractError(
-                    MATERIAL_PARENT_CYCLE, "Material parent relationship creates a cycle"
+                    MATERIAL_PARENT_CYCLE,
+                    "Material parent relationship creates a cycle",
                 )
             seen.add(cursor)
             row = conn.execute(
@@ -1102,13 +1126,45 @@ class BackendResourceService:
             "SELECT * FROM site WHERE uuid=? AND deleted_at IS NULL", (site_uuid,)
         ).fetchone()
         if site is None:
-            raise BackendContractError(MATERIAL_SITE_NOT_FOUND, "Material site not found")
+            raise BackendContractError(
+                MATERIAL_SITE_NOT_FOUND, "Material site not found"
+            )
         if site["material_uuid"] == material_uuid:
             raise BackendContractError(
                 MATERIAL_SITE_CYCLE, "Material cannot occupy its own Site"
             )
         allowed = _json(site["allowed_resource_template_uuids"], [])
-        if allowed and template_uuid not in allowed:
+        content_types = _json(site["content_type"], [])
+        template_allowed = template_uuid in allowed
+        content_type_allowed = False
+        if content_types:
+            template = conn.execute(
+                "SELECT tags FROM resource_template "
+                "WHERE uuid=? AND deleted_at IS NULL",
+                (template_uuid,),
+            ).fetchone()
+            template_tags = (
+                {
+                    str(tag).strip().casefold()
+                    for tag in _json(template["tags"], [])
+                    if str(tag).strip()
+                }
+                if template is not None
+                else set()
+            )
+            accepted_tags = {
+                alias
+                for value in content_types
+                for alias in _SITE_CONTENT_TYPE_TAG_ALIASES.get(
+                    str(value).strip().casefold(),
+                    {str(value).strip().casefold()},
+                )
+                if alias
+            }
+            content_type_allowed = bool(template_tags & accepted_tags)
+        if (allowed or content_types) and not (
+            template_allowed or content_type_allowed
+        ):
             raise BackendContractError(
                 MATERIAL_SITE_TEMPLATE_NOT_ALLOWED,
                 "Material resource template is not allowed by the target site",
@@ -1221,6 +1277,7 @@ class BackendResourceService:
                 "allowed_resource_template_uuids": _json(
                     row.get("allowed_resource_template_uuids"), []
                 ),
+                "content_type": _json(row.get("content_type"), []),
                 "occupied_material_uuid": row.get("occupied_material_uuid"),
                 "position_x": float(row["position_x"]),
                 "position_y": float(row["position_y"]),

@@ -15,9 +15,7 @@ def _create_v4_database(path: str) -> None:
     connection.execute(store_module._SCHEMA_V3_ADD_PARENT)
     connection.execute(store_module._SCHEMA_V3_INDEX)
     for table, columns in store_module._SCHEMA_V4_COLUMNS.items():
-        existing = {
-            row[1] for row in connection.execute(f"PRAGMA table_info({table})")
-        }
+        existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         for column, definition in columns.items():
             if column not in existing:
                 connection.execute(
@@ -76,9 +74,7 @@ def test_v4_migrates_to_backend_tables_without_losing_edge_inventory(tmp_path):
 
     table_names = {
         row["name"]
-        for row in store.query_all(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
+        for row in store.query_all("SELECT name FROM sqlite_master WHERE type='table'")
     }
     assert {
         "resource_template",
@@ -90,9 +86,7 @@ def test_v4_migrates_to_backend_tables_without_losing_edge_inventory(tmp_path):
     } <= table_names
     view_names = {
         row["name"]
-        for row in store.query_all(
-            "SELECT name FROM sqlite_master WHERE type='view'"
-        )
+        for row in store.query_all("SELECT name FROM sqlite_master WHERE type='view'")
     }
     assert {
         "inventory_resource_template",
@@ -115,15 +109,20 @@ def test_v4_migrates_to_backend_tables_without_losing_edge_inventory(tmp_path):
         "barcode",
         "type",
     } <= material_columns
+    site_columns = {row["name"] for row in store.query_all("PRAGMA table_info(site)")}
+    assert "content_type" in site_columns
 
     occupant = store.query_one("SELECT * FROM material WHERE uuid='occupant'")
     assert occupant["parent_uuid"] == "owner"
     assert occupant["data"] == '{"temperature":25}'
     assert occupant["type"] == "device"
-    assert store.query_one(
-        "SELECT inventory_status FROM material_inventory "
-        "WHERE material_uuid='occupant'"
-    )["inventory_status"] == "reserved"
+    assert (
+        store.query_one(
+            "SELECT inventory_status FROM material_inventory "
+            "WHERE material_uuid='occupant'"
+        )["inventory_status"]
+        == "reserved"
+    )
     assert store.get_instance("occupant")["status"] == "reserved"
     assert store.query_one("PRAGMA integrity_check")["integrity_check"] == "ok"
     assert store.query_all("PRAGMA foreign_key_check") == []
@@ -133,6 +132,30 @@ def test_v4_migrates_to_backend_tables_without_losing_edge_inventory(tmp_path):
     assert site["material_uuid"] == "owner"
     assert site["occupied_material_uuid"] == "occupant"
     store.close()
+
+
+def test_v6_database_adds_replay_safe_site_content_type_column(tmp_path):
+    database = tmp_path / "inventory-v6.db"
+    store = InventoryStore(str(database))
+    store.close()
+
+    connection = sqlite3.connect(database)
+    connection.execute("ALTER TABLE site DROP COLUMN content_type")
+    connection.execute("PRAGMA user_version=6")
+    connection.commit()
+    connection.close()
+
+    migrated = InventoryStore(str(database))
+    assert migrated.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
+    content_type = next(
+        row
+        for row in migrated.query_all("PRAGMA table_info(site)")
+        if row["name"] == "content_type"
+    )
+    assert content_type["notnull"] == 1
+    assert content_type["dflt_value"] == "'[]'"
+    assert migrated.query_one("PRAGMA integrity_check")["integrity_check"] == "ok"
+    migrated.close()
 
 
 def test_v5_database_backfills_backend_material_type_and_rebuilds_legacy_view(
@@ -153,16 +176,21 @@ def test_v5_database_backfills_backend_material_type_and_rebuilds_legacy_view(
         "UPDATE material SET class='template-a',name='template-a' WHERE uuid='owner'"
     )
     connection.execute(
-        "UPDATE material SET class='component',name='pipette-tip' "
-        "WHERE uuid='occupant'"
+        "UPDATE material SET class='component',name='pipette-tip' WHERE uuid='occupant'"
     )
     connection.commit()
     connection.close()
 
     store = InventoryStore(str(database))
     assert store.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
-    assert store.query_one("SELECT type FROM material WHERE uuid='owner'")["type"] == "container"
-    assert store.query_one("SELECT type FROM material WHERE uuid='occupant'")["type"] == "tip"
+    assert (
+        store.query_one("SELECT type FROM material WHERE uuid='owner'")["type"]
+        == "container"
+    )
+    assert (
+        store.query_one("SELECT type FROM material WHERE uuid='occupant'")["type"]
+        == "tip"
+    )
     assert store.get_instance("occupant")["type"] == "tip"
     assert "type" in {
         row["name"] for row in store.query_all("PRAGMA table_info(material_instance)")
@@ -180,12 +208,9 @@ def test_divergent_edge_v5_migrates_without_losing_instance_type(tmp_path):
     _create_v4_database(str(database))
     connection = sqlite3.connect(database)
     connection.execute(
-        "ALTER TABLE material_instance ADD COLUMN type "
-        "TEXT NOT NULL DEFAULT 'resource'"
+        "ALTER TABLE material_instance ADD COLUMN type TEXT NOT NULL DEFAULT 'resource'"
     )
-    connection.execute(
-        "CREATE INDEX idx_instance_type ON material_instance(type)"
-    )
+    connection.execute("CREATE INDEX idx_instance_type ON material_instance(type)")
     connection.execute(
         "UPDATE material_instance SET type='workcell' WHERE edge_uuid='owner'"
     )
@@ -199,17 +224,21 @@ def test_divergent_edge_v5_migrates_without_losing_instance_type(tmp_path):
     store = InventoryStore(str(database))
 
     assert store.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
-    assert store.query_one("SELECT type FROM material WHERE uuid='owner'")[
-        "type"
-    ] == "workcell"
-    assert store.query_one("SELECT type FROM material WHERE uuid='occupant'")[
-        "type"
-    ] == "tip"
+    assert (
+        store.query_one("SELECT type FROM material WHERE uuid='owner'")["type"]
+        == "workcell"
+    )
+    assert (
+        store.query_one("SELECT type FROM material WHERE uuid='occupant'")["type"]
+        == "tip"
+    )
     assert store.get_instance("owner")["type"] == "workcell"
-    assert store.query_one(
-        "SELECT name FROM sqlite_master "
-        "WHERE name='_edge_v5_material_type_backup'"
-    ) is None
+    assert (
+        store.query_one(
+            "SELECT name FROM sqlite_master WHERE name='_edge_v5_material_type_backup'"
+        )
+        is None
+    )
     assert store.query_one("PRAGMA integrity_check")["integrity_check"] == "ok"
     assert store.query_all("PRAGMA foreign_key_check") == []
     store.close()
@@ -222,8 +251,7 @@ def test_divergent_v5_type_backup_survives_restart_between_v5_and_v6(tmp_path):
     _create_v4_database(str(database))
     connection = sqlite3.connect(database)
     connection.execute(
-        "ALTER TABLE material_instance ADD COLUMN type "
-        "TEXT NOT NULL DEFAULT 'resource'"
+        "ALTER TABLE material_instance ADD COLUMN type TEXT NOT NULL DEFAULT 'resource'"
     )
     connection.execute(
         "UPDATE material_instance SET type='workcell' WHERE edge_uuid='owner'"
@@ -246,16 +274,20 @@ def test_divergent_v5_type_backup_survives_restart_between_v5_and_v6(tmp_path):
     store = InventoryStore(str(database))
 
     assert store.query_one("PRAGMA user_version")["user_version"] == SCHEMA_VERSION
-    assert store.query_one("SELECT type FROM material WHERE uuid='owner'")[
-        "type"
-    ] == "workcell"
-    assert store.query_one("SELECT type FROM material WHERE uuid='occupant'")[
-        "type"
-    ] == "tip"
-    assert store.query_one(
-        "SELECT name FROM sqlite_master "
-        "WHERE name='_edge_v5_material_type_backup'"
-    ) is None
+    assert (
+        store.query_one("SELECT type FROM material WHERE uuid='owner'")["type"]
+        == "workcell"
+    )
+    assert (
+        store.query_one("SELECT type FROM material WHERE uuid='occupant'")["type"]
+        == "tip"
+    )
+    assert (
+        store.query_one(
+            "SELECT name FROM sqlite_master WHERE name='_edge_v5_material_type_backup'"
+        )
+        is None
+    )
     assert store.query_one("PRAGMA integrity_check")["integrity_check"] == "ok"
     assert store.query_all("PRAGMA foreign_key_check") == []
     store.close()
@@ -279,10 +311,9 @@ def test_fresh_v6_legacy_views_write_the_canonical_material_once(tmp_path):
         )
 
     assert store.query_one("SELECT COUNT(*) AS n FROM material")["n"] == 1
-    assert store.query_one(
-        "SELECT COUNT(*) AS n FROM material_inventory"
-    )["n"] == 1
-    assert store.query_one("SELECT type FROM material WHERE uuid='material-a'")[
-        "type"
-    ] == "resource"
+    assert store.query_one("SELECT COUNT(*) AS n FROM material_inventory")["n"] == 1
+    assert (
+        store.query_one("SELECT type FROM material WHERE uuid='material-a'")["type"]
+        == "resource"
+    )
     store.close()

@@ -127,6 +127,7 @@ def _material_sites(
         site = deepcopy(by_name.get(name.casefold(), {}))
         occupied_uuid = str(row.get("occupied_material_uuid") or "")
         allowed = _json_object_list(row.get("allowed_resource_template_uuids"))
+        content_types = _json_object_list(row.get("content_type"))
         site.update(
             {
                 "uuid": str(row["uuid"]),
@@ -150,6 +151,7 @@ def _material_sites(
                 "material_uuid": material_uuid,
                 "occupied_material_uuid": occupied_uuid or None,
                 "allowed_resource_template_uuids": allowed,
+                "content_type": content_types,
             }
         )
         result.append(site)

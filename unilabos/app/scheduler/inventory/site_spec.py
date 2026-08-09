@@ -141,7 +141,9 @@ def _axis(value: Any, axis: str, default: float) -> float:
     return _number(_mapping(value).get(axis), default)
 
 
-def component_relative_position(component: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+def component_relative_position(
+    component: Mapping[str, Any],
+) -> Optional[Dict[str, Any]]:
     """Project a Backend template component position/pose into canonical columns."""
 
     config = _mapping(component.get("config"))
@@ -170,9 +172,15 @@ def component_relative_position(component: Mapping[str, Any]) -> Optional[Dict[s
         "position_x": _axis(position, "x", 0),
         "position_y": _axis(position, "y", 0),
         "position_z": _axis(position, "z", 0),
-        "depth": max(0.0, _number(config.get("size_z"), _number(pose_size.get("depth")))),
-        "length": max(0.0, _number(config.get("size_y"), _number(pose_size.get("height")))),
-        "width": max(0.0, _number(config.get("size_x"), _number(pose_size.get("width")))),
+        "depth": max(
+            0.0, _number(config.get("size_z"), _number(pose_size.get("depth")))
+        ),
+        "length": max(
+            0.0, _number(config.get("size_y"), _number(pose_size.get("height")))
+        ),
+        "width": max(
+            0.0, _number(config.get("size_x"), _number(pose_size.get("width")))
+        ),
         "scale_x": _axis(pose_scale, "x", 1),
         "scale_y": _axis(pose_scale, "y", 1),
         "scale_z": _axis(pose_scale, "z", 1),
@@ -185,49 +193,31 @@ def component_relative_position(component: Mapping[str, Any]) -> Optional[Dict[s
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
-        "+00:00", "Z"
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
     )
 
 
-def _allowed_templates(
-    connection: sqlite3.Connection,
-    site: Mapping[str, Any],
-) -> List[str]:
+def _site_admission_rules(site: Mapping[str, Any]) -> tuple[List[str], List[str]]:
     explicit = site.get("allowed_resource_template_uuids")
-    if isinstance(explicit, list):
-        return sorted({str(value).strip() for value in explicit if str(value).strip()})
+    if explicit is not None and not isinstance(explicit, list):
+        raise ValueError("Site allowed_resource_template_uuids must be an array")
+    allowed = sorted(
+        {str(value).strip() for value in (explicit or []) if str(value).strip()}
+    )
 
     content_types = site.get("content_type")
     if content_types is None:
-        return []
+        return allowed, []
     if not isinstance(content_types, list):
         raise ValueError("Site content_type must be an array")
-    identifiers = sorted(
-        {str(value).strip().casefold() for value in content_types if str(value).strip()}
+    normalized_content_types = sorted(
+        {str(value).strip() for value in content_types if str(value).strip()},
+        key=str.casefold,
     )
-    if not identifiers:
-        return []
-
-    matches: Dict[str, set[str]] = {identifier: set() for identifier in identifiers}
-    rows = connection.execute(
-        "SELECT uuid,tags FROM resource_template WHERE deleted_at IS NULL"
-    ).fetchall()
-    for row in rows:
-        tags = _load(row["tags"], [])
-        if not isinstance(tags, list):
-            raise ValueError(f"resource template {row['uuid']} tags must be an array")
-        normalized_tags = {str(tag).strip().casefold() for tag in tags}
-        for identifier in identifiers:
-            if identifier in normalized_tags:
-                matches[identifier].add(str(row["uuid"]))
-    unmatched = [identifier for identifier in identifiers if not matches[identifier]]
-    if unmatched:
-        raise ValueError(
-            "Site content_type has no matching resource template: "
-            + ", ".join(unmatched)
-        )
-    return sorted({value for values in matches.values() for value in values})
+    return allowed, normalized_content_types
 
 
 def materialize_component_sites(
@@ -259,7 +249,7 @@ def materialize_component_sites(
 
         position = _mapping(site.get("position"))
         size = _mapping(site.get("size"))
-        allowed = _allowed_templates(connection, site)
+        allowed, content_types = _site_admission_rules(site)
         sort_order = index if isinstance(index, int) and index >= 0 else ordinal
         site_uuid = str(uuid4())
         timestamp = _now()
@@ -268,9 +258,10 @@ def materialize_component_sites(
             INSERT INTO site(
                 uuid,create_time,update_time,deleted_at,description,meta_data,
                 material_uuid,name,sort_order,allowed_resource_template_uuids,
+                content_type,
                 occupied_material_uuid,position_x,position_y,position_z,
                 depth,length,width
-            ) VALUES (?,?,?,NULL,?,?,?,?,?,?,NULL,?,?,?,?,?,?)
+            ) VALUES (?,?,?,NULL,?,?,?,?,?,?,?,NULL,?,?,?,?,?,?)
             """,
             (
                 site_uuid,
@@ -282,6 +273,7 @@ def materialize_component_sites(
                 name,
                 sort_order,
                 json.dumps(allowed, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(content_types, ensure_ascii=False, separators=(",", ":")),
                 _number(position.get("x")),
                 _number(position.get("y")),
                 _number(position.get("z")),

@@ -1,4 +1,4 @@
-# Edge SQLite 物理 Schema 证据（v6，2026-08-08）
+# Edge SQLite 物理 Schema 证据（v7，2026-08-10）
 
 本文记录隔离分支继承提交 `cd2d409a007e233aec0e9422359bf85c5427e37b`、同步受指导模型
 `92743142572fcfdc69a2424945d5dcffd846920b` 后，
@@ -6,12 +6,12 @@
 `PRAGMA user_version/table_info/foreign_key_list/index_list`。`TEXT JSON` 与 Backend
 的 JSON 类型是允许的物理差异；语义、标识、约束和公开 DTO 才是对齐目标。
 
-本文主体由两类已实现证据组成：v6 shared 表和当前控制面属于 `edge-live`；旧三库、
+本文主体由两类已实现证据组成：v7 shared 表和当前控制面属于 `edge-live`；旧三库、
 旧 Workflow 审计表和兼容 View 属于 `legacy-implemented`。导师提供、待实机复核的
 `leaplab/designs@24fc4ce` `os-local.sqlite` v1 只在文末作为 `target-design` 登记，不会自动改名、
 合并或删除当前 Edge 表。
 
-## `inventory.db`：user_version=6
+## `inventory.db`：user_version=7
 
 ### Backend 共享资源表
 
@@ -26,21 +26,24 @@
   `resource_type`、最终 `resource` 依次回填。
 - `relative_position`：字段和一 Material 一 active position 约束一致；Edge 为尺寸提供
   `0` 默认值，Backend 要求调用方给值，这是物理默认差异。
-- `site`：字段、两个 Material FK、owner/name、occupant 唯一约束、排序索引一致；
-  Edge 额外显式禁止 owner=occupant，与 Backend 服务校验同义。
+- `site`：字段、两个 Material FK、owner/name、occupant 唯一约束、排序索引一致；v7 独立
+  持久化 `content_type` JSON array；Edge 额外显式禁止 owner=occupant，与 Backend 服务校验同义。
 - `material_state_history`：字段、FK、时间线索引一致。
 
 公共资源 API 从这些表读写，正常查询统一过滤 `deleted_at IS NULL`。删除 Material/模板/位置
 采用软删除；历史记录不靠物理删除表达状态。
 
-### v6 已实现的 d123ce0 对齐
+### v6/v7 已实现的 Backend 对齐
 
 - `material.type` 为服务端派生事实；Material create/update DTO 不授予客户端写权。
 - create 接收 `data`，递归合并模板组件默认值和请求值，并为根与每个组件写初始
   `material_state_history`。
 - `config_info` 第一项物化根，其余项全部作为根的直接子 Material；模板里的组件 UUID/parent
   不复用，Site 也为每个实例分配新 UUID。
-- `site.content_type` 大小写不敏感解析 `resource_template.tags`；无法解析时整笔创建回滚。
+- `site.content_type` 与 `allowed_resource_template_uuids` 分开持久化。创建 Site 时不依赖当前
+  模板注册顺序；物料放入 Site 时才以大小写不敏感的 `resource_template.tags` 动态准入，
+  显式 UUID 或类型 tag 任一命中即可。`bottle(s)`、`bottle_carrier(s)`、`tip_rack(s)` 兼容
+  单复数别名，其余值精确匹配；两组规则均为空表示不限制。
 - Material 更新是 partial：显式 `null` 与省略均保留旧普通字段，`config` 整体替换但保护模板
   `sites`，`data/class/type/resource_template_uuid` 不可由更新请求改变。
 - Material 列表默认 `with_children=false`；需要完整树的内部同步显式请求子组件。
@@ -49,7 +52,8 @@
   也不广告 publication capability。
 
 迁移器还识别曾与 canonical v5 撞号的旧 Edge-local v5（物理 `material_instance` 且无
-`material`）：先保存旧 `type`，重跑 canonical v5，再执行 v6 回填并覆盖保存值。真实 v5 数据库
+`material`）：先保存旧 `type`，重跑 canonical v5，再执行 v6 回填并覆盖保存值。v7 使用
+replay-safe additive migration 增加 `site.content_type`，既有 Site 默认 `[]`。真实 v5 数据库
 副本验证结果为 13/13 Material 保留、10 个 Site 保留、外键检查 0 错误。
 
 ### Edge 本地运行态与同步表

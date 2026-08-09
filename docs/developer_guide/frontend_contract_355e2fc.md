@@ -12,12 +12,13 @@
 本轮直接读取并修改：
 
 - 路径：`/home/wz/unilab-context/unilab-edge-ui`
-- ref：`feat/backend-resource-contract-v6@dd5337e`（工作树 clean）
+- ref：`feat/backend-resource-contract-v7@438849f`（已推送，工作树 clean）
 - 登记文件：`packages/protocol/src/catalog.ts::STANDARD_TABLES`、
   `packages/protocol/src/entities.ts::DATA_ENTITIES`、`packages/protocol/src/resource.ts`、
   `packages/protocol/src/entity-client.ts` 与 `src/views/DataEntitiesView.vue`
 
-catalog 已从旧 17 项纠正为 26 个 v6 表/View，并按三层登记：
+catalog 已从旧 17 项纠正为 26 个 v7 表/View，并按三层登记；`site.content_type` 已进入
+typed DTO、字段 utils、Mock 与实体工作台：
 
 1. `backend-shared`：`resource_template`、`resource_handle_template`、`material`、
    `relative_position`、`site`、`material_state_history`。
@@ -46,7 +47,7 @@ base URL，经 Vite `/api` 同源代理逐项查询 26/26 实体成功。
   `config`、`createdAt`、`updatedAt`。
 - `placement`：`unplaced/world/parent/site`；site placement 使用 `parentId + siteId`。
 - `sites[]`：`id`（Site UUID）、`ownerMaterialId`、`key/name`、pose/size、capacity、
-  allowed template IDs、occupied Material IDs 和渲染元数据。
+  persisted content types、allowed template IDs、occupied Material IDs 和渲染元数据。
 - `revision`：前端并发 token，不应擅自塞进 Backend `material` 表。
 
 `packages/services/src/materials.ts::mapBackendMaterialGraph` 是该私有前端从 Backend wire 到
@@ -55,6 +56,7 @@ UI 的 Adapter Seam：
 - `site.uuid → MaterialSite.id`
 - `site.material_uuid → ownerMaterialId`
 - `site.occupied_material_uuid → occupiedMaterialIds[0]`
+- `site.content_type → contentTypes`（保留动态准入语义，不能只投影成创建时的模板 UUID）
 - `current_site_uuid → MaterialPlacement.siteId`
 - `relative_position → LabPose`
 
