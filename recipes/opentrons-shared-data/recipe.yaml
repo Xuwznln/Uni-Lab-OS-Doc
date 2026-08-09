@@ -29,15 +29,19 @@ requirements:
   - typing_extensions >=4.0.0,<5
   - pydantic >=2.0.0,<3.0.0
 
-test:
-  imports:
-  - opentrons_shared_data
-  - opentrons_shared_data.labware.labware_definition
-  commands:
+tests:
+- python:
+    imports:
+    - opentrons_shared_data
+    - opentrons_shared_data.labware.labware_definition
+    pip_check: true
+    python_version: 3.12.*
+- script:
   - python -c "import importlib.metadata as m; import numpy as np; from opentrons_shared_data.labware import labware_definition as ld; assert int(np.__version__.split('.')[0]) == 2; assert ld.trapezoid([1, 2, 3]) == 4; assert m.version('opentrons-shared-data') == '9.1.0+unilabos.np2.1'"
-  - pip check
-  requires:
-  - pip
+- package_contents:
+    files:
+    - share/licenses/opentrons-shared-data/LICENSE
+    - share/licenses/opentrons-shared-data/NOTICE
 
 about:
   homepage: https://github.com/Opentrons/opentrons
@@ -45,4 +49,3 @@ about:
   license: Apache-2.0
   license_file: LICENSE
   description: "Unofficial UniLabOS NumPy 2 compatibility build of Opentrons shared data. Not affiliated with or endorsed by Opentrons."
-
