@@ -69,7 +69,7 @@ jobs:
           - os: macos-latest # ARM64
             platform: osx-arm64
             env_file: unilabos-osx-arm64.yaml
-          - os: windows-latest
+          - os: windows-2022
             platform: win-64
             env_file: unilabos-win64.yaml
 

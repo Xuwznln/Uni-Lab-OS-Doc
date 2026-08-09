@@ -8,7 +8,7 @@ on:
 
 jobs:
   registry-check:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       # Fix Unicode encoding issue on Windows runner (cp1252 -> utf-8)

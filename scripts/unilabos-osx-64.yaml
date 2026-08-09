@@ -13,7 +13,7 @@ dependencies:
   - sphinx
   - sphinx_rtd_theme
   # Data Visualization
-  - numpy
+  - numpy=1.26.4
   - scipy
   - pandas
   - networkx
@@ -23,7 +23,7 @@ dependencies:
   - pyserial
   - pyusb
   - pylibftdi
-  - pymodbus
+  - pymodbus >=3.6.9,<4
   - python-can
   - pyvisa
   - opencv
@@ -66,5 +66,5 @@ dependencies:
   - pprp
   - pip:
       - paho-mqtt
-      - opentrons_shared_data
+      - opentrons_shared_data>=9.1.1,<10
       - git+https://github.com/Xuwznln/pylabrobot

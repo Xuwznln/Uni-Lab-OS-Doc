@@ -63,7 +63,7 @@ jobs:
             platform: osx-64
           - os: macos-latest # ARM64
             platform: osx-arm64
-          - os: windows-latest
+          - os: windows-2022
             platform: win-64
 
     runs-on: ${{ matrix.os }}
