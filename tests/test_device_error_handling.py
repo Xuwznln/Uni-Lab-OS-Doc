@@ -6,6 +6,7 @@ from unilabos.registry.decorators import action, get_action_error_policy
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
 from unilabos.utils.action_decision import (
     PendingDecisionRegistry,
+    SkippedActionResult,
     run_action_with_decisions,
 )
 from unilabos.utils.exception import (
@@ -292,7 +293,20 @@ class ActionDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             result,
             {"status": "skipped", "reason": "operator accepted"},
         )
+        self.assertIsInstance(result, SkippedActionResult)
         self.assertEqual(call_count, 1)
+
+    async def test_skip_shaped_action_output_is_not_framework_skip(self):
+        async def invoke():
+            return {"status": "skipped", "message": "ordinary action output"}
+
+        async def decide(_):
+            self.fail("successful Action output must not request a decision")
+
+        result = await run_action_with_decisions(invoke=invoke, decide=decide)
+
+        self.assertEqual(result, {"status": "skipped", "message": "ordinary action output"})
+        self.assertNotIsInstance(result, SkippedActionResult)
 
     async def test_abort_reraises_original_exception(self):
         async def invoke():

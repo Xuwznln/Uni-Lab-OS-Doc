@@ -84,7 +84,7 @@ from rclpy.task import Task, Future
 from unilabos.utils.import_manager import default_manager
 from unilabos.utils.log import info, debug, warning, error, critical, logger, trace
 from unilabos.utils.type_check import get_type_class, TypeEncoder, get_result_info_str
-from unilabos.utils.action_decision import PendingDecisionRegistry, run_action_with_decisions
+from unilabos.utils.action_decision import PendingDecisionRegistry, SkippedActionResult, run_action_with_decisions
 from unilabos.utils.exception import (
     DeviceActionError,
     DeviceException,
@@ -2529,7 +2529,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     setattr(result_msg, attr_name, execution_success)
                 elif attr_name == "return_info":
                     suc_type = None
-                    if isinstance(action_return_value, dict) and action_return_value.get("status") == "skipped":
+                    if isinstance(action_return_value, SkippedActionResult):
                         suc_type = "user_bypass_error"
                     setattr(
                         result_msg,
