@@ -65,8 +65,8 @@ dependencies:
   - uni-lab::ros-jazzy-unilabos-msgs
   - zeep
   - jinja2
-  - pprp
   - pip:
       - paho-mqtt
       - opentrons_shared_data>=9.1.1,<10
+      - pprp>=0.2.7
       - git+https://github.com/Xuwznln/pylabrobot

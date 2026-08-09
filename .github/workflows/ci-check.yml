@@ -43,11 +43,20 @@ jobs:
       - name: Install ROS 2 Jazzy dependencies and build tools
         run: |
           echo Installing ROS 2 Jazzy dependencies...
-          mamba install -n check-env --override-channels -c conda-forge -c robostack-jazzy conda-forge::uv conda-forge::opencv conda-forge::colcon-common-extensions robostack-jazzy::ros-jazzy-ros-core robostack-jazzy::ros-jazzy-action-msgs robostack-jazzy::ros-jazzy-std-msgs robostack-jazzy::ros-jazzy-geometry-msgs robostack-jazzy::ros-jazzy-control-msgs robostack-jazzy::ros-jazzy-nav2-msgs robostack-jazzy::ros-jazzy-cv-bridge robostack-jazzy::ros-jazzy-vision-opencv robostack-jazzy::ros-jazzy-tf-transformations robostack-jazzy::ros-jazzy-moveit-msgs robostack-jazzy::ros-jazzy-tf2-ros robostack-jazzy::ros-jazzy-tf2-ros-py conda-forge::transforms3d -y
+          mamba install -n check-env --override-channels -c conda-forge -c robostack-jazzy conda-forge::numpy=1.26.4 conda-forge::uv conda-forge::opencv conda-forge::colcon-common-extensions robostack-jazzy::ros-jazzy-ros-core robostack-jazzy::ros-jazzy-action-msgs robostack-jazzy::ros-jazzy-std-msgs robostack-jazzy::ros-jazzy-geometry-msgs robostack-jazzy::ros-jazzy-control-msgs robostack-jazzy::ros-jazzy-nav2-msgs robostack-jazzy::ros-jazzy-cv-bridge robostack-jazzy::ros-jazzy-vision-opencv robostack-jazzy::ros-jazzy-tf-transformations robostack-jazzy::ros-jazzy-moveit-msgs robostack-jazzy::ros-jazzy-tf2-ros robostack-jazzy::ros-jazzy-tf2-ros-py conda-forge::transforms3d -y
+
+      - name: Initialize MSVC x64 toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Build unilabos_msgs for Jazzy/cp312
         run: |
           call conda activate check-env
+          if not exist "%CONDA_PREFIX%\Lib\site-packages\numpy\_core\include" if exist "%CONDA_PREFIX%\Lib\site-packages\numpy\core\include" (
+            mkdir "%CONDA_PREFIX%\Lib\site-packages\numpy\_core"
+            xcopy /E /I /Y "%CONDA_PREFIX%\Lib\site-packages\numpy\core\include" "%CONDA_PREFIX%\Lib\site-packages\numpy\_core\include"
+          )
           colcon build --base-paths unilabos_msgs --build-base build\unilabos_msgs --install-base install\unilabos_msgs --merge-install --packages-select unilabos_msgs --cmake-args -DBUILD_TESTING=OFF
           call install\unilabos_msgs\setup.bat
           python -c "from unilabos_msgs.msg import Resource; print('unilabos_msgs Jazzy/cp312: OK')"
