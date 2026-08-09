@@ -128,13 +128,26 @@ jobs:
       - name: Install pip dependencies and unilabos
         run: |
           uv pip install -r unilabos/utils/requirements.txt
-          uv pip install pytest git+https://github.com/Xuwznln/pylabrobot.git
+          uv pip install pytest hypothesis git+https://github.com/Xuwznln/pylabrobot.git
           uv pip uninstall enum34 || echo "enum34 not installed, skipping"
           uv pip install .
 
       - name: Run hostlink unit suite
         run: |
           pytest tests/hostlink -v -p no:launch_testing -p no:launch_ros
+
+      - name: Run local scheduler and microbackend contract suites
+        run: |
+          pytest -q -p no:launch_testing -p no:launch_ros \
+            tests/scheduler \
+            tests/app/test_local_api.py \
+            tests/app/test_offline_os.py \
+            tests/app/test_schedule_ws.py \
+            tests/app/test_workflow_to_dag.py \
+            tests/app/test_workflow_ws.py \
+            tests/app/test_ws_job_start_deadpaths.py \
+            tests/app/test_backend_resource_api.py \
+            tests/app/test_inventory_backend_schema_v5.py
 
       - name: Run 联网测试 (two-process host/slave isolation + HostLink)
         run: |
