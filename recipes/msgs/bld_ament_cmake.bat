@@ -23,13 +23,6 @@ set PYTHON=%PYTHON:\=/%
 set SP_DIR="..\Lib\site-packages"
 set SP_DIR=%SP_DIR:\=/%
 
-:: RoboStack 的 np2 CMake 导出使用 numpy/_core/include；NumPy 1.26 使用 numpy/core/include。
-:: 仅在构建环境复制头文件兼容目录，避免它进入最终消息包。
-if not exist "%PREFIX%\Lib\site-packages\numpy\_core\include" if exist "%PREFIX%\Lib\site-packages\numpy\core\include" (
-    mkdir "%PREFIX%\Lib\site-packages\numpy\_core"
-    xcopy /E /I /Y "%PREFIX%\Lib\site-packages\numpy\core\include" "%PREFIX%\Lib\site-packages\numpy\_core\include"
-)
-
 cmake ^
     -G "%CMAKE_GENERATOR%" ^
     -DCMAKE_INSTALL_PREFIX=%LIBRARY_PREFIX% ^

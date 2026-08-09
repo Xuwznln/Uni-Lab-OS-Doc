@@ -27,13 +27,6 @@ echo "Using Python ${ROS_PYTHON_VERSION}"
 FIXED_SP_DIR=$($PYTHON_EXECUTABLE -c "import site; print(site.getsitepackages()[0])")
 echo "Using site-package dir ${FIXED_SP_DIR}"
 
-# RoboStack 的 np2 CMake 导出使用 numpy/_core/include；NumPy 1.26 的实际目录仍为 numpy/core/include。
-# 仅在构建环境补兼容链接，避免它进入最终消息包。
-if [[ -d "${FIXED_SP_DIR}/numpy/core/include" && ! -e "${FIXED_SP_DIR}/numpy/_core/include" ]]; then
-  mkdir -p "${FIXED_SP_DIR}/numpy/_core"
-  ln -s ../core/include "${FIXED_SP_DIR}/numpy/_core/include"
-fi
-
 # see https://github.com/conda-forge/cross-python-feedstock/issues/24
 if [[ "$CONDA_BUILD_CROSS_COMPILATION" == "1" ]]; then
   find $PREFIX/lib/cmake -type f -exec sed -i "s~\${_IMPORT_PREFIX}/lib/python${ROS_PYTHON_VERSION}/site-packages~${BUILD_PREFIX}/lib/python${ROS_PYTHON_VERSION}/site-packages~g" {} + || true

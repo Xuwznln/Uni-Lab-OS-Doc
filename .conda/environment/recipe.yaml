@@ -13,9 +13,10 @@ requirements:
   - zstd
   - zstandard
   - conda-forge::python ==3.12.13
-  - conda-forge::numpy ==1.26.4
+  - conda-forge::numpy >=2,<3
   - conda-forge::opencv
   # ROS2 dependencies (from ci-check.yml)
+  - robostack-jazzy::ros2-distro-mutex 0.15.* jazzy_*
   - robostack-jazzy::ros-jazzy-ros-core
   - robostack-jazzy::ros-jazzy-action-msgs
   - robostack-jazzy::ros-jazzy-std-msgs

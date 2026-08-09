@@ -13,7 +13,7 @@ dependencies:
   - sphinx
   - sphinx_rtd_theme
   # Data Visualization
-  - numpy=1.26.4
+  - numpy >=2,<3
   - scipy
   - pandas
   - networkx
@@ -40,6 +40,7 @@ dependencies:
   - jupyros
   # ros
   - colcon-common-extensions
+  - robostack-jazzy::ros2-distro-mutex=0.15.*
   - ros-jazzy-desktop-full
   - ros-jazzy-control-msgs
   - ros-jazzy-sensor-msgs
@@ -65,6 +66,5 @@ dependencies:
   - jinja2
   - pip:
       - paho-mqtt
-      - opentrons_shared_data>=9.1.1,<10
       - pprp>=0.2.7
       - git+https://github.com/Xuwznln/pylabrobot
