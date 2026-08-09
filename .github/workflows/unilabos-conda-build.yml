@@ -116,6 +116,8 @@ jobs:
           echo "CONDA_NO_PLUGINS=true" >> "$GITHUB_ENV"
           echo "PYTHONUTF8=1" >> "$GITHUB_ENV"
           echo "PYTHONIOENCODING=utf-8" >> "$GITHUB_ENV"
+          # anaconda-client 1.13+ 的顶层 CLI 不再支持 --version，上传也需使用兼容入口。
+          echo "ANACONDA_CLIENT_FORCE_STANDALONE=1" >> "$GITHUB_ENV"
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
@@ -123,7 +125,7 @@ jobs:
           conda info
           conda list -n build-env | grep -E "(rattler-build|anaconda-client)"
           conda run -n build-env rattler-build --version
-          conda run -n build-env anaconda --version
+          conda run -n build-env python -m binstar_client.scripts.cli --version
           echo "Platform: ${{ matrix.platform }}"
           echo "OS: ${{ matrix.os }}"
           echo "Build full package: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_full == 'true' }}"
