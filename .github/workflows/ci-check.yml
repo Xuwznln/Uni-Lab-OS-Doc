@@ -71,6 +71,7 @@ jobs:
       - name: Run HostLink networking tests
         run: |
           call conda activate check-env
+          call install\unilabos_msgs\setup.bat
           echo Running HostLink, ROS2 domain and networking runtime tests...
           python -m pytest -q tests\hostlink tests\networking tests\ros\test_domain_init.py -p no:launch_testing -p no:launch_ros
 
