@@ -341,6 +341,22 @@ def device(
 _ACTION_TYPE_UNSET = object()
 
 
+def _normalize_builtin_error_policy(error_policy: Optional[Dict[str, Any]]) -> Optional[Dict[str, bool]]:
+    """仅保留第一阶段支持的 retry / skip 开关。"""
+    if error_policy is None:
+        return None
+
+    supported_keys = {"allow_retry", "allow_skip"}
+    unsupported_keys = set(error_policy) - supported_keys
+    if unsupported_keys:
+        raise ValueError(f"第一阶段不支持 error_policy 配置: {sorted(unsupported_keys)}")
+
+    return {
+        "allow_retry": bool(error_policy.get("allow_retry", True)),
+        "allow_skip": bool(error_policy.get("allow_skip", True)),
+    }
+
+
 # noinspection PyShadowingNames
 def action(
     action_type: Any = _ACTION_TYPE_UNSET,
@@ -359,6 +375,7 @@ def action(
     feedback_interval: Optional[float] = None,
     timeout: Optional[float] = None,
     exception_handling: bool = True,
+    error_policy: Optional[Dict[str, Any]] = None,
 ):
     """
     动作方法装饰器
@@ -393,10 +410,13 @@ def action(
                    不填写时不写入注册表。
         timeout: 动作执行超时秒数。超时后进入异常处理流程；None 表示不限时。
         exception_handling: 是否启用异常上报和用户决策回环，默认启用。
+        error_policy: 第一阶段仅支持 allow_retry / allow_skip；abort 始终保留。
     """
 
     def decorator(func: F) -> F:
         import asyncio as _asyncio
+
+        normalized_error_policy = _normalize_builtin_error_policy(error_policy)
 
         if _asyncio.iscoroutinefunction(func):
             @wraps(func)
@@ -449,9 +469,12 @@ def action(
             meta["timeout"] = timeout
         if exception_handling is not True:
             meta["exception_handling"] = exception_handling
+        if normalized_error_policy is not None:
+            meta["error_policy"] = normalized_error_policy
         wrapper._action_registry_meta = meta  # type: ignore[attr-defined]
         wrapper._action_timeout = timeout  # type: ignore[attr-defined]
         wrapper._exception_handling = exception_handling  # type: ignore[attr-defined]
+        wrapper._action_error_policy = normalized_error_policy  # type: ignore[attr-defined]
 
         # 设置 _is_always_free 保持与旧 @always_free 装饰器兼容
         if always_free:
@@ -476,6 +499,11 @@ def get_action_timeout(func) -> Optional[float]:
     """获取动作超时秒数。"""
 
     return getattr(func, "_action_timeout", None)
+
+
+def get_action_error_policy(func) -> Optional[Dict[str, bool]]:
+    """获取 Action 的内置错误处理策略。"""
+    return getattr(func, "_action_error_policy", None)
 
 
 def is_exception_handling_enabled(func) -> bool:
