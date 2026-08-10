@@ -104,18 +104,18 @@ class HostSkipStatusTest(unittest.TestCase):
 class WebSocketSkipStatusTest(unittest.TestCase):
     def test_skipped_is_processed_as_terminal_job_status(self) -> None:
         client = WebSocketClient()
-        client.device_manager.enqueue_job(
-            JobInfo(
-                job_id="job-1",
-                task_id="task-1",
-                device_id="fault-injection-device",
-                notebook_id="",
-                action_name="raise_modbus_error",
-                device_action_key="fault-injection-device.raise_modbus_error",
-                status=JobStatus.STARTED,
-                start_time=time.time(),
-            )
+        job = JobInfo(
+            job_id="job-1",
+            task_id="task-1",
+            device_id="fault-injection-device",
+            notebook_id="",
+            action_name="raise_modbus_error",
+            device_action_key="fault-injection-device.raise_modbus_error",
+            status=JobStatus.QUEUE,
+            start_time=time.time(),
         )
+        self.assertTrue(client.device_manager.add_queue_request(job))
+        self.assertTrue(client.device_manager.start_job(job.job_id))
 
         client.publish_job_status({}, _queue_item(), "skipped", {"suc": True})
 

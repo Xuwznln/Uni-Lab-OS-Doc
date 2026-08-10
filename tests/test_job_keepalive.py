@@ -31,8 +31,9 @@ class StartedJobKeepaliveTest(unittest.TestCase):
             status=JobStatus.QUEUE,
             start_time=time.time(),
         )
-        should_start, _ = manager.enqueue_job(job)
+        should_start = manager.add_queue_request(job)
         self.assertTrue(should_start)
+        self.assertTrue(manager.start_job(job.job_id))
 
         always_free_job = JobInfo(
             job_id="job-2",
@@ -45,46 +46,45 @@ class StartedJobKeepaliveTest(unittest.TestCase):
             start_time=time.time(),
             always_free=True,
         )
-        should_start, _ = manager.enqueue_job(always_free_job)
+        should_start = manager.add_queue_request(always_free_job)
         self.assertTrue(should_start)
+        self.assertTrue(manager.start_job(always_free_job.job_id))
 
-        queue_processor.start()
-        try:
-            keepalive = send_queue.get(timeout=0.5)
-            self.assertEqual(
-                keepalive,
-                {
-                    "action": "report_action_state",
-                    "data": {
-                        "type": "job_call_back_status",
-                        "device_id": "robot-1",
-                        "action_name": "move",
-                        "task_id": "task-1",
-                        "job_id": "job-1",
-                        "notebook_id": "",
-                        "free": False,
-                        "need_more": 21,
-                    },
+        queue_processor._send_running_keepalives()
+        keepalive = send_queue.get(timeout=0.5)
+        self.assertEqual(
+            keepalive,
+            {
+                "action": "report_action_state",
+                "data": {
+                    "type": "job_call_back_status",
+                    "device_id": "robot-1",
+                    "action_name": "move",
+                    "task_id": "task-1",
+                    "job_id": "job-1",
+                    "notebook_id": "",
+                    "free": False,
+                    "need_more": 21,
                 },
-            )
-            always_free_keepalive = send_queue.get(timeout=0.5)
-            self.assertEqual(always_free_keepalive["action"], "report_action_state")
-            self.assertEqual(always_free_keepalive["data"]["job_id"], "job-2")
-            self.assertFalse(always_free_keepalive["data"]["free"])
-            self.assertEqual(always_free_keepalive["data"]["need_more"], 21)
+            },
+        )
+        always_free_keepalive = send_queue.get(timeout=0.5)
+        self.assertEqual(always_free_keepalive["action"], "report_action_state")
+        self.assertEqual(always_free_keepalive["data"]["job_id"], "job-2")
+        self.assertFalse(always_free_keepalive["data"]["free"])
+        self.assertEqual(always_free_keepalive["data"]["need_more"], 21)
 
-            for _ in range(3):
-                queue_processor.notify_queue_update()
-            with self.assertRaises(Empty):
-                send_queue.get(timeout=0.05)
+        for _ in range(3):
+            queue_processor._send_running_keepalives()
+        with self.assertRaises(Empty):
+            send_queue.get(timeout=0.05)
 
-            manager.end_job(job.job_id)
-            manager.end_job(always_free_job.job_id)
-            time.sleep(queue_processor.keepalive_interval_s + 0.05)
-            with self.assertRaises(Empty):
-                send_queue.get_nowait()
-        finally:
-            queue_processor.stop()
+        manager.end_job(job.job_id)
+        manager.end_job(always_free_job.job_id)
+        time.sleep(queue_processor.keepalive_interval_s + 0.05)
+        queue_processor._send_running_keepalives()
+        with self.assertRaises(Empty):
+            send_queue.get_nowait()
 
 
 if __name__ == "__main__":
