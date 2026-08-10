@@ -173,6 +173,59 @@ class ActionErrorPolicyAlarmTest(unittest.IsolatedAsyncioTestCase):
             ["retry", "abort"],
         )
 
+    async def test_last_failed_attempt_hides_retry_and_reports_exhaustion(self):
+        node = BaseROS2DeviceNode.__new__(BaseROS2DeviceNode)
+        node.device_id = "robot-1"
+        node.uuid = "device-uuid"
+        published_alarms = []
+        call_count = 0
+
+        class Logger:
+            def error(self, _message):
+                return None
+
+        node.lab_logger = lambda: Logger()
+
+        async def publish_decision(*, alarm_data, task_id, job_id):
+            published_alarms.append(alarm_data)
+            self.assertEqual((task_id, job_id), ("task-1", "job-1"))
+            if len(published_alarms) == 1:
+                return {"action": "retry"}
+            return {"action": "abort"}
+
+        node._publish_and_wait_for_decision = publish_decision
+
+        async def always_fail(**_kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("still failing")
+
+        with self.assertRaisesRegex(RuntimeError, "still failing"):
+            await node._run_action_with_decision_loop(
+                action_func=always_fail,
+                action_name="always_fail",
+                task_id="task-1",
+                job_id="job-1",
+                action_kwargs={},
+                error_policy={
+                    "allow_retry": True,
+                    "allow_skip": False,
+                    "max_retries": 1,
+                },
+            )
+
+        self.assertEqual(call_count, 2)
+        self.assertEqual(len(published_alarms), 2)
+        self.assertEqual(
+            [item["action"] for item in published_alarms[0]["suggested_actions"]],
+            ["retry", "abort"],
+        )
+        self.assertEqual(
+            [item["action"] for item in published_alarms[1]["suggested_actions"]],
+            ["abort"],
+        )
+        self.assertIn("达到最大尝试次数", published_alarms[1]["error_message"])
+
 
 class PendingDecisionRegistryTest(unittest.IsolatedAsyncioTestCase):
     async def test_timeout_uses_configured_default_action_and_cleans_waiter(self):
@@ -321,7 +374,7 @@ class ActionDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             call_count += 1
             raise RuntimeError("still failing")
 
-        async def decide(_):
+        async def decide(_, _can_retry):
             return {"action": "retry"}
 
         with self.assertRaisesRegex(RuntimeError, "2 次重试"):
@@ -343,7 +396,7 @@ class ActionDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
                 raise RuntimeError("temporary")
             return "success"
 
-        async def decide(_):
+        async def decide(_, _can_retry):
             return {"action": "retry"}
 
         result = await run_action_with_decisions(invoke=invoke, decide=decide)
@@ -359,7 +412,7 @@ class ActionDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
             call_count += 1
             raise RuntimeError("known issue")
 
-        async def decide(_):
+        async def decide(_, _can_retry):
             return {"action": "skip", "reason": "operator accepted"}
 
         result = await run_action_with_decisions(invoke=invoke, decide=decide)
@@ -375,7 +428,7 @@ class ActionDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         async def invoke():
             return {"status": "skipped", "message": "ordinary action output"}
 
-        async def decide(_):
+        async def decide(_, _can_retry):
             self.fail("successful Action output must not request a decision")
 
         result = await run_action_with_decisions(invoke=invoke, decide=decide)
@@ -387,7 +440,7 @@ class ActionDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
         async def invoke():
             raise ValueError("fatal")
 
-        async def decide(_):
+        async def decide(_, _can_retry):
             return {"action": "abort"}
 
         with self.assertRaisesRegex(ValueError, "fatal"):
