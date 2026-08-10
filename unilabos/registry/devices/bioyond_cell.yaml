@@ -394,6 +394,35 @@ bioyond_cell:
           title: export_order_report参数
           type: object
         type: UniLabJsonCommand
+      auto-upload_csv_to_datacore:
+        always_free: true
+        feedback: {}
+        goal: {}
+        goal_default:
+          file_path: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 手动把指定 CSV 推送到 DataCore 大装置数据接入，用于补传历史文件或重传失败的文件
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                file_path:
+                  title: "CSV 文件路径\n（需要主控电脑的路径）"
+                  description: 待上传文件的完整路径；筛选请在外部完成，这里一次只认一个文件。非 .csv 会告警但仍会上传
+                  type: string
+              required:
+              - file_path
+              type: object
+            result:
+              type: object
+          required:
+          - goal
+          title: upload_csv_to_datacore参数
+          type: object
+        type: UniLabJsonCommand
       auto-conductivity_test_external:
         always_free: true
         feedback: {}
@@ -1328,11 +1357,12 @@ bioyond_cell:
           type_keyword: 分液瓶板
           match_by_material_id: true
           target_wh_id: ''
+          task_hint: ''
         handles: {}
         placeholder_keys: {}
         result: {}
         schema:
-          description: 321 转运的【前置】门控：确认 1号2号交接堆栈(0016) 可以放新板。必须排在 transfer_3_to_2_to_1_auto 之前——321 会把新板放进 0016，而 0016 只有 1 个库位，所以放之前必须确认它是空的；放到 321 之后就退化成一句无用查询，不会报错，只是保护静默失效。判定分两条路：0016 本就空则立即放行（快速路径，不查 0017）；0016 有板则快照这些 materialId，等它们既离开 0016、又出现在 2号内部堆栈(0017)，确认板真的回流到位而不是刚离开还在途中。
+          description: 321 转运的【前置】门控：确认 1号2号交接堆栈(0016) 可以放新板，并占下它的使用权。必须排在 transfer_3_to_2_to_1_auto 之前——321 会把新板放进 0016，而 0016 只有 1 个库位，所以放之前必须确认它是空的；放到 321 之后就退化成一句无用查询，不会报错，只是保护静默失效。判定分两条路：0016 本就空则立即放行（快速路径，不查 0017）；0016 有板则快照这些 materialId，等它们既离开 0016、又出现在 2号内部堆栈(0017)，确认板真的回流到位而不是刚离开还在途中。放行时会占下一张「交接堆栈预约」，由随后的 transfer_3_to_2_to_1_auto 释放——否则本节点放行到 321 真把板放进 0016 之间（实测约 380ms）库存显示的还是「空」，下一轮的门控会查到过期的真话而同样放行，其 321 必被 LIMS 拒建。
           properties:
             feedback: {}
             goal:
@@ -1343,7 +1373,7 @@ bioyond_cell:
                   type: number
                 timeout:
                   default: 3600
-                  description: 最长等待秒数，默认 3600 秒（1 小时）；超时报错
+                  description: 最长等待秒数，默认 3600 秒（1 小时）；超时报错。注意它不是「交接堆栈预约」的作废时长——后者固定 10 分钟，正常由 transfer_3_to_2_to_1_auto 主动释放。
                   type: integer
                 type_keyword:
                   default: 分液瓶板
@@ -1360,6 +1390,11 @@ bioyond_cell:
                   title: 回流目标仓库 whId
                   description: 留空则用 2号手套箱内部堆栈(0017)。一般不需要填。
                   type: string
+                task_hint:
+                  default: ''
+                  title: 任务标识
+                  description: 只用于日志与「交接堆栈预约」的归属显示，多任务时填个能区分轮次的名字（如实验名或轮次号），排查谁占着交接堆栈时会省很多事。不影响判定逻辑。
+                  type: string
               required: []
               type: object
             result:
@@ -1369,6 +1404,9 @@ bioyond_cell:
                   items:
                     type: string
                   type: array
+                claim_token:
+                  description: 本轮占下的交接堆栈预约 token，仅供日志对账；释放不需要它
+                  type: string
                 elapsed_seconds:
                   type: number
                 fast_path:
