@@ -5422,6 +5422,40 @@ class BioyondCellWorkstation(BioyondWorkstation):
             csv_file, self.bioyond_config.get("datacore_config"), tag=tag, log=logger.info
         )
 
+    def upload_csv_to_datacore(self, file_path: str = "") -> Dict[str, Any]:
+        """
+        手动把指定 CSV 推送到 DataCore 大装置数据接入
+
+        用于补传历史文件或重传失败的文件。接入凭据取自 bioyond_config.datacore_config，
+        无需在此填写。文件筛选由调用方在外部完成，这里一次只认一个完整路径。
+
+        Args:
+            file_path: 待上传文件的完整路径（主控电脑上的路径）
+
+        Returns:
+            dict: 包含 success / file_path / filename / message
+        """
+        file_path = (file_path or "").strip()
+        if not file_path:
+            raise BioyondException("[upload_csv_to_datacore] file_path 不能为空")
+        if not os.path.isfile(file_path):
+            raise BioyondException(f"[upload_csv_to_datacore] 文件不存在: {file_path}")
+
+        ok = self._push_csv_to_datacore(file_path, tag="upload_csv_to_datacore")
+        if not ok:
+            raise BioyondException(
+                f"[upload_csv_to_datacore] DataCore 推送失败: {file_path}；"
+                f"请检查 bioyond_config.datacore_config 与网络连通性"
+            )
+
+        filename = os.path.basename(file_path)
+        return {
+            "success": True,
+            "file_path": file_path,
+            "filename": filename,
+            "message": f"已推送到 DataCore: {filename}",
+        }
+
     @staticmethod
     def _pick_vial_type(mr: Dict[str, Any]) -> str:
         """从配方项里取分液瓶类型；vial_bottle_types 可能是单串或 JSON 数组串。"""

@@ -48,6 +48,35 @@ neware_battery_test_system:
           title: test_connection参数
           type: object
         type: UniLabJsonCommand
+      auto-upload_csv_to_datacore:
+        always_free: true
+        feedback: {}
+        goal: {}
+        goal_default:
+          file_path: ''
+        handles: {}
+        placeholder_keys: {}
+        result: {}
+        schema:
+          description: 手动把指定 CSV 推送到 DataCore 大装置数据接入，用于补传历史文件或重传失败的文件
+          properties:
+            feedback: {}
+            goal:
+              properties:
+                file_path:
+                  title: "CSV 文件路径\n（需要主控电脑的路径）"
+                  description: 待上传文件的完整路径；筛选请在外部完成，这里一次只认一个文件。非 .csv 会告警但仍会上传
+                  type: string
+              required:
+              - file_path
+              type: object
+            result:
+              type: object
+          required:
+          - goal
+          title: upload_csv_to_datacore参数
+          type: object
+        type: UniLabJsonCommand
       debug_resource_names:
         feedback: {}
         goal: {}

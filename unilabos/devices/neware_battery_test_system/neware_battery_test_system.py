@@ -2428,6 +2428,46 @@ class NewareBatteryTestSystem:
             "pole_weight": pole_weight,
         }
 
+    def upload_csv_to_datacore(self, file_path: str = "") -> dict:
+        """
+        手动把指定 CSV 推送到 DataCore 大装置数据接入
+
+        用于补传历史文件或重传失败的文件。接入凭据取自图 JSON 的 datacore_config，
+        无需在此填写。文件筛选由调用方在外部完成，这里一次只认一个完整路径。
+
+        Args:
+            file_path: 待上传文件的完整路径（主控电脑上的路径）
+
+        Returns:
+            dict: 包含 success / file_path / filename / message
+        """
+        file_path = (file_path or "").strip()
+        if not file_path:
+            raise ValueError("[upload_csv_to_datacore] file_path 不能为空")
+        if not os.path.isfile(file_path):
+            raise ValueError(f"[upload_csv_to_datacore] 文件不存在: {file_path}")
+
+        lab_logger = self._ros_node.lab_logger() if self._ros_node else None
+        ok = push_csv_by_config(
+            file_path,
+            self.datacore_config,
+            tag="upload_csv_to_datacore",
+            log=lab_logger.info if lab_logger else print,
+        )
+        if not ok:
+            raise ValueError(
+                f"[upload_csv_to_datacore] DataCore 推送失败: {file_path}；"
+                f"请检查图 JSON 的 datacore_config 与网络连通性"
+            )
+
+        filename = os.path.basename(file_path)
+        return {
+            "success": True,
+            "file_path": file_path,
+            "filename": filename,
+            "message": f"已推送到 DataCore: {filename}",
+        }
+
     def _export_manual_confirm_csv(
         self,
         csv_export_dir: str,

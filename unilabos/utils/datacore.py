@@ -55,6 +55,9 @@ def push_csv_to_datacore(csv_path, url=None, device_id=None, device_key=None,
         return False
 
     filename = os.path.basename(csv_path)
+    if not filename.lower().endswith(".csv"):
+        log(f"[DataCore] 警告: {filename} 不是 .csv，仍按 text/csv 上传，请确认服务端能解析")
+
     # 一次性读入内存，重试时复用，避免每次重新读盘
     with open(csv_path, "rb") as f:
         file_bytes = f.read()
