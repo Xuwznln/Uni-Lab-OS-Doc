@@ -45,6 +45,8 @@ def build_estimator() -> DurationEstimator:
 
 
 def _build_device_state(storage_paths: RuntimeStoragePaths):
+    """按统一路径创建设备状态投影；该存储关闭时返回 ``None``。"""
+
     db_path = storage_paths.device_state_db
     if db_path is None:
         return None
@@ -55,6 +57,8 @@ def _build_device_state(storage_paths: RuntimeStoragePaths):
 
 
 def _build_history(storage_paths: RuntimeStoragePaths):
+    """创建工作流运行历史存储，并把遗留运行态标记为已中断。"""
+
     if not storage_paths.legacy_workflow_history_enabled:
         return None
     from unilabos.app.scheduler.history import WorkflowHistoryStore
@@ -71,6 +75,8 @@ def _build_history(storage_paths: RuntimeStoragePaths):
 
 
 def _build_inventory(storage_paths: RuntimeStoragePaths):
+    """按统一路径创建本地库存权威服务；该存储关闭时返回 ``None``。"""
+
     db_path = storage_paths.inventory_db
     if db_path is None:
         return None

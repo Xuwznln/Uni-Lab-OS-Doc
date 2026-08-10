@@ -231,7 +231,12 @@ def configure_runtime_storage(
     *,
     working_dir: str | os.PathLike[str],
 ) -> tuple[RuntimeStoragePaths, SchedulerAuthorityProfile]:
-    """解析唯一四库路径与调度权威运行模式（SchedulerAuthorityProfile）。"""
+    """解析唯一四库路径与调度权威运行模式。
+
+    ``args_dict`` 是已解析的启动参数，``working_dir`` 是本次进程的数据根；
+    返回统一路径对象和唯一权威模式，并把同一对象发布给各组合根。路径职责
+    冲突或双调度权威时在任何存储打开前失败关闭。
+    """
 
     config: Dict[str, Any] = dict(args_dict)
     config["working_dir"] = working_dir

@@ -16,6 +16,8 @@ from unilabos.storage.profiles import SchedulerAuthorityProfile
 
 
 def test_manifest_declares_four_store_roles_and_migration_owners(tmp_path) -> None:
+    """迁移清单应完整声明四库角色、所有者和版本准备状态。"""
+
     paths = RuntimeStoragePaths.resolve(
         {
             "working_dir": tmp_path / "workspace",
@@ -39,6 +41,8 @@ def test_manifest_declares_four_store_roles_and_migration_owners(tmp_path) -> No
 
 
 def test_manifest_opens_stores_only_in_their_authority_profile(tmp_path) -> None:
+    """每类存储只能在拥有对应读写权威的运行模式中打开。"""
+
     paths = RuntimeStoragePaths.resolve(
         {
             "working_dir": tmp_path / "workspace",
@@ -66,6 +70,8 @@ def test_manifest_opens_stores_only_in_their_authority_profile(tmp_path) -> None
 
 
 def test_layout_rejects_one_database_for_different_authorities(tmp_path) -> None:
+    """不同权威职责指向同一 SQLite 时必须在启动前拒绝。"""
+
     shared = (tmp_path / "shared.db").resolve()
     paths = RuntimeStoragePaths(
         working_dir=tmp_path.resolve(),
@@ -80,6 +86,8 @@ def test_layout_rejects_one_database_for_different_authorities(tmp_path) -> None
 
 
 def test_disabled_optional_store_remains_declared_but_closed(tmp_path) -> None:
+    """关闭的可选存储仍应在清单中可审计，但不得被打开。"""
+
     paths = RuntimeStoragePaths.resolve(
         {
             "working_dir": tmp_path / "workspace",

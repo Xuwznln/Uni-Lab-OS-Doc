@@ -36,6 +36,12 @@ class StoreMigrationManifest:
     enabled_profiles: frozenset[SchedulerAuthorityProfile]
 
     def opens_in(self, profile: SchedulerAuthorityProfile | str) -> bool:
+        """判断该存储是否应在给定调度权威运行模式中打开。
+
+        ``profile`` 接受规范枚举或其线格式字符串；返回值只描述打开策略，
+        不打开数据库，也不改变迁移状态。
+        """
+
         return self.database_path is not None and (
             SchedulerAuthorityProfile.parse(profile) in self.enabled_profiles
         )
@@ -44,7 +50,11 @@ class StoreMigrationManifest:
 def build_store_migration_manifest(
     paths: RuntimeStoragePaths,
 ) -> dict[str, StoreMigrationManifest]:
-    """为同一组解析路径建立四库清单，不打开任何数据库。"""
+    """为同一组解析路径建立四库清单，不打开任何数据库。
+
+    ``paths`` 必须是组合根唯一解析出的路径对象；返回值固定覆盖工作流、
+    库存、设备状态和 Edge 控制四个存储，供启动前校验其迁移所有者。
+    """
 
     local_profiles = frozenset(
         {
@@ -95,7 +105,11 @@ def build_store_migration_manifest(
 def validate_store_layout(
     manifest: Mapping[str, StoreMigrationManifest],
 ) -> None:
-    """拒绝把不同职责的存储静默合并成一个 SQLite 文件。"""
+    """拒绝把不同职责的存储静默合并成一个 SQLite 文件。
+
+    ``manifest`` 是按存储键索引的迁移清单；布局合法时无返回值，多个
+    职责解析到同一路径时失败关闭并抛出 :class:`StoreLayoutConflict`。
+    """
 
     owners_by_path: dict[Path, list[str]] = {}
     for entry in manifest.values():

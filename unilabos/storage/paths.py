@@ -14,6 +14,8 @@ class RuntimeStorageConflict(RuntimeError):
 
 
 def _read(config: Mapping[str, Any] | object, *names: str) -> Any:
+    """按候选名读取映射键或对象属性，找不到时返回 ``None``。"""
+
     if isinstance(config, Mapping):
         for name in names:
             if name in config:
@@ -26,6 +28,8 @@ def _read(config: Mapping[str, Any] | object, *names: str) -> Any:
 
 
 def _normalize_path(value: Any, *, working_dir: Path, home_dir: Path) -> Path:
+    """把配置路径规范化为绝对路径，但不创建文件或目录。"""
+
     text = str(value).strip()
     if text == "~":
         path = home_dir
@@ -45,6 +49,8 @@ def _optional_path(
     working_dir: Path,
     home_dir: Path,
 ) -> Path | None:
+    """解析可关闭的路径；空值用默认路径，``off`` 返回 ``None``。"""
+
     if value is None:
         return default.resolve()
     text = str(value).strip()
@@ -54,7 +60,11 @@ def _optional_path(
 
 
 def _sqlite_has_domain_facts(path: Path) -> bool:
-    """只读判断数据库是否已有非迁移领域事实，不创建文件。"""
+    """只读判断数据库是否已有非迁移领域事实，不创建文件。
+
+    ``path`` 不存在或为空时返回 ``False``；数据库不可读时失败关闭，避免
+    在无法证明权威归属时选择另一个工作流数据库。
+    """
 
     if not path.is_file() or path.stat().st_size == 0:
         return False
@@ -85,6 +95,8 @@ def _sqlite_has_domain_facts(path: Path) -> bool:
 
 
 def _deduplicate(paths: list[Path]) -> list[Path]:
+    """按输入顺序去重路径，返回新的列表且不修改调用方数据。"""
+
     result: list[Path] = []
     for path in paths:
         if path not in result:
@@ -105,7 +117,11 @@ class RuntimeStoragePaths:
 
     @classmethod
     def resolve(cls, config: Mapping[str, Any] | object) -> RuntimeStoragePaths:
-        """一次解析路径，并对分叉的工作流权威（Workflow Authority）失败关闭。"""
+        """一次解析四类路径，并对分叉的工作流权威失败关闭。
+
+        ``config`` 可为启动参数映射或配置对象；返回不可变的统一路径对象。
+        本函数只读探测已有 SQLite，不创建、迁移或修改任何数据库。
+        """
 
         raw_working_dir = _read(config, "working_dir")
         if raw_working_dir is None or not str(raw_working_dir).strip():

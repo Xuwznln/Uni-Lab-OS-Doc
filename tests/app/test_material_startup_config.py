@@ -78,6 +78,8 @@ def test_production_edge_control_disables_local_scheduler_and_inventory() -> Non
 
 
 def test_backend_controlled_profile_disables_local_scheduler_and_inventory() -> None:
+    """Backend 控制模式不得同时启动本地调度器或本地库存写权威。"""
+
     args = vars(
         parse_args().parse_args(["--scheduler_authority_profile", "backend_controlled"])
     )
