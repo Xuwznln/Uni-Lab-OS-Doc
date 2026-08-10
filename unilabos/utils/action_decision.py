@@ -23,7 +23,7 @@ class SkippedActionResult(dict[str, Any]):
 async def run_action_with_decisions(
     *,
     invoke: Callable[[], Awaitable[Any]],
-    decide: Callable[[Exception], Awaitable[dict]],
+    decide: Callable[[Exception, bool], Awaitable[dict]],
     max_iterations: int = 10,
     max_retries: Optional[int] = None,
 ) -> Any:
@@ -33,15 +33,18 @@ async def run_action_with_decisions(
         raise ValueError("max_retries 必须大于等于 0")
     max_attempts = max_iterations if max_retries is None else max_retries + 1
     last_exception = None
-    for _ in range(max_attempts):
+    for attempt_index in range(max_attempts):
         try:
             return await invoke()
         except Exception as exc:
             last_exception = exc
-            decision = await decide(exc)
+            can_retry = attempt_index < max_attempts - 1
+            decision = await decide(exc, can_retry)
             action = decision.get("action", "abort")
             if action == "retry":
-                continue
+                if can_retry:
+                    continue
+                break
             if action == "skip":
                 return SkippedActionResult(decision.get("reason", "user_skip"))
             raise

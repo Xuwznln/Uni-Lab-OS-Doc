@@ -1678,7 +1678,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         async def invoke():
             return await action_func(**action_kwargs)
 
-        async def decide(exc: Exception) -> dict:
+        async def decide(exc: Exception, can_retry: bool) -> dict:
             traceback_text = "".join(
                 traceback.format_exception(type(exc), exc, exc.__traceback__)
             )
@@ -1717,6 +1717,19 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 }
 
             alarm_data = apply_builtin_error_policy_to_alarm(alarm_data, error_policy)
+            if not can_retry:
+                max_attempts = max_iterations if max_retries is None else max_retries + 1
+                alarm_data = dict(alarm_data)
+                alarm_data["suggested_actions"] = [
+                    item
+                    for item in alarm_data.get("suggested_actions", [])
+                    if item.get("action") != "retry"
+                ]
+                exhaustion_message = f"达到最大尝试次数（共 {max_attempts} 次）"
+                error_message = alarm_data.get("error_message", "")
+                alarm_data["error_message"] = (
+                    f"{error_message}\n{exhaustion_message}" if error_message else exhaustion_message
+                )
 
             self.lab_logger().error(f"动作 {action_name} 抛出 {type(exc).__name__}: {exc}")
             wait_kwargs = {
