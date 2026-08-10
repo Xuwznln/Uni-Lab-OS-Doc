@@ -66,8 +66,12 @@ class EdgeControlSettings:
         edge_key = str(EdgeControlConfig.edge_key or BasicConfig.machine_name).strip()
         state_db = str(EdgeControlConfig.state_db or "").strip()
         if not state_db:
-            working_dir = BasicConfig.working_dir or "~/.unilabos"
-            state_db = str(Path(working_dir).expanduser() / "edge_control.db")
+            storage_paths = BasicConfig.runtime_storage_paths
+            if storage_paths is not None:
+                state_db = str(storage_paths.edge_control_db)
+            else:
+                working_dir = BasicConfig.working_dir or "~/.unilabos"
+                state_db = str(Path(working_dir).expanduser() / "edge_control.db")
         return cls(
             scheduler_address=scheduler_address,
             backend_address=backend_address,

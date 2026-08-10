@@ -32,6 +32,8 @@ from unilabos.app.scheduler.estimation import DurationEstimator
 from unilabos.app.scheduler.monitor import monitor_bus
 from unilabos.app.scheduler.ordering import HttpSchedulerOrderer, StableLocalOrderer
 from unilabos.app.scheduler.service import EdgeScheduler
+from unilabos.storage.paths import RuntimeStoragePaths
+from unilabos.storage.profiles import select_scheduler_authority_profile
 from unilabos.utils.tracing import initialize_tracing
 
 
@@ -42,26 +44,24 @@ def build_estimator() -> DurationEstimator:
     )
 
 
-def _build_device_state():
-    db_path = os.environ.get("ULAB_DEVICE_STATE_DB", "~/.unilabos/device_state.db").strip()
-    if not db_path or db_path.lower() == "off":
+def _build_device_state(storage_paths: RuntimeStoragePaths):
+    db_path = storage_paths.device_state_db
+    if db_path is None:
         return None
     from unilabos.app.scheduler.device_state import DeviceStateStore
 
-    db_path = os.path.abspath(os.path.expanduser(db_path))
-    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-    return DeviceStateStore(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return DeviceStateStore(str(db_path))
 
 
-def _build_history():
-    db_path = os.environ.get("ULAB_WORKFLOW_HISTORY_DB", "~/.unilabos/workflow_history.db").strip()
-    if not db_path or db_path.lower() == "off":
+def _build_history(storage_paths: RuntimeStoragePaths):
+    if not storage_paths.legacy_workflow_history_enabled:
         return None
     from unilabos.app.scheduler.history import WorkflowHistoryStore
 
-    db_path = os.path.abspath(os.path.expanduser(db_path))
-    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-    store = WorkflowHistoryStore(db_path)
+    db_path = storage_paths.workflow_db
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    store = WorkflowHistoryStore(str(db_path))
     interrupted = store.mark_interrupted()
     if interrupted:
         logging.getLogger(__name__).info(
@@ -70,17 +70,16 @@ def _build_history():
     return store
 
 
-def _build_inventory():
-    db_path = os.environ.get("ULAB_INVENTORY_DB", "").strip()
-    if not db_path:
+def _build_inventory(storage_paths: RuntimeStoragePaths):
+    db_path = storage_paths.inventory_db
+    if db_path is None:
         return None
     from unilabos.app.scheduler.inventory.service import InventoryService
     from unilabos.app.scheduler.inventory.store import InventoryStore
 
-    db_path = os.path.abspath(os.path.expanduser(db_path))
-    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     return InventoryService(
-        InventoryStore(db_path),
+        InventoryStore(str(db_path)),
         edge_id=os.environ.get("ULAB_EDGE_ID", "edge-default"),
         lab_id=os.environ.get("ULAB_LAB_ID", "edge-lab"),
         monitor=monitor_bus,
@@ -110,19 +109,32 @@ def build_scheduler(inventory=None, history=None) -> EdgeScheduler:
 
 
 initialize_tracing()
-_inventory = _build_inventory()
-_history = _build_history()
+_storage_paths = RuntimeStoragePaths.resolve(
+    {
+        "working_dir": os.environ.get("ULAB_WORKING_DIR", "~/.unilabos"),
+        "edge_inventory_db": os.environ.get("ULAB_INVENTORY_DB", "off"),
+        "edge_device_state_db": os.environ.get(
+            "ULAB_DEVICE_STATE_DB", "~/.unilabos/device_state.db"
+        ),
+        "edge_workflow_history_db": os.environ.get(
+            "ULAB_WORKFLOW_HISTORY_DB", "~/.unilabos/workflow_history.db"
+        ),
+    }
+)
+_authority_profile = select_scheduler_authority_profile(
+    os.environ.get("ULAB_SCHEDULER_AUTHORITY_PROFILE", "local_scheduler"),
+    edge_control_enabled=False,
+)
+_inventory = _build_inventory(_storage_paths)
+_history = _build_history(_storage_paths)
 app = create_app(
     build_scheduler(inventory=_inventory, history=_history),
-    device_state=_build_device_state(),
+    device_state=_build_device_state(_storage_paths),
     history=_history,
     include_execution_shaped_workflow_routes=False,
 )
 
-_workflow_history_path = os.environ.get(
-    "ULAB_WORKFLOW_HISTORY_DB", "~/.unilabos/workflow_history.db"
-).strip()
-if _workflow_history_path and _workflow_history_path.lower() != "off":
+if _storage_paths.legacy_workflow_history_enabled:
     from unilabos.app.workflow_api import install_workflow_api
     from unilabos.workflow.service import WorkflowService
     from unilabos.workflow.store import WorkflowStore
@@ -130,7 +142,8 @@ if _workflow_history_path and _workflow_history_path.lower() != "off":
     install_workflow_api(
         app,
         WorkflowService(
-            WorkflowStore(os.path.abspath(os.path.expanduser(_workflow_history_path)))
+            WorkflowStore(_storage_paths.workflow_db),
+            authority_profile=_authority_profile,
         ),
     )
 if _inventory is not None:

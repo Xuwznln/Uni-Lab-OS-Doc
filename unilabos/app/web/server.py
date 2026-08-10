@@ -93,9 +93,22 @@ def setup_server() -> FastAPI:
     if not workflow_routes_mounted and BasicConfig.working_dir:
         try:
             from unilabos.app.workflow_api import install_workflow_api
+            from unilabos.storage.paths import RuntimeStoragePaths
+            from unilabos.storage.profiles import SchedulerAuthorityProfile
             from unilabos.workflow.composition import compose_workflow_runtime
 
-            workflow_service = compose_workflow_runtime(BasicConfig.working_dir)
+            storage_paths = BasicConfig.runtime_storage_paths
+            if storage_paths is None:
+                storage_paths = RuntimeStoragePaths.resolve(
+                    {"working_dir": BasicConfig.working_dir}
+                )
+                BasicConfig.runtime_storage_paths = storage_paths
+            workflow_service = compose_workflow_runtime(
+                storage_paths,
+                authority_profile=SchedulerAuthorityProfile.parse(
+                    BasicConfig.scheduler_authority_profile
+                ),
+            )
             install_workflow_api(app, workflow_service)
             workflow_routes_mounted = True
         except Exception as e:  # noqa: BLE001 - unrelated Edge routes remain available

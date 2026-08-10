@@ -26,6 +26,8 @@ from unilabos.app.scheduler.backend import JobExecutionBackend, create_edge_stac
 from unilabos.app.scheduler.models import to_backend_workflow_status
 from unilabos.app.scheduler.ordering import HttpSchedulerOrderer, StableLocalOrderer
 from unilabos.app.scheduler.service import EdgeScheduler
+from unilabos.config.config import BasicConfig
+from unilabos.storage.paths import RuntimeStoragePaths
 from unilabos.utils.tracing import inject_trace_context
 
 logger = logging.getLogger(__name__)
@@ -235,6 +237,7 @@ def setup_edge_scheduler(
     sync_sender: Any = None,
     device_state_db_path: str = "",
     workflow_history_db_path: str = "",
+    storage_paths: Optional[RuntimeStoragePaths] = None,
 ) -> Tuple[EdgeScheduler, JobExecutionBackend]:
     """装配 EdgeScheduler + 微后端，并接通云端 ws 链路（幂等）。
 
@@ -255,6 +258,9 @@ def setup_edge_scheduler(
             空则用 ULAB_WORKFLOW_HISTORY_DB，默认
             ~/.unilabos/workflow_history.db，"off" 关闭）。启动时把上一
             世代残留的非终态 run 标记 interrupted。
+        storage_paths: 主组合根解析的运行时存储路径（RuntimeStoragePaths）。
+            传入后设备遥测投影（DeviceTelemetryProjection）与工作流历史只从
+            该对象取路径；旧的独立路径参数仅保留测试和兼容入口。
     Returns:
         (scheduler, backend)；backend 需由调用方追加进 HostNode bridges 列表。
     """
@@ -264,6 +270,34 @@ def setup_edge_scheduler(
             "[EdgeSchedulerIntegration] already set up, reusing existing stack"
         )
         return _scheduler, _backend
+
+    explicit_legacy_paths = any(
+        str(value or "").strip()
+        for value in (
+            inventory_db_path,
+            device_state_db_path,
+            workflow_history_db_path,
+        )
+    )
+    if storage_paths is None and not explicit_legacy_paths:
+        storage_paths = BasicConfig.runtime_storage_paths
+    if storage_paths is None:
+        storage_paths = RuntimeStoragePaths.resolve(
+            {
+                "working_dir": BasicConfig.working_dir or "~/.unilabos",
+                "edge_inventory_db": inventory_db_path or "off",
+                "edge_device_state_db": device_state_db_path
+                or os.environ.get(
+                    "ULAB_DEVICE_STATE_DB",
+                    "~/.unilabos/device_state.db",
+                ),
+                "edge_workflow_history_db": workflow_history_db_path
+                or os.environ.get(
+                    "ULAB_WORKFLOW_HISTORY_DB",
+                    "~/.unilabos/workflow_history.db",
+                ),
+            }
+        )
 
     # 时长预估器：orderer（排序 duration）与 scheduler（泳道图/历史样本）共享
     from unilabos.app.scheduler.estimation import DurationEstimator
@@ -299,30 +333,22 @@ def setup_edge_scheduler(
 
     # 设备状态存储：独立 SQLite（与仓储/工作流库分开），归微后端管
     device_state_store = None
-    state_db = device_state_db_path or os.environ.get(
-        "ULAB_DEVICE_STATE_DB", "~/.unilabos/device_state.db"
-    )
-    state_db = state_db.strip()
-    if state_db and state_db.lower() != "off":
+    state_db = storage_paths.device_state_db
+    if state_db is not None:
         from unilabos.app.scheduler.device_state import DeviceStateStore
 
-        state_db = os.path.abspath(os.path.expanduser(state_db))
-        os.makedirs(os.path.dirname(state_db) or ".", exist_ok=True)
-        device_state_store = DeviceStateStore(state_db)
+        state_db.parent.mkdir(parents=True, exist_ok=True)
+        device_state_store = DeviceStateStore(str(state_db))
         logger.info("[EdgeSchedulerIntegration] device state store: %s", state_db)
 
     # 工作流执行历史：第三个独立 SQLite（低频 append，审计/回放/跨重启）
     history_store = None
-    history_db = workflow_history_db_path or os.environ.get(
-        "ULAB_WORKFLOW_HISTORY_DB", "~/.unilabos/workflow_history.db"
-    )
-    history_db = history_db.strip()
-    if history_db and history_db.lower() != "off":
+    history_db = storage_paths.workflow_db
+    if storage_paths.legacy_workflow_history_enabled:
         from unilabos.app.scheduler.history import WorkflowHistoryStore
 
-        history_db = os.path.abspath(os.path.expanduser(history_db))
-        os.makedirs(os.path.dirname(history_db) or ".", exist_ok=True)
-        history_store = WorkflowHistoryStore(history_db)
+        history_db.parent.mkdir(parents=True, exist_ok=True)
+        history_store = WorkflowHistoryStore(str(history_db))
         interrupted = history_store.mark_interrupted()
         if interrupted:
             logger.info(

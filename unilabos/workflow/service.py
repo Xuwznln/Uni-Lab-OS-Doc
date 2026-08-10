@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from unilabos.storage.profiles import SchedulerAuthorityProfile
 from unilabos.workflow.graph_validation import GraphValidationError, validate_graph
 from unilabos.workflow.json_codec import encode_json, strict_json_equal
 from unilabos.workflow.models import (
@@ -69,6 +70,10 @@ _ERRORS = {
     "template_catalog_unavailable": (
         503,
         "设备动作模板暂不可用，请稍后重试",
+    ),
+    "local_task_authority_forbidden": (
+        409,
+        "当前调度权威运行模式不允许创建本地可执行工作流任务",
     ),
     "internal_error": (500, "本地工作流服务出现错误，请重试或查看日志"),
 }
@@ -257,9 +262,13 @@ class WorkflowService:
         store: WorkflowStore,
         *,
         compiler: Optional[AuthoringCompiler] = None,
+        authority_profile: SchedulerAuthorityProfile = (
+            SchedulerAuthorityProfile.LOCAL_SCHEDULER
+        ),
     ):
         self._store = store
         self.compiler = compiler
+        self._authority_profile = SchedulerAuthorityProfile.parse(authority_profile)
         self._locks_guard = threading.Lock()
         self._authoring_locks: Dict[str, threading.RLock] = {}
 
@@ -411,6 +420,8 @@ class WorkflowService:
         description: Optional[str],
         meta_data: Dict[str, Any],
     ) -> Dict[str, Any]:
+        if not self._authority_profile.can_create_local_workflow_task:
+            raise WorkflowError("local_task_authority_forbidden")
         workflow_uuid = self.get_workflow(workflow_uuid)["uuid"]
         run_mode = "normal" if run_mode == "" else run_mode
         if run_mode not in {"normal", "step", "single_node"}:

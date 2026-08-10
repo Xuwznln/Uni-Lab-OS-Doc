@@ -16,6 +16,9 @@ class BasicConfig:
     ak = ""
     sk = ""
     working_dir = ""
+    # 由主组合根一次解析；Store 不得再从 working_dir 或环境变量推导路径。
+    runtime_storage_paths = None
+    scheduler_authority_profile = "local_scheduler"
     config_path = ""
     is_host_mode = True
     # False（默认）：Slave 必须等 HostLink/Host ROS 服务就绪后才初始化 ROS。

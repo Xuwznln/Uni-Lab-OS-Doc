@@ -45,6 +45,15 @@ from unilabos.config.config import (
     load_config,
     resolve_host_node_name,
 )
+from unilabos.storage.migrations import (
+    build_store_migration_manifest,
+    validate_store_layout,
+)
+from unilabos.storage.paths import RuntimeStoragePaths
+from unilabos.storage.profiles import (
+    SchedulerAuthorityProfile,
+    select_scheduler_authority_profile,
+)
 
 # Global restart flags (used by ws_client and web/server)
 _restart_requested: bool = False
@@ -174,7 +183,10 @@ def configure_material_startup(args_dict: Dict[str, Any]) -> str:
     """Apply material CLI overrides and resolve embedded/external host mode."""
 
     source_arg = args_dict.get("material_source")
-    production_control_enabled = "edge_control" in args_dict.get("app_bridges", [])
+    production_control_enabled = (
+        "edge_control" in args_dict.get("app_bridges", [])
+        or args_dict.get("scheduler_authority_profile") == "backend_controlled"
+    )
     source = (
         str(
             source_arg
@@ -214,6 +226,27 @@ def configure_material_startup(args_dict: Dict[str, Any]) -> str:
     return mode
 
 
+def configure_runtime_storage(
+    args_dict: Dict[str, Any],
+    *,
+    working_dir: str | os.PathLike[str],
+) -> tuple[RuntimeStoragePaths, SchedulerAuthorityProfile]:
+    """解析唯一四库路径与调度权威运行模式（SchedulerAuthorityProfile）。"""
+
+    config: Dict[str, Any] = dict(args_dict)
+    config["working_dir"] = working_dir
+    paths = RuntimeStoragePaths.resolve(config)
+    validate_store_layout(build_store_migration_manifest(paths))
+    profile = select_scheduler_authority_profile(
+        args_dict.get("scheduler_authority_profile"),
+        edge_control_enabled="edge_control" in args_dict.get("app_bridges", []),
+    )
+    BasicConfig.runtime_storage_paths = paths
+    BasicConfig.scheduler_authority_profile = profile.value
+    EdgeControlConfig.state_db = str(paths.edge_control_db)
+    return paths, profile
+
+
 def should_start_embedded_material_service(
     args_dict: Dict[str, Any], *, is_host_mode: bool
 ) -> bool:
@@ -231,7 +264,10 @@ def should_start_edge_scheduler(
 ) -> bool:
     """独立运行默认启用微后端；生产控制面启用时由云端负责调度。"""
 
-    production_control_enabled = "edge_control" in args_dict.get("app_bridges", [])
+    production_control_enabled = (
+        "edge_control" in args_dict.get("app_bridges", [])
+        or args_dict.get("scheduler_authority_profile") == "backend_controlled"
+    )
     return (
         is_host_mode
         and bool(args_dict.get("edge_scheduler", True))
@@ -346,6 +382,15 @@ def parse_args():
         dest="edge_scheduler",
         action="store_false",
         help="Disable the host Edge scheduler and its device-state/workflow-history stores.",
+    )
+    parser.add_argument(
+        "--scheduler_authority_profile",
+        choices=[item.value for item in SchedulerAuthorityProfile],
+        default="",
+        help=(
+            "Scheduler authority profile: local_scheduler, backend_controlled, "
+            "or offline_recovery. Empty derives deterministically from edge_control."
+        ),
     )
     parser.add_argument(
         "--edge_scheduler_ordering_url",
@@ -1219,6 +1264,14 @@ def main():
             f"HostNode 运行时实例名: {BasicConfig.host_node_name}", "info"
         )
     try:
+        runtime_storage_paths, _authority_profile = configure_runtime_storage(
+            args_dict,
+            working_dir=working_dir,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print_status(f"运行时存储或调度权威配置错误: {exc}", "error")
+        os._exit(2)
+    try:
         material_service_mode = configure_material_startup(args_dict)
     except ValueError as exc:
         print_status(f"物料服务启动参数错误: {exc}", "error")
@@ -1623,10 +1676,10 @@ def main():
         ):
             from unilabos.app.scheduler.integration import setup_edge_inventory
 
-            inventory_db = str(args_dict.get("edge_inventory_db") or "").strip()
-            if not inventory_db:
+            inventory_path = runtime_storage_paths.inventory_db
+            if inventory_path is None:
                 raise ValueError("embedded material service requires --material_db")
-            inventory_db = os.path.abspath(os.path.expanduser(inventory_db))
+            inventory_db = str(inventory_path)
             setup_edge_inventory(
                 inventory_db,
                 ws_client=(
@@ -1660,10 +1713,7 @@ def main():
                 ),
                 ordering_url=args_dict.get("edge_scheduler_ordering_url", ""),
                 inventory_db_path=inventory_db,
-                device_state_db_path=str(args_dict.get("edge_device_state_db") or ""),
-                workflow_history_db_path=str(
-                    args_dict.get("edge_workflow_history_db") or ""
-                ),
+                storage_paths=runtime_storage_paths,
             )
             # backend 是 bridge 形状(publish_job_status)，注册进 HostNode.bridges 收执行回报
             args_dict["bridges"].append(edge_exec_backend)

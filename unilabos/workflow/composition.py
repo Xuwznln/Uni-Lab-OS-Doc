@@ -3,42 +3,54 @@
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 from typing import Optional
 
+from unilabos.storage.paths import RuntimeStoragePaths
+from unilabos.storage.profiles import SchedulerAuthorityProfile
 from unilabos.workflow.service import AuthoringCompiler, WorkflowService
 from unilabos.workflow.source_monitor import WorkflowSourceMonitor
 from unilabos.workflow.store import WorkflowStore
 
 _lock = threading.Lock()
 _service: Optional[WorkflowService] = None
-_database_path: Optional[Path] = None
+_database_path = None
+_authority_profile: Optional[SchedulerAuthorityProfile] = None
 _monitor: Optional[WorkflowSourceMonitor] = None
 
 
 def compose_workflow_runtime(
-    working_dir: str | Path,
+    storage_paths: RuntimeStoragePaths,
     *,
     compiler: Optional[AuthoringCompiler] = None,
+    authority_profile: SchedulerAuthorityProfile = (
+        SchedulerAuthorityProfile.LOCAL_SCHEDULER
+    ),
 ) -> WorkflowService:
-    """装配工作区唯一的 Workflow authority、启动恢复和 Draft 监视。"""
+    """装配唯一工作流权威（Workflow Authority）与创作监视。"""
 
-    global _database_path, _monitor, _service
-    # Backend-shaped definitions/tasks and legacy execution history share the
-    # documented workflow_history SQLite file, but remain separate tables.
-    database_path = Path(working_dir).resolve() / "workflow_history.db"
+    global _authority_profile, _database_path, _monitor, _service
+    if not isinstance(storage_paths, RuntimeStoragePaths):
+        raise TypeError("storage_paths must be RuntimeStoragePaths")
+    database_path = storage_paths.workflow_db
+    profile = SchedulerAuthorityProfile.parse(authority_profile)
     with _lock:
         if _service is not None:
             if database_path != _database_path:
                 raise RuntimeError(
-                    "Workflow authority cannot switch working_dir at runtime"
+                    "Workflow authority cannot switch database path at runtime"
+                )
+            if profile is not _authority_profile:
+                raise RuntimeError(
+                    "Workflow authority profile cannot switch at runtime"
                 )
             return _service
         _service = WorkflowService(
             WorkflowStore(database_path),
             compiler=compiler,
+            authority_profile=profile,
         )
         _database_path = database_path
+        _authority_profile = profile
         _service.recover_registered_sources()
         _monitor = WorkflowSourceMonitor(_service)
         _monitor.start()
@@ -46,13 +58,20 @@ def compose_workflow_runtime(
 
 
 def setup_workflow_service(
-    working_dir: str | Path,
+    storage_paths: RuntimeStoragePaths,
     *,
     compiler: Optional[AuthoringCompiler] = None,
+    authority_profile: SchedulerAuthorityProfile = (
+        SchedulerAuthorityProfile.LOCAL_SCHEDULER
+    ),
 ) -> WorkflowService:
     """兼容旧装配调用；所有入口统一进入完整运行时组合。"""
 
-    return compose_workflow_runtime(working_dir, compiler=compiler)
+    return compose_workflow_runtime(
+        storage_paths,
+        compiler=compiler,
+        authority_profile=authority_profile,
+    )
 
 
 def get_workflow_service() -> Optional[WorkflowService]:
@@ -62,7 +81,7 @@ def get_workflow_service() -> Optional[WorkflowService]:
 def reset_workflow_service_for_test() -> None:
     """停止监视器并关闭测试使用的进程级单例。"""
 
-    global _database_path, _monitor, _service
+    global _authority_profile, _database_path, _monitor, _service
     with _lock:
         if _monitor is not None:
             _monitor.stop()
@@ -71,6 +90,7 @@ def reset_workflow_service_for_test() -> None:
         _monitor = None
         _service = None
         _database_path = None
+        _authority_profile = None
 
 
 __all__ = [
