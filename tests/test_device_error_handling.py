@@ -2,7 +2,7 @@ import asyncio
 import traceback
 import unittest
 
-from unilabos.registry.decorators import action, get_action_error_policy
+from unilabos.registry.decorators import action, get_action_error_policy, get_action_meta
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
 from unilabos.utils.action_decision import (
     PendingDecisionRegistry,
@@ -18,6 +18,40 @@ from unilabos.utils.exception import (
 
 
 class DeviceExceptionTest(unittest.TestCase):
+    def test_action_exposes_builtin_recovery_limits_in_registry_metadata(self):
+        @action(
+            error_policy={
+                "max_retries": 2,
+                "decision_timeout_seconds": 30,
+                "default_on_decision_timeout": "skip",
+            }
+        )
+        def recoverable_action():
+            return None
+
+        expected_policy = {
+            "allow_retry": True,
+            "allow_skip": True,
+            "max_retries": 2,
+            "decision_timeout_seconds": 30.0,
+            "default_on_decision_timeout": "skip",
+        }
+        self.assertEqual(get_action_error_policy(recoverable_action), expected_policy)
+        self.assertEqual(get_action_meta(recoverable_action)["error_policy"], expected_policy)
+
+    def test_action_rejects_invalid_builtin_recovery_limits(self):
+        invalid_policies = [
+            {"max_retries": -1},
+            {"decision_timeout_seconds": 0},
+            {"default_on_decision_timeout": "manual_fix"},
+        ]
+
+        for policy in invalid_policies:
+            with self.subTest(policy=policy), self.assertRaises(ValueError):
+                @action(error_policy=policy)
+                def invalid_action():
+                    return None
+
     def test_alarm_contains_correlation_and_builtin_actions(self):
         alarm = DeviceException("motor jammed").to_alarm_dict(
             device_id="robot-1",
@@ -141,6 +175,24 @@ class ActionErrorPolicyAlarmTest(unittest.IsolatedAsyncioTestCase):
 
 
 class PendingDecisionRegistryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_uses_configured_default_action_and_cleans_waiter(self):
+        registry = PendingDecisionRegistry()
+
+        decision = await registry.publish_and_wait(
+            task_id="task-1",
+            job_id="job-1",
+            device_id="robot-1",
+            publish=lambda: None,
+            timeout=0.01,
+            default_action="skip",
+        )
+
+        self.assertEqual(
+            decision,
+            {"action": "skip", "reason": "user_decision_timeout"},
+        )
+        self.assertFalse(registry.has_pending("task-1", "job-1"))
+
     async def test_default_waits_until_matching_decision_without_timeout(self):
         registry = PendingDecisionRegistry()
         published = asyncio.Event()
@@ -258,6 +310,26 @@ class PendingDecisionRegistryTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ActionDecisionLoopTest(unittest.IsolatedAsyncioTestCase):
+    async def test_max_retries_counts_additional_action_attempts(self):
+        call_count = 0
+
+        async def invoke():
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("still failing")
+
+        async def decide(_):
+            return {"action": "retry"}
+
+        with self.assertRaisesRegex(RuntimeError, "2 次重试"):
+            await run_action_with_decisions(
+                invoke=invoke,
+                decide=decide,
+                max_retries=2,
+            )
+
+        self.assertEqual(call_count, 3)
+
     async def test_retry_reexecutes_action(self):
         call_count = 0
 

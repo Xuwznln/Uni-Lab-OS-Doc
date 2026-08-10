@@ -2049,6 +2049,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         task_id: str,
         job_id: str,
         timeout: Optional[float] = None,
+        default_action: str = "abort",
     ) -> dict:
         """上报异常并等待首个有效决策；暂不作为设备驱动公开 API。"""
 
@@ -2062,6 +2063,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             device_id=self.device_id,
             publish=publish,
             timeout=timeout,
+            default_action=default_action,
         )
 
     def handle_device_exception_decision(
@@ -2090,12 +2092,17 @@ class BaseROS2DeviceNode(Node, Generic[T]):
         job_id: str,
         action_kwargs: dict,
         max_iterations: int = 10,
-        error_policy: Optional[Dict[str, bool]] = None,
+        error_policy: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """执行 Action，并仅处理框架内置的 retry / skip / abort。"""
 
         if not task_id or not job_id:
             raise RuntimeError(f"动作 {action_name} 缺少 task_id 或 job_id，无法进入异常决策回环")
+
+        policy = error_policy or {}
+        max_retries = policy.get("max_retries")
+        decision_timeout = policy.get("decision_timeout_seconds")
+        default_on_timeout = policy.get("default_on_decision_timeout", "abort")
 
         async def invoke():
             return await action_func(**action_kwargs)
@@ -2141,16 +2148,23 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             alarm_data = apply_builtin_error_policy_to_alarm(alarm_data, error_policy)
 
             self.lab_logger().error(f"动作 {action_name} 抛出 {type(exc).__name__}: {exc}")
+            wait_kwargs = {
+                "alarm_data": alarm_data,
+                "task_id": task_id,
+                "job_id": job_id,
+            }
+            if decision_timeout is not None:
+                wait_kwargs["timeout"] = decision_timeout
+                wait_kwargs["default_action"] = default_on_timeout
             return await self._publish_and_wait_for_decision(
-                alarm_data=alarm_data,
-                task_id=task_id,
-                job_id=job_id,
+                **wait_kwargs,
             )
 
         return await run_action_with_decisions(
             invoke=invoke,
             decide=decide,
             max_iterations=max_iterations,
+            max_retries=max_retries,
         )
 
     async def _invoke_action(self, action_func, action_kwargs: dict) -> Any:

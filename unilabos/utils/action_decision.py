@@ -25,11 +25,15 @@ async def run_action_with_decisions(
     invoke: Callable[[], Awaitable[Any]],
     decide: Callable[[Exception], Awaitable[dict]],
     max_iterations: int = 10,
+    max_retries: Optional[int] = None,
 ) -> Any:
     """执行 Action，并按用户决策实现 retry / skip / abort。"""
 
+    if max_retries is not None and max_retries < 0:
+        raise ValueError("max_retries 必须大于等于 0")
+    max_attempts = max_iterations if max_retries is None else max_retries + 1
     last_exception = None
-    for _ in range(max_iterations):
+    for _ in range(max_attempts):
         try:
             return await invoke()
         except Exception as exc:
@@ -42,6 +46,8 @@ async def run_action_with_decisions(
                 return SkippedActionResult(decision.get("reason", "user_skip"))
             raise
 
+    if max_retries is not None:
+        raise RuntimeError(f"Action 在 {max_retries} 次重试后仍然失败") from last_exception
     raise RuntimeError(f"Action 已连续重试 {max_iterations} 次") from last_exception
 
 
@@ -68,11 +74,14 @@ class PendingDecisionRegistry:
         device_id: str,
         publish: Callable[[], None],
         timeout: Optional[float] = None,
+        default_action: str = "abort",
     ) -> dict:
         """先注册 Future，再发布异常并等待首个有效决策。"""
 
         if not task_id or not job_id:
             raise ValueError("异常处理缺少 task_id 或 job_id")
+        if default_action not in BUILT_IN_DECISIONS:
+            raise ValueError(f"不支持的决策超时默认动作: {default_action}")
 
         key = (task_id, job_id)
         loop = asyncio.get_running_loop()
@@ -92,7 +101,8 @@ class PendingDecisionRegistry:
                 try:
                     decision = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
                 except asyncio.TimeoutError:
-                    return {"action": "abort", "reason": "user_decision_timeout"}
+                    decision = {"action": default_action, "reason": "user_decision_timeout"}
+                    return decision
 
             action = decision.get("action") if isinstance(decision, dict) else None
             if action not in BUILT_IN_DECISIONS:

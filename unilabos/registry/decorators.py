@@ -47,6 +47,7 @@ Usage:
 
 from enum import Enum
 from functools import wraps
+import math
 import re
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
@@ -341,20 +342,45 @@ def device(
 _ACTION_TYPE_UNSET = object()
 
 
-def _normalize_builtin_error_policy(error_policy: Optional[Dict[str, Any]]) -> Optional[Dict[str, bool]]:
-    """仅保留第一阶段支持的 retry / skip 开关。"""
+def _normalize_builtin_error_policy(error_policy: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """归一化框架内置的 Action Recovery 策略。"""
     if error_policy is None:
         return None
 
-    supported_keys = {"allow_retry", "allow_skip"}
+    supported_keys = {
+        "allow_retry",
+        "allow_skip",
+        "max_retries",
+        "decision_timeout_seconds",
+        "default_on_decision_timeout",
+    }
     unsupported_keys = set(error_policy) - supported_keys
     if unsupported_keys:
         raise ValueError(f"第一阶段不支持 error_policy 配置: {sorted(unsupported_keys)}")
 
-    return {
+    normalized: Dict[str, Any] = {
         "allow_retry": bool(error_policy.get("allow_retry", True)),
         "allow_skip": bool(error_policy.get("allow_skip", True)),
     }
+    if "max_retries" in error_policy:
+        max_retries = error_policy["max_retries"]
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
+            raise ValueError("error_policy.max_retries 必须是大于等于 0 的整数")
+        normalized["max_retries"] = max_retries
+    if "decision_timeout_seconds" in error_policy:
+        decision_timeout = error_policy["decision_timeout_seconds"]
+        if isinstance(decision_timeout, bool) or not isinstance(decision_timeout, (int, float)):
+            raise ValueError("error_policy.decision_timeout_seconds 必须是大于 0 的有限数字")
+        normalized_timeout = float(decision_timeout)
+        if normalized_timeout <= 0 or not math.isfinite(normalized_timeout):
+            raise ValueError("error_policy.decision_timeout_seconds 必须是大于 0 的有限数字")
+        normalized["decision_timeout_seconds"] = normalized_timeout
+    if "default_on_decision_timeout" in error_policy:
+        default_action = error_policy["default_on_decision_timeout"]
+        if default_action not in {"retry", "skip", "abort"}:
+            raise ValueError("error_policy.default_on_decision_timeout 仅支持 retry / skip / abort")
+        normalized["default_on_decision_timeout"] = default_action
+    return normalized
 
 
 # noinspection PyShadowingNames
@@ -410,7 +436,11 @@ def action(
                    不填写时不写入注册表。
         timeout: 动作执行超时秒数。超时后进入异常处理流程；None 表示不限时。
         exception_handling: 是否启用异常上报和用户决策回环，默认启用。
-        error_policy: 第一阶段仅支持 allow_retry / allow_skip；abort 始终保留。
+        error_policy: 框架内置 retry / skip / abort 的恢复策略。支持
+                      allow_retry、allow_skip、max_retries、
+                      decision_timeout_seconds、default_on_decision_timeout。
+                      max_retries 表示首次执行后的额外重试次数；未配置
+                      decision_timeout_seconds 时无限等待用户决策。
     """
 
     def decorator(func: F) -> F:
@@ -501,7 +531,7 @@ def get_action_timeout(func) -> Optional[float]:
     return getattr(func, "_action_timeout", None)
 
 
-def get_action_error_policy(func) -> Optional[Dict[str, bool]]:
+def get_action_error_policy(func) -> Optional[Dict[str, Any]]:
     """获取 Action 的内置错误处理策略。"""
     return getattr(func, "_action_error_policy", None)
 
