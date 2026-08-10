@@ -664,6 +664,6 @@ ros2 topic list
 
 ## 参考资料
 
-- [ROS2 网络配置](https://docs.ros.org/en/humble/Tutorials/Advanced/Networking.html)
+- [ROS2 网络配置](https://docs.ros.org/en/jazzy/Tutorials/Advanced/Networking.html)
 - [DDS 配置](https://fast-dds.docs.eprosima.com/)
 - Uni-Lab 云平台文档

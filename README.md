@@ -43,21 +43,21 @@ Uni-Lab-OS recommends using `mamba` for environment management. Choose the packa
 
 ```bash
 # Create new environment
-mamba create -n unilab python=3.11.14
+mamba create -n unilab python=3.12.13
 mamba activate unilab
 
 # Option A: Standard installation (recommended for most users)
-mamba install uni-lab::unilabos -c robostack-staging -c conda-forge
+mamba install uni-lab::unilabos -c conda-forge -c robostack-jazzy
 
 # Option B: For developers (editable mode development)
-mamba install uni-lab::unilabos-env -c robostack-staging -c conda-forge
+mamba install uni-lab::unilabos-env -c conda-forge -c robostack-jazzy
 # Then install unilabos and dependencies:
 git clone https://github.com/deepmodeling/Uni-Lab-OS.git && cd Uni-Lab-OS
 pip install -e .
 uv pip install -r unilabos/utils/requirements.txt
 
 # Option C: Full installation (simulation/visualization)
-mamba install uni-lab::unilabos-full -c robostack-staging -c conda-forge
+mamba install uni-lab::unilabos-full -c conda-forge -c robostack-jazzy
 ```
 
 **When to use which?**
