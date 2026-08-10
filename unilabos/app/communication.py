@@ -101,6 +101,11 @@ class BaseCommunicationClient(ABC):
 
         return False
 
+    def publish_device_exception_decision_applied(self, decision_data: dict) -> bool:
+        """上报框架已执行的自动异常决策；不支持或未连接时返回 False。"""
+
+        return False
+
     def setup_pong_subscription(self) -> None:
         """
         设置pong消息订阅（可选实现）
