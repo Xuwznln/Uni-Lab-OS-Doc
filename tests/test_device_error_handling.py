@@ -177,6 +177,7 @@ class ActionErrorPolicyAlarmTest(unittest.IsolatedAsyncioTestCase):
 class PendingDecisionRegistryTest(unittest.IsolatedAsyncioTestCase):
     async def test_timeout_uses_configured_default_action_and_cleans_waiter(self):
         registry = PendingDecisionRegistry()
+        applied_decisions = []
 
         decision = await registry.publish_and_wait(
             task_id="task-1",
@@ -185,12 +186,14 @@ class PendingDecisionRegistryTest(unittest.IsolatedAsyncioTestCase):
             publish=lambda: None,
             timeout=0.01,
             default_action="skip",
+            on_timeout=applied_decisions.append,
         )
 
         self.assertEqual(
             decision,
             {"action": "skip", "reason": "user_decision_timeout"},
         )
+        self.assertEqual(applied_decisions, [decision])
         self.assertFalse(registry.has_pending("task-1", "job-1"))
 
     async def test_default_waits_until_matching_decision_without_timeout(self):

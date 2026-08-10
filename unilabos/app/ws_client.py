@@ -1810,6 +1810,31 @@ class WebSocketClient(BaseCommunicationClient):
         )
         return True
 
+    def publish_device_exception_decision_applied(self, decision_data: dict) -> bool:
+        """上报因用户决策超时而由框架执行的默认动作。"""
+
+        if self.is_disabled or not self.is_connected():
+            logger.warning(
+                f"[WebSocketClient] Not connected, cannot publish automatic device exception decision: "
+                f"task_id={decision_data.get('task_id')}, job_id={decision_data.get('job_id')}"
+            )
+            return False
+
+        queued = self.message_processor.send_message(
+            {
+                "action": "device_exception_decision_applied",
+                "data": decision_data,
+            }
+        )
+        if not queued:
+            return False
+        logger.info(
+            f"[WebSocketClient] device_exception_decision_applied: "
+            f"task_id={decision_data.get('task_id')}, job_id={decision_data.get('job_id')}, "
+            f"action={decision_data.get('action')}"
+        )
+        return True
+
     def send_ping(self, ping_id: str, timestamp: float) -> None:
         """发送ping消息"""
         if self.is_disabled or not self.is_connected():

@@ -75,6 +75,7 @@ class PendingDecisionRegistry:
         publish: Callable[[], None],
         timeout: Optional[float] = None,
         default_action: str = "abort",
+        on_timeout: Optional[Callable[[dict], None]] = None,
     ) -> dict:
         """先注册 Future，再发布异常并等待首个有效决策。"""
 
@@ -102,6 +103,8 @@ class PendingDecisionRegistry:
                     decision = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
                 except asyncio.TimeoutError:
                     decision = {"action": default_action, "reason": "user_decision_timeout"}
+                    if on_timeout is not None:
+                        on_timeout(decision)
                     return decision
 
             action = decision.get("action") if isinstance(decision, dict) else None

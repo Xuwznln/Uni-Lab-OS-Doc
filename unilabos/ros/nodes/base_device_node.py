@@ -2053,9 +2053,26 @@ class BaseROS2DeviceNode(Node, Generic[T]):
     ) -> dict:
         """上报异常并等待首个有效决策；暂不作为设备驱动公开 API。"""
 
+        client = self._get_ws_client()
+
         def publish() -> None:
-            if not self._get_ws_client().publish_device_exception_alarm(alarm_data):
+            if not client.publish_device_exception_alarm(alarm_data):
                 raise ConnectionError("设备异常上报失败：WebSocket 未连接")
+
+        def report_timeout_decision(decision: dict) -> None:
+            reported = client.publish_device_exception_decision_applied(
+                {
+                    "task_id": task_id,
+                    "job_id": job_id,
+                    "device_id": self.device_id,
+                    "action": decision["action"],
+                    "reason": decision["reason"],
+                }
+            )
+            if not reported:
+                self.lab_logger().warning(
+                    f"动作 {alarm_data.get('action_name', '')} 的超时默认决策未能同步到 Backend"
+                )
 
         return await self._decision_registry.publish_and_wait(
             task_id=task_id,
@@ -2064,6 +2081,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             publish=publish,
             timeout=timeout,
             default_action=default_action,
+            on_timeout=report_timeout_decision,
         )
 
     def handle_device_exception_decision(
