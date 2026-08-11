@@ -18,6 +18,10 @@ from unilabos.workflow.graph_validation import (
 )
 from unilabos.workflow.json_codec import decode_json_bytes, encode_json
 from unilabos.workflow.models import WorkflowEdgeWrite, WorkflowNodeWrite
+from unilabos.workflow.schema import (
+    WORKFLOW_SCHEMA_VERSION,
+    migrate_workflow_schema,
+)
 
 _STORE_INITIALIZATION_BUSY_TIMEOUT_SECONDS = 5.0
 _STORE_INITIALIZATION_SQLITE_BUSY_TIMEOUT_MS = 100
@@ -324,6 +328,7 @@ class WorkflowStore:
                     deadline=initialization_deadline,
                 )
                 try:
+                    migrate_workflow_schema(self._conn)
                     columns = {
                         row["name"]
                         for row in self._conn.execute(
@@ -1515,17 +1520,19 @@ class WorkflowStore:
             rows = self._conn.execute(
                 """
                 SELECT * FROM frontend_event
-                WHERE id > ?
-                ORDER BY id
+                WHERE sequence > ?
+                ORDER BY sequence
                 LIMIT ?
                 """,
                 (after_id, limit),
             ).fetchall()
         return [
             {
-                "id": row["id"],
-                "event": row["event"],
-                "data": _load(row["data"], {}),
+                "id": row["sequence"],
+                "uuid": row["uuid"],
+                "event": row["type"],
+                "aggregate_uuid": row["aggregate_uuid"],
+                "data": _load(row["payload"], {}),
                 "create_time": row["create_time"],
             }
             for row in rows
@@ -1539,9 +1546,21 @@ class WorkflowStore:
         data: Dict[str, Any],
         now: str,
     ) -> int:
+        aggregate_uuid = next(
+            (
+                str(data[key])
+                for key in ("workflow_uuid", "task_uuid", "uuid")
+                if data.get(key)
+            ),
+            "00000000-0000-0000-0000-000000000000",
+        )
         cursor = conn.execute(
-            "INSERT INTO frontend_event(event, data, create_time) VALUES (?, ?, ?)",
-            (event, _json(data), now),
+            """
+            INSERT INTO frontend_event(
+                uuid, create_time, type, aggregate_uuid, payload
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (str(uuid4()), now, event, aggregate_uuid, _json(data)),
         )
         return int(cursor.lastrowid)
 
@@ -1552,6 +1571,12 @@ class WorkflowStore:
             "workflow_edge",
             "workflow_task",
             "workflow_node_job",
+            "workflow_task_command",
+            "workflow_node_job_feedback_history",
+            "workflow_node_job_result",
+            "workflow_intervention",
+            "workflow_manual_confirmation",
+            "execution_lock_lease",
             "workflow_authoring",
             "frontend_event",
         }
@@ -1677,6 +1702,7 @@ class WorkflowStore:
         result = {
             **cls._base(row),
             "workflow_uuid": row["workflow_uuid"],
+            "execution_kind": row["execution_kind"],
             "status": row["status"],
             "workflow_snapshot": _load(row["workflow_snapshot"], {}),
             "execution_plan": _load(row["execution_plan"], {}),
@@ -1755,6 +1781,7 @@ __all__ = [
     "StoreConflict",
     "StoreNotFound",
     "StoreRevisionConflict",
+    "WORKFLOW_SCHEMA_VERSION",
     "WorkflowStore",
     "utc_now",
 ]

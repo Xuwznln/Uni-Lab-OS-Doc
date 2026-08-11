@@ -89,31 +89,43 @@ Material 稳定身份只使用 `material.uuid`；`edge_uuid/cloud_uuid` 仅存�
 表回读。`resource_relation` 不暴露 `site.uuid`，因此只能用于旧的 owner+name 定位；公共 API
 和新同步必须使用稳定 Site UUID。
 
-## Backend-shaped `workflow` SQLite：user_version=0
+## Backend-shaped `workflow` SQLite：user_version=1
 
 实际表：`workflow`、`workflow_node_template`、`workflow_handle_template`、`workflow_node`、
-`workflow_edge`、`workflow_task`、`workflow_node_job`、`workflow_source_registration`、
+`workflow_edge`、`workflow_task`、`workflow_node_job`、`workflow_task_command`、
+`workflow_node_job_feedback_history`、`workflow_node_job_result`、`workflow_intervention`、
+`workflow_manual_confirmation`、`execution_lock_lease`、`workflow_source_registration`、
 `workflow_authoring`、`frontend_event`。
 
 主要差异：
 
-- `workflow` 基本字段和 revision 一致，但缺 Backend active cursor index。
-- Node/Handle template 有 Edge 私有 `authority_id`，且缺完整 FK/active unique。
+- `workflow` 基本字段、revision 与 active cursor index 一致。
+- Node/Handle template 保留 Edge 私有 `authority_id`，v1 已补 active unique/type/cursor index；
+  `resource_template` 位于 `inventory.db`，因此不伪造跨文件 SQLite FK。
 - `workflow_node` 仍有 Backend migration 42 已删除的 `status`；这是兼容列，不应出现在公共 DTO。
 - `workflow_edge` 多存 `workflow_uuid`，Backend 通过节点归属推导；Edge 当前仅有 Workflow FK，
-  缺 Handle/Node FK 和四元组/target-handle active unique。
-- `workflow_task.workflow_uuid` 仍 NOT NULL，仍保留 Backend migrations 37/40 已删除的
-  `input/output`，缺 `execution_kind/idempotency_key/request_fingerprint`，因此不能完整表达
-  Backend 的 ad-hoc device action。
-- `workflow_node_job` 字段接近 Backend，但缺 Edge Agent/Command/Material FK、attempt 唯一、
-  deadline/recovery 索引；它不持久化 result/feedback/intervention/manual-confirmation/lock lease。
+  v1 已补四元组/target-handle active unique 与 source/target index；物理 Node/Handle FK 仍待旧图
+  孤儿清理后再启用。
+- `workflow_task.workflow_uuid` 已可空，并用
+  `execution_kind/idempotency_key/request_fingerprint` CHECK 区分 workflow 与 ad-hoc device action；
+  `input/output` 只作为旧数据兼容列继续保存，不进入公共 DTO。
+- `workflow_node_job` 已补 Backend 状态/executor/check、attempt/command unique、deadline、in-flight
+  和 local recovery 索引。Material/Edge Agent/Command 分属其他 SQLite/上游 Authority，依赖由
+  adapter/service 校验而非跨文件 FK 表达。
+- v1 新增 Task Command、Job Feedback/Result、Intervention、Manual Confirmation 与 Execution
+  Lock Lease，同步落下 Backend 的状态枚举、JSON shape、active unique 与幂等索引。
+- `frontend_event` 已从 `id/event/data` 原地转换为
+  `sequence/uuid/type/aggregate_uuid/payload`；Store 暂时继续输出旧 `id/event/data` alias 供现有
+  SSE 客户端兼容，同时带上 uuid 与 aggregate UUID。
 - Backend-shaped Workflow Store/Interface 使用 canonical `succeeded`。Edge Local REST v1、旧
   Scheduler 快照和历史仍使用 `success`；集中 Adapter 在共享出入口执行
   `success → succeeded`，Local v1 输出才做反向兼容。
-- Schema 没有 `user_version`，无法证明旧库进行了有序升级。
+- v0 Task/Job/Event 行在单个 `BEGIN IMMEDIATE` 事务内重建并保留；空库、旧库数据保留、事件
+  cursor 和业务幂等约束均有回归测试。
 
-由于这些差异涉及现有工作流历史的迁移和运行职责分配，不能以一次无版本
-`CREATE TABLE IF NOT EXISTS` 直接改写。
+Schema 已完成，不等于 Scheduler 运行闭环已完成。尚需把本地 Task 状态推进、控制命令消费、
+反馈/结果提交、人工决策与 lease fencing 接到同一运行事务；`backend_controlled` 下仍以
+`edge_control.db` 作为上下行投递镜像，不能双写出两个权威。
 
 ## `device_state.db`：user_version=0
 

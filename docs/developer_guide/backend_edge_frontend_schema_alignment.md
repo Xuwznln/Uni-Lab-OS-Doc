@@ -18,8 +18,10 @@ DDL 逐字做成一样。
    逐项复核。Edge 已对齐候选的
    Material/Site CRUD 与序列化语义；`published_workflow_contract` 保持 Backend-only，不复制表、
    不向 Edge session 广告发布能力。
-3. Edge Workflow SQLite 仍只是“字段相近”，缺迁移版本、关键 FK/index、ad-hoc Task、
-   feedback/result/intervention/lock 等持久事实，不能宣称与 Backend 相同。
+3. Edge Workflow SQLite 已升级到 v1：Task/Job、事件 cursor、关键 active index、ad-hoc Task、
+   command/feedback/result/intervention/manual-confirmation/lock lease 持久事实已经落表并支持旧库
+   原地升级。跨数据库的 Material/Edge Command FK 与 Scheduler 运行逻辑接线仍须按 Authority
+   模式处理，不能因“已有表”宣称闭环完成。
 4. `ResourceDict.sites` 已与 barcode 一样提升为根字段；PLR 双形态输入、序列化/反序列化、
    Host 图合并与实例 Site UUID 均有回归测试。
 5. 本地 `unilab-edge-ui` 已直接审计并更新为 26 个 v7 实体：6 张 Backend-shared 表、4 个
@@ -147,19 +149,19 @@ Task、保存投影并提供网关，但 target-design 下不成为第二个实�
 | `current_substance/substance_history` | `material.data` + content version + 私有 ledger | 前端 Material 内容投影 | D | Backend 是规范；迁移现有 tracker 历史需单位/重放策略，不能自动改表 |
 | `workflow` | 同名表 | Workflow Runtime Port | A | revision/软删除一致；补迁移版本和索引 |
 | `published_workflow_contract` | 无同义表；target `local_workflow_version` 不是其别名 | 私有前端 355e2fc 无对应 Port | Backend 专属 / B+C | d123ce0 的不可变发布制品留在 Backend；Edge 只通过版本制品 DTO/hydration 执行，不复制 Backend 行；本地 Quick Debug 版本另有 Authority |
-| `workflow_node_template` | 同名表 + `authority_id` | Authoring catalog | A+B | 私有 authority 可留 sidecar/列，不进入共享 DTO；补 FK/index |
-| `workflow_handle_template` | 同名表 + `authority_id` | Authoring Handle | A+B | `handle_key` 兼容寻址；边仍以 Handle UUID 为准 |
+| `workflow_node_template` | 同名表 + `authority_id` | Authoring catalog | A+B | v1 已补 active unique/type index；跨库 Resource FK 由 adapter 校验，私有 authority 不进入共享 DTO |
+| `workflow_handle_template` | 同名表 + `authority_id` | Authoring Handle | A+B | v1 已补业务键/cursor index；`handle_key` 兼容寻址，物理 FK 待旧图孤儿清理 |
 | `workflow_node` | 同名表但多 `status` | Authoring node | D | `status` 只能 legacy read；移除/回填需历史迁移决策 |
-| `workflow_edge` | 多 `workflow_uuid`，缺关键 FK/unique | Authoring edge | A | 可保留冗余 workflow UUID，但必须校验一致并补四元组/target Handle unique |
-| `workflow_task` | 缺 ad-hoc 字段，保留 input/output | Runtime Task | D | 当前 DB 不能表达 Backend 全集；需版本化重建/双读 |
-| `workflow_node_job` | 字段近似但约束/事实表不完整 | Runtime Job | A+D | local Scheduler 要持久化；Backend-controlled 只保留 execution mirror，职责需分模式 |
-| Job feedback/result | `edge_control` outbox/outcome pending，非同表 | Runtime REST projection | B+D | backend_controlled 只同步；local_scheduler 需新增 durable 事实表 |
-| intervention/manual confirmation | Edge 执行控制有协议状态，无 canonical 表 | Runtime UI | B+D | Backend 权威模式只缓存必要恢复；本地权威模式需要完整表 |
-| `execution_lock_lease` | 内存 `_job_resource_locks` + inventory reservation | 无数据库投影 | D | 不能把 reservation 冒充 lease；需决定本地 Workflow DB 迁移 |
+| `workflow_edge` | 多 `workflow_uuid`；v1 已补四元组/target Handle active unique | Authoring edge | A+B | 冗余 workflow UUID 继续校验一致；Node/Handle 物理 FK 待旧图孤儿清理 |
+| `workflow_task` | v1 已支持 nullable workflow、execution_kind/idempotency/fingerprint；保留 input/output 兼容列 | Runtime Task | A+B | Schema 与 Backend 执行来源约束对齐；ad-hoc API/调度入口仍待接线 |
+| `workflow_node_job` | v1 已补状态/check、attempt/command unique、deadline/recovery 索引 | Runtime Job | A+B | local Scheduler 可持久化；跨库 Material/Edge Command FK 由 adapter 校验，不能伪造 SQLite FK |
+| Job feedback/result | v1 同名 durable 表；同时保留 `edge_control` pending/outbox | Runtime REST projection | A+B | local authority 写 Workflow 表；backend-controlled 继续以 control outbox 投递，待接线原子事务 |
+| intervention/manual confirmation | v1 已有同名表、状态/check/幂等索引 | Runtime UI | A+B | Schema 已落；decision API 与调度恢复尚待接线 |
+| `execution_lock_lease` | v1 同名持久表；inventory reservation 仍独立 | 无数据库投影 | A+D | active lock/job unique 已落；fencing token/重启恢复策略仍须冻结 |
 | `edge_agent/session/binding` | Edge 本机配置和 control meta | 设备/Edge UI 投影 | B+C | Backend 权威；Edge 只保存自身 session 恢复信息 |
 | Backend `edge_command` | Edge `edge_control.edge_command` | 不直接展示 | B | 字段不同但协议同义；Command UUID+sequence+Trace 转换 |
 | Backend `edge_event_inbox` | Edge `edge_event_outbox` | SSE 只接短通知 | B | 一端 Outbox 对另一端 Inbox；不是表名对齐问题 |
-| `frontend_event` | Workflow SQLite 有私有 event 表 | SSE invalidation | B+D | 事件 envelope/sequence 需对齐，物理表可不同 |
+| `frontend_event` | v1 为 sequence/uuid/type/aggregate_uuid/payload；旧 id/event/data 原地转换 | SSE invalidation | A+B | cursor 结构已对齐；事件类型与客户端投影继续由 adapter 管理 |
 | device property latest/history | Edge 两张 EAV 表 | Device status adapter | Edge 私有 / A | Edge 遥测投影；Backend 没有同义共享表 |
 | `sync_outbox/processed_command/sync_cursor` | Edge 私有表 | 无 | Edge 私有 / A | 保留；定义增量同步，不对前端开放 |
 | `workflow_runs/job_runs` | Edge 旧审计库 | 无 | Edge 私有 / B | 内部事实保留 `success`；Backend-shaped 方向规范化为 `succeeded`，Local REST v1 响应由 Adapter 做 `succeeded → success` |
@@ -374,7 +376,7 @@ Registry 再用 `parse_docstring` 把首行和参数说明写入动作 JSON Sche
 |---|---|---|---|---|
 | `backend_controlled` Backend | Backend；Backend 生成 Material/Site UUID | Backend canonical 资源表、`material_ledger_entry`、Workflow/Task/Job/控制与事实表；候选分支另有 `published_workflow_contract` | Backend-shaped HTTP；WS 短通知 | 保持 d552078 默认语义；评审 d123ce0 的 `material.type`/发布契约后再版本化下发 |
 | `backend_controlled` Edge | 无 Material/Workflow 第二权威；只执行 Backend Command | `edge_control.db` 的 Command/执行镜像/结果 Outbox；遥测投影；必要的只读 Material/Site 投影 | HTTP 拉参数/报结果，WS 通知；原样复用 Backend Site UUID | 保持 hydration 不重生成；补 durable JobExecutionClaim/栅栏 |
-| `local_scheduler` / 默认开源 Host | Host Edge；Host 首次生成并持久化本地 Material/Site UUID | `inventory.db` v7 canonical 资源六表；版本化本地 Workflow/Task/Job Authority；Edge 私有 lot/reservation/outbox/cursor | 对前端暴露 Backend-shaped DTO；Local REST v1 状态经 Adapter 兼容 | 完成 Workflow Schema 与 JobExecutionClaim 迁移 |
+| `local_scheduler` / 默认开源 Host | Host Edge；Host 首次生成并持久化本地 Material/Site UUID | `inventory.db` v7 canonical 资源六表；`workflow` v1 Task/Job/控制/结果/反馈/锁事实；Edge 私有 lot/reservation/outbox/cursor | 对前端暴露 Backend-shaped DTO；Local REST v1 状态经 Adapter 兼容 | 把 v1 runtime facts 接入 Scheduler 原子事务并冻结 fencing token |
 | Edge-origin → Backend | 原 Host Authority 保留 identity；Backend 是导入后的接管方或投影方 | Backend 保存传入 UUID，或持久 identity mapping；不得生成冲突 UUID | import/upsert + event UUID + sequence + aggregate_version | 新增 Backend Material/Site import/upsert、冲突与接管协议 |
 | `offline_recovery` | 只恢复原本由 Host Edge 创建的聚合/任务 | 复用既有本地 canonical 表与执行事实 | 不接管 Backend-owned 聚合；恢复后按原权威同步 | 增加显式 Authority/profile 校验，禁止断网自动接管 |
 | 前端 / 微前端 | 无领域写入权威 | 仅客户端缓存/投影；catalog 不成为写模型 | 私有 `uni-lab-fe` 用 Adapter；`unilab-edge-ui` 已分三层登记并用同形 Resource client | 继续补 Workflow Authority 接管后的 DTO，不复制 Backend 发布表 |
@@ -405,10 +407,10 @@ Registry 再用 `parse_docstring` 把首行和参数说明写入动作 JSON Sche
 
 1. **Backend Site import/upsert**：为 Edge-origin Material Graph 增加外部 Material/Site UUID
    导入或显式 identity mapping；必须有幂等、版本和冲突规则。
-2. **Workflow 本地 Authority / JobExecutionClaim**：若继续支持 `local_scheduler` 的完整 Backend-shaped
-   Workflow Authority？若支持，需要版本化新库/重建表并迁移现有 Task/Job；若生产只支持
-   `backend_controlled`，则本地 store 应降级为执行镜像。两种模式都需要明确 durable claim、
-   attempt/fencing token、重启恢复与重复执行防护，不能继续只靠 `_job_resource_locks` 内存集合。
+2. **Workflow 本地 Authority / JobExecutionClaim**：v1 已版本化重建 Task/Job，并落 command、
+   feedback、result、intervention、manual confirmation、lock lease 与 frontend event。下一步需按
+   `local_scheduler/backend_controlled` 冻结各表写入者，把 Scheduler 状态转换接入同事务，并明确
+   attempt/fencing token、重启恢复与重复执行防护；不能继续只靠 `_job_resource_locks` 内存集合。
 3. **SchedulerAuthorityProfile 版本化**：决定是否接受“Go 业务权威 + Active Host OS 实时调度”并
    取代/新增于当前 `backend_controlled`；冻结 scope identity、接管和单 Active Host 失败语义。
 4. **`os-local.sqlite` v1 migration**：定义完整字段、FK、unique、索引、`user_version`、旧三库读取
