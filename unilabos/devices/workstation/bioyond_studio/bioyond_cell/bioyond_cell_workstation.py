@@ -309,7 +309,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         )
 
     @property
-    def device_id(self):
+    def device_id(self) -> str:
         """获取设备ID，优先从_ros_node获取，否则返回默认值"""
         if hasattr(self, '_ros_node') and self._ros_node is not None:
             return getattr(self._ros_node, 'device_id', self._device_id)

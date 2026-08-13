@@ -145,6 +145,38 @@ def _coerce_deck_input(deck: Any) -> Optional[Deck]:
 
 #构建物料系统
 
+# 旁观者采集：组装记录 CSV 表头（与 func_pack_get_msg_cmd 的表头一致，去掉配方相关列）
+_OBSERVER_ASSEMBLY_HEADER = [
+    'Time', 'open_circuit_voltage', 'pole_weight',
+    'assembly_time', 'target_assembly_pressure', 'real_assembly_pressure', 'electrolyte_volume',
+    'data_coin_type', 'electrolyte_code', 'coin_cell_code',
+]
+
+# 旁观者采集：Neware 提交 CSV 表头，必须与 submit_from_csv_export_ndax 校验的列名逐字一致
+_OBSERVER_NEWARE_HEADER = [
+    'coin_cell_code', 'electrolyte_code', '电池体系', '设备号', '排号', '通道号',
+    'pole_weight', '集流体质量', '活性物质含量', '克容量mah/g',
+]
+
+
+def _observer_cast_float(value) -> float:
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else 0.0
+    return float(value)
+
+
+def _observer_cast_int(value) -> int:
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else 0
+    return int(float(value))
+
+
+def _observer_cast_code(value) -> str:
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    return str(value).strip() or "N/A"
+
+
 class CoinCellAssemblyWorkstation(WorkstationBase):
     def __init__(self, 
         config: dict = None, 
@@ -196,6 +228,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self.coin_num_N = 0  #已组装电池数量
         self._elec_use_num = 0  # 每瓶电池数（下单后由 coin_cell_start 更新）
         self._elec_bottle_num = 0  # 电解液瓶数（下单后由 coin_cell_start 更新）
+        self._observer_running = False  # 旁观者采集运行标志（与 csv_export_running 分开，避免互相干扰）
 
     def _ensure_modbus_connected(self) -> None:
         """检查 Modbus TCP 连接是否存活，若已断开则自动重连（防止长时间空闲后连接超时）"""
@@ -650,6 +683,18 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             return 0
         pressure, read_err = self.client.use_node('REG_DATA_ASSEMBLY_PRESSURE').read(1)
         return pressure
+
+    @property
+    def data_target_assembly_pressure(self) -> int:
+        """设备侧设定的目标压制力 MW490 (INT16)，旁观模式下压制力非 Uni-Lab 下发，只能从此寄存器读"""
+        if self.debug_mode:
+            return 0
+        try:
+            pressure, read_err = self.client.use_node('REG_DATA_TARGET_ASSEMBLY_PRESSURE').read(1)
+            return pressure or 0
+        except Exception as e:
+            logger.warning(f"读取目标压制力失败，返回 0: {e}")
+            return 0
 
     @property
     def data_electrolyte_volume(self) -> int:
@@ -2407,6 +2452,243 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             'allow_read': self.allow_data_read,
             'running': self.csv_export_running,
             'thread_alive': self.csv_export_thread.is_alive() if self.csv_export_thread else False
+        }
+
+    # ===================== 旁观者采集（全程只读） ======================
+
+    def _observer_read_snapshot(self) -> Dict[str, Any]:
+        """只读方式采集一份当前设备数据快照（旁观者模式专用，不写任何线圈）
+
+        Returns:
+            dict: 单颗电池的数据快照，读取失败的字段回退为 0 / "N/A"
+        """
+        def _read(attr_name: str, caster, default):
+            try:
+                return caster(getattr(self, attr_name))
+            except Exception as e:
+                logger.warning(f"[旁观采集] 读取 {attr_name} 失败，使用默认值 {default}: {e}")
+                return default
+
+        return {
+            "time": datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "open_circuit_voltage": _read("data_open_circuit_voltage", _observer_cast_float, 0.0),
+            "pole_weight": _read("data_pole_weight", _observer_cast_float, 0.0),
+            "assembly_time": _read("data_assembly_time", _observer_cast_float, 0.0),
+            "target_assembly_pressure": _read("data_target_assembly_pressure", _observer_cast_int, 0),
+            "real_assembly_pressure": _read("data_assembly_pressure", _observer_cast_int, 0),
+            "electrolyte_volume": _read("data_electrolyte_volume", _observer_cast_int, 0),
+            "data_coin_type": _read("data_coin_type", _observer_cast_int, 0),
+            "electrolyte_code": _read("data_electrolyte_code", _observer_cast_code, "N/A"),
+            "coin_cell_code": _read("data_coin_cell_code", _observer_cast_code, "N/A"),
+        }
+
+    def _observer_prepare_files(self, file_path: str, run_timestamp: str):
+        """创建旁观者采集的两个 CSV 并写入表头
+
+        Args:
+            file_path: 导出目录
+            run_timestamp: 本次采集的运行时间戳，两个文件共用
+
+        Returns:
+            tuple: (组装记录CSV路径, Neware提交CSV路径)
+        """
+        assembly_file = os.path.join(file_path, f"coin_cell_observe_{run_timestamp}.csv")
+        neware_file = os.path.join(file_path, f"neware_submit_{run_timestamp}.csv")
+
+        if not os.path.exists(assembly_file):
+            with open(assembly_file, 'w', newline='', encoding='utf-8') as csvfile:
+                csv.writer(csvfile).writerow(_OBSERVER_ASSEMBLY_HEADER)
+                csvfile.flush()
+
+        # Neware 的 submit_from_csv_export_ndax 以 gbk 读取，此处必须同样用 gbk 写
+        if not os.path.exists(neware_file):
+            with open(neware_file, 'w', newline='', encoding='gbk', errors='replace') as csvfile:
+                csv.writer(csvfile).writerow(_OBSERVER_NEWARE_HEADER)
+                csvfile.flush()
+
+        return assembly_file, neware_file
+
+    def _observer_write_row(self, snapshot: Dict[str, Any], assembly_file: str, neware_file: str,
+                            battery_system: str = "") -> None:
+        """把一颗电池的快照同时追加到组装记录 CSV 和 Neware 提交 CSV
+
+        Args:
+            snapshot: _observer_read_snapshot 返回的快照
+            assembly_file: 组装记录CSV路径
+            neware_file: Neware提交CSV路径
+            battery_system: 预填 Neware CSV 的「电池体系」列
+        """
+        with open(assembly_file, 'a', newline='', encoding='utf-8') as csvfile:
+            csv.writer(csvfile).writerow([
+                snapshot["time"], snapshot["open_circuit_voltage"], snapshot["pole_weight"],
+                snapshot["assembly_time"], snapshot["target_assembly_pressure"], snapshot["real_assembly_pressure"],
+                snapshot["electrolyte_volume"], snapshot["data_coin_type"],
+                snapshot["electrolyte_code"], snapshot["coin_cell_code"],
+            ])
+            csvfile.flush()
+
+        # 除三个可采集字段外其余列留空，由人工补充后再喂给 Neware
+        with open(neware_file, 'a', newline='', encoding='gbk', errors='replace') as csvfile:
+            csv.writer(csvfile).writerow([
+                snapshot["coin_cell_code"], snapshot["electrolyte_code"], battery_system,
+                '', '', '', snapshot["pole_weight"], '', '', '',
+            ])
+            csvfile.flush()
+
+    def coin_cell_observe_export(
+        self,
+        file_path: str = r"D:\Uni-Lab-OS-Data\observe",
+        max_duration: float = 3600,
+        target_count: int = 0,
+        idle_timeout: float = 0,
+        stop_on_device_idle: bool = False,
+        device_idle_grace: float = 120,
+        poll_interval: float = 0.5,
+        battery_system: str = "",
+    ) -> Dict[str, Any]:
+        """旁观者采集：不下发任务、不写任何线圈，只轮询依华工站的已完成电池计数。计数跳变时记录跳变前一拍的快照，同时追加写入组装记录 CSV 和 Neware 提交 CSV。
+
+        Args:
+            file_path: 导出目录，两个 CSV 的输出目录，不存在会自动创建
+            max_duration: 监控时长上限（秒），到点即停；填 0 或负数表示不限
+            target_count: 目标电池数，采满该颗数即停；0 表示不限
+            idle_timeout: 空闲超时（秒），连续该秒数没有新电池即停；0 表示关闭
+            stop_on_device_idle: 设备停机即停，设备运行/自动状态掉线并持续超过宽限时间后停止采集，默认关闭以免误停
+            device_idle_grace: 停机判定宽限（秒），仅在“设备停机即停”开启时生效
+            poll_interval: 轮询间隔（秒），越小越不容易错过跳变前的数据，但 Modbus 读取压力越大
+            battery_system: 电池体系，预填 Neware 提交 CSV 的「电池体系」列，如 HC_LFP；留空则由人工补
+
+        Returns:
+            dict: 采集汇总，含停止原因、采集颗数、两个 CSV 路径
+        """
+        if self._observer_running:
+            logger.warning("[旁观采集] 已有采集在运行中，忽略本次请求")
+            return {
+                "success": False,
+                "stop_reason": "already_running",
+                "collected": 0,
+                "missed": 0,
+                "csv_assembly_file": "",
+                "csv_neware_file": "",
+                "start_time": "",
+                "end_time": "",
+            }
+
+        max_duration = float(max_duration or 0)
+        target_count = int(target_count or 0)
+        idle_timeout = float(idle_timeout or 0)
+        device_idle_grace = float(device_idle_grace or 0)
+        poll_interval = max(float(poll_interval or 0.5), 0.05)
+        battery_system = str(battery_system or "").strip()
+
+        os.makedirs(file_path, exist_ok=True)
+        run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        assembly_file, neware_file = self._observer_prepare_files(file_path, run_timestamp)
+
+        logger.info("=" * 60)
+        logger.info("[旁观采集] 启动，只读监控依华工站已完成电池计数")
+        logger.info(f"[旁观采集] 组装记录: {assembly_file}")
+        logger.info(f"[旁观采集] Neware提交: {neware_file}")
+        logger.info(
+            f"[旁观采集] 停止条件: 时长上限={max_duration or '不限'}s, 目标颗数={target_count or '不限'}, "
+            f"空闲超时={idle_timeout or '关闭'}s, 停机即停={stop_on_device_idle}"
+        )
+        logger.info("=" * 60)
+        if self.debug_mode:
+            logger.warning("[旁观采集] 当前为 debug_mode，寄存器恒返回 0，采集将空转到停止条件命中")
+
+        start_ts = time.time()
+        start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        collected = 0
+        missed = 0
+        last_count = None
+        prev_snapshot = None
+        last_new_ts = start_ts
+        device_idle_since = None
+        stop_reason = "max_duration"
+
+        self._observer_running = True
+        try:
+            while True:
+                now = time.time()
+                if max_duration > 0 and now - start_ts >= max_duration:
+                    stop_reason = "max_duration"
+                    break
+                if target_count > 0 and collected >= target_count:
+                    stop_reason = "target_count"
+                    break
+                if idle_timeout > 0 and now - last_new_ts >= idle_timeout:
+                    stop_reason = "idle_timeout"
+                    break
+
+                try:
+                    self._ensure_modbus_connected()
+                    # 先读数据后读计数，保证拿到的是跳变前的那一拍
+                    snapshot = self._observer_read_snapshot()
+                    count = _observer_cast_int(self.data_current_completed_count)
+                except Exception as e:
+                    logger.warning(f"[旁观采集] 本轮读取失败，{poll_interval}s 后重试: {e}")
+                    time.sleep(poll_interval)
+                    continue
+
+                if stop_on_device_idle:
+                    try:
+                        device_running = bool(self._sys_start_status()) and bool(self._sys_auto_status())
+                    except Exception as e:
+                        logger.warning(f"[旁观采集] 读取设备运行状态失败，本轮不做停机判定: {e}")
+                        device_running = True
+                    if device_running:
+                        device_idle_since = None
+                    else:
+                        device_idle_since = device_idle_since or now
+                        if now - device_idle_since >= device_idle_grace:
+                            stop_reason = "device_idle"
+                            break
+
+                if last_count is None:
+                    last_count = count
+                    logger.info(f"[旁观采集] 基线计数={count}，从下一次跳变开始记录")
+                elif count != last_count:
+                    if count < last_count:
+                        logger.warning(f"[旁观采集] 计数回退 {last_count} → {count}，视为设备复位，仅重置基线")
+                    else:
+                        step = count - last_count
+                        if step > 1:
+                            missed += step - 1
+                            logger.warning(f"[旁观采集] 计数跳变 {last_count} → {count}，漏采 {step - 1} 颗")
+                        row_snapshot = prev_snapshot or snapshot
+                        try:
+                            self._observer_write_row(row_snapshot, assembly_file, neware_file, battery_system)
+                            collected += 1
+                            logger.info(
+                                f"[旁观采集] 第 {collected} 颗已记录: 计数={count}, "
+                                f"电池码={row_snapshot['coin_cell_code']}, 电解液码={row_snapshot['electrolyte_code']}, "
+                                f"极片重={row_snapshot['pole_weight']}"
+                            )
+                        except Exception as e:
+                            logger.error(f"[旁观采集] 写入 CSV 失败（跳过本颗，不中断采集）: {e}")
+                    last_count = count
+                    last_new_ts = now
+
+                prev_snapshot = snapshot
+                time.sleep(poll_interval)
+        finally:
+            self._observer_running = False
+
+        end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logger.info("=" * 60)
+        logger.info(f"[旁观采集] 结束，停止原因={stop_reason}，共采集 {collected} 颗，漏采 {missed} 颗")
+        logger.info("=" * 60)
+
+        return {
+            "success": True,
+            "stop_reason": stop_reason,
+            "collected": collected,
+            "missed": missed,
+            "csv_assembly_file": assembly_file,
+            "csv_neware_file": neware_file,
+            "start_time": start_time,
+            "end_time": end_time,
         }
 
     

@@ -28,6 +28,7 @@ REG_DATA_AXIS_Z_POS,FLOAT32,,,,hold_register,10008,Data axis Z position
 REG_DATA_POLE_WEIGHT,FLOAT32,,,,hold_register,10010,Current coin-cell positive-electrode weight
 REG_DATA_ASSEMBLY_PER_TIME,FLOAT32,,,,hold_register,10012,Current single-cell assembly time
 REG_DATA_ASSEMBLY_PRESSURE,INT16,,,,hold_register,10014,Current coin-cell assembly pressing force
+REG_DATA_TARGET_ASSEMBLY_PRESSURE,INT16,,,,hold_register,490,Target coin-cell assembly pressing force set on the device HMI (MW490 R)
 REG_DATA_ELECTROLYTE_VOLUME,INT16,,,,hold_register,10016,Current electrolyte filling volume
 REG_DATA_COIN_TYPE,INT16,,,,hold_register,10018,Assembly parameter: electrode stacking mode (7/8)
 REG_DATA_CURRENT_ASSEMBLING_COUNT,INT16,,,,hold_register,10072,Current in-progress assembly cell count (R)
