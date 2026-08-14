@@ -917,6 +917,7 @@ class EdgeScheduler:
             }
 
     def cancel_workflow(self, workflow_id: str) -> bool:
+        jobs_to_cancel: List[str] = []
         with self._lock:
             run = self._workflows.get(workflow_id)
             if run is None:
@@ -926,6 +927,7 @@ class EdgeScheduler:
                 job_id for job_id, j in self._inflight.items() if j.workflow_id == workflow_id
             ]
             for job_id in removed:
+                jobs_to_cancel.append(job_id)
                 job = self._inflight.pop(job_id, None)
                 self._job_resource_locks.pop(job_id, None)
                 action_trace = self._job_spans.pop(job_id, None)
@@ -938,6 +940,21 @@ class EdgeScheduler:
                 if job is not None:
                     self._record_timeline(job, success=False, state="canceled")
             notifications = self._collect_terminal_notifications()
+
+        cancel_job = getattr(self._dispatcher, "cancel_job", None)
+        if callable(cancel_job):
+            for job_id in jobs_to_cancel:
+                try:
+                    if not cancel_job(job_id):
+                        logger.warning(
+                            "[EdgeScheduler] execution backend did not cancel job %s",
+                            job_id,
+                        )
+                except Exception:  # noqa: BLE001 - 调度终态不能被执行器取消异常回滚
+                    logger.exception(
+                        "[EdgeScheduler] execution backend cancel failed for job %s",
+                        job_id,
+                    )
         self._fire_notifications(notifications)
         return True
 

@@ -33,9 +33,16 @@ class CallbackDispatcher:
 class RecordingDispatcher:
     def __init__(self) -> None:
         self.dispatched: List[DispatchPayload] = []
+        self.cancelled: List[str] = []
 
     def dispatch(self, payload: DispatchPayload) -> None:
         self.dispatched.append(payload)
+
+    def cancel_job(self, job_id: str) -> bool:
+        """记录取消请求；真实执行器由 JobExecutionBackend 实现同名接口。"""
+
+        self.cancelled.append(job_id)
+        return True
 
 
 def build_job_start_payload(

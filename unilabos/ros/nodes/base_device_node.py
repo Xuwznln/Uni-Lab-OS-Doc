@@ -98,7 +98,7 @@ from unilabos.utils.tracing import (
     submit_with_context,
 )
 from unilabos.utils.type_check import get_type_class, TypeEncoder, get_result_info_str
-from unilabos.utils.exception import DeviceActionError
+from unilabos.utils.exception import ActionResultError, DeviceActionError
 
 if TYPE_CHECKING:
     from pylabrobot.resources import Resource as ResourcePLR
@@ -142,6 +142,55 @@ def _native_driver_result_failed(
     if value is False:
         return True
     return isinstance(value, dict) and value.get("success") is False
+
+
+def _coerce_device_error_info(
+    action_name: str,
+    value: Any,
+    error_text: str,
+) -> Dict[str, Any]:
+    """把原生 Action 的失败返回归一化为 Host 可匹配的结构化错误。"""
+
+    source: Dict[str, Any] = {}
+    if isinstance(value, dict):
+        provided = value.get("error_info")
+        source = dict(provided) if isinstance(provided, dict) else value
+
+    exception_type = str(source.get("exception_type") or "ActionResultError")
+    raw_mro = source.get("exception_mro")
+    if isinstance(raw_mro, list) and raw_mro:
+        exception_mro = [str(name) for name in raw_mro]
+    elif exception_type == "ActionResultError":
+        exception_mro = [
+            error_class.__name__ for error_class in ActionResultError.__mro__
+        ]
+    else:
+        exception_mro = [
+            exception_type,
+            "Exception",
+            "BaseException",
+            "object",
+        ]
+
+    error_message = str(
+        source.get("error_message")
+        or source.get("error")
+        or source.get("message")
+        or source.get("reason")
+        or error_text
+        or "device action reported an unsuccessful result"
+    )
+    error_info: Dict[str, Any] = {
+        "action_name": str(source.get("action_name") or action_name),
+        "exception_type": exception_type,
+        "exception_mro": exception_mro,
+        "error_message": error_message,
+        "traceback": str(source.get("traceback") or error_text or error_message),
+    }
+    for key in ("category", "severity"):
+        if source.get(key) is not None:
+            error_info[key] = str(source[key])
+    return error_info
 
 
 class RclpyAsyncMutex:
@@ -2779,6 +2828,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         execution_error_info["severity"] = str(
                             getattr(severity, "value", severity)
                         )
+                elif not execution_success:
+                    execution_error_info = _coerce_device_error_info(
+                        report_action_name,
+                        _raw_result,
+                        execution_error,
+                    )
 
             # 清理 feedback timer
             if _feedback_timer is not None:

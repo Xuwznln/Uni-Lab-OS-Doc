@@ -77,6 +77,9 @@ class JobExecutionBackend:
         self._running = False
         self._pending = 0
         self._pending_lock = threading.Lock()
+        # cancel 与 worker.start 可能并发；tombstone 防止已取消的排队事件晚到后仍发 Goal。
+        self._canceled_job_ids: Set[str] = set()
+        self._canceled_job_ids_lock = threading.Lock()
 
     # ── 生命周期 ─────────────────────────────────────────────
 
@@ -114,6 +117,8 @@ class JobExecutionBackend:
 
     def dispatch(self, payload: DispatchPayload) -> None:
         """接收调度器下发的 job_start 载荷：入队/直发（同 _handle_job_start 语义）。"""
+        with self._canceled_job_ids_lock:
+            self._canceled_job_ids.discard(payload["job_id"])
         job_info = JobInfo(
             job_id=payload["job_id"],
             task_id=payload.get("task_id", ""),
@@ -152,6 +157,66 @@ class JobExecutionBackend:
             self._put_event(("start", job_info), context=job_info.trace_context)
         else:
             logger.info("[JobExecutionBackend] job %s queued", job_log)
+
+    def cancel_job(self, job_id: str) -> bool:
+        """取消排队/运行 job，并把真实执行取消传递给 HostNode。"""
+
+        job_info = self.device_manager.get_job_info(job_id)
+        if job_info is None:
+            return False
+
+        with self._canceled_job_ids_lock:
+            self._canceled_job_ids.add(job_id)
+
+        was_started = job_info.status == JobStatus.STARTED
+        success, next_job, _lock_became_free = self.device_manager.cancel_job(job_id)
+        if not success:
+            return False
+
+        if was_started:
+            host_node = self._host_node_getter()
+            if host_node is not None:
+                cancel = getattr(host_node, "cancel_job", None)
+                if not callable(cancel):
+                    cancel = getattr(host_node, "cancel_goal", None)
+                if callable(cancel):
+                    try:
+                        if not cancel(job_id):
+                            logger.warning(
+                                "[JobExecutionBackend] Host did not find job %s to cancel",
+                                job_id,
+                            )
+                    except Exception:  # noqa: BLE001 - 状态机已取消，物理取消失败仅记录
+                        logger.exception(
+                            "[JobExecutionBackend] Host cancel failed for job %s",
+                            job_id,
+                        )
+
+        # 清理事件排在既有 start 事件之后；既防止晚到 start 发出 Goal，也避免 tombstone 累积。
+        self._put_event(("cancel_cleanup", job_id))
+
+        if next_job is not None:
+            self._put_event(("start", next_job), context=next_job.trace_context)
+
+        self._emit_cancel_event(job_info)
+        return True
+
+    def _emit_cancel_event(self, job: JobInfo) -> None:
+        if self._monitor is None:
+            return
+        try:
+            self._monitor.emit(
+                "action",
+                "job_canceled",
+                {
+                    "job_id": job.job_id,
+                    "task_id": job.task_id,
+                    "device_id": job.device_id,
+                    "action_name": job.action_name,
+                },
+            )
+        except Exception:  # noqa: BLE001 - 监控故障不影响取消
+            pass
 
     def add_job_finished_listener(self, listener: Callable[..., None]) -> None:
         """注册完成回调；兼容 3 参 (job_id, success, ret_value) 旧签名。"""
@@ -305,6 +370,9 @@ class JobExecutionBackend:
                             self._handle_finished(event[1], event[2], event[3], suc_type)
                         elif event[0] == "device_status":
                             self._write_device_property(event[1], event[2], event[3])
+                        elif event[0] == "cancel_cleanup":
+                            with self._canceled_job_ids_lock:
+                                self._canceled_job_ids.discard(event[1])
             except Exception:  # noqa: BLE001 - worker 不允许死
                 logger.exception("[JobExecutionBackend] event %s failed", event[0])
             finally:
@@ -312,6 +380,16 @@ class JobExecutionBackend:
                     self._pending -= 1
 
     def _start_goal(self, job: JobInfo) -> None:
+        with self._canceled_job_ids_lock:
+            canceled = job.job_id in self._canceled_job_ids
+        current_job = self.device_manager.get_job_info(job.job_id)
+        if canceled or current_job is None or current_job.status != JobStatus.STARTED:
+            logger.info(
+                "[JobExecutionBackend] skip canceled/stale start event for job %s",
+                job.job_id,
+            )
+            return
+
         job_log = format_job_log(job.job_id, job.task_id, job.device_id, job.action_name)
         queue_item = QueueItem(
             task_type="job_call_back_status",
@@ -343,6 +421,18 @@ class JobExecutionBackend:
                 sample_material=job.sample_material,
                 server_info=job.server_info,
             )
+            with self._canceled_job_ids_lock:
+                canceled_after_send = job.job_id in self._canceled_job_ids
+            if canceled_after_send:
+                cancel = getattr(host_node, "cancel_job", None)
+                if not callable(cancel):
+                    cancel = getattr(host_node, "cancel_goal", None)
+                if callable(cancel):
+                    if not cancel(job.job_id):
+                        logger.warning(
+                            "[JobExecutionBackend] Host did not find late-canceled job %s",
+                            job.job_id,
+                        )
             logger.info("[JobExecutionBackend] goal sent for job %s", job_log)
         except Exception:  # noqa: BLE001 - 启动失败必须走完结流程释放锁
             logger.exception("[JobExecutionBackend] send_goal failed for job %s", job_log)
@@ -353,6 +443,8 @@ class JobExecutionBackend:
     def _handle_finished(
         self, job_id: str, success: bool, ret_value: Any, suc_type: str = "normal"
     ) -> None:
+        with self._canceled_job_ids_lock:
+            self._canceled_job_ids.discard(job_id)
         finished_job = self.device_manager.get_job_info(job_id)
         # 出队下一个同设备 job 并启动（锁保持 busy）
         next_job, _lock_became_free = self.device_manager.end_job(job_id)

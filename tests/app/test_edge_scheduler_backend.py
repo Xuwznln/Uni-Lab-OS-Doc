@@ -25,6 +25,7 @@ class FakeHostNode:
         self.auto_complete = auto_complete
         self.ret_values = ret_values or {}
         self.lock = threading.Lock()
+        self.canceled_jobs: List[str] = []
 
     def send_goal(self, item: QueueItem, action_type: str, action_kwargs: Dict[str, Any],
                   sample_material: Dict[str, Any], server_info: Any = None) -> None:
@@ -36,6 +37,10 @@ class FakeHostNode:
             backend.publish_job_status(
                 {}, item, "success", serialize_result_info("", True, ret)
             )
+
+    def cancel_job(self, job_id: str) -> bool:
+        self.canceled_jobs.append(job_id)
+        return True
 
 
 def _node(node_id: str, device: str = "dev1", action: str = "run") -> WorkflowNode:
@@ -136,6 +141,45 @@ class TestBackendAlone:
             assert backend.wait_idle()
             assert received == []
             assert backend.busy_device_action_keys() == {"/devices/d1/run"}
+        finally:
+            backend.stop()
+
+    def test_cancel_running_job_reaches_host(self):
+        backend, host = _make_backend(auto_complete=False)
+        try:
+            backend.dispatch(build_job_start_payload(
+                job_id="j1", task_id="t", workflow_id="wf", node_id="A",
+                device_id="d1", action_name="run", action_type="goal", action_args={},
+            ))
+            assert backend.wait_idle()
+
+            assert backend.cancel_job("j1")
+            assert backend.wait_idle()
+
+            assert host.canceled_jobs == ["j1"]
+            assert backend.busy_device_action_keys() == set()
+            assert backend._canceled_job_ids == set()
+        finally:
+            backend.stop()
+
+    def test_cancel_before_worker_start_suppresses_stale_goal(self):
+        ref: Dict[str, Any] = {}
+        host = FakeHostNode(ref, auto_complete=False)
+        backend = JobExecutionBackend(host_node_getter=lambda: host)
+        ref["backend"] = backend
+        backend.dispatch(build_job_start_payload(
+            job_id="j1", task_id="t", workflow_id="wf", node_id="A",
+            device_id="d1", action_name="run", action_type="goal", action_args={},
+        ))
+
+        assert backend.cancel_job("j1")
+
+        backend.start()
+        try:
+            assert backend.wait_idle()
+            assert host.sent_goals == []
+            assert host.canceled_jobs == ["j1"]
+            assert backend._canceled_job_ids == set()
         finally:
             backend.stop()
 

@@ -215,6 +215,7 @@ class TestCancel:
         scheduler, dispatcher = _make()
         r1 = scheduler.submit_workflow(_chain_spec("wf1"))
         assert scheduler.cancel_workflow("wf1") is True
+        assert dispatcher.cancelled == [r1["dispatched"][0]["job_id"]]
         # 完成回调后不再推进
         scheduler.on_job_finished(r1["dispatched"][0]["job_id"], True)
         assert len(dispatcher.dispatched) == 1

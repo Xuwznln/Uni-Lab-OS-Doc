@@ -6,7 +6,10 @@ import asyncio
 
 from unilabos.devices.virtual.virtual_heatchill import VirtualHeatChill
 from unilabos.devices.virtual.virtual_transferpump import VirtualTransferPump
-from unilabos.ros.nodes.base_device_node import _native_driver_result_failed
+from unilabos.ros.nodes.base_device_node import (
+    _coerce_device_error_info,
+    _native_driver_result_failed,
+)
 
 
 class _InstantROSNode:
@@ -85,3 +88,39 @@ def test_native_action_failure_is_not_confused_with_json_command_boolean_data() 
     assert not _native_driver_result_failed("heat_chill", HeatChill, {"success": True})
     assert not _native_driver_result_failed("auto-is_empty", UniLabJsonCommand, False)
     assert not _native_driver_result_failed("_execute_driver_command", HeatChill, False)
+
+
+def test_native_false_result_gets_structured_action_result_error() -> None:
+    error_info = _coerce_device_error_info(
+        "heat_chill",
+        False,
+        "driver returned an unsuccessful native action result: False",
+    )
+
+    assert error_info["action_name"] == "heat_chill"
+    assert error_info["exception_type"] == "ActionResultError"
+    assert error_info["exception_mro"][:2] == ["ActionResultError", "RuntimeError"]
+    assert "unsuccessful native action result" in error_info["error_message"]
+
+
+def test_native_structured_failure_preserves_driver_error_classification() -> None:
+    error_info = _coerce_device_error_info(
+        "set_position",
+        {
+            "success": False,
+            "error_info": {
+                "exception_type": "CommunicationError",
+                "exception_mro": ["CommunicationError", "Exception"],
+                "error_message": "serial port closed",
+                "category": "communication",
+                "severity": "recoverable",
+            },
+        },
+        "native result failed",
+    )
+
+    assert error_info["exception_type"] == "CommunicationError"
+    assert error_info["exception_mro"] == ["CommunicationError", "Exception"]
+    assert error_info["error_message"] == "serial port closed"
+    assert error_info["category"] == "communication"
+    assert error_info["severity"] == "recoverable"
