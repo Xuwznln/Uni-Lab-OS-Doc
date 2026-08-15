@@ -182,6 +182,7 @@ class _FakeHost:
         self.backend: Optional[JobExecutionBackend] = None
         self.devices_instances: Dict[str, Any] = {}
         self.pending_error_decisions: List[Dict[str, Any]] = []
+        self.resolved_error_decisions: Dict[str, Dict[str, Any]] = {}
         self.decisions: List[Dict[str, Any]] = []
 
     def send_goal(self, item: QueueItem, action_type, action_kwargs,
@@ -209,9 +210,40 @@ class _FakeHost:
         )
         if report is None:
             return False
+        if (
+            not job_id
+            or decision.get("decision_id") != decision_id
+            or decision.get("job_id") != report.get("job_id")
+            or decision.get("device_id") != report.get("device_id")
+        ):
+            return False
         self.pending_error_decisions.remove(report)
         self.decisions.append(dict(decision))
+        self.resolved_error_decisions[decision_id] = {
+            "decision_id": decision_id,
+            "job_id": report["job_id"],
+            "device_id": report["device_id"],
+            "selected_action": decision.get("action") or "abort",
+            "reason": decision.get("reason") or "",
+        }
         return True
+
+    def get_resolved_action_error_decision(
+        self,
+        decision_id,
+        job_id,
+        device_id,
+        *,
+        decision_target=None,
+    ):
+        report = self.resolved_error_decisions.get(decision_id)
+        if (
+            report is None
+            or report.get("job_id") != job_id
+            or report.get("device_id") != device_id
+        ):
+            return None
+        return dict(report)
 
 
 class TestBackendSucTypePropagation:
@@ -268,6 +300,14 @@ class TestLocalErrorDecisionChannel:
                         {"action": "skip", "label": "跳过"}],
         }
 
+    def _decision(self, decision_id="d-1", action="retry"):
+        return {
+            "decision_id": decision_id,
+            "job_id": "job-9",
+            "device_id": "dev1",
+            "action": action,
+        }
+
     def test_store_list_resolve(self):
         backend, host = self._make()
         host.pending_error_decisions.append(self._report())
@@ -275,18 +315,27 @@ class TestLocalErrorDecisionChannel:
         assert len(decisions) == 1
         assert decisions[0]["decision_id"] == "d-1"
 
-        assert backend.resolve_error_decision("d-1", {"action": "retry"}) is True
+        assert backend.resolve_error_decision(
+            "d-1",
+            self._decision(),
+        ) is True
         assert host.decisions[0]["action"] == "retry"
         assert backend.list_error_decisions() == []
 
     def test_resolve_unknown_decision(self):
         backend, _ = self._make()
-        assert backend.resolve_error_decision("nope", {"action": "skip"}) is False
+        assert backend.resolve_error_decision(
+            "nope",
+            self._decision("nope", "skip"),
+        ) is False
 
     def test_host_gone_has_no_report(self):
         """Host 不可用时微后端不能伪造设备侧 pending。"""
         backend = JobExecutionBackend(host_node_getter=lambda: None)
-        assert backend.resolve_error_decision("d-1", {"action": "retry"}) is False
+        assert backend.resolve_error_decision(
+            "d-1",
+            self._decision(),
+        ) is False
         assert backend.list_error_decisions() == []
 
 
@@ -311,12 +360,21 @@ class TestErrorDecisionRest:
         assert resp.status_code == 200
         assert resp.json()["decisions"][0]["decision_id"] == "d-rest"
 
-        resp = client.post("/api/v1/error-decisions/d-rest", json={"action": "skip"})
+        incomplete = client.post(
+            "/api/v1/error-decisions/d-rest",
+            json={"action": "skip"},
+        )
+        assert incomplete.status_code == 422
+
+        request = TestLocalErrorDecisionChannel()._decision("d-rest", "skip")
+        resp = client.post("/api/v1/error-decisions/d-rest", json=request)
         assert resp.status_code == 200
         assert host.decisions[0]["action"] == "skip"
 
-        resp = client.post("/api/v1/error-decisions/d-rest", json={"action": "skip"})
-        assert resp.status_code == 404
+        resp = client.post("/api/v1/error-decisions/d-rest", json=request)
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "resolved"
+        assert resp.json()["replayed"] is True
 
     def test_backend_absent_503(self):
         from fastapi import FastAPI

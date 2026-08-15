@@ -106,6 +106,7 @@ def store_job_result(
         "success": 4,  # SUCCEEDED
         "failed": 6,  # ABORTED
         "cancelled": 5,  # CANCELED
+        "canceled": 5,  # CANCELED (canonical spelling)
         "running": 2,  # EXECUTING
     }
     status_int = status_map.get(status, 0)

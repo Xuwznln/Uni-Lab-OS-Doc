@@ -350,6 +350,31 @@ class JobExecutionBackend:
             )
         )
 
+    def get_resolved_error_decision(
+        self,
+        decision_id: str,
+        job_id: str,
+        device_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """读取 Host 短期 tombstone，供 REST 重试返回稳定终态。"""
+
+        host_node = self._host_node_getter()
+        if host_node is None:
+            return None
+        get_resolved = getattr(
+            host_node,
+            "get_resolved_action_error_decision",
+            None,
+        )
+        if not callable(get_resolved):
+            return None
+        return get_resolved(
+            decision_id,
+            job_id,
+            device_id,
+            decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
+        )
+
     # ── worker ───────────────────────────────────────────────
 
     def _run(self) -> None:

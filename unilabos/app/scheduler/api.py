@@ -108,6 +108,9 @@ class JobFinishIn(BaseModel):
 class ErrorDecisionIn(BaseModel):
     """人工审批结果（与云端 ws job_error_decision 消息同语义）。"""
 
+    decision_id: str = Field(min_length=1)
+    job_id: str = Field(min_length=1)
+    device_id: str = Field(min_length=1)
     action: str = ""  # retry / skip / abort / 其它已配置 option
     option: Optional[Dict[str, Any]] = None  # 或直接回传选中的 option 对象
     result: Any = None  # operator_intervention 的服务端结果
@@ -459,7 +462,17 @@ def create_scheduler_router(
     def resolve_error_decision(
         decision_id: str, body: ErrorDecisionIn
     ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {"reason": body.reason}
+        if body.decision_id != decision_id:
+            raise HTTPException(
+                status_code=409,
+                detail="path decision_id does not match request body",
+            )
+        payload: Dict[str, Any] = {
+            "decision_id": body.decision_id,
+            "job_id": body.job_id,
+            "device_id": body.device_id,
+            "reason": body.reason,
+        }
         if body.option is not None:
             payload["option"] = body.option
         if body.action:
@@ -467,6 +480,23 @@ def create_scheduler_router(
         if body.result is not None:
             payload["result"] = body.result
         if not _backend().resolve_error_decision(decision_id, payload):
+            resolved = _backend().get_resolved_error_decision(
+                decision_id,
+                body.job_id,
+                body.device_id,
+            )
+            if resolved is not None:
+                if resolved.get("reason") == "decision_timeout":
+                    raise HTTPException(
+                        status_code=409,
+                        detail="action error decision expired",
+                    )
+                return {
+                    "decision_id": decision_id,
+                    "status": "resolved",
+                    "replayed": True,
+                    "resolution": resolved,
+                }
             raise HTTPException(
                 status_code=404,
                 detail=f"decision {decision_id} not pending (resolved / timed out / device gone)",
