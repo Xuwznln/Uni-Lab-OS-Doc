@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 
-WORKFLOW_SCHEMA_VERSION = 1
+WORKFLOW_SCHEMA_VERSION = 2
 
 
 _WORKFLOW_TASK_SCHEMA = """
@@ -381,50 +381,169 @@ CREATE TABLE IF NOT EXISTS workflow_intervention (
     meta_data TEXT NOT NULL DEFAULT '{}' CHECK (
         json_valid(meta_data) AND json_type(meta_data) = 'object'
     ),
-    workflow_task_uuid TEXT NOT NULL,
-    workflow_node_job_uuid TEXT NOT NULL,
-    edge_agent_uuid TEXT NOT NULL,
-    revision INTEGER NOT NULL CHECK (revision > 0),
-    status TEXT NOT NULL CHECK (status IN ('open', 'selected', 'superseded')),
-    options TEXT NOT NULL CHECK (json_valid(options) AND json_type(options) = 'array'),
-    resume_control_status TEXT NOT NULL CHECK (
-        resume_control_status IN ('active', 'paused')
+    kind TEXT NOT NULL DEFAULT 'action_error' CHECK (
+        kind IN ('action_error', 'legacy')
     ),
-    selected_option_id TEXT,
-    selected_option TEXT NOT NULL DEFAULT '{}' CHECK (
-        json_valid(selected_option) AND json_type(selected_option) = 'object'
+    state TEXT NOT NULL CHECK (
+        state IN (
+            'pending', 'decision_submitted', 'resolved', 'superseded',
+            'expired', 'canceled'
+        )
     ),
-    decision_idempotency_key TEXT,
-    edge_command_uuid TEXT,
+    aggregate_version INTEGER NOT NULL DEFAULT 1 CHECK (aggregate_version > 0),
+    workflow_task_uuid TEXT,
+    workflow_node_job_uuid TEXT,
+    logical_job_id TEXT NOT NULL,
+    device_uuid TEXT NOT NULL,
+    device_id_snapshot TEXT,
+    host_uuid TEXT NOT NULL,
+    authority_epoch TEXT NOT NULL,
+    attempt_id TEXT NOT NULL,
+    attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+    attempt_kind TEXT NOT NULL CHECK (
+        attempt_kind IN ('original', 'retry', 'fallback', 'legacy')
+    ),
+    required_payload TEXT NOT NULL CHECK (
+        json_valid(required_payload) AND json_type(required_payload) = 'object'
+    ),
+    required_fingerprint TEXT NOT NULL,
+    options TEXT NOT NULL CHECK (
+        json_valid(options) AND json_type(options) = 'array'
+    ),
+    expires_at TEXT NOT NULL,
+    selected_action TEXT,
+    resolution_reason TEXT,
+    resolved_payload TEXT NOT NULL DEFAULT '{}' CHECK (
+        json_valid(resolved_payload) AND json_type(resolved_payload) = 'object'
+    ),
+    resolved_at TEXT,
+    job_status_version INTEGER NOT NULL DEFAULT 0 CHECK (job_status_version >= 0),
     opened_at TEXT NOT NULL,
-    decided_at TEXT,
-    FOREIGN KEY(workflow_task_uuid) REFERENCES workflow_task(uuid),
-    FOREIGN KEY(workflow_node_job_uuid) REFERENCES workflow_node_job(uuid),
     CHECK (
         (
-            status = 'open' AND selected_option_id IS NULL
-            AND decision_idempotency_key IS NULL AND edge_command_uuid IS NULL
-            AND decided_at IS NULL
+            state IN ('pending', 'decision_submitted')
+            AND resolved_at IS NULL
         )
         OR
         (
-            status = 'selected' AND selected_option_id IS NOT NULL
-            AND decision_idempotency_key IS NOT NULL
-            AND edge_command_uuid IS NOT NULL AND decided_at IS NOT NULL
+            state IN ('resolved', 'superseded', 'expired', 'canceled')
+            AND resolved_at IS NOT NULL
         )
-        OR status = 'superseded'
     )
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_intervention_job_revision
-    ON workflow_intervention(workflow_node_job_uuid, revision);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_intervention_job_open
-    ON workflow_intervention(workflow_node_job_uuid)
-    WHERE deleted_at IS NULL AND status = 'open';
-CREATE INDEX IF NOT EXISTS idx_workflow_intervention_status_opened
-    ON workflow_intervention(status, opened_at, uuid) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_intervention_required_fingerprint
+    ON workflow_intervention(uuid, required_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_workflow_intervention_state_opened
+    ON workflow_intervention(state, opened_at, uuid) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_workflow_intervention_task
     ON workflow_intervention(workflow_task_uuid, opened_at, uuid)
     WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_workflow_intervention_logical_job
+    ON workflow_intervention(logical_job_id, opened_at, uuid)
+    WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS workflow_intervention_command (
+    command_id TEXT PRIMARY KEY,
+    create_time TEXT NOT NULL,
+    update_time TEXT NOT NULL,
+    decision_id TEXT NOT NULL,
+    trusted_actor TEXT NOT NULL,
+    authority_epoch TEXT NOT NULL,
+    request_fingerprint TEXT NOT NULL,
+    request_payload TEXT NOT NULL CHECK (
+        json_valid(request_payload) AND json_type(request_payload) = 'object'
+    ),
+    selected_action TEXT NOT NULL,
+    reason TEXT,
+    expected_intervention_version INTEGER NOT NULL CHECK (
+        expected_intervention_version >= 0
+    ),
+    terminal_status TEXT NOT NULL CHECK (
+        terminal_status IN ('pending', 'completed', 'rejected')
+    ),
+    http_status INTEGER NOT NULL,
+    result_snapshot TEXT NOT NULL DEFAULT '{}' CHECK (
+        json_valid(result_snapshot) AND json_type(result_snapshot) = 'object'
+    ),
+    error_snapshot TEXT NOT NULL DEFAULT '{}' CHECK (
+        json_valid(error_snapshot) AND json_type(error_snapshot) = 'object'
+    ),
+    resolved_version INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_intervention_command_decision
+    ON workflow_intervention_command(decision_id, create_time, command_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_intervention_command_status
+    ON workflow_intervention_command(terminal_status, update_time, command_id);
+
+CREATE TABLE IF NOT EXISTS workflow_event_outbox (
+    global_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    occurred_at TEXT NOT NULL,
+    aggregate_type TEXT NOT NULL CHECK (
+        aggregate_type IN ('intervention', 'job', 'hold')
+    ),
+    aggregate_id TEXT NOT NULL,
+    aggregate_version INTEGER NOT NULL CHECK (aggregate_version > 0),
+    event_type TEXT NOT NULL,
+    causation_kind TEXT NOT NULL,
+    causation_id TEXT NOT NULL,
+    correlation_id TEXT NOT NULL,
+    payload TEXT NOT NULL CHECK (
+        json_valid(payload) AND json_type(payload) = 'object'
+    ),
+    published_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_event_outbox_aggregate_version
+    ON workflow_event_outbox(aggregate_type, aggregate_id, aggregate_version);
+CREATE INDEX IF NOT EXISTS idx_workflow_event_outbox_unpublished
+    ON workflow_event_outbox(global_sequence)
+    WHERE published_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS workflow_execution_hold (
+    hold_id TEXT PRIMARY KEY,
+    create_time TEXT NOT NULL,
+    update_time TEXT NOT NULL,
+    cause_id TEXT NOT NULL,
+    scope_type TEXT NOT NULL CHECK (
+        scope_type IN ('device', 'site', 'workflow', 'action', 'job')
+    ),
+    scope_uuid TEXT NOT NULL,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'cleared')),
+    aggregate_version INTEGER NOT NULL DEFAULT 1 CHECK (aggregate_version > 0),
+    created_at TEXT NOT NULL,
+    cleared_at TEXT,
+    meta_data TEXT NOT NULL DEFAULT '{}' CHECK (
+        json_valid(meta_data) AND json_type(meta_data) = 'object'
+    ),
+    CHECK (
+        (status = 'active' AND cleared_at IS NULL)
+        OR (status = 'cleared' AND cleared_at IS NOT NULL)
+    )
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_execution_hold_cause_scope
+    ON workflow_execution_hold(cause_id, scope_type, scope_uuid);
+CREATE INDEX IF NOT EXISTS idx_workflow_execution_hold_active_scope
+    ON workflow_execution_hold(scope_type, scope_uuid, created_at, hold_id)
+    WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS workflow_job_status_projection (
+    logical_job_id TEXT PRIMARY KEY,
+    create_time TEXT NOT NULL,
+    update_time TEXT NOT NULL,
+    device_uuid TEXT NOT NULL,
+    action_name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('queued', 'executing', 'success', 'failed', 'canceled', 'unknown')
+    ),
+    status_version INTEGER NOT NULL CHECK (status_version > 0),
+    terminal INTEGER NOT NULL DEFAULT 0 CHECK (terminal IN (0, 1)),
+    payload TEXT NOT NULL CHECK (
+        json_valid(payload) AND json_type(payload) = 'object'
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_job_status_projection_state
+    ON workflow_job_status_projection(status, update_time, logical_job_id);
 
 CREATE TABLE IF NOT EXISTS workflow_manual_confirmation (
     uuid TEXT PRIMARY KEY,
@@ -610,6 +729,73 @@ def _rebuild_frontend_event(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE frontend_event_v0")
 
 
+def _rebuild_workflow_intervention_v2(conn: sqlite3.Connection) -> None:
+    """把 v1 的通用人工介入行迁移为可持久重放的 Action 决策聚合。"""
+
+    for index_name in (
+        "ux_workflow_intervention_job_revision",
+        "ux_workflow_intervention_job_open",
+        "idx_workflow_intervention_status_opened",
+        "idx_workflow_intervention_task",
+    ):
+        conn.execute(f"DROP INDEX IF EXISTS {index_name}")
+    conn.execute("ALTER TABLE workflow_intervention RENAME TO workflow_intervention_v1")
+    _execute_script(conn, _RUNTIME_FACT_SCHEMA)
+    conn.execute(
+        """
+        INSERT INTO workflow_intervention(
+            uuid, create_time, update_time, deleted_at, description, meta_data,
+            kind, state, aggregate_version, workflow_task_uuid,
+            workflow_node_job_uuid, logical_job_id, device_uuid,
+            device_id_snapshot, host_uuid, authority_epoch, attempt_id,
+            attempt_no, attempt_kind, required_payload, required_fingerprint,
+            options, expires_at, selected_action, resolution_reason,
+            resolved_payload, resolved_at, job_status_version, opened_at
+        )
+        SELECT
+            uuid,
+            create_time,
+            update_time,
+            deleted_at,
+            description,
+            meta_data,
+            'legacy',
+            CASE status
+                WHEN 'open' THEN 'pending'
+                WHEN 'selected' THEN 'resolved'
+                ELSE 'superseded'
+            END,
+            revision,
+            workflow_task_uuid,
+            workflow_node_job_uuid,
+            workflow_node_job_uuid,
+            edge_agent_uuid,
+            edge_agent_uuid,
+            edge_agent_uuid,
+            'legacy:' || edge_agent_uuid,
+            uuid,
+            revision,
+            CASE WHEN revision = 1 THEN 'original' ELSE 'legacy' END,
+            json_object(
+                'legacy', 1,
+                'options', json(options),
+                'resume_control_status', resume_control_status
+            ),
+            COALESCE(decision_idempotency_key, 'legacy:' || uuid),
+            options,
+            COALESCE(decided_at, opened_at),
+            selected_option_id,
+            CASE WHEN status = 'superseded' THEN 'legacy_superseded' ELSE NULL END,
+            selected_option,
+            CASE WHEN status = 'open' THEN NULL ELSE COALESCE(decided_at, update_time) END,
+            0,
+            opened_at
+        FROM workflow_intervention_v1
+        """
+    )
+    conn.execute("DROP TABLE workflow_intervention_v1")
+
+
 def migrate_workflow_schema(conn: sqlite3.Connection) -> None:
     """把任意旧 Workflow DB 原地升级到当前 Backend-shaped 结构。"""
 
@@ -623,6 +809,13 @@ def migrate_workflow_schema(conn: sqlite3.Connection) -> None:
     event_columns = _columns(conn, "frontend_event")
     if "sequence" not in event_columns:
         _rebuild_frontend_event(conn)
+
+    intervention_columns = _columns(conn, "workflow_intervention")
+    if intervention_columns and (
+        "kind" not in intervention_columns
+        or "aggregate_version" not in intervention_columns
+    ):
+        _rebuild_workflow_intervention_v2(conn)
 
     # v0 的短索引会被兼容 ``_SCHEMA`` 在每次打开时补回；统一删除，避免与
     # Backend-shaped 复合/partial 索引重复占用写放大。

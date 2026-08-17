@@ -40,6 +40,11 @@ from unilabos.app.ws_client import (
     format_job_log,
 )
 from unilabos.registry.action_policy import ERROR_DECISION_TARGET_MICRO_BACKEND
+from unilabos.workflow.intervention import (
+    ActionExecutionCoordinator,
+    ActionInterventionRepository,
+    DecisionCommandResponse,
+)
 from unilabos.utils.tracing import (
     add_event,
     capture_context,
@@ -64,6 +69,7 @@ class JobExecutionBackend:
         host_node_getter: Optional[Callable[[], Any]] = None,
         device_state_store: Any = None,
         monitor: Any = None,
+        workflow_store: Any = None,
     ):
         self.device_manager = device_manager or DeviceActionManager()
         self._host_node_getter = host_node_getter or self._default_host_getter
@@ -71,6 +77,20 @@ class JobExecutionBackend:
         # 设备状态存储（DeviceStateStore；None = 不落盘）与监控总线
         self.device_state = device_state_store
         self._monitor = monitor
+        self.workflow_store = workflow_store
+        self.interventions = (
+            ActionInterventionRepository(workflow_store)
+            if workflow_store is not None
+            else None
+        )
+        self.action_execution_coordinator = (
+            ActionExecutionCoordinator(
+                self.interventions,
+                self._resolve_host_error_decision,
+            )
+            if self.interventions is not None
+            else None
+        )
 
         self._events: "queue.Queue[tuple[Any, tuple]]" = queue.Queue()
         self._worker: Optional[threading.Thread] = None
@@ -151,6 +171,12 @@ class JobExecutionBackend:
                 {"action.queue.start_immediately": should_start_now},
                 span=queue_span,
             )
+        self._record_durable_job_status(
+            job_info,
+            "queued",
+            causation_kind="dispatch",
+            causation_id=job_info.job_id,
+        )
         job_log = format_job_log(job_info.job_id, job_info.task_id, job_info.device_id, job_info.action_name)
         if should_start_now:
             logger.info("[JobExecutionBackend] job %s start now", job_log)
@@ -199,6 +225,12 @@ class JobExecutionBackend:
             self._put_event(("start", next_job), context=next_job.trace_context)
 
         self._emit_cancel_event(job_info)
+        self._record_durable_job_status(
+            job_info,
+            "canceled",
+            causation_kind="cancel_command",
+            causation_id=job_id,
+        )
         return True
 
     def _emit_cancel_event(self, job: JobInfo) -> None:
@@ -264,6 +296,17 @@ class JobExecutionBackend:
         if status not in ("success", "failed"):
             return  # running/feedback 不推进生命周期
 
+        self._record_durable_job_status(
+            item,
+            status,
+            causation_kind="action_result",
+            causation_id=item.job_id,
+            extra={
+                "return_info": return_info or {},
+                "feedback_data": feedback_data,
+            },
+        )
+
         ret_value = None
         suc_type = "normal"
         if isinstance(return_info, dict):
@@ -317,7 +360,17 @@ class JobExecutionBackend:
     # ── Host 异常决策状态的 REST 适配 ────────────────────────
 
     def list_error_decisions(self) -> List[Dict[str, Any]]:
-        """读取 HostNode 持有的本地异常决策权威列表。"""
+        """优先读取持久 projection；未配置时兼容 Host 内存列表。"""
+
+        if self.interventions is not None:
+            return [
+                {
+                    **snapshot["required"],
+                    "state": snapshot["state"],
+                    "aggregate_version": snapshot["aggregate_version"],
+                }
+                for snapshot in self.interventions.list_pending()
+            ]
 
         host_node = self._host_node_getter()
         if host_node is None:
@@ -334,12 +387,40 @@ class JobExecutionBackend:
     def resolve_error_decision(self, decision_id: str, decision: Dict[str, Any]) -> bool:
         """将人工选择提交给 HostNode，不再路由到设备节点等待器。"""
 
+        if self.action_execution_coordinator is not None:
+            if not decision.get("command_id"):
+                return False
+            response = self.resolve_error_decision_command(
+                decision_id,
+                decision,
+                trusted_actor=str(decision.get("trusted_actor") or "local-backend"),
+            )
+            return response.status == "completed"
+
+        return self._resolve_host_error_decision(
+            decision_id,
+            str(decision.get("job_id") or ""),
+            str(decision.get("device_id") or ""),
+            decision,
+        )
+
+    def _resolve_host_error_decision(
+        self,
+        decision_id: str,
+        job_id: str,
+        device_id: str,
+        decision: Dict[str, Any],
+    ) -> bool:
+        """当前 ROS Host adapter；Coordinator 不依赖 HostNode 类型。"""
+
         host_node = self._host_node_getter()
         if host_node is None:
             return False
         payload = {
-            "decision_id": decision_id,
             **decision,
+            "decision_id": decision_id,
+            "job_id": job_id,
+            "device_id": device_id,
         }
         return bool(
             host_node.handle_action_error_decision(
@@ -350,13 +431,107 @@ class JobExecutionBackend:
             )
         )
 
+    def resolve_error_decision_command(
+        self,
+        decision_id: str,
+        decision: Dict[str, Any],
+        *,
+        trusted_actor: str,
+    ) -> DecisionCommandResponse:
+        """提交带稳定 command_id 的领域命令并返回首次持久快照。"""
+
+        if self.action_execution_coordinator is None:
+            raise RuntimeError("durable action intervention store is unavailable")
+        payload = {"decision_id": decision_id, **decision}
+        return self.action_execution_coordinator.submit_decision(
+            payload,
+            trusted_actor=trusted_actor,
+        )
+
+    def publish_action_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """Host bridge：required/resolved 先写 projection/outbox。"""
+
+        if self.action_execution_coordinator is None:
+            return
+        self.action_execution_coordinator.publish_action_event(event_type, data)
+
+    def reconcile_action_execution_authority(
+        self,
+        authority_epoch: str,
+        host_uuid: str,
+    ) -> List[Dict[str, Any]]:
+        """Host 启动 bridge：关闭旧 authority 的未决介入。"""
+
+        if self.interventions is None:
+            return []
+        return self.interventions.reconcile_authority(
+            host_uuid=host_uuid,
+            authority_epoch=authority_epoch,
+        )
+
+    def _record_durable_job_status(
+        self,
+        item: Any,
+        status: str,
+        *,
+        causation_kind: str,
+        causation_id: str,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self.interventions is None:
+            return
+        try:
+            self.interventions.record_job_status(
+                {
+                    "job_id": str(getattr(item, "job_id", "")),
+                    "task_id": str(getattr(item, "task_id", "") or ""),
+                    "device_id": str(getattr(item, "device_id", "")),
+                    "device_uuid": str(
+                        getattr(item, "device_uuid", None)
+                        or getattr(item, "device_id", "")
+                    ),
+                    "action_name": str(getattr(item, "action_name", "")),
+                    "status": status,
+                    **(extra or {}),
+                },
+                causation_kind=causation_kind,
+                causation_id=causation_id,
+            )
+        except Exception:  # noqa: BLE001 - 审计失败不得阻断设备控制
+            logger.exception(
+                "[JobExecutionBackend] durable job status failed job=%s status=%s",
+                getattr(item, "job_id", ""),
+                status,
+            )
+
     def get_resolved_error_decision(
         self,
         decision_id: str,
         job_id: str,
         device_id: str,
     ) -> Optional[Dict[str, Any]]:
-        """读取 Host 短期 tombstone，供 REST 重试返回稳定终态。"""
+        """优先读取永久 projection，未配置时兼容 Host 短期 tombstone。"""
+
+        if self.interventions is not None:
+            snapshot = self.interventions.get(decision_id)
+            if (
+                snapshot is None
+                or snapshot["job_id"] != job_id
+                or device_id
+                not in {snapshot["device_uuid"], snapshot.get("device_id")}
+                or snapshot["state"]
+                not in {"resolved", "superseded", "expired", "canceled"}
+            ):
+                return None
+            return snapshot["resolved"] or {
+                "decision_id": decision_id,
+                "job_id": job_id,
+                "device_id": snapshot.get("device_id"),
+                "device_uuid": snapshot["device_uuid"],
+                "selected_action": snapshot["selected_action"],
+                "reason": snapshot["resolution_reason"],
+                "resolved_at": snapshot["resolved_at"],
+            }
 
         host_node = self._host_node_getter()
         if host_node is None:
@@ -445,6 +620,12 @@ class JobExecutionBackend:
                 action_kwargs=job.action_args,
                 sample_material=job.sample_material,
                 server_info=job.server_info,
+            )
+            self._record_durable_job_status(
+                job,
+                "executing",
+                causation_kind="dispatch",
+                causation_id=job.job_id,
             )
             with self._canceled_job_ids_lock:
                 canceled_after_send = job.job_id in self._canceled_job_ids
@@ -550,6 +731,7 @@ def create_edge_stack(
     monitor: Any = None,
     device_state_store: Any = None,
     history: Any = None,
+    workflow_store: Any = None,
 ) -> "tuple[Any, JobExecutionBackend]":
     """组装 EdgeScheduler + 微后端（composition root）。
 
@@ -571,6 +753,7 @@ def create_edge_stack(
         host_node_getter=host_node_getter,
         device_state_store=device_state_store,
         monitor=monitor,
+        workflow_store=workflow_store,
     )
     scheduler = EdgeScheduler(
         orderer=orderer,

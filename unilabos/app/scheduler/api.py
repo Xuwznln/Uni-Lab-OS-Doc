@@ -34,7 +34,7 @@ from typing import Callable
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from unilabos.app.scheduler.dag_state import WorkflowCycleError
@@ -108,9 +108,13 @@ class JobFinishIn(BaseModel):
 class ErrorDecisionIn(BaseModel):
     """人工审批结果（与云端 ws job_error_decision 消息同语义）。"""
 
+    command_id: Optional[str] = Field(default=None, min_length=1)
     decision_id: str = Field(min_length=1)
     job_id: str = Field(min_length=1)
     device_id: str = Field(min_length=1)
+    device_uuid: Optional[str] = Field(default=None, min_length=1)
+    host_uuid: Optional[str] = Field(default=None, min_length=1)
+    authority_epoch: Optional[str] = Field(default=None, min_length=1)
     action: str = ""  # retry / skip / abort / 其它已配置 option
     option: Optional[Dict[str, Any]] = None  # 或直接回传选中的 option 对象
     result: Any = None  # operator_intervention 的服务端结果
@@ -461,7 +465,7 @@ def create_scheduler_router(
     @router.post("/error-decisions/{decision_id}")
     def resolve_error_decision(
         decision_id: str, body: ErrorDecisionIn
-    ) -> Dict[str, Any]:
+    ) -> Any:
         if body.decision_id != decision_id:
             raise HTTPException(
                 status_code=409,
@@ -473,14 +477,50 @@ def create_scheduler_router(
             "device_id": body.device_id,
             "reason": body.reason,
         }
+        if body.command_id is not None:
+            payload["command_id"] = body.command_id
+        if body.device_uuid is not None:
+            payload["device_uuid"] = body.device_uuid
+        if body.host_uuid is not None:
+            payload["host_uuid"] = body.host_uuid
+        if body.authority_epoch is not None:
+            payload["authority_epoch"] = body.authority_epoch
         if body.option is not None:
             payload["option"] = body.option
         if body.action:
             payload["action"] = body.action
         if body.result is not None:
             payload["result"] = body.result
-        if not _backend().resolve_error_decision(decision_id, payload):
-            resolved = _backend().get_resolved_error_decision(
+        backend = _backend()
+        coordinator = getattr(backend, "action_execution_coordinator", None)
+        if coordinator is not None:
+            missing = [
+                field
+                for field in (
+                    "command_id",
+                    "device_uuid",
+                    "host_uuid",
+                    "authority_epoch",
+                )
+                if not payload.get(field)
+            ]
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"code": "missing_command_identity", "fields": missing},
+                )
+            response = backend.resolve_error_decision_command(
+                decision_id,
+                payload,
+                trusted_actor="local-rest",
+            )
+            return JSONResponse(
+                status_code=response.http_status,
+                content=response.as_dict(),
+            )
+
+        if not backend.resolve_error_decision(decision_id, payload):
+            resolved = backend.get_resolved_error_decision(
                 decision_id,
                 body.job_id,
                 body.device_id,

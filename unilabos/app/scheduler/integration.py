@@ -344,6 +344,16 @@ def setup_edge_scheduler(
     # 工作流执行历史：第三个独立 SQLite（低频 append，审计/回放/跨重启）
     history_store = None
     history_db = storage_paths.workflow_db
+    workflow_store = None
+    if history_db is not None:
+        from unilabos.workflow.store import WorkflowStore
+
+        history_db.parent.mkdir(parents=True, exist_ok=True)
+        workflow_store = WorkflowStore(history_db)
+        logger.info(
+            "[EdgeSchedulerIntegration] durable workflow authority: %s",
+            history_db,
+        )
     if storage_paths.legacy_workflow_history_enabled:
         from unilabos.app.scheduler.history import WorkflowHistoryStore
 
@@ -365,6 +375,7 @@ def setup_edge_scheduler(
         monitor=monitor_bus,
         device_state_store=device_state_store,
         history=history_store,
+        workflow_store=workflow_store,
     )
     _scheduler, _backend = scheduler, backend
 
@@ -421,6 +432,9 @@ def shutdown_edge_services() -> None:
         device_state = getattr(_backend, "device_state", None)
         if device_state is not None:
             device_state.close()
+        workflow_store = getattr(_backend, "workflow_store", None)
+        if workflow_store is not None:
+            workflow_store.close()
     if _scheduler is not None:
         history = getattr(_scheduler, "_history", None)
         if history is not None:

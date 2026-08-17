@@ -409,7 +409,26 @@ class HostNode(BaseROS2DeviceNode):
         self._error_execution_contexts: Dict[str, Dict[str, Any]] = {}
         self._pending_action_error_decisions: Dict[str, Dict[str, Any]] = {}
         self._resolved_action_error_decisions: Dict[str, Dict[str, Any]] = {}
+        # 每次 Host 进程启动生成新 epoch；旧进程的人工决策不得跨 epoch 消费。
+        self._action_execution_authority_epoch = str(uuid.uuid4())
         self._pending_action_error_decisions_lock = threading.RLock()
+        for bridge in self.bridges:
+            reconcile_authority = getattr(
+                bridge,
+                "reconcile_action_execution_authority",
+                None,
+            )
+            if not callable(reconcile_authority):
+                continue
+            try:
+                reconcile_authority(
+                    self._action_execution_authority_epoch,
+                    str(getattr(self, "device_uuid", "")),
+                )
+            except Exception as ex:  # noqa: BLE001 - 重启审计不能阻断 Host 启动
+                self.lab_logger().warning(
+                    f"[Host Node] 旧异常决策 reconciliation 失败: {bridge!r}: {ex}"
+                )
         # cancel 可能发生在 Goal 等待响应、执行中或等待异常决策三个阶段。
         self._canceled_jobs: Set[str] = set()
         self._online_devices: Set[str] = {f"{self.namespace}/{device_id}"}  # 用于跟踪在线设备
@@ -1334,6 +1353,24 @@ class HostNode(BaseROS2DeviceNode):
         except Exception:  # noqa: BLE001 - 观测链路必须 fail-open
             pass
 
+    def _persist_local_action_event(
+        self,
+        event_type: str,
+        data: Dict[str, Any],
+    ) -> None:
+        """把本地决策事件交给持久 bridge；测试替身无需继承该方法。"""
+
+        for bridge in getattr(self, "bridges", []):
+            publish_action_event = getattr(bridge, "publish_action_event", None)
+            if not callable(publish_action_event):
+                continue
+            try:
+                publish_action_event(event_type, deepcopy(data))
+            except Exception as ex:  # noqa: BLE001 - 持久观测故障不改变设备执行
+                self.lab_logger().warning(
+                    f"[Host Node] 本地 Action 事件持久化失败: {bridge!r}: {ex}"
+                )
+
     def _finish_error_handled_job(
         self,
         item: "QueueItem",
@@ -1521,9 +1558,35 @@ class HostNode(BaseROS2DeviceNode):
 
         created_at = time.time()
         timeout_seconds = float(error_info.get("decision_timeout_seconds", 300.0))
+        expires_at = created_at + timeout_seconds
+        # 锁内消费直接使用同一绝对截止时间，不能只依赖可能延迟调度的 Timer。
+        error_info["expires_at"] = expires_at
+        pending["error_info"]["expires_at"] = expires_at
+        attempt_id = str(uuid.uuid4())
+        device_wrapper = getattr(self, "devices_instances", {}).get(item.device_id)
+        device_node = getattr(device_wrapper, "_ros_node", device_wrapper)
+        device_uuid = str(
+            getattr(device_node, "device_uuid", None) or item.device_id
+        )
+        authority_epoch = getattr(
+            self,
+            "_action_execution_authority_epoch",
+            None,
+        )
+        if not authority_epoch:
+            authority_epoch = str(uuid.uuid4())
+            self._action_execution_authority_epoch = authority_epoch
         report = {
             "decision_id": decision_id,
             "device_id": item.device_id,
+            "device_uuid": device_uuid,
+            "host_uuid": str(
+                getattr(self, "device_uuid", "") or BasicConfig.host_node_name
+            ),
+            "authority_epoch": authority_epoch,
+            "attempt_id": attempt_id,
+            "attempt_no": retry_count + 1,
+            "attempt_kind": "original" if retry_count == 0 else "retry",
             "action_name": error_info.get("action_name") or item.action_name,
             "task_id": item.task_id,
             "job_id": item.job_id,
@@ -1535,7 +1598,7 @@ class HostNode(BaseROS2DeviceNode):
             "max_retries": int(error_info.get("max_retries", 3)),
             "created_at": created_at,
             "decision_timeout_seconds": timeout_seconds,
-            "expires_at": created_at + timeout_seconds,
+            "expires_at": expires_at,
             "default_on_decision_timeout": error_info.get(
                 "default_on_decision_timeout",
                 "abort",
@@ -1586,6 +1649,11 @@ class HostNode(BaseROS2DeviceNode):
         with self._pending_action_error_decisions_lock:
             still_pending = decision_id in self._pending_action_error_decisions
         if still_pending:
+            HostNode._persist_local_action_event(
+                self,
+                "job_error_decision_required",
+                deepcopy(report),
+            )
             self._emit_local_action_event(
                 item,
                 "job_error_decision_required",
@@ -1651,6 +1719,19 @@ class HostNode(BaseROS2DeviceNode):
             "reason": reason,
             "resolved_at": resolved_at,
         }
+        pending_report = pending.get("report") or {}
+        for key in (
+            "device_uuid",
+            "host_uuid",
+            "authority_epoch",
+            "attempt_id",
+            "attempt_no",
+            "attempt_kind",
+        ):
+            if pending_report.get(key) is not None:
+                resolved_report[key] = pending_report[key]
+        if pending.get("resolving_command_id"):
+            resolved_report["command_id"] = pending["resolving_command_id"]
         tombstones = getattr(self, "_resolved_action_error_decisions", None)
         if tombstones is None:
             tombstones = {}
@@ -1778,6 +1859,11 @@ class HostNode(BaseROS2DeviceNode):
                         reason,
                     )
                 )
+        HostNode._persist_local_action_event(
+            self,
+            "job_error_decision_resolved",
+            deepcopy(resolved_report),
+        )
         self._emit_local_action_event(
             item,
             "job_error_decision_resolved",
@@ -1922,6 +2008,7 @@ class HostNode(BaseROS2DeviceNode):
                 return False
 
             pending["resolving"] = True
+            pending["resolving_command_id"] = str(decision.get("command_id") or "")
             self._pending_action_error_decisions.pop(pending["decision_id"], None)
             timer = pending.get("timer")
             if timer is not None:

@@ -1575,6 +1575,10 @@ class WorkflowStore:
             "workflow_node_job_feedback_history",
             "workflow_node_job_result",
             "workflow_intervention",
+            "workflow_intervention_command",
+            "workflow_event_outbox",
+            "workflow_execution_hold",
+            "workflow_job_status_projection",
             "workflow_manual_confirmation",
             "execution_lock_lease",
             "workflow_authoring",
@@ -1589,6 +1593,10 @@ class WorkflowStore:
             in {
                 "workflow_authoring",
                 "frontend_event",
+                "workflow_intervention_command",
+                "workflow_event_outbox",
+                "workflow_execution_hold",
+                "workflow_job_status_projection",
             }
             else " WHERE deleted_at IS NULL"
         )

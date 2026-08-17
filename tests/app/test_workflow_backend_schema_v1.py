@@ -17,6 +17,10 @@ RUNTIME_TABLES = {
     "workflow_node_job_result",
     "workflow_node_job_feedback_history",
     "workflow_intervention",
+    "workflow_intervention_command",
+    "workflow_event_outbox",
+    "workflow_execution_hold",
+    "workflow_job_status_projection",
     "workflow_manual_confirmation",
 }
 
