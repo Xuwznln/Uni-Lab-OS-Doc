@@ -11,11 +11,14 @@
 
 import base64
 import json
-import os
-import fcntl
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field, asdict
+
+from unilabos.utils.file_lock import (
+    acquire_exclusive_file_lock,
+    release_file_lock,
+)
 
 
 DEFAULT_BASE_URL = "https://leap-lab.bohrium.com/api/v1"
@@ -114,20 +117,27 @@ class SessionManager:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if exc_type is None:
-            self._save_state()
-        self._release_lock()
+        try:
+            if exc_type is None:
+                self._save_state()
+        finally:
+            self._release_lock()
         return False
 
     def _acquire_lock(self):
         self.working_dir.mkdir(parents=True, exist_ok=True)
         lock_file_path = self.working_dir / "session.lock"
-        self._lock_file = open(lock_file_path, "w")
-        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX)
+        self._lock_file = open(lock_file_path, "a+b")
+        try:
+            acquire_exclusive_file_lock(self._lock_file)
+        except Exception:
+            self._lock_file.close()
+            self._lock_file = None
+            raise
 
     def _release_lock(self):
         if self._lock_file:
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+            release_file_lock(self._lock_file)
             self._lock_file.close()
             self._lock_file = None
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import os
 import re
@@ -17,6 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 from uuid import uuid4
+
+try:
+    import fcntl
+except ImportError:  # Linux file lease；Windows 上保持 fail-closed
+    fcntl = None
 
 from pydantic import ValidationError
 
@@ -79,9 +83,17 @@ _ERRORS = {
 }
 _HASH_TOKEN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _NO_EXPECTED_HASH = object()
-_F_SETOWN_EX = getattr(fcntl, "F_SETOWN_EX", 15)
+_F_SETOWN_EX = getattr(fcntl, "F_SETOWN_EX", 15) if fcntl is not None else 15
 _F_OWNER_TID = 0
-_LEASE_BREAK_SIGNAL = signal.SIGRTMAX
+_LEASE_BREAK_SIGNAL = getattr(signal, "SIGRTMAX", None)
+_HAS_SOURCE_FILE_LEASE = (
+    fcntl is not None
+    and _LEASE_BREAK_SIGNAL is not None
+    and hasattr(fcntl, "F_SETLEASE")
+    and hasattr(fcntl, "F_SETSIG")
+    and hasattr(signal, "pthread_sigmask")
+    and hasattr(signal, "sigtimedwait")
+)
 _WORKFLOW_READ_FIELDS = {
     "uuid",
     "create_time",
@@ -1509,6 +1521,12 @@ class WorkflowService:
     ) -> None:
         """在可安全中断的 lease 下执行 fsync 后的原子 CAS replace。"""
 
+        if not _HAS_SOURCE_FILE_LEASE:
+            # Linux lease 能发现不遵守应用锁的 IDE/编辑器句柄。Windows 的
+            # msvcrt 字节锁无法提供等价保证，因此不能静默降级为有竞态的
+            # hash-then-replace；保留 draft 并要求调用方刷新后重试。
+            raise WorkflowConflict("draft_hash_conflict")
+
         target_descriptor = -1
         temporary_descriptor = -1
         backup_name = f".{target_name}.{uuid4().hex}.cas"
@@ -1677,6 +1695,9 @@ class WorkflowService:
     @staticmethod
     def _drain_lease_break_signal() -> bool:
         """同步消费发给当前线程的 lease 通知。"""
+
+        if not _HAS_SOURCE_FILE_LEASE:
+            return False
 
         observed = False
         while True:
