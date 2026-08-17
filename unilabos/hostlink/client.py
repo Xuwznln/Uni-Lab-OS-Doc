@@ -1,11 +1,18 @@
-"""Slave-side HostLink client for discovery and ROS2 configuration sync."""
+"""Slave-side HostLink client for discovery, state sync and bidirectional RPC."""
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import threading
 import time
 import uuid
+from concurrent.futures import (
+    Future,
+    InvalidStateError,
+    ThreadPoolExecutor,
+    TimeoutError as FutureTimeoutError,
+)
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from unilabos.hostlink.protocol import (
@@ -15,6 +22,7 @@ from unilabos.hostlink.protocol import (
     PROTOCOL_VERSION,
     RemoteError,
     new_request,
+    new_response,
     read_message,
     send_message,
 )
@@ -23,11 +31,30 @@ from unilabos.utils import logger
 
 
 class _Pending:
-    __slots__ = ("event", "response")
+    """One response shared by blocking and asyncio callers."""
+
+    __slots__ = ("future",)
 
     def __init__(self) -> None:
-        self.event = threading.Event()
-        self.response: Optional[Dict[str, Any]] = None
+        self.future: Future[Dict[str, Any]] = Future()
+
+    def resolve(self, response: Dict[str, Any]) -> None:
+        if self.future.done():
+            return
+        try:
+            self.future.set_result(response)
+        except InvalidStateError:
+            # asyncio timeout/cancellation may win the race with the reader.
+            pass
+
+    def wait(self, timeout: Optional[float]) -> Dict[str, Any]:
+        return self.future.result(timeout=timeout)
+
+    async def wait_async(self, timeout: Optional[float]) -> Dict[str, Any]:
+        wrapped = asyncio.wrap_future(self.future)
+        if timeout is None:
+            return await wrapped
+        return await asyncio.wait_for(wrapped, timeout)
 
 
 class HostLinkClient:
@@ -44,6 +71,8 @@ class HostLinkClient:
         request_timeout: float = 10.0,
         reconnect_max_backoff: float = 10.0,
         on_status_change: Optional[Callable[[bool], None]] = None,
+        device_descriptors: Optional[Iterable[Dict[str, Any]]] = None,
+        heartbeat_payload_provider: Optional[Callable[[], Dict[str, Any]]] = None,
     ) -> None:
         if not str(host or "").strip():
             raise ValueError("HostLink host cannot be empty")
@@ -55,11 +84,21 @@ class HostLinkClient:
         self.request_timeout = float(request_timeout)
         self.reconnect_max_backoff = float(reconnect_max_backoff)
         self.on_status_change = on_status_change
+        self.heartbeat_payload_provider = heartbeat_payload_provider
         self.node_id = self.machine_name or f"slave-{uuid.uuid4().hex}"
         self.device_ids: List[str] = []
+        self.device_descriptors: List[Dict[str, Any]] = []
         self.configure_device_ids(device_ids or [])
-        self.capabilities = ["device-discovery", "ros-assist"]
+        self.configure_device_descriptors(device_descriptors or [])
+        self.capabilities = [
+            "device-discovery",
+            "ros-assist",
+            "device-rpc",
+            "service-rpc",
+            "topic-pubsub",
+        ]
         self.hello_info: Dict[str, Any] = {}
+        self.handlers: Dict[str, Callable[[Dict[str, Any]], Any]] = {}
 
         self._sock: Optional[socket.socket] = None
         self._manager_thread: Optional[threading.Thread] = None
@@ -71,6 +110,10 @@ class HostLinkClient:
         self._connection_lost = threading.Event()
         self._online = threading.Event()
         self._status_condition = threading.Condition()
+        self._rpc_executor = ThreadPoolExecutor(
+            max_workers=8,
+            thread_name_prefix="hostlink-slave-rpc",
+        )
 
     def start(self) -> "HostLinkClient":
         if self._manager_thread is not None and self._manager_thread.is_alive():
@@ -105,6 +148,7 @@ class HostLinkClient:
         if self._manager_thread is not None and self._manager_thread.is_alive():
             self._manager_thread.join(timeout=3)
         self._manager_thread = None
+        self._rpc_executor.shutdown(wait=False, cancel_futures=True)
 
     @property
     def online(self) -> bool:
@@ -122,6 +166,31 @@ class HostLinkClient:
             self.device_ids = normalized
             self.node_id = f"device:{normalized[0]}"
 
+    def configure_device_descriptors(
+        self,
+        descriptors: Iterable[Dict[str, Any]],
+    ) -> None:
+        normalized: List[Dict[str, Any]] = []
+        for descriptor in descriptors:
+            if not isinstance(descriptor, dict):
+                continue
+            device_id = str(descriptor.get("id") or "").strip()
+            if not device_id:
+                continue
+            item = dict(descriptor)
+            item["id"] = device_id
+            normalized.append(item)
+        self.device_descriptors = sorted(normalized, key=lambda item: item["id"])
+        if self.device_descriptors:
+            self.configure_device_ids(item["id"] for item in self.device_descriptors)
+
+    def register_handler(
+        self,
+        action_type: str,
+        handler: Callable[[Dict[str, Any]], Any],
+    ) -> None:
+        self.handlers[str(action_type)] = handler
+
     def request(
         self,
         action_type: str,
@@ -129,6 +198,21 @@ class HostLinkClient:
         timeout: Optional[float] = None,
     ) -> Any:
         return self._request(action_type, data, timeout, require_online=True)
+
+    async def request_async(
+        self,
+        action_type: str,
+        data: Optional[Dict[str, Any]] = None,
+        timeout: Optional[float] = None,
+    ) -> Any:
+        """Send a request and await its response without blocking a worker."""
+
+        return await self._request_async(
+            action_type,
+            data,
+            timeout,
+            require_online=True,
+        )
 
     def ros_info(self, timeout: Optional[float] = None) -> RosNetworkInfo:
         data = self.request(ActionType.ROS_INFO, timeout=timeout)
@@ -145,6 +229,7 @@ class HostLinkClient:
             "role": "slave",
             "protocol_version": PROTOCOL_VERSION,
             "capabilities": list(self.capabilities),
+            "devices": [dict(item) for item in self.device_descriptors],
         }
 
     def _request(
@@ -155,6 +240,55 @@ class HostLinkClient:
         *,
         require_online: bool,
     ) -> Any:
+        request_id, pending = self._begin_request(
+            action_type,
+            data,
+            require_online=require_online,
+        )
+        wait_timeout = self.request_timeout if timeout is None else float(timeout)
+        try:
+            try:
+                response = pending.wait(wait_timeout)
+            except FutureTimeoutError as exc:
+                raise LinkError(
+                    f"request timeout: {action_type} ({request_id[:8]})"
+                ) from exc
+        finally:
+            self._remove_pending(request_id, pending)
+        return self._response_data(response)
+
+    async def _request_async(
+        self,
+        action_type: str,
+        data: Optional[Dict[str, Any]],
+        timeout: Optional[float],
+        *,
+        require_online: bool,
+    ) -> Any:
+        request_id, pending = self._begin_request(
+            action_type,
+            data,
+            require_online=require_online,
+        )
+        wait_timeout = self.request_timeout if timeout is None else float(timeout)
+        try:
+            try:
+                response = await pending.wait_async(wait_timeout)
+            except TimeoutError as exc:
+                raise LinkError(
+                    f"request timeout: {action_type} ({request_id[:8]})"
+                ) from exc
+        finally:
+            self._remove_pending(request_id, pending)
+        return self._response_data(response)
+
+    def _begin_request(
+        self,
+        action_type: str,
+        data: Optional[Dict[str, Any]],
+        *,
+        require_online: bool,
+    ) -> tuple[str, _Pending]:
         sock = self._sock
         if sock is None or (require_online and not self.online):
             raise LinkError(f"hostlink offline ({self.host}:{self.port})")
@@ -166,14 +300,21 @@ class HostLinkClient:
         try:
             with self._write_lock:
                 send_message(sock, message)
-            if not pending.event.wait(timeout or self.request_timeout):
-                raise LinkError(f"request timeout: {action_type} ({request_id[:8]})")
         except OSError as exc:
+            self._remove_pending(request_id, pending)
             raise LinkError(f"request send failed: {exc}") from exc
-        finally:
-            with self._pending_lock:
+        except Exception:
+            self._remove_pending(request_id, pending)
+            raise
+        return request_id, pending
+
+    def _remove_pending(self, request_id: str, pending: _Pending) -> None:
+        with self._pending_lock:
+            if self._pending.get(request_id) is pending:
                 self._pending.pop(request_id, None)
-        response = pending.response or {}
+
+    @staticmethod
+    def _response_data(response: Dict[str, Any]) -> Any:
         if not response.get("ok"):
             raise RemoteError(str(response.get("error") or "remote error"))
         return response.get("data")
@@ -225,7 +366,13 @@ class HostLinkClient:
         while not self._stop.wait(self.heartbeat_interval):
             if self._connection_lost.is_set():
                 raise LinkError("connection closed")
-            self.request(ActionType.PING, timeout=self.request_timeout)
+            payload: Optional[Dict[str, Any]] = None
+            if self.heartbeat_payload_provider is not None:
+                try:
+                    payload = self.heartbeat_payload_provider()
+                except Exception:  # noqa: BLE001 - 状态采集不能中断重连
+                    logger.exception("[HostLink] heartbeat payload collection failed")
+            self.request(ActionType.PING, data=payload, timeout=self.request_timeout)
 
     def _read_loop(self, sock: socket.socket) -> None:
         reader = LineReader(sock)
@@ -234,14 +381,23 @@ class HostLinkClient:
                 message = read_message(reader)
                 if message is None:
                     break
+                if message.get("kind") == "req":
+                    try:
+                        self._rpc_executor.submit(
+                            self._handle_incoming_request,
+                            sock,
+                            message,
+                        )
+                    except RuntimeError:
+                        break
+                    continue
                 if message.get("kind") != "resp":
                     continue
                 request_id = str(message.get("id") or "")
                 with self._pending_lock:
                     pending = self._pending.get(request_id)
                 if pending is not None:
-                    pending.response = message
-                    pending.event.set()
+                    pending.resolve(message)
         except (OSError, LinkError) as exc:
             logger.debug(f"[HostLink] reader stopped: {exc}")
         finally:
@@ -251,9 +407,42 @@ class HostLinkClient:
             with self._pending_lock:
                 pending_items = list(self._pending.values())
             for pending in pending_items:
-                if pending.response is None:
-                    pending.response = {"ok": False, "error": "connection closed"}
-                    pending.event.set()
+                pending.resolve({"ok": False, "error": "connection closed"})
+
+    def _handle_incoming_request(
+        self,
+        sock: socket.socket,
+        message: Dict[str, Any],
+    ) -> None:
+        request_id = str(message.get("id") or "")
+        if message.get("v") != PROTOCOL_VERSION:
+            response = new_response(
+                request_id,
+                False,
+                error=f"unsupported protocol version: {message.get('v')!r}",
+            )
+        else:
+            action = str(message.get("action_type") or "")
+            handler = self.handlers.get(action)
+            if handler is None:
+                response = new_response(
+                    request_id,
+                    False,
+                    error=f"unknown action: {action}",
+                )
+            else:
+                raw_data = message.get("data")
+                data = raw_data if isinstance(raw_data, dict) else {}
+                try:
+                    response = new_response(request_id, True, handler(data))
+                except Exception as exc:  # noqa: BLE001 - RPC 请求必须返回明确错误
+                    logger.warning(f"[HostLink] incoming {action} failed: {exc}")
+                    response = new_response(request_id, False, error=str(exc))
+        try:
+            with self._write_lock:
+                send_message(sock, response)
+        except OSError:
+            self._connection_lost.set()
 
     def _teardown_socket(self) -> None:
         sock, self._sock = self._sock, None

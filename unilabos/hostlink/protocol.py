@@ -1,8 +1,7 @@
 """HostLink wire protocol: newline-delimited JSON over TCP.
 
-The first slice deliberately contains only networking control messages.  Device
-actions and material/resource queries continue to use the existing ROS2 and
-HTTP paths.
+ROS2 mode uses the control messages for assisted discovery. The standalone
+HostLink backend additionally uses the same connection for device RPC/state.
 """
 
 from __future__ import annotations
@@ -12,8 +11,10 @@ import socket
 import uuid
 from typing import Any, Dict, Optional
 
+from unilabos.device_runtime.topic import message_to_value
+
 PROTOCOL_VERSION = 1
-MAX_FRAME_BYTES = 1024 * 1024
+MAX_FRAME_BYTES = 8 * 1024 * 1024
 
 
 class ActionType:
@@ -22,6 +23,15 @@ class ActionType:
     HELLO = "hello"
     PING = "ping"
     ROS_INFO = "ros_info"
+    DEVICE_CALL = "device.call"
+    DEVICE_STATE = "device.state"
+    SERVICE_CALL = "service.call"
+    ACTION_FEEDBACK = "action.feedback"
+    ACTION_CANCEL = "action.cancel"
+    TOPIC_PUBLISH = "topic.publish"
+    TOPIC_SUBSCRIBE = "topic.subscribe"
+    TOPIC_UNSUBSCRIBE = "topic.unsubscribe"
+    TOPIC_DELIVER = "topic.deliver"
 
 
 class LinkError(Exception):
@@ -69,7 +79,12 @@ def new_response(
 
 def encode_frame(message: Dict[str, Any]) -> bytes:
     raw = (
-        json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            message,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=message_to_value,
+        ).encode("utf-8")
         + b"\n"
     )
     if len(raw) > MAX_FRAME_BYTES:

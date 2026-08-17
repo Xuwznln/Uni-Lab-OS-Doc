@@ -106,17 +106,52 @@ ros2 topic list
 ros2 action list
 ```
 
-### HostLink 组网控制通道
+### HostLink 组网控制通道与无 ROS backend
 
-Host 运行 ROS backend 时会在 TCP `7302` 监听 HostLink。Slave 通过
-`--host-node-ip <host-ip>[:port]` 建立控制连接，在 `rclpy.init` 前完成两件事：
+Host 运行 ROS2 或 HostLink backend 时会在 TCP `7302` 监听 HostLink。Slave 通过
+`--host-node-ip <host-ip>[:port]` 建立控制连接并完成：
 
 - 上报启动图中的设备 ID，供 Host 发现 Slave 及其设备归属；
-- 接收并应用 Host 的 `ROS_DOMAIN_ID`、发现范围、静态对端和外部 Fast DDS
-  Discovery Server 地址。
+- ROS2 模式在 `rclpy.init` 前接收并应用 Host 的 `ROS_DOMAIN_ID`、发现范围、
+  静态对端和外部 Fast DDS Discovery Server 地址。
 
-HostLink 只辅助 ROS2 组网。设备 Action、节点注册和资源同步仍走现有 ROS2
-接口；本阶段没有通过 HostLink 提供物料查询或无 ROS backend。
+在 `--backend ros2` 下，HostLink 只辅助组网，设备 Action、节点注册和资源同步仍
+走 ROS2。`--backend hostlink` 则完全不导入 ROS：Host 与 Slave 都使用 BasicRuntime
+加载本地纯 Python 驱动。Slave 在 HELLO 中发布设备动作、状态字段和设备 UUID；驱动
+通过通用节点发布的状态通知会立即发送，心跳还会定期补发完整状态。Host 与 Slave 可以双向调用设备动作，
+动作带独立 ID，支持反馈和协作取消。通用节点还提供与 ROS 相同形状的
+`create_publisher(...).publish(...)` 和 `create_subscription(...)`：Basic 在本进程分发，
+HostLink 由 Host 按绝对 Topic 名称转发，消息会转换为 JSON 可传输的 Python 值。
+Slave 启动时会把本地设备物料树同步给 Host，
+后续 `update_resource` 和 `get_resource` 也由 Host 保存和查询，不要求启动 ROS service
+或 Web API。
+
+```bash
+# 无 ROS Host
+unilab -g host.json --backend hostlink --hostlink-port 7302
+
+# 无 ROS Slave
+unilab -g slave.json --backend hostlink --is-slave \
+  --host-node-ip 192.168.1.10 --hostlink-port 7302
+```
+
+驱动通过 `post_init(node)` 获得通用 `DeviceNode`，可使用日志、异步等待、任务调度、
+状态通知、Topic 发布/订阅、物料更新/查询和跨设备动作调用。相对 Topic 名称会按
+`/devices/<device_id>/<topic>` 解析；设备状态也会发布到这个路径。注册表可用
+`class.supported_backends: [basic, hostlink, ros2]` 明确声明可运行的 backend；
+`class.type: ros2` 默认只允许 ROS2。注册表设备动作可以在 HostLink 上传递目标、反馈、取消和结果；
+驱动调用时携带的 `action_type` 只作为兼容信息，实际按动作名和字典参数执行。
+直接操作外部 ROS 图的 MoveIt ActionClient、规划场景/图像等 ROS 专用 Topic，
+以及工作站跨设备物料搬运仍使用 ROS2。这些驱动已标记为 `[ros2]`，HostLink 启动时会
+直接提示该驱动不支持，而不是在导入过程中报缺少 `rclpy`。
+
+设备动作在每台设备内串行执行；不同 Slave/设备可以并行。取消是协作式的：驱动需
+接收 `ActionContext` 并在长操作中检查取消状态，已经进入的阻塞硬件调用不会被强制
+终止。连接断开时设备在 `heartbeat_timeout` 后离线，客户端会指数退避重连，但不会
+自动重放动作。HostLink 的物料树保存在 Host 进程内，目前不会自动上传云端。
+
+当前 HostLink 是面向可信实验室局域网的明文 TCP 协议，尚未提供 TLS 或双方身份认证。
+部署时应通过防火墙限制 `7302` 的来源；跨不可信网络使用时应先接入 VPN/安全隧道。
 
 #### 端口与前端归属
 
@@ -139,16 +174,16 @@ HostLink 只辅助 ROS2 组网。设备 Action、节点注册和资源同步仍�
 | `--hostlink-port` | Host + Slave | `7302` | HostLink TCP 监听/连接端口；优先于 `--host-node-ip` 中的端口 |
 | `--hostlink-bind` | Host | `0.0.0.0` | HostLink 监听网卡 |
 | `--hostlink-advertise-ip` | Host | 自动探测 | 多网卡时发布给 Slave 的可达 IP |
-| `--disable-hostlink` | Host + Slave | 否 | 禁用 HostLink，回退原 ROS2 发现 |
+| `--disable-hostlink` | Host + Slave | 否 | 仅 ROS2 可用：禁用 HostLink 并回退原 ROS2 发现；不能和 `--backend hostlink` 同用 |
 | `--hostlink-heartbeat-interval` | Slave | `5` 秒 | 心跳发送间隔 |
 | `--hostlink-heartbeat-timeout` | Host | `15` 秒 | Slave 离线判定时间 |
 | `--hostlink-connect-timeout` | Slave | `5` 秒 | 单次 TCP 连接和握手超时 |
-| `--hostlink-request-timeout` | Slave | `10` 秒 | 控制请求超时 |
+| `--hostlink-request-timeout` | Host + Slave | `10` 秒 | 控制请求/设备 RPC 超时 |
 | `--ros-domain-id` | Host + Slave | 环境值 | Host 下发给 Slave；Slave 本地值仅作连接前兜底 |
 | `--ros-discovery-range` | Host | 环境值 | `SYSTEM_DEFAULT/SUBNET/LOCALHOST/OFF` |
 | `--ros-static-peers` | Host | 自动加入 Host IP | 分号分隔的静态发现对端 |
 | `--ros-discovery-server` | Host | 环境值 | 外部 Fast DDS `host:port`；`off` 清除继承值 |
-| `--no-ros-assist` | Slave | 否 | 保留 HostLink 心跳/设备发现，但不应用 Host ROS 参数 |
+| `--no-ros-assist` | ROS2 Slave | 否 | 保留 HostLink 心跳/设备发现，但不应用 Host ROS 参数 |
 
 本切片没有启动 Fast DDS Discovery Server 进程，因此没有
 `--ros-discovery-port`；该参数应与托管 Discovery Server 功能一并引入，不能成为
@@ -434,8 +469,9 @@ unilab -g host.json --ros-domain-id 42 \
 **建议做法**：
 
 HostLink 需要 Slave 能访问 Host 的 TCP `7302`（若在 `--host-node-ip` 中指定
-其他端口，则开放对应端口）。该端口只承载组网握手、心跳和设备 ID，不承载设备
-动作或物料数据。
+其他端口，则开放对应端口）。ROS2 backend 下该端口只承载组网控制；HostLink
+backend 下还承载设备描述、状态、JSON Topic、动作 RPC 和物料树同步，
+但不承载浏览器流量。
 
 为了确保 ROS2 DDS 通信正常，建议直接关闭防火墙，而不是配置特定端口。ROS2 使用动态端口范围，配置特定端口可能导致通信问题。
 
