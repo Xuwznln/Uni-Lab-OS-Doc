@@ -58,6 +58,7 @@ from unilabos.registry.utils import (
 )
 from unilabos.resources.graphio import resource_plr_to_ulab, tree_to_list
 from unilabos.resources.resource_tracker import ResourceTreeSet, RETURN_UNILABOS_SAMPLES
+from unilabos.resources.site_definition import normalize_available_sites
 from unilabos.ros.msgs.message_converter import (
     msg_converter_manager,
     ros_action_to_json_schema,
@@ -287,6 +288,7 @@ class Registry:
             "registry_type": "device",
             "description": "Host Node",
             "handles": [],
+            "available_sites": [],
             "init_param_schema": {},
             "file_path": "/",
         }
@@ -1153,11 +1155,17 @@ class Registry:
                 "status_types": status_types_str,
                 "action_value_mappings": action_value_mappings,
                 "type": ast_meta.get("device_type", "python"),
+                **(
+                    {"supported_backends": ast_meta["supported_backends"]}
+                    if ast_meta.get("supported_backends")
+                    else {}
+                ),
             },
             "config_info": [],
             "description": ast_meta.get("description", ""),
             "displayname": resolve_registry_displayname(ast_meta.get("displayname"), device_id),
             "handles": handles,
+            "available_sites": normalize_available_sites(ast_meta.get("available_sites")),
             "icon": ast_meta.get("icon", ""),
             "init_param_schema": init_schema,
             "version": ast_meta.get("version", "1.0.0"),
@@ -1303,7 +1311,7 @@ class Registry:
             return Path(BasicConfig.working_dir) / "registry_cache.pkl"
         return None
 
-    _CACHE_VERSION = 6
+    _CACHE_VERSION = 7
 
     def _load_config_cache(self) -> dict:
         import pickle
@@ -1886,6 +1894,9 @@ class Registry:
                 device_config["icon"] = ""
             if "handles" not in device_config:
                 device_config["handles"] = []
+            device_config["available_sites"] = normalize_available_sites(
+                device_config.get("available_sites")
+            )
             if "init_param_schema" not in device_config:
                 device_config["init_param_schema"] = {}
 
@@ -2405,6 +2416,9 @@ class Registry:
         devices = []
         for device_id, device_info in self.device_type_registry.items():
             device_info_copy = copy.deepcopy(device_info)
+            device_info_copy["available_sites"] = normalize_available_sites(
+                device_info_copy.get("available_sites")
+            )
             if "class" in device_info_copy and "action_value_mappings" in device_info_copy["class"]:
                 action_mappings = device_info_copy["class"]["action_value_mappings"]
                 builtin_actions = ["_execute_driver_command", "_execute_driver_command_async"]

@@ -48,9 +48,14 @@ Usage:
 from enum import Enum
 from functools import wraps
 import re
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from unilabos.resources.site_definition import (
+    SiteDefinitionInput,
+    normalize_available_sites,
+)
 
 F = TypeVar("F", bound=Callable[..., Any])
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
@@ -255,8 +260,10 @@ def device(
     icon: str = "",
     version: str = "1.0.0",
     handles: Optional[List[_DeviceHandleBase]] = None,
+    available_sites: Optional[Sequence[SiteDefinitionInput]] = None,
     model: Optional[Dict[str, Any]] = None,
     device_type: str = "python",
+    supported_backends: Optional[List[str]] = None,
     hardware_interface: Optional[HardwareInterface] = None,
 ):
     """
@@ -279,8 +286,10 @@ def device(
         icon: 图标路径
         version: 版本号
         handles: 设备端口列表 (单设备或 id_meta 未覆盖时使用)
+        available_sites: 设备可用 Site 的初始化定义，不包含实例 UUID/占用关系
         model: 可选的 3D 模型配置
         device_type: 设备实现类型 ("python" / "ros2")
+        supported_backends: 可运行该驱动的 backend 名称列表
         hardware_interface: 硬件通信接口 (HardwareInterface)
     """
     # Resolve device ids
@@ -289,6 +298,26 @@ def device(
         if not device_ids:
             raise ValueError("@device ids 不能为空")
         id_meta = id_meta or {}
+        id_meta = {
+            device_id: {
+                **meta,
+                **(
+                    {"available_sites": normalize_available_sites(meta.get("available_sites"))}
+                    if "available_sites" in meta
+                    else {}
+                ),
+                **(
+                    {
+                        "supported_backends": list(
+                            meta.get("supported_backends") or []
+                        )
+                    }
+                    if "supported_backends" in meta
+                    else {}
+                ),
+            }
+            for device_id, meta in id_meta.items()
+        }
     elif id is not None:
         device_ids = [id]
         id_meta = {}
@@ -313,8 +342,10 @@ def device(
         "icon": icon,
         "version": version,
         "handles": _device_handles_to_list(handles),
+        "available_sites": normalize_available_sites(available_sites),
         "model": model,
         "device_type": device_type,
+        "supported_backends": list(supported_backends or []),
         "hardware_interface": (hardware_interface.model_dump(exclude_none=True) if hardware_interface else None),
     }
 
@@ -521,12 +552,24 @@ def get_device_meta(cls, device_id: Optional[str] = None) -> Optional[Dict[str, 
     overrides = id_meta[device_id]
     result = dict(base)
     result["device_id"] = device_id
-    for key in ["handles", "description", "displayname", "icon", "model"]:
+    for key in [
+        "handles",
+        "available_sites",
+        "description",
+        "displayname",
+        "icon",
+        "model",
+        "supported_backends",
+    ]:
         if key in overrides:
             val = overrides[key]
             if key == "handles" and isinstance(val, list):
                 # handles 必须是 Handle 对象列表
                 result[key] = [h.to_registry_dict() for h in val]
+            elif key == "available_sites":
+                result[key] = normalize_available_sites(val)
+            elif key == "supported_backends":
+                result[key] = list(val or [])
             else:
                 result[key] = val
     return result

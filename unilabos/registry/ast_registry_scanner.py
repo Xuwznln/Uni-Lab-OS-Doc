@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from unilabos.registry.utils import resolve_registry_displayname
+from unilabos.resources.site_definition import normalize_available_sites
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,7 @@ from unilabos.registry.utils import resolve_registry_displayname
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 6       # 缓存格式版本号，格式变更时递增
+_CACHE_VERSION = 8       # 缓存格式版本号，格式变更时递增
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
@@ -366,6 +367,7 @@ def _parse_file(
 
     # Build import map from the file (includes same-file class defs)
     import_map = _collect_imports(tree, module_path)
+    literal_constants = _collect_literal_constants(tree, import_map)
 
     devices: List[dict] = []
     resources: List[dict] = []
@@ -376,6 +378,14 @@ def _parse_file(
             device_decorator = _find_decorator(node, "device")
             if device_decorator is not None and _is_registry_decorator("device", import_map):
                 device_args = _extract_decorator_args(device_decorator, import_map)
+                # Site 数组通常较长，允许装饰器引用本文件中的静态字面量常量。
+                # AST 扫描仍不执行用户代码，也不解析导入模块里的动态对象。
+                for key in ("available_sites", "id_meta"):
+                    value = device_args.get(key)
+                    if isinstance(value, str):
+                        constant_name = value.rsplit(":", 1)[-1]
+                        if constant_name in literal_constants:
+                            device_args[key] = literal_constants[constant_name]
                 class_body = _extract_class_body(node, import_map)
 
                 # Support ids + id_meta (multi-device) or id (single device)
@@ -398,8 +408,13 @@ def _parse_file(
                     "displayname": displayname,
                     "icon": device_args.get("icon", ""),
                     "version": device_args.get("version", "1.0.0"),
-                    "device_type": _detect_class_type(node, import_map),
+                    "device_type": device_args.get("device_type")
+                    or _detect_class_type(node, import_map),
+                    "supported_backends": device_args.get("supported_backends"),
                     "handles": device_args.get("handles", []),
+                    "available_sites": normalize_available_sites(
+                        device_args.get("available_sites")
+                    ),
                     "model": device_args.get("model"),
                     "hardware_interface": device_args.get("hardware_interface"),
                     "actions": class_body.get("actions", {}),
@@ -413,9 +428,22 @@ def _parse_file(
                     meta = dict(base_meta)
                     meta["device_id"] = did
                     overrides = id_meta.get(did, {})
-                    for key in ("handles", "description", "displayname", "icon", "model", "hardware_interface"):
+                    for key in (
+                        "handles",
+                        "available_sites",
+                        "description",
+                        "displayname",
+                        "icon",
+                        "model",
+                        "hardware_interface",
+                        "supported_backends",
+                    ):
                         if key in overrides:
-                            meta[key] = overrides[key]
+                            meta[key] = (
+                                normalize_available_sites(overrides[key])
+                                if key == "available_sites"
+                                else overrides[key]
+                            )
                     meta["displayname"] = resolve_registry_displayname(meta.get("displayname"), did)
                     devices.append(meta)
 
@@ -441,6 +469,65 @@ def _parse_file(
                 resources.append(res_meta)
 
     return devices, resources
+
+
+_STATIC_MODEL_CALLS = frozenset(
+    {
+        "unilabos.resources.site_definition:SiteDefinition",
+        "unilabos.resources.resource_pose:ResourceDictPosition",
+        "unilabos.resources.resource_pose:ResourceDictPositionObject",
+        "unilabos.resources.resource_pose:ResourceDictPositionSize",
+    }
+)
+
+
+def _decode_static_model_calls(value: Any) -> Any:
+    """将受支持的 Pydantic 构造表达式还原成纯字典，不执行用户代码。"""
+
+    if isinstance(value, list):
+        return [_decode_static_model_calls(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    call_name = value.get("_call")
+    if call_name is not None and call_name not in _STATIC_MODEL_CALLS:
+        raise ValueError(f"不支持的静态模型构造: {call_name}")
+    return {
+        key: _decode_static_model_calls(item)
+        for key, item in value.items()
+        if key != "_call"
+    }
+
+
+def _collect_literal_constants(
+    tree: ast.Module,
+    import_map: Dict[str, str],
+) -> Dict[str, Any]:
+    """收集模块根级的安全字面量或受支持模型常量，不执行用户代码。"""
+
+    result: Dict[str, Any] = {}
+    for statement in tree.body:
+        target: Optional[ast.Name] = None
+        value: Optional[ast.expr] = None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            if isinstance(statement.targets[0], ast.Name):
+                target = statement.targets[0]
+                value = statement.value
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            target = statement.target
+            value = statement.value
+        if target is None or value is None:
+            continue
+        try:
+            result[target.id] = ast.literal_eval(value)
+        except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+            try:
+                result[target.id] = _decode_static_model_calls(
+                    _ast_node_to_value(value, import_map)
+                )
+            except (TypeError, ValueError):
+                continue
+    return result
 
 
 def _find_init_in_class(cls_node: ast.ClassDef) -> Optional[ast.FunctionDef]:

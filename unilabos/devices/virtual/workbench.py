@@ -40,6 +40,12 @@ from unilabos.resources.resource_tracker import (
     LabSample,
     ResourceTreeSet,
 )
+from unilabos.resources.resource_pose import (
+    ResourceDictPosition,
+    ResourceDictPositionObject,
+    ResourceDictPositionSize,
+)
+from unilabos.resources.site_definition import SiteDefinition
 
 # ============ TypedDict 返回类型定义 ============
 
@@ -122,11 +128,56 @@ class HeatingStation:
     heating_progress: float = 0.0
 
 
+VIRTUAL_WORKBENCH_AVAILABLE_SITES: List[SiteDefinition] = [
+    SiteDefinition(
+        index=1,
+        label="heating_station_1",
+        pose=ResourceDictPosition(
+            position=ResourceDictPositionObject(x=100.0, y=100.0, z=0.0),
+            position3d=ResourceDictPositionObject(x=100.0, y=100.0, z=0.0),
+            size=ResourceDictPositionSize(width=100.0, height=100.0, depth=20.0),
+        ),
+        content_type=["workbench_material"],
+        parent_link="heating_station_1",
+        description="虚拟工作台加热位 1",
+        meta_data={"station_id": 1, "role": "heating"},
+    ),
+    SiteDefinition(
+        index=2,
+        label="heating_station_2",
+        pose=ResourceDictPosition(
+            position=ResourceDictPositionObject(x=250.0, y=100.0, z=0.0),
+            position3d=ResourceDictPositionObject(x=250.0, y=100.0, z=0.0),
+            size=ResourceDictPositionSize(width=100.0, height=100.0, depth=20.0),
+        ),
+        content_type=["workbench_material"],
+        parent_link="heating_station_2",
+        description="虚拟工作台加热位 2",
+        meta_data={"station_id": 2, "role": "heating"},
+    ),
+    SiteDefinition(
+        index=3,
+        label="heating_station_3",
+        pose=ResourceDictPosition(
+            position=ResourceDictPositionObject(x=400.0, y=100.0, z=0.0),
+            position3d=ResourceDictPositionObject(x=400.0, y=100.0, z=0.0),
+            size=ResourceDictPositionSize(width=100.0, height=100.0, depth=20.0),
+        ),
+        content_type=["workbench_material"],
+        parent_link="heating_station_3",
+        description="虚拟工作台加热位 3",
+        meta_data={"station_id": 3, "role": "heating"},
+    ),
+]
+
+
 @device(
     id="virtual_workbench",
     displayname="虚拟工作台",
     category=["virtual_device"],
     description="Virtual Workbench with 1 robotic arm and 3 heating stations for concurrent material processing",
+    available_sites=VIRTUAL_WORKBENCH_AVAILABLE_SITES,
+    supported_backends=["ros2"],
 )
 class VirtualWorkbench:
     """

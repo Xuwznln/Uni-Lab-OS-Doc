@@ -805,7 +805,7 @@ unilab --ak your_ak --sk your_sk -g test/experiments/Grignard_flow_batchreact_si
 class ResourceDict(BaseModel):
     # === 基础标识 ===
     id: str                          # 资源ID（必需）
-    uuid: str                        # 全局唯一标识符（自动生成）
+    uuid: str                        # 微后端分配的全局唯一标识符
     name: str                        # 显示名称（必需）
 
     # === 类型和分类 ===
@@ -817,13 +817,14 @@ class ResourceDict(BaseModel):
     parent_uuid: Optional[str]       # 父资源UUID
 
     # === 位置和姿态 ===
-    position: ResourceDictPosition   # 位置信息
-    pose: ResourceDictPosition       # 姿态信息（推荐使用）
+    position: Optional[ResourceDictPositionObject]  # 动态当前位置 xyz；未知时为 null
+    pose: ResourceDictPosition       # 静态几何与 2D/3D 布局
 
     # === 配置和数据 ===
     config: Dict[str, Any]           # 设备配置参数
     data: Dict[str, Any]             # 运行时状态数据
-    extra: Dict[str, Any]            # 额外自定义数据
+    extra: Dict[str, Any]            # UniLab 通信/转换扩展数据
+    meta_data: Dict[str, JsonValue]  # 资源业务元数据（规范根字段）
 
     # === 元数据 ===
     description: str                 # 资源描述
@@ -833,6 +834,18 @@ class ResourceDict(BaseModel):
 ```
 
 **Position/Pose 结构**:
+
+`position` 与 `pose.position` 不是别名：根级 `position` 表示 PLR/ROS
+运行时当前位置，移动资源时可以频繁更新；`pose` 保存尺寸、缩放、旋转及前端
+2D/3D 布局等低频静态信息。设备关节数组等非笛卡尔状态仍应放在设备状态字段，
+不要塞入仅有 `x/y/z` 的根级 `position`。
+
+资源脱离父节点后若实验室根坐标暂时未知，`position` 必须保持 `null`；Adapter
+不得沿用旧的 parent-local 坐标，也不得自动补成 `{x: 0, y: 0, z: 0}`。
+
+资源业务元数据只保存在根级 `meta_data`，不得复制进 `config`、`data` 或规范
+`extra`。PLR/ROS 缺少原生字段时会使用保留的传输 sidecar 往返；Adapter 入站后
+立即将其提升到根字段并移除 sidecar。
 
 ```python
 class ResourceDictPosition(BaseModel):
