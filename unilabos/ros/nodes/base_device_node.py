@@ -36,6 +36,8 @@ from unilabos_msgs.action import SendCmd, StrSingleInput
 from unilabos_msgs.srv._serial_command import SerialCommand_Request, SerialCommand_Response
 
 from unilabos.config.config import BasicConfig
+from unilabos.device_runtime.node import DeviceNode
+from unilabos.device_runtime.async_utils import schedule_async_func
 from unilabos.registry.decorators import get_topic_config
 from unilabos.registry.action_policy import (
     SUCCESS_TYPE_NORMAL,
@@ -80,7 +82,12 @@ from unilabos.resources.resource_tracker import (
     PARAM_SAMPLE_UUIDS,
     JSON_UNILABOS_PARAM,
 )
-from unilabos.ros.utils.driver_creator import WorkstationNodeCreator, PyLabRobotCreator, DeviceClassCreator
+from unilabos.device_runtime.driver_creator import (
+    DeviceClassCreator,
+    PyLabRobotCreator,
+    WorkstationNodeCreator,
+    uses_pylabrobot_creator,
+)
 from rclpy.task import Task, Future
 from unilabos.utils.import_manager import default_manager
 from unilabos.utils.log import info, debug, warning, error, critical, logger, trace
@@ -410,6 +417,7 @@ class PropertyPublisher:
         try:
             # self.node.lab_logger().trace(f"【.publish_property】开始发布属性: {self.name}")
             value = self.get_property()
+            self.node.emit_status(self.name, value)
             if self.print_publish:
                 pass
                 # self.node.lab_logger().trace(f"【.publish_property】发布 {self.msg_type}: {value}")
@@ -436,7 +444,7 @@ class PropertyPublisher:
         self.timer = self.node.create_timer(self.timer_period, self.publish_property)
 
 
-class BaseROS2DeviceNode(Node, Generic[T]):
+class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
     """
     ROS2设备节点基类
 
@@ -455,6 +463,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
     _time_remaining = 0.0
     # 是否创建Action
     create_action_server = True
+    backend_name = "ros2"
 
     def __init__(
         self,
@@ -835,9 +844,19 @@ class BaseROS2DeviceNode(Node, Generic[T]):
             callback_group = self.callback_group
         await ROS2DeviceNode.async_wait_for(self, rel_time, callback_group)
 
-    @classmethod
-    async def create_task(cls, func, trace_error=True, **kwargs) -> Task:
-        return ROS2DeviceNode.run_async_func(func, trace_error, **kwargs)
+    def create_task(self, coroutine, trace_error=True, **kwargs) -> Task:
+        """Schedule a coroutine while accepting the legacy async-function form."""
+
+        if callable(coroutine):
+            return self.run_async_func(
+                coroutine,
+                trace_error,
+                **kwargs,
+            )
+        if kwargs:
+            raise TypeError("协程对象不能再接收额外关键字参数")
+
+        return rclpy.get_global_executor().create_task(coroutine)
 
     async def update_resource(self, resources: List["ResourcePLR"]):
         r = SerialCommand.Request()
@@ -2235,7 +2254,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                                     f"异步任务 {ACTION.__name__} 报错了\n{traceback.format_exc()}\n原始输入：{action_kwargs}"
                                 )
 
-                        future = ROS2DeviceNode.run_async_func(ACTION, trace_error=False, **action_kwargs)
+                        future = self.run_async_func(ACTION, trace_error=False, **action_kwargs)
                         future.add_done_callback(_handle_future_exception)
                     except Exception as e:
                         execution_error = traceback.format_exc()
@@ -2806,34 +2825,18 @@ class ROS2DeviceNode:
     def get_asyncio_loop(cls):
         return cls._asyncio_loop
 
-    @staticmethod
-    async def safe_task_wrapper(trace_callback, func, **kwargs):
-        try:
-            if callable(trace_callback):
-                trace_callback(await func(**kwargs))
-            return await func(**kwargs)
-        except Exception as e:
-            if callable(trace_callback):
-                trace_callback(e)
-            return e
-
     @classmethod
     def run_async_func(cls, func, trace_error=True, inner_trace_callback=None, **kwargs) -> Task:
-        def _handle_future_exception(fut: Future):
-            try:
-                ret = fut.result()
-                if isinstance(ret, BaseException):
-                    raise ret
-            except Exception as e:
-                error(f"异步任务 {func.__name__} 获取结果失败")
-                error(traceback.format_exc())
+        """兼容旧调用；新驱动应使用当前 DeviceNode 实例的同名方法。"""
 
-        future = rclpy.get_global_executor().create_task(
-            ROS2DeviceNode.safe_task_wrapper(inner_trace_callback, func, **kwargs)
+        return schedule_async_func(
+            rclpy.get_global_executor().create_task,
+            func,
+            trace_error=trace_error,
+            inner_trace_callback=inner_trace_callback,
+            error_callback=error,
+            **kwargs,
         )
-        if trace_error:
-            future.add_done_callback(_handle_future_exception)
-        return future
 
     @classmethod
     async def async_wait_for(cls, node: Node, wait_time: float, callback_group=None):
@@ -2898,14 +2901,7 @@ class ROS2DeviceNode:
         self.resource_tracker = DeviceNodeResourceTracker()
 
         # use_pylabrobot_creator 使用 cls的包路径检测
-        use_pylabrobot_creator = (
-            driver_class.__module__.startswith("pylabrobot")
-            or driver_class.__name__ == "LiquidHandlerAbstract"
-            or driver_class.__name__ == "LiquidHandlerBiomek"
-            or driver_class.__name__ == "PRCXI9300Handler"
-            or driver_class.__name__ == "TransformXYZHandler"
-            or driver_class.__name__ == "OpcUaClient"
-        )
+        use_pylabrobot_creator = uses_pylabrobot_creator(driver_class)
 
         # 创建设备类实例
         if use_pylabrobot_creator:
@@ -2913,7 +2909,10 @@ class ROS2DeviceNode:
             # 在下方对于加载Deck等Resource要手动import
             register()
             self._driver_creator = PyLabRobotCreator(
-                driver_class, children=children, resource_tracker=self.resource_tracker
+                driver_class,
+                children=children,
+                resource_tracker=self.resource_tracker,
+                task_scheduler=rclpy.get_global_executor().create_task,
             )
         else:
             from unilabos.devices.workstation.workstation_base import WorkstationBase
@@ -2923,7 +2922,10 @@ class ROS2DeviceNode:
             ):  # 是WorkstationNode的子节点，就要调用WorkstationNodeCreator
                 self.driver_is_workstation = True
                 self._driver_creator = WorkstationNodeCreator(
-                    driver_class, children=children, resource_tracker=self.resource_tracker
+                    driver_class,
+                    children=children,
+                    resource_tracker=self.resource_tracker,
+                    task_scheduler=rclpy.get_global_executor().create_task,
                 )
             else:
                 self._driver_creator = DeviceClassCreator(

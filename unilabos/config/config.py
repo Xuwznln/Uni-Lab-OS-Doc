@@ -2,11 +2,14 @@ import base64
 import traceback
 import os
 import importlib.util
-from typing import Optional, Literal
+from typing import Literal
 from unilabos.utils import logger
 
 
 class BasicConfig:
+    # 运行时 backend 名称由 unilabos.app.backend 统一规范化。
+    backend: Literal["basic", "hostlink", "ros2", "dora"] = "ros2"
+    app_bridges: tuple[str, ...] = ("websocket", "fastapi")
     ak = ""
     sk = ""
     working_dir = ""
@@ -54,8 +57,8 @@ class HTTPConfig:
     schedule_addr = ""
 
 
-# Host/Slave ROS2 组网控制通道。Host 在 ROS backend 启动时监听；Slave 只有在
-# ``host`` 非空（--host_node_ip）时连接，不接管物料、动作或微后端职责。
+# Host/Slave 控制通道。ROS2 backend 用它同步发现参数；hostlink backend 还会
+# 通过同一条长连接发布设备状态并执行远程动作。
 class HostLinkConfig:
     enable = True
     host = ""  # Slave 侧指定的 HostNode IP/主机名
@@ -133,11 +136,11 @@ def _update_config_from_env():
 
             current_value = getattr(matched_cls, matched_field)
             attr_type = type(current_value)
-            if attr_type == bool:
+            if attr_type is bool:
                 value = env_value.lower() in ("true", "1", "yes")
-            elif attr_type == int:
+            elif attr_type is int:
                 value = int(env_value)
-            elif attr_type == float:
+            elif attr_type is float:
                 value = float(env_value)
             else:
                 value = env_value
@@ -167,7 +170,7 @@ def load_config(config_path=None):
             _update_config_from_module(module)
             logger.info(f"[ENV] 配置文件 {config_path} 加载成功")
             _update_config_from_env()
-        except Exception as e:
+        except Exception:
             logger.error(f"[ENV] 加载配置文件 {config_path} 失败")
             traceback.print_exc()
             exit(1)

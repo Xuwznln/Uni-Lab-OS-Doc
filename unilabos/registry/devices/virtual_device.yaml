@@ -248,6 +248,10 @@ virtual_centrifuge:
       target_speed: float
       target_temp: float
       time_remaining: float
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Centrifuge for CentrifugeProtocol Testing
@@ -674,6 +678,10 @@ virtual_column:
       processed_volume: float
       progress: float
       status: str
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Column Chromatography Device for RunColumn Protocol Testing
@@ -1111,6 +1119,10 @@ virtual_filter:
       message: str
       progress: float
       status: str
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Filter for FilterProtocol Testing
@@ -1976,6 +1988,10 @@ virtual_heatchill:
       remaining_time: float
       status: str
       stir_speed: float
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual HeatChill for HeatChillProtocol Testing
@@ -2744,6 +2760,10 @@ virtual_rotavap:
       rotavap_state: str
       status: str
       vacuum_pressure: float
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Rotary Evaporator for EvaporateProtocol Testing
@@ -3960,6 +3980,10 @@ virtual_separator:
       status: str
       stir_speed: float
       volume: float
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Separator for SeparateProtocol Testing
@@ -4305,6 +4329,10 @@ virtual_solenoid_valve:
       status: str
       valve_position: str
       valve_state: str
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Solenoid Valve for simple on/off flow control
@@ -4709,6 +4737,10 @@ virtual_solid_dispenser:
       dispensed_amount: float
       status: str
       total_operations: int
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Solid Dispenser for Add Protocol Testing - supports mass and
@@ -5334,6 +5366,10 @@ virtual_stirrer:
       operation_mode: str
       remaining_time: float
       status: str
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Stirrer for StirProtocol Testing
@@ -5869,6 +5905,10 @@ virtual_transfer_pump:
       remaining_capacity: float
       status: str
       transfer_rate: float
+    supported_backends:
+    - basic
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual Transfer Pump for TransferProtocol Testing (Syringe-style)

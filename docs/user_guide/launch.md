@@ -15,12 +15,15 @@ options:
                         Path to the registry directory
   --working_dir WORKING_DIR
                         Path to the working directory
-  --backend {ros,simple,automancer}
-                        Choose the backend to run with: 'ros', 'simple', or 'automancer'.
-  --app_bridges APP_BRIDGES [APP_BRIDGES ...]
-                        Bridges to connect to. Now support 'websocket' and 'fastapi'.
-  --is_slave            Run the backend as slave node (without host privileges).
-  --slave_no_host       Skip waiting for host service in slave mode
+  --backend {basic,hostlink,ros2,dora}
+                        Runtime backend: basic (in-process), hostlink (distributed,
+                        no ROS), ros2 (default), or dora.
+  --app_bridges [APP_BRIDGES ...]
+                        Application bridges. Defaults depend on the selected backend.
+  --is_slave, --is-slave
+                        Run the backend as slave node (without host privileges).
+  --slave_no_host, --slave-no-host
+                        Skip waiting for host service in slave mode
   --upload_registry     Upload registry information when starting unilab
   --config CONFIG       Configuration file path, supports .py format Python config files
   --port_management PORT_MANAGEMENT, --port-management PORT_MANAGEMENT, --port PORT_MANAGEMENT
@@ -136,26 +139,89 @@ unilab --config path/to/your/config.py
 
 ## 通信中间件 `--backend`
 
-目前 Uni-Lab 支持以下通信中间件：
+Uni-Lab 对外提供四个 backend 名称。名称、能力和实现入口由
+`unilabos.app.backend.BACKEND_PROFILES` 统一管理：
 
-- **ros** (默认)：基于 ROS2 的通信
-- **automancer**：Automancer 兼容模式 (实验性)
+| Backend | 定位 | 默认 App bridges | Host/Slave | 可视化 |
+|---|---|---|---|---|
+| **basic** | 单进程直接加载纯 Python 设备驱动，不使用通信中间件；跳过工作站聚合节点 | 无 | 不支持 | 不支持 |
+| **hostlink** | Basic 驱动通过 HostLink TCP 组网，不启动 rclpy/DDS；可加载 ROS message 包并以 JSON 传输；支持设备发现、双向动作调用、Topic、状态和物料树同步 | 无 | 支持 | 不支持 |
+| **ros2**（默认） | 完整 ROS 2 分布式运行时 | `websocket fastapi` | 支持 | 支持 |
+| **dora** | 独立 dora-rs dataflow 运行时 | 无 | 暂不支持 | 暂不支持 |
+
+典型启动命令：
+
+```bash
+# 轻量本地驱动运行；不启动 WebSocket/FastAPI
+unilab -g graph.json --backend basic
+
+# Python Link Host：监听 7302，并运行 host.json 中的本地驱动
+unilab -g host.json --backend hostlink --hostlink-port 7302
+
+# Python Link Slave：连接 Host，并发布 slave.json 中的设备/状态
+unilab -g slave.json --backend hostlink --is-slave \
+  --host-node-ip 192.168.1.10 --hostlink-port 7302
+
+# 完整 ROS 2 运行时；不写 --backend 时也使用 ros2
+unilab -g graph.json --backend ros2
+
+# Dora 独立运行时；不会同时启动 ROS 2 backend
+unilab -g graph.json --backend dora
+```
+
+兼容期内，旧名称 `ros` 会映射到 `ros2`，`simple` 会映射到 `basic`，并输出弃用提示。
+原 `automancer` 只有不可运行的占位分支，现已从可选项移除。
+
+### Dora 依赖
+
+Dora 的 Python 包名是 `dora-rs`，导入名是 `dora`；命令行工具名是 `dora-cli`。
+Python 依赖与 Uni-Lab 默认环境隔离安装：
+
+```bash
+pip install -e ".[dora]"
+cargo install dora-cli
+
+dora --version
+python -c "from dora import Node; import pyarrow"
+```
+
+也可以使用 [Dora 官方安装脚本](https://dora-rs.ai/dora/getting-started/quickstart)。
+Uni-Lab 会在 backend 线程启动前检查 CLI、Python API 和 PyArrow，缺失时直接给出错误。
 
 ## 端云桥接 `--app_bridges`
 
-目前 Uni-Lab 提供 WebSocket、FastAPI (http) 两种端云通信方式：
+ROS2 backend 提供 WebSocket、FastAPI (HTTP) 两种端云通信方式：
 
 - **WebSocket**：负责实时通信和任务下发
 - **FastAPI**：负责端对云物料更新和 HTTP API
 
+`basic`、`hostlink` 和 `dora` 当前没有兼容的 HostNode bridge，因此默认不加载这些桥，也会拒绝
+显式传入不支持的组合。若要让 ROS2 也不启动桥，可以使用空参数：
+
+```bash
+unilab -g graph.json --backend ros2 --app_bridges
+```
+
 ## 分布式组网
 
-启动 Uni-Lab 时，加入 `--is_slave` 将作为从站，不加将作为主站：
+Host/Slave 可选择 `ros2` 或不启动 DDS 的 `hostlink` backend。启动时加入
+`--is_slave` 将作为从站，不加将作为主站：
 
 - **主站 (host)**：持有物料修改权以及对云端的通信
 - **从站 (slave)**：无主机权限，可选择跳过等待主机服务 (`--slave_no_host`)
 
-局域网内分别启动的 Uni-Lab 主站/从站将自动组网，互相能访问所有设备状态、传感器信息并发送指令。
+`ros2` 使用 DDS 上的 ROS Action/Topic；`hostlink` 直接在 TCP 长连接上同步注册表声明的设备描述、
+状态，执行动作并转发 JSON Topic。设备代码可以继续使用通用节点的
+`create_publisher(...).publish(...)` 和 `create_subscription(...)` 写法。
+
+HostLink 可以加载 `std_msgs`、`geometry_msgs`、`unilabos_msgs` 等 ROS message Python 包，
+使用其中的消息类和字段定义做类型解析。Topic、Action 参数、结果、feedback 和状态在发送时都会
+递归转换为 UTF-8 JSON，因此消息类型本身不要求使用 DDS。驱动直接依赖 ROS graph、TF、RViz
+插件或某个 rclpy Node/Service 时，仍需使用 `ros2`，或者先把该调用接入通用节点接口。
+
+驱动需要在后台安排异步函数时，使用 `node.run_async_func(async_function, **kwargs)`；它会根据
+当前 backend 选择 ROS executor 或 Python asyncio loop。不要在驱动中直接引用
+`ROS2DeviceNode.run_async_func`。
 
 推荐由 Host 统一发布 ROS2 domain，Slave 只指定 Host IP：
 
@@ -178,8 +244,12 @@ unilab -g slave.json --is-slave \
 - `--hostlink-bind` / `--hostlink-advertise-ip`：Host 监听地址与多网卡发布地址。
 - `--ros-domain-id`：Host 下发给 Slave 的 ROS2 domain。
 - `--ros-discovery-range` / `--ros-static-peers` / `--ros-discovery-server`：ROS2 发现策略。
-- `--no-ros-assist`：仅保留 HostLink 设备发现，不覆盖 Slave 的 ROS2 环境。
+- `--no-ros-assist`：仅用于 ROS2 backend；保留 HostLink 设备发现，不覆盖 Slave 的 ROS2 环境。
 - `--disable-hostlink`：完全关闭 HostLink，使用原 ROS2 发现流程。
+
+选择 `--backend hostlink` 时不能使用 `--disable-hostlink`，Slave 也必须提供
+`--host-node-ip`。当前该 backend 不启动 `8002` 管理端或微前端；`7302` 只供
+Host/Slave 进程通信。需要 Web/API 时仍使用 `ros2` backend。
 
 浏览器和主微前端访问管理端口（默认 `8002`），不会访问 HostLink 的 `7302`。
 即使使用 `--disable-browser`，前端仍可手动访问 `http://<节点 IP>:8002`。

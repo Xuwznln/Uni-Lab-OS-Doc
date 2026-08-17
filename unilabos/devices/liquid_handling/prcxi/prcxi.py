@@ -47,6 +47,7 @@ from pylabrobot.resources import (
     TubeRack,
 )
 
+from unilabos.device_runtime.node import DeviceNode
 from unilabos.devices.liquid_handling.liquid_handler_abstract import (
     LiquidHandlerAbstract,
     SimpleReturn,
@@ -62,7 +63,6 @@ from unilabos.resources.resource_tracker import (
     resource_site_to_plr_site,
     set_plr_template_name,
 )
-from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
 
 
 class PRCXIError(RuntimeError):
@@ -787,7 +787,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         )
         super().__init__(backend=self._unilabos_backend, deck=deck, simulator=simulator, channel_num=channel_num)
 
-    def post_init(self, ros_node: BaseROS2DeviceNode):
+    def post_init(self, ros_node: DeviceNode):
         super().post_init(ros_node)
         self._unilabos_backend.post_init(ros_node)
 
@@ -1094,7 +1094,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
 
     _num_channels = 8  # 默认通道数为 8
     _is_reset_ok = False
-    _ros_node: BaseROS2DeviceNode
+    _ros_node: DeviceNode
 
     @property
     def is_reset_ok(self) -> bool:
@@ -1172,7 +1172,7 @@ class PRCXI9300Backend(LiquidHandlerBackend):
         print(f"\n\nHeater action: temperature={temperature}, time={time}\n\n")
         # return await self.api_client.heater_action(temperature, time)
 
-    def post_init(self, ros_node: BaseROS2DeviceNode):
+    def post_init(self, ros_node: DeviceNode):
         self._ros_node = ros_node
 
     def create_protocol(self, protocol_name):

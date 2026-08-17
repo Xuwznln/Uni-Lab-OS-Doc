@@ -21,7 +21,6 @@ import ast
 import hashlib
 import json
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
@@ -410,7 +409,9 @@ def _parse_file(
                     "version": device_args.get("version", "1.0.0"),
                     "device_type": device_args.get("device_type")
                     or _detect_class_type(node, import_map),
-                    "supported_backends": device_args.get("supported_backends"),
+                    "supported_backends": device_args.get(
+                        "supported_backends"
+                    ),
                     "handles": device_args.get("handles", []),
                     "available_sites": normalize_available_sites(
                         device_args.get("available_sites")

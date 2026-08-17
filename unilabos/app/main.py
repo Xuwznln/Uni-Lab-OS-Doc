@@ -36,9 +36,9 @@ unilabos_dir = os.path.dirname(os.path.dirname(current_dir))
 if unilabos_dir not in sys.path:
     sys.path.append(unilabos_dir)
 
-from unilabos.app.utils import cleanup_for_restart
-from unilabos.utils.banner_print import print_status, print_unilab_banner
-from unilabos.config.config import load_config, BasicConfig, HTTPConfig
+from unilabos.app.utils import cleanup_for_restart  # noqa: E402
+from unilabos.utils.banner_print import print_status, print_unilab_banner  # noqa: E402
+from unilabos.config.config import load_config, BasicConfig, HTTPConfig  # noqa: E402
 
 # Global restart flags (used by ws_client and web/server)
 _restart_requested: bool = False
@@ -224,6 +224,8 @@ def convert_argv_dashes_to_underscores(args: argparse.ArgumentParser):
 
 def parse_args():
     """解析命令行参数"""
+    from unilabos.app.backend import BACKEND_NAMES, backend_cli_value
+
     parser = argparse.ArgumentParser(description="Start Uni-Lab Edge server.")
     subparsers = parser.add_subparsers(title="Valid subcommands", dest="command")
 
@@ -251,18 +253,30 @@ def parse_args():
     )
     parser.add_argument(
         "--backend",
-        choices=["ros", "dora", "simple", "automancer"],
-        default="ros",
-        help="Choose the backend to run with: 'ros', 'dora', 'simple', or 'automancer'.",
+        type=backend_cli_value,
+        choices=BACKEND_NAMES,
+        default="ros2",
+        metavar="{basic,hostlink,ros2,dora}",
+        help=(
+            "Runtime backend: basic (in-process), hostlink (distributed, no "
+            "ROS), ros2 (default), or dora. "
+            "Legacy aliases 'simple' and 'ros' remain accepted."
+        ),
     )
     parser.add_argument(
         "--app_bridges",
-        nargs="+",
-        default=["websocket", "fastapi"],
-        help="Bridges to connect to. Now support 'websocket' and 'fastapi'.",
+        nargs="*",
+        default=None,
+        help=(
+            "Application bridges. Defaults are backend-specific: ros2 enables "
+            "websocket and fastapi; basic/hostlink/dora enable none. Pass the flag with "
+            "no values to disable all bridges explicitly."
+        ),
     )
     parser.add_argument(
         "--is_slave",
+        "--is-slave",
+        dest="is_slave",
         action="store_true",
         help="Run the backend as slave node (without host privileges).",
     )
@@ -303,7 +317,10 @@ def parse_args():
         "--disable-hostlink",
         dest="disable_hostlink",
         action="store_true",
-        help="关闭 HostLink；ROS2 使用原有发现和注册流程。",
+        help=(
+            "关闭 HostLink；ROS2 使用原有发现和注册流程。"
+            "不能与 --backend hostlink 同时使用。"
+        ),
     )
     parser.add_argument(
         "--hostlink_heartbeat_interval",
@@ -377,10 +394,15 @@ def parse_args():
         "--no-ros-assist",
         dest="no_ros_assist",
         action="store_true",
-        help="保留 HostLink 设备发现和心跳，但不应用 Host 下发的 ROS2 环境。",
+        help=(
+            "ROS2 backend：保留 HostLink 设备发现和心跳，"
+            "但不应用 Host 下发的 ROS2 环境。"
+        ),
     )
     parser.add_argument(
         "--slave_no_host",
+        "--slave-no-host",
+        dest="slave_no_host",
         action="store_true",
         help=(
             "允许 Slave 在 HostLink/Host ROS 服务离线时启动；"
@@ -702,6 +724,23 @@ def main():
     args = parser.parse_args()
     args_dict = vars(args)
 
+    from unilabos.app.backend import (
+        BackendConfigurationError,
+        resolve_backend_selection,
+    )
+
+    try:
+        backend_selection = resolve_backend_selection(
+            args_dict["backend"],
+            args_dict.get("app_bridges"),
+            is_slave=args_dict.get("is_slave", False),
+            visual=args_dict.get("visual", "disable"),
+        )
+    except BackendConfigurationError as exc:
+        parser.error(str(exc))
+    args_dict["backend"] = backend_selection.name
+    args_dict["app_bridges"] = list(backend_selection.app_bridges)
+
     # 处理 HTTP 客户端子命令（login, logout, whoami, config, lab, material, workflow）
     # 这些命令不需要加载完整的 UniLab-OS 环境，提前处理并退出
     http_client_commands = ["login", "logout", "whoami", "config", "lab", "material", "workflow"]
@@ -711,7 +750,6 @@ def main():
             set_output_format,
             OutputFormat,
             print_error,
-            print_output,
             resolve_addr,
         )
         from unilabos.app.cli.auth import cmd_login, cmd_logout, cmd_whoami
@@ -859,7 +897,7 @@ def main():
             config_path = candidate
             print_status(f"发现本地配置文件: {config_path}", "info")
         else:
-            print_status(f"未指定config路径，可通过 --config 传入 local_config.py 文件路径", "info")
+            print_status("未指定config路径，可通过 --config 传入 local_config.py 文件路径", "info")
             print_status(f"您是否为第一次使用？并将当前路径 {working_dir} 作为工作目录？ (Y/n)", "info")
             if check_mode or input() != "n":
                 os.makedirs(working_dir, exist_ok=True)
@@ -939,11 +977,19 @@ def main():
 
     workflow_upload = args_dict.get("command") in ("workflow_upload", "wf")
 
-    # HostLink is a ROS-only control channel in this slice.  It exchanges the
-    # ROS domain/discovery policy and Slave device IDs; normal device actions,
-    # resources and backend APIs keep their existing transports.
+    # ROS2 backend 用 HostLink 辅助发现；hostlink backend 则在同一 TCP 长连接上
+    # 直接同步设备描述/状态和执行设备动作，不导入 ROS。
     is_slave = bool(args_dict.get("is_slave", False))
     _apply_hostlink_cli(args_dict, is_slave=is_slave)
+    if args_dict["backend"] == "hostlink":
+        from unilabos.config.config import HostLinkConfig
+
+        if not HostLinkConfig.enable:
+            parser.error("--backend hostlink 不能与 --disable-hostlink 同时使用")
+        if is_slave and not str(HostLinkConfig.host or "").strip():
+            parser.error(
+                "--backend hostlink --is-slave 必须通过 --host-node-ip 指定 Host"
+            )
 
     # 使用远程资源启动
     if not workflow_upload and args_dict["use_remote_resource"]:
@@ -973,7 +1019,11 @@ def main():
     BasicConfig.extra_resource = args_dict.get("extra_resource", False)
     if BasicConfig.extra_resource:
         print_status("启用额外资源加载：将加载lab_开头的labware资源定义", "info")
-    BasicConfig.communication_protocol = "websocket"
+    BasicConfig.backend = args_dict["backend"]
+    BasicConfig.app_bridges = tuple(args_dict["app_bridges"])
+    BasicConfig.communication_protocol = (
+        "websocket" if "websocket" in BasicConfig.app_bridges else ""
+    )
     machine_name = platform.node()
     machine_name = "".join([c if c.isalnum() or c == "_" else "_" for c in machine_name])
     BasicConfig.machine_name = machine_name
@@ -1072,7 +1122,6 @@ def main():
     from unilabos.app.communication import get_communication_client
     from unilabos.app.backend import start_backend
     from unilabos.app.web import http_client
-    from unilabos.app.web import start_server
     from unilabos.app.register import register_devices_and_resources
     from unilabos.resources.resource_tracker import ResourceTreeSet, ResourceDict
 
@@ -1187,8 +1236,8 @@ def main():
         args_dict["bridges"].append(http_client)
     # 获取通信客户端（仅支持WebSocket）
     if BasicConfig.is_host_mode:
-        comm_client = get_communication_client()
         if "websocket" in args_dict["app_bridges"]:
+            comm_client = get_communication_client()
             args_dict["bridges"].append(comm_client)
 
             def _exit(signum, frame):
@@ -1219,14 +1268,17 @@ def main():
             )
             args_dict["resources_mesh_config"] = resource_visualization.resource_model
             start_backend(**args_dict)
-            server_thread = threading.Thread(
-                target=start_server,
-                kwargs=dict(
-                    open_browser=not BasicConfig.disable_browser,
-                    port=BasicConfig.port,
-                ),
-            )
-            server_thread.start()
+            if "fastapi" in args_dict["app_bridges"]:
+                from unilabos.app.web import start_server
+
+                server_thread = threading.Thread(
+                    target=start_server,
+                    kwargs=dict(
+                        open_browser=not BasicConfig.disable_browser,
+                        port=BasicConfig.port,
+                    ),
+                )
+                server_thread.start()
             asyncio.set_event_loop(asyncio.new_event_loop())
             try:
                 resource_visualization.start()
@@ -1236,7 +1288,7 @@ def main():
                     print_status(
                         "建议解决方案：\n"
                         "1. 激活Conda环境: conda activate unilab\n"
-                        "2. 或使用 --backend simple 参数\n"
+                        "2. 或使用 --backend basic 参数\n"
                         "3. 或使用 --visual disable 参数禁用可视化",
                         "info",
                     )
@@ -1245,23 +1297,35 @@ def main():
             while True:
                 time.sleep(1)
         else:
-            start_backend(**args_dict)
-            restart_requested = start_server(
-                open_browser=not BasicConfig.disable_browser,
-                port=BasicConfig.port,
-            )
+            backend_thread = start_backend(**args_dict)
+            if "fastapi" in args_dict["app_bridges"]:
+                from unilabos.app.web import start_server
+
+                restart_requested = start_server(
+                    open_browser=not BasicConfig.disable_browser,
+                    port=BasicConfig.port,
+                )
+            else:
+                backend_thread.join()
+                restart_requested = False
             if restart_requested:
                 print_status("[Main] Restart requested, cleaning up...", "info")
                 cleanup_for_restart()
                 return
     else:
-        start_backend(**args_dict)
+        backend_thread = start_backend(**args_dict)
 
-        # 启动服务器（默认支持WebSocket触发重启）
-        restart_requested = start_server(
-            open_browser=not BasicConfig.disable_browser,
-            port=BasicConfig.port,
-        )
+        # 只有声明支持 FastAPI bridge 的 backend 才加载 ROS2 Web 状态面。
+        if "fastapi" in args_dict["app_bridges"]:
+            from unilabos.app.web import start_server
+
+            restart_requested = start_server(
+                open_browser=not BasicConfig.disable_browser,
+                port=BasicConfig.port,
+            )
+        else:
+            backend_thread.join()
+            restart_requested = False
         if restart_requested:
             print_status("[Main] Restart requested, cleaning up...", "info")
             cleanup_for_restart()
