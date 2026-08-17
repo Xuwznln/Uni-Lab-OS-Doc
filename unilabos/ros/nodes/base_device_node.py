@@ -46,6 +46,10 @@ from unilabos.resources.graphio import (
     initialize_resources,
 )
 from unilabos.resources.plr_additional_res_reg import register
+from unilabos.resources.resource_state import (
+    load_all_state_with_unilabos,
+    serialize_all_state_with_unilabos,
+)
 from unilabos.ros.msgs.message_converter import (
     String,
     convert_to_ros_msg,
@@ -64,12 +68,12 @@ from unilabos_msgs.srv import (
 from unilabos_msgs.msg import Resource  # type: ignore
 
 from unilabos.resources.resource_tracker import (
+    EXTRA_SAMPLE_UUID,
     DeviceNodeResourceTracker,
     ResourceDictType,
     ResourceTreeSet,
     ResourceTreeInstance,
     ResourceDictInstance,
-    EXTRA_SAMPLE_UUID,
     PARAM_SAMPLE_UUIDS,
     JSON_UNILABOS_PARAM,
 )
@@ -1043,7 +1047,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 if isinstance(plr_resource, ResourceDictInstance):
                     self._lab_logger.info(f"跳过 非资源{plr_resource.res_content.name} 的更新")
                     continue
-                states = plr_resource.serialize_all_state()
+                states = serialize_all_state_with_unilabos(plr_resource)
                 original_instance: ResourcePLR = self.resource_tracker.figure_resource(
                     {"uuid": tree.root_node.res_content.uuid}, try_mode=False
                 )
@@ -1107,16 +1111,25 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     if target_site is not None and sites is not None and site_names is not None:
                         site_index = None
                         try:
-                            # sites 可能是 Resource 列表或 dict 列表 (如 PRCXI9300Deck)
+                            # sites 可能是 ItemizedCarrier 的 Resource 列表，或 PRCXI 的 ResourceSite 列表。
                             # 只有itemized_carrier在使用，准备弃用
                             site_index = sites.index(original_instance)
                         except ValueError:
-                            # dict 类型的 sites: 通过name匹配
+                            # 规范 Site 按占用物料 UUID 匹配，旧 dict 数据回退 occupied_by name。
                             for idx, site in enumerate(sites):
-                                if original_instance.name == site["occupied_by"]:
+                                if isinstance(site, dict):
+                                    occupied_uuid = site.get("occupied_material_uuid")
+                                    occupied_name = site.get("occupied_by")
+                                else:
+                                    occupied_uuid = getattr(site, "occupied_material_uuid", None)
+                                    occupied_name = getattr(site, "occupied_by", None)
+                                if (
+                                    occupied_uuid
+                                    and occupied_uuid == getattr(original_instance, "unilabos_uuid", None)
+                                ) or (occupied_name and original_instance.name == occupied_name):
                                     site_index = idx
                                     break
-                                # 默认资源会放到000，导致匹配site，后面严格按照occupied_by来匹配
+                                # 默认资源会放到000，后续必须按 occupied_material_uuid 精确匹配。
                                 # elif (original_instance.location.x == site["position"]["x"] and original_instance.location.y == site["position"]["y"] and original_instance.location.z == site["position"]["z"]):
                                 #     site_index = idx
                                 #     break
@@ -1142,7 +1155,7 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                 original_instance.location = plr_resource.location
                 original_instance.rotation = plr_resource.rotation
                 original_instance.barcode = plr_resource.barcode
-                original_instance.load_all_state(states)
+                load_all_state_with_unilabos(original_instance, states)
                 child_count = len(original_instance.get_all_children())
                 self.lab_logger().info(
                     f"更新了资源属性 {plr_resource}[{tree.root_node.res_content.uuid}] " f"及其子节点 {child_count} 个"

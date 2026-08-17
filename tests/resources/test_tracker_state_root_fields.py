@@ -1,26 +1,17 @@
 from __future__ import annotations
 
-
 from uuid import uuid4
-
 
 import pytest
 from pylabrobot.resources import Coordinate, Rotation
-
-
 from pylabrobot import serializer as plr_serializer
 
-
 from unilabos.resources.container import RegularContainer
-
-
 from unilabos.resources.resource_pose import (
     ResourceDictPosition,
     ResourceDictPositionObject,
     ResourceDictPositionSize,
 )
-
-
 from unilabos.resources.resource_tracker import (
     EXTRA_RESOURCE_CLASS,
     EXTRA_RESOURCE_META_DATA,

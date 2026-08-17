@@ -6,6 +6,7 @@
 """
 
 import json
+import math
 import traceback
 from io import StringIO
 from typing import Iterable, Any, Dict, Type, TypeVar, Union
@@ -20,10 +21,15 @@ from rosidl_parser.definition import UnboundedSequence, NamespacedType, BasicTyp
 from unilabos.utils import logger
 from unilabos.utils.import_manager import ImportManager
 from unilabos.config.config import ROSConfig
+from unilabos.resources.resource_pose import ResourceDictPosition
 
 # 定义泛型类型
 T = TypeVar("T")
 DataClassT = TypeVar("DataClassT")
+
+# ROS Resource.pose.position 不能表达 null。动态位置未知时在 config 中携带
+# 仅供 Adapter 使用的标记，反序列化时立即移除，避免把 Pose() 的零值误当事实。
+ROS_CONFIG_POSITION_UNKNOWN = "unilabos_resource_position_unknown"
 
 # 从配置中获取需要导入的模块列表
 ROS_MODULES = ROSConfig.modules
@@ -159,13 +165,119 @@ _msg_converter: Dict[Type, Any] = {
             if x.get("position", None) is not None
             else Pose()
         ),
-        config=json.dumps(x.get("config", {})),
+        config=json.dumps(obtain_config_with_root_fields(x)),
         data=json.dumps(obtain_data_with_uuid(x)),
     ),
 }
 
+def obtain_config_with_root_fields(x: dict):
+    """把 ROS Resource 尚未定义的根字段无损暂存到 config。"""
+
+    from unilabos.resources.resource_tracker import EXTRA_RESOURCE_META_DATA
+
+    config = dict(x.get("config") or {})
+    missing = object()
+    legacy_config_meta_data = config.pop("meta_data", missing)
+    config_meta_data = config.pop(EXTRA_RESOURCE_META_DATA, missing)
+    root_meta_data = x.get("meta_data")
+    if "meta_data" not in x:
+        root_meta_data = {}
+        if legacy_config_meta_data is not missing:
+            root_meta_data = legacy_config_meta_data
+        if config_meta_data is not missing:
+            root_meta_data = config_meta_data
+    if isinstance(root_meta_data, BaseModel):
+        root_meta_data = root_meta_data.model_dump()
+    if not isinstance(root_meta_data, dict):
+        raise ValueError("根字段 meta_data 必须是对象")
+    if config_meta_data is not missing:
+        if not isinstance(config_meta_data, dict):
+            raise ValueError(f"config.{EXTRA_RESOURCE_META_DATA} 必须是对象")
+        if config_meta_data != root_meta_data:
+            raise ValueError(
+                f"根字段 meta_data 与 config.{EXTRA_RESOURCE_META_DATA} 冲突"
+            )
+    if legacy_config_meta_data is not missing:
+        if not isinstance(legacy_config_meta_data, dict):
+            raise ValueError("config.meta_data 必须是对象")
+        if legacy_config_meta_data != root_meta_data:
+            raise ValueError("根字段 meta_data 与 config.meta_data 冲突")
+    # ROS Resource 尚无 meta_data 字段；该键仅用于传输，入站后立即移除。
+    config[EXTRA_RESOURCE_META_DATA] = root_meta_data
+    position_unknown_marker = config.pop(ROS_CONFIG_POSITION_UNKNOWN, None)
+    if position_unknown_marker is not None and not isinstance(position_unknown_marker, bool):
+        raise ValueError(f"config.{ROS_CONFIG_POSITION_UNKNOWN} 必须是布尔值")
+    if x.get("position") is None:
+        config[ROS_CONFIG_POSITION_UNKNOWN] = True
+    elif position_unknown_marker is True:
+        raise ValueError("根字段 position 与 ROS config 的未知位置标记冲突")
+
+    root_pose = x.get("pose")
+    if root_pose is not None:
+        if isinstance(root_pose, BaseModel):
+            root_pose = root_pose.model_dump()
+        normalized_root_pose = ResourceDictPosition.model_validate(root_pose).model_dump()
+        config_pose = config.get("pose")
+        if config_pose is not None:
+            if isinstance(config_pose, BaseModel):
+                config_pose = config_pose.model_dump()
+            normalized_config_pose = ResourceDictPosition.model_validate(config_pose).model_dump()
+            if normalized_config_pose != normalized_root_pose:
+                raise ValueError("根字段 pose 与 config.pose 冲突")
+        config["pose"] = normalized_root_pose
+    barcode = x.get("barcode", "")
+    if barcode and not isinstance(barcode, dict) and "barcode" not in config:
+        config["barcode"] = {
+            "data": barcode,
+            "symbology": x.get("barcode_symbology", "") or "",
+            "position_on_resource": "front",
+        }
+    if x.get("template_name"):
+        if config.get("template_name") not in (None, x["template_name"]):
+            raise ValueError("根字段 template_name 与 config.template_name 冲突")
+        config["template_name"] = x["template_name"]
+    if x.get("resource_template_uuid"):
+        if config.get("resource_template_uuid") not in (
+            None,
+            x["resource_template_uuid"],
+        ):
+            raise ValueError(
+                "根字段 resource_template_uuid 与 config.resource_template_uuid 冲突"
+            )
+        config["resource_template_uuid"] = x["resource_template_uuid"]
+    # available_sites 只属于 Registry/ResourceTemplate，不进入实例 ROS payload。
+    config.pop("available_sites", None)
+    if x.get("sites") is not None:
+        root_sites = [
+            site.model_dump() if isinstance(site, BaseModel) else site
+            for site in x["sites"]
+        ]
+        config_sites = config.get("sites")
+        if config_sites is not None:
+            config_sites = [
+                site.model_dump() if isinstance(site, BaseModel) else site
+                for site in config_sites
+            ]
+        if config_sites is not None and config_sites != root_sites:
+            raise ValueError("根字段 sites 与 config.sites 冲突")
+        config["sites"] = root_sites
+        if "sites_initialized" not in x:
+            config.setdefault("sites_initialized", bool(root_sites))
+    if "sites_initialized" in x:
+        if config.get("sites_initialized") is not None and config["sites_initialized"] != x["sites_initialized"]:
+            raise ValueError("根字段 sites_initialized 与 config.sites_initialized 冲突")
+        config["sites_initialized"] = x["sites_initialized"]
+    return config
+
+
 def obtain_data_with_uuid(x: dict):
-    data = x.get("data", {})
+    from unilabos.resources.resource_tracker import TRACKER_STATE_KEYS
+
+    data = dict(x.get("data") or {})
+    # ROS Resource 尚无独立 VolumeTracker 字段，临时组装回旧 data 形态传输。
+    for state_key in TRACKER_STATE_KEYS:
+        if x.get(state_key) is not None:
+            data[state_key] = x[state_key]
     data["unilabos_uuid"] = x.get("uuid", None)
     return data
 
@@ -178,6 +290,50 @@ def json_or_yaml_loads(data: str) -> Any:
         except:
             pass
         raise e
+
+
+def resource_msg_to_dict(x: Any) -> Dict[str, Any]:
+    """把 ROS Resource 转成规范字典，并恢复可空动态位置。"""
+
+    from unilabos.resources.resource_tracker import EXTRA_RESOURCE_META_DATA
+
+    config = json_or_yaml_loads(x.config or "{}")
+    if not isinstance(config, dict):
+        raise ValueError("ROS Resource.config 必须解码为对象")
+    missing = object()
+    meta_data = config.pop(EXTRA_RESOURCE_META_DATA, missing)
+    if meta_data is not missing and not isinstance(meta_data, dict):
+        raise ValueError(f"config.{EXTRA_RESOURCE_META_DATA} 必须是对象")
+    position_unknown = config.pop(ROS_CONFIG_POSITION_UNKNOWN, False)
+    if not isinstance(position_unknown, bool):
+        raise ValueError(f"config.{ROS_CONFIG_POSITION_UNKNOWN} 必须是布尔值")
+    if position_unknown:
+        # presence=false 时 Pose 只是 ROS 消息的占位 padding，不承载位置事实。
+        position = None
+    else:
+        encoded_position = {
+            "x": float(x.pose.position.x),
+            "y": float(x.pose.position.y),
+            "z": float(x.pose.position.z),
+        }
+        if not all(math.isfinite(value) for value in encoded_position.values()):
+            raise ValueError("ROS Resource.pose.position 必须是有限 xyz")
+        position = encoded_position
+    resource = {
+        "id": x.id,
+        "name": x.name,
+        "sample_id": x.sample_id if x.sample_id else None,
+        "children": list(x.children),
+        "parent": x.parent if x.parent else None,
+        "type": x.type,
+        "class": "",
+        "position": position,
+        "config": config,
+        "data": json_or_yaml_loads(x.data or "{}"),
+    }
+    if meta_data is not missing:
+        resource["meta_data"] = meta_data
+    return resource
 
 
 # ROS消息到Python转换器
@@ -193,18 +349,7 @@ _msg_converter_back: Dict[Type, Any] = {
     str: str,
     String: lambda x: x.data,
     Point: lambda x: Point3D(x=x.x, y=x.y, z=x.z),
-    Resource: lambda x: {
-        "id": x.id,
-        "name": x.name,
-        "sample_id": x.sample_id if x.sample_id else None,
-        "children": list(x.children),
-        "parent": x.parent if x.parent else None,
-        "type": x.type,
-        "class": "",
-        "position": {"x": x.pose.position.x, "y": x.pose.position.y, "z": x.pose.position.z},
-        "config": json_or_yaml_loads(x.config or "{}"),
-        "data": json_or_yaml_loads(x.data or "{}"),
-    },
+    Resource: resource_msg_to_dict,
 }
 
 # 消息数据类型映射

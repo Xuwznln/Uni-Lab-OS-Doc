@@ -13,6 +13,10 @@ from typing import Type, Any, Dict, Optional, TypeVar, Generic, List
 
 from unilabos.resources.resource_tracker import DeviceNodeResourceTracker, ResourceTreeSet, ResourceDictInstance, \
     ResourceTreeInstance
+from unilabos.resources.resource_state import (
+    load_all_state_with_unilabos,
+    serialize_all_state_with_unilabos,
+)
 from unilabos.utils import logger
 from unilabos.utils.cls_creator import create_instance_from_config
 
@@ -158,11 +162,11 @@ class PyLabRobotCreator(DeviceClassCreator[T]):
                             res_tree_set = ResourceTreeSet([res_tree])
                             resource_instance: Resource = res_tree_set.to_plr_resources()[0]
                             # resource_instance: Resource = resource_ulab_to_plr(resource, contain_model)  # 带state
-                            states[prefix_path] = resource_instance.serialize_all_state()
+                            states[prefix_path] = serialize_all_state_with_unilabos(resource_instance)
                             # 使用 prefix_path 作为 key 存储资源状态
                             if to_dict:
                                 serialized = resource_instance.serialize()
-                                states[prefix_path] = resource_instance.serialize_all_state()
+                                states[prefix_path] = serialize_all_state_with_unilabos(resource_instance)
                                 return serialized
                             else:
                                 processed_child_names[child_name] = resource_instance
@@ -244,13 +248,13 @@ class PyLabRobotCreator(DeviceClassCreator[T]):
 
                 self.device_instance: Resource = deserialize_method(**processed_data)
                 self.resource_tracker.loop_set_uuid(self.device_instance, name_to_uuid)
-                all_states = self.device_instance.serialize_all_state()
+                all_states = serialize_all_state_with_unilabos(self.device_instance)
                 for k, v in states.items():
                     logger.debug(f"PyLabRobot反序列化设置状态：{k}")
                     for kk, vv in all_states.items():
                         if kk not in v:
                             v[kk] = vv
-                    self.device_instance.load_all_state(v)
+                    load_all_state_with_unilabos(self.device_instance, v)
                 self.resource_tracker.add_resource(self.device_instance)
                 self.post_create()  # 对应DeviceClassCreator进行调用
                 return self.device_instance  # type: ignore

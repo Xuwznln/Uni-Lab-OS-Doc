@@ -1,21 +1,13 @@
 from uuid import UUID, uuid4
 
-
 import pytest
-
-
 from pydantic import ValidationError
-
-
 from pylabrobot.resources import Container, Resource
-
 
 from unilabos.resources.resource_state import (
     load_all_state_with_unilabos,
     serialize_all_state_with_unilabos,
 )
-
-
 from unilabos.resources.resource_tracker import (
     EXTRA_RESOURCE_CLASS,
     EXTRA_RESOURCE_META_DATA,
@@ -153,6 +145,30 @@ def test_resource_meta_data_rejects_explicit_empty_root_against_legacy_value():
                     "type": "RegularContainer",
                     "meta_data": {"vendor": "legacy"},
                 },
+            )
+        )
+
+
+def test_ros_transport_uuid_is_promoted_once_and_removed_from_data():
+    transport_uuid = str(uuid4())
+    resource = ResourceDict.model_validate(
+        _resource_payload(
+            uuid="",
+            data={"unilabos_uuid": transport_uuid, "runtime": "kept"},
+        )
+    )
+
+    assert resource.uuid == transport_uuid
+    assert resource.data == {"runtime": "kept"}
+    assert ResourceDict.model_validate(resource.model_dump(by_alias=True)).uuid == transport_uuid
+
+
+def test_ros_transport_uuid_rejects_conflicting_root_uuid():
+    with pytest.raises(ValidationError, match="uuid.*data.unilabos_uuid.*冲突"):
+        ResourceDict.model_validate(
+            _resource_payload(
+                uuid=str(uuid4()),
+                data={"unilabos_uuid": str(uuid4())},
             )
         )
 
