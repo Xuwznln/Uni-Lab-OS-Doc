@@ -1,9 +1,11 @@
 chiller:
+  available_sites: []
   category:
   - temperature
   class:
     action_value_mappings:
       auto-build_modbus_frame:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -42,6 +44,7 @@ chiller:
           type: object
         type: UniLabJsonCommand
       auto-convert_temperature_to_modbus_value:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -72,6 +75,7 @@ chiller:
           type: object
         type: UniLabJsonCommand
       auto-modbus_crc:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -98,6 +102,7 @@ chiller:
           type: object
         type: UniLabJsonCommand
       auto-stop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -119,6 +124,7 @@ chiller:
           type: object
         type: UniLabJsonCommand
       set_temperature:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -163,6 +169,9 @@ chiller:
         type: SendCmd
     module: unilabos.devices.temperature.chiller:Chiller
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 实验室制冷设备，用于精确的温度控制和冷却操作。该设备通过Modbus RTU协议与控制系统通信，支持精确的温度设定和监控。具备快速降温、恒温控制和温度保持功能，广泛应用于需要低温环境的化学反应、样品保存、结晶操作等实验场景。提供稳定可靠的冷却性能，确保实验过程的温度精度。
@@ -187,11 +196,13 @@ chiller:
       type: object
   version: 1.0.0
 heaterstirrer.dalong:
+  available_sites: []
   category:
   - temperature
   class:
     action_value_mappings:
       auto-close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -213,6 +224,7 @@ heaterstirrer.dalong:
           type: object
         type: UniLabJsonCommand
       auto-set_stir_speed:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -238,6 +250,7 @@ heaterstirrer.dalong:
           type: object
         type: UniLabJsonCommand
       auto-set_temp_inner:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -267,6 +280,7 @@ heaterstirrer.dalong:
           type: object
         type: UniLabJsonCommand
       heatchill:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -461,6 +475,7 @@ heaterstirrer.dalong:
           type: object
         type: HeatChill
       set_temp_target:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -505,6 +520,7 @@ heaterstirrer.dalong:
           type: object
         type: SendCmd
       set_temp_warning:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -555,6 +571,9 @@ heaterstirrer.dalong:
       temp: float
       temp_target: float
       temp_warning: float
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 大龙加热搅拌器，集成加热和搅拌双重功能的实验室设备。该设备通过串口通信控制，支持精确的温度调节、搅拌速度控制和安全保护功能。具备实时温度监测、目标温度设定、安全温度报警等特性。适用于化学合成、样品制备、反应控制等需要同时进行加热和搅拌的实验操作，提供稳定均匀的反应环境。
@@ -597,11 +616,13 @@ heaterstirrer.dalong:
       type: object
   version: 1.0.0
 tempsensor:
+  available_sites: []
   category:
   - temperature
   class:
     action_value_mappings:
       auto-build_modbus_request:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -639,6 +660,7 @@ tempsensor:
           type: object
         type: UniLabJsonCommand
       auto-calculate_crc:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -664,6 +686,7 @@ tempsensor:
           type: object
         type: UniLabJsonCommand
       auto-read_modbus_response:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -689,6 +712,7 @@ tempsensor:
           type: object
         type: UniLabJsonCommand
       auto-send_prototype_command:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -714,6 +738,7 @@ tempsensor:
           type: object
         type: UniLabJsonCommand
       set_warning:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -759,6 +784,9 @@ tempsensor:
     module: unilabos.devices.temperature.sensor_node:TempSensorNode
     status_types:
       value: float
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 高精度温度传感器设备，用于实验室环境和设备的温度监测。该传感器通过Modbus RTU协议与控制系统通信，提供实时准确的温度数据。具备高精度测量、报警温度设定、数据稳定性好等特点。适用于反应器监控、环境温度监测、设备保护等需要精确温度测量的实验场景，为实验安全和数据可靠性提供保障。

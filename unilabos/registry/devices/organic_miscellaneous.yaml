@@ -1,9 +1,11 @@
 rotavap.one:
+  available_sites: []
   category:
   - organic_miscellaneous
   class:
     action_value_mappings:
       auto-cmd_write:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -29,6 +31,7 @@ rotavap.one:
           type: object
         type: UniLabJsonCommand
       auto-main_loop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -50,6 +53,7 @@ rotavap.one:
           type: object
         type: UniLabJsonCommand
       auto-set_pump_time:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -75,6 +79,7 @@ rotavap.one:
           type: object
         type: UniLabJsonCommand
       auto-set_rotate_time:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -100,6 +105,7 @@ rotavap.one:
           type: object
         type: UniLabJsonCommand
       set_timer:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -144,6 +150,9 @@ rotavap.one:
         type: SendCmd
     module: unilabos.devices.rotavap.rotavap_one:RotavapOne
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 旋转蒸发仪设备，用于有机化学实验中的溶剂回收和浓缩操作。该设备通过串口通信控制，集成旋转和真空泵功能，支持定时控制和自动化操作。具备旋转速度调节、真空度控制、温度管理等功能，实现高效的溶剂蒸发和回收。适用于有机合成、天然产物提取、药物制备等需要溶剂去除和浓缩的实验室应用场景。
@@ -168,11 +177,13 @@ rotavap.one:
       type: object
   version: 1.0.0
 separator.homemade:
+  available_sites: []
   category:
   - organic_miscellaneous
   class:
     action_value_mappings:
       auto-read_sensor_loop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -194,6 +205,7 @@ separator.homemade:
           type: object
         type: UniLabJsonCommand
       auto-valve_open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -227,6 +239,7 @@ separator.homemade:
           type: object
         type: UniLabJsonCommand
       auto-write:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -252,6 +265,7 @@ separator.homemade:
           type: object
         type: UniLabJsonCommand
       stir:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -439,6 +453,7 @@ separator.homemade:
           type: object
         type: Stir
       valve_open_cmd:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -483,6 +498,9 @@ separator.homemade:
         type: SendCmd
     module: unilabos.devices.separator.homemade_grbl_conductivity:SeparatorController
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 液-液分离器设备，基于自制Grbl控制器的自动化分离系统。该设备集成搅拌、沉降、阀门控制和电导率传感器，通过串口通信实现精确的分离操作控制。支持自动搅拌、分层沉降、基于传感器反馈的智能分液等功能。适用于有机化学中的萃取分离、相分离、液-液提取等需要精确分离控制的实验应用。

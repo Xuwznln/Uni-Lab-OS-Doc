@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+import yaml
+
 from unilabos.registry.ast_registry_scanner import (
     _CACHE_VERSION,
     load_scan_cache,
@@ -25,6 +28,28 @@ def test_device_decorator_keeps_supported_backends() -> None:
     assert metadata["supported_backends"] == ["hostlink", "ros2"]
 
 
+def test_device_decorator_defaults_ordinary_device_metadata() -> None:
+    @device(id="backend_metadata_default_test", category=["test"])
+    class RuntimeDriver:
+        pass
+
+    metadata = get_device_meta(RuntimeDriver)
+    assert metadata is not None
+    assert metadata["supported_backends"] == ["hostlink", "ros2"]
+    assert metadata["available_sites"] == []
+
+
+def test_device_decorator_rejects_internal_basic_runtime() -> None:
+    with pytest.raises(ValueError, match="只允许 hostlink/ros2"):
+        @device(
+            id="backend_metadata_internal_basic_test",
+            category=["test"],
+            supported_backends=["basic", "ros2"],
+        )
+        class RuntimeDriver:
+            pass
+
+
 def test_ast_scanner_keeps_supported_backends(tmp_path) -> None:
     source = tmp_path / "driver.py"
     source.write_text(
@@ -35,7 +60,7 @@ def test_ast_scanner_keeps_supported_backends(tmp_path) -> None:
                 "@device(",
                 "    id='backend_metadata_ast_test',",
                 "    category=['test'],",
-                "    supported_backends=['basic', 'hostlink', 'ros2'],",
+                "    supported_backends=['hostlink', 'ros2'],",
                 ")",
                 "class Driver:",
                 "    pass",
@@ -52,7 +77,44 @@ def test_ast_scanner_keeps_supported_backends(tmp_path) -> None:
         )
 
     metadata = result["devices"]["backend_metadata_ast_test"]
-    assert metadata["supported_backends"] == ["basic", "hostlink", "ros2"]
+    assert metadata["supported_backends"] == ["hostlink", "ros2"]
+
+
+def test_ast_scanner_defaults_python_and_native_ros2_devices(tmp_path) -> None:
+    source = tmp_path / "default_drivers.py"
+    source.write_text(
+        "\n".join(
+            [
+                "from rclpy.node import Node",
+                "from unilabos.registry.decorators import device",
+                "",
+                "@device(id='ordinary_ast_device', category=['test'])",
+                "class OrdinaryDriver:",
+                "    pass",
+                "",
+                "@device(id='native_ros_ast_device', category=['test'])",
+                "class NativeROSDriver(Node):",
+                "    pass",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = scan_directory(
+            tmp_path,
+            python_path=tmp_path,
+            executor=executor,
+        )
+
+    assert result["devices"]["ordinary_ast_device"]["supported_backends"] == [
+        "hostlink",
+        "ros2",
+    ]
+    assert result["devices"]["ordinary_ast_device"]["available_sites"] == []
+    assert result["devices"]["native_ros_ast_device"]["supported_backends"] == [
+        "ros2"
+    ]
 
 
 def test_device_decorator_applies_per_id_supported_backends() -> None:
@@ -64,7 +126,7 @@ def test_device_decorator_applies_per_id_supported_backends() -> None:
             },
         },
         category=["test"],
-        supported_backends=["basic", "ros2"],
+        supported_backends=["hostlink", "ros2"],
     )
     class MultiRuntimeDriver:
         pass
@@ -74,7 +136,7 @@ def test_device_decorator_applies_per_id_supported_backends() -> None:
 
     assert base is not None
     assert override is not None
-    assert base["supported_backends"] == ["basic", "ros2"]
+    assert base["supported_backends"] == ["hostlink", "ros2"]
     assert override["supported_backends"] == ["hostlink"]
 
 
@@ -93,7 +155,7 @@ def test_ast_scanner_applies_per_id_supported_backends(tmp_path) -> None:
                 "        },",
                 "    },",
                 "    category=['test'],",
-                "    supported_backends=['basic', 'ros2'],",
+                "    supported_backends=['hostlink', 'ros2'],",
                 ")",
                 "class Driver:",
                 "    pass",
@@ -110,12 +172,59 @@ def test_ast_scanner_applies_per_id_supported_backends(tmp_path) -> None:
         )
 
     assert result["devices"]["backend_metadata_ast_a"]["supported_backends"] == [
-        "basic",
+        "hostlink",
         "ros2",
     ]
     assert result["devices"]["backend_metadata_ast_b"]["supported_backends"] == [
         "hostlink",
     ]
+
+
+def test_registry_completion_publishes_backend_site_and_policy_defaults(
+    monkeypatch,
+) -> None:
+    registry = Registry()
+    monkeypatch.setattr(
+        registry,
+        "device_type_registry",
+        {
+            "ordinary": {
+                "class": {
+                    "type": "python",
+                    "status_types": {},
+                    "action_value_mappings": {"run": {"type": "", "schema": {}}},
+                }
+            },
+            "native_ros": {
+                "class": {
+                    "type": "ros2",
+                    "status_types": {},
+                    "action_value_mappings": {"run": {"type": "", "schema": {}}},
+                }
+            },
+        },
+    )
+
+    completion = {
+        entry["id"]: entry for entry in registry.obtain_registry_device_info()
+    }
+
+    assert completion["ordinary"]["class"]["supported_backends"] == [
+        "hostlink",
+        "ros2",
+    ]
+    assert completion["native_ros"]["class"]["supported_backends"] == ["ros2"]
+    assert completion["ordinary"]["available_sites"] == []
+    assert completion["ordinary"]["class"]["action_value_mappings"]["run"][
+        "error_policy"
+    ] == {}
+
+    yaml_entry = yaml.safe_load(registry.get_yaml_output("ordinary"))["ordinary"]
+    assert yaml_entry["available_sites"] == []
+    assert yaml_entry["class"]["supported_backends"] == ["hostlink", "ros2"]
+    assert yaml_entry["class"]["action_value_mappings"]["run"][
+        "error_policy"
+    ] == {}
 
 
 def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
@@ -127,7 +236,7 @@ def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
 
     cache = load_scan_cache(cache_path)
 
-    assert _CACHE_VERSION == 8
+    assert _CACHE_VERSION == 11
     assert cache == {"version": _CACHE_VERSION, "files": {}}
 
 

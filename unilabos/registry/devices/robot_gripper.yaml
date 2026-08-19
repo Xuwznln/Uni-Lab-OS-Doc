@@ -1,9 +1,11 @@
 gripper.misumi_rz:
+  available_sites: []
   category:
   - robot_gripper
   class:
     action_value_mappings:
       auto-data_loop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -25,6 +27,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-data_reader:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -46,6 +49,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-gripper_move:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -79,6 +83,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-init_gripper:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -100,6 +105,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-modbus_crc:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -126,6 +132,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-move_and_rotate:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -171,6 +178,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-node_gripper_move:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -196,6 +204,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-node_rotate_move:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -221,6 +230,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-read_address:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -254,6 +264,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-rotate_move_abs:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -287,6 +298,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-send_cmd:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -324,6 +336,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_gripper:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -345,6 +358,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_gripper_init:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -366,6 +380,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_rotate:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -387,6 +402,7 @@ gripper.misumi_rz:
           type: object
         type: UniLabJsonCommand
       execute_command_from_outer:
+        error_policy: {}
         feedback: {}
         goal:
           command: command
@@ -429,6 +445,9 @@ gripper.misumi_rz:
     module: unilabos.devices.motor.Grasp:EleGripper
     status_types:
       status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Misumi RZ系列电子夹爪设备，集成旋转和抓取双重功能的精密夹爪系统。该设备通过Modbus RTU协议与控制系统通信，支持位置、速度、力矩的精确控制。具备高精度的位置反馈、实时状态监控和故障检测功能。适用于需要精密抓取和旋转操作的实验室自动化场景，如样品管理、精密装配、器件操作等应用。
@@ -462,11 +481,13 @@ gripper.misumi_rz:
       type: object
   version: 1.0.0
 gripper.mock:
+  available_sites: []
   category:
   - robot_gripper
   class:
     action_value_mappings:
       auto-edit_id:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -502,6 +523,7 @@ gripper.mock:
           type: object
         type: UniLabJsonCommand
       push_to:
+        error_policy: {}
         feedback:
           effort: effort
           position: position
@@ -592,6 +614,9 @@ gripper.mock:
       status: str
       torque: float
       velocity: float
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 模拟夹爪设备，用于系统测试和开发调试。该设备模拟真实夹爪的位置、速度、力矩等物理特性，支持虚拟的抓取和移动操作。提供与真实夹爪相同的接口和状态反馈，便于在没有实际硬件的情况下进行系统集成测试和算法验证。适用于软件开发、系统调试和培训演示等场景。

@@ -26,6 +26,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from unilabos.registry.backend_metadata import normalize_supported_backends
 from unilabos.registry.utils import resolve_registry_displayname
 from unilabos.resources.site_definition import normalize_available_sites
 
@@ -36,7 +37,7 @@ from unilabos.resources.site_definition import normalize_available_sites
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 8       # 缓存格式版本号，格式变更时递增
+_CACHE_VERSION = 11      # 缓存格式版本号，格式变更时递增
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
@@ -398,6 +399,9 @@ def _parse_file(
                 _validate_device_ids(device_ids)
                 id_meta = device_args.get("id_meta") or {}
                 displayname = device_args.get("displayname", "")
+                device_type = device_args.get("device_type") or _detect_class_type(
+                    node, import_map
+                )
                 base_meta = {
                     "class_name": node.name,
                     "module": f"{module_path}:{node.name}",
@@ -407,10 +411,10 @@ def _parse_file(
                     "displayname": displayname,
                     "icon": device_args.get("icon", ""),
                     "version": device_args.get("version", "1.0.0"),
-                    "device_type": device_args.get("device_type")
-                    or _detect_class_type(node, import_map),
-                    "supported_backends": device_args.get(
-                        "supported_backends"
+                    "device_type": device_type,
+                    "supported_backends": normalize_supported_backends(
+                        device_args.get("supported_backends"),
+                        device_type=device_type,
                     ),
                     "handles": device_args.get("handles", []),
                     "available_sites": normalize_available_sites(
@@ -443,6 +447,11 @@ def _parse_file(
                             meta[key] = (
                                 normalize_available_sites(overrides[key])
                                 if key == "available_sites"
+                                else normalize_supported_backends(
+                                    overrides[key],
+                                    device_type=device_type,
+                                )
+                                if key == "supported_backends"
                                 else overrides[key]
                             )
                     meta["displayname"] = resolve_registry_displayname(meta.get("displayname"), did)
@@ -478,6 +487,9 @@ _STATIC_MODEL_CALLS = frozenset(
         "unilabos.resources.resource_pose:ResourceDictPosition",
         "unilabos.resources.resource_pose:ResourceDictPositionObject",
         "unilabos.resources.resource_pose:ResourceDictPositionSize",
+        "unilabos.resources.objects.pose:ResourceDictPosition",
+        "unilabos.resources.objects.pose:ResourceDictPositionObject",
+        "unilabos.resources.objects.pose:ResourceDictPositionSize",
     }
 )
 
@@ -984,11 +996,13 @@ def _extract_class_body(
             action_args.setdefault("description", "")
             action_args.setdefault("auto_prefix", False)
             action_args.setdefault("parent", False)
-            action_args.setdefault("error_policy", None)
+            action_args.setdefault("error_policy", {})
             if action_args["error_policy"]:
                 from unilabos.registry.action_policy import normalize_error_policy
 
-                action_args["error_policy"] = normalize_error_policy(action_args["error_policy"])
+                action_args["error_policy"] = (
+                    normalize_error_policy(action_args["error_policy"]) or {}
+                )
             method_params = _extract_method_params(item, import_map)
             return_type = _get_annotation_str(item.returns, import_map)
             is_async = isinstance(item, ast.AsyncFunctionDef)

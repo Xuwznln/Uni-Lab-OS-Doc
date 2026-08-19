@@ -23,6 +23,7 @@ from unilabos_msgs.action import EmptyIn, ResourceCreateFromOuter, ResourceCreat
 from unilabos_msgs.msg import Resource
 
 from unilabos.config.config import BasicConfig
+from unilabos.registry.backend_metadata import normalize_supported_backends
 from unilabos.registry.decorators import (
     get_device_meta,
     get_action_meta,
@@ -292,6 +293,10 @@ class Registry:
             "init_param_schema": {},
             "file_path": "/",
         }
+        for action_config in self.device_type_registry["host_node"]["class"][
+            "action_value_mappings"
+        ].values():
+            action_config.setdefault("error_policy", {})
         self._add_builtin_actions(self.device_type_registry["host_node"], "host_node")
 
     # ------------------------------------------------------------------
@@ -859,6 +864,7 @@ class Registry:
                 "schema": ros_action_to_json_schema(str_single_input),
                 "goal_default": goal_default,
                 "handles": {},
+                "error_policy": {},
             }
 
     # ------------------------------------------------------------------
@@ -979,8 +985,7 @@ class Registry:
                 entry["always_free"] = True
             _fb_iv = (action_args or {}).get("feedback_interval", method_info.get("feedback_interval", 1.0))
             entry["feedback_interval"] = _fb_iv
-            if (action_args or {}).get("error_policy"):
-                entry["error_policy"] = action_args["error_policy"]
+            entry["error_policy"] = (action_args or {}).get("error_policy") or {}
             nt = normalize_enum_value((action_args or {}).get("node_type"), NodeType)
             if nt:
                 entry["node_type"] = nt
@@ -1119,8 +1124,7 @@ class Registry:
                 action_entry["always_free"] = True
             _fb_iv = action_args.get("feedback_interval", method_info.get("feedback_interval", 1.0))
             action_entry["feedback_interval"] = _fb_iv
-            if action_args.get("error_policy"):
-                action_entry["error_policy"] = action_args["error_policy"]
+            action_entry["error_policy"] = action_args.get("error_policy") or {}
             nt = normalize_enum_value(action_args.get("node_type"), NodeType)
             if nt:
                 action_entry["node_type"] = nt
@@ -1159,14 +1163,9 @@ class Registry:
                 "status_types": status_types_str,
                 "action_value_mappings": action_value_mappings,
                 "type": ast_meta.get("device_type", "python"),
-                **(
-                    {
-                        "supported_backends": ast_meta[
-                            "supported_backends"
-                        ]
-                    }
-                    if ast_meta.get("supported_backends")
-                    else {}
+                "supported_backends": normalize_supported_backends(
+                    ast_meta.get("supported_backends"),
+                    device_type=ast_meta.get("device_type", "python"),
                 ),
             },
             "config_info": [],
@@ -1413,7 +1412,7 @@ class Registry:
                     tree_set = ResourceTreeSet.from_plr_resources(
                         [res_instance], known_newly_created=True, old_size=True
                     )
-                    dumped = tree_set.dump(old_position=True)
+                    dumped = tree_set.dump()
                     return resource_id, dumped[0] if dumped else []
             except Exception as e:
                 logger.warning(f"[UniLab Registry] 资源 {resource_id} config_info 生成失败: {e}")
@@ -1931,6 +1930,12 @@ class Registry:
                     or device_config["class"]["action_value_mappings"] is None
                 ):
                     device_config["class"]["action_value_mappings"] = {}
+                device_config["class"]["supported_backends"] = (
+                    normalize_supported_backends(
+                        device_config["class"].get("supported_backends"),
+                        device_type=device_config["class"].get("type", "python"),
+                    )
+                )
 
                 enhanced_info = {}
                 enhanced_import_map: Dict[str, str] = {}
@@ -2074,6 +2079,7 @@ class Registry:
                             "goal_default": entry_goal_default,
                             "handles": old_cfg.get("handles", []),
                             "placeholder_keys": merged_pk,
+                            "error_policy": old_cfg.get("error_policy") or {},
                         }
                         if v.get("always_free"):
                             entry["always_free"] = True
@@ -2115,6 +2121,7 @@ class Registry:
                     sorted(device_config["class"]["action_value_mappings"].items())
                 )
                 for action_name, action_config in device_config["class"]["action_value_mappings"].items():
+                    action_config.setdefault("error_policy", {})
                     if "handles" not in action_config:
                         action_config["handles"] = {}
                     elif isinstance(action_config["handles"], list):
@@ -2201,6 +2208,7 @@ class Registry:
                     )
             # action type: str → class (non-UniLabJsonCommand only)
             for _act_name, act_cfg in device_config["class"].get("action_value_mappings", {}).items():
+                act_cfg.setdefault("error_policy", {})
                 t_ref = act_cfg.get("type", "")
                 if isinstance(t_ref, str) and t_ref and not t_ref.startswith("UniLabJsonCommand"):
                     resolved = self._replace_type_with_class(t_ref, device_id, f"动作 {_act_name}")
@@ -2427,6 +2435,12 @@ class Registry:
             device_info_copy["available_sites"] = normalize_available_sites(
                 device_info_copy.get("available_sites")
             )
+            if "class" in device_info_copy:
+                class_config = device_info_copy["class"]
+                class_config["supported_backends"] = normalize_supported_backends(
+                    class_config.get("supported_backends"),
+                    device_type=class_config.get("type", "python"),
+                )
             if "class" in device_info_copy and "action_value_mappings" in device_info_copy["class"]:
                 action_mappings = device_info_copy["class"]["action_value_mappings"]
                 builtin_actions = ["_execute_driver_command", "_execute_driver_command_async"]
@@ -2438,6 +2452,7 @@ class Registry:
                 device_info_copy["class"]["action_value_mappings"] = filtered_action_mappings
 
                 for action_name, action_config in filtered_action_mappings.items():
+                    action_config.setdefault("error_policy", {})
                     type_obj = action_config.get("type")
                     if hasattr(type_obj, "__name__"):
                         action_config["type"] = type_obj.__name__
@@ -2490,14 +2505,22 @@ class Registry:
             return ""
 
         entry = copy.deepcopy(entry)
+        entry["available_sites"] = normalize_available_sites(
+            entry.get("available_sites")
+        )
 
         if "class" in entry:
+            entry["class"]["supported_backends"] = normalize_supported_backends(
+                entry["class"].get("supported_backends"),
+                device_type=entry["class"].get("type", "python"),
+            )
             status_types = entry["class"].get("status_types", {})
             for name, type_obj in status_types.items():
                 if hasattr(type_obj, "__name__"):
                     status_types[name] = type_obj.__name__
 
             for action_name, action_config in entry["class"].get("action_value_mappings", {}).items():
+                action_config.setdefault("error_policy", {})
                 type_obj = action_config.get("type")
                 if hasattr(type_obj, "__name__"):
                     action_config["type"] = type_obj.__name__

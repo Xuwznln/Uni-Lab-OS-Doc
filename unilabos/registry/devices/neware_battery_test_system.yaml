@@ -1,4 +1,5 @@
 neware_battery_test_system:
+  available_sites: []
   category:
   - neware_battery_test_system
   - neware
@@ -6,6 +7,7 @@ neware_battery_test_system:
   class:
     action_value_mappings:
       auto-print_status_summary:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -27,6 +29,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       auto-test_connection:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -49,6 +52,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       debug_resource_names:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -71,6 +75,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       export_status_json:
+        error_policy: {}
         feedback: {}
         goal:
           filepath: filepath
@@ -99,6 +104,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       get_device_summary:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -131,6 +137,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       get_plate_status:
+        error_policy: {}
         feedback: {}
         goal:
           plate_num: plate_num
@@ -158,6 +165,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       print_status_summary_action:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -180,6 +188,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       query_plate_action:
+        error_policy: {}
         feedback: {}
         goal:
           plate_id: plate_id
@@ -220,6 +229,7 @@ neware_battery_test_system:
           type: object
         type: StrSingleInput
       submit_from_csv:
+        error_policy: {}
         feedback: {}
         goal:
           csv_path: string
@@ -254,6 +264,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       test_connection_action:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -276,6 +287,7 @@ neware_battery_test_system:
           type: object
         type: UniLabJsonCommand
       upload_backup_to_oss:
+        error_policy: {}
         feedback: {}
         goal:
           backup_dir: backup_dir
@@ -328,7 +340,6 @@ neware_battery_test_system:
       status: str
       total_channels: int
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python

@@ -1,9 +1,11 @@
 raman.home_made:
+  available_sites: []
   category:
   - characterization_optic
   class:
     action_value_mappings:
       auto-ccd_time:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -29,6 +31,7 @@ raman.home_made:
           type: object
         type: UniLabJsonCommand
       auto-laser_on_power:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -54,6 +57,7 @@ raman.home_made:
           type: object
         type: UniLabJsonCommand
       auto-raman_without_background:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -83,6 +87,7 @@ raman.home_made:
           type: object
         type: UniLabJsonCommand
       auto-raman_without_background_average:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -120,6 +125,7 @@ raman.home_made:
           type: object
         type: UniLabJsonCommand
       raman_cmd:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -164,6 +170,9 @@ raman.home_made:
         type: SendCmd
     module: unilabos.devices.raman_uv.home_made_raman:RamanObj
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 拉曼光谱分析设备，用于物质的分子结构和化学成分表征。该设备集成激光器和CCD检测器，通过串口通信控制激光功率和光谱采集。具备背景扣除、多次平均、自动数据处理等功能，支持高精度的拉曼光谱测量。适用于材料表征、化学分析、质量控制、研究开发等需要分子指纹识别和结构分析的实验应用。

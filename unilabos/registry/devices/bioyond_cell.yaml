@@ -1,9 +1,11 @@
 bioyond_cell:
+  available_sites: []
   category:
   - bioyond_cell
   class:
     action_value_mappings:
       auto-auto_batch_outbound_from_xlsx:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -30,6 +32,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-auto_feeding4to3:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -475,6 +478,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-create_and_inbound_materials:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -513,6 +517,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-create_material:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -554,6 +559,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-create_materials:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -584,6 +590,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-create_orders:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -617,6 +624,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-create_orders_v2:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -650,6 +658,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-create_sample:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -697,6 +706,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-order_list_v2:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -751,6 +761,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-process_order_finish_report:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -779,6 +790,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-process_sample_finish_report:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -804,6 +816,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-process_step_finish_report:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -829,6 +842,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-report_material_change:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -855,6 +869,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-resource_tree_transfer:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -888,6 +903,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-scheduler_continue:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -910,6 +926,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-scheduler_reset:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -932,6 +949,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-scheduler_start:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -954,6 +972,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-scheduler_start_and_auto_feeding:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1400,6 +1419,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-scheduler_start_and_auto_feeding_v2:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1846,6 +1866,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-scheduler_stop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1868,6 +1889,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-storage_batch_inbound:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1898,6 +1920,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-storage_inbound:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1928,6 +1951,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-transfer_1_to_2:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1950,6 +1974,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-transfer_3_to_2:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1992,6 +2017,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-transfer_3_to_2_to_1:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2030,6 +2056,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-update_push_ip:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2058,6 +2085,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_order_finish:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2090,6 +2118,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_order_finish_polling:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2127,6 +2156,7 @@ bioyond_cell:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_transfer_task:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2162,6 +2192,9 @@ bioyond_cell:
     module: unilabos.devices.workstation.bioyond_studio.bioyond_cell.bioyond_cell_workstation:BioyondCellWorkstation
     status_types:
       device_id: ''
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: ''

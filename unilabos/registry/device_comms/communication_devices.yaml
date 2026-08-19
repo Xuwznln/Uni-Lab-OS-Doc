@@ -1,9 +1,11 @@
 serial:
+  available_sites: []
   category:
   - communication_devices
   class:
     action_value_mappings:
       auto-handle_serial_request:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -33,6 +35,7 @@ serial:
           type: object
         type: UniLabJsonCommand
       auto-read_data:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -54,6 +57,7 @@ serial:
           type: object
         type: UniLabJsonCommand
       auto-send_command:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -80,6 +84,8 @@ serial:
         type: UniLabJsonCommand
     module: unilabos.ros.nodes.presets.serial_node:ROS2SerialNode
     status_types: {}
+    supported_backends:
+    - ros2
     type: ros2
   config_info: []
   description: Serial communication interface, used when sharing same serial port

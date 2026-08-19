@@ -1,9 +1,11 @@
 xyz_stepper_controller:
+  available_sites: []
   category:
   - laiyu_liquid_test
   class:
     action_value_mappings:
       auto-degrees_to_steps:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -31,6 +33,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-emergency_stop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -58,6 +61,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-enable_all_axes:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -87,6 +91,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-enable_motor:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -119,6 +124,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-home_all_axes:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -143,6 +149,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-home_axis:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -170,6 +177,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-move_to_position:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -217,6 +225,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-move_to_position_degrees:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -264,6 +273,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-move_to_position_revolutions:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -311,6 +321,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-move_xyz:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -357,6 +368,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-move_xyz_degrees:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -403,6 +415,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-move_xyz_revolutions:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -449,6 +462,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-revolutions_to_steps:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -476,6 +490,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-set_speed_mode:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -513,6 +528,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-steps_to_degrees:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -540,6 +556,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-steps_to_revolutions:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -567,6 +584,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-stop_all_axes:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -591,6 +609,7 @@ xyz_stepper_controller:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_completion:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -625,6 +644,9 @@ xyz_stepper_controller:
     module: unilabos.devices.liquid_handling.laiyu.drivers.xyz_stepper_driver:XYZStepperController
     status_types:
       all_positions: Dict[MotorAxis, MotorPosition]
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 新XYZ控制器

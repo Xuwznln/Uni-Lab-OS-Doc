@@ -1,9 +1,11 @@
 liquid_handler:
+  available_sites: []
   category:
   - liquid_handler
   class:
     action_value_mappings:
       add_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           asp_vols: asp_vols
@@ -285,6 +287,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerAdd
       aspirate:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -444,6 +447,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerAspirate
       auto-create_protocol:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -495,6 +499,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommandAsync
       auto-custom_delay:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -525,6 +530,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommandAsync
       auto-iter_tips:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -553,6 +559,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommand
       auto-set_group:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -590,6 +597,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommand
       auto-set_liquid:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -624,7 +632,9 @@ liquid_handler:
               type: object
             result:
               $defs:
+                JsonValue: {}
                 ResourceDict:
+                  description: 资源实例的唯一规范快照；运行时树行为留在 ``resource_tracker``。
                   properties:
                     barcode:
                       default: ''
@@ -647,7 +657,8 @@ liquid_handler:
                       type: object
                     data:
                       additionalProperties: true
-                      description: 'Resource data, eg: container liquid data'
+                      description: 'Resource data, eg: container data without liquids,
+                        since liquids are tracked separately'
                       title: Data
                       type: object
                     description:
@@ -657,7 +668,7 @@ liquid_handler:
                       type: string
                     extra:
                       additionalProperties: true
-                      description: 'Extra data, eg: slot index'
+                      description: UniLab communication and conversion metadata
                       title: Extra
                       type: object
                     icon:
@@ -669,11 +680,57 @@ liquid_handler:
                       description: Resource ID
                       title: Id
                       type: string
+                    joint_state:
+                      anyOf:
+                      - $ref: '#/$defs/ResourceJointState'
+                      - type: 'null'
+                      default: null
+                      description: Frequently changing device joint state; independent
+                        from pose
+                    liquid_history:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - anyOf:
+                            - type: string
+                            - type: 'null'
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: VolumeTracker (liquid_name, delta, unit) event
+                        history
+                      title: Liquid History
+                    liquids:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - type: string
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Current (liquid_name, amount, unit) entries
+                      title: Liquids
                     machine_name:
                       default: ''
                       description: Machine this resource belongs to
                       title: Machine Name
                       type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      description: Canonical resource metadata
+                      title: Meta Data
+                      type: object
                     model:
                       additionalProperties: true
                       description: Resource model
@@ -698,12 +755,38 @@ liquid_handler:
                       title: Parent Uuid
                     pose:
                       $ref: '#/$defs/ResourceDictPosition'
-                      description: Resource position
+                      description: Resource pose relative to its parent, plus geometry/layout
+                        metadata
+                    resource_template_uuid:
+                      default: ''
+                      description: Micro-backend ResourceTemplate UUID
+                      title: Resource Template Uuid
+                      type: string
                     schema:
                       additionalProperties: true
                       description: Resource schema
                       title: Schema
                       type: object
+                    sites:
+                      anyOf:
+                      - items:
+                          $ref: '#/$defs/ResourceSite'
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Carrier site definitions / 载架位点
+                      title: Sites
+                    sites_initialized:
+                      default: false
+                      description: Whether site preparation has run for this resource
+                        instance
+                      title: Sites Initialized
+                      type: boolean
+                    template_name:
+                      default: ''
+                      description: Edge resource template name
+                      title: Template Name
+                      type: string
                     type:
                       anyOf:
                       - const: device
@@ -711,6 +794,14 @@ liquid_handler:
                       - type: string
                       description: Resource type
                       title: Type
+                    unknown_counter:
+                      anyOf:
+                      - minimum: 0
+                        type: integer
+                      - type: 'null'
+                      default: null
+                      description: Unnamed liquid counter
+                      title: Unknown Counter
                     uuid:
                       description: Resource UUID
                       title: Uuid
@@ -727,6 +818,7 @@ liquid_handler:
                   title: ResourceDict
                   type: object
                 ResourceDictPosition:
+                  additionalProperties: false
                   properties:
                     cross_section_type:
                       default: rectangle
@@ -756,11 +848,15 @@ liquid_handler:
                       title: Layout
                       type: string
                     position:
-                      $ref: '#/$defs/ResourceDictPositionObject'
-                      description: Resource position
+                      anyOf:
+                      - $ref: '#/$defs/ResourceDictPositionObject'
+                      - type: 'null'
+                      default: null
+                      description: Actual position relative to the parent resource
                     position3d:
                       $ref: '#/$defs/ResourceDictPositionObject'
-                      description: Resource position in 3D space
+                      description: 3D layout/visualization position; not a second
+                        runtime position
                     rotation:
                       $ref: '#/$defs/ResourceDictPositionObject'
                       description: Resource rotation
@@ -773,61 +869,176 @@ liquid_handler:
                   title: ResourceDictPosition
                   type: object
                 ResourceDictPositionObject:
+                  additionalProperties: false
                   properties:
                     x:
-                      default: 0.0
                       description: X coordinate
                       title: X
                       type: number
                     y:
-                      default: 0.0
                       description: Y coordinate
                       title: Y
                       type: number
                     z:
-                      default: 0.0
                       description: Z coordinate
                       title: Z
                       type: number
+                  required:
+                  - x
+                  - y
+                  - z
                   title: ResourceDictPositionObject
                   type: object
                 ResourceDictPositionScale:
+                  additionalProperties: false
                   properties:
                     x:
-                      default: 0.0
                       description: x scale
                       title: X
                       type: number
                     y:
-                      default: 0.0
                       description: y scale
                       title: Y
                       type: number
                     z:
-                      default: 0.0
                       description: z scale
                       title: Z
                       type: number
+                  required:
+                  - x
+                  - y
+                  - z
                   title: ResourceDictPositionScale
                   type: object
                 ResourceDictPositionSize:
+                  additionalProperties: false
                   properties:
                     depth:
-                      default: 0.0
                       description: Depth
+                      minimum: 0.0
                       title: Depth
                       type: number
                     height:
-                      default: 0.0
                       description: Height
+                      minimum: 0.0
                       title: Height
                       type: number
                     width:
-                      default: 0.0
                       description: Width
+                      minimum: 0.0
                       title: Width
                       type: number
+                  required:
+                  - depth
+                  - width
+                  - height
                   title: ResourceDictPositionSize
+                  type: object
+                ResourceJointState:
+                  additionalProperties: false
+                  description: 设备关节的瞬时状态；不属于资源在父坐标系中的 ``pose``。
+                  properties:
+                    effort:
+                      description: Joint efforts; empty when unavailable
+                      items:
+                        type: number
+                      title: Effort
+                      type: array
+                    name:
+                      description: Joint names
+                      items:
+                        type: string
+                      title: Name
+                      type: array
+                    position:
+                      description: Joint positions in the joint-defined unit
+                      items:
+                        type: number
+                      title: Position
+                      type: array
+                    velocity:
+                      description: Joint velocities; empty when unavailable
+                      items:
+                        type: number
+                      title: Velocity
+                      type: array
+                  title: ResourceJointState
+                  type: object
+                ResourceSite:
+                  additionalProperties: false
+                  description: 'Edge、微后端和 PLR Adapter 共用的唯一 Site 实例模型。
+
+
+                    PLR 特有但需要往返保留的字段进入显式 ``extra``；canonical v1 仍拒绝
+
+                    未声明的顶层字段，避免 Adapter 形状反向污染微后端协议。'
+                  properties:
+                    allowed_resource_categories:
+                      description: ResourceTemplate category hints for frontend canvas
+                        filtering only; not an Edge/backend mount constraint
+                      items:
+                        type: string
+                      title: Allowed Resource Categories
+                      type: array
+                    description:
+                      default: ''
+                      title: Description
+                      type: string
+                    extra:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Extra
+                      type: object
+                    index:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      title: Index
+                    label:
+                      title: Label
+                      type: string
+                    material_uuid:
+                      title: Material Uuid
+                      type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Meta Data
+                      type: object
+                    occupied_material_uuid:
+                      anyOf:
+                      - type: string
+                      - type: 'null'
+                      default: null
+                      title: Occupied Material Uuid
+                    parent_link:
+                      default: ''
+                      title: Parent Link
+                      type: string
+                    pose:
+                      $ref: '#/$defs/ResourceDictPosition'
+                    schema_version:
+                      const: 1
+                      default: 1
+                      title: Schema Version
+                      type: integer
+                    template_name:
+                      title: Template Name
+                      type: string
+                    uuid:
+                      title: Uuid
+                      type: string
+                    visible:
+                      default: true
+                      title: Visible
+                      type: boolean
+                  required:
+                  - uuid
+                  - template_name
+                  - material_uuid
+                  - index
+                  - label
+                  title: ResourceSite
                   type: object
               properties:
                 volumes:
@@ -853,6 +1064,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommand
       auto-set_liquid_from_plate:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -970,7 +1182,9 @@ liquid_handler:
               type: object
             result:
               $defs:
+                JsonValue: {}
                 ResourceDict:
+                  description: 资源实例的唯一规范快照；运行时树行为留在 ``resource_tracker``。
                   properties:
                     barcode:
                       default: ''
@@ -993,7 +1207,8 @@ liquid_handler:
                       type: object
                     data:
                       additionalProperties: true
-                      description: 'Resource data, eg: container liquid data'
+                      description: 'Resource data, eg: container data without liquids,
+                        since liquids are tracked separately'
                       title: Data
                       type: object
                     description:
@@ -1003,7 +1218,7 @@ liquid_handler:
                       type: string
                     extra:
                       additionalProperties: true
-                      description: 'Extra data, eg: slot index'
+                      description: UniLab communication and conversion metadata
                       title: Extra
                       type: object
                     icon:
@@ -1015,11 +1230,57 @@ liquid_handler:
                       description: Resource ID
                       title: Id
                       type: string
+                    joint_state:
+                      anyOf:
+                      - $ref: '#/$defs/ResourceJointState'
+                      - type: 'null'
+                      default: null
+                      description: Frequently changing device joint state; independent
+                        from pose
+                    liquid_history:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - anyOf:
+                            - type: string
+                            - type: 'null'
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: VolumeTracker (liquid_name, delta, unit) event
+                        history
+                      title: Liquid History
+                    liquids:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - type: string
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Current (liquid_name, amount, unit) entries
+                      title: Liquids
                     machine_name:
                       default: ''
                       description: Machine this resource belongs to
                       title: Machine Name
                       type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      description: Canonical resource metadata
+                      title: Meta Data
+                      type: object
                     model:
                       additionalProperties: true
                       description: Resource model
@@ -1044,12 +1305,38 @@ liquid_handler:
                       title: Parent Uuid
                     pose:
                       $ref: '#/$defs/ResourceDictPosition'
-                      description: Resource position
+                      description: Resource pose relative to its parent, plus geometry/layout
+                        metadata
+                    resource_template_uuid:
+                      default: ''
+                      description: Micro-backend ResourceTemplate UUID
+                      title: Resource Template Uuid
+                      type: string
                     schema:
                       additionalProperties: true
                       description: Resource schema
                       title: Schema
                       type: object
+                    sites:
+                      anyOf:
+                      - items:
+                          $ref: '#/$defs/ResourceSite'
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Carrier site definitions / 载架位点
+                      title: Sites
+                    sites_initialized:
+                      default: false
+                      description: Whether site preparation has run for this resource
+                        instance
+                      title: Sites Initialized
+                      type: boolean
+                    template_name:
+                      default: ''
+                      description: Edge resource template name
+                      title: Template Name
+                      type: string
                     type:
                       anyOf:
                       - const: device
@@ -1057,6 +1344,14 @@ liquid_handler:
                       - type: string
                       description: Resource type
                       title: Type
+                    unknown_counter:
+                      anyOf:
+                      - minimum: 0
+                        type: integer
+                      - type: 'null'
+                      default: null
+                      description: Unnamed liquid counter
+                      title: Unknown Counter
                     uuid:
                       description: Resource UUID
                       title: Uuid
@@ -1073,6 +1368,7 @@ liquid_handler:
                   title: ResourceDict
                   type: object
                 ResourceDictPosition:
+                  additionalProperties: false
                   properties:
                     cross_section_type:
                       default: rectangle
@@ -1102,11 +1398,15 @@ liquid_handler:
                       title: Layout
                       type: string
                     position:
-                      $ref: '#/$defs/ResourceDictPositionObject'
-                      description: Resource position
+                      anyOf:
+                      - $ref: '#/$defs/ResourceDictPositionObject'
+                      - type: 'null'
+                      default: null
+                      description: Actual position relative to the parent resource
                     position3d:
                       $ref: '#/$defs/ResourceDictPositionObject'
-                      description: Resource position in 3D space
+                      description: 3D layout/visualization position; not a second
+                        runtime position
                     rotation:
                       $ref: '#/$defs/ResourceDictPositionObject'
                       description: Resource rotation
@@ -1119,61 +1419,176 @@ liquid_handler:
                   title: ResourceDictPosition
                   type: object
                 ResourceDictPositionObject:
+                  additionalProperties: false
                   properties:
                     x:
-                      default: 0.0
                       description: X coordinate
                       title: X
                       type: number
                     y:
-                      default: 0.0
                       description: Y coordinate
                       title: Y
                       type: number
                     z:
-                      default: 0.0
                       description: Z coordinate
                       title: Z
                       type: number
+                  required:
+                  - x
+                  - y
+                  - z
                   title: ResourceDictPositionObject
                   type: object
                 ResourceDictPositionScale:
+                  additionalProperties: false
                   properties:
                     x:
-                      default: 0.0
                       description: x scale
                       title: X
                       type: number
                     y:
-                      default: 0.0
                       description: y scale
                       title: Y
                       type: number
                     z:
-                      default: 0.0
                       description: z scale
                       title: Z
                       type: number
+                  required:
+                  - x
+                  - y
+                  - z
                   title: ResourceDictPositionScale
                   type: object
                 ResourceDictPositionSize:
+                  additionalProperties: false
                   properties:
                     depth:
-                      default: 0.0
                       description: Depth
+                      minimum: 0.0
                       title: Depth
                       type: number
                     height:
-                      default: 0.0
                       description: Height
+                      minimum: 0.0
                       title: Height
                       type: number
                     width:
-                      default: 0.0
                       description: Width
+                      minimum: 0.0
                       title: Width
                       type: number
+                  required:
+                  - depth
+                  - width
+                  - height
                   title: ResourceDictPositionSize
+                  type: object
+                ResourceJointState:
+                  additionalProperties: false
+                  description: 设备关节的瞬时状态；不属于资源在父坐标系中的 ``pose``。
+                  properties:
+                    effort:
+                      description: Joint efforts; empty when unavailable
+                      items:
+                        type: number
+                      title: Effort
+                      type: array
+                    name:
+                      description: Joint names
+                      items:
+                        type: string
+                      title: Name
+                      type: array
+                    position:
+                      description: Joint positions in the joint-defined unit
+                      items:
+                        type: number
+                      title: Position
+                      type: array
+                    velocity:
+                      description: Joint velocities; empty when unavailable
+                      items:
+                        type: number
+                      title: Velocity
+                      type: array
+                  title: ResourceJointState
+                  type: object
+                ResourceSite:
+                  additionalProperties: false
+                  description: 'Edge、微后端和 PLR Adapter 共用的唯一 Site 实例模型。
+
+
+                    PLR 特有但需要往返保留的字段进入显式 ``extra``；canonical v1 仍拒绝
+
+                    未声明的顶层字段，避免 Adapter 形状反向污染微后端协议。'
+                  properties:
+                    allowed_resource_categories:
+                      description: ResourceTemplate category hints for frontend canvas
+                        filtering only; not an Edge/backend mount constraint
+                      items:
+                        type: string
+                      title: Allowed Resource Categories
+                      type: array
+                    description:
+                      default: ''
+                      title: Description
+                      type: string
+                    extra:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Extra
+                      type: object
+                    index:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      title: Index
+                    label:
+                      title: Label
+                      type: string
+                    material_uuid:
+                      title: Material Uuid
+                      type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Meta Data
+                      type: object
+                    occupied_material_uuid:
+                      anyOf:
+                      - type: string
+                      - type: 'null'
+                      default: null
+                      title: Occupied Material Uuid
+                    parent_link:
+                      default: ''
+                      title: Parent Link
+                      type: string
+                    pose:
+                      $ref: '#/$defs/ResourceDictPosition'
+                    schema_version:
+                      const: 1
+                      default: 1
+                      title: Schema Version
+                      type: integer
+                    template_name:
+                      title: Template Name
+                      type: string
+                    uuid:
+                      title: Uuid
+                      type: string
+                    visible:
+                      default: true
+                      title: Visible
+                      type: boolean
+                  required:
+                  - uuid
+                  - template_name
+                  - material_uuid
+                  - index
+                  - label
+                  title: ResourceSite
                   type: object
               properties:
                 plate:
@@ -1207,6 +1622,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommand
       auto-set_tiprack:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1234,6 +1650,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommand
       auto-touch_tip:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1261,6 +1678,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommandAsync
       auto-transfer_group:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1294,6 +1712,7 @@ liquid_handler:
           type: object
         type: UniLabJsonCommandAsync
       discard_tips:
+        error_policy: {}
         feedback: {}
         goal:
           use_channels: use_channels
@@ -1333,6 +1752,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerDiscardTips
       dispense:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -1487,6 +1907,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerDispense
       drop_tips:
+        error_policy: {}
         feedback: {}
         goal:
           allow_nonzero_volume: allow_nonzero_volume
@@ -1625,6 +2046,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerDropTips
       drop_tips96:
+        error_policy: {}
         feedback: {}
         goal:
           allow_nonzero_volume: allow_nonzero_volume
@@ -1800,6 +2222,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerDropTips96
       mix:
+        error_policy: {}
         feedback: {}
         goal:
           height_to_bottom: height_to_bottom
@@ -1958,6 +2381,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerMix
       move_lid:
+        error_policy: {}
         feedback: {}
         goal:
           destination_offset: destination_offset
@@ -2306,6 +2730,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerMoveLid
       move_plate:
+        error_policy: {}
         feedback: {}
         goal:
           destination_offset: destination_offset
@@ -2679,6 +3104,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerMovePlate
       move_resource:
+        error_policy: {}
         feedback: {}
         goal:
           destination_offset: destination_offset
@@ -2941,6 +3367,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerMoveResource
       move_to:
+        error_policy: {}
         feedback: {}
         goal:
           channel: channel
@@ -3107,6 +3534,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerMoveTo
       pick_up_tips:
+        error_policy: {}
         feedback: {}
         goal:
           offsets: offsets
@@ -3239,6 +3667,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerPickUpTips
       pick_up_tips96:
+        error_policy: {}
         feedback: {}
         goal:
           offset: offset
@@ -3410,6 +3839,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerPickUpTips96
       remove:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -3703,6 +4133,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerRemove
       remove_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -4001,6 +4432,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerRemove
       return_tips:
+        error_policy: {}
         feedback: {}
         goal:
           allow_nonzero_volume: allow_nonzero_volume
@@ -4044,6 +4476,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerReturnTips
       return_tips96:
+        error_policy: {}
         feedback: {}
         goal:
           allow_nonzero_volume: allow_nonzero_volume
@@ -4081,6 +4514,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerReturnTips96
       stamp:
+        error_policy: {}
         feedback: {}
         goal:
           aspiration_flow_rate: aspiration_flow_rate
@@ -4356,6 +4790,7 @@ liquid_handler:
           type: object
         type: LiquidHandlerStamp
       transfer:
+        error_policy: {}
         goal:
           aspiration_flow_rate: aspiration_flow_rate
           dispense_flow_rates: dispense_flow_rates
@@ -4444,6 +4879,7 @@ liquid_handler:
           type: object
         type: Transfer
       transfer_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           asp_flow_rates: asp_flow_rates
@@ -4850,7 +5286,6 @@ liquid_handler:
     module: unilabos.devices.liquid_handling.liquid_handler_abstract:LiquidHandlerAbstract
     status_types: {}
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -4888,11 +5323,13 @@ liquid_handler:
       type: object
   version: 1.0.0
 liquid_handler.biomek:
+  available_sites: []
   category:
   - liquid_handler
   class:
     action_value_mappings:
       auto-create_resource:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -4960,6 +5397,7 @@ liquid_handler.biomek:
           type: object
         type: UniLabJsonCommand
       auto-deserialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -4990,6 +5428,7 @@ liquid_handler.biomek:
           type: object
         type: UniLabJsonCommand
       auto-instrument_setup_biomek:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5045,6 +5484,7 @@ liquid_handler.biomek:
           type: object
         type: UniLabJsonCommand
       create_protocol:
+        error_policy: {}
         feedback: {}
         goal:
           none_keys: none_keys
@@ -5114,6 +5554,7 @@ liquid_handler.biomek:
           type: object
         type: LiquidHandlerProtocolCreation
       incubation_biomek:
+        error_policy: {}
         feedback: {}
         goal:
           time: time
@@ -5167,6 +5608,7 @@ liquid_handler.biomek:
           type: object
         type: LiquidHandlerIncubateBiomek
       move_biomek:
+        error_policy: {}
         feedback: {}
         goal:
           source: source
@@ -5224,6 +5666,7 @@ liquid_handler.biomek:
           type: object
         type: LiquidHandlerMoveBiomek
       oscillation_biomek:
+        error_policy: {}
         feedback: {}
         goal:
           rpm: rpm
@@ -5283,6 +5726,7 @@ liquid_handler.biomek:
           type: object
         type: LiquidHandlerOscillateBiomek
       run_protocol:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -5314,6 +5758,7 @@ liquid_handler.biomek:
           type: object
         type: EmptyIn
       transfer_biomek:
+        error_policy: {}
         feedback: {}
         goal:
           aspirate_technique: aspirate_technique
@@ -5406,6 +5851,7 @@ liquid_handler.biomek:
           type: object
         type: LiquidHandlerTransferBiomek
       transfer_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           asp_flow_rates: asp_flow_rates
@@ -5814,6 +6260,9 @@ liquid_handler.biomek:
     module: unilabos.devices.liquid_handling.biomek:LiquidHandlerBiomek
     status_types:
       success: ''
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Biomek液体处理器设备，基于pylabrobot控制
@@ -5835,11 +6284,13 @@ liquid_handler.biomek:
       type: object
   version: 1.0.0
 liquid_handler.laiyu:
+  available_sites: []
   category:
   - liquid_handler
   class:
     action_value_mappings:
       add_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           asp_vols: asp_vols
@@ -6121,6 +6572,7 @@ liquid_handler.laiyu:
           type: object
         type: LiquidHandlerAdd
       aspirate:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -6284,6 +6736,7 @@ liquid_handler.laiyu:
           type: object
         type: LiquidHandlerAspirate
       auto-transfer_liquid:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -6419,6 +6872,7 @@ liquid_handler.laiyu:
           type: object
         type: UniLabJsonCommandAsync
       dispense:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -6577,6 +7031,7 @@ liquid_handler.laiyu:
           type: object
         type: LiquidHandlerDispense
       drop_tips:
+        error_policy: {}
         feedback: {}
         goal:
           allow_nonzero_volume: allow_nonzero_volume
@@ -6716,6 +7171,7 @@ liquid_handler.laiyu:
           type: object
         type: LiquidHandlerDropTips
       mix:
+        error_policy: {}
         feedback: {}
         goal:
           height_to_bottom: height_to_bottom
@@ -6875,6 +7331,7 @@ liquid_handler.laiyu:
           type: object
         type: LiquidHandlerMix
       pick_up_tips:
+        error_policy: {}
         feedback: {}
         goal:
           offsets: offsets
@@ -7013,6 +7470,9 @@ liquid_handler.laiyu:
     properties:
       support_touch_tip: bool
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Laiyu液体处理器设备，基于pylabrobot控制
@@ -7049,11 +7509,13 @@ liquid_handler.laiyu:
       type: object
   version: 1.0.0
 liquid_handler.prcxi:
+  available_sites: []
   category:
   - liquid_handler
   class:
     action_value_mappings:
       add_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           asp_vols: asp_vols
@@ -7335,6 +7797,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerAdd
       aspirate:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -7498,6 +7961,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerAspirate
       auto-create_protocol:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7549,6 +8013,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       auto-custom_delay:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7577,6 +8042,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       auto-heater_action:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7606,6 +8072,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       auto-iter_tips:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7634,6 +8101,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommand
       auto-move_to:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7667,6 +8135,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       auto-run_protocol:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -7688,6 +8157,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       auto-set_group:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7725,6 +8195,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommand
       auto-shaker_action:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7762,6 +8233,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       auto-touch_tip:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7789,6 +8261,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       auto-transfer_group:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -7822,6 +8295,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommandAsync
       discard_tips:
+        error_policy: {}
         feedback: {}
         goal:
           allow_nonzero_volume: allow_nonzero_volume
@@ -7865,6 +8339,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerDiscardTips
       dispense:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -8023,6 +8498,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerDispense
       drop_tips:
+        error_policy: {}
         feedback: {}
         goal:
           allow_nonzero_volume: allow_nonzero_volume
@@ -8162,6 +8638,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerDropTips
       mix:
+        error_policy: {}
         feedback: {}
         goal:
           height_to_bottom: height_to_bottom
@@ -8321,6 +8798,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerMix
       move_plate:
+        error_policy: {}
         feedback: {}
         goal:
           destination_offset: destination_offset
@@ -8699,6 +9177,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerMovePlate
       pick_up_tips:
+        error_policy: {}
         feedback: {}
         goal:
           offsets: offsets
@@ -8834,6 +9313,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerPickUpTips
       remove_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           blow_out_air_volume: blow_out_air_volume
@@ -9132,6 +9612,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerRemove
       set_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           liquid_names: liquid_names
@@ -9265,6 +9746,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerSetLiquid
       set_liquid_from_plate:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -9404,7 +9886,9 @@ liquid_handler.prcxi:
               type: object
             result:
               $defs:
+                JsonValue: {}
                 ResourceDict:
+                  description: 资源实例的唯一规范快照；运行时树行为留在 ``resource_tracker``。
                   properties:
                     barcode:
                       default: ''
@@ -9427,7 +9911,8 @@ liquid_handler.prcxi:
                       type: object
                     data:
                       additionalProperties: true
-                      description: 'Resource data, eg: container liquid data'
+                      description: 'Resource data, eg: container data without liquids,
+                        since liquids are tracked separately'
                       title: Data
                       type: object
                     description:
@@ -9437,7 +9922,7 @@ liquid_handler.prcxi:
                       type: string
                     extra:
                       additionalProperties: true
-                      description: 'Extra data, eg: slot index'
+                      description: UniLab communication and conversion metadata
                       title: Extra
                       type: object
                     icon:
@@ -9449,11 +9934,57 @@ liquid_handler.prcxi:
                       description: Resource ID
                       title: Id
                       type: string
+                    joint_state:
+                      anyOf:
+                      - $ref: '#/$defs/ResourceJointState'
+                      - type: 'null'
+                      default: null
+                      description: Frequently changing device joint state; independent
+                        from pose
+                    liquid_history:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - anyOf:
+                            - type: string
+                            - type: 'null'
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: VolumeTracker (liquid_name, delta, unit) event
+                        history
+                      title: Liquid History
+                    liquids:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - type: string
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Current (liquid_name, amount, unit) entries
+                      title: Liquids
                     machine_name:
                       default: ''
                       description: Machine this resource belongs to
                       title: Machine Name
                       type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      description: Canonical resource metadata
+                      title: Meta Data
+                      type: object
                     model:
                       additionalProperties: true
                       description: Resource model
@@ -9478,12 +10009,38 @@ liquid_handler.prcxi:
                       title: Parent Uuid
                     pose:
                       $ref: '#/$defs/ResourceDictPosition'
-                      description: Resource position
+                      description: Resource pose relative to its parent, plus geometry/layout
+                        metadata
+                    resource_template_uuid:
+                      default: ''
+                      description: Micro-backend ResourceTemplate UUID
+                      title: Resource Template Uuid
+                      type: string
                     schema:
                       additionalProperties: true
                       description: Resource schema
                       title: Schema
                       type: object
+                    sites:
+                      anyOf:
+                      - items:
+                          $ref: '#/$defs/ResourceSite'
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Carrier site definitions / 载架位点
+                      title: Sites
+                    sites_initialized:
+                      default: false
+                      description: Whether site preparation has run for this resource
+                        instance
+                      title: Sites Initialized
+                      type: boolean
+                    template_name:
+                      default: ''
+                      description: Edge resource template name
+                      title: Template Name
+                      type: string
                     type:
                       anyOf:
                       - const: device
@@ -9491,6 +10048,14 @@ liquid_handler.prcxi:
                       - type: string
                       description: Resource type
                       title: Type
+                    unknown_counter:
+                      anyOf:
+                      - minimum: 0
+                        type: integer
+                      - type: 'null'
+                      default: null
+                      description: Unnamed liquid counter
+                      title: Unknown Counter
                     uuid:
                       description: Resource UUID
                       title: Uuid
@@ -9507,6 +10072,7 @@ liquid_handler.prcxi:
                   title: ResourceDict
                   type: object
                 ResourceDictPosition:
+                  additionalProperties: false
                   properties:
                     cross_section_type:
                       default: rectangle
@@ -9536,11 +10102,15 @@ liquid_handler.prcxi:
                       title: Layout
                       type: string
                     position:
-                      $ref: '#/$defs/ResourceDictPositionObject'
-                      description: Resource position
+                      anyOf:
+                      - $ref: '#/$defs/ResourceDictPositionObject'
+                      - type: 'null'
+                      default: null
+                      description: Actual position relative to the parent resource
                     position3d:
                       $ref: '#/$defs/ResourceDictPositionObject'
-                      description: Resource position in 3D space
+                      description: 3D layout/visualization position; not a second
+                        runtime position
                     rotation:
                       $ref: '#/$defs/ResourceDictPositionObject'
                       description: Resource rotation
@@ -9553,61 +10123,176 @@ liquid_handler.prcxi:
                   title: ResourceDictPosition
                   type: object
                 ResourceDictPositionObject:
+                  additionalProperties: false
                   properties:
                     x:
-                      default: 0.0
                       description: X coordinate
                       title: X
                       type: number
                     y:
-                      default: 0.0
                       description: Y coordinate
                       title: Y
                       type: number
                     z:
-                      default: 0.0
                       description: Z coordinate
                       title: Z
                       type: number
+                  required:
+                  - x
+                  - y
+                  - z
                   title: ResourceDictPositionObject
                   type: object
                 ResourceDictPositionScale:
+                  additionalProperties: false
                   properties:
                     x:
-                      default: 0.0
                       description: x scale
                       title: X
                       type: number
                     y:
-                      default: 0.0
                       description: y scale
                       title: Y
                       type: number
                     z:
-                      default: 0.0
                       description: z scale
                       title: Z
                       type: number
+                  required:
+                  - x
+                  - y
+                  - z
                   title: ResourceDictPositionScale
                   type: object
                 ResourceDictPositionSize:
+                  additionalProperties: false
                   properties:
                     depth:
-                      default: 0.0
                       description: Depth
+                      minimum: 0.0
                       title: Depth
                       type: number
                     height:
-                      default: 0.0
                       description: Height
+                      minimum: 0.0
                       title: Height
                       type: number
                     width:
-                      default: 0.0
                       description: Width
+                      minimum: 0.0
                       title: Width
                       type: number
+                  required:
+                  - depth
+                  - width
+                  - height
                   title: ResourceDictPositionSize
+                  type: object
+                ResourceJointState:
+                  additionalProperties: false
+                  description: 设备关节的瞬时状态；不属于资源在父坐标系中的 ``pose``。
+                  properties:
+                    effort:
+                      description: Joint efforts; empty when unavailable
+                      items:
+                        type: number
+                      title: Effort
+                      type: array
+                    name:
+                      description: Joint names
+                      items:
+                        type: string
+                      title: Name
+                      type: array
+                    position:
+                      description: Joint positions in the joint-defined unit
+                      items:
+                        type: number
+                      title: Position
+                      type: array
+                    velocity:
+                      description: Joint velocities; empty when unavailable
+                      items:
+                        type: number
+                      title: Velocity
+                      type: array
+                  title: ResourceJointState
+                  type: object
+                ResourceSite:
+                  additionalProperties: false
+                  description: 'Edge、微后端和 PLR Adapter 共用的唯一 Site 实例模型。
+
+
+                    PLR 特有但需要往返保留的字段进入显式 ``extra``；canonical v1 仍拒绝
+
+                    未声明的顶层字段，避免 Adapter 形状反向污染微后端协议。'
+                  properties:
+                    allowed_resource_categories:
+                      description: ResourceTemplate category hints for frontend canvas
+                        filtering only; not an Edge/backend mount constraint
+                      items:
+                        type: string
+                      title: Allowed Resource Categories
+                      type: array
+                    description:
+                      default: ''
+                      title: Description
+                      type: string
+                    extra:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Extra
+                      type: object
+                    index:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      title: Index
+                    label:
+                      title: Label
+                      type: string
+                    material_uuid:
+                      title: Material Uuid
+                      type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Meta Data
+                      type: object
+                    occupied_material_uuid:
+                      anyOf:
+                      - type: string
+                      - type: 'null'
+                      default: null
+                      title: Occupied Material Uuid
+                    parent_link:
+                      default: ''
+                      title: Parent Link
+                      type: string
+                    pose:
+                      $ref: '#/$defs/ResourceDictPosition'
+                    schema_version:
+                      const: 1
+                      default: 1
+                      title: Schema Version
+                      type: integer
+                    template_name:
+                      title: Template Name
+                      type: string
+                    uuid:
+                      title: Uuid
+                      type: string
+                    visible:
+                      default: true
+                      title: Visible
+                      type: boolean
+                  required:
+                  - uuid
+                  - template_name
+                  - material_uuid
+                  - index
+                  - label
+                  title: ResourceSite
                   type: object
               properties:
                 plate:
@@ -9641,6 +10326,7 @@ liquid_handler.prcxi:
           type: object
         type: UniLabJsonCommand
       set_tiprack:
+        error_policy: {}
         feedback: {}
         goal:
           tip_racks: tip_racks
@@ -9753,6 +10439,7 @@ liquid_handler.prcxi:
           type: object
         type: LiquidHandlerSetTipRack
       transfer:
+        error_policy: {}
         goal:
           aspiration_flow_rate: aspiration_flow_rate
           dispense_flow_rates: dispense_flow_rates
@@ -9841,6 +10528,7 @@ liquid_handler.prcxi:
           type: object
         type: Transfer
       transfer_liquid:
+        error_policy: {}
         feedback: {}
         goal:
           asp_flow_rates: asp_flow_rates
@@ -10248,7 +10936,6 @@ liquid_handler.prcxi:
     status_types:
       reset_ok: bool
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -10308,11 +10995,13 @@ liquid_handler.prcxi:
       type: object
   version: 1.0.0
 liquid_handler.revvity:
+  available_sites: []
   category:
   - liquid_handler
   class:
     action_value_mappings:
       run:
+        error_policy: {}
         feedback:
           gantt: gantt
           status: status
@@ -10479,6 +11168,9 @@ liquid_handler.revvity:
     status_types:
       status: str
       success: bool
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: ''

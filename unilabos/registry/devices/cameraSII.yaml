@@ -1,9 +1,11 @@
 cameracontroller_device:
+  available_sites: []
   category:
   - cameraSII
   class:
     action_value_mappings:
       auto-start:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -28,6 +30,7 @@ cameracontroller_device:
           type: object
         type: UniLabJsonCommand
       auto-stop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -52,6 +55,9 @@ cameracontroller_device:
     module: unilabos.devices.cameraSII.cameraUSB:CameraController
     status_types:
       status: Dict[str, Any]
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Uni-Lab-OS 摄像头驱动（Linux USB 摄像头版，无 PTZ）

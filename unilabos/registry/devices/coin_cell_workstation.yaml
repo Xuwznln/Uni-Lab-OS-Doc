@@ -1,9 +1,11 @@
 coincellassemblyworkstation_device:
+  available_sites: []
   category:
   - coin_cell_workstation
   class:
     action_value_mappings:
       auto-change_hole_sheet_to_2:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -29,6 +31,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommandAsync
       auto-fill_plate:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -50,6 +53,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommandAsync
       auto-fun_wuliao_test:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -72,6 +76,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_allpack_cmd:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -118,6 +123,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_allpack_cmd_simp:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -230,6 +236,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_get_csv_export_status:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -251,6 +258,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_device_auto:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -272,6 +280,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_device_init:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -293,6 +302,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_device_init_auto_start_combined:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -326,6 +336,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_device_start:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -347,6 +358,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_device_stop:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -369,6 +381,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_get_msg_cmd:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -395,6 +408,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_send_bottle_num:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -428,6 +442,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_send_finished_cmd:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -450,6 +465,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_pack_send_msg_cmd:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -488,6 +504,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_read_data_and_output:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -513,6 +530,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_sendbottle_allpack_multi:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -633,6 +651,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-func_stop_read_data:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -654,6 +673,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-modify_deck_name:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -679,6 +699,7 @@ coincellassemblyworkstation_device:
           type: object
         type: UniLabJsonCommand
       auto-qiming_coin_cell_code:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -753,6 +774,9 @@ coincellassemblyworkstation_device:
       request_send_msg_status: bool
       sys_mode: str
       sys_status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: ''

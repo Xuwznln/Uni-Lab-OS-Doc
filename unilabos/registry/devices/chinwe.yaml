@@ -1,10 +1,12 @@
 separator.chinwe:
+  available_sites: []
   category:
   - separator
   - chinwe
   class:
     action_value_mappings:
       auto-connect:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -27,6 +29,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       auto-disconnect:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -48,6 +51,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       auto-execute_command_from_outer:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -74,6 +78,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       motor_rotate_quarter:
+        error_policy: {}
         feedback: {}
         goal:
           direction: 顺时针
@@ -113,6 +118,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       motor_run_continuous:
+        error_policy: {}
         feedback: {}
         goal:
           direction: 顺时针
@@ -152,6 +158,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       motor_stop:
+        error_policy: {}
         feedback: {}
         goal:
           motor_id: 4
@@ -180,6 +187,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       pump_aspirate:
+        error_policy: {}
         feedback: {}
         goal:
           pump_id: 1
@@ -219,6 +227,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       pump_dispense:
+        error_policy: {}
         feedback: {}
         goal:
           pump_id: 1
@@ -258,6 +267,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       pump_initialize:
+        error_policy: {}
         feedback: {}
         goal:
           drain_port: 0
@@ -304,6 +314,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       pump_valve:
+        error_policy: {}
         feedback: {}
         goal:
           port: 1
@@ -337,6 +348,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       wait_sensor_level:
+        error_policy: {}
         feedback: {}
         goal:
           target_state: 有液
@@ -371,6 +383,7 @@ separator.chinwe:
           type: object
         type: UniLabJsonCommand
       wait_time:
+        error_policy: {}
         feedback: {}
         goal:
           duration: 10
@@ -403,6 +416,9 @@ separator.chinwe:
       is_connected: bool
       sensor_level: bool
       sensor_rssi: int
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: ChinWe 简易工作站控制器 (3泵, 2电机, 1传感器)

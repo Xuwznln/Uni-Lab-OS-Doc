@@ -1,9 +1,11 @@
 Qone_nmr:
+  available_sites: []
   category:
   - Qone_nmr
   class:
     action_value_mappings:
       abort:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -33,6 +35,7 @@ Qone_nmr:
           type: object
         type: EmptyIn
       auto-monitor_folder_for_new_content:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -73,6 +76,7 @@ Qone_nmr:
           type: object
         type: UniLabJsonCommand
       auto-strings_to_txt:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -108,6 +112,7 @@ Qone_nmr:
           type: object
         type: UniLabJsonCommand
       get_status:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -137,6 +142,7 @@ Qone_nmr:
           type: object
         type: EmptyIn
       start:
+        error_policy: {}
         feedback: {}
         goal:
           string: string
@@ -185,6 +191,9 @@ Qone_nmr:
     module: unilabos.devices.Qone_nmr.Qone_nmr:Qone_nmr
     status_types:
       status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Oxford NMR设备驱动，支持CSV字符串到TXT文件的批量转换功能，并监测对应.nmr文件的大小变化以确认结果生成完成

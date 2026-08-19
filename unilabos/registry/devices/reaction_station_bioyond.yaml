@@ -1,10 +1,12 @@
 reaction_station.bioyond:
+  available_sites: []
   category:
   - work_station
   - reaction_station_bioyond
   class:
     action_value_mappings:
       add_time_constraint:
+        error_policy: {}
         feedback: {}
         goal:
           duration: duration
@@ -56,6 +58,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-clear_workflows:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -77,6 +80,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-create_order:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -104,6 +108,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-hard_delete_merged_workflows:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -133,6 +138,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-merge_workflow_with_parameters:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -160,6 +166,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-process_temperature_cutoff_report:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -186,6 +193,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-process_web_workflows:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -217,6 +225,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-set_reactor_temperature:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -249,6 +258,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-skip_titration_steps:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -276,6 +286,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-sync_workflow_sequence_from_bioyond:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -298,6 +309,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_multiple_orders_and_get_reports:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -331,6 +343,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-workflow_sequence:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -359,6 +372,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       auto-workflow_step_query:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -386,6 +400,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       clean_all_server_workflows:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -408,6 +423,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       drip_back:
+        error_policy: {}
         feedback: {}
         goal:
           assign_material_name: assign_material_name
@@ -465,6 +481,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       extract_actuals_from_batch_reports:
+        error_policy: {}
         feedback: {}
         goal:
           batch_reports_result: batch_reports_result
@@ -508,6 +525,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       liquid_feeding_beaker:
+        error_policy: {}
         feedback: {}
         goal:
           assign_material_name: assign_material_name
@@ -565,6 +583,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       liquid_feeding_solvents:
+        error_policy: {}
         feedback: {}
         goal:
           assign_material_name: assign_material_name
@@ -635,6 +654,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       liquid_feeding_titration:
+        error_policy: {}
         feedback: {}
         goal:
           assign_material_name: assign_material_name
@@ -719,6 +739,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       liquid_feeding_vials_non_titration:
+        error_policy: {}
         feedback: {}
         goal:
           assign_material_name: assign_material_name
@@ -776,6 +797,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       process_and_execute_workflow:
+        error_policy: {}
         feedback: {}
         goal:
           task_name: task_name
@@ -810,6 +832,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       reactor_taken_in:
+        error_policy: {}
         feedback: {}
         goal:
           assign_material_name: assign_material_name
@@ -849,6 +872,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       reactor_taken_out:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -870,6 +894,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       scheduler_start:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -893,6 +918,7 @@ reaction_station.bioyond:
           type: object
         type: UniLabJsonCommand
       solid_feeding_vials:
+        error_policy: {}
         feedback: {}
         goal:
           assign_material_name: assign_material_name
@@ -946,6 +972,9 @@ reaction_station.bioyond:
     protocol_type: []
     status_types:
       workflow_sequence: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Bioyond反应站
@@ -976,12 +1005,14 @@ reaction_station.bioyond:
       type: object
   version: 1.0.0
 reaction_station.reactor:
+  available_sites: []
   category:
   - reactor
   - reaction_station_bioyond
   class:
     action_value_mappings:
       auto-update_metrics:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -1008,6 +1039,9 @@ reaction_station.reactor:
         type: UniLabJsonCommand
     module: unilabos.devices.workstation.bioyond_studio.reaction_station.reaction_station:BioyondReactor
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 反应站子设备-反应器

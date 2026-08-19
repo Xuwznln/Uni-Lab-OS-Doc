@@ -1,9 +1,11 @@
 virtual_centrifuge:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -26,6 +28,7 @@ virtual_centrifuge:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -48,6 +51,7 @@ virtual_centrifuge:
           type: object
         type: UniLabJsonCommandAsync
       centrifuge:
+        error_policy: {}
         feedback:
           current_speed: current_speed
           current_status: current_status
@@ -249,7 +253,6 @@ virtual_centrifuge:
       target_temp: float
       time_remaining: float
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -318,11 +321,13 @@ virtual_centrifuge:
       type: object
   version: 1.0.0
 virtual_column:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -345,6 +350,7 @@ virtual_column:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -367,6 +373,7 @@ virtual_column:
           type: object
         type: UniLabJsonCommandAsync
       run_column:
+        error_policy: {}
         feedback:
           progress: progress
           status: status
@@ -679,7 +686,6 @@ virtual_column:
       progress: float
       status: str
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -753,11 +759,13 @@ virtual_column:
       type: object
   version: 1.0.0
 virtual_filter:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -780,6 +788,7 @@ virtual_filter:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -802,6 +811,7 @@ virtual_filter:
           type: object
         type: UniLabJsonCommandAsync
       filter:
+        error_policy: {}
         feedback:
           current_status: current_status
           current_temp: current_temp
@@ -1120,7 +1130,6 @@ virtual_filter:
       progress: float
       status: str
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -1196,11 +1205,13 @@ virtual_filter:
       type: object
   version: 1.0.0
 virtual_gas_source:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1223,6 +1234,7 @@ virtual_gas_source:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1245,6 +1257,7 @@ virtual_gas_source:
           type: object
         type: UniLabJsonCommandAsync
       auto-is_closed:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1266,6 +1279,7 @@ virtual_gas_source:
           type: object
         type: UniLabJsonCommand
       auto-is_open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1287,6 +1301,7 @@ virtual_gas_source:
           type: object
         type: UniLabJsonCommand
       close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1318,6 +1333,7 @@ virtual_gas_source:
           type: object
         type: EmptyIn
       open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1349,6 +1365,7 @@ virtual_gas_source:
           type: object
         type: EmptyIn
       set_status:
+        error_policy: {}
         feedback: {}
         goal:
           string: string
@@ -1390,6 +1407,9 @@ virtual_gas_source:
     module: unilabos.devices.virtual.virtual_gas_source:VirtualGasSource
     status_types:
       status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual gas source
@@ -1423,11 +1443,13 @@ virtual_gas_source:
       type: object
   version: 1.0.0
 virtual_heatchill:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1450,6 +1472,7 @@ virtual_heatchill:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -1472,6 +1495,7 @@ virtual_heatchill:
           type: object
         type: UniLabJsonCommandAsync
       heat_chill:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -1666,6 +1690,7 @@ virtual_heatchill:
           type: object
         type: HeatChill
       heat_chill_start:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -1827,6 +1852,7 @@ virtual_heatchill:
           type: object
         type: HeatChillStart
       heat_chill_stop:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -1989,7 +2015,6 @@ virtual_heatchill:
       status: str
       stir_speed: float
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -2049,11 +2074,13 @@ virtual_heatchill:
       type: object
   version: 1.0.0
 virtual_multiway_valve:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -2075,6 +2102,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-is_at_port:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2101,6 +2129,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-is_at_position:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2127,6 +2156,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-is_at_pump_position:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -2149,6 +2179,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -2170,6 +2201,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-reset:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -2191,6 +2223,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-set_to_port:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2217,6 +2250,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-set_to_pump_position:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -2238,6 +2272,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       auto-switch_between_pump_and_port:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -2264,6 +2299,7 @@ virtual_multiway_valve:
           type: object
         type: UniLabJsonCommand
       set_position:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -2308,6 +2344,7 @@ virtual_multiway_valve:
           type: object
         type: SendCmd
       set_valve_position:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -2360,6 +2397,9 @@ virtual_multiway_valve:
       target_position: int
       valve_position: int
       valve_state: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual 8-Way Valve for flow direction control
@@ -2485,11 +2525,13 @@ virtual_multiway_valve:
       type: object
   version: 1.0.0
 virtual_rotavap:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -2512,6 +2554,7 @@ virtual_rotavap:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -2534,6 +2577,7 @@ virtual_rotavap:
           type: object
         type: UniLabJsonCommandAsync
       evaporate:
+        error_policy: {}
         feedback:
           current_device: current_device
           status: status
@@ -2761,7 +2805,6 @@ virtual_rotavap:
       status: str
       vacuum_pressure: float
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -2843,11 +2886,13 @@ virtual_rotavap:
       type: object
   version: 1.0.0
 virtual_sample_demo:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       analyze_readings:
+        error_policy: {}
         feedback: {}
         goal:
           readings: readings
@@ -2916,6 +2961,7 @@ virtual_sample_demo:
           type: object
         type: UniLabJsonCommandAsync
       measure_samples:
+        error_policy: {}
         feedback: {}
         goal:
           concentrations: concentrations
@@ -2960,6 +3006,7 @@ virtual_sample_demo:
           type: object
         type: UniLabJsonCommandAsync
       split_and_measure:
+        error_policy: {}
         feedback: {}
         goal:
           split_count: split_count
@@ -3017,6 +3064,9 @@ virtual_sample_demo:
     module: unilabos.devices.virtual.virtual_sample_demo:VirtualSampleDemo
     status_types:
       status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual sample tracking demo device
@@ -3042,11 +3092,13 @@ virtual_sample_demo:
       type: object
   version: 1.0.0
 virtual_separator:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -3069,6 +3121,7 @@ virtual_separator:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -3091,6 +3144,7 @@ virtual_separator:
           type: object
         type: UniLabJsonCommandAsync
       separate:
+        error_policy: {}
         feedback:
           progress: progress
           status: status
@@ -3981,7 +4035,6 @@ virtual_separator:
       stir_speed: float
       volume: float
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -4065,11 +4118,13 @@ virtual_separator:
       type: object
   version: 1.0.0
 virtual_solenoid_valve:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4092,6 +4147,7 @@ virtual_solenoid_valve:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4114,6 +4170,7 @@ virtual_solenoid_valve:
           type: object
         type: UniLabJsonCommandAsync
       auto-is_closed:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4136,6 +4193,7 @@ virtual_solenoid_valve:
           type: object
         type: UniLabJsonCommand
       auto-reset:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4157,6 +4215,7 @@ virtual_solenoid_valve:
           type: object
         type: UniLabJsonCommandAsync
       auto-toggle:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4178,6 +4237,7 @@ virtual_solenoid_valve:
           type: object
         type: UniLabJsonCommand
       close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4209,6 +4269,7 @@ virtual_solenoid_valve:
           type: object
         type: EmptyIn
       open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4240,6 +4301,7 @@ virtual_solenoid_valve:
           type: object
         type: EmptyIn
       set_status:
+        error_policy: {}
         feedback: {}
         goal:
           string: string
@@ -4280,6 +4342,7 @@ virtual_solenoid_valve:
           type: object
         type: StrSingleInput
       set_valve_position:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -4330,7 +4393,6 @@ virtual_solenoid_valve:
       valve_position: str
       valve_state: str
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -4383,11 +4445,13 @@ virtual_solenoid_valve:
       type: object
   version: 1.0.0
 virtual_solid_dispenser:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       add_solid:
+        error_policy: {}
         feedback:
           current_status: current_status
           progress: progress
@@ -4610,6 +4674,7 @@ virtual_solid_dispenser:
           type: object
         type: Add
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4632,6 +4697,7 @@ virtual_solid_dispenser:
           type: object
         type: UniLabJsonCommandAsync
       auto-find_solid_reagent_bottle:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -4658,6 +4724,7 @@ virtual_solid_dispenser:
           type: object
         type: UniLabJsonCommand
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4680,6 +4747,7 @@ virtual_solid_dispenser:
           type: object
         type: UniLabJsonCommandAsync
       auto-parse_mass_string:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -4706,6 +4774,7 @@ virtual_solid_dispenser:
           type: object
         type: UniLabJsonCommand
       auto-parse_mol_string:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -4738,7 +4807,6 @@ virtual_solid_dispenser:
       status: str
       total_operations: int
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -4792,11 +4860,13 @@ virtual_solid_dispenser:
       type: object
   version: 1.0.0
 virtual_stirrer:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4819,6 +4889,7 @@ virtual_stirrer:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -4841,6 +4912,7 @@ virtual_stirrer:
           type: object
         type: UniLabJsonCommandAsync
       start_stir:
+        error_policy: {}
         feedback:
           current_speed: current_speed
           current_status: current_status
@@ -5015,6 +5087,7 @@ virtual_stirrer:
           type: object
         type: StartStir
       stir:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -5197,6 +5270,7 @@ virtual_stirrer:
           type: object
         type: Stir
       stop_stir:
+        error_policy: {}
         feedback:
           current_status: current_status
           progress: progress
@@ -5367,7 +5441,6 @@ virtual_stirrer:
       remaining_time: float
       status: str
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -5427,11 +5500,13 @@ virtual_stirrer:
       type: object
   version: 1.0.0
 virtual_transfer_pump:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-aspirate:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5460,6 +5535,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -5482,6 +5558,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-dispense:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5510,6 +5587,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-empty_syringe:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5534,6 +5612,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-fill_syringe:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5558,6 +5637,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -5580,6 +5660,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-is_empty:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -5602,6 +5683,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommand
       auto-is_full:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -5624,6 +5706,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommand
       auto-pull_plunger:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5654,6 +5737,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-push_plunger:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5684,6 +5768,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-set_max_velocity:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -5709,6 +5794,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommand
       auto-stop_operation:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -5730,6 +5816,7 @@ virtual_transfer_pump:
           type: object
         type: UniLabJsonCommandAsync
       set_position:
+        error_policy: {}
         feedback:
           current_position: current_position
           progress: progress
@@ -5796,6 +5883,7 @@ virtual_transfer_pump:
           type: object
         type: SetPumpPosition
       transfer:
+        error_policy: {}
         feedback:
           current_status: current_status
           progress: progress
@@ -5906,7 +5994,6 @@ virtual_transfer_pump:
       status: str
       transfer_rate: float
     supported_backends:
-    - basic
     - hostlink
     - ros2
     type: python
@@ -5959,11 +6046,13 @@ virtual_transfer_pump:
       type: object
   version: 1.0.0
 virtual_vacuum_pump:
+  available_sites: []
   category:
   - virtual_device
   class:
     action_value_mappings:
       auto-cleanup:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -5986,6 +6075,7 @@ virtual_vacuum_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-initialize:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -6008,6 +6098,7 @@ virtual_vacuum_pump:
           type: object
         type: UniLabJsonCommandAsync
       auto-is_closed:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -6029,6 +6120,7 @@ virtual_vacuum_pump:
           type: object
         type: UniLabJsonCommand
       auto-is_open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -6050,6 +6142,7 @@ virtual_vacuum_pump:
           type: object
         type: UniLabJsonCommand
       close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -6081,6 +6174,7 @@ virtual_vacuum_pump:
           type: object
         type: EmptyIn
       open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -6112,6 +6206,7 @@ virtual_vacuum_pump:
           type: object
         type: EmptyIn
       set_status:
+        error_policy: {}
         feedback: {}
         goal:
           string: string
@@ -6153,6 +6248,9 @@ virtual_vacuum_pump:
     module: unilabos.devices.virtual.virtual_vacuum_pump:VirtualVacuumPump
     status_types:
       status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Virtual vacuum pump

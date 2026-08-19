@@ -1,4 +1,5 @@
 bioyond_dispensing_station:
+  available_sites: []
   category:
   - workstation
   - bioyond
@@ -6,6 +7,7 @@ bioyond_dispensing_station:
   class:
     action_value_mappings:
       auto-brief_step_parameters:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -32,6 +34,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       auto-process_order_finish_report:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -64,6 +67,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       auto-project_order_report:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -90,6 +94,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       auto-query_resource_by_name:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -116,6 +121,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       auto-workflow_sample_locations:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -142,6 +148,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       batch_create_90_10_vial_feeding_tasks:
+        error_policy: {}
         feedback: {}
         goal:
           delay_time: delay_time
@@ -214,6 +221,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       batch_create_diamine_solution_tasks:
+        error_policy: {}
         feedback: {}
         goal:
           delay_time: delay_time
@@ -283,6 +291,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       compute_experiment_design:
+        error_policy: {}
         feedback: {}
         goal:
           m_tot: m_tot
@@ -381,6 +390,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       create_90_10_vial_feeding_task:
+        error_policy: {}
         feedback: {}
         goal:
           delay_time: delay_time
@@ -505,6 +515,7 @@ bioyond_dispensing_station:
           type: object
         type: DispenStationVialFeed
       create_diamine_solution_task:
+        error_policy: {}
         feedback: {}
         goal:
           delay_time: delay_time
@@ -573,6 +584,7 @@ bioyond_dispensing_station:
           type: object
         type: DispenStationSolnPrep
       scheduler_start:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -596,6 +608,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       transfer_materials_to_reaction_station:
+        error_policy: {}
         feedback: {}
         goal:
           target_device_id: target_device_id
@@ -631,6 +644,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
       wait_for_multiple_orders_and_get_reports:
+        error_policy: {}
         feedback: {}
         goal:
           batch_create_result: batch_create_result
@@ -688,6 +702,9 @@ bioyond_dispensing_station:
         type: UniLabJsonCommand
     module: unilabos.devices.workstation.bioyond_studio.dispensing_station.dispensing_station:BioyondDispensingStation
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: ''

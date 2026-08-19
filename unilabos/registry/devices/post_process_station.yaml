@@ -1,9 +1,11 @@
 post_process_station:
+  available_sites: []
   category:
   - post_process_station
   class:
     action_value_mappings:
       auto-load_config:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -29,6 +31,7 @@ post_process_station:
           type: object
         type: UniLabJsonCommand
       auto-print_cache_stats:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -50,6 +53,7 @@ post_process_station:
           type: object
         type: UniLabJsonCommand
       auto-set_node_value:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -79,6 +83,7 @@ post_process_station:
           type: object
         type: UniLabJsonCommand
       disconnect:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -122,6 +127,7 @@ post_process_station:
           type: object
         type: SendCmd
       read_node:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -166,6 +172,7 @@ post_process_station:
           type: object
         type: SendCmd
       trigger_cleaning_action:
+        error_policy: {}
         feedback: {}
         goal:
           acetone_inner_wall_cleaning_count: acetone_inner_wall_cleaning_count
@@ -437,6 +444,7 @@ post_process_station:
           type: object
         type: PostProcessTriggerClean
       trigger_grab_action:
+        error_policy: {}
         feedback: {}
         goal:
           raw_tank_number: raw_tank_number
@@ -480,6 +488,7 @@ post_process_station:
           type: object
         type: PostProcessGrab
       trigger_post_processing:
+        error_policy: {}
         feedback: {}
         goal:
           atomization_fast_speed: atomization_fast_speed
@@ -595,6 +604,7 @@ post_process_station:
           type: object
         type: PostProcessTriggerPostPro
       write_node:
+        error_policy: {}
         feedback:
           result: result
         goal:
@@ -638,6 +648,9 @@ post_process_station:
     module: unilabos.devices.workstation.post_process.post_process:OpcUaClient
     status_types:
       cache_stats: Dict[str, Any]
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 后处理站

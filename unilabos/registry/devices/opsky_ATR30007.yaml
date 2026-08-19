@@ -1,10 +1,12 @@
 opsky_ATR30007:
+  available_sites: []
   category:
   - characterization_optic
   - opsky_ATR30007
   class:
     action_value_mappings:
       auto-ensure_connected:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -42,6 +44,7 @@ opsky_ATR30007:
           type: object
         type: UniLabJsonCommand
       auto-run_once:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -88,6 +91,7 @@ opsky_ATR30007:
           type: object
         type: UniLabJsonCommand
       auto-safe_read:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -129,6 +133,7 @@ opsky_ATR30007:
           type: object
         type: UniLabJsonCommand
       auto-safe_write:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -170,6 +175,7 @@ opsky_ATR30007:
           type: object
         type: UniLabJsonCommand
       auto-wait_with_quit_check:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -204,6 +210,9 @@ opsky_ATR30007:
         type: UniLabJsonCommand
     module: unilabos.devices.opsky_Raman.opsky_ATR30007:opsky_ATR30007
     status_types: {}
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: OPSKY ATR30007 光纤拉曼模块，提供单一入口大函数以执行一次完整流程。

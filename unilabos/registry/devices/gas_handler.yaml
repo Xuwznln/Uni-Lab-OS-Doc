@@ -1,9 +1,11 @@
 gas_source.mock:
+  available_sites: []
   category:
   - gas_handler
   class:
     action_value_mappings:
       auto-is_closed:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -25,6 +27,7 @@ gas_source.mock:
           type: object
         type: UniLabJsonCommand
       auto-is_open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -46,6 +49,7 @@ gas_source.mock:
           type: object
         type: UniLabJsonCommand
       close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -77,6 +81,7 @@ gas_source.mock:
           type: object
         type: EmptyIn
       open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -108,6 +113,7 @@ gas_source.mock:
           type: object
         type: EmptyIn
       set_status:
+        error_policy: {}
         feedback: {}
         goal:
           string: string
@@ -149,6 +155,9 @@ gas_source.mock:
     module: unilabos.devices.pump_and_valve.vacuum_pump_mock:VacuumPumpMock
     status_types:
       status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 模拟气体源设备，用于系统测试和开发调试。该设备模拟真实气体源的开关控制和状态监测功能，支持气体供应的启停操作。提供与真实气体源相同的接口和状态反馈，便于在没有实际硬件的情况下进行系统集成测试和算法验证。适用于气路系统调试、软件开发和实验流程验证等场景。
@@ -179,12 +188,14 @@ gas_source.mock:
       type: object
   version: 1.0.0
 vacuum_pump.mock:
+  available_sites: []
   category:
   - vacuum_and_purge
   - gas_handler
   class:
     action_value_mappings:
       auto-is_closed:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -206,6 +217,7 @@ vacuum_pump.mock:
           type: object
         type: UniLabJsonCommand
       auto-is_open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -227,6 +239,7 @@ vacuum_pump.mock:
           type: object
         type: UniLabJsonCommand
       close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -258,6 +271,7 @@ vacuum_pump.mock:
           type: object
         type: EmptyIn
       open:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -289,6 +303,7 @@ vacuum_pump.mock:
           type: object
         type: EmptyIn
       set_status:
+        error_policy: {}
         feedback: {}
         goal:
           string: string
@@ -330,6 +345,9 @@ vacuum_pump.mock:
     module: unilabos.devices.pump_and_valve.vacuum_pump_mock:VacuumPumpMock
     status_types:
       status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: 模拟真空泵设备，用于系统测试和开发调试。该设备模拟真实真空泵的抽气功能和状态控制，支持真空系统的启停操作和状态监测。提供与真实真空泵相同的接口和控制逻辑，便于在没有实际硬件的情况下进行真空系统的集成测试。适用于真空工艺调试、软件开发和实验流程验证等场景。

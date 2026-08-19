@@ -1,9 +1,11 @@
 robotic_arm.SCARA_with_slider.moveit.virtual:
+  available_sites: []
   category:
   - robot_arm
   class:
     action_value_mappings:
       auto-check_tf_update_actions:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -25,6 +27,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           type: object
         type: UniLabJsonCommand
       auto-moveit_joint_task:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -65,6 +68,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           type: object
         type: UniLabJsonCommand
       auto-moveit_task:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -123,6 +127,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           type: object
         type: UniLabJsonCommand
       auto-resource_manager:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -152,6 +157,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           type: object
         type: UniLabJsonCommand
       auto-wait_for_resource_action:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -173,6 +179,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           type: object
         type: UniLabJsonCommand
       pick_and_place:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -218,6 +225,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           type: object
         type: SendCmd
       set_position:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -263,6 +271,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           type: object
         type: SendCmd
       set_status:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -342,11 +351,13 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
     type: device
   version: 1.0.0
 robotic_arm.UR:
+  available_sites: []
   category:
   - robot_arm
   class:
     action_value_mappings:
       auto-arm_init:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -368,6 +379,7 @@ robotic_arm.UR:
           type: object
         type: UniLabJsonCommand
       auto-load_pose_data:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -393,6 +405,7 @@ robotic_arm.UR:
           type: object
         type: UniLabJsonCommand
       auto-load_pose_file:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -418,6 +431,7 @@ robotic_arm.UR:
           type: object
         type: UniLabJsonCommand
       auto-reload_pose:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -439,6 +453,7 @@ robotic_arm.UR:
           type: object
         type: UniLabJsonCommand
       move_pos_task:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -487,6 +502,9 @@ robotic_arm.UR:
       arm_status: str
       gripper_pose: float
       gripper_status: str
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Universal Robots机械臂设备，用于实验室精密操作和自动化作业。该设备集成了UR机械臂本体、Robotiq夹爪和RTDE通信接口，支持六自由度精确运动控制和力觉反馈。具备实时位置监控、状态反馈、轨迹规划等功能，可执行复杂的多点位运动任务。适用于样品抓取、精密装配、实验器具操作等需要高精度和高重复性的实验室自动化场景。
@@ -523,11 +541,13 @@ robotic_arm.UR:
       type: object
   version: 1.0.0
 robotic_arm.elite:
+  available_sites: []
   category:
   - robot_arm
   class:
     action_value_mappings:
       auto-close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -549,6 +569,7 @@ robotic_arm.elite:
           type: object
         type: UniLabJsonCommand
       auto-modbus_close:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default: {}
@@ -570,6 +591,7 @@ robotic_arm.elite:
           type: object
         type: UniLabJsonCommand
       auto-modbus_read_holding_registers:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -603,6 +625,7 @@ robotic_arm.elite:
           type: object
         type: UniLabJsonCommand
       auto-modbus_task:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -628,6 +651,7 @@ robotic_arm.elite:
           type: object
         type: UniLabJsonCommand
       auto-modbus_write_single_register:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -661,6 +685,7 @@ robotic_arm.elite:
           type: object
         type: UniLabJsonCommand
       auto-parse_success_response:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -686,6 +711,7 @@ robotic_arm.elite:
           type: object
         type: UniLabJsonCommand
       auto-send_command:
+        error_policy: {}
         feedback: {}
         goal: {}
         goal_default:
@@ -711,6 +737,7 @@ robotic_arm.elite:
           type: object
         type: UniLabJsonCommand
       modbus_task_cmd:
+        error_policy: {}
         feedback:
           status: status
         goal:
@@ -757,6 +784,9 @@ robotic_arm.elite:
     status_types:
       actual_joint_positions: ''
       arm_pose: list[float]
+    supported_backends:
+    - hostlink
+    - ros2
     type: python
   config_info: []
   description: Elite robot arm

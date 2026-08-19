@@ -52,6 +52,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from unilabos.registry.backend_metadata import normalize_supported_backends
 from unilabos.resources.site_definition import (
     SiteDefinitionInput,
     normalize_available_sites,
@@ -308,8 +309,9 @@ def device(
                 ),
                 **(
                     {
-                        "supported_backends": list(
-                            meta.get("supported_backends") or []
+                        "supported_backends": normalize_supported_backends(
+                            meta.get("supported_backends"),
+                            device_type=device_type,
                         )
                     }
                     if "supported_backends" in meta
@@ -345,7 +347,10 @@ def device(
         "available_sites": normalize_available_sites(available_sites),
         "model": model,
         "device_type": device_type,
-        "supported_backends": list(supported_backends or []),
+        "supported_backends": normalize_supported_backends(
+            supported_backends,
+            device_type=device_type,
+        ),
         "hardware_interface": (hardware_interface.model_dump(exclude_none=True) if hardware_interface else None),
     }
 
@@ -458,12 +463,12 @@ def action(
             meta["feedback_interval"] = feedback_interval
         if node_type is not None:
             meta["node_type"] = node_type.value if isinstance(node_type, NodeType) else str(node_type)
-        normalized_error_policy = None
+        normalized_error_policy: Dict[str, Any] = {}
         if error_policy:
             from unilabos.registry.action_policy import normalize_error_policy
 
-            normalized_error_policy = normalize_error_policy(error_policy)
-            meta["error_policy"] = normalized_error_policy
+            normalized_error_policy = normalize_error_policy(error_policy) or {}
+        meta["error_policy"] = normalized_error_policy
         wrapper._action_registry_meta = meta  # type: ignore[attr-defined]
         wrapper._action_error_policy = normalized_error_policy  # type: ignore[attr-defined]
 
@@ -579,7 +584,10 @@ def get_device_meta(cls, device_id: Optional[str] = None) -> Optional[Dict[str, 
             elif key == "available_sites":
                 result[key] = normalize_available_sites(val)
             elif key == "supported_backends":
-                result[key] = list(val or [])
+                result[key] = normalize_supported_backends(
+                    val,
+                    device_type=result.get("device_type"),
+                )
             else:
                 result[key] = val
     return result
