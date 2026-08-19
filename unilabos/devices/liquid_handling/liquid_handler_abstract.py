@@ -28,11 +28,12 @@ from typing_extensions import TypedDict
 from unilabos.device_runtime.node import DeviceNode
 from unilabos.devices.liquid_handling.rviz_backend import UniLiquidHandlerRvizBackend
 from unilabos.registry.placeholder_type import ResourceSlot
-from unilabos.resources.resource_tracker import (
+from unilabos.resources.objects.resource import (
     EXTRA_SAMPLE_UUID,
-    EXTRA_UNILABOS_SAMPLE_UUID,
-    ResourceTreeSet,
     ResourceDict,
+)
+from unilabos.resources.resource_tracker import (
+    ResourceTreeSet,
 )
 
 

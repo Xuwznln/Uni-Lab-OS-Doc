@@ -20,10 +20,6 @@ from unilabos.resources.resource_tracker import (
     ResourceTreeInstance,
     ResourceTreeSet,
 )
-from unilabos.resources.resource_state import (
-    load_all_state_with_unilabos,
-    serialize_all_state_with_unilabos,
-)
 from unilabos.utils import logger
 from unilabos.utils.cls_creator import create_instance_from_config
 
@@ -143,9 +139,7 @@ class PyLabRobotCreator(DeviceClassCreator[T]):
                     resource_instance: Resource = ResourceTreeSet(
                         [ResourceTreeInstance(resource)]
                     ).to_plr_resources()[0]
-                    states[prefix_path] = serialize_all_state_with_unilabos(
-                        resource_instance
-                    )
+                    states[prefix_path] = resource_instance.serialize_all_state()
                     if to_dict:
                         return resource_instance.serialize()
                     processed_child_names[child_name] = resource_instance
@@ -243,13 +237,11 @@ class PyLabRobotCreator(DeviceClassCreator[T]):
                     self.device_instance,
                     name_to_uuid,
                 )
-                all_states = serialize_all_state_with_unilabos(
-                    self.device_instance
-                )
+                all_states = self.device_instance.serialize_all_state()
                 for state in states.values():
                     for key, value in all_states.items():
                         state.setdefault(key, value)
-                    load_all_state_with_unilabos(self.device_instance, state)
+                    self.device_instance.load_all_state(state)
                 self.resource_tracker.add_resource(self.device_instance)
                 self.post_create()
                 return self.device_instance

@@ -70,38 +70,6 @@ class ResultInfoEncoder(json.JSONEncoder):
             return str(obj)
 
 
-def get_result_info_str(
-    error: str,
-    suc: bool,
-    return_value=None,
-    suc_type: Optional[SuccessType] = None,
-    error_info: Optional[dict] = None,
-) -> str:
-    """
-    序列化任务执行结果信息
-
-    Args:
-        error: 错误信息字符串
-        suc: 是否成功的布尔值
-        return_value: 返回值，可以是任何类型
-
-    Returns:
-        JSON字符串格式的结果信息
-    """
-    # 请在返回的字典中使用 unilabos_samples进行返回
-    # samples = None
-    # if isinstance(return_value, dict):
-    #     if "samples" in return_value and type(return_value["samples"]) in [list, tuple] and type(return_value["samples"][0]) == dict:
-    #         samples = return_value.pop("samples")
-    result_info = {"error": error, "suc": suc, "return_value": return_value}
-    if suc:
-        result_info["suc_type"] = suc_type or SUCCESS_TYPE_NORMAL
-    elif error_info:
-        result_info["error_info"] = error_info
-
-    return json.dumps(result_info, ensure_ascii=False, cls=ResultInfoEncoder)
-
-
 def serialize_result_info(
     error: str,
     suc: bool,
@@ -118,7 +86,7 @@ def serialize_result_info(
         return_value: 返回值，可以是任何类型
 
     Returns:
-        JSON字符串格式的结果信息
+        可直接用于 HTTP/WebSocket，或在 ROS 字符串字段边界编码的结果字典
     """
     result_info = {"error": error, "suc": suc, "return_value": return_value}
     if suc:

@@ -7,7 +7,18 @@ import os
 import socket
 import time
 import uuid
-from typing import Any, List, Dict, Optional, Tuple, TypedDict, Union, Sequence, Iterator, Literal
+from typing import (
+    Any,
+    List,
+    Dict,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+    Sequence,
+    Iterator,
+    Literal,
+)
 from pylabrobot.liquid_handling.standard import GripDirection
 
 from pylabrobot.liquid_handling import (
@@ -56,11 +67,9 @@ from unilabos.devices.liquid_handling.liquid_handler_abstract import (
     TransferLiquidReturn,
 )
 from unilabos.registry.placeholder_type import ResourceSlot
+from unilabos.resources.objects.site import ResourceSite
 from unilabos.resources.resource_tracker import (
-    PLRSerializedSite,
-    ResourceSite,
     ResourceTreeSet,
-    resource_site_to_plr_site,
     set_plr_template_name,
 )
 
@@ -97,62 +106,18 @@ class PRCXI9300Deck(Deck):
     该类定义了 PRCXI 9300 的工作台布局和槽位信息。
     """
 
-    # 标记该类的构造/序列化边界使用 UniLabOS 的 PLR sites[] 适配格式。
-    __unilabos_plr_site_format__ = True
-    # 运行时 sites 直接保存 ResourceSite；PLR 形状只在 serialize() 边界生成。
-    __unilabos_resource_site_storage__ = True
-
-    # T1-T16 默认位置 (4列×4行)
-    _DEFAULT_SITE_POSITIONS = [
-        (0, 0, 0), (138, 0, 0), (276, 0, 0), (414, 0, 0),         # T1-T4
-        (0, 96, 0), (138, 96, 0), (276, 96, 0), (414, 96, 0),     # T5-T8
-        (0, 192, 0), (138, 192, 0), (276, 192, 0), (414, 192, 0), # T9-T12
-        (0, 288, 0), (138, 288, 0), (276, 288, 0), (414, 288, 0), # T13-T16
-    ]
-    _DEFAULT_SITE_SIZE = {"width": 128.0, "height": 86, "depth": 0}
-    _DEFAULT_CONTENT_TYPE = ["plate", "tip_rack", "plates", "tip_racks", "tube_rack", "adaptor"]
-
-    def _serialize_plr_sites(self) -> List[Dict[str, Any]]:
-        """把内部 ResourceSite 投影成项目 PLR ``sites[]`` 适配格式。"""
-
-        sites_out: List[Dict[str, Any]] = []
-        for i, site in enumerate(self.sites):
-            occupied = self._get_site_resource(i)
-            occupied_by = self._site_expected_occupant_names.get(i)
-            if occupied is not None:
-                occupied_uuid = getattr(occupied, "unilabos_uuid", "")
-                if not occupied_uuid:
-                    raise ValueError(
-                        f"Deck {self.name} 的占用物料 {occupied.name} 缺少微后端分配的 UUID"
-                    )
-                expected_uuid = self._site_expected_occupants.get(i)
-                if expected_uuid is not None and expected_uuid != str(occupied_uuid):
-                    raise ValueError(
-                        f"Deck {self.name} 的 Site {site.label} 占用 UUID 冲突: "
-                        f"{expected_uuid!r} != {occupied_uuid!r}"
-                    )
-                if site.occupied_material_uuid != str(occupied_uuid):
-                    site = site.model_copy(update={"occupied_material_uuid": str(occupied_uuid)})
-                    self.sites[i] = site
-                occupied_by = occupied.name
-                self._site_expected_occupant_names.pop(i, None)
-            sites_out.append(resource_site_to_plr_site(site, occupied_by=occupied_by))
-        return sites_out
-
     def __init__(
         self,
         name: str,
         size_x: float,
         size_y: float,
         size_z: float,
-        sites: Optional[List[Union[PLRSerializedSite, ResourceSite, Dict[str, Any]]]] = None,
+        sites: Optional[List[Union[ResourceSite, Dict[str, Any]]]] = None,
         **kwargs,
     ):
         super().__init__(size_x, size_y, size_z, name)
 
         template_name = self.__class__.__name__
-        self._site_expected_occupants: Dict[int, Optional[str]] = {}
-        self._site_expected_occupant_names: Dict[int, str] = {}
         raw_sites = list(sites) if sites is not None else None
         if raw_sites is None:
             raise ValueError(
@@ -168,13 +133,20 @@ class PRCXI9300Deck(Deck):
                     isinstance(raw_site, dict)
                     and any(
                         key in raw_site
-                        for key in ("schema_version", "uuid", "template_name", "material_uuid")
+                        for key in (
+                            "schema_version",
+                            "uuid",
+                            "template_name",
+                            "material_uuid",
+                        )
                     )
                 )
                 for raw_site in raw_sites
             ]
             if any(canonical_flags) and not all(canonical_flags):
-                raise ValueError(f"Deck {name} 的 sites 不能混用 ResourceSite 与 PLR 序列化格式")
+                raise ValueError(
+                    f"Deck {name} 的 sites 不能混用 ResourceSite 与 PLR 序列化格式"
+                )
 
             if all(canonical_flags):
                 self.sites = [
@@ -189,12 +161,10 @@ class PRCXI9300Deck(Deck):
             else:
                 raise ValueError(
                     f"Deck {name} 仅接受带 UUID/owner/template 的 ResourceSite；"
-                    "PLR sites 只能作为序列化边界格式"
+                    "平铺 PLR sites 仅由 ItemizedCarrier 兼容适配器使用"
                 )
 
         set_plr_template_name(self, template_name)
-        for index, site in enumerate(self.sites):
-            self._site_expected_occupants[index] = site.occupied_material_uuid
 
         # _ordering: label -> None, 用于外部通过 list(keys()).index(site) 将 Tn 转换为 spot index
         self._ordering = collections.OrderedDict(
@@ -243,17 +213,24 @@ class PRCXI9300Deck(Deck):
                     break
 
         if idx is None:
-            raise ValueError(f"No available site on deck '{self.name}' for resource '{resource.name}'")
+            raise ValueError(
+                f"No available site on deck '{self.name}' for resource '{resource.name}'"
+            )
         if idx < 0 or idx >= len(self.sites):
             raise ValueError(f"Deck {self.name} 不存在 Site index={idx}")
 
         if not reassign and self._get_site_resource(idx) is not None:
-            raise ValueError(f"Site {idx} ('{self.sites[idx].label}') is already occupied")
+            raise ValueError(
+                f"Site {idx} ('{self.sites[idx].label}') is already occupied"
+            )
 
-        expected_occupant = self._site_expected_occupants.get(idx)
+        expected_occupant = self.sites[idx].occupied_material_uuid
         current_occupant_uuid = getattr(resource, "unilabos_uuid", "")
         if expected_occupant:
-            if current_occupant_uuid and str(current_occupant_uuid) != expected_occupant:
+            if (
+                current_occupant_uuid
+                and str(current_occupant_uuid) != expected_occupant
+            ):
                 raise ValueError(
                     f"Deck {self.name} 的 Site {self.sites[idx].label} 期望物料 UUID "
                     f"{expected_occupant!r}，实际为 {current_occupant_uuid!r}"
@@ -261,12 +238,6 @@ class PRCXI9300Deck(Deck):
             if not current_occupant_uuid:
                 resource.unilabos_uuid = expected_occupant
                 current_occupant_uuid = expected_occupant
-        expected_name = self._site_expected_occupant_names.get(idx)
-        if expected_name and resource.name != expected_name:
-            raise ValueError(
-                f"Deck {self.name} 的 Site {self.sites[idx].label} 期望物料 {expected_name!r}，"
-                f"实际为 {resource.name!r}"
-            )
         if not current_occupant_uuid:
             raise ValueError(
                 f"物料 {resource.name} 缺少微后端分配的 UUID，不能放入 Site"
@@ -276,13 +247,16 @@ class PRCXI9300Deck(Deck):
         self.sites[idx] = self.sites[idx].model_copy(
             update={"occupied_material_uuid": str(current_occupant_uuid)}
         )
-        self._site_expected_occupant_names.pop(idx, None)
 
     def unassign_child_resource(self, resource: Resource):
         """移除物料时同步清空内部 ResourceSite 的占用关系。"""
 
         site_index = next(
-            (index for index in range(len(self.sites)) if self._get_site_resource(index) is resource),
+            (
+                index
+                for index in range(len(self.sites))
+                if self._get_site_resource(index) is resource
+            ),
             None,
         )
         super().unassign_child_resource(resource)
@@ -290,16 +264,11 @@ class PRCXI9300Deck(Deck):
             self.sites[site_index] = self.sites[site_index].model_copy(
                 update={"occupied_material_uuid": None}
             )
-            self._site_expected_occupants[site_index] = None
-            self._site_expected_occupant_names.pop(site_index, None)
 
-    def assign_child_at_slot(self, resource: Resource, slot: int, reassign: bool = False) -> None:
+    def assign_child_at_slot(
+        self, resource: Resource, slot: int, reassign: bool = False
+    ) -> None:
         self.assign_child_resource(resource, spot=slot - 1, reassign=reassign)
-
-    def serialize(self) -> dict:
-        data = super().serialize()
-        data["sites"] = self._serialize_plr_sites()
-        return data
 
 
 class PRCXI9300Container(Container):

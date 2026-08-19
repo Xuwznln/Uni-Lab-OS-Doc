@@ -10,22 +10,21 @@ from pydantic import ValidationError
 from pylabrobot.resources import Carrier, Coordinate, Resource, ResourceHolder
 
 from unilabos.resources.itemized_carrier import ItemizedCarrier
+from unilabos.resources.objects.pose import ResourceDictPositionObject
+from unilabos.resources.objects.resource import ResourceDict
+from unilabos.resources.objects.site import ResourceSite
 from unilabos.resources.site_definition import normalize_available_sites
 from unilabos.resources.resource_tracker import (
     EXTRA_RESOURCE_CLASS,
     EXTRA_RESOURCE_META_DATA,
     EXTRA_SITES,
     DeviceNodeResourceTracker,
-    PLRSerializedSite,
-    ResourceDict,
-    ResourceSite,
     ResourceTreeSet,
     apply_plr_site_metadata,
     extract_plr_sites,
     merge_resource_sites,
     prepare_resource_creation_payloads,
     prepare_resource_tree_for_creation,
-    resource_site_to_plr_site,
     set_plr_template_name,
     sites_for_plr_deserialization,
 )
@@ -41,7 +40,7 @@ def _resource_payload(**overrides):
         "config": {"type": "StrictCarrier"},
         "data": {},
         "extra": {},
-        "position": {"x": 1, "y": 2, "z": 3},
+        "pose": {"position": {"x": 1, "y": 2, "z": 3}},
     }
     payload.update(overrides)
     return payload
@@ -65,14 +64,13 @@ def _site_payload(owner_uuid: str, template_name: str = "StrictCarrier", **overr
     return payload
 
 
-def test_runtime_create_response_preserves_static_pose_dynamic_position_and_site_identity():
+def test_runtime_create_response_preserves_canonical_pose_and_site_identity():
     owner_uuid = str(uuid4())
     site = _site_payload(owner_uuid)
     raw = _resource_payload(
         uuid=owner_uuid,
         template_name="StrictCarrier",
-        pose={"position": {"x": 4, "y": 5, "z": 6}},
-        position={"x": 40, "y": 50, "z": 60},
+        pose={"position": {"x": 40, "y": 50, "z": 60}},
         sites=[site],
         sites_initialized=True,
         children=[],
@@ -80,8 +78,8 @@ def test_runtime_create_response_preserves_static_pose_dynamic_position_and_site
 
     _, prepared = prepare_resource_creation_payloads([raw])
     created = prepared[0]
-    assert created["position"] == {"x": 40.0, "y": 50.0, "z": 60.0}
-    assert created["pose"]["position"] == {"x": 4.0, "y": 5.0, "z": 6.0}
+    assert "position" not in created
+    assert created["pose"]["position"] == {"x": 40.0, "y": 50.0, "z": 60.0}
     assert created["sites"][0]["material_uuid"] == created["uuid"]
     assert created["sites_initialized"] is True
     site_uuid = created["sites"][0]["uuid"]
@@ -95,7 +93,9 @@ def test_runtime_create_response_preserves_static_pose_dynamic_position_and_site
 def test_instance_payload_discards_available_sites_without_instantiating_them():
     raw = _resource_payload(
         template_name="StrictCarrier",
-        available_sites=[{"index": "A1", "label": "A1", "content_type": ["tube"]}],
+        available_sites=[
+            {"index": "A1", "label": "A1", "allowed_resource_categories": ["tube"]}
+        ],
         sites=[],
         sites_initialized=True,
         children=[],
@@ -170,9 +170,12 @@ def test_offline_uuid_migration_updates_tree_and_site_references_atomically():
     migrated_owner_uuid = str(uuid4())
     migrated_occupant_uuid = str(uuid4())
 
-    assert tree.replace_resource_uuids(
-        {owner_uuid: migrated_owner_uuid, occupant_uuid: migrated_occupant_uuid}
-    ) == 2
+    assert (
+        tree.replace_resource_uuids(
+            {owner_uuid: migrated_owner_uuid, occupant_uuid: migrated_occupant_uuid}
+        )
+        == 2
+    )
 
     owner = tree.find_by_uuid(migrated_owner_uuid)
     occupant = tree.find_by_uuid(migrated_occupant_uuid)
@@ -189,6 +192,42 @@ def test_offline_uuid_migration_updates_tree_and_site_references_atomically():
     with pytest.raises(ValueError, match="重复资源 UUID"):
         tree.replace_resource_uuids({migrated_owner_uuid: migrated_occupant_uuid})
     assert tree.dump() == before
+
+
+def test_allowed_resource_categories_are_frontend_metadata_not_tree_enforcement():
+    owner_uuid = str(uuid4())
+    occupant_uuid = str(uuid4())
+
+    tree = ResourceTreeSet.from_raw_dict_list(
+        [
+            _resource_payload(
+                uuid=owner_uuid,
+                template_name="StrictCarrier",
+                sites_initialized=True,
+                sites=[
+                    _site_payload(
+                        owner_uuid,
+                        occupied_material_uuid=occupant_uuid,
+                        allowed_resource_categories=["plate"],
+                    )
+                ],
+            ),
+            _resource_payload(
+                id="tube-1",
+                uuid=occupant_uuid,
+                name="tube-1",
+                type="tube",
+                config={"type": "Tube"},
+                template_name="TubeTemplate",
+                parent_uuid=owner_uuid,
+            ),
+        ]
+    )
+
+    owner = tree.find_by_uuid(owner_uuid)
+    assert owner is not None
+    assert owner.res_content.sites is not None
+    assert owner.res_content.sites[0].allowed_resource_categories == ["plate"]
 
 
 def test_plr_offline_uuid_migration_updates_site_sidecar_references():
@@ -215,10 +254,13 @@ def test_plr_offline_uuid_migration_updates_site_sidecar_references():
     }
 
     tracker = DeviceNodeResourceTracker()
-    assert tracker.loop_update_uuid(
-        resource,
-        {owner_uuid: migrated_owner_uuid, occupant_uuid: migrated_occupant_uuid},
-    ) == 2
+    assert (
+        tracker.loop_update_uuid(
+            resource,
+            {owner_uuid: migrated_owner_uuid, occupant_uuid: migrated_occupant_uuid},
+        )
+        == 2
+    )
 
     assert resource["uuid"] == migrated_owner_uuid
     assert resource["data"]["unilabos_uuid"] == migrated_owner_uuid
@@ -247,11 +289,11 @@ def test_legacy_site_geometry_is_promoted_to_shared_pose():
                         "material_uuid": owner_uuid,
                         "index": "A1",
                         "label": "A1",
-                        "occupied_by": occupant_uuid,
+                        "occupied_material_uuid": occupant_uuid,
                         "position": {"x": 10, "y": 20, "z": 30},
                         "size": {"width": 40, "height": 50, "depth": 60},
                         "rotation": {"x": 1, "y": 2, "z": 3},
-                        "content_type": ["plate", "plate"],
+                        "allowed_resource_categories": ["plate", "plate"],
                         "vendor_extension": {"rack": 7},
                     }
                 ],
@@ -262,7 +304,8 @@ def test_legacy_site_geometry_is_promoted_to_shared_pose():
     dumped = resource.model_dump(by_alias=True)
     assert "sites" not in dumped["config"]
     assert dumped["config"]["type"] == "StrictCarrier"
-    assert dumped["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert "position" not in dumped
+    assert dumped["pose"]["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
     site = dumped["sites"][0]
     assert site["template_name"] == "StrictCarrier"
     assert site["material_uuid"] == owner_uuid
@@ -271,9 +314,16 @@ def test_legacy_site_geometry_is_promoted_to_shared_pose():
     assert site["pose"]["position3d"] == {"x": 10.0, "y": 20.0, "z": 30.0}
     assert site["pose"]["size"] == {"width": 40.0, "height": 50.0, "depth": 60.0}
     assert site["pose"]["rotation"] == {"x": 1.0, "y": 2.0, "z": 3.0}
-    assert site["content_type"] == ["plate"]
+    assert site["allowed_resource_categories"] == ["plate"]
     assert site["meta_data"]["legacy_fields"]["vendor_extension"] == {"rack": 7}
-    assert {"position_x", "position_y", "position_z", "width", "length", "depth"}.isdisjoint(site)
+    assert {
+        "position_x",
+        "position_y",
+        "position_z",
+        "width",
+        "length",
+        "depth",
+    }.isdisjoint(site)
     assert "occupied_by" not in site
     assert dumped["sites_initialized"] is True
 
@@ -368,43 +418,41 @@ def test_canonical_site_rejects_unknown_or_conflicting_fields():
         )
 
     resource = ResourceDict.model_validate(
-        _resource_payload(
-            position={"x": 1, "y": 2, "z": 3},
-            pose={"position": {"x": 9, "y": 8, "z": 7}},
-        )
+        _resource_payload(pose={"position": {"x": 9, "y": 8, "z": 7}})
     )
-    assert resource.position.model_dump() == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert not hasattr(resource, "position")
     assert resource.pose.position.model_dump() == {"x": 9.0, "y": 8.0, "z": 7.0}
 
-
-def test_dynamic_position_can_be_unknown_without_zero_default():
-    resource = ResourceDict.model_validate(_resource_payload(position=None))
-
-    assert resource.position is None
-    dumped = resource.model_dump(by_alias=True)
-    assert dumped["position"] is None
-    assert ResourceDict.model_validate(dumped).position is None
-
-
-def test_legacy_full_position_shape_migrates_to_pose_and_dynamic_xyz():
-    resource = ResourceDict.model_validate(
-        _resource_payload(
-            position={
-                "position": {"x": 1, "y": 2, "z": 3},
-                "position3d": {"x": 4, "y": 5, "z": 6},
-                "size": {"width": 7, "height": 8, "depth": 9},
-            },
+    with pytest.raises(ValidationError, match="根字段 position 已删除"):
+        ResourceDict.model_validate(
+            _resource_payload(position={"x": 1, "y": 2, "z": 3})
         )
-    )
-
-    assert resource.position.model_dump() == {"x": 1.0, "y": 2.0, "z": 3.0}
-    assert resource.pose.position3d.model_dump() == {"x": 4.0, "y": 5.0, "z": 6.0}
-    assert resource.pose.size.model_dump() == {"depth": 9.0, "width": 7.0, "height": 8.0}
 
 
-def test_legacy_occupied_name_is_resolved_and_checked_bidirectionally():
+def test_pose_position_can_be_unknown_without_zero_default():
+    resource = ResourceDict.model_validate(_resource_payload(pose={"position": None}))
+
+    assert resource.pose.position is None
+    dumped = resource.model_dump(by_alias=True)
+    assert "position" not in dumped
+    assert ResourceDict.model_validate(dumped).pose.position is None
+
+
+def test_legacy_full_root_position_shape_is_rejected():
+    with pytest.raises(ValidationError, match="根字段 position 已删除"):
+        ResourceDict.model_validate(
+            _resource_payload(
+                position={
+                    "position": {"x": 1, "y": 2, "z": 3},
+                    "position3d": {"x": 4, "y": 5, "z": 6},
+                    "size": {"width": 7, "height": 8, "depth": 9},
+                },
+            )
+        )
+
+
+def test_legacy_occupied_name_is_rejected():
     owner_uuid = str(uuid4())
-    occupant_uuid = str(uuid4())
     raw = [
         _resource_payload(
             uuid=owner_uuid,
@@ -418,24 +466,10 @@ def test_legacy_occupied_name_is_resolved_and_checked_bidirectionally():
                     "occupied_by": "tube-1",
                 }
             ],
-        ),
-        _resource_payload(
-            id="tube-1",
-            uuid=occupant_uuid,
-            name="tube-1",
-            type="tube",
-            config={"type": "Tube"},
-            parent_uuid=owner_uuid,
-            position={"x": 0, "y": 0, "z": 0},
-        ),
+        )
     ]
-    tree = ResourceTreeSet.from_raw_dict_list(raw)
-    assert tree.root_nodes[0].res_content.sites[0].occupied_material_uuid == occupant_uuid
-
-    broken = deepcopy(raw)
-    broken[1]["parent_uuid"] = str(uuid4())
-    with pytest.raises(ValueError, match="不在物料树|不属于 owner"):
-        ResourceTreeSet.from_raw_dict_list(broken)
+    with pytest.raises(ValidationError, match="occupied_by 已停用"):
+        ResourceTreeSet.from_raw_dict_list(raw)
 
 
 @pytest.mark.parametrize("capacity", [0, 1, 111, 384, 1024])
@@ -453,7 +487,7 @@ def test_site_model_preserves_large_root_lists(capacity):
                 "position": {"x": float(index), "y": 0, "z": 0},
                 "position3d": {"x": float(index), "y": 0, "z": 0},
             },
-            "content_type": ["plate"],
+            "allowed_resource_categories": ["plate"],
             "meta_data": {"ordinal": index},
         }
         for index in range(capacity)
@@ -485,15 +519,9 @@ def test_itemized_carrier_uses_native_sites_and_injected_extra_metadata():
     carrier.unilabos_uuid = str(uuid4())
     set_plr_template_name(carrier, "StrictCarrier")
     assert carrier.unilabos_extra[EXTRA_RESOURCE_CLASS] == "StrictCarrier"
-    native = carrier.serialize()
-    assert set(native["sites"][0]) == {
-        "label",
-        "visible",
-        "occupied_by",
-        "position",
-        "size",
-        "content_type",
-    }
+
+    with pytest.raises(ValueError, match="canonical ResourceSite 快照"):
+        carrier.serialize()
 
     backend_sites = [
         ResourceSite(
@@ -501,45 +529,54 @@ def test_itemized_carrier_uses_native_sites_and_injected_extra_metadata():
             template_name="StrictCarrier",
             material_uuid=carrier.unilabos_uuid,
             index=index,
-            label=raw_site["label"],
+            label=label,
             pose={
-                "position": raw_site["position"],
-                "position3d": raw_site["position"],
-                "size": raw_site["size"],
+                "position": {
+                    "x": carrier.child_locations[label].x,
+                    "y": carrier.child_locations[label].y,
+                    "z": carrier.child_locations[label].z,
+                },
+                "position3d": {
+                    "x": carrier.child_locations[label].x,
+                    "y": carrier.child_locations[label].y,
+                    "z": carrier.child_locations[label].z,
+                },
+                "size": carrier.child_size[label],
             },
-            content_type=raw_site["content_type"],
         )
-        for index, raw_site in enumerate(native["sites"])
+        for index, label in enumerate(carrier.child_locations)
     ]
     apply_plr_site_metadata(carrier, {carrier.name: backend_sites})
 
-    extracted = extract_plr_sites(carrier, carrier.serialize())
+    serialized = carrier.serialize()
+    assert serialized["sites"] == [site.model_dump() for site in backend_sites]
+    assert set(serialized["sites"][0]) == set(ResourceSite.model_fields)
+
+    extracted = extract_plr_sites(carrier, serialized)
     assert extracted is not None
     injected_site = extracted[0].model_copy(
         deep=True,
         update={
-            "content_type": ["plate"],
-            "allowed_resource_template_uuids": ["template-1"],
+            "allowed_resource_categories": ["plate"],
             "parent_link": "deck/main",
             "meta_data": {"vendor": {"slot": "A1"}},
-        }
+        },
     )
     injected_site.pose.position.x = 101
     injected_site.pose.position.y = 102
     apply_plr_site_metadata(carrier, {carrier.name: [injected_site, extracted[1]]})
 
     assert carrier.unilabos_extra[EXTRA_SITES]["A1"]["uuid"] == injected_site.uuid
-    assert "uuid" not in carrier.serialize()["sites"][0]
+    assert carrier.serialize()["sites"][0]["uuid"] == injected_site.uuid
     restored = extract_plr_sites(carrier, carrier.serialize())
     assert restored is not None
-    assert restored[0].content_type == ["plate"]
-    assert restored[0].allowed_resource_template_uuids == ["template-1"]
+    assert restored[0].allowed_resource_categories == ["plate"]
     assert restored[0].parent_link == "deck/main"
     assert restored[0].meta_data == {"vendor": {"slot": "A1"}}
     assert restored[0].pose.position.model_dump() == {"x": 101.0, "y": 102.0, "z": 0.0}
 
 
-def test_itemized_carrier_sidecar_cannot_hide_missing_native_site():
+def test_itemized_carrier_rejects_canonical_site_not_in_native_layout():
     carrier = ItemizedCarrier(
         name="carrier",
         size_x=100,
@@ -549,24 +586,19 @@ def test_itemized_carrier_sidecar_cannot_hide_missing_native_site():
     )
     carrier.unilabos_uuid = str(uuid4())
     set_plr_template_name(carrier, "StrictCarrier")
-    carrier.unilabos_extra = {
-        EXTRA_SITES: {
-            "A2": {
-                "schema_version": 1,
-                "uuid": str(uuid4()),
-                "template_name": "StrictCarrier",
-                "material_uuid": carrier.unilabos_uuid,
-                "index": 1,
-                "label": "A2",
-            }
-        }
-    }
+    wrong_site = ResourceSite(
+        uuid=str(uuid4()),
+        template_name="StrictCarrier",
+        material_uuid=carrier.unilabos_uuid,
+        index=1,
+        label="A2",
+    )
 
-    with pytest.raises(ValueError, match="缺少.*sidecar"):
-        extract_plr_sites(carrier, carrier.serialize())
+    with pytest.raises(ValueError, match="槽位与 canonical sites 不一致"):
+        apply_plr_site_metadata(carrier, {carrier.name: [wrong_site]})
 
 
-def test_itemized_carrier_deserialization_adapter_uses_native_shape():
+def test_itemized_carrier_deserialization_uses_canonical_shape():
     owner_uuid = str(uuid4())
     occupant_uuid = str(uuid4())
     site = ResourceSite(
@@ -581,27 +613,27 @@ def test_itemized_carrier_deserialization_adapter_uses_native_shape():
             "position3d": {"x": 1, "y": 2, "z": 3},
             "size": {"width": 4, "height": 5, "depth": 6},
         },
-        content_type=["tube"],
+        allowed_resource_categories=["tube"],
     )
 
-    native = sites_for_plr_deserialization(
-        ItemizedCarrier,
-        [site],
-        {occupant_uuid: "tube-1"},
+    native = sites_for_plr_deserialization([site])
+    assert native == [site.model_dump()]
+
+    carrier = ItemizedCarrier(
+        name="carrier",
+        size_x=100,
+        size_y=100,
+        size_z=20,
+        sites=native,
     )
-    assert native == [
-        {
-            "label": "A1",
-            "visible": True,
-            "occupied_by": "tube-1",
-            "position": {"x": 1.0, "y": 2.0, "z": 3.0},
-            "size": {"width": 4.0, "height": 5.0, "depth": 6.0},
-            "content_type": ["tube"],
-        }
-    ]
+    assert carrier.serialize()["sites"] == native
+
+    restored = Resource.deserialize(carrier.serialize(), allow_marshal=True)
+    assert isinstance(restored, ItemizedCarrier)
+    assert restored.serialize()["sites"] == native
 
 
-def test_plr_serialized_site_boundary_has_only_native_fields():
+def test_itemized_carrier_site_boundary_has_only_canonical_fields():
     site = ResourceSite(
         uuid=str(uuid4()),
         template_name="StrictCarrier",
@@ -615,37 +647,54 @@ def test_plr_serialized_site_boundary_has_only_native_fields():
             "position3d": {"x": 1, "y": 2, "z": 3},
             "size": {"width": 4, "height": 5, "depth": 6},
         },
-        content_type=["plate", "plate"],
-        allowed_resource_template_uuids=["template-1"],
+        allowed_resource_categories=["plate", "plate"],
         meta_data={"vendor": "kept-in-ResourceSite"},
     )
 
-    native = resource_site_to_plr_site(site, occupied_by="plate-1")
+    native = sites_for_plr_deserialization([site])[0]
 
-    assert native == {
-        "label": "T8",
-        "visible": False,
-        "occupied_by": "plate-1",
-        "position": {"x": 1.0, "y": 2.0, "z": 3.0},
-        "size": {"width": 4.0, "height": 5.0, "depth": 6.0},
-        "content_type": ["plate"],
-    }
-    assert set(native) == {
-        "label",
-        "visible",
-        "occupied_by",
-        "position",
-        "size",
-        "content_type",
-    }
+    assert native == site.model_dump()
+    assert set(native) == set(ResourceSite.model_fields)
+    assert "occupied_by" not in native
+    assert native["occupied_material_uuid"] == site.occupied_material_uuid
     assert site.pose.position.model_dump() == {"x": 101.0, "y": 102.0, "z": 0.0}
-    with pytest.raises(ValidationError, match="extra_forbidden"):
-        PLRSerializedSite.model_validate({**native, "uuid": site.uuid})
+    with pytest.raises(ValidationError, match="occupied_by 已停用"):
+        ResourceSite.model_validate(
+            {**native, "occupied_by": "plate-1"}
+        )
+
+
+def test_resource_models_are_reusable_and_nested_xyz_is_required():
+    from unilabos.resources.objects import ResourceDict as ExportedResourceDict
+    from unilabos.resources.resource_tracker import ResourceDict as TrackerResourceDict
+
+    assert ExportedResourceDict is ResourceDict
+    assert TrackerResourceDict is ResourceDict
     with pytest.raises(ValidationError, match="Field required"):
-        PLRSerializedSite.model_validate({key: value for key, value in native.items() if key != "size"})
+        ResourceDictPositionObject.model_validate({"x": 1})
 
 
-def test_plr_site_adapter_metadata_requires_exact_bidirectional_match():
+def test_single_site_model_preserves_explicit_extra_round_trip():
+    site = ResourceSite(
+        uuid=str(uuid4()),
+        template_name="StrictCarrier",
+        material_uuid=str(uuid4()),
+        index=0,
+        label="A1",
+        pose={
+            "position3d": {"x": 1, "y": 2, "z": 3},
+            "size": {"width": 4, "height": 5, "depth": 6},
+        },
+        extra={"vendor_slot": 7},
+    )
+
+    native = sites_for_plr_deserialization([site])[0]
+    assert native["extra"] == {"vendor_slot": 7}
+    assert ResourceSite.model_validate(native) == site
+    assert site.extra == {"vendor_slot": 7}
+
+
+def test_resource_site_storage_is_structural_and_requires_exact_match():
     owner_uuid = str(uuid4())
     occupant_uuid = str(uuid4())
     site = ResourceSite(
@@ -660,45 +709,36 @@ def test_plr_site_adapter_metadata_requires_exact_bidirectional_match():
             "position3d": {"x": 1, "y": 2, "z": 3},
             "size": {"width": 4, "height": 5, "depth": 6},
         },
-        content_type=["plate"],
+        allowed_resource_categories=["plate"],
+        extra={"vendor_slot": 7},
     )
     plate = Resource("plate-1", 1, 1, 1)
     plate.unilabos_uuid = occupant_uuid
 
     class FakeDeck:
-        __unilabos_plr_site_format__ = True
-        __unilabos_resource_site_storage__ = True
-
-        def __init__(self, native_site):
+        def __init__(self, stored_site):
             self.name = "deck"
+            self.unilabos_uuid = owner_uuid
+            self.unilabos_extra = {EXTRA_RESOURCE_CLASS: "FakeDeck"}
             self.children = [plate]
-            self.sites = [site.model_copy(update={"uuid": str(uuid4())})]
-            self._native_site = native_site
-            self._ordering = {}
-            self._site_expected_occupants = {}
-            self._site_expected_occupant_names = {0: "plate-1"}
+            self.sites = [stored_site]
 
-        def _serialize_plr_sites(self):
-            return [self._native_site]
-
-    native = resource_site_to_plr_site(site, occupied_by="plate-1")
-    assert sites_for_plr_deserialization(FakeDeck, [site], {occupant_uuid: "plate-1"}) == [
-        site.model_dump()
-    ]
-    deck = FakeDeck(native)
+    assert sites_for_plr_deserialization([site]) == [site.model_dump()]
+    deck = FakeDeck(site.model_copy(deep=True))
     apply_plr_site_metadata(deck, {"deck": [site]})
 
     assert deck.sites == [site]
-    assert deck._site_expected_occupants == {0: occupant_uuid}
-    assert deck._site_expected_occupant_names == {}
+    extracted = extract_plr_sites(deck, {})
+    assert extracted is not None
+    assert extracted[0].extra == {"vendor_slot": 7}
 
-    mismatched = deepcopy(native)
-    mismatched["position"]["x"] = 99
+    mismatched = site.model_copy(deep=True)
+    mismatched.pose.position3d.x = 99
     with pytest.raises(ValueError, match="与根字段不一致"):
         apply_plr_site_metadata(FakeDeck(mismatched), {"deck": [site]})
 
 
-def test_prcxi_deck_uses_resource_sites_and_serializes_plr_boundary():
+def test_prcxi_deck_uses_resource_sites_without_extending_plr_serialize():
     prcxi = pytest.importorskip(
         "unilabos.devices.liquid_handling.prcxi.prcxi",
         reason="PRCXI 驱动导入依赖 ROS Jazzy 运行时",
@@ -716,7 +756,7 @@ def test_prcxi_deck_uses_resource_sites_and_serializes_plr_boundary():
             "position3d": {"x": 10, "y": 20, "z": 30},
             "size": {"width": 40, "height": 50, "depth": 60},
         },
-        content_type=["plate"],
+        allowed_resource_categories=["plate"],
     )
     deck = prcxi.PRCXI9300Deck(
         name="deck",
@@ -730,23 +770,26 @@ def test_prcxi_deck_uses_resource_sites_and_serializes_plr_boundary():
     assert isinstance(deck.sites[0], ResourceSite)
     assert deck.sites[0].pose.position3d.x == 10
     assert deck.sites[0].pose.size.height == 50
-    serialized_sites = deck.serialize()["sites"]
-    assert serialized_sites == [resource_site_to_plr_site(site)]
-    assert {"uuid", "material_uuid", "template_name", "index"}.isdisjoint(serialized_sites[0])
+    assert "sites" not in deck.serialize()
+    extracted = extract_plr_sites(deck, deck.serialize())
+    assert extracted == [site]
 
     plate = Resource("plate-1", 10, 10, 10)
     plate.unilabos_uuid = str(uuid4())
     deck.assign_child_resource(plate, spot=0)
-    assert deck.serialize()["sites"][0]["occupied_by"] == "plate-1"
+    assert "sites" not in deck.serialize()
     assert deck.sites[0].occupied_material_uuid == plate.unilabos_uuid
+    extracted = extract_plr_sites(deck, deck.serialize())
+    assert extracted is not None
+    assert extracted[0].occupied_material_uuid == plate.unilabos_uuid
 
     deck.unassign_child_resource(plate)
-    assert deck.serialize()["sites"][0]["occupied_by"] is None
+    assert "sites" not in deck.serialize()
     assert deck.sites[0].occupied_material_uuid is None
 
 
 def test_prcxi_resource_sites_remain_canonical_for_constructor():
-    prcxi = pytest.importorskip(
+    pytest.importorskip(
         "unilabos.devices.liquid_handling.prcxi.prcxi",
         reason="PRCXI 驱动导入依赖 ROS Jazzy 运行时",
         exc_type=ImportError,
@@ -765,14 +808,10 @@ def test_prcxi_resource_sites_remain_canonical_for_constructor():
             "position3d": {"x": 1, "y": 2, "z": 3},
             "size": {"width": 4, "height": 5, "depth": 6},
         },
-        content_type=["plate"],
+        allowed_resource_categories=["plate"],
     )
 
-    native = sites_for_plr_deserialization(
-        prcxi.PRCXI9300Deck,
-        [site],
-        {occupant_uuid: "plate-1"},
-    )
+    native = sites_for_plr_deserialization([site])
 
     assert native == [site.model_dump()]
 
@@ -823,17 +862,16 @@ def test_standard_plr_carrier_site_roundtrip_preserves_identity_and_metadata():
 
     payload = site.model_copy(
         update={
-            "content_type": ["tube"],
-            "allowed_resource_template_uuids": ["tube-template"],
+            "allowed_resource_categories": ["tube"],
             "meta_data": {"vendor": {"slot": 7}},
         }
     )
     apply_plr_site_metadata(carrier, {carrier.name: [payload]})
+    assert not hasattr(holder, "content_type")
     extracted = extract_plr_sites(carrier, carrier.serialize())
     assert extracted is not None
     assert extracted[0].uuid == site.uuid
-    assert extracted[0].content_type == ["tube"]
-    assert extracted[0].allowed_resource_template_uuids == ["tube-template"]
+    assert extracted[0].allowed_resource_categories == ["tube"]
     assert extracted[0].meta_data == {"vendor": {"slot": 7}}
 
 
@@ -922,7 +960,8 @@ def test_graphio_keeps_protocol_fields_at_resource_root():
 
     assert dumped["template_name"] == "StrictCarrier"
     assert dumped["resource_template_uuid"] == "template-uuid"
-    assert dumped["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert "position" not in dumped
+    assert dumped["pose"]["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
     assert dumped["meta_data"] == {"vendor": {"lot": "A-1"}}
     assert "meta_data" not in dumped["config"]
     assert "meta_data" not in dumped["data"]
@@ -941,12 +980,12 @@ def test_graphio_keeps_protocol_fields_at_resource_root():
     assert transported["uuid"] == transport_uuid
     assert "unilabos_uuid" not in transported["data"]
 
-    unknown_position = _resource_payload(position=None)
+    unknown_position = _resource_payload(pose={"position": None})
     unknown_tree = graphio.canonicalize_nodes_data([unknown_position])
-    assert unknown_tree.dump()[0][0]["position"] is None
+    assert unknown_tree.dump()[0][0]["pose"]["position"] is None
 
     conflicting_position = _resource_payload(position=None, x=1)
-    with pytest.raises(ValueError, match="position=null.*冲突"):
+    with pytest.raises(ValueError, match="根字段 position 已删除"):
         graphio.canonicalize_nodes_data([conflicting_position])
 
 
@@ -965,12 +1004,14 @@ def test_ros_resource_config_transport_normalizes_root_site_fields():
                     {
                         "index": "A1",
                         "label": "A1",
-                        "position": {"x": 1},
+                        "position": {"x": 1, "y": 0, "z": 0},
                     }
                 ]
             },
             "template_name": "StrictCarrier",
             "resource_template_uuid": "template-uuid",
+            "barcode": "BC-ROS-001",
+            "barcode_symbology": "code128",
             "meta_data": {"vendor": {"lot": "A-1"}},
             "pose": {
                 "size": {"width": 100, "height": 200, "depth": 30},
@@ -981,7 +1022,10 @@ def test_ros_resource_config_transport_normalizes_root_site_fields():
                 {
                     "index": "A1",
                     "label": "A1",
-                    "pose": {"position": {"x": 1}, "position3d": {"x": 1}},
+                    "pose": {
+                        "position": {"x": 1, "y": 0, "z": 0},
+                        "position3d": {"x": 1, "y": 0, "z": 0},
+                    },
                 }
             ],
             "sites": [
@@ -991,7 +1035,10 @@ def test_ros_resource_config_transport_normalizes_root_site_fields():
                     material_uuid=owner_uuid,
                     index="A1",
                     label="A1",
-                    pose={"position": {"x": 1}, "position3d": {"x": 1}},
+                    pose={
+                        "position": {"x": 1, "y": 0, "z": 0},
+                        "position3d": {"x": 1, "y": 0, "z": 0},
+                    },
                 )
             ],
             "sites_initialized": True,
@@ -1000,8 +1047,13 @@ def test_ros_resource_config_transport_normalizes_root_site_fields():
 
     assert "available_sites" not in config
     assert config["resource_template_uuid"] == "template-uuid"
+    assert config["barcode"] == {
+        "data": "BC-ROS-001",
+        "symbology": "code128",
+        "position_on_resource": "front",
+    }
     assert config[EXTRA_RESOURCE_META_DATA] == {"vendor": {"lot": "A-1"}}
-    assert config["pose"]["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert "position" not in config["pose"]
     assert config["pose"]["position3d"] == {"x": 10.0, "y": 20.0, "z": 30.0}
     assert config["sites"][0]["uuid"] == site_uuid
     assert config["sites_initialized"] is True
@@ -1010,18 +1062,38 @@ def test_ros_resource_config_transport_normalizes_root_site_fields():
         _resource_payload(
             uuid=owner_uuid,
             template_name="StrictCarrier",
-            position={"x": 40, "y": 50, "z": 60},
+            pose={
+                "size": {"width": 100, "height": 200, "depth": 30},
+                "position": {"x": 40, "y": 50, "z": 60},
+                "position3d": {"x": 10, "y": 20, "z": 30},
+            },
             config=config,
         )
     )
     assert "pose" not in restored.config
-    assert restored.position.model_dump() == {"x": 40.0, "y": 50.0, "z": 60.0}
-    assert restored.pose.position.model_dump() == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert "barcode" not in restored.config
+    assert restored.barcode == "BC-ROS-001"
+    assert restored.barcode_symbology == "code128"
+    assert restored.pose.position.model_dump() == {"x": 40.0, "y": 50.0, "z": 60.0}
+    assert restored.pose.position3d.model_dump() == {"x": 10.0, "y": 20.0, "z": 30.0}
+
+    with pytest.raises(ValueError, match="barcode.*冲突"):
+        message_converter.obtain_config_with_root_fields(
+            {
+                "barcode": "ROOT",
+                "config": {
+                    "barcode": {
+                        "data": "CONFIG",
+                        "symbology": "code128",
+                    }
+                },
+            }
+        )
 
     unknown_config = message_converter.obtain_config_with_root_fields(
-        {"config": {}, "position": None}
+        {"config": {}, "pose": {"position": None}}
     )
-    assert unknown_config[message_converter.ROS_CONFIG_POSITION_UNKNOWN] is True
+    assert unknown_config[message_converter.ROS_CONFIG_POSE_POSITION_UNKNOWN] is True
 
     ros_resource = message_converter.convert_to_ros_msg(
         message_converter.Resource,
@@ -1031,22 +1103,25 @@ def test_ros_resource_config_transport_normalizes_root_site_fields():
             "name": "unknown-position",
             "type": "carrier",
             "class": "",
-            "position": None,
+            "pose": {"position": None},
             "meta_data": {"vendor": {"lot": "A-1"}},
             "config": {},
             "data": {},
         },
     )
     restored_transport = message_converter.convert_from_ros_msg(ros_resource)
-    assert restored_transport["position"] is None
+    assert restored_transport["pose"]["position"] is None
     assert restored_transport["meta_data"] == {"vendor": {"lot": "A-1"}}
     assert EXTRA_RESOURCE_META_DATA not in restored_transport["config"]
-    assert message_converter.ROS_CONFIG_POSITION_UNKNOWN not in restored_transport["config"]
+    assert (
+        message_converter.ROS_CONFIG_POSE_POSITION_UNKNOWN
+        not in restored_transport["config"]
+    )
 
     ros_resource.pose.position.x = 1.0
     ros_resource.pose.position.z = float("inf")
     restored_padding = message_converter.convert_from_ros_msg(ros_resource)
-    assert restored_padding["position"] is None
+    assert restored_padding["pose"]["position"] is None
 
     known_resource = message_converter.convert_to_ros_msg(
         message_converter.Resource,
@@ -1056,7 +1131,7 @@ def test_ros_resource_config_transport_normalizes_root_site_fields():
             "name": "known-position",
             "type": "carrier",
             "class": "",
-            "position": {"x": 1, "y": 2, "z": 3},
+            "pose": {"position": {"x": 1, "y": 2, "z": 3}},
             "config": {},
             "data": {},
         },
@@ -1083,7 +1158,7 @@ def test_ros_missing_metadata_sidecar_allows_legacy_promotion(legacy_source):
             "name": f"legacy-{legacy_source}",
             "type": "carrier",
             "class": "",
-            "position": {"x": 1, "y": 2, "z": 3},
+            "pose": {"position": {"x": 1, "y": 2, "z": 3}},
             "config": {},
             "data": {},
         },
@@ -1105,7 +1180,7 @@ def test_ros_missing_metadata_sidecar_allows_legacy_promotion(legacy_source):
             uuid=owner_uuid,
             config=restored["config"],
             data=restored["data"],
-            position=restored["position"],
+            pose=restored["pose"],
         )
     )
     assert canonical.meta_data == legacy_meta_data

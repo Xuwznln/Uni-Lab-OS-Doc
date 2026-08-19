@@ -1,28 +1,30 @@
 import copy
 import inspect
-import traceback
 import uuid
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    JsonValue,
-    ValidationError,
-    ValidationInfo,
-    field_serializer,
-    field_validator,
-    model_validator,
+from pydantic import BaseModel, Field, ValidationError
+from typing import List, Tuple, Any, Dict, Mapping, Optional, cast, TYPE_CHECKING, Union
+
+from unilabos.resources.objects.resource import (
+    EXTRA_CLASS,
+    EXTRA_RESOURCE_CLASS,
+    EXTRA_RESOURCE_JOINT_STATE,
+    EXTRA_RESOURCE_META_DATA,
+    EXTRA_RESOURCE_POSE,
+    EXTRA_SAMPLE_UUID,
+    EXTRA_SITES,
+    EXTRA_UNILABOS_SAMPLE_UUID,
+    FRONTEND_POSE_EXTRA,
+    PLR_CONFIG_ROOT_KEYS,
+    RESOURCE_ROOT_FIELDS,
+    ResourceDict,
+    ResourceDictType,
+    assemble_tracker_state,
 )
-from pydantic import Field
-from typing import List, Tuple, Any, Dict, Literal, Mapping, Optional, cast, TYPE_CHECKING, Union
-
-from typing_extensions import NotRequired, TypedDict
-
+from unilabos.resources.objects.site import ResourceSite, ResourceSiteType
+from unilabos.resources.objects.sample import LabSample, SampleUUIDsType
+from unilabos.resources.objects.state import TRACKER_STATE_KEYS
 from unilabos.resources.plr_additional_res_reg import register
-from unilabos.resources.resource_state import (
-    load_all_state_with_unilabos,
-    serialize_all_state_with_unilabos,
-)
-from unilabos.resources.resource_pose import (
+from unilabos.resources.objects.pose import (
     ResourceDictPosition,
     ResourceDictPositionObject,
     ResourceDictPositionObjectType,
@@ -32,24 +34,11 @@ from unilabos.resources.resource_pose import (
     ResourceDictPositionSizeType,
     ResourceDictPositionType,
 )
-from unilabos.resources.site_definition import (
-    normalize_site_pose_payload,
-)
 from unilabos.utils.log import logger
 
 if TYPE_CHECKING:
     from unilabos.devices.workstation.workstation_base import WorkstationBase
     from pylabrobot.resources import Resource as PLRResource
-
-
-EXTRA_RESOURCE_CLASS = "unilabos_resource_class"
-EXTRA_CLASS = EXTRA_RESOURCE_CLASS
-FRONTEND_POSE_EXTRA = "unilabos_frontend_pose_extra"
-EXTRA_RESOURCE_POSE = "unilabos_resource_pose"
-EXTRA_RESOURCE_META_DATA = "unilabos_resource_meta_data"
-EXTRA_SAMPLE_UUID = "sample_uuid"
-EXTRA_UNILABOS_SAMPLE_UUID = "unilabos_sample_uuid"
-EXTRA_SITES = "sites"
 
 
 # 函数参数名常量 - 用于自动注入 sample_uuids 列表
@@ -61,735 +50,31 @@ JSON_UNILABOS_PARAM = "unilabos_param"
 # 返回值中的 samples 字段名
 RETURN_UNILABOS_SAMPLES = "unilabos_samples"
 
-# sample_uuids 参数类型 (用于 virtual bench 等设备添加 sample_uuids 参数)
-SampleUUIDsType = Dict[str, Optional["PLRResource"]]
-
-
-class LabSample(TypedDict):
-    sample_uuid: str
-    oss_path: str
-    extra: Dict[str, Any]
-
-
-class PLRSerializedSitePosition(BaseModel):
-    """UniLabOS 的 PLR ``sites[]`` 适配层坐标。"""
-
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-
-    x: float
-    y: float
-    z: float
-
-
-class PLRSerializedSiteSize(BaseModel):
-    """UniLabOS 的 PLR ``sites[]`` 适配层尺寸。"""
-
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-
-    width: float = Field(ge=0.0)
-    height: float = Field(ge=0.0)
-    depth: float = Field(ge=0.0)
-
-
-class PLRSerializedSite(BaseModel):
-    """UniLabOS 在 PLR 运行时使用的 ``sites[]`` 适配形状。
-
-    该结构只负责 PLR 构造/序列化边界，不保存 Site UUID、owner UUID 或扩展
-    元数据。完整持久化信息进入资源对象后统一使用 :class:`ResourceSite`。
-    """
-
-    model_config = ConfigDict(
-        extra="forbid",
-        str_strip_whitespace=True,
-        validate_assignment=True,
-        validate_default=True,
-        allow_inf_nan=False,
-    )
-
-    label: str
-    visible: bool
-    occupied_by: Optional[str]
-    position: PLRSerializedSitePosition
-    size: PLRSerializedSiteSize
-    content_type: List[str]
-
-    @field_validator("label")
-    @classmethod
-    def _require_label(cls, value: str) -> str:
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("PLR Site.label 不能为空")
-        return value.strip()
-
-    @field_validator("occupied_by")
-    @classmethod
-    def _normalize_occupied_by(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("PLR Site.occupied_by 必须是非空资源名或 null")
-        return value.strip()
-
-    @field_validator("content_type")
-    @classmethod
-    def _normalize_content_type(cls, values: List[str]) -> List[str]:
-        result: List[str] = []
-        seen: set[str] = set()
-        for value in values:
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError("PLR Site.content_type 只能包含非空字符串")
-            normalized = value.strip()
-            key = normalized.casefold()
-            if key not in seen:
-                result.append(normalized)
-                seen.add(key)
-        return result
-
-
-class ResourceSiteType(TypedDict):
-    """物料根字段 ``sites`` 中的规范 Site 结构。"""
-
-    schema_version: Literal[1]
-    uuid: str
-    template_name: str
-    material_uuid: str
-    index: Union[int, str]
-    label: str
-    visible: NotRequired[bool]
-    occupied_material_uuid: NotRequired[Optional[str]]
-    pose: NotRequired[ResourceDictPositionType]
-    content_type: NotRequired[List[str]]
-    allowed_resource_template_uuids: NotRequired[List[str]]
-    parent_link: NotRequired[str]
-    description: NotRequired[str]
-    meta_data: NotRequired[Dict[str, Any]]
-
-
-class ResourceSite(BaseModel):
-    """严格的载架 Site 协议模型。
-
-    Site 与物料复用同一个 ``pose``，完整保存 2D/3D 位置、尺寸、旋转、缩放和
-    布局。旧版扁平几何字段仅在反序列化时迁移，规范序列化不会再输出。
-    """
-
-    model_config = ConfigDict(
-        extra="forbid",
-        str_strip_whitespace=True,
-        validate_assignment=True,
-        validate_default=True,
-        allow_inf_nan=False,
-    )
-
-    schema_version: Literal[1] = 1
-    uuid: str
-    template_name: str
-    material_uuid: str
-    index: Union[int, str]
-    label: str
-    visible: bool = True
-    occupied_material_uuid: Optional[str] = None
-    pose: ResourceDictPosition = Field(default_factory=ResourceDictPosition)
-    content_type: List[str] = Field(default_factory=list)
-    allowed_resource_template_uuids: List[str] = Field(default_factory=list)
-    parent_link: str = ""
-    description: str = ""
-    meta_data: Dict[str, JsonValue] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_shape(cls, value: Any, info: ValidationInfo):
-        if isinstance(value, cls):
-            return value
-        if not isinstance(value, dict):
-            raise ValueError("Site 必须是对象")
-
-        site = normalize_site_pose_payload(value)
-        is_legacy = "schema_version" not in site
-
-        occupied_by = site.pop("occupied_by", None)
-        if occupied_by:
-            occupied_by = str(occupied_by)
-            occupied_uuid = site.get("occupied_material_uuid")
-            if occupied_uuid and str(occupied_uuid) != occupied_by:
-                raise ValueError("occupied_by 与 occupied_material_uuid 冲突")
-            try:
-                resolved = str(uuid.UUID(occupied_by))
-            except (ValueError, AttributeError):
-                lookup = (info.context or {}).get("material_uuid_by_name", {})
-                resolved = lookup.get(occupied_by)
-                if not resolved:
-                    raise ValueError(f"旧 Site.occupied_by={occupied_by!r} 无法唯一解析为物料 UUID")
-            site["occupied_material_uuid"] = resolved
-
-        # 旧协议允许扩展键；迁移时显式收进 meta_data，规范 v1 输入则严格拒绝未知键。
-        known = set(cls.model_fields)
-        if is_legacy:
-            legacy_fields = {key: site.pop(key) for key in list(site) if key not in known}
-            if legacy_fields:
-                metadata = site.get("meta_data")
-                if metadata is None:
-                    metadata = {}
-                if not isinstance(metadata, dict):
-                    raise ValueError("Site.meta_data 必须是对象")
-                metadata = copy.deepcopy(metadata)
-                existing = metadata.get("legacy_fields")
-                if existing is not None and not isinstance(existing, dict):
-                    raise ValueError("Site.meta_data.legacy_fields 必须是对象")
-                metadata["legacy_fields"] = {**(existing or {}), **legacy_fields}
-                site["meta_data"] = metadata
-
-        return site
-
-    @field_validator("uuid", "template_name", "material_uuid", "label")
-    @classmethod
-    def _require_non_empty_string(cls, value: str, info: ValidationInfo) -> str:
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"Site.{info.field_name} 不能为空")
-        return value.strip()
-
-    @field_validator("occupied_material_uuid")
-    @classmethod
-    def _normalize_occupied_uuid(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError("Site.occupied_material_uuid 必须是非空字符串或 null")
-        return value.strip()
-
-    @field_validator("index")
-    @classmethod
-    def _validate_index(cls, value: Union[int, str]) -> Union[int, str]:
-        if isinstance(value, bool):
-            raise ValueError("Site.index 不能是布尔值")
-        if isinstance(value, str):
-            value = value.strip()
-            if not value:
-                raise ValueError("Site.index 不能为空")
-        return value
-
-    @field_validator("content_type", "allowed_resource_template_uuids")
-    @classmethod
-    def _normalize_string_list(cls, values: List[str], info: ValidationInfo) -> List[str]:
-        result: List[str] = []
-        seen: set[str] = set()
-        for value in values:
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"Site.{info.field_name} 只能包含非空字符串")
-            normalized = value.strip()
-            key = normalized.casefold()
-            if key not in seen:
-                result.append(normalized)
-                seen.add(key)
-        return result
-
-    @model_validator(mode="after")
-    def _validate_references(self) -> "ResourceSite":
-        if self.occupied_material_uuid == self.material_uuid:
-            raise ValueError("Site 不能承载拥有该 Site 的物料本身")
-        return self
-
-
-def resource_site_to_plr_site(
-    site: Union[ResourceSite, Dict[str, Any]],
-    *,
-    occupied_by: Optional[str] = None,
-) -> Dict[str, Any]:
-    """把 Site 的 pose.position3d/size 投影成 PLR ``sites[]`` 边界格式。"""
-
-    normalized = site if isinstance(site, ResourceSite) else ResourceSite.model_validate(site)
-    return PLRSerializedSite(
-        label=normalized.label,
-        visible=normalized.visible,
-        occupied_by=occupied_by,
-        position=PLRSerializedSitePosition(
-            x=normalized.pose.position3d.x,
-            y=normalized.pose.position3d.y,
-            z=normalized.pose.position3d.z,
-        ),
-        size=PLRSerializedSiteSize(
-            width=normalized.pose.size.width,
-            height=normalized.pose.size.height,
-            depth=normalized.pose.size.depth,
-        ),
-        content_type=list(normalized.content_type),
-    ).model_dump()
-
-
-class ResourceDictType(TypedDict):
-    id: str
-    uuid: str
-    name: str
-    description: str
-    resource_schema: Dict[str, Any]
-    model: Dict[str, Any]
-    icon: str
-    parent_uuid: Optional[str]
-    parent: Optional["ResourceDictType"]
-    type: Union[Literal["device"], str]
-    klass: str
-    pose: ResourceDictPositionType
-    config: Dict[str, Any]
-    data: Dict[str, Any]
-    extra: Dict[str, Any]
-    meta_data: Dict[str, JsonValue]
-    machine_name: str
-    barcode: str
-    barcode_symbology: str
-    template_name: str
-    resource_template_uuid: str
-    position: Optional[ResourceDictPositionObjectType]
-    sites: Optional[List[ResourceSiteType]]
-    sites_initialized: bool
-    liquids: Optional[List[Tuple[str, float, str]]]
-    liquid_history: Optional[List[Tuple[Optional[str], float, str]]]
-    unknown_counter: Optional[int]
-
-
-# PLR Container.serialize_state() 中属于物质运行态的字段。它们像 barcode 一样
-# 在 ResourceDict 中只保留根字段；max_volume/thing 仍留在 data，分别表示规格和冗余标识。
-TRACKER_STATE_KEYS = ("liquids", "liquid_history", "unknown_counter")
-
-
-# 统一的资源字典模型，parent 自动序列化为 parent_uuid，children 不序列化
-class ResourceDict(BaseModel):
-    id: str = Field(description="Resource ID")
-    uuid: str = Field(description="Resource UUID")
-    name: str = Field(description="Resource name")
-    description: str = Field(description="Resource description", default="")
-    resource_schema: Dict[str, Any] = Field(
-        description="Resource schema", default_factory=dict, serialization_alias="schema", validation_alias="schema"
-    )
-    model: Dict[str, Any] = Field(description="Resource model", default_factory=dict)
-    icon: str = Field(description="Resource icon", default="")
-    parent_uuid: Optional["str"] = Field(description="Parent resource uuid", default=None)  # 先设定parent_uuid
-    parent: Optional["ResourceDict"] = Field(description="Parent resource object", default=None, exclude=True)
-    type: Union[Literal["device"], str] = Field(description="Resource type")
-    klass: str = Field(alias="class", description="Resource class name")
-    # 持久化的静态几何/布局：尺寸、缩放、2D/3D 布局坐标和旋转。
-    # 运行时当前位置使用独立根字段 position，二者不是镜像。
-    pose: ResourceDictPosition = Field(
-        description="Static resource geometry and layout",
-        default_factory=ResourceDictPosition,
-    )
-    config: Dict[str, Any] = Field(description="Resource configuration")
-    data: Dict[str, Any] = Field(description="Resource data, eg: container liquid data")
-    extra: Dict[str, Any] = Field(description="UniLab communication and conversion metadata")
-    meta_data: Dict[str, JsonValue] = Field(
-        description="Canonical resource metadata",
-        default_factory=dict,
-    )
-    machine_name: str = Field(description="Machine this resource belongs to", default="")
-    # 由pylabrobot序列化到config，由 get_resource_instance_from_dict 统一提升到此根字段并移出 config
-    barcode: str = Field(description="Material barcode", default="")  #
-    # 条码码制（PLR Barcode.symbology，如 "Code 128"）；与 barcode 一同从 config 提升，回写时组装回 PLR Barcode dict
-    barcode_symbology: str = Field(description="Barcode symbology / 码制", default="")
-    # Edge 模板稳定名称；PLR 边界使用 ``unilabos_resource_class`` 注入。
-    template_name: str = Field(description="Edge resource template name", default="")
-    resource_template_uuid: str = Field(
-        description="Micro-backend ResourceTemplate UUID",
-        default="",
-    )
-    # 运行时当前位置（例如 PLR location/ROS Resource.pose.position）。它可能频繁变化，
-    # 不得回写或覆盖静态 pose.position/pose.position3d。
-    position: Optional[ResourceDictPositionObject] = Field(
-        description="Dynamic current resource position",
-        default=None,
-    )
-    sites: Optional[List[ResourceSite]] = Field(description="Carrier site definitions / 载架位点", default=None)
-    sites_initialized: bool = Field(
-        description="Whether site preparation has run for this resource instance",
-        default=False,
-    )
-    # VolumeTracker 物质运行态从 data 提升到根字段。None 表示非容器，[]/0 表示空容器。
-    liquids: Optional[List[Tuple[str, float, str]]] = Field(
-        description="Current (liquid_name, amount, unit) entries",
-        default=None,
-    )
-    liquid_history: Optional[List[Tuple[Optional[str], float, str]]] = Field(
-        description="VolumeTracker (liquid_name, delta, unit) event history",
-        default=None,
-    )
-    unknown_counter: Optional[int] = Field(description="Unnamed liquid counter", default=None, ge=0)
-
-    @field_validator("liquids", "liquid_history", mode="before")
-    @classmethod
-    def _normalize_tracker_entries(cls, value: Any, info: ValidationInfo):
-        if value is None:
-            return None
-        if not isinstance(value, (list, tuple)):
-            raise ValueError(f"{info.field_name} 必须是数组")
-
-        normalized = []
-        for ordinal, item in enumerate(value):
-            if not isinstance(item, (list, tuple)) or len(item) not in (2, 3):
-                raise ValueError(
-                    f"{info.field_name}[{ordinal}] 必须是 (liquid_name, amount, unit) 三元组"
-                )
-            name, amount = item[0], item[1]
-            unit = item[2] if len(item) == 3 else "ul"
-            if name is None and info.field_name == "liquids":
-                raise ValueError(f"liquids[{ordinal}].liquid_name 不能为空")
-            if name is not None and (not isinstance(name, str) or not name.strip()):
-                raise ValueError(f"{info.field_name}[{ordinal}].liquid_name 必须是非空字符串或 null")
-            if not isinstance(unit, str) or not unit.strip():
-                raise ValueError(f"{info.field_name}[{ordinal}].unit 必须是非空字符串")
-            normalized.append((name.strip() if isinstance(name, str) else None, amount, unit.strip()))
-        return normalized
-
-    @model_validator(mode="before")
-    @classmethod
-    def _promote_root_fields(cls, value: Any):
-        if not isinstance(value, dict):
-            return value
-        content = copy.deepcopy(value)
-        data = content.get("data")
-        extra = content.get("extra")
-        if not isinstance(data, dict):
-            raise ValueError("根字段 data 必须是对象")
-        if not isinstance(extra, dict):
-            raise ValueError("根字段 extra 必须是对象")
-
-        # ROS Resource 尚无独立 UUID 字段，消息转换层暂存在 data.unilabos_uuid。
-        # 反序列化后只保留规范根字段；两边同时存在时必须双向核对，避免为同一
-        # 资源静默生成两套身份。常规 Edge 路径只接受微后端返回的最终 UUID；
-        # strict import 也必须由调用方显式携带 UUID。
-        transport_uuid = data.pop("unilabos_uuid", None)
-        root_uuid = content.get("uuid")
-        normalized_root_uuid = str(root_uuid).strip() if root_uuid is not None else ""
-        normalized_transport_uuid = (
-            str(transport_uuid).strip() if transport_uuid is not None else ""
-        )
-        if (
-            normalized_root_uuid
-            and normalized_transport_uuid
-            and normalized_root_uuid != normalized_transport_uuid
-        ):
-            raise ValueError("根字段 uuid 与 data.unilabos_uuid 冲突")
-        resolved_uuid = normalized_root_uuid or normalized_transport_uuid
-        if not resolved_uuid:
-            raise ValueError("资源缺少 UUID；请先通过微后端 runtime create 或 strict import")
-        content["uuid"] = resolved_uuid
-
-        extra_template_name = extra.pop(EXTRA_RESOURCE_CLASS, None)
-        missing = object()
-        extra_meta_data = extra.pop(EXTRA_RESOURCE_META_DATA, missing)
-        data_meta_data = data.pop("meta_data", missing)
-        root_meta_data = content.get("meta_data", missing)
-
-        def normalize_meta_data(raw_meta_data: Any, source: str) -> Optional[Dict[str, Any]]:
-            if raw_meta_data is missing:
-                return None
-            if isinstance(raw_meta_data, BaseModel):
-                raw_meta_data = raw_meta_data.model_dump()
-            if not isinstance(raw_meta_data, Mapping):
-                raise ValueError(f"{source} 必须是对象")
-            return copy.deepcopy(dict(raw_meta_data))
-
-        resolved_meta_data: Optional[Dict[str, Any]] = None
-        resolved_meta_data_source = ""
-        for source, raw_meta_data in (
-            ("根字段 meta_data", root_meta_data),
-            ("data.meta_data", data_meta_data),
-            (f"extra.{EXTRA_RESOURCE_META_DATA}", extra_meta_data),
-        ):
-            normalized_meta_data = normalize_meta_data(raw_meta_data, source)
-            if normalized_meta_data is None:
-                continue
-            if resolved_meta_data is not None and normalized_meta_data != resolved_meta_data:
-                raise ValueError(f"{resolved_meta_data_source} 与 {source} 冲突")
-            resolved_meta_data = normalized_meta_data
-            resolved_meta_data_source = source
-        for state_key in TRACKER_STATE_KEYS:
-            state_value = data.pop(state_key, None)
-            if content.get(state_key) is None and state_value is not None:
-                content[state_key] = state_value
-        content["data"] = data
-        content["extra"] = extra
-
-        config = content.get("config")
-        if not isinstance(config, dict):
-            config = {}
-        else:
-            config = copy.deepcopy(config)
-        config_meta_data = config.pop("meta_data", missing)
-        normalized_config_meta_data = normalize_meta_data(
-            config_meta_data,
-            "config.meta_data",
-        )
-        if normalized_config_meta_data is not None:
-            if (
-                resolved_meta_data is not None
-                and normalized_config_meta_data != resolved_meta_data
-            ):
-                raise ValueError(
-                    f"{resolved_meta_data_source} 与 config.meta_data 冲突"
-                )
-            resolved_meta_data = normalized_config_meta_data
-        content["meta_data"] = resolved_meta_data or {}
-        content["config"] = config
-
-        config_template_name = config.pop("template_name", None)
-        config_model = config.get("model")
-        template_name = content.get("template_name")
-        for source_name, source_value in (
-            (f"extra.{EXTRA_RESOURCE_CLASS}", extra_template_name),
-            ("config.template_name", config_template_name),
-        ):
-            if template_name and source_value and str(template_name) != str(source_value):
-                raise ValueError(f"根字段 template_name 与 {source_name} 冲突")
-            if not template_name and source_value:
-                template_name = source_value
-        if not template_name:
-            # 原生 PLR 资源未注入模板名时，使用其 model/type 生成模板身份。
-            template_name = (
-                (config_model if isinstance(config_model, str) else None)
-                or config.get("type")
-                or content.get("type")
-                or ""
-            )
-        content["template_name"] = str(template_name)
-
-        config_template_uuid = config.pop("resource_template_uuid", None)
-        root_template_uuid = content.get("resource_template_uuid")
-        if root_template_uuid and config_template_uuid and root_template_uuid != config_template_uuid:
-            raise ValueError("根字段 resource_template_uuid 与 config.resource_template_uuid 冲突")
-        content["resource_template_uuid"] = str(root_template_uuid or config_template_uuid or "")
-
-        # ROS Resource 尚没有完整静态 pose 字段，兼容 Adapter 会临时放进 config。
-        # 进入规范模型时必须提升到根并移除，避免形成两份持久化事实。
-        config_pose = config.pop("pose", None)
-        root_pose = content.get("pose")
-
-        def normalize_resource_pose(raw_pose: Any, source: str) -> Optional[Dict[str, Any]]:
-            if raw_pose is None:
-                return None
-            if isinstance(raw_pose, ResourceDictPosition):
-                return raw_pose.model_dump()
-            if not isinstance(raw_pose, dict):
-                raise ValueError(f"{source} 必须是对象")
-            return ResourceDictPosition.model_validate(raw_pose).model_dump()
-
-        normalized_root_pose = normalize_resource_pose(root_pose, "根字段 pose")
-        normalized_config_pose = normalize_resource_pose(config_pose, "config.pose")
-        if (
-            normalized_root_pose is not None
-            and normalized_config_pose is not None
-            and normalized_root_pose != normalized_config_pose
-        ):
-            raise ValueError("根字段 pose 与 config.pose 冲突")
-        normalized_pose = normalized_root_pose or normalized_config_pose
-
-        # available_sites 只属于 Registry/ResourceTemplate。兼容读取旧实例输入时
-        # 显式丢弃，确保规范实例序列化和上报不形成第二份模板事实。
-        content.pop("available_sites", None)
-        config.pop("available_sites", None)
-
-        config_sites = config.pop("sites", None)
-        if content.get("sites") is not None and config_sites is not None and content["sites"] != config_sites:
-            raise ValueError("根字段 sites 与 config.sites 冲突")
-        if content.get("sites") is None and config_sites is not None:
-            content["sites"] = config_sites
-
-        config_sites_initialized = config.pop("sites_initialized", None)
-        if "sites_initialized" in content and config_sites_initialized is not None:
-            if content["sites_initialized"] != config_sites_initialized:
-                raise ValueError("根字段 sites_initialized 与 config.sites_initialized 冲突")
-        elif config_sites_initialized is not None:
-            content["sites_initialized"] = config_sites_initialized
-
-        # 旧快照没有 sites_initialized。只要已经持久化了 Site 实例身份，就说明
-        # 初始化已经完成；即使旧写入方留下 false，也以可验证的 Site 快照为准。
-        if content.get("sites"):
-            content["sites_initialized"] = True
-        elif content.get("sites_initialized") and content.get("sites") is None:
-            content["sites"] = []
-
-        raw_position = content.get("position")
-        if isinstance(raw_position, ResourceDictPosition):
-            legacy_pose = raw_position.model_dump()
-            root_position = legacy_pose["position"]
-            if normalized_pose is not None and normalized_pose != legacy_pose:
-                raise ValueError("旧 position pose 与根字段 pose 冲突")
-            normalized_pose = normalized_pose or legacy_pose
-        elif isinstance(raw_position, dict) and "position" in raw_position:
-            # 兼容旧版把完整 ResourceDictPosition 错放在根 position 的输入。
-            legacy_pose = ResourceDictPosition.model_validate(raw_position).model_dump()
-            root_position = legacy_pose["position"]
-            if normalized_pose is not None and normalized_pose != legacy_pose:
-                raise ValueError("旧 position pose 与根字段 pose 冲突")
-            normalized_pose = normalized_pose or legacy_pose
-        elif isinstance(raw_position, dict):
-            root_position = copy.deepcopy(raw_position)
-        elif isinstance(raw_position, ResourceDictPositionObject):
-            root_position = raw_position.model_dump()
-        elif raw_position is None:
-            root_position = None
-        else:
-            raise ValueError("根字段 position 必须是对象")
-        content["position"] = root_position
-        content["pose"] = normalized_pose or {}
-
-        owner_uuid = content.get("uuid")
-        if owner_uuid and content.get("sites") is not None:
-            normalized_sites = []
-            for ordinal, raw_site in enumerate(content["sites"]):
-                if isinstance(raw_site, ResourceSite):
-                    raw_site = raw_site.model_dump()
-                if not isinstance(raw_site, dict):
-                    raise ValueError(f"sites[{ordinal}] 必须是对象")
-                site = copy.deepcopy(raw_site)
-                normalized_sites.append(site)
-            content["sites"] = normalized_sites
-        return content
-
-    @model_validator(mode="after")
-    def _validate_site_ownership(self) -> "ResourceDict":
-        if self.sites:
-            seen_uuids: set[str] = set()
-            seen_indexes: set[tuple[str, Union[int, str]]] = set()
-            seen_labels: set[str] = set()
-            seen_occupants: set[str] = set()
-            for site in self.sites:
-                if site.material_uuid != self.uuid:
-                    raise ValueError(
-                        f"Site {site.uuid} 的 material_uuid={site.material_uuid} 与所属物料 {self.uuid} 不一致"
-                    )
-                if site.template_name != self.template_name:
-                    raise ValueError(
-                        f"Site {site.uuid} 的 template_name={site.template_name} "
-                        f"与所属物料模板 {self.template_name} 不一致"
-                    )
-                if site.uuid in seen_uuids:
-                    raise ValueError(f"物料 {self.uuid} 下存在重复 Site UUID: {site.uuid}")
-                index_key = (type(site.index).__name__, site.index)
-                if index_key in seen_indexes:
-                    raise ValueError(f"物料 {self.uuid} 下存在重复 Site index: {site.index}")
-                label_key = site.label.casefold()
-                if label_key in seen_labels:
-                    raise ValueError(f"物料 {self.uuid} 下存在重复 Site label: {site.label}")
-                if site.occupied_material_uuid:
-                    if site.occupied_material_uuid in seen_occupants:
-                        raise ValueError(
-                            f"物料 {site.occupied_material_uuid} 同时占用了 {self.uuid} 下多个 Site"
-                        )
-                    seen_occupants.add(site.occupied_material_uuid)
-                seen_uuids.add(site.uuid)
-                seen_indexes.add(index_key)
-                seen_labels.add(label_key)
-
-        return self
-
-    @field_serializer("parent_uuid")
-    def _serialize_parent(self, parent_uuid: Optional["ResourceDict"]):
-        return self.uuid_parent
-
-    @field_validator("parent", mode="before")
-    @classmethod
-    def _deserialize_parent(cls, parent: Optional["ResourceDict"]):
-        if isinstance(parent, ResourceDict):
-            return parent
-        else:
-            return None
-
-    @property
-    def uuid_parent(self) -> str:
-        """获取父节点的UUID"""
-        parent_instance_uuid = self.parent_instance_uuid
-        if parent_instance_uuid is not None and self.parent_uuid and parent_instance_uuid != self.parent_uuid:
-            logger.warning(f"{self.name}[{self.uuid}]的parent uuid未同步！")  # 现在强制要求设置
-        if parent_instance_uuid is not None:
-            return parent_instance_uuid
-        return self.parent_uuid
-
-    @property
-    def parent_instance_uuid(self) -> Optional[str]:
-        """获取父节点的UUID"""
-        return self.parent.uuid if self.parent is not None else None
-
-    @property
-    def parent_instance_name(self) -> Optional[str]:
-        """获取父节点的名字"""
-        return self.parent.name if self.parent is not None else None
-
-    @property
-    def is_root_node(self) -> bool:
-        """判断资源是否为根节点"""
-        return self.parent is None
-
-
-# ResourceDict 全部规范根键（含 schema/class 别名）。GraphIO 使用该集合，
-# 避免新增根字段后又被旧白名单静默搬进 config。
-RESOURCE_ROOT_FIELDS: tuple[str, ...] = tuple(
-    field.serialization_alias or field.alias or field_name
-    for field_name, field in ResourceDict.model_fields.items()
-)
-
-# ROS Resource 消息暂时没有这些字段，消息转换层会无损暂存到 config，
-# 接收后再由 ResourceDict 唯一入口提升回来。
-PLR_CONFIG_ROOT_KEYS = (
-    "barcode",
-    "barcode_symbology",
-    "template_name",
-    "resource_template_uuid",
-    "sites",
-    "sites_initialized",
-)
-
-
-def assemble_tracker_state(resource: ResourceDict) -> Dict[str, Any]:
-    """将根级 VolumeTracker 字段组装回 PLR ``serialize_state`` 结构。"""
-
-    state = copy.deepcopy(resource.data)
-    for state_key in TRACKER_STATE_KEYS:
-        root_value = getattr(resource, state_key)
-        if root_value is not None:
-            state[state_key] = copy.deepcopy(root_value)
-    return state
-
 
 def plr_class_accepts_serialized_sites(plr_cls: type) -> bool:
     """判断 PLR 类构造器是否直接消费项目的 ``sites[]`` 列表。"""
 
     from pylabrobot.resources.carrier import Carrier
 
-    return not issubclass(plr_cls, Carrier) and "sites" in inspect.signature(plr_cls).parameters
+    return (
+        not issubclass(plr_cls, Carrier)
+        and "sites" in inspect.signature(plr_cls).parameters
+    )
 
 
 def sites_for_plr_deserialization(
-    plr_cls: type,
     sites: List[Union[ResourceSite, Dict[str, Any]]],
-    material_name_by_uuid: Dict[str, str],
 ) -> List[Dict[str, Any]]:
-    """按目标 PLR 类生成其原生 ``sites`` 反序列化结构。"""
+    """生成唯一 canonical ``ResourceSite`` 构造输入。"""
 
-    normalized = [
-        site if isinstance(site, ResourceSite) else ResourceSite.model_validate(site)
+    return [
+        (
+            site.model_dump()
+            if isinstance(site, ResourceSite)
+            else ResourceSite.model_validate(site).model_dump()
+        )
         for site in sites
     ]
-    from unilabos.resources.itemized_carrier import ItemizedCarrier
-
-    # PRCXI 等内部直接使用 ResourceSite。这里是构造输入，不是 PLR serializer 输出，
-    # 因此保留规范模型，避免先丢掉身份字段再生成临时 UUID。
-    if bool(getattr(plr_cls, "__unilabos_resource_site_storage__", False)):
-        return [site.model_dump() for site in normalized]
-
-    uses_plr_site_format = issubclass(plr_cls, ItemizedCarrier) or bool(
-        getattr(plr_cls, "__unilabos_plr_site_format__", False)
-    )
-    if not uses_plr_site_format:
-        return [site.model_dump() for site in normalized]
-
-    result: List[Dict[str, Any]] = []
-    for site in normalized:
-        occupied_by = None
-        if site.occupied_material_uuid is not None:
-            occupied_by = material_name_by_uuid.get(site.occupied_material_uuid)
-            if occupied_by is None:
-                raise ValueError(
-                    f"PLR Site {site.label} 的 occupied_material_uuid="
-                    f"{site.occupied_material_uuid} 无法解析为子物料名称"
-                )
-        result.append(resource_site_to_plr_site(site, occupied_by=occupied_by))
-    return result
 
 
 def _ensure_plr_uuid(resource: Optional["PLRResource"]) -> Optional[str]:
@@ -797,13 +82,13 @@ def _ensure_plr_uuid(resource: Optional["PLRResource"]) -> Optional[str]:
         return None
     resource_uuid = getattr(resource, "unilabos_uuid", "")
     if not resource_uuid:
-        raise ValueError(
-            f"PLR 资源 {resource.name} 缺少微后端分配的 unilabos_uuid"
-        )
+        raise ValueError(f"PLR 资源 {resource.name} 缺少微后端分配的 unilabos_uuid")
     return str(resource_uuid)
 
 
-def get_plr_template_name(resource: "PLRResource", serialized: Optional[Dict[str, Any]] = None) -> str:
+def get_plr_template_name(
+    resource: "PLRResource", serialized: Optional[Dict[str, Any]] = None
+) -> str:
     """读取 PLR 对象携带的模板名，并兼容旧序列化字段。"""
 
     extra = getattr(resource, "unilabos_extra", {}) or {}
@@ -848,33 +133,9 @@ def set_plr_template_name(resource: "PLRResource", template_name: str) -> None:
     resource.unilabos_extra = extra
 
 
-def _get_plr_site_sidecar(resource: "PLRResource") -> Dict[str, Dict[str, Any]]:
-    """读取注入到 ``unilabos_extra`` 的规范 Site 元数据。"""
-
-    extra = getattr(resource, "unilabos_extra", {}) or {}
-    if not isinstance(extra, dict):
-        raise ValueError(f"{resource.name}.unilabos_extra 必须是对象")
-    raw_sites = extra.get(EXTRA_SITES)
-    if raw_sites is None:
-        return {}
-    if isinstance(raw_sites, list):
-        raw_sites = {
-            str(site.get("label", ordinal)): site
-            for ordinal, site in enumerate(raw_sites)
-            if isinstance(site, dict)
-        }
-    if not isinstance(raw_sites, dict):
-        raise ValueError(f"{resource.name}.unilabos_extra[{EXTRA_SITES!r}] 必须是按 label 索引的对象")
-
-    result: Dict[str, Dict[str, Any]] = {}
-    for label, site in raw_sites.items():
-        if not isinstance(site, dict):
-            raise ValueError(f"{resource.name}.unilabos_extra[{EXTRA_SITES!r}][{label!r}] 必须是对象")
-        result[str(label)] = copy.deepcopy(site)
-    return result
-
-
-def _inject_plr_site_sidecar(resource: "PLRResource", site_defs: List[ResourceSite]) -> None:
+def _inject_plr_site_sidecar(
+    resource: "PLRResource", site_defs: List[ResourceSite]
+) -> None:
     """把规范 Site 元数据注入 PLR 对象，不修改其原生 Site 数据结构。"""
 
     extra = copy.deepcopy(getattr(resource, "unilabos_extra", {}) or {})
@@ -884,115 +145,57 @@ def _inject_plr_site_sidecar(resource: "PLRResource", site_defs: List[ResourceSi
     resource.unilabos_extra = extra
 
 
-def _merge_native_site_with_sidecar(
+def _validate_canonical_plr_sites(
     resource: "PLRResource",
-    raw_site: Dict[str, Any],
-    ordinal: int,
+    sites: List[ResourceSite],
     owner_uuid: str,
     template_name: str,
-    occupants_by_name: Dict[str, str],
-    sidecar: Optional[Dict[str, Any]],
-) -> ResourceSite:
-    """将 PLR 适配层 Site 与注入元数据合成规范模型。"""
+) -> List[ResourceSite]:
+    """核对 PLR 类持有或输出的 canonical Site 快照。"""
 
-    label = str(raw_site.get("label", ordinal))
-    injected = ResourceSite.model_validate(sidecar) if sidecar is not None else None
-    if injected is None:
-        raise ValueError(
-            f"载架 {resource.name} 的 Site {label} 缺少微后端权威 sidecar/UUID"
-        )
-    if injected.label != label:
-        raise ValueError(f"载架 {resource.name} 的 Site sidecar label={injected.label!r} 与原生 label={label!r} 冲突")
-    if injected.material_uuid != owner_uuid:
-        raise ValueError(
-            f"载架 {resource.name} 的 Site {label} material_uuid={injected.material_uuid} "
-            f"与 owner uuid={owner_uuid} 冲突"
-        )
-    if injected.template_name != template_name:
-        raise ValueError(
-            f"载架 {resource.name} 的 Site {label} template_name={injected.template_name!r} "
-            f"与 owner template_name={template_name!r} 冲突"
-        )
-
-    native_payload = copy.deepcopy(raw_site)
-    native_payload.setdefault("uuid", injected.uuid)
-    native_payload.setdefault("material_uuid", owner_uuid)
-    native_payload.setdefault("template_name", template_name)
-    native_payload.setdefault("index", injected.index)
-    native_payload.setdefault("label", label)
-    native = ResourceSite.model_validate(
-        native_payload,
-        context={"material_uuid_by_name": occupants_by_name},
-    )
-    if native.material_uuid != owner_uuid:
-        raise ValueError(f"载架 {resource.name} 的 Site {label} material_uuid 与 owner uuid 冲突")
-    if native.template_name != template_name:
-        raise ValueError(f"载架 {resource.name} 的 Site {label} template_name 与 owner template_name 冲突")
-    if native.uuid != injected.uuid:
-        raise ValueError(f"载架 {resource.name} 的 Site {label} uuid 与 sidecar 冲突")
-
-    # 原生结构只携带 PLR 能表达的三维位置和尺寸；完整 2D/3D pose 仍以 sidecar 为准。
-    merged = injected.model_dump()
-    for field_name in ("visible", "occupied_material_uuid"):
-        merged[field_name] = getattr(native, field_name)
-    merged_pose = copy.deepcopy(merged["pose"])
-    native_pose = native.pose.model_dump()
-    merged_pose["position3d"] = copy.deepcopy(native_pose["position3d"])
-    merged_pose["size"] = copy.deepcopy(native_pose["size"])
-    merged["pose"] = merged_pose
-    return ResourceSite.model_validate(merged)
+    result = [site.model_copy(deep=True) for site in sites]
+    for ordinal, site in enumerate(result):
+        if site.material_uuid != owner_uuid:
+            raise ValueError(
+                f"PLR 资源 {resource.name} 的 Site[{ordinal}] material_uuid 与 owner uuid 冲突"
+            )
+        if site.template_name != template_name:
+            raise ValueError(
+                f"PLR 资源 {resource.name} 的 Site[{ordinal}] template_name 与 owner template_name 冲突"
+            )
+    _inject_plr_site_sidecar(resource, result)
+    return result
 
 
 def extract_plr_sites(
     resource: "PLRResource", serialized: Optional[Dict[str, Any]] = None
 ) -> Optional[List[ResourceSite]]:
-    """从标准 Carrier 或项目 PLR ``sites[]`` 适配类抽取规范 Site 快照。"""
+    """从标准 Carrier 或 canonical ``ResourceSite`` 存储抽取规范快照。"""
 
     owner_uuid = _ensure_plr_uuid(resource)
     template_name = get_plr_template_name(resource, serialized)
-    serialized_sites = (serialized or {}).get("sites")
-
-    if isinstance(serialized_sites, list):
-        sidecar_by_label = _get_plr_site_sidecar(resource)
-        occupants_by_name: Dict[str, str] = {}
-        runtime_site_values = list(getattr(resource, "sites", []) or [])
-        runtime_site_values.extend(getattr(resource, "children", []) or [])
-        for occupant in runtime_site_values:
-            if isinstance(occupant, (str, dict)) or not hasattr(occupant, "name"):
-                continue
-            occupant_uuid = _ensure_plr_uuid(occupant)
-            if occupant_uuid:
-                occupants_by_name[str(occupant.name)] = occupant_uuid
-
-        result: List[ResourceSite] = []
-        seen_labels: set[str] = set()
-        for ordinal, raw_site in enumerate(serialized_sites):
-            if not isinstance(raw_site, dict):
-                raise ValueError(f"{resource.name}.sites[{ordinal}] 必须是对象")
-            label = str(raw_site.get("label", ordinal))
-            if label in seen_labels:
-                raise ValueError(f"载架 {resource.name} 包含重复 Site label={label!r}")
-            seen_labels.add(label)
-            result.append(
-                _merge_native_site_with_sidecar(
-                    resource,
-                    raw_site,
-                    ordinal,
-                    owner_uuid,
-                    template_name,
-                    occupants_by_name,
-                    sidecar_by_label.get(label),
-                )
-            )
-        missing_labels = set(sidecar_by_label) - seen_labels
-        if missing_labels:
-            raise ValueError(
-                f"载架 {resource.name} 的原生 sites 缺少 sidecar 中的 Site: {sorted(missing_labels)}"
-            )
-        _inject_plr_site_sidecar(resource, result)
-        return result
+    resource_sites = getattr(resource, "resource_sites", None)
+    if isinstance(resource_sites, list) and all(
+        isinstance(site, ResourceSite) for site in resource_sites
+    ):
+        return _validate_canonical_plr_sites(
+            resource, resource_sites, owner_uuid, template_name
+        )
 
     plr_sites = getattr(resource, "sites", None)
+    if isinstance(plr_sites, list) and all(
+        isinstance(site, ResourceSite) for site in plr_sites
+    ):
+        return _validate_canonical_plr_sites(
+            resource, plr_sites, owner_uuid, template_name
+        )
+
+    serialized_sites = (serialized or {}).get("sites")
+    if isinstance(serialized_sites, list):
+        result = [ResourceSite.model_validate(site) for site in serialized_sites]
+        return _validate_canonical_plr_sites(
+            resource, result, owner_uuid, template_name
+        )
     if not isinstance(plr_sites, dict):
         return None
     from pylabrobot.resources.carrier import Carrier
@@ -1000,7 +203,10 @@ def extract_plr_sites(
     if not isinstance(resource, Carrier):
         return None
     site_items = list(plr_sites.items())
-    if any(site is None or not hasattr(site, "get_size_x") or not hasattr(site, "location") for _, site in site_items):
+    if any(
+        site is None or not hasattr(site, "get_size_x") or not hasattr(site, "location")
+        for _, site in site_items
+    ):
         return None
 
     result = []
@@ -1013,7 +219,9 @@ def extract_plr_sites(
         location = getattr(site_holder, "location", None)
         held_resource = getattr(site_holder, "resource", None)
         rotation = getattr(site_holder, "rotation", None)
-        metadata = copy.deepcopy(getattr(site_holder, "unilabos_site_metadata", {}) or {})
+        metadata = copy.deepcopy(
+            getattr(site_holder, "unilabos_site_metadata", {}) or {}
+        )
         payload = {
             **metadata,
             "schema_version": 1,
@@ -1022,7 +230,9 @@ def extract_plr_sites(
             "material_uuid": owner_uuid,
             "index": site_index if isinstance(site_index, (int, str)) else ordinal,
             "label": str(getattr(site_holder, "name", site_index)),
-            "visible": bool(getattr(site_holder, "visible", metadata.get("visible", True))),
+            "visible": bool(
+                getattr(site_holder, "visible", metadata.get("visible", True))
+            ),
             "occupied_material_uuid": _ensure_plr_uuid(held_resource),
             "pose": {
                 "size": {
@@ -1046,10 +256,8 @@ def extract_plr_sites(
                     "z": getattr(rotation, "z", 0.0) if rotation is not None else 0.0,
                 },
             },
-            "content_type": list(
-                getattr(site_holder, "content_type", None)
-                or metadata.get("content_type", [])
-                or []
+            "allowed_resource_categories": list(
+                metadata.get("allowed_resource_categories", []) or []
             ),
         }
         result.append(ResourceSite.model_validate(payload))
@@ -1057,7 +265,8 @@ def extract_plr_sites(
 
 
 def apply_plr_site_metadata(
-    resource: "PLRResource", sites_by_name: Dict[str, List[Union[ResourceSite, Dict[str, Any]]]]
+    resource: "PLRResource",
+    sites_by_name: Dict[str, List[Union[ResourceSite, Dict[str, Any]]]],
 ) -> None:
     """把根级 Site 元数据恢复到反序列化后的 PLR 树，保证再次序列化不丢字段。"""
 
@@ -1067,9 +276,15 @@ def apply_plr_site_metadata(
         for site in (raw_site_defs or [])
     ]
     plr_sites = getattr(resource, "sites", None)
-    if raw_site_defs is not None and isinstance(plr_sites, dict):
+    site_setter = getattr(resource, "set_resource_sites", None)
+    if raw_site_defs is not None and callable(site_setter):
+        site_setter(site_defs)
+    elif raw_site_defs is not None and isinstance(plr_sites, dict):
         remaining = dict(plr_sites)
-        by_name = {str(getattr(site, "name", key)): (key, site) for key, site in remaining.items()}
+        by_name = {
+            str(getattr(site, "name", key)): (key, site)
+            for key, site in remaining.items()
+        }
         restored: Dict[Union[int, str], Any] = {}
         used_keys: set[Union[int, str]] = set()
         for ordinal, site_def in enumerate(site_defs):
@@ -1087,7 +302,6 @@ def apply_plr_site_metadata(
             site_holder.unilabos_site_uuid = site_def.uuid
             site_holder.unilabos_site_metadata = site_def.model_dump()
             site_holder.visible = site_def.visible
-            site_holder.content_type = list(site_def.content_type)
             restored[site_def.index] = site_holder
             if current_key is not None:
                 used_keys.add(current_key)
@@ -1096,28 +310,27 @@ def apply_plr_site_metadata(
                 restored[current_key] = site_holder
         resource.sites = restored
     elif raw_site_defs is not None and isinstance(plr_sites, list):
-        uses_resource_site_storage = bool(
-            getattr(resource, "__unilabos_resource_site_storage__", False)
-        ) and all(isinstance(site, ResourceSite) for site in plr_sites)
-        if uses_resource_site_storage:
-            # PRCXI9300Deck 等运行时直接保存 ResourceSite，仅序列化边界投影成 PLR 字典。
-            serialize_plr_sites = getattr(resource, "_serialize_plr_sites", None)
-            if not callable(serialize_plr_sites):
-                raise ValueError(f"PLR 资源 {resource.name} 缺少 _serialize_plr_sites()")
-            native_sites = serialize_plr_sites()
-            if len(native_sites) != len(site_defs):
+        if all(isinstance(site, ResourceSite) for site in plr_sites):
+            # ResourceSite 存储是类自身的实现细节；这里只按实际值核对 canonical
+            # 快照，不读取标记，也不调用设备类私有的序列化方法。
+            if len(plr_sites) != len(site_defs):
                 raise ValueError(
                     f"PLR 资源 {resource.name} 的 Site 数量与根字段不一致: "
-                    f"native={len(native_sites)}, canonical={len(site_defs)}"
+                    f"native={len(plr_sites)}, canonical={len(site_defs)}"
                 )
             children_by_uuid: Dict[str, Any] = {}
             for child in getattr(resource, "children", []) or []:
                 child_uuid = _ensure_plr_uuid(child)
                 if child_uuid is not None:
                     children_by_uuid[child_uuid] = child
-            for ordinal, (raw_native, site_def) in enumerate(zip(native_sites, site_defs)):
-                native = PLRSerializedSite.model_validate(raw_native)
-                occupied_by = None
+            for ordinal, (native_site, site_def) in enumerate(
+                zip(plr_sites, site_defs)
+            ):
+                if native_site != site_def:
+                    raise ValueError(
+                        f"PLR 资源 {resource.name} 的 Site[{ordinal}] 与根字段不一致: "
+                        f"native={native_site.model_dump()}, canonical={site_def.model_dump()}"
+                    )
                 if site_def.occupied_material_uuid is not None:
                     occupant = children_by_uuid.get(site_def.occupied_material_uuid)
                     if occupant is None:
@@ -1125,45 +338,10 @@ def apply_plr_site_metadata(
                             f"PLR 资源 {resource.name} 的 Site {site_def.label} 找不到占用物料 "
                             f"UUID={site_def.occupied_material_uuid}"
                         )
-                    occupied_by = str(occupant.name)
-                expected = PLRSerializedSite.model_validate(
-                    resource_site_to_plr_site(site_def, occupied_by=occupied_by)
-                )
-                if native != expected:
-                    raise ValueError(
-                        f"PLR 资源 {resource.name} 的 Site[{ordinal}] 与根字段不一致: "
-                        f"native={native.model_dump()}, canonical={expected.model_dump()}"
-                    )
-            resource.sites = [site.model_copy(deep=True) for site in site_defs]
-            if hasattr(resource, "_ordering"):
-                resource._ordering = dict.fromkeys(site.label for site in site_defs)
-            if hasattr(resource, "_site_expected_occupants"):
-                resource._site_expected_occupants = {
-                    index: site.occupied_material_uuid for index, site in enumerate(site_defs)
-                }
-            if hasattr(resource, "_site_expected_occupant_names"):
-                resource._site_expected_occupant_names = {}
         else:
-            # ItemizedCarrier 保存 occupant list，完整 Site 元数据只注入 unilabos_extra。
-            from pylabrobot.resources import ResourceHolder
-
-            native_labels = [str(label) for label in getattr(resource, "child_locations", {})]
-            canonical_labels = [site.label for site in site_defs]
-            if native_labels != canonical_labels:
-                raise ValueError(
-                    f"ItemizedCarrier {resource.name} 的原生 Site 与根字段 sites 不一致: "
-                    f"native={native_labels}, canonical={canonical_labels}"
-                )
-            for ordinal, site_def in enumerate(site_defs):
-                occupant = plr_sites[ordinal]
-                actual_occupant_uuid = None
-                if occupant is not None and not isinstance(occupant, (str, dict, ResourceHolder)):
-                    actual_occupant_uuid = _ensure_plr_uuid(occupant)
-                if actual_occupant_uuid != site_def.occupied_material_uuid:
-                    raise ValueError(
-                        f"ItemizedCarrier {resource.name} 的 Site {site_def.label} 占用关系冲突: "
-                        f"native={actual_occupant_uuid}, canonical={site_def.occupied_material_uuid}"
-                    )
+            raise ValueError(
+                f"PLR 资源 {resource.name} 的 sites 必须使用 canonical ResourceSite"
+            )
 
     if raw_site_defs is not None:
         _inject_plr_site_sidecar(resource, site_defs)
@@ -1198,11 +376,21 @@ def merge_resource_sites(
         ]
 
     def as_payload(site: Union[ResourceSite, Dict[str, Any]]) -> Dict[str, Any]:
-        return site.model_dump() if isinstance(site, ResourceSite) else copy.deepcopy(site)
+        return (
+            site.model_dump() if isinstance(site, ResourceSite) else copy.deepcopy(site)
+        )
 
     result = [as_payload(site) for site in current_sites]
-    uuid_to_index = {str(site.get("uuid")): index for index, site in enumerate(result) if site.get("uuid")}
-    label_to_site = {str(site.get("label", "")).casefold(): site for site in result if site.get("label")}
+    uuid_to_index = {
+        str(site.get("uuid")): index
+        for index, site in enumerate(result)
+        if site.get("uuid")
+    }
+    label_to_site = {
+        str(site.get("label", "")).casefold(): site
+        for site in result
+        if site.get("label")
+    }
     index_to_site = {
         (type(site.get("index")).__name__, site.get("index")): site
         for site in result
@@ -1215,7 +403,9 @@ def merge_resource_sites(
         existing_index = uuid_to_index.get(incoming_uuid)
         if existing_index is None:
             same_label = label_to_site.get(str(incoming.get("label", "")).casefold())
-            same_index = index_to_site.get((type(incoming.get("index")).__name__, incoming.get("index")))
+            same_index = index_to_site.get(
+                (type(incoming.get("index")).__name__, incoming.get("index"))
+            )
             collision = same_label or same_index
             if collision is not None:
                 if not collision.get("uuid"):
@@ -1237,13 +427,7 @@ def merge_resource_sites(
             existing.setdefault("uuid", incoming_uuid)
             existing.setdefault("material_uuid", incoming.get("material_uuid"))
             existing.setdefault("template_name", incoming.get("template_name"))
-            occupied_lookup: Dict[str, str] = {}
-            if existing.get("occupied_by") and incoming.get("occupied_material_uuid"):
-                occupied_lookup[str(existing["occupied_by"])] = str(incoming["occupied_material_uuid"])
-            existing = ResourceSite.model_validate(
-                existing,
-                context={"material_uuid_by_name": occupied_lookup},
-            ).model_dump()
+            existing = ResourceSite.model_validate(existing).model_dump()
             result[existing_index] = existing
         canonical_existing = ResourceSite.model_validate(existing).model_dump()
         canonical_incoming = ResourceSite.model_validate(
@@ -1269,7 +453,9 @@ def merge_resource_sites(
             continue
         previous = seen_occupants.get(str(occupant_uuid))
         if previous is not None:
-            raise ValueError(f"物料 {occupant_uuid} 同时占用 Site {previous} 和 {site.get('uuid')}")
+            raise ValueError(
+                f"物料 {occupant_uuid} 同时占用 Site {previous} 和 {site.get('uuid')}"
+            )
         seen_occupants[str(occupant_uuid)] = str(site.get("uuid"))
     return result
 
@@ -1277,8 +463,12 @@ def merge_resource_sites(
 class GraphData(BaseModel):
     """图数据结构，包含节点和边"""
 
-    nodes: List["ResourceTreeInstance"] = Field(description="Resource nodes list", default_factory=list)
-    links: List[Dict[str, Any]] = Field(description="Resource links/edges list", default_factory=list)
+    nodes: List["ResourceTreeInstance"] = Field(
+        description="Resource nodes list", default_factory=list
+    )
+    links: List[Dict[str, Any]] = Field(
+        description="Resource links/edges list", default_factory=list
+    )
 
 
 class ResourceDictInstance(object):
@@ -1293,9 +483,12 @@ class ResourceDictInstance(object):
     def get_resource_instance_from_dict(
         cls,
         content: ResourceDictType,
-        material_uuid_by_name: Optional[Dict[str, str]] = None,
     ) -> "ResourceDictInstance":
         """从字典创建资源实例"""
+        # children 属于 ResourceTree 的递归容器，不是 ResourceDict 领域字段。
+        # 规范模型采用 extra=forbid，因此在树边界显式剥离，避免依赖静默忽略。
+        content = copy.deepcopy(content)
+        content.pop("children", None)
         if "id" not in content:
             content["id"] = content["name"]
         if not content.get("uuid"):
@@ -1324,18 +517,6 @@ class ResourceDictInstance(object):
             content["data"] = {}
         if not content.get("extra"):  # MagicCode
             content["extra"] = {}
-        # 条码：老物料把 barcode 落在 config 中（PLR serialize 的位置），而根字段可能为空。
-        # 统一在此漏斗里提升到根字段并移出 config：根字段已有值则以根字段为准、仅清理 config。
-        # 原生 PLR Barcode 对象序列化为 {data, symbology, position_on_resource}：data→barcode、symbology→barcode_symbology
-        # （position_on_resource 不在 ResourceDict 保留）；自定义 Bottle 则 barcode 直接是字符串。
-        config_barcode = content["config"].pop("barcode", None)
-        if isinstance(config_barcode, dict):
-            if not content.get("barcode"):
-                content["barcode"] = config_barcode.get("data", "")
-            if not content.get("barcode_symbology"):
-                content["barcode_symbology"] = config_barcode.get("symbology", "")
-        elif config_barcode and not content.get("barcode"):
-            content["barcode"] = config_barcode
         # 旧 PLR 输入可能只有 config.size_*；它只补静态 pose.size，绝不把运行时
         # position 镜像进 pose.position。
         if content.get("pose") is None and content["config"].get("pose") is None:
@@ -1349,10 +530,7 @@ class ResourceDictInstance(object):
                     )
                 }
         try:
-            res_dict = ResourceDict.model_validate(
-                content,
-                context={"material_uuid_by_name": material_uuid_by_name or {}},
-            )
+            res_dict = ResourceDict.model_validate(content)
             return ResourceDictInstance(res_dict)
         except ValidationError as err:
             raise err
@@ -1360,15 +538,22 @@ class ResourceDictInstance(object):
     def get_plr_nested_dict(self) -> Dict[str, Any]:
         """获取资源实例的嵌套字典表示（根字段回装为 PLR 形式）。"""
         res_dict = self.res_content.model_dump(by_alias=True)
-        res_dict["children"] = {child.res_content.id: child.get_plr_nested_dict() for child in self.children}
+        res_dict["children"] = {
+            child.res_content.id: child.get_plr_nested_dict() for child in self.children
+        }
         res_dict["parent"] = self.res_content.parent_instance_name
-        res_dict["position"] = (
-            self.res_content.position.model_dump()
-            if self.res_content.position is not None
+        res_dict["extra"] = copy.deepcopy(res_dict.get("extra") or {})
+        res_dict["location"] = (
+            self.res_content.pose.position.model_dump()
+            if self.res_content.pose.position is not None
             else None
         )
-        res_dict["extra"] = copy.deepcopy(res_dict.get("extra") or {})
-        res_dict["extra"][EXTRA_RESOURCE_POSE] = self.res_content.pose.model_dump()
+        res_dict["extra"][EXTRA_RESOURCE_POSE] = self.res_content.pose.model_dump(
+            exclude={"position"}
+        )
+        joint_state = res_dict.pop("joint_state", None)
+        if joint_state is not None:
+            res_dict["extra"][EXTRA_RESOURCE_JOINT_STATE] = joint_state
         res_dict["extra"][EXTRA_RESOURCE_META_DATA] = copy.deepcopy(
             self.res_content.meta_data
         )
@@ -1377,7 +562,13 @@ class ResourceDictInstance(object):
         barcode = res_dict.pop("barcode", "")
         symbology = res_dict.pop("barcode_symbology", "")
         res_dict["barcode"] = (
-            {"data": barcode, "symbology": symbology or "", "position_on_resource": "front"} if barcode else None
+            {
+                "data": barcode,
+                "symbology": symbology or "",
+                "position_on_resource": "front",
+            }
+            if barcode
+            else None
         )
         res_dict["data"] = assemble_tracker_state(self.res_content)
         for state_key in TRACKER_STATE_KEYS:
@@ -1391,7 +582,9 @@ class ResourceTreeInstance(object):
     """
 
     @staticmethod
-    def _build_uuid_map(resource_list: List[ResourceDictInstance]) -> Dict[str, ResourceDictInstance]:
+    def _build_uuid_map(
+        resource_list: List[ResourceDictInstance],
+    ) -> Dict[str, ResourceDictInstance]:
         """构建uuid到资源对象的映射，并检查重复"""
         uuid_map: Dict[str, ResourceDictInstance] = {}
         for res_instance in resource_list:
@@ -1406,7 +599,10 @@ class ResourceTreeInstance(object):
         resource_list: List[ResourceDictInstance],
     ) -> Dict[str, ResourceDictInstance]:
         """构建uuid到资源实例的映射"""
-        return {res_instance.res_content.uuid: res_instance for res_instance in resource_list}
+        return {
+            res_instance.res_content.uuid: res_instance
+            for res_instance in resource_list
+        }
 
     @staticmethod
     def _collect_tree_nodes(
@@ -1476,7 +672,11 @@ class ResourceTreeInstance(object):
             # 验证并递归处理子节点
             for child in node.children:
                 if child.res_content.parent != node.res_content:
-                    parent_id = child.res_content.parent.id if child.res_content.parent else None
+                    parent_id = (
+                        child.res_content.parent.id
+                        if child.res_content.parent
+                        else None
+                    )
                     raise ValueError(
                         f"节点 {child.res_content.id} 的parent引用不正确，应该指向 {node.res_content.id}，但实际指向 {parent_id}"
                     )
@@ -1555,7 +755,10 @@ class ResourceTreeSet(object):
     多个根节点的resource集合，包含多个ResourceTree
     """
 
-    def __init__(self, resource_list: List[List[ResourceDictInstance]] | List[ResourceTreeInstance]):
+    def __init__(
+        self,
+        resource_list: List[List[ResourceDictInstance]] | List[ResourceTreeInstance],
+    ):
         """
         初始化资源树集合
 
@@ -1579,7 +782,9 @@ class ResourceTreeSet(object):
             )
 
     @classmethod
-    def from_plr_resources(cls, resources: List["PLRResource"], known_newly_created=False, old_size=False) -> "ResourceTreeSet":
+    def from_plr_resources(
+        cls, resources: List["PLRResource"], known_newly_created=False, old_size=False
+    ) -> "ResourceTreeSet":
         """
         从plr资源创建ResourceTreeSet
         """
@@ -1620,7 +825,9 @@ class ResourceTreeSet(object):
                 logger.trace(f"转换pylabrobot的时候，出现未知类型 {source}")
                 return source
 
-        def build_uuid_mapping(res: "PLRResource", uuid_list: list, parent_uuid: Optional[str] = None):
+        def build_uuid_mapping(
+            res: "PLRResource", uuid_list: list, parent_uuid: Optional[str] = None
+        ):
             """递归构建uuid和extra映射字典，返回(current_uuid, parent_uuid, extra)元组列表"""
             uid = getattr(res, "unilabos_uuid", "")
             if not uid:
@@ -1639,8 +846,11 @@ class ResourceTreeSet(object):
             extra.pop(EXTRA_RESOURCE_CLASS, None)
 
             static_pose = extra.pop(EXTRA_RESOURCE_POSE, None)
+            joint_state = extra.pop(EXTRA_RESOURCE_JOINT_STATE, None)
             resource_meta_data = extra.pop(EXTRA_RESOURCE_META_DATA, missing)
-            if resource_meta_data is not missing and not isinstance(resource_meta_data, Mapping):
+            if resource_meta_data is not missing and not isinstance(
+                resource_meta_data, Mapping
+            ):
                 raise ValueError(
                     f"{res.name}.unilabos_extra.{EXTRA_RESOURCE_META_DATA} 必须是对象"
                 )
@@ -1651,6 +861,7 @@ class ResourceTreeSet(object):
                     parent_uuid,
                     extra,
                     static_pose,
+                    joint_state,
                     legacy_pose_extra,
                     (
                         copy.deepcopy(dict(resource_meta_data))
@@ -1674,18 +885,32 @@ class ResourceTreeSet(object):
                 parent_uuid,
                 extra,
                 static_pose,
+                joint_state,
                 legacy_pose_extra,
                 resource_meta_data,
             ) = uuids.pop(0)
 
             raw_pos = (
-                {"x": d["location"]["x"], "y": d["location"]["y"], "z": d["location"]["z"]}
+                {
+                    "x": d["location"]["x"],
+                    "y": d["location"]["y"],
+                    "z": d["location"]["z"],
+                }
                 if d["location"] is not None
                 else None
             )
+            sidecar_position = (
+                copy.deepcopy(static_pose.get("position"))
+                if isinstance(static_pose, dict) and "position" in static_pose
+                else missing
+            )
             if static_pose is None:
                 static_pose = {
-                    "size": {"width": d["size_x"], "height": d["size_y"], "depth": d["size_z"]},
+                    "size": {
+                        "width": d["size_x"],
+                        "height": d["size_y"],
+                        "depth": d["size_z"],
+                    },
                     "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
                     "layout": d.get("layout", "x-y"),
                     # PLR serializer 会额外输出 ``type=Rotation``；它是传输标签，
@@ -1698,9 +923,17 @@ class ResourceTreeSet(object):
                     "cross_section_type": d.get("cross_section_type", "rectangle"),
                     "extra": legacy_pose_extra,
                 }
-                if raw_pos is not None:
-                    static_pose["position"] = raw_pos
-                    static_pose["position3d"] = raw_pos
+            if raw_pos is not None:
+                if sidecar_position is not missing:
+                    normalized_sidecar_position = ResourceDictPositionObject.model_validate(
+                        sidecar_position
+                    ).model_dump()
+                    if normalized_sidecar_position != raw_pos:
+                        raise ValueError(
+                            f"PLR 资源 {d['name']} 的 location 与 "
+                            f"unilabos_extra.{EXTRA_RESOURCE_POSE}.position 冲突"
+                        )
+                static_pose["position"] = raw_pos
 
             # 先构建当前节点的字典（不包含children）
             r_dict = {
@@ -1712,36 +945,40 @@ class ResourceTreeSet(object):
                 "type": replace_plr_type(d.get("category", "")),
                 "class": d.get("class", ""),
                 "template_name": get_plr_template_name(plr_resource, d),
-                "position": raw_pos,
                 "pose": static_pose,
+                "joint_state": joint_state,
                 "config": {
                     k: v
                     for k, v in d.items()
                     if k
-                    not in ([
-                        "name",
-                        "template_name",
-                        "sites",
-                        "children",
-                        "parent_name",
-                        "location",
-                        "rotation",
-                        "size_x",
-                        "size_y",
-                        "size_z",
-                        "cross_section_type",
-                        "bottom_type",
-                    ] if not old_size else [
-                        "name",
-                        "template_name",
-                        "sites",
-                        "children",
-                        "parent_name",
-                        "location",
-                        "rotation",
-                        "cross_section_type",
-                        "bottom_type",
-                    ])
+                    not in (
+                        [
+                            "name",
+                            "template_name",
+                            "sites",
+                            "children",
+                            "parent_name",
+                            "location",
+                            "rotation",
+                            "size_x",
+                            "size_y",
+                            "size_z",
+                            "cross_section_type",
+                            "bottom_type",
+                        ]
+                        if not old_size
+                        else [
+                            "name",
+                            "template_name",
+                            "sites",
+                            "children",
+                            "parent_name",
+                            "location",
+                            "rotation",
+                            "cross_section_type",
+                            "bottom_type",
+                        ]
+                    )
                 },
                 "data": states[d["name"]],
                 "extra": extra,
@@ -1752,13 +989,19 @@ class ResourceTreeSet(object):
                 r_dict["meta_data"] = resource_meta_data
 
             # 先转换为 ResourceDictInstance，获取其中的 ResourceDict
-            current_instance = ResourceDictInstance.get_resource_instance_from_dict(r_dict)
+            current_instance = ResourceDictInstance.get_resource_instance_from_dict(
+                r_dict
+            )
             current_resource = current_instance.res_content
 
             # 递归处理子节点，传入当前节点的 ResourceDict 作为 parent
             current_instance.children = [
-                resource_plr_inner(child_resource, child_dict, current_resource, states, uuids)
-                for child_resource, child_dict in zip(plr_resource.children, d["children"])
+                resource_plr_inner(
+                    child_resource, child_dict, current_resource, states, uuids
+                )
+                for child_resource, child_dict in zip(
+                    plr_resource.children, d["children"]
+                )
             ]
 
             return current_instance
@@ -1767,13 +1010,17 @@ class ResourceTreeSet(object):
         for resource in resources:
             # 构建uuid列表
             uuid_list = []
-            build_uuid_mapping(resource, uuid_list, getattr(resource.parent, "unilabos_uuid", None))
+            build_uuid_mapping(
+                resource, uuid_list, getattr(resource.parent, "unilabos_uuid", None)
+            )
 
             serialized_data = resource.serialize()
-            all_states = serialize_all_state_with_unilabos(resource)
+            all_states = resource.serialize_all_state()
 
             # 根节点没有父节点，传入 None
-            root_instance = resource_plr_inner(resource, serialized_data, None, all_states, uuid_list)
+            root_instance = resource_plr_inner(
+                resource, serialized_data, None, all_states, uuid_list
+            )
             tree_instance = ResourceTreeInstance(root_instance)
             trees.append(tree_instance)
         return cls(trees)
@@ -1801,17 +1048,21 @@ class ResourceTreeSet(object):
         def collect_node_data(
             node: ResourceDictInstance,
             name_to_uuid: dict,
-            material_name_by_uuid: dict,
             all_states: dict,
             name_to_extra: dict,
             name_to_sites: dict,
         ):
             """一次遍历收集 UUID、state、extra、Site 与模板名称。"""
             name_to_uuid[node.res_content.name] = node.res_content.uuid
-            material_name_by_uuid[node.res_content.uuid] = node.res_content.name
             all_states[node.res_content.name] = assemble_tracker_state(node.res_content)
             plr_extra = copy.deepcopy(node.res_content.extra)
-            plr_extra[EXTRA_RESOURCE_POSE] = node.res_content.pose.model_dump()
+            plr_extra[EXTRA_RESOURCE_POSE] = node.res_content.pose.model_dump(
+                exclude={"position"}
+            )
+            if node.res_content.joint_state is not None:
+                plr_extra[EXTRA_RESOURCE_JOINT_STATE] = (
+                    node.res_content.joint_state.model_dump()
+                )
             plr_extra[EXTRA_RESOURCE_META_DATA] = copy.deepcopy(
                 node.res_content.meta_data
             )
@@ -1819,12 +1070,13 @@ class ResourceTreeSet(object):
             plr_extra[EXTRA_RESOURCE_CLASS] = node.res_content.template_name
             name_to_extra[node.res_content.name] = plr_extra
             if node.res_content.sites is not None:
-                name_to_sites[node.res_content.name] = [site.model_dump() for site in node.res_content.sites]
+                name_to_sites[node.res_content.name] = [
+                    site.model_dump() for site in node.res_content.sites
+                ]
             for child in node.children:
                 collect_node_data(
                     child,
                     name_to_uuid,
-                    material_name_by_uuid,
                     all_states,
                     name_to_extra,
                     name_to_sites,
@@ -1840,7 +1092,7 @@ class ResourceTreeSet(object):
             # 反序列化方向：把根字段 barcode/barcode_symbology 组装回 config 的 barcode
             # （PLR Barcode dict {data, symbology, position_on_resource}），与
             # get_resource_instance_from_dict 从 config 读取的逻辑对称。PLR location
-            # 对应动态 position；完整静态 pose 通过 unilabos_extra sidecar 保留。
+            # 对应唯一的 pose.position；其余 pose 字段通过 unilabos_extra sidecar 保留。
             config = dict(res.config)
             config.pop("sites", None)
             config.pop("template_name", None)
@@ -1859,29 +1111,29 @@ class ResourceTreeSet(object):
                 "size_z": res.pose.size.depth,
                 "location": (
                     {
-                        "x": res.position.x,
-                        "y": res.position.y,
-                        "z": res.position.z,
+                        "x": res.pose.position.x,
+                        "y": res.pose.position.y,
+                        "z": res.pose.position.z,
                         "type": "Coordinate",
                     }
-                    if res.position is not None
+                    if res.pose.position is not None
                     else None
                 ),
                 "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},
                 "category": res.config.get("category", plr_type),
-                "children": [node_to_plr_dict(child, has_model) for child in node.children],
+                "children": [
+                    node_to_plr_dict(child, has_model) for child in node.children
+                ],
                 "parent_name": res.parent_instance_name,
             }
             if has_model:
                 d["model"] = res.config.get("model", None)
             if res.sites is not None:
                 site_cls = find_subclass(d["type"], PLRResource)
-                if site_cls is not None and plr_class_accepts_serialized_sites(site_cls):
-                    d["sites"] = sites_for_plr_deserialization(
-                        site_cls,
-                        res.sites,
-                        material_name_by_uuid,
-                    )
+                if site_cls is not None and plr_class_accepts_serialized_sites(
+                    site_cls
+                ):
+                    d["sites"] = sites_for_plr_deserialization(res.sites)
             return d
 
         plr_resources = []
@@ -1889,14 +1141,12 @@ class ResourceTreeSet(object):
 
         for tree in self.trees:
             name_to_uuid: Dict[str, str] = {}
-            material_name_by_uuid: Dict[str, str] = {}
             all_states: Dict[str, Any] = {}
             name_to_extra: Dict[str, dict] = {}
             name_to_sites: Dict[str, List[Dict[str, Any]]] = {}
             collect_node_data(
                 tree.root_node,
                 name_to_uuid,
-                material_name_by_uuid,
                 all_states,
                 name_to_extra,
                 name_to_sites,
@@ -1924,7 +1174,7 @@ class ResourceTreeSet(object):
                     if plr_dict["location"] is not None
                     else None
                 )
-                load_all_state_with_unilabos(plr_resource, all_states)
+                plr_resource.load_all_state(all_states)
                 # 使用 DeviceNodeResourceTracker 设置 UUID 和 Extra
                 tracker.loop_set_uuid(plr_resource, name_to_uuid)
                 tracker.loop_set_extra(plr_resource, name_to_extra)
@@ -1954,8 +1204,7 @@ class ResourceTreeSet(object):
         Raises:
             ValueError: 当建立关系时发现不一致
         """
-        # 第一步：校验微后端 UUID，并仅为唯一 name/id 建立旧 occupied_by 迁移映射。
-        selector_to_uuids: Dict[str, set[str]] = {}
+        # 第一步：校验微后端 UUID。
         for node_dict in raw_list:
             if not node_dict.get("uuid"):
                 transport_uuid = (node_dict.get("data") or {}).get("unilabos_uuid")
@@ -1964,18 +1213,10 @@ class ResourceTreeSet(object):
                         f"资源 {node_dict.get('id', node_dict.get('name'))} 缺少微后端分配的 UUID"
                     )
                 node_dict["uuid"] = str(transport_uuid)
-            for selector in (node_dict.get("name"), node_dict.get("id")):
-                if selector:
-                    selector_to_uuids.setdefault(str(selector), set()).add(str(node_dict["uuid"]))
-        material_uuid_by_name = {
-            selector: next(iter(uuids))
-            for selector, uuids in selector_to_uuids.items()
-            if len(uuids) == 1
-        }
 
         # 第二步：将字典列表转换为 ResourceDictInstance 列表。
         instances = [
-            ResourceDictInstance.get_resource_instance_from_dict(node_dict, material_uuid_by_name)
+            ResourceDictInstance.get_resource_instance_from_dict(node_dict)
             for node_dict in raw_list
         ]
 
@@ -2016,7 +1257,9 @@ class ResourceTreeSet(object):
         return cls.from_nested_instance_list(instances)
 
     @classmethod
-    def from_nested_instance_list(cls, nested_list: List[ResourceDictInstance]) -> "ResourceTreeSet":
+    def from_nested_instance_list(
+        cls, nested_list: List[ResourceDictInstance]
+    ) -> "ResourceTreeSet":
         """
         从扁平化的资源列表创建ResourceTreeSet，自动按根节点分组
 
@@ -2034,7 +1277,8 @@ class ResourceTreeSet(object):
         root_instances = [
             ResourceTreeInstance(res_instance)
             for res_instance in nested_list
-            if res_instance.res_content.is_root_node or res_instance.res_content.uuid_parent not in known_uuids
+            if res_instance.res_content.is_root_node
+            or res_instance.res_content.uuid_parent not in known_uuids
         ]
         return cls(root_instances)
 
@@ -2076,7 +1320,11 @@ class ResourceTreeSet(object):
         Returns:
             所有节点的资源实例列表
         """
-        return [node.res_content.uuid for tree in self.trees for node in tree.get_all_nodes()]
+        return [
+            node.res_content.uuid
+            for tree in self.trees
+            for node in tree.get_all_nodes()
+        ]
 
     def find_by_uuid(self, target_uuid: str) -> Optional[ResourceDictInstance]:
         """
@@ -2121,7 +1369,10 @@ class ResourceTreeSet(object):
         if not replacements:
             return 0
 
-        final_uuids = [replacements.get(node.res_content.uuid, node.res_content.uuid) for node in nodes]
+        final_uuids = [
+            replacements.get(node.res_content.uuid, node.res_content.uuid)
+            for node in nodes
+        ]
         if len(final_uuids) != len(set(final_uuids)):
             raise ValueError("UUID 替换后会产生重复资源 UUID")
 
@@ -2138,7 +1389,9 @@ class ResourceTreeSet(object):
                         site["material_uuid"] = replacements.get(owner_uuid, owner_uuid)
                     occupant_uuid = site.get("occupied_material_uuid")
                     if occupant_uuid:
-                        site["occupied_material_uuid"] = replacements.get(occupant_uuid, occupant_uuid)
+                        site["occupied_material_uuid"] = replacements.get(
+                            occupant_uuid, occupant_uuid
+                        )
 
         candidate = ResourceTreeSet.load(candidate_payload)
         candidate_by_uuid = {
@@ -2151,7 +1404,9 @@ class ResourceTreeSet(object):
             tree._validate_tree()
         return len(replacements)
 
-    def merge_remote_resources(self, remote_tree_set: "ResourceTreeSet") -> "ResourceTreeSet":
+    def merge_remote_resources(
+        self, remote_tree_set: "ResourceTreeSet"
+    ) -> "ResourceTreeSet":
         """
         将远端物料同步到本地物料中（以子树为单位）
 
@@ -2185,13 +1440,17 @@ class ResourceTreeSet(object):
                 # 情况1: 一级是 device
                 if remote_root_id not in local_device_map:
                     if remote_root_id != "host_node":
-                        logger.warning(f"Device '{remote_root_id}' 在本地不存在，跳过该 device 下的物料同步")
+                        logger.warning(
+                            f"Device '{remote_root_id}' 在本地不存在，跳过该 device 下的物料同步"
+                        )
                     continue
 
                 local_device = local_device_map[remote_root_id]
 
                 # 构建本地一级 device 下的子节点映射
-                local_children_map = {child.res_content.name: child for child in local_device.children}
+                local_children_map = {
+                    child.res_content.name: child for child in local_device.children
+                }
 
                 # 遍历远端一级 device 的子节点
                 for remote_child in remote_root.children:
@@ -2201,13 +1460,18 @@ class ResourceTreeSet(object):
                     if remote_child_type == "device":
                         # 情况2: 二级是 device
                         if remote_child_name not in local_children_map:
-                            logger.warning(f"Device '{remote_root_id}/{remote_child_name}' 在本地不存在，跳过")
+                            logger.warning(
+                                f"Device '{remote_root_id}/{remote_child_name}' 在本地不存在，跳过"
+                            )
                             continue
 
                         local_sub_device = local_children_map[remote_child_name]
 
                         # 构建本地二级 device 下的子节点映射
-                        local_sub_children_map = {child.res_content.name: child for child in local_sub_device.children}
+                        local_sub_children_map = {
+                            child.res_content.name: child
+                            for child in local_sub_device.children
+                        }
 
                         # 遍历远端二级 device 的子节点（三级物料）
                         added_count = 0
@@ -2217,7 +1481,9 @@ class ResourceTreeSet(object):
                             # 情况3: 三级物料
                             if remote_material_name not in local_sub_children_map:
                                 # 引入整个子树
-                                remote_material.res_content.parent = local_sub_device.res_content
+                                remote_material.res_content.parent = (
+                                    local_sub_device.res_content
+                                )
                                 local_sub_device.children.append(remote_material)
                                 added_count += 1
                             else:
@@ -2234,13 +1500,17 @@ class ResourceTreeSet(object):
                     else:
                         # 二级物料已存在，比较三级子节点是否缺失
                         local_material = local_children_map[remote_child_name]
-                        local_material_children_map = {child.res_content.name: child for child in
-                                                       local_material.children}
+                        local_material_children_map = {
+                            child.res_content.name: child
+                            for child in local_material.children
+                        }
                         added_count = 0
                         for remote_sub in remote_child.children:
                             remote_sub_name = remote_sub.res_content.name
                             if remote_sub_name not in local_material_children_map:
-                                remote_sub.res_content.parent = local_material.res_content
+                                remote_sub.res_content.parent = (
+                                    local_material.res_content
+                                )
                                 local_material.children.append(remote_sub)
                                 added_count += 1
                             else:
@@ -2260,7 +1530,9 @@ class ResourceTreeSet(object):
                 for local_root in self.root_nodes:
                     if local_root.res_content.name == remote_root.res_content.name:
                         existing = True
-                        logger.info(f"根节点物料 '{remote_root.res_content.name}' 已存在，跳过")
+                        logger.info(
+                            f"根节点物料 '{remote_root.res_content.name}' 已存在，跳过"
+                        )
                         break
 
                 if not existing:
@@ -2275,7 +1547,7 @@ class ResourceTreeSet(object):
 
         return self
 
-    def dump(self, old_position=False) -> List[List[ResourceDictType]]:
+    def dump(self) -> List[List[ResourceDictType]]:
         """
         将 ResourceTreeSet 序列化为嵌套列表格式
 
@@ -2289,10 +1561,11 @@ class ResourceTreeSet(object):
         result = []
         for tree in self.trees:
             # 获取树的所有节点并序列化
-            tree_nodes = [node.res_content.model_dump(by_alias=True) for node in tree.get_all_nodes()]
+            tree_nodes = [
+                node.res_content.model_dump(by_alias=True)
+                for node in tree.get_all_nodes()
+            ]
             result.append(tree_nodes)
-        # 参数仅保留给老调用方；规范模型本身已经输出 PLR/旧接口需要的
-        # 根级动态 xyz position，不能再用静态 pose.position 覆盖它。
         return result
 
     @classmethod
@@ -2328,7 +1601,9 @@ def prepare_resource_creation_payloads(
         if isinstance(config, dict):
             config.pop("available_sites", None)
         resource.pop("available_sites", None)
-        if not resource.get("uuid") and not (resource.get("data") or {}).get("unilabos_uuid"):
+        if not resource.get("uuid") and not (resource.get("data") or {}).get(
+            "unilabos_uuid"
+        ):
             raise ValueError(
                 f"资源 {resource.get('id', resource.get('name'))} 缺少微后端分配的 UUID"
             )
@@ -2348,7 +1623,9 @@ def prepare_resource_creation_payloads(
     for original, normalized in zip(resources, normalized_inputs):
         canonical = canonical_by_uuid.get(str(normalized.get("uuid") or ""))
         if canonical is None:
-            raise ValueError(f"物料 {normalized.get('id', normalized.get('name'))} 创建预备失败")
+            raise ValueError(
+                f"物料 {normalized.get('id', normalized.get('name'))} 创建预备失败"
+            )
         payload = copy.deepcopy(canonical)
         payload["children"] = copy.deepcopy(original.get("children", []))
         prepared.append(payload)
@@ -2362,9 +1639,7 @@ def prepare_resource_tree_for_creation(resources: ResourceTreeSet) -> int:
     for node in resources.all_nodes:
         resource = node.res_content
         if not resource.sites_initialized:
-            raise ValueError(
-                f"资源 {resource.id} 尚未由微后端生成权威 Site 快照"
-            )
+            raise ValueError(f"资源 {resource.id} 尚未由微后端生成权威 Site 快照")
         if resource.sites is None:
             raise ValueError(f"资源 {resource.id} 的 sites 必须是数组")
         count += 1
@@ -2374,7 +1649,6 @@ def prepare_resource_tree_for_creation(resources: ResourceTreeSet) -> int:
 
 
 class DeviceNodeResourceTracker(object):
-
     def __init__(self):
         self.resources = []
         self.resource2parent_resource = {}
@@ -2402,7 +1676,9 @@ class DeviceNodeResourceTracker(object):
                     self.uuid_to_resources[new_uuid] = instance
                     print(f"更新uuid映射: {old_uuid} -> {new_uuid} | {instance}")
 
-    def _get_resource_attr(self, resource, attr_name: str, uuid_attr: Optional[str] = None):
+    def _get_resource_attr(
+        self, resource, attr_name: str, uuid_attr: Optional[str] = None
+    ):
         """
         获取资源的属性值，统一处理 dict 和 instance 两种类型
 
@@ -2479,7 +1755,11 @@ class DeviceNodeResourceTracker(object):
 
         # 先递归处理所有子节点
         count = 0
-        children = resource.get("children", []) if isinstance(resource, dict) else getattr(resource, "children", [])
+        children = (
+            resource.get("children", [])
+            if isinstance(resource, dict)
+            else getattr(resource, "children", [])
+        )
         for child in children:
             count += self._traverse_and_process(child, process_func)
 
@@ -2699,7 +1979,11 @@ class DeviceNodeResourceTracker(object):
         """
         root_uuids = {}
         for r in self.resources:
-            res_uuid = r.get("uuid") if isinstance(r, dict) else getattr(r, "unilabos_uuid", None)
+            res_uuid = (
+                r.get("uuid")
+                if isinstance(r, dict)
+                else getattr(r, "unilabos_uuid", None)
+            )
             if res_uuid:
                 root_uuids[res_uuid] = r
             if id(r) == id(resource):
@@ -2766,8 +2050,14 @@ class DeviceNodeResourceTracker(object):
         self.resource2parent_resource.clear()
 
     def figure_resource(
-        self, query_resource: Union[List[Union[dict, "PLRResource"]], dict, "PLRResource"], try_mode=False
-    ) -> Union[List[Union[dict, "PLRResource", List[Union[dict, "PLRResource"]]]], dict, "PLRResource"]:
+        self,
+        query_resource: Union[List[Union[dict, "PLRResource"]], dict, "PLRResource"],
+        try_mode=False,
+    ) -> Union[
+        List[Union[dict, "PLRResource", List[Union[dict, "PLRResource"]]]],
+        dict,
+        "PLRResource",
+    ]:
         if isinstance(query_resource, list):
             return [self.figure_resource(r, try_mode) for r in query_resource]
         elif (
@@ -2790,13 +2080,23 @@ class DeviceNodeResourceTracker(object):
             res_list = []
             for r in self.resources:
                 if isinstance(query_resource, dict):
-                    res_list.extend(self.loop_find_resource(r, object, "uuid", res_uuid))
+                    res_list.extend(
+                        self.loop_find_resource(r, object, "uuid", res_uuid)
+                    )
                 else:
-                    res_list.extend(self.loop_find_resource(r, type(query_resource), "unilabos_uuid", res_uuid))
+                    res_list.extend(
+                        self.loop_find_resource(
+                            r, type(query_resource), "unilabos_uuid", res_uuid
+                        )
+                    )
 
             if not try_mode:
-                assert len(res_list) > 0, f"没有找到资源 (uuid={res_uuid})，请检查资源是否存在"
-                assert len(res_list) == 1, f"通过uuid={res_uuid} 找到多个资源，请检查资源是否唯一: {res_list}"
+                assert len(res_list) > 0, (
+                    f"没有找到资源 (uuid={res_uuid})，请检查资源是否存在"
+                )
+                assert len(res_list) == 1, (
+                    f"通过uuid={res_uuid} 找到多个资源，请检查资源是否唯一: {res_list}"
+                )
             else:
                 return [i[1] for i in res_list]
 
@@ -2808,31 +2108,48 @@ class DeviceNodeResourceTracker(object):
         res_id = (
             query_resource.id  # type: ignore
             if hasattr(query_resource, "id")
-            else (query_resource.get("id") if isinstance(query_resource, dict) else None)
+            else (
+                query_resource.get("id") if isinstance(query_resource, dict) else None
+            )
         )
         res_name = (
             query_resource.name  # type: ignore
             if hasattr(query_resource, "name")
-            else (query_resource.get("name") if isinstance(query_resource, dict) else None)
+            else (
+                query_resource.get("name") if isinstance(query_resource, dict) else None
+            )
         )
         res_identifier = res_id if res_id else res_name
         identifier_key = "id" if res_id else "name"
         resource_cls_type = type(query_resource)
         if res_identifier is None:
-            logger.warning(f"resource {query_resource} 没有id、name或uuid，暂不能对应figure")
+            logger.warning(
+                f"resource {query_resource} 没有id、name或uuid，暂不能对应figure"
+            )
         res_list = []
         for r in self.resources:
             if isinstance(query_resource, dict):
-                res_list.extend(self.loop_find_resource(r, object, identifier_key, query_resource[identifier_key]))
+                res_list.extend(
+                    self.loop_find_resource(
+                        r, object, identifier_key, query_resource[identifier_key]
+                    )
+                )
             else:
                 res_list.extend(
                     self.loop_find_resource(
-                        r, resource_cls_type, identifier_key, getattr(query_resource, identifier_key)
+                        r,
+                        resource_cls_type,
+                        identifier_key,
+                        getattr(query_resource, identifier_key),
                     )
                 )
         if not try_mode:
-            assert len(res_list) > 0, f"没有找到资源 {query_resource}，请检查资源是否存在"
-            assert len(res_list) == 1, f"{query_resource} 找到多个资源，请检查资源是否唯一: {res_list}"
+            assert len(res_list) > 0, (
+                f"没有找到资源 {query_resource}，请检查资源是否存在"
+            )
+            assert len(res_list) == 1, (
+                f"{query_resource} 找到多个资源，请检查资源是否唯一: {res_list}"
+            )
         else:
             return [i[1] for i in res_list]
         # 后续加入其他对比方式
@@ -2841,7 +2158,12 @@ class DeviceNodeResourceTracker(object):
         return res_list[0][1]
 
     def loop_find_resource(
-        self, resource, target_resource_cls_type, identifier_key, compare_value, parent_res=None
+        self,
+        resource,
+        target_resource_cls_type,
+        identifier_key,
+        compare_value,
+        parent_res=None,
     ) -> List[Tuple[Any, Any]]:
         res_list = []
         # print(resource, target_resource_cls_type, identifier_key, compare_value)
@@ -2851,10 +2173,18 @@ class DeviceNodeResourceTracker(object):
         else:
             children = resource.get("children")
             if children is not None:
-                children = list(children.values()) if isinstance(children, dict) else children
+                children = (
+                    list(children.values()) if isinstance(children, dict) else children
+                )
         for child in children:
             res_list.extend(
-                self.loop_find_resource(child, target_resource_cls_type, identifier_key, compare_value, resource)
+                self.loop_find_resource(
+                    child,
+                    target_resource_cls_type,
+                    identifier_key,
+                    compare_value,
+                    resource,
+                )
             )
         if issubclass(type(resource), target_resource_cls_type):
             if type(resource) == dict:
@@ -2913,7 +2243,9 @@ if __name__ == "__main__":
     print(f"   - 子节点数量: {len(original_plate.children)}")
     if original_plate.children:
         print(f"   - 第一个子节点: {original_plate.children[0].name}")
-        print(f"   - 第一个子节点 UUID: {getattr(original_plate.children[0], 'unilabos_uuid', 'N/A')}")
+        print(
+            f"   - 第一个子节点 UUID: {getattr(original_plate.children[0], 'unilabos_uuid', 'N/A')}"
+        )
 
     # 2. 将 PLR 资源转换为 ResourceTreeSet
     resource_tree_set = ResourceTreeSet.from_plr_resources([original_plate])
@@ -2934,8 +2266,12 @@ if __name__ == "__main__":
     print(f"\n4. 验证 unilabos_uuid 设置:")
     if hasattr(converted_plate, "unilabos_uuid"):
         print(f"   - 根节点 UUID: {getattr(converted_plate, 'unilabos_uuid')}")
-        if converted_plate.children and hasattr(converted_plate.children[0], "unilabos_uuid"):
-            print(f"   - 第一个子节点 UUID: {getattr(converted_plate.children[0], 'unilabos_uuid')}")
+        if converted_plate.children and hasattr(
+            converted_plate.children[0], "unilabos_uuid"
+        ):
+            print(
+                f"   - 第一个子节点 UUID: {getattr(converted_plate.children[0], 'unilabos_uuid')}"
+            )
     else:
         print("   - 警告: unilabos_uuid 未设置")
 
@@ -2953,7 +2289,9 @@ if __name__ == "__main__":
     print(f"\n6. 第二次往返转换:")
     print(f"   - 资源名称: {plr_resources_2[0].name}")
     print(f"   - 子节点数量: {len(plr_resources_2[0].children)}")
-    print(f"   - UUID 依然保持: {getattr(plr_resources_2[0], 'unilabos_uuid') == original_uuid}")
+    print(
+        f"   - UUID 依然保持: {getattr(plr_resources_2[0], 'unilabos_uuid') == original_uuid}"
+    )
 
     print("\n" + "=" * 60)
     print("✅ 测试完成! 所有转换正常工作")

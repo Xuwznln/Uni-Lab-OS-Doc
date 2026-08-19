@@ -20,8 +20,9 @@ from unilabos.ros.msgs.message_converter import (
     convert_from_ros_msg_with_mapping,
 )
 from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode, DeviceNodeResourceTracker, ROS2DeviceNode
-from unilabos.resources.resource_tracker import ResourceDictType, ResourceTreeSet, ResourceDictInstance
-from unilabos.utils.type_check import get_result_info_str
+from unilabos.resources.objects.resource import ResourceDictType
+from unilabos.resources.resource_tracker import ResourceTreeSet, ResourceDictInstance
+from unilabos.utils.type_check import serialize_result_info
 
 if TYPE_CHECKING:
     from unilabos.devices.workstation.workstation_base import WorkstationBase
@@ -497,7 +498,14 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
                     setattr(
                         result,
                         attr_name,
-                        get_result_info_str(execution_error, execution_success, protocol_return_value),
+                        json.dumps(
+                            serialize_result_info(
+                                execution_error,
+                                execution_success,
+                                protocol_return_value,
+                            ),
+                            ensure_ascii=False,
+                        ),
                     )
 
             self.lab_logger().info(f"协议 {protocol_name} 完成并返回结果")

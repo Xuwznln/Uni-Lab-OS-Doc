@@ -4,9 +4,11 @@ from uuid import uuid4
 
 import pytest
 from pylabrobot.resources import Coordinate, Rotation
+from pylabrobot.resources.barcode import Barcode
 from pylabrobot import serializer as plr_serializer
 
 from unilabos.resources.container import RegularContainer
+from unilabos.resources.objects.joint_state import ResourceJointState
 from unilabos.resources.resource_pose import (
     ResourceDictPosition,
     ResourceDictPositionObject,
@@ -14,7 +16,9 @@ from unilabos.resources.resource_pose import (
 )
 from unilabos.resources.resource_tracker import (
     EXTRA_RESOURCE_CLASS,
+    EXTRA_RESOURCE_JOINT_STATE,
     EXTRA_RESOURCE_META_DATA,
+    EXTRA_RESOURCE_POSE,
     RESOURCE_ROOT_FIELDS,
     TRACKER_STATE_KEYS,
     ResourceDict,
@@ -108,6 +112,11 @@ def test_plr_container_tracker_state_survives_resource_tree_roundtrip(monkeypatc
         size_z=20,
         max_volume=100.0,
     )
+    container.barcode = Barcode(
+        data="BC-001",
+        symbology="code128",
+        position_on_resource="front",
+    )
     container.tracker.add_liquid("water", 50.0)
     container.tracker.add_liquid(None, 10.0)
     container.tracker.remove_liquid(20.0)
@@ -133,16 +142,17 @@ def test_plr_container_tracker_state_survives_resource_tree_roundtrip(monkeypatc
     assert root.liquid_history == expected_history
     assert root.unknown_counter == original_state["unknown_counter"]
     assert all(state_key not in root.data for state_key in TRACKER_STATE_KEYS)
+    assert root.barcode == "BC-001"
+    assert root.barcode_symbology == "code128"
+    assert "barcode" not in root.config
     assert root.template_name == "BeakerTemplate"
     assert EXTRA_RESOURCE_CLASS not in root.extra
     assert root.meta_data == {"vendor": {"lot": "A-1"}}
     assert EXTRA_RESOURCE_META_DATA not in root.extra
 
-    # 静态 pose 与动态 position 可不同；PLR location 只跟随动态 position，
-    # 静态几何通过 UniLabOS sidecar 无损往返。
-    root.position = ResourceDictPositionObject(x=40, y=50, z=60)
+    # pose.position 是当前实际位置的唯一真相；其余几何字段通过 sidecar 往返。
     root.pose = ResourceDictPosition(
-        position=ResourceDictPositionObject(x=1, y=2, z=3),
+        position=ResourceDictPositionObject(x=40, y=50, z=60),
         position3d=ResourceDictPositionObject(x=10, y=20, z=30),
         size=ResourceDictPositionSize(width=10, height=10, depth=20),
     )
@@ -160,22 +170,64 @@ def test_plr_container_tracker_state_survives_resource_tree_roundtrip(monkeypatc
     monkeypatch.setattr(plr_serializer, "deserialize", deserialize_geometry_without_backend_scan)
     restored = tree.to_plr_resources(skip_devices=False)[0]
     assert restored.serialize_state() == original_state
+    assert restored.barcode is not None
+    assert restored.barcode.serialize() == {
+        "data": "BC-001",
+        "symbology": "code128",
+        "position_on_resource": "front",
+    }
     assert restored.unilabos_extra[EXTRA_RESOURCE_CLASS] == "BeakerTemplate"
     assert restored.unilabos_extra[EXTRA_RESOURCE_META_DATA] == {
         "vendor": {"lot": "A-1"}
     }
     assert restored.location == Coordinate(40, 50, 60)
+    assert "position" not in restored.unilabos_extra[EXTRA_RESOURCE_POSE]
 
     roundtripped = ResourceTreeSet.from_plr_resources(
         [restored], known_newly_created=True
     ).root_nodes[0].res_content
-    assert roundtripped.position.model_dump() == {"x": 40.0, "y": 50.0, "z": 60.0}
-    assert roundtripped.pose.position.model_dump() == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert not hasattr(roundtripped, "position")
+    assert roundtripped.pose.position.model_dump() == {"x": 40.0, "y": 50.0, "z": 60.0}
     assert roundtripped.pose.position3d.model_dump() == {"x": 10.0, "y": 20.0, "z": 30.0}
+    assert roundtripped.barcode == "BC-001"
+    assert roundtripped.barcode_symbology == "code128"
     assert roundtripped.meta_data == {"vendor": {"lot": "A-1"}}
 
 
-def test_plr_resource_without_location_preserves_unknown_position(monkeypatch):
+def test_barcode_config_is_promoted_once_and_conflicts_are_rejected():
+    resource = ResourceDict.model_validate(
+        _resource_payload(
+            config={
+                "type": "RegularContainer",
+                "barcode": {
+                    "data": "BC-002",
+                    "symbology": "qr",
+                    "position_on_resource": "left",
+                },
+            }
+        )
+    )
+
+    assert resource.barcode == "BC-002"
+    assert resource.barcode_symbology == "qr"
+    assert "barcode" not in resource.config
+
+    with pytest.raises(ValueError, match="barcode.*冲突"):
+        ResourceDict.model_validate(
+            _resource_payload(
+                barcode="ROOT",
+                config={
+                    "type": "RegularContainer",
+                    "barcode": {
+                        "data": "CONFIG",
+                        "symbology": "code128",
+                    },
+                },
+            )
+        )
+
+
+def test_plr_resource_without_location_preserves_unknown_pose_position(monkeypatch):
     container = RegularContainer(
         name="unlocated_beaker",
         size_x=10,
@@ -188,8 +240,8 @@ def test_plr_resource_without_location_preserves_unknown_position(monkeypatch):
     assert container.location is None
 
     tree = ResourceTreeSet.from_plr_resources([container], known_newly_created=True)
-    assert tree.root_nodes[0].res_content.position is None
-    assert tree.root_nodes[0].get_plr_nested_dict()["position"] is None
+    assert tree.root_nodes[0].res_content.pose.position is None
+    assert tree.root_nodes[0].get_plr_nested_dict()["location"] is None
 
     monkeypatch.setattr("unilabos.resources.resource_tracker.register", lambda: None)
     original_deserialize = plr_serializer.deserialize
@@ -208,7 +260,60 @@ def test_plr_resource_without_location_preserves_unknown_position(monkeypatch):
     roundtripped = ResourceTreeSet.from_plr_resources(
         [restored], known_newly_created=True
     ).root_nodes[0].res_content
-    assert roundtripped.position is None
+    assert roundtripped.pose.position is None
+
+
+def test_joint_state_uses_plr_runtime_sidecar_without_entering_serialize(monkeypatch):
+    container = RegularContainer(
+        name="jointed_beaker",
+        size_x=10,
+        size_y=10,
+        size_z=20,
+        max_volume=100.0,
+    )
+    container.unilabos_uuid = str(uuid4())
+    container.unilabos_extra = {EXTRA_RESOURCE_CLASS: "BeakerTemplate"}
+    tree = ResourceTreeSet.from_plr_resources([container], known_newly_created=True)
+    root = tree.root_nodes[0].res_content
+    root.joint_state = ResourceJointState(
+        name=["joint_1", "joint_2"],
+        position=[1.25, -0.5],
+        velocity=[0.1, 0.2],
+        effort=[],
+    )
+
+    monkeypatch.setattr("unilabos.resources.resource_tracker.register", lambda: None)
+    restored = tree.to_plr_resources(skip_devices=False)[0]
+
+    assert "joint_state" not in restored.serialize()
+    assert EXTRA_RESOURCE_JOINT_STATE not in restored.serialize()
+    assert restored.unilabos_extra[EXTRA_RESOURCE_JOINT_STATE] == {
+        "name": ["joint_1", "joint_2"],
+        "position": [1.25, -0.5],
+        "velocity": [0.1, 0.2],
+        "effort": [],
+    }
+
+    roundtripped = ResourceTreeSet.from_plr_resources(
+        [restored], known_newly_created=True
+    ).root_nodes[0].res_content
+    assert roundtripped.joint_state is not None
+    assert roundtripped.joint_state.position == [1.25, -0.5]
+    assert EXTRA_RESOURCE_JOINT_STATE not in roundtripped.extra
+
+
+def test_joint_state_rejects_mismatched_arrays():
+    with pytest.raises(ValueError, match="velocity.*长度"):
+        ResourceDict.model_validate(
+            _resource_payload(
+                joint_state={
+                    "name": ["joint_1", "joint_2"],
+                    "position": [1.0, 2.0],
+                    "velocity": [0.1],
+                    "effort": [],
+                }
+            )
+        )
 
 
 @pytest.mark.parametrize("legacy_source", ["config", "data"])
@@ -236,7 +341,19 @@ def test_resource_tree_set_missing_metadata_sidecar_allows_legacy_promotion(
 
         monkeypatch.setattr(container, "serialize", serialize_with_legacy_meta_data)
     else:
-        container._unilabos_state = {"meta_data": legacy_meta_data}
+        original_serialize_state = container.serialize_state
+
+        def serialize_state_with_legacy_meta_data():
+            return {
+                **original_serialize_state(),
+                "meta_data": legacy_meta_data,
+            }
+
+        monkeypatch.setattr(
+            container,
+            "serialize_state",
+            serialize_state_with_legacy_meta_data,
+        )
 
     tree_resource = ResourceTreeSet.from_plr_resources(
         [container], known_newly_created=True
@@ -276,7 +393,19 @@ def test_graphio_plr_missing_metadata_sidecar_allows_legacy_promotion(
 
         monkeypatch.setattr(container, "serialize", serialize_with_legacy_meta_data)
     else:
-        container._unilabos_state = {"meta_data": legacy_meta_data}
+        original_serialize_state = container.serialize_state
+
+        def serialize_state_with_legacy_meta_data():
+            return {
+                **original_serialize_state(),
+                "meta_data": legacy_meta_data,
+            }
+
+        monkeypatch.setattr(
+            container,
+            "serialize_state",
+            serialize_state_with_legacy_meta_data,
+        )
 
     graph_payload = graphio.resource_plr_to_ulab(container)
     assert "meta_data" not in graph_payload

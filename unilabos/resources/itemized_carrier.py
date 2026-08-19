@@ -5,12 +5,14 @@ Automated Liquid Handling Station Resource Classes - Simplified Version
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, TypeVar, Union, Sequence, Tuple
+from typing import Any, Dict, List, Optional, TypeVar, Union, Sequence, Tuple
 
 import pylabrobot
 from pylabrobot.resources import Resource as ResourcePLR
 from pylabrobot.resources import Well, ResourceHolder
 from pylabrobot.resources.coordinate import Coordinate
+
+from unilabos.resources.objects.site import ResourceSite
 
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
@@ -60,7 +62,12 @@ S = TypeVar("S", bound=ResourceHolder)
 
 
 class ItemizedCarrier(ResourcePLR):
-  """Base class for all carriers."""
+  """UniLabOS 按位载架。
+
+  ``resource_sites`` 是唯一 Site 元数据；``sites`` 只保存运行时占用对象。
+  序列化和反序列化均使用 canonical ``ResourceSite``，不再接受按资源名
+  表示占用关系的旧 PLR Site 字典。
+  """
 
   def __init__(
     self,
@@ -72,7 +79,12 @@ class ItemizedCarrier(ResourcePLR):
     num_items_y: int = 0,
     num_items_z: int = 0,
     layout: str = "x-y",
-    sites: Optional[Dict[Union[int, str], Optional[ResourcePLR]]] = None,
+    sites: Optional[
+      Union[
+        Dict[Union[int, str], Optional[ResourcePLR]],
+        Sequence[Union[ResourceSite, Dict[str, Any]]],
+      ]
+    ] = None,
     category: Optional[str] = "carrier",
     model: Optional[str] = None,
     invisible_slots: Optional[str] = None,
@@ -85,17 +97,19 @@ class ItemizedCarrier(ResourcePLR):
       category=category,
       model=model,
     )
-    self.num_items = len(sites)
     self.num_items_x, self.num_items_y, self.num_items_z = num_items_x, num_items_y, num_items_z
     self.invisible_slots = [] if invisible_slots is None else invisible_slots
     self.layout = "z-y" if self.num_items_z > 1 and self.num_items_x == 1 else "x-z" if self.num_items_z > 1 and self.num_items_y == 1 else "x-y"
+    self.resource_sites: Optional[List[ResourceSite]] = None
+    self.sites: List[Optional[ResourcePLR]] = []
+    self._ordering: Dict[Union[int, str], Any] = {}
+    self.child_locations: Dict[Union[int, str], Coordinate] = {}
+    self.child_size: Dict[Union[int, str], Dict[str, float]] = {}
 
     if isinstance(sites, dict):
       sites = sites or {}
-      self.sites: List[Optional[ResourcePLR]] = list(sites.values())
+      self.sites = list(sites.values())
       self._ordering = sites
-      self.child_locations: Dict[str, Coordinate] = {}
-      self.child_size: Dict[str, dict] = {}
       for spot, resource in sites.items():
         if resource is not None and getattr(resource, "location", None) is None:
           raise ValueError(f"resource {resource} has no location")
@@ -105,14 +119,79 @@ class ItemizedCarrier(ResourcePLR):
         else:
           self.child_locations[spot] = Coordinate.zero()
           self.child_size[spot] = {"width": 0, "height": 0, "depth": 0}
-    elif isinstance(sites, list):
-      # deserialize时走这里；还需要根据 self.sites 索引children
-      self.child_locations = {site["label"]: Coordinate(**site["position"]) for site in sites}
-      self.child_size = {site["label"]: site["size"] for site in sites}
-      self.sites = [site["occupied_by"] for site in sites]
-      self._ordering = {site["label"]: site["position"] for site in sites}
-    else:
-      print("sites:", sites)
+    elif sites is not None:
+      normalized = [
+        site.model_copy(deep=True)
+        if isinstance(site, ResourceSite)
+        else ResourceSite.model_validate(site)
+        for site in sites
+      ]
+      self.resource_sites = normalized
+      self.sites = [None] * len(normalized)
+      self._ordering = {site.label: None for site in normalized}
+      self.child_locations = {
+        site.label: Coordinate(
+          site.pose.position3d.x,
+          site.pose.position3d.y,
+          site.pose.position3d.z,
+        )
+        for site in normalized
+      }
+      self.child_size = {
+        site.label: site.pose.size.model_dump() for site in normalized
+      }
+      if normalized:
+        self.unilabos_uuid = normalized[0].material_uuid
+
+    self.num_items = len(self.sites)
+
+  def set_resource_sites(
+    self, sites: Sequence[Union[ResourceSite, Dict[str, Any]]]
+  ) -> None:
+    """注入并核对微后端返回的 canonical Site 快照。"""
+
+    normalized = [
+      site.model_copy(deep=True)
+      if isinstance(site, ResourceSite)
+      else ResourceSite.model_validate(site)
+      for site in sites
+    ]
+    native_labels = [str(label) for label in self.child_locations]
+    canonical_labels = [site.label for site in normalized]
+    if native_labels != canonical_labels:
+      raise ValueError(
+        f"ItemizedCarrier {self.name} 的槽位与 canonical sites 不一致: "
+        f"native={native_labels}, canonical={canonical_labels}"
+      )
+    if len(self.sites) != len(normalized):
+      raise ValueError(
+        f"ItemizedCarrier {self.name} 的槽位数量与 canonical sites 不一致"
+      )
+
+    for ordinal, site in enumerate(normalized):
+      location = self.child_locations[site.label]
+      if location != Coordinate(
+        site.pose.position3d.x,
+        site.pose.position3d.y,
+        site.pose.position3d.z,
+      ):
+        raise ValueError(
+          f"ItemizedCarrier {self.name} 的 Site {site.label} 位置与 canonical 快照冲突"
+        )
+      if self.child_size[site.label] != site.pose.size.model_dump():
+        raise ValueError(
+          f"ItemizedCarrier {self.name} 的 Site {site.label} 尺寸与 canonical 快照冲突"
+        )
+      occupant = self.sites[ordinal]
+      actual_uuid = None
+      if occupant is not None and not isinstance(occupant, ResourceHolder):
+        actual_uuid = str(getattr(occupant, "unilabos_uuid", "") or "") or None
+      if actual_uuid != site.occupied_material_uuid:
+        raise ValueError(
+          f"ItemizedCarrier {self.name} 的 Site {site.label} 占用关系冲突: "
+          f"native={actual_uuid}, canonical={site.occupied_material_uuid}"
+        )
+    self.resource_sites = normalized
 
   @property
   def capacity(self):
@@ -131,24 +210,41 @@ class ItemizedCarrier(ResourcePLR):
     spot: Optional[int] = None,
   ):
     idx = spot
-    # 如果只给 location，根据坐标和 deserialize 后的 self.sites（持有names）来寻找 resource 该摆放的位置
+    # 如果只给 location，根据 canonical Site 坐标定位槽位。
     if spot is not None:
       idx = spot
     else:
-      for i, site in enumerate(self.sites):
+      for i in range(len(self.sites)):
         site_location = list(self.child_locations.values())[i]
-        if type(site) == str and site == resource.name:
-          idx = i
-          break
         if site_location == location:
           idx = i
           break
 
+    if idx is None:
+      raise ValueError(f"无法为资源 {resource.name} 确定 ItemizedCarrier Site")
     if not reassign and self.sites[idx] is not None:
       raise ValueError(f"a site with index {idx} already exists")
+    if self.resource_sites is not None:
+      expected_uuid = self.resource_sites[idx].occupied_material_uuid
+      resource_uuid = str(getattr(resource, "unilabos_uuid", "") or "")
+      if expected_uuid:
+        if resource_uuid and resource_uuid != expected_uuid:
+          raise ValueError(
+            f"ItemizedCarrier {self.name} 的 Site {self.resource_sites[idx].label} "
+            f"期望物料 UUID {expected_uuid!r}，实际为 {resource_uuid!r}"
+          )
+        if not resource_uuid:
+          resource.unilabos_uuid = expected_uuid
+          resource_uuid = expected_uuid
+      if not resource_uuid:
+        raise ValueError(f"物料 {resource.name} 缺少微后端分配的 UUID，不能放入 Site")
     location = list(self.child_locations.values())[idx]
     super().assign_child_resource(resource, location=location, reassign=reassign)
     self.sites[idx] = resource
+    if self.resource_sites is not None:
+      self.resource_sites[idx] = self.resource_sites[idx].model_copy(
+        update={"occupied_material_uuid": resource_uuid}
+      )
 
   def assign_resource_to_site(self, resource: ResourcePLR, spot: int):
     if self.sites[spot] is not None and not isinstance(self.sites[spot], ResourceHolder):
@@ -160,6 +256,10 @@ class ItemizedCarrier(ResourcePLR):
     for spot, res in enumerate(self.sites):
       if res == resource:
         self.sites[spot] = None
+        if self.resource_sites is not None:
+          self.resource_sites[spot] = self.resource_sites[spot].model_copy(
+            update={"occupied_material_uuid": None}
+          )
         found = True
         break
     if not found:
@@ -393,31 +493,30 @@ class ItemizedCarrier(ResourcePLR):
 
   def get_resources(self) -> List[ResourcePLR]:
     """Get all resources assigned to this carrier."""
-    return [resource for resource in self.sites.values() if resource is not None]
+    return [resource for resource in self.sites if resource is not None]
 
   def __eq__(self, other):
-    return super().__eq__(other) and self.sites == other.sites
+    return (
+      super().__eq__(other)
+      and self.sites == other.sites
+      and self.resource_sites == other.resource_sites
+    )
 
   def get_free_sites(self) -> List[int]:
-    return [spot for spot, resource in self.sites.items() if resource is None]
+    return [spot for spot, resource in enumerate(self.sites) if resource is None]
 
   def serialize(self):
+    if self.resource_sites is None:
+      raise ValueError(
+        f"ItemizedCarrier {self.name} 缺少微后端返回的 canonical ResourceSite 快照"
+      )
     return {
       **super().serialize(),
       "num_items_x": self.num_items_x,
       "num_items_y": self.num_items_y,
       "num_items_z": self.num_items_z,
       "layout": self.layout,
-      "sites": [{
-        "label": str(identifier),
-        "visible": False if identifier in self.invisible_slots else True,
-        "occupied_by": self[identifier].name
-                        if isinstance(self[identifier], ResourcePLR) and not isinstance(self[identifier], ResourceHolder) else
-                        self[identifier] if isinstance(self[identifier], str) else None,
-        "position": {"x": location.x, "y": location.y, "z": location.z},
-        "size": self.child_size[identifier],
-        "content_type": ["bottle", "container", "tube", "bottle_carrier", "tip_rack"]
-      } for identifier, location in self.child_locations.items()]
+      "sites": [site.model_dump() for site in self.resource_sites],
     }
 
 
@@ -430,7 +529,12 @@ class BottleCarrier(ItemizedCarrier):
         size_x: float,
         size_y: float,
         size_z: float,
-        sites: Optional[Dict[Union[int, str], ResourceHolder]] = None,
+        sites: Optional[
+            Union[
+                Dict[Union[int, str], Optional[ResourcePLR]],
+                Sequence[Union[ResourceSite, Dict[str, Any]]],
+            ]
+        ] = None,
         category: str = "bottle_carrier",
         model: Optional[str] = None,
         invisible_slots: List[str] = None,

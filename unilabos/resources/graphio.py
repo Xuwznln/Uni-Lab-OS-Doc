@@ -13,20 +13,23 @@ from unilabos_msgs.msg import Resource
 from unilabos.config.config import BasicConfig
 from unilabos.resources.container import RegularContainer
 from unilabos.resources.itemized_carrier import ItemizedCarrier, BottleCarrier
-from unilabos.resources.resource_pose import ResourceDictPosition
-from unilabos.resources.resource_state import (
-    load_all_state_with_unilabos,
-    serialize_all_state_with_unilabos,
+from unilabos.resources.objects.joint_state import ResourceJointState
+from unilabos.resources.objects.pose import (
+    ResourceDictPosition,
+    ResourceDictPositionObject,
 )
-from unilabos.ros.msgs.message_converter import convert_to_ros_msg
-from unilabos.resources.resource_tracker import (
+from unilabos.resources.objects.resource import (
     EXTRA_RESOURCE_CLASS,
+    EXTRA_RESOURCE_JOINT_STATE,
     EXTRA_RESOURCE_META_DATA,
     EXTRA_RESOURCE_POSE,
     RESOURCE_ROOT_FIELDS,
-    TRACKER_STATE_KEYS,
+)
+from unilabos.resources.objects.site import ResourceSite
+from unilabos.resources.objects.state import TRACKER_STATE_KEYS
+from unilabos.ros.msgs.message_converter import convert_to_ros_msg
+from unilabos.resources.resource_tracker import (
     ResourceDictInstance,
-    ResourceSite,
     ResourceTreeSet,
     apply_plr_site_metadata,
     extract_plr_sites,
@@ -64,7 +67,6 @@ def canonicalize_nodes_data(
 
     # 第一步：基本预处理（处理graphml的label字段）
     outer_host_node_id = None
-    selector_to_uuids: Dict[str, set[str]] = {}
     for node in nodes:
         if not node.get("uuid"):
             transport_uuid = (node.get("data") or {}).get("unilabos_uuid")
@@ -74,15 +76,6 @@ def canonicalize_nodes_data(
                     "-g strict import 必须携带资源/Site UUID"
                 )
             node["uuid"] = str(transport_uuid)
-        for selector in (node.get("name"), node.get("id"), node.get("label")):
-            if selector:
-                selector_to_uuids.setdefault(str(selector), set()).add(str(node["uuid"]))
-    material_uuid_by_name = {
-        selector: next(iter(uuids))
-        for selector, uuids in selector_to_uuids.items()
-        if len(uuids) == 1
-    }
-
     for idx, node in enumerate(nodes):
         if node.get("label") is not None:
             node_id = node.pop("label")
@@ -97,35 +90,35 @@ def canonicalize_nodes_data(
         if node.get("name", None) is None:
             node["name"] = node.get("id")
             print_status(f"Warning: Node {node.get('id', 'unknown')} missing 'name', defaulting to {node['name']}", "warning")
-        if "position" not in node:
-            dynamic_position = {}
-            x = node.pop("x", None)
-            if x is not None:
-                dynamic_position["x"] = x
-            y = node.pop("y", None)
-            if y is not None:
-                dynamic_position["y"] = y
-            z = node.pop("z", None)
-            if z is not None:
-                dynamic_position["z"] = z
-            node["position"] = dynamic_position or None
-        elif node["position"] is None:
-            conflicting_axes = [axis for axis in ("x", "y", "z") if node.get(axis) is not None]
-            if conflicting_axes:
-                raise ValueError(
-                    f"资源 {node.get('id', node.get('name'))} 的 position=null "
-                    f"与旧坐标字段 {conflicting_axes} 冲突"
-                )
-        elif not isinstance(node["position"], dict):
+        if "position" in node:
             raise ValueError(
-                f"资源 {node.get('id', node.get('name'))} 的 position 必须是 xyz 对象或 null"
+                f"资源 {node.get('id', node.get('name'))} 的根字段 position 已删除，"
+                "请使用 pose.position"
             )
+        legacy_position = {
+            axis: node.pop(axis)
+            for axis in ("x", "y", "z")
+            if node.get(axis) is not None
+        }
+        if legacy_position:
+            raw_pose = copy.deepcopy(node.get("pose") or {})
+            if not isinstance(raw_pose, dict):
+                raise ValueError(
+                    f"资源 {node.get('id', node.get('name'))} 的 pose 必须是对象"
+                )
+            if raw_pose.get("position") not in (None, legacy_position):
+                raise ValueError(
+                    f"资源 {node.get('id', node.get('name'))} 的 pose.position "
+                    "与旧 x/y/z 坐标冲突"
+                )
+            raw_pose["position"] = legacy_position
+            node["pose"] = raw_pose
         if "sample_id" in node:
             sample_id = node.pop("sample_id")
             if sample_id:
                 logger.error(f"{node}的sample_id参数已弃用，sample_id: {sample_id}")
         for k in list(node.keys()):
-            if k not in RESOURCE_ROOT_FIELDS and k not in ("position", "children"):
+            if k not in RESOURCE_ROOT_FIELDS and k != "children":
                 v = node.pop(k)
                 node["config"][k] = v
     if outer_host_node_id is not None:
@@ -148,7 +141,7 @@ def canonicalize_nodes_data(
         try:
             # print_status(f"DeviceId: {node['id']}, Class: {node['class']}", "info")
             # 使用标准化方法
-            resource_instance = ResourceDictInstance.get_resource_instance_from_dict(node, material_uuid_by_name)
+            resource_instance = ResourceDictInstance.get_resource_instance_from_dict(node)
             known_nodes[node["id"]] = resource_instance
             uuid_to_instance[resource_instance.res_content.uuid] = resource_instance
             standardized_instances.append(resource_instance)
@@ -631,8 +624,6 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
         raise ImportError("pylabrobot not found")
 
     resource = copy.deepcopy(resource)
-    selector_to_uuids: Dict[str, set[str]] = {}
-    material_name_by_uuid: Dict[str, str] = {}
 
     def prepare_identity(node: dict) -> None:
         if not node.get("uuid"):
@@ -642,21 +633,12 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
                     f"资源 {node.get('id', node.get('name'))} 缺少微后端分配的 UUID"
                 )
             node["uuid"] = str(transport_uuid)
-        material_name_by_uuid[str(node["uuid"])] = str(node.get("name") or node.get("id") or node["uuid"])
-        for selector in (node.get("name"), node.get("id")):
-            if selector:
-                selector_to_uuids.setdefault(str(selector), set()).add(str(node["uuid"]))
         children = node.get("children") or []
         child_values = children.values() if isinstance(children, dict) else children
         for child in child_values:
             prepare_identity(child)
 
     prepare_identity(resource)
-    material_uuid_by_name = {
-        selector: next(iter(uuids))
-        for selector, uuids in selector_to_uuids.items()
-        if len(uuids) == 1
-    }
 
     def tracker_state(resource_dict: dict) -> dict:
         """兼容根字段新形态和 data 内旧形态，组装 PLR state。"""
@@ -727,25 +709,31 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
                     f"资源 {resource['name']} 的根字段 meta_data 与 config.meta_data 冲突"
                 )
         plr_extra[EXTRA_RESOURCE_META_DATA] = copy.deepcopy(root_meta_data)
-        plr_extra[EXTRA_RESOURCE_POSE] = ResourceDictPosition.model_validate(
+        normalized_pose = ResourceDictPosition.model_validate(
             resource.get("pose") or {}
-        ).model_dump()
+        )
+        plr_extra[EXTRA_RESOURCE_POSE] = normalized_pose.model_dump(
+            exclude={"position"}
+        )
+        if resource.get("joint_state") is not None:
+            plr_extra[EXTRA_RESOURCE_JOINT_STATE] = ResourceJointState.model_validate(
+                resource["joint_state"]
+            ).model_dump()
         all_extras[resource["name"]] = plr_extra
         if root_sites is not None:
             normalized_sites = []
             for ordinal, raw_site in enumerate(root_sites):
                 site = copy.deepcopy(raw_site)
                 normalized_sites.append(
-                    ResourceSite.model_validate(
-                        site,
-                        context={"material_uuid_by_name": material_uuid_by_name},
-                    ).model_dump()
+                    ResourceSite.model_validate(site).model_dump()
                 )
             all_sites[resource["name"]] = normalized_sites
             root_sites = normalized_sites
-        dynamic_position = resource.get("position")
-        if dynamic_position is not None and not isinstance(dynamic_position, dict):
-            raise ValueError(f"资源 {resource['name']} 的 position 必须是 xyz 对象或 null")
+        actual_position = (
+            normalized_pose.position.model_dump()
+            if normalized_pose.position is not None
+            else None
+        )
         d = {
             "name": resource["name"],
             "type": config.get("type", resource["type"]),
@@ -753,8 +741,8 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
             "size_y": config.get("size_y", 0),
             "size_z": config.get("size_z", 0),
             "location": (
-                {**dynamic_position, "type": "Coordinate"}
-                if dynamic_position is not None
+                {**actual_position, "type": "Coordinate"}
+                if actual_position is not None
                 else None
             ),
             "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},  # Resource如果没有rotation，是plr版本太低
@@ -773,11 +761,7 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
 
             site_cls = find_subclass(d["type"], ResourcePLR)
             if site_cls is not None and plr_class_accepts_serialized_sites(site_cls):
-                d["sites"] = sites_for_plr_deserialization(
-                    site_cls,
-                    root_sites,
-                    material_name_by_uuid,
-                )
+                d["sites"] = sites_for_plr_deserialization(root_sites)
         if not plr_model:
             d.pop("model")
         return d
@@ -791,7 +775,7 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
     if "category" not in spect.parameters:
         d.pop("category")
     resource_plr = sub_cls.deserialize(d, allow_marshal=True)
-    load_all_state_with_unilabos(resource_plr, all_states)
+    resource_plr.load_all_state(all_states)
     def restore_resource_identity(current: "ResourcePLR") -> None:
         current.unilabos_extra = copy.deepcopy(all_extras.get(current.name, {}))
         set_plr_template_name(current, all_templates.get(current.name, current.__class__.__name__))
@@ -846,15 +830,21 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
                 f"资源 {d['name']} 的 unilabos_extra.{EXTRA_RESOURCE_META_DATA} 必须是对象"
             )
         static_pose = plr_extra.pop(EXTRA_RESOURCE_POSE, None)
+        joint_state = plr_extra.pop(EXTRA_RESOURCE_JOINT_STATE, None)
         state = copy.deepcopy(all_states[d["name"]])
         tracker_roots = {}
         for state_key in TRACKER_STATE_KEYS:
             if state_key in state:
                 tracker_roots[state_key] = state.pop(state_key)
-        dynamic_position = (
+        actual_position = (
             {"x": d["location"]["x"], "y": d["location"]["y"], "z": d["location"]["z"]}
             if d["location"] is not None
             else None
+        )
+        sidecar_position = (
+            copy.deepcopy(static_pose.get("position"))
+            if isinstance(static_pose, dict) and "position" in static_pose
+            else missing
         )
         if static_pose is None:
             static_pose = {
@@ -867,9 +857,17 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
                 "layout": d.get("layout", "x-y"),
                 "cross_section_type": d.get("cross_section_type", "rectangle"),
             }
-            if dynamic_position is not None:
-                static_pose["position"] = dynamic_position
-                static_pose["position3d"] = dynamic_position
+        if actual_position is not None:
+            if sidecar_position is not missing:
+                normalized_sidecar_position = ResourceDictPositionObject.model_validate(
+                    sidecar_position
+                ).model_dump()
+                if normalized_sidecar_position != actual_position:
+                    raise ValueError(
+                        f"PLR 资源 {d['name']} 的 location 与 "
+                        f"unilabos_extra.{EXTRA_RESOURCE_POSE}.position 冲突"
+                    )
+            static_pose["position"] = actual_position
         r = {
             "id": d["name"],
             "uuid": getattr(plr_node, "unilabos_uuid", ""),
@@ -887,14 +885,18 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
             "type": replace_plr_type_to_ulab(d.get("category")),  # FIXME plr自带的type是python class name
             "class": d.get("class", ""),
             "template_name": get_plr_template_name(plr_node, d),
-            "position": dynamic_position,
             "pose": static_pose,
+            "joint_state": joint_state,
             "config": {
                 k: v
                 for k, v in d.items()
                 if k not in ["name", "children", "parent_name", "location", "sites", "template_name"]
             },
             "data": state,
+            # 未被提升为 canonical 根字段的 PLR sidecar 仍须以对象形态保留。
+            # ResourceDict 对 data/extra 都执行严格对象校验，不能依赖字段缺失
+            # 或 PLR serialize() 的偶然输出。
+            "extra": plr_extra,
             "sites": [site.model_dump() for site in site_defs] if site_defs is not None else None,
             **tracker_roots,
         }
@@ -903,7 +905,7 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
         return r
 
     d = resource_plr.serialize()
-    all_states = serialize_all_state_with_unilabos(resource_plr)
+    all_states = resource_plr.serialize_all_state()
     r = resource_plr_to_ulab_inner(resource_plr, d, all_states, with_children)
 
     return r

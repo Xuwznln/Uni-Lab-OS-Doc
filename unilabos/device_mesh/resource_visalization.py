@@ -219,7 +219,7 @@ class ResourceVisualization:
                 "1. 已安装ROS 2 (推荐使用 ros-jazzy-desktop-full)\n"
                 "2. 已激活Conda环境: conda activate unilab\n"
                 "3. 或手动source ROS 2 setup文件: source /opt/ros/jazzy/setup.bash\n"
-                "4. 或者使用 --backend basic 参数跳过 ROS2 runtime"
+                "4. 或者使用 --backend hostlink 启动无需 ROS2 的通信运行时"
             )
 
         try:

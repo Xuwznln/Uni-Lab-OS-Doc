@@ -21,15 +21,14 @@ from rosidl_parser.definition import UnboundedSequence, NamespacedType, BasicTyp
 from unilabos.utils import logger
 from unilabos.utils.import_manager import ImportManager
 from unilabos.config.config import ROSConfig
-from unilabos.resources.resource_pose import ResourceDictPosition
+from unilabos.resources.objects.joint_state import ResourceJointState
+from unilabos.resources.objects.pose import ResourceDictPosition
+
+ROS_CONFIG_POSE_POSITION_UNKNOWN = "unilabos_resource_pose_position_unknown"
 
 # 定义泛型类型
 T = TypeVar("T")
 DataClassT = TypeVar("DataClassT")
-
-# ROS Resource.pose.position 不能表达 null。动态位置未知时在 config 中携带
-# 仅供 Adapter 使用的标记，反序列化时立即移除，避免把 Pose() 的零值误当事实。
-ROS_CONFIG_POSITION_UNKNOWN = "unilabos_resource_position_unknown"
 
 # 从配置中获取需要导入的模块列表
 ROS_MODULES = ROSConfig.modules
@@ -47,6 +46,8 @@ Int32 = msg_converter_manager.get_class("std_msgs.msg:Int32")
 Int64 = msg_converter_manager.get_class("std_msgs.msg:Int64")
 String = msg_converter_manager.get_class("std_msgs.msg:String")
 Bool = msg_converter_manager.get_class("std_msgs.msg:Bool")
+"""sensor_msgs"""
+JointState = msg_converter_manager.get_class("sensor_msgs.msg:JointState")
 """nav2_msgs"""
 NavigateToPose = msg_converter_manager.get_class("nav2_msgs.action:NavigateToPose")
 NavigateThroughPoses = msg_converter_manager.get_class("nav2_msgs.action:NavigateThroughPoses")
@@ -129,7 +130,41 @@ for py_msgtype in imsg.__all__:
             traceback.print_exc()
             logger.debug(f"Failed to load Protocol class: {py_msgtype}")
 
+def _resource_to_ros(x: dict) -> Any:
+    canonical_pose = ResourceDictPosition.model_validate(x.get("pose") or {})
+    position = canonical_pose.position
+    return Resource(
+        id=x.get("id", ""),
+        name=x.get("name", ""),
+        sample_id=x.get("sample_id", "") or "",
+        children=list(x.get("children", [])),
+        parent=x.get("parent", "") or "",
+        type=x.get("type", ""),
+        category=x.get("class", "") or x.get("type", ""),
+        pose=Pose(
+            position=Point(
+                x=float(position.x) if position is not None else 0.0,
+                y=float(position.y) if position is not None else 0.0,
+                z=float(position.z) if position is not None else 0.0,
+            )
+        ),
+        config=json.dumps(obtain_config_with_root_fields(x)),
+        data=json.dumps(obtain_data_with_uuid(x)),
+    )
+
+
+def _joint_state_to_ros(x: Any) -> Any:
+    canonical = ResourceJointState.model_validate(_extract_data(x))
+    return JointState(
+        name=list(canonical.name),
+        position=list(canonical.position),
+        velocity=list(canonical.velocity),
+        effort=list(canonical.effort),
+    )
+
+
 # Python到ROS消息转换器
+# todo: ros2的resource转换后续移除，走str解析
 _msg_converter: Dict[Type, Any] = {
     float: float,
     Float64: lambda x: Float64(data=float(x)),
@@ -139,6 +174,7 @@ _msg_converter: Dict[Type, Any] = {
     Int64: lambda x: Int64(data=int(x)),
     bool: bool,
     Bool: lambda x: Bool(data=bool(x)),
+    JointState: _joint_state_to_ros,
     str: str,
     String: lambda x: String(data=str(x)),
     Point: lambda x: (
@@ -146,28 +182,7 @@ _msg_converter: Dict[Type, Any] = {
         if not isinstance(x, dict)
         else Point(x=float(x.get("x", 0.0)), y=float(x.get("y", 0.0)), z=float(x.get("z", 0.0)))
     ),
-    Resource: lambda x: Resource(
-        id=x.get("id", ""),
-        name=x.get("name", ""),
-        sample_id=x.get("sample_id", "") or "",
-        children=list(x.get("children", [])),
-        parent=x.get("parent", "") or "",
-        type=x.get("type", ""),
-        category=x.get("class", "") or x.get("type", ""),
-        pose=(
-            Pose(
-                position=Point(
-                    x=float(x.get("position", {}).get("x", 0.0)),
-                    y=float(x.get("position", {}).get("y", 0.0)),
-                    z=float(x.get("position", {}).get("z", 0.0)),
-                )
-            )
-            if x.get("position", None) is not None
-            else Pose()
-        ),
-        config=json.dumps(obtain_config_with_root_fields(x)),
-        data=json.dumps(obtain_data_with_uuid(x)),
-    ),
+    Resource: _resource_to_ros,
 }
 
 def obtain_config_with_root_fields(x: dict):
@@ -204,34 +219,79 @@ def obtain_config_with_root_fields(x: dict):
             raise ValueError("根字段 meta_data 与 config.meta_data 冲突")
     # ROS Resource 尚无 meta_data 字段；该键仅用于传输，入站后立即移除。
     config[EXTRA_RESOURCE_META_DATA] = root_meta_data
-    position_unknown_marker = config.pop(ROS_CONFIG_POSITION_UNKNOWN, None)
-    if position_unknown_marker is not None and not isinstance(position_unknown_marker, bool):
-        raise ValueError(f"config.{ROS_CONFIG_POSITION_UNKNOWN} 必须是布尔值")
-    if x.get("position") is None:
-        config[ROS_CONFIG_POSITION_UNKNOWN] = True
-    elif position_unknown_marker is True:
-        raise ValueError("根字段 position 与 ROS config 的未知位置标记冲突")
-
-    root_pose = x.get("pose")
-    if root_pose is not None:
-        if isinstance(root_pose, BaseModel):
-            root_pose = root_pose.model_dump()
-        normalized_root_pose = ResourceDictPosition.model_validate(root_pose).model_dump()
-        config_pose = config.get("pose")
-        if config_pose is not None:
-            if isinstance(config_pose, BaseModel):
-                config_pose = config_pose.model_dump()
-            normalized_config_pose = ResourceDictPosition.model_validate(config_pose).model_dump()
-            if normalized_config_pose != normalized_root_pose:
-                raise ValueError("根字段 pose 与 config.pose 冲突")
-        config["pose"] = normalized_root_pose
-    barcode = x.get("barcode", "")
-    if barcode and not isinstance(barcode, dict) and "barcode" not in config:
+    root_pose = x.get("pose") or {}
+    if isinstance(root_pose, BaseModel):
+        root_pose = root_pose.model_dump()
+    normalized_root_pose = ResourceDictPosition.model_validate(root_pose)
+    unknown_marker = config.pop(ROS_CONFIG_POSE_POSITION_UNKNOWN, None)
+    if unknown_marker is not None and not isinstance(unknown_marker, bool):
+        raise ValueError(
+            f"config.{ROS_CONFIG_POSE_POSITION_UNKNOWN} 必须是布尔值"
+        )
+    if normalized_root_pose.position is None:
+        config[ROS_CONFIG_POSE_POSITION_UNKNOWN] = True
+    elif unknown_marker is True:
+        raise ValueError(
+            f"pose.position 与 config.{ROS_CONFIG_POSE_POSITION_UNKNOWN} 冲突"
+        )
+    config_pose = config.get("pose")
+    if config_pose is not None:
+        if isinstance(config_pose, BaseModel):
+            config_pose = config_pose.model_dump()
+        if not isinstance(config_pose, dict):
+            raise ValueError("config.pose 必须是对象")
+        config_has_position = "position" in config_pose
+        normalized_config_pose = ResourceDictPosition.model_validate(config_pose)
+        if (
+            config_has_position
+            and normalized_config_pose.position != normalized_root_pose.position
+        ):
+            raise ValueError("根字段 pose.position 与 config.pose.position 冲突")
+        if normalized_config_pose.model_dump(exclude={"position"}) != (
+            normalized_root_pose.model_dump(exclude={"position"})
+        ):
+            raise ValueError("根字段 pose 与 config.pose 冲突")
+    # ROS Resource.pose 承载唯一实际位置；config 只暂存其余 pose 字段。
+    config["pose"] = normalized_root_pose.model_dump(exclude={"position"})
+    barcode = x.get("barcode", "") or ""
+    barcode_symbology = x.get("barcode_symbology", "") or ""
+    config_barcode = config.get("barcode")
+    config_barcode_data = ""
+    config_barcode_symbology = ""
+    barcode_position = "front"
+    if isinstance(config_barcode, dict):
+        config_barcode_data = config_barcode.get("data") or ""
+        config_barcode_symbology = config_barcode.get("symbology") or ""
+        barcode_position = config_barcode.get("position_on_resource") or "front"
+    elif config_barcode:
+        config_barcode_data = config_barcode
+    if not isinstance(barcode, str):
+        raise ValueError("根字段 barcode 必须是字符串")
+    if not isinstance(barcode_symbology, str):
+        raise ValueError("根字段 barcode_symbology 必须是字符串")
+    if not isinstance(config_barcode_data, str):
+        raise ValueError("config.barcode.data 必须是字符串")
+    if not isinstance(config_barcode_symbology, str):
+        raise ValueError("config.barcode.symbology 必须是字符串")
+    if barcode and config_barcode_data and barcode != config_barcode_data:
+        raise ValueError("根字段 barcode 与 config.barcode.data 冲突")
+    if (
+        barcode_symbology
+        and config_barcode_symbology
+        and barcode_symbology != config_barcode_symbology
+    ):
+        raise ValueError(
+            "根字段 barcode_symbology 与 config.barcode.symbology 冲突"
+        )
+    resolved_barcode = barcode or config_barcode_data
+    if resolved_barcode:
         config["barcode"] = {
-            "data": barcode,
-            "symbology": x.get("barcode_symbology", "") or "",
-            "position_on_resource": "front",
+            "data": resolved_barcode,
+            "symbology": barcode_symbology or config_barcode_symbology,
+            "position_on_resource": barcode_position,
         }
+    else:
+        config.pop("barcode", None)
     if x.get("template_name"):
         if config.get("template_name") not in (None, x["template_name"]):
             raise ValueError("根字段 template_name 与 config.template_name 冲突")
@@ -293,7 +353,7 @@ def json_or_yaml_loads(data: str) -> Any:
 
 
 def resource_msg_to_dict(x: Any) -> Dict[str, Any]:
-    """把 ROS Resource 转成规范字典，并恢复可空动态位置。"""
+    """把 ROS Resource 转成规范字典，并恢复唯一的 ``pose.position``。"""
 
     from unilabos.resources.resource_tracker import EXTRA_RESOURCE_META_DATA
 
@@ -304,21 +364,36 @@ def resource_msg_to_dict(x: Any) -> Dict[str, Any]:
     meta_data = config.pop(EXTRA_RESOURCE_META_DATA, missing)
     if meta_data is not missing and not isinstance(meta_data, dict):
         raise ValueError(f"config.{EXTRA_RESOURCE_META_DATA} 必须是对象")
-    position_unknown = config.pop(ROS_CONFIG_POSITION_UNKNOWN, False)
+    encoded_position = {
+        "x": float(x.pose.position.x),
+        "y": float(x.pose.position.y),
+        "z": float(x.pose.position.z),
+    }
+    position_unknown = config.pop(ROS_CONFIG_POSE_POSITION_UNKNOWN, False)
     if not isinstance(position_unknown, bool):
-        raise ValueError(f"config.{ROS_CONFIG_POSITION_UNKNOWN} 必须是布尔值")
-    if position_unknown:
-        # presence=false 时 Pose 只是 ROS 消息的占位 padding，不承载位置事实。
-        position = None
+        raise ValueError(f"config.{ROS_CONFIG_POSE_POSITION_UNKNOWN} 必须是布尔值")
+    if not position_unknown and not all(
+        math.isfinite(value) for value in encoded_position.values()
+    ):
+        raise ValueError("ROS Resource.pose.position 必须是有限 xyz")
+    config_pose = config.pop("pose", None)
+    if config_pose is None:
+        canonical_pose = ResourceDictPosition()
     else:
-        encoded_position = {
-            "x": float(x.pose.position.x),
-            "y": float(x.pose.position.y),
-            "z": float(x.pose.position.z),
-        }
-        if not all(math.isfinite(value) for value in encoded_position.values()):
-            raise ValueError("ROS Resource.pose.position 必须是有限 xyz")
-        position = encoded_position
+        if not isinstance(config_pose, dict):
+            raise ValueError("config.pose 必须是对象")
+        config_has_position = "position" in config_pose
+        canonical_pose = ResourceDictPosition.model_validate(config_pose)
+        if (
+            config_has_position
+            and canonical_pose.position is not None
+            and (
+                position_unknown
+                or canonical_pose.position.model_dump() != encoded_position
+            )
+        ):
+            raise ValueError("ROS Resource.pose.position 与 config.pose.position 冲突")
+    canonical_pose.position = None if position_unknown else encoded_position
     resource = {
         "id": x.id,
         "name": x.name,
@@ -327,7 +402,7 @@ def resource_msg_to_dict(x: Any) -> Dict[str, Any]:
         "parent": x.parent if x.parent else None,
         "type": x.type,
         "class": "",
-        "position": position,
+        "pose": canonical_pose.model_dump(),
         "config": config,
         "data": json_or_yaml_loads(x.data or "{}"),
     }
@@ -346,6 +421,12 @@ _msg_converter_back: Dict[Type, Any] = {
     Int64: lambda x: x.data,
     bool: bool,
     Bool: lambda x: x.data,
+    JointState: lambda x: ResourceJointState(
+        name=list(x.name),
+        position=list(x.position),
+        velocity=list(x.velocity),
+        effort=list(x.effort),
+    ).model_dump(),
     str: str,
     String: lambda x: x.data,
     Point: lambda x: Point3D(x=x.x, y=x.y, z=x.z),

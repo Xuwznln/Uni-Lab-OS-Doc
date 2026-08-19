@@ -21,7 +21,8 @@ from unilabos.registry.decorators import (
     topic_config,
 )
 from unilabos.registry.placeholder_type import DeviceSlot, ResourceSlot
-from unilabos.resources.resource_tracker import ResourceDict, ResourceTreeSet
+from unilabos.resources.objects.resource import ResourceDict
+from unilabos.resources.resource_tracker import ResourceTreeSet
 if TYPE_CHECKING:
     from unilabos.device_runtime.node import DeviceNode
 

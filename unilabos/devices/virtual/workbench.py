@@ -35,11 +35,10 @@ from unilabos.registry.decorators import (
 from unilabos.device_runtime.node import DeviceNode
 from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.resources.resource_tracker import (
-    SampleUUIDsType,
-    LabSample,
     ResourceTreeSet,
 )
-from unilabos.resources.resource_pose import (
+from unilabos.resources.objects.sample import LabSample, SampleUUIDsType
+from unilabos.resources.objects.pose import (
     ResourceDictPosition,
     ResourceDictPositionObject,
     ResourceDictPositionSize,
@@ -136,7 +135,7 @@ VIRTUAL_WORKBENCH_AVAILABLE_SITES: List[SiteDefinition] = [
             position3d=ResourceDictPositionObject(x=100.0, y=100.0, z=0.0),
             size=ResourceDictPositionSize(width=100.0, height=100.0, depth=20.0),
         ),
-        content_type=["workbench_material"],
+        allowed_resource_categories=["workbench_material"],
         parent_link="heating_station_1",
         description="虚拟工作台加热位 1",
         meta_data={"station_id": 1, "role": "heating"},
@@ -149,7 +148,7 @@ VIRTUAL_WORKBENCH_AVAILABLE_SITES: List[SiteDefinition] = [
             position3d=ResourceDictPositionObject(x=250.0, y=100.0, z=0.0),
             size=ResourceDictPositionSize(width=100.0, height=100.0, depth=20.0),
         ),
-        content_type=["workbench_material"],
+        allowed_resource_categories=["workbench_material"],
         parent_link="heating_station_2",
         description="虚拟工作台加热位 2",
         meta_data={"station_id": 2, "role": "heating"},
@@ -162,7 +161,7 @@ VIRTUAL_WORKBENCH_AVAILABLE_SITES: List[SiteDefinition] = [
             position3d=ResourceDictPositionObject(x=400.0, y=100.0, z=0.0),
             size=ResourceDictPositionSize(width=100.0, height=100.0, depth=20.0),
         ),
-        content_type=["workbench_material"],
+        allowed_resource_categories=["workbench_material"],
         parent_link="heating_station_3",
         description="虚拟工作台加热位 3",
         meta_data={"station_id": 3, "role": "heating"},

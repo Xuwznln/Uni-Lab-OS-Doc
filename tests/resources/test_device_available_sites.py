@@ -35,8 +35,7 @@ AVAILABLE_SITES = [
             "size": {"width": 10, "height": 20, "depth": 30},
             "rotation": {"x": 0, "y": 0, "z": 90},
         },
-        "content_type": ["plate", "plate"],
-        "allowed_resource_template_uuids": ["template-1"],
+        "allowed_resource_categories": ["plate", "plate"],
     }
 ]
 
@@ -88,7 +87,7 @@ def test_device_decorator_emits_root_available_sites_without_instance_identity()
     assert site["pose"]["position3d"] == {"x": 1.0, "y": 2.0, "z": 3.0}
     assert site["pose"]["size"]["height"] == 20
     assert site["pose"]["rotation"]["z"] == 90
-    assert site["content_type"] == ["plate"]
+    assert site["allowed_resource_categories"] == ["plate"]
     assert {"uuid", "material_uuid", "occupied_material_uuid", "template_name"}.isdisjoint(site)
 
 
@@ -343,8 +342,7 @@ def test_device_report_validates_backend_snapshot_without_mutation():
     owner_uuid = str(uuid4())
     device_config = _device_resource(
         uuid=owner_uuid,
-        position={"x": 40, "y": 50, "z": 60},
-        pose={"position": {"x": 4, "y": 5, "z": 6}},
+        pose={"position": {"x": 40, "y": 50, "z": 60}},
         sites=_instantiated_sites(owner_uuid, "available_sites_test_device"),
     )
     resources = ResourceTreeSet([ResourceTreeInstance(device_config)])
@@ -356,8 +354,8 @@ def test_device_report_validates_backend_snapshot_without_mutation():
 
     assert prepare_devices_for_report(resources, registry) == 1
     resource = device_config.res_content
-    assert resource.position.model_dump() == {"x": 40.0, "y": 50.0, "z": 60.0}
-    assert resource.pose.position.model_dump() == {"x": 4.0, "y": 5.0, "z": 6.0}
+    assert not hasattr(resource, "position")
+    assert resource.pose.position.model_dump() == {"x": 40.0, "y": 50.0, "z": 60.0}
     assert resource.template_name == "available_sites_test_device"
     assert resource.sites is not None
     first_site_uuid = resource.sites[0].uuid

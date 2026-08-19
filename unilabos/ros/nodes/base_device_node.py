@@ -51,10 +51,7 @@ from unilabos.resources.graphio import (
     initialize_resources,
 )
 from unilabos.resources.plr_additional_res_reg import register
-from unilabos.resources.resource_state import (
-    load_all_state_with_unilabos,
-    serialize_all_state_with_unilabos,
-)
+from unilabos.resources.objects.resource import EXTRA_SAMPLE_UUID, ResourceDictType
 from unilabos.ros.msgs.message_converter import (
     String,
     convert_to_ros_msg,
@@ -73,9 +70,7 @@ from unilabos_msgs.srv import (
 from unilabos_msgs.msg import Resource  # type: ignore
 
 from unilabos.resources.resource_tracker import (
-    EXTRA_SAMPLE_UUID,
     DeviceNodeResourceTracker,
-    ResourceDictType,
     ResourceTreeSet,
     ResourceTreeInstance,
     ResourceDictInstance,
@@ -91,7 +86,7 @@ from unilabos.device_runtime.driver_creator import (
 from rclpy.task import Task, Future
 from unilabos.utils.import_manager import default_manager
 from unilabos.utils.log import info, debug, warning, error, critical, logger, trace
-from unilabos.utils.type_check import get_type_class, TypeEncoder, get_result_info_str
+from unilabos.utils.type_check import get_type_class, TypeEncoder, serialize_result_info
 from unilabos.utils.exception import ActionResultError, DeviceActionError
 
 if TYPE_CHECKING:
@@ -715,12 +710,15 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                         liquid_volume=LIQUID_VOLUME,
                         slot_on_deck=slot,
                     )
-                    res.response = get_result_info_str("", True, ret)
+                    res.response = json.dumps(serialize_result_info("", True, ret), ensure_ascii=False)
                 except Exception as e:
                     self.lab_logger().error(
                         f"运行设备的create_resource出错：{create_resource_func}\n{traceback.format_exc()}"
                     )
-                    res.response = get_result_info_str(traceback.format_exc(), False, {})
+                    res.response = json.dumps(
+                        serialize_result_info(traceback.format_exc(), False, {}),
+                        ensure_ascii=False,
+                    )
                 return res
             try:
                 if len(rts.root_nodes) == 1 and parent_resource is not None:
@@ -799,11 +797,17 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                 future.add_done_callback(done_cb)
             except ImportError:
                 self.lab_logger().error("Host请求添加物料时，本环境并不存在pylabrobot")
-                res.response = get_result_info_str(traceback.format_exc(), False, {})
+                res.response = json.dumps(
+                    serialize_result_info(traceback.format_exc(), False, {}),
+                    ensure_ascii=False,
+                )
             except Exception as e:
                 self.lab_logger().error("Host请求添加物料时出错")
                 self.lab_logger().error(traceback.format_exc())
-                res.response = get_result_info_str(traceback.format_exc(), False, {})
+                res.response = json.dumps(
+                    serialize_result_info(traceback.format_exc(), False, {}),
+                    ensure_ascii=False,
+                )
             return res
 
         # noinspection PyTypeChecker
@@ -1136,7 +1140,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                 if isinstance(plr_resource, ResourceDictInstance):
                     self._lab_logger.info(f"跳过 非资源{plr_resource.res_content.name} 的更新")
                     continue
-                states = serialize_all_state_with_unilabos(plr_resource)
+                states = plr_resource.serialize_all_state()
                 original_instance: ResourcePLR = self.resource_tracker.figure_resource(
                     {"uuid": tree.root_node.res_content.uuid}, try_mode=False
                 )
@@ -1204,18 +1208,15 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                             # 只有itemized_carrier在使用，准备弃用
                             site_index = sites.index(original_instance)
                         except ValueError:
-                            # 规范 Site 按占用物料 UUID 匹配，旧 dict 数据回退 occupied_by name。
+                            # canonical Site 只按占用物料 UUID 匹配。
                             for idx, site in enumerate(sites):
                                 if isinstance(site, dict):
                                     occupied_uuid = site.get("occupied_material_uuid")
-                                    occupied_name = site.get("occupied_by")
                                 else:
                                     occupied_uuid = getattr(site, "occupied_material_uuid", None)
-                                    occupied_name = getattr(site, "occupied_by", None)
-                                if (
-                                    occupied_uuid
-                                    and occupied_uuid == getattr(original_instance, "unilabos_uuid", None)
-                                ) or (occupied_name and original_instance.name == occupied_name):
+                                if occupied_uuid and occupied_uuid == getattr(
+                                    original_instance, "unilabos_uuid", None
+                                ):
                                     site_index = idx
                                     break
                                 # 默认资源会放到000，后续必须按 occupied_material_uuid 精确匹配。
@@ -1244,7 +1245,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                 original_instance.location = plr_resource.location
                 original_instance.rotation = plr_resource.rotation
                 original_instance.barcode = plr_resource.barcode
-                load_all_state_with_unilabos(original_instance, states)
+                original_instance.load_all_state(states)
                 child_count = len(original_instance.get_all_children())
                 self.lab_logger().info(
                     f"更新了资源属性 {plr_resource}[{tree.root_node.res_content.uuid}] " f"及其子节点 {child_count} 个"
@@ -2468,12 +2469,15 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                     setattr(
                         result_msg,
                         attr_name,
-                        get_result_info_str(
-                            execution_error,
-                            execution_success,
-                            action_return_value,
-                            suc_type=execution_suc_type,
-                            error_info=execution_error_info,
+                        json.dumps(
+                            serialize_result_info(
+                                execution_error,
+                                execution_success,
+                                action_return_value,
+                                suc_type=execution_suc_type,
+                                error_info=execution_error_info,
+                            ),
+                            ensure_ascii=False,
                         ),
                     )
 

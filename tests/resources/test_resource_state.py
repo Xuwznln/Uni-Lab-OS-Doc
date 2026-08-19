@@ -2,16 +2,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
-from pylabrobot.resources import Container, Resource
+from pylabrobot.resources import Resource
 
-from unilabos.resources.resource_state import (
-    load_all_state_with_unilabos,
-    serialize_all_state_with_unilabos,
-)
 from unilabos.resources.resource_tracker import (
     EXTRA_RESOURCE_CLASS,
     EXTRA_RESOURCE_META_DATA,
     ResourceDict,
+    ResourceTreeSet,
 )
 
 
@@ -30,21 +27,56 @@ def _resource_payload(**overrides):
     return payload
 
 
-def test_data_state_roundtrip_preserves_unilabos_state_and_native_state():
-    resource = Container("material", 10, 10, 10)
-    resource._unilabos_state = {
-        "thing": "stale-value",
-        "device_package_state": {"material_id": "private-id"},
+def test_custom_state_uses_native_hooks_without_reserved_attribute_name(monkeypatch):
+    class CustomStateResource(Resource):
+        def __init__(
+            self,
+            name: str,
+            size_x: float = 10,
+            size_y: float = 10,
+            size_z: float = 10,
+            **kwargs,
+        ):
+            super().__init__(name, size_x, size_y, size_z, **kwargs)
+            self.package_payload = {"material_id": "private-id"}
+
+        def serialize_state(self):
+            return {
+                **super().serialize_state(),
+                "device_package_state": dict(self.package_payload),
+            }
+
+        def load_state(self, state):
+            super().load_state(state)
+            self.package_payload = dict(state["device_package_state"])
+
+    resource = CustomStateResource("material")
+    states = resource.serialize_all_state()
+    assert states[resource.name]["device_package_state"] == {
+        "material_id": "private-id"
     }
+    assert not hasattr(resource, "_unilabos_state")
 
-    states = serialize_all_state_with_unilabos(resource)
-    assert states[resource.name]["thing"] == "material_volume_tracker"
-    assert states[resource.name]["device_package_state"]["material_id"] == "private-id"
+    restored = CustomStateResource("material")
+    restored.package_payload = {}
+    restored.load_all_state(states)
+    assert restored.package_payload == {"material_id": "private-id"}
+    assert restored.serialize_all_state() == states
 
-    restored = Container("material", 10, 10, 10)
-    load_all_state_with_unilabos(restored, states)
-    assert restored._unilabos_state == states[resource.name]
-    assert serialize_all_state_with_unilabos(restored)[resource.name] == states[resource.name]
+    resource.unilabos_uuid = str(uuid4())
+    resource.unilabos_extra = {
+        EXTRA_RESOURCE_CLASS: "CustomStateResource",
+    }
+    tree = ResourceTreeSet.from_plr_resources([resource])
+    root = tree.root_nodes[0].res_content
+    assert root.data["device_package_state"] == {"material_id": "private-id"}
+    assert "_unilabos_state" not in root.data
+
+    monkeypatch.setattr("unilabos.resources.resource_tracker.register", lambda: None)
+    roundtripped = tree.to_plr_resources(skip_devices=False)[0]
+    assert isinstance(roundtripped, CustomStateResource)
+    assert roundtripped.package_payload == {"material_id": "private-id"}
+    assert not hasattr(roundtripped, "_unilabos_state")
 
 
 def test_template_name_extra_is_promoted_to_root():
