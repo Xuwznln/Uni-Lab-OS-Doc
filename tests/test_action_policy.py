@@ -2,13 +2,18 @@ import asyncio
 import ast
 import json
 import time
+from queue import Queue
 
 import pytest
 
-from unilabos.app.ws_client import MessageProcessor, QueueItem, WebSocketClient
+from unilabos.app.ws_client import (
+    DeviceActionManager,
+    JobInfo,
+    JobStatus,
+    MessageProcessor,
+    QueueItem,
+)
 from unilabos.registry.action_policy import (
-    ERROR_DECISION_TARGET_BACKEND,
-    ERROR_DECISION_TARGET_MICRO_BACKEND,
     SUCCESS_TYPE_NORMAL,
     SUCCESS_TYPE_OPERATOR_INTERVENTION,
     SUCCESS_TYPE_SKIP,
@@ -25,10 +30,7 @@ from unilabos.ros.nodes.base_device_node import (
     _native_driver_result_failed,
 )
 from unilabos.ros.nodes.presets.host_node import HostNode
-from unilabos.utils.type_check import (
-    get_result_info_str,
-    serialize_result_info,
-)
+from unilabos.utils.type_check import serialize_result_info
 
 
 class CommunicationError(Exception):
@@ -118,6 +120,15 @@ def test_action_exposes_normalized_policy_in_runtime_and_registry_meta():
     ]["params"] == {"channel": 2}
 
 
+def test_action_without_policy_exposes_empty_registry_object():
+    @action()
+    def run(self):
+        return None
+
+    assert run._action_error_policy == {}
+    assert get_action_meta(run)["error_policy"] == {}
+
+
 def test_ast_scanner_preserves_exception_class_option_mapping():
     source = """
 from unilabos.registry.decorators import action
@@ -154,6 +165,25 @@ class Driver:
     }
 
 
+def test_ast_scanner_defaults_unconfigured_policy_to_empty_object():
+    tree = ast.parse(
+        """
+from unilabos.registry.decorators import action
+
+class Driver:
+    @action()
+    def run(self):
+        pass
+"""
+    )
+    class_node = next(
+        node for node in tree.body if isinstance(node, ast.ClassDef)
+    )
+    extracted = _extract_class_body(class_node, _collect_imports(tree))
+
+    assert extracted["actions"]["run"]["action_args"]["error_policy"] == {}
+
+
 @pytest.mark.parametrize(
     ("suc_type", "return_value"),
     [
@@ -163,9 +193,6 @@ class Driver:
     ],
 )
 def test_result_info_distinguishes_three_success_types(suc_type, return_value):
-    encoded = json.loads(
-        get_result_info_str("", True, return_value, suc_type=suc_type)
-    )
     serialized = serialize_result_info(
         "",
         True,
@@ -173,10 +200,14 @@ def test_result_info_distinguishes_three_success_types(suc_type, return_value):
         suc_type=suc_type,
     )
 
-    assert encoded == serialized
-    assert encoded["suc"] is True
-    assert encoded["suc_type"] == suc_type
-    assert encoded["return_value"] == return_value
+    encoded_at_ros_boundary = json.loads(
+        json.dumps(serialized, ensure_ascii=False)
+    )
+
+    assert encoded_at_ros_boundary == serialized
+    assert serialized["suc"] is True
+    assert serialized["suc_type"] == suc_type
+    assert serialized["return_value"] == return_value
 
 
 def test_failed_result_does_not_claim_success_type():
@@ -261,9 +292,6 @@ def test_failed_result_carries_structured_error_info():
         "exception_mro": ["CommunicationError", "Exception"],
     }
 
-    encoded = json.loads(
-        get_result_info_str("offline", False, None, error_info=error_info)
-    )
     serialized = serialize_result_info(
         "offline",
         False,
@@ -271,9 +299,8 @@ def test_failed_result_carries_structured_error_info():
         error_info=error_info,
     )
 
-    assert encoded == serialized
-    assert encoded["error_info"] == error_info
-    assert "suc_type" not in encoded
+    assert serialized["error_info"] == error_info
+    assert "suc_type" not in serialized
 
 
 def test_native_action_failure_is_not_confused_with_json_command_boolean_data():
@@ -345,86 +372,11 @@ class _Logger:
 
 class _DecisionBridge:
     def __init__(self):
-        self.reports = []
-        self.resolved_reports = []
+        self.required = []
 
     def publish_job_error_decision_required(self, report):
-        self.reports.append(report)
+        self.required.append(report)
         return True
-
-    def publish_job_error_decision_resolved(self, report):
-        self.resolved_reports.append(report)
-        return True
-
-
-def test_ws_resolved_error_decision_uses_documented_envelope():
-    class _Processor:
-        def __init__(self):
-            self.messages = []
-
-        def send_message(self, message):
-            self.messages.append(message)
-            return True
-
-    class _Client:
-        is_disabled = False
-        message_processor = _Processor()
-
-        @staticmethod
-        def is_connected():
-            return True
-
-    client = _Client()
-    report = {"decision_id": "d-1", "selected_action": "abort"}
-
-    assert WebSocketClient.publish_job_error_decision_resolved(client, report)
-    assert client.message_processor.messages == [
-        {"action": "job_error_decision_resolved", "data": report}
-    ]
-
-
-def test_ws_reconnect_replays_pending_and_resolved_decisions(monkeypatch):
-    class _Host:
-        @staticmethod
-        def get_pending_action_error_decisions(decision_target=None):
-            assert decision_target == ERROR_DECISION_TARGET_BACKEND
-            return [{"decision_id": "pending-1"}]
-
-        @staticmethod
-        def get_resolved_action_error_decisions(decision_target=None):
-            assert decision_target == ERROR_DECISION_TARGET_BACKEND
-            return [{"decision_id": "resolved-1"}]
-
-    class _Client:
-        is_disabled = False
-
-        def __init__(self):
-            self.required = []
-            self.resolved = []
-
-        @staticmethod
-        def is_connected():
-            return True
-
-        def publish_job_error_decision_required(self, report):
-            self.required.append(report)
-            return True
-
-        def publish_job_error_decision_resolved(self, report):
-            self.resolved.append(report)
-            return True
-
-    monkeypatch.setattr(
-        HostNode,
-        "get_instance",
-        classmethod(lambda cls, index=0: _Host()),
-    )
-    client = _Client()
-
-    WebSocketClient.report_action_error_decisions(client)
-
-    assert client.required == [{"decision_id": "pending-1"}]
-    assert client.resolved == [{"decision_id": "resolved-1"}]
 
 
 class FakeHostDecisionNode:
@@ -432,10 +384,6 @@ class FakeHostDecisionNode:
         HostNode._ACTION_ERROR_DECISION_TOMBSTONE_TTL_SECONDS
     )
     _begin_action_error_decision = HostNode._begin_action_error_decision
-    _emit_local_action_event = staticmethod(HostNode._emit_local_action_event)
-    _handle_action_error_decision_timeout = (
-        HostNode._handle_action_error_decision_timeout
-    )
     handle_action_error_decision = HostNode.handle_action_error_decision
     _publish_action_error_decision_resolved = (
         HostNode._publish_action_error_decision_resolved
@@ -449,12 +397,6 @@ class FakeHostDecisionNode:
     get_resolved_action_error_decision = (
         HostNode.get_resolved_action_error_decision
     )
-    get_resolved_action_error_decisions = (
-        HostNode.get_resolved_action_error_decisions
-    )
-    replay_action_error_decision_resolution = (
-        HostNode.replay_action_error_decision_resolution
-    )
     _request_goal_cancel = HostNode._request_goal_cancel
     cancel_job = HostNode.cancel_job
     get_pending_action_error_decisions = (
@@ -464,23 +406,15 @@ class FakeHostDecisionNode:
     def __init__(self):
         import threading
 
-        self.bridge = _DecisionBridge()
-        self.bridges = [self.bridge]
+        self.decision_bridge = _DecisionBridge()
+        self.bridges = [self.decision_bridge]
+        self.local_events = []
         self._goals = {"job-1": object()}
         self._pending_action_error_decisions = {}
         self._resolved_action_error_decisions = {}
         self._pending_action_error_decisions_lock = threading.RLock()
         self._canceled_jobs = set()
-        self._error_execution_contexts = {
-            "job-1": {
-                "item": _queue_item(),
-                "action_type": "UniLabJsonCommand",
-                "action_kwargs": {"channel": 1},
-                "sample_material": {},
-                "server_info": None,
-                "retry_count": 0,
-            }
-        }
+        self._inflight_goal_jobs = set()
         self._action_value_mappings = {
             "device-1": {
                 "run": {
@@ -492,6 +426,10 @@ class FakeHostDecisionNode:
                                     {"action": "retry", "label": "重试"},
                                     {"action": "skip", "label": "跳过"},
                                     {"action": "abort", "label": "终止"},
+                                    {
+                                        "action": "operator_intervention",
+                                        "label": "人工替代结果",
+                                    },
                                 ]
                             },
                             "max_retries": 2,
@@ -508,6 +446,9 @@ class FakeHostDecisionNode:
     def lab_logger(self):
         return _Logger()
 
+    def _emit_local_action_event(self, item, event_type, data):
+        self.local_events.append((event_type, data))
+
     def send_goal(self, *args, **kwargs):
         self.sent_goals.append((args, kwargs))
 
@@ -519,14 +460,12 @@ class FakeHostDecisionNode:
         result_data,
     ):
         self.finished.append((item, status, return_info, result_data))
-        self._error_execution_contexts.pop(item.job_id, None)
+        self._inflight_goal_jobs.discard(item.job_id)
         self._goals.pop(item.job_id, None)
         self._canceled_jobs.discard(item.job_id)
 
 
-def _queue_item(
-    error_decision_target=ERROR_DECISION_TARGET_BACKEND,
-):
+def _queue_item():
     return QueueItem(
         task_type="job_call_back_status",
         device_id="device-1",
@@ -535,8 +474,12 @@ def _queue_item(
         job_id="job-1",
         notebook_id="notebook-1",
         device_action_key="/devices/device-1/run",
-        error_decision_target=error_decision_target,
+        node_id="node-1",
     )
+
+
+def _local_event_data(host, event_type):
+    return [data for current_type, data in host.local_events if current_type == event_type]
 
 
 def _error_return_info():
@@ -565,7 +508,6 @@ def _begin_pending(host, policy=None, item=None):
             normalize_error_policy(policy)
         )
     pending_item = item or _queue_item()
-    host._error_execution_contexts["job-1"]["item"] = pending_item
     assert host._begin_action_error_decision(
         pending_item,
         _error_return_info(),
@@ -588,15 +530,16 @@ def _decision(
         "job_id": job_id,
         "device_id": device_id,
         "action": action,
+        "scheduler_updated": True,
         **extra,
     }
 
 
-def test_host_owns_decision_and_publishes_registry_options():
+def test_host_holds_failure_and_publishes_registry_options_to_backend():
     host = FakeHostDecisionNode()
     decision_id = _begin_pending(host)
 
-    report = host.bridge.reports[0]
+    report = _local_event_data(host, "job_error_decision_required")[0]
     assert report["decision_id"] == decision_id
     assert report["device_id"] == "device-1"
     assert report["exception_type"] == "CommunicationError"
@@ -604,11 +547,14 @@ def test_host_owns_decision_and_publishes_registry_options():
         "retry",
         "skip",
         "abort",
+        "operator_intervention",
     ]
     assert report["expires_at"] > report["created_at"]
     assert report["max_retries"] == 2
     assert report["default_on_decision_timeout"] == "abort"
     assert "job-1" not in host._goals
+    assert host.decision_bridge.required == [report]
+    assert not host.finished
 
     assert host.handle_action_error_decision(
         decision_id,
@@ -617,112 +563,86 @@ def test_host_owns_decision_and_publishes_registry_options():
     )
 
 
-def test_ws_decision_routes_to_host_not_device(monkeypatch):
-    received = []
-
-    class _Host:
-        def handle_action_error_decision(
-            self,
-            decision_id,
-            job_id,
-            decision,
-            *,
-            decision_target=None,
-        ):
-            received.append((decision_id, job_id, decision, decision_target))
-            return True
-
-    monkeypatch.setattr(
-        HostNode,
-        "get_instance",
-        classmethod(lambda cls, index=0: _Host()),
-    )
-    payload = {
-        "decision_id": "decision-ws",
-        "job_id": "job-ws",
-        "device_id": "remote-device",
-        "action": "retry",
-    }
-
-    asyncio.run(MessageProcessor._handle_job_error_decision(object(), payload))
-
-    assert received == [
-        (
-            "decision-ws",
-            "job-ws",
-            payload,
-            ERROR_DECISION_TARGET_BACKEND,
-        )
-    ]
-
-
-@pytest.mark.parametrize("missing", ["decision_id", "job_id", "device_id"])
-def test_ws_decision_requires_complete_identity(monkeypatch, missing):
-    class _Host:
-        def handle_action_error_decision(self, *args, **kwargs):
-            raise AssertionError("incomplete identity must not reach HostNode")
-
-    monkeypatch.setattr(
-        HostNode,
-        "get_instance",
-        classmethod(lambda cls, index=0: _Host()),
-    )
-    payload = {
-        "decision_id": "decision-ws",
-        "job_id": "job-ws",
-        "device_id": "remote-device",
-        "action": "retry",
-    }
-    payload.pop(missing)
-
-    asyncio.run(MessageProcessor._handle_job_error_decision(object(), payload))
-
-
-def test_host_micro_backend_decision_stays_local_and_rejects_cloud_reply():
-    from unilabos.app.web.event_bus import monitor_bus
-
-    sub_id, event_queue, _ = monitor_bus.subscribe(channels={"action"})
+def test_backend_release_keeps_retry_as_failed_without_host_redispatch():
     host = FakeHostDecisionNode()
-    try:
-        decision_id = _begin_pending(
-            host,
-            item=_queue_item(ERROR_DECISION_TARGET_MICRO_BACKEND),
-        )
+    decision_id = _begin_pending(host)
 
-        required_event = event_queue.get(timeout=1)
-        assert required_event["channel"] == "action"
-        assert required_event["type"] == "job_error_decision_required"
-        assert required_event["data"]["decision_id"] == decision_id
-        assert required_event["data"]["expires_at"] > required_event["data"]["created_at"]
-        assert host.bridge.reports == []
-        reports = host.get_pending_action_error_decisions(
-            ERROR_DECISION_TARGET_MICRO_BACKEND,
-        )
-        assert [report["decision_id"] for report in reports] == [decision_id]
-        assert not host.handle_action_error_decision(
+    required = _local_event_data(host, "job_error_decision_required")[0]
+    assert required["decision_id"] == decision_id
+    assert required["expires_at"] > required["created_at"]
+    reports = host.get_pending_action_error_decisions()
+    assert [report["decision_id"] for report in reports] == [decision_id]
+    assert host.handle_action_error_decision(
+        decision_id,
+        "job-1",
+        _decision(decision_id, "retry"),
+    )
+    resolved = _local_event_data(host, "job_error_decision_resolved")[0]
+    assert resolved["selected_action"] == "retry"
+    assert not host.sent_goals
+    assert host.finished[0][1] == "failed"
+    assert host.finished[0][2]["error_resolution"] == {
+        "decision_id": decision_id,
+        "selected_action": "retry",
+        "reason": "",
+        "scheduler_updated": True,
+    }
+
+
+def test_operator_intervention_replaces_effective_result_but_keeps_raw_failure():
+    host = FakeHostDecisionNode()
+    decision_id = _begin_pending(host)
+
+    assert host.handle_action_error_decision(
+        decision_id,
+        "job-1",
+        _decision(
             decision_id,
-            "job-1",
-            _decision(decision_id, "abort"),
-            decision_target=ERROR_DECISION_TARGET_BACKEND,
-        )
-        assert host.handle_action_error_decision(
-            decision_id,
-            "job-1",
-            _decision(decision_id, "retry"),
-            decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
-        )
-        resolved_event = event_queue.get(timeout=1)
-        assert resolved_event["type"] == "job_error_decision_resolved"
-        assert resolved_event["data"]["selected_action"] == "retry"
-        assert (
-            host.sent_goals[0][0][0].error_decision_target
-            == ERROR_DECISION_TARGET_MICRO_BACKEND
-        )
-    finally:
-        monitor_bus.unsubscribe(sub_id)
+            "operator_intervention",
+            result={"confirmed": True},
+            reason="operator supplied result",
+        ),
+    )
+
+    _, status, return_info, result_data = host.finished[0]
+    assert status == "success"
+    assert return_info["suc"] is True
+    assert return_info["return_value"] == {"confirmed": True}
+    assert return_info["suc_type"] == SUCCESS_TYPE_OPERATOR_INTERVENTION
+    assert return_info["error_resolution"] == {
+        "decision_id": decision_id,
+        "selected_action": "operator_intervention",
+        "reason": "operator supplied result",
+        "scheduler_updated": True,
+    }
+    assert result_data["raw_return_info"]["suc"] is False
+    assert json.loads(result_data["return_info"]) == return_info
 
 
-def test_local_api_job_targets_host_micro_backend(monkeypatch):
+def test_websocket_release_requires_scheduler_update(monkeypatch):
+    host = FakeHostDecisionNode()
+    decision_id = _begin_pending(host)
+    processor = MessageProcessor("ws://example.invalid", Queue(), DeviceActionManager())
+    monkeypatch.setattr(
+        HostNode,
+        "get_instance",
+        classmethod(lambda cls, index=0: host),
+    )
+
+    unresolved = _decision(decision_id, "retry")
+    unresolved["scheduler_updated"] = False
+    asyncio.run(processor._handle_job_error_decision(unresolved))
+    assert decision_id in host._pending_action_error_decisions
+    assert not host.finished
+
+    asyncio.run(
+        processor._handle_job_error_decision(_decision(decision_id, "retry"))
+    )
+    assert not host._pending_action_error_decisions
+    assert host.finished[0][1] == "failed"
+
+
+def test_local_controller_job_execution_is_disabled(monkeypatch):
     from unilabos.app.model import JobAddReq
     from unilabos.app.web import controller
 
@@ -756,11 +676,11 @@ def test_local_api_job_targets_host_micro_backend(monkeypatch):
         )
     )
 
-    assert result.status == 1
-    assert sent[0].error_decision_target == ERROR_DECISION_TARGET_MICRO_BACKEND
+    assert result.status == 6
+    assert not sent
 
 
-def test_micro_backend_rest_contract_roundtrip(monkeypatch):
+def test_micro_backend_error_decision_api_is_read_only(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -768,10 +688,7 @@ def test_micro_backend_rest_contract_roundtrip(monkeypatch):
     from unilabos.app.web.controller import job_result_store, store_job_result
 
     host = FakeHostDecisionNode()
-    decision_id = _begin_pending(
-        host,
-        item=_queue_item(ERROR_DECISION_TARGET_MICRO_BACKEND),
-    )
+    decision_id = _begin_pending(host)
     monkeypatch.setattr(
         HostNode,
         "get_instance",
@@ -795,12 +712,6 @@ def test_micro_backend_rest_contract_roundtrip(monkeypatch):
     assert snapshot.json()["host_ready"] is True
     assert snapshot.json()["pending_error_decisions"][0]["decision_id"] == decision_id
 
-    incomplete = client.post(
-        f"/api/v1/error-decisions/{decision_id}",
-        json={"action": "skip", "reason": "operator confirmed"},
-    )
-    assert incomplete.status_code == 422
-
     request = _decision(
         decision_id,
         "skip",
@@ -810,17 +721,20 @@ def test_micro_backend_rest_contract_roundtrip(monkeypatch):
         f"/api/v1/error-decisions/{decision_id}",
         json=request,
     )
-    assert response.status_code == 200
-    assert response.json() == {"decision_id": decision_id, "status": "delivered"}
+    assert response.status_code == 409
+    assert "scheduler backend" in response.json()["detail"]
+    assert decision_id in host._pending_action_error_decisions
 
-    response = client.post(
-        f"/api/v1/error-decisions/{decision_id}",
-        json=request,
+    local_job = client.post(
+        "/api/v1/job/add",
+        json={
+            "device_id": "device-1",
+            "action": "run",
+            "sample_material": {},
+        },
     )
-    assert response.status_code == 200
-    assert response.json()["status"] == "resolved"
-    assert response.json()["replayed"] is True
-    assert response.json()["resolution"]["selected_action"] == "skip"
+    assert local_job.status_code == 409
+    assert "scheduler backend" in local_job.json()["detail"]
 
     store_job_result(
         "job-poll",
@@ -856,7 +770,7 @@ def test_monitor_bus_sse_contract_and_bounded_replay():
         bus.unsubscribe(sub_id)
 
 
-def test_host_retry_uses_existing_action_client_path_and_new_transport_id():
+def test_retry_release_never_redispatches_on_host():
     host = FakeHostDecisionNode()
     decision_id = _begin_pending(host)
 
@@ -866,15 +780,44 @@ def test_host_retry_uses_existing_action_client_path_and_new_transport_id():
         _decision(decision_id, "retry"),
     )
 
-    args, kwargs = host.sent_goals[0]
-    assert args[0].job_id == "job-1"
-    assert args[1] == "UniLabJsonCommand"
-    assert args[2] == {"channel": 1}
-    assert kwargs["cache_error_context"] is False
-    assert kwargs["transport_goal_id"] != "job-1"
-    assert host._error_execution_contexts["job-1"]["retry_count"] == 1
-    assert HostNode.get_goal_status(host, "job-1") == 2
-    assert not host.finished
+    assert not host.sent_goals
+    assert host.finished[0][1] == "failed"
+    assert host.finished[0][2]["error_resolution"]["selected_action"] == "retry"
+
+
+def test_scheduler_retry_attempt_is_promoted_after_original_failed_releases_lock():
+    manager = DeviceActionManager()
+    key = "/devices/device-1/run"
+    original = JobInfo(
+        job_id="job-1",
+        task_id="task-1",
+        device_id="device-1",
+        notebook_id="notebook-1",
+        action_name="run",
+        device_action_key=key,
+        status=JobStatus.QUEUE,
+        start_time=time.time(),
+    )
+    recovery = JobInfo(
+        job_id="job-recovery",
+        task_id="task-1",
+        device_id="device-1",
+        notebook_id="notebook-1",
+        action_name="run",
+        device_action_key=key,
+        status=JobStatus.QUEUE,
+        start_time=time.time(),
+    )
+
+    assert manager.enqueue_job(original) == (True, True)
+    assert manager.enqueue_job(recovery) == (False, False)
+    assert manager.active_jobs[key] is original
+    assert manager.device_queues[key] == [recovery]
+
+    next_job, lock_became_free = manager.end_job("job-1")
+    assert next_job is recovery
+    assert lock_became_free is False
+    assert manager.active_jobs[key] is recovery
 
 
 def test_host_decision_validates_identity_and_first_result_wins():
@@ -901,9 +844,11 @@ def test_host_decision_validates_identity_and_first_result_wins():
         "job-1",
         _decision(decision_id, "abort"),
     )
-    assert host.finished[0][1] == "success"
-    assert host.finished[0][2]["suc_type"] == SUCCESS_TYPE_SKIP
-    assert host.bridge.resolved_reports[0]["selected_action"] == "skip"
+    assert host.finished[0][1] == "failed"
+    assert host.finished[0][2]["error_resolution"]["selected_action"] == "skip"
+    assert _local_event_data(host, "job_error_decision_resolved")[0][
+        "selected_action"
+    ] == "skip"
 
 
 @pytest.mark.parametrize("missing", ["decision_id", "job_id", "device_id"])
@@ -921,43 +866,32 @@ def test_host_decision_requires_complete_identity(missing):
     assert decision_id in host._pending_action_error_decisions
 
 
-def test_expired_manual_decision_atomically_runs_timeout_default():
+def test_host_rejects_release_until_scheduler_is_updated():
     host = FakeHostDecisionNode()
     decision_id = _begin_pending(host)
-    pending = host._pending_action_error_decisions[decision_id]
-    pending["timer"].cancel()
-    pending["error_info"]["expires_at"] = time.time() - 1
+    decision = _decision(decision_id, "retry")
+    decision["scheduler_updated"] = False
 
     assert not host.handle_action_error_decision(
         decision_id,
         "job-1",
-        _decision(decision_id, "retry"),
+        decision,
     )
 
-    assert not host._pending_action_error_decisions
+    assert decision_id in host._pending_action_error_decisions
     assert not host.sent_goals
-    assert host.finished[0][1] == "failed"
-    assert host.bridge.resolved_reports[0]["selected_action"] == "abort"
-    assert host.bridge.resolved_reports[0]["reason"] == "decision_timeout"
-    resolved = host.get_resolved_action_error_decision(
-        decision_id,
-        "job-1",
-        "device-1",
-        decision_target=ERROR_DECISION_TARGET_BACKEND,
-    )
-    assert resolved == host.bridge.resolved_reports[0]
+    assert not host.finished
 
 
-def test_pending_decision_uses_report_absolute_expiry():
+def test_pending_decision_exposes_backend_timeout_without_local_timer():
     host = FakeHostDecisionNode()
     decision_id = _begin_pending(host)
     pending = host._pending_action_error_decisions[decision_id]
-    pending["timer"].cancel()
-
     assert pending["error_info"]["expires_at"] == pending["report"]["expires_at"]
+    assert pending["timer"] is None
 
 
-def test_resolved_decision_replay_does_not_execute_twice():
+def test_resolved_decision_lookup_does_not_execute_twice():
     host = FakeHostDecisionNode()
     decision_id = _begin_pending(host)
     assert host.handle_action_error_decision(
@@ -966,21 +900,20 @@ def test_resolved_decision_replay_does_not_execute_twice():
         _decision(decision_id, "skip"),
     )
 
-    replayed = host.replay_action_error_decision_resolution(
+    replayed = host.get_resolved_action_error_decision(
         decision_id,
         "job-1",
         "device-1",
-        decision_target=ERROR_DECISION_TARGET_BACKEND,
     )
 
-    assert replayed == host.bridge.resolved_reports[0]
-    assert host.bridge.resolved_reports == [replayed, replayed]
+    resolved_events = _local_event_data(host, "job_error_decision_resolved")
+    assert replayed == resolved_events[0]
+    assert resolved_events == [replayed]
     assert len(host.finished) == 1
 
 
-def test_host_retry_limit_fails_closed():
+def test_host_reports_retry_count_but_does_not_enforce_scheduler_limit():
     host = FakeHostDecisionNode()
-    host._error_execution_contexts["job-1"]["retry_count"] = 1
     host._action_value_mappings["device-1"]["run"]["error_policy"] = (
         normalize_error_policy(
             {
@@ -994,21 +927,22 @@ def test_host_retry_limit_fails_closed():
         )
     )
 
-    return_info = _error_return_info()
-    assert not host._begin_action_error_decision(
-        _queue_item(),
-        return_info,
+    item = _queue_item()
+    item.retry_count = 1
+    assert host._begin_action_error_decision(
+        item,
+        _error_return_info(),
         {"return_info": "failed"},
     )
     assert not host.sent_goals
-    assert not host._pending_action_error_decisions
-    assert not host.bridge.reports
-    assert "达到最大重试次数（1）" in return_info["error"]
+    report = _local_event_data(host, "job_error_decision_required")[0]
+    assert report["retry_count"] == 1
+    assert report["max_retries"] == 1
+    assert [option["action"] for option in report["options"]] == ["retry"]
 
 
-def test_host_retry_exhaustion_hides_retry_and_timeout_falls_back_to_abort():
+def test_retry_exhaustion_and_timeout_policy_are_left_to_backend():
     host = FakeHostDecisionNode()
-    host._error_execution_contexts["job-1"]["retry_count"] = 1
     decision_id = _begin_pending(
         host,
         {
@@ -1023,21 +957,15 @@ def test_host_retry_exhaustion_hides_retry_and_timeout_falls_back_to_abort():
         },
     )
 
-    report = host.bridge.reports[0]
-    assert [option["action"] for option in report["options"]] == ["abort"]
-    assert "达到最大重试次数（1）" in report["error_message"]
-    assert report["default_on_decision_timeout"] == "abort"
-
-    host._handle_action_error_decision_timeout(decision_id)
-
-    assert host.finished[0][1] == "failed"
-    assert host.bridge.resolved_reports[0]["selected_action"] == "abort"
-    assert host.bridge.resolved_reports[0]["reason"] == "decision_timeout"
+    report = _local_event_data(host, "job_error_decision_required")[0]
+    assert [option["action"] for option in report["options"]] == ["retry", "abort"]
+    assert report["default_on_decision_timeout"] == "retry"
+    assert decision_id in host._pending_action_error_decisions
+    assert not host.finished
 
 
-def test_host_without_execution_context_does_not_offer_retry():
+def test_host_forwards_all_scheduler_options_without_local_recovery_context():
     host = FakeHostDecisionNode()
-    host._error_execution_contexts.clear()
 
     assert host._begin_action_error_decision(
         _queue_item(),
@@ -1045,30 +973,28 @@ def test_host_without_execution_context_does_not_offer_retry():
         {"return_info": "failed"},
     )
 
-    report = host.bridge.reports[0]
+    report = _local_event_data(host, "job_error_decision_required")[0]
     assert [option["action"] for option in report["options"]] == [
+        "retry",
         "skip",
         "abort",
+        "operator_intervention",
     ]
-    assert "缺少原动作上下文，无法重试" in report["error_message"]
 
 
-def test_cancel_pending_error_decision_closes_timer_and_rejects_late_reply():
+def test_cancel_pending_error_decision_rejects_late_backend_release():
     host = FakeHostDecisionNode()
     decision_id = _begin_pending(host)
-    timer = host._pending_action_error_decisions[decision_id]["timer"]
-
     assert host.cancel_job("job-1")
 
-    timer.join(timeout=1)
-    assert not timer.is_alive()
     assert not host._pending_action_error_decisions
-    assert not host._error_execution_contexts
+    assert not host._inflight_goal_jobs
     assert host.finished[0][1] == "canceled"
-    assert host.bridge.resolved_reports[0]["selected_action"] == "abort"
-    assert host.bridge.resolved_reports[0]["reason"] == "job_canceled"
+    resolved_events = _local_event_data(host, "job_error_decision_resolved")
+    assert resolved_events[0]["selected_action"] == "abort"
+    assert resolved_events[0]["reason"] == "job_canceled"
     assert not host.cancel_job("job-1")
-    assert len(host.bridge.resolved_reports) == 1
+    assert len(resolved_events) == 1
     assert not host.handle_action_error_decision(
         decision_id,
         "job-1",
@@ -1125,7 +1051,7 @@ def test_goal_accepted_after_inflight_cancel_is_canceled_immediately():
     assert goal_handle.cancel_calls == 1
 
 
-def test_host_dispatches_registered_fallback_action():
+def test_fallback_release_is_failed_and_never_dispatched_by_host():
     host = FakeHostDecisionNode()
     options = [
         {
@@ -1148,12 +1074,9 @@ def test_host_dispatches_registered_fallback_action():
         _decision(decision_id, "reset_connection"),
     )
 
-    args, kwargs = host.sent_goals[0]
-    assert args[0].action_name == "auto-reset"
-    assert args[2] == {"channel": 2}
-    assert kwargs["result_item"].action_name == "run"
-    assert kwargs["recovery_suc_type"] == SUCCESS_TYPE_OPERATOR_INTERVENTION
-    assert kwargs["cache_error_context"] is False
+    assert not host.sent_goals
+    assert host.finished[0][1] == "failed"
+    assert host.finished[0][2]["error_resolution"]["selected_action"] == "reset_connection"
 
 
 def test_host_rejects_unconfigured_backend_option_without_consuming_pending():

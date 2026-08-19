@@ -27,8 +27,7 @@ from enum import Enum
 from typing_extensions import TypedDict
 
 from unilabos.app.model import JobAddReq
-from unilabos.registry.action_policy import ERROR_DECISION_TARGET_BACKEND
-from unilabos.resources.resource_tracker import ResourceDictType
+from unilabos.resources.objects.resource import ResourceDictType
 from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.utils.type_check import serialize_result_info
 from unilabos.app.communication import BaseCommunicationClient
@@ -67,9 +66,9 @@ class QueueItem:
     job_id: str
     notebook_id: str
     device_action_key: str
+    node_id: str = ""  # 调度图逻辑节点；retry 的新 job 仍关联同一 node_id
     next_run_time: float = 0  # 下次执行时间戳
     retry_count: int = 0  # 重试次数
-    error_decision_target: str = ERROR_DECISION_TARGET_BACKEND
 
 
 @dataclass
@@ -86,6 +85,8 @@ class JobInfo:
     start_time: float
     last_update_time: float = field(default_factory=time.time)
     always_free: bool = False  # 是否为永久闲置动作(不受排队限制)
+    node_id: str = ""
+    retry_count: int = 0
     # 执行载荷：排队的 job 在出队时由客户端自行启动，需保存原始 job_start 参数
     action_type: str = ""
     action_args: Dict[str, Any] = field(default_factory=dict)
@@ -757,8 +758,8 @@ class MessageProcessor:
         self.websocket_client.report_all_action_locks()
         logger.trace("[MessageProcessor] query_action_lock: re-reported all action locks")
 
-    async def _handle_job_error_decision(self, data: Dict[str, Any]):
-        """Route one approved error option/result to the exact pending job."""
+    async def _handle_job_error_decision(self, data: Dict[str, Any]) -> None:
+        """后端完成前端询问和调度更新后，释放 Host 暂存的设备失败。"""
 
         decision_id = str(data.get("decision_id") or "")
         job_id = str(data.get("job_id") or "")
@@ -769,26 +770,33 @@ class MessageProcessor:
                 "decision_id, job_id and device_id"
             )
             return
+        if data.get("scheduler_updated") is not True:
+            logger.warning(
+                "[MessageProcessor] Ignore error decision before scheduler update: "
+                f"decision={decision_id} job={job_id[:8]}"
+            )
+            return
 
         host_node = HostNode.get_instance(0)
         if host_node is None:
-            logger.warning(f"[MessageProcessor] HostNode unavailable, drop error decision job={job_id[:8]}")
+            logger.warning(
+                f"[MessageProcessor] HostNode unavailable, keep backend decision "
+                f"pending job={job_id[:8]}"
+            )
             return
         if not host_node.handle_action_error_decision(
             decision_id,
             job_id,
             dict(data),
-            decision_target=ERROR_DECISION_TARGET_BACKEND,
         ):
-            replayed = host_node.replay_action_error_decision_resolution(
+            replayed = host_node.get_resolved_action_error_decision(
                 decision_id,
                 job_id,
                 device_id,
-                decision_target=ERROR_DECISION_TARGET_BACKEND,
             )
             if replayed is not None:
                 logger.info(
-                    f"[MessageProcessor] Replayed resolved error decision "
+                    f"[MessageProcessor] Error decision already released "
                     f"decision={decision_id} job={job_id[:8]}"
                 )
                 return
@@ -840,6 +848,8 @@ class MessageProcessor:
                 status=JobStatus.QUEUE,
                 start_time=time.time(),
                 always_free=action_always_free,
+                node_id=req.node_id,
+                retry_count=req.retry_count,
                 action_type=req.action_type,
                 action_args=req.action_args,
                 sample_material=req.sample_material,
@@ -867,6 +877,8 @@ class MessageProcessor:
                 job_id=req.job_id,
                 notebook_id=notebook_id,
                 device_action_key=device_action_key,
+                node_id=req.node_id,
+                retry_count=req.retry_count,
             )
 
             # 提交给HostNode执行
@@ -1331,6 +1343,8 @@ class QueueProcessor:
             job_id=job.job_id,
             notebook_id=job.notebook_id,
             device_action_key=job.device_action_key,
+            node_id=job.node_id,
+            retry_count=job.retry_count,
         )
 
         host_node = HostNode.get_instance(0)
@@ -1711,6 +1725,8 @@ class WebSocketClient(BaseCommunicationClient):
                 "device_id": item.device_id,
                 "notebook_id": item.notebook_id,
                 "action_name": item.action_name,
+                "node_id": item.node_id,
+                "retry_count": item.retry_count,
                 "status": status,
                 "feedback_data": feedback_data,
                 "return_info": return_info,
@@ -1728,52 +1744,30 @@ class WebSocketClient(BaseCommunicationClient):
         logger.trace(f"[WebSocketClient] Job status published: {job_log} - {status}")
 
     def publish_job_error_decision_required(self, report: Dict[str, Any]) -> bool:
-        """Send an action exception and its class-matched options for approval."""
+        """把暂存失败及可选策略发送给调度后端，由后端询问前端。"""
 
         if self.is_disabled or not self.is_connected():
             logger.warning(
-                f"[WebSocketClient] Cannot report action error while disconnected: "
-                f"job={str(report.get('job_id', ''))[:8]} "
-                f"exception={report.get('exception_type', '')}"
+                "[WebSocketClient] Cannot publish pending action failure while "
+                f"disconnected: job={str(report.get('job_id', ''))[:8]}"
             )
             return False
-        message = {"action": "job_error_decision_required", "data": report}
-        queued = self.message_processor.send_message(message)
-        if queued:
-            logger.info(
-                f"[WebSocketClient] Action error awaiting decision: "
-                f"decision={report.get('decision_id')} job={str(report.get('job_id', ''))[:8]}"
+        return bool(
+            self.message_processor.send_message(
+                {"action": "job_error_decision_required", "data": report}
             )
-        return queued
-
-    def publish_job_error_decision_resolved(self, report: Dict[str, Any]) -> bool:
-        """向云端上报 Host 已采用的异常决策，供 timeout/人工操作审计。"""
-
-        if self.is_disabled or not self.is_connected():
-            logger.warning(
-                "[WebSocketClient] Not connected, cannot report resolved error decision"
-            )
-            return False
-        return self.message_processor.send_message(
-            {"action": "job_error_decision_resolved", "data": report}
         )
 
     def report_action_error_decisions(self) -> None:
-        """连接/重连后重放 Host 持有的 pending 与短期终态。"""
+        """连接或重连后重放仍等待后端 release 的失败。"""
 
         if self.is_disabled or not self.is_connected():
             return
         host_node = HostNode.get_instance(0)
         if host_node is None:
             return
-        for report in host_node.get_pending_action_error_decisions(
-            ERROR_DECISION_TARGET_BACKEND,
-        ):
+        for report in host_node.get_pending_action_error_decisions():
             self.publish_job_error_decision_required(report)
-        for report in host_node.get_resolved_action_error_decisions(
-            ERROR_DECISION_TARGET_BACKEND,
-        ):
-            self.publish_job_error_decision_resolved(report)
 
     def send_ping(self, ping_id: str, timestamp: float) -> None:
         """发送ping消息"""

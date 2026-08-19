@@ -7,12 +7,10 @@ Web API Controller
 import threading
 import time
 import traceback
-import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, Tuple
 
 from unilabos.app.model import JobAddReq, JobData
-from unilabos.registry.action_policy import ERROR_DECISION_TARGET_MICRO_BACKEND
 from unilabos.ros.nodes.presets.host_node import HostNode
 from unilabos.utils import logger
 
@@ -265,156 +263,39 @@ def _get_action_type(device_id: str, action_name: str) -> Optional[str]:
 
 
 def job_add(req: JobAddReq) -> JobData:
-    """添加任务（检查设备是否繁忙，繁忙则返回失败）
+    """拒绝 Edge 本地执行；所有动作必须由调度后端通过 ``job_start`` 下发。"""
 
-    Args:
-        req: 任务添加请求
-
-    Returns:
-        JobData: 任务数据（包含状态）
-    """
-    # 服务端自动生成 job_id 和 task_id
-    job_id = str(uuid.uuid4())
-    task_id = str(uuid.uuid4())
-
-    # 服务端自动生成 server_info
-    server_info = {"send_timestamp": time.time()}
-
-    host_node = HostNode.get_instance(0)
-    if host_node is None:
-        logger.error(f"[Controller] Host node not initialized for job: {job_id[:8]}")
-        return JobData(jobId=job_id, status=6)  # 6 = ABORTED
-
-    # 解析动作信息
-    action_name = req.data.get("action", req.action) if req.data else req.action
-    action_args = req.data.get("action_kwargs") or req.data.get("action_args") if req.data else req.action_args
-
-    if action_args is None:
-        action_args = req.action_args or {}
-    elif isinstance(action_args, dict) and "command" in action_args:
-        action_args = action_args["command"]
-
-    # 自动获取 action_type
-    action_type = _get_action_type(req.device_id, action_name)
-    if action_type is None:
-        logger.error(f"[Controller] Action type not found for {req.device_id}/{action_name}")
-        return JobData(jobId=job_id, status=6)  # ABORTED
-
-    # 检查设备动作是否繁忙
-    is_busy, current_job_id = check_device_action_busy(req.device_id, action_name)
-
-    if is_busy:
-        logger.warning(
-            f"[Controller] Device action busy: {req.device_id}/{action_name}, "
-            f"current job: {current_job_id[:8] if current_job_id else 'unknown'}"
-        )
-        # 返回失败状态，status=6 表示 ABORTED
-        return JobData(jobId=job_id, status=6)
-
-    # 设备空闲，提交任务执行
-    try:
-        from unilabos.app.ws_client import QueueItem
-
-        device_action_key = f"/devices/{req.device_id}/{action_name}"
-        queue_item = QueueItem(
-            task_type="job_call_back_status",
-            device_id=req.device_id,
-            action_name=action_name,
-            task_id=task_id,
-            job_id=job_id,
-            notebook_id=req.notebook_id,
-            device_action_key=device_action_key,
-            error_decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
-        )
-
-        host_node.send_goal(
-            queue_item,
-            action_type=action_type,
-            action_kwargs=action_args,
-            sample_material=req.sample_material,
-            server_info=server_info,
-        )
-
-        logger.info(f"[Controller] Job submitted: {job_id[:8]} -> {req.device_id}/{action_name}")
-        # 返回已接受状态，status=1 表示 ACCEPTED
-        return JobData(jobId=job_id, status=1)
-
-    except ValueError as e:
-        # ActionClient not found 等错误
-        logger.error(f"[Controller] Action not available: {str(e)}")
-        return JobData(jobId=job_id, status=6)  # ABORTED
-
-    except Exception as e:
-        logger.error(f"[Controller] Error submitting job: {str(e)}")
-        traceback.print_exc()
-        return JobData(jobId=job_id, status=6)  # ABORTED
+    job_id = str(req.job_id or "")
+    logger.warning(
+        "[Controller] Local job execution is disabled; submit the workflow to "
+        "the scheduler backend"
+    )
+    return JobData(jobId=job_id, status=6)
 
 
 def get_pending_action_error_decisions() -> Tuple[bool, Dict[str, Any]]:
-    """读取应由 Host 微后端处理的异常决策。"""
+    """只读查看 Host 正在等待后端 release 的设备失败。"""
 
     host_node = HostNode.get_instance(0)
     if host_node is None:
         return False, {"error": "Host node not initialized"}
-    return True, {
-        "decisions": host_node.get_pending_action_error_decisions(
-            decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
-        )
-    }
+    return True, {"decisions": host_node.get_pending_action_error_decisions()}
 
 
 def submit_action_error_decision(
     decision_id: str,
     decision: Dict[str, Any],
 ) -> Tuple[bool, Dict[str, Any]]:
-    """将 Host 微后端的选择提交给 HostNode。"""
+    """拒绝 Edge 本地决策；唯一写入口是调度后端的 WebSocket release。"""
 
-    host_node = HostNode.get_instance(0)
-    if host_node is None:
-        return False, {"error": "Host node not initialized"}
-    decision_id = str(decision_id or "")
-    if not decision_id:
-        return False, {"error": "decision_id is required"}
-    body_decision_id = str(decision.get("decision_id") or "")
-    job_id = str(decision.get("job_id") or "")
-    device_id = str(decision.get("device_id") or "")
-    if not body_decision_id or not job_id or not device_id:
-        return False, {
-            "error": "decision_id, job_id and device_id are required",
-            "error_code": "decision_identity_required",
-        }
-    if body_decision_id != decision_id:
-        return False, {
-            "error": "path decision_id does not match request body",
-            "error_code": "decision_identity_mismatch",
-        }
-    if not host_node.handle_action_error_decision(
-        decision_id,
-        job_id,
-        decision,
-        decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
-    ):
-        resolved = host_node.get_resolved_action_error_decision(
-            decision_id,
-            job_id,
-            device_id,
-            decision_target=ERROR_DECISION_TARGET_MICRO_BACKEND,
-        )
-        if resolved is not None:
-            if resolved.get("reason") == "decision_timeout":
-                return False, {
-                    "error": "action error decision expired",
-                    "error_code": "decision_expired",
-                    "resolution": resolved,
-                }
-            return True, {
-                "decision_id": decision_id,
-                "status": "resolved",
-                "replayed": True,
-                "resolution": resolved,
-            }
-        return False, {"error": "pending action error decision not found or mismatched"}
-    return True, {"decision_id": decision_id, "status": "delivered"}
+    del decision_id, decision
+    return False, {
+        "error": (
+            "action error decisions must be submitted to the scheduler backend; "
+            "Host accepts only a scheduler-updated WebSocket release"
+        ),
+        "error_code": "decision_backend_authority",
+    }
 
 
 def get_online_devices() -> Tuple[bool, Dict[str, Any]]:

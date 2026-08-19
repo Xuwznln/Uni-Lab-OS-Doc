@@ -17,6 +17,7 @@ from typing import Any, Deque, Dict, List, Optional, Set, Tuple
 CHANNELS = ("action",)
 
 
+# 主动事件推送
 class MonitorBus:
     """线程安全的进程内事件总线和有界历史缓冲。"""
 

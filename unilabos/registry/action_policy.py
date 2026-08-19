@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, List, Literal, Mapping, NotRequired, TypedDict
+from typing import Any, Dict, List, Literal, Mapping
+
+from typing_extensions import NotRequired, TypedDict
 
 
 DEFAULT_ERROR_CLASS = "*"
@@ -12,10 +14,6 @@ SUCCESS_TYPE_NORMAL = "normal"
 SUCCESS_TYPE_SKIP = "skip"
 SUCCESS_TYPE_OPERATOR_INTERVENTION = "operator_intervention"
 SuccessType = Literal["normal", "skip", "operator_intervention"]
-
-ERROR_DECISION_TARGET_BACKEND = "backend"
-ERROR_DECISION_TARGET_MICRO_BACKEND = "micro_backend"
-
 
 class FallbackAction(TypedDict):
     """Server-side single action executed after operator approval."""

@@ -14,7 +14,6 @@ from fastapi.responses import StreamingResponse
 
 from unilabos.app.web.controller import (
     devices,
-    job_add,
     job_info,
     get_online_devices,
     get_device_actions,
@@ -30,7 +29,6 @@ from unilabos.app.model import (
     JobAddResp,
     JobAddReq,
     ErrorDecisionIn,
-    JobData,
 )
 from unilabos.app.web.utils.host_utils import get_host_node_info
 from unilabos.registry.registry import lab_registry
@@ -1310,7 +1308,7 @@ def api_get_all_actions():
 
 @api.get("/error-decisions", summary="查询本地待处理的动作异常决策")
 def api_get_pending_action_error_decisions():
-    """查询由 Host 微后端负责处理的异常决策。"""
+    """只读查询 Host 正在等待调度后端 release 的设备失败。"""
 
     isok, data = get_pending_action_error_decisions()
     if not isok:
@@ -1323,10 +1321,10 @@ def api_get_pending_action_error_decisions():
 
 @api.post(
     "/error-decisions/{decision_id}",
-    summary="提交本地动作异常处理决策",
+    summary="已停用：异常决策必须提交到调度后端",
 )
 def api_submit_action_error_decision(decision_id: str, req: ErrorDecisionIn):
-    """提交 retry/skip/abort 或注册表声明的 fallback 选项。"""
+    """Edge 不接受决策写入；保留明确的 409 以防前端误接旧入口。"""
 
     if hasattr(req, "model_dump"):
         decision = req.model_dump(exclude_unset=True)
@@ -1338,10 +1336,11 @@ def api_submit_action_error_decision(decision_id: str, req: ErrorDecisionIn):
         raise HTTPException(
             status_code=(
                 409
-                if error_code in {
-                    "decision_expired",
-                    "decision_identity_mismatch",
-                }
+                 if error_code in {
+                     "decision_expired",
+                     "decision_identity_mismatch",
+                     "decision_backend_authority",
+                 }
                 else 422
                 if error_code == "decision_identity_required"
                 else 404
@@ -1432,25 +1431,13 @@ def job_status(id: str):
 
 @api.post("/job/add", summary="Create job", response_model=JobAddResp)
 def post_job_add(req: JobAddReq):
-    """创建任务"""
-    # 检查必要参数：device_id 和 action
-    if not req.device_id:
-        return JobAddResp(
-            data=JobData(jobId="", status=6),
-            code=RespCode.ErrorInvalidReq,
-            message="device_id is required",
-        )
+    """Edge 不同步执行；工作流必须提交到调度后端。"""
 
-    action_name = req.data.get("action", req.action) if req.data else req.action
-    if not action_name:
-        return JobAddResp(
-            data=JobData(jobId="", status=6),
-            code=RespCode.ErrorInvalidReq,
-            message="action is required",
-        )
-
-    data = job_add(req)
-    return JobAddResp(data=data)
+    del req
+    raise HTTPException(
+        status_code=409,
+        detail="local job execution is disabled; submit to the scheduler backend",
+    )
 
 
 def setup_api_routes(app):

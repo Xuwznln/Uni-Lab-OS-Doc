@@ -61,6 +61,11 @@ class JobAddReq(BaseModel):
     task_id: str = Field(examples=["task_id"], description="task uuid (auto-generated if empty)", default="")
     job_id: str = Field(examples=["job_id"], description="goal uuid (auto-generated if empty)", default="")
     node_id: str = Field(examples=["node_id"], description="node uuid", default="")
+    retry_count: int = Field(
+        default=0,
+        ge=0,
+        description="scheduler attempt retry count; Host only echoes it",
+    )
     notebook_id: str = Field(examples=["notebook_id"], description="notebook uuid", default="")
     server_info: dict = Field(
         examples=[{"send_timestamp": 1717000000.0}],

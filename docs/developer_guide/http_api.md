@@ -1,10 +1,10 @@
 # HTTP API 指南
 
-本文档介绍如何通过 HTTP API 与 Uni-Lab-OS 进行交互，包括查询设备、提交任务和获取结果。
+本文档介绍如何通过 Edge HTTP API 查询 Uni-Lab-OS 的设备、任务和动作异常状态。任务创建由调度后端负责，Edge HTTP API 不接受本地执行请求。
 
 ## 概述
 
-Uni-Lab-OS 提供 RESTful HTTP API，允许外部系统通过标准 HTTP 请求控制实验室设备。API 基于 FastAPI 构建，默认运行在 `http://localhost:8002`。
+Uni-Lab-OS 提供基于 FastAPI 的 RESTful HTTP API，默认运行在 `http://localhost:8002`。该接口用于只读查询和监控；动作由调度后端下发给 Host。
 
 ### 基础信息
 
@@ -30,7 +30,7 @@ Uni-Lab-OS 提供 RESTful HTTP API，允许外部系统通过标准 HTTP 请求�
 
 ## 快速开始
 
-以下是一个完整的工作流示例：查询设备 → 获取动作 → 提交任务 → 获取结果。
+以下是一个完整的查询工作流示例：查询设备 → 获取动作 → 等待调度后端下发任务 → 获取结果。
 
 ### 步骤 1: 获取在线设备
 
@@ -106,43 +106,15 @@ curl -X GET "http://localhost:8002/api/v1/devices/host_node/actions"
 | `is_busy`        | 动作是否正在执行              |
 | `current_job_id` | 当前执行的任务 ID（如果繁忙） |
 
-### 步骤 3: 提交任务
+### 步骤 3: 由调度后端下发任务
 
-```bash
-curl -X POST "http://localhost:8002/api/v1/job/add" \
-  -H "Content-Type: application/json" \
-  -d '{"device_id":"host_node","action":"test_latency","action_args":{}}'
-```
+`POST /api/v1/job/add` 已停用并固定返回 HTTP 409。前端必须把执行请求提交给调度后端；调度后端完成排程后，通过 HostLink 或 ROS2 下发带有 `job_id`、`node_id` 和 `task_id` 的执行命令。
 
-**请求体**:
+**停用接口响应示例**:
 
 ```json
 {
-  "device_id": "host_node",
-  "action": "test_latency",
-  "action_args": {}
-}
-```
-
-**请求参数说明**:
-
-| 字段          | 类型   | 必填 | 说明                               |
-| ------------- | ------ | ---- | ---------------------------------- |
-| `device_id`   | string | ✓    | 目标设备 ID                        |
-| `action`      | string | ✓    | 动作名称                           |
-| `action_args` | object | ✓    | 动作参数（根据动作类型不同而变化） |
-
-**响应示例**:
-
-```json
-{
-  "code": 0,
-  "data": {
-    "jobId": "b6acb586-733a-42ab-9f73-55c9a52aa8bd",
-    "status": 1,
-    "result": {}
-  },
-  "message": "success"
+  "detail": "Local job submission is disabled; submit the action to the scheduler backend"
 }
 ```
 
@@ -222,7 +194,7 @@ curl -X GET "http://localhost:8002/api/v1/job/b6acb586-733a-42ab-9f73-55c9a52aa8
 
 | 端点                          | 方法 | 说明               |
 | ----------------------------- | ---- | ------------------ |
-| `/api/v1/job/add`             | POST | 提交新任务         |
+| `/api/v1/job/add`             | POST | 已停用，固定返回 409；任务由调度后端下发 |
 | `/api/v1/job/{job_id}/status` | GET  | 查询任务状态和结果 |
 
 ### 动作异常决策相关
@@ -230,11 +202,11 @@ curl -X GET "http://localhost:8002/api/v1/job/b6acb586-733a-42ab-9f73-55c9a52aa8
 | 端点                                                | 方法 | 说明                             |
 | --------------------------------------------------- | ---- | -------------------------------- |
 | `/api/v1/error-decisions`                           | GET  | 获取尚未处理的动作异常决策       |
-| `/api/v1/error-decisions/{decision_id}`             | POST | 提交一项动作异常决策             |
+| `/api/v1/error-decisions/{decision_id}`             | POST | 已停用，固定返回 409；决策由调度后端下发 |
 | `/api/v1/monitor/events`                             | GET  | 订阅动作状态与异常决策 SSE 事件  |
 | `/api/v1/monitor/snapshot`                           | GET  | 获取异常决策及近期事件权威快照   |
 
-这组接口直接返回业务 JSON，HTTP 错误使用 FastAPI 的 `detail` 结构，不套用本页其他接口的 `code/data/message` 外层。完整字段、SSE 事件、TypeScript 示例和前端状态机见[动作异常决策：前端接入协议](action_error_decision_frontend.md)。
+这组接口直接返回业务 JSON，HTTP 错误使用 FastAPI 的 `detail` 结构，不套用本页其他接口的 `code/data/message` 外层。Edge 只读展示待决策项；后端完成前端询问和调度更新后，才通过 transport 释放 Host 上暂存的失败结果。完整协议见[动作异常决策：前端接入协议](action_error_decision_frontend.md)。
 
 ### 资源相关
 
@@ -242,57 +214,11 @@ curl -X GET "http://localhost:8002/api/v1/job/b6acb586-733a-42ab-9f73-55c9a52aa8
 | ------------------- | ---- | ------------ |
 | `/api/v1/resources` | GET  | 获取资源列表 |
 
-## 常见动作示例
-
-### test_latency - 延迟测试
-
-测试系统延迟，无需参数。
-
-```bash
-curl -X POST "http://localhost:8002/api/v1/job/add" \
-  -H "Content-Type: application/json" \
-  -d '{"device_id":"host_node","action":"test_latency","action_args":{}}'
-```
-
-### create_resource - 创建资源
-
-在设备上创建新资源。
-
-```bash
-curl -X POST "http://localhost:8002/api/v1/job/add" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "device_id": "host_node",
-    "action": "create_resource",
-    "action_args": {
-        "res_id": "my_plate",
-        "device_id": "host_node",
-        "class_name": "Plate",
-        "parent": "deck",
-        "bind_locations": {"x": 0, "y": 0, "z": 0}
-    }
-}'
-```
-
 ## 错误处理
 
-### 设备繁忙
+### 动作执行失败
 
-当设备正在执行其他任务时，提交新任务会返回 `status: 6`（ABORTED）：
-
-```json
-{
-  "code": 0,
-  "data": {
-    "jobId": "xxx",
-    "status": 6,
-    "result": {}
-  },
-  "message": "success"
-}
-```
-
-此时应等待当前任务完成后重试，或使用 `/devices/{device_id}/actions` 检查动作的 `is_busy` 状态。
+Host 先暂存设备原始失败并通知后端。后端负责询问前端、更新调度，再带 `scheduler_updated: true` 释放失败上报。除 `operator_intervention` 外，Host 不会在本地重试、跳过或执行 fallback；调度后端如需重试，应创建并关联新的调度节点或执行尝试。
 
 ### 参数错误
 
@@ -328,12 +254,8 @@ def wait_for_job(job_id, timeout=60, interval=0.5):
 
     raise TimeoutError(f"Job {job_id} did not complete within {timeout} seconds")
 
-# 使用示例
-response = requests.post(
-    "http://localhost:8002/api/v1/job/add",
-    json={"device_id": "host_node", "action": "test_latency", "action_args": {}}
-)
-job_id = response.json()["data"]["jobId"]
+# job_id 来自调度后端创建的任务
+job_id = "b6acb586-733a-42ab-9f73-55c9a52aa8bd"
 result = wait_for_job(job_id)
 print(result)
 ```

@@ -29,10 +29,7 @@ from unique_identifier_msgs.msg import UUID
 
 from unilabos.registry.decorators import device, action, NodeType, ActionInputHandle, ActionOutputHandle, DataSource
 from unilabos.registry.action_policy import (
-    ERROR_DECISION_TARGET_BACKEND,
-    ERROR_DECISION_TARGET_MICRO_BACKEND,
     SUCCESS_TYPE_OPERATOR_INTERVENTION,
-    SUCCESS_TYPE_SKIP,
     resolve_error_options_by_names,
 )
 from unilabos.registry.placeholder_type import (
@@ -49,15 +46,15 @@ from unilabos.resources.container import RegularContainer
 from unilabos.resources.graphio import initialize_resource
 from unilabos.resources.liquids import apply_substances
 from unilabos.resources.registry import add_schema
+from unilabos.resources.objects.resource import ResourceDictType
+from unilabos.resources.objects.sample import LabSample, SampleUUIDsType
 from unilabos.resources.resource_tracker import (
-    ResourceDict,
-    ResourceDictType,
     ResourceDictInstance,
     ResourceTreeSet,
     ResourceTreeInstance,
     RETURN_UNILABOS_SAMPLES,
     JSON_UNILABOS_PARAM,
-    PARAM_SAMPLE_UUIDS, SampleUUIDsType, LabSample,
+    PARAM_SAMPLE_UUIDS,
 )
 from unilabos.ros.initialize_device import initialize_device_from_dict
 from unilabos.ros.msgs.message_converter import (
@@ -369,8 +366,9 @@ class HostNode(BaseROS2DeviceNode):
         }  # device_id -> action_value_mappings(本地+远程设备统一存储)
         self._slave_registry_configs: Dict[str, Dict] = {}  # registry_name -> registry_config(含action_value_mappings)
         self._goals: Dict[str, Any] = {}  # 用来存储多个目标的状态
-        # 异常决策只存在于 Host：设备返回结构化失败，Host 保留原 job 并负责恢复动作。
-        self._error_execution_contexts: Dict[str, Dict[str, Any]] = {}
+        # 设备失败先暂存在 Host；后端完成前端询问和调度更新后，再释放终态上报。
+        # Host 不执行 retry/skip/fallback，唯一可在这里改变结果的是人工结果替代。
+        self._inflight_goal_jobs: Set[str] = set()
         self._pending_action_error_decisions: Dict[str, Dict[str, Any]] = {}
         self._resolved_action_error_decisions: Dict[str, Dict[str, Any]] = {}
         self._pending_action_error_decisions_lock = threading.RLock()
@@ -873,11 +871,6 @@ class HostNode(BaseROS2DeviceNode):
         action_kwargs: Dict[str, Any],
         sample_material: Dict[str, str],
         server_info: Optional[Dict[str, Any]] = None,
-        *,
-        transport_goal_id: Optional[str] = None,
-        result_item: Optional["QueueItem"] = None,
-        recovery_suc_type: Optional[str] = None,
-        cache_error_context: bool = True,
     ) -> None:
         """
         向设备发送目标请求
@@ -887,18 +880,15 @@ class HostNode(BaseROS2DeviceNode):
             action_kwargs: 动作参数
             server_info: 服务器发送信息，包含发送时间戳等
         """
-        callback_item = result_item or item
         with self._pending_action_error_decisions_lock:
-            if callback_item.job_id in self._canceled_jobs:
+            if item.job_id in self._canceled_jobs:
                 self.lab_logger().info(
-                    f"[Host Node] Skip canceled goal {callback_item.job_id[:8]}"
+                    f"[Host Node] Skip canceled goal {item.job_id[:8]}"
                 )
                 return
-        u = uuid.UUID(transport_goal_id or item.job_id)
+        u = uuid.UUID(item.job_id)
         device_id = item.device_id
         action_name = item.action_name
-        original_action_kwargs = dict(action_kwargs)
-
         if BasicConfig.test_mode:
             action_id = f"/devices/{device_id}/{action_name}"
             self.lab_logger().info(
@@ -930,19 +920,7 @@ class HostNode(BaseROS2DeviceNode):
         if action_id not in self._action_clients:
             raise ValueError(f"ActionClient {action_id} not found.")
 
-        context_cached = False
-        if cache_error_context:
-            existing = self._error_execution_contexts.get(callback_item.job_id, {})
-            self._error_execution_contexts[callback_item.job_id] = {
-                "item": callback_item,
-                "action_type": action_type,
-                "action_kwargs": original_action_kwargs,
-                "sample_material": dict(sample_material),
-                "server_info": dict(server_info) if server_info else None,
-                "retry_count": int(existing.get("retry_count", 0)),
-            }
-            context_cached = True
-
+        self._inflight_goal_jobs.add(item.job_id)
         try:
             action_client: ActionClient = self._action_clients[action_id]
             goal_msg = convert_to_ros_msg(action_client._action_type.Goal(), action_kwargs)
@@ -956,22 +934,20 @@ class HostNode(BaseROS2DeviceNode):
             future = action_client.send_goal_async(
                 goal_msg,
                 feedback_callback=lambda feedback_msg: self.feedback_callback(
-                    callback_item,
+                    item,
                     action_id,
                     feedback_msg,
                 ),
                 goal_uuid=goal_uuid_obj,
             )
         except Exception:
-            if context_cached:
-                self._error_execution_contexts.pop(callback_item.job_id, None)
+            self._inflight_goal_jobs.discard(item.job_id)
             raise
         future.add_done_callback(
             lambda f: self.goal_response_callback(
-                callback_item,
+                item,
                 action_id,
                 f,
-                recovery_suc_type=recovery_suc_type,
             )
         )
 
@@ -1029,7 +1005,7 @@ class HostNode(BaseROS2DeviceNode):
                 return_info,
             ),
         )
-        self._error_execution_contexts.pop(job_id, None)
+        self._inflight_goal_jobs.discard(job_id)
 
     @staticmethod
     def _job_status_event_data(
@@ -1042,6 +1018,8 @@ class HostNode(BaseROS2DeviceNode):
 
         return {
             "job_id": item.job_id,
+            "node_id": str(getattr(item, "node_id", "") or ""),
+            "retry_count": int(getattr(item, "retry_count", 0) or 0),
             "task_id": item.task_id,
             "device_id": item.device_id,
             "notebook_id": item.notebook_id,
@@ -1060,11 +1038,6 @@ class HostNode(BaseROS2DeviceNode):
     ) -> None:
         """向 Host 微后端发布事件；事件系统故障不得影响 action。"""
 
-        if (
-            getattr(item, "error_decision_target", ERROR_DECISION_TARGET_BACKEND)
-            != ERROR_DECISION_TARGET_MICRO_BACKEND
-        ):
-            return
         try:
             from unilabos.app.web.event_bus import monitor_bus
 
@@ -1083,7 +1056,7 @@ class HostNode(BaseROS2DeviceNode):
 
         job_id = item.job_id
         self._goals.pop(job_id, None)
-        self._error_execution_contexts.pop(job_id, None)
+        self._inflight_goal_jobs.discard(job_id)
         with self._pending_action_error_decisions_lock:
             stale_ids = [
                 decision_id
@@ -1128,7 +1101,7 @@ class HostNode(BaseROS2DeviceNode):
         return_info: Dict[str, Any],
         result_data: Dict[str, Any],
     ) -> bool:
-        """设备失败后在 Host 创建决策点；成功上报时原 job 继续保持 pending。"""
+        """暂存设备失败，并请求后端在完成调度更新后释放该终态。"""
 
         with self._pending_action_error_decisions_lock:
             if item.job_id in self._canceled_jobs:
@@ -1163,52 +1136,9 @@ class HostNode(BaseROS2DeviceNode):
         options = resolve_error_options_by_names(policy, exception_mro)
         if not options:
             return False
-        execution_context = self._error_execution_contexts.get(item.job_id)
-        retry_count = int((execution_context or {}).get("retry_count", 0))
+        # retry 次数属于后端调度 attempt，不由 Host 的 transport 重发次数推导。
+        retry_count = int(getattr(item, "retry_count", 0) or 0)
         max_retries = int(policy.get("max_retries", 3))
-        has_retry_option = any(
-            str(option.get("action")) == "retry" for option in options
-        )
-        retry_unavailable_message = ""
-        if has_retry_option and execution_context is None:
-            options = [
-                option
-                for option in options
-                if str(option.get("action")) != "retry"
-            ]
-            retry_unavailable_message = "缺少原动作上下文，无法重试"
-        elif has_retry_option and retry_count >= max_retries:
-            options = [
-                option
-                for option in options
-                if str(option.get("action")) != "retry"
-            ]
-            retry_unavailable_message = f"达到最大重试次数（{max_retries}）"
-
-        if retry_unavailable_message:
-            previous_message = str(
-                raw_error_info.get("error_message")
-                or return_info.get("error")
-                or ""
-            )
-            raw_error_info = {
-                **raw_error_info,
-                "error_message": (
-                    f"{previous_message}\n{retry_unavailable_message}"
-                    if previous_message
-                    else retry_unavailable_message
-                ),
-            }
-            return_info["error"] = raw_error_info["error_message"]
-            return_info["error_info"] = dict(raw_error_info)
-            if "return_info" in result_data:
-                result_data["return_info"] = json.dumps(
-                    return_info,
-                    ensure_ascii=False,
-                )
-            # 重试是唯一选项且已不可用时，不创建无法处理的决策点，直接失败。
-            if not options:
-                return False
         timeout_action = str(policy.get("default_on_decision_timeout", "abort"))
         if timeout_action != "abort" and timeout_action not in {
             str(option.get("action")) for option in options
@@ -1223,22 +1153,14 @@ class HostNode(BaseROS2DeviceNode):
             ),
             "default_on_decision_timeout": timeout_action,
         }
-        decision_target = str(
-            getattr(item, "error_decision_target", ERROR_DECISION_TARGET_BACKEND)
-        )
-        if decision_target not in {
-            ERROR_DECISION_TARGET_BACKEND,
-            ERROR_DECISION_TARGET_MICRO_BACKEND,
-        }:
-            self.lab_logger().warning(
-                f"[Host Node] 未知异常决策目标 {decision_target!r}，按后端通道处理"
-            )
-            decision_target = ERROR_DECISION_TARGET_BACKEND
-
-        if execution_context is None:
-            self.lab_logger().warning(
-                f"[Host Node] Job {item.job_id[:8]} 缺少重试上下文，仅支持 skip/abort"
-            )
+        decision_bridges = [
+            bridge
+            for bridge in self.bridges
+            if hasattr(bridge, "publish_job_error_decision_required")
+        ]
+        if not decision_bridges:
+            # 本地直跑或未配置调度后端时不能制造永远无法释放的 pending。
+            return False
 
         decision_id = str(uuid.uuid4())
         pending = {
@@ -1248,8 +1170,6 @@ class HostNode(BaseROS2DeviceNode):
             "return_info": dict(return_info),
             "result_data": dict(result_data),
             "error_info": dict(error_info),
-            "execution_context": execution_context,
-            "decision_target": decision_target,
             "report": None,
             "resolving": False,
             "timer": None,
@@ -1260,8 +1180,7 @@ class HostNode(BaseROS2DeviceNode):
         created_at = time.time()
         timeout_seconds = float(error_info.get("decision_timeout_seconds", 300.0))
         expires_at = created_at + timeout_seconds
-        # Timer 仅负责唤醒；人工决策消费时必须从 pending 副本读取同一个
-        # 绝对截止时间，才能在 Timer 调度延迟时仍原子拒绝过期决策。
+        # 截止时间只作为调度后端的前端询问策略输入；Host 不自行执行超时动作。
         error_info["expires_at"] = expires_at
         pending["error_info"]["expires_at"] = expires_at
         report = {
@@ -1270,6 +1189,7 @@ class HostNode(BaseROS2DeviceNode):
             "action_name": error_info.get("action_name") or item.action_name,
             "task_id": item.task_id,
             "job_id": item.job_id,
+            "node_id": str(getattr(item, "node_id", "") or ""),
             "exception_type": error_info.get("exception_type", "Exception"),
             "error_message": error_info.get("error_message", return_info.get("error", "")),
             "traceback": error_info.get("traceback", return_info.get("error", "")),
@@ -1291,70 +1211,37 @@ class HostNode(BaseROS2DeviceNode):
         pending["report"] = report
 
         self._goals.pop(item.job_id, None)
-        timer = threading.Timer(
-            timeout_seconds,
-            self._handle_action_error_decision_timeout,
-            args=(decision_id,),
-        )
-        timer.daemon = True
-        pending["timer"] = timer
-        timer.start()
-
-        # 本地任务由微后端直接读取 Host pending；云端任务只投递给后端 bridge。
-        accepted = decision_target == ERROR_DECISION_TARGET_MICRO_BACKEND
-        if decision_target == ERROR_DECISION_TARGET_BACKEND:
-            for bridge in self.bridges:
-                publish = getattr(bridge, "publish_job_error_decision_required", None)
-                if not callable(publish):
-                    continue
-                try:
-                    if publish(report):
-                        accepted = True
-                        break
-                except Exception as ex:  # noqa: BLE001 - 逐个尝试决策通道
-                    self.lab_logger().warning(
-                        f"[Host Node] 异常决策通道失败: {bridge!r}: {ex}"
-                    )
-
-        if not accepted:
-            with self._pending_action_error_decisions_lock:
-                removed = self._pending_action_error_decisions.pop(
-                    decision_id,
-                    None,
-                )
-            if removed is not None:
-                timer.cancel()
-            return False
 
         with self._pending_action_error_decisions_lock:
             still_pending = decision_id in self._pending_action_error_decisions
         if still_pending:
+            for bridge in decision_bridges:
+                try:
+                    bridge.publish_job_error_decision_required(deepcopy(report))
+                except Exception as ex:  # noqa: BLE001 - pending 可在重连后重放
+                    self.lab_logger().warning(
+                        f"[Host Node] Failed to publish error decision "
+                        f"{decision_id}: {ex}"
+                    )
             self._emit_local_action_event(
                 item,
                 "job_error_decision_required",
                 deepcopy(report),
             )
             self.lab_logger().info(
-                f"[Host Node] Job {item.job_id[:8]} 等待异常决策 "
-                f"{decision_id} target={decision_target}"
+                f"[Host Node] Job {item.job_id[:8]} 等待后端完成决策与调度更新 "
+                f"{decision_id}"
             )
         return True
 
-    def get_pending_action_error_decisions(
-        self,
-        decision_target: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """按决策目标查询 Host 持有的 pending 报告。"""
+    def get_pending_action_error_decisions(self) -> List[Dict[str, Any]]:
+        """查询等待调度后端 release 的 pending 失败报告。"""
 
         with self._pending_action_error_decisions_lock:
             reports = [
                 deepcopy(pending["report"])
                 for pending in self._pending_action_error_decisions.values()
                 if pending.get("report") is not None
-                and (
-                    decision_target is None
-                    or pending.get("decision_target") == decision_target
-                )
             ]
         return reports
 
@@ -1388,6 +1275,7 @@ class HostNode(BaseROS2DeviceNode):
             "decision_id": pending["decision_id"],
             "job_id": pending["job_id"],
             "task_id": item.task_id,
+            "node_id": str(getattr(item, "node_id", "") or ""),
             "device_id": item.device_id,
             "action_name": item.action_name,
             "selected_action": selected_action,
@@ -1401,7 +1289,6 @@ class HostNode(BaseROS2DeviceNode):
         self._prune_action_error_decision_tombstones_locked(resolved_at)
         tombstones[pending["decision_id"]] = {
             "report": deepcopy(resolved_report),
-            "decision_target": pending.get("decision_target"),
             "retain_until": (
                 resolved_at + self._ACTION_ERROR_DECISION_TOMBSTONE_TTL_SECONDS
             ),
@@ -1413,10 +1300,8 @@ class HostNode(BaseROS2DeviceNode):
         decision_id: str,
         job_id: str,
         device_id: str,
-        *,
-        decision_target: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """按完整身份读取短期终态，供断线重放和 REST 幂等响应。"""
+        """按完整身份读取短期终态，供后端重复 release 幂等识别。"""
 
         if not decision_id or not job_id or not device_id:
             return None
@@ -1429,11 +1314,6 @@ class HostNode(BaseROS2DeviceNode):
             ).get(decision_id)
             if tombstone is None:
                 return None
-            if (
-                decision_target is not None
-                and tombstone.get("decision_target") != decision_target
-            ):
-                return None
             report = tombstone.get("report")
             if not isinstance(report, dict):
                 return None
@@ -1443,64 +1323,6 @@ class HostNode(BaseROS2DeviceNode):
             ):
                 return None
             return deepcopy(report)
-
-    def get_resolved_action_error_decisions(
-        self,
-        decision_target: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """读取仍在 Host tombstone 窗口内的决策终态。"""
-
-        with self._pending_action_error_decisions_lock:
-            self._prune_action_error_decision_tombstones_locked()
-            return [
-                deepcopy(tombstone["report"])
-                for tombstone in getattr(
-                    self,
-                    "_resolved_action_error_decisions",
-                    {},
-                ).values()
-                if isinstance(tombstone.get("report"), dict)
-                and (
-                    decision_target is None
-                    or tombstone.get("decision_target") == decision_target
-                )
-            ]
-
-    def replay_action_error_decision_resolution(
-        self,
-        decision_id: str,
-        job_id: str,
-        device_id: str,
-        *,
-        decision_target: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """向原决策端重放已解决终态，不再次执行恢复动作。"""
-
-        resolved_report = self.get_resolved_action_error_decision(
-            decision_id,
-            job_id,
-            device_id,
-            decision_target=decision_target,
-        )
-        if resolved_report is None:
-            return None
-        if decision_target == ERROR_DECISION_TARGET_BACKEND:
-            for bridge in self.bridges:
-                publish_resolved = getattr(
-                    bridge,
-                    "publish_job_error_decision_resolved",
-                    None,
-                )
-                if not callable(publish_resolved):
-                    continue
-                try:
-                    if publish_resolved(deepcopy(resolved_report)):
-                        break
-                except Exception as ex:  # noqa: BLE001 - 重放失败不改变终态
-                    self.lab_logger().warning(
-                        f"[Host Node] 异常决策终态重放失败: {bridge!r}: {ex}"
-                    )
-        return resolved_report
 
     def _publish_action_error_decision_resolved(
         self,
@@ -1526,64 +1348,15 @@ class HostNode(BaseROS2DeviceNode):
             "job_error_decision_resolved",
             resolved_report,
         )
-        if pending.get("decision_target") == ERROR_DECISION_TARGET_BACKEND:
-            for bridge in self.bridges:
-                publish_resolved = getattr(
-                    bridge,
-                    "publish_job_error_decision_resolved",
-                    None,
-                )
-                if not callable(publish_resolved):
-                    continue
-                try:
-                    if publish_resolved(deepcopy(resolved_report)):
-                        break
-                except Exception as ex:  # noqa: BLE001 - 审计上报失败不阻断决策
-                    self.lab_logger().warning(
-                        f"[Host Node] 异常决策结果上报失败: {bridge!r}: {ex}"
-                    )
         return resolved_report
-
-    def _handle_action_error_decision_timeout(self, decision_id: str) -> None:
-        with self._pending_action_error_decisions_lock:
-            pending = self._pending_action_error_decisions.get(decision_id)
-            if pending is None:
-                return
-            error_info = pending["error_info"]
-            job_id = pending["job_id"]
-            device_id = pending["item"].device_id
-            timeout_action = str(
-                error_info.get("default_on_decision_timeout", "abort")
-            )
-            allowed_actions = {
-                str(option.get("action"))
-                for option in error_info.get("options", [])
-            }
-            if timeout_action != "abort" and timeout_action not in allowed_actions:
-                timeout_action = "abort"
-        self.handle_action_error_decision(
-            decision_id,
-            job_id,
-            {
-                "decision_id": decision_id,
-                "job_id": job_id,
-                "device_id": device_id,
-                "action": timeout_action,
-                "reason": "decision_timeout",
-            },
-            _timeout_resolution=True,
-        )
 
     def handle_action_error_decision(
         self,
         decision_id: str,
         job_id: str,
         decision: Dict[str, Any],
-        *,
-        decision_target: Optional[str] = None,
-        _timeout_resolution: bool = False,
     ) -> bool:
-        """在 Host 上处理决策，并通过现有 ActionClient 发起恢复动作。"""
+        """消费后端 release；除人工替代外，原始设备失败保持 failed。"""
 
         body_decision_id = str(decision.get("decision_id") or "")
         body_job_id = str(decision.get("job_id") or "")
@@ -1596,6 +1369,7 @@ class HostNode(BaseROS2DeviceNode):
             or not body_device_id
             or body_decision_id != decision_id
             or body_job_id != job_id
+            or decision.get("scheduler_updated") is not True
         ):
             return False
 
@@ -1608,42 +1382,10 @@ class HostNode(BaseROS2DeviceNode):
                 or pending.get("job_id") in self._canceled_jobs
             ):
                 return False
-            if (
-                decision_target is not None
-                and pending.get("decision_target") != decision_target
-            ):
-                return False
             if pending["job_id"] != job_id:
                 return False
             if body_device_id != pending["item"].device_id:
                 return False
-
-            expires_at = float(pending["error_info"].get("expires_at", 0.0))
-            if (
-                not _timeout_resolution
-                and expires_at > 0.0
-                and time.time() >= expires_at
-            ):
-                timeout_action = str(
-                    pending["error_info"].get(
-                        "default_on_decision_timeout",
-                        "abort",
-                    )
-                )
-                allowed_actions = {
-                    str(option.get("action"))
-                    for option in pending["error_info"].get("options", [])
-                }
-                if timeout_action != "abort" and timeout_action not in allowed_actions:
-                    timeout_action = "abort"
-                decision = {
-                    "decision_id": decision_id,
-                    "job_id": job_id,
-                    "device_id": body_device_id,
-                    "action": timeout_action,
-                    "reason": "decision_timeout",
-                }
-                caller_accepted = False
 
             selected_option = decision.get("option")
             if isinstance(selected_option, dict):
@@ -1658,10 +1400,7 @@ class HostNode(BaseROS2DeviceNode):
                 (candidate for candidate in options if str(candidate.get("action")) == selected),
                 None,
             )
-            if option is None and not (
-                decision.get("reason") == "decision_timeout"
-                and selected == "abort"
-            ):
+            if option is None:
                 return False
 
             pending["resolving"] = True
@@ -1682,145 +1421,40 @@ class HostNode(BaseROS2DeviceNode):
             str(decision.get("reason") or ""),
             resolved_report,
         )
-        if selected == "abort":
-            self._finish_error_handled_job(
-                item,
-                "failed",
-                pending["return_info"],
-                pending["result_data"],
-            )
-            return caller_accepted
-
-        if selected == "skip":
+        if selected == "operator_intervention" and (
+            "result" in decision or "return_value" in decision
+        ):
             return_value = decision.get("result", decision.get("return_value"))
             return_info = serialize_result_info(
                 "",
                 True,
                 return_value,
-                suc_type=SUCCESS_TYPE_SKIP,
+                suc_type=SUCCESS_TYPE_OPERATOR_INTERVENTION,
             )
+            return_info["error_resolution"] = {
+                "decision_id": decision_id,
+                "selected_action": selected,
+                "reason": str(decision.get("reason") or ""),
+                "scheduler_updated": True,
+            }
             result_data = dict(pending["result_data"])
+            result_data["raw_return_info"] = deepcopy(pending["return_info"])
             result_data["return_info"] = json.dumps(return_info, ensure_ascii=False)
             self._finish_error_handled_job(item, "success", return_info, result_data)
             return caller_accepted
 
-        execution_context = pending.get("execution_context")
-        if selected == "retry":
-            if execution_context is None:
-                self._finish_error_handled_job(
-                    item,
-                    "failed",
-                    serialize_result_info("缺少原动作上下文，无法重试", False, {}),
-                    pending["result_data"],
-                )
-                return caller_accepted
-            retries = int(execution_context.get("retry_count", 0))
-            max_retries = int(pending["error_info"].get("max_retries", 3))
-            if retries >= max_retries:
-                self._finish_error_handled_job(
-                    item,
-                    "failed",
-                    serialize_result_info(
-                        f"action {item.action_name} exceeded {max_retries} retries",
-                        False,
-                        {},
-                    ),
-                    pending["result_data"],
-                )
-                return caller_accepted
-            execution_context["retry_count"] = retries + 1
-            try:
-                self.send_goal(
-                    execution_context["item"],
-                    execution_context["action_type"],
-                    execution_context["action_kwargs"],
-                    execution_context["sample_material"],
-                    execution_context["server_info"],
-                    transport_goal_id=str(uuid.uuid4()),
-                    cache_error_context=False,
-                )
-            except Exception as ex:  # noqa: BLE001 - 转成原 job 的终态失败
-                self._finish_error_handled_job(
-                    item,
-                    "failed",
-                    serialize_result_info(traceback.format_exc(), False, {}),
-                    {"error": str(ex)},
-                )
-            return caller_accepted
-
-        fallback = option.get("fallback_action") if isinstance(option, dict) else None
-        if not isinstance(fallback, dict):
-            if "result" in decision or "return_value" in decision:
-                return_value = decision.get("result", decision.get("return_value"))
-                return_info = serialize_result_info(
-                    "",
-                    True,
-                    return_value,
-                    suc_type=SUCCESS_TYPE_OPERATOR_INTERVENTION,
-                )
-                self._finish_error_handled_job(item, "success", return_info, {})
-                return caller_accepted
-            self._finish_error_handled_job(
-                item,
-                "failed",
-                serialize_result_info(
-                    f"error option {selected} missing fallback_action",
-                    False,
-                    {},
-                ),
-                pending["result_data"],
-            )
-            return caller_accepted
-
-        fallback_name = str(fallback.get("action_name") or "")
-        action_mappings = self._action_value_mappings.get(item.device_id, {})
-        fallback_key = fallback_name
-        mapping = action_mappings.get(fallback_key)
-        if mapping is None:
-            fallback_key = f"auto-{fallback_name}"
-            mapping = action_mappings.get(fallback_key)
-        if not fallback_name or not isinstance(mapping, dict):
-            self._finish_error_handled_job(
-                item,
-                "failed",
-                serialize_result_info(
-                    f"fallback action not registered: {fallback_name}",
-                    False,
-                    {},
-                ),
-                pending["result_data"],
-            )
-            return caller_accepted
-
-        fallback_item = type(item)(
-            task_type=item.task_type,
-            device_id=item.device_id,
-            action_name=fallback_key,
-            task_id=item.task_id,
-            job_id=item.job_id,
-            notebook_id=item.notebook_id,
-            device_action_key=f"/devices/{item.device_id}/{fallback_key}",
-            error_decision_target=decision_target or pending["decision_target"],
-        )
-        try:
-            self.send_goal(
-                fallback_item,
-                str(mapping.get("type") or "UniLabJsonCommand"),
-                dict(fallback.get("params") or {}),
-                {},
-                None,
-                transport_goal_id=str(uuid.uuid4()),
-                result_item=item,
-                recovery_suc_type=SUCCESS_TYPE_OPERATOR_INTERVENTION,
-                cache_error_context=False,
-            )
-        except Exception as ex:  # noqa: BLE001 - 转成原 job 的终态失败
-            self._finish_error_handled_job(
-                item,
-                "failed",
-                serialize_result_info(traceback.format_exc(), False, {}),
-                {"error": str(ex)},
-            )
+        # retry/skip/abort/fallback 都已由后端更新调度；Host 只保留并上报原始失败。
+        return_info = deepcopy(pending["return_info"])
+        return_info["error_resolution"] = {
+            "decision_id": decision_id,
+            "selected_action": selected,
+            "reason": str(decision.get("reason") or ""),
+            "scheduler_updated": True,
+        }
+        result_data = dict(pending["result_data"])
+        if "return_info" in result_data:
+            result_data["return_info"] = json.dumps(return_info, ensure_ascii=False)
+        self._finish_error_handled_job(item, "failed", return_info, result_data)
         return caller_accepted
 
     def goal_response_callback(
@@ -1828,9 +1462,9 @@ class HostNode(BaseROS2DeviceNode):
         item: "QueueItem",
         action_id: str,
         future,
-        recovery_suc_type: Optional[str] = None,
     ) -> None:
         """目标响应回调"""
+        self._inflight_goal_jobs.discard(item.job_id)
         try:
             goal_handle = future.result()
         except Exception as ex:  # noqa: BLE001 - 转成 job 终态失败
@@ -1862,7 +1496,6 @@ class HostNode(BaseROS2DeviceNode):
                 item,
                 action_id,
                 f,
-                recovery_suc_type=recovery_suc_type,
             )
         )
         with self._pending_action_error_decisions_lock:
@@ -1895,7 +1528,6 @@ class HostNode(BaseROS2DeviceNode):
         item: "QueueItem",
         action_id: str,
         future,
-        recovery_suc_type: Optional[str] = None,
     ) -> None:
         """获取结果回调"""
         job_id = item.job_id
@@ -1948,19 +1580,11 @@ class HostNode(BaseROS2DeviceNode):
                         status = "failed"
                         return_info = serialize_result_info("缺少return_info", False, result_data)
 
-                if status == "success" and recovery_suc_type:
-                    return_info["suc_type"] = recovery_suc_type
-                    result_data["return_info"] = json.dumps(
-                        return_info,
-                        ensure_ascii=False,
-                    )
-
             terminal_result_data = (
                 {} if cancel_requested or goal_status == GoalStatus.STATUS_CANCELED else result_data
             )
             if (
                 status == "failed"
-                and recovery_suc_type is None
                 and self._begin_action_error_decision(
                     item,
                     return_info,
@@ -2031,8 +1655,8 @@ class HostNode(BaseROS2DeviceNode):
                 break
 
             goal_handle = self._goals.get(job_id)
-            has_context = job_id in self._error_execution_contexts
-            if pending is None and goal_handle is None and not has_context:
+            is_inflight = job_id in self._inflight_goal_jobs
+            if pending is None and goal_handle is None and not is_inflight:
                 self.lab_logger().warning(
                     f"[Host Node] Job {job_id[:8]} not found, cannot cancel"
                 )
@@ -2096,8 +1720,7 @@ class HostNode(BaseROS2DeviceNode):
                 for pending in self._pending_action_error_decisions.values()
             ):
                 return GoalStatus.STATUS_EXECUTING
-        # retry/fallback 已受理但 ROS goal response 尚未回调时，仍保持执行中投影。
-        if job_id in self._error_execution_contexts:
+        if job_id in self._inflight_goal_jobs:
             return GoalStatus.STATUS_EXECUTING
         self.lab_logger().warning(f"[Host Node] Goal {job_id} not found, status unknown")
         return GoalStatus.STATUS_UNKNOWN
