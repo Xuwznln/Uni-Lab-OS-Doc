@@ -23,6 +23,10 @@ from unilabos.devices.workstation.bioyond_studio.bioyond_rpc import BioyondExcep
 # from unilabos.devices.workstation.bioyond_studio.config import API_CONFIG, ...
 from unilabos.devices.workstation.workstation_http_service import WorkstationHTTPService
 from unilabos.resources.bioyond.decks import BioyondElectrolyteDeck, bioyond_electrolyte_deck
+from unilabos.resources.bioyond.YB_warehouse_material import (
+    empty_stock_snapshot,
+    slot_entry_from_snapshot,
+)
 from unilabos.utils.datacore import push_csv_by_config
 from unilabos.utils.log import logger
 from unilabos.registry.registry import lab_registry
@@ -375,6 +379,42 @@ class BioyondCellWorkstation(BioyondWorkstation):
         except Exception as e:
             logger.warning(f"计算分液完成百分比失败，返回 0.0: {e}")
             return 0.0
+
+    def _stock_slot_entry(self, kind: str, index: int) -> dict:
+        snapshot = getattr(self, "_stock_snapshot", None) or empty_stock_snapshot()
+        return slot_entry_from_snapshot(snapshot, getattr(self, "bioyond_config", None), kind, index)
+
+    def _stock_slot_name(self, kind: str, index: int) -> str:
+        return str(self._stock_slot_entry(kind, index).get("name") or "")
+
+    def _stock_slot_qty(self, kind: str, index: int) -> float:
+        try:
+            return float(self._stock_slot_entry(kind, index).get("qty") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _stock_tip_count(self, key: str) -> int:
+        tips = (getattr(self, "_stock_snapshot", None) or {}).get("tips") or {}
+        try:
+            return int(tips.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @property
+    def data_prep_tip_5000uL_count(self) -> int:
+        return self._stock_tip_count("prep_5000uL")
+
+    @property
+    def data_prep_tip_1000uL_count(self) -> int:
+        return self._stock_tip_count("prep_1000uL")
+
+    @property
+    def data_prep_tip_50uL_count(self) -> int:
+        return self._stock_tip_count("prep_50uL")
+
+    @property
+    def data_dispense_tip_5000uL_count(self) -> int:
+        return self._stock_tip_count("dispense_5000uL")
 
     # http报送服务，返回数据部分
     def process_step_finish_report(self, report_request):
@@ -5659,17 +5699,56 @@ class BioyondCellWorkstation(BioyondWorkstation):
         location_id = vial_plate_info["locationId"]
         order_code = vial_plate_info["orderCode"]
         type_name = vial_plate_info["typeName"]
-        
+
         logger.info(
             f"[资源树] 开始创建分液瓶板: orderCode={order_code}, "
             f"typeName={type_name}"
         )
-        
-        # 1. 根据类型创建Carrier对象
+
+        # 位置先解析：库位刷新可能已经把同一块板放到盘面上，这时不再新建、不再占格
+        wh_name, slot_name = self._get_warehouse_and_slot_from_location_id(
+            location_id
+        )
+        if not wh_name or not slot_name:
+            logger.warning(
+                f"[资源树] ⚠️ 无法解析位置: locationId={location_id}, "
+                f"wh_name={wh_name}, slot_name={slot_name}"
+            )
+            return
+
+        warehouse = self.deck.get_resource(wh_name)
+        if not warehouse:
+            logger.error(f"[资源树] ❌ 未找到仓库: {wh_name}")
+            return
+
+        def _hold_id(resource) -> Optional[str]:
+            extra = getattr(resource, "unilabos_extra", {}) or {}
+            return extra.get("material_bioyond_id") or getattr(resource, "unilabos_uuid", None)
+
+        occupant = self._slot_occupant(warehouse, slot_name)
+        existing_wh, existing_slot, existing = self._find_resource_by_hold_id(material_id)
+        if occupant is not None and _hold_id(occupant) == material_id:
+            logger.info(
+                f"[资源树] {wh_name}[{slot_name}] 已是同一物料 {occupant.name}，"
+                f"库位刷新已对齐，跳过占格"
+            )
+            return
+        if existing is not None:
+            logger.info(
+                f"[资源树] 同物料已在 {existing_wh.name}[{existing_slot}] "
+                f"({existing.name})，位置交给库位刷新，跳过再占 {wh_name}[{slot_name}]"
+            )
+            return
+        if occupant is not None:
+            logger.warning(
+                f"[资源树] {wh_name}[{slot_name}] 已有其他物料 {occupant.name}，"
+                f"不覆盖，交给库位刷新"
+            )
+            return
+
+        # 盘面还没有这块板：创建并放入
         # 命名必须含**完整** materialId：同订单多块物理板同前缀，重名会触发
         # deck 的 "already assigned to deck"（只挂第1块，其余槽位留空 holder）。
-        # 奔曜 materialId 是顺序生成的，截断到前 8 位仍会撞
-        # （3a22ac50-2daf / 3a22ac50-879e 前 8 位相同），故不做截断。
         plate_name = f"vial_plate_{order_code}_{material_id}"
         if "5ml" in type_name.lower() or "5mL" in type_name:
             vial_plate_obj = YB_Vial_5mL_Carrier(name=plate_name)
@@ -5682,49 +5761,31 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 f"[资源树] ⚠️ 未知的分液瓶板类型: {type_name}, 跳过创建"
             )
             return
-        
-        # ✅ 关键：分配 UUID（用于资源树转运）
-        # 使用 materialId 作为 UUID，确保与LIMS系统一致
+
         vial_plate_obj.unilabos_uuid = material_id
+        extra = getattr(vial_plate_obj, "unilabos_extra", None)
+        if not isinstance(extra, dict):
+            extra = {}
+        extra["material_bioyond_id"] = material_id
+        extra["material_bioyond_type"] = type_name
+        vial_plate_obj.unilabos_extra = extra
         logger.debug(f"[资源树] 分配 UUID: {material_id[:30]}...")
-        
-        # ✅ 新增：查询并创建分液瓶板上的瓶子资源
+
         try:
             self._populate_vial_bottles(vial_plate_obj, material_id, order_code)
         except Exception as e:
             logger.warning(
                 f"[资源树] ⚠️ 创建瓶子资源失败（继续创建瓶板）: {e}"
             )
-        
-        # 2. 解析位置 (locationId → warehouse + slot)
-        wh_name, slot_name = self._get_warehouse_and_slot_from_location_id(
-            location_id
-        )
-        
-        if not wh_name or not slot_name:
-            logger.warning(
-                f"[资源树] ⚠️ 无法解析位置: locationId={location_id}, "
-                f"wh_name={wh_name}, slot_name={slot_name}"
-            )
-            return
-        
+
         logger.debug(
             f"[资源树] 解析位置: locationId={location_id[:20]}... → "
             f"{wh_name}[{slot_name}]"
         )
-        
-        # 3. 添加到资源树
+
         try:
-            warehouse = self.deck.get_resource(wh_name)
-            if not warehouse:
-                logger.error(f"[资源树] ❌ 未找到仓库: {wh_name}")
-                return
-            
-            # 使用直接槽位赋值
-            # warehouse 的 sites 是一个 dict: {"A01": ResourceHolder, "A02": ...}
-            # 直接通过 warehouse[slot_name] 访问槽位并赋值资源对象
             warehouse[slot_name] = vial_plate_obj
-            
+            self._register_resource_in_tracker(vial_plate_obj)
             logger.info(
                 f"[资源树] ✅ 创建成功: {wh_name}[{slot_name}] = "
                 f"{vial_plate_obj.name} (类型: {type_name})"
@@ -8210,8 +8271,16 @@ class BioyondCellWorkstation(BioyondWorkstation):
                 warehouse_name = parent_resource.name if parent_resource else "手动堆栈"
                 barcode = plr_resource.unilabos_extra.get("barCode", "")
                 logger.info(f"拖拽上料: {plr_resource.name} -> {warehouse_name} / {site}, barCode={barcode!r}")
-                
-                self.create_sample(plr_resource.name, board_type, bottle_type, site, warehouse_name, barcode)
+
+                extra = getattr(plr_resource, "unilabos_extra", None)
+                if not isinstance(extra, dict):
+                    extra = {}
+                    plr_resource.unilabos_extra = extra
+                sample_uuid = self.create_sample(
+                    plr_resource.name, board_type, bottle_type, site, warehouse_name, barcode
+                )
+                if isinstance(sample_uuid, str) and sample_uuid:
+                    extra["material_bioyond_id"] = sample_uuid
                 return
         self.lab_logger().warning(f"无库位的上料，不处理，{plr_resource} 挂载到 {parent_resource}")
 
@@ -8263,7 +8332,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         location_code: str,
         warehouse_name: str = "手动堆栈右",
         barcode: str = ""
-    ) -> Dict[str, Any]:
+    ) -> Optional[str]:
         """创建配液板物料并自动入库。
         Args:
             name: 物料名称（必填）
@@ -8330,15 +8399,53 @@ class BioyondCellWorkstation(BioyondWorkstation):
             }
         # print("xxx:",data)
         create_result = self._post_lims("/api/lims/storage/material", data)
-        sample_uuid = create_result.get("data")
+        raw = create_result.get("data") if isinstance(create_result, dict) else create_result
+        if isinstance(raw, str):
+            sample_uuid = raw
+        elif isinstance(raw, dict):
+            sample_uuid = raw.get("id") or raw.get("materialId")
+        else:
+            sample_uuid = None
+
+        if not sample_uuid:
+            logger.error(f"[create_sample] 建料未返回物料 ID: {create_result}")
+            return None
 
         final_result = self._post_lims("/api/lims/storage/inbound", {
             "materialId": sample_uuid,
             "locationId": location_id,
         })
-        return final_result
+        if isinstance(final_result, dict) and final_result.get("error"):
+            logger.error(f"[create_sample] 入库失败: {final_result}")
+        return sample_uuid
 
 
+def _install_stock_monitor_properties(cls) -> None:
+    """ROS 只认类上的 property，用循环挂粉体/液体成对属性。"""
+
+    def _make_name(kind: str, index: int):
+        def _getter(self) -> str:
+            return self._stock_slot_name(kind, index)
+
+        _getter.__name__ = f"data_{kind}_{index:02d}_name"
+        return property(_getter)
+
+    def _make_qty(kind: str, index: int):
+        def _getter(self) -> float:
+            return self._stock_slot_qty(kind, index)
+
+        _getter.__name__ = f"data_{kind}_{index:02d}_qty"
+        return property(_getter)
+
+    for i in range(1, 21):
+        setattr(cls, f"data_powder_{i:02d}_name", _make_name("powder", i))
+        setattr(cls, f"data_powder_{i:02d}_qty", _make_qty("powder", i))
+    for i in range(1, 16):
+        setattr(cls, f"data_liquid_{i:02d}_name", _make_name("liquid", i))
+        setattr(cls, f"data_liquid_{i:02d}_qty", _make_qty("liquid", i))
+
+
+_install_stock_monitor_properties(BioyondCellWorkstation)
 
 
 if __name__ == "__main__":

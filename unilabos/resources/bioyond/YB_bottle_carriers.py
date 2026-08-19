@@ -745,10 +745,12 @@ def YB_TipRack_5000uL(name: str) -> BottleCarrier:
 
 
 def YB_TipRack_Mixed(name: str) -> BottleCarrier:
-    """混合枪头盒 - 复杂布局
-    上层: 2x8空位（原50uL枪头位置，现空余）
-    中层: 4x4布局，放5000uL枪头
-    下层: 2x8布局，放1000uL枪头
+    """混合枪头盒 - 复杂布局（相对原横放整体逆时针转 90°）
+
+    外框仍为 SBS 127.8×85.5，才能放进站内 Tip 堆栈格（137×96）。
+    左侧: 2×8 空位（原上层 8×2）
+    中部: 4×4 放 5000uL 枪头
+    右侧: 2×8 放 1000uL 枪头
     """
 
     # 载架尺寸 (mm)
@@ -760,38 +762,35 @@ def YB_TipRack_Mixed(name: str) -> BottleCarrier:
     tip_5000_diameter = 16.0
     tip_5000_spacing_x = 16.5
     tip_5000_spacing_y = 16.5
-    
+
     tip_1000_diameter = 7.0
     tip_1000_spacing_x = 7.5
     tip_1000_spacing_y = 7.5
 
-    # 空位尺寸（上层2x8，原50uL位置）
+    # 空位尺寸（原上层 8×2，旋转后 2×8）
     empty_diameter = 7.0
     empty_spacing_x = 7.5
     empty_spacing_y = 7.5
 
-    # 计算各层的起始位置
-    # 上层空位 (2x8)
-    empty_top_start_x = (carrier_size_x - (8 - 1) * empty_spacing_x - empty_diameter) / 2
-    empty_top_start_y = 5.0
-    
-    # 中层5000uL (4x4)
-    tip_5000_start_x = (carrier_size_x - (4 - 1) * tip_5000_spacing_x - tip_5000_diameter) / 2
-    tip_5000_start_y = empty_top_start_y + 2 * empty_spacing_y + 5.0
-    
-    # 下层1000uL (2x8)
-    tip_1000_start_x = (carrier_size_x - (8 - 1) * tip_1000_spacing_x - tip_1000_diameter) / 2
-    tip_1000_start_y = tip_5000_start_y + 4 * tip_5000_spacing_y + 5.0
+    # 三列从左到右：空位 → 5000uL → 1000uL（原从前到后的三层逆时针 90°）
+    empty_start_x = 5.0
+    empty_start_y = (carrier_size_y - (8 - 1) * empty_spacing_y - empty_diameter) / 2
+
+    tip_5000_start_x = empty_start_x + 2 * empty_spacing_x + 5.0
+    tip_5000_start_y = (carrier_size_y - (4 - 1) * tip_5000_spacing_y - tip_5000_diameter) / 2
+
+    tip_1000_start_x = tip_5000_start_x + 4 * tip_5000_spacing_x + 5.0
+    tip_1000_start_y = (carrier_size_y - (8 - 1) * tip_1000_spacing_y - tip_1000_diameter) / 2
 
     sites = {}
-    
-    # 创建上层空位 (2x8) - 不创建实际的枪头对象
+
+    # 左侧空位 (2×8) - 不创建实际的枪头对象
     empty_top_sites = create_ordered_items_2d(
         klass=ResourceHolder,
-        num_items_x=8,
-        num_items_y=2,
-        dx=empty_top_start_x,
-        dy=empty_top_start_y,
+        num_items_x=2,
+        num_items_y=8,
+        dx=empty_start_x,
+        dy=empty_start_y,
         dz=5.0,
         item_dx=empty_spacing_x,
         item_dy=empty_spacing_y,
@@ -799,12 +798,11 @@ def YB_TipRack_Mixed(name: str) -> BottleCarrier:
         size_y=empty_diameter,
         size_z=carrier_size_z,
     )
-    # 添加空位，索引 0-15
     for k, v in empty_top_sites.items():
         v.name = f"{name}_empty_top_{v.name}"
         sites[k] = v
-    
-    # 创建中层5000uL枪头位 (4x4)，索引 16-31
+
+    # 中部 5000uL 枪头位 (4×4)，索引 16-31
     tip_5000_sites = create_ordered_items_2d(
         klass=ResourceHolder,
         num_items_x=4,
@@ -821,12 +819,12 @@ def YB_TipRack_Mixed(name: str) -> BottleCarrier:
     for i, (k, v) in enumerate(tip_5000_sites.items()):
         v.name = f"{name}_5000_{v.name}"
         sites[16 + i] = v
-    
-    # 创建下层1000uL枪头位 (2x8)，索引 32-47
+
+    # 右侧 1000uL 枪头位 (2×8)，索引 32-47
     tip_1000_sites = create_ordered_items_2d(
         klass=ResourceHolder,
-        num_items_x=8,
-        num_items_y=2,
+        num_items_x=2,
+        num_items_y=8,
         dx=tip_1000_start_x,
         dy=tip_1000_start_y,
         dz=25.0,
@@ -848,21 +846,19 @@ def YB_TipRack_Mixed(name: str) -> BottleCarrier:
         sites=sites,
         model="YB_TipRack_Mixed",
     )
-    carrier.num_items_x = 8  # 最大宽度
-    carrier.num_items_y = 8  # 总行数 (2+4+2)
+    carrier.num_items_x = 8  # 2+4+2 列
+    carrier.num_items_y = 8
     carrier.num_items_z = 1
-    
-    # 为5000uL枪头创建实例 (16个)，对应索引 16-31
+
     for i in range(16):
         row = chr(65 + i // 4)  # A-D
         col = (i % 4) + 1  # 1-4
         carrier[16 + i] = YB_Tip_5000uL(f"{name}_tip5000_{row}{col}")
-    
-    # 为1000uL枪头创建实例 (16个)，对应索引 32-47
+
     for i in range(16):
-        row = chr(65 + i // 8)  # A-B
-        col = (i % 8) + 1  # 1-8
+        row = chr(65 + i // 2)  # A-H
+        col = (i % 2) + 1  # 1-2
         carrier[32 + i] = YB_Tip_1000uL(f"{name}_tip1000_{row}{col}")
-    
+
     return carrier
 

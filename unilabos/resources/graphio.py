@@ -11,8 +11,12 @@ from unilabos_msgs.msg import Resource
 
 from unilabos.config.config import BasicConfig
 from unilabos.resources.bioyond.YB_warehouse_material import (
+    apply_stock_entry_to_resource,
     apply_warehouse_placeholder_size,
     bioyond_tracker_unit,
+    is_tip_rack_type,
+    lookup_reverse_type_info,
+    parse_tip_top_count_info,
     resolve_warehouse_material_class,
 )
 from unilabos.resources.container import RegularContainer
@@ -710,8 +714,8 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
     name_counter = {}
 
     for material in bioyond_materials:
-        # 从反向映射中查找: typeName(显示名称) -> (model, UUID)
-        type_info = reverse_type_mapping.get(material.get("typeName"))
+        # 从反向映射中查找: typeName(显示名称) -> (model, UUID)；大小写不敏感
+        type_info = lookup_reverse_type_info(reverse_type_mapping, material.get("typeName"))
         className = type_info[0] if type_info else "RegularContainer"
         className = resolve_warehouse_material_class(className)
 
@@ -803,9 +807,10 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                     else:
                         typeName = default_detail_type
 
-                if typeName and typeName in reverse_type_mapping:
+                detail_type_info = lookup_reverse_type_info(reverse_type_mapping, typeName)
+                if typeName and detail_type_info:
                     bottle = plr_material[number] = initialize_resource(
-                        {"name": f'{detail["name"]}_{number}', "class": reverse_type_mapping[typeName][0]}, resource_type=ResourcePLR
+                        {"name": f'{detail["name"]}_{number}', "class": detail_type_info[0]}, resource_type=ResourcePLR
                     )
                     if hasattr(bottle, 'tracker') and bottle.tracker is not None:
                         bottle.tracker.liquids = [
@@ -820,8 +825,20 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                 else:
                     logger.warning(f"  └─ [子物料警告] {detail['name']} 的类型 '{typeName}' 不在mapping中，跳过")
         else:
-            # 只对有 capacity 属性的容器（液体容器）处理液体追踪
-            if hasattr(plr_material, 'capacity'):
+            # 枪头盒余量写在载架，不要摊到第一根子枪头；试剂瓶写第一格 tracker
+            tip_counts = parse_tip_top_count_info(material.get("parameters"))
+            if is_tip_rack_type(material.get("typeName")) or any(tip_counts.values()):
+                apply_stock_entry_to_resource(
+                    plr_material,
+                    {
+                        "name": material.get("name") or "",
+                        "qty": float(material.get("quantity") or 0),
+                        "unit": bioyond_tracker_unit(material),
+                        "typeName": material.get("typeName") or "",
+                        "tips": tip_counts,
+                    },
+                )
+            elif hasattr(plr_material, 'capacity'):
                 bottle = plr_material[0] if plr_material.capacity > 0 else plr_material
                 if hasattr(bottle, 'tracker') and bottle.tracker is not None:
                     bottle.tracker.liquids = [
