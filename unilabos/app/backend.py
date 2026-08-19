@@ -1,19 +1,16 @@
 """Backend 配置档与运行时分发。
 
-公开名称直接说明使用的通信方式和运行模式，不跟内部包名绑定：
+公开名称直接说明使用的通信协议，不跟内部运行时包名绑定：
 
-``basic``
-    不使用通信中间件的进程内 Python 驱动运行时。
 ``hostlink``
-    Basic 驱动 + HostLink TCP 的 Python 分布式运行时；不启动 rclpy/DDS，
+    本地 Python 驱动 + HostLink TCP 的分布式运行时；不启动 rclpy/DDS，
     但可以加载 ROS message 包用于字段解析和 JSON 转换。
 ``ros2``
     完整 ROS 2 运行时。
-``dora``
-    dora-rs 数据流运行时。
 
-旧 CLI 值 ``simple`` 和 ``ros`` 作为兼容别名继续接受。所有映射集中在本模块，
-使 CLI、运行时、测试和文档共享同一份事实，并确保可选 backend 只在被选中时导入。
+``BasicRuntime`` 是 HostLink 内部使用的本地执行引擎，不是可部署 backend；Dora
+代码保留用于实验，也不进入公开选择。CLI、运行时、测试和文档共享本模块中的
+公开 backend 清单，并确保可选 backend 只在被选中时导入。
 """
 
 from __future__ import annotations
@@ -60,16 +57,6 @@ class BackendSelection:
 
 
 BACKEND_PROFILES: dict[str, BackendProfile] = {
-    "basic": BackendProfile(
-        name="basic",
-        display_name="Basic",
-        module="unilabos.basic.main_basic_run",
-        description="无中间件的单进程 Python 驱动运行时",
-        default_app_bridges=(),
-        supported_app_bridges=(),
-        supports_slave=False,
-        supports_visualization=False,
-    ),
     "hostlink": BackendProfile(
         name="hostlink",
         display_name="HostLink",
@@ -90,43 +77,25 @@ BACKEND_PROFILES: dict[str, BackendProfile] = {
         supports_slave=True,
         supports_visualization=True,
     ),
-    "dora": BackendProfile(
-        name="dora",
-        display_name="Dora",
-        module="unilabos.dora.main_dora_run",
-        description="dora-rs 数据流运行时",
-        default_app_bridges=(),
-        supported_app_bridges=(),
-        supports_slave=False,
-        supports_visualization=False,
-    ),
 }
 
 BACKEND_NAMES: tuple[str, ...] = tuple(BACKEND_PROFILES)
-BACKEND_ALIASES: dict[str, str] = {
-    "simple": "basic",
-    "ros": "ros2",
-}
 
-DEFAULT_PYTHON_DRIVER_BACKENDS = ("basic", "hostlink", "ros2")
+DEFAULT_PYTHON_DRIVER_BACKENDS = ("hostlink", "ros2")
 
 _REMOVED_BACKENDS: dict[str, str] = {
     "automancer": "automancer 从未实现，现已移除",
+    "basic": "basic 是 HostLink 的内部本地执行引擎，请使用 backend 'hostlink'",
+    "simple": "simple/basic 不再是公开 backend，请使用 backend 'hostlink'",
+    "dora": "dora 是实验运行时，不是公开 backend",
+    "ros": "ros 旧别名已移除，请使用 backend 'ros2'",
 }
 
 
 def normalize_backend_name(value: str) -> str:
-    """返回规范 backend 名称，并接受已登记的旧别名。"""
+    """校验并返回公开 backend 名称。"""
 
     name = str(value or "").strip().lower()
-    if name in BACKEND_ALIASES:
-        canonical = BACKEND_ALIASES[name]
-        logger.warning(
-            "Backend 名称 '%s' 已弃用，请改用 '%s'。",
-            name,
-            canonical,
-        )
-        return canonical
     if name in _REMOVED_BACKENDS:
         raise BackendConfigurationError(_REMOVED_BACKENDS[name])
     if name not in BACKEND_PROFILES:

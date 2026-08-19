@@ -1,4 +1,4 @@
-"""dora 监控 host 节点（用于 `--backend dora` 常规运行）。
+"""Dora 实验性监控 host 节点，不属于公开 runtime backend。
 
 订阅所有设备的状态输出并周期性汇总打印。它不参与性能测试——
 性能测试由 `unilabos/dora/benchmark/host.py` 中的专用 host 承担。

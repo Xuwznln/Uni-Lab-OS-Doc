@@ -148,7 +148,7 @@ def test_driver_instantiation_supports_config_and_flat_styles() -> None:
     assert flat_driver.port == "B"
 
 
-def test_liquid_handlers_declare_python_backends_and_action_metadata() -> None:
+def test_liquid_handlers_declare_public_backends_and_action_metadata() -> None:
     registry = yaml.safe_load(
         Path("unilabos/registry/devices/liquid_handler.yaml").read_text(
             encoding="utf-8"
@@ -156,7 +156,7 @@ def test_liquid_handlers_declare_python_backends_and_action_metadata() -> None:
     )
     for name in ("liquid_handler", "liquid_handler.prcxi"):
         class_config = registry[name]["class"]
-        assert class_config["supported_backends"] == ["basic", "hostlink", "ros2"]
+        assert class_config["supported_backends"] == ["hostlink", "ros2"]
         first_action = next(iter(class_config["action_value_mappings"].values()))
         assert first_action["type"]
         assert first_action["schema"]["type"] == "object"

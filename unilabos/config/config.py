@@ -8,7 +8,7 @@ from unilabos.utils import logger
 
 class BasicConfig:
     # 运行时 backend 名称由 unilabos.app.backend 统一规范化。
-    backend: Literal["basic", "hostlink", "ros2", "dora"] = "ros2"
+    backend: Literal["hostlink", "ros2"] = "ros2"
     app_bridges: tuple[str, ...] = ("websocket", "fastapi")
     ak = ""
     sk = ""

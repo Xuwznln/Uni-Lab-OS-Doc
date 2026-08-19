@@ -256,11 +256,10 @@ def parse_args():
         type=backend_cli_value,
         choices=BACKEND_NAMES,
         default="ros2",
-        metavar="{basic,hostlink,ros2,dora}",
+        metavar="{hostlink,ros2}",
         help=(
-            "Runtime backend: basic (in-process), hostlink (distributed, no "
-            "ROS), ros2 (default), or dora. "
-            "Legacy aliases 'simple' and 'ros' remain accepted."
+            "Communication backend: hostlink (distributed, no DDS) or "
+            "ros2 (default)."
         ),
     )
     parser.add_argument(
@@ -269,7 +268,7 @@ def parse_args():
         default=None,
         help=(
             "Application bridges. Defaults are backend-specific: ros2 enables "
-            "websocket and fastapi; basic/hostlink/dora enable none. Pass the flag with "
+            "websocket and fastapi; hostlink enables none. Pass the flag with "
             "no values to disable all bridges explicitly."
         ),
     )
@@ -1288,7 +1287,7 @@ def main():
                     print_status(
                         "建议解决方案：\n"
                         "1. 激活Conda环境: conda activate unilab\n"
-                        "2. 或使用 --backend basic 参数\n"
+                        "2. 或使用 --backend hostlink 参数（无需 ROS2 可视化）\n"
                         "3. 或使用 --visual disable 参数禁用可视化",
                         "info",
                     )

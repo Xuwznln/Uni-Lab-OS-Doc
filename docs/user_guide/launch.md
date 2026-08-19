@@ -15,9 +15,9 @@ options:
                         Path to the registry directory
   --working_dir WORKING_DIR
                         Path to the working directory
-  --backend {basic,hostlink,ros2,dora}
-                        Runtime backend: basic (in-process), hostlink (distributed,
-                        no ROS), ros2 (default), or dora.
+  --backend {hostlink,ros2}
+                        Communication backend: hostlink (distributed, no DDS) or
+                        ros2 (default).
   --app_bridges [APP_BRIDGES ...]
                         Application bridges. Defaults depend on the selected backend.
   --is_slave, --is-slave
@@ -139,22 +139,17 @@ unilab --config path/to/your/config.py
 
 ## 通信中间件 `--backend`
 
-Uni-Lab 对外提供四个 backend 名称。名称、能力和实现入口由
+Uni-Lab 对外提供两个通信 backend。名称、能力和实现入口由
 `unilabos.app.backend.BACKEND_PROFILES` 统一管理：
 
 | Backend | 定位 | 默认 App bridges | Host/Slave | 可视化 |
 |---|---|---|---|---|
-| **basic** | 单进程直接加载纯 Python 设备驱动，不使用通信中间件；跳过工作站聚合节点 | 无 | 不支持 | 不支持 |
-| **hostlink** | Basic 驱动通过 HostLink TCP 组网，不启动 rclpy/DDS；可加载 ROS message 包并以 JSON 传输；支持设备发现、双向动作调用、Topic、状态和物料树同步 | 无 | 支持 | 不支持 |
+| **hostlink** | 本地 Python 驱动通过 HostLink TCP 组网，不启动 rclpy/DDS；可加载 ROS message 包并以 JSON 传输；支持设备发现、双向动作调用、Topic、状态和物料树同步 | 无 | 支持 | 不支持 |
 | **ros2**（默认） | 完整 ROS 2 分布式运行时 | `websocket fastapi` | 支持 | 支持 |
-| **dora** | 独立 dora-rs dataflow 运行时 | 无 | 暂不支持 | 暂不支持 |
 
 典型启动命令：
 
 ```bash
-# 轻量本地驱动运行；不启动 WebSocket/FastAPI
-unilab -g graph.json --backend basic
-
 # Python Link Host：监听 7302，并运行 host.json 中的本地驱动
 unilab -g host.json --backend hostlink --hostlink-port 7302
 
@@ -164,29 +159,11 @@ unilab -g slave.json --backend hostlink --is-slave \
 
 # 完整 ROS 2 运行时；不写 --backend 时也使用 ros2
 unilab -g graph.json --backend ros2
-
-# Dora 独立运行时；不会同时启动 ROS 2 backend
-unilab -g graph.json --backend dora
 ```
 
-兼容期内，旧名称 `ros` 会映射到 `ros2`，`simple` 会映射到 `basic`，并输出弃用提示。
-原 `automancer` 只有不可运行的占位分支，现已从可选项移除。
-
-### Dora 依赖
-
-Dora 的 Python 包名是 `dora-rs`，导入名是 `dora`；命令行工具名是 `dora-cli`。
-Python 依赖与 Uni-Lab 默认环境隔离安装：
-
-```bash
-pip install -e ".[dora]"
-cargo install dora-cli
-
-dora --version
-python -c "from dora import Node; import pyarrow"
-```
-
-也可以使用 [Dora 官方安装脚本](https://dora-rs.ai/dora/getting-started/quickstart)。
-Uni-Lab 会在 backend 线程启动前检查 CLI、Python API 和 PyArrow，缺失时直接给出错误。
+`BasicRuntime` 仍作为 HostLink 内部的本地 Python 驱动执行引擎，但不能通过
+`--backend basic` 独立选择。Dora 代码仅保留作实验，不属于公开部署 backend。
+旧名称 `simple`、`ros` 以及 `basic`、`dora` 都不会被 CLI 接受。
 
 ## 端云桥接 `--app_bridges`
 
@@ -195,7 +172,7 @@ ROS2 backend 提供 WebSocket、FastAPI (HTTP) 两种端云通信方式：
 - **WebSocket**：负责实时通信和任务下发
 - **FastAPI**：负责端对云物料更新和 HTTP API
 
-`basic`、`hostlink` 和 `dora` 当前没有兼容的 HostNode bridge，因此默认不加载这些桥，也会拒绝
+`hostlink` 当前没有兼容的 HostNode bridge，因此默认不加载这些桥，也会拒绝
 显式传入不支持的组合。若要让 ROS2 也不启动桥，可以使用空参数：
 
 ```bash

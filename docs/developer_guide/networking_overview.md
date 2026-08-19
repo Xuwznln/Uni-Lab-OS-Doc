@@ -138,7 +138,7 @@ unilab -g slave.json --backend hostlink --is-slave \
 驱动通过 `post_init(node)` 获得通用 `DeviceNode`，可使用日志、异步等待、任务调度、
 状态通知、Topic 发布/订阅、物料更新/查询和跨设备动作调用。相对 Topic 名称会按
 `/devices/<device_id>/<topic>` 解析；设备状态也会发布到这个路径。注册表可用
-`class.supported_backends: [basic, hostlink, ros2]` 明确声明可运行的 backend；
+`class.supported_backends: [hostlink, ros2]` 明确声明可运行的通信 backend；
 `class.type: ros2` 默认只允许 ROS2。注册表设备动作可以在 HostLink 上传递目标、反馈、取消和结果；
 驱动调用时携带的 `action_type` 只作为兼容信息，实际按动作名和字典参数执行。
 直接操作外部 ROS 图的 MoveIt ActionClient、规划场景/图像等 ROS 专用 Topic，

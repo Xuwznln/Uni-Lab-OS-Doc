@@ -1,4 +1,4 @@
-"""供 ``basic`` backend 使用的单进程运行时。"""
+"""HostLink 内部使用的单进程 Python 驱动执行引擎。"""
 
 from __future__ import annotations
 

@@ -17,28 +17,33 @@ from unilabos.app.backend import (
     start_backend,
 )
 from unilabos.app.main import parse_args
+from unilabos.basic.runtime import BasicRuntime
 from unilabos.config.config import BasicConfig
-from unilabos.dora import main_dora_run
+from unilabos.hostlink import main_hostlink_run
 
 
-def test_public_backend_names_include_hostlink() -> None:
-    assert BACKEND_NAMES == ("basic", "hostlink", "ros2", "dora")
+def test_only_public_communication_backends_are_selectable() -> None:
+    assert BACKEND_NAMES == ("hostlink", "ros2")
     assert BasicConfig.backend == "ros2"
 
 
 @pytest.mark.parametrize(
     ("value", "canonical"),
     [
-        ("basic", "basic"),
         ("hostlink", "hostlink"),
-        ("simple", "basic"),
-        ("ros", "ros2"),
         ("ros2", "ros2"),
-        ("dora", "dora"),
     ],
 )
-def test_backend_names_and_legacy_aliases(value: str, canonical: str) -> None:
+def test_public_backend_names(value: str, canonical: str) -> None:
     assert normalize_backend_name(value) == canonical
+
+
+@pytest.mark.parametrize("value", ["basic", "simple", "dora", "ros"])
+def test_internal_experimental_and_legacy_backend_names_are_rejected(
+    value: str,
+) -> None:
+    with pytest.raises(BackendConfigurationError):
+        normalize_backend_name(value)
 
 
 def test_automancer_placeholder_is_not_selectable() -> None:
@@ -51,24 +56,19 @@ def test_backend_specific_bridge_defaults() -> None:
         "websocket",
         "fastapi",
     )
-    assert resolve_backend_selection("basic").app_bridges == ()
     assert resolve_backend_selection("hostlink").app_bridges == ()
-    assert resolve_backend_selection("dora").app_bridges == ()
 
 
 def test_backend_capability_validation() -> None:
     with pytest.raises(BackendConfigurationError, match="不支持应用桥"):
-        resolve_backend_selection("dora", ["websocket"])
-    with pytest.raises(BackendConfigurationError, match="不支持 --is_slave"):
-        resolve_backend_selection("basic", is_slave=True)
+        resolve_backend_selection("hostlink", ["websocket"])
     with pytest.raises(BackendConfigurationError, match="不支持 --visual"):
-        resolve_backend_selection("dora", visual="rviz")
+        resolve_backend_selection("hostlink", visual="rviz")
     assert resolve_backend_selection("hostlink", is_slave=True).name == "hostlink"
 
 
 def test_registry_driver_backend_defaults_and_explicit_support() -> None:
     assert resolve_driver_backends({"type": "python"}) == (
-        "basic",
         "hostlink",
         "ros2",
     )
@@ -80,16 +80,21 @@ def test_registry_driver_backend_defaults_and_explicit_support() -> None:
         resolve_driver_backends(
             {"type": "python", "supported_backends": ["missing"]}
         )
+    with pytest.raises(BackendConfigurationError, match="未知 backend"):
+        resolve_driver_backends(
+            {"type": "python", "supported_backends": ["basic"]}
+        )
 
 
-def test_cli_shows_canonical_names_and_accepts_aliases() -> None:
+def test_cli_shows_and_accepts_only_public_backend_names() -> None:
     parser = parse_args()
-    assert parser.parse_args(["--backend", "ros"]).backend == "ros2"
-    assert parser.parse_args(["--backend", "simple"]).backend == "basic"
-    assert parser.parse_args(["--backend", "dora"]).backend == "dora"
     assert parser.parse_args(["--backend", "hostlink"]).backend == "hostlink"
+    assert parser.parse_args(["--backend", "ros2"]).backend == "ros2"
+    for value in ("basic", "simple", "dora", "ros"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--backend", value])
     help_text = parser.format_help()
-    assert "{basic,hostlink,ros2,dora}" in help_text
+    assert "{hostlink,ros2}" in help_text
     assert "automancer" not in help_text
 
 
@@ -109,26 +114,19 @@ def test_start_backend_imports_only_selected_profile(monkeypatch) -> None:
         return fake_module
 
     monkeypatch.setattr(backend_module.importlib, "import_module", fake_import)
-    thread = start_backend("basic", object(), object())
+    thread = start_backend("hostlink", object(), object())
     thread.join(timeout=2)
 
     assert called.is_set()
-    assert imported == ["unilabos.basic.main_basic_run"]
-    assert thread.name == "backend-basic"
+    assert imported == ["unilabos.hostlink.main_hostlink_run"]
+    assert thread.name == "backend-hostlink"
     assert received[0][2] == []
 
 
-def test_dora_preflight_reports_optional_dependencies(monkeypatch) -> None:
-    monkeypatch.setattr(main_dora_run.runtime, "dora_binary", lambda: None)
-    monkeypatch.setattr(main_dora_run.importlib.util, "find_spec", lambda name: None)
-
-    with pytest.raises(RuntimeError) as exc_info:
-        main_dora_run.validate_environment()
-
-    message = str(exc_info.value)
-    assert "dora-cli" in message
-    assert "dora-rs" in message
-    assert "pyarrow" in message
+def test_hostlink_still_builds_its_internal_basic_runtime() -> None:
+    runtime = main_hostlink_run.build_runtime(None, backend_name="hostlink")
+    assert isinstance(runtime, BasicRuntime)
+    assert runtime.backend_name == "hostlink"
 
 
 def test_web_package_does_not_eagerly_import_ros_modules() -> None:

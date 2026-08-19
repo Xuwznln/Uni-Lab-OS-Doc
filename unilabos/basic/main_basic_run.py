@@ -1,4 +1,7 @@
-"""无中间件 ``basic`` backend 的启动入口。"""
+"""HostLink 内部使用的本地 Python 驱动运行时构建入口。
+
+``BasicRuntime`` 名称保留给内部实现与测试；它不属于公开部署 backend。
+"""
 
 from __future__ import annotations
 
@@ -19,11 +22,11 @@ def get_runtime() -> Optional[BasicRuntime]:
 
 
 def build_runtime(devices_config: Any, backend_name: str = "basic") -> BasicRuntime:
-    from unilabos.registry.registry import lab_registry
-
     runtime = BasicRuntime(backend_name=backend_name)
     if devices_config is None:
         return runtime
+
+    from unilabos.registry.registry import lab_registry
 
     for node in devices_config.all_nodes:
         resource = node.res_content
@@ -100,7 +103,7 @@ def main(
     *args: Any,
     **kwargs: Any,
 ) -> None:
-    """在进程内加载 Python 驱动，并保持运行直到进程退出。"""
+    """内部兼容入口：在进程内加载 Python 驱动并保持运行。"""
 
     global _runtime
     del resources_config
@@ -119,4 +122,4 @@ def main(
 
 
 def slave(*args: Any, **kwargs: Any) -> None:
-    raise RuntimeError("Basic backend 不支持 Slave 模式；请使用 ros2")
+    raise RuntimeError("BasicRuntime 是内部本地执行引擎；请使用 hostlink 或 ros2")
