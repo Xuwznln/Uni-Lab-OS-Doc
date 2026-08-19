@@ -279,13 +279,15 @@ def bioyond_warehouse_5x3x1(name: str, row_offset: int = 0) -> WareHouse:
     )
 
 
-def bioyond_warehouse_3x3x1(name: str) -> WareHouse:
+def bioyond_warehouse_3x3x1(name: str, removed_positions=None) -> WareHouse:
     """创建BioYond 3x3x1仓库（3行×3列×1层）
 
     布局:
     A01 | A02 | A03
     B01 | B02 | B03
     C01 | C02 | C03
+
+    removed_positions: 行优先下标，例如 [8] 去掉 C03
     """
     return warehouse_factory(
         name=name,
@@ -299,8 +301,78 @@ def bioyond_warehouse_3x3x1(name: str) -> WareHouse:
         item_dy=96.0,
         item_dz=120.0,
         category="warehouse",
-        layout="row-major",  # ⭐ 使用行优先避免上下颠倒
+        layout="row-major",
+        removed_positions=removed_positions,
     )
+
+
+def bioyond_warehouse_3x2x1(name: str) -> WareHouse:
+    """创建BioYond 3x2x1仓库（3行×2列：A01-C02），用于站内Tip头盒堆栈。"""
+    return warehouse_factory(
+        name=name,
+        num_items_x=2,
+        num_items_y=3,
+        num_items_z=1,
+        dx=10.0,
+        dy=10.0,
+        dz=10.0,
+        item_dx=137.0,
+        item_dy=96.0,
+        item_dz=120.0,
+        category="warehouse",
+        layout="row-major",
+    )
+
+
+def bioyond_warehouse_letter_row(name: str, n: int, letter_offset: int = 0) -> WareHouse:
+    """横向一排 n 格，字母递增（粉末加样头 / 试剂替换左右半区）。
+
+    letter_offset=0  → A01,B01,...
+    letter_offset=10 → K01,...,T01
+    letter_offset=5  → F01,...,J01
+    """
+    return warehouse_factory(
+        name=name,
+        num_items_x=n,
+        num_items_y=1,
+        num_items_z=1,
+        dx=10.0,
+        dy=10.0,
+        dz=10.0,
+        item_dx=137.0,
+        item_dy=96.0,
+        item_dz=120.0,
+        category="warehouse",
+        row_offset=letter_offset,
+        layout="letter-row",
+    )
+
+
+def bioyond_warehouse_1x1(name: str) -> WareHouse:
+    """单格仓库（A01），用于预留位 / 单点位上料库。"""
+    return bioyond_warehouse_letter_row(name, 1)
+
+
+def bioyond_warehouse_c03_only(name: str) -> WareHouse:
+    """仅 C03 一格，用于小分液瓶堆栈。"""
+    return warehouse_factory(
+        name=name,
+        num_items_x=1,
+        num_items_y=1,
+        num_items_z=1,
+        dx=10.0,
+        dy=10.0,
+        dz=10.0,
+        item_dx=137.0,
+        item_dy=96.0,
+        item_dz=120.0,
+        category="warehouse",
+        row_offset=2,
+        col_offset=2,
+        layout="row-major",
+    )
+
+
 def bioyond_warehouse_2x1x3(name: str) -> WareHouse:
     """创建BioYond 2x1x3仓库"""
     return warehouse_factory(

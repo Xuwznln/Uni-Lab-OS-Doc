@@ -8261,7 +8261,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
         board_type: str,
         bottle_type: str,
         location_code: str,
-        warehouse_name: str = "手动传递窗右",
+        warehouse_name: str = "手动堆栈右",
         barcode: str = ""
     ) -> Dict[str, Any]:
         """创建配液板物料并自动入库。
@@ -8270,7 +8270,7 @@ class BioyondCellWorkstation(BioyondWorkstation):
             board_type: 板类型，如 "5ml分液瓶板"、"配液瓶(小)板"
             bottle_type: 瓶类型，如 "5ml分液瓶"、"配液瓶(小)"
             location_code: 库位编号，例如 "A01"
-            warehouse_name: 仓库名称，默认为 "手动传递窗右"，支持 "自动堆栈-左"、"自动堆栈-右" 等
+            warehouse_name: 仓库名称，默认为 "手动堆栈右"，支持 "自动堆栈-左"、"自动堆栈-右" 等
             barcode: 物料条码（可选），填写后发给奔曜；不填则为空字符串
         """
         # 使用反向查找获取 type_id

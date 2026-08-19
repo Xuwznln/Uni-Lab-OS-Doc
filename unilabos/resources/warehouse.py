@@ -28,7 +28,7 @@ def warehouse_factory(
     model: Optional[str] = None,
     col_offset: int = 0,  # 列起始偏移量，用于生成A05-D08等命名
     row_offset: int = 0,  # 行起始偏移量，用于生成F01-J03等命名
-    layout: str = "col-major",  # 新增：排序方式，"col-major"=列优先，"row-major"=行优先
+    layout: str = "col-major",  # "col-major"=列优先，"row-major"=行优先，"letter-row"=横向字母递增(A01,B01,...)
 ):
     # 创建位置坐标
     locations = []
@@ -68,7 +68,10 @@ def warehouse_factory(
 
     # 根据 layout 参数生成不同的排序方式
     # 注意：物理位置的 y 坐标是倒序的 (row=0 时 y 最大，对应前端显示的顶部)
-    if layout == "row-major":
+    if layout == "letter-row":
+        # 横向一排、字母递增: A01,B01,..., 右半区可用 row_offset=10 → K01,T01
+        keys = [f"{LETTERS[i + row_offset]}{1 + col_offset:02d}" for i in range(len_x)]
+    elif layout == "row-major":
         # 行优先顺序: A01,A02,A03,A04, B01,B02,B03,B04
         # locations[0] 对应 row=0, y最大（前端顶部）→ 应该是 A01
         keys = [f"{LETTERS[j + row_offset]}{i + 1 + col_offset:02d}" for j in range(len_y) for i in range(len_x)]

@@ -136,6 +136,20 @@ class BioyondV1RPC(BaseRequest):
 
         return response.get("data", {})
 
+    def warehouse_info(self, wh_id: str, include_detail: bool = True) -> dict:
+        """查询仓库及库位占用（warehouse-info）。失败返回空字典。"""
+        response = self.post(
+            url=f'{self.host}/api/lims/storage/warehouse-info',
+            params={
+                "apiKey": self.api_key,
+                "requestTime": self.get_current_time_iso8601(),
+                "data": {"whId": wh_id, "includeDetail": include_detail},
+            })
+        if not response or response.get("code") != 1:
+            print(f"warehouse_info error: {response}")
+            return {}
+        return response.get("data") or {}
+
     def material_id_query(self, json_str: str) -> dict:
         """
         查询物料id
@@ -313,7 +327,8 @@ class BioyondV1RPC(BaseRequest):
             })
 
         if not response or response['code'] != 1:
-            return {}
+            print(f"delete_material error: {response}")
+            return None
 
         # 自动更新缓存 - 移除被删除的物料
         for name, mid in list(self.material_cache.items()):
@@ -322,7 +337,7 @@ class BioyondV1RPC(BaseRequest):
                 print(f"已从缓存移除物料: {name}")
                 break
 
-        return response.get("data", {})
+        return response
 
     def material_outbound(self, material_id: str, location_name: str, quantity: int) -> dict:
         """指定库位出库物料（通过库位名称）"""

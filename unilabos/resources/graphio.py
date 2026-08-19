@@ -10,6 +10,11 @@ from pylabrobot.resources import ResourceHolder
 from unilabos_msgs.msg import Resource
 
 from unilabos.config.config import BasicConfig
+from unilabos.resources.bioyond.YB_warehouse_material import (
+    apply_warehouse_placeholder_size,
+    bioyond_tracker_unit,
+    resolve_warehouse_material_class,
+)
 from unilabos.resources.container import RegularContainer
 from unilabos.resources.itemized_carrier import ItemizedCarrier, BottleCarrier
 from unilabos.ros.msgs.message_converter import convert_to_ros_msg
@@ -708,6 +713,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
         # 从反向映射中查找: typeName(显示名称) -> (model, UUID)
         type_info = reverse_type_mapping.get(material.get("typeName"))
         className = type_info[0] if type_info else "RegularContainer"
+        className = resolve_warehouse_material_class(className)
 
         # 为同名物料添加唯一后缀
         base_name = material["name"]
@@ -736,6 +742,9 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
             logger.warning(f"物料 {unique_name} 不是有效的 ResourcePLR 实例，类型: {type(plr_material)}")
             continue
 
+        if className == "RegularContainer":
+            apply_warehouse_placeholder_size(plr_material)
+
         plr_material.code = material.get("code", "") and material.get("barCode", "") or ""
         plr_material.unilabos_uuid = str(uuid.uuid4())
 
@@ -744,6 +753,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
             "material_bioyond_id": material.get("id"),           # Bioyond 物料 UUID
             "material_bioyond_name": material.get("name"),       # Bioyond 原始名称（如 "MDA"）
             "material_bioyond_type": material.get("typeName"),   # Bioyond 物料类型名称
+            "material_bioyond_unit": bioyond_tracker_unit(material),
         }
 
         logger.debug(f"[转换物料] {material['name']} (ID:{material['id']}) → {unique_name} (类型:{className})")
@@ -799,7 +809,11 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                     )
                     if hasattr(bottle, 'tracker') and bottle.tracker is not None:
                         bottle.tracker.liquids = [
-                            (detail["name"], float(detail.get("quantity", 0)) if detail.get("quantity") else 0)
+                            (
+                                detail["name"],
+                                float(detail.get("quantity") or 0),
+                                bioyond_tracker_unit(detail, typeName),
+                            )
                         ]
                     bottle.code = detail.get("code", "")
                     logger.debug(f"  └─ [子物料] {detail['name']} → {plr_material.name}[{number}] (类型:{typeName})")
@@ -811,7 +825,11 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                 bottle = plr_material[0] if plr_material.capacity > 0 else plr_material
                 if hasattr(bottle, 'tracker') and bottle.tracker is not None:
                     bottle.tracker.liquids = [
-                        (material["name"], float(material.get("quantity", 0)) if material.get("quantity") else 0)
+                        (
+                            material["name"],
+                            float(material.get("quantity") or 0),
+                            bioyond_tracker_unit(material),
+                        )
                     ]
 
         plr_materials.append(plr_material)
@@ -862,6 +880,33 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                         wh_name = "站内Tip盒堆栈(左)"
                         y = y - 1  # 调整列号，因为左侧仓库对应的 Bioyond y=2 实际上是它的第1列
 
+                # 电解液工站：LIMS 全称拆到 deck 左右半区
+                x_val = loc.get("x", 1)
+                if wh_name == "手动堆栈":
+                    if 1 <= x_val <= 5:
+                        wh_name = "手动堆栈右"
+                    elif 6 <= x_val <= 10:
+                        wh_name = "手动堆栈左"
+                    else:
+                        logger.warning(f"物料 {material['name']} 的行号 x={x_val} 无法映射到手动堆栈左/右")
+                        continue
+                elif wh_name == "粉末加样头堆栈":
+                    if 1 <= x_val <= 10:
+                        wh_name = "粉末加样头堆栈左"
+                    elif 11 <= x_val <= 20:
+                        wh_name = "粉末加样头堆栈右"
+                    else:
+                        logger.warning(f"物料 {material['name']} 的列号 x={x_val} 无法映射到粉末加样头堆栈左/右")
+                        continue
+                elif wh_name == "试剂替换仓库":
+                    if 1 <= x_val <= 5:
+                        wh_name = "试剂替换仓库左"
+                    elif 6 <= x_val <= 10:
+                        wh_name = "试剂替换仓库右"
+                    else:
+                        logger.warning(f"物料 {material['name']} 的列号 x={x_val} 无法映射到试剂替换仓库左/右")
+                        continue
+
                 if hasattr(deck, "warehouses") and wh_name in deck.warehouses:
                     warehouse = deck.warehouses[wh_name]
                     logger.debug(f"[Warehouse匹配] 找到warehouse: {wh_name} (容量: {warehouse.capacity}, 行×列: {warehouse.num_items_x}×{warehouse.num_items_y})")
@@ -874,6 +919,14 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                     # 如果是右侧堆栈，需要调整列号 (5→1, 6→2, 7→3, 8→4)
                     if wh_name == "堆栈1右":
                         y = y - 4  # 将5-8映射到1-4
+
+                    # 电解液工站半区：把 LIMS 全称坐标折算到 deck 半区仓库的局部坐标
+                    if wh_name == "手动堆栈左":
+                        x = x - 5
+                    elif wh_name == "粉末加样头堆栈右":
+                        x = x - 10
+                    elif wh_name == "试剂替换仓库右":
+                        x = x - 5
 
                     # 特殊处理竖向warehouse（站内试剂存放堆栈、测量小瓶仓库）
                     # 这些warehouse使用 vertical-col-major 布局
@@ -902,7 +955,11 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                         ordering_layout = getattr(warehouse, 'ordering_layout', 'col-major')
                         logger.debug(f"🔍 Warehouse {wh_name} layout检测: hasattr={hasattr(warehouse, 'ordering_layout')}, ordering_layout值='{ordering_layout}', warehouse类型={type(warehouse).__name__}")
 
-                        if ordering_layout == "row-major":
+                        if ordering_layout == "letter-row":
+                            # 横向一排字母递增: A01,B01,..., 半区已把 x 折到 1..n
+                            idx = layer_idx * warehouse.num_items_x + row_idx
+                            logger.debug(f"letter-row warehouse {wh_name}: x={x} → idx={idx}")
+                        elif ordering_layout == "row-major":
                             # 行优先: A01,A02,A03,A04, B01,B02,B03,B04 (所有Bioyond堆栈)
                             # 索引计算: idx = (row) * num_cols + (col) + (layer) * (rows * cols)
                             idx = layer_idx * (warehouse.num_items_x * warehouse.num_items_y) + row_idx * warehouse.num_items_x + col_idx
@@ -912,6 +969,12 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                             # 索引计算: idx = (col) * num_rows + (row) + (layer) * (rows * cols)
                             idx = layer_idx * (warehouse.num_items_x * warehouse.num_items_y) + col_idx * warehouse.num_items_y + row_idx
                             logger.debug(f"列优先warehouse {wh_name}: x={x}(行),y={y}(列) → row={row_idx},col={col_idx} → idx={idx}")
+
+                    # 优先用 LIMS 库位 code 对上 deck 槽位名（小分液仅 C03、半区字母槽）
+                    slot_code = loc.get("code")
+                    ordering = getattr(warehouse, "_ordering", None) or {}
+                    if slot_code and slot_code in ordering:
+                        idx = list(ordering.keys()).index(slot_code)
 
                     if 0 <= idx < warehouse.capacity:
                         if warehouse[idx] is None or isinstance(warehouse[idx], ResourceHolder):

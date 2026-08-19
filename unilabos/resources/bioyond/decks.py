@@ -9,13 +9,17 @@ from unilabos.resources.bioyond.YB_warehouses import (
     bioyond_warehouse_1x2x2,
     bioyond_warehouse_2x2x1,  # 新增：321和43窗口 (2行×2列)
     bioyond_warehouse_1x3x3,
-    bioyond_warehouse_5x3x1,  # 新增：手动传递窗仓库 (5行×3列)
-    bioyond_warehouse_4x2x1,  # 新增：5号右侧手动堆栈 (2行×4列)
+    bioyond_warehouse_5x3x1,  # 手动堆栈左右 (5行×3列)
+    bioyond_warehouse_4x2x1,  # 5号右侧手动堆栈 (2行×4列)
     bioyond_warehouse_10x1x1,
     bioyond_warehouse_3x3x1,
+    bioyond_warehouse_3x2x1,
     bioyond_warehouse_3x3x1_2,
     bioyond_warehouse_5x1x1,
     bioyond_warehouse_1x8x4,
+    bioyond_warehouse_letter_row,
+    bioyond_warehouse_1x1,
+    bioyond_warehouse_c03_only,
     bioyond_warehouse_reagent_storage,
     # bioyond_warehouse_liquid_preparation,
     bioyond_warehouse_density_vial,
@@ -116,40 +120,69 @@ class BioyondElectrolyteDeck(Deck):
         self.warehouses = {
             "自动堆栈-左": bioyond_warehouse_2x2x1("自动堆栈-左"),  # 2行×2列
             "自动堆栈-右": bioyond_warehouse_2x2x1("自动堆栈-右"),  # 2行×2列
-            "手动传递窗右": bioyond_warehouse_5x3x1("手动传递窗右", row_offset=0),  # A01-E03
+            "手动堆栈右": bioyond_warehouse_5x3x1("手动堆栈右", row_offset=0),  # A01-E03
             "5号右侧手动堆栈": bioyond_warehouse_4x2x1("5号右侧手动堆栈"),  # A01-A04, B01-B04
             # LIMS code=0018，电导板配液完成后停在此处，等 conductivity_test_inline
             "5号自动传递窗": bioyond_warehouse_2x2x1("5号自动传递窗"),  # 2行×2列
-            "手动传递窗左": bioyond_warehouse_5x3x1("手动传递窗左", row_offset=5),  # F01-J03
-            "加样头堆栈左": bioyond_warehouse_10x1x1("加样头堆栈左"),
-            "加样头堆栈右": bioyond_warehouse_10x1x1("加样头堆栈右"),
-
-            "15ml配液堆栈左": bioyond_warehouse_3x3x1("15ml配液堆栈左"),
-            "母液加样右": bioyond_warehouse_3x3x1_2("母液加样右"),
-            "大瓶母液堆栈左": bioyond_warehouse_5x1x1("大瓶母液堆栈左"),
-            "大瓶母液堆栈右": bioyond_warehouse_5x1x1("大瓶母液堆栈右"),
-            "2号手套箱内部堆栈": bioyond_warehouse_3x3x1("2号手套箱内部堆栈"),  # 新增：3行×3列 (A01-C03)
-            "大分液瓶堆栈": bioyond_warehouse_3x3x1("大分液瓶堆栈"),  # 新增：3行×3列 (A01-C03)，承接配液分液完成后的20ml分液瓶板
-            "小分液瓶堆栈": bioyond_warehouse_3x3x1("小分液瓶堆栈"),  # 新增：3行×3列 (A01-C03)，承接5ml分液瓶板
+            "手动堆栈左": bioyond_warehouse_5x3x1("手动堆栈左", row_offset=5),  # F01-J03
+            "粉末加样头堆栈左": bioyond_warehouse_letter_row("粉末加样头堆栈左", 10, letter_offset=0),  # A01-J01
+            "粉末加样头堆栈右": bioyond_warehouse_letter_row("粉末加样头堆栈右", 10, letter_offset=10),  # K01-T01
+            "配液站内试剂仓库": bioyond_warehouse_3x3x1("配液站内试剂仓库"),
+            "站内Tip头盒堆栈": bioyond_warehouse_3x2x1("站内Tip头盒堆栈"),  # A01-C02
+            "试剂替换仓库左": bioyond_warehouse_letter_row("试剂替换仓库左", 5, letter_offset=0),  # A01-E01
+            "试剂替换仓库右": bioyond_warehouse_letter_row("试剂替换仓库右", 5, letter_offset=5),  # F01-J01
+            "2号手套箱内部堆栈": bioyond_warehouse_3x3x1("2号手套箱内部堆栈"),
+            "1号2号手套箱交接堆栈": bioyond_warehouse_1x1("1号2号手套箱交接堆栈"),
+            "大分液瓶堆栈": bioyond_warehouse_3x3x1("大分液瓶堆栈", removed_positions=[8]),  # A01-C02，不含 C03
+            "小分液瓶堆栈": bioyond_warehouse_c03_only("小分液瓶堆栈"),  # 仅 C03
+            # 试剂替换左上方（从左到右，对齐 A01–D01）
+            "预留": bioyond_warehouse_1x1("预留"),
+            "分液站内Tip头盒位置库": bioyond_warehouse_1x1("分液站内Tip头盒位置库"),
+            "移液站内小瓶板仓库(无需提前入料)": bioyond_warehouse_1x1("移液站内小瓶板仓库(无需提前入料)"),
+            "移液站内大瓶板仓库(无需提前如料)": bioyond_warehouse_1x1("移液站内大瓶板仓库(无需提前如料)"),
+            # 试剂替换右上方（从左到右，对齐 F01–J01）
+            "配液站内Tip头盒位置库": bioyond_warehouse_1x1("配液站内Tip头盒位置库"),
+            "配液站内50uLTip盒位置库": bioyond_warehouse_1x1("配液站内50uLTip盒位置库"),
+            "配液站内配液大板仓库(无需提前上料)": bioyond_warehouse_1x1("配液站内配液大板仓库(无需提前上料)"),
+            "配液站内配液小板仓库(无需以前入料)": bioyond_warehouse_1x1("配液站内配液小板仓库(无需以前入料)"),  # 与大板共用坐标
+            "适配器位仓库": bioyond_warehouse_letter_row("适配器位仓库", 2),  # 物理两格，LIMS 仅 A01
         }
+        # letter-row / 单点位格宽，用于试剂替换上方对齐
+        _slot = 137.0
+        _replace_left = 1164.0
+        _replace_right = 2717.0
+        _overhead_y = 740.0
         # warehouse 的位置
         self.warehouse_locations = {
-            "自动堆栈-左": Coordinate(-150.0, 1142.0, 0.0),
-            "自动堆栈-右": Coordinate(4160.0, 1142.0, 0.0),
-            "手动传递窗左": Coordinate(-150.0, 423.0, 0.0),
-            "手动传递窗右": Coordinate(4160.0, 423.0, 0.0),
-            "5号右侧手动堆栈": Coordinate(4600.0, 423.0, 0.0),  # 位于手动传递窗右的右侧
-            "5号自动传递窗": Coordinate(4600.0, 1142.0, 0.0),  # 自动堆栈-右的右侧、5号右侧手动堆栈的上方
-            "加样头堆栈左": Coordinate(385.0, 0, 0.0),
-            "加样头堆栈右": Coordinate(2187.0, 0, 0.0),
-
-            "15ml配液堆栈左": Coordinate(749.0, 945.0, 0.0),
-            "母液加样右": Coordinate(2152.0, 967.0, 0.0),
-            "大瓶母液堆栈左": Coordinate(1164.0, 624.0, 0.0),
-            "大瓶母液堆栈右": Coordinate(2717.0, 624.0, 0.0),
-            "2号手套箱内部堆栈": Coordinate(-800, 800.0, 0.0),  # 新增：位置需根据实际硬件调整
-            "大分液瓶堆栈": Coordinate(-800, 400.0, 0.0),  # 新增：位置占位值，需根据实际硬件校准
-            "小分液瓶堆栈": Coordinate(-800, 0.0, 0.0),  # 新增：位置占位值，需根据实际硬件校准
+            "自动堆栈-左": Coordinate(50.0, 1000.0, 0.0),
+            "自动堆栈-右": Coordinate(3980.0, 1000.0, 0.0),
+            "手动堆栈左": Coordinate(-150.0, 300.0, 0.0),
+            "手动堆栈右": Coordinate(4160.0, 300.0, 0.0),
+            "5号右侧手动堆栈": Coordinate(4600.0, 300.0, 0.0),  # 随手动堆栈右下移对齐
+            "5号自动传递窗": Coordinate(4420.0, 1000.0, 0.0),  # 随自动堆栈-右向左下移
+            "粉末加样头堆栈左": Coordinate(385.0, 0, 0.0),
+            # 夹在粉末左右之间，底部 y=0 对齐（粉末左右缘 1765，粉末右 2187，居中）
+            "站内Tip头盒堆栈": Coordinate(1834.0, 0.0, 0.0),
+            "粉末加样头堆栈右": Coordinate(2187.0, 0, 0.0),
+            # 原站内Tip 位置，顶栏居中、靠近自动堆栈
+            "配液站内试剂仓库": Coordinate(2152.0, 967.0, 0.0),
+            "试剂替换仓库左": Coordinate(_replace_left, 624.0, 0.0),
+            "试剂替换仓库右": Coordinate(_replace_right, 624.0, 0.0),
+            "2号手套箱内部堆栈": Coordinate(-800, 800.0, 0.0),
+            # 2号手套箱左侧，单格 A01
+            "1号2号手套箱交接堆栈": Coordinate(-800 - 160.0, 800.0, 0.0),
+            # 原配液站内试剂仓库位置
+            "大分液瓶堆栈": Coordinate(749.0, 945.0, 0.0),
+            "小分液瓶堆栈": Coordinate(749.0 + 274.0, 945.0, 0.0),
+            "预留": Coordinate(_replace_left, _overhead_y, 0.0),
+            "分液站内Tip头盒位置库": Coordinate(_replace_left + _slot, _overhead_y, 0.0),
+            "移液站内小瓶板仓库(无需提前入料)": Coordinate(_replace_left + 2 * _slot, _overhead_y, 0.0),
+            "移液站内大瓶板仓库(无需提前如料)": Coordinate(_replace_left + 3 * _slot, _overhead_y, 0.0),
+            "配液站内Tip头盒位置库": Coordinate(_replace_right, _overhead_y, 0.0),
+            "配液站内50uLTip盒位置库": Coordinate(_replace_right + _slot, _overhead_y, 0.0),
+            "配液站内配液大板仓库(无需提前上料)": Coordinate(_replace_right + 2 * _slot, _overhead_y, 0.0),
+            "配液站内配液小板仓库(无需以前入料)": Coordinate(_replace_right + 2 * _slot, _overhead_y, 0.0),
+            "适配器位仓库": Coordinate(_replace_right + 3 * _slot, _overhead_y, 0.0),
         }
 
         for warehouse_name, warehouse in self.warehouses.items():
