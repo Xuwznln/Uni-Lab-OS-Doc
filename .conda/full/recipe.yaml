@@ -7,11 +7,13 @@ package:
 
 build:
   noarch: generic
+  number: 1
+  string: jazzy_1
 
 requirements:
   run:
   # Base unilabos package (includes unilabos-env)
-  - uni-lab::unilabos ==0.12.1
+  - unilabos ==0.12.1 jazzy_1
   # Documentation tools
   - sphinx
   - sphinx_rtd_theme
@@ -26,15 +28,15 @@ requirements:
   # ROS2 full desktop (includes rviz2, gazebo, etc.)
   - robostack-jazzy::ros-jazzy-desktop-full
   # Navigation and motion control
-  - ros-jazzy-navigation2
-  - ros-jazzy-ros2-control
-  - ros-jazzy-robot-state-publisher
-  - ros-jazzy-joint-state-publisher
+  - robostack-jazzy::ros-jazzy-navigation2
+  - robostack-jazzy::ros-jazzy-ros2-control
+  - robostack-jazzy::ros-jazzy-robot-state-publisher
+  - robostack-jazzy::ros-jazzy-joint-state-publisher
   # MoveIt motion planning
-  - ros-jazzy-moveit
-  - ros-jazzy-moveit-servo
+  - robostack-jazzy::ros-jazzy-moveit
+  - robostack-jazzy::ros-jazzy-moveit-servo
   # Simulation
-  - ros-jazzy-simulation
+  - robostack-jazzy::ros-jazzy-simulation
 
 about:
   repository: https://github.com/deepmodeling/Uni-Lab-OS

@@ -31,10 +31,10 @@ Detailed documentation can be found at:
 
 ## Supported Runtime
 
-The current binary and development baseline is **Python 3.12.13 (`cp312`) + ROS 2
-Jazzy + NumPy 2**, using `robostack-jazzy::ros2-distro-mutex 0.15.*`. Python 3.11
-and ROS 2 Humble environments are legacy combinations and should not be upgraded in
-place or mixed with the Jazzy channels. See the
+The current binary and development baseline is **Python 3.12.13 (`cp312`) + NumPy
+2**. ROS 2 Jazzy is the default (`robostack-jazzy`, mutex `0.15.*`), and ROS 2
+Humble is also supported (`robostack-humble`, mutex `0.9.*`). Use separate Conda
+environments and never mix the two RoboStack channels. See the
 [runtime and ABI baseline](docs/user_guide/runtime_baseline.md) for migration and
 verification instructions.
 
@@ -68,6 +68,10 @@ uv pip install -r unilabos/utils/requirements.txt
 # Option C: Full installation (simulation/visualization)
 mamba install uni-lab::unilabos-full -c uni-lab -c conda-forge -c robostack-jazzy
 ```
+
+For ROS 2 Humble, create a separate environment and replace every
+`-c robostack-jazzy` above with `-c robostack-humble`; Conda will select the
+matching `humble_1` package build automatically.
 
 **When to use which?**
 - **unilabos**: Standard installation for production deployment and general usage (recommended)

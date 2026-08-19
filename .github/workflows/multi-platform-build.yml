@@ -20,6 +20,10 @@ on:
         description: '选择构建平台 (逗号分隔): linux-64, osx-64, osx-arm64, win-64'
         required: false
         default: 'osx-arm64'
+      ros_distros:
+        description: '选择 ROS 2 发行版 (逗号分隔): jazzy, humble'
+        required: false
+        default: 'jazzy,humble'
       upload_to_anaconda:
         description: '是否上传到Anaconda.org'
         required: false
@@ -63,15 +67,47 @@ jobs:
           - os: ubuntu-latest
             platform: linux-64
             env_file: unilabos-linux-64.yaml
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            recipe: msgs
           - os: macos-15-intel # Intel x86_64
             platform: osx-64
             env_file: unilabos-osx-64.yaml
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            recipe: msgs
           - os: macos-latest # ARM64
             platform: osx-arm64
             env_file: unilabos-osx-arm64.yaml
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            recipe: msgs
           - os: windows-2022
             platform: win-64
             env_file: unilabos-win64.yaml
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            recipe: msgs
+          - os: ubuntu-latest
+            platform: linux-64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            recipe: msgs-humble
+          - os: macos-15-intel
+            platform: osx-64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            recipe: msgs-humble
+          - os: macos-latest
+            platform: osx-arm64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            recipe: msgs-humble
+          - os: windows-2022
+            platform: win-64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            recipe: msgs-humble
 
     runs-on: ${{ matrix.os }}
 
@@ -91,9 +127,7 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
-          elif [[ -z "${{ github.event.inputs.platforms }}" ]]; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
+          elif [[ ( -z "${{ github.event.inputs.platforms }}" || "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ) && ( -z "${{ github.event.inputs.ros_distros }}" || "${{ github.event.inputs.ros_distros }}" == *"${{ matrix.ros_distro }}"* ) ]]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
           else
             echo "should_build=false" >> $GITHUB_OUTPUT
@@ -106,7 +140,7 @@ jobs:
           miniforge-version: latest
           use-mamba: true
           python-version: '3.12.13'
-          channels: conda-forge,robostack-jazzy
+          channels: conda-forge,${{ matrix.ros_channel }}
           channel-priority: strict
           activate-environment: build-env
           auto-update-conda: false
@@ -138,11 +172,12 @@ jobs:
           conda run -n build-env python -m binstar_client.scripts.cli --version
           echo "Platform: ${{ matrix.platform }}"
           echo "OS: ${{ matrix.os }}"
+          echo "ROS distro: ${{ matrix.ros_distro }}"
 
       - name: Build conda package
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          conda run -n build-env rattler-build build -r ./recipes/msgs/recipe.yaml --target-platform ${{ matrix.platform }} -c conda-forge -c robostack-jazzy
+          conda run -n build-env rattler-build build -r ./recipes/${{ matrix.recipe }}/recipe.yaml --target-platform ${{ matrix.platform }} -c conda-forge -c ${{ matrix.ros_channel }}
 
       - name: List built packages
         if: steps.should_build.outputs.should_build == 'true'
@@ -166,7 +201,7 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: conda-package-${{ matrix.platform }}
+          name: conda-package-${{ matrix.ros_distro }}-${{ matrix.platform }}
           path: conda-packages-temp
           if-no-files-found: warn
           retention-days: 30

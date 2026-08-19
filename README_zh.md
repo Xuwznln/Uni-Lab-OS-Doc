@@ -31,10 +31,11 @@ Uni-Lab-OS 是一个用于实验室自动化的综合平台，旨在连接和控
 
 ## 支持的运行时
 
-当前二进制包和开发环境统一使用 **Python 3.12.13（`cp312`）+ ROS 2 Jazzy +
-NumPy 2**，并锁定 `robostack-jazzy::ros2-distro-mutex 0.15.*`。Python 3.11
-与 ROS 2 Humble 环境仅作为历史组合保留，不应在原环境中直接升级或与 Jazzy
-频道混用。迁移和版本核对方法见[运行时与 ABI 基线](docs/user_guide/runtime_baseline.md)。
+当前二进制包和开发环境统一使用 **Python 3.12.13（`cp312`）+ NumPy 2**。
+ROS 2 Jazzy 是默认发行版（`robostack-jazzy`，mutex `0.15.*`），同时支持
+ROS 2 Humble（`robostack-humble`，mutex `0.9.*`）。两个发行版必须使用独立
+Conda 环境，不能混用 RoboStack channel。迁移和版本核对方法见
+[运行时与 ABI 基线](docs/user_guide/runtime_baseline.md)。
 
 ## 快速开始
 
@@ -66,6 +67,9 @@ uv pip install -r unilabos/utils/requirements.txt
 # 方案 C：完整安装（仿真/可视化）
 mamba install uni-lab::unilabos-full -c uni-lab -c conda-forge -c robostack-jazzy
 ```
+
+如需 ROS 2 Humble，请新建独立环境，并将上述所有 `-c robostack-jazzy` 替换为
+`-c robostack-humble`；Conda 会自动选择对应的 `humble_1` 构建。
 
 **如何选择？**
 - **unilabos**：标准安装，适用于生产部署和日常使用（推荐）

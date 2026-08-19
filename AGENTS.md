@@ -7,13 +7,13 @@ Also follow the monorepo-level rules in `../AGENTS.md`.
 ## Build & Development
 
 ```bash
-# Install in editable mode (requires mamba env with Python 3.12 / ROS 2 Jazzy)
+# Install in editable mode (requires Python 3.12 and either ROS 2 Jazzy or Humble)
 pip install -e .
 uv pip install -r unilabos/utils/requirements.txt
 
 # Run with a device graph
 unilab --graph <graph.json> --config <config.py> --backend ros2
-unilab --graph <graph.json> --config <config.py> --backend basic  # no ROS2 runtime
+unilab --graph <graph.json> --config <config.py> --backend hostlink  # no ROS2 runtime
 
 # Common CLI flags
 unilab --app_bridges websocket fastapi    # communication bridges
@@ -36,7 +36,7 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 ### Startup Flow
 
-`unilab` CLI → `unilabos/app/main.py:main()` → loads config → builds registry → reads device graph (JSON/GraphML) → starts the selected backend (`basic`/`ros2`/`dora`) → starts only the bridges supported by that backend.
+`unilab` CLI → `unilabos/app/main.py:main()` → loads config → builds registry → reads device graph (JSON/GraphML) → starts the selected backend (`hostlink`/`ros2`) → starts only the bridges supported by that backend. `BasicRuntime` is HostLink's internal local driver executor, not a public backend.
 
 ### Core Layers
 

@@ -1,58 +1,90 @@
 # 运行时与 ABI 基线
 
-本页记录当前 `dev` 分支及正式 Conda 包使用的统一运行时基线。安装、开发、CI
-和设备包应以此处为准，避免混用不同 ROS 发行版或 Python ABI。
+本页记录当前 `dev` 分支及 Conda 包支持的运行时基线。Python 与 NumPy ABI 在
+两个 ROS 2 发行版之间保持一致，但每个 Conda 环境只能选择一个 ROS 发行版。
 
 ## 当前支持矩阵
 
-| 组件 | 当前基线 | 说明 |
+| 组件 | Jazzy | Humble |
 | --- | --- | --- |
-| Python | 3.12.13 | 固定 `cp312` ABI；当前包要求 `>=3.12,<3.13` |
-| ROS 2 | Jazzy | 使用 `robostack-jazzy` 频道 |
-| ROS 2 distro mutex | `0.15.*` | 构建字符串应为 `jazzy_*` |
-| NumPy | `>=2,<3` | 与 Jazzy/cp312 包保持同一 ABI 组合 |
-| UniLabOS messages | `ros-jazzy-unilabos-msgs` | 从 `uni-lab` 频道安装 |
+| Python | 3.12.13（`cp312`） | 3.12.13（`cp312`） |
+| NumPy | `>=2,<3` | `>=2,<3` |
+| RoboStack channel | `robostack-jazzy` | `robostack-humble` |
+| ROS 2 distro mutex | `0.15.*` / `jazzy_*` | `0.9.*` / `humble_*` |
+| UniLabOS messages | `ros-jazzy-unilabos-msgs=0.12.0` | `ros-humble-unilabos-msgs=0.12.0` |
+| Conda build string | `jazzy_1` | `humble_1` |
 
-Python 3.11 与 ROS 2 Humble 不再是当前二进制包的支持组合。已有旧环境不要原地
-混装或切换 `robostack-humble`/`robostack-jazzy` 频道；请新建环境，避免 Conda
-求解出 ABI 不一致的 ROS、NumPy 或扩展模块。
+Jazzy 是默认和推荐发行版；Humble 作为兼容发行版运行相同的 Python 3.12、NumPy 2
+与 microbackend v2 源码。公开通信 backend 只有 `hostlink` 和 `ros2`：HostLink
+内部的本地 Python 执行引擎不依赖具体 ROS 发行版，`ros2` backend 会使用当前
+环境安装的 Humble 或 Jazzy。
+
+不要在同一环境中同时配置 `robostack-humble` 与 `robostack-jazzy`。两个 channel
+提供互斥的 `ros2-distro-mutex`，混装或原地切换会导致 ROS 原生扩展 ABI 不一致。
 
 ## 推荐安装
 
+### ROS 2 Jazzy（默认）
+
 ```bash
-mamba create -n unilab python=3.12.13
-mamba activate unilab
+mamba create -n unilab-jazzy python=3.12.13
+mamba activate unilab-jazzy
 mamba install uni-lab::unilabos -c uni-lab -c conda-forge -c robostack-jazzy
 ```
 
-开发者使用环境包后再安装源码：
+### ROS 2 Humble（兼容）
 
 ```bash
-mamba install uni-lab::unilabos-env -c uni-lab -c conda-forge -c robostack-jazzy
+mamba create -n unilab-humble python=3.12.13
+mamba activate unilab-humble
+mamba install uni-lab::unilabos -c uni-lab -c conda-forge -c robostack-humble
+```
+
+开发者可将 `unilabos` 换成 `unilabos-env`，再安装当前源码：
+
+```bash
 uv pip install -r unilabos/utils/requirements.txt
 pip install -e .
 ```
 
+包名在两个发行版中保持一致，Conda 根据启用的 RoboStack channel 选择
+`jazzy_1` 或 `humble_1` build。自定义消息包名称仍包含发行版，不能交叉安装。
+
+## Windows DLL 加载兼容
+
+UniLabOS 会优先从当前环境的 `ros2-distro-mutex` 元数据识别 ROS 发行版，
+不依赖可能尚未由激活脚本设置的 `ROS_DISTRO`：
+
+- Humble 与 Jazzy 仅在实际出现 `DLL load failed` 时，对 rclpy/rpyutils 的加载
+  入口应用同一套兼容补丁，并提示重新启动进程。
+- 补丁使用原子文件替换，避免修改与环境文件硬链接的 Conda package cache。
+
 ## 从旧环境迁移
 
-1. 保留旧环境用于复现实验，不要在其中直接升级 ROS 发行版。
-2. 按上面的命令创建新的 Python 3.12.13/Jazzy 环境。
+旧 Humble 环境常见组合是 Python 3.11、NumPy 1、mutex 0.7。它与当前 Humble
+兼容线的 cp312/NumPy 2/mutex 0.9 也不兼容，必须新建环境：
+
+1. 保留旧环境用于复现实验，不要原地升级 Python、NumPy 或 distro mutex。
+2. 按上面的 Jazzy 或 Humble 命令创建新的 Python 3.12.13 环境。
 3. 重新安装设备驱动及其 Python 依赖，不要复制旧环境的 `site-packages`。
 4. 验证实际安装版本：
 
 ```bash
-python -c "import sys, numpy; print(sys.version); print(numpy.__version__)"
-conda list | grep -E "ros2-distro-mutex|ros-jazzy|unilabos"
+python -c "import os, sys, numpy; print(os.environ.get('ROS_DISTRO')); print(sys.version); print(numpy.__version__)"
+conda list | grep -E "ros2-distro-mutex|ros-(jazzy|humble)|unilabos"
 ```
 
 Windows 可将最后一条命令改为：
 
 ```powershell
-conda list | findstr /I "ros2-distro-mutex ros-jazzy unilabos"
+conda list | findstr /I "ros2-distro-mutex ros-jazzy ros-humble unilabos"
 ```
 
-## 历史兼容文件
+## 构建与验证入口
 
-仓库中的 `recipes/ros-humble-unilabos-msgs/` 仅用于维护历史 Humble 消息包，
-不是当前安装入口。新的 Jazzy 消息包由 `recipes/msgs/` 构建；用户环境应安装
-`ros-jazzy-unilabos-msgs`。
+- `recipes/msgs/`：Jazzy/cp312/NumPy 2 消息包。
+- `recipes/msgs-humble/`：Humble/cp312/NumPy 2 消息包。
+- `.conda/environment*/`、`.conda/base*/`、`.conda/full*/`：两个发行版的
+  `unilabos-env`、`unilabos` 和 `unilabos-full` build 变体。
+- CI 在 Humble 与 Jazzy 中分别从源码构建 `unilabos_msgs` 并运行同一套
+  backend/ROS 合同测试。

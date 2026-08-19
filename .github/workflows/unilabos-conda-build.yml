@@ -12,6 +12,10 @@ on:
         description: '选择构建平台 (逗号分隔): linux-64, osx-64, osx-arm64, win-64'
         required: false
         default: 'linux-64'
+      ros_distros:
+        description: '选择 ROS 2 发行版 (逗号分隔): jazzy, humble'
+        required: false
+        default: 'jazzy,humble'
       build_full:
         description: '是否构建 unilabos-full 完整包 (默认只构建 unilabos 基础包)'
         required: false
@@ -59,12 +63,60 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-64
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            environment_recipe: .conda/environment/recipe.yaml
+            base_recipe: .conda/base/recipe.yaml
+            full_recipe: .conda/full/recipe.yaml
           - os: macos-15-intel # Intel x86_64
             platform: osx-64
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            environment_recipe: .conda/environment/recipe.yaml
+            base_recipe: .conda/base/recipe.yaml
+            full_recipe: .conda/full/recipe.yaml
           - os: macos-latest # ARM64
             platform: osx-arm64
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            environment_recipe: .conda/environment/recipe.yaml
+            base_recipe: .conda/base/recipe.yaml
+            full_recipe: .conda/full/recipe.yaml
           - os: windows-2022
             platform: win-64
+            ros_distro: jazzy
+            ros_channel: robostack-jazzy
+            environment_recipe: .conda/environment/recipe.yaml
+            base_recipe: .conda/base/recipe.yaml
+            full_recipe: .conda/full/recipe.yaml
+          - os: ubuntu-latest
+            platform: linux-64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            environment_recipe: .conda/environment-humble/recipe.yaml
+            base_recipe: .conda/base-humble/recipe.yaml
+            full_recipe: .conda/full-humble/recipe.yaml
+          - os: macos-15-intel
+            platform: osx-64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            environment_recipe: .conda/environment-humble/recipe.yaml
+            base_recipe: .conda/base-humble/recipe.yaml
+            full_recipe: .conda/full-humble/recipe.yaml
+          - os: macos-latest
+            platform: osx-arm64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            environment_recipe: .conda/environment-humble/recipe.yaml
+            base_recipe: .conda/base-humble/recipe.yaml
+            full_recipe: .conda/full-humble/recipe.yaml
+          - os: windows-2022
+            platform: win-64
+            ros_distro: humble
+            ros_channel: robostack-humble
+            environment_recipe: .conda/environment-humble/recipe.yaml
+            base_recipe: .conda/base-humble/recipe.yaml
+            full_recipe: .conda/full-humble/recipe.yaml
 
     runs-on: ${{ matrix.os }}
 
@@ -84,9 +136,7 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
-          elif [[ -z "${{ github.event.inputs.platforms }}" ]]; then
-            echo "should_build=true" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
+          elif [[ ( -z "${{ github.event.inputs.platforms }}" || "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ) && ( -z "${{ github.event.inputs.ros_distros }}" || "${{ github.event.inputs.ros_distros }}" == *"${{ matrix.ros_distro }}"* ) ]]; then
             echo "should_build=true" >> $GITHUB_OUTPUT
           else
             echo "should_build=false" >> $GITHUB_OUTPUT
@@ -99,7 +149,7 @@ jobs:
           miniforge-version: latest
           use-mamba: true
           python-version: '3.12.13'
-          channels: conda-forge,robostack-jazzy,uni-lab
+          channels: conda-forge,${{ matrix.ros_channel }},uni-lab
           channel-priority: strict
           activate-environment: build-env
           auto-update-conda: false
@@ -128,6 +178,7 @@ jobs:
           conda run -n build-env python -m binstar_client.scripts.cli --version
           echo "Platform: ${{ matrix.platform }}"
           echo "OS: ${{ matrix.os }}"
+          echo "ROS distro: ${{ matrix.ros_distro }}"
           echo "Build full package: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_full == 'true' }}"
           echo "Building packages:"
           echo "  - unilabos-env (environment dependencies)"
@@ -139,8 +190,8 @@ jobs:
       - name: Build unilabos-env (conda environment only, noarch)
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          echo "Building unilabos-env (conda environment dependencies)..."
-          conda run -n build-env rattler-build build -r .conda/environment/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c conda-forge -c robostack-jazzy
+          echo "Building unilabos-env for ${{ matrix.ros_distro }}..."
+          conda run -n build-env rattler-build build -r ${{ matrix.environment_recipe }} --target-platform ${{ matrix.platform }} -c uni-lab -c conda-forge -c ${{ matrix.ros_channel }}
 
       - name: Upload unilabos-env to Anaconda.org (if enabled)
         if: |
@@ -159,9 +210,9 @@ jobs:
       - name: Build unilabos (with pip package)
         if: steps.should_build.outputs.should_build == 'true'
         run: |
-          echo "Building unilabos package..."
+          echo "Building unilabos package for ${{ matrix.ros_distro }}..."
           # 如果已上传到 Anaconda，从 uni-lab channel 获取 unilabos-env；否则从本地 output 获取
-          conda run -n build-env rattler-build build -r .conda/base/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c conda-forge -c robostack-jazzy --channel ./output
+          conda run -n build-env rattler-build build -r ${{ matrix.base_recipe }} --target-platform ${{ matrix.platform }} -c uni-lab -c conda-forge -c ${{ matrix.ros_channel }} --channel ./output
 
       - name: Upload unilabos to Anaconda.org (if enabled)
         if: |
@@ -182,8 +233,8 @@ jobs:
           github.event_name == 'workflow_dispatch' &&
           github.event.inputs.build_full == 'true'
         run: |
-          echo "Building unilabos-full package on ${{ matrix.platform }}..."
-          conda run -n build-env rattler-build build -r .conda/full/recipe.yaml --target-platform ${{ matrix.platform }} -c uni-lab -c conda-forge -c robostack-jazzy --channel ./output
+          echo "Building unilabos-full (${{ matrix.ros_distro }}) on ${{ matrix.platform }}..."
+          conda run -n build-env rattler-build build -r ${{ matrix.full_recipe }} --target-platform ${{ matrix.platform }} -c uni-lab -c conda-forge -c ${{ matrix.ros_channel }} --channel ./output
 
       - name: Upload unilabos-full to Anaconda.org (if enabled)
         if: |
@@ -220,7 +271,7 @@ jobs:
         if: steps.should_build.outputs.should_build == 'true'
         uses: actions/upload-artifact@v6
         with:
-          name: conda-package-unilabos-${{ matrix.platform }}
+          name: conda-package-unilabos-${{ matrix.ros_distro }}-${{ matrix.platform }}
           path: conda-packages-temp
           if-no-files-found: warn
           retention-days: 30

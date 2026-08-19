@@ -18,12 +18,12 @@
 | 组件 | 要求 |
 |------|------|
 | Python | 3.12.13（`cp312` ABI，包约束为 `>=3.12,<3.13`） |
-| ROS 2 | Jazzy（`robostack-jazzy`） |
+| ROS 2 | Jazzy（默认）或 Humble（兼容）；必须使用独立环境 |
 | NumPy | `>=2,<3` |
-| ROS 2 distro mutex | `0.15.*`，Jazzy 构建 |
+| ROS 2 distro mutex | Jazzy `0.15.*`；Humble `0.9.*` |
 
-Python 3.11/ROS 2 Humble 旧环境请新建环境迁移，不要原地混用 Humble 与 Jazzy
-频道。完整的兼容矩阵、迁移步骤和验证命令见[运行时与 ABI 基线](runtime_baseline.md)。
+两个发行版都使用 Python 3.12 与 NumPy 2。不要原地混用 Humble 与 Jazzy
+channel；完整的兼容矩阵、迁移步骤和验证命令见[运行时与 ABI 基线](runtime_baseline.md)。
 
 ## 安装包选择
 
@@ -167,8 +167,8 @@ bash Miniforge3-$(uname)-$(uname -m).sh
 使用以下命令创建 Uni-Lab 专用环境：
 
 ```bash
-mamba create -n unilab python=3.12.13  # ROS 2 Jazzy 的 Conda 包使用 cp312 ABI
-mamba activate unilab
+mamba create -n unilab-jazzy python=3.12.13
+mamba activate unilab-jazzy
 
 # 选择安装包（三选一）：
 
@@ -186,13 +186,22 @@ uv pip install -r unilabos/utils/requirements.txt
 mamba install uni-lab::unilabos-full -c uni-lab -c conda-forge -c robostack-jazzy
 ```
 
+Humble 使用相同的 Python/NumPy ABI，但必须创建另一个环境并只启用
+`robostack-humble`：
+
+```bash
+mamba create -n unilab-humble python=3.12.13
+mamba activate unilab-humble
+mamba install uni-lab::unilabos -c uni-lab -c conda-forge -c robostack-humble
+```
+
 **参数说明**:
 
-- `-n unilab`: 创建名为 "unilab" 的环境
+- `-n unilab-jazzy` / `-n unilab-humble`: 为每个 ROS 发行版创建独立环境
 - `uni-lab::unilabos`: 安装 unilabos 完整包，开箱即用（推荐）
 - `uni-lab::unilabos-env`: 仅安装环境依赖，适合开发者使用 `pip install -e .`
 - `uni-lab::unilabos-full`: 安装完整包（含 ROS2 Desktop、Gazebo、MoveIt 等）
-- `-c uni-lab -c conda-forge -c robostack-jazzy`: 添加 UniLabOS、通用依赖与 ROS 2 Jazzy 软件源
+- `-c uni-lab -c conda-forge -c robostack-<distro>`: 添加 UniLabOS、通用依赖与对应 ROS 2 软件源
 
 **包选择建议**：
 - **日常使用/生产部署**：安装 `unilabos`（推荐，完整功能，开箱即用）
@@ -256,7 +265,7 @@ cd Uni-Lab-OS
 ### 第二步：安装开发环境（unilabos-env）
 
 **重要**：开发者请使用 `unilabos-env` 包，它专为开发者设计：
-- 包含 ROS 2 核心组件和消息包（ros-jazzy-ros-core、std-msgs、geometry-msgs 等）
+- 包含所选 ROS 2 发行版的核心组件和消息包（ros-core、std-msgs、geometry-msgs 等）
 - 包含 transforms3d、cv-bridge、tf2 等 conda 依赖
 - 包含 `uv` 工具，用于快速安装 pip 依赖
 - **不包含** pip 依赖和 unilabos 包（由 `pip install -e .` 和 `uv pip install` 安装）
@@ -268,6 +277,14 @@ conda activate unilab
 
 # 安装开发者环境包（ROS2 + conda 依赖 + uv）
 mamba install uni-lab::unilabos-env -c uni-lab -c conda-forge -c robostack-jazzy
+```
+
+Humble 开发环境使用独立环境和对应 channel：
+
+```bash
+mamba create -n unilab-humble python=3.12.13
+conda activate unilab-humble
+mamba install uni-lab::unilabos-env -c uni-lab -c conda-forge -c robostack-humble
 ```
 
 ### 第三步：安装 pip 依赖和可编辑模式安装
@@ -335,7 +352,7 @@ python -c "import unilabos; print(unilabos.__version__)"
 pip show unilabos | grep Location
 ```
 
-### 第四步：安装或自定义 ros-jazzy-unilabos-msgs（可选）
+### 第四步：安装或自定义 unilabos_msgs（可选）
 
 Uni-Lab 使用 ROS2 消息系统进行设备间通信。如果你使用方式一或方式二安装，msgs 包已经自动安装。
 
@@ -367,10 +384,12 @@ ros2 interface show unilabos_msgs/action/DeviceCmd
 - 测试和验证新的 Action
 
 ```bash
-# 安装自定义构建的 msgs 包
+# Jazzy：安装自定义构建的 msgs 包
 mamba remove --force ros-jazzy-unilabos-msgs
 mamba config set safety_checks disabled  # 关闭 md5 检查
 mamba install /path/to/ros-jazzy-unilabos-msgs-*.conda --offline
+
+# Humble 环境使用 ros-humble-unilabos-msgs-*.conda；不要交叉安装
 ```
 
 ### 第五步：验证开发环境
@@ -416,7 +435,7 @@ unilab --help
 
 ```
 usage: unilab [-h] [-g GRAPH] [-c CONTROLLERS] [--registry_path REGISTRY_PATH]
-              [--working_dir WORKING_DIR] [--backend {basic,hostlink,ros2,dora}]
+              [--working_dir WORKING_DIR] [--backend {hostlink,ros2}]
               ...
 ```
 
@@ -599,8 +618,11 @@ cd /path/to/Uni-Lab-OS
 git pull
 pip install -e . --upgrade -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 
-# 更新 ros-jazzy-unilabos-msgs
+# Jazzy 环境
 mamba update ros-jazzy-unilabos-msgs -c uni-lab -c conda-forge -c robostack-jazzy
+
+# Humble 环境
+mamba update ros-humble-unilabos-msgs -c uni-lab -c conda-forge -c robostack-humble
 ```
 
 ---

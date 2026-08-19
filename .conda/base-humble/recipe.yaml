@@ -1,5 +1,4 @@
-# unilabos: Production package (depends on unilabos-env + pip unilabos)
-# For production deployment
+# Humble build variant of the production package.
 
 package:
   name: unilabos
@@ -11,7 +10,7 @@ source:
 
 build:
   number: 1
-  string: jazzy_1
+  string: humble_1
   python:
     entry_points:
     - unilab = unilabos.app.main:main
@@ -57,9 +56,9 @@ requirements:
   - pymodbus
   - matplotlib
   - pylibftdi
-  - unilabos-env ==0.12.1 jazzy_1
+  - unilabos-env ==0.12.1 humble_1
 
 about:
   repository: https://github.com/deepmodeling/Uni-Lab-OS
   license: GPL-3.0-only
-  description: "UniLabOS - Production package for ROS 2 Jazzy and CPython 3.12"
+  description: "UniLabOS - Production package for ROS 2 Humble and CPython 3.12"

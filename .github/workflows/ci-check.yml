@@ -8,7 +8,13 @@ on:
 
 jobs:
   registry-check:
+    name: registry-check (${{ matrix.ros_distro }})
     runs-on: windows-2022
+
+    strategy:
+      fail-fast: false
+      matrix:
+        ros_distro: [jazzy, humble]
 
     env:
       # Fix Unicode encoding issue on Windows runner (cp1252 -> utf-8)
@@ -19,6 +25,10 @@ jobs:
       # 原生崩溃(0xC0000005 访问违例)时打印 Python 调用栈，便于定位是哪个设备模块 import 崩溃
       PYTHONFAULTHANDLER: "1"
       UNILABOS_README_EXAMPLES_ROOT: ${{ github.workspace }}/readme-examples
+      ROS_DISTRO: ${{ matrix.ros_distro }}
+      ROS_CHANNEL: robostack-${{ matrix.ros_distro }}
+      ROS_PACKAGE_PREFIX: ros-${{ matrix.ros_distro }}
+      ROS_MUTEX: ${{ matrix.ros_distro == 'jazzy' && '0.15' || '0.9' }}
 
     defaults:
       run:
@@ -51,28 +61,28 @@ jobs:
           miniforge-version: latest
           use-mamba: true
           python-version: '3.12.13'
-          channels: conda-forge,robostack-jazzy
+          channels: conda-forge,robostack-${{ matrix.ros_distro }}
           channel-priority: strict
           activate-environment: check-env
           auto-update-conda: false
           show-channel-urls: true
 
-      - name: Install ROS 2 Jazzy dependencies and build tools
+      - name: Install ROS 2 ${{ matrix.ros_distro }} dependencies and build tools
         run: |
-          echo Installing ROS 2 Jazzy dependencies...
-          mamba install -n check-env --override-channels -c conda-forge -c robostack-jazzy conda-forge::numpy=2 conda-forge::uv conda-forge::opencv conda-forge::colcon-common-extensions robostack-jazzy::ros2-distro-mutex=0.15 robostack-jazzy::ros-jazzy-ros-core robostack-jazzy::ros-jazzy-action-msgs robostack-jazzy::ros-jazzy-std-msgs robostack-jazzy::ros-jazzy-geometry-msgs robostack-jazzy::ros-jazzy-control-msgs robostack-jazzy::ros-jazzy-nav2-msgs robostack-jazzy::ros-jazzy-cv-bridge robostack-jazzy::ros-jazzy-vision-opencv robostack-jazzy::ros-jazzy-tf-transformations robostack-jazzy::ros-jazzy-moveit-msgs robostack-jazzy::ros-jazzy-tf2-ros robostack-jazzy::ros-jazzy-tf2-ros-py conda-forge::transforms3d -y
+          echo Installing ROS 2 %ROS_DISTRO% dependencies...
+          mamba install -n check-env --override-channels -c conda-forge -c %ROS_CHANNEL% conda-forge::numpy=2 conda-forge::uv conda-forge::opencv conda-forge::colcon-common-extensions %ROS_CHANNEL%::ros2-distro-mutex=%ROS_MUTEX% %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-ros-core %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-action-msgs %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-std-msgs %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-geometry-msgs %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-control-msgs %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-nav2-msgs %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-cv-bridge %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-vision-opencv %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-tf-transformations %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-moveit-msgs %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-tf2-ros %ROS_CHANNEL%::%ROS_PACKAGE_PREFIX%-tf2-ros-py conda-forge::transforms3d -y
 
       - name: Initialize MSVC x64 toolchain
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
-      - name: Build unilabos_msgs for Jazzy/cp312
+      - name: Build unilabos_msgs for ${{ matrix.ros_distro }}/cp312
         run: |
           call conda activate check-env
           colcon build --base-paths unilabos_msgs --build-base build\unilabos_msgs --install-base install\unilabos_msgs --merge-install --packages-select unilabos_msgs --cmake-args -DBUILD_TESTING=OFF
           call install\unilabos_msgs\setup.bat
-          python -c "from unilabos_msgs.msg import Resource; print('unilabos_msgs Jazzy/cp312: OK')"
+          python -c "import os; from unilabos_msgs.msg import Resource; print('unilabos_msgs ' + os.environ['ROS_DISTRO'] + '/cp312: OK')"
 
       - name: Install pip dependencies and unilabos
         run: |
@@ -99,7 +109,7 @@ jobs:
           call conda activate check-env
           call install\unilabos_msgs\setup.bat
           echo Running HostLink, ROS2 domain and networking runtime tests...
-          python -m pytest -q tests\hostlink tests\networking tests\basic tests\device_runtime tests\app\test_backend_selection.py tests\registry\test_backend_metadata.py tests\ros\test_domain_init.py tests\ros\test_device_node_contract.py -p no:launch_testing -p no:launch_ros
+          python -m pytest -q tests\hostlink tests\networking tests\basic tests\device_runtime tests\app\test_backend_selection.py tests\app\test_rclpy_dll_patch.py tests\registry\test_backend_metadata.py tests\ros\test_domain_init.py tests\ros\test_device_node_contract.py -p no:launch_testing -p no:launch_ros
 
       - name: Run check mode (AST registry validation)
         # check_mode 会真实 import 所有设备类(连带 matplotlib/opencv 等原生库)。

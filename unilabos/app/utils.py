@@ -5,6 +5,7 @@ UniLabOS 应用工具函数
 """
 
 import glob
+import json
 import os
 import shutil
 import sys
@@ -15,6 +16,39 @@ _PATCH_END_MARKER = "# End UniLabOS DLL Patch"
 
 # 75 = EX_TEMPFAIL: 临时失败、重试即可，避免与业务退出码冲突
 _RESTART_EXIT_CODE = 75
+
+
+def _detect_conda_ros_distro(conda_prefix: str) -> str | None:
+    """识别当前 conda 环境的 ROS 发行版。
+
+    ``ROS_DISTRO`` 只有在环境激活脚本完整执行后才可靠；DLL 加载补丁恰好还要
+    覆盖 IDE、快捷方式等激活不完整的启动方式。因此优先读取互斥包元数据，
+    再回退到环境变量。发现冲突或未知发行版时返回 ``None``，避免修改错误的
+    ROS 安装。
+    """
+    mutex_distros: set[str] = set()
+    conda_meta = os.path.join(conda_prefix, "conda-meta")
+    for metadata_path in glob.glob(os.path.join(conda_meta, "ros2-distro-mutex-*.json")):
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as metadata_file:
+                metadata = json.load(metadata_file)
+        except (OSError, ValueError, TypeError):
+            continue
+
+        metadata_text = " ".join(
+            str(metadata.get(key, "")) for key in ("name", "version", "build", "channel")
+        ).lower()
+        for distro in ("humble", "jazzy"):
+            if distro in metadata_text:
+                mutex_distros.add(distro)
+
+    if len(mutex_distros) == 1:
+        return next(iter(mutex_distros))
+    if len(mutex_distros) > 1:
+        return None
+
+    env_distro = os.environ.get("ROS_DISTRO", "").strip().lower()
+    return env_distro if env_distro in {"humble", "jazzy"} else None
 
 
 def _build_dll_patch(lib_bin: str, preload_pyd: str = "") -> str:
@@ -57,8 +91,18 @@ def _apply_dll_patch(file_path: str, lib_bin: str, preload_pyd: str = "") -> boo
     if _PATCH_MARKER in content:
         return False
     shutil.copy2(file_path, file_path + ".bak")
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(_build_dll_patch(lib_bin, preload_pyd) + content)
+    # conda 常用硬链接把环境文件指向 package cache。直接以写模式打开目标会
+    # 连缓存一起改坏，并让之后创建的 Jazzy/Humble 环境继承错误补丁。先写同目录
+    # 临时文件再原子替换，既断开硬链接，也避免进程中断留下半个 Python 文件。
+    patched_path = file_path + ".unilabos.tmp"
+    try:
+        with open(patched_path, "w", encoding="utf-8") as f:
+            f.write(_build_dll_patch(lib_bin, preload_pyd) + content)
+        shutil.copymode(file_path, patched_path)
+        os.replace(patched_path, file_path)
+    finally:
+        if os.path.exists(patched_path):
+            os.remove(patched_path)
     return True
 
 
@@ -120,12 +164,15 @@ def _print_restart_banner(patched_files):
 
 
 def patch_rclpy_dll_windows():
-    """在 Windows + conda 环境下修复 rclpy / rosidl typesupport 的 DLL 加载。
+    """在 Windows + conda Humble/Jazzy 环境下修复 ROS DLL 加载。
 
     背景：conda 安装的 ros 系列包，其原生扩展依赖 ``$CONDA_PREFIX/Library/bin``
     下的 DLL；只有 conda 环境被正确激活、且 PATH 中含 ``Library/bin`` 时，
     ``os.add_dll_directory`` 才能找到它们。当从快捷方式 / IDE / 子进程 /
     没激活的 shell 启动 ``unilab`` 时，会出现 ``DLL load failed``。
+
+    RoboStack Humble 和 Jazzy 的 ``rclpy`` / ``rpyutils`` 都使用相同的加载
+    入口，因此两种发行版共用这一套文件补丁，不再维护两种修复路径。
 
     本函数会:
         1) 修补 ``rclpy/impl/implementation_singleton.py`` —— rclpy 自身的 C 扩展入口；
@@ -139,6 +186,16 @@ def patch_rclpy_dll_windows():
     if sys.platform != "win32" or not os.environ.get("CONDA_PREFIX"):
         return
 
+    cp = os.environ["CONDA_PREFIX"]
+    ros_distro = _detect_conda_ros_distro(cp)
+    if ros_distro not in {"humble", "jazzy"}:
+        return
+
+    lib_bin = os.path.join(cp, "Library", "bin")
+    site_packages = os.path.join(cp, "Lib", "site-packages")
+    if not os.path.isdir(lib_bin):
+        return
+
     try:
         import rclpy  # noqa: F401
 
@@ -146,12 +203,6 @@ def patch_rclpy_dll_windows():
     except ImportError as e:
         if not str(e).startswith("DLL load failed"):
             return
-
-    cp = os.environ["CONDA_PREFIX"]
-    lib_bin = os.path.join(cp, "Library", "bin")
-    site_packages = os.path.join(cp, "Lib", "site-packages")
-    if not os.path.isdir(lib_bin):
-        return
 
     patched = []
 

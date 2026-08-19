@@ -1,0 +1,35 @@
+# Humble full package variant.
+
+package:
+  name: unilabos-full
+  version: 0.12.1
+
+build:
+  noarch: generic
+  number: 1
+  string: humble_1
+
+requirements:
+  run:
+  - unilabos ==0.12.1 humble_1
+  - sphinx
+  - sphinx_rtd_theme
+  - gradio
+  - flask
+  - ipython
+  - jupyter
+  - jupyros
+  - colcon-common-extensions
+  - robostack-humble::ros-humble-desktop-full
+  - robostack-humble::ros-humble-navigation2
+  - robostack-humble::ros-humble-ros2-control
+  - robostack-humble::ros-humble-robot-state-publisher
+  - robostack-humble::ros-humble-joint-state-publisher
+  - robostack-humble::ros-humble-moveit
+  - robostack-humble::ros-humble-moveit-servo
+  - robostack-humble::ros-humble-simulation
+
+about:
+  repository: https://github.com/deepmodeling/Uni-Lab-OS
+  license: GPL-3.0-only
+  description: "UniLabOS Full - ROS 2 Humble Desktop, MoveIt, Navigation2, Gazebo, and Jupyter"
