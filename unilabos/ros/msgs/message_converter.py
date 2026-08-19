@@ -974,6 +974,33 @@ def ros_message_to_json_schema(msg_class: Any, field_name: str) -> Dict[str, Any
     return schema
 
 
+def ros_action_result_mapping(action_class: Any) -> Dict[str, str]:
+    """生成 action Result 字段映射，并消除跨 ROS 发行版的不稳定字段。
+
+    ``NavigateThroughPoses.Result`` 在 Humble 中包装 ``std_msgs/Empty``，在
+    Jazzy 中则是 ``error_code/error_msg``。UniLabOS 的轨迹动作不读取这些
+    字段，因此统一声明为无结果映射，避免共享 registry 随发行版来回变化。
+    """
+    if action_class is NavigateThroughPoses:
+        return {}
+    return {
+        field_name: field_name
+        for field_name in action_class.Result.get_fields_and_field_types()
+    }
+
+
+def ros_action_result_to_json_schema(action_class: Any) -> Dict[str, Any]:
+    """生成可跨受支持 ROS 发行版复用的 action Result schema。"""
+    if action_class is NavigateThroughPoses:
+        return {
+            "title": action_class.Result.__name__,
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        }
+    return ros_message_to_json_schema(action_class.Result, action_class.Result.__name__)
+
+
 def ros_action_to_json_schema(
     action_class: Any, description="", previous_schema: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
@@ -1011,7 +1038,7 @@ def ros_action_to_json_schema(
             },
             "result": {
                 # 'description': 'Action 结果 - 完成后从服务器发送到客户端',
-                **ros_message_to_json_schema(action_class.Result, action_class.Result.__name__)
+                **ros_action_result_to_json_schema(action_class)
             },
         },
         "required": ["goal"],

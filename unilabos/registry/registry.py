@@ -62,6 +62,7 @@ from unilabos.resources.resource_tracker import ResourceTreeSet, RETURN_UNILABOS
 from unilabos.resources.site_definition import normalize_available_sites
 from unilabos.ros.msgs.message_converter import (
     msg_converter_manager,
+    ros_action_result_mapping,
     ros_action_to_json_schema,
     String,
     ros_message_to_json_schema,
@@ -2039,8 +2040,7 @@ class Registry:
                                     pass
                                 try:
                                     if hasattr(action_type_obj, "Result"):
-                                        res_fields = action_type_obj.Result.get_fields_and_field_types()
-                                        entry_result = {f: f for f in res_fields}
+                                        entry_result = ros_action_result_mapping(action_type_obj)
                                 except Exception:
                                     pass
                                 try:
