@@ -618,7 +618,7 @@ bioyond_cell:
           bottle_type: null
           location_code: null
           name: null
-          warehouse_name: 手动传递窗右
+          warehouse_name: 手动堆栈右
           barcode: ''
         handles: {}
         placeholder_keys: {}
@@ -642,8 +642,8 @@ bioyond_cell:
                   description: 物料名称
                   type: string
                 warehouse_name:
-                  default: 手动传递窗右
-                  description: 仓库名称，默认为 "手动传递窗右"，支持 "自动堆栈-左"、"自动堆栈-右" 等
+                  default: 手动堆栈右
+                  description: 仓库名称，默认为 "手动堆栈右"，支持 "自动堆栈-左"、"自动堆栈-右" 等
                   type: string
                 barcode:
                   default: ''
