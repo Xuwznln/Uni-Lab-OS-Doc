@@ -21,7 +21,14 @@ from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.resources.warehouse import WareHouse
 from unilabos.resources.container import RegularContainer
 from unilabos.utils.log import logger
-from unilabos.resources.bioyond.YB_warehouse_material import resolve_warehouse_material_class
+from unilabos.resources.bioyond.YB_warehouse_material import (
+    apply_stock_entry_to_resource,
+    build_stock_snapshot,
+    empty_stock_snapshot,
+    lookup_mapped_class,
+    resolve_slot_location_id,
+    resolve_warehouse_material_class,
+)
 from unilabos.resources.graphio import (
     resource_bioyond_to_plr,
     resource_plr_to_bioyond,
@@ -165,6 +172,43 @@ class WarehouseOccupancyMonitor:
                 traceback.print_exc()
 
 
+class StockMaterialMonitor:
+    """定时拉 stock-material，只写内存快照，不改 deck。"""
+
+    def __init__(self, workstation, interval: float):
+        self.workstation = workstation
+        self.interval = interval
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        if self._running or self.interval <= 0:
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name="BioyondStockMaterial"
+        )
+        self._thread.start()
+        logger.info(f"库存余量快照线程已启动，间隔 {self.interval}s")
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=2)
+            logger.info("库存余量快照线程已停止")
+
+    def _loop(self):
+        while self._running:
+            time.sleep(self.interval)
+            if not self._running:
+                break
+            try:
+                self.workstation._refresh_stock_snapshot()
+            except Exception as e:
+                logger.error(f"[库存快照] 周期刷新异常: {e}")
+                traceback.print_exc()
+
+
 class BioyondResourceSynchronizer(ResourceSynchronizer):
     """Bioyond资源同步器
 
@@ -240,8 +284,12 @@ class BioyondResourceSynchronizer(ResourceSynchronizer):
             logger.error(f"从Bioyond同步物料数据失败: {e}")
             return False
 
-    def sync_to_external(self, resource: Any) -> bool:
-        """将本地物料数据变更同步到Bioyond系统"""
+    def sync_to_external(self, resource: Any, allow_create: bool = True) -> bool:
+        """将本地物料数据变更同步到Bioyond系统。
+
+        allow_create: False 时（前端 update）只移动已有物料，不创建新料。
+        新料由 resource_tree_transfer / create_sample 或 resource_tree_add 兜底创建。
+        """
         try:
             # ✅ 跳过仓库类型的资源 - 仓库是容器，不是物料
             resource_category = getattr(resource, "category", None)
@@ -293,7 +341,12 @@ class BioyondResourceSynchronizer(ResourceSynchronizer):
 
                 if not material_bioyond_id:
                     logger.warning(f"⚠️ 在 Bioyond 系统中未找到名为 {resource.name} 的物料")
-                    logger.info(f"[同步→Bioyond] 这是一个新物料，将创建并入库到 Bioyond 系统")
+                    if not allow_create:
+                        logger.info(
+                            f"[同步→Bioyond] 物料 {resource.name} 尚无 Bioyond ID，"
+                            "update 路径不创建新料（由 transfer/add 负责入库）"
+                        )
+                        return True
 
             # 检查是否有位置更新请求
             update_site = extra_info.get("update_resource_site")
@@ -485,13 +538,16 @@ class BioyondResourceSynchronizer(ResourceSynchronizer):
                                 break
 
                         if location_occupied:
-                            # 如果是同一个物料（ID相同），说明已经在目标位置了，跳过
-                            if occupying_material and occupying_material.get("id") == material_id:
-                                logger.info(f"✅ [同步→Bioyond] 物料 {resource.name} 已经在库位 {update_site}，跳过重复入库")
+                            occupying_id = occupying_material.get("id") if occupying_material else None
+                            occupying_name = occupying_material.get("name") if occupying_material else None
+                            # 同一物料已在目标格，或拖拽 transfer 刚入的同名板
+                            if occupying_id == material_id or occupying_name == resource.name:
+                                logger.info(
+                                    f"✅ [同步→Bioyond] 物料 {resource.name} 已经在库位 {update_site}，跳过重复入库"
+                                )
                                 return True
-                            else:
-                                logger.error(f"❌ [同步→Bioyond] 库位 {update_site} 已被其他物料占用，拒绝入库")
-                                return False
+                            logger.error(f"❌ [同步→Bioyond] 库位 {update_site} 已被其他物料占用，拒绝入库")
+                            return False
 
                         logger.info(f"✅ [同步→Bioyond] 库位 {update_site} 可用，准备入库...")
 
@@ -707,6 +763,31 @@ class BioyondResourceSynchronizer(ResourceSynchronizer):
 
             logger.info(f"[物料入库] 库位 UUID: {target_location_uuid[:8]}...")
 
+            # transfer 的 create_sample 可能已经入库；目标格已是本物料则视为成功
+            try:
+                all_materials = (
+                    (self.bioyond_api_client.stock_material('{"typeMode": 1, "includeDetail": true}') or [])
+                    + (self.bioyond_api_client.stock_material('{"typeMode": 2, "includeDetail": true}') or [])
+                )
+                for material in all_materials:
+                    for loc in material.get("locations") or []:
+                        if loc.get("id") != target_location_uuid:
+                            continue
+                        occupying_id = material.get("id")
+                        occupying_name = material.get("name")
+                        if occupying_id == material_id or occupying_name == resource.name:
+                            logger.info(
+                                f"✅ [物料入库] 物料 {resource.name} 已在库位 {update_site}，跳过重复入库"
+                            )
+                            return True
+                        logger.error(
+                            f"❌ [物料入库] 库位 {update_site} 已被其他物料占用: "
+                            f"{occupying_name} ({str(occupying_id)[:8]}...)"
+                        )
+                        return False
+            except Exception as e:
+                logger.warning(f"⚠️ [物料入库] 检查库位占用失败: {e}，继续尝试入库")
+
             # 调用入库 API
             logger.info(f"[物料入库] 调用 Bioyond API 执行入库...")
             response = self.bioyond_api_client.material_inbound(material_id, target_location_uuid)
@@ -838,7 +919,9 @@ class BioyondWorkstation(WorkstationBase):
         self.http_service = None  # 将在 post_init 启动
         self.connection_monitor = None # 将在 post_init 启动
         self.warehouse_refresh_monitor = None
+        self.stock_refresh_monitor = None
         self._warehouse_refresh_skip_until = 0.0
+        self._stock_snapshot = empty_stock_snapshot()
 
         logger.info(f"Bioyond工作站初始化完成")
 
@@ -849,6 +932,8 @@ class BioyondWorkstation(WorkstationBase):
                 self.connection_monitor.stop()
             if hasattr(self, 'warehouse_refresh_monitor') and self.warehouse_refresh_monitor:
                 self.warehouse_refresh_monitor.stop()
+            if hasattr(self, 'stock_refresh_monitor') and self.stock_refresh_monitor:
+                self.stock_refresh_monitor.stop()
             if hasattr(self, 'http_service') and self.http_service is not None:
                 logger.info("正在停止 HTTP 报送服务...")
                 self.http_service.stop()
@@ -884,6 +969,20 @@ class BioyondWorkstation(WorkstationBase):
                 logger.info("warehouse_refresh_interval=0，不启动库位定时刷新")
         except Exception as e:
             logger.error(f"启动仓库占用刷新失败: {e}")
+
+        # 库存余量快照（stock-material），0 表示关闭。只写内存，不改 deck。
+        try:
+            stock_interval = float(self.bioyond_config.get("stock_refresh_interval", 0) or 0)
+            if stock_interval > 0:
+                self._refresh_stock_snapshot()
+                self._apply_stock_snapshot_to_occupants()
+                self.stock_refresh_monitor = StockMaterialMonitor(self, stock_interval)
+                self.stock_refresh_monitor.start()
+            else:
+                logger.info("stock_refresh_interval=0，不启动库存余量轮询")
+        except Exception as e:
+            logger.error(f"启动库存余量快照失败: {e}")
+            traceback.print_exc()
 
         # 启动 HTTP 报送接收服务（现在 device_id 已可用）
         # ⚠️ 检查子类是否已经自己管理 HTTP 服务
@@ -950,7 +1049,6 @@ class BioyondWorkstation(WorkstationBase):
         self._touch_warehouse_refresh_skip()
         for resource in resources:
             try:
-                # 🔍 检查资源是否已有 Bioyond ID
                 extra_info = getattr(resource, "unilabos_extra", {})
                 material_bioyond_id = extra_info.get("material_bioyond_id")
 
@@ -1249,14 +1347,7 @@ class BioyondWorkstation(WorkstationBase):
 
     def _make_occupancy_resource(self, loc: Dict[str, Any], hold_id: str) -> ResourcePLR:
         type_name = loc.get("holdMTypeName")
-        class_name = "RegularContainer"
-        mappings = self.bioyond_config.get("material_type_mappings", {}) or {}
-        for key, value in mappings.items():
-            display = value[0] if isinstance(value, (tuple, list)) and value else None
-            if display and display == type_name:
-                class_name = key
-                break
-
+        class_name = lookup_mapped_class(self.bioyond_config.get("material_type_mappings", {}) or {}, type_name)
         class_name = resolve_warehouse_material_class(class_name)
 
         raw_name = loc.get("holdMName") or type_name or hold_id[:8]
@@ -1278,6 +1369,50 @@ class BioyondWorkstation(WorkstationBase):
             except Exception as e:
                 logger.warning(f"[库位刷新] 按类型 {type_name}/{class_name} 创建物料失败，改用占位: {e}")
         return self._make_occupancy_placeholder(loc, hold_id)
+
+    def _refresh_stock_snapshot(self) -> None:
+        """拉 stock-material typeMode 0+2，整体替换 _stock_snapshot。不改 deck。"""
+        if self.hardware_interface is None:
+            return
+        materials: List[Any] = []
+        for type_mode in (0, 2):
+            data = self.hardware_interface.stock_material(
+                json.dumps({"typeMode": type_mode, "includeDetail": True})
+            )
+            if data:
+                materials.extend(data)
+        mapping = self.bioyond_config.get("warehouse_mapping", {}) or {}
+        self._stock_snapshot = build_stock_snapshot(materials, warehouse_mapping=mapping)
+        tips = (self._stock_snapshot or {}).get("tips") or {}
+        logger.debug(
+            f"[库存快照] 库位 {len((self._stock_snapshot or {}).get('by_location') or {})} 格，"
+            f"配液枪头 5000/1000/50={tips.get('prep_5000uL')}/{tips.get('prep_1000uL')}/{tips.get('prep_50uL')}，"
+            f"分液5000={tips.get('dispense_5000uL')}"
+        )
+
+    def _apply_stock_snapshot_to_occupants(self) -> None:
+        """占用对齐后，用当前快照回写该格瓶 tracker / 枪头盒载架余量。"""
+        snapshot = getattr(self, "_stock_snapshot", None) or empty_stock_snapshot()
+        by_location = snapshot.get("by_location") or {}
+        if not by_location or self.deck is None:
+            return
+        mapping = self.bioyond_config.get("warehouse_mapping", {}) or {}
+        warehouses = getattr(self.deck, "warehouses", {}) or {}
+        for wh_name, warehouse in warehouses.items():
+            site_uuids = (mapping.get(wh_name) or {}).get("site_uuids") or {}
+            for slot in list(getattr(warehouse, "_ordering", {}).keys()):
+                occupant = self._slot_occupant(warehouse, slot)
+                if occupant is None:
+                    continue
+                loc_id = site_uuids.get(slot) or resolve_slot_location_id(self.bioyond_config, wh_name, slot)
+                entry = by_location.get(loc_id)
+                if not entry:
+                    extra = getattr(occupant, "unilabos_extra", {}) or {}
+                    material_id = extra.get("material_bioyond_id")
+                    if material_id:
+                        entry = (snapshot.get("by_material") or {}).get(material_id)
+                if entry:
+                    apply_stock_entry_to_resource(occupant, entry)
 
     def _register_resource_in_tracker(self, resource: ResourcePLR) -> None:
         tracker = getattr(getattr(self, "_ros_node", None), "resource_tracker", None)
@@ -1354,6 +1489,8 @@ class BioyondWorkstation(WorkstationBase):
                         changed = True
                         logger.info(f"[库位刷新] 卸空 {wh_name}/{slot}: {occupant.name}")
 
+        self._apply_stock_snapshot_to_occupants()
+
         if not changed:
             logger.debug("[库位刷新] 占用无变化，跳过推送")
             return
@@ -1414,8 +1551,8 @@ class BioyondWorkstation(WorkstationBase):
 
                 # 调用同步器的 sync_to_external 方法
                 # 该方法会检查 unilabos_extra 中的 update_resource_site 字段
-                # 如果存在，会执行位置移动操作
-                result = self.resource_synchronizer.sync_to_external(resource)
+                # 如果存在，会执行位置移动操作。update 不建新料，避免与拖拽 transfer 双建。
+                result = self.resource_synchronizer.sync_to_external(resource, allow_create=False)
 
                 if result:
                     logger.info(f"✅ [resource_tree_update] 资源 {resource.name} 成功同步到 Bioyond 系统")

@@ -2099,6 +2099,80 @@ bioyond_cell:
       data_dispense_total_bottles: int
       data_dispense_completed_bottles: int
       data_dispense_completion_percentage: float
+      data_powder_01_name: str
+      data_powder_01_qty: float
+      data_powder_02_name: str
+      data_powder_02_qty: float
+      data_powder_03_name: str
+      data_powder_03_qty: float
+      data_powder_04_name: str
+      data_powder_04_qty: float
+      data_powder_05_name: str
+      data_powder_05_qty: float
+      data_powder_06_name: str
+      data_powder_06_qty: float
+      data_powder_07_name: str
+      data_powder_07_qty: float
+      data_powder_08_name: str
+      data_powder_08_qty: float
+      data_powder_09_name: str
+      data_powder_09_qty: float
+      data_powder_10_name: str
+      data_powder_10_qty: float
+      data_powder_11_name: str
+      data_powder_11_qty: float
+      data_powder_12_name: str
+      data_powder_12_qty: float
+      data_powder_13_name: str
+      data_powder_13_qty: float
+      data_powder_14_name: str
+      data_powder_14_qty: float
+      data_powder_15_name: str
+      data_powder_15_qty: float
+      data_powder_16_name: str
+      data_powder_16_qty: float
+      data_powder_17_name: str
+      data_powder_17_qty: float
+      data_powder_18_name: str
+      data_powder_18_qty: float
+      data_powder_19_name: str
+      data_powder_19_qty: float
+      data_powder_20_name: str
+      data_powder_20_qty: float
+      data_liquid_01_name: str
+      data_liquid_01_qty: float
+      data_liquid_02_name: str
+      data_liquid_02_qty: float
+      data_liquid_03_name: str
+      data_liquid_03_qty: float
+      data_liquid_04_name: str
+      data_liquid_04_qty: float
+      data_liquid_05_name: str
+      data_liquid_05_qty: float
+      data_liquid_06_name: str
+      data_liquid_06_qty: float
+      data_liquid_07_name: str
+      data_liquid_07_qty: float
+      data_liquid_08_name: str
+      data_liquid_08_qty: float
+      data_liquid_09_name: str
+      data_liquid_09_qty: float
+      data_liquid_10_name: str
+      data_liquid_10_qty: float
+      data_liquid_11_name: str
+      data_liquid_11_qty: float
+      data_liquid_12_name: str
+      data_liquid_12_qty: float
+      data_liquid_13_name: str
+      data_liquid_13_qty: float
+      data_liquid_14_name: str
+      data_liquid_14_qty: float
+      data_liquid_15_name: str
+      data_liquid_15_qty: float
+      data_prep_tip_5000uL_count: int
+      data_prep_tip_1000uL_count: int
+      data_prep_tip_50uL_count: int
+      data_dispense_tip_5000uL_count: int
     type: python
   config_info: []
   description: ''
@@ -2136,6 +2210,154 @@ bioyond_cell:
           type: integer
         data_dispense_completion_percentage:
           type: number
+        data_powder_01_name:
+          type: string
+        data_powder_01_qty:
+          type: number
+        data_powder_02_name:
+          type: string
+        data_powder_02_qty:
+          type: number
+        data_powder_03_name:
+          type: string
+        data_powder_03_qty:
+          type: number
+        data_powder_04_name:
+          type: string
+        data_powder_04_qty:
+          type: number
+        data_powder_05_name:
+          type: string
+        data_powder_05_qty:
+          type: number
+        data_powder_06_name:
+          type: string
+        data_powder_06_qty:
+          type: number
+        data_powder_07_name:
+          type: string
+        data_powder_07_qty:
+          type: number
+        data_powder_08_name:
+          type: string
+        data_powder_08_qty:
+          type: number
+        data_powder_09_name:
+          type: string
+        data_powder_09_qty:
+          type: number
+        data_powder_10_name:
+          type: string
+        data_powder_10_qty:
+          type: number
+        data_powder_11_name:
+          type: string
+        data_powder_11_qty:
+          type: number
+        data_powder_12_name:
+          type: string
+        data_powder_12_qty:
+          type: number
+        data_powder_13_name:
+          type: string
+        data_powder_13_qty:
+          type: number
+        data_powder_14_name:
+          type: string
+        data_powder_14_qty:
+          type: number
+        data_powder_15_name:
+          type: string
+        data_powder_15_qty:
+          type: number
+        data_powder_16_name:
+          type: string
+        data_powder_16_qty:
+          type: number
+        data_powder_17_name:
+          type: string
+        data_powder_17_qty:
+          type: number
+        data_powder_18_name:
+          type: string
+        data_powder_18_qty:
+          type: number
+        data_powder_19_name:
+          type: string
+        data_powder_19_qty:
+          type: number
+        data_powder_20_name:
+          type: string
+        data_powder_20_qty:
+          type: number
+        data_liquid_01_name:
+          type: string
+        data_liquid_01_qty:
+          type: number
+        data_liquid_02_name:
+          type: string
+        data_liquid_02_qty:
+          type: number
+        data_liquid_03_name:
+          type: string
+        data_liquid_03_qty:
+          type: number
+        data_liquid_04_name:
+          type: string
+        data_liquid_04_qty:
+          type: number
+        data_liquid_05_name:
+          type: string
+        data_liquid_05_qty:
+          type: number
+        data_liquid_06_name:
+          type: string
+        data_liquid_06_qty:
+          type: number
+        data_liquid_07_name:
+          type: string
+        data_liquid_07_qty:
+          type: number
+        data_liquid_08_name:
+          type: string
+        data_liquid_08_qty:
+          type: number
+        data_liquid_09_name:
+          type: string
+        data_liquid_09_qty:
+          type: number
+        data_liquid_10_name:
+          type: string
+        data_liquid_10_qty:
+          type: number
+        data_liquid_11_name:
+          type: string
+        data_liquid_11_qty:
+          type: number
+        data_liquid_12_name:
+          type: string
+        data_liquid_12_qty:
+          type: number
+        data_liquid_13_name:
+          type: string
+        data_liquid_13_qty:
+          type: number
+        data_liquid_14_name:
+          type: string
+        data_liquid_14_qty:
+          type: number
+        data_liquid_15_name:
+          type: string
+        data_liquid_15_qty:
+          type: number
+        data_prep_tip_5000uL_count:
+          type: integer
+        data_prep_tip_1000uL_count:
+          type: integer
+        data_prep_tip_50uL_count:
+          type: integer
+        data_dispense_tip_5000uL_count:
+          type: integer
       required:
       - device_id
       type: object
