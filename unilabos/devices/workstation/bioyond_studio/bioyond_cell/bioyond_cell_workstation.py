@@ -8247,6 +8247,8 @@ class BioyondCellWorkstation(BioyondWorkstation):
         print("resource_tree_transfer", plr_resource, parent_resource)
         if hasattr(plr_resource, "unilabos_extra") and plr_resource.unilabos_extra:
             if "update_resource_site" in plr_resource.unilabos_extra:
+                # create_sample 会阻塞 1s+，刷新线程可能在 inbound 完成前看到空格并卸掉刚挂上的板
+                self._touch_warehouse_refresh_skip()
                 site = plr_resource.unilabos_extra["update_resource_site"]
                 plr_model = plr_resource.model
                 

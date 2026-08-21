@@ -1461,7 +1461,19 @@ class BioyondWorkstation(WorkstationBase):
 
                 if hold_id:
                     extra = getattr(occupant, "unilabos_extra", {}) or {} if occupant else {}
-                    if occupant is not None and extra.get("material_bioyond_id") == hold_id:
+                    hold_name = (loc or {}).get("holdMName")
+                    same_id = occupant is not None and extra.get("material_bioyond_id") == hold_id
+                    same_name = occupant is not None and bool(hold_name) and occupant.name == hold_name
+                    if occupant is not None and (same_id or same_name):
+                        if extra.get("material_bioyond_id") != hold_id:
+                            extra["material_bioyond_id"] = hold_id
+                            if hold_name:
+                                extra["material_bioyond_name"] = hold_name
+                            occupant.unilabos_extra = extra
+                            logger.debug(
+                                f"[库位刷新] 复用 {wh_name}/{slot}: {occupant.name} "
+                                f"holdMId={hold_id[:8]}..."
+                            )
                         continue
                     existing_wh, existing_slot, existing = self._find_resource_by_hold_id(hold_id)
                     if existing is not None and existing_wh is warehouse and existing_slot == slot:
@@ -1485,6 +1497,14 @@ class BioyondWorkstation(WorkstationBase):
                         )
                 else:
                     if occupant is not None:
+                        extra = getattr(occupant, "unilabos_extra", {}) or {}
+                        pending_inbound = extra.get("update_resource_site") and not extra.get("material_bioyond_id")
+                        if pending_inbound:
+                            logger.info(
+                                f"[库位刷新] 保留 {wh_name}/{slot}: {occupant.name}"
+                                f"（拖拽入库尚未写上 LIMS 占用）"
+                            )
+                            continue
                         warehouse.unassign_child_resource(occupant)
                         changed = True
                         logger.info(f"[库位刷新] 卸空 {wh_name}/{slot}: {occupant.name}")
