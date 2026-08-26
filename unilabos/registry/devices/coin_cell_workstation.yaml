@@ -92,6 +92,8 @@ coincellassemblyworkstation_device:
           file_path: D:\Uni-Lab-OS-Data\date
           ne_plate_matrix: 0
           ne_plate_num: 0
+          pe_plate_matrix: 0
+          pe_plate_num: 0
           sep_plate_matrix: 0
           sep_plate_num: 0
           aluminum_foil: true
@@ -128,7 +130,7 @@ coincellassemblyworkstation_device:
                 positive_plate_pick_mode:
                   default: false
                   title: 正极片取料方式
-                  description: False=弹夹取料, True=水平取料
+                  description: False=弹夹取料, True=水平取料。水平取料时需填写正极片盘数与矩阵点位
                   type: boolean
                 negative_plate_thickness_mode:
                   default: false
@@ -137,12 +139,12 @@ coincellassemblyworkstation_device:
                   type: boolean
                 thick_negative_plate_blow_time:
                   default: 0
-                  title: 厚负极片吹扫时间（s）
+                  title: 厚负极片吹扫时间（ms）
                   description: 厚负极片吹气时间
                   type: integer
                 thin_negative_plate_blow_time:
                   default: 0
-                  title: 薄负极片吹扫时间（s）
+                  title: 薄负极片吹扫时间（ms）
                   description: 薄负极片吹气时间
                   type: integer
                 dual_drop_first_volume:
@@ -193,6 +195,16 @@ coincellassemblyworkstation_device:
                   default: 0
                   title: 负极片盘数
                   description: 现场清点负极片盘数进行填写
+                  type: integer
+                pe_plate_matrix:
+                  default: 0
+                  title: 正极片矩阵点位
+                  description: 仅水平取料时需要填写。正极片盘为5*4方形盘，从0编号至19，0-7与12-19为摆放正极片位置，8-11（第3行）实际无法摆放正极片
+                  type: integer
+                pe_plate_num:
+                  default: 0
+                  title: 正极片盘数
+                  description: 仅水平取料时需要填写。现场清点正极片盘数进行填写
                   type: integer
                 sep_plate_matrix:
                   default: 0
@@ -664,6 +676,8 @@ coincellassemblyworkstation_device:
           file_path: D:\Uni-Lab-OS-Data\date
           ne_plate_matrix: 0
           ne_plate_num: 0
+          pe_plate_matrix: 0
+          pe_plate_num: 0
           sep_plate_matrix: 0
           sep_plate_num: 0
           aluminum_foil: true
@@ -717,7 +731,7 @@ coincellassemblyworkstation_device:
                 positive_plate_pick_mode:
                   default: false
                   title: 正极片取料方式
-                  description: False=弹夹取料, True=水平取料
+                  description: False=弹夹取料, True=水平取料。水平取料时需填写正极片盘数与矩阵点位
                   type: boolean
                 negative_plate_thickness_mode:
                   default: false
@@ -726,12 +740,12 @@ coincellassemblyworkstation_device:
                   type: boolean
                 thick_negative_plate_blow_time:
                   default: 0
-                  title: 厚负极片吹扫时间（s）
+                  title: 厚负极片吹扫时间（ms）
                   description: 厚负极片吹气时间
                   type: integer
                 thin_negative_plate_blow_time:
                   default: 0
-                  title: 薄负极片吹扫时间（s）
+                  title: 薄负极片吹扫时间（ms）
                   description: 薄负极片吹气时间
                   type: integer
                 dual_drop_first_volume:
@@ -781,6 +795,16 @@ coincellassemblyworkstation_device:
                   default: 0
                   title: 负极片盘数
                   description: 现场清点负极片盘数进行填写
+                  type: integer
+                pe_plate_matrix:
+                  default: 0
+                  title: 正极片矩阵点位
+                  description: 仅水平取料时需要填写。正极片盘为5*4方形盘，从0编号至19，0-7与12-19为摆放正极片位置，8-11（第3行）实际无法摆放正极片
+                  type: integer
+                pe_plate_num:
+                  default: 0
+                  title: 正极片盘数
+                  description: 仅水平取料时需要填写。现场清点正极片盘数进行填写
                   type: integer
                 sep_plate_matrix:
                   default: 0

@@ -1513,9 +1513,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         dual_drop_start_timing: bool = False,
         assembly_type: int = 7, 
         assembly_pressure: int = 4200,
-        # 装配参数（负极片/隔膜/枪头盒/铝箔垫）
+        # 装配参数（负极片/正极片/隔膜/枪头盒/铝箔垫）
         ne_plate_num: int = 0,
         ne_plate_matrix: int = 0,
+        pe_plate_num: int = 0,
+        pe_plate_matrix: int = 0,
         sep_plate_num: int = 0,
         sep_plate_matrix: int = 0,
         tip_box_matrix: int = 0,
@@ -1548,6 +1550,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             assembly_pressure: 电池压制力 (N)
             ne_plate_num: 负极片盘数
             ne_plate_matrix: 负极片矩阵点位
+            pe_plate_num: 正极片盘数（仅水平取料时需要填写）
+            pe_plate_matrix: 正极片矩阵点位（仅水平取料时需要填写）
             sep_plate_num: 隔膜盘数
             sep_plate_matrix: 隔膜矩阵点位
             tip_box_matrix: 枪头盒矩阵点位
@@ -1633,6 +1637,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             assembly_pressure=assembly_pressure,
             ne_plate_num=ne_plate_num,
             ne_plate_matrix=ne_plate_matrix,
+            pe_plate_num=pe_plate_num,
+            pe_plate_matrix=pe_plate_matrix,
             sep_plate_num=sep_plate_num,
             sep_plate_matrix=sep_plate_matrix,
             tip_box_matrix=tip_box_matrix,
@@ -1963,9 +1969,11 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         dual_drop_start_timing: bool = False,
         assembly_type: int = 7, 
         assembly_pressure: int = 4200,
-        # 装配参数（负极片/隔膜/枪头盒/铝箔垫）
+        # 装配参数（负极片/正极片/隔膜/枪头盒/铝箔垫）
         ne_plate_num: int = 0,
         ne_plate_matrix: int = 0,
+        pe_plate_num: int = 0,
+        pe_plate_matrix: int = 0,
         sep_plate_num: int = 0,
         sep_plate_matrix: int = 0,
         tip_box_matrix: int = 0,
@@ -1982,7 +1990,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         """
     
         简化版组装函数，自动处理以下配置：
-        - 负极片和隔膜的盘数及矩阵点位
+        - 负极片、正极片（仅水平取料）和隔膜的盘数及矩阵点位
         - 枪头盒矩阵点位
         - 铝箔垫片使用设置
         - 压力模式和清洁忽略选项
@@ -2000,6 +2008,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             assembly_pressure: 电池压制力 (N)
             ne_plate_num: 负极片盘数
             ne_plate_matrix: 负极片矩阵点位
+            pe_plate_num: 正极片盘数（仅水平取料时需要填写）
+            pe_plate_matrix: 正极片矩阵点位（仅水平取料时需要填写）
             sep_plate_num: 隔膜盘数
             sep_plate_matrix: 隔膜矩阵点位
             tip_box_matrix: 枪头盒矩阵点位
@@ -2024,6 +2034,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         assembly_pressure = int(assembly_pressure)
         ne_plate_num = int(ne_plate_num)
         ne_plate_matrix = int(ne_plate_matrix)
+        pe_plate_num = int(pe_plate_num)
+        pe_plate_matrix = int(pe_plate_matrix)
         sep_plate_num = int(sep_plate_num)
         sep_plate_matrix = int(sep_plate_matrix)
         tip_box_matrix = int(tip_box_matrix)
@@ -2034,6 +2046,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         logger.info("=" * 60)
         logger.info("设置设备参数...")
         logger.info(f"  负极片盘数: {ne_plate_num}, 矩阵点位: {ne_plate_matrix}")
+        logger.info(f"  正极片盘数: {pe_plate_num}, 矩阵点位: {pe_plate_matrix}")
         logger.info(f"  隔膜盘数: {sep_plate_num}, 矩阵点位: {sep_plate_matrix}")
         logger.info(f"  枪头盒矩阵点位: {tip_box_matrix}")
         logger.info(f"  铝箔垫片: {aluminum_foil}, 压力模式: {battery_pressure_mode}")
@@ -2047,6 +2060,8 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         # 写入基础参数到PLC
         self.client.use_node('REG_MSG_NE_PLATE_NUM').write(ne_plate_num)
         self.client.use_node('REG_MSG_NE_PLATE_MATRIX').write(ne_plate_matrix)
+        self.client.use_node('REG_MSG_PE_PLATE_NUM').write(pe_plate_num)
+        self.client.use_node('REG_MSG_PE_PLATE_MATRIX').write(pe_plate_matrix)
         self.client.use_node('REG_MSG_SEPARATOR_PLATE_NUM').write(sep_plate_num)
         self.client.use_node('REG_MSG_SEPARATOR_PLATE_MATRIX').write(sep_plate_matrix)
         self.client.use_node('REG_MSG_TIP_BOX_MATRIX').write(tip_box_matrix)

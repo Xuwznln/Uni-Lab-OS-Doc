@@ -48,9 +48,11 @@ UNILAB_RECE_FINISHED_CMD,BOOL,,,,coil,8530,Device request to receive finished da
 REG_UNILAB_INTERACT,BOOL,,,,coil,8450,"UNILAB interaction ignore flag (false=use, true=ignore)"
 COIL_ALUMINUM_FOIL,BOOL,,,,coil,8340,"Aluminum-foil material ignore flag (false=use, true=ignore)"
 REG_MSG_NE_PLATE_MATRIX,INT16,,,,hold_register,440,Negative-electrode tray matrix position (initial position 0)
+REG_MSG_PE_PLATE_MATRIX,INT16,,,,hold_register,420,Positive-electrode tray matrix position (initial position 0)
 REG_MSG_SEPARATOR_PLATE_MATRIX,INT16,,,,hold_register,450,Separator tray matrix position (initial position 0)
 REG_MSG_TIP_BOX_MATRIX,INT16,,,,hold_register,480,Pipette-tip box matrix position (initial position 0)
 REG_MSG_NE_PLATE_NUM,INT16,,,,hold_register,443,Set negative-electrode tray count
+REG_MSG_PE_PLATE_NUM,INT16,,,,hold_register,423,Set positive-electrode tray count
 REG_MSG_SEPARATOR_PLATE_NUM,INT16,,,,hold_register,453,Set separator tray count
 REG_MSG_PRESS_MODE,BOOL,,,,coil,8360,"Pressing mode (false=force-detection mode, true=distance mode)"
 COIL_VISION_ALIGNMENT_IGNORE,BOOL,,,,coil,8300,"Vision alignment ignore flag (false=use, true=ignore)"
