@@ -1563,19 +1563,22 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
 
     @staticmethod
     def _resolve_tube_compat(rack: TubeRack, name: str) -> Container:
-        """从 TubeRack 取液体容器（Tube），兼容新版 PLR 的 holder 模型。
+        """从 TubeRack 取液体容器（Tube），兼容两种子资源模型。
 
-        新版 PLR 把 ``TubeRack`` 定义为 ``ItemizedResource[ResourceHolder]``，其
-        ``get_tube`` 返回 ``holder.resource``；而 Uni-Lab 的 ``PRCXI9300TubeRack``
-        把 ``Tube`` 直接作为子资源（``get_item`` 即 Tube），导致 ``get_tube`` 恒返回
-        ``None`` —— 进而让 set_liquid 收到 ``None`` well 并崩溃。这里优先 ``get_tube``，
-        为 ``None`` 时回退到 ``get_item``（若子资源是 holder 再取 ``.resource``）。
+        Uni-Lab / PRCXI 工厂把 ``Tube`` 直接作为 ``ordered_items``（``get_item`` 即 Tube）。
+        新版 PLR 的 ``TubeRack.get_tube`` 会走 ``has_container`` → ``holder.resource``，
+        在这种模型下直接 **AttributeError**，而不是返回 ``None``，因此不能先调 ``get_tube``。
+
+        正确顺序：先 ``get_item``；若是 holder（有 ``.resource``）取其中的 Tube，
+        否则 item 本身就是 Tube。
         """
-        tube = rack.get_tube(name)
-        if tube is not None:
-            return tube  # type: ignore[return-value]
         item = rack.get_item(name)
-        return getattr(item, "resource", item)
+        if hasattr(item, "resource"):
+            resource = item.resource
+            if resource is None:
+                raise ValueError(f"TubeRack {rack.name!r} 位置 {name!r} 没有 Tube")
+            return resource  # type: ignore[return-value]
+        return item  # type: ignore[return-value]
 
     def _coerce_well(self, w: Union[Well, Dict[str, Any]]) -> Well:
         """dict → PLR Well：通过 self._ros_node.resource_tracker 同步解析；Well 原样返回。

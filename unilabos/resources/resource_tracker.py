@@ -529,6 +529,37 @@ class ResourceTreeSet(object):
                 logger.trace(f"转换pylabrobot的时候，出现未知类型 {source}")
                 return source
 
+        def _is_synth_holder_obj(res: "PLRResource") -> bool:
+            """判断是否为我们在 _ordering_to_ordered_items 里合成的孔位包装 ResourceHolder。
+
+            这些 holder 只是为了满足 pylabrobot ContainerRack/TubeRack 的 ordered_items
+            必须是 ResourceHolder 的约束，在上云/建树时需折叠掉，让 rack→holder→tube
+            拍回 rack→tube，避免云端 "parent node uuid not exist" 及树体积膨胀。
+            """
+            return getattr(res, "category", "") == "resource_holder" and len(getattr(res, "children", []) or []) >= 1
+
+        def _is_synth_holder_dict(d: dict) -> bool:
+            return d.get("category") == "resource_holder" and len(d.get("children") or []) >= 1
+
+        def _compose_loc(parent_loc: Optional[dict], child_loc: Optional[dict]) -> Optional[dict]:
+            """把 holder 的 location 叠加到其子(tube)的 location 上，保持 tube 的绝对坐标不变。"""
+            if parent_loc is None and child_loc is None:
+                return child_loc
+
+            def _g(l: Optional[dict], k: str):
+                return (l or {}).get(k, 0) or 0
+
+            merged = {
+                "x": _g(parent_loc, "x") + _g(child_loc, "x"),
+                "y": _g(parent_loc, "y") + _g(child_loc, "y"),
+                "z": _g(parent_loc, "z") + _g(child_loc, "z"),
+            }
+            # 保留 child location 的其它字段（如 {"type": "Coordinate"}）
+            for k, v in (child_loc or {}).items():
+                if k not in ("x", "y", "z"):
+                    merged[k] = v
+            return merged
+
         def build_uuid_mapping(res: "PLRResource", uuid_list: list, parent_uuid: Optional[str] = None):
             """递归构建uuid和extra映射字典，返回(current_uuid, parent_uuid, extra)元组列表"""
             uid = getattr(res, "unilabos_uuid", "")
@@ -543,7 +574,13 @@ class ResourceTreeSet(object):
 
             uuid_list.append((uid, parent_uuid, extra))
             for child in res.children:
-                build_uuid_mapping(child, uuid_list, uid)
+                # 折叠合成 holder：跳过 holder 本身，把它的子(tube)直接挂到当前节点下，
+                # 与下方 resource_plr_inner 的折叠逻辑保持同序，保证 uuid_list 不错位。
+                if _is_synth_holder_obj(child):
+                    for grandchild in child.children:
+                        build_uuid_mapping(grandchild, uuid_list, uid)
+                else:
+                    build_uuid_mapping(child, uuid_list, uid)
 
         def resource_plr_inner(
             d: dict, parent_resource: Optional[ResourceDict], states: dict, uuids: list
@@ -621,9 +658,21 @@ class ResourceTreeSet(object):
             current_instance = ResourceDictInstance.get_resource_instance_from_dict(r_dict)
             current_resource = current_instance.res_content
 
+            # 折叠合成 holder：与 build_uuid_mapping 同序展开，把 rack→holder→tube 拍回 rack→tube。
+            collapsed_children = []
+            for child in d["children"]:
+                if _is_synth_holder_dict(child):
+                    holder_loc = child.get("location")
+                    for grandchild in child["children"]:
+                        grandchild = dict(grandchild)
+                        grandchild["location"] = _compose_loc(holder_loc, grandchild.get("location"))
+                        collapsed_children.append(grandchild)
+                else:
+                    collapsed_children.append(child)
+
             # 递归处理子节点，传入当前节点的 ResourceDict 作为 parent
             current_instance.children = [
-                resource_plr_inner(child, current_resource, states, uuids) for child in d["children"]
+                resource_plr_inner(child, current_resource, states, uuids) for child in collapsed_children
             ]
 
             return current_instance
@@ -742,15 +791,25 @@ class ResourceTreeSet(object):
                 if sub_cls is not None:
                     spec = inspect.signature(sub_cls)
                     valid_params = set(spec.parameters.keys())
-                    # TubeRack 特殊处理：先转换 ordering，再参与后续过滤
-                    if "ordering" not in valid_params and "ordering" in plr_d:
+                    # TubeRack（含 PRCXI9300TubeRack 等子类）特殊处理：
+                    # pylabrobot 基类 TubeRack/ContainerRack 只认 ordered_items、不认 ordering，
+                    # 即使子类 __init__ 形参里声明了 ordering，也会把它透传给基类而触发 TypeError。
+                    # 因此只要是 TubeRack 的子类，就必须在此把 ordering 转成 ordered_items，
+                    # 不能只依赖「子类签名是否含 ordering」来判断。
+                    try:
+                        from pylabrobot.resources.tube_rack import TubeRack as _PLRTubeRack
+
+                        _is_tube_rack = isinstance(sub_cls, type) and issubclass(sub_cls, _PLRTubeRack)
+                    except Exception:
+                        _is_tube_rack = sub_cls.__name__ == "TubeRack"
+                    if _is_tube_rack and "ordering" in plr_d:
                         ordering = plr_d.pop("ordering", None)
-                        if sub_cls.__name__ == "TubeRack":
-                            plr_d["ordered_items"] = (
-                                _ordering_to_ordered_items(plr_d, ordering)
-                                if ordering
-                                else {}
-                            )
+                        plr_d["ordered_items"] = (
+                            _ordering_to_ordered_items(plr_d, ordering) if ordering else {}
+                        )
+                    elif "ordering" not in valid_params and "ordering" in plr_d:
+                        # 其它类型：构造函数不接受 ordering 就直接丢弃，避免 deserialize 报错
+                        plr_d.pop("ordering", None)
                     # 移除构造函数不接受的参数（保留 META 和 deserialize 自定义逻辑需要的 key）
                     for key in list(plr_d.keys()):
                         if (
@@ -763,14 +822,45 @@ class ResourceTreeSet(object):
                 remove_incompatible_params(child)
 
         def _ordering_to_ordered_items(plr_d: dict, ordering: dict) -> dict:
-            """将 ordering 转为 ordered_items，从 children 构建 Tube 对象"""
+            """将 ordering 转为 ordered_items，从 children 构建 Tube。
+
+            Uni-Lab / PRCXI 工厂把 Tube 直接作为 ``ordered_items``（与 Plate 的 Well 一样），
+            取液走 ``_resolve_tube_compat``，不走 PLR ``get_tube`` 的 holder 模型。
+            因此这里必须继续产出 Tube，不能包 ResourceHolder，否则工厂路径与反序列化
+            路径会变成两套对象模型。
+
+            ItemizedResource.__init__ 会把 item.name 再拼成 ``{rack}_{item.name}``，
+            所以构造 Tube 时要去掉已有的 rack 前缀，避免名字加倍。
+            """
             from pylabrobot.resources import Tube, Coordinate
             from pylabrobot.serializer import deserialize as plr_deserialize
 
-            children = plr_d.get("children", [])
+            children = [c for c in plr_d.get("children", []) if isinstance(c, dict)]
+            children_by_name = {c.get("name"): c for c in children if c.get("name")}
+            rack_name = plr_d.get("name") or ""
+            rack_prefix = f"{rack_name}_" if rack_name else ""
+
+            def _find_child(ident: str, child_name: Any, idx: int) -> Optional[dict]:
+                if child_name and child_name in children_by_name:
+                    return children_by_name[child_name]
+                suffix = f"_{ident}"
+                for child in children:
+                    name = child.get("name") or ""
+                    if name.endswith(suffix):
+                        return child
+                if 0 <= idx < len(children):
+                    return children[idx]
+                return None
+
+            def _short_tube_name(full_name: str, ident: str) -> str:
+                name = full_name or f"tube_{ident}"
+                while rack_prefix and name.startswith(rack_prefix):
+                    name = name[len(rack_prefix) :]
+                return name or f"tube_{ident}"
+
             ordered_items = {}
             for idx, (ident, child_name) in enumerate(ordering.items()):
-                child_data = children[idx] if idx < len(children) else None
+                child_data = _find_child(str(ident), child_name, idx)
                 if child_data is None:
                     continue
                 loc_data = child_data.get("location")
@@ -779,8 +869,11 @@ class ResourceTreeSet(object):
                     if loc_data
                     else Coordinate(0, 0, 0)
                 )
+                tube_name = _short_tube_name(
+                    child_data.get("name") or child_name or ident, str(ident)
+                )
                 tube = Tube(
-                    name=child_data.get("name", child_name or ident),
+                    name=tube_name,
                     size_x=child_data.get("size_x", 10),
                     size_y=child_data.get("size_y", 10),
                     size_z=child_data.get("size_z", 50),
@@ -1605,6 +1698,32 @@ class DeviceNodeResourceTracker(object):
                     if getattr(res, k) == v:
                         new_list.append(res)
         return new_list
+
+
+def collect_discardable_labware(parent) -> List[Tuple[str, str]]:
+    """收集 ``parent``（通常是 Deck）直接子节点中可废弃的耗材 ``(uuid, name)``。
+
+    不含 parent 自身；跳过无 uuid、以及 category 为 deck/device 的节点。
+    云端 ``bench/discard`` 会级联删除子孙（孔位/枪头），因此只需提交直接子节点。
+    """
+    results: List[Tuple[str, str]] = []
+    seen = set()
+    for child in list(getattr(parent, "children", None) or []):
+        if child is None or child is parent:
+            continue
+        category = str(getattr(child, "category", "") or "").lower()
+        if category in {"deck", "device"}:
+            continue
+        uid = getattr(child, "unilabos_uuid", None)
+        if not uid:
+            continue
+        uid_s = str(uid)
+        if uid_s in seen:
+            continue
+        seen.add(uid_s)
+        name = str(getattr(child, "name", "") or uid_s)
+        results.append((uid_s, name))
+    return results
 
 
 if __name__ == "__main__":

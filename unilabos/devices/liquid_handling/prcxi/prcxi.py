@@ -1811,9 +1811,16 @@ class PRCXI9300TubeRack(TubeRack):
                 name, size_x, size_y, size_z, ordered_items=items_to_pass, category=category, model=model, **kwargs
             )
         elif ordering_param is not None:
-            # 传递 ordering 参数，让 TubeRack 自己创建 Tube 对象
-            super().__init__(
-                name, size_x, size_y, size_z, ordering=ordering_param, category=category, model=model, **kwargs
+            # 走到这里说明拿到的是「只有键、没有真实几何」的 ordering（字符串/None 值）。
+            # pylabrobot 的 TubeRack/ContainerRack 只接受带真实 location 的 ordered_items，
+            # 仅凭键无法重建正确的孔位坐标；若在此伪造占位 Tube，会得到位置错误的管架，
+            # 对移液设备是危险的静默错误。正常反序列化路径下，resource_tracker 的
+            # remove_incompatible_params 已把 ordering 转成带几何的 ordered_items（走上面的分支），
+            # 因此这里应快速失败而不是伪造几何。
+            raise ValueError(
+                f"PRCXI9300TubeRack({name!r}) 收到仅含键的 ordering（无真实几何），"
+                f"无法安全构建管架。请传入带 location 的 ordered_items，"
+                f"或经由 resource_tracker 的 _ordering_to_ordered_items 转换后再构造。"
             )
         else:
             super().__init__(name, size_x, size_y, size_z, category=category, model=model, **kwargs)

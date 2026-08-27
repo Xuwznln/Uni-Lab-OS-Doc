@@ -192,6 +192,7 @@ class Registry:
         apply_deduct_resource_action = ast_actions.get("apply_deduct_resource", {})
         set_substance_action = ast_actions.get("set_substance", {})
         discard_resource_action = ast_actions.get("discard_resource", {})
+        clear_device_resources_action = ast_actions.get("clear_device_resources", {})
         transfer_resource_action = ast_actions.get("transfer_resource", {})
         transfer_manual_action = ast_actions.get("transfer_manual", {})
         test_resource_action["handles"] = {
@@ -275,6 +276,7 @@ class Registry:
                     "apply_deduct_resource": apply_deduct_resource_action,
                     "set_substance": set_substance_action,
                     "discard_resource": discard_resource_action,
+                    "clear_device_resources": clear_device_resources_action,
                     "transfer_resource": transfer_resource_action,
                     "transfer_manual": transfer_manual_action,
                 },

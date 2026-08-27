@@ -93,14 +93,16 @@ class HTTPClient:
                 f"{self.remote_addr}/edge/material",
                 data=body_bytes,
                 headers=http_headers,
-                timeout=60,
+                timeout=(30, 120),
             )
         else:
+            # 二次上传会全量重传整棵父树（可达数百节点），10s 读超时不够，
+            # 大树时会触发 "The write operation timed out"，故放宽到 (连接30s, 读120s)。
             response = self._session.put(
                 f"{self.remote_addr}/edge/material",
                 data=body_bytes,
                 headers=http_headers,
-                timeout=10,
+                timeout=(30, 120),
             )
 
         with open(os.path.join(BasicConfig.working_dir, "res_resource_tree_add.json"), "w", encoding="utf-8") as f:
@@ -194,6 +196,21 @@ class HTTPClient:
         if "code" in res and res["code"] != 0:
             logger.error(f"台面物料废弃失败: {response.text}")
         return res
+
+    def material_bench_discard_many(self, uuids: List[str], chunk_size: int = 100) -> Dict[str, Any]:
+        """按云端 1~100 上限分片废弃台面物料；空列表视为成功（无需请求）。"""
+        if not uuids:
+            return {"code": 0, "discarded": []}
+        discarded: List[str] = []
+        size = max(int(chunk_size), 1)
+        for i in range(0, len(uuids), size):
+            chunk = uuids[i : i + size]
+            res = self.material_bench_discard(chunk)
+            code = res.get("code") if isinstance(res, dict) else None
+            if code not in (0, None):
+                raise ValueError(f"台面物料废弃失败（chunk={chunk[:3]}... n={len(chunk)}）: {res}")
+            discarded.extend(chunk)
+        return {"code": 0, "discarded": discarded}
 
     def resource_add(self, resources: List[Dict[str, Any]]) -> requests.Response:
         """
@@ -377,7 +394,9 @@ class HTTPClient:
             f"{self.remote_addr}/lab/resource",
             data=compressed_body,
             headers=headers,
-            timeout=30,
+            # 注册表 payload 可达上百 MB（数百个资源模板），云端落库耗时较长，
+            # 30s 容易 Read timed out，联网调试时放大到 600s（连接 30s / 读取 600s）
+            timeout=(30, 600),
         )
 
         # 保存响应数据到 unilabos_data
@@ -430,7 +449,8 @@ class HTTPClient:
             f"{self.remote_addr}/lab/resource",
             data=compressed_body,
             headers=headers,
-            timeout=60,
+            # 与 resource_registry 同端点，大 payload 落库耗时长，放大读取超时
+            timeout=(30, 600),
         )
 
         res_path = os.path.join(BasicConfig.working_dir, "res_package_upload.json")

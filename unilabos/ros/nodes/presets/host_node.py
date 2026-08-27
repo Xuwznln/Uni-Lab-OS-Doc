@@ -51,6 +51,7 @@ from unilabos.resources.resource_tracker import (
     RETURN_UNILABOS_SAMPLES,
     JSON_UNILABOS_PARAM,
     PARAM_SAMPLE_UUIDS, SampleUUIDsType, LabSample,
+    collect_discardable_labware,
 )
 from unilabos.ros.initialize_device import initialize_device_from_dict
 from unilabos.ros.msgs.message_converter import (
@@ -93,6 +94,15 @@ class DeductResourceReturn(CreateResourceReturn):
     """apply_deduct_resource 返回值：在创建结果之外，额外输出实际挂载到的目标物料树。"""
 
     mount_resource: List[List[ResourceDictType]]
+
+
+class ClearDeviceResourcesReturn(TypedDict):
+    """clear_device_resources 返回值：已废弃的台面耗材 uuid 与所属设备。"""
+
+    code: int
+    device_id: str
+    uuids: List[str]
+    names: List[str]
 
 
 class TransferResourceReturn(TypedDict):
@@ -2176,6 +2186,140 @@ class HostNode(BaseROS2DeviceNode):
                 f"（notified={notified}），边缘侧将于下次同步对齐"
             )
         return {"code": 0, "uuids": [res_uuid], "device_id": edge_id}
+
+    def _get_device_deck(self, device_id: str):
+        """取设备 driver 上的 deck 实例；找不到返回 None。"""
+        candidate_ids = []
+        if device_id:
+            candidate_ids.append(device_id)
+            stripped = device_id.lstrip("/")
+            if stripped and stripped != device_id:
+                candidate_ids.append(stripped)
+            tail = device_id.split("/")[-1]
+            if tail and tail not in candidate_ids:
+                candidate_ids.append(tail)
+
+        d = None
+        for did in candidate_ids:
+            d = self.devices_instances.get(did)
+            if d is not None:
+                break
+        if d is None:
+            return None
+
+        driver_candidates = []
+        for attr_path in ("_driver_instance", "_ros_node.driver_instance", "driver_instance"):
+            obj = d
+            for part in attr_path.split("."):
+                obj = getattr(obj, part, None)
+                if obj is None:
+                    break
+            if obj is not None and obj not in driver_candidates:
+                driver_candidates.append(obj)
+
+        for drv in driver_candidates:
+            deck = getattr(drv, "deck", None)
+            if deck is not None:
+                return deck
+        return None
+
+    def _cloud_direct_children_of(self, parent_uuid: str) -> List[Tuple[str, str]]:
+        """从云端资源树取 parent 的直接子节点 (uuid, name)，失败返回空列表。"""
+        from unilabos.app.web.client import http_client
+
+        try:
+            raw_nodes = http_client.resource_tree_get([parent_uuid], True) or []
+        except Exception as e:
+            self.lab_logger().warning(f"[clear_device_resources] 查询云端子树失败: {e}")
+            return []
+
+        results: List[Tuple[str, str]] = []
+        seen = set()
+        for node in raw_nodes:
+            if not isinstance(node, dict):
+                continue
+            uid = node.get("uuid")
+            if not uid or str(uid) == str(parent_uuid):
+                continue
+            parent = node.get("parent_uuid")
+            if parent is None and isinstance(node.get("parent"), dict):
+                parent = node.get("parent", {}).get("uuid")
+            if str(parent or "") != str(parent_uuid):
+                continue
+            ntype = str(node.get("type") or "").lower()
+            if ntype in {"device", "deck"}:
+                continue
+            uid_s = str(uid)
+            if uid_s in seen:
+                continue
+            seen.add(uid_s)
+            name = str(node.get("name") or node.get("id") or uid_s)
+            results.append((uid_s, name))
+        return results
+
+    @action(
+        description="清空指定设备 Deck 上的全部耗材（不删除设备与 Deck 本身）",
+        always_free=True,
+        placeholder_keys={"device_id": PLACEHOLDER_DEVICES},
+        handles=[
+            ActionInputHandle(
+                key="device_id",
+                data_type="device_id",
+                label="目标设备",
+                data_key="device_id",
+                data_source=DataSource.HANDLE,
+            ),
+        ],
+    )
+    async def clear_device_resources(self, device_id: DeviceSlot) -> ClearDeviceResourcesReturn:
+        """清空指定移液设备台面上的耗材，供工作流 create_resource 前复位数字孪生。
+
+        只废弃 Deck 的直接子节点（板 / 枪头架 / EP 管架 / 垃圾桶等）。设备节点与 Deck
+        本身保留。云端 discard 会级联删除孔位等子孙；随后通知边缘设备本地卸载。
+
+        台面已空时视为成功，不报错。
+
+        注意：本动作只清软件物料树，不会搬走机器上的实物。执行前仍需保证实物与即将
+        create_resource 的槽位一致。
+
+        Args:
+            device_id[目标设备]: 要清台的边缘设备（如 /PRCXI）。
+        """
+        if not device_id:
+            raise ValueError("清台失败：未指定 device_id")
+        edge_id = str(device_id).split("/")[-1]
+        deck = self._get_device_deck(str(device_id))
+        if deck is None:
+            raise ValueError(f"清台失败：设备 {device_id} 上找不到 Deck")
+
+        by_uuid: Dict[str, str] = {}
+        for uid, name in collect_discardable_labware(deck):
+            by_uuid[uid] = name
+        deck_uuid = getattr(deck, "unilabos_uuid", None)
+        if deck_uuid:
+            for uid, name in self._cloud_direct_children_of(str(deck_uuid)):
+                by_uuid.setdefault(uid, name)
+
+        names = [by_uuid[u] for u in by_uuid]
+        uuids = list(by_uuid.keys())
+        if not uuids:
+            self.lab_logger().info(f"[clear_device_resources] 设备 {edge_id} 台面已空，跳过废弃")
+            return {"code": 0, "device_id": edge_id, "uuids": [], "names": []}
+
+        self.lab_logger().info(
+            f"[clear_device_resources] 准备清空 {edge_id} 台面耗材 n={len(uuids)} "
+            f"names={names}"
+        )
+        from unilabos.app.web.client import http_client
+
+        http_client.material_bench_discard_many(uuids)
+        notified = self.notify_resource_tree_update(edge_id, "remove", uuids)
+        if notified is not True:
+            self.lab_logger().warning(
+                f"[clear_device_resources] 云端已销毁 n={len(uuids)}，但通知设备 {edge_id} "
+                f"本地移除未成功（notified={notified}），边缘侧将于下次同步对齐"
+            )
+        return {"code": 0, "device_id": edge_id, "uuids": uuids, "names": names}
 
     async def _do_transfer_resource(
         self,

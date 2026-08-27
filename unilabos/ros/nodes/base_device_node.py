@@ -675,16 +675,23 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                         )
                     # noinspection PyUnresolvedReferences
                     # _t3 = time.time()
-                    rts_with_parent = ResourceTreeSet.from_plr_resources([parent_resource])
+                    # 增量上传：只上传本次新增的子树 plr_instance（新加的这件物料及其孔位，
+                    # 此时已 assign 进 deck、位置已解析），挂到 parent(deck) 下即可。
+                    # 不再用 from_plr_resources([parent_resource]) 全量重传整棵 deck：
+                    # 全量重传是 O(N²)，deck 越大单次越慢（实测 14-18s），大 JSON 序列化+gzip 长时间
+                    # 占用 GIL，会把 ws_client 心跳线程的事件循环饿死（ping_interval 5 + ping_timeout 8 = 13s），
+                    # 导致每十几秒断连、job_status 送不达、后端判定 edge timeout。
+                    # 后端 /edge/material 按 (lab_id, name) upsert，之前已上传的节点无需重复回传。
+                    rts_with_parent = ResourceTreeSet.from_plr_resources([plr_instance])
                     # _n_parent = len(rts_with_parent.all_nodes)
                     if rts_with_parent.root_nodes[0].res_content.uuid_parent is None:
-                        rts_with_parent.root_nodes[0].res_content.parent_uuid = self.uuid
+                        rts_with_parent.root_nodes[0].res_content.parent_uuid = parent_resource.unilabos_uuid
                     request.command = _fast_dumps_str(
                         {
                             "action": "add",
                             "data": {
                                 "data": rts_with_parent.dump(),
-                                "mount_uuid": rts_with_parent.root_nodes[0].res_content.uuid_parent,
+                                "mount_uuid": parent_resource.unilabos_uuid,
                                 "first_add": False,
                             },
                         }
@@ -695,7 +702,12 @@ class BaseROS2DeviceNode(Node, Generic[T]):
                     # )
                     tree_response: SerialCommand.Response = await client.call_async(request)
                     # _t5 = time.time()
-                    uuid_maps = _fast_loads(tree_response.response)
+                    # Host 端上传失败时会把 response 置成 "ERROR: ..." / "FAILED" 之类的非 JSON 字符串，
+                    # 直接 _fast_loads 会抛出看不懂的 orjson 解析错误，掩盖真实根因。这里先显式判断。
+                    _tree_resp_text = tree_response.response or ""
+                    if (not _tree_resp_text.strip()) or _tree_resp_text.lstrip().startswith(("ERROR", "FAILED")):
+                        raise RuntimeError(f"Host 添加资源树失败，返回: {_tree_resp_text[:500]!r}")
+                    uuid_maps = _fast_loads(_tree_resp_text)
                     self.resource_tracker.loop_update_uuid(input_resources, uuid_maps)
                     # self._lab_logger.info(
                     #     f"[AR:{_ar_tag}] 二次上传完成 HTTP={(_t5 - _t4) * 1000:.0f}ms "
