@@ -18,7 +18,11 @@ from msgcenterpy.instances.typed_dict_instance import TypedDictMessageInstance
 
 from unilabos.utils.cls_creator import import_class
 from unilabos.registry.decorators import Side, DataSource, normalize_enum_value
-from unilabos.registry.placeholder_type import PLACEHOLDER_RESOURCES, PLACEHOLDER_DEVICES
+from unilabos.registry.placeholder_type import (
+    PLACEHOLDER_DEVICES,
+    PLACEHOLDER_RESOURCES,
+    PLACEHOLDER_SITES,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -168,7 +172,7 @@ SIMPLE_TYPE_MAP = {
 ARRAY_TYPES = {"list", "List", "tuple", "Tuple", "set", "Set", "Sequence", "Iterable"}
 OBJECT_TYPES = {"dict", "Dict", "Mapping"}
 WRAPPER_TYPES = {"Optional"}
-SLOT_TYPES = {"ResourceSlot", "DeviceSlot"}
+SLOT_TYPES = {"ResourceSlot", "DeviceSlot", "SiteSlot"}
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +443,7 @@ def type_to_schema(tp: Any) -> Dict[str, Any]:
 
 
 def detect_slot_type(ptype) -> Tuple[Optional[str], bool]:
-    """检测参数类型是否为 ResourceSlot / DeviceSlot。
+    """检测参数类型是否为 ResourceSlot / DeviceSlot / SiteSlot。
 
     兼容多种格式:
     - runtime: "unilabos.registry.placeholder_type:ResourceSlot"
@@ -451,15 +455,14 @@ def detect_slot_type(ptype) -> Tuple[Optional[str], bool]:
     ptype_str = str(ptype)
 
     # 快速路径: 字符串里根本没有 Slot
-    if "ResourceSlot" not in ptype_str and "DeviceSlot" not in ptype_str:
+    if not any(slot_name in ptype_str for slot_name in SLOT_TYPES):
         return (None, False)
 
     # runtime 格式: 完整模块路径
     if isinstance(ptype, str):
-        if ptype.endswith(":ResourceSlot") or ptype == "ResourceSlot":
-            return ("ResourceSlot", False)
-        if ptype.endswith(":DeviceSlot") or ptype == "DeviceSlot":
-            return ("DeviceSlot", False)
+        for slot_name in SLOT_TYPES:
+            if ptype.endswith(f":{slot_name}") or ptype == slot_name:
+                return (slot_name, False)
         # AST 复杂格式: List[ResourceSlot], Optional[ResourceSlot] 等
         if "[" in ptype:
             node = parse_type_node(ptype)
@@ -477,23 +480,24 @@ def detect_slot_type(ptype) -> Tuple[Optional[str], bool]:
     # runtime tuple 格式
     if isinstance(ptype, tuple) and len(ptype) == 2:
         inner_str = str(ptype[1])
-        if "ResourceSlot" in inner_str:
-            return ("ResourceSlot", True)
-        if "DeviceSlot" in inner_str:
-            return ("DeviceSlot", True)
+        for slot_name in SLOT_TYPES:
+            if slot_name in inner_str:
+                return (slot_name, True)
 
     return (None, False)
 
 
 def detect_placeholder_keys(params: list) -> Dict[str, str]:
-    """Detect parameters that reference ResourceSlot or DeviceSlot."""
+    """Detect parameters that reference ResourceSlot / DeviceSlot / SiteSlot."""
     result: Dict[str, str] = {}
     for p in params:
-        ptype = p.get("type", "")
-        if "ResourceSlot" in str(ptype):
+        ptype = str(p.get("type", ""))
+        if "ResourceSlot" in ptype:
             result[p["name"]] = PLACEHOLDER_RESOURCES
-        elif "DeviceSlot" in str(ptype):
+        elif "DeviceSlot" in ptype:
             result[p["name"]] = PLACEHOLDER_DEVICES
+        elif "SiteSlot" in ptype:
+            result[p["name"]] = PLACEHOLDER_SITES
     return result
 
 

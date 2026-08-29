@@ -70,7 +70,6 @@ from msgcenterpy.instances.json_schema_instance import JSONSchemaMessageInstance
 _HOSTLINK_SCHEMA_ONLY = BasicConfig.backend == "hostlink"
 
 if not _HOSTLINK_SCHEMA_ONLY:
-    from unilabos_msgs.action import ResourceCreateFromOuterEasy
     from unilabos_msgs.msg import Resource
     from unilabos.ros.msgs.message_converter import (
         msg_converter_manager,
@@ -84,7 +83,6 @@ else:
     # HostLink transmits JSON descriptors and values.  ROS message classes are
     # intentionally absent on this path; legacy ROS actions remain as string
     # metadata and are not executable by the JSON-only demo registry.
-    ResourceCreateFromOuterEasy = None
     Resource = None
     msg_converter_manager = None
     ROS2MessageInstance = None
@@ -277,70 +275,15 @@ class Registry:
             ]
         }
 
-        create_resource_action = ast_actions.get("auto-create_resource", {})
-        raw_create_resource_schema = ros_action_to_json_schema(
-            ResourceCreateFromOuterEasy, "用于创建或更新物料资源，每次传入一个物料信息。"
-        )
-        raw_create_resource_schema["properties"]["result"] = create_resource_action["schema"]["properties"]["result"]
-
         # 覆写: 保留硬编码的 ROS2 action + AST 生成的 auto-method
+        # 注: 物料创建只发生在微后端（POST /api/v1/materials/trees），host 不再提供
+        # create_resource action；创建后经 notify_resource_tree_update("add") 分发到设备。
         self.device_type_registry["host_node"] = {
             "class": {
                 "module": "unilabos.ros.nodes.presets.host_node:HostNode",
                 "status_types": {},
                 "status_policies": {},
                 "action_value_mappings": {
-                    "create_resource": {
-                        "type": ResourceCreateFromOuterEasy,
-                        "goal": {
-                            "res_id": "res_id",
-                            "class_name": "class_name",
-                            "parent": "parent",
-                            "device_id": "device_id",
-                            "bind_locations": "bind_locations",
-                            "liquid_input_slot": "liquid_input_slot[]",
-                            "liquid_type": "liquid_type[]",
-                            "liquid_volume": "liquid_volume[]",
-                            "slot_on_deck": "slot_on_deck",
-                        },
-                        "feedback": {},
-                        "result": {"success": "success"},
-                        "schema": raw_create_resource_schema,
-                        "goal_default": ROS2MessageInstance(ResourceCreateFromOuterEasy.Goal()).get_python_dict(),
-                        "handles": {
-                            "output": [
-                                {
-                                    "handler_key": "labware",
-                                    "data_type": "resource",
-                                    "label": "Labware",
-                                    "data_source": "executor",
-                                    "data_key": "created_resource_tree.@flatten",
-                                },
-                                {
-                                    "handler_key": "liquid_slots",
-                                    "data_type": "resource",
-                                    "label": "LiquidSlots",
-                                    "data_source": "executor",
-                                    "data_key": "liquid_input_resource_tree.@flatten",
-                                },
-                                {
-                                    "handler_key": "materials",
-                                    "data_type": "resource",
-                                    "label": "AllMaterials",
-                                    "data_source": "executor",
-                                    "data_key": "[created_resource_tree,liquid_input_resource_tree].@flatten.@flatten",
-                                },
-                            ]
-                        },
-                        "placeholder_keys": {
-                            "res_id": "unilabos_resources",
-                            "device_id": "unilabos_devices",
-                            "parent": "unilabos_nodes",
-                            "class_name": "unilabos_class",
-                        },
-                        "always_free": True,
-                        "feedback_interval": 300.0,
-                    },
                     "test_latency": test_latency_action,
                     "auto-test_resource": test_resource_action,
                     "manual_confirm": manual_confirm_action,
@@ -431,15 +374,18 @@ class Registry:
 
         # 主扫描
         if external_only:
-            core_files = [pkg_root / "resources" / "container.py"]
-            if not _HOSTLINK_SCHEMA_ONLY:
-                core_files.insert(
-                    0, pkg_root / "ros" / "nodes" / "presets" / "host_node.py"
-                )
-            if BasicConfig.demo_mode:
-                core_files.append(
-                    pkg_root / "devices" / "virtual" / "heating_platform.py"
-                )
+            core_files = [
+                # host_node 的动作 schema 两种 backend 都需要：ROS2 实例化
+                # HostNode，HostLink 由内置 host 服务设备复用同一份描述。
+                # AST 扫描不 import 模块，schema-only 模式下同样安全。
+                pkg_root / "ros" / "nodes" / "presets" / "host_node.py",
+                pkg_root / "resources" / "container.py",
+            ]
+            # 虚拟加热平台是纯虚拟设备，无硬件依赖；始终纳入核心扫描，
+            # 保证 external_only 模式下演示图可直接运行。
+            core_files.append(
+                pkg_root / "devices" / "virtual" / "heating_platform.py"
+            )
             scan_result = scan_directory(
                 scan_root, python_path=python_path, executor=self._startup_executor,
                 cache=ast_cache, include_files=core_files,
@@ -787,6 +733,11 @@ class Registry:
                     schema["properties"][param_name] = resource_schema
             elif is_slot == "DeviceSlot":
                 schema["properties"][param_name] = {"type": "string", "description": "device reference"}
+            elif is_slot == "SiteSlot":
+                schema["properties"][param_name] = {
+                    "type": "string",
+                    "description": "site reference (ResourceSite uuid)",
+                }
             else:
                 schema["properties"][param_name] = self._generate_schema_from_info(
                     param_name, param_type, param_default, import_map=import_map
@@ -1305,7 +1256,7 @@ class Registry:
             pdefault = p.get("default")
             prequired = p.get("required", True)
 
-            # --- 检测 ResourceSlot / DeviceSlot (兼容 runtime 和 AST 两种格式) ---
+            # --- 检测 ResourceSlot / DeviceSlot / SiteSlot (兼容 runtime 和 AST 两种格式) ---
             is_slot, is_list_slot = detect_slot_type(ptype)
             if is_slot == "ResourceSlot":
                 resource_schema = self._resource_reference_schema(pname)
@@ -1318,6 +1269,11 @@ class Registry:
                     schema["properties"][pname] = resource_schema
             elif is_slot == "DeviceSlot":
                 schema["properties"][pname] = {"type": "string", "description": "device reference"}
+            elif is_slot == "SiteSlot":
+                schema["properties"][pname] = {
+                    "type": "string",
+                    "description": "site reference (ResourceSite uuid)",
+                }
             else:
                 schema["properties"][pname] = self._generate_schema_from_info(
                     pname, ptype, pdefault, import_map

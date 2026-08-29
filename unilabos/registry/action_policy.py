@@ -13,7 +13,8 @@ DEFAULT_ERROR_CLASS = "*"
 SUCCESS_TYPE_NORMAL = "normal"
 SUCCESS_TYPE_SKIP = "skip"
 SUCCESS_TYPE_OPERATOR_INTERVENTION = "operator_intervention"
-SuccessType = Literal["normal", "skip", "operator_intervention"]
+SUCCESS_TYPE_CANCELLATION = "cancellation"
+SuccessType = Literal["normal", "skip", "operator_intervention", "cancellation"]
 
 class FallbackAction(TypedDict):
     """Server-side single action executed after operator approval."""
