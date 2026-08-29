@@ -91,7 +91,10 @@ def serialize_result_info(
     result_info = {"error": error, "suc": suc, "return_value": return_value}
     if suc:
         result_info["suc_type"] = suc_type or SUCCESS_TYPE_NORMAL
-    elif error_info:
-        result_info["error_info"] = error_info
+    else:
+        if suc_type is not None:
+            result_info["suc_type"] = suc_type
+        if error_info:
+            result_info["error_info"] = error_info
 
     return json.loads(json.dumps(result_info, ensure_ascii=False, cls=ResultInfoEncoder))
