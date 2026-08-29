@@ -87,10 +87,6 @@ def main():
     args = parser.parse_args()
     args_dict = vars(args)
 
-    from unilabos.hostlink.startup import configure_heating_demo_args
-
-    configure_heating_demo_args(args_dict)
-
     if run_cli_command(args, parser):
         return
 
@@ -178,13 +174,6 @@ def main():
         if os.path.exists(candidate):
             config_path = candidate
             print_status(f"发现本地配置文件: {config_path}", "info")
-        elif args_dict.get("demo_mode", False):
-            config_path = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "config",
-                "example_config.py",
-            )
-            print_status("演示模式使用内置默认配置，不创建 local_config.py", "info")
         else:
             print_status("未指定config路径，可通过 --config 传入 local_config.py 文件路径", "info")
             print_status(f"您是否为第一次使用？并将当前路径 {working_dir} 作为工作目录？ (Y/n)", "info")
@@ -256,7 +245,6 @@ def main():
     BasicConfig.slave_no_host = args_dict.get("slave_no_host", False)
     BasicConfig.no_update_feedback = args_dict.get("no_update_feedback", False)
     BasicConfig.test_mode = args_dict.get("test_mode", False)
-    BasicConfig.demo_mode = args_dict.get("demo_mode", False)
     if BasicConfig.test_mode:
         print_status("启用测试模式：所有动作将模拟执行，不调用真实硬件", "warning")
     BasicConfig.extra_resource = args_dict.get("extra_resource", False)
@@ -458,6 +446,19 @@ def main():
                 "info",
             )
 
+        # 开机图物料权威对齐（与 Slave 的 materials.ensure 语义一致）：
+        # 权威已有同 uuid 的物料则直接采用，没有则以图中 uuid 显式创建。
+        if resource_tree_set.trees:
+            from unilabos.resources import materials as materials_helper
+
+            ensured = materials_helper.ensure(
+                resource_tree_set, gateway=server_stack.materials_gateway
+            )
+            print_status(
+                f"开机物料权威对齐完成: {len(ensured.trees)} 棵树（uuid 与图一致）",
+                "info",
+            )
+
         # 微后端必须先于控制链路接收命令，避免首个 job_start 绕过生命周期权威。
         comm_client.start()
     else:
@@ -465,7 +466,7 @@ def main():
         if args_dict["backend"] == "ros2":
             # 正常 Slave 必须在 rclpy.init 前拿到 Host 的 ROS policy；
             # --slave_no_host 才允许离线启动并后台重连。
-            from unilabos.server.scheduler.host_network import (
+            from unilabos.hostlink.network import (
                 require_slave_startup_device_ids,
                 setup_slave_network_client,
             )
@@ -486,9 +487,9 @@ def main():
         if comm_client is not None:
             comm_client.stop()
         if BasicConfig.is_host_mode:
-            from unilabos.server.scheduler.integration import shutdown_edge_services
+            from unilabos.server.backend.composition import shutdown_backend_services
 
-            shutdown_edge_services()
+            shutdown_backend_services()
 
 if __name__ == "__main__":
     main()

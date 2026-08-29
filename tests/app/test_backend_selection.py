@@ -249,28 +249,3 @@ def test_hostlink_entrypoint_does_not_import_ros_runtime() -> None:
         timeout=20,
     )
     assert result.returncode == 0, result.stderr
-
-
-def test_hostlink_registry_does_not_require_ros_message_packages() -> None:
-    code = (
-        "import sys, tempfile; "
-        "from unilabos.config.config import BasicConfig; "
-        "BasicConfig.backend = 'hostlink'; "
-        "BasicConfig.demo_mode = True; "
-        "tmp = tempfile.TemporaryDirectory(); "
-        "BasicConfig.working_dir = tmp.name; "
-        "from unilabos.registry.registry import build_registry; "
-        "registry = build_registry(external_only=True); "
-        "assert 'virtual_heating_platform' in registry.device_type_registry; "
-        "import unilabos.resources.graphio; "
-        "assert 'rclpy' not in sys.modules; "
-        "assert 'unilabos.ros.msgs.message_converter' not in sys.modules; "
-        "tmp.cleanup()"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert result.returncode == 0, result.stderr

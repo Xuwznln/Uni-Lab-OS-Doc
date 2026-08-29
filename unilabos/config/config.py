@@ -37,7 +37,6 @@ class BasicConfig:
     port = 8002  # 管理端 HTTP/Web API 与主微前端服务
     check_mode = False  # CI 检查模式，用于验证 registry 导入和文件一致性
     test_mode = False  # 测试模式，所有动作不实际执行，返回模拟结果
-    demo_mode = False  # 三工位加热演示：本机 Host + 6005 HTTP 微后端
     extra_resource = False  # 是否加载lab_开头的额外资源
     # 'TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
     log_level: Literal["TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
@@ -77,7 +76,10 @@ class WSConfig:
 
 # HTTP配置
 class HTTPConfig:
-    remote_addr = "https://leap-lab.bohrium.com/api/v1"
+    # 云端 Backend 地址。为空（默认）时本机是调度权威（本地 Scheduler + Workflow API）；
+    # 显式配置（config 文件或 --address）后进入 Backend-controlled 纯执行模式。
+    # 不内置任何云端默认地址；环境快捷选项仅保留在 UniLabOS-Launcher。
+    remote_addr = ""
     # 独立部署的低层覆盖；CLI 只暴露统一 --address。为空时从 remote_addr 派生。
     schedule_addr = ""
     # Edge 只访问微后端物料中心；可选择进程内或独立部署的微后端。

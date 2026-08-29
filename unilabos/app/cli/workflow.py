@@ -26,11 +26,11 @@ def _create_workflow_client(
     with session_manager:
         effective = resolve_effective_auth(args, session_manager)
 
-    if effective["base_url_source"] == "default":
+    base_url = effective["base_url"]
+    if not base_url:
+        # 未指定后端地址时使用本机微后端
         port = getattr(args, "port_management", None) or BasicConfig.port
         base_url = f"http://127.0.0.1:{port}"
-    else:
-        base_url = effective["base_url"]
 
     return HTTPWorkflowClient(
         base_url,

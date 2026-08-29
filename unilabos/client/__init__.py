@@ -12,7 +12,6 @@ from .session import (
     SessionState,
     AuthInfo,
     ContextInfo,
-    DEFAULT_BASE_URL,
     resolve_addr,
 )
 from unilabos.utils.address import resolve_address
@@ -39,7 +38,6 @@ __all__ = [
     "SessionState",
     "AuthInfo",
     "ContextInfo",
-    "DEFAULT_BASE_URL",
     "resolve_addr",
     "resolve_address",
     "OutputFormat",

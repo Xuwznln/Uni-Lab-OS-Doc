@@ -6,27 +6,20 @@ from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
 
-DEFAULT_BACKEND_ADDRESS = "https://leap-lab.bohrium.com/api/v1"
-
-ADDRESS_ALIASES = {
-    "prod": DEFAULT_BACKEND_ADDRESS,
-    "test": "https://leap-lab.test.bohrium.com/api/v1",
-    "uat": "https://leap-lab.uat.bohrium.com/api/v1",
-    "local": "http://127.0.0.1:48197/api/v1",
-}
-
-
 def resolve_address(
     address: Optional[str],
     *,
-    default: str = DEFAULT_BACKEND_ADDRESS,
+    default: str = "",
 ) -> str:
-    """解析环境别名并返回不带尾部斜杠的规范地址。"""
+    """返回不带尾部斜杠的规范地址；空值回退 default。
+
+    不内置任何云端默认地址或环境别名，后端地址必须由用户显式指定
+    （环境快捷选项仅保留在 UniLabOS-Launcher）。
+    """
 
     value = str(address or "").strip()
     if not value:
         value = default
-    value = ADDRESS_ALIASES.get(value.lower(), value)
     return value.rstrip("/")
 
 
@@ -82,8 +75,6 @@ def derive_websocket_address(
 
 
 __all__ = [
-    "ADDRESS_ALIASES",
-    "DEFAULT_BACKEND_ADDRESS",
     "derive_websocket_address",
     "normalize_api_address",
     "resolve_address",

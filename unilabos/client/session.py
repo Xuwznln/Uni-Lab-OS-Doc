@@ -19,10 +19,7 @@ from unilabos.utils.file_lock import (
     acquire_exclusive_file_lock,
     release_file_lock,
 )
-from unilabos.utils.address import DEFAULT_BACKEND_ADDRESS, resolve_address
-
-
-DEFAULT_BASE_URL = DEFAULT_BACKEND_ADDRESS
+from unilabos.utils.address import resolve_address
 
 
 @dataclass
@@ -53,8 +50,8 @@ class ContextInfo:
 
 @dataclass
 class SessionState:
-    """会话状态"""
-    base_url: str = DEFAULT_BASE_URL
+    """会话状态。base_url 为空表示未指定后端地址（本机权威模式）。"""
+    base_url: str = ""
     auth: AuthInfo = field(default_factory=AuthInfo)
     context: ContextInfo = field(default_factory=ContextInfo)
 
@@ -68,7 +65,7 @@ class SessionState:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionState":
         return cls(
-            base_url=data.get("base_url", DEFAULT_BASE_URL),
+            base_url=data.get("base_url", ""),
             auth=AuthInfo(**data.get("auth", {})),
             context=ContextInfo(**data.get("context", {})),
         )

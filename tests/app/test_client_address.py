@@ -9,10 +9,11 @@ from unilabos.server.backend.url import build_backend_websocket_url
 from unilabos.utils.address import resolve_address
 
 
-def test_address_alias_and_api_normalization_are_shared() -> None:
-    assert resolve_address("test") == (
-        "https://leap-lab.test.bohrium.com/api/v1"
-    )
+def test_address_normalization_has_no_builtin_default() -> None:
+    # 不再内置云端默认地址或环境别名；地址原样规范化（去尾斜杠）
+    assert resolve_address("http://edge:8002/") == "http://edge:8002"
+    assert resolve_address("") == ""
+    assert resolve_address(None) == ""
     assert normalize_workflow_api_url("http://edge:8002") == (
         "http://edge:8002/api/v1"
     )

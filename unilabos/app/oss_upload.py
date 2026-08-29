@@ -24,8 +24,12 @@ class _UploadClient:
 
 
 def _default_upload_client() -> _UploadClient:
+    # 不内置云端兜底：上传需要显式配置后端地址（--address 或 HTTPConfig.remote_addr）。
+    remote_addr = (HTTPConfig.remote_addr or "").rstrip("/")
+    if not remote_addr:
+        raise ValueError("上传需要后端地址，请通过 --address 或配置 HTTPConfig.remote_addr 指定")
     return _UploadClient(
-        remote_addr=HTTPConfig.remote_addr.rstrip("/"),
+        remote_addr=remote_addr,
         auth=BasicConfig.auth_secret(),
     )
 

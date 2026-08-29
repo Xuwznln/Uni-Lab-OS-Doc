@@ -10,7 +10,7 @@
 import os
 from typing import Any, Dict, Optional
 
-from unilabos.client import SessionManager, DEFAULT_BASE_URL
+from unilabos.client import SessionManager
 
 
 def _try_load_local_config(working_dir: str) -> Optional[Dict[str, str]]:
@@ -58,8 +58,11 @@ def resolve_effective_auth(args: Any, session_manager: SessionManager) -> Dict[s
         {
           "ak": str, "ak_source": "cli|session|config|none",
           "sk": str, "sk_source": "cli|session|config|none",
-          "base_url": str, "base_url_source": "cli|session|config|default",
+          "base_url": str, "base_url_source": "cli|session|config|none",
         }
+
+    base_url 不做任何云端兜底；三个来源都缺失时返回空串，
+    由调用方决定回退行为（通常是本机微后端）。
     """
     state = session_manager.get_state()
 
@@ -94,15 +97,15 @@ def resolve_effective_auth(args: Any, session_manager: SessionManager) -> Dict[s
     else:
         sk, sk_source = "", "none"
 
-    # base_url: CLI > session(非默认值) > config > default
+    # base_url: CLI > session > config；无兜底默认
     if cli_addr:
         base_url, base_url_source = cli_addr, "cli"
-    elif state.base_url and state.base_url != DEFAULT_BASE_URL:
+    elif state.base_url:
         base_url, base_url_source = state.base_url, "session"
     elif cfg_base_url:
         base_url, base_url_source = cfg_base_url, "config"
     else:
-        base_url, base_url_source = DEFAULT_BASE_URL, "default"
+        base_url, base_url_source = "", "none"
 
     return {
         "ak": ak,

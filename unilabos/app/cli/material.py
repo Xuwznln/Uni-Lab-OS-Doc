@@ -21,8 +21,7 @@ def cmd_material_list(args, session_manager: SessionManager):
 
             with session_manager:
                 effective = resolve_effective_auth(args, session_manager)
-            if effective["base_url_source"] != "default":
-                address = effective["base_url"]
+            address = effective["base_url"]
         if not address:
             port = getattr(args, "port_management", None) or BasicConfig.port
             address = f"http://127.0.0.1:{port}"

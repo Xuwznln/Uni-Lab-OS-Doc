@@ -23,18 +23,16 @@ def test_parser_uses_one_address_for_top_level_and_client_subcommands() -> None:
     parser = build_parser()
 
     top_level = parser.parse_args(
-        ["--address", "test", "material", "list"]
+        ["--address", "http://backend:8002/api/v1/", "material", "list"]
     )
     nested = parser.parse_args(
-        ["material", "list", "--addr", "test"]
+        ["material", "list", "--addr", "http://backend:8002/api/v1/"]
     )
 
-    assert top_level.address == nested.address == "test"
+    assert top_level.address == nested.address == "http://backend:8002/api/v1/"
     _prepare_command_session(top_level, parser)
     _prepare_command_session(nested, parser)
-    assert top_level.address_resolved == (
-        "https://leap-lab.test.bohrium.com/api/v1"
-    )
+    assert top_level.address_resolved == "http://backend:8002/api/v1"
     assert nested.address_resolved == top_level.address_resolved
     assert "--schedule_addr" not in parser._option_string_actions
     assert "--schedule-address" not in parser._option_string_actions
