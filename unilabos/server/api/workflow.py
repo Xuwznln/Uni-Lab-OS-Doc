@@ -119,13 +119,28 @@ class GraphWriteRequest(_BackendModel):
 
 
 class WorkflowTaskCreateRequest(_BackendModel):
-    workflow_uuid: str
+    """整图运行与单点设备动作共用的提交体。
+
+    execution_kind=workflow（默认）：workflow_uuid 必填，走整图编排。
+    execution_kind=ad_hoc_device_action：device_id + action_name + param 必填，
+    生成单 job 任务（微前端设备页/画布单点动作），幂等键可选。
+    """
+
+    execution_kind: str = "workflow"
+    workflow_uuid: str = ""
     run_mode: str = "normal"
     target_node_uuid: Optional[str] = None
     description: Optional[str] = None
     meta_data: Dict[str, Any] = Field(default_factory=dict)
+    device_id: str = ""
+    action_name: str = ""
+    action_type: str = ""
+    param: Dict[str, Any] = Field(default_factory=dict)
+    execution_policy: Dict[str, Any] = Field(default_factory=dict)
+    execution_timeout_seconds: int = 0
+    idempotency_key: Optional[str] = None
 
-    @field_validator("meta_data", mode="before")
+    @field_validator("meta_data", "param", "execution_policy", mode="before")
     @classmethod
     def _json_object(cls, value: Any) -> Dict[str, Any]:
         return normalize_json_object(value)
@@ -284,6 +299,23 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
     def create_workflow_task(
         body: WorkflowTaskCreateRequest,
     ) -> JSONResponse:
+        if body.execution_kind == "ad_hoc_device_action":
+            return _success(
+                service.create_ad_hoc_device_action_task(
+                    device_id=body.device_id,
+                    action_name=body.action_name,
+                    action_type=body.action_type,
+                    param=body.param,
+                    execution_policy=body.execution_policy,
+                    execution_timeout_seconds=body.execution_timeout_seconds,
+                    idempotency_key=body.idempotency_key,
+                    description=body.description,
+                    meta_data=body.meta_data,
+                ),
+                status=201,
+            )
+        if body.execution_kind != "workflow":
+            raise WorkflowError("invalid_input")
         return _success(
             service.create_workflow_task(
                 workflow_uuid=body.workflow_uuid,

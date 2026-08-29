@@ -17,7 +17,7 @@ from unilabos.server.workflow.composite_compatibility import (
     published_workflow_compatibility_projection,
 )
 from unilabos.server.workflow.service import WorkflowService
-from unilabos.server.workflow.store import WorkflowStore
+from unilabos.server.database.repositories.workflow import WorkflowStore
 
 PARENT_UUID = "10000000-0000-4000-8000-000000000001"
 CHILD_UUID = "10000000-0000-4000-8000-000000000002"

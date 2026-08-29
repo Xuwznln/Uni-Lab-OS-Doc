@@ -7,7 +7,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
-from unilabos.config.config import BasicConfig
 from unilabos.utils.fastapi.log_adapter import setup_fastapi_logging
 from unilabos.utils.log import info, error
 from unilabos.utils.tracing import install_http_tracing
@@ -155,46 +154,44 @@ def setup_server() -> FastAPI:
     global edge_routes_mounted, materials_routes_mounted, server_routes_mounted
     global workflow_routes_mounted
 
-    # Scheduler 路由只暴露微后端执行观测面；本地不创建 Workflow/DAG 权威。
+    # Backend 诊断面不复制 Runtime/History/Telemetry 数据 API。
     if not edge_routes_mounted:
         try:
-            from unilabos.server.scheduler.api import create_scheduler_router
-            from unilabos.server.scheduler.integration import (
-                get_edge_backend,
-                get_edge_scheduler,
-                get_workflow_service,
+            from unilabos.server.api.backend import create_backend_router
+            from unilabos.server.backend.composition import (
+                get_execution_backend,
+                get_scheduler,
             )
 
             app.include_router(
-                create_scheduler_router(
-                    get_edge_scheduler,
-                    get_edge_backend,
-                    get_history=lambda: None,
-                    get_workflow_authority=get_workflow_service,
-                    include_execution_shaped_workflow_routes=False,
+                create_backend_router(
+                    get_scheduler,
+                    get_execution_backend,
                 )
             )
             edge_routes_mounted = True
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
             error(f"[Microbackend] 挂载执行观测路由失败: {exc}")
 
-    if BasicConfig.demo_mode and not workflow_routes_mounted:
+    # 本机调度（默认）时挂载 Workflow Authority 写 API；接入云端后
+    # get_workflow_service() 为 None，不挂载。
+    if not workflow_routes_mounted:
         try:
-            from unilabos.server.scheduler.integration import get_workflow_service
-            from unilabos.server.workflow.api import install_workflow_api
+            from unilabos.server.backend.composition import get_workflow_service
+            from unilabos.server.api.workflow import install_workflow_api
 
             workflow_service = get_workflow_service()
             if workflow_service is not None:
                 install_workflow_api(app, workflow_service)
                 workflow_routes_mounted = True
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
-            error(f"[Microbackend] 挂载 Demo Workflow Authority 失败: {exc}")
+            error(f"[Microbackend] 挂载本机 Workflow Authority 失败: {exc}")
 
     if not server_routes_mounted:
         try:
             from unilabos.server.api import install_server_apis
             from unilabos.server.composition import get_server_services
-            from unilabos.server.scheduler.integration import get_materials_service
+            from unilabos.server.backend.composition import get_materials_service
 
             services = get_server_services()
             if services is not None:
@@ -213,7 +210,7 @@ def setup_server() -> FastAPI:
     if not materials_routes_mounted:
         try:
             from unilabos.server.api.materials import install_materials_api
-            from unilabos.server.scheduler.integration import get_materials_service
+            from unilabos.server.backend.composition import get_materials_service
 
             materials_service = get_materials_service()
             if materials_service is not None:

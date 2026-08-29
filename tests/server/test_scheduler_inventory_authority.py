@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from unilabos.client.materials import LocalMaterialsClient, bind_payload
 from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.api.materials import install_materials_api
-from unilabos.server.protocol.common import InventoryMutation
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import (
     InventoryLotInbound,
     InventoryRequirement,
     InventoryReservationCreate,
@@ -22,15 +22,19 @@ from unilabos.server.protocol.materials import (
     MaterialTreeCreate,
     ResourceTemplateWrite,
 )
-from unilabos.server.scheduler.backend import JobExecutionBackend
-from unilabos.server.scheduler.status_incidents import StatusIncidentManager
-from unilabos.server.scheduler.workflow_execution import WorkflowTaskExecutor
+from unilabos.server.backend.execution import JobExecutionBackend
+from unilabos.server.backend.incidents import StatusIncidentManager
+from unilabos.server.backend.inventory import (
+    ExecutionInventoryCoordinator,
+    ExecutionInventoryError,
+)
+from unilabos.server.backend.scheduler.service import BackendScheduler
 from unilabos.server.services.materials import (
     InsufficientInventoryError,
     MaterialsService,
 )
 from unilabos.server.workflow.service import WorkflowService
-from unilabos.server.workflow.store import WorkflowStore
+from unilabos.server.database.repositories.workflow import WorkflowStore
 
 
 def _mutation(operation: str, *, job_uuid: str | None = None) -> InventoryMutation:
@@ -125,6 +129,66 @@ def _reservation(
             ],
         ),
     ).data
+
+
+def test_execution_rejects_stale_or_changed_inventory_reservation(
+    tmp_path,
+) -> None:
+    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    client = LocalMaterialsClient(service)
+    try:
+        _template(service, "plate-template", "plate")
+        _template(service, "reagent-template", "reagent")
+        material_uuid = _material(service, "plate")
+        _inbound(service, lot_uuid="lot-a", quantity=20)
+        reservation = _reservation(
+            service,
+            material_uuid=material_uuid,
+            job_uuid="job-strict",
+        )
+        requirements = [
+            InventoryRequirement(
+                key="plate",
+                kind="material",
+                material_uuid=material_uuid,
+            ).model_dump(mode="json", exclude_none=False),
+            InventoryRequirement(
+                key="solvent",
+                kind="reagent",
+                template_uuid="reagent-template",
+                quantity=12,
+                unit="ul",
+            ).model_dump(mode="json", exclude_none=False),
+        ]
+        payload = {
+            "job_id": "job-strict",
+            "task_id": "task-1",
+            "node_id": "node-1",
+            "scheduler_revision": 3,
+            "inventory_requirements": requirements,
+            "inventory_reservation_uuid": reservation.reservation_uuid,
+        }
+        coordinator = ExecutionInventoryCoordinator(client)
+
+        with pytest.raises(
+            ExecutionInventoryError,
+            match="scheduler_revision",
+        ):
+            coordinator.prepare({**payload, "scheduler_revision": 2})
+
+        changed = [dict(item) for item in requirements]
+        changed[1]["quantity"] = 11
+        with pytest.raises(
+            ExecutionInventoryError,
+            match="requirements do not match",
+        ):
+            coordinator.prepare(
+                {**payload, "inventory_requirements": changed}
+            )
+
+        assert coordinator.prepare(payload) == reservation
+    finally:
+        service.repository.close()
 
 
 def test_reserve_and_consume_material_and_reagent_atomically(tmp_path) -> None:
@@ -352,7 +416,7 @@ class _RecordingAdapter:
         return None
 
 
-def test_execution_consumes_under_material_lock_and_releases_on_terminal(
+def test_execution_consumes_scheduler_reservation_before_driver_call(
     tmp_path,
 ) -> None:
     service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
@@ -363,6 +427,12 @@ def test_execution_consumes_under_material_lock_and_releases_on_terminal(
         material_uuid = _material(service, "plate")
         _inbound(service, lot_uuid="lot-a", quantity=10)
         adapter = _InventoryAwareAdapter(service, material_uuid)
+        reservation = _reservation(
+            service,
+            material_uuid=material_uuid,
+            quantity=4,
+            job_uuid="job-execute",
+        )
         backend = JobExecutionBackend(
             host_node_getter=lambda: adapter,
             materials_gateway=client,
@@ -381,6 +451,11 @@ def test_execution_consumes_under_material_lock_and_releases_on_terminal(
                     "materials_need_lock": ["material"],
                     "inventory_requirements": [
                         InventoryRequirement(
+                            key="plate",
+                            kind="material",
+                            material_uuid=material_uuid,
+                        ).model_dump(mode="json", exclude_none=False),
+                        InventoryRequirement(
                             key="solvent",
                             kind="reagent",
                             template_uuid="reagent-template",
@@ -388,11 +463,12 @@ def test_execution_consumes_under_material_lock_and_releases_on_terminal(
                             unit="ul",
                         ).model_dump(mode="json", exclude_none=False)
                     ],
-                    "scheduler_revision": 1,
+                    "scheduler_revision": 3,
+                    "inventory_reservation_uuid": reservation.reservation_uuid,
                 }
             )
             assert adapter.goal_event.wait(2)
-            assert backend._material_locks.held_by("job-execute") == (material_uuid,)
+            assert backend.device_manager.get_job_info("job-execute") is not None
 
             backend.publish_job_status(
                 {},
@@ -401,7 +477,7 @@ def test_execution_consumes_under_material_lock_and_releases_on_terminal(
                 {"return_value": None},
             )
             assert backend.wait_idle()
-            assert backend._material_locks.held_by("job-execute") == ()
+            assert backend.device_manager.get_job_info("job-execute") is None
             assert (
                 service.get_inventory_reservation_by_job("job-execute").status
                 == "consumed"
@@ -421,6 +497,12 @@ def test_failed_action_quarantines_consumed_material_without_refund(tmp_path) ->
         material_uuid = _material(service, "plate")
         _inbound(service, lot_uuid="lot-a", quantity=10)
         adapter = _InventoryAwareAdapter(service, material_uuid)
+        reservation = _reservation(
+            service,
+            material_uuid=material_uuid,
+            quantity=4,
+            job_uuid="job-failed",
+        )
         backend = JobExecutionBackend(
             host_node_getter=lambda: adapter,
             materials_gateway=client,
@@ -450,6 +532,8 @@ def test_failed_action_quarantines_consumed_material_without_refund(tmp_path) ->
                             unit="ul",
                         ).model_dump(mode="json", exclude_none=False),
                     ],
+                    "scheduler_revision": 3,
+                    "inventory_reservation_uuid": reservation.reservation_uuid,
                 }
             )
             assert adapter.goal_event.wait(2)
@@ -459,6 +543,7 @@ def test_failed_action_quarantines_consumed_material_without_refund(tmp_path) ->
                 "failed",
                 {"error": "device failed"},
             )
+            assert backend.wait_idle()
 
             reservation = service.get_inventory_reservation_by_job("job-failed")
             assert reservation.status == "quarantined"
@@ -466,20 +551,20 @@ def test_failed_action_quarantines_consumed_material_without_refund(tmp_path) ->
                 "quarantined"
             )
             assert service.get_inventory_lot("lot-a").quantity_total == 6
-            assert backend._material_locks.held_by("job-failed") == ()
+            assert backend.device_manager.get_job_info("job-failed") is None
         finally:
             backend.stop()
     finally:
         service.repository.close()
 
 
-def test_authority_allocated_material_is_automatically_action_locked(tmp_path) -> None:
+def test_execution_rejects_unreserved_warehouse_requirement(tmp_path) -> None:
     service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
     client = LocalMaterialsClient(service)
     adapter = _RecordingAdapter()
     try:
         _template(service, "plate-template", "plate")
-        material_uuid = _material(service, "plate")
+        _material(service, "plate")
         backend = JobExecutionBackend(
             host_node_getter=lambda: adapter,
             materials_gateway=client,
@@ -504,31 +589,16 @@ def test_authority_allocated_material_is_automatically_action_locked(tmp_path) -
                 }
             )
 
-            assert adapter.goal_event.wait(2)
-            assert backend._material_locks.held_by("job-auto-material") == (
-                material_uuid,
-            )
-            reservation = service.get_inventory_reservation_by_job(
-                "job-auto-material"
-            )
-            assert reservation.status == "consumed"
-            assert reservation.items[0].material_uuid == material_uuid
-
-            backend.publish_job_status(
-                {},
-                adapter.goals[0],
-                "success",
-                {"return_value": None},
-            )
             assert backend.wait_idle()
-            assert backend._material_locks.held_by("job-auto-material") == ()
+            assert adapter.goals == []
+            assert service.list_inventory_reservations() == []
         finally:
             backend.stop()
     finally:
         service.repository.close()
 
 
-def test_cancel_task_releases_status_held_inventory_reservation(tmp_path) -> None:
+def test_status_hold_rejects_and_releases_scheduler_reservation(tmp_path) -> None:
     service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
     client = LocalMaterialsClient(service)
     incidents = StatusIncidentManager()
@@ -547,41 +617,53 @@ def test_cancel_task_releases_status_held_inventory_reservation(tmp_path) -> Non
         assert incident is not None
         assert incidents.is_device_held("device-held")
 
+        requirement = InventoryRequirement(
+            key="solvent",
+            kind="reagent",
+            template_uuid="reagent-template",
+            quantity=2,
+            unit="ul",
+        )
+        reservation = service.reserve_inventory(
+            _mutation("reserve_inventory", job_uuid="job-held"),
+            InventoryReservationCreate(
+                task_uuid="task-held",
+                node_uuid="node-held",
+                job_uuid="job-held",
+                scheduler_revision=1,
+                requirements=[requirement],
+            ),
+        ).data
         backend = JobExecutionBackend(
             status_incidents=incidents,
-            queue_conflicts=True,
             materials_gateway=client,
         )
-        backend.dispatch(
-            {
-                "job_id": "job-held",
-                "task_id": "task-held",
-                "node_id": "node-held",
-                "device_id": "device-held",
-                "action": "use",
-                "action_args": {},
-                "inventory_requirements": [
-                    InventoryRequirement(
-                        key="solvent",
-                        kind="reagent",
-                        template_uuid="reagent-template",
-                        quantity=2,
-                        unit="ul",
-                    ).model_dump(mode="json", exclude_none=False)
-                ],
-            }
-        )
-        assert service.get_inventory_reservation_by_job("job-held").status == (
-            "active"
-        )
-        assert service.get_inventory_lot("lot-a").quantity_reserved == 2
-
-        assert backend.cancel_task("task-held") == ["job-held"]
-        assert service.get_inventory_reservation_by_job("job-held").status == (
-            "released"
-        )
-        lot = service.get_inventory_lot("lot-a")
-        assert (lot.quantity_available, lot.quantity_reserved) == (5, 0)
+        backend.start()
+        try:
+            backend.dispatch(
+                {
+                    "job_id": "job-held",
+                    "task_id": "task-held",
+                    "node_id": "node-held",
+                    "device_id": "device-held",
+                    "action": "use",
+                    "action_args": {},
+                    "inventory_requirements": [
+                        requirement.model_dump(mode="json", exclude_none=False)
+                    ],
+                    "scheduler_revision": 1,
+                    "inventory_reservation_uuid": reservation.reservation_uuid,
+                }
+            )
+            assert backend.wait_idle()
+            assert backend.cancel_task("task-held") == []
+            assert service.get_inventory_reservation_by_job("job-held").status == (
+                "released"
+            )
+            lot = service.get_inventory_lot("lot-a")
+            assert (lot.quantity_available, lot.quantity_reserved) == (5, 0)
+        finally:
+            backend.stop()
     finally:
         service.repository.close()
 
@@ -591,13 +673,13 @@ class _ListenerOnlyBackend:
         self.listener = listener
 
 
-def test_local_workflow_executor_reserves_complete_task_before_dispatch(tmp_path) -> None:
+def test_backend_scheduler_reserves_complete_task_before_dispatch(tmp_path) -> None:
     service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
     client = LocalMaterialsClient(service)
     try:
         _template(service, "reagent-template", "reagent")
         _inbound(service, lot_uuid="lot-a", quantity=5)
-        executor = WorkflowTaskExecutor(
+        scheduler = BackendScheduler(
             object(),
             _ListenerOnlyBackend(),
             materials_gateway=client,
@@ -613,14 +695,16 @@ def test_local_workflow_executor_reserves_complete_task_before_dispatch(tmp_path
             "job-a": {
                 "workflow_node_uuid": "node-a",
                 "inventory_requirements": [requirement],
+                "scheduler_revision": 1,
             },
             "job-b": {
                 "workflow_node_uuid": "node-b",
                 "inventory_requirements": [requirement],
+                "scheduler_revision": 1,
             },
         }
 
-        executor._reserve_task_inventory({"uuid": "task-local"}, specs)  # noqa: SLF001
+        scheduler._reserve_task_inventory({"uuid": "task-local"}, specs)  # noqa: SLF001
 
         assert all(spec.get("inventory_reservation_uuid") for spec in specs.values())
         assert [
@@ -629,7 +713,7 @@ def test_local_workflow_executor_reserves_complete_task_before_dispatch(tmp_path
         ] == ["active", "active"]
         assert service.get_inventory_lot("lot-a").quantity_available == 1
 
-        executor._release_unconsumed_task_inventory("task-local")  # noqa: SLF001
+        scheduler._release_unconsumed_task_inventory("task-local")  # noqa: SLF001
         assert [
             item.status
             for item in service.list_inventory_reservations(task_uuid="task-local")

@@ -23,6 +23,15 @@ from unilabos.server.workflow.schema import (
     WorkflowSchemaError,
     migrate_workflow_schema,
 )
+from unilabos.server.database.repositories.workflow.ddl import (
+    WORKFLOW_STORE_SCHEMA as _SCHEMA,
+)
+from unilabos.server.database.repositories.workflow.errors import (
+    StoreAuthoringConflict,
+    StoreConflict,
+    StoreNotFound,
+    StoreRevisionConflict,
+)
 
 _STORE_INITIALIZATION_BUSY_TIMEOUT_SECONDS = 5.0
 _STORE_INITIALIZATION_SQLITE_BUSY_TIMEOUT_MS = 100
@@ -42,247 +51,6 @@ def _load(value: Optional[str], fallback: Any) -> Any:
     if value is None or value == "":
         return fallback
     return decode_json_bytes(value.encode("utf-8"))
-
-
-class StoreNotFound(LookupError):
-    pass
-
-
-class StoreConflict(RuntimeError):
-    pass
-
-
-class StoreRevisionConflict(StoreConflict):
-    pass
-
-
-class StoreAuthoringConflict(StoreConflict):
-    """Apply 事务提交前发生了 Authoring 前置条件冲突。"""
-
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
-
-
-_SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS workflow (
-    uuid TEXT PRIMARY KEY,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    deleted_at TEXT,
-    description TEXT,
-    meta_data TEXT NOT NULL,
-    name TEXT NOT NULL,
-    tags TEXT NOT NULL,
-    revision INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS workflow_node_template (
-    uuid TEXT PRIMARY KEY,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    deleted_at TEXT,
-    description TEXT,
-    meta_data TEXT NOT NULL,
-    authority_id TEXT NOT NULL,
-    resource_template_uuid TEXT NOT NULL,
-    name TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    class TEXT,
-    goal TEXT NOT NULL,
-    goal_default TEXT NOT NULL,
-    feedback TEXT NOT NULL,
-    result TEXT NOT NULL,
-    schema TEXT,
-    type TEXT NOT NULL,
-    icon TEXT,
-    header TEXT,
-    footer TEXT,
-    node_type TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ix_workflow_node_template_authority
-    ON workflow_node_template(authority_id);
-
-CREATE TABLE IF NOT EXISTS workflow_handle_template (
-    uuid TEXT PRIMARY KEY,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    deleted_at TEXT,
-    description TEXT,
-    meta_data TEXT NOT NULL,
-    authority_id TEXT NOT NULL,
-    workflow_node_template_uuid TEXT NOT NULL,
-    handle_key TEXT NOT NULL,
-    io_type TEXT NOT NULL,
-    display_name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    required INTEGER NOT NULL,
-    data_source TEXT,
-    data_key TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_workflow_handle_template_node
-    ON workflow_handle_template(workflow_node_template_uuid);
-CREATE INDEX IF NOT EXISTS ix_workflow_handle_template_authority
-    ON workflow_handle_template(authority_id);
-
-CREATE TABLE IF NOT EXISTS workflow_node (
-    uuid TEXT PRIMARY KEY,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    deleted_at TEXT,
-    description TEXT,
-    meta_data TEXT NOT NULL,
-    workflow_uuid TEXT NOT NULL,
-    workflow_node_template_uuid TEXT,
-    parent_uuid TEXT,
-    material_uuid TEXT,
-    name TEXT NOT NULL,
-    status TEXT NOT NULL,
-    type TEXT NOT NULL,
-    icon TEXT,
-    pose TEXT NOT NULL,
-    param TEXT NOT NULL,
-    footer TEXT,
-    action_name TEXT,
-    action_type TEXT,
-    execution_policy TEXT NOT NULL,
-    disabled INTEGER NOT NULL,
-    minimized INTEGER NOT NULL,
-    script TEXT,
-    FOREIGN KEY(workflow_uuid) REFERENCES workflow(uuid)
-);
-CREATE INDEX IF NOT EXISTS ix_workflow_node_workflow
-    ON workflow_node(workflow_uuid);
-
-CREATE TABLE IF NOT EXISTS workflow_edge (
-    uuid TEXT PRIMARY KEY,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    deleted_at TEXT,
-    description TEXT,
-    meta_data TEXT NOT NULL,
-    workflow_uuid TEXT NOT NULL,
-    source_node_uuid TEXT NOT NULL,
-    target_node_uuid TEXT NOT NULL,
-    source_handle_uuid TEXT NOT NULL,
-    target_handle_uuid TEXT NOT NULL,
-    FOREIGN KEY(workflow_uuid) REFERENCES workflow(uuid)
-);
-CREATE INDEX IF NOT EXISTS ix_workflow_edge_workflow
-    ON workflow_edge(workflow_uuid);
-
-CREATE TABLE IF NOT EXISTS workflow_task (
-    uuid TEXT PRIMARY KEY,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    deleted_at TEXT,
-    description TEXT,
-    meta_data TEXT NOT NULL,
-    workflow_uuid TEXT NOT NULL,
-    status TEXT NOT NULL,
-    workflow_snapshot TEXT NOT NULL,
-    execution_plan TEXT NOT NULL,
-    run_mode TEXT NOT NULL,
-    target_node_uuid TEXT,
-    control_status TEXT NOT NULL,
-    cleanup_status TEXT NOT NULL,
-    trace_context TEXT NOT NULL,
-    input TEXT NOT NULL,
-    output TEXT NOT NULL,
-    error_info TEXT NOT NULL,
-    timeout_at TEXT,
-    attention_reason TEXT,
-    terminal_ghost_detected_at TEXT,
-    reconciliation_resume_control_status TEXT,
-    started_at TEXT,
-    finished_at TEXT,
-    FOREIGN KEY(workflow_uuid) REFERENCES workflow(uuid)
-);
-CREATE INDEX IF NOT EXISTS ix_workflow_task_workflow
-    ON workflow_task(workflow_uuid);
-CREATE INDEX IF NOT EXISTS ix_workflow_task_status
-    ON workflow_task(status);
-
-CREATE TABLE IF NOT EXISTS workflow_node_job (
-    uuid TEXT PRIMARY KEY,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    deleted_at TEXT,
-    description TEXT,
-    meta_data TEXT NOT NULL,
-    workflow_task_uuid TEXT NOT NULL,
-    workflow_node_uuid TEXT NOT NULL,
-    material_uuid TEXT,
-    edge_agent_uuid TEXT,
-    edge_command_uuid TEXT,
-    job_access_token_hash TEXT NOT NULL DEFAULT '',
-    feedback_sequence INTEGER NOT NULL,
-    topological_index INTEGER NOT NULL,
-    executor_kind TEXT NOT NULL,
-    execution_policy TEXT NOT NULL,
-    execution_timeout_seconds INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    attempt INTEGER NOT NULL,
-    param TEXT NOT NULL,
-    feedback_data TEXT NOT NULL,
-    return_info TEXT NOT NULL,
-    control_data TEXT NOT NULL,
-    error_info TEXT NOT NULL,
-    dispatch_deadline_at TEXT,
-    execution_deadline_at TEXT,
-    cancel_command_uuid TEXT,
-    cancel_ack_deadline_at TEXT,
-    cancel_complete_deadline_at TEXT,
-    uncertainty_reason TEXT,
-    started_at TEXT,
-    finished_at TEXT,
-    FOREIGN KEY(workflow_task_uuid) REFERENCES workflow_task(uuid)
-);
-CREATE INDEX IF NOT EXISTS ix_workflow_node_job_task
-    ON workflow_node_job(workflow_task_uuid);
-CREATE INDEX IF NOT EXISTS ix_workflow_node_job_node
-    ON workflow_node_job(workflow_node_uuid);
-
-CREATE TABLE IF NOT EXISTS workflow_source_registration (
-    workflow_uuid TEXT PRIMARY KEY,
-    package_id TEXT NOT NULL,
-    package_root TEXT NOT NULL,
-    relative_path TEXT NOT NULL,
-    source_uri TEXT NOT NULL,
-    create_time TEXT NOT NULL,
-    update_time TEXT NOT NULL,
-    FOREIGN KEY(workflow_uuid) REFERENCES workflow(uuid)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_source_registration_path
-    ON workflow_source_registration(package_root, relative_path);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_source_registration_uri
-    ON workflow_source_registration(source_uri);
-
-CREATE TABLE IF NOT EXISTS workflow_authoring (
-    workflow_uuid TEXT PRIMARY KEY,
-    observed_draft_hash TEXT,
-    draft_update_time TEXT,
-    diagnostics TEXT NOT NULL,
-    candidate_hash TEXT,
-    candidate TEXT,
-    applied_source TEXT,
-    writeback_status TEXT NOT NULL DEFAULT 'settled',
-    writeback_source TEXT,
-    writeback_expected_hash TEXT,
-    writeback_generation TEXT,
-    update_time TEXT NOT NULL,
-    FOREIGN KEY(workflow_uuid) REFERENCES workflow(uuid)
-);
-
-CREATE TABLE IF NOT EXISTS frontend_event (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event TEXT NOT NULL,
-    data TEXT NOT NULL,
-    create_time TEXT NOT NULL
-);
-"""
 
 
 class WorkflowStore:
@@ -1088,6 +856,118 @@ class WorkflowStore:
                     ),
                 )
         return self.get_task(task_uuid)
+
+    def create_ad_hoc_task_with_job(
+        self,
+        *,
+        task_uuid: str,
+        node_uuid: str,
+        device_id: str,
+        action_name: str,
+        action_type: str,
+        param: Dict[str, Any],
+        execution_policy: Dict[str, Any],
+        execution_timeout_seconds: int,
+        description: Optional[str],
+        meta_data: Dict[str, Any],
+        idempotency_key: str,
+        request_fingerprint: str,
+    ) -> Dict[str, Any]:
+        """单点设备动作任务：无 workflow 定义，task+单 job 一次落库。
+
+        snapshot/plan 按调度器 `_build_dag` 的消费面构造（snapshot.nodes 提供
+        action_name/action_type/target_device_id，plan.nodes 提供 param），
+        与整图任务共用同一执行/历史/异常链路。幂等键唯一索引兜底并发重复。
+        """
+
+        now = utc_now()
+        snapshot = {
+            "nodes": [
+                {
+                    "uuid": node_uuid,
+                    "action_name": action_name,
+                    "action_type": action_type,
+                    "meta_data": {"target_device_id": device_id},
+                }
+            ],
+            "edges": [],
+        }
+        plan = {
+            "run_mode": "normal",
+            "target_node_uuid": None,
+            "nodes": [{"uuid": node_uuid, "param": param}],
+            "edges": [],
+        }
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO workflow_task(
+                        uuid, create_time, update_time, deleted_at, description,
+                        meta_data, workflow_uuid, status, workflow_snapshot,
+                        execution_plan, run_mode, target_node_uuid, control_status,
+                        cleanup_status, trace_context, input, output, error_info,
+                        execution_kind, idempotency_key, request_fingerprint
+                    ) VALUES (?, ?, ?, NULL, ?, ?, NULL, 'pending', ?, ?, 'normal',
+                              NULL, 'active', 'none', '{}', '{}', '{}', '[]',
+                              'ad_hoc_device_action', ?, ?)
+                    """,
+                    (
+                        task_uuid,
+                        now,
+                        now,
+                        description,
+                        _json(meta_data),
+                        _json(snapshot),
+                        _json(plan),
+                        idempotency_key,
+                        request_fingerprint,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO workflow_node_job(
+                        uuid, create_time, update_time, deleted_at, description,
+                        meta_data, workflow_task_uuid, workflow_node_uuid,
+                        material_uuid, feedback_sequence, topological_index,
+                        executor_kind, execution_policy,
+                        execution_timeout_seconds, status, attempt, param,
+                        feedback_data, return_info, control_data, error_info
+                    ) VALUES (?, ?, ?, NULL, NULL, '{}', ?, ?, NULL, 0, 0,
+                              'device_action', ?, ?, 'pending', 1, ?,
+                              '{}', '{}', '{}', '[]')
+                    """,
+                    (
+                        str(uuid4()),
+                        now,
+                        now,
+                        task_uuid,
+                        node_uuid,
+                        _json(execution_policy),
+                        int(execution_timeout_seconds),
+                        _json(param),
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            # 幂等键唯一索引命中：并发同键提交由 service 读回先到者
+            raise StoreConflict(str(exc)) from exc
+        return self.get_task(task_uuid)
+
+    def find_task_by_idempotency_key(
+        self, execution_kind: str, idempotency_key: str
+    ) -> Optional[Dict[str, Any]]:
+        """按 (execution_kind, idempotency_key) 命中既有任务（幂等复用）。"""
+
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM workflow_task
+                WHERE execution_kind = ? AND idempotency_key = ?
+                  AND deleted_at IS NULL
+                """,
+                (execution_kind, idempotency_key),
+            ).fetchone()
+        return None if row is None else self._task_row(row)
 
     def get_task(self, task_uuid: str) -> Dict[str, Any]:
         with self._lock:
@@ -2071,7 +1951,12 @@ class WorkflowStore:
             "reconciliation_resume_control_status",
             "started_at",
             "finished_at",
+            "idempotency_key",
         )
+        # ad_hoc 幂等复用需要指纹比对；workflow 任务恒为空串，不额外暴露
+        fingerprint = row["request_fingerprint"]
+        if fingerprint:
+            result["request_fingerprint"] = fingerprint
         return result
 
     @classmethod

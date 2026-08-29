@@ -24,8 +24,8 @@ except ImportError:  # pragma: no cover - exercised on Windows CI/runtime
 
 from pydantic import ValidationError
 
-from unilabos.server.scheduler.authority import SchedulerAuthorityProfile
-from unilabos.server.protocol.materials import InventoryRequirement
+from unilabos.server.backend.scheduler.authority import SchedulerAuthorityProfile
+from unilabos.protocol.materials import InventoryRequirement
 from unilabos.server.workflow.execution_plan_graph import (
     CompositeExecutionPlanNormalizer,
 )
@@ -42,7 +42,7 @@ from unilabos.server.workflow.models import (
     normalize_json_object,
     validate_uuid,
 )
-from unilabos.server.workflow.store import (
+from unilabos.server.database.repositories.workflow import (
     StoreAuthoringConflict,
     StoreConflict,
     StoreNotFound,
@@ -493,6 +493,91 @@ class WorkflowService:
             return task
         except StoreConflict:
             raise WorkflowError("invalid_input") from None
+
+    def create_ad_hoc_device_action_task(
+        self,
+        *,
+        device_id: str,
+        action_name: str,
+        action_type: str = "",
+        param: Dict[str, Any],
+        execution_policy: Optional[Dict[str, Any]] = None,
+        execution_timeout_seconds: int = 0,
+        idempotency_key: Optional[str] = None,
+        description: Optional[str],
+        meta_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """微前端单点设备动作：单 job 任务，复用整图任务的调度/历史/异常链路。
+
+        request_fingerprint 锁定 (device, action, param) 语义；同 idempotency_key
+        重复提交时指纹一致返回既有任务（幂等），不一致按 conflict 拒绝。
+        """
+
+        if not self._authority_profile.can_create_local_workflow_task:
+            raise WorkflowError("local_task_authority_forbidden")
+        device_id = str(device_id or "").strip()
+        action_name = str(action_name or "").strip()
+        if not device_id or not action_name:
+            raise WorkflowError("invalid_input")
+        try:
+            param = normalize_json_object(param)
+            meta_data = normalize_json_object(meta_data)
+            policy = normalize_json_object(execution_policy or {})
+        except ValueError:
+            raise WorkflowError("invalid_input") from None
+        if execution_timeout_seconds < 0:
+            raise WorkflowError("invalid_input")
+        description = self._optional_text(description)
+        fingerprint = _sha256(
+            _canonical_json(
+                {
+                    "device_id": device_id,
+                    "action_name": action_name,
+                    "param": param,
+                }
+            )
+        )
+        if idempotency_key is not None:
+            idempotency_key = str(idempotency_key).strip()
+            if not idempotency_key:
+                raise WorkflowError("invalid_input")
+        else:
+            idempotency_key = str(uuid4())
+        existing = self._store.find_task_by_idempotency_key(
+            "ad_hoc_device_action", idempotency_key
+        )
+        if existing is not None:
+            if existing.get("request_fingerprint", "") not in {"", fingerprint}:
+                raise WorkflowConflict("conflict")
+            return existing
+        try:
+            task = self._store.create_ad_hoc_task_with_job(
+                task_uuid=str(uuid4()),
+                node_uuid=str(uuid4()),
+                device_id=device_id,
+                action_name=action_name,
+                action_type=str(action_type or ""),
+                param=param,
+                execution_policy=policy,
+                execution_timeout_seconds=execution_timeout_seconds,
+                description=description,
+                meta_data=meta_data,
+                idempotency_key=idempotency_key,
+                request_fingerprint=fingerprint,
+            )
+        except StoreConflict:
+            # 唯一索引兜底：并发同键提交，读回先到者
+            existing = self._store.find_task_by_idempotency_key(
+                "ad_hoc_device_action", idempotency_key
+            )
+            if existing is None:
+                raise WorkflowError("internal_error") from None
+            if existing.get("request_fingerprint", "") != fingerprint:
+                raise WorkflowConflict("conflict") from None
+            return existing
+        if self._task_submitter is not None:
+            self._task_submitter(task["uuid"])
+        return task
 
     def list_recoverable_workflow_tasks(self) -> List[Dict[str, Any]]:
         """列出本地 Adapter 可接管的非终态规范任务。"""

@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import UUID, uuid5
 
-from unilabos.server.workflow.store import StoreConflict
+from unilabos.server.database.repositories.workflow import StoreConflict
 
 
 class CompositeExecutionPlanError(StoreConflict):

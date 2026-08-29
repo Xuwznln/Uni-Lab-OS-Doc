@@ -5,7 +5,7 @@ from __future__ import annotations
 from unilabos.server.workflow.graph_validation import validate_graph
 from unilabos.server.workflow.models import WorkflowNodeWrite
 from unilabos.server.workflow.service import WorkflowService
-from unilabos.server.workflow.store import WorkflowStore
+from unilabos.server.database.repositories.workflow import WorkflowStore
 
 INVOCATION_UUID = "75000000-0000-4000-8000-000000000001"
 TEMPLATE_UUID = "75000000-0000-4000-8000-000000000002"
