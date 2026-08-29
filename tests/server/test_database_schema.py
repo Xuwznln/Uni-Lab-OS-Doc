@@ -9,7 +9,7 @@ from unilabos.server.database import DATABASE_SPECS, initialize_database
 
 EXPECTED_TABLES = {
     "runtime": {
-        "schema_migration",
+        "schema_identity",
         "backend_session",
         "executor_endpoint",
         "command_inbox",
@@ -19,7 +19,7 @@ EXPECTED_TABLES = {
         "backend_event_outbox",
     },
     "materials": {
-        "schema_migration",
+        "schema_identity",
         "resource_template",
         "inventory_lot",
         "material",
@@ -32,13 +32,13 @@ EXPECTED_TABLES = {
         "inventory_ledger",
     },
     "telemetry": {
-        "schema_migration",
+        "schema_identity",
         "telemetry_source_cursor",
         "device_state_latest",
         "telemetry_event",
     },
     "history": {
-        "schema_migration",
+        "schema_identity",
         "payload_object",
         "history_event",
     },
@@ -60,7 +60,6 @@ def test_database_v1_schema_is_complete_and_replay_safe(tmp_path, key: str) -> N
             if not str(row[0]).startswith("sqlite_")
         }
         assert tables == EXPECTED_TABLES[key]
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()

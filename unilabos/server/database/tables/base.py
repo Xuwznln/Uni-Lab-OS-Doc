@@ -1,25 +1,25 @@
-"""微后端 SQLModel 表与协议对象共用的严格配置。"""
+"""微后端 SQLModel 表的严格配置；共享标量与 DTO 基类来自协议层。"""
 
 from __future__ import annotations
 
 import json
 from contextvars import ContextVar
-from typing import Annotated, Any, ClassVar, Dict
+from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, JsonValue, StringConstraints
-from sqlalchemy import Column, Integer, Text, text
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import Column, text
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
 
+from unilabos.protocol.base import (
+    JsonObject,
+    NonEmptyStr,
+    PositiveVersion,
+    ServerObject,
+    UnixMilliseconds,
+)
 
-NonEmptyStr = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1),
-    Field(sa_type=Text),
-]
-UnixMilliseconds = Annotated[int, Field(ge=0, sa_type=Integer)]
-PositiveVersion = Annotated[int, Field(ge=1, sa_type=Integer)]
-JsonObject = Dict[str, JsonValue]
+
 _VALIDATING_TABLES: ContextVar[frozenset[type[SQLModel]]] = ContextVar(
     "unilabos_validating_sqlmodel_tables",
     default=frozenset(),
@@ -64,18 +64,6 @@ def json_text_column(
         server_default=None if nullable else text(f"'{default_json}'"),
     )
 
-
-class ServerObject(BaseModel):
-    """协议 DTO 和内嵌值对象的严格 Pydantic 基类。"""
-
-    model_config = ConfigDict(
-        extra="forbid",
-        str_strip_whitespace=True,
-        validate_assignment=True,
-        validate_default=True,
-        allow_inf_nan=False,
-        protected_namespaces=(),
-    )
 
 class TableObject(SQLModel):
     """SQLModel 表基类；ORM 分字段 hydration 时不执行半成品赋值校验。"""
@@ -124,14 +112,12 @@ class TableObject(SQLModel):
         super().__init__(**values)
 
 
-class SchemaMigrationRecord(TableObject, table=True):
-    """每个 SQLite 文件自己的迁移记录。"""
+class SchemaIdentityRecord(TableObject, table=True):
+    """每个 SQLite 文件自己的 schema 身份记录。"""
 
-    __tablename__: ClassVar[str] = "schema_migration"
+    __tablename__: ClassVar[str] = "schema_identity"
 
     database_key: NonEmptyStr = Field(primary_key=True)
-    version: PositiveVersion = Field(primary_key=True)
-    name: NonEmptyStr
     checksum: NonEmptyStr
     applied_at_ms: UnixMilliseconds
 
@@ -141,7 +127,7 @@ __all__ = [
     "JsonText",
     "NonEmptyStr",
     "PositiveVersion",
-    "SchemaMigrationRecord",
+    "SchemaIdentityRecord",
     "ServerObject",
     "TableObject",
     "UnixMilliseconds",

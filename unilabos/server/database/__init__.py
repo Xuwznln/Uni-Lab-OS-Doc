@@ -8,7 +8,6 @@ from unilabos.server.database.layout import (
 from unilabos.server.database.schema import (
     DatabaseIdentityConflict,
     DatabaseSpec,
-    SchemaDriftError,
     TableSpec,
     initialize_database,
 )
@@ -42,7 +41,6 @@ __all__ = [
     "MATERIALS_DATABASE",
     "RUNTIME_DATABASE",
     "ServerDatabasePaths",
-    "SchemaDriftError",
     "TELEMETRY_DATABASE",
     "TableSpec",
     "initialize_database",

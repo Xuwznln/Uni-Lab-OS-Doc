@@ -6,32 +6,38 @@
 
 代码命名空间统一归属微后端：工作流定义/上传位于
 `unilabos.server.workflow`，调度与执行期 DAG 位于
-`unilabos.server.scheduler`，四库组合根位于 `unilabos.server.composition`。
+`unilabos.server.backend.scheduler`，四库组合根位于
+`unilabos.server.composition`，运行时装配位于
+`unilabos.server.backend.composition`。
 不保留 `unilabos.server.storage`，也不保留顶层 `unilabos.workflow`、
 `unilabos.scheduler` 或 `unilabos.storage`；旧库不会被探测、打开或迁移。
 
-| 数据库 | 权威内容 | 表数（含 migration） |
+| 数据库 | 权威内容 | 表数（含 identity） |
 | --- | --- | ---: |
 | `runtime.db` | 后端命令、执行 job、endpoint 与可靠收发 | 8 |
 | `materials.db` | 资源模板、物料、Site、预留与库存账本 | 11 |
 | `telemetry.db` | 设备最新状态和高频追加事件 | 4 |
 | `history.db` | 大 payload 和统一执行历史流 | 3 |
 
-四库合计 26 张表，其中 4 张是各库自己的 `schema_migration`。
+四库合计 26 张表，其中 4 张是各库自己的 `schema_identity`。
 
 ## 持久化代码收敛
 
-- `database/tables/` 是持久化行模型和 SQLAlchemy metadata 的唯一来源；模型使用
-  SQLModel，同时承担 Pydantic 构造校验和 SQLite 字段映射，不再保留平行的
-  `server/models/`。
-- `database/migrations/v1/` 是已经发布的不可变建库快照。生产建库仍执行该目录的
-  SQL，以保留 CHECK、partial index、trigger、外键和 schema checksum；后续结构变化
-  新增 migration，不改写 v1，也不直接用 `metadata.create_all()` 覆盖已有库。
+- `database/tables/` 是持久化行模型、建表 DDL 和 SQLAlchemy metadata 的唯一来源；
+  模型使用 SQLModel，同时承担 Pydantic 构造校验和 SQLite 字段映射，DDL 以
+  `TableSpec`/`DatabaseSpec` 与行模型放在同一文件，不再保留平行的
+  `server/models/` 或 migration 目录。
+- 未发布阶段不维护 migration 链：`schema_identity` 记录库身份与 DDL checksum，
+  打开时 checksum 与代码声明不一致直接删除文件重建；身份属于其他库则报
+  `DatabaseIdentityConflict` 拒绝打开。
 - `database/repositories/` 只负责连接、事务、行映射、CRUD 和批量 SQL，不再声明
   第二套数据模型。幂等、游标推进和状态机规则属于 `services/`。
+  Workflow Authority 的 `workflow.db` 存储层位于
+  `database/repositories/workflow/`（DDL、错误与 `WorkflowStore` 拆分为子模块，
+  经 `__init__` 导出）。
 - `protocol/` 只保留线上请求、响应和跨表聚合 DTO。协议形状与单表行完全相同时直接
   复用表模型，不再继承或复制一遍字段。
-- CI 以真实 migration 创建四个 SQLite 文件，并逐表核对 SQLModel metadata 的表名、
+- CI 以真实 DDL 创建四个 SQLite 文件，并逐表核对 SQLModel metadata 的表名、
   字段顺序和复合主键，防止表模型与落库结构漂移。
 
 ## 表目录
@@ -40,7 +46,7 @@
 
 | 表 | 职责 |
 | --- | --- |
-| `schema_migration` | 数据库身份、版本和真实 schema checksum |
+| `schema_identity` | 数据库身份和真实 schema checksum |
 | `backend_session` | 后端连接 epoch 与命令/事件游标 |
 | `executor_endpoint` | HostLink/ROS2 endpoint；route、action capability 和 availability 是 JSON 模型字段 |
 | `command_inbox` | 后端命令幂等接收箱 |
@@ -53,7 +59,7 @@
 
 | 表 | 职责 |
 | --- | --- |
-| `schema_migration` | 数据库身份和 schema 版本 |
+| `schema_identity` | 数据库身份和 schema checksum |
 | `resource_template` | 完整模板；`category`、`available_sites`、`handles` 都是模型字段 |
 | `inventory_lot` | 独立批次和数量聚合 |
 | `material` | Material 身份、树关系及低频静态配置 |
@@ -69,7 +75,7 @@
 
 | 表 | 职责 |
 | --- | --- |
-| `schema_migration` | 数据库身份和 schema 版本 |
+| `schema_identity` | 数据库身份和 schema checksum |
 | `telemetry_source_cursor` | endpoint epoch/generation/sequence 水位 |
 | `device_state_latest` | 每个 endpoint/device 一行完整最新状态、属性、连接和告警 |
 | `telemetry_event` | state/property/connection/alarm 的统一高频追加流 |
@@ -78,7 +84,7 @@
 
 | 表 | 职责 |
 | --- | --- |
-| `schema_migration` | 数据库身份和 schema 版本 |
+| `schema_identity` | 数据库身份和 schema checksum |
 | `payload_object` | 最大 256 KiB inline payload；更大内容使用外部对象存储 |
 | `history_event` | transition/feedback/result/log/error/decision 的统一追加历史流 |
 
@@ -163,12 +169,12 @@ Local 和 HTTP 两种调用方式下保持一致。
 
 | 层 | 入口 | 职责 |
 | --- | --- | --- |
-| 通信协议 | `unilabos.server.protocol.materials` | `materials.v1` DTO、写命令信封、版本前置条件和结果 |
+| 通信协议 | `unilabos.protocol.materials` | `materials.v1` DTO、写命令信封、版本前置条件和结果 |
 | 持久化 | `unilabos.server.database.repositories.materials` | 表行 CRUD、`BEGIN IMMEDIATE` 单 writer、ledger/outbox |
 | 聚合服务 | `unilabos.server.services.materials` | 模板、Material Tree、Position/Data/Substance、Site move 和软删除 |
 | 快照 | `unilabos.server.services.material_snapshot` | 规范哈希、逐 section diff 和一次事务应用 |
-| PLR 边界 | `unilabos.server.adapters.plr_materials` | PLR 创建草稿、权威 UUID 回填、上传和下载 |
-| Registry 边界 | `unilabos.server.adapters.registry_materials` | Registry/lab_resources 定义登记和模板 UUID 映射 |
+| PLR 边界 | `unilabos.adapters.plr_materials` | PLR 创建草稿、权威 UUID 回填、上传和下载 |
+| Registry 边界 | `unilabos.adapters.registry_materials` | Registry/lab_resources 定义登记和模板 UUID 映射 |
 | Helper | `unilabos.resources.materials` | `materials.create(plr_resource)`，按 Host/Slave 角色选择权威链路 |
 | 设备运行时 | `unilabos.device_runtime.resource` | `ResourceService` 把 create/get/update 统一路由到微后端；update 使用局部 snapshot 和版本前置条件 |
 | HTTP / Client | `unilabos.server.api.materials`、`unilabos.client.materials` | `/api/v1/materials` 与同构 Local/HTTP/HostLink client |

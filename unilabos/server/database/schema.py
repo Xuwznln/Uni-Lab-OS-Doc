@@ -1,20 +1,23 @@
-"""四个独立 SQLite 文件共用的声明式 schema 与建库入口。"""
+"""四个独立 SQLite 文件共用的声明式 schema 与建库入口。
+
+未发布阶段不维护 migration 链：库内 checksum 与当前代码声明不一致时，
+直接删除数据库文件重建。
+"""
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+logger = logging.getLogger(__name__)
+
 
 class DatabaseIdentityConflict(RuntimeError):
-    """物理 SQLite 文件已属于其他职责或没有可验证的数据库身份。"""
-
-
-class SchemaDriftError(RuntimeError):
-    """同一 schema 版本的实际声明与已落库 checksum 不一致。"""
+    """物理 SQLite 文件已属于其他职责，拒绝打开以免误清数据。"""
 
 
 @dataclass(frozen=True)
@@ -28,12 +31,11 @@ class TableSpec:
 
 @dataclass(frozen=True)
 class DatabaseSpec:
-    """一个物理 SQLite 文件的完整 v1 schema。"""
+    """一个物理 SQLite 文件的完整 schema。"""
 
     key: str
     filename: str
     role: str
-    version: int
     synchronous: str
     tables: tuple[TableSpec, ...]
 
@@ -52,16 +54,13 @@ class DatabaseSpec:
         return hashlib.sha256(canonical).hexdigest()
 
 
-SCHEMA_MIGRATION_TABLE = TableSpec(
-    name="schema_migration",
+SCHEMA_IDENTITY_TABLE = TableSpec(
+    name="schema_identity",
     create_sql="""
-        CREATE TABLE IF NOT EXISTS schema_migration (
-            database_key TEXT NOT NULL CHECK (TRIM(database_key) <> ''),
-            version INTEGER NOT NULL CHECK (version > 0),
-            name TEXT NOT NULL CHECK (TRIM(name) <> ''),
+        CREATE TABLE IF NOT EXISTS schema_identity (
+            database_key TEXT PRIMARY KEY CHECK (TRIM(database_key) <> ''),
             checksum TEXT NOT NULL CHECK (TRIM(checksum) <> ''),
-            applied_at_ms INTEGER NOT NULL CHECK (applied_at_ms >= 0),
-            PRIMARY KEY(database_key, version)
+            applied_at_ms INTEGER NOT NULL CHECK (applied_at_ms >= 0)
         )
     """,
 )
@@ -77,52 +76,64 @@ def _table_names(connection: sqlite3.Connection) -> set[str]:
     }
 
 
-def _validate_schema_migration_shape(connection: sqlite3.Connection) -> None:
-    expected = {"database_key", "version", "name", "checksum", "applied_at_ms"}
-    actual = {
-        str(row[1]) for row in connection.execute("PRAGMA table_info(schema_migration)")
-    }
-    if actual != expected:
-        raise SchemaDriftError(
-            "schema_migration has an incompatible shape; discard or explicitly "
-            "migrate this pre-v1 database"
-        )
+def _open_connection(
+    path: Path, spec: DatabaseSpec, timeout: float
+) -> sqlite3.Connection:
+    connection = sqlite3.connect(
+        str(path),
+        timeout=timeout,
+        check_same_thread=False,
+    )
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute(f"PRAGMA synchronous = {spec.synchronous}")
+    connection.execute("PRAGMA busy_timeout = 30000")
+    return connection
 
 
-def _validate_existing_database(
-    connection: sqlite3.Connection,
-    spec: DatabaseSpec,
-    *,
-    preexisting_tables: set[str],
-) -> None:
-    _validate_schema_migration_shape(connection)
+def _needs_rebuild(connection: sqlite3.Connection, spec: DatabaseSpec) -> bool:
+    """判断现有库能否直接复用；身份属于其他库时抛错兜底。"""
+
+    tables = _table_names(connection)
+    if not tables:
+        return False
+    if "schema_identity" not in tables:
+        # 旧格式（schema_migration 时代）或未知来源，未发布期直接重建
+        return True
     rows = connection.execute(
-        "SELECT database_key,version,name,checksum FROM schema_migration"
+        "SELECT database_key, checksum FROM schema_identity"
     ).fetchall()
-    existing_keys = {str(row[0]) for row in rows}
-    if existing_keys and existing_keys != {spec.key}:
-        keys = ", ".join(sorted(existing_keys))
+    keys = {str(row[0]) for row in rows}
+    if keys - {spec.key}:
+        conflict = ", ".join(sorted(keys))
         raise DatabaseIdentityConflict(
-            f"database file belongs to {keys!r}, cannot open it as {spec.key!r}"
+            f"database file belongs to {conflict!r}, cannot open it as {spec.key!r}"
         )
-    if preexisting_tables - {"schema_migration"} and not rows:
-        raise DatabaseIdentityConflict(
-            "database contains domain tables but has no verifiable database identity"
-        )
+    if not rows:
+        # 有 domain 表但身份行缺失，视为不完整初始化
+        return bool(tables - {"schema_identity"})
+    return str(rows[0][1]) != spec.checksum
 
-    current = next((row for row in rows if int(row[1]) == spec.version), None)
-    if current is not None:
-        expected_name = f"{spec.key}_v{spec.version}"
-        if str(current[2]) != expected_name or str(current[3]) != spec.checksum:
-            raise SchemaDriftError(
-                f"{expected_name} checksum differs from the embedded schema"
-            )
 
-    user_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    if user_version > spec.version:
-        raise SchemaDriftError(
-            f"database user_version {user_version} is newer than supported "
-            f"version {spec.version}"
+def _delete_database_files(path: Path) -> None:
+    for suffix in ("", "-wal", "-shm"):
+        target = Path(f"{path}{suffix}")
+        if target.exists():
+            target.unlink()
+
+
+def _apply_schema(connection: sqlite3.Connection, spec: DatabaseSpec) -> None:
+    with connection:
+        for statement in spec.statements():
+            connection.execute(statement)
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO schema_identity(
+                database_key, checksum, applied_at_ms
+            ) VALUES (?, ?, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+            """,
+            (spec.key, spec.checksum),
         )
 
 
@@ -132,49 +143,26 @@ def initialize_database(
     *,
     timeout: float = 30.0,
 ) -> sqlite3.Connection:
-    """创建或打开一个独立后端数据库并确保完整 v1 schema 已存在。"""
+    """创建或打开一个独立后端数据库；schema 变化时删除文件重建。"""
 
     database_path = Path(path).expanduser().resolve()
     database_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(
-        str(database_path),
-        timeout=timeout,
-        check_same_thread=False,
-    )
-    connection.row_factory = sqlite3.Row
+    connection = _open_connection(database_path, spec, timeout)
     try:
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute(f"PRAGMA synchronous = {spec.synchronous}")
-        connection.execute("PRAGMA busy_timeout = 30000")
-        preexisting_tables = _table_names(connection)
-        if preexisting_tables and "schema_migration" not in preexisting_tables:
-            raise DatabaseIdentityConflict(
-                "database contains tables but no schema_migration identity"
-            )
-        with connection:
-            connection.execute(SCHEMA_MIGRATION_TABLE.create_sql.strip())
-            _validate_existing_database(
-                connection,
-                spec,
-                preexisting_tables=preexisting_tables,
-            )
-            for statement in spec.statements():
-                connection.execute(statement)
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO schema_migration(
-                    database_key, version, name, checksum, applied_at_ms
-                ) VALUES (?, ?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER) * 1000)
-                """,
-                (
-                    spec.key,
-                    spec.version,
-                    f"{spec.key}_v{spec.version}",
-                    spec.checksum,
-                ),
-            )
-            connection.execute(f"PRAGMA user_version = {spec.version}")
+        rebuild = _needs_rebuild(connection, spec)
+    except BaseException:
+        connection.close()
+        raise
+    if rebuild:
+        connection.close()
+        logger.warning(
+            "数据库 %s 的 schema 与当前代码不一致，删除重建（未发布期约定）",
+            database_path,
+        )
+        _delete_database_files(database_path)
+        connection = _open_connection(database_path, spec, timeout)
+    try:
+        _apply_schema(connection, spec)
         return connection
     except BaseException:
         connection.close()
@@ -184,8 +172,7 @@ def initialize_database(
 __all__ = [
     "DatabaseIdentityConflict",
     "DatabaseSpec",
-    "SCHEMA_MIGRATION_TABLE",
-    "SchemaDriftError",
+    "SCHEMA_IDENTITY_TABLE",
     "TableSpec",
     "initialize_database",
 ]
