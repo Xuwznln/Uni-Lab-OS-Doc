@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from unilabos.app import backend as backend_module
-from unilabos.hostlink.adapter_registry import get_execution_adapter
-from unilabos.app.backend import (
+from unilabos import backend as backend_module
+from unilabos.backend.hostlink.adapter_registry import get_execution_adapter
+from unilabos.backend import (
     BACKEND_NAMES,
     BackendConfigurationError,
     normalize_backend_name,
@@ -19,9 +19,9 @@ from unilabos.app.backend import (
     start_backend,
 )
 from unilabos.app.cli.parser import build_parser
-from unilabos.hostlink.local_runtime import HostLinkLocalRuntime
+from unilabos.backend.hostlink.local_runtime import HostLinkLocalRuntime
 from unilabos.config.config import BasicConfig, HostLinkConfig
-from unilabos.hostlink import main_hostlink_run
+from unilabos.backend.hostlink import main_hostlink_run
 from unilabos.server.startup import resolve_database_paths
 
 
@@ -136,7 +136,7 @@ def test_local_scheduler_cli_is_removed() -> None:
             parser.parse_args(arguments)
 
 
-def test_server_database_cli_resolves_only_the_four_new_files(tmp_path) -> None:
+def test_server_database_cli_resolves_only_the_five_new_files(tmp_path) -> None:
     parsed = build_parser().parse_args(
         [
             "--server-database-root",
@@ -154,6 +154,7 @@ def test_server_database_cli_resolves_only_the_four_new_files(tmp_path) -> None:
         "materials.db",
         "telemetry.db",
         "history.db",
+        "workflow.db",
     }
     assert list(tmp_path.glob("*.db")) == []
 
@@ -178,7 +179,7 @@ def test_start_backend_imports_only_selected_profile(monkeypatch) -> None:
     thread.join(timeout=2)
 
     assert called.is_set()
-    assert imported == ["unilabos.hostlink.main_hostlink_run"]
+    assert imported == ["unilabos.backend.hostlink.main_hostlink_run"]
     assert thread.name == "backend-hostlink"
     assert received[0][2] == []
 
@@ -222,7 +223,7 @@ def test_hostlink_host_registers_direct_execution_adapter(monkeypatch) -> None:
 def test_web_package_does_not_eagerly_import_ros_modules() -> None:
     code = (
         "import sys; import unilabos.server.api.app; "
-        "assert not any(name.startswith('unilabos.ros') for name in sys.modules)"
+        "assert not any(name.startswith('unilabos.backend.ros2') for name in sys.modules)"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],
@@ -238,9 +239,9 @@ def test_hostlink_entrypoint_does_not_import_ros_runtime() -> None:
         "import sys; "
         "from unilabos.config.config import BasicConfig; "
         "BasicConfig.backend = 'hostlink'; "
-        "import unilabos.hostlink.main_hostlink_run; "
+        "import unilabos.backend.hostlink.main_hostlink_run; "
         "assert 'rclpy' not in sys.modules; "
-        "assert not any(name.startswith('unilabos.ros') for name in sys.modules)"
+        "assert not any(name.startswith('unilabos.backend.ros2') for name in sys.modules)"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],

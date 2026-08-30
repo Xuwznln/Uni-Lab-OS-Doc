@@ -18,7 +18,7 @@ from unilabos.client.history import (
     HistoryHTTPError,
     LocalHistoryClient,
 )
-from unilabos.server.protocol.history import (
+from unilabos.protocol.history import (
     ExternalPayloadWrite,
     HistoryEventAppend,
     HistoryEventQuery,

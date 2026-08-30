@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from unilabos.server.database.repositories.telemetry import TelemetryRepository
-from unilabos.server.protocol.telemetry import (
+from unilabos.protocol.telemetry import (
     DeviceStateSnapshot,
     TelemetryEventQuery,
     TelemetryEventWrite,

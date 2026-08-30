@@ -224,7 +224,7 @@ def main():
     # ROS2 backend 用 HostLink 辅助发现；hostlink backend 则在同一 TCP 长连接上
     # 直接同步设备描述/状态和执行设备动作，不导入 ROS。
     is_slave = bool(args_dict.get("is_slave", False))
-    from unilabos.backend.presets.hostlink.startup import (
+    from unilabos.backend.hostlink.startup import (
         apply_hostlink_cli,
         validate_hostlink_backend,
     )
@@ -459,6 +459,32 @@ def main():
                 "info",
             )
 
+        # @workflow 默认子工作流上报：本机持有 Workflow Authority 时，把设备包
+        # 声明的工作流按稳定 uuid 幂等 upsert，供前端实时创建/运行工作流引用。
+        from unilabos.server.backend.composition import get_workflow_service
+
+        workflow_service = get_workflow_service()
+        if workflow_service is not None and lab_registry.workflow_registry:
+            from unilabos.registry.workflows import (
+                DeviceCatalog,
+                import_workflow_modules,
+                report_workflows_to_service,
+            )
+
+            import_workflow_modules(
+                [meta["module"] for meta in lab_registry.workflow_registry.values()]
+            )
+            reported_workflows = report_workflows_to_service(
+                workflow_service,
+                DeviceCatalog.from_resource_tree_set(resource_tree_set),
+            )
+            if reported_workflows:
+                print_status(
+                    f"默认子工作流已上报: {len(reported_workflows)} 个 "
+                    f"({', '.join(reported_workflows.values())})",
+                    "info",
+                )
+
         # 微后端必须先于控制链路接收命令，避免首个 job_start 绕过生命周期权威。
         comm_client.start()
     else:
@@ -466,7 +492,7 @@ def main():
         if args_dict["backend"] == "ros2":
             # 正常 Slave 必须在 rclpy.init 前拿到 Host 的 ROS policy；
             # --slave_no_host 才允许离线启动并后台重连。
-            from unilabos.backend.presets.hostlink.network import (
+            from unilabos.backend.hostlink.network import (
                 require_slave_startup_device_ids,
                 setup_slave_network_client,
             )

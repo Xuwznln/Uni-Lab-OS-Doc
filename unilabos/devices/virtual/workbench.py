@@ -32,7 +32,7 @@ from unilabos.registry.decorators import (
     not_action,
     topic_config,
 )
-from unilabos.device_runtime.node import DeviceNode
+from unilabos.backend.runtime.node import DeviceNode
 from unilabos.registry.placeholder_type import ResourceSlot, DeviceSlot
 from unilabos.resources.resource_tracker import (
     ResourceTreeSet,

@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.api.materials import install_materials_api
 from unilabos.client.materials import LocalMaterialsClient, bind_payload
-from unilabos.server.protocol.common import InventoryMutation
-from unilabos.server.protocol.materials import ResourceTemplateWrite
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import ResourceTemplateWrite
+from unilabos.protocol.materials import (
     MaterialIdentityWrite,
     MaterialNodeCreate,
     MaterialTreeCreate,
@@ -73,6 +73,65 @@ def test_post_template_allocates_authoritative_uuid(tmp_path) -> None:
 
         assert created.data.template_uuid
         assert client.get_template(created.data.template_uuid).name == "beaker"
+    finally:
+        service.repository.close()
+
+
+def test_notify_device_dispatches_via_edge_hostnode_and_returns_receipt(tmp_path) -> None:
+    """物料创建只发生在微后端；变更经 notify-device 分发到设备并透传回执。"""
+    from unilabos.backend.hostlink.adapter_registry import (
+        clear_execution_adapter,
+        set_execution_adapter,
+    )
+
+    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    app = FastAPI()
+    install_materials_api(app, service)
+
+    calls = []
+
+    class _Adapter:
+        def notify_resource_tree_update(self, device_id, action, resource_uuids):
+            calls.append((device_id, action, resource_uuids))
+            return True
+
+    set_execution_adapter(_Adapter())
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/materials/notify-device",
+                json={
+                    "device_id": "edge-device",
+                    "action": "add",
+                    "resource_uuids": ["uuid-1", "uuid-2"],
+                },
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["notified"] is True
+        assert calls == [("edge-device", "add", ["uuid-1", "uuid-2"])]
+    finally:
+        clear_execution_adapter()
+        service.repository.close()
+
+
+def test_notify_device_requires_ready_edge_hostnode(tmp_path) -> None:
+    from unilabos.backend.hostlink.adapter_registry import clear_execution_adapter
+
+    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    app = FastAPI()
+    install_materials_api(app, service)
+    clear_execution_adapter()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/materials/notify-device",
+                json={
+                    "device_id": "edge-device",
+                    "action": "add",
+                    "resource_uuids": ["uuid-1"],
+                },
+            )
+        assert response.status_code == 503
     finally:
         service.repository.close()
 

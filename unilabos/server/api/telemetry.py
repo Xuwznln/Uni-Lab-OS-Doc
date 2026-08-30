@@ -6,7 +6,7 @@ from typing import Literal, Optional, TypeVar
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 
-from unilabos.server.protocol.telemetry import (
+from unilabos.protocol.telemetry import (
     TelemetryEventQuery,
     TelemetryIngestRequest,
 )

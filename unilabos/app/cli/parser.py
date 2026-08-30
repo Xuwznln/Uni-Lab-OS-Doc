@@ -145,9 +145,9 @@ def _register_database_arguments(parser: argparse.ArgumentParser) -> None:
         group,
         "--server_database_root",
         default="~/.unilabos",
-        help="Directory containing runtime/materials/telemetry/history SQLite files.",
+        help="Directory containing runtime/materials/telemetry/history/workflow SQLite files.",
     )
-    for database in ("runtime", "materials", "telemetry", "history"):
+    for database in ("runtime", "materials", "telemetry", "history", "workflow"):
         _add(
             group,
             f"--{database}_db",
@@ -310,6 +310,8 @@ def _register_backend_arguments(parser: argparse.ArgumentParser) -> None:
             "notifications are derived from this value; --addr is an alias."
         ),
     )
+
+
 def _register_development_arguments(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("validation and development")
     _add(
@@ -368,6 +370,8 @@ def _register_development_arguments(parser: argparse.ArgumentParser) -> None:
         default=False,
         help="Load extra lab_ prefixed labware resource definitions",
     )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构建不带运行时副作用的统一 CLI parser。"""
 

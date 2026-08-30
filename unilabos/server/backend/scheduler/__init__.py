@@ -1,4 +1,6 @@
-"""Backend Scheduler 资源分配合同与管理器。"""
+"""唯一 Backend Scheduler、DAG 与资源分配合同。"""
+
+from unilabos.server.backend.scheduler.authority import SchedulerAuthorityProfile
 
 from unilabos.server.backend.scheduler.models import (
     ActionLockClaim,
@@ -44,4 +46,5 @@ __all__ = [
     "SchedulerResourceRequest",
     "SchedulerResourceRequestRecord",
     "SchedulerResourceSnapshot",
+    "SchedulerAuthorityProfile",
 ]

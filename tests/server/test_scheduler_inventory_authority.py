@@ -33,7 +33,7 @@ from unilabos.server.services.materials import (
     InsufficientInventoryError,
     MaterialsService,
 )
-from unilabos.server.workflow.service import WorkflowService
+from unilabos.server.services.workflow.service import WorkflowService
 from unilabos.server.database.repositories.workflow import WorkflowStore
 
 

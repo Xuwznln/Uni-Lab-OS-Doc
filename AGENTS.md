@@ -16,7 +16,6 @@ unilab --graph <graph.json> --config <config.py> --backend ros2
 unilab --graph <graph.json> --config <config.py> --backend hostlink  # no ROS2 runtime
 
 # Common CLI flags
-unilab --legacy                          # deprecated old Backend compatibility; removed 2026-12
 unilab --test_mode                        # simulate hardware, no real execution
 unilab --check_mode                       # CI validation of registry imports
 unilab --skip_env_check                   # skip auto-install of dependencies
@@ -36,7 +35,7 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 ### Startup Flow
 
-`unilab` CLI → `unilabos/app/cli/parser.py:build_parser()` → `app/cli/router.py` handles lightweight subcommands (`package` included) → `unilabos/app/main.py:main()` loads config and starts device runtime only when no CLI subcommand handled the request. Runtime then builds the registry, reads the device graph (JSON/GraphML), and starts `hostlink` or `ros2`. HostLink's local driver executor is `unilabos.hostlink.local_runtime.HostLinkLocalRuntime`; there is no separate Basic backend.
+`unilab` CLI → `unilabos/app/cli/parser.py:build_parser()` → `app/cli/router.py` handles lightweight subcommands (`package` included) → `unilabos/app/main.py:main()` loads config and starts device runtime only when no CLI subcommand handled the request. Runtime then builds the registry, reads the device graph (JSON/GraphML), and starts `hostlink` or `ros2`. HostLink's local driver executor is `unilabos.backend.hostlink.local_runtime.HostLinkLocalRuntime`; there is no separate Basic backend.
 
 ### Core Layers
 
@@ -44,15 +43,17 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 **Resource Tracking** (`unilabos/resources/resource_tracker.py`): Pydantic-based `ResourceDict` → `ResourceDictInstance` → `ResourceTreeSet` hierarchy. `ResourceTreeSet` is the canonical in-memory representation of all devices and resources, used throughout the system. Graph I/O is in `resources/graphio.py` (reads JSON/GraphML device topology files into `nx.Graph` + `ResourceTreeSet`).
 
-**Device Drivers** (`unilabos/devices/`): 30+ hardware drivers organized by device type (liquid_handling, hplc, balance, arm, etc.). Each driver is a Python class that gets wrapped by `ros/device_node_wrapper.py:ros2_device_node()` to become a ROS2 node with publishers, subscribers, and action servers.
+**Device Drivers** (`unilabos/devices/`): 30+ hardware drivers organized by device type (liquid_handling, hplc, balance, arm, etc.). Each driver is a Python class that gets wrapped by `backend/ros2/device_node_wrapper.py:ros2_device_node()` to become a ROS2 node with publishers, subscribers, and action servers.
 
-**ROS2 Layer** (`unilabos/ros/`): `device_node_wrapper.py` dynamically wraps any device class into `ROS2DeviceNode` (defined in `ros/nodes/base_device_node.py`). Preset node types in `ros/nodes/presets/` include `host_node`, `controller_node`, `workstation`, `serial_node`, `camera`. Messages use custom `unilabos_msgs` (pre-built, distributed via releases).
+**Device Runtime** (`unilabos/backend/runtime/`): Transport-neutral device execution kernel shared by HostLink and ROS 2 — `DeviceNode`, action routing, resource service, and runtime exceptions (`DeviceActionError`, `DeviceClassInvalid`, `ActionResultError`).
 
-**Protocol Compilation** (`unilabos/compile/`): 20+ protocol compilers (add, centrifuge, dissolve, filter, heatchill, stir, pump, etc.) that transform YAML protocol definitions into executable sequences.
+**ROS2 Layer** (`unilabos/backend/ros2/`): `device_node_wrapper.py` dynamically wraps any device class into `ROS2DeviceNode` (defined in `base_device_node.py`). Preset node types in `presets/` include `host_node`, `controller_node`, `workstation`, `serial_node`, `camera`. Messages use custom `unilabos_msgs` (pre-built, distributed via releases). The sibling `unilabos/backend/hostlink/` package is the HostLink transport runtime; experimental `unilabos/backend/dora/` is not a public backend.
+
+**Experiment Protocols** (`unilabos/experiments/`): `models.py` holds Pydantic parameter models for XDL-style experiment actions (mirroring `unilabos_msgs` ROS actions); `compile/` holds 20+ protocol compilers (add, centrifuge, dissolve, filter, heatchill, stir, pump, etc.) that expand protocol steps into device action sequences at execution time (consumed by the `workstation` preset node). One-shot workflow import converters (`from_xdl.py`, `from_python_script.py`, legacy JSON) live in `scripts/workflow/`, not in the runtime packages.
 
 **Communication** (`unilabos/device_comms/`): Hardware communication adapters — OPC-UA client, Modbus PLC, RPC, and a universal driver. `app/communication.py` provides a factory pattern for WebSocket client connections to the cloud.
 
-**Web/API** (`unilabos/app/web/`): FastAPI server with REST API (`api.py`), Jinja2 template pages (`pages.py`), and HTTP client for cloud communication (`client.py`). Runs on port 8002 by default.
+**Microbackend HTTP API** (`unilabos/server/api/`): FastAPI routers and the Host management application. It exposes runtime, materials, telemetry, history, and scheduler observation APIs on port 8002 by default.
 
 ### Configuration System
 
@@ -66,7 +67,7 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 1. Graph file → `graphio.read_node_link_json()` → `(nx.Graph, ResourceTreeSet, resource_links)`
 2. `ResourceTreeSet` + `Registry` → `initialize_device.initialize_device_from_dict()` → `ROS2DeviceNode` instances
 3. Device nodes communicate via ROS2 topics/actions or direct Python calls (simple backend)
-4. Cloud sync via WebSocket (`app/ws_client.py`) and HTTP (`app/web/client.py`)
+4. Backend control notices use `server/backend/websocket.py`; complete state and commands use the microbackend HTTP APIs in `server/api/`
 
 ### Test Data
 

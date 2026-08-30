@@ -17,7 +17,7 @@ from unilabos.client.telemetry import (
     LocalTelemetryClient,
     TelemetryHTTPError,
 )
-from unilabos.server.protocol.telemetry import (
+from unilabos.protocol.telemetry import (
     DeviceStateSnapshot,
     TelemetryEventQuery,
     TelemetryEventWrite,

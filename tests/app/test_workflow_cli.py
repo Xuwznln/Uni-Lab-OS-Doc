@@ -307,8 +307,8 @@ def test_workflow_client_roundtrips_through_the_microbackend_api() -> None:
     from fastapi.testclient import TestClient
 
     from unilabos.server.api.workflow import install_workflow_api
-    from unilabos.server.workflow.models import WorkflowNodeWrite
-    from unilabos.server.workflow.service import WorkflowService
+    from unilabos.protocol.workflow import WorkflowNodeWrite
+    from unilabos.server.services.workflow.service import WorkflowService
     from unilabos.server.database.repositories.workflow import WorkflowStore
 
     service = WorkflowService(WorkflowStore(":memory:"))

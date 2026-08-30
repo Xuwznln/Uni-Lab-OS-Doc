@@ -13,7 +13,7 @@ from unilabos.server.database.tables.history import (
     HistoryEventRecord,
     PayloadObjectRecord,
 )
-from unilabos.server.protocol.history import (
+from unilabos.protocol.history import (
     ExternalPayloadWrite,
     HistoryEventAppend,
     HistoryEventQuery,

@@ -17,8 +17,8 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from unilabos.device_runtime.action import ActionContext
-from unilabos.hostlink.protocol import LinkError
+from unilabos.backend.runtime.action import ActionContext
+from unilabos.backend.hostlink.protocol import LinkError
 from unilabos.registry.decorators import action, device, not_action, topic_config
 from unilabos.resources.objects.pose import (
     ResourceDictPosition,
@@ -26,8 +26,8 @@ from unilabos.resources.objects.pose import (
     ResourceDictPositionSize,
 )
 from unilabos.resources.objects.site import SiteDefinition
-from unilabos.server.protocol.common import InventoryMutation
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import (
     MaterialDataWrite,
     MaterialIdentityWrite,
     MaterialMove,

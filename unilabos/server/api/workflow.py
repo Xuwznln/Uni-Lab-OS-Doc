@@ -14,14 +14,14 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from unilabos.server.workflow.json_codec import decode_json_bytes, encode_json
-from unilabos.server.workflow.models import (
+from unilabos.protocol.json_codec import decode_json_bytes, encode_json
+from unilabos.protocol.workflow import (
     WorkflowEdgeWrite,
     WorkflowNodeWrite,
     normalize_json_array,
     normalize_json_object,
 )
-from unilabos.server.workflow.service import WorkflowError, WorkflowService
+from unilabos.server.services.workflow.service import WorkflowError, WorkflowService
 
 
 class _StrictModel(BaseModel):

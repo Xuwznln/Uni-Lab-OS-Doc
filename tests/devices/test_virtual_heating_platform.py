@@ -6,7 +6,7 @@ from pathlib import Path
 
 from unilabos.client.materials import LocalMaterialsClient
 from unilabos.config.config import BasicConfig
-from unilabos.device_runtime.action import ActionContext
+from unilabos.backend.runtime.action import ActionContext
 from unilabos.devices.virtual.heating_platform import (
     SAMPLE_DISPLAY_COLORS,
     VirtualHeatingPlatform,
@@ -15,7 +15,7 @@ from unilabos.registry.ast_registry_scanner import _parse_file
 from unilabos.registry.decorators import get_device_meta
 from unilabos.resources.objects.resource import ResourceDict
 from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.server.scheduler.integration import set_materials_gateway
+from unilabos.server.backend.composition import set_materials_gateway
 from unilabos.server.services.materials import MaterialsService
 
 
@@ -33,7 +33,7 @@ def test_virtual_heating_platform_is_registry_discoverable_and_demo_graph_is_str
 
     source = Path(inspect.getfile(VirtualHeatingPlatform)).resolve()
     repository_root = Path(__file__).resolve().parents[2]
-    devices, _resources = _parse_file(source, repository_root)
+    devices, _resources, _workflows = _parse_file(source, repository_root)
     assert devices[0]["device_id"] == "virtual_heating_platform"
     assert "serialized_state" in devices[0]["status_properties"]
 

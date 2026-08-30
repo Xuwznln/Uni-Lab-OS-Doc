@@ -669,7 +669,7 @@ xyz_stepper_controller:
     type: python
   config_info: []
   description: 新XYZ控制器
-  displayname: xyz_stepper_controller
+  displayname: 莱羽 XYZ 步进电机控制器
   handles: []
   icon: ''
   init_param_enforce: {}

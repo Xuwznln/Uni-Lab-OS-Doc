@@ -1004,7 +1004,7 @@ reaction_station.bioyond:
     type: python
   config_info: []
   description: Bioyond反应站
-  displayname: reaction_station.bioyond
+  displayname: BIOYOND 反应工作站
   handles: []
   icon: reaction_station.webp
   init_param_enforce: {}
@@ -1073,7 +1073,7 @@ reaction_station.reactor:
     type: python
   config_info: []
   description: 反应站子设备-反应器
-  displayname: reaction_station.reactor
+  displayname: BIOYOND 反应站反应器
   handles: []
   icon: reaction_station.webp
   init_param_enforce: {}

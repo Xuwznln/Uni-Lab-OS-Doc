@@ -1,69 +1,72 @@
 # Edge UI v8 对齐记录
 
-## 对齐基线
+## 当前边界
 
-- 输入归档：`Z:\gaojing\a.tar.gz`
-- Edge UI 分支：`feat/backend-resource-contract-v7`
-- 基线提交：`cab89d1 feat(ui): complete Edge runtime workflows and diagnostics`
-- 协议版本：OpenLab Protocol 1.9.0（Edge v8）
-- 默认部署：完整 Host API 使用 `:8002`；独立 Scheduler Provider 使用 `:8092`
+UniLabOS 只保留一套微后端数据面和一套调度语义：
 
-本次以归档为接口真相，将 Scheduler、Inventory 与 Resource Provider 收进
-UniLabOS。设备运行时只提供 `hostlink` 和 `ros2` 两个公开 backend；HostLink 的本地
-驱动执行器归属 `unilabos.hostlink`。
-
-## 已在 UniLabOS 对齐
-
-| 边界 | UniLabOS 落点 | 状态 |
+| 能力 | 唯一实现 | 说明 |
 | --- | --- | --- |
-| Workflow 定义、Graph、Task、Node Job | `unilabos/server/workflow/` | 已挂到统一 composition root；补齐 manual confirmations、interventions、results、feedback history 只读接口 |
-| Scheduler Provider | `unilabos/server/scheduler/` | Host 内嵌与 `:8092` 独立启动均可；Host 模式默认启用 |
-| Inventory Provider | `unilabos/server/scheduler/inventory/` | 本地 SQLite 权威、17 类命令、Outbox、云端命令回报使用同一 wire schema |
-| Resource Provider | `unilabos/server/scheduler/inventory/backend_api.py` | Resource Template、Material、Site、状态历史接口已并入 |
-| Device State 与 Status Incident | `unilabos/server/scheduler/device_state.py`、`status_incidents.py` | 状态策略、联锁、Scheduler Hold、决策与恢复事件已接通 |
-| 实时监控 | `unilabos/server/scheduler/monitor.py` | material/device/action/scheduler/status 五通道共享同一个进程内序列 |
-| 配置、存储与生命周期 | `unilabos/config/config.py`、`unilabos/server/storage/`、`unilabos/server/api/app.py` | 统一路径、authority profile、启动与关闭已接入 |
+| Workflow 定义、Graph、Task、Node Job | `workflow.db` + `WorkflowService`（`unilabos/server/services/workflow/`） | 本地写入口默认挂载；接入云端（Backend-controlled）后不挂载 |
+| DAG、动作锁、物料锁、库存准入 | `unilabos/server/backend/scheduler/` | 同一轮调度使用一个完整资源申请，不存在第二套锁队列 |
+| 执行与 Backend 命令协调 | `unilabos/server/backend/` | 接入云端后 Host 只执行 Backend 已准入的 Job |
+| Material、Site、库存预留与账本 | `materials.db` + `MaterialsService` | 不再有独立 Inventory 数据库或 Provider |
+| 设备状态 | `telemetry.db` + `TelemetryService` | latest 与 append-only event 使用既有表 |
+| Job 生命周期与可靠收发 | `runtime.db` + `RuntimeService` | Backend 命令先持久化再执行 |
+| 结果、反馈、错误与人工替换 | `history.db` + `HistoryService` | 不再维护平行的 Scheduler history |
+| HostLink 网络 | `unilabos/backend/hostlink/` | 与调度实现解耦 |
 
-旧 Host 专用诊断路由改为 `/api/v1/host-error-decisions*` 和
-`/api/v1/host-monitor/*`；Edge UI 契约里的 `/api/v1/error-decisions*` 与
-`/api/v1/monitor/*` 由 Scheduler Provider 独占，避免 FastAPI 注册顺序导致请求被
-旧实现截获。
+完整 Host API 默认使用 `:8002`。独立 Scheduler Provider、独立 Inventory API、
+进程内 Monitor SSE 和旧形状 Workflow 执行入口均已移除，不再提供兼容路由。
 
-## 尚未对齐
+## UI 应使用的接口
 
-### 1. Edge UI 仍混用两套 Workflow 语义
+默认 Host 数据面：
 
-新 Workflow Authority 约定：
+- `/api/v1/runtime`：endpoint、命令、execution job、可靠 outbox；
+- `/api/v1/materials`：模板、Material、Site、lot、reservation 和 ledger；
+- `/api/v1/telemetry`：设备最新状态和事件；
+- `/api/v1/history`：payload 与统一历史事件；
+- `/api/v1/health`、`/api/v1/hostlink/peers`：轻量诊断；
+- `/api/v1/status-incidents`、`/api/v1/error-decisions`：人工决策；
+- `/api/v1/scheduler/resources`：本机调度（默认）时可读；接入云端后以 503
+  明确表示调度权威在远端 Backend。
 
-- `/api/v1/workflows` 管理 Workflow 定义；
+默认（本机调度）Host 同时挂载 Workflow Authority，这是 edge UI 的写入口：
+
+- `/api/v1/workflows` 管理定义；
 - `/api/v1/workflows/{uuid}/graph` 管理整图；
-- `/api/v1/workflow-tasks` 创建和查询运行。
+- `/api/v1/workflow-tasks` 创建一次运行；
+- `/api/v1/workflow-tasks/{uuid}/jobs` 查询节点 Job。
 
-但归档中的 `packages/protocol/src/workflow.ts`、Scheduler store、Editor、Devices
-快捷动作和 organic synthesis workbench 仍向 `POST /api/v1/workflows` 提交旧
-Scheduler DAG，并调用 `POST /api/v1/workflows/{id}/cancel`。同一路径不能同时
-安全承载“创建定义”和“开始运行”。当前 UniLabOS 明确关闭 Scheduler 旧形状路由，
-以 Workflow Authority 为唯一写入权威，因此这些页面的提交/取消链路尚不可用。
+UI 不得再向 `/workflows` 提交“直接执行的 DAG”。正确写链路是：保存 Workflow
+定义，保存 Graph，再创建 Workflow Task。接入云端（Backend-controlled）的 Host
+不挂本地 Workflow 写 API，图由 Backend 持有，Edge 只接收已经调度好的 Job 命令。
 
-后续应把 UI 写链路迁到：创建或更新定义 -> 保存 Graph -> 创建 Workflow Task；
-不要在 UniLabOS 中恢复第二套 `/workflows` 执行入口。
+## 实时与恢复
 
-### 2. Action retry/skip 尚未形成完整的新 attempt
+UI 的恢复基线来自四库 API，而不是进程内事件缓存：
 
-Host 只公布错误决策，不应直接篡改 Scheduler 状态。当前 retry/skip 回调已经能
-传递，但 retry 决策还没有在 Scheduler/Workflow Task 侧原子创建新的 attempt/job
-后再释放 Host。未完成这一步前，不能把错误恢复视为 durable。
+- 当前执行状态读取 `runtime.execution_job`；
+- 设备当前值读取 `telemetry.device_state_latest`；
+- 执行历史读取 `history.history_event`；
+- 物料余额和预留读取 Materials API；
+- WebSocket 只传短通知，完整命令和状态经 HTTP 数据面获取。
 
-### 3. Canonical Workflow Task 与旧实时 Timeline 仍是两条投影
+因此断线重连不依赖 SSE replay，也不会因服务重启丢失恢复水位。
 
-历史查询已读取统一持久化数据；旧 Scheduler snapshot/timeline 仍主要观察
-`EdgeScheduler` 自身提交的运行。UI 全量迁到 Workflow Task 后，需要让实时
-timeline 读取同一个执行投影。
+## 尚需前端配合
 
-## 回归范围
+1. 移除所有旧执行形 Workflow 请求和旧 Provider 地址配置。
+2. Timeline 改为组合 Runtime、History 和 Telemetry 的持久化投影。
+3. retry 必须表现为 Backend 创建的新 attempt/job；Edge 不在原 Job 上本地重排。
+4. 调度资源页面要识别 `/scheduler/resources` 的 503：这表示该 Host 已接入云端、
+   调度权威在远端 Backend，不是服务故障。
 
-- Edge UI：协议校验通过；protocol 104 个测试通过；应用 22 个测试通过；
-  `vue-tsc` 与 Vite production build 通过。
-- UniLabOS：Provider v8 与 HostLink coordinator 无 ROS 回归通过。
-- 完整 Host `:8002` 导入仍依赖本机 ROS/unilabos_msgs 版本；当前环境安装的
-  `unilabos_msgs` 缺少部分 action 类型，因此不能把本机导入失败归为本次接口回归。
+## 回归重点
+
+- 普通 Host 启动时只打开 `runtime.db`、`materials.db`、`telemetry.db`、
+  `history.db` 四个 writer；
+- 同一物料即使流向不同设备动作，也由同一个 Scheduler 串行化；
+- 仓储 reservation 分配出的实体物料 UUID 会进入同一资源申请；
+- 执行端遇到动作冲突会拒绝，不创建本地等待队列；
+- Runtime 和 History 的状态转换仍使用既有 Service，不增加或修改表结构。

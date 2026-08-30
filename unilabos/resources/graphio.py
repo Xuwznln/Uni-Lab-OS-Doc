@@ -41,7 +41,7 @@ from unilabos.utils.banner_print import print_status
 
 if BasicConfig.backend == "ros2":
     from unilabos_msgs.msg import Resource
-    from unilabos.ros.msgs.message_converter import convert_to_ros_msg
+    from unilabos.backend.ros2.msgs.message_converter import convert_to_ros_msg
 else:
     Resource = None
     convert_to_ros_msg = None

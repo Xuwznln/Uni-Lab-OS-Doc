@@ -5,7 +5,7 @@ from typing import Dict, Any, TYPE_CHECKING
 
 from unilabos.registry.decorators import topic_config
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 class VirtualStirrer:
     """Virtual stirrer device for StirProtocol testing - 功能完整版 🌪️"""

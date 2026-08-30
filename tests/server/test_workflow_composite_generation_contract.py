@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unilabos.server.workflow.published_workflow_runtime import (
+from unilabos.server.services.workflow.published_workflow_runtime import (
     build_published_workflow_generation,
 )
 

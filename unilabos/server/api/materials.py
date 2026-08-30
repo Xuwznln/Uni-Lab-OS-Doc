@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+import asyncio
+import json
+from typing import Literal, Optional
+
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import Field
 
 from unilabos.config.config import BasicConfig
-from unilabos.server.database.tables.base import ServerObject
-from unilabos.server.protocol.common import InventoryMutation
-from unilabos.server.protocol.materials import (
+from unilabos.server.database.tables.base import NonEmptyStr, ServerObject
+from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import (
     InventoryLotInbound,
     InventoryReservationCreate,
     InventoryReservationTransition,
     InventoryTaskReservationCreate,
     MaterialDataWrite,
     MaterialDelete,
+    MaterialInstantiate,
     MaterialMove,
     MaterialPatch,
     MaterialPosition,
@@ -33,7 +39,7 @@ from unilabos.server.services.materials import (
     InsufficientInventoryError,
     RejectedMutationError,
 )
-from unilabos.server.protocol.virtual_environment import (
+from unilabos.protocol.virtual_environment import (
     VirtualEnvironmentId,
     VirtualEnvironmentResetRequest,
 )
@@ -42,6 +48,20 @@ from unilabos.server.services.virtual_environment import VirtualEnvironmentServi
 
 class LedgerAcknowledge(ServerObject):
     through_sequence: int = Field(ge=0)
+
+
+class ResourceTreeNotify(ServerObject):
+    """前端在权威完成物料变更后，请求 edge hostnode 把变更分发到目标设备。"""
+
+    device_id: NonEmptyStr = Field(description="目标边缘设备 id（可对应 slave edge 上的设备）")
+    action: Literal["add", "update", "remove"] = "add"
+    resource_uuids: list[str] = Field(min_length=1)
+
+
+class ResourceTreeNotifyResult(ServerObject):
+    notified: Optional[bool] = Field(
+        description="True=设备已确认投影；False=通知失败；null=设备未注册被跳过"
+    )
 
 
 def _payload(mutation: InventoryMutation, model: type):
@@ -238,8 +258,81 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
             _payload(mutation, MaterialTreeCreate),
         )
 
+    @router.get("/registry-classes")
+    def list_registry_classes():
+        """registry 可实例化资源类目录（前端出库选择器的数据源）。
+
+        只列 pylabrobot 类型（可被 /instantiate 实例化）；显示名走 registry
+        displayname 约定，缺省回退资源类 id。
+        """
+        from unilabos.registry.registry import lab_registry
+        from unilabos.registry.utils import resolve_registry_displayname
+
+        items = []
+        for resource_id, entry in lab_registry.resource_type_registry.items():
+            if not isinstance(entry, dict):
+                continue
+            cls = entry.get("class")
+            if not isinstance(cls, dict) or cls.get("type") != "pylabrobot":
+                continue
+            items.append(
+                {
+                    "registry_class": resource_id,
+                    "display_name": resolve_registry_displayname(
+                        entry.get("displayname"), resource_id
+                    ),
+                }
+            )
+        return sorted(items, key=lambda item: item["registry_class"])
+
+    @router.post("/instantiate")
+    def instantiate_material(mutation: InventoryMutation):
+        """物料出库/实例化：按 registry 资源类实例化草稿 → 权威登记（权威发 uuid）。
+
+        微前端出库入口——前端只提供「资源类 + 实例名」，实例化发生在微后端
+        （Host 进程内已加载 registry/PLR）。产物以 ResourceSlot 引用 {id, uuid}
+        写回动作参数（unilabos_deduct_resource 选择器），再由 apply_deduct_resource
+        等动作消费。（def 端点走线程池，registry 实例化为阻塞调用。）
+        """
+        value = _payload(mutation, MaterialInstantiate)
+        from pylabrobot.resources.resource import Resource as ResourcePLR
+
+        from unilabos.resources.graphio import initialize_resource
+        from unilabos.resources.adapters.plr_materials import plr_resources_to_create
+
+        draft = initialize_resource(
+            {"name": value.name, "class": value.registry_class},
+            resource_type=ResourcePLR,
+        )
+        if not isinstance(draft, ResourcePLR):
+            raise HTTPException(
+                status_code=422,
+                detail=f"registry 资源类不可实例化: {value.registry_class}",
+            )
+        # 底层落库统一走 create_material_tree；effect_key 保留调用方原值维持幂等。
+        # payload 重绑为展开后的树（service 校验 payload 与 typed body 一致）。
+        tree_create = plr_resources_to_create([draft])
+        if value.barcode:
+            # 条码只落在出库产物的根节点（子节点如 tip spot 不带条码）。
+            for node in tree_create.nodes:
+                if node.parent_client_ref is None:
+                    node.identity.barcode = value.barcode
+                    break
+        create_mutation = mutation.model_copy(
+            update={
+                "operation": "create_material_tree",
+                "payload": tree_create.model_dump(mode="json", exclude_none=False),
+            }
+        )
+        return _call(service.create_tree, create_mutation, tree_create)
+
     @router.get("/instances")
-    async def list_materials(roots_only: bool = Query(default=False)):
+    async def list_materials(
+        roots_only: bool = Query(default=False),
+        name: Optional[str] = Query(default=None, description="按名称精确搜索；未命中返回 []"),
+    ):
+        if name is not None:
+            return _call(service.search_materials, name)
         return _call(service.list_materials, roots_only=roots_only)
 
     @router.get("/instances/by-resource-id/{resource_id}")
@@ -316,6 +409,27 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
             _payload(mutation, MaterialSnapshot),
         )
 
+    @router.post("/notify-device", response_model=ResourceTreeNotifyResult)
+    def notify_device(value: ResourceTreeNotify):
+        """把权威已完成的物料变更分发到目标设备（经 edge hostnode，可达 slave edge）。
+
+        物料创建/变更只发生在微后端；设备侧投影由 hostnode 的
+        notify_resource_tree_update 触发（add=拉取实例化+assign，remove=卸载移除）。
+        同步等待设备回执；调用方应校验 notified 为 true。
+        （def 端点走线程池，允许阻塞等待。）
+        """
+        from unilabos.backend.hostlink.adapter_registry import get_execution_adapter
+
+        adapter = get_execution_adapter(0)
+        notify = getattr(adapter, "notify_resource_tree_update", None)
+        if adapter is None or not callable(notify):
+            raise HTTPException(
+                status_code=503,
+                detail="edge hostnode is not ready to dispatch resource tree updates",
+            )
+        notified = notify(value.device_id, value.action, list(value.resource_uuids))
+        return ResourceTreeNotifyResult(notified=notified)
+
     @router.get("/changes")
     async def changes(
         after_sequence: int = Query(default=0, ge=0),
@@ -327,6 +441,70 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
     async def acknowledge_changes(value: LedgerAcknowledge):
         return {"acknowledged": service.acknowledge_changes(value.through_sequence)}
 
+    @router.get("/events")
+    async def events(
+        request: Request,
+        last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+    ) -> StreamingResponse:
+        """物料变更 SSE 失效通知（与 workflow ``/api/v1/events`` 同范式）。
+
+        以 inventory_ledger 的 sequence 为游标推送 ``materials.changed``；
+        浏览器只把事件当失效信号并回 HTTP 重取，payload 不承载业务正文。
+        首连（无 Last-Event-ID）静默追平账本尾部，只推送此后的增量；
+        重连带 Last-Event-ID 时从该游标续传，补齐离线期间的变更。
+        """
+        replay = False
+        cursor = 0
+        if last_event_id is not None and last_event_id.strip():
+            try:
+                cursor = int(last_event_id.strip())
+                if cursor < 0:
+                    raise ValueError
+                replay = True
+            except ValueError:
+                raise HTTPException(status_code=422, detail="invalid Last-Event-ID")
+
+        def _format_event(row) -> str:
+            data = json.dumps(
+                {
+                    "sequence": row.sequence,
+                    "operation": row.operation,
+                    "aggregate_type": row.aggregate_type,
+                    "aggregate_uuid": row.aggregate_uuid,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            return f"id: {row.sequence}\nevent: materials.changed\ndata: {data}\n\n"
+
+        async def stream():
+            nonlocal cursor
+            yield "retry: 3000\n: connected\n\n"
+            if not replay:
+                # 首连不重放历史：把游标推进到账本尾部
+                while True:
+                    rows = service.changes(after_sequence=cursor, limit=1000)
+                    if not rows:
+                        break
+                    cursor = rows[-1].sequence
+            while not await request.is_disconnected():
+                rows = service.changes(after_sequence=cursor, limit=500)
+                for row in rows:
+                    cursor = row.sequence
+                    yield _format_event(row)
+                if not rows:
+                    yield ": keepalive\n\n"
+                await asyncio.sleep(1)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     return router
 
 
@@ -336,6 +514,8 @@ def install_materials_api(app: FastAPI, service: MaterialsService) -> None:
 
 __all__ = [
     "LedgerAcknowledge",
+    "ResourceTreeNotify",
+    "ResourceTreeNotifyResult",
     "create_materials_router",
     "install_materials_api",
 ]

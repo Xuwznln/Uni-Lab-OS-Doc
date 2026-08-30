@@ -137,7 +137,7 @@ unilab --config path/to/your/config.py
 ## 通信中间件 `--backend`
 
 Uni-Lab 对外提供两个设备通信 backend。名称、能力和实现入口由
-`unilabos.app.backend.BACKEND_PROFILES` 统一管理：
+`unilabos.backend.BACKEND_PROFILES` 统一管理：
 
 | Backend | 设备运行时 | 支持的设备能力 | 应选择该 backend 的场景 |
 |---|---|---|---|
@@ -167,7 +167,7 @@ unilab -g slave.json --backend hostlink --is-slave \
 unilab -g graph.json --backend ros2
 ```
 
-HostLink 的本地 Python 驱动执行器已归入 `unilabos.hostlink`，不存在可通过
+HostLink 的本地 Python 驱动执行器已归入 `unilabos.backend.hostlink`，不存在可通过
 `--backend basic` 选择的独立 backend。Dora 代码仅保留作实验，不属于公开部署 backend。
 旧名称 `simple`、`ros` 以及 `basic`、`dora` 都不会被 CLI 接受。
 

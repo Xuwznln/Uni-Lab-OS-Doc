@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from unilabos.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
+from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
 from unilabos.config.config import BasicConfig, HostLinkConfig
-from unilabos.hostlink.backend import HostLinkBackend
+from unilabos.backend.hostlink.backend import HostLinkBackend
 
 from tests.networking.hostlink_lan_virtual_devices import (
     HOST_NODE_ID,

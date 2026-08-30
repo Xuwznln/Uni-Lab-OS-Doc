@@ -801,7 +801,7 @@ coincellassemblyworkstation_device:
     type: python
   config_info: []
   description: ''
-  displayname: coincellassemblyworkstation_device
+  displayname: 扣式电池组装工作站
   handles: []
   icon: koudian.webp
   init_param_enforce: {}

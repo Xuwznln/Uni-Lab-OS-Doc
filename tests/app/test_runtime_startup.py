@@ -16,7 +16,7 @@ def test_slave_runtime_waits_for_backend_without_starting_web(monkeypatch) -> No
     thread = _Thread()
     monkeypatch.setattr(BasicConfig, "is_host_mode", False)
     monkeypatch.setattr(
-        "unilabos.app.backend.start_backend",
+        "unilabos.backend.start_backend",
         lambda **_args: thread,
     )
 
@@ -33,7 +33,7 @@ def test_host_runtime_starts_management_api(monkeypatch) -> None:
     monkeypatch.setattr(BasicConfig, "disable_browser", True)
     monkeypatch.setattr(BasicConfig, "port", 9002)
     monkeypatch.setattr(
-        "unilabos.app.backend.start_backend",
+        "unilabos.backend.start_backend",
         lambda **_args: thread,
     )
     monkeypatch.setattr(

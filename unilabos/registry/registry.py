@@ -71,7 +71,7 @@ _HOSTLINK_SCHEMA_ONLY = BasicConfig.backend == "hostlink"
 
 if not _HOSTLINK_SCHEMA_ONLY:
     from unilabos_msgs.msg import Resource
-    from unilabos.ros.msgs.message_converter import (
+    from unilabos.backend.ros2.msgs.message_converter import (
         msg_converter_manager,
         ros_action_result_mapping,
         ros_action_to_json_schema,
@@ -171,6 +171,9 @@ class Registry:
 
         self.device_type_registry: Dict[str, Any] = {}
         self.resource_type_registry: Dict[str, Any] = {}
+        #: AST 扫描发现的模块级 @workflow 函数（"module:function" -> 元数据），
+        #: host 启动时按 module 导入并把注册的默认子工作流上报到 Workflow Authority。
+        self.workflow_registry: Dict[str, Any] = {}
         self._type_resolve_cache: Dict[str, Any] = {}
 
         self._setup_called = False
@@ -262,7 +265,6 @@ class Registry:
         set_substance_action = ast_actions.get("set_substance", {})
         discard_resource_action = ast_actions.get("discard_resource", {})
         transfer_resource_action = ast_actions.get("transfer_resource", {})
-        transfer_manual_action = ast_actions.get("transfer_manual", {})
         test_resource_action["handles"] = {
             "input": [
                 {
@@ -280,7 +282,7 @@ class Registry:
         # create_resource action；创建后经 notify_resource_tree_update("add") 分发到设备。
         self.device_type_registry["host_node"] = {
             "class": {
-                "module": "unilabos.ros.nodes.presets.host_node:HostNode",
+                "module": "unilabos.backend.ros2.presets.host_node:HostNode",
                 "status_types": {},
                 "status_policies": {},
                 "action_value_mappings": {
@@ -291,7 +293,6 @@ class Registry:
                     "set_substance": set_substance_action,
                     "discard_resource": discard_resource_action,
                     "transfer_resource": transfer_resource_action,
-                    "transfer_manual": transfer_manual_action,
                 },
                 "init_params": {},
             },
@@ -378,7 +379,7 @@ class Registry:
                 # host_node 的动作 schema 两种 backend 都需要：ROS2 实例化
                 # HostNode，HostLink 由内置 host 服务设备复用同一份描述。
                 # AST 扫描不 import 模块，schema-only 模式下同样安全。
-                pkg_root / "ros" / "nodes" / "presets" / "host_node.py",
+                pkg_root / "backend" / "ros2" / "presets" / "host_node.py",
                 pkg_root / "resources" / "container.py",
             ]
             # 虚拟加热平台是纯虚拟设备，无硬件依赖；始终纳入核心扫描，
@@ -449,6 +450,8 @@ class Registry:
                     rmeta = dict(rmeta)
                     rmeta["resource_id"] = key
                 scan_result.setdefault("resources", {})[key] = rmeta
+            for wf_key, wf_meta in extra_result.get("workflows", {}).items():
+                scan_result.setdefault("workflows", {})[wf_key] = wf_meta
 
         # 缓存命中统计
         if total_stats["total"] > 0:
@@ -460,6 +463,11 @@ class Registry:
 
         ast_devices = scan_result.get("devices", {})
         ast_resources = scan_result.get("resources", {})
+        self.workflow_registry.update(scan_result.get("workflows", {}))
+        if self.workflow_registry:
+            logger.info(
+                f"[UniLab Registry] 发现 {len(self.workflow_registry)} 个 @workflow 默认子工作流定义"
+            )
 
         # build 结果缓存：当所有 AST 文件命中时跳过 _build_*_entry_from_ast
         all_ast_hit = total_stats["misses"] == 0 and total_stats["total"] > 0
@@ -1014,6 +1022,7 @@ class Registry:
                 "goal_default": goal_default,
                 "handles": handles,
                 "placeholder_keys": pk,
+                "display_name": (action_args or {}).get("display_name") or "",
             }
             if (action_args or {}).get("always_free") or method_info.get("always_free"):
                 entry["always_free"] = True
@@ -1158,6 +1167,7 @@ class Registry:
                     **detect_placeholder_keys(method_params),
                     **(action_args.get("placeholder_keys") or {}),
                 },
+                "display_name": action_args.get("display_name") or "",
             }
             if action_args.get("always_free") or method_info.get("always_free"):
                 action_entry["always_free"] = True
@@ -1359,7 +1369,7 @@ class Registry:
 
         python_path = Path(__file__).resolve().parent.parent.parent
         try:
-            devs, ress = _parse_file(src_file, python_path)
+            devs, ress, _flows = _parse_file(src_file, python_path)
         except Exception:
             return None
 

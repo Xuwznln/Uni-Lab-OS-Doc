@@ -22,7 +22,7 @@ from unilabos.server.database.tables.materials import (
     ResourceTemplateRecord,
     SiteRecord,
 )
-from unilabos.server.protocol.common import (
+from unilabos.protocol.common import (
     AggregatePrecondition,
     AggregateVersion,
     InventoryMutation,
@@ -30,7 +30,7 @@ from unilabos.server.protocol.common import (
     MutationResult,
     canonical_hash,
 )
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.materials import (
     InventoryAllocation,
     InventoryLotInbound,
     InventoryLotRead,
@@ -1464,6 +1464,13 @@ class MaterialsService:
             raise MaterialNotFoundError(f"material not found: {resource_id}")
         return self.get_material(record.material_uuid)
 
+    def search_materials(self, name: str) -> list[MaterialAggregateRead]:
+        """按名称精确搜索；与 get 系不同，未命中返回空列表而不抛错。"""
+        return [
+            self.get_material(record.material_uuid)
+            for record in self.repository.search_materials_by_name(name)
+        ]
+
     def get_tree(
         self, root_material_uuid: str, *, client_ref_map: Optional[dict[str, str]] = None
     ) -> MaterialTreeRead:
@@ -1579,7 +1586,17 @@ class MaterialsService:
             raise MaterialValidationError("material create operation is invalid")
 
         def apply(timestamp: int) -> _Applied[MaterialTreeRead]:
-            client_map = {node.client_ref: str(uuid4()) for node in value.nodes}
+            client_map: dict[str, str] = {}
+            for node in value.nodes:
+                if node.material_uuid is None:
+                    client_map[node.client_ref] = str(uuid4())
+                    continue
+                # 显式 uuid（adopt）：带条件的创建——uuid 已被占用即冲突
+                if self.repository.get_material(node.material_uuid) is not None:
+                    raise MaterialConflictError(
+                        f"material uuid already exists: {node.material_uuid}"
+                    )
+                client_map[node.client_ref] = node.material_uuid
             node_ordinals: dict[str, int] = {}
             used_ordinals: dict[str | None, set[int]] = {}
             next_ordinals: dict[str | None, int] = {}
@@ -1713,6 +1730,7 @@ class MaterialsService:
                     ordinal=node_ordinals[node.client_ref],
                     lot_uuid=identity.lot_uuid,
                     name=identity.name,
+                    display_name=identity.display_name or identity.name,
                     description=identity.description,
                     resource_type=identity.resource_type,
                     class_name=identity.class_name,
@@ -2816,6 +2834,7 @@ class MaterialsService:
                         "parent_material_uuid": identity.parent_material_uuid,
                         "lot_uuid": identity.lot_uuid,
                         "name": identity.name,
+                        "display_name": identity.display_name or identity.name,
                         "description": identity.description,
                         "machine_name": identity.machine_name,
                         "barcode": identity.barcode,

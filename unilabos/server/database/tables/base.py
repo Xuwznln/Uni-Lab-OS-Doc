@@ -7,7 +7,7 @@ from contextvars import ContextVar
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import Column, text
+from sqlalchemy import Column, Text, text
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
 

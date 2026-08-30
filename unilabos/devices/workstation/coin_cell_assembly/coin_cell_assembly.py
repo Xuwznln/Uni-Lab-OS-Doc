@@ -19,7 +19,7 @@ from unilabos.utils.log import logger
 import struct
 
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 
 def convert_resources_to_type(*args, **kwargs):

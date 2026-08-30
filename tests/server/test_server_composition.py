@@ -16,12 +16,13 @@ from unilabos.server.database.repositories import (
     RuntimeRepository,
     TelemetryRepository,
 )
+from unilabos.protocol.history import HistoryEventQuery
 from unilabos.config.config import BasicConfig
-from unilabos.server.scheduler.integration import (
-    get_edge_backend,
+from unilabos.server.backend.composition import (
+    get_execution_backend,
     get_materials_service,
     reset_for_test,
-    setup_job_execution_backend,
+    setup_execution_backend,
     setup_materials_service,
 )
 from unilabos.server.services import (
@@ -90,11 +91,37 @@ def test_host_startup_uses_four_new_writers_without_local_scheduler(
     monkeypatch.setattr(BasicConfig, "server_database_paths", paths)
     try:
         materials = setup_materials_service(database_paths=paths)
-        backend = setup_job_execution_backend(database_paths=paths)
+        backend = setup_execution_backend(database_paths=paths)
 
         assert get_materials_service() is materials
-        assert get_edge_backend() is backend
+        assert get_execution_backend() is backend
         assert backend.device_state.endpoint_uuid == "hostlink:test-host"
+        incident = backend.status_incidents.observe(
+            "pump-1",
+            "mode",
+            "Error",
+            {
+                "incidents": {
+                    "Error": {
+                        "code": "pump.mode.error",
+                        "hold": True,
+                    }
+                }
+            },
+        )
+        assert incident is not None
+        services = get_server_services()
+        assert services is not None
+        events = services.history.query_events(
+            HistoryEventQuery(
+                event_types=["action_availability"],
+                device_uuid="pump-1",
+            )
+        )
+        assert len(events) == 1
+        assert events[0].event_key == "pump.mode.error"
+        assert events[0].payload_uuid is not None
+        assert events[0].summary["event"] == "status_incident_required"
         assert {path.name for path in tmp_path.glob("*.db")} == {
             "runtime.db",
             "materials.db",

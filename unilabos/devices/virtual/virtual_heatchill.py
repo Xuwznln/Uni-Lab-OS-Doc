@@ -4,7 +4,7 @@ import time as time_module  # 重命名time模块，避免与参数冲突
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 class VirtualHeatChill:
     """Virtual heat chill device for HeatChillProtocol testing 🌡️"""

@@ -11,8 +11,8 @@ from unilabos.server.database.tables.telemetry import (
     TelemetryEventRecord,
     TelemetrySourceCursorRecord,
 )
-from unilabos.server.protocol.common import canonical_hash
-from unilabos.server.protocol.telemetry import (
+from unilabos.protocol.common import canonical_hash
+from unilabos.protocol.telemetry import (
     DeviceStateSnapshot,
     TelemetryEventQuery,
     TelemetryEventWrite,

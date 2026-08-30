@@ -13,7 +13,7 @@ from unilabos.server.database.tables.telemetry import (
     TelemetryEventRecord,
     TelemetrySourceCursorRecord,
 )
-from unilabos.server.protocol.telemetry import (
+from unilabos.protocol.telemetry import (
     DeviceStateSnapshot,
     TelemetryEventQuery,
     TelemetryEventWrite,

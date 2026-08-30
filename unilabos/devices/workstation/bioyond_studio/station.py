@@ -24,7 +24,7 @@ from pylabrobot.resources.resource import Resource as ResourcePLR
 from unilabos.devices.workstation.workstation_http_service import WorkstationHTTPService
 
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 
 def resource_bioyond_to_plr(*args, **kwargs):

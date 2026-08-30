@@ -11,7 +11,7 @@ from urllib.parse import quote
 import requests
 
 from unilabos.config.config import BasicConfig, HTTPConfig
-from unilabos.server.protocol.control import BackendCommandDocument
+from unilabos.protocol.control import BackendCommandDocument
 from unilabos.utils.tracing import inject_trace_context
 
 

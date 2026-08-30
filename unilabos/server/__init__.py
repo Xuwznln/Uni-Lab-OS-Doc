@@ -1,51 +1,14 @@
-"""UniLabOS 微后端的四库、工作流协议与执行桥。"""
+"""UniLabOS 微后端：四库、工作流权威与执行桥。
 
-from unilabos.server.database import (
-    DATABASE_SPECS,
-    DatabaseLayoutConflict,
-    DatabaseIdentityConflict,
-    HISTORY_DATABASE,
-    MATERIALS_DATABASE,
-    RUNTIME_DATABASE,
-    ServerDatabasePaths,
-    TELEMETRY_DATABASE,
-    DatabaseSpec,
-    initialize_database,
-    validate_distinct_database_paths,
-)
-from unilabos.server.composition import ServerServices
-from unilabos.server.database.repositories import (
-    HistoryRepository,
-    MaterialsRepository,
-    RuntimeRepository,
-    TelemetryRepository,
-)
-from unilabos.server.services import (
-    HistoryService,
-    MaterialsService,
-    RuntimeService,
-    TelemetryService,
-)
+子包按职责划分，请直接从深路径导入：
 
-__all__ = [
-    "DATABASE_SPECS",
-    "DatabaseLayoutConflict",
-    "DatabaseIdentityConflict",
-    "DatabaseSpec",
-    "HISTORY_DATABASE",
-    "HistoryRepository",
-    "HistoryService",
-    "MATERIALS_DATABASE",
-    "MaterialsRepository",
-    "MaterialsService",
-    "RUNTIME_DATABASE",
-    "RuntimeRepository",
-    "RuntimeService",
-    "ServerServices",
-    "ServerDatabasePaths",
-    "TELEMETRY_DATABASE",
-    "TelemetryRepository",
-    "TelemetryService",
-    "initialize_database",
-    "validate_distinct_database_paths",
-]
+- ``unilabos.server.database``：四个物理 SQLite 文件的 schema、布局与 Repository。
+- ``unilabos.server.services``：materials / runtime / telemetry / history 四域服务。
+- ``unilabos.server.composition``：``ServerServices`` 装配入口。
+- ``unilabos.server.backend``：调度器与云端 Backend 执行协调（区别于
+  ``unilabos.backend`` 传输大类）。
+- ``unilabos.server.api``：微后端 FastAPI 路由。
+
+本包 ``__init__`` 不做 eager re-export：协议层（``unilabos.protocol``）与表模块
+互有引用，顶层导入全家桶会在子模块加载途中制造循环。
+"""

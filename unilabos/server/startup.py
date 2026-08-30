@@ -26,7 +26,7 @@ class HostServerStack:
 def resolve_database_paths(
     args: Mapping[str, Any], *, working_dir: str | Path
 ) -> ServerDatabasePaths:
-    """解析四库路径并一次性绑定到进程配置。"""
+    """解析五库路径并一次性绑定到进程配置。"""
 
     root = str(
         args.get("server_database_root")
@@ -39,6 +39,7 @@ def resolve_database_paths(
             "materials": args.get("materials_db"),
             "telemetry": args.get("telemetry_db"),
             "history": args.get("history_db"),
+            "workflow": args.get("workflow_db"),
         }.items()
         if value is not None and str(value).strip()
     }
@@ -56,15 +57,15 @@ def setup_host_server_stack(
 ) -> HostServerStack:
     """装配 Host 唯一的微后端权威及其控制链路。"""
 
-    from unilabos.server.adapters.registry_materials import sync_registry_resources
+    from unilabos.resources.adapters.registry_materials import sync_registry_resources
     from unilabos.client.materials import (
         HTTPMaterialsClient,
         LocalMaterialsClient,
     )
-    from unilabos.server.scheduler.integration import (
+    from unilabos.server.backend.composition import (
         set_materials_gateway,
-        shutdown_edge_services,
-        setup_job_execution_backend,
+        shutdown_backend_services,
+        setup_execution_backend,
         setup_materials_service,
     )
 
@@ -88,24 +89,28 @@ def setup_host_server_stack(
         template_report = sync_registry_resources(registry, materials_gateway)
         set_materials_gateway(materials_gateway)
 
-        execution_backend = setup_job_execution_backend(
+        execution_backend = setup_execution_backend(
             control_client=communication_client,
             database_paths=paths,
             materials_gateway=materials_gateway,
         )
-        if BasicConfig.demo_mode:
-            from unilabos.server.scheduler.integration import (
-                setup_demo_workflow_authority,
+        # 调度权威归属：未显式配置云端地址时本机是默认权威（本地 Scheduler +
+        # Workflow API）；配置后调度在远端 Backend，本机纯执行。
+        from unilabos.server.backend.url import build_backend_websocket_url
+
+        if not build_backend_websocket_url():
+            from unilabos.server.backend.composition import (
+                setup_local_scheduler,
             )
 
-            setup_demo_workflow_authority(
-                database_path=paths.root / "workflow.db",
+            setup_local_scheduler(
+                database_path=paths.workflow_db,
                 backend=execution_backend,
             )
 
         host_network = None
         if args.get("backend") == "ros2":
-            from unilabos.server.scheduler.host_network import setup_host_network_service
+            from unilabos.backend.hostlink.network import setup_host_network_service
 
             host_network = setup_host_network_service(
                 material_gateway=materials_gateway
@@ -120,7 +125,7 @@ def setup_host_server_stack(
             host_network=host_network,
         )
     except BaseException:
-        shutdown_edge_services()
+        shutdown_backend_services()
         raise
 
 

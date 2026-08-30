@@ -11,8 +11,8 @@ import serial.tools.list_ports
 from serial import Serial
 from serial.serialutil import SerialException
 
-from unilabos.messages import Point3D
-from unilabos.device_runtime.node import DeviceNode
+from unilabos.experiments.models import Point3D
+from unilabos.backend.runtime.node import DeviceNode
 
 
 class GrblCNCConnectionError(Exception):

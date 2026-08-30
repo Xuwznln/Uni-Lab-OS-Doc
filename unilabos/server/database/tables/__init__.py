@@ -1,4 +1,4 @@
-"""四个独立 SQLite 数据库的 SQLModel 表映射与数据库规格。"""
+"""五个独立 SQLite 数据库的 SQLModel 表映射与数据库规格。"""
 
 from unilabos.server.database.tables.base import SchemaIdentityRecord
 from unilabos.server.database.tables.history import (
@@ -18,6 +18,10 @@ from unilabos.server.database.tables.telemetry import (
     TELEMETRY_DATABASE,
     TELEMETRY_TABLE_MODELS,
 )
+from unilabos.server.database.tables.workflow import (
+    WORKFLOW_DATABASE,
+    WORKFLOW_TABLE_MODELS,
+)
 
 
 DATABASE_TABLE_MODELS = {
@@ -25,6 +29,7 @@ DATABASE_TABLE_MODELS = {
     "materials": (SchemaIdentityRecord, *MATERIALS_TABLE_MODELS),
     "telemetry": (SchemaIdentityRecord, *TELEMETRY_TABLE_MODELS),
     "history": (SchemaIdentityRecord, *HISTORY_TABLE_MODELS),
+    "workflow": (SchemaIdentityRecord, *WORKFLOW_TABLE_MODELS),
 }
 
 __all__ = [
@@ -34,4 +39,5 @@ __all__ = [
     "MATERIALS_DATABASE",
     "RUNTIME_DATABASE",
     "TELEMETRY_DATABASE",
+    "WORKFLOW_DATABASE",
 ]

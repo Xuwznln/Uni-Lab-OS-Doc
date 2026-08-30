@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from unilabos.server.database.repositories.history import HistoryRepository
 from unilabos.server.database.tables.history import INLINE_PAYLOAD_LIMIT_BYTES
-from unilabos.server.protocol.history import (
+from unilabos.protocol.history import (
     ExternalPayloadWrite,
     HistoryEventAppend,
     HistoryEventQuery,

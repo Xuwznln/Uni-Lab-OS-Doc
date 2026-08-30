@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 from unilabos.client.materials import bind_payload
 from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.api.materials import create_materials_router
-from unilabos.server.protocol.common import InventoryMutation
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import (
     MaterialIdentityWrite,
     MaterialMove,
     MaterialNodeCreate,

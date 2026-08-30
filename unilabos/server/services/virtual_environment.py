@@ -7,8 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from unilabos.server.protocol.common import InventoryMutation
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import (
     MaterialDataWrite,
     MaterialDelete,
     MaterialIdentityWrite,
@@ -18,7 +18,7 @@ from unilabos.server.protocol.materials import (
     MaterialTreeCreate,
     SiteCreate,
 )
-from unilabos.server.protocol.virtual_environment import (
+from unilabos.protocol.virtual_environment import (
     VirtualEnvironmentCatalogRead,
     VirtualEnvironmentId,
     VirtualEnvironmentPresetRead,

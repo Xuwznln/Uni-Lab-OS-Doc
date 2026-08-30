@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from unilabos.server.workflow.authoring_kernel import AuthoringCatalogSnapshot
-from unilabos.server.workflow.catalog import PublishedSourceCatalog
-from unilabos.server.workflow.composite import (
+from unilabos.server.services.workflow.authoring_kernel import AuthoringCatalogSnapshot
+from unilabos.server.services.workflow.catalog import PublishedSourceCatalog
+from unilabos.server.services.workflow.composite import (
     CompositeAuthoring,
     project_published_workflow_contract,
 )

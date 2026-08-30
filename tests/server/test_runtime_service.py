@@ -8,7 +8,7 @@ import pytest
 
 from unilabos.server.database.repositories.runtime import RuntimeRepository
 from unilabos.server.database.tables.runtime import DeviceRoute
-from unilabos.server.protocol.runtime import (
+from unilabos.protocol.runtime import (
     AdapterCommandAck,
     AdapterCommandClaim,
     AdapterCommandEnqueue,

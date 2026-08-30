@@ -2,11 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from unilabos.server.scheduler.backend import (
+from unilabos.server.backend.execution import (
     JobExecutionBackend,
     make_device_status_policy_resolver,
 )
-from unilabos.server.scheduler.status_incidents import StatusIncidentManager
+from unilabos.server.backend.incidents import StatusIncidentManager
 
 
 def test_mirrored_registry_status_policy_is_resolved_and_normalized(

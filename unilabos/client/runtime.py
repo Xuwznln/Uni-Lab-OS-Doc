@@ -17,7 +17,7 @@ from unilabos.server.database.tables.runtime import (
     ExecutionJobRecord,
     ExecutorEndpointRecord,
 )
-from unilabos.server.protocol.runtime import (
+from unilabos.protocol.runtime import (
     AdapterCommandAck,
     AdapterCommandClaim,
     AdapterCommandEnqueue,

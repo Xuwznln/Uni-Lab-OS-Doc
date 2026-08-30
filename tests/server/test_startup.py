@@ -7,9 +7,11 @@ import pytest
 from unilabos.config.config import BasicConfig, HTTPConfig
 from unilabos.client.materials import LocalMaterialsClient
 from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.server.scheduler.integration import (
+from unilabos.server.backend.composition import (
     get_materials_gateway,
     get_materials_service,
+    get_scheduler,
+    get_workflow_service,
     reset_for_test,
 )
 from unilabos.server.services.materials import MaterialsService
@@ -44,11 +46,13 @@ def _reset_server_stack():
         BasicConfig.machine_name,
         BasicConfig.server_database_paths,
         HTTPConfig.material_microbackend_addr,
+        HTTPConfig.remote_addr,
     )
     reset_for_test()
     BasicConfig.backend = "hostlink"
     BasicConfig.machine_name = "test-host"
     HTTPConfig.material_microbackend_addr = ""
+    HTTPConfig.remote_addr = ""
     yield
     reset_for_test()
     (
@@ -56,6 +60,7 @@ def _reset_server_stack():
         BasicConfig.machine_name,
         BasicConfig.server_database_paths,
         HTTPConfig.material_microbackend_addr,
+        HTTPConfig.remote_addr,
     ) = previous
 
 
@@ -111,6 +116,45 @@ def test_host_stack_uses_external_materials_as_the_only_authority(
         assert len(external_client.list_templates()) == 1
     finally:
         external_service.repository.close()
+
+
+def test_host_stack_mounts_local_scheduler_by_default(tmp_path) -> None:
+    """未配置云端地址时，本机是默认调度权威（本地 Scheduler + Workflow API）。"""
+
+    setup_host_server_stack(
+        args={
+            "backend": "hostlink",
+            "server_database_root": str(tmp_path / "edge"),
+            "material_microbackend_addr": "",
+        },
+        working_dir=tmp_path,
+        registry=_Registry(),
+        communication_client=_communication_client(),
+    )
+
+    assert get_scheduler() is not None
+    assert get_workflow_service() is not None
+
+
+def test_host_stack_defers_scheduling_when_backend_address_configured(
+    tmp_path,
+) -> None:
+    """显式配置云端地址后调度权威在远端 Backend，本机不挂本地调度器。"""
+
+    HTTPConfig.remote_addr = "https://backend.example/api/v1"
+    setup_host_server_stack(
+        args={
+            "backend": "hostlink",
+            "server_database_root": str(tmp_path / "edge"),
+            "material_microbackend_addr": "",
+        },
+        working_dir=tmp_path,
+        registry=_Registry(),
+        communication_client=_communication_client(),
+    )
+
+    assert get_scheduler() is None
+    assert get_workflow_service() is None
 
 
 def test_host_stack_closes_partial_services_when_template_sync_fails(tmp_path) -> None:

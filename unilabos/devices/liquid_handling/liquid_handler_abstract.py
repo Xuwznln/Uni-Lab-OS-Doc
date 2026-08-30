@@ -25,7 +25,7 @@ from pylabrobot.resources import (
 )
 from typing_extensions import TypedDict
 
-from unilabos.device_runtime.node import DeviceNode
+from unilabos.backend.runtime.node import DeviceNode
 from unilabos.devices.liquid_handling.rviz_backend import UniLiquidHandlerRvizBackend
 from unilabos.registry.placeholder_type import ResourceSlot
 from unilabos.resources.objects.resource import (

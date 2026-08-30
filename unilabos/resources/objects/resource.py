@@ -43,12 +43,15 @@ EXTRA_RESOURCE_META_DATA = "unilabos_resource_meta_data"
 EXTRA_SAMPLE_UUID = "sample_uuid"
 EXTRA_UNILABOS_SAMPLE_UUID = "unilabos_sample_uuid"
 EXTRA_SITES = "sites"
+#: 权威根物料 extra 中登记的所属设备 id（host 动作自动推断来源/目标设备的依据）。
+EXTRA_BOUND_DEVICE = "unilabos_bound_device_id"
 
 
 class ResourceDictType(TypedDict):
     id: str
     uuid: str
     name: str
+    display_name: str
     description: str
     resource_schema: Dict[str, Any]
     model: Dict[str, Any]
@@ -81,6 +84,10 @@ class ResourceDict(BaseModel):
     id: str = Field(description="Resource ID")
     uuid: str = Field(description="Resource UUID")
     name: str = Field(description="Resource name")
+    display_name: str = Field(
+        description="Display name; authority falls back to name when empty",
+        default="",
+    )
     description: str = Field(description="Resource description", default="")
     resource_schema: Dict[str, Any] = Field(
         description="Resource schema",
@@ -199,6 +206,11 @@ class ResourceDict(BaseModel):
                 "资源缺少 UUID；请先通过微后端 runtime create 或 strict import"
             )
         content["uuid"] = resolved_uuid
+
+        # 展示名：旧输入可能带 null；空值不回退 name（权威库落库时回退），
+        # 避免快照上传把用户自定义展示名覆盖回 name。
+        if content.get("display_name") is None:
+            content["display_name"] = ""
 
         # substances 是全部内容物的唯一规范字段。旧 liquids 仅作为输入兼容，
         # 新 PLR 同时输出 substances/liquids 时以后者的全集 substances 为准。

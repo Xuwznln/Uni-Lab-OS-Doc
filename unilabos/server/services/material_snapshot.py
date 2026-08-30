@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from unilabos.server.protocol.common import canonical_hash
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import canonical_hash
+from unilabos.protocol.materials import (
     MaterialAggregateRead,
     MaterialSnapshot,
     MaterialSnapshotChange,

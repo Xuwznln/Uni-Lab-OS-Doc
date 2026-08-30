@@ -722,7 +722,7 @@ bioyond_dispensing_station:
     type: python
   config_info: []
   description: ''
-  displayname: bioyond_dispensing_station
+  displayname: BIOYOND 分液工作站
   handles: []
   icon: preparation_station.webp
   init_param_enforce: {}

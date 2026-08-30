@@ -1246,6 +1246,26 @@ class ResourceTreeSet(object):
                     site_cls
                 ):
                     d["sites"] = sites_for_plr_deserialization(res.sites)
+                # 权威快照重放以 Site 占用为准：把被占用 child 的 location 覆写
+                # 为对应 Site 坐标。权威 move 只落 parent/occupied、不回写子节点
+                # position，若按旧 position 反序列化，带 Site 校验的容器（如
+                # PRCXI deck）会把 child 误配回旧 Site。
+                children_by_uuid = {
+                    child.res_content.uuid: child_dict
+                    for child, child_dict in zip(node.children, d["children"])
+                }
+                for site in res.sites:
+                    occupied = site.occupied_material_uuid
+                    child_dict = children_by_uuid.get(occupied) if occupied else None
+                    position = site.pose.position if site.pose is not None else None
+                    if child_dict is None or position is None:
+                        continue
+                    child_dict["location"] = {
+                        "x": position.x,
+                        "y": position.y,
+                        "z": position.z,
+                        "type": "Coordinate",
+                    }
             return d
 
         plr_resources = []

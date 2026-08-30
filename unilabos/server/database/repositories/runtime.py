@@ -20,7 +20,7 @@ from unilabos.server.database.tables.runtime import (
     ExecutionJobRecord,
     ExecutorEndpointRecord,
 )
-from unilabos.server.protocol.common import canonical_json
+from unilabos.protocol.common import canonical_json
 
 
 def _load_json(value: Any, fallback: Any) -> Any:

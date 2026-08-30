@@ -389,6 +389,7 @@ def action(
     always_free: bool = False,
     is_protocol: bool = False,
     description: str = "",
+    display_name: str = "",
     auto_prefix: bool = False,
     parent: bool = False,
     node_type: Optional["NodeType"] = None,
@@ -423,6 +424,7 @@ def action(
         always_free: 是否为永久闲置动作 (不受排队限制)
         is_protocol: 是否为工作站协议 (protocol)。True 时运行时走 protocol generator 路径。
         description: 动作描述
+        display_name: 动作显示名（前端/工作流模板展示；缺省用方法名）
         auto_prefix: 若为 True，动作名使用 auto-{method_name} 形式（与无 @action 时一致）
         parent: 若为 True，当方法参数为空 (*args, **kwargs) 时，通过 MRO 从父类获取真实方法参数
         node_type: 动作的节点类型 (NodeType.ILAB / NodeType.MANUAL_CONFIRM)。
@@ -460,6 +462,7 @@ def action(
             "always_free": always_free,
             "is_protocol": is_protocol,
             "description": description,
+            "display_name": display_name,
             "auto_prefix": auto_prefix,
             "parent": parent,
         }

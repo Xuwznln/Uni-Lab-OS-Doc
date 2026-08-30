@@ -5,18 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from unilabos.server.workflow.authoring_identity import expanded_node_uuid
-from unilabos.server.workflow.authoring_kernel import AuthoringCatalogSnapshot
-from unilabos.server.workflow.catalog import PublishedSourceCatalog
-from unilabos.server.workflow.composite import (
+from unilabos.server.services.workflow.authoring_identity import expanded_node_uuid
+from unilabos.server.services.workflow.authoring_kernel import AuthoringCatalogSnapshot
+from unilabos.server.services.workflow.catalog import PublishedSourceCatalog
+from unilabos.server.services.workflow.composite import (
     CompositeAuthoring,
     project_published_workflow_contract,
 )
-from unilabos.server.workflow.composite_compatibility import (
+from unilabos.server.services.workflow.composite_compatibility import (
     classify_published_workflow_compatibility_projections,
     published_workflow_compatibility_projection,
 )
-from unilabos.server.workflow.service import WorkflowService
+from unilabos.server.services.workflow.service import WorkflowService
 from unilabos.server.database.repositories.workflow import WorkflowStore
 
 PARENT_UUID = "10000000-0000-4000-8000-000000000001"

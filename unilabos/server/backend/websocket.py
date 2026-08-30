@@ -15,11 +15,11 @@ from typing import Any, Optional
 
 import websockets
 
-from unilabos.hostlink.adapter_registry import get_execution_adapter
+from unilabos.backend.hostlink.adapter_registry import get_execution_adapter
 from unilabos.config.config import BasicConfig, WSConfig
 from unilabos.server.backend.session import BaseBackendClient
 from unilabos.server.backend.url import build_backend_websocket_url
-from unilabos.server.protocol.control import CONTROL_PROTOCOL_VERSION
+from unilabos.protocol.control import CONTROL_PROTOCOL_VERSION
 from unilabos.utils.log import get_comm_logger
 
 logger = get_comm_logger()
@@ -29,7 +29,7 @@ def _get_business_coordinator() -> Any:
     """延迟解析进程内微后端，避免通信工厂与组合根循环导入。"""
 
     try:
-        from unilabos.server.scheduler.integration import get_business_coordinator
+        from unilabos.server.backend.composition import get_business_coordinator
 
         return get_business_coordinator()
     except ImportError:
@@ -67,7 +67,10 @@ class BackendWebSocketClient(BaseBackendClient):
         if self.is_disabled or self._running:
             return
         if not self.websocket_url:
-            logger.error("[ControlProtocol] Backend WebSocket URL not configured")
+            # 未配置云端地址是本机调度模式的正常状态，不视为错误。
+            logger.info(
+                "[ControlProtocol] 未配置云端 Backend 地址，本机调度模式，不建立控制连接"
+            )
             return
         self._running = True
         self._thread = threading.Thread(

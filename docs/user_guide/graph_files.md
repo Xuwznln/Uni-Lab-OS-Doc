@@ -4,7 +4,7 @@
 
 ## 概述
 
-设备图文件采用 JSON 格式，节点定义基于 **`ResourceDict`** 标准模型（定义在 `unilabos.ros.nodes.resource_tracker`）。系统会自动处理旧格式并转换为标准格式，确保向后兼容性。
+设备图文件采用 JSON 格式，节点定义基于 **`ResourceDict`** 标准模型（定义在 `unilabos.backend.ros2.resource_tracker`）。系统会自动处理旧格式并转换为标准格式，确保向后兼容性。
 
 **核心概念**:
 
@@ -799,7 +799,7 @@ unilab --ak your_ak --sk your_sk -g test/experiments/Grignard_flow_batchreact_si
 
 ## 快速参考：ResourceDict 完整字段列表
 
-基于 `unilabos.ros.nodes.resource_tracker.ResourceDict` 的完整字段定义：
+基于 `unilabos.backend.ros2.resource_tracker.ResourceDict` 的完整字段定义：
 
 ```python
 class ResourceDict(BaseModel):
@@ -863,7 +863,7 @@ class ResourceDictPosition(BaseModel):
 - {doc}`../boot_examples/index` - 查看完整启动示例
 - {doc}`../developer_guide/add_device` - 了解如何添加新设备
 - {doc}`06_troubleshooting` - 图文件相关问题排查
-- 源码参考: `unilabos/ros/nodes/resource_tracker.py` - ResourceDict 标准定义
+- 源码参考: `unilabos/backend/ros2/resource_tracker.py` - ResourceDict 标准定义
 
 ## 获取帮助
 

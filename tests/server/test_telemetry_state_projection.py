@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from unilabos.server.database.repositories.telemetry import TelemetryRepository
-from unilabos.server.scheduler.telemetry_state import TelemetryDeviceStateProjection
+from unilabos.server.backend.telemetry import TelemetryDeviceStateProjection
 from unilabos.server.services.telemetry import TelemetryService
 
 

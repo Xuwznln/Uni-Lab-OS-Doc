@@ -58,7 +58,7 @@ from pylabrobot.resources import (
     TubeRack,
 )
 
-from unilabos.device_runtime.node import DeviceNode
+from unilabos.backend.runtime.node import DeviceNode
 from unilabos.devices.liquid_handling.liquid_handler_abstract import (
     LiquidHandlerAbstract,
     SimpleReturn,
@@ -269,10 +269,18 @@ class PRCXI9300Deck(Deck):
                 f"物料 {resource.name} 缺少微后端分配的 UUID，不能放入 Site"
             )
         loc = self._get_site_location(idx)
-        super().assign_child_resource(resource, location=loc, reassign=reassign)
-        self.sites[idx] = self.sites[idx].model_copy(
+        # 先登记 Site 占用再触发 PLR assign：assign 回调（如物料快照观察者）
+        # 会立刻冻结整棵树，占用滞后写入会让快照携带"物料已挂、Site 未占"的
+        # 中间态并覆盖权威。失败时回滚。
+        previous_site = self.sites[idx]
+        self.sites[idx] = previous_site.model_copy(
             update={"occupied_material_uuid": str(current_occupant_uuid)}
         )
+        try:
+            super().assign_child_resource(resource, location=loc, reassign=reassign)
+        except BaseException:
+            self.sites[idx] = previous_site
+            raise
 
     def unassign_child_resource(self, resource: Resource):
         """移除物料时同步清空内部 ResourceSite 的占用关系。"""
@@ -285,11 +293,20 @@ class PRCXI9300Deck(Deck):
             ),
             None,
         )
-        super().unassign_child_resource(resource)
+        # 同 assign：先清占用再触发 PLR unassign 回调，保证回调冻结的快照
+        # 状态自洽。失败时回滚。
+        previous_site = None
         if site_index is not None:
-            self.sites[site_index] = self.sites[site_index].model_copy(
+            previous_site = self.sites[site_index]
+            self.sites[site_index] = previous_site.model_copy(
                 update={"occupied_material_uuid": None}
             )
+        try:
+            super().unassign_child_resource(resource)
+        except BaseException:
+            if site_index is not None and previous_site is not None:
+                self.sites[site_index] = previous_site
+            raise
 
     def assign_child_at_slot(
         self, resource: Resource, slot: int, reassign: bool = False

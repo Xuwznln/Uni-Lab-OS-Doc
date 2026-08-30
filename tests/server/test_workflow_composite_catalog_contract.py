@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from unilabos.server.workflow.authoring_kernel import (
+from unilabos.server.services.workflow.authoring_kernel import (
     AuthoringCatalogError,
     AuthoringCatalogSnapshot,
 )
-from unilabos.server.workflow.composite_compatibility import (
+from unilabos.server.services.workflow.composite_compatibility import (
     classify_published_workflow_compatibility_projections,
 )
 

@@ -4,7 +4,7 @@ import re
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 class VirtualSolidDispenser:
     """

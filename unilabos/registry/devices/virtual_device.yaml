@@ -262,7 +262,7 @@ virtual_centrifuge:
     type: python
   config_info: []
   description: Virtual Centrifuge for CentrifugeProtocol Testing
-  displayname: virtual_centrifuge
+  displayname: 虚拟离心机
   handles:
   - data_key: vessel
     data_source: handle
@@ -699,7 +699,7 @@ virtual_column:
     type: python
   config_info: []
   description: Virtual Column Chromatography Device for RunColumn Protocol Testing
-  displayname: virtual_column
+  displayname: 虚拟柱层析装置
   handles:
   - data_key: from_vessel
     data_source: handle
@@ -1147,7 +1147,7 @@ virtual_filter:
     type: python
   config_info: []
   description: Virtual Filter for FilterProtocol Testing
-  displayname: virtual_filter
+  displayname: 虚拟过滤器
   handles:
   - data_key: vessel_in
     data_source: handle
@@ -1433,7 +1433,7 @@ virtual_gas_source:
     type: python
   config_info: []
   description: Virtual gas source
-  displayname: virtual_gas_source
+  displayname: 虚拟气体源
   handles:
   - data_key: fluid_out
     data_source: executor
@@ -2046,7 +2046,7 @@ virtual_heatchill:
     type: python
   config_info: []
   description: Virtual HeatChill for HeatChillProtocol Testing
-  displayname: virtual_heatchill
+  displayname: 虚拟加热冷却器
   handles:
   - data_key: vessel
     data_source: handle
@@ -2441,7 +2441,7 @@ virtual_multiway_valve:
     type: python
   config_info: []
   description: Virtual 8-Way Valve for flow direction control
-  displayname: virtual_multiway_valve
+  displayname: 虚拟八通阀
   handles:
   - data_key: fluid_in
     data_source: handle
@@ -2852,7 +2852,7 @@ virtual_rotavap:
     type: python
   config_info: []
   description: Virtual Rotary Evaporator for EvaporateProtocol Testing
-  displayname: virtual_rotavap
+  displayname: 虚拟旋转蒸发仪
   handles:
   - data_key: vessel_in
     data_source: handle
@@ -3116,7 +3116,7 @@ virtual_sample_demo:
     type: python
   config_info: []
   description: Virtual sample tracking demo device
-  displayname: virtual_sample_demo
+  displayname: 虚拟样品追踪演示设备
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -4090,7 +4090,7 @@ virtual_separator:
     type: python
   config_info: []
   description: Virtual Separator for SeparateProtocol Testing
-  displayname: virtual_separator
+  displayname: 虚拟分离器
   handles:
   - data_key: from_vessel
     data_source: handle
@@ -4458,7 +4458,7 @@ virtual_solenoid_valve:
     type: python
   config_info: []
   description: Virtual Solenoid Valve for simple on/off flow control
-  displayname: virtual_solenoid_valve
+  displayname: 虚拟电磁阀
   handles:
   - data_key: fluid_port_in
     data_source: handle
@@ -4880,7 +4880,7 @@ virtual_solid_dispenser:
   config_info: []
   description: Virtual Solid Dispenser for Add Protocol Testing - supports mass and
     molar additions
-  displayname: virtual_solid_dispenser
+  displayname: 虚拟固体分装器
   handles:
   - data_key: solid_out
     data_source: executor
@@ -5519,7 +5519,7 @@ virtual_stirrer:
     type: python
   config_info: []
   description: Virtual Stirrer for StirProtocol Testing
-  displayname: virtual_stirrer
+  displayname: 虚拟搅拌器
   handles:
   - data_key: vessel
     data_source: handle
@@ -6087,7 +6087,7 @@ virtual_transfer_pump:
     type: python
   config_info: []
   description: Virtual Transfer Pump for TransferProtocol Testing (Syringe-style)
-  displayname: virtual_transfer_pump
+  displayname: 虚拟传输泵
   handles:
   - data_key: fluid_port
     data_source: handle
@@ -6350,7 +6350,7 @@ virtual_vacuum_pump:
     type: python
   config_info: []
   description: Virtual vacuum pump
-  displayname: virtual_vacuum_pump
+  displayname: 虚拟真空泵
   handles:
   - data_key: fluid_in
     data_source: handle

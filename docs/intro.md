@@ -55,6 +55,7 @@ developer_guide/add_protocol.md
 developer_guide/examples/workstation_architecture.md
 developer_guide/examples/materials_construction_guide.md
 developer_guide/examples/materials_tutorial.md
+developer_guide/examples/materials_operations_guide.md
 developer_guide/examples/battery_plc_workstation.md
 ```
 

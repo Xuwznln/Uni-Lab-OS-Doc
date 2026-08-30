@@ -155,7 +155,7 @@ from typing import Dict, Any
 from unilabos.registry.decorators import device, action, topic_config, not_action
 
 try:
-    from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
+    from unilabos.backend.ros2.base_device_node import BaseROS2DeviceNode
 except ImportError:
     BaseROS2DeviceNode = None
 
@@ -1339,7 +1339,7 @@ def manual_confirm(
 
 节点启动时会扫描所有 `@device` 类和 Registry YAML，形成当前进程的设备能力清单。
 Host 不再生成 `req_device_registry_upload.json`，也不会调用旧 `/lab/resource`
-接口；物料模板由 `unilabos.server.adapters.registry_materials` 同步到微后端，
+接口；物料模板由 `unilabos.resources.adapters.registry_materials` 同步到微后端，
 设备动作、状态与通信能力则通过当前 Registry 和运行时 API 提供给 Backend/前端。
 
 调试时建议：

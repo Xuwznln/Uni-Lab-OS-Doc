@@ -40,7 +40,7 @@ def test_class_init_built_via_real_creator():
     """resolve_init_kwargs output flows through the real DeviceClassCreator."""
     from unilabos.registry.initializer import resolve_init_kwargs
     from unilabos.resources.resource_tracker import DeviceNodeResourceTracker
-    from unilabos.device_runtime.driver_creator import DeviceClassCreator
+    from unilabos.backend.runtime.driver_creator import DeviceClassCreator
     from tests.registry.fixtures.initializer_drivers import SharedDevice
 
     resolved = resolve_init_kwargs(ENTRY, node=NODE, config=CONFIG)
@@ -61,7 +61,7 @@ def test_class_init_via_instantiate_device_node(ros_context):
     ROS2DeviceNode whose driver_instance is the factory-constructed SharedDevice."""
     from unilabos.registry.registry import lab_registry
     from unilabos.resources.resource_tracker import ResourceDictInstance
-    from unilabos.ros.initialize_device import _instantiate_device_node
+    from unilabos.backend.ros2.initialize_device import _instantiate_device_node
 
     lab_registry.device_type_registry["vendor.lh.model_a"] = dict(ENTRY)
     try:
@@ -131,7 +131,7 @@ def test_pylabrobot_via_instantiate_device_node(ros_context):
     pytest.importorskip("pylabrobot")
     from unilabos.registry.registry import lab_registry
     from unilabos.resources.resource_tracker import ResourceDictInstance
-    from unilabos.ros.initialize_device import _instantiate_device_node
+    from unilabos.backend.ros2.initialize_device import _instantiate_device_node
 
     lab_registry.device_type_registry["pylabrobot.lh.chatterbox"] = dict(PLR_ENTRY)
     try:

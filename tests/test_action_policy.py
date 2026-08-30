@@ -4,14 +4,15 @@ import time
 
 import pytest
 
-from unilabos.server.scheduler.execution_queue import (
+from unilabos.server.backend.execution_queue import (
     DeviceActionManager,
     JobInfo,
     JobStatus,
     QueueItem,
 )
-from unilabos.server.scheduler.backend import JobExecutionBackend
+from unilabos.server.backend.execution import JobExecutionBackend
 from unilabos.registry.action_policy import (
+    SUCCESS_TYPE_CANCELLATION,
     SUCCESS_TYPE_NORMAL,
     SUCCESS_TYPE_OPERATOR_INTERVENTION,
     SUCCESS_TYPE_SKIP,
@@ -23,11 +24,11 @@ from unilabos.registry.ast_registry_scanner import (
     _extract_class_body,
 )
 from unilabos.registry.decorators import action, get_action_meta
-from unilabos.ros.nodes.base_device_node import (
+from unilabos.backend.ros2.base_device_node import (
     _coerce_device_error_info,
     _native_driver_result_failed,
 )
-from unilabos.ros.nodes.presets.host_node import HostNode
+from unilabos.backend.ros2.presets.host_node import HostNode
 from unilabos.utils.type_check import serialize_result_info
 
 
@@ -212,6 +213,22 @@ def test_failed_result_does_not_claim_success_type():
     result = serialize_result_info("failed", False, None)
 
     assert result == {"error": "failed", "suc": False, "return_value": None}
+
+
+def test_cancellation_result_keeps_failed_success_flag_and_reason():
+    result = serialize_result_info(
+        "cancelled",
+        False,
+        None,
+        suc_type=SUCCESS_TYPE_CANCELLATION,
+    )
+
+    assert result == {
+        "error": "cancelled",
+        "suc": False,
+        "return_value": None,
+        "suc_type": "cancellation",
+    }
 
 
 def test_policy_rejects_empty_class_options():
@@ -638,25 +655,6 @@ def test_operator_intervention_replaces_effective_result_but_keeps_raw_failure()
     assert json.loads(result_data["return_info"]) == return_info
 
 
-def test_monitor_bus_sse_contract_and_bounded_replay():
-    from unilabos.server.scheduler.monitor import MonitorBus, format_sse_event
-
-    bus = MonitorBus(history=2)
-    bus.emit("action", "job_status", {"job_id": "job-1", "status": "running"})
-    bus.emit("action", "job_status", {"job_id": "job-1", "status": "success"})
-    bus.emit("action", "job_status", {"job_id": "job-2", "status": "failed"})
-
-    sub_id, _, replay = bus.subscribe(channels={"action"}, backlog=10)
-    try:
-        assert [event["seq"] for event in replay] == [2, 3]
-        encoded = format_sse_event(replay[-1])
-        assert encoded.startswith("id: 3\nevent: action\ndata: ")
-        assert '"job_id": "job-2"' in encoded
-        assert encoded.endswith("\n\n")
-    finally:
-        bus.unsubscribe(sub_id)
-
-
 def test_retry_release_never_redispatches_on_host():
     host = FakeHostDecisionNode()
     decision_id = _begin_pending(host)
@@ -876,7 +874,8 @@ def test_cancel_pending_error_decision_rejects_late_backend_release():
 
     assert not host._pending_action_error_decisions
     assert host.device_manager.get_job_info("job-1") is None
-    assert host.finished[0][1] == "canceled"
+    assert host.finished[0][1] == "failed"
+    assert host.finished[0][2]["suc_type"] == SUCCESS_TYPE_CANCELLATION
     resolved_events = _local_event_data(host, "job_error_decision_resolved")
     assert resolved_events[0]["selected_action"] == "abort"
     assert resolved_events[0]["reason"] == "job_canceled"

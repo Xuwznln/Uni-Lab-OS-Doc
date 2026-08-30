@@ -15,8 +15,8 @@ from unilabos.server.database.tables.runtime import (
     ExecutionJobRecord,
     ExecutorEndpointRecord,
 )
-from unilabos.server.protocol.common import canonical_hash
-from unilabos.server.protocol.runtime import (
+from unilabos.protocol.common import canonical_hash
+from unilabos.protocol.runtime import (
     AdapterCommandAck,
     AdapterCommandClaim,
     AdapterCommandEnqueue,

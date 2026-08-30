@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 
-from unilabos.server.protocol.runtime import (
+from unilabos.protocol.runtime import (
     AdapterCommandAck,
     AdapterCommandClaim,
     AdapterCommandEnqueue,

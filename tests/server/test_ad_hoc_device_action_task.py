@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from unilabos.server.backend.scheduler.authority import SchedulerAuthorityProfile
 from unilabos.server.backend.scheduler.service import BackendScheduler
 from unilabos.server.api.workflow import create_workflow_app
-from unilabos.server.workflow.service import (
+from unilabos.server.services.workflow.service import (
     WorkflowConflict,
     WorkflowError,
     WorkflowService,

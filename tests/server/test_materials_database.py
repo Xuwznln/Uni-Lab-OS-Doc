@@ -51,11 +51,11 @@ def _insert_material(
         """
         INSERT INTO material(
             material_uuid,resource_id,template_uuid,parent_material_uuid,name,
-            resource_type,class_name,template_name,lifecycle_status,
+            display_name,resource_type,class_name,template_name,lifecycle_status,
             created_at_ms,updated_at_ms
-        ) VALUES (?,?,?,?,?,'resource','Resource',?,'active',1,1)
+        ) VALUES (?,?,?,?,?,?,'resource','Resource',?,'active',1,1)
         """,
-        (uuid, uuid, template_uuid, parent_uuid, uuid, template_uuid),
+        (uuid, uuid, template_uuid, parent_uuid, uuid, uuid, template_uuid),
     )
 
 

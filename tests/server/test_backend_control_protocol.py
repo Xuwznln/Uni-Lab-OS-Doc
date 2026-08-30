@@ -8,8 +8,8 @@ from pydantic import ValidationError
 from unilabos.server.backend.http import BackendHTTPClient
 from unilabos.server.backend.sync import InstanceSynchronizer, TemplateSynchronizer
 from unilabos.server.backend.websocket import BackendWebSocketClient
-from unilabos.server.protocol.common import canonical_hash
-from unilabos.server.protocol.control import BackendCommandNotice
+from unilabos.protocol.common import canonical_hash
+from unilabos.protocol.control import BackendCommandNotice
 
 
 class _Response:

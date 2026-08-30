@@ -11,8 +11,8 @@ from unilabos.server.api.backend import create_backend_router
 from unilabos.server.backend.execution import JobExecutionBackend
 from unilabos.server.backend.incidents import StatusIncidentManager
 from unilabos.server.api.workflow import install_workflow_api
-from unilabos.server.workflow.models import WorkflowNodeWrite
-from unilabos.server.workflow.service import WorkflowService
+from unilabos.protocol.workflow import WorkflowNodeWrite
+from unilabos.server.services.workflow.service import WorkflowService
 from unilabos.server.database.repositories.workflow import WorkflowStore
 
 

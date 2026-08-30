@@ -664,7 +664,7 @@ post_process_station:
     type: python
   config_info: []
   description: 后处理站
-  displayname: post_process_station
+  displayname: 后处理工作站
   handles: []
   icon: post_process_station.webp
   init_param_enforce: {}

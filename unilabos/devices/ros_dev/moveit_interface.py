@@ -9,7 +9,7 @@ from tf2_ros import Buffer, TransformListener
 from unilabos_msgs.action import SendCmd
 
 from unilabos.devices.ros_dev.moveit2 import MoveIt2
-from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
+from unilabos.backend.ros2.base_device_node import BaseROS2DeviceNode
 
 
 class MoveitInterface:

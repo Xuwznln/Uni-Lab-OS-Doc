@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 from unilabos.server.database.repositories.runtime import RuntimeRepository
 from unilabos.server.database.repositories.history import HistoryRepository
-from unilabos.server.protocol.common import canonical_hash
-from unilabos.server.protocol.control import (
+from unilabos.protocol.common import canonical_hash
+from unilabos.protocol.control import (
     BackendCommandDocument,
     BackendCommandNotice,
 )
-from unilabos.server.protocol.history import HistoryEventQuery
-from unilabos.server.protocol.runtime import CommandEnvelope
-from unilabos.server.scheduler.coordinator import WorkflowBusinessCoordinator
+from unilabos.protocol.history import HistoryEventQuery
+from unilabos.protocol.runtime import CommandEnvelope
+from unilabos.server.backend.coordinator import WorkflowBusinessCoordinator
 from unilabos.server.services.history import HistoryService
 from unilabos.server.services.runtime import RuntimeService
 

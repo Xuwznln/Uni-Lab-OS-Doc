@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from unilabos.server.database.tables.history import HistoryEventRecord
-from unilabos.server.protocol.history import (
+from unilabos.protocol.history import (
     HistoryEventAppend,
     HistoryEventQuery,
     ManualResultReplacement,

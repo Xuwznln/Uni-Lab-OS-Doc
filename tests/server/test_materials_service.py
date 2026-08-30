@@ -7,8 +7,8 @@ from uuid import uuid4
 import pytest
 
 from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.server.protocol.common import AggregatePrecondition, InventoryMutation
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import AggregatePrecondition, InventoryMutation
+from unilabos.protocol.materials import (
     MaterialDataWrite,
     MaterialDelete,
     MaterialIdentityWrite,
@@ -121,6 +121,93 @@ def test_template_and_material_tree_roundtrip_is_authoritative(tmp_path) -> None
         assert replay.data == result.data
     finally:
         service.repository.close()
+
+
+def test_material_display_name_defaults_and_patch(tmp_path) -> None:
+    """display_name 根字段：缺省回退 name（与 device 的 id/displayname 约定一致），
+    显式值保留，且可经 patch 单独修改。"""
+    from unilabos.protocol.materials import MaterialPatch
+
+    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    try:
+        _template(service, "deck-template", "deck", with_site=True)
+        _template(service, "tube-template", "tube")
+        named = _node("child", "tube", parent="root")
+        named.identity.display_name = "试管 A"
+        request = MaterialTreeCreate(nodes=[_node("root", "deck"), named])
+        result = service.create_tree(_mutation("create_material_tree"), request)
+
+        root_node, child_node = result.data.nodes
+        assert root_node.material.display_name == root_node.material.name == "root"
+        assert child_node.material.display_name == "试管 A"
+
+        patched = service.patch_material(
+            _mutation("patch_material"),
+            root_node.material.material_uuid,
+            MaterialPatch(display_name="主甲板"),
+        )
+        assert patched.data.material.display_name == "主甲板"
+        assert patched.data.material.name == "root"
+    finally:
+        service.repository.close()
+
+
+def test_create_tree_adopts_explicit_material_uuid(tmp_path) -> None:
+    """显式 material_uuid 是「带条件的创建」：以调用方 uuid 落库，uuid 已占用即冲突。
+
+    这是开机图物料对齐（materials.ensure）与出库扣减产物落库的服务端契约。
+    """
+    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    try:
+        _template(service, "deck-template", "deck", with_site=True)
+        _template(service, "tube-template", "tube")
+        root_uuid, child_uuid = str(uuid4()), str(uuid4())
+        request = MaterialTreeCreate(
+            nodes=[
+                _node("root", "deck").model_copy(
+                    update={"material_uuid": root_uuid}
+                ),
+                _node("child", "tube", parent="root").model_copy(
+                    update={"material_uuid": child_uuid}
+                ),
+            ],
+        )
+        result = service.create_tree(_mutation("create_material_tree"), request)
+
+        assert result.data.root_material_uuid == root_uuid
+        assert result.data.client_ref_map == {
+            "root": root_uuid,
+            "child": child_uuid,
+        }
+
+        # 同 uuid 再次创建（新 mutation，非幂等重放）→ 冲突
+        conflict = MaterialTreeCreate(
+            nodes=[
+                _node("root-again", "deck").model_copy(
+                    update={"material_uuid": root_uuid}
+                )
+            ],
+        )
+        with pytest.raises(MaterialConflictError, match="already exists"):
+            service.create_tree(_mutation("create_material_tree"), conflict)
+    finally:
+        service.repository.close()
+
+
+def test_create_tree_rejects_duplicate_explicit_uuid_in_one_tree() -> None:
+    """同一棵创建树中显式 material_uuid 重复在协议层即被拒绝。"""
+    duplicated = str(uuid4())
+    with pytest.raises(ValueError, match="material_uuid"):
+        MaterialTreeCreate(
+            nodes=[
+                _node("root", "deck").model_copy(
+                    update={"material_uuid": duplicated}
+                ),
+                _node("child", "tube", parent="root").model_copy(
+                    update={"material_uuid": duplicated}
+                ),
+            ],
+        )
 
 
 def test_position_update_checks_material_version(tmp_path) -> None:
@@ -409,5 +496,48 @@ def test_snapshot_moves_between_sites_in_one_transaction(tmp_path) -> None:
         assert service.repository.get_site(
             carrier_2.sites[0].site_uuid
         ).occupied_material_uuid == identities["tube"]
+    finally:
+        service.repository.close()
+
+
+def test_search_materials_by_name_returns_list(tmp_path) -> None:
+    """search 按 name 精确匹配返回列表；未命中返回 [] 而不是抛错。
+
+    根物料 name 有唯一索引（ux_material_root_name_active），但子物料可以与
+    其他根同名，search 需要把根与子节点的命中都返回。
+    """
+    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    try:
+        _template(service, "deck-template", "deck", with_site=True)
+        _template(service, "tube-template", "tube")
+
+        def _renamed(node, name):
+            return node.model_copy(
+                update={"identity": node.identity.model_copy(update={"name": name})}
+            )
+
+        # 树 1：根本身叫 shared-name
+        service.create_tree(
+            _mutation("create_material_tree"),
+            MaterialTreeCreate(nodes=[_renamed(_node("tube-a", "tube"), "shared-name")]),
+        )
+        # 树 2：根叫 other-root，其子节点叫 shared-name
+        service.create_tree(
+            _mutation("create_material_tree"),
+            MaterialTreeCreate(
+                nodes=[
+                    _renamed(_node("deck-b", "deck"), "other-root"),
+                    _renamed(_node("tube-b", "tube", parent="deck-b"), "shared-name"),
+                ]
+            ),
+        )
+
+        hits = service.search_materials("shared-name")
+        assert [item.material.name for item in hits] == ["shared-name", "shared-name"]
+        assert {item.material.resource_id for item in hits} == {
+            "resource-tube-a",
+            "resource-tube-b",
+        }
+        assert service.search_materials("missing-name") == []
     finally:
         service.repository.close()

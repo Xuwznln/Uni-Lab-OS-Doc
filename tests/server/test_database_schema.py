@@ -153,5 +153,6 @@ def test_total_table_count_stays_small() -> None:
         "materials": 11,
         "telemetry": 4,
         "history": 3,
+        "workflow": 17,
     }
-    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 26
+    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 43

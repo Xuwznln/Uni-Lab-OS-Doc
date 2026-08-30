@@ -3,7 +3,7 @@ import asyncio
 from typing import Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 
 class VirtualSolenoidValve:

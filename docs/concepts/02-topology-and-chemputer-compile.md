@@ -65,7 +65,7 @@ Goal received: {
 ]
 ```
 
-若想开发新的“编译”/“规划”功能，在 `unilabos/compilers` 实现一个新函数即可。详情请见 [添加新实验操作（Protocol）](../developer_guide/add_protocol.md)
+若想开发新的“编译”/“规划”功能，在 `unilabos/experiments/compile` 实现一个新函数即可。详情请见 [添加新实验操作（Protocol）](../developer_guide/add_protocol.md)
 
 ## 通信转接关系
 

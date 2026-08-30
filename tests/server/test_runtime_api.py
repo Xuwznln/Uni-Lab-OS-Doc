@@ -22,7 +22,7 @@ from unilabos.client.runtime import (
     RuntimeHTTPError,
 )
 from unilabos.server.database.tables.runtime import DeviceRoute
-from unilabos.server.protocol.runtime import (
+from unilabos.protocol.runtime import (
     AdapterCommandAck,
     AdapterCommandClaim,
     AdapterCommandEnqueue,
@@ -340,6 +340,19 @@ def test_explicit_outbox_commands_work_through_local_and_http_clients(
         service.repository.close()
 
 
+def _flatten_routes(routes):
+    """兼容新版 FastAPI：include_router 以 _IncludedRouter 包装子路由。"""
+    result = []
+    for route in routes:
+        result.append(route)
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            result.extend(_flatten_routes(inner.routes))
+        else:
+            result.extend(_flatten_routes(getattr(route, "routes", None) or []))
+    return result
+
+
 def test_runtime_http_errors_and_router_do_not_expose_delete(tmp_path) -> None:
     service = RuntimeService(RuntimeRepository(tmp_path / "runtime.db"))
     app = FastAPI()
@@ -347,8 +360,9 @@ def test_runtime_http_errors_and_router_do_not_expose_delete(tmp_path) -> None:
     try:
         runtime_routes = [
             route
-            for route in app.routes
+            for route in _flatten_routes(app.routes)
             if getattr(route, "path", "").startswith("/api/v1/runtime")
+            and hasattr(route, "methods")
         ]
         assert runtime_routes
         assert all("DELETE" not in route.methods for route in runtime_routes)

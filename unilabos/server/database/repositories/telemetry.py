@@ -17,8 +17,8 @@ from unilabos.server.database.tables.telemetry import (
     TelemetryEventRecord,
     TelemetrySourceCursorRecord,
 )
-from unilabos.server.protocol.common import canonical_json
-from unilabos.server.protocol.telemetry import TelemetryEventQuery
+from unilabos.protocol.common import canonical_json
+from unilabos.protocol.telemetry import TelemetryEventQuery
 
 
 def _load_json(value: Any) -> Any:

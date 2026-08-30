@@ -27,8 +27,8 @@ class ErrorDecision(BaseModel):
 
 
 def _hostlink_snapshot() -> dict[str, Any]:
-    from unilabos.backend.presets.hostlink.client import get_hostlink_client
-    from unilabos.backend.presets.hostlink.server import get_hostlink_server
+    from unilabos.backend.hostlink.client import get_hostlink_client
+    from unilabos.backend.hostlink.server import get_hostlink_server
 
     link_server = get_hostlink_server()
     link_client = get_hostlink_client()

@@ -14,9 +14,9 @@ from unilabos.client.materials import LocalMaterialsClient
 from unilabos.registry.registry import lab_registry
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.server.adapters.plr_materials import create_plr_materials
-from unilabos.server.adapters.registry_materials import register_resource_definitions
-from unilabos.server.protocol.common import InventoryMutation
+from unilabos.resources.adapters.plr_materials import create_plr_materials
+from unilabos.resources.adapters.registry_materials import register_resource_definitions
+from unilabos.protocol.common import InventoryMutation
 from unilabos.server.services.materials import MaterialsService
 
 

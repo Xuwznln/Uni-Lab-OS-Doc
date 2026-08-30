@@ -201,7 +201,7 @@ def test_ast_scanner_parses_available_sites(tmp_path):
         encoding="utf-8",
     )
 
-    devices, _ = _parse_file(source, tmp_path)
+    devices, _, _ = _parse_file(source, tmp_path)
     assert len(devices) == 1
     site = devices[0]["available_sites"][0]
     assert site["index"] == 0
@@ -237,7 +237,7 @@ def test_ast_scanner_parses_typed_site_definition_constant(tmp_path):
         encoding="utf-8",
     )
 
-    devices, _ = _parse_file(source, tmp_path)
+    devices, _, _ = _parse_file(source, tmp_path)
     assert len(devices) == 1
     site = devices[0]["available_sites"][0]
     assert site["index"] == "A1"
@@ -270,7 +270,7 @@ def test_ast_scanner_parses_real_workbench_typed_pose_models():
             for site in metadata["available_sites"]
         ] == expected_sites
 
-    devices, _ = _parse_file(source, repository_root)
+    devices, _, _ = _parse_file(source, repository_root)
     metadata = next(
         device for device in devices if device["device_id"] == "virtual_workbench"
     )

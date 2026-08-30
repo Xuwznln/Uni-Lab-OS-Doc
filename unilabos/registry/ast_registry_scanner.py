@@ -38,11 +38,13 @@ from unilabos.resources.objects.site import normalize_available_sites
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 13      # 缓存/entry 构建格式版本号，格式变更时递增
+_CACHE_VERSION = 14      # 缓存/entry 构建格式版本号，格式变更时递增
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
 _REGISTRY_DECORATOR_MODULE = "unilabos.registry.decorators"
+# @workflow 装饰器来源模块（模块级函数声明默认子工作流）
+_REGISTRY_WORKFLOW_MODULE = "unilabos.registry.workflows"
 # @subscribe 订阅装饰器来源模块（区分于注册表，这是运行时，订阅回调不应被当作 action）
 _SUBSCRIBE_DECORATOR_MODULE = "unilabos.utils.decorator"
 # placeholder_keys 常量来源模块（如 PLACEHOLDER_DEDUCT_RESOURCE），值需解析成字符串字面量
@@ -196,7 +198,8 @@ def scan_directory(
     changed since the last scan are served from cache without re-parsing.
 
     Returns:
-        {"devices": {device_id: meta, ...}, "resources": {resource_id: meta, ...}}
+        {"devices": {device_id: meta, ...}, "resources": {resource_id: meta, ...},
+         "workflows": {"module:function": meta, ...}}
 
     Args:
         root_dir: Directory to scan (e.g. "unilabos/devices").
@@ -233,25 +236,31 @@ def scan_directory(
     # --- Parallel scan (with cache fast-path) ---
     devices: Dict[str, dict] = {}
     resources: Dict[str, dict] = {}
+    workflows: Dict[str, dict] = {}
     cache_hits = 0
     cache_misses = 0
 
-    def _parse_one_cached(py_file: Path) -> Tuple[List[dict], List[dict], bool]:
-        """Returns (devices, resources, was_cache_hit)."""
+    def _parse_one_cached(py_file: Path) -> Tuple[List[dict], List[dict], List[dict], bool]:
+        """Returns (devices, resources, workflows, was_cache_hit)."""
         key = str(py_file)
         try:
             fp = _file_fingerprint(py_file)
         except OSError:
-            return [], [], False
+            return [], [], [], False
 
         cached_entry = cache_files.get(key)
         if cached_entry and _is_cache_hit(cached_entry, fp):
-            return cached_entry.get("devices", []), cached_entry.get("resources", []), True
+            return (
+                cached_entry.get("devices", []),
+                cached_entry.get("resources", []),
+                cached_entry.get("workflows", []),
+                True,
+            )
 
         try:
-            devs, ress = _parse_file(py_file, python_path)
+            devs, ress, flows = _parse_file(py_file, python_path)
         except (SyntaxError, Exception):
-            devs, ress = [], []
+            devs, ress, flows = [], [], []
 
         cache_files[key] = {
             "md5": fp["md5"],
@@ -259,13 +268,14 @@ def scan_directory(
             "mtime": fp["mtime"],
             "devices": devs,
             "resources": ress,
+            "workflows": flows,
         }
-        return devs, ress, False
+        return devs, ress, flows, False
 
     def _collect_results(futures_dict: Dict):
         nonlocal cache_hits, cache_misses
         for future in as_completed(futures_dict):
-            devs, ress, hit = future.result()
+            devs, ress, flows, hit = future.result()
             if hit:
                 cache_hits += 1
             else:
@@ -290,6 +300,9 @@ def scan_directory(
                             f"@resource id 重复: '{resource_id}' 同时出现在 {existing} 和 {new_file}"
                         )
                     resources[resource_id] = res
+            for flow in flows:
+                flow_key = f"{flow.get('module')}:{flow.get('function')}"
+                workflows[flow_key] = flow
 
     futures = {executor.submit(_parse_one_cached, f): f for f in py_files}
     _collect_results(futures)
@@ -300,6 +313,7 @@ def scan_directory(
     return {
         "devices": devices,
         "resources": resources,
+        "workflows": workflows,
         "_cache_stats": {"hits": cache_hits, "misses": cache_misses, "total": len(py_files)},
     }
 
@@ -352,13 +366,13 @@ def _detect_class_type(cls_node: ast.ClassDef, import_map: Dict[str, str]) -> st
 def _parse_file(
     filepath: Path,
     python_path: Path,
-) -> Tuple[List[dict], List[dict]]:
+) -> Tuple[List[dict], List[dict], List[dict]]:
     """
-    Parse a single .py file using ast and extract all @device-decorated classes
-    and @resource-decorated functions/classes.
+    Parse a single .py file using ast and extract all @device-decorated classes,
+    @resource-decorated functions/classes and module-level @workflow functions.
 
     Returns:
-        (devices, resources) -- two lists of metadata dicts.
+        (devices, resources, workflows) -- three lists of metadata dicts.
     """
     source = filepath.read_text(encoding="utf-8", errors="replace")
     tree = ast.parse(source, filename=str(filepath))
@@ -372,6 +386,7 @@ def _parse_file(
 
     devices: List[dict] = []
     resources: List[dict] = []
+    workflows: List[dict] = []
 
     for node in ast.iter_child_nodes(tree):
         # --- @device on classes ---
@@ -468,7 +483,7 @@ def _parse_file(
                 )
                 resources.append(res_meta)
 
-        # --- @resource on module-level functions ---
+        # --- @resource / @workflow on module-level functions ---
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             resource_decorator = _find_method_decorator(node, "resource")
             if resource_decorator is not None and _is_registry_decorator("resource", import_map):
@@ -478,8 +493,23 @@ def _parse_file(
                     func_node=node,
                 )
                 resources.append(res_meta)
+                continue
 
-    return devices, resources
+            workflow_decorator = _find_method_decorator(node, "workflow")
+            if workflow_decorator is not None and _is_workflow_decorator("workflow", import_map):
+                workflow_args = _extract_decorator_args(workflow_decorator, import_map)
+                workflows.append(
+                    {
+                        "module": module_path,
+                        "function": node.name,
+                        "display_name": str(workflow_args.get("display_name") or ""),
+                        "description": str(workflow_args.get("description") or ""),
+                        "tags": workflow_args.get("tags") or [],
+                        "file_path": str(filepath).replace("\\", "/"),
+                    }
+                )
+
+    return devices, resources, workflows
 
 
 _STATIC_MODEL_CALLS = frozenset(
@@ -701,6 +731,12 @@ def _is_registry_decorator(name: str, import_map: Dict[str, str]) -> bool:
     """Check that *name* was imported from ``unilabos.registry.decorators``."""
     source = import_map.get(name, "")
     return _REGISTRY_DECORATOR_MODULE in source
+
+
+def _is_workflow_decorator(name: str, import_map: Dict[str, str]) -> bool:
+    """Check that *name* was imported from ``unilabos.registry.workflows``."""
+    source = import_map.get(name, "")
+    return _REGISTRY_WORKFLOW_MODULE in source
 
 
 def _is_subscribe_decorator(name: str, import_map: Dict[str, str]) -> bool:
@@ -1001,6 +1037,7 @@ def _extract_class_body(
             action_args.setdefault("is_protocol", False)
             action_args.setdefault("feedback_interval", 1.0)
             action_args.setdefault("description", "")
+            action_args.setdefault("display_name", "")
             action_args.setdefault("auto_prefix", False)
             action_args.setdefault("parent", False)
             action_args.setdefault("error_policy", {})

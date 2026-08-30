@@ -252,7 +252,7 @@ class MyResourceSynchronizer(ResourceSynchronizer):
 
 ```python
 # 在 post_init 中上传初始 deck
-from unilabos.ros.nodes.base_device_node import ROS2DeviceNode
+from unilabos.backend.ros2.base_device_node import ROS2DeviceNode
 
 ROS2DeviceNode.run_async_func(
     self._ros_node.update_resource, True,

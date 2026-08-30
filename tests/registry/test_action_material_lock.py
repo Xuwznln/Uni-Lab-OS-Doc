@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from unilabos.device_runtime.definition import DeviceDefinition
+from unilabos.backend.runtime.definition import DeviceDefinition
 from unilabos.registry.ast_registry_scanner import _parse_file
 from unilabos.registry.decorators import action, get_action_meta
 from unilabos.registry.registry import Registry
@@ -43,7 +43,7 @@ def test_action_decorator_keeps_and_validates_material_parameter_names() -> None
 def _scan_entry(tmp_path: Path, source: str) -> tuple[dict, dict]:
     module_path = tmp_path / "material_lock_driver.py"
     module_path.write_text(source, encoding="utf-8")
-    devices, _resources = _parse_file(module_path, tmp_path)
+    devices, _resources, _workflows = _parse_file(module_path, tmp_path)
     ast_meta = devices[0]
     entry = Registry()._build_device_entry_from_ast(
         "material_lock_test",
@@ -110,15 +110,16 @@ class Driver:
 def test_host_material_actions_declare_their_authoritative_locks() -> None:
     """框架自带的物料动作不能只支持锁协议，却忘记实际声明。"""
 
+    repo_root = Path(__file__).parents[2]
     source = (
-        Path(__file__).parents[2]
+        repo_root
         / "unilabos"
-        / "ros"
-        / "nodes"
+        / "backend"
+        / "ros2"
         / "presets"
         / "host_node.py"
     )
-    devices, _resources = _parse_file(source, source.parents[4])
+    devices, _resources, _workflows = _parse_file(source, repo_root)
     host = next(
         device for device in devices if device["device_id"] == "host_node"
     )
@@ -131,9 +132,6 @@ def test_host_material_actions_declare_their_authoritative_locks() -> None:
         "materials_need_lock"
     ] == ["resource"]
     assert actions["transfer_resource"]["action_args"][
-        "materials_need_lock"
-    ] == ["resource", "mount_resource"]
-    assert actions["transfer_manual"]["action_args"][
         "materials_need_lock"
     ] == ["resource", "mount_resource"]
 

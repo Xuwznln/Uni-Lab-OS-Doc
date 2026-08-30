@@ -16,7 +16,7 @@ from unilabos.server.database.tables.history import (
     HistoryEventRecord,
     PayloadObjectRecord,
 )
-from unilabos.server.protocol.common import canonical_json
+from unilabos.protocol.common import canonical_json
 
 
 class HistoryRepository:

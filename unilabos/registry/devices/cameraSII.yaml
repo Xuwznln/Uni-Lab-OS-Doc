@@ -64,7 +64,7 @@ cameracontroller_device:
     type: python
   config_info: []
   description: Uni-Lab-OS 摄像头驱动（Linux USB 摄像头版，无 PTZ）
-  displayname: cameracontroller_device
+  displayname: USB 摄像头控制器
   handles: []
   icon: ''
   init_param_enforce: {}
