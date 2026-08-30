@@ -91,6 +91,23 @@ class DeviceAsyncMutex:
         node.create_task(_wake())
 
 
+async def run_blocking(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    """在正确的线程策略下执行阻塞调用（gateway / materials IO）。
+
+    设备协程既可能跑在 asyncio loop（HostLink 本地运行时，阻塞 IO 必须
+    挪到线程池），也可能由 rclpy executor 直接迭代（无运行中 loop，
+    ``asyncio.to_thread`` 会抛 no running event loop）。rclpy 多线程
+    executor 下阻塞当前 callback 线程是安全的，与 ROS2 原生同步
+    service 调用同语义。
+    """
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return func(*args, **kwargs)
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
 def run_node_coroutine(node: Any, coroutine: Any, timeout: float = 30.0) -> Any:
     """在节点自己的执行器上运行协程并阻塞等待结果（供非执行器线程调用）。
 
@@ -164,4 +181,9 @@ def schedule_async_func(
     return future
 
 
-__all__ = ["DeviceAsyncMutex", "run_node_coroutine", "schedule_async_func"]
+__all__ = [
+    "DeviceAsyncMutex",
+    "run_blocking",
+    "run_node_coroutine",
+    "schedule_async_func",
+]

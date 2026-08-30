@@ -1,4 +1,4 @@
-"""设备运行时到微后端 Materials Authority 的唯一资源服务边界。"""
+﻿"""设备运行时到微后端 Materials Authority 的唯一资源服务边界。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterator, Optional, Protocol, Sequence
 from uuid import uuid4
 
+from unilabos.backend.runtime.async_utils import run_blocking
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.resources.adapters.plr_materials import (
     CreatedPLRMaterials,
@@ -550,7 +551,7 @@ class AuthorityResourceService:
         device_uuid: str,
         resources: Any,
     ) -> CreatedPLRMaterials:
-        return await asyncio.to_thread(
+        return await run_blocking(
             self._create_sync,
             device_id,
             device_uuid,
@@ -720,7 +721,7 @@ class AuthorityResourceService:
         device_uuid: str,
         resources: Any,
     ) -> ResourceTreeSet:
-        return await asyncio.to_thread(
+        return await run_blocking(
             self._update_sync,
             device_id,
             device_uuid,
@@ -750,7 +751,7 @@ class AuthorityResourceService:
         循环承接。
         """
 
-        return await asyncio.to_thread(
+        return await run_blocking(
             self._update_sync,
             device_id,
             device_uuid,
@@ -799,7 +800,7 @@ class AuthorityResourceService:
         parent_material_uuid: Optional[str] = None,
         destination_site_uuid: Optional[str] = None,
     ) -> None:
-        await asyncio.to_thread(
+        await run_blocking(
             self.move_resource_sync,
             device_id,
             device_uuid,
@@ -837,7 +838,7 @@ class AuthorityResourceService:
         with_children: bool,
     ) -> ResourceTreeSet:
         del device_id
-        return await asyncio.to_thread(
+        return await run_blocking(
             self._get_sync,
             resources_uuid,
             with_children,
@@ -871,7 +872,7 @@ class AuthorityResourceService:
         with_children: bool,
     ) -> ResourceTreeSet:
         del device_id
-        return await asyncio.to_thread(
+        return await run_blocking(
             self.get_resource_by_id_sync,
             resource_id,
             with_children,
@@ -908,7 +909,7 @@ class AuthorityResourceService:
         device_uuid: str,
         resources_uuid: list[str],
     ) -> list[str]:
-        return await asyncio.to_thread(
+        return await run_blocking(
             self.delete_resources_sync,
             device_id,
             device_uuid,

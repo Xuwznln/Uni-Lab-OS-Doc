@@ -138,9 +138,10 @@ class DeviceNode(ABC):
         ``ResourceTreeSet`` 均可；重复节点在服务内按 uuid 去重。
         """
 
+        from unilabos.backend.runtime.async_utils import run_blocking
         from unilabos.resources import materials
 
-        return await asyncio.to_thread(materials.update, self, *resources)
+        return await run_blocking(materials.update, self, *resources)
 
     async def get_resource(
         self,

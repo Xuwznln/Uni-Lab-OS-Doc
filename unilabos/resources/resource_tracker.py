@@ -64,6 +64,35 @@ def sites_for_plr_deserialization(
     ]
 
 
+def repair_itemized_ordering(
+    config: Dict[str, Any], serialized_children: List[Dict[str, Any]]
+) -> None:
+    """按 children 实际顺序原地修复 ItemizedResource ``ordering`` 键序。
+
+    PLR ``ItemizedResource.get_item`` 按 ordering 键序的位置索引直取
+    children[idx]；若 config 途中经过键排序（如历史 canonical 存储），
+    键序会与 children 顺序错位，孔位标识整体错乱。ordering 的 value 是
+    item name，据此按 children 实际顺序重排键序即可无损还原。
+    """
+
+    ordering = config.get("ordering")
+    if not (isinstance(ordering, dict) and ordering and serialized_children):
+        return
+    child_positions = {
+        child["name"]: index for index, child in enumerate(serialized_children)
+    }
+    if all(
+        isinstance(item_name, str) and item_name in child_positions
+        for item_name in ordering.values()
+    ):
+        config["ordering"] = dict(
+            sorted(
+                ordering.items(),
+                key=lambda entry: child_positions[entry[1]],
+            )
+        )
+
+
 def _ensure_plr_uuid(resource: Optional["PLRResource"]) -> Optional[str]:
     if resource is None:
         return None
@@ -1238,6 +1267,7 @@ class ResourceTreeSet(object):
                 ],
                 "parent_name": res.parent_instance_name,
             }
+            repair_itemized_ordering(d, d["children"])
             if has_model:
                 d["model"] = res.config.get("model", None)
             if res.sites is not None:

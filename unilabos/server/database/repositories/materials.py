@@ -1,4 +1,4 @@
-"""``materials.db`` 的同步 Repository 和单写事务边界。"""
+﻿"""``materials.db`` 的同步 Repository 和单写事务边界。"""
 
 from __future__ import annotations
 
@@ -24,7 +24,20 @@ from unilabos.server.database.tables.materials import (
     ResourceTemplateRecord,
     SiteRecord,
 )
-from unilabos.protocol.common import canonical_json
+def stored_json(value: Any) -> str:
+    """存储层 JSON 序列化：保持键序，紧凑、无 NaN。
+
+    ``canonical_json`` 的 ``sort_keys`` 只服务哈希与幂等键；存储序列化必须
+    保序——PLR ``ItemizedResource.ordering`` 等结构依赖键序与 children 顺序
+    严格对应，重排会让重建实例的孔位标识错位。
+    """
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _load_json(value: Any, fallback: Any) -> Any:
@@ -239,10 +252,10 @@ class MaterialsRepository:
             (
                 values["template_uuid"], values["name"], values["display_name"],
                 values["resource_type"], values["class_name"], values["module_name"],
-                values["template_version"], canonical_json(values["category"]),
-                canonical_json(values["available_sites"]),
-                canonical_json(values["handles"]),
-                canonical_json(values["definition_json"]), values["definition_hash"],
+                values["template_version"], stored_json(values["category"]),
+                stored_json(values["available_sites"]),
+                stored_json(values["handles"]),
+                stored_json(values["definition_json"]), values["definition_hash"],
                 values["status"], values["created_at_ms"], values["updated_at_ms"],
                 values["deleted_at_ms"], values["version"],
             ),
@@ -262,10 +275,10 @@ class MaterialsRepository:
             (
                 values["name"], values["display_name"], values["resource_type"],
                 values["class_name"], values["module_name"], values["template_version"],
-                canonical_json(values["category"]),
-                canonical_json(values["available_sites"]),
-                canonical_json(values["handles"]),
-                canonical_json(values["definition_json"]), values["definition_hash"],
+                stored_json(values["category"]),
+                stored_json(values["available_sites"]),
+                stored_json(values["handles"]),
+                stored_json(values["definition_json"]), values["definition_hash"],
                 values["status"], values["updated_at_ms"], values["deleted_at_ms"],
                 values["version"], values["template_uuid"], values["version"] - 1,
             ),
@@ -416,7 +429,7 @@ class MaterialsRepository:
                 values["reservation_uuid"], values["task_uuid"],
                 values["node_uuid"], values["job_uuid"],
                 values["scheduler_revision"], values["request_hash"],
-                canonical_json(values["items"]), values["status"],
+                stored_json(values["items"]), values["status"],
                 values["expires_at_ms"], values["created_at_ms"],
                 values["updated_at_ms"], values["version"],
             ),
@@ -434,7 +447,7 @@ class MaterialsRepository:
             (
                 values["task_uuid"], values["node_uuid"], values["job_uuid"],
                 values["scheduler_revision"], values["request_hash"],
-                canonical_json(values["items"]), values["status"],
+                stored_json(values["items"]), values["status"],
                 values["expires_at_ms"], values["updated_at_ms"], values["version"],
                 values["reservation_uuid"], values["version"] - 1,
             ),
@@ -634,7 +647,7 @@ class MaterialsRepository:
             "meta_data_json",
         }
         params = [
-            canonical_json(values[name]) if name in json_fields else values[name]
+            stored_json(values[name]) if name in json_fields else values[name]
             for name in columns
         ]
         self.connection.execute(
@@ -658,10 +671,10 @@ class MaterialsRepository:
             values["parent_material_uuid"], values["ordinal"], values["lot_uuid"], values["name"],
             values["display_name"], values["description"], values["resource_type"], values["class_name"],
             values["machine_name"], values["barcode"], values["barcode_symbology"],
-            values["template_name"], canonical_json(values["resource_schema_json"]),
-            canonical_json(values["model_json"]), values["icon_uri"],
-            canonical_json(values["config_json"]), canonical_json(values["extra_json"]),
-            canonical_json(values["meta_data_json"]), values["lifecycle_status"],
+            values["template_name"], stored_json(values["resource_schema_json"]),
+            stored_json(values["model_json"]), values["icon_uri"],
+            stored_json(values["config_json"]), stored_json(values["extra_json"]),
+            stored_json(values["meta_data_json"]), values["lifecycle_status"],
             values["updated_at_ms"], values["deleted_at_ms"], values["version"],
             values["material_uuid"], values["version"] - 1,
         )
@@ -677,7 +690,7 @@ class MaterialsRepository:
         values = record.model_dump(mode="json")
         columns = tuple(values)
         params = [
-            canonical_json(values[name]) if name == "extra_json" else values[name]
+            stored_json(values[name]) if name == "extra_json" else values[name]
             for name in columns
         ]
         updates = ",".join(f"{name}=excluded.{name}" for name in columns[1:])
@@ -692,7 +705,7 @@ class MaterialsRepository:
         values = record.model_dump(mode="json", exclude={"substances"})
         columns = tuple(values)
         params = [
-            canonical_json(values[name]) if name == "data_json" else values[name]
+            stored_json(values[name]) if name == "data_json" else values[name]
             for name in columns
         ]
         updates = ",".join(f"{name}=excluded.{name}" for name in columns[1:])
@@ -723,8 +736,8 @@ class MaterialsRepository:
                     values["substance_uuid"], values["material_uuid"],
                     values["ordinal"], values["name"], values["quantity"],
                     values["quantity_unit"], values["physical_state"],
-                    canonical_json(values["composition"]),
-                    canonical_json(values["meta_data_json"]),
+                    stored_json(values["composition"]),
+                    stored_json(values["meta_data_json"]),
                     values["content_version"], values["observed_at_ms"],
                     values["updated_at_ms"], values["version"],
                 ),
@@ -752,7 +765,7 @@ class MaterialsRepository:
             "extra_json",
         }
         params = [
-            canonical_json(mapped[name]) if name in json_fields else mapped[name]
+            stored_json(mapped[name]) if name in json_fields else mapped[name]
             for name in columns
         ]
         self.connection.execute(
@@ -777,11 +790,11 @@ class MaterialsRepository:
                 values["schema_version"], values["owner_material_uuid"],
                 values["ordinal"], values["template_name"], values["site_index"], values["label"],
                 values["visible"], values["occupied_material_uuid"],
-                canonical_json(values["pose"]),
-                canonical_json(values["allowed_resource_categories"]),
+                stored_json(values["pose"]),
+                stored_json(values["allowed_resource_categories"]),
                 values["parent_link"], values["description"],
-                canonical_json(values["meta_data_json"]),
-                canonical_json(values["extra_json"]), values["changed_by_job_uuid"],
+                stored_json(values["meta_data_json"]),
+                stored_json(values["extra_json"]), values["changed_by_job_uuid"],
                 values["changed_by_command_uuid"], values["changed_at_ms"],
                 values["updated_at_ms"], values["deleted_at_ms"], values["version"],
                 values["site_uuid"], values["version"] - 1,
@@ -826,9 +839,9 @@ class MaterialsRepository:
             """,
             (
                 values["command_uuid"], values["effect_key"], values["job_uuid"],
-                values["operation"], canonical_json(values["request_json"]),
+                values["operation"], stored_json(values["request_json"]),
                 values["request_hash"], values["status"],
-                canonical_json(values["result_json"]),
+                stored_json(values["result_json"]),
                 values["ledger_sequence_start"], values["ledger_sequence_end"],
                 values["error_code"], values["error_message"],
                 values["started_at_ms"], values["updated_at_ms"],
@@ -854,7 +867,7 @@ class MaterialsRepository:
             WHERE command_uuid=? AND effect_key=? AND status='applying'
             """,
             (
-                canonical_json(dict(result)), ledger_sequence_start,
+                stored_json(dict(result)), ledger_sequence_start,
                 ledger_sequence_end, completed_at_ms, completed_at_ms,
                 command_uuid, effect_key,
             ),
@@ -875,7 +888,7 @@ class MaterialsRepository:
                 values["event_uuid"], values["aggregate_type"],
                 values["aggregate_uuid"], values["operation"],
                 values["previous_version"], values["aggregate_version"],
-                values["state_hash"], canonical_json(values["delta_json"]),
+                values["state_hash"], stored_json(values["delta_json"]),
                 values["job_uuid"], values["command_uuid"], values["effect_key"],
                 values["actor_type"], values["actor_uuid"], values["occurred_at_ms"],
                 values["delivery_status"], values["delivery_attempt_count"],

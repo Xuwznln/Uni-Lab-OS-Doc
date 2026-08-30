@@ -18,10 +18,10 @@ HostLink 入口；业务全部收敛在这里、且全部走 ``materials.*`` 门
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Awaitable, Callable, Dict, Sequence
 
 from unilabos.backend.hostlink.protocol import ActionType
+from unilabos.backend.runtime.async_utils import run_blocking as _run_blocking
 from unilabos.resources import materials
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.utils.log import logger
@@ -36,20 +36,6 @@ HOST_MATERIAL_ACTIONS = (
     "discard_resource",
     "transfer_resource",
 )
-
-
-async def _run_blocking(fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
-    """在正确的线程策略下执行阻塞的 materials 调用。
-
-    HostLink 设备节点跑在 asyncio loop 上，阻塞 IO 必须挪到线程池；
-    rclpy 协程没有 asyncio loop（多线程 executor），直接阻塞即可。
-    """
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return fn(*args, **kwargs)
-    return await asyncio.to_thread(fn, *args, **kwargs)
 
 
 def _normalize_point(value: Any) -> Dict[str, float]:

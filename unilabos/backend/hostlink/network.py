@@ -55,7 +55,16 @@ class HostNetworkService:
 
         self._refresh_hello_payload()
         self.server.register_handler(
+            ActionType.MATERIAL_TEMPLATE_LIST, self._material_template_list
+        )
+        self.server.register_handler(
+            ActionType.MATERIAL_TEMPLATE_CREATE, self._material_template_create
+        )
+        self.server.register_handler(
             ActionType.MATERIAL_CREATE, self._material_create
+        )
+        self.server.register_handler(
+            ActionType.MATERIAL_DATA_PUT, self._material_data_put
         )
         self.server.register_handler(
             ActionType.MATERIAL_GET_TREE, self._material_get_tree
@@ -255,6 +264,43 @@ class HostNetworkService:
         if gateway is None:
             raise RuntimeError("Host 尚未配置 materials authority")
         return gateway
+
+    def _material_template_list(
+        self, _data: dict[str, Any], _peer: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        return [
+            item.model_dump(mode="json", exclude_none=False)
+            for item in self._require_material_gateway().list_templates()
+        ]
+
+    def _material_template_create(
+        self, data: dict[str, Any], _peer: dict[str, Any]
+    ) -> dict[str, Any]:
+        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import ResourceTemplateWrite
+
+        mutation = InventoryMutation.model_validate(data)
+        value = ResourceTemplateWrite.model_validate(mutation.payload)
+        return self._require_material_gateway().create_template(
+            mutation, value
+        ).model_dump(mode="json", exclude_none=False)
+
+    def _material_data_put(
+        self, data: dict[str, Any], _peer: dict[str, Any]
+    ) -> dict[str, Any]:
+        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import MaterialDataWrite
+
+        material_uuid = str(data.get("material_uuid") or "").strip()
+        if not material_uuid:
+            raise ValueError("material.data.put requires material_uuid")
+        mutation_data = dict(data)
+        mutation_data.pop("material_uuid", None)
+        mutation = InventoryMutation.model_validate(mutation_data)
+        value = MaterialDataWrite.model_validate(mutation.payload)
+        return self._require_material_gateway().put_data(
+            mutation, material_uuid, value
+        ).model_dump(mode="json", exclude_none=False)
 
     def _material_create(
         self, data: dict[str, Any], _peer: dict[str, Any]

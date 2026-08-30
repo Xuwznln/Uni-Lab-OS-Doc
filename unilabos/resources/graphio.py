@@ -33,6 +33,7 @@ from unilabos.resources.resource_tracker import (
     extract_plr_sites,
     get_plr_template_name,
     plr_class_accepts_serialized_sites,
+    repair_itemized_ordering,
     sites_for_plr_deserialization,
     set_plr_template_name,
 )
@@ -739,6 +740,12 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
             if normalized_pose.position is not None
             else None
         )
+        serialized_children = (
+            [resource_ulab_to_plr_inner(child) for child in resource["children"]]
+            if isinstance(resource["children"], list)
+            else [resource_ulab_to_plr_inner(child) for child_id, child in resource["children"].items()]
+        )
+        repair_itemized_ordering(config, serialized_children)
         d = {
             "name": resource["name"],
             "type": config.get("type", resource["type"]),
@@ -753,11 +760,7 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
             "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},  # Resource如果没有rotation，是plr版本太低
             "category": resource["type"],
             "model": config.get("model", None),  # resource中deck没有model
-            "children": (
-                [resource_ulab_to_plr_inner(child) for child in resource["children"]]
-                if isinstance(resource["children"], list)
-                else [resource_ulab_to_plr_inner(child) for child_id, child in resource["children"].items()]
-            ),
+            "children": serialized_children,
             "parent_name": resource["parent"] if resource["parent"] is not None else None,
             **config,
         }
