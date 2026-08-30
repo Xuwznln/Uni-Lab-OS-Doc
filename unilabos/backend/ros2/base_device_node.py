@@ -1,3 +1,4 @@
+import inspect
 import io
 import json
 import threading
@@ -1881,6 +1882,24 @@ class ROS2DeviceNode:
             driver_params["device_id"] = device_id
             driver_params["registry_name"] = device_config.res_content.klass
             driver_params["resource_tracker"] = self.resource_tracker
+        else:
+            # 与 HostLink 运行时对齐（local_runtime._create_driver）：构造签名声明
+            # device_id/**kwargs 的纯 Python 驱动注入实例 id，驱动据此以图中的
+            # 设备 id 访问物料权威等实例级资源；声明 id 的旧驱动同样兼容。
+            init_signature = inspect.signature(driver_class.__init__)
+            init_parameters = {
+                name: parameter
+                for name, parameter in init_signature.parameters.items()
+                if name != "self"
+            }
+            init_accepts_kwargs = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in init_parameters.values()
+            )
+            if "device_id" in init_parameters or init_accepts_kwargs:
+                driver_params.setdefault("device_id", device_id)
+            elif "id" in init_parameters:
+                driver_params.setdefault("id", device_id)
         self._driver_instance = self._driver_creator.create_instance(driver_params)
         if self._driver_instance is None:
             logger.critical(f"设备实例创建失败 {driver_class}, params: {driver_params}")

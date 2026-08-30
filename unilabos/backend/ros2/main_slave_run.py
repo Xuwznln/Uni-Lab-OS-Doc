@@ -192,7 +192,13 @@ def slave(
         # 3.2 物料权威对齐：与 host 语义一致——开机不再上报创建、不再换 uuid。
         # 图中物料自带权威 uuid；权威已有则直接采用，没有则以原 uuid 显式创建
         # （materials.ensure，经 HostLink 访问 Host 上的微后端权威）。
-        if resources_config:
+        # --disable_hostlink 是显式的纯 ROS2 降级模式：无链路可达物料权威，
+        # 跳过对齐（资源仅存在于本地图），不阻断设备启动。
+        if resources_config and _hostlink_client is None:
+            logger.warning(
+                f"HostLink 未启用，跳过 Slave 物料权威对齐: {len(resources_config.trees)} 棵树仅存在于本地图"
+            )
+        elif resources_config:
             from unilabos.resources import materials
 
             ensured = materials.ensure(resources_config)

@@ -756,6 +756,22 @@ class HostNode(BaseROS2DeviceNode):
         u = uuid.UUID(item.job_id)
         device_id = item.device_id
         action_name = item.action_name
+        if not action_type:
+            # 工作流节点可能不带 action_type（如 @workflow ctx.run 指向不在
+            # host 启动图中的 slave 设备，构建时查不到类）。派发时以 host 持有
+            # 的设备能力副本兜底：本地设备装配时写入，slave 设备经
+            # node_info_update 上报镜像，二者均以动作裸名/auto- 名索引。
+            fallback_mappings = self._action_value_mappings.get(device_id) or {}
+            fallback_mapping = fallback_mappings.get(action_name) or fallback_mappings.get(
+                f"auto-{action_name}"
+            )
+            if isinstance(fallback_mapping, dict):
+                raw_type = fallback_mapping.get("type")
+                if isinstance(raw_type, str) and raw_type:
+                    action_type = raw_type
+                    self.lab_logger().info(
+                        f"[Host Node] action_type 兜底解析: {device_id}/{action_name} -> {action_type}"
+                    )
         if BasicConfig.test_mode:
             action_id = f"/devices/{device_id}/{action_name}"
             self.lab_logger().info(
@@ -785,7 +801,19 @@ class HostNode(BaseROS2DeviceNode):
         if action_name == "test_latency" and server_info is not None:
             self.server_latest_timestamp = server_info.get("send_timestamp", 0.0)
         if action_id not in self._action_clients:
-            raise ValueError(f"ActionClient {action_id} not found.")
+            # UniLabJsonCommand 走设备节点固定存在的 _execute_driver_command[_async]
+            # （StrSingleInput）server；client 只靠 DDS discovery 建立会引入时序竞态
+            # （slave 远端设备/刚启动的设备可能尚未被扫描到），此处按固定类型现场
+            # 补建，可达性交由下方带超时的 wait_for_server 判定。
+            if action_id.endswith(("/_execute_driver_command", "/_execute_driver_command_async")):
+                self._action_clients[action_id] = ActionClient(
+                    self, StrSingleInput, action_id, callback_group=self.callback_group
+                )
+                self.lab_logger().info(
+                    f"[Host Node] Created ActionClient (OnDemand): {action_id}"
+                )
+            else:
+                raise ValueError(f"ActionClient {action_id} not found.")
 
         self._inflight_goal_jobs.add(item.job_id)
         try:
@@ -795,7 +823,10 @@ class HostNode(BaseROS2DeviceNode):
             # self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {str(goal_msg)[:1000]}")
             self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {action_kwargs}")
             self.lab_logger().trace(f"[Host Node] Sending goal for {action_id}: {goal_msg}")
-            action_client.wait_for_server()
+            if not action_client.wait_for_server(timeout_sec=30.0):
+                raise RuntimeError(
+                    f"Action server {action_id} 在 30s 内不可达（设备离线或尚未完成启动）"
+                )
             goal_uuid_obj = UUID(uuid=list(u.bytes))
 
             future = action_client.send_goal_async(
