@@ -171,7 +171,7 @@ VIRTUAL_WORKBENCH_AVAILABLE_SITES: List[SiteDefinition] = [
 
 @device(
     id="virtual_workbench",
-    displayname="虚拟工作台",
+    display_name="虚拟工作台",
     category=["virtual_device"],
     description="Virtual Workbench with 1 robotic arm and 3 heating stations for concurrent material processing",
     available_sites=VIRTUAL_WORKBENCH_AVAILABLE_SITES,

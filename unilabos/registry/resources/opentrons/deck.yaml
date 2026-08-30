@@ -5,7 +5,7 @@ OTDeck:
     module: pylabrobot.resources.opentrons.deck:OTDeck
     type: pylabrobot
   description: Opentrons deck
-  displayname: Opentrons OT 台面
+  display_name: Opentrons OT 台面
   handles: []
   icon: ''
   init_param_schema: {}

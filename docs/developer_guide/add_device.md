@@ -21,7 +21,7 @@ from unilabos.registry.decorators import device, topic_config
     id="mock_gripper",
     category=["gripper"],
     description="Mock Gripper",
-    displayname="模拟夹爪",
+    display_name="模拟夹爪",
 )
 class MockGripper:
     def __init__(self):
@@ -197,7 +197,7 @@ from unilabos.registry.decorators import device, topic_config
     id="my_device",
     category=["general"],
     description="My Device",
-    displayname="我的设备",
+    display_name="我的设备",
 )
 class MyDevice:
     """设备类文档字符串
@@ -917,7 +917,7 @@ from unilabos.registry.decorators import device
     id="my_heating_device",
     category=["heating"],
     description="My Heating Device",
-    displayname="加热设备",
+    display_name="加热设备",
     icon="heater.webp",
 )
 class MyDevice:
@@ -927,7 +927,7 @@ class MyDevice:
 - `id`：设备唯一标识符，用于注册表匹配；只能包含英文大小写字母、数字、下划线，不能包含中文、空格、短横线、点号或其他符号
 - `category`：分类列表，前端用于分组显示
 - `description`：设备描述
-- `displayname`：设备显示名称，用于 UI 展示中文名或更友好的名称；不要把显示名写进 `id`
+- `display_name`：设备显示名称，用于 UI 展示中文名或更友好的名称；不要把显示名写进 `id`
 - `icon`：图标文件名（可选）
 
 ### 2. 使用 `@topic_config` 声明需要广播的状态

@@ -124,7 +124,7 @@ def test_template_and_material_tree_roundtrip_is_authoritative(tmp_path) -> None
 
 
 def test_material_display_name_defaults_and_patch(tmp_path) -> None:
-    """display_name 根字段：缺省回退 name（与 device 的 id/displayname 约定一致），
+    """display_name 根字段：缺省回退 name（与 device 的 id/display_name 约定一致），
     显式值保留，且可经 patch 单独修改。"""
     from unilabos.protocol.materials import MaterialPatch
 

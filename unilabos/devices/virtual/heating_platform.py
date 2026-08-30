@@ -89,7 +89,7 @@ VIRTUAL_HEATING_PLATFORM_SITES = [
 
 @device(
     id="virtual_heating_platform",
-    displayname="三工位虚拟加热平台",
+    display_name="三工位虚拟加热平台",
     category=["virtual_device", "heating"],
     description="HostLink demo platform with three independently heated material sites",
     available_sites=VIRTUAL_HEATING_PLATFORM_SITES,

@@ -94,7 +94,7 @@ serial:
   config_info: []
   description: Serial communication interface, used when sharing same serial port
     for multiple devices
-  displayname: 串口通讯
+  display_name: 串口通讯
   handles: []
   icon: ''
   init_param_enforce: {}

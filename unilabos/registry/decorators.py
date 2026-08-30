@@ -15,7 +15,7 @@ Usage:
         id="solenoid_valve_mock",
         category=["pump_and_valve"],
         description="模拟电磁阀设备",
-        displayname="模拟电磁阀",
+        display_name="模拟电磁阀",
         handles=[
             InputHandle(key="in", data_type="fluid", label="in", side=Side.NORTH),
             OutputHandle(key="out", data_type="fluid", label="out", side=Side.SOUTH),
@@ -256,7 +256,6 @@ def device(
     id_meta: Optional[Dict[str, Dict[str, Any]]] = None,
     category: Optional[List[str]] = None,
     description: str = "",
-    displayname: str = "",
     display_name: str = "",
     icon: str = "",
     version: str = "1.0.0",
@@ -282,8 +281,7 @@ def device(
         id_meta: 每个 device_id 的覆盖元数据 (handles/description/icon/model)
         category: 设备分类标签列表 (必填)
         description: 设备描述
-        displayname: 人类可读的设备显示名称，缺失时默认使用 id
-        display_name: 兼容旧代码的显示名称参数；新代码优先使用 displayname
+        display_name: 人类可读的设备显示名称，缺失时默认使用 id
         icon: 图标路径
         version: 版本号
         handles: 设备端口列表 (单设备或 id_meta 未覆盖时使用)
@@ -336,11 +334,10 @@ def device(
     if category is None:
         raise ValueError("@device category 必填")
 
-    resolved_display_name = displayname or display_name
     base_meta = {
         "category": category,
         "description": description,
-        "displayname": resolved_display_name,
+        "display_name": display_name,
         "icon": icon,
         "version": version,
         "handles": _device_handles_to_list(handles),
@@ -516,7 +513,7 @@ def resource(
     id: str,
     category: List[str],
     description: str = "",
-    displayname: str = "",
+    display_name: str = "",
     icon: str = "",
     version: str = "1.0.0",
     handles: Optional[List[_DeviceHandleBase]] = None,
@@ -532,7 +529,7 @@ def resource(
         id: 注册表唯一标识 (必填, 不可重复)
         category: 资源分类标签列表 (必填)
         description: 资源描述
-        displayname: 人类可读的资源显示名称，缺失时默认使用 id
+        display_name: 人类可读的资源显示名称，缺失时默认使用 id
         icon: 图标路径
         version: 版本号
         handles: 端口列表 (InputHandle / OutputHandle)
@@ -545,7 +542,7 @@ def resource(
             "resource_id": id,
             "category": category,
             "description": description,
-            "displayname": displayname,
+            "display_name": display_name,
             "icon": icon,
             "version": version,
             "handles": _device_handles_to_list(handles),
@@ -587,7 +584,7 @@ def get_device_meta(cls, device_id: Optional[str] = None) -> Optional[Dict[str, 
         "handles",
         "available_sites",
         "description",
-        "displayname",
+        "display_name",
         "icon",
         "model",
         "supported_backends",

@@ -2228,7 +2228,7 @@ bioyond_cell:
     type: python
   config_info: []
   description: ''
-  displayname: BIOYOND 细胞工作站
+  display_name: BIOYOND 细胞工作站
   handles: []
   icon: benyao2.webp
   init_param_enforce: {}

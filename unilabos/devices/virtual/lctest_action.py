@@ -65,7 +65,7 @@ class TestResourceActionReturn(TypedDict):
 
 @device(
     id="test_action",
-    displayname="测试动作设备",
+    display_name="测试动作设备",
     category=["virtual"],
     description="用于测试动作调用、资源参数、设备参数、返回值和 workflow handle 链路的虚拟设备",
 )

@@ -35,7 +35,7 @@ def registry_entry(monkeypatch: pytest.MonkeyPatch) -> None:
                 ),
                 "type": "pylabrobot",
             },
-            "displayname": "PRCXI 300ul 枪头盒",
+            "display_name": "PRCXI 300ul 枪头盒",
         },
     )
 

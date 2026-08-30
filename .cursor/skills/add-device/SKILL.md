@@ -112,7 +112,7 @@ from unilabos.registry.decorators import device
     id="my_device_vendor",           # 注册表唯一标识（必填，只能包含英文、数字、下划线）
     category=["temperature"],         # 分类标签列表（必填）
     description="设备描述",            # 设备描述
-    displayname="显示名称",            # UI 显示名称（默认用 id）
+    display_name="显示名称",            # UI 显示名称（默认用 id）
     icon="DeviceIcon.webp",           # 图标文件名
     version="1.0.0",                  # 版本号
     device_type="python",             # "python" 或 "ros2"
@@ -125,8 +125,8 @@ from unilabos.registry.decorators import device
 @device(
     ids=["pump_vendor_model_A", "pump_vendor_model_B"],
     id_meta={
-        "pump_vendor_model_A": {"handles": [...], "description": "型号 A", "displayname": "泵型号 A"},
-        "pump_vendor_model_B": {"handles": [...], "description": "型号 B", "displayname": "泵型号 B"},
+        "pump_vendor_model_A": {"handles": [...], "description": "型号 A", "display_name": "泵型号 A"},
+        "pump_vendor_model_B": {"handles": [...], "description": "型号 B", "display_name": "泵型号 B"},
     },
     category=["pump_and_valve"],
 )
@@ -135,7 +135,7 @@ from unilabos.registry.decorators import device
 **ID 与显示名规则：**
 - `id` / `ids` 是注册表稳定标识，只能包含英文大小写字母、数字、下划线，推荐格式为 `vendor_model` 或 `category_vendor_model`。
 - `id` / `ids` 不能包含中文、空格、短横线、点号或其他符号；不要把中文设备名放进 id。
-- 中文名、品牌型号展示名、UI 友好名称使用 `displayname`，不要塞进 `id`。
+- 中文名、品牌型号展示名、UI 友好名称使用 `display_name`，不要塞进 `id`。
 
 ### @action — 动作方法装饰器
 
@@ -334,7 +334,7 @@ from unilabos.registry.decorators import action, device, not_action, topic_confi
     id="my_device",
     category=["my_category"],
     description="设备描述",
-    displayname="设备显示名",
+    display_name="设备显示名",
 )
 class MyDevice:
     """设备类说明。"""
@@ -555,7 +555,7 @@ unilab --check_mode --skip_env_check
 ## 常见错误清单
 
 - 缺少 `@device`：设备不会被 AST 扫描发现。
-- `@device(id=...)` 使用中文、点号、短横线或空格：id 必须只包含英文、数字、下划线，显示名称用 `displayname`。
+- `@device(id=...)` 使用中文、点号、短横线或空格：id 必须只包含英文、数字、下划线，显示名称用 `display_name`。
 - 只有 `@property` 没有 `@topic_config()`：属性不会稳定广播到 `status_types`。
 - `post_init` 没有 `@not_action`：会被误暴露为动作。
 - `self.data = {}`：空字典会导致属性读取和 schema 初始数据不稳定，必须预填充每个状态键。

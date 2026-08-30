@@ -5,7 +5,7 @@ container:
     module: unilabos.resources.presets.container:get_regular_container
     type: pylabrobot
   description: regular organic container
-  displayname: 通用有机容器
+  display_name: 通用有机容器
   handles:
   - data_key: fluid_in
     data_source: handle

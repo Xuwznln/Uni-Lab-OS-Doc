@@ -263,10 +263,10 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
         """registry 可实例化资源类目录（前端出库选择器的数据源）。
 
         只列 pylabrobot 类型（可被 /instantiate 实例化）；显示名走 registry
-        displayname 约定，缺省回退资源类 id。
+        display_name 约定，缺省回退资源类 id。
         """
         from unilabos.registry.registry import lab_registry
-        from unilabos.registry.utils import resolve_registry_displayname
+        from unilabos.registry.utils import resolve_registry_display_name
 
         items = []
         for resource_id, entry in lab_registry.resource_type_registry.items():
@@ -278,8 +278,8 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
             items.append(
                 {
                     "registry_class": resource_id,
-                    "display_name": resolve_registry_displayname(
-                        entry.get("displayname"), resource_id
+                    "display_name": resolve_registry_display_name(
+                        entry.get("display_name"), resource_id
                     ),
                 }
             )

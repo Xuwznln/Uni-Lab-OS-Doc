@@ -6596,7 +6596,7 @@ workstation:
     type: python
   config_info: []
   description: Workstation
-  displayname: 通用工作站
+  display_name: 通用工作站
   handles: []
   icon: ''
   init_param_enforce: {}

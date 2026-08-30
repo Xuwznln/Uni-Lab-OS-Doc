@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from unilabos.registry.backend_metadata import normalize_supported_backends
 from unilabos.registry.material_locks import normalize_material_parameter_names
-from unilabos.registry.utils import resolve_registry_displayname
+from unilabos.registry.utils import resolve_registry_display_name
 from unilabos.resources.objects.site import normalize_available_sites
 
 
@@ -38,7 +38,7 @@ from unilabos.resources.objects.site import normalize_available_sites
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 14      # 缓存/entry 构建格式版本号，格式变更时递增
+_CACHE_VERSION = 15      # 缓存/entry 构建格式版本号，格式变更时递增
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 # 合法的装饰器来源模块
@@ -414,7 +414,7 @@ def _parse_file(
 
                 _validate_device_ids(device_ids)
                 id_meta = device_args.get("id_meta") or {}
-                displayname = device_args.get("displayname", "")
+                display_name = device_args.get("display_name", "")
                 device_type = device_args.get("device_type") or _detect_class_type(
                     node, import_map
                 )
@@ -424,7 +424,7 @@ def _parse_file(
                     "file_path": str(filepath).replace("\\", "/"),
                     "category": device_args.get("category", []),
                     "description": device_args.get("description", ""),
-                    "displayname": displayname,
+                    "display_name": display_name,
                     "icon": device_args.get("icon", ""),
                     "version": device_args.get("version", "1.0.0"),
                     "device_type": device_type,
@@ -453,7 +453,7 @@ def _parse_file(
                         "handles",
                         "available_sites",
                         "description",
-                        "displayname",
+                        "display_name",
                         "icon",
                         "model",
                         "hardware_interface",
@@ -470,7 +470,7 @@ def _parse_file(
                                 if key == "supported_backends"
                                 else overrides[key]
                             )
-                    meta["displayname"] = resolve_registry_displayname(meta.get("displayname"), did)
+                    meta["display_name"] = resolve_registry_display_name(meta.get("display_name"), did)
                     devices.append(meta)
 
             # --- @resource on classes ---
@@ -613,7 +613,7 @@ def _extract_resource_meta(
         "is_function": is_function,
         "category": res_args.get("category", []),
         "description": res_args.get("description", ""),
-        "displayname": resolve_registry_displayname(res_args.get("displayname"), resource_id),
+        "display_name": resolve_registry_display_name(res_args.get("display_name"), resource_id),
         "icon": res_args.get("icon", ""),
         "version": res_args.get("version", "1.0.0"),
         "class_type": res_args.get("class_type", "pylabrobot"),

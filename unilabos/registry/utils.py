@@ -36,10 +36,10 @@ class ROSMsgNotFound(Exception):
     pass
 
 
-def resolve_registry_displayname(displayname: Optional[str], entry_id: str) -> str:
-    """注册表 displayname：显式为空时回退为 entry id。"""
-    if displayname:
-        return displayname
+def resolve_registry_display_name(display_name: Optional[str], entry_id: str) -> str:
+    """注册表 display_name：显式为空时回退为 entry id。"""
+    if display_name:
+        return str(display_name)
     return entry_id
 
 

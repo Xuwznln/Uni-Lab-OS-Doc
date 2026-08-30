@@ -211,7 +211,7 @@ def _template_definition(
     definition: Dict[str, Any] = {
         "id": name,
         "display_name": str(
-            source.get("display_name") or source.get("displayname") or name
+            source.get("display_name") or name
         ).strip(),
         "registry_type": expected_type,
         "model": _object(source.get("model")),
@@ -267,7 +267,7 @@ def _action_definition(raw_action: Any) -> Dict[str, Any]:
             ],
         },
         "display_name": str(
-            action.get("display_name") or action.get("displayname") or ""
+            action.get("display_name") or ""
         ).strip(),
         "materials_need_lock": [
             str(name)

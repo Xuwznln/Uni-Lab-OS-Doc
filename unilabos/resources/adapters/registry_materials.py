@@ -148,7 +148,6 @@ def registry_definition_to_template(
     for promoted in (
         "id",
         "display_name",
-        "displayname",
         "registry_type",
         "category",
         "available_sites",
@@ -159,9 +158,7 @@ def registry_definition_to_template(
     return ResourceTemplateWrite(
         template_uuid=template_uuid,
         name=name,
-        display_name=str(
-            definition.get("display_name") or definition.get("displayname") or name
-        ),
+        display_name=str(definition.get("display_name") or name),
         resource_type=_resource_type(definition),
         class_name=_class_name(definition),
         module_name=str(class_definition.get("module") or "") or None,

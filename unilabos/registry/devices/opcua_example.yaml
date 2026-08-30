@@ -163,7 +163,7 @@ opcua_example:
     type: python
   config_info: []
   description: null
-  displayname: OPC UA 示例设备
+  display_name: OPC UA 示例设备
   handles: []
   icon: ''
   init_param_enforce: {}

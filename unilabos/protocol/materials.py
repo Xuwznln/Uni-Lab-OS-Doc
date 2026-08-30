@@ -105,7 +105,7 @@ class MaterialIdentityWrite(ServerObject):
     parent_material_uuid: Optional[NonEmptyStr] = None
     lot_uuid: Optional[NonEmptyStr] = None
     name: NonEmptyStr
-    # 展示名；空值由权威落库时回退 name（与 device 的 id/displayname 约定一致）。
+    # 展示名；空值由权威落库时回退 name（与 device 的 id/display_name 约定一致）。
     display_name: str = ""
     description: str = ""
     resource_type: NonEmptyStr = "resource"

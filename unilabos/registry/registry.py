@@ -54,7 +54,7 @@ from unilabos.registry.utils import (
     wrap_action_schema,
     preserve_field_descriptions,
     resolve_method_params_via_import,
-    resolve_registry_displayname,
+    resolve_registry_display_name,
     SIMPLE_TYPE_MAP,
 )
 from unilabos.resources.graphio import resource_plr_to_ulab, tree_to_list
@@ -1227,7 +1227,7 @@ class Registry:
             },
             "config_info": [],
             "description": ast_meta.get("description", ""),
-            "displayname": resolve_registry_displayname(ast_meta.get("displayname"), device_id),
+            "display_name": resolve_registry_display_name(ast_meta.get("display_name"), device_id),
             "handles": handles,
             "available_sites": normalize_available_sites(ast_meta.get("available_sites")),
             "icon": ast_meta.get("icon", ""),
@@ -1339,7 +1339,7 @@ class Registry:
             },
             "config_info": [],
             "description": ast_meta.get("description", ""),
-            "displayname": resolve_registry_displayname(ast_meta.get("displayname"), resource_id),
+            "display_name": resolve_registry_display_name(ast_meta.get("display_name"), resource_id),
             "file_path": file_path,
         }
 
@@ -1847,8 +1847,8 @@ class Registry:
                 resource_info["handles"] = []
             if "init_param_schema" not in resource_info:
                 resource_info["init_param_schema"] = {}
-            resource_info["displayname"] = resolve_registry_displayname(
-                resource_info.get("displayname"), resource_id
+            resource_info["display_name"] = resolve_registry_display_name(
+                resource_info.get("display_name"), resource_id
             )
             if "config_info" in resource_info:
                 del resource_info["config_info"]
@@ -2027,8 +2027,8 @@ class Registry:
                 device_config["config_info"] = []
             if "description" not in device_config:
                 device_config["description"] = ""
-            device_config["displayname"] = resolve_registry_displayname(
-                device_config.get("displayname"), device_id
+            device_config["display_name"] = resolve_registry_display_name(
+                device_config.get("display_name"), device_id
             )
             if "icon" not in device_config:
                 device_config["icon"] = ""
@@ -2645,7 +2645,7 @@ class Registry:
                         status_types[status_name] = status_type.__name__
 
             msg = {"id": device_id, **device_info_copy}
-            msg["displayname"] = resolve_registry_displayname(msg.get("displayname"), device_id)
+            msg["display_name"] = resolve_registry_display_name(msg.get("display_name"), device_id)
             devices.append(msg)
         return devices
 
@@ -2653,7 +2653,7 @@ class Registry:
         resources = []
         for resource_id, resource_info in self.resource_type_registry.items():
             msg = {"id": resource_id, **resource_info}
-            msg["displayname"] = resolve_registry_displayname(msg.get("displayname"), resource_id)
+            msg["display_name"] = resolve_registry_display_name(msg.get("display_name"), resource_id)
             resources.append(msg)
         return resources
 
