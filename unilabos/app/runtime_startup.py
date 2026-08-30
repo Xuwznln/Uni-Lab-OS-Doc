@@ -25,7 +25,7 @@ def _run_management_or_wait(backend_thread: threading.Thread) -> None:
 def run_runtime(args: dict[str, Any]) -> None:
     """启动设备 runtime 和 Host 微后端管理 API。"""
 
-    from unilabos.app.backend import start_backend
+    from unilabos.backend import start_backend
 
     if args["visual"] == "disable":
         _run_management_or_wait(start_backend(**args))

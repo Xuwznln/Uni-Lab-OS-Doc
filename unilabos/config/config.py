@@ -16,7 +16,7 @@ _REMOVED_CONFIG_FIELDS = {
 
 
 class BasicConfig:
-    # 运行时 backend 名称由 unilabos.app.backend 统一规范化。
+    # 运行时 backend 名称由 unilabos.backend 统一规范化。
     backend: Literal["hostlink", "ros2"] = "ros2"
     ak = ""
     sk = ""

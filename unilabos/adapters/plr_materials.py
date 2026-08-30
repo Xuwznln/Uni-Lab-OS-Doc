@@ -8,8 +8,8 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from unilabos.resources.objects.resource import ResourceDict
 from unilabos.resources.resource_tracker import ResourceTreeSet
-from unilabos.server.protocol.common import InventoryMutation, MutationResult
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import InventoryMutation, MutationResult
+from unilabos.protocol.materials import (
     MaterialAggregateRead,
     MaterialDataRead,
     MaterialDataWrite,
@@ -46,6 +46,8 @@ class MaterialGateway(Protocol):
     def get_material_by_resource_id(
         self, resource_id: str
     ) -> MaterialAggregateRead: ...
+
+    def search_materials(self, name: str) -> list[MaterialAggregateRead]: ...
 
     def move_material(
         self, mutation: InventoryMutation, value: MaterialMove
@@ -192,8 +194,15 @@ def _site_create_from_resource(
     )
 
 
-def resource_tree_to_create(value: ResourceTreeSet) -> MaterialTreeCreate:
-    """把一棵内部草稿转为不携带实例 UUID 的创建请求。"""
+def resource_tree_to_create(
+    value: ResourceTreeSet, *, adopt_uuid: bool = False
+) -> MaterialTreeCreate:
+    """把一棵内部草稿转为创建请求。
+
+    默认不携带实例 UUID（由权威分配）；``adopt_uuid=True`` 时把草稿节点的
+    uuid 作为显式 material_uuid 提交（带条件的创建），供开机图对齐、
+    出库扣减产物落库等要求「uuid 与外部一致」的场景使用。
+    """
 
     if len(value.trees) != 1:
         raise ValueError("one create request must contain exactly one resource tree")
@@ -223,9 +232,11 @@ def resource_tree_to_create(value: ResourceTreeSet) -> MaterialTreeCreate:
                 client_ref=client_refs[resource.uuid],
                 parent_client_ref=client_refs.get(resource.uuid_parent),
                 ordinal=ordinal,
+                material_uuid=resource.uuid if adopt_uuid else None,
                 identity=MaterialIdentityWrite(
                     resource_id=resource_ids[resource.uuid],
                     name=resource.name,
+                    display_name=resource.display_name,
                     description=resource.description,
                     resource_type=resource.type,
                     class_name=(
@@ -314,6 +325,7 @@ def material_tree_to_resource_tree(value: MaterialTreeRead) -> ResourceTreeSet:
                 "id": material.resource_id,
                 "uuid": material.material_uuid,
                 "name": material.name,
+                "display_name": material.display_name,
                 "description": material.description,
                 "resource_schema": material.resource_schema,
                 "model": material.model,
@@ -368,26 +380,49 @@ def material_tree_to_plr_resources(value: MaterialTreeRead) -> list[Any]:
     return material_tree_to_resource_tree(value).to_plr_resources()
 
 
+class SnapshotUuidMismatchError(ValueError):
+    """运行时树与权威基线的 UUID 集合不一致（结构漂移）。
+
+    挂载 / 转移的主流程会先经 move/transfer 改写权威父子关系；观察者
+    冻结的运行时树若恰在该窗口内提交，会与新基线出现暂态集合差异。
+    调用方（观察者）应放弃本次提交并等待后续回调重新冻结收敛，而非
+    视为真实错误。
+    """
+
+
 def resource_tree_to_snapshot(
-    value: ResourceTreeSet,
+    value: ResourceTreeSet | Sequence[Any],
     base: MaterialTreeRead,
     *,
     allow_partial: bool = False,
 ) -> MaterialSnapshot:
-    """用运行时 ResourceTreeSet 覆盖下载基线。
+    """用运行时资源覆盖下载基线。
+
+    ``value`` 接受 ResourceTreeSet 或 ``ResourceDict`` 序列。按权威 root 分组
+    出的局部节点集合可能跨树引用（如 deck 的 Site occupied 指向另一棵权威树
+    的挂载物），不构成完整合法树，因此这里不要求树形输入。
 
     ``allow_partial`` 用于设备仅上报孔位或子树的场景；未上报的权威节点保持
     不变。无论是否局部更新，运行时都不能夹带权威树之外的 UUID。
     """
 
-    runtime = {item.res_content.uuid: item.res_content for item in value.all_nodes}
+    resources = (
+        [item.res_content for item in value.all_nodes]
+        if isinstance(value, ResourceTreeSet)
+        else list(value)
+    )
+    runtime = {res.uuid: res for res in resources}
     authoritative_uuids = {
         node.material.material_uuid for node in base.nodes
     }
     if not runtime.keys() <= authoritative_uuids:
-        raise ValueError("runtime tree contains material UUIDs outside downloaded tree")
+        raise SnapshotUuidMismatchError(
+            "runtime tree contains material UUIDs outside downloaded tree"
+        )
     if not allow_partial and runtime.keys() != authoritative_uuids:
-        raise ValueError("runtime tree does not match downloaded material UUID set")
+        raise SnapshotUuidMismatchError(
+            "runtime tree does not match downloaded material UUID set"
+        )
     nodes: list[MaterialAggregateRead] = []
     for node in base.nodes:
         resource = runtime.get(node.material.material_uuid)
@@ -402,6 +437,10 @@ def resource_tree_to_snapshot(
             {
                 **node.material.model_dump(mode="json"),
                 "name": resource.name,
+                # 展示名以权威为准；PLR 运行时不承载 display_name，
+                # 空值回退权威避免快照把自定义展示名重置回 name。
+                "display_name": resource.display_name
+                or node.material.display_name,
                 "description": resource.description,
                 "machine_name": resource.machine_name,
                 "barcode": resource.barcode,

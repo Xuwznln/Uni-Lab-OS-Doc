@@ -90,7 +90,7 @@ def main():
     if run_cli_command(args, parser):
         return
 
-    from unilabos.app.backend import (
+    from unilabos.backend import (
         BackendConfigurationError,
         resolve_backend_selection,
     )
@@ -224,7 +224,7 @@ def main():
     # ROS2 backend 用 HostLink 辅助发现；hostlink backend 则在同一 TCP 长连接上
     # 直接同步设备描述/状态和执行设备动作，不导入 ROS。
     is_slave = bool(args_dict.get("is_slave", False))
-    from unilabos.hostlink.startup import (
+    from unilabos.backend.presets.hostlink.startup import (
         apply_hostlink_cli,
         validate_hostlink_backend,
     )
@@ -466,7 +466,7 @@ def main():
         if args_dict["backend"] == "ros2":
             # 正常 Slave 必须在 rclpy.init 前拿到 Host 的 ROS policy；
             # --slave_no_host 才允许离线启动并后台重连。
-            from unilabos.hostlink.network import (
+            from unilabos.backend.presets.hostlink.network import (
                 require_slave_startup_device_ids,
                 setup_slave_network_client,
             )

@@ -9,8 +9,8 @@ from typing import Any, Protocol
 from uuid import UUID, uuid5
 
 from unilabos.server.database.tables.materials import ResourceTemplateHandle
-from unilabos.server.protocol.common import InventoryMutation, canonical_hash
-from unilabos.server.protocol.materials import (
+from unilabos.protocol.common import InventoryMutation, canonical_hash
+from unilabos.protocol.materials import (
     ResourceTemplateRead,
     ResourceTemplateWrite,
 )
