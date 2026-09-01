@@ -38,8 +38,8 @@ def extract_community_classes(graph_data: Optional[Dict[str, Any]]) -> List[str]
     for node in graph_data.get("nodes", []):
         if not isinstance(node, dict):
             continue
-        class_name = node.get("class")
-        if isinstance(class_name, str) and class_name.startswith(COMMUNITY_PREFIX):
+        class_name = str(node.get("template_name") or node.get("class") or "").strip()
+        if class_name.startswith(COMMUNITY_PREFIX):
             result.append(class_name)
     return sorted(set(result))
 
@@ -90,8 +90,7 @@ def prepare_community_packages(
 ) -> CommunityPackagePrepareResult:
     """从本地安装清单解析图中的 community 设备包。
 
-    Host 不再调用旧 Backend 的 package resolve/download API。包缓存由部署流程
-    准备，启动阶段只读取本地 manifest。
+    包缓存由部署流程准备；启动阶段只从本地 manifest 解析图中的包引用。
     """
 
     classes = extract_community_classes(graph_data)

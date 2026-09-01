@@ -90,6 +90,17 @@ def _register_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     )
     _add(
         group,
+        "--role",
+        choices=["auto", "backend"],
+        default="auto",
+        help=(
+            "进程角色：auto（默认）按现有语义启动完整 runtime；backend 只启动"
+            "调度权威进程（scheduler + workflow + runtime.v1 控制面服务端，无设备/无 "
+            "ROS），Edge 进程配置 --address 指向它后可独立重启。"
+        ),
+    )
+    _add(
+        group,
         "--host_node_name",
         "--host_node_id",
         dest="host_node_name",
@@ -145,9 +156,12 @@ def _register_database_arguments(parser: argparse.ArgumentParser) -> None:
         group,
         "--server_database_root",
         default="~/.unilabos",
-        help="Directory containing runtime/materials/telemetry/history/workflow SQLite files.",
+        help=(
+            "Directory containing runtime/materials/telemetry/history "
+            "SQLite files."
+        ),
     )
-    for database in ("runtime", "materials", "telemetry", "history", "workflow"):
+    for database in ("runtime", "materials", "telemetry", "history"):
         _add(
             group,
             f"--{database}_db",
@@ -386,7 +400,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# 兼容早期测试和集成代码中“parse_args 返回 parser”的命名。
+# 供直接导入解析器构建函数的集成代码使用。
 parse_args = build_parser
 
 

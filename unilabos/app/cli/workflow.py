@@ -11,7 +11,7 @@ from unilabos.client import (
     print_output,
     print_success,
 )
-from unilabos.client.workflow import HTTPWorkflowClient, WorkflowClientError
+from unilabos.client.runtime.workflow import HTTPWorkflowClient, WorkflowClientError
 from unilabos.config.config import BasicConfig
 
 
@@ -174,7 +174,7 @@ def cmd_workflow_upload(args, session_manager: SessionManager):
             if not _inject_credentials(args, session_manager):
                 sys.exit(1)
 
-        from unilabos.server.services.workflow.upload import upload_workflow
+        from unilabos.server.services.runtime.workflow.upload import upload_workflow
 
         client = _create_workflow_client(args, session_manager)
         try:

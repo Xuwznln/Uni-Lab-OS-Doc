@@ -1,6 +1,6 @@
 from typing import Any, Dict, Tuple
 
-from unilabos.utils.tools import normalize_json as _normalize_device
+from unilabos.utils.serialization import normalize_json as _normalize_device
 
 
 def collect_devices_and_resources(

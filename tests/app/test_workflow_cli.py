@@ -7,7 +7,7 @@ from typing import Any
 from unilabos.app.cli import workflow as workflow_cli
 from unilabos.app.cli.parser import build_parser
 from unilabos.app.cli.router import run_client_command
-from unilabos.client.workflow import HTTPWorkflowClient
+from unilabos.client.runtime.workflow import HTTPWorkflowClient
 
 
 def test_workflow_parser_exposes_only_supported_authority_commands() -> None:
@@ -57,7 +57,7 @@ def test_workflow_parser_exposes_only_supported_authority_commands() -> None:
     }
 
 
-def test_workflow_list_uses_current_api_without_legacy(
+def test_workflow_list_calls_runtime_workflow_api(
     monkeypatch,
     capsys,
 ) -> None:
@@ -306,12 +306,11 @@ def test_workflow_client_roundtrips_through_the_microbackend_api() -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from unilabos.server.api.workflow import install_workflow_api
-    from unilabos.protocol.workflow import WorkflowNodeWrite
-    from unilabos.server.services.workflow.service import WorkflowService
-    from unilabos.server.database.repositories.workflow import WorkflowStore
+    from unilabos.server.api.runtime.workflow import install_workflow_api
+    from unilabos.protocol.runtime.workflow import WorkflowNodeWrite
+    from unilabos.server.services.runtime.workflow.service import WorkflowService
 
-    service = WorkflowService(WorkflowStore(":memory:"))
+    service = WorkflowService(":memory:")
     workflow = service.create_workflow(
         name="CLI authority contract",
         tags=[],

@@ -238,12 +238,12 @@ def read_registry_yaml_devices(pkg_dir: Path) -> Dict[str, Dict[str, Any]]:
 def read_external_registry_devices(pkg_dir: Path) -> Dict[str, Dict[str, Any]]:
     """读取包内"文件夹式"外部注册表的设备条目，返回 {device_id: entry}。
 
-    遵循 Plan 09 外部包注册表约定（与运行时 Registry.load_device_types 同构）：
+    采用与运行时 ``Registry.load_device_types`` 相同的注册表布局：
     - 注册表根来自 pyproject ``[tool.unilabos.registry] paths``，否则回退 ``unilabos_registry/``；
     - 每个根下的 ``devices/*.yaml`` 即设备文件；
     - 逐文件用 ``resolve_yaml_refs`` 展开跨文件 ``$ref``（共享 contracts），与运行时一致。
 
-    与根目录 ``registry.yaml`` 互补：不要求把条目摊平到包根，目录化注册表即可被纳管。
+    根目录 ``registry.yaml`` 和目录化注册表均可被识别。
     """
     try:
         import yaml
@@ -251,7 +251,7 @@ def read_external_registry_devices(pkg_dir: Path) -> Dict[str, Dict[str, Any]]:
         logger.warning("[package] 未安装 pyyaml，跳过外部注册表读取")
         return {}
 
-    from unilabos.registry.yaml_ref import resolve_yaml_refs
+    from unilabos.registry.utils.yaml_ref import resolve_yaml_refs
 
     registry_roots = discover_registry_paths_from_project(pkg_dir)
     if not registry_roots:
@@ -388,7 +388,7 @@ def build_resources(devices: Dict[str, Dict[str, Any]], package_info: Dict[str, 
             "device_id": device_id,
             "version": meta.get("version", package_info.get("version", "")),
             "description": meta.get("description", ""),
-            "displayname": meta.get("displayname") or device_id,
+            "display_name": meta.get("display_name") or device_id,
             "icon": meta.get("icon", ""),
         }
         category = meta.get("category") if isinstance(meta.get("category"), list) else []
@@ -398,7 +398,7 @@ def build_resources(devices: Dict[str, Dict[str, Any]], package_info: Dict[str, 
                 "registry_type": "device",
                 "version": meta.get("version", package_info.get("version", "0.0.1")),
                 "description": meta.get("description", ""),
-                "displayname": meta.get("displayname") or device_id,
+                "display_name": meta.get("display_name") or device_id,
                 "icon": meta.get("icon", ""),
                 "class": reg_class,
                 "category": category,

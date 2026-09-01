@@ -14,6 +14,7 @@ def test_extract_community_classes_dedupes_and_ignores_regular_nodes():
             {"id": "b", "class": "regular_device"},
             {"id": "c", "class": "community.counter.counting_device"},
             {"id": "d"},
+            {"id": "e", "template_name": "community.counter.counting_device"},
         ]
     }
 

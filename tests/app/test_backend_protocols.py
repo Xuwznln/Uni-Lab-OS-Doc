@@ -7,12 +7,12 @@ import pytest
 
 from unilabos.app.cli.parser import build_parser
 from unilabos.config.config import BasicConfig, _update_config_from_module
-from unilabos.server.backend.session import (
+from unilabos.server.backend.legacy_adaptor.session import (
     APP_BRIDGES,
     BackendSessionFactory,
     COMMUNICATION_PROTOCOL,
 )
-from unilabos.server.backend.websocket import BackendWebSocketClient
+from unilabos.server.backend.legacy_adaptor.websocket import BackendWebSocketClient
 
 
 class _Coordinator:
@@ -23,7 +23,7 @@ class _Coordinator:
         self.edge_changes = [
             SimpleNamespace(
                 model_dump=lambda **_kwargs: {
-                    "protocol_version": "control.v1",
+                    "protocol_version": "runtime.v1",
                     "session_uuid": "session-1",
                     "event_uuid": "event-1",
                     "event_sequence": 1,
@@ -61,12 +61,12 @@ def test_transport_configuration_is_fixed_to_websocket() -> None:
 
 
 def test_removed_transport_fields_are_not_loaded_from_config() -> None:
-    old_basic_config = type(
+    unsupported_config = type(
         "BasicConfig",
         (),
         {"app_bridges": ("fastapi",), "communication_protocol": "old"},
     )
-    _update_config_from_module(SimpleNamespace(BasicConfig=old_basic_config))
+    _update_config_from_module(SimpleNamespace(BasicConfig=unsupported_config))
     assert not hasattr(BasicConfig, "app_bridges")
     assert not hasattr(BasicConfig, "communication_protocol")
 
@@ -123,7 +123,7 @@ def test_control_protocol_publishes_only_edge_change_index() -> None:
     assert client._send_queue.get_nowait() == {
         "action": "edge_change",
         "data": {
-            "protocol_version": "control.v1",
+            "protocol_version": "runtime.v1",
             "session_uuid": "session-1",
             "event_uuid": "event-1",
             "event_sequence": 1,

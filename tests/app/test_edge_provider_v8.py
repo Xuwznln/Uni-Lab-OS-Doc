@@ -1,4 +1,4 @@
-"""Edge UI v8 与统一 Backend Provider 的无 ROS 契约回归。"""
+"""Edge UI and unified Backend Provider contracts without ROS."""
 
 from __future__ import annotations
 
@@ -7,19 +7,18 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from unilabos.server.api.backend import create_backend_router
+from unilabos.server.api.runtime import create_backend_router
 from unilabos.server.backend.execution import JobExecutionBackend
 from unilabos.server.backend.incidents import StatusIncidentManager
-from unilabos.server.api.workflow import install_workflow_api
-from unilabos.protocol.workflow import WorkflowNodeWrite
-from unilabos.server.services.workflow.service import WorkflowService
-from unilabos.server.database.repositories.workflow import WorkflowStore
+from unilabos.server.api.runtime.workflow import install_workflow_api
+from unilabos.protocol.runtime.workflow import WorkflowNodeWrite
+from unilabos.server.services.runtime.workflow.service import WorkflowService
 
 
-def test_workflow_v8_runtime_read_routes_keep_empty_and_not_found_semantics():
-    service = WorkflowService(WorkflowStore(":memory:"))
+def test_workflow_runtime_read_routes_keep_empty_and_not_found_semantics():
+    service = WorkflowService(":memory:")
     workflow = service.create_workflow(
-        name="v8 runtime",
+        name="runtime read routes",
         tags=[],
         description=None,
         meta_data={},

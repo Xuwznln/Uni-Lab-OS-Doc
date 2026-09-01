@@ -109,7 +109,7 @@ def _apply_dll_patch(file_path: str, lib_bin: str, preload_pyd: str = "") -> boo
 def _print_restart_banner(patched_files):
     """打印重启提示并以 EX_TEMPFAIL 退出。
 
-    - 不使用 ANSI 颜色码：Windows 旧版 cmd / PowerShell 5 默认不开 VT 处理，
+    - 不使用 ANSI 颜色码：Windows cmd / PowerShell 5 可能未启用 VT 处理，
       会把 ``\\033[1;33m`` 当做字面字符显示，反而让用户看不到正文。
     - 同时写入 stderr 与 stdout：某些上层 launcher / supervisor 只重定向
       其中一路，写两遍能保证用户至少看到一份。
@@ -171,8 +171,8 @@ def patch_rclpy_dll_windows():
     ``os.add_dll_directory`` 才能找到它们。当从快捷方式 / IDE / 子进程 /
     没激活的 shell 启动 ``unilab`` 时，会出现 ``DLL load failed``。
 
-    RoboStack Humble 和 Jazzy 的 ``rclpy`` / ``rpyutils`` 都使用相同的加载
-    入口，因此两种发行版共用这一套文件补丁，不再维护两种修复路径。
+    RoboStack Humble 和 Jazzy 的 ``rclpy`` / ``rpyutils`` 使用相同的加载
+    入口，因此两种发行版共用这套文件补丁。
 
     本函数会:
         1) 修补 ``rclpy/impl/implementation_singleton.py`` —— rclpy 自身的 C 扩展入口；

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from unilabos.client.workflow import (
+from unilabos.client.runtime.workflow import (
     derive_workflow_websocket_url,
     normalize_workflow_api_url,
 )
 from unilabos.config.config import HTTPConfig
-from unilabos.server.backend.url import build_backend_websocket_url
+from unilabos.server.backend.legacy_adaptor.url import build_backend_websocket_url
 from unilabos.utils.address import resolve_address
 
 
 def test_address_normalization_has_no_builtin_default() -> None:
-    # 不再内置云端默认地址或环境别名；地址原样规范化（去尾斜杠）
+    # 地址解析只执行规范化，不注入云端默认值或环境别名。
     assert resolve_address("http://edge:8002/") == "http://edge:8002"
     assert resolve_address("") == ""
     assert resolve_address(None) == ""

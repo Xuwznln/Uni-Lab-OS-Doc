@@ -6,7 +6,7 @@ from unilabos.app.cli.parser import build_parser
 from unilabos.app.cli.router import run_client_command
 
 
-def test_material_list_uses_microbackend_without_legacy(monkeypatch, capsys) -> None:
+def test_material_list_uses_configured_microbackend(monkeypatch, capsys) -> None:
     calls = []
 
     class _Client:

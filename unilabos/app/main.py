@@ -5,6 +5,7 @@ import platform
 import shutil
 import signal
 import sys
+from pathlib import Path
 from typing import Dict, Any, List
 import networkx as nx
 import yaml
@@ -41,6 +42,7 @@ from unilabos.config.config import (  # noqa: E402
     resolve_host_node_name,
 )
 from unilabos.utils.address import resolve_address  # noqa: E402
+
 
 def load_config_from_file(config_path):
     if config_path is None:
@@ -80,9 +82,145 @@ def _load_graph_json_preview(file_path: str | None) -> Dict[str, Any] | None:
         return None
 
 
+def _materialize_graph_from_authority(
+    identity: str, args_dict: Dict[str, Any], working_dir: str
+) -> str | None:
+    """``-g <uuid|名称>``：从本机 Graph Authority 拉取图并落盘为缓存文件。
+
+    图快照存于 materials.db 的 lab_graph 表；只读本机数据库（启动时微后端
+    尚未监听 HTTP），云端图先用 ``unilab graph download --remote`` 下载为
+    文件再启动。
+    """
+
+    from unilabos.server.startup import resolve_database_paths
+
+    paths = resolve_database_paths(args_dict, working_dir=working_dir)
+    if not os.path.isfile(paths.materials_db):
+        return None
+
+    from unilabos.server.services.materials.graph import GraphError, GraphService
+
+    service = GraphService(paths.materials_db)
+    try:
+        try:
+            record = service.get_graph(identity)
+        except GraphError:
+            return None
+    finally:
+        service.close()
+
+    cache_path = _write_graph_cache(paths, record["uuid"], record["payload"])
+    print_status(
+        f"已从本机 Graph Authority 加载图: {record['name']} "
+        f"(uuid={record['uuid']}, revision={record['revision']})",
+        "info",
+    )
+    return cache_path
+
+
+def _write_graph_cache(paths, graph_uuid: str, payload: Dict[str, Any]) -> str:
+    cache_dir = os.path.join(str(paths.root), "graph_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{graph_uuid}.json")
+    with open(cache_path, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False, indent=2)
+    return cache_path
+
+
+def _registry_device_site_templates() -> Dict[str, Any]:
+    """从已构建的注册表提取 ``template_name -> available_sites`` 映射。"""
+
+    from unilabos.registry.registry import lab_registry
+
+    return {
+        device_id: (entry or {}).get("available_sites") or []
+        for device_id, entry in lab_registry.device_type_registry.items()
+    }
+
+
+def _register_graph_file_to_authority(
+    file_path: str, args_dict: Dict[str, Any], working_dir: str
+) -> str | None:
+    """``-g <文件>.json``：先经 Graph Authority 创建/对账，再以权威 payload 启动。
+
+    上传创建即登记：草稿图（节点/Site 无 uuid）在此获得权威身份，设备节点
+    的模板 Site 一并实例化；再次导入按节点 id 复用既有身份并输出 diff 摘要
+    （新建/更新/移除/不变）。身份冲突或 payload 非法时拒绝启动并打印原因
+    （fail-closed）；基础设施异常（数据库不可用等）告警后回退为直接装配
+    原文件（fail-open）。必须在 ``build_registry`` 之后调用。
+
+    Returns:
+        权威 payload 的缓存文件路径；fail-open 回退时返回 ``None``。
+    """
+
+    from unilabos.server.startup import resolve_database_paths
+    from unilabos.server.services.materials.graph import GraphError, GraphService
+
+    try:
+        with open(file_path, encoding="utf-8") as stream:
+            graph_payload = json.load(stream)
+    except (OSError, json.JSONDecodeError) as exc:
+        print_status(f"读取 graph JSON 失败: {exc}", "error")
+        os._exit(1)
+
+    graph_name = Path(str(file_path)).stem
+    try:
+        paths = resolve_database_paths(args_dict, working_dir=working_dir)
+        service = GraphService(paths.materials_db)
+    except Exception as exc:
+        print_status(f"Graph Authority 不可用（跳过登记，直接装配启动文件）: {exc}", "warning")
+        return None
+    try:
+        try:
+            stored = service.upsert_graph(
+                name=graph_name,
+                payload=graph_payload,
+                device_site_templates=_registry_device_site_templates(),
+            )
+        except GraphError as exc:
+            print_status(
+                f"启动图被 Graph Authority 拒绝 [{exc.code}]: {exc.message}", "error"
+            )
+            os._exit(1)
+        except Exception as exc:
+            print_status(
+                f"启动图登记 Graph Authority 失败（跳过登记，直接装配启动文件）: {exc}",
+                "warning",
+            )
+            return None
+    finally:
+        service.close()
+
+    summary = stored.get("summary") or {}
+    counts = {
+        key: len(summary.get(key) or [])
+        for key in ("created", "updated", "removed", "unchanged")
+    }
+    assigned = int(summary.get("uuid_assigned") or 0)
+    if counts["created"] or counts["updated"] or counts["removed"] or assigned:
+        detail = (
+            f"节点 新建 {counts['created']} / 更新 {counts['updated']} / "
+            f"移除 {counts['removed']} / 不变 {counts['unchanged']}"
+        )
+        if assigned:
+            detail += f"，发号 {assigned} 个身份"
+        print_status(
+            f"启动图已登记 Graph Authority: {stored['name']} "
+            f"(uuid={stored['uuid']}, revision={stored['revision']})，{detail}；"
+            f"可用 unilab -g {stored['name']} 复用",
+            "info",
+        )
+    else:
+        print_status(
+            f"启动图与 Graph Authority 快照一致: {stored['name']} "
+            f"(uuid={stored['uuid']}, revision={stored['revision']})",
+            "info",
+        )
+    return _write_graph_cache(paths, stored["uuid"], stored["payload"])
+
+
 def main():
-    """主函数"""
-    # CLI 仅负责解析和轻量子命令分流；设备 runtime 在后续按需启动。
+    """运行 UniLabOS CLI，并在需要时启动设备运行时。"""
     parser = build_parser()
     args = parser.parse_args()
     args_dict = vars(args)
@@ -111,7 +249,11 @@ def main():
         patch_rclpy_dll_windows()
 
     # 环境检查 - 检查并自动安装必需的包 (可选)
-    skip_env_check = args_dict.get("skip_env_check", False)
+    # backend 角色进程无 ROS/设备依赖，跳过环境自动安装
+    skip_env_check = (
+        args_dict.get("skip_env_check", False)
+        or args_dict.get("role") == "backend"
+    )
     check_mode = args_dict.get("check_mode", False)
 
     if not skip_env_check:
@@ -251,7 +393,8 @@ def main():
     if BasicConfig.extra_resource:
         print_status("启用额外资源加载：将加载lab_开头的labware资源定义", "info")
     BasicConfig.backend = args_dict["backend"]
-    machine_name = platform.node()
+    # 分布式 slave 等场景通过环境变量显式指定身份；否则用主机名
+    machine_name = os.environ.get("UNILABOS_BASICCONFIG_MACHINE_NAME") or platform.node()
     machine_name = "".join([c if c.isalnum() or c == "_" else "_" for c in machine_name])
     BasicConfig.machine_name = machine_name
     BasicConfig.vis_2d_enable = args_dict["2d_vis"]
@@ -268,6 +411,21 @@ def main():
     # Step -1: 预读取 graph 中的 community.* class，并在 build_registry 前挂载社区设备包
     if not check_mode:
         graph_file_path = _resolve_graph_file_path(args_dict.get("graph") or BasicConfig.startup_json_path)
+        # 非文件参数按 uuid 或名称从本机 Graph Authority 解析。
+        if graph_file_path is not None and not os.path.isfile(graph_file_path):
+            materialized_path = _materialize_graph_from_authority(
+                graph_file_path, args_dict, working_dir
+            )
+            if materialized_path is not None:
+                graph_file_path = materialized_path
+                args_dict["_graph_from_authority"] = True
+            else:
+                print_status(
+                    f"-g {graph_file_path} 既不是本地文件，也不在本机 Graph Authority 中；"
+                    "可先 unilab graph upload -f <文件>，或 unilab graph download --remote 拉取云端图",
+                    "error",
+                )
+                os._exit(1)
         args_dict["_graph_file_path"] = graph_file_path
         graph_preview = _load_graph_json_preview(graph_file_path)
 
@@ -330,13 +488,21 @@ def main():
         print_status(f"Check mode: 注册表验证完成 ({device_count} 设备, {resource_count} 资源)，退出", "info")
         os._exit(0)
 
+    # backend 角色只装配 scheduler、workflow 和 runtime.v1 控制面；
+    # 设备图与设备运行时由通过 --address 接入的 Edge 进程持有。
+    if args_dict.get("role") == "backend":
+        from unilabos.app.backend_main import run_backend_process
+
+        run_backend_process(args_dict, lab_registry, working_dir)
+        return
+
     # 以下导入依赖 ROS2 环境，check_mode 已退出不需要
     from unilabos.resources.graphio import (
         read_node_link_json,
         read_graphml,
         modify_to_backend_format,
     )
-    from unilabos.server.backend import get_backend_client
+    from unilabos.server.backend.legacy_adaptor import get_backend_client
     from unilabos.resources.resource_tracker import ResourceTreeSet, ResourceDict
 
     graph: nx.Graph
@@ -353,6 +519,20 @@ def main():
         )
         os._exit(1)
     else:
+        if (
+            file_path.endswith(".json")
+            and not args_dict.get("_graph_from_authority")
+            and os.path.isfile(file_path)
+        ):
+            # -g 本地 JSON 是创建入口：注册表就绪后先经 Graph Authority
+            # 对账/发号/模板 Site 实例化，再以权威 payload 装配启动。
+            registered_path = _register_graph_file_to_authority(
+                file_path, args_dict, working_dir
+            )
+            if registered_path is not None:
+                file_path = registered_path
+                args_dict["_graph_file_path"] = registered_path
+                args_dict["_graph_from_authority"] = True
         if file_path.endswith(".json"):
             graph, resource_tree_set, resource_links = read_node_link_json(file_path)
         else:
@@ -377,10 +557,14 @@ def main():
         source_handle = i["sourceHandle"]
         target_handle = i["targetHandle"]
         source_handler_keys = [
-            h["handler_key"] for h in materials[source_node.klass]["handles"] if h["io_type"] == "source"
+            h["handler_key"]
+            for h in materials[source_node.template_name]["handles"]
+            if h["io_type"] == "source"
         ]
         target_handler_keys = [
-            h["handler_key"] for h in materials[target_node.klass]["handles"] if h["io_type"] == "target"
+            h["handler_key"]
+            for h in materials[target_node.template_name]["handles"]
+            if h["io_type"] == "target"
         ]
         if source_handle not in source_handler_keys:
             print_status(
@@ -459,6 +643,26 @@ def main():
                 "info",
             )
 
+        # 图中的 links 在物料节点就绪后幂等写入 material_link。运行期间的
+        # 拓扑变更继续写入该表，并由 /api/v1/graphs/live/payload 实时导出。
+        if resource_edge_info:
+            try:
+                from unilabos.server.composition import get_server_services
+
+                local_services = get_server_services()
+                if local_services is not None:
+                    link_stats = local_services.materials.ensure_links(
+                        resource_edge_info
+                    )
+                    print_status(
+                        "开机拓扑边对齐完成: "
+                        f"新建 {link_stats['created']} / 更新 {link_stats['updated']} / "
+                        f"不变 {link_stats['unchanged']} / 跳过 {link_stats['skipped']}",
+                        "info",
+                    )
+            except Exception as exc:
+                print_status(f"开机拓扑边对齐失败（不影响运行）: {exc}", "warning")
+
         # @workflow 默认子工作流上报：本机持有 Workflow Authority 时，把设备包
         # 声明的工作流按稳定 uuid 幂等 upsert，供前端实时创建/运行工作流引用。
         from unilabos.server.backend.composition import get_workflow_service
@@ -482,6 +686,31 @@ def main():
                 print_status(
                     f"默认子工作流已上报: {len(reported_workflows)} 个 "
                     f"({', '.join(reported_workflows.values())})",
+                    "info",
+                )
+
+        # Backend-controlled 模式下，Edge 启动时上报完整注册表快照。服务端
+        # 按条目版本化变更，并挂起会影响活跃 workflow 的 action 变更。
+        if HTTPConfig.remote_addr:
+            from unilabos.server.backend.legacy_adaptor.sync.templates import (
+                report_registry_snapshot,
+            )
+
+            registry_report = report_registry_snapshot(
+                lab_registry, HTTPConfig.remote_addr
+            )
+            if registry_report is not None:
+                counts = (registry_report.summary or {}).get("counts", {})
+                print_status(
+                    f"注册表已上报: 设备 {registry_report.device_count} "
+                    f"资源 {registry_report.resource_count}"
+                    + (
+                        f"（新增 {counts.get('added', 0)} 更新 {counts.get('updated', 0)} "
+                        f"挂起 {counts.get('pending', 0)} 移除 {counts.get('removed', 0)} "
+                        f"不可用 {counts.get('unusable', 0)}）"
+                        if counts
+                        else "（服务端未返回条目级统计）"
+                    ),
                     "info",
                 )
 
@@ -516,6 +745,18 @@ def main():
             from unilabos.server.backend.composition import shutdown_backend_services
 
             shutdown_backend_services()
+
+    # 安静点重启：端口、数据库等均已在上方退出链路释放，此时用相同参数
+    # 拉起新进程即可让设备驱动获得完整的重新初始化（调试用）。
+    from unilabos.server.backend.restart import (
+        is_restart_requested,
+        spawn_replacement_process,
+    )
+
+    if is_restart_requested():
+        print_status("安静点重启：正在以相同参数拉起新的 Uni-Lab 进程", "warning")
+        spawn_replacement_process()
+
 
 if __name__ == "__main__":
     main()

@@ -13,7 +13,7 @@ from .package import (
 )
 
 CLIENT_COMMANDS = frozenset(
-    {"login", "logout", "whoami", "config", "material", "workflow"}
+    {"login", "logout", "whoami", "config", "material", "workflow", "graph"}
 )
 PACKAGE_COMMANDS = frozenset({"package", "pkg"})
 
@@ -152,6 +152,123 @@ def _register_workflow_authority_commands(workflow_actions: Any) -> None:
     _add_client_connection_options(workflow_authoring, include_auth=True)
 
 
+def _add_graph_backend_options(command_parser: argparse.ArgumentParser) -> None:
+    """graph 子命令的后端选择：默认本机微后端，``--remote`` 切云端。"""
+
+    command_parser.add_argument(
+        "--remote",
+        action="store_true",
+        default=False,
+        help="Target the cloud Graph Authority instead of the local microbackend.",
+    )
+    command_parser.add_argument(
+        "--port_management",
+        "--port-management",
+        dest="port_management",
+        type=int,
+        default=None,
+        help="Local microbackend management port (default: BasicConfig.port).",
+    )
+    _add_client_connection_options(command_parser, include_auth=True)
+
+
+def _register_graph_commands(subparsers: Any) -> None:
+    """``unilab graph``：设备图的 create/upload/list/get/download/delete。"""
+
+    graph_parser = subparsers.add_parser("graph", help="Lab graph management")
+    graph_actions = graph_parser.add_subparsers(
+        title="graph subcommands", dest="graph_command"
+    )
+
+    graph_create = graph_actions.add_parser(
+        "create",
+        help="Scan @device packages and generate a node-link graph skeleton",
+    )
+    graph_create.add_argument(
+        "--devices",
+        nargs="+",
+        default=None,
+        help="Device package directories to scan.",
+    )
+    graph_create.add_argument(
+        "--include",
+        nargs="*",
+        default=[],
+        help="Only include these registry device keys.",
+    )
+    graph_create.add_argument(
+        "-o",
+        "--output",
+        dest="output",
+        default="graph.json",
+        help="Output graph file path.",
+    )
+
+    graph_upload = graph_actions.add_parser(
+        "upload", help="Upload (upsert) a graph file to the Graph Authority"
+    )
+    graph_upload.add_argument(
+        "-f",
+        "--graph_file",
+        "--graph-file",
+        dest="graph_file",
+        required=True,
+        help="Graph file (node-link JSON).",
+    )
+    graph_upload.add_argument(
+        "-n",
+        "--graph_name",
+        "--graph-name",
+        dest="graph_name",
+        default=None,
+        help="Graph name (default: file stem).",
+    )
+    graph_upload.add_argument(
+        "--tags", nargs="*", default=[], help="Tags (space-separated)."
+    )
+    graph_upload.add_argument(
+        "--description", default="", help="Graph description."
+    )
+    _add_graph_backend_options(graph_upload)
+
+    graph_list = graph_actions.add_parser("list", help="List graphs")
+    graph_list.add_argument("--page", type=int, default=1)
+    graph_list.add_argument(
+        "--page_size",
+        "--page-size",
+        dest="page_size",
+        type=int,
+        default=100,
+    )
+    graph_list.add_argument("--name", default="", help="Filter by name substring.")
+    _add_graph_backend_options(graph_list)
+
+    graph_get = graph_actions.add_parser(
+        "get", help="Show one graph record (uuid or name)"
+    )
+    graph_get.add_argument("identity")
+    _add_graph_backend_options(graph_get)
+
+    graph_download = graph_actions.add_parser(
+        "download", help="Download a graph payload to a file"
+    )
+    graph_download.add_argument("identity")
+    graph_download.add_argument(
+        "-o",
+        "--output",
+        dest="output",
+        default=None,
+        help="Output file (default: <identity>.json).",
+    )
+    _add_graph_backend_options(graph_download)
+
+    graph_delete = graph_actions.add_parser(
+        "delete", help="Soft-delete a graph (uuid or name)"
+    )
+    graph_delete.add_argument("identity")
+    _add_graph_backend_options(graph_delete)
+
+
 def register_cli_commands(
     parser: argparse.ArgumentParser,
     subparsers: Any,
@@ -236,6 +353,7 @@ def register_cli_commands(
     )
     _add_client_connection_options(workflow_upload, include_auth=True)
     _register_workflow_authority_commands(workflow_actions)
+    _register_graph_commands(subparsers)
 
 
 def _prepare_command_session(
@@ -253,7 +371,7 @@ def _prepare_command_session(
 
     address = values.get("address")
     args.address_resolved = resolve_address(address) if address else None
-    # 兼容尚未迁移的第三方 CLI 扩展；内部代码统一读取 address_resolved。
+    # 同步第三方 CLI 扩展使用的属性名；内部代码读取 address_resolved。
     args.addr_resolved = args.address_resolved
     return SessionManager(working_dir=working_dir)
 
@@ -304,6 +422,21 @@ def run_client_command(
             cmd_workflow_command(args, session_manager)
         else:
             print_error("workflow 子命令不完整")
+            raise SystemExit(1)
+    elif command == "graph":
+        if values.get("graph_command") in {
+            "create",
+            "upload",
+            "list",
+            "get",
+            "download",
+            "delete",
+        }:
+            from unilabos.app.cli.graph import cmd_graph_command
+
+            cmd_graph_command(args, session_manager)
+        else:
+            print_error("graph 子命令不完整")
             raise SystemExit(1)
     else:
         print_error(f"{command} 子命令不完整")
