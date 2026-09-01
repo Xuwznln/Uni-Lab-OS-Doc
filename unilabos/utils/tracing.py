@@ -529,36 +529,6 @@ def use_context(context_value: Any) -> Iterator[None]:
         _backend.detach(token)
 
 
-def await_with_context(context_value: Any, awaitable: Any) -> Any:
-    """逐次恢复异步上下文，兼容会跨 Context 推进协程的 rclpy Task。"""
-
-    @types.coroutine
-    def _runner():
-        iterator = awaitable.__await__()
-        value = None
-        pending_error: Optional[BaseException] = None
-        while True:
-            try:
-                with use_context(context_value):
-                    if pending_error is None:
-                        yielded = iterator.send(value)
-                    else:
-                        error_value = pending_error
-                        pending_error = None
-                        yielded = iterator.throw(
-                            type(error_value), error_value, error_value.__traceback__
-                        )
-            except StopIteration as stopped:
-                return stopped.value
-            try:
-                value = yield yielded
-            except BaseException as exc:  # 由外层 Task 注入取消或等待异常
-                pending_error = exc
-                value = None
-
-    return _runner()
-
-
 def extract_trace_context(carrier: Optional[Mapping[str, Any]]) -> Any:
     if _backend is None or not carrier:
         return None
@@ -762,42 +732,11 @@ class DetachedSpan:
             pass
 
 
-def start_detached_span(
-    name: str,
-    *,
-    attributes: Optional[Mapping[str, Any]] = None,
-    parent_context: Any = None,
-    kind: str = "internal",
-) -> DetachedSpan:
-    return DetachedSpan(
-        name,
-        _safe_attributes(attributes),
-        parent_context if parent_context is not None else capture_context(),
-        kind,
-    )
-
-
 def run_with_context(
     context_value: Any, function: Any, *args: Any, **kwargs: Any
 ) -> Any:
     with use_context(context_value):
         return function(*args, **kwargs)
-
-
-def submit_with_context(executor: Any, function: Any, *args: Any, **kwargs: Any):
-    context_value = capture_context()
-    return executor.submit(
-        run_with_context, context_value, function, *args, **kwargs
-    )
-
-
-def wrap_with_current_context(function: Any):
-    context_value = capture_context()
-
-    def _wrapped(*args: Any, **kwargs: Any):
-        return run_with_context(context_value, function, *args, **kwargs)
-
-    return _wrapped
 
 
 def install_http_tracing(app: Any) -> None:
@@ -853,25 +792,6 @@ def install_http_tracing(app: Any) -> None:
             return response
 
 
-def _set_backend_for_test(backend: Any) -> None:
-    """仅供离线单测注入 recording backend。"""
-
-    global _backend, _shutdown_started, _initialization_attempted
-    with _backend_lock:
-        _backend = backend
-        _shutdown_started = False
-        _initialization_attempted = True
-
-
-def _reset_for_test() -> None:
-    global _backend, _settings, _shutdown_started, _initialization_attempted
-    with _backend_lock:
-        _backend = None
-        _settings = None
-        _shutdown_started = False
-        _initialization_attempted = False
-
-
 __all__ = [
     "DetachedSpan",
     "SPAN_ID",
@@ -881,7 +801,6 @@ __all__ = [
     "TracingSettings",
     "add_event",
     "capture_context",
-    "await_with_context",
     "current_span",
     "current_trace_ids",
     "extract_trace_context",
@@ -893,8 +812,5 @@ __all__ = [
     "set_error",
     "shutdown_tracing",
     "span",
-    "start_detached_span",
-    "submit_with_context",
     "use_context",
-    "wrap_with_current_context",
 ]

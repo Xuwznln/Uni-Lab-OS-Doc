@@ -48,7 +48,7 @@ def subscribe(
 
     回调收到的值统一经 ``convert_from_ros_msg`` 转换：``std_msgs`` 这类基础消息直接得到原生值
     （如 ``Int32 -> int``），复合消息得到递归转换后的 dict（与 topic 发布、call_device_action
-    结果解析等通道一致）。框架不再对消息做额外解包，拿到什么由消息类型决定。
+    结果解析等通道一致）。回调值的形状由消息类型及该转换结果决定。
 
     Args:
         topic: 目标 topic 的绝对路径（以 ``/`` 开头）。与 ``device_id`` + ``status_name``
@@ -66,8 +66,7 @@ def subscribe(
             启动先后顺序影响，行为为：
 
             - 发布者尚未就绪时，按该间隔**循环重试解析类型，不设上限直到订上**；
-            - **一旦订上即停止重试**，之后只管订阅、不再判活 / 轮询（断线重连交给 DDS
-              自动完成，真出问题等报错暴露）。
+            - **一旦订上即停止重试**，之后由 DDS 负责连接状态与断线重连。
 
             不设置时使用默认间隔 ``_SUBSCRIBE_RETRY_PERIOD``（10s），同样一直重试直到订上。
             注意：自动识别类型时，回调首参不要加 Python 内置类型注解（如 ``value: int``），
@@ -132,9 +131,7 @@ def get_all_subscriptions(instance) -> list:
     return subscriptions
 
 
-# ---------------------------------------------------------------------------
-# 向后兼容重导出 -- 已迁移到 unilabos.registry.decorators
-# ---------------------------------------------------------------------------
+# 公共 Registry 装饰器重导出。
 from unilabos.registry.decorators import (  # noqa: E402, F401
     topic_config,
     get_topic_config,

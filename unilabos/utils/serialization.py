@@ -1,20 +1,12 @@
-import collections.abc
+"""对象序列化工具：JSON 类型编码、YAML dumper 与动作结果序列化。"""
+
 import json
 from collections import OrderedDict
-from typing import Optional, get_origin, get_args
+from typing import Optional
 
 import yaml
 
 from unilabos.registry.action_policy import SUCCESS_TYPE_NORMAL, SuccessType
-
-
-def get_type_class(type_hint):
-    origin = get_origin(type_hint)
-    if origin is not None and issubclass(origin, collections.abc.Sequence):
-        final_type = [get_args(type_hint)[0]]  # 默认sequence中类型都一样
-    else:
-        final_type = type_hint
-    return final_type
 
 
 def json_default(obj):
@@ -34,17 +26,28 @@ class TypeEncoder(json.JSONEncoder):
             return super().default(obj)
 
 
+try:
+    import orjson
+
+    def normalize_json(info: dict) -> dict:
+        """经 JSON 序列化/反序列化一轮来清理非标准类型。"""
+        return orjson.loads(orjson.dumps(info, default=json_default))
+
+except ImportError:
+
+    def normalize_json(info: dict) -> dict:  # type: ignore[misc]
+        return json.loads(json.dumps(info, ensure_ascii=False, cls=TypeEncoder))
+
+
 class NoAliasDumper(yaml.SafeDumper):
     def ignore_aliases(self, data):
         return True
 
 
-# 为NoAliasDumper添加OrderedDict的representation方法
 def represent_ordereddict(dumper, data):
     return dumper.represent_mapping("tag:yaml.org,2002:map", data.items())
 
 
-# 注册OrderedDict的representer
 NoAliasDumper.add_representer(OrderedDict, represent_ordereddict)
 
 
@@ -98,3 +101,13 @@ def serialize_result_info(
             result_info["error_info"] = error_info
 
     return json.loads(json.dumps(result_info, ensure_ascii=False, cls=ResultInfoEncoder))
+
+
+__all__ = [
+    "NoAliasDumper",
+    "ResultInfoEncoder",
+    "TypeEncoder",
+    "json_default",
+    "normalize_json",
+    "serialize_result_info",
+]
