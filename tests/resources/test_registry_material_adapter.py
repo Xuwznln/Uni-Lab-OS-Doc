@@ -1,13 +1,12 @@
 """Registry 生成定义与微后端模板模型的映射测试。"""
 
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.resources.adapters.registry_materials import register_resource_definitions
 from unilabos.client.materials import LocalMaterialsClient
 from unilabos.server.services.materials import MaterialsService
 
 
 def test_registry_definition_is_registered_once_with_promoted_fields(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     definitions = [
         {
@@ -45,4 +44,4 @@ def test_registry_definition_is_registered_once_with_promoted_fields(tmp_path) -
         assert "category" not in template.definition
         assert "handles" not in template.definition
     finally:
-        service.repository.close()
+        service.close()

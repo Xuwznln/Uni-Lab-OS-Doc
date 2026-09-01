@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from unilabos.registry.ast_registry_scanner import _parse_file, scan_directory
 from unilabos.registry.decorators import device, get_device_meta
 from unilabos.devices.virtual.workbench import VirtualWorkbench
-from unilabos.resources.device_site_adapter import (
+from unilabos.resources.adapters.device_site import (
     apply_device_available_sites,
     prepare_devices_for_report,
 )
@@ -395,6 +395,24 @@ def test_device_report_accepts_authoritative_empty_snapshot_without_expansion():
     assert device_config.res_content.template_name == "available_sites_test_device"
     assert device_config.res_content.sites == []
     assert device_config.res_content.sites_initialized is True
+
+
+def test_device_report_resolves_registry_by_template_name_not_class():
+    """运行态注册表解析只读 template_name；class 为空的新图节点照常通过。"""
+    by_template = _device_resource(**{"class": ""})
+    registry = {"available_sites_test_device": {"available_sites": []}}
+
+    assert prepare_devices_for_report(
+        ResourceTreeSet([ResourceTreeInstance(by_template)]), registry
+    ) == 1
+
+    legacy_class_only = _device_resource(
+        **{"class": "available_sites_test_device", "template_name": "other_template"}
+    )
+    with pytest.raises(ValueError, match="template_name='other_template' 不在注册表中"):
+        prepare_devices_for_report(
+            ResourceTreeSet([ResourceTreeInstance(legacy_class_only)]), registry
+        )
 
 
 def test_device_report_rejects_uninitialized_template_sites():

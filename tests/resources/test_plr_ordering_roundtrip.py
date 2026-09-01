@@ -2,15 +2,13 @@
 
 PLR ``get_item("A2")`` 的语义是「ordering 键序中的位置 -> children 同位置」，
 键序（列优先 A1, B1, C1, A2, ...）一旦被字典序重排（A1, A2, A3, ...），
-重建实例的孔位标识会整体错位（get_well("A2") 拿到 B1 的孔）。历史上
-repository 曾用 ``canonical_json``（sort_keys=True）存储 config 触发过该
-问题；A1 在任何排序下都是首位，因此只断言 A1 的用例无法暴露。
+重建实例的孔位标识会整体错位（get_well("A2") 拿到 B1 的孔）。A1 在两种
+排序下都是首位，因此测试必须覆盖非首位孔。
 
 两层防线分别验证：
 
 - 存储层 ``stored_json`` 保序（materials.db round-trip 键序不变）；
-- 适配层 ``resource_ulab_to_plr`` 兜底：即使 ordering 已被重排（历史脏
-  数据），也按 children 顺序还原。
+- 适配层 ``resource_ulab_to_plr`` 在 ordering 被重排时按 children 顺序还原。
 """
 
 from __future__ import annotations
@@ -24,7 +22,6 @@ from pylabrobot.resources.utils import create_ordered_items_2d
 from unilabos.client.materials import LocalMaterialsClient
 from unilabos.resources import materials
 from unilabos.server.backend.composition import set_materials_gateway
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.services.materials import MaterialsService
 
 
@@ -60,7 +57,7 @@ COLUMN_MAJOR = [
 
 
 def test_authority_roundtrip_preserves_well_identity(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     gateway = LocalMaterialsClient(service)
     set_materials_gateway(gateway)
     try:
@@ -91,15 +88,15 @@ def test_authority_roundtrip_preserves_well_identity(tmp_path) -> None:
         ] == [("Water", 40.0)]
     finally:
         set_materials_gateway(None)
-        service.repository.close()
+        service.close()
 
 
 def test_rebuild_repairs_sorted_ordering_from_children() -> None:
-    """适配层兜底：历史被字典序重排的 ordering 按 children 顺序还原。"""
+    """适配层按 children 顺序修复被字典序重排的 ordering。"""
 
     from unilabos.resources.resource_tracker import ResourceTreeSet
 
-    draft = _plate_4x3("legacy_plate")
+    draft = _plate_4x3("reordered_plate")
     draft.unilabos_uuid = str(uuid4())
     for child in draft.get_all_children():
         child.unilabos_uuid = str(uuid4())
@@ -107,7 +104,7 @@ def test_rebuild_repairs_sorted_ordering_from_children() -> None:
 
     tree_set = ResourceTreeSet.from_plr_resources([draft])
     root = tree_set.trees[0].root_node.res_content
-    # 模拟 canonical 存储造成的键排序（dict 序 == 字典序）
+    # 构造键按字典序排列、children 仍为列优先的输入。
     root.config["ordering"] = collections.OrderedDict(
         sorted(root.config["ordering"].items())
     )
@@ -115,5 +112,5 @@ def test_rebuild_repairs_sorted_ordering_from_children() -> None:
 
     rebuilt = tree_set.to_plr_resources()[0]
     assert list(rebuilt._ordering) == COLUMN_MAJOR
-    assert rebuilt.get_well("A2").name == "legacy_plate_well_A2"
+    assert rebuilt.get_well("A2").name == "reordered_plate_well_A2"
     assert rebuilt.get_well("A2").unilabos_uuid == a2_uuid

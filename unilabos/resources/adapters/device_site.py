@@ -69,12 +69,14 @@ def prepare_devices_for_report(
         resource = node.res_content
         if resource.type != "device":
             continue
-        registry_name = resource.klass
+        registry_name = resource.template_name
         if not isinstance(registry_name, str) or not registry_name:
-            raise ValueError(f"设备 {resource.id} 的 class 不能为空")
+            raise ValueError(f"设备 {resource.id} 的 template_name 不能为空")
         registry_entry = device_registry.get(registry_name)
         if registry_entry is None:
-            raise ValueError(f"设备 {resource.id} 的 class={registry_name!r} 不在注册表中")
+            raise ValueError(
+                f"设备 {resource.id} 的 template_name={registry_name!r} 不在注册表中"
+            )
         apply_device_available_sites(node, registry_entry, registry_name)
         prepared += 1
     return prepared

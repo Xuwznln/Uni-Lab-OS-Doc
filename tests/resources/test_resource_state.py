@@ -96,10 +96,27 @@ def test_template_name_extra_is_promoted_to_root():
 
 def test_root_class_is_not_used_as_template_name():
     resource = ResourceDict.model_validate(
-        _resource_payload(**{"class": "LegacyTemplate"})
+        _resource_payload(**{"class": "ShadowTemplate"})
     )
 
     assert resource.template_name == "RegularContainer"
+
+
+def test_normalize_legacy_graph_node_copies_class_only_when_template_name_missing():
+    from unilabos.resources.objects.resource import normalize_legacy_graph_node
+
+    upgraded = normalize_legacy_graph_node({"id": "pump", "class": "pump_demo"})
+    assert upgraded["template_name"] == "pump_demo"
+    assert upgraded["class"] == "pump_demo"
+
+    kept = normalize_legacy_graph_node(
+        {"id": "pump", "class": "legacy_name", "template_name": "pump_demo"}
+    )
+    assert kept["template_name"] == "pump_demo"
+    assert kept["class"] == "legacy_name"
+
+    blank = normalize_legacy_graph_node({"id": "pump", "class": "  "})
+    assert "template_name" not in blank
 
 
 def test_template_name_rejects_conflicting_extra():
@@ -107,7 +124,7 @@ def test_template_name_rejects_conflicting_extra():
         ResourceDict.model_validate(
             _resource_payload(
                 template_name="CanonicalTemplate",
-                extra={EXTRA_RESOURCE_CLASS: "LegacyTemplate"},
+                extra={EXTRA_RESOURCE_CLASS: "SidecarTemplate"},
             )
         )
 
@@ -131,18 +148,18 @@ def test_resource_meta_data_sidecar_is_promoted_and_removed():
     resource = ResourceDict.model_validate(
         _resource_payload(
             extra={
-                EXTRA_RESOURCE_META_DATA: {"vendor": {"lot": "legacy"}},
+                EXTRA_RESOURCE_META_DATA: {"vendor": {"lot": "sidecar"}},
                 "transport_trace": "kept",
             }
         )
     )
 
-    assert resource.meta_data == {"vendor": {"lot": "legacy"}}
+    assert resource.meta_data == {"vendor": {"lot": "sidecar"}}
     assert resource.extra == {"transport_trace": "kept"}
 
 
-def test_resource_meta_data_legacy_duplicates_are_checked_and_removed():
-    meta_data = {"vendor": {"lot": "legacy"}}
+def test_resource_meta_data_nested_duplicates_are_checked_and_removed():
+    meta_data = {"vendor": {"lot": "nested"}}
     resource = ResourceDict.model_validate(
         _resource_payload(
             meta_data=meta_data,
@@ -168,14 +185,14 @@ def test_resource_meta_data_rejects_conflicting_sidecar():
         )
 
 
-def test_resource_meta_data_rejects_explicit_empty_root_against_legacy_value():
+def test_resource_meta_data_rejects_explicit_empty_root_against_nested_value():
     with pytest.raises(ValidationError, match="根字段 meta_data.*config.meta_data 冲突"):
         ResourceDict.model_validate(
             _resource_payload(
                 meta_data={},
                 config={
                     "type": "RegularContainer",
-                    "meta_data": {"vendor": "legacy"},
+                    "meta_data": {"vendor": "nested"},
                 },
             )
         )

@@ -4,7 +4,7 @@ import inspect
 import json
 import os.path
 import traceback
-from typing import Union, Any, Dict, List, Tuple
+from typing import Union, Any, Dict, List, Optional, Tuple
 import uuid
 import networkx as nx
 from pylabrobot.resources import ResourceHolder
@@ -23,6 +23,7 @@ from unilabos.resources.objects.resource import (
     EXTRA_RESOURCE_META_DATA,
     EXTRA_RESOURCE_POSE,
     RESOURCE_ROOT_FIELDS,
+    normalize_legacy_graph_node,
 )
 from unilabos.resources.objects.site import ResourceSite
 from unilabos.resources.objects.state import TRACKER_STATE_KEYS
@@ -57,7 +58,8 @@ physical_setup_graph: nx.Graph = None
 
 
 def canonicalize_nodes_data(
-    nodes: List[Dict[str, Any]], parent_relation: Dict[str, List[str]] = {}
+    nodes: List[Dict[str, Any]],
+    parent_relation: Optional[Dict[str, List[str]]] = None,
 ) -> ResourceTreeSet:
     """
     标准化节点数据，使用 ResourceInstanceDictFlatten 进行规范化并创建 ResourceTreeSet
@@ -69,10 +71,10 @@ def canonicalize_nodes_data(
     Returns:
         ResourceTreeSet: 标准化后的资源树集合
     """
+    parent_relation = parent_relation or {}
     print_status(f"{len(nodes)} Resources loaded", "info")
 
     # 第一步：基本预处理（处理graphml的label字段）
-    outer_host_node_id = None
     for node in nodes:
         if not node.get("uuid"):
             transport_uuid = (node.get("data") or {}).get("unilabos_uuid")
@@ -82,12 +84,14 @@ def canonicalize_nodes_data(
                     "-g strict import 必须携带资源/Site UUID"
                 )
             node["uuid"] = str(transport_uuid)
-    for idx, node in enumerate(nodes):
+    for node in nodes:
         if node.get("label") is not None:
             node_id = node.pop("label")
             node["id"] = node["name"] = node_id
-        if node["id"] == "host_node":
-            outer_host_node_id = idx
+        # 旧图只写 class；模型校验器不做该推导，图读取边界在此兼容。
+        normalize_legacy_graph_node(node)
+        # 父子关系只由 parent/parent_uuid 表达；旧图的 children 列表是派生字段，读取时丢弃。
+        node.pop("children", None)
         if not isinstance(node.get("config"), dict):
             node["config"] = {}
         if not node.get("type"):
@@ -98,7 +102,7 @@ def canonicalize_nodes_data(
             print_status(f"Warning: Node {node.get('id', 'unknown')} missing 'name', defaulting to {node['name']}", "warning")
         if "position" in node:
             raise ValueError(
-                f"资源 {node.get('id', node.get('name'))} 的根字段 position 已删除，"
+                f"资源 {node.get('id', node.get('name'))} 的根字段 position 不受支持，"
                 "请使用 pose.position"
             )
         legacy_position = {
@@ -122,21 +126,17 @@ def canonicalize_nodes_data(
         if "sample_id" in node:
             sample_id = node.pop("sample_id")
             if sample_id:
-                logger.error(f"{node}的sample_id参数已弃用，sample_id: {sample_id}")
+                logger.error(f"{node} 的 sample_id 参数不受支持，已忽略: {sample_id}")
         for k in list(node.keys()):
-            if k not in RESOURCE_ROOT_FIELDS and k != "children":
+            if k not in RESOURCE_ROOT_FIELDS:
                 v = node.pop(k)
                 node["config"][k] = v
-    if outer_host_node_id is not None:
-        nodes.pop(outer_host_node_id)
-    # 第二步：处理parent_relation
+    # 第二步：处理parent_relation（GraphML 的 "父::子" 命名）→ 写入子节点 parent
     id2idx = {node["id"]: idx for idx, node in enumerate(nodes)}
     for parent, children in parent_relation.items():
-        if parent in id2idx:
-            nodes[id2idx[parent]]["children"] = children
-            for child in children:
-                if child in id2idx:
-                    nodes[id2idx[child]]["parent"] = parent
+        for child in children:
+            if child in id2idx:
+                nodes[id2idx[child]]["parent"] = parent
 
     # 第三步：使用 ResourceInstanceDictFlatten 标准化每个节点
     standardized_instances = []
@@ -286,16 +286,17 @@ def handle_communications(G: nx.Graph):
     for e, edata in G.edges.items():
         if edata.get("type", "physical") != "communication":
             continue
-        if G.nodes[e[0]].get("class") in available_communication_types:
+        if G.nodes[e[0]].get("template_name") in available_communication_types:
             device_comm, device = e[0], e[1]
-        elif G.nodes[e[1]].get("class") in available_communication_types:
+        elif G.nodes[e[1]].get("template_name") in available_communication_types:
             device_comm, device = e[1], e[0]
         else:
             continue
 
-        if G.nodes[device_comm].get("class") == "serial":
+        comm_template = G.nodes[device_comm].get("template_name")
+        if comm_template == "serial":
             G.nodes[device]["config"]["port"] = device_comm
-        elif G.nodes[device_comm].get("class") == "io_device":
+        elif comm_template == "io_device":
             logger.warning(f'Modify {device}\'s io_device_port to {edata["port"][device_comm]}')
             G.nodes[device]["config"]["io_device_port"] = int(edata["port"][device_comm])
 
@@ -303,8 +304,11 @@ def handle_communications(G: nx.Graph):
 def read_node_link_json(
     json_info: Union[str, Dict[str, Any]],
 ) -> tuple[nx.Graph, ResourceTreeSet, List[Dict[str, Any]]]:
-    """
-    读取节点-边的JSON数据并构建图
+    """把 node-link JSON payload 装配为运行时图结构。
+
+    规范输入是 Graph Authority 导出的权威 payload（``unilab -g <名称|uuid>``
+    的缓存文件即该形态）。``-g`` 本地 JSON 文件在启动早期先经
+    ``GraphService.upsert_graph`` 对账/发号登记，再以权威 payload 进入本函数。
 
     Args:
         json_info: JSON文件路径或字典数据
@@ -446,16 +450,38 @@ def dict_from_graph(graph: nx.Graph) -> dict:
     return nodes_copy
 
 
+def _child_ids_by_parent(nodes: dict) -> dict[str, list[str]]:
+    """按 ``parent`` 派生每个节点的子节点 id 列表（保持输入顺序）。
+
+    扁平节点列表的父子关系只由 ``parent`` 表达；仅当整批节点都没有 parent
+    时才回退读取旧数据的 ``children`` 列表。
+    """
+
+    children: dict[str, list[str]] = {node_id: [] for node_id in nodes}
+    for node_id, node in nodes.items():
+        parent_id = node.get("parent")
+        if isinstance(parent_id, dict):
+            parent_id = parent_id.get("id")
+        if parent_id in children and parent_id != node_id:
+            children[parent_id].append(node_id)
+    if any(children.values()):
+        return children
+    return {
+        node_id: [child for child in (node.get("children") or []) if isinstance(child, str) and child in nodes]
+        for node_id, node in nodes.items()
+    }
+
+
 def dict_to_tree(nodes: dict, devices_only: bool = False) -> list[dict]:
     # 将节点转换为字典，以便通过 ID 快速查找
     nodes_list = [node for node in nodes.values() if node.get("type") == "device" or not devices_only]
-    id_list = [node["id"] for node in nodes_list]
     is_root = {node["id"]: True for node in nodes_list}
+    child_ids = _child_ids_by_parent(nodes)
 
     # 初始化每个节点的 children 为包含节点字典的列表
     for node in nodes_list:
-        node["children"] = [nodes[child_id] for child_id in node.get("children", [])]
-        for child_id in node.get("children", []):
+        node["children"] = [nodes[child_id] for child_id in child_ids[node["id"]]]
+        for child_id in child_ids[node["id"]]:
             if child_id in is_root:
                 is_root[child_id] = False
 
@@ -470,15 +496,16 @@ def dict_to_nested_dict(nodes: dict, devices_only: bool = False) -> dict:
     # 将节点转换为字典，以便通过 ID 快速查找
     nodes_list = [node for node in nodes.values() if node.get("type") == "device" or not devices_only]
     is_root = {node["id"]: True for node in nodes_list}
+    child_ids = _child_ids_by_parent(nodes)
 
     # 初始化每个节点的 children 为包含节点字典的列表
     for node in nodes_list:
         node["children"] = {
             child_id: nodes[child_id]
-            for child_id in node.get("children", [])
+            for child_id in child_ids[node["id"]]
             if nodes[child_id].get("type") == "device" or not devices_only
         }
-        for child_id in node.get("children", []):
+        for child_id in child_ids[node["id"]]:
             if child_id in is_root:
                 is_root[child_id] = False
         if len(node["children"]) > 0 and node["type"].lower() == "device":
@@ -497,20 +524,23 @@ def list_to_nested_dict(nodes: list[dict]) -> dict:
 
 
 def tree_to_list(tree: list[dict]) -> list[dict]:
-    def _tree_to_list(tree: list[dict], result: list[dict]):
+    """嵌套树 → 扁平节点列表；层级只由每个节点的 ``parent`` 表达，不再输出 children。"""
+
+    def _tree_to_list(tree: list[dict], result: list[dict], parent_id: Optional[str]):
         for node_ in tree:
             node = node_.copy()
+            children = node.pop("children", None) or []
+            if not node.get("parent"):
+                node["parent"] = parent_id
             result.append(node)
-            if node.get("children"):
-                _tree_to_list(node["children"], result)
-            node["children"] = [n["id"] for n in node["children"]]
+            _tree_to_list(children, result, node["id"])
 
-    result = []
-    _tree_to_list(tree, result)
+    result: list[dict] = []
+    _tree_to_list(tree, result, None)
     return result
 
 
-def nested_dict_to_list(nested_dict: dict) -> list[dict]:  # FIXME 是tree？
+def nested_dict_to_list(nested_dict: dict) -> list[dict]:
     """
     将嵌套字典转换为扁平列表
 
@@ -757,7 +787,8 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
                 if actual_position is not None
                 else None
             ),
-            "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},  # Resource如果没有rotation，是plr版本太低
+            # PLR 反序列化输入需要显式 rotation 对象。
+            "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},
             "category": resource["type"],
             "model": config.get("model", None),  # resource中deck没有model
             "children": serialized_children,
@@ -898,7 +929,8 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
                 else []
             ),
             "parent": d.get("parent_name") or parent_name,
-            "type": replace_plr_type_to_ulab(d.get("category")),  # FIXME plr自带的type是python class name
+            # PLR category 表示资源用途，需映射到 Uni-Lab-OS 节点类型。
+            "type": replace_plr_type_to_ulab(d.get("category")),
             "class": d.get("class", ""),
             "template_name": get_plr_template_name(plr_node, d),
             "pose": static_pose,
@@ -995,7 +1027,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
         plr_material.code = material.get("code", "") and material.get("barCode", "") or ""
         plr_material.unilabos_uuid = str(uuid.uuid4())
 
-        # ⭐ 保存 Bioyond 原始信息到 unilabos_extra（用于出库时查询）
+        # 保存 Bioyond 标识和名称，供出库查询使用。
         plr_material.unilabos_extra = {
             "material_bioyond_id": material.get("id"),           # Bioyond 物料 UUID
             "material_bioyond_name": material.get("name"),       # Bioyond 原始名称（如 "MDA"）
@@ -1045,12 +1077,10 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                         # 第一行(x=1)是10%分装小瓶，第二行(x=2)是90%分装小瓶
                         x_pos = detail.get("x", 0)
                         y_pos = detail.get("y", 0)
-                        # logger.debug(f"  └─ [推断类型] {detail['name']} 坐标(x={x_pos}, y={y_pos})")
                         if x_pos == 1:
                             typeName = "10%分装小瓶"
                         elif x_pos == 2:
                             typeName = "90%分装小瓶"
-                        # logger.debug(f"  └─ [推断结果] {detail['name']} → {typeName}")
                     else:
                         typeName = default_detail_type
 
@@ -1086,8 +1116,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
             if not locations:
                 logger.debug(f"[物料位置] {unique_name} 没有location信息，跳过warehouse放置")
 
-            # ⭐ 预先检查：如果物料的任何location在竖向warehouse中，提前交换尺寸
-            # 这样可以避免多个location时尺寸不一致的问题
+            # 任一 location 位于竖向 warehouse 时统一交换物料尺寸。
             needs_size_swap = False
             for loc in locations:
                 wh_name_check = loc.get("whName")
@@ -1252,7 +1281,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                         logger.error(f"❌ [PLR→Bioyond] 子物料 '{bottle.name}' 的 model '{bottle.model}' 不在 type_mapping 中")
                         raise ValueError(f"子物料 model '{bottle.model}' 未在 MATERIAL_TYPE_MAPPINGS 中配置")
 
-                    # ⚠️ 坐标系转换说明:
+                    # 坐标系转换：
                     # _parse_identifier_to_indices 返回: x=列索引, y=行索引 (0-based)
                     # Bioyond 系统要求: x=行号, y=列号 (1-based)
                     # 因此需要交换 x 和 y!
@@ -1326,7 +1355,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
             else:
                 logger.debug(f"  📭 [单瓶物料] {resource.name} 无液体，使用资源名: {material_name}")
 
-            # 🎯 处理物料默认参数和单位
+            # 处理物料默认参数和单位。
             # 优先级: typeId参数 > 物料名称参数 > 默认值
             default_unit = "个"  # 默认单位
             material_parameters = {}
@@ -1368,7 +1397,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                 "Parameters": parameters_json  # API 实际要求的字段（必需）
             }
 
-        # ⭐ 处理 locations 信息
+        # 处理 locations 信息。
         # 优先级: update_resource_site (位置更新请求) > 当前 parent 位置
         extra_info = getattr(resource, "unilabos_extra", {})
         update_site = extra_info.get("update_resource_site")
@@ -1425,7 +1454,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
             carrier_parent = resource.parent.parent
             site_in_parent = carrier_parent.get_child_identifier(resource)
 
-            # ⚠️ 坐标系转换说明:
+            # 坐标系转换：
             # get_child_identifier 返回: x_idx=列索引, y_idx=行索引 (0-based)
             # Bioyond 系统要求: x=行号, y=列号 (1-based)
             # 因此需要交换 x 和 y!

@@ -370,12 +370,12 @@ def test_joint_state_rejects_mismatched_arrays():
         )
 
 
-@pytest.mark.parametrize("legacy_source", ["config", "data"])
-def test_resource_tree_set_missing_metadata_sidecar_allows_legacy_promotion(
-    monkeypatch, legacy_source
+@pytest.mark.parametrize("source_location", ["config", "data"])
+def test_resource_tree_set_missing_metadata_sidecar_promotes_nested_metadata(
+    monkeypatch, source_location
 ):
     container = RegularContainer(
-        name=f"legacy_{legacy_source}_beaker",
+        name=f"nested_{source_location}_beaker",
         size_x=10,
         size_y=10,
         size_z=20,
@@ -383,43 +383,43 @@ def test_resource_tree_set_missing_metadata_sidecar_allows_legacy_promotion(
     )
     container.unilabos_uuid = str(uuid4())
     container.unilabos_extra = {EXTRA_RESOURCE_CLASS: "BeakerTemplate"}
-    legacy_meta_data = {"vendor": {"lot": f"legacy-{legacy_source}"}}
+    nested_meta_data = {"vendor": {"lot": f"nested-{source_location}"}}
 
-    if legacy_source == "config":
+    if source_location == "config":
         original_serialize = container.serialize
 
-        def serialize_with_legacy_meta_data():
+        def serialize_with_nested_meta_data():
             serialized = original_serialize()
-            serialized["meta_data"] = legacy_meta_data
+            serialized["meta_data"] = nested_meta_data
             return serialized
 
-        monkeypatch.setattr(container, "serialize", serialize_with_legacy_meta_data)
+        monkeypatch.setattr(container, "serialize", serialize_with_nested_meta_data)
     else:
         original_serialize_state = container.serialize_state
 
-        def serialize_state_with_legacy_meta_data():
+        def serialize_state_with_nested_meta_data():
             return {
                 **original_serialize_state(),
-                "meta_data": legacy_meta_data,
+                "meta_data": nested_meta_data,
             }
 
         monkeypatch.setattr(
             container,
             "serialize_state",
-            serialize_state_with_legacy_meta_data,
+            serialize_state_with_nested_meta_data,
         )
 
     tree_resource = ResourceTreeSet.from_plr_resources(
         [container]
     ).root_nodes[0].res_content
-    assert tree_resource.meta_data == legacy_meta_data
+    assert tree_resource.meta_data == nested_meta_data
     assert "meta_data" not in tree_resource.config
     assert "meta_data" not in tree_resource.data
 
 
-@pytest.mark.parametrize("legacy_source", ["config", "data"])
-def test_graphio_plr_missing_metadata_sidecar_allows_legacy_promotion(
-    monkeypatch, legacy_source
+@pytest.mark.parametrize("source_location", ["config", "data"])
+def test_graphio_plr_missing_metadata_sidecar_promotes_nested_metadata(
+    monkeypatch, source_location
 ):
     graphio = pytest.importorskip(
         "unilabos.resources.graphio",
@@ -427,7 +427,7 @@ def test_graphio_plr_missing_metadata_sidecar_allows_legacy_promotion(
         exc_type=ImportError,
     )
     container = RegularContainer(
-        name=f"legacy_graphio_{legacy_source}_beaker",
+        name=f"nested_graphio_{source_location}_beaker",
         size_x=10,
         size_y=10,
         size_z=20,
@@ -435,35 +435,35 @@ def test_graphio_plr_missing_metadata_sidecar_allows_legacy_promotion(
     )
     container.unilabos_uuid = str(uuid4())
     container.unilabos_extra = {EXTRA_RESOURCE_CLASS: "BeakerTemplate"}
-    legacy_meta_data = {"vendor": {"lot": f"legacy-{legacy_source}"}}
+    nested_meta_data = {"vendor": {"lot": f"nested-{source_location}"}}
 
-    if legacy_source == "config":
+    if source_location == "config":
         original_serialize = container.serialize
 
-        def serialize_with_legacy_meta_data():
+        def serialize_with_nested_meta_data():
             serialized = original_serialize()
-            serialized["meta_data"] = legacy_meta_data
+            serialized["meta_data"] = nested_meta_data
             return serialized
 
-        monkeypatch.setattr(container, "serialize", serialize_with_legacy_meta_data)
+        monkeypatch.setattr(container, "serialize", serialize_with_nested_meta_data)
     else:
         original_serialize_state = container.serialize_state
 
-        def serialize_state_with_legacy_meta_data():
+        def serialize_state_with_nested_meta_data():
             return {
                 **original_serialize_state(),
-                "meta_data": legacy_meta_data,
+                "meta_data": nested_meta_data,
             }
 
         monkeypatch.setattr(
             container,
             "serialize_state",
-            serialize_state_with_legacy_meta_data,
+            serialize_state_with_nested_meta_data,
         )
 
     graph_payload = graphio.resource_plr_to_ulab(container)
     assert "meta_data" not in graph_payload
     graph_resource = ResourceDict.model_validate(graph_payload)
-    assert graph_resource.meta_data == legacy_meta_data
+    assert graph_resource.meta_data == nested_meta_data
     assert "meta_data" not in graph_resource.config
     assert "meta_data" not in graph_resource.data

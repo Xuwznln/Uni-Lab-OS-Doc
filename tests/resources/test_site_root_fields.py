@@ -273,7 +273,7 @@ def test_plr_offline_uuid_migration_updates_site_sidecar_references():
     assert resource["extra"][EXTRA_SITES]["A1"] == resource["sites"][0]
 
 
-def test_legacy_site_geometry_is_promoted_to_shared_pose():
+def test_flat_site_geometry_is_promoted_to_shared_pose():
     owner_uuid = str(uuid4())
     occupant_uuid = str(uuid4())
     resource = ResourceDict.model_validate(
@@ -327,7 +327,9 @@ def test_legacy_site_geometry_is_promoted_to_shared_pose():
     assert dumped["sites_initialized"] is True
 
 
-def test_old_experiment_without_strict_identity_is_rejected_at_edge_import():
+def test_bundled_experiment_without_strict_identity_is_rejected_at_edge_import():
+    # 内置图已升级为新契约（全节点带 UUID）；此处剥离 uuid 构造非法变体，
+    # 验证 strict import 仍拒绝缺身份的图。
     experiment_path = (
         Path(__file__).resolve().parents[2]
         / "unilabos"
@@ -336,12 +338,16 @@ def test_old_experiment_without_strict_identity_is_rejected_at_edge_import():
         / "prcxi_9320_slim.json"
     )
     raw = json.loads(experiment_path.read_text(encoding="utf-8"))
+    nodes = deepcopy(raw["nodes"])
+    for node in nodes:
+        node.pop("uuid", None)
+        (node.get("data") or {}).pop("unilabos_uuid", None)
 
     with pytest.raises((ValueError, ValidationError), match="UUID|Field required"):
-        ResourceTreeSet.from_raw_dict_list(deepcopy(raw["nodes"]))
+        ResourceTreeSet.from_raw_dict_list(nodes)
 
 
-def test_registry_available_sites_normalizes_legacy_geometry_without_entering_instance():
+def test_registry_available_sites_normalizes_flat_geometry_without_entering_instance():
     definitions = normalize_available_sites(
         [
             {
@@ -422,7 +428,7 @@ def test_canonical_site_rejects_unknown_or_conflicting_fields():
     assert not hasattr(resource, "position")
     assert resource.pose.position.model_dump() == {"x": 9.0, "y": 8.0, "z": 7.0}
 
-    with pytest.raises(ValidationError, match="根字段 position 已删除"):
+    with pytest.raises(ValidationError, match="根字段 position 不受支持"):
         ResourceDict.model_validate(
             _resource_payload(position={"x": 1, "y": 2, "z": 3})
         )
@@ -437,8 +443,8 @@ def test_pose_position_can_be_unknown_without_zero_default():
     assert ResourceDict.model_validate(dumped).pose.position is None
 
 
-def test_legacy_full_root_position_shape_is_rejected():
-    with pytest.raises(ValidationError, match="根字段 position 已删除"):
+def test_full_root_position_shape_is_rejected():
+    with pytest.raises(ValidationError, match="根字段 position 不受支持"):
         ResourceDict.model_validate(
             _resource_payload(
                 position={
@@ -450,7 +456,7 @@ def test_legacy_full_root_position_shape_is_rejected():
         )
 
 
-def test_legacy_occupied_name_is_rejected():
+def test_occupied_by_name_is_rejected():
     owner_uuid = str(uuid4())
     raw = [
         _resource_payload(
@@ -467,7 +473,7 @@ def test_legacy_occupied_name_is_rejected():
             ],
         )
     ]
-    with pytest.raises(ValidationError, match="occupied_by 已停用"):
+    with pytest.raises(ValidationError, match="occupied_by 不受支持"):
         ResourceTreeSet.from_raw_dict_list(raw)
 
 
@@ -714,7 +720,7 @@ def test_itemized_carrier_site_boundary_has_only_canonical_fields():
     assert "occupied_by" not in native
     assert native["occupied_material_uuid"] == site.occupied_material_uuid
     assert site.pose.position.model_dump() == {"x": 101.0, "y": 102.0, "z": 0.0}
-    with pytest.raises(ValidationError, match="occupied_by 已停用"):
+    with pytest.raises(ValidationError, match="occupied_by 不受支持"):
         ResourceSite.model_validate({**native, "occupied_by": "plate-1"})
 
 
@@ -985,6 +991,20 @@ def test_site_snapshot_merge_is_uuid_based_and_never_deletes_missing_sites():
         merge_resource_sites(current, conflicting)
 
 
+def test_graphio_promotes_legacy_class_to_template_name():
+    graphio = pytest.importorskip(
+        "unilabos.resources.graphio",
+        reason="GraphIO 依赖 ROS Jazzy 生成的 unilabos_msgs",
+        exc_type=ImportError,
+    )
+    node = _resource_payload(**{"class": "virtual_workbench"})
+    node.pop("template_name", None)
+    dumped = graphio.canonicalize_nodes_data([node]).dump()[0][0]
+
+    assert dumped["class"] == "virtual_workbench"
+    assert dumped["template_name"] == "virtual_workbench"
+
+
 def test_graphio_keeps_protocol_fields_at_resource_root():
     graphio = pytest.importorskip(
         "unilabos.resources.graphio",
@@ -1039,8 +1059,59 @@ def test_graphio_keeps_protocol_fields_at_resource_root():
     assert unknown_tree.dump()[0][0]["pose"]["position"] is None
 
     conflicting_position = _resource_payload(position=None, x=1)
-    with pytest.raises(ValueError, match="根字段 position 已删除"):
+    with pytest.raises(ValueError, match="根字段 position 不受支持"):
         graphio.canonicalize_nodes_data([conflicting_position])
+
+
+def test_graphio_keeps_graph_defined_host_node_and_links():
+    """图可显式声明 host_node（多主机设计），导入导出必须保留其身份与连接。"""
+
+    graphio = pytest.importorskip(
+        "unilabos.resources.graphio",
+        reason="GraphIO 依赖 ROS Jazzy 生成的 unilabos_msgs",
+        exc_type=ImportError,
+    )
+    host_uuid = str(uuid4())
+    device = _resource_payload(
+        id="device-1",
+        name="device-1",
+        type="device",
+        template_name="dummy_device",
+        parent="host_node",
+        parent_uuid=host_uuid,
+        **{"class": "dummy_device"},
+    )
+    graph, tree, links = graphio.read_node_link_json(
+        {
+            "nodes": [
+                {
+                    "id": "host_node",
+                    "uuid": host_uuid,
+                    "name": "host_node",
+                    "type": "device",
+                    "class": "host_node",
+                    "config": {},
+                    "data": {},
+                },
+                device,
+            ],
+            "links": [
+                {
+                    "source": "host_node",
+                    "target": "device-1",
+                    "type": "communication",
+                }
+            ],
+        }
+    )
+
+    assert [node.res_content.id for node in tree.root_nodes] == ["host_node"]
+    host_root = tree.root_nodes[0]
+    assert host_root.res_content.uuid == host_uuid
+    assert [child.res_content.id for child in host_root.children] == ["device-1"]
+    assert set(graph.nodes) == {"host_node", "device-1"}
+    assert len(links) == 1
+    assert links[0]["source_uuid"] == host_uuid
 
 
 def test_ros_resource_transport_roundtrip_single_json_field():
@@ -1111,7 +1182,7 @@ def test_ros_resource_transport_roundtrip_single_json_field():
 
 
 def test_ros_resource_transport_preserves_unknown_position():
-    """pose.position=None 整 JSON 透传，不再需要 unknown 标记位。"""
+    """pose.position=None 通过完整 JSON 保持为空。"""
 
     message_converter = pytest.importorskip(
         "unilabos.backend.ros2.msgs.message_converter",

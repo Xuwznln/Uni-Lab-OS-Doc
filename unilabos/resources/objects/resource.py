@@ -131,7 +131,7 @@ class ResourceDict(BaseModel):
     sites: Optional[List[ResourceSite]] = Field(
         description="Carrier site definitions / 载架位点", default=None
     )
-    sites_initialized: bool = Field(  # todo: 有可能删除
+    sites_initialized: bool = Field(
         description="Whether site preparation has run for this resource instance",
         default=False,
     )
@@ -207,13 +207,13 @@ class ResourceDict(BaseModel):
             )
         content["uuid"] = resolved_uuid
 
-        # 展示名：旧输入可能带 null；空值不回退 name（权威库落库时回退），
-        # 避免快照上传把用户自定义展示名覆盖回 name。
+        # display_name=None 归一化为空字符串，不在此处回退到 name；权威写入层
+        # 负责默认值，避免快照上传覆盖用户自定义展示名。
         if content.get("display_name") is None:
             content["display_name"] = ""
 
-        # substances 是全部内容物的唯一规范字段。旧 liquids 仅作为输入兼容，
-        # 新 PLR 同时输出 substances/liquids 时以后者的全集 substances 为准。
+        # substances 是规范内容物字段。仅在缺少 substances 时才用 liquids
+        # 作为输入回退；根级与 data 级 substances 同时存在时必须一致。
         root_substances = content.get("substances")
         root_liquids = content.pop("liquids", None)
         data_substances = data.pop("substances", None)
@@ -460,7 +460,7 @@ class ResourceDict(BaseModel):
             content["sites"] = []
 
         if "position" in content:
-            raise ValueError("根字段 position 已删除，请使用 pose.position")
+            raise ValueError("根字段 position 不受支持，请使用 pose.position")
         content["pose"] = normalized_pose or {}
 
         owner_uuid = content.get("uuid")
@@ -556,7 +556,7 @@ class ResourceDict(BaseModel):
 
     @property
     def liquids(self) -> Optional[List[LiquidStateEntry]]:
-        """旧调用兼容视图：只返回非质量单位的液体，不再保存第二份状态。"""
+        """从 substances 返回非质量单位的兼容液体视图。"""
 
         if self.substances is None:
             return None
@@ -585,6 +585,24 @@ PLR_CONFIG_ROOT_KEYS = (
 )
 
 
+def normalize_legacy_graph_node(node: Dict[str, Any]) -> Dict[str, Any]:
+    """图读取边界的旧字段兼容：``template_name`` 缺失时取旧图的 ``class``。
+
+    图契约字段是 ``template_name``，运行态消费点（注册表解析、host 判别、
+    拓扑编译等）只读它；旧图只写 ``class``。这里就地回填、绝不覆盖已有值，
+    让旧图无需改文件即可加载，并使登记进 Graph Authority 的 payload 自然升级
+    为带 ``template_name`` 的形态。只在图读取/导入入口调用（graphio 装配、
+    Graph Authority upsert），不进 ``ResourceDict`` 校验器——运行态、PLR 与
+    数据库来源不做此推导。
+    """
+
+    if not str(node.get("template_name") or "").strip():
+        legacy_class = str(node.get("class") or "").strip()
+        if legacy_class:
+            node["template_name"] = legacy_class
+    return node
+
+
 def assemble_tracker_state(resource: ResourceDict) -> Dict[str, Any]:
     state = copy.deepcopy(resource.data)
     for state_key in TRACKER_STATE_KEYS:
@@ -609,4 +627,5 @@ __all__ = [
     "ResourceDict",
     "ResourceDictType",
     "assemble_tracker_state",
+    "normalize_legacy_graph_node",
 ]

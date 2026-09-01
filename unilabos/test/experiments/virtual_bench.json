@@ -3,25 +3,29 @@
         {
             "id": "workbench_1",
             "name": "虚拟工作台",
-            "children": [],
             "parent": null,
             "type": "device",
             "class": "virtual_workbench",
-            "position": {
-                "x": 400,
-                "y": 300,
-                "z": 0
-            },
             "config": {
-                "arm_operation_time": 3.0,
-                "heating_time": 10.0,
-                "num_heating_stations": 3
+                "config": {
+                    "arm_operation_time": 3.0,
+                    "heating_time": 10.0,
+                    "num_heating_stations": 3
+                }
             },
             "data": {
                 "status": "Ready",
                 "arm_state": "idle",
                 "message": "工作台就绪"
-            }
+            },
+            "pose": {
+                "position": {
+                    "x": 400,
+                    "y": 300,
+                    "z": 0
+                }
+            },
+            "template_name": "virtual_workbench"
         },
         {
             "id": "PRCXI",
@@ -34,6 +38,11 @@
                     "width": 562,
                     "height": 394,
                     "depth": 0
+                },
+                "position": {
+                    "x": 0,
+                    "y": 240,
+                    "z": 0
                 }
             },
             "config": {
@@ -58,52 +67,53 @@
             "schema": {},
             "description": "",
             "model": null,
-            "position": {
-                "x": 0,
-                "y": 240,
-                "z": 0
-            }
+            "template_name": "liquid_handler.prcxi"
         },
         {
             "id": "PRCXI_Deck",
             "name": "PRCXI_Deck",
-            "children": [],
             "parent": "PRCXI",
             "type": "deck",
             "class": "",
-            "position": {
-                "x": 10,
-                "y": 10,
-                "z": 0
+            "pose": {
+                "size": {
+                    "width": 542,
+                    "height": 374,
+                    "depth": 0
+                },
+                "rotation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                },
+                "layout": "x-y",
+                "cross_section_type": "rectangle",
+                "position": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0
+                }
             },
+            "joint_state": null,
             "config": {
                 "type": "PRCXI9300Deck",
                 "size_x": 542,
                 "size_y": 374,
                 "size_z": 0,
-                "rotation": {
-                    "x": 0,
-                    "y": 0,
-                    "z": 0,
-                    "type": "Rotation"
-                },
                 "category": "deck",
-                "barcode": null,
-                "preferred_pickup_location": null,
                 "sites": [
                     {
                         "label": "T1",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 0,
-                            "y": 0,
-                            "z": 0
+                            "x": 0.0,
+                            "y": 0.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "container",
@@ -118,16 +128,15 @@
                     {
                         "label": "T2",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 138,
-                            "y": 0,
-                            "z": 0
+                            "x": 138.0,
+                            "y": 0.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -141,16 +150,15 @@
                     {
                         "label": "T3",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 276,
-                            "y": 0,
-                            "z": 0
+                            "x": 276.0,
+                            "y": 0.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -164,16 +172,15 @@
                     {
                         "label": "T4",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 414,
-                            "y": 0,
-                            "z": 0
+                            "x": 414.0,
+                            "y": 0.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -187,16 +194,15 @@
                     {
                         "label": "T5",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 0,
-                            "y": 96,
-                            "z": 0
+                            "x": 0.0,
+                            "y": 96.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -210,16 +216,15 @@
                     {
                         "label": "T6",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 138,
-                            "y": 96,
-                            "z": 0
+                            "x": 138.0,
+                            "y": 96.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -233,16 +238,15 @@
                     {
                         "label": "T7",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 276,
-                            "y": 96,
-                            "z": 0
+                            "x": 276.0,
+                            "y": 96.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -256,16 +260,15 @@
                     {
                         "label": "T8",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 414,
-                            "y": 96,
-                            "z": 0
+                            "x": 414.0,
+                            "y": 96.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -279,16 +282,15 @@
                     {
                         "label": "T9",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 0,
-                            "y": 192,
-                            "z": 0
+                            "x": 0.0,
+                            "y": 192.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -302,16 +304,15 @@
                     {
                         "label": "T10",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 138,
-                            "y": 192,
-                            "z": 0
+                            "x": 138.0,
+                            "y": 192.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -325,16 +326,15 @@
                     {
                         "label": "T11",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 276,
-                            "y": 192,
-                            "z": 0
+                            "x": 276.0,
+                            "y": 192.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -348,16 +348,15 @@
                     {
                         "label": "T12",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 414,
-                            "y": 192,
-                            "z": 0
+                            "x": 414.0,
+                            "y": 192.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -371,16 +370,15 @@
                     {
                         "label": "T13",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 0,
-                            "y": 288,
-                            "z": 0
+                            "x": 0.0,
+                            "y": 288.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -394,16 +392,15 @@
                     {
                         "label": "T14",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 138,
-                            "y": 288,
-                            "z": 0
+                            "x": 138.0,
+                            "y": 288.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -417,16 +414,15 @@
                     {
                         "label": "T15",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 276,
-                            "y": 288,
-                            "z": 0
+                            "x": 276.0,
+                            "y": 288.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -440,16 +436,15 @@
                     {
                         "label": "T16",
                         "visible": true,
-                        "occupied_by": null,
                         "position": {
-                            "x": 414,
-                            "y": 288,
-                            "z": 0
+                            "x": 414.0,
+                            "y": 288.0,
+                            "z": 0.0
                         },
                         "size": {
                             "width": 128.0,
-                            "height": 86,
-                            "depth": 0
+                            "height": 86.0,
+                            "depth": 0.0
                         },
                         "content_type": [
                             "plate",
@@ -462,7 +457,17 @@
                     }
                 ]
             },
-            "data": {}
+            "data": {
+                "rotation": {
+                    "x": 0,
+                    "y": 0,
+                    "z": 0,
+                    "type": "Rotation"
+                }
+            },
+            "extra": {
+                "unilabos_resource_class": "PRCXI9300Deck"
+            }
         }
     ],
     "links": []

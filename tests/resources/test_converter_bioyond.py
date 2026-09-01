@@ -1,6 +1,5 @@
 import pytest
 import json
-import os
 from pathlib import Path
 
 from unilabos.resources.graphio import (
@@ -31,37 +30,28 @@ type_mapping = {
 
 @pytest.fixture
 def bioyond_materials_reaction() -> list[dict]:
-    print("加载 BioYond 物料数据...")
-    print(os.getcwd())
     with Path(__file__).with_name("bioyond_materials_reaction.json").open(
         "r", encoding="utf-8"
     ) as f:
         data = json.load(f)
-    print(f"加载了 {len(data)} 条物料数据")
     return data
 
 
 @pytest.fixture
 def bioyond_materials_liquidhandling_1() -> list[dict]:
-    print("加载 BioYond 物料数据...")
-    print(os.getcwd())
     with Path(__file__).with_name("bioyond_materials_liquidhandling_1.json").open(
         "r", encoding="utf-8"
     ) as f:
         data = json.load(f)
-    print(f"加载了 {len(data)} 条物料数据")
     return data
 
 
 @pytest.fixture
 def bioyond_materials_liquidhandling_2() -> list[dict]:
-    print("加载 BioYond 物料数据...")
-    print(os.getcwd())
     with Path(__file__).with_name("bioyond_materials_liquidhandling_2.json").open(
         "r", encoding="utf-8"
     ) as f:
         data = json.load(f)
-    print(f"加载了 {len(data)} 条物料数据")
     return data
 
 
@@ -69,15 +59,14 @@ def bioyond_materials_liquidhandling_2() -> list[dict]:
     "bioyond_materials_reaction",
     "bioyond_materials_liquidhandling_1",
 ])
-def test_bioyond_to_plr(materials_fixture, request, tmp_path) -> list[dict]:
+def test_bioyond_to_plr(materials_fixture, request, tmp_path) -> None:
     materials = request.getfixturevalue(materials_fixture)
     deck = BIOYOND_PolymerReactionStation_Deck("test_deck")
-    output = resource_bioyond_to_plr(materials, type_mapping=type_mapping, deck=deck)
-    print(deck.summary())
-    print([resource.serialize() for resource in output])
-    print([resource.serialize_all_state() for resource in output])
-    with (tmp_path / "test.json").open("w", encoding="utf-8") as f:
+    resource_bioyond_to_plr(materials, type_mapping=type_mapping, deck=deck)
+    output_path = tmp_path / "test.json"
+    with output_path.open("w", encoding="utf-8") as f:
         json.dump(deck.serialize(), f, indent=4)
+    assert output_path.is_file()
 
 
 def test_plr_to_bioyond_reads_occupants_from_resource_holders():

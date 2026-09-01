@@ -7,13 +7,12 @@ import pytest
 from unilabos.resources.presets.container import RegularContainer
 from unilabos.resources.presets.itemized_carrier import ItemizedCarrier
 from unilabos.resources import materials
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.resources.adapters.plr_materials import (
     create_plr_materials,
     plr_resources_to_create,
 )
 from unilabos.client.materials import LocalMaterialsClient
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import ResourceTemplateWrite
 from unilabos.server.services.materials import MaterialsService
 
@@ -25,7 +24,7 @@ def _mutation(operation: str) -> InventoryMutation:
 
 
 def test_plr_create_returns_server_uuid_and_all_substances(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     client.put_template(
         _mutation("put_template"),
@@ -74,7 +73,7 @@ def test_plr_create_returns_server_uuid_and_all_substances(tmp_path) -> None:
         assert created.result.data.nodes[0].data.sites_initialized is True
         assert created.tree.root_nodes[0].res_content.sites_initialized is True
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_plr_create_request_contains_refs_but_no_instance_uuids() -> None:
@@ -116,7 +115,7 @@ def test_plr_create_rejects_an_existing_authoritative_resource() -> None:
 
 
 def test_materials_create_unwraps_the_single_authoritative_root(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     draft = RegularContainer(
         name="single-root",
@@ -136,11 +135,11 @@ def test_materials_create_unwraps_the_single_authoritative_root(tmp_path) -> Non
         assert authoritative.unilabos_uuid
         assert not getattr(draft, "unilabos_uuid", "")
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_materials_create_can_return_the_complete_receipt(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     draft = RegularContainer(
         name="receipt-root",
@@ -165,7 +164,7 @@ def test_materials_create_can_return_the_complete_receipt(tmp_path) -> None:
             created.resources[0].unilabos_uuid
         )
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_materials_create_rejects_multiple_root_inputs() -> None:

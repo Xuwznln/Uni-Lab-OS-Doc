@@ -177,7 +177,7 @@ class ResourceSite(ResourceObject):
 
         if "occupied_by" in site:
             raise ValueError(
-                "Site.occupied_by 已停用；请直接提供 occupied_material_uuid"
+                "Site.occupied_by 不受支持；请直接提供 occupied_material_uuid"
             )
 
         # 旧协议的未知顶层字段继续显式归档；规范 v1 输入只允许声明过的字段。

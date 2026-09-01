@@ -8,7 +8,7 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from unilabos.resources.objects.resource import ResourceDict
 from unilabos.resources.resource_tracker import ResourceTreeSet
-from unilabos.protocol.common import InventoryMutation, MutationResult
+from unilabos.protocol.materials import InventoryMutation, MutationResult
 from unilabos.protocol.materials import (
     MaterialAggregateRead,
     MaterialDataRead,

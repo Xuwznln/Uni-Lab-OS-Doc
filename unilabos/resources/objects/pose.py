@@ -135,7 +135,7 @@ def normalize_site_pose_payload(value: Mapping[str, Any]) -> Dict[str, Any]:
         values = {key: site.pop(key) for key in mapping if key in site}
         if values:
             merge_object(target, values, mapping)
-            # 仅旧版扁平字段沿用缺项补零；新的嵌套对象仍要求完整坐标/尺寸。
+            # 扁平兼容字段可为缺项补零；嵌套对象必须提供完整坐标或尺寸。
             required_keys = (
                 ("width", "height", "depth") if target == "size" else ("x", "y", "z")
             )

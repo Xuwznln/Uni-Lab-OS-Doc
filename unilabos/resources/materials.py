@@ -37,7 +37,7 @@ from unilabos.resources.adapters.plr_materials import (
     material_tree_to_resource_tree,
     resource_tree_to_create,
 )
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     MaterialTransfer,
     MaterialTransferItem,
@@ -427,7 +427,7 @@ def resolve_materials_gateway() -> MaterialGateway:
 
     Host 侧的链路选择只发生在启动装配处（``setup_host_server_stack``：给了外部
     地址走 HTTP client，否则用进程内嵌的 LocalMaterialsClient），这里只取它公布
-    的那一个 gateway，不再二次推断。取不到即微后端未装配，属致命配置错误。
+    的唯一 gateway。取不到即微后端未装配，属致命配置错误。
     """
 
     from unilabos.config.config import BasicConfig
@@ -837,8 +837,7 @@ def update(
 
     物料直接传：单个 PLR 实例、多个实例（多参）、实例列表或
     ``ResourceTreeSet`` 均可，自动展平；重复节点在服务层按 uuid 去重。
-    原 ROS ``c2s_update_resource_tree`` 的 update 语义等价物，返回更新后
-    的权威树。
+    返回更新后的权威树。
     """
 
     from unilabos.backend.runtime.node import DeviceNode
@@ -874,10 +873,7 @@ def remove(
     source_device_uuid: str = "",
     gateway: MaterialGateway | None = None,
 ) -> List[str]:
-    """按 uuid 或 resource id 删除权威物料树，返回实际删除的根 uuid。
-
-    原 ROS ``c2s_update_resource_tree`` 的 remove 语义等价物。
-    """
+    """按 uuid 或 resource id 删除权威物料树，返回实际删除的根 uuid。"""
 
     from unilabos.backend.runtime.resource import AuthorityResourceService
 

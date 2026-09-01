@@ -13,10 +13,9 @@ from pylabrobot.resources import Resource
 from unilabos.client.materials import LocalMaterialsClient
 from unilabos.registry.registry import lab_registry
 from unilabos.resources.resource_tracker import ResourceTreeSet
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.resources.adapters.plr_materials import create_plr_materials
 from unilabos.resources.adapters.registry_materials import register_resource_definitions
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.server.services.materials import MaterialsService
 
 
@@ -194,7 +193,7 @@ def test_complete_registry_resources_can_be_created_by_materials_authority(
     """Registry 模板和实际 PLR 树必须能经微后端创建并取回权威 UUID。"""
 
     entries = _registry_resources()
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     failures: list[str] = []
     try:
@@ -237,6 +236,6 @@ def test_complete_registry_resources_can_be_created_by_materials_authority(
                     f"{resource_id}: {type(exc).__name__}: {exc}"
                 )
     finally:
-        service.repository.close()
+        service.close()
 
     assert not failures, "\n\n".join(failures)

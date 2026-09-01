@@ -9,12 +9,13 @@ from typing import Any, Protocol
 from uuid import UUID, uuid5
 
 from unilabos.server.database.tables.materials import ResourceTemplateHandle
-from unilabos.protocol.common import InventoryMutation, canonical_hash
+from unilabos.protocol.base import canonical_hash
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     ResourceTemplateRead,
     ResourceTemplateWrite,
 )
-from unilabos.utils.tools import normalize_json
+from unilabos.utils.serialization import normalize_json
 
 
 _REGISTRY_SYNC_NAMESPACE = UUID("9e5f7a4a-cae5-4d89-a039-c10c9c065ad1")

@@ -105,7 +105,7 @@ def _ensure_plr_uuid(resource: Optional["PLRResource"]) -> Optional[str]:
 def get_plr_template_name(
     resource: "PLRResource", serialized: Optional[Dict[str, Any]] = None
 ) -> str:
-    """读取 PLR 对象携带的模板名，并兼容旧序列化字段。"""
+    """从 PLR 对象或兼容序列化字段读取模板名。"""
 
     extra = getattr(resource, "unilabos_extra", {}) or {}
     if not isinstance(extra, dict):
@@ -553,17 +553,6 @@ def merge_resource_sites(
     return result
 
 
-class GraphData(BaseModel):
-    """图数据结构，包含节点和边"""
-
-    nodes: List["ResourceTreeInstance"] = Field(
-        description="Resource nodes list", default_factory=list
-    )
-    links: List[Dict[str, Any]] = Field(
-        description="Resource links/edges list", default_factory=list
-    )
-
-
 class ResourceDictInstance(object):
     """ResourceDict的实例，同时提供一些方法"""
 
@@ -604,11 +593,11 @@ class ResourceDictInstance(object):
         if not content.get("class"):
             # noinspection PyTypedDict
             content["class"] = ""
-        if not content.get("config"):  # todo: 后续从后端保证字段非空
+        if not content.get("config"):
             content["config"] = {}
         if not content.get("data"):
             content["data"] = {}
-        if not content.get("extra"):  # MagicCode
+        if not content.get("extra"):
             content["extra"] = {}
         # 旧 PLR 输入可能只有 config.size_*；它只补静态 pose.size，绝不把运行时
         # position 镜像进 pose.position。
@@ -673,51 +662,6 @@ class ResourceTreeInstance(object):
     """
     资源树，表示一个根节点及其所有子节点的层次结构，继承ResourceDictInstance表示自己是根节点
     """
-
-    @staticmethod
-    def _build_uuid_map(
-        resource_list: List[ResourceDictInstance],
-    ) -> Dict[str, ResourceDictInstance]:
-        """构建uuid到资源对象的映射，并检查重复"""
-        uuid_map: Dict[str, ResourceDictInstance] = {}
-        for res_instance in resource_list:
-            res = res_instance.res_content
-            if res.uuid in uuid_map:
-                raise ValueError(f"发现重复的uuid: {res.uuid}")
-            uuid_map[res.uuid] = res_instance
-        return uuid_map
-
-    @staticmethod
-    def _build_uuid_instance_map(
-        resource_list: List[ResourceDictInstance],
-    ) -> Dict[str, ResourceDictInstance]:
-        """构建uuid到资源实例的映射"""
-        return {
-            res_instance.res_content.uuid: res_instance
-            for res_instance in resource_list
-        }
-
-    @staticmethod
-    def _collect_tree_nodes(
-        root_instance: ResourceDictInstance, uuid_map: Dict[str, ResourceDict]
-    ) -> List[ResourceDictInstance]:
-        """使用BFS收集属于某个根节点的所有节点"""
-        # BFS遍历，根据parent_uuid字段找到所有属于这棵树的节点
-        tree_nodes = [root_instance]
-        visited = {root_instance.res_content.uuid}
-        queue = [root_instance.res_content.uuid]
-
-        while queue:
-            current_uuid = queue.pop(0)
-            # 查找所有parent_uuid指向当前节点的子节点
-            for uuid_str, res in uuid_map.items():
-                if res.uuid_parent == current_uuid and uuid_str not in visited:
-                    child_instance = ResourceDictInstance(res)
-                    tree_nodes.append(child_instance)
-                    visited.add(uuid_str)
-                    queue.append(uuid_str)
-
-        return tree_nodes
 
     def __init__(self, resource: ResourceDictInstance):
         self.root_node = resource
@@ -878,7 +822,6 @@ class ResourceTreeSet(object):
     def from_plr_resources(
         cls,
         resources: List["PLRResource"],
-        known_newly_created=False,
         old_size=False,
         *,
         known_random_uuid: bool = False,
@@ -889,8 +832,6 @@ class ResourceTreeSet(object):
         ``known_random_uuid`` 只用于尚未登记的创建草稿/模板测试。开启后会为
         缺少 UUID 的 Resource 和 Carrier Site 递归生成临时 UUID；它们只是
         client_ref，必须再交给微后端 create 并使用返回的权威 UUID 树。
-
-        ``known_newly_created`` 为兼容旧调用保留，不再改变 UUID 校验规则。
         """
 
         missing = object()
@@ -965,7 +906,7 @@ class ResourceTreeSet(object):
                 raise ValueError(f"{res.name}.unilabos_extra 必须是对象")
             # Site sidecar 只属于 PLR 运行时；ResourceDict 以根字段 sites 为唯一真相。
             extra.pop(EXTRA_SITES, None)
-            # 模板名提升后不再保留在 Resource.extra，避免双真相。
+            # 模板名提升到规范根字段，extra 中移除同名 sidecar。
             extra.pop(EXTRA_RESOURCE_CLASS, None)
 
             static_pose = extra.pop(EXTRA_RESOURCE_POSE, None)
@@ -1568,149 +1509,6 @@ class ResourceTreeSet(object):
             tree._validate_tree()
         return len(replacements)
 
-    def merge_remote_resources(
-        self, remote_tree_set: "ResourceTreeSet"
-    ) -> "ResourceTreeSet":
-        """
-        将远端物料同步到本地物料中（以子树为单位）
-
-        同步规则：
-        1. 一级节点（根节点）：如果不存在的物料，引入整个子树
-        2. 一级设备下的二级物料：如果不存在，引入整个子树
-        3. 二级设备下的三级物料：如果不存在，引入整个子树
-        如果存在则跳过并提示
-
-        Args:
-            remote_tree_set: 远端的资源树集合
-
-        Returns:
-            合并后的资源树集合（self）
-        """
-        # 构建本地映射：一级 device id -> 根节点实例
-        local_device_map: Dict[str, ResourceDictInstance] = {}
-        for root_node in self.root_nodes:
-            if root_node.res_content.type == "device":
-                local_device_map[root_node.res_content.id] = root_node
-
-        # 记录需要添加的新根节点（不属于任何 device 的物料）
-        new_root_nodes: List[ResourceDictInstance] = []
-
-        # 遍历远端根节点
-        for remote_root in remote_tree_set.root_nodes:
-            remote_root_id = remote_root.res_content.id
-            remote_root_type = remote_root.res_content.type
-
-            if remote_root_type == "device":
-                # 情况1: 一级是 device
-                if remote_root_id not in local_device_map:
-                    if remote_root_id != "host_node":
-                        logger.warning(
-                            f"Device '{remote_root_id}' 在本地不存在，跳过该 device 下的物料同步"
-                        )
-                    continue
-
-                local_device = local_device_map[remote_root_id]
-
-                # 构建本地一级 device 下的子节点映射
-                local_children_map = {
-                    child.res_content.name: child for child in local_device.children
-                }
-
-                # 遍历远端一级 device 的子节点
-                for remote_child in remote_root.children:
-                    remote_child_name = remote_child.res_content.name
-                    remote_child_type = remote_child.res_content.type
-
-                    if remote_child_type == "device":
-                        # 情况2: 二级是 device
-                        if remote_child_name not in local_children_map:
-                            logger.warning(
-                                f"Device '{remote_root_id}/{remote_child_name}' 在本地不存在，跳过"
-                            )
-                            continue
-
-                        local_sub_device = local_children_map[remote_child_name]
-
-                        # 构建本地二级 device 下的子节点映射
-                        local_sub_children_map = {
-                            child.res_content.name: child
-                            for child in local_sub_device.children
-                        }
-
-                        # 遍历远端二级 device 的子节点（三级物料）
-                        added_count = 0
-                        for remote_material in remote_child.children:
-                            remote_material_name = remote_material.res_content.name
-
-                            # 情况3: 三级物料
-                            if remote_material_name not in local_sub_children_map:
-                                # 引入整个子树
-                                remote_material.res_content.parent = (
-                                    local_sub_device.res_content
-                                )
-                                local_sub_device.children.append(remote_material)
-                                added_count += 1
-                            else:
-                                logger.info(
-                                    f"物料 '{remote_root_id}/{remote_child_name}/{remote_material_name}' "
-                                    f"已存在，跳过"
-                                )
-
-                        if added_count > 0:
-                            logger.info(
-                                f"Device '{remote_root_id}/{remote_child_name}': "
-                                f"从远端同步了 {added_count} 个物料子树"
-                            )
-                    else:
-                        # 二级物料已存在，比较三级子节点是否缺失
-                        local_material = local_children_map[remote_child_name]
-                        local_material_children_map = {
-                            child.res_content.name: child
-                            for child in local_material.children
-                        }
-                        added_count = 0
-                        for remote_sub in remote_child.children:
-                            remote_sub_name = remote_sub.res_content.name
-                            if remote_sub_name not in local_material_children_map:
-                                remote_sub.res_content.parent = (
-                                    local_material.res_content
-                                )
-                                local_material.children.append(remote_sub)
-                                added_count += 1
-                            else:
-                                logger.info(
-                                    f"物料 '{remote_root_id}/{remote_child_name}/{remote_sub_name}' "
-                                    f"已存在，跳过"
-                                )
-                        if added_count > 0:
-                            logger.info(
-                                f"物料 '{remote_root_id}/{remote_child_name}': "
-                                f"从远端同步了 {added_count} 个子物料"
-                            )
-            else:
-                # 情况1: 一级节点是物料（不是 device）
-                # 检查是否已存在
-                existing = False
-                for local_root in self.root_nodes:
-                    if local_root.res_content.name == remote_root.res_content.name:
-                        existing = True
-                        logger.info(
-                            f"根节点物料 '{remote_root.res_content.name}' 已存在，跳过"
-                        )
-                        break
-
-                if not existing:
-                    # 引入整个子树
-                    new_root_nodes.append(remote_root)
-                    logger.info(f"添加远端独立物料根节点子树: '{remote_root_id}'")
-
-        # 将新的根节点添加到本地树集合
-        if new_root_nodes:
-            for new_root in new_root_nodes:
-                self.trees.append(ResourceTreeInstance(new_root))
-
-        return self
-
     def dump(self) -> List[List[ResourceDictType]]:
         """
         将 ResourceTreeSet 序列化为嵌套列表格式
@@ -1866,18 +1664,6 @@ class DeviceNodeResourceTracker(object):
             resource_parent = resource_parent.parent
 
         return resource_prefix_path
-
-    def map_uuid_to_resource(self, resource, uuid_map: Dict[str, str]):
-        for old_uuid, new_uuid in uuid_map.items():
-            if old_uuid != new_uuid:
-                if old_uuid in self.uuid_to_resources:
-                    instance = self.uuid_to_resources.pop(old_uuid)
-                    if isinstance(resource, dict):
-                        resource["uuid"] = new_uuid
-                    else:  # 实例的
-                        setattr(instance, "unilabos_uuid", new_uuid)
-                    self.uuid_to_resources[new_uuid] = instance
-                    print(f"更新uuid映射: {old_uuid} -> {new_uuid} | {instance}")
 
     def _get_resource_attr(
         self, resource, attr_name: str, uuid_attr: Optional[str] = None
@@ -2107,27 +1893,6 @@ class DeviceNodeResourceTracker(object):
 
         return self._traverse_and_process(resource, process)
 
-    def loop_gather_uuid(self, resource) -> List[str]:
-        """
-        递归遍历资源树，收集所有节点的uuid
-
-        Args:
-            resource: 资源对象（可以是dict或实例）
-
-        Returns:
-            收集到的uuid列表
-        """
-        uuid_list = []
-
-        def process(res):
-            current_uuid = self._get_resource_attr(res, "uuid", "unilabos_uuid")
-            if current_uuid:
-                uuid_list.append(current_uuid)
-            return 0
-
-        self._traverse_and_process(resource, process)
-        return uuid_list
-
     def _collect_uuid_mapping(self, resource):
         """
         递归收集资源的 uuid 映射到 uuid_to_resources
@@ -2199,7 +1964,6 @@ class DeviceNodeResourceTracker(object):
             res_uuid = getattr(resource, "unilabos_uuid", None)
         if res_uuid in root_uuids:
             old_res = root_uuids[res_uuid]
-            # self.remove_resource(old_res)
             logger.warning(f"资源{resource}已存在，旧资源: {old_res}")
         self.resources.append(resource)
         # 递归收集uuid映射
@@ -2251,16 +2015,6 @@ class DeviceNodeResourceTracker(object):
         logger.trace(f"[ResourceTracker] 成功移除资源: {resource}")
         return True
 
-    def clear_resource(self):
-        """清空所有资源"""
-        observer = getattr(self, "_material_snapshot_observer", None)
-        if observer is not None:
-            for resource in list(self.resources):
-                observer.unobserve(resource)
-        self.resources = []
-        self.uuid_to_resources.clear()
-        self.resource2parent_resource.clear()
-
     def figure_resource(
         self,
         query_resource: Union[List[Union[dict, "PLRResource"]], dict, "PLRResource"],
@@ -2277,7 +2031,8 @@ class DeviceNodeResourceTracker(object):
             and "id" not in query_resource
             and "name" not in query_resource
             and "uuid" not in query_resource
-        ):  # 临时处理，要删除的，driver有太多类型错误标注
+        ):
+            # 无资源标识的字典按命名资源集合处理。
             return [self.figure_resource(r, try_mode) for r in query_resource.values()]
 
         # 优先尝试通过 uuid 查找
@@ -2336,7 +2091,7 @@ class DeviceNodeResourceTracker(object):
         resource_cls_type = type(query_resource)
         if res_identifier is None:
             logger.warning(
-                f"resource {query_resource} 没有id、name或uuid，暂不能对应figure"
+                f"resource {query_resource} 缺少 id、name 或 uuid，无法解析资源引用"
             )
         res_list = []
         for r in self.resources:
@@ -2364,7 +2119,6 @@ class DeviceNodeResourceTracker(object):
             )
         else:
             return [i[1] for i in res_list]
-        # 后续加入其他对比方式
         self.resource2parent_resource[id(query_resource)] = res_list[0][0]
         self.resource2parent_resource[id(res_list[0][1])] = res_list[0][0]
         return res_list[0][1]
@@ -2378,7 +2132,6 @@ class DeviceNodeResourceTracker(object):
         parent_res=None,
     ) -> List[Tuple[Any, Any]]:
         res_list = []
-        # print(resource, target_resource_cls_type, identifier_key, compare_value)
         children = []
         if not isinstance(resource, dict):
             children = getattr(resource, "children", [])
@@ -2413,16 +2166,6 @@ class DeviceNodeResourceTracker(object):
                     if getattr(resource, identifier_key) == compare_value:
                         res_list.append((parent_res, resource))
         return res_list
-
-    def filter_find_list(self, res_list, compare_std_dict):
-        new_list = []
-        for res in res_list:
-            for k, v in compare_std_dict.items():
-                if hasattr(res, k):
-                    if getattr(res, k) == v:
-                        new_list.append(res)
-        return new_list
-
 
 if __name__ == "__main__":
     from pylabrobot.resources import corning_6_wellplate_16point8ml_flat

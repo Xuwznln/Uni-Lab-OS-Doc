@@ -3,7 +3,6 @@ from uuid import uuid4
 from unilabos.client.materials import LocalMaterialsClient
 from unilabos.resources import materials
 from unilabos.resources.resource_tracker import ResourceTreeSet
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.services.materials import MaterialsService
 
 
@@ -92,12 +91,11 @@ def _graph_tree(root_uuid: str, child_uuid: str) -> ResourceTreeSet:
 
 
 def test_materials_ensure_adopts_graph_uuid_and_is_idempotent(tmp_path) -> None:
-    """开机权威对齐：权威缺失时以图中 uuid 显式创建；重复开机不再新建。
+    """开机权威对齐采用图中 uuid，并在重复调用时复用权威记录。
 
-    host 与 slave 的开机物料语义统一走本入口（原 /c2s_update_resource_tree
-    add 上报 + uuid_mapping 换 uuid 的机制已退役）。
+    Host 与 Slave 使用同一个 ``materials.ensure`` 入口。
     """
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     gateway = LocalMaterialsClient(service)
     try:
         root_uuid, child_uuid = str(uuid4()), str(uuid4())
@@ -111,12 +109,12 @@ def test_materials_ensure_adopts_graph_uuid_and_is_idempotent(tmp_path) -> None:
             root_uuid,
             child_uuid,
         }
-        # 权威中的 uuid 与图完全一致（adopt，不换 uuid）
+        # 权威记录采用图中 UUID。
         assert (
             service.get_material(root_uuid).material.material_uuid == root_uuid
         )
 
-        # 第二次开机（同一张图）：命中权威，不再创建
+        # 同一张图再次对齐时命中已有记录。
         again = materials.ensure(
             _graph_tree(root_uuid, child_uuid), gateway=gateway
         )
@@ -127,4 +125,4 @@ def test_materials_ensure_adopts_graph_uuid_and_is_idempotent(tmp_path) -> None:
         ]
         assert len(roots) == 1
     finally:
-        service.repository.close()
+        service.close()
