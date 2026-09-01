@@ -502,17 +502,16 @@ unilab --check_mode --skip_env_check
 
 ## 图文件节点模板
 
-实验图 JSON 中的 `class` 对应 `@device(id=...)`。`config` 中的字段应对应 `__init__` 的同名基础类型参数，不要只定义一个 `config: dict` 参数承载所有配置：
+实验图 JSON 中的 `template_name` 对应 `@device(id=...)`（旧图字段 `class`，读取时自动回填）。层级只由子节点的 `parent` 表达，不写 `children`。`config` 中的字段应对应 `__init__` 的同名基础类型参数，不要只定义一个 `config: dict` 参数承载所有配置：
 
 ```json
 {
   "id": "my_device_1",
   "name": "我的设备",
-  "children": [],
   "parent": null,
   "type": "device",
-  "class": "my_device",
-  "position": {"x": 0, "y": 0, "z": 0},
+  "template_name": "my_device",
+  "pose": {"position": {"x": 0, "y": 0, "z": 0}},
   "config": {
     "port": "/dev/ttyUSB0",
     "baudrate": 9600
@@ -521,7 +520,7 @@ unilab --check_mode --skip_env_check
 }
 ```
 
-工作站需要同时配置 `deck` 和 `children`：
+工作站需要配置 `deck`，Deck 节点通过 `parent` 挂到工作站下：
 
 ```json
 {
@@ -529,8 +528,7 @@ unilab --check_mode --skip_env_check
     {
       "id": "my_station",
       "type": "device",
-      "class": "my_workstation",
-      "children": ["my_deck"],
+      "template_name": "my_workstation",
       "config": {},
       "deck": {
         "data": {
@@ -542,7 +540,7 @@ unilab --check_mode --skip_env_check
     {
       "id": "my_deck",
       "type": "deck",
-      "class": "MyDeckClass",
+      "template_name": "MyDeckClass",
       "parent": "my_station",
       "config": {"type": "MyDeckClass", "setup": true}
     }

@@ -167,15 +167,13 @@ unilab -g slave.json --backend hostlink --is-slave \
 unilab -g graph.json --backend ros2
 ```
 
-HostLink 的本地 Python 驱动执行器已归入 `unilabos.backend.hostlink`，不存在可通过
-`--backend basic` 选择的独立 backend。Dora 代码仅保留作实验，不属于公开部署 backend。
-旧名称 `simple`、`ros` 以及 `basic`、`dora` 都不会被 CLI 接受。
+公开部署支持 `hostlink` 与 `ros2` 两种 backend。Dora 代码用于实验，不属于
+CLI 可选的部署 backend。
 
 ## 端云通信
 
 Host 的端云传输固定使用 WebSocket：正常模式只发送轻量变更通知，正文通过 HTTP
-拉取。Host 本地微后端 HTTP API 固定启动，不再作为可选 bridge。旧完整载荷
-WebSocket、`/lab/*` HTTP API 及其 CLI 开关已经删除。
+拉取。Host 本地微后端 HTTP API 始终启动。
 
 ## 分布式组网
 
@@ -228,13 +226,13 @@ unilab -g slave.json --is-slave \
 
 - `--host-node-ip`：Slave 指定 Host IP/主机名。
 - `--port-management` / `--port_management`：微后端 HTTP API 和前端导航页端口，默认 `8002`；`--port` 是兼容缩写。
-- `--disable-browser` / `--disable_browser`：只禁止启动时自动打开浏览器，不会停止管理端口。
+- `--disable-browser` / `--disable_browser`：只禁止启动时自动打开浏览器，不会停止管理端口。配置了 `--address`（backend-controlled 模式）时，浏览器打开的是 backend 管理页；本进程 `/` 只保留指向调度权威的路标页和设备侧 API 文档入口。
 - `--hostlink-port`：HostLink TCP 端口，默认 `7302`，与管理端口独立。
 - `--hostlink-bind` / `--hostlink-advertise-ip`：Host 监听地址与多网卡发布地址。
 - `--ros-domain-id`：Host 下发给 Slave 的 ROS2 domain。
 - `--ros-discovery-range` / `--ros-static-peers` / `--ros-discovery-server`：ROS2 发现策略。
 - `--no-ros-assist`：仅用于 ROS2 backend；保留 HostLink 设备发现，不覆盖 Slave 的 ROS2 环境。
-- `--disable-hostlink`：完全关闭 HostLink，使用原 ROS2 发现流程。
+- `--disable-hostlink`：完全关闭 HostLink，使用 ROS2/DDS 默认发现流程。
 
 选择 `--backend hostlink` 时不能使用 `--disable-hostlink`，Slave 也必须提供
 `--host-node-ip`。`7302` 只供 Host/Slave 进程通信，不提供浏览器页面；Host 进程的

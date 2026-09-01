@@ -1166,7 +1166,6 @@ def method(
 ## 参考资料
 
 - {doc}`add_device` - 设备驱动编写指南
-- {doc}`04_add_device_testing` - 设备测试指南
 - Python [typing 模块](https://docs.python.org/3/library/typing.html)
 - [YAML 语法](https://yaml.org/)
 - [JSON Schema](https://json-schema.org/)

@@ -12,9 +12,9 @@ import sys
 # 将项目的根目录添加到 sys.path 中，以便 Sphinx 能够找到 unilabos 包
 sys.path.insert(0, os.path.abspath(".."))
 
-project = "Uni-Lab"
-copyright = "2025, Uni-Lab Community, DP Technology & Peking University"
-author = "Uni-Lab Community, DP Technology & Peking University"
+project = "Uni-Lab-OS"
+copyright = "2026, Uni-Lab-OS Community"
+author = "Uni-Lab-OS Community"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

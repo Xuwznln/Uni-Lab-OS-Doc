@@ -5,7 +5,7 @@
 
 端到端向导，通过**设备类别（物模型）** 和 **通信协议** 两个维度引导设备接入。
 
-**核心变化：Uni-Lab-OS 使用装饰器 + AST 自动扫描生成注册表，无需手写 YAML。**
+Uni-Lab-OS 使用装饰器和 AST 自动扫描生成注册表，通常无需手写 YAML。
 
 ---
 
@@ -44,7 +44,7 @@ class MyDevice:
 
 ```bash
 # 创建 conda 环境并安装 unilabos
-mamba create -n unilab python=3.11.14 -c conda-forge -y
+mamba create -n unilab python=3.12.13 -c conda-forge -y
 mamba activate unilab
 mamba install uni-lab::unilabos -c uni-lab -c robostack-staging -c conda-forge -y
 
@@ -352,9 +352,9 @@ unilab --check_mode --skip_env_check
 
 | 场景 | 说明 |
 |---|---|
-| 旧代码无 `@device` 装饰器 | 第三方库或未迁移的旧设备 |
+| 无法添加 `@device` 装饰器 | 外部第三方设备类 |
 | 需手动覆盖特定字段 | 如特殊 `handles`、`placeholder_keys` |
-| `--complete_registry` 补全 | 对仅有 YAML 的旧设备做一次性 AST 补全并写回 |
+| `--complete_registry` 补全 | 为仅有 YAML 的设备定义补充 AST 扫描结果 |
 
 YAML 最小配置（如确实需要）：
 
@@ -502,6 +502,7 @@ class MySyringePump:
     def post_init(self, ros_node):
         self._ros_node = ros_node
 
+    @not_action
     def initialize(self):
         return True
 
@@ -603,148 +604,17 @@ class MySolenoidValve:
 | `level` | `bool` | 液位状态 |
 | `rssi` | `int` | 信号强度 |
 
----
-
-## 物模型代码模板
-
-### temperature — 温控设备
-
-```python
-class MyTemperatureDevice:
-    """温控设备：加热器、冷却器、恒温槽等"""
-
-    def __init__(self, device_id=None, config=None, **kwargs):
-        # ... 标准 init ...
-        self.data = {
-            "status": "Idle",
-            "temp": 25.0,
-            "temp_target": 25.0,
-        }
-
-    async def set_temperature(self, temp: float, **kwargs) -> bool:
-        """设定目标温度 (°C)"""
-        temp = float(temp)
-        self.data["temp_target"] = temp
-        # >>> 在此填入实际指令 <<<
-        return True
-
-    async def stop(self, **kwargs) -> bool:
-        self.data["status"] = "Idle"
-        # >>> 在此填入实际指令 <<<
-        return True
-
-    @property
-    def temp(self) -> float:
-        return self.data.get("temp", 0.0)
-
-    @property
-    def temp_target(self) -> float:
-        return self.data.get("temp_target", 0.0)
-
-    @property
-    def status(self) -> str:
-        return self.data.get("status", "Idle")
-```
-
-### pump_and_valve — 注射泵
-
-> **严禁重命名参数！** 下方模板中的参数名（`volume`、`position`、`max_velocity` 等）是接口契约。禁止加后缀（如 ~~`volume_ml`~~）、改名（如 ~~`speed_ml_s`~~）或用其他名字替代。单位信息写在 docstring 里，不写在参数名中。
-
-```python
-class MySyringePump:
-    """注射泵设备 — 含阀门控制"""
-
-    def __init__(self, device_id=None, config=None, **kwargs):
-        # ... 标准 init ...
-        self.max_volume = float(config.get("max_volume", 25.0))
-        self.total_steps = 6000
-        self.data = {
-            "status": "Idle",          # 必须用英文 "Idle" / "Busy"
-            "valve_position": "I",
-            "position": 0.0,           # 当前体积位置 (mL)
-            # 第四步可能要求补充更多字段（如 max_velocity, mode 等）
-        }
-
-    def initialize(self):
-        # >>> 发送初始化指令 <<<
-        return response
-
-    def set_valve_position(self, position):
-        """设置阀门位置。参数名必须是 position"""
-        # >>> 发送阀门指令 <<<
-        return response
-
-    def set_position(self, position: float, max_velocity: float = None):
-        """移动到绝对体积位置 (mL)。参数名 position / max_velocity 不可修改"""
-        pos_step = int(float(position) / self.max_volume * self.total_steps)
-        # >>> 发送绝对位置指令 <<<
-        return response
-
-    def pull_plunger(self, volume: float):
-        """吸液 (mL)。参数名必须是 volume"""
-        pos_step = int(float(volume) / self.max_volume * self.total_steps)
-        # >>> 发送相对吸液指令 <<<
-        return response
-
-    def push_plunger(self, volume: float):
-        """排液 (mL)。参数名必须是 volume"""
-        pos_step = int(float(volume) / self.max_volume * self.total_steps)
-        # >>> 发送相对排液指令 <<<
-        return response
-
-    def stop_operation(self):
-        # >>> 发送终止指令 <<<
-        return response
-
-    def close(self):
-        self.hardware_interface.close()
-
-    @property
-    def status(self) -> str:
-        return self._status  # "Idle" 或 "Busy"
-
-    @property
-    def valve_position(self) -> str:
-        return self._valve_position
-
-    @property
-    def position(self) -> float:
-        """当前体积位置 (mL)"""
-        return self._position
-```
-
-### pump_and_valve — 电磁阀
-
-```python
-class MySolenoidValve:
-    def __init__(self, device_id=None, config=None, **kwargs):
-        self.data = {"status": "Idle", "valve_position": "closed"}
-
-    async def open(self, **kwargs) -> bool:
-        return True
-
-    async def close(self, **kwargs) -> bool:
-        return True
-
-    async def set_valve_position(self, position: str, **kwargs) -> bool:
-        self.data["valve_position"] = str(position)
-        return True
-
-    @property
-    def valve_position(self) -> str:
-        return self.data.get("valve_position", "closed")
-
-    @property
-    def status(self) -> str:
-        return self.data.get("status", "Idle")
-```
-
 ### pump_and_valve — 蠕动泵
 
 ```python
+@device(id="my_peristaltic_pump", category=["pump_and_valve"], description="蠕动泵")
 class MyPeristalticPump:
     def __init__(self, device_id=None, config=None, **kwargs):
         self.data = {"status": "Idle", "speed": 0.0, "direction": "CW"}
+
+    @not_action
+    def post_init(self, ros_node):
+        self._ros_node = ros_node
 
     async def set_speed(self, speed: float, **kwargs) -> bool:
         """设置流速 (mL/min)"""
@@ -757,10 +627,12 @@ class MyPeristalticPump:
         return True
 
     @property
+    @topic_config()
     def speed(self) -> float:
         return self.data.get("speed", 0.0)
 
     @property
+    @topic_config()
     def status(self) -> str:
         return self.data.get("status", "Idle")
 ```
@@ -768,9 +640,14 @@ class MyPeristalticPump:
 ### motor — 电机设备
 
 ```python
+@device(id="my_motor", category=["motor"], description="电机设备")
 class MyMotor:
     def __init__(self, device_id=None, config=None, **kwargs):
         self.data = {"status": "Idle", "position": 0, "speed": 0.0}
+
+    @not_action
+    def post_init(self, ros_node):
+        self._ros_node = ros_node
 
     async def enable(self, **kwargs) -> bool:
         self.data["status"] = "Enabled"
@@ -790,10 +667,12 @@ class MyMotor:
         return True
 
     @property
+    @topic_config()
     def position(self) -> int:
         return self.data.get("position", 0)
 
     @property
+    @topic_config()
     def status(self) -> str:
         return self.data.get("status", "Idle")
 ```
@@ -801,12 +680,17 @@ class MyMotor:
 ### heaterstirrer — 加热搅拌
 
 ```python
+@device(id="my_heater_stirrer", category=["heaterstirrer"], description="加热搅拌器")
 class MyHeaterStirrer:
     def __init__(self, device_id=None, config=None, **kwargs):
         self.data = {
             "status": "Idle", "temp": 25.0, "temp_target": 25.0,
             "stir_speed": 0.0, "is_stirring": False,
         }
+
+    @not_action
+    def post_init(self, ros_node):
+        self._ros_node = ros_node
 
     async def set_temperature(self, temp: float, **kwargs) -> bool:
         self.data["temp_target"] = float(temp)
@@ -828,14 +712,17 @@ class MyHeaterStirrer:
         return True
 
     @property
+    @topic_config()
     def temp(self) -> float:
         return self.data.get("temp", 25.0)
 
     @property
+    @topic_config()
     def stir_speed(self) -> float:
         return self.data.get("stir_speed", 0.0)
 
     @property
+    @topic_config()
     def status(self) -> str:
         return self.data.get("status", "Idle")
 ```
@@ -843,9 +730,14 @@ class MyHeaterStirrer:
 ### balance — 天平
 
 ```python
+@device(id="my_balance", category=["balance"], description="天平")
 class MyBalance:
     def __init__(self, device_id=None, config=None, **kwargs):
         self.data = {"status": "Idle", "weight": 0.0, "unit": "g", "stable": True}
+
+    @not_action
+    def post_init(self, ros_node):
+        self._ros_node = ros_node
 
     def read_weight(self, **kwargs) -> Dict[str, Any]:
         return {"success": True, "weight_g": self.data["weight"], "stable": self.data["stable"]}
@@ -855,10 +747,12 @@ class MyBalance:
         return {"success": True, "message": "去皮完成"}
 
     @property
+    @topic_config()
     def weight(self) -> float:
         return self.data.get("weight", 0.0)
 
     @property
+    @topic_config()
     def status(self) -> str:
         return self.data.get("status", "Idle")
 ```
@@ -866,9 +760,14 @@ class MyBalance:
 ### sensor — 传感器
 
 ```python
+@device(id="my_sensor", category=["sensor"], description="传感器")
 class MySensor:
     def __init__(self, device_id=None, config=None, **kwargs):
         self.data = {"status": "Idle", "value": 0.0, "level": False}
+
+    @not_action
+    def post_init(self, ros_node):
+        self._ros_node = ros_node
 
     def read_value(self, **kwargs) -> Dict[str, Any]:
         return {"success": True, "value": self.data["value"]}
@@ -882,14 +781,17 @@ class MySensor:
         return False
 
     @property
+    @topic_config()
     def value(self) -> float:
         return self.data.get("value", 0.0)
 
     @property
+    @topic_config()
     def level(self) -> bool:
         return self.data.get("level", False)
 
     @property
+    @topic_config()
     def status(self) -> str:
         return self.data.get("status", "Idle")
 ```
@@ -1069,7 +971,7 @@ self.opc_client.connect()
 
 ## 常见错误（必读）
 
-以下是历史上导致设备无法接入的真实案例，**生成代码后必须逐条对照检查**：
+以下问题会导致设备无法接入，生成代码后应逐条检查：
 
 ### 错误 1：重命名模板参数名
 
@@ -1338,8 +1240,7 @@ def manual_confirm(
 ## 设备注册表进入微后端
 
 节点启动时会扫描所有 `@device` 类和 Registry YAML，形成当前进程的设备能力清单。
-Host 不再生成 `req_device_registry_upload.json`，也不会调用旧 `/lab/resource`
-接口；物料模板由 `unilabos.resources.adapters.registry_materials` 同步到微后端，
+物料模板由 `unilabos.resources.adapters.registry_materials` 同步到微后端，
 设备动作、状态与通信能力则通过当前 Registry 和运行时 API 提供给 Backend/前端。
 
 调试时建议：

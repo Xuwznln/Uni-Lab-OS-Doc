@@ -11,8 +11,8 @@
 ```{literalinclude} ../../unilabos_msgs/action/PumpTransfer.action
 ```
 
-2. 在 `unilabos_msgs/CMakeLists.txt` 中添加新定义的 action
-因为在指令集中新建了指令，因此调试时需要编译，并在终端环境中加载临时路径：
+2. 在 `unilabos_msgs/CMakeLists.txt` 中登记新 action。调试时编译消息包，并在
+当前终端加载工作区：
 ```bash
 cd unilabos_msgs
 colcon build
@@ -20,7 +20,7 @@ source ./install/local_setup.sh
 cd ..
 ```
 
-调试成功后，发起 pull request，Uni-Lab 的 CI/CD 系统会自动将新的指令集编译打包，mamba执行升级即可永久生效：
+使用已发布的消息包时，可通过 Mamba 更新：
 
 ```bash
 mamba update ros-jazzy-unilabos-msgs -c uni-lab -c conda-forge -c robostack-jazzy
@@ -44,7 +44,5 @@ mamba update ros-jazzy-unilabos-msgs -c uni-lab -c conda-forge -c robostack-jazz
 :end-before: End Protocols
 ```
 
-6. 记得将新开发的 `Protocol` 添加至启动时的 `devices.json` 中。
-```{literalinclude} ../../devices.json
-:lines: 2-4
-```
+6. 在 `unilabos/registry/devices/work_station.yaml` 中公开对应的工作站动作，并用
+完整 Registry 检查动作模型、句柄和默认值。

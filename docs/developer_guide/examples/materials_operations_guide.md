@@ -116,7 +116,7 @@ tree_set = await node.get_resource_by_id("PRCXI_Deck/plate_1")
 # 物料实例 + 目标父物料名 + slot
 materials.assign(node, plate, parent="PRCXI_Deck", slot="T2")
 
-# 也接受裸 uuid（设备此前不持有 -> 自动从权威拉取实例化）
+# 裸 uuid 在本地未命中时会从权威加载并实例化
 materials.assign(node, plate_uuid, parent="PRCXI_Deck", slot="T2")
 
 # site= 传权威 ResourceSite 的 uuid（机器路径，与 slot 二选一）
@@ -250,7 +250,7 @@ materials.assign(node, tips, parent="PRCXI_Deck", slot="T2")
 ensured = materials.ensure(deducted_plr)
 #   已在权威 -> 直接采用权威记录（不重复创建，version 不变）
 #   权威缺失 -> 以原 uuid adopt 创建
-# 挂载（设备此前不持有 -> 权威拉取实例化 -> 触发 resource_tree_add）
+# 挂载（本地未命中 -> 从权威加载实例 -> 触发 resource_tree_add）
 materials.assign(node, deducted_uuid, parent="PRCXI_Deck", slot="T3")
 ```
 
@@ -261,9 +261,11 @@ materials.assign(node, deducted_uuid, parent="PRCXI_Deck", slot="T3")
 ### Host 固定物料 API（画布 / 工作流入口）
 
 `host_node` 对前端画布与工作流暴露**固定的四个物料动作**，方便与 Slave 通信
-和在画布上展示；两种 backend（ROS2 HostNode / HostLink 内置 host 服务设备）
-都是同一份共享实现（`unilabos/backend/host_material_actions.py`）的薄壳，
-业务全部走 `materials.*`：
+和在画布上展示；host_node 服务设备只有一份定义
+（`unilabos/backend/host_services.py` 的 `HostServices`），两种 backend 都经
+各自的通用设备管线从外部初始化它，动作是同一份共享实现
+（`unilabos/backend/host_material_actions.py`）的薄壳，业务全部走
+`materials.*`：
 
 | 动作                      | 语义        | 底层                                                     |
 | ----------------------- | --------- | ------------------------------------------------------ |
@@ -292,7 +294,7 @@ materials.assign(node, deducted_uuid, parent="PRCXI_Deck", slot="T3")
 
 人工确认（`manual_confirm`）是系统自带的通用动作，不属于物料 API；人工搬运
 工作流为 `apply_deduct_resource → manual_confirm（人工搬运到位）→
-transfer_resource`（与机械臂 pick/place 流对齐，不再有单独的 transfer_manual）。
+transfer_resource`，与机械臂 pick/place 流使用同一转移语义。
 
 ## 4. 设备驱动回调约定
 

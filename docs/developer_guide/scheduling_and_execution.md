@@ -1,4 +1,4 @@
-# 实验室协议 0.1
+# 调度与执行架构
 
 本文描述 UniLabOS 当前微后端、统一调度器、库存与 Edge 执行链路。实现入口以
 `unilabos/server/backend/` 为准；数据库边界和表目录见
@@ -12,8 +12,8 @@
 2. DAG 就绪、动作互斥、物料互斥和仓储分配属于同一调度决策。
 3. 执行端不保存等待队列；资源冲突必须拒绝并回到调度权威重算。
 4. 库存预留必须先于动作下发，库存消费必须紧邻真实驱动调用且幂等。
-5. Runtime、Materials、Telemetry、History 只通过既有 Repository 和 Service
-   写入，不新增 Scheduler 私有数据库、私有历史表或平行物料模型。
+5. Runtime、Materials、Telemetry、History 通过各自 Service 写入；Scheduler
+   不创建私有数据库、历史表或平行物料模型。
 6. WebSocket 只承担短通知；完整命令、状态和恢复数据走持久化 HTTP 数据面。
 
 ## 2. 两种部署 profile
@@ -63,7 +63,7 @@ Authority，再创建执行层，因此不存在执行器先于库存权威工�
 3. `WorkflowService` 调用已绑定的 `BackendScheduler.submit(task_uuid)`。
 4. Scheduler 从持久化 Task/Node Job 构建 `TaskDag`，恢复已完成节点后开始走图。
 
-`/workflows` 只表示 Workflow 定义，不再兼容“提交一张图立即执行”的旧语义。
+`/workflows` 表示 Workflow 定义；执行需另行创建 Workflow Task。
 
 ### 4.2 Backend-controlled（接入云端）
 
@@ -174,7 +174,7 @@ HostLink adapter 路由到实际 Slave。
 
 ## 9. 四库与 Service
 
-表结构保持不变，四库组合根是 `unilabos/server/composition.py::ServerServices`。
+四库组合根是 `unilabos/server/composition.py::ServerServices`。
 
 | 数据库 | 调度/执行使用方式 |
 | --- | --- |
@@ -183,12 +183,12 @@ HostLink adapter 路由到实际 Slave。
 | `telemetry.db` | endpoint/device latest 状态和追加事件，供状态联锁投影读取 |
 | `history.db` | payload、feedback、result、error、decision 和 replacement chain |
 
-Repository 只负责 SQL 与事务，Service 负责幂等和状态机。Scheduler 和执行层不得
-直接创建 SQLite connection，也不得声明同名表。跨库只使用规范 UUID，不使用
+Store 基座负责 SQL 与事务，Service 负责幂等和状态机。Scheduler 和执行层不得
+直接创建 SQLite connection 或声明业务表。跨库只使用规范 UUID，不使用
 `ATTACH DATABASE` 或跨库外键。
 
-本机调度的 Workflow 定义、Graph 和 Task 事实由 `WorkflowService` 的现有
-Workflow Store 保存；它不是 Runtime/History 的替代物。Backend-controlled
+本机调度的 Workflow 定义、Graph 和 Task 事实由 `WorkflowService` 的
+`WorkflowStore` 基座保存；它不是 Runtime/History 的替代物。Backend-controlled
 执行的完整 Job 生命周期始终进入 Runtime 和 History。
 
 ## 10. HTTP 面
@@ -242,19 +242,11 @@ Backend 必须先更新调度事实，然后下发 `release_failed` 或 replacem
 | 统一调度服务 | `unilabos/server/backend/scheduler/service.py` |
 | 动作/物料资源管理 | `unilabos/server/backend/scheduler/resource_manager.py` |
 | DAG runner | `unilabos/server/backend/scheduler/dag/` |
-| Backend 诊断 API | `unilabos/server/api/backend.py` |
+| Backend 诊断 API | `unilabos/server/api/runtime/diagnostics.py` |
 | HostLink 网络与执行 adapter | `unilabos/backend/hostlink/` |
 
-## 14. 已移除的兼容面
+## 14. 扩展约束
 
-以下能力不再存在，也不应恢复为平行实现：
-
-- 独立 Scheduler Provider 进程和第二套 Workflow 执行入口；
-- Scheduler 私有 Inventory 数据库、Resource Provider 和仓储模型；
-- 执行端动作等待队列与独立物料锁队列；
-- Scheduler 私有 history/device-state store；
-- 进程内 Monitor SSE replay；
-- 本地 retry、旧 DAG cursor 文件和旧 timeline/snapshot API。
-
-新增能力必须落到上述唯一 Service、协议和表设计中；需要变更 schema 时新增正式
-migration，不得在 Scheduler 目录临时建表。
+- 调度、库存、历史和设备状态能力必须复用对应领域 Service。
+- 数据库表及 DDL 只在 `unilabos/server/database/tables/` 声明。
+- 当前 schema 使用 checksum 驱动的重建策略；Scheduler 目录不得创建私有表。

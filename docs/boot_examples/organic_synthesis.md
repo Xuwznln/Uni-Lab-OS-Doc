@@ -6,7 +6,7 @@
 
 ### 设备配置文件
 
-有机常量合成工作站的完整配置可在 `test/experiments/mock_reactor.json` 文件中找到。该配置文件采用平展结构，通过 `type` 字段区分物料和设备，并通过 `parent` 和 `children` 字段实现层级关系。
+有机合成工作站的完整配置可在 `unilabos/test/experiments/mock_reactor.json` 文件中找到。该配置文件采用平展结构，通过 `type` 字段区分物料和设备，并通过 `parent` 和 `children` 字段实现层级关系。
 
 配置文件示例片段：
 
@@ -91,7 +91,7 @@
 使用以下命令启动模拟反应器：
 
 ```bash
-unilab -g test/experiments/mock_reactor.json
+unilab -g unilabos/test/experiments/mock_reactor.json
 ```
 
 ### 2. 执行抽真空和充气操作
@@ -102,4 +102,5 @@ unilab -g test/experiments/mock_reactor.json
 ros2 action send_goal /devices/ReactorX/EvacuateAndRefillProtocol unilabos_msgs/action/EvacuateAndRefill "{vessel: reactor, gas: N2, repeats: 2}"
 ```
 
-此命令会通过ros通信触发工作站执行抽真空和充气的协议操作，与此同时，您可以通过 http://localhost:8002/status 在`主机节点信息`-`设备状态`查看该操作对设备开关的实时效果。
+此命令会通过 ROS 通信触发工作站执行抽真空和充气操作。运行期间可在
+`http://localhost:8002/api/docs` 查看当前微后端提供的状态与遥测接口。

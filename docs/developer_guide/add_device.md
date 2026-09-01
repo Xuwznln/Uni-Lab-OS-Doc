@@ -181,7 +181,7 @@ my_device:
   schema: {} # 自动生成
 ```
 
-> 💡 **提示：** 详细的注册表编写指南和高级配置，请参考 {doc}`03_add_device_registry`。
+> 💡 **提示：** 详细的注册表编写指南和高级配置，请参考 {doc}`add_registry`。
 
 ---
 
@@ -290,7 +290,7 @@ def get_sensor_data(self) -> Dict[str, float]:
 - 添加到注册表的 `status_types`
 - 定期发布到 ROS2 topic
 
-> **⚠️ 重要：** 仅有 `@property` 装饰器而没有 `@topic_config` 的属性**不会**被广播。这是一个 Breaking Change。
+> **⚠️ 重要：** 仅有 `@property` 装饰器而没有 `@topic_config` 的属性**不会**被广播。
 
 ### 动作方法
 
@@ -1077,8 +1077,7 @@ return {
 
 进阶主题：
 
-- {doc}`03_add_device_registry` - 了解如何配置注册表
-- {doc}`04_add_device_testing` - 学习如何测试设备
+- {doc}`add_registry` - 了解如何配置注册表
 - {doc}`add_old_device` - 没有 SDK 时如何开发设备驱动
 
 ## 参考

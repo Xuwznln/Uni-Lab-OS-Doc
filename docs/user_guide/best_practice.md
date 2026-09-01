@@ -155,22 +155,22 @@ Uni-Lab-OS 在安装时已经预置了大量真实的设备图文件示例，无
 
 ```bash
 # 使用简单的工作台示例（推荐新手）
-unilab --ak your_ak --sk your_sk -g test/experiments/workshop.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/workshop.json
 
 # 使用 PRCXI 液体处理工作站示例
-unilab --ak your_ak --sk your_sk -g test/experiments/prcxi_9300.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/prcxi_9320_slim.json
 
 # 使用格林纳德反应工作站示例（有机合成）
-unilab --ak your_ak --sk your_sk -g test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
 
 # 使用 Bioyond 配液站示例
-unilab --ak your_ak --sk your_sk -g test/experiments/dispensing_station_bioyond.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/dispensing_station_bioyond.json
 
 # 使用 HPLC 分析系统示例
-unilab --ak your_ak --sk your_sk -g test/experiments/HPLC.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/HPLC.json
 
 # 使用空设备配置（最小化配置）
-unilab --ak your_ak --sk your_sk -g test/experiments/empty_devices.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/empty_devices.json
 ```
 
 **更多可用示例**：系统预置了 40+ 个组态图文件，涵盖液体处理、有机合成、分析检测等多个领域。完整列表请查看 `unilabos/test/experiments/` 目录。
@@ -270,7 +270,7 @@ Uni-Lab-OS 在安装时已经包含了大量真实的设备图文件，位于 `u
 | ------------------------------------------------ | -------------------- | -------------------- |
 | `workshop.json`                                  | 综合工作台           | 新手入门推荐         |
 | `empty_devices.json`                             | 空设备配置           | 最小化配置，快速启动 |
-| `prcxi_9300.json`                                | PRCXI 液体处理工作站 | 液体处理自动化       |
+| `prcxi_9320_slim.json`                           | PRCXI 液体处理工作站 | 液体处理自动化       |
 | `Grignard_flow_batchreact_single_pumpvalve.json` | 格林纳德反应工作站   | 有机合成流动化学     |
 | `dispensing_station_bioyond.json`                | Bioyond 配液站       | 生物样品配液         |
 | `reaction_station_bioyond.json`                  | Bioyond 反应站       | 生物化学反应         |
@@ -282,16 +282,16 @@ Uni-Lab-OS 在安装时已经包含了大量真实的设备图文件，位于 `u
 
 ```bash
 # 使用简单工作台（推荐新手第一次启动）
-unilab --ak your_ak --sk your_sk -g test/experiments/workshop.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/workshop.json
 
 # 使用 PRCXI 液体处理工作站
-unilab --ak your_ak --sk your_sk -g test/experiments/prcxi_9300.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/prcxi_9320_slim.json
 
 # 使用格林纳德反应工作站（有机合成）
-unilab --ak your_ak --sk your_sk -g test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
 
 # 使用虚拟设备（无需真实硬件，用于学习和测试）
-unilab --ak your_ak --sk your_sk -g test/experiments/mock_devices/mock_all.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/mock_devices/mock_all.json
 ```
 
 **注意**：所有组态图文件都是真实项目中使用的配置，可以直接学习和参考。完整文件列表请查看 `unilabos/test/experiments/` 目录。
@@ -1509,7 +1509,7 @@ solenoid_valve:
 
     # 使用 io_device_port 字段接收通信设备名
     hardware_interface:
-      name: io_device_port # 例如当前电磁阀修改了name，从默认的hardware_interface改成了io_device_port，那么启动json中就应该对__init__中的io_device_port进行赋值
+      name: io_device_port # 与驱动 __init__ 接收的通信设备参数名保持一致
       read: read_io_coil
       write: write_io_coil
 ```
@@ -1916,8 +1916,3 @@ unilab --ak your_ak --sk your_sk -g graph.json \
 2. 在 GitHub 上提问和分享经验
 3. 关注文档更新和新功能发布
 4. 为 Uni-Lab-OS 社区贡献您的设备驱动和最佳实践
-
----
-
-_本指南最后更新：2025-11_
-_Uni-Lab-OS 版本：最新稳定版_

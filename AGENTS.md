@@ -1,8 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-Also follow the monorepo-level rules in `../AGENTS.md`.
+This file provides guidance for coding agents working in this repository.
 
 ## Build & Development
 
@@ -21,6 +19,7 @@ unilab --check_mode                       # CI validation of registry imports
 unilab --skip_env_check                   # skip auto-install of dependencies
 unilab --visual rviz|web|disable          # visualization mode
 unilab --is_slave                         # run as slave node
+unilab --role backend                     # scheduler authority and runtime.v1 control plane, without devices or ROS
 
 # Workflow upload subcommand
 unilab workflow upload -f <workflow.json> -n <name> --tags tag1 tag2
@@ -35,7 +34,7 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 ### Startup Flow
 
-`unilab` CLI → `unilabos/app/cli/parser.py:build_parser()` → `app/cli/router.py` handles lightweight subcommands (`package` included) → `unilabos/app/main.py:main()` loads config and starts device runtime only when no CLI subcommand handled the request. Runtime then builds the registry, reads the device graph (JSON/GraphML), and starts `hostlink` or `ros2`. HostLink's local driver executor is `unilabos.backend.hostlink.local_runtime.HostLinkLocalRuntime`; there is no separate Basic backend.
+`unilab` CLI → `unilabos/app/cli/parser.py:build_parser()` → `app/cli/router.py` handles lightweight subcommands (`package` included) → `unilabos/app/main.py:main()` loads config and starts device runtime only when no CLI subcommand handled the request. Runtime then builds the registry, reads the device graph (JSON/GraphML), and starts `hostlink` or `ros2`. HostLink's local driver executor is `unilabos.backend.hostlink.local_runtime.HostLinkLocalRuntime`.
 
 ### Core Layers
 
@@ -47,7 +46,7 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 **Device Runtime** (`unilabos/backend/runtime/`): Transport-neutral device execution kernel shared by HostLink and ROS 2 — `DeviceNode`, action routing, resource service, and runtime exceptions (`DeviceActionError`, `DeviceClassInvalid`, `ActionResultError`).
 
-**ROS2 Layer** (`unilabos/backend/ros2/`): `device_node_wrapper.py` dynamically wraps any device class into `ROS2DeviceNode` (defined in `base_device_node.py`). Preset node types in `presets/` include `host_node`, `controller_node`, `workstation`, `serial_node`, `camera`. Messages use custom `unilabos_msgs` (pre-built, distributed via releases). The sibling `unilabos/backend/hostlink/` package is the HostLink transport runtime; experimental `unilabos/backend/dora/` is not a public backend.
+**Transport Layers**: `unilabos/backend/ros2/` wraps device classes as `ROS2DeviceNode` instances; its presets include `host_node`, `workstation`, controller, serial, and camera nodes. `unilabos/backend/hostlink/` provides the HostLink transport runtime plus its own `host_node.py:HostNode` and `workstation.py:WorkstationNode` (the ROS2 counterpart keeps its original name `ROS2WorkstationNode`); `unilabos/backend/dora/` is experimental. The per-backend host/workstation orchestrators share transport-neutral logic from `backend/runtime/` (`host_adapter.py:HostAdapterBase` for bookkeeping/bridge notification/ping-pong/test-mode, `workstation_protocol.py` for protocol name/model resolution and resource expand/write-back) and carry no `@device` decorator. `backend/host_services.py:HostServices` uniquely defines the host service actions; the file is excluded from the default registry AST scan and scanned separately by `Registry._setup_host_node`. Host-to-device material and management requests use the module-level functions in `backend/hostlink/downlink.py` (cross-machine channel is HostLink RPC; ros2 reuses it).
 
 **Experiment Protocols** (`unilabos/experiments/`): `models.py` holds Pydantic parameter models for XDL-style experiment actions (mirroring `unilabos_msgs` ROS actions); `compile/` holds 20+ protocol compilers (add, centrifuge, dissolve, filter, heatchill, stir, pump, etc.) that expand protocol steps into device action sequences at execution time (consumed by the `workstation` preset node). One-shot workflow import converters (`from_xdl.py`, `from_python_script.py`, legacy JSON) live in `scripts/workflow/`, not in the runtime packages.
 
@@ -66,8 +65,8 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 1. Graph file → `graphio.read_node_link_json()` → `(nx.Graph, ResourceTreeSet, resource_links)`
 2. `ResourceTreeSet` + `Registry` → `initialize_device.initialize_device_from_dict()` → `ROS2DeviceNode` instances
-3. Device nodes communicate via ROS2 topics/actions or direct Python calls (simple backend)
-4. Backend control notices use `server/backend/websocket.py`; complete state and commands use the microbackend HTTP APIs in `server/api/`
+3. Device nodes communicate via ROS2 topics/actions or HostLink
+4. Backend control notices use `server/backend/legacy_adaptor/websocket.py`; complete state and commands use the microbackend HTTP APIs in `server/api/`
 
 ### Test Data
 

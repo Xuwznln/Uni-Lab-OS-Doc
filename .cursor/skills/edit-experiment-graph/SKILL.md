@@ -31,13 +31,14 @@ description: Guide for creating and editing experiment graph files in Uni-Lab-OS
 | 字段 | 类型 | 必需 | 说明 |
 |------|------|------|------|
 | `id` | string | **是** | 节点唯一标识 |
-| `class` | string | **是** | `@device(id=...)` 中的 id，或 YAML 注册表 key |
+| `template_name` | string | **是** | `@device(id=...)` 中的 id，或 YAML 注册表 key（旧图写 `class`，读取时自动回填） |
 | `type` | string | 否 | `"device"` / `"deck"` / `"container"` |
 | `name` | string | 否 | 显示名称 |
-| `children` | string[] | 否 | 子节点 ID 列表 |
-| `parent` | string\|null | 否 | 父节点 ID |
+| `parent` | string\|null | 否 | 父节点 ID；层级关系只由它表达，不写 `children` |
 | `config` | object | 否 | 传给 `__init__` 的 `config` 参数 |
 | `data` | object | 否 | 初始运行状态 |
+
+> 子节点顺序即其在 `nodes` 数组中的出现顺序；旧图里的 `children` 列表读取时会被忽略并在入库时剥离。
 
 ### 设备节点
 
@@ -46,7 +47,7 @@ description: Guide for creating and editing experiment graph files in Uni-Lab-OS
     "id": "my_device",
     "name": "我的设备",
     "type": "device",
-    "class": "my_device_id",
+    "template_name": "my_device_id",
     "config": {"port": "/dev/ttyUSB0", "baudrate": 115200},
     "data": {"status": "Idle"}
 }
@@ -59,7 +60,6 @@ description: Guide for creating and editing experiment graph files in Uni-Lab-OS
     "id": "flask_DMF",
     "name": "DMF试剂瓶",
     "type": "container",
-    "class": null,
     "parent": "my_station",
     "config": {"max_volume": 1000.0},
     "data": {"liquid": [{"liquid_type": "DMF", "liquid_volume": 800.0}]}
@@ -86,7 +86,7 @@ description: Guide for creating and editing experiment graph files in Uni-Lab-OS
 ```json
 {
     "nodes": [
-        {"id": "my_device", "class": "my_device_id", "type": "device",
+        {"id": "my_device", "template_name": "my_device_id", "type": "device",
          "config": {"port": "/dev/ttyUSB0"}}
     ],
     "links": []
@@ -98,12 +98,11 @@ description: Guide for creating and editing experiment graph files in Uni-Lab-OS
 ```json
 {
     "nodes": [
-        {"id": "station", "class": "workstation", "type": "device",
-         "children": ["pump", "valve", "flask"],
+        {"id": "station", "template_name": "workstation", "type": "device",
          "config": {"protocol_type": ["PumpTransferProtocol"]}},
-        {"id": "pump", "class": "virtual_transfer_pump", "parent": "station"},
-        {"id": "valve", "class": "virtual_multiway_valve", "parent": "station"},
-        {"id": "flask", "type": "container", "class": null, "parent": "station"}
+        {"id": "pump", "template_name": "virtual_transfer_pump", "parent": "station"},
+        {"id": "valve", "template_name": "virtual_multiway_valve", "parent": "station"},
+        {"id": "flask", "type": "container", "parent": "station"}
     ],
     "links": [
         {"source": "pump", "target": "valve", "type": "fluid",
@@ -117,11 +116,10 @@ description: Guide for creating and editing experiment graph files in Uni-Lab-OS
 ```json
 {
     "nodes": [
-        {"id": "my_station", "class": "my_workstation",
-         "children": ["my_deck"],
+        {"id": "my_station", "template_name": "my_workstation",
          "deck": {"data": {"_resource_child_name": "my_deck",
                            "_resource_type": "unilabos.resources.module:MyDeck"}}},
-        {"id": "my_deck", "class": "MyDeck", "parent": "my_station",
+        {"id": "my_deck", "template_name": "MyDeck", "parent": "my_station",
          "type": "deck", "config": {"type": "MyDeck", "setup": true}}
     ]
 }
@@ -131,8 +129,9 @@ description: Guide for creating and editing experiment graph files in Uni-Lab-OS
 
 ## 父子关系规则
 
-- `children` 和 `parent` 必须双向一致
+- 层级只由子节点的 `parent`（或 `parent_uuid`）表达，父节点不写 `children`
 - 子设备的 `parent` 必须指向工作站节点的 `id`
+- 需要固定子设备初始化顺序时，按顺序排列 `nodes` 数组（如通信设备放在其他子设备之前）
 - Deck 节点的 `_resource_child_name` 必须与 Deck 节点 `id` 一致
 
 ---
@@ -149,8 +148,8 @@ unilab -g unilabos/test/experiments/<name>.json
 
 | 错误 | 修复 |
 |------|------|
-| `class` 找不到 | 确认 `@device(id=...)` / `@resource(id=...)` 中的 id 或 YAML key |
-| children/parent 不一致 | 确保双向一致 |
+| `template_name` 找不到 | 确认 `@device(id=...)` / `@resource(id=...)` 中的 id 或 YAML key |
+| 子节点没挂到父节点下 | 检查子节点 `parent` 是否等于父节点 `id`（`children` 不会被读取） |
 | `_resource_child_name` 不匹配 | 必须与 Deck 节点 `id` 一致 |
 
 详见 [reference.md](reference.md)：ResourceDict schema、Pose 标准化、Handle 验证、GraphML 格式。

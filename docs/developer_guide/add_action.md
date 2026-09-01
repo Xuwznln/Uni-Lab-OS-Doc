@@ -122,12 +122,11 @@ add_action_files(
 
 ## 4. 使用新的 Action
 
-如果采用自己构建的action包，可以通过以下命令更新安装：
+如需验证本地构建的 Action 包，请直接安装产物。重复使用同一版本号时，
+使用 `--force-reinstall`，不要关闭包管理器的完整性检查：
 
 ```bash
-mamba remove --force ros-jazzy-unilabos-msgs
-mamba config set safety_checks disabled  # 如果没有提升版本号，会触发md5与网络上md5不一致，是正常现象，因此通过本指令关闭md5检查
-mamba install xxx.conda --offline
+mamba install --force-reinstall /path/to/ros-jazzy-unilabos-msgs-<version>.conda
 ```
 
 ## 常见问题

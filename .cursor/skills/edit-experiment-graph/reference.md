@@ -111,7 +111,7 @@ my_device:
 
 | 特性 | JSON | GraphML |
 |------|------|---------|
-| 父子关系 | `parent`/`children` 字段 | `::` 分隔的节点 ID（如 `station::pump_1`） |
+| 父子关系 | 子节点 `parent` 字段 | `::` 分隔的节点 ID（如 `station::pump_1`） |
 | 加载后 | 直接解析 | 先 `nx.read_graphml` 再转 JSON 格式 |
 | 输出 | 不生成副本 | 自动生成等价的 `.json` 文件 |
 

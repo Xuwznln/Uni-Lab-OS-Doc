@@ -44,6 +44,8 @@ advanced_usage/working_directory.md
 :maxdepth: 2
 
 developer_guide/networking_overview.md
+developer_guide/scheduling_and_execution.md
+developer_guide/edge_ui_api.md
 developer_guide/add_device.md
 developer_guide/add_old_device.md
 developer_guide/add_registry.md
@@ -57,12 +59,4 @@ developer_guide/examples/materials_construction_guide.md
 developer_guide/examples/materials_tutorial.md
 developer_guide/examples/materials_operations_guide.md
 developer_guide/examples/battery_plc_workstation.md
-```
-
-## 接口文档
-
-```{toctree}
-:maxdepth: 2
-
-apidocs/unilabos
 ```
