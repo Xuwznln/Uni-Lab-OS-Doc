@@ -5,19 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from unilabos.server.services.workflow.authoring_identity import expanded_node_uuid
-from unilabos.server.services.workflow.authoring_kernel import AuthoringCatalogSnapshot
-from unilabos.server.services.workflow.catalog import PublishedSourceCatalog
-from unilabos.server.services.workflow.composite import (
+from unilabos.server.services.runtime.workflow.authoring_identity import expanded_node_uuid
+from unilabos.server.services.runtime.workflow.authoring_kernel import AuthoringCatalogSnapshot
+from unilabos.server.services.runtime.workflow.catalog import PublishedSourceCatalog
+from unilabos.server.services.runtime.workflow.composite import (
     CompositeAuthoring,
     project_published_workflow_contract,
 )
-from unilabos.server.services.workflow.composite_compatibility import (
+from unilabos.server.services.runtime.workflow.composite_compatibility import (
     classify_published_workflow_compatibility_projections,
     published_workflow_compatibility_projection,
 )
-from unilabos.server.services.workflow.service import WorkflowService
-from unilabos.server.database.repositories.workflow import WorkflowStore
+from unilabos.server.services.runtime.workflow.service import WorkflowService
 
 PARENT_UUID = "10000000-0000-4000-8000-000000000001"
 CHILD_UUID = "10000000-0000-4000-8000-000000000002"
@@ -345,7 +344,7 @@ def test_composite_display_node_does_not_generate_job() -> None:
         "node_templates": [_action_template(), template],
         "handle_templates": [*_action_handles(), *handles],
     }
-    service = WorkflowService(WorkflowStore(":memory:"))
+    service = WorkflowService(":memory:")
     try:
         plan, jobs = service._build_execution_plan(  # noqa: SLF001
             graph,
@@ -372,6 +371,8 @@ def test_composite_display_node_does_not_generate_job() -> None:
 
 
 def test_store_returns_graph_and_applied_source_in_one_snapshot() -> None:
+    from unilabos.server.services.runtime.workflow.store import WorkflowStore
+
     store = WorkflowStore(":memory:")
     try:
         store.create_workflow(
@@ -427,7 +428,8 @@ def _candidate(seed: str) -> dict[str, Any]:
 
 def test_cold_activation_advances_child_before_parent() -> None:
     store = _FixedPointStore()
-    service = WorkflowService(store)  # type: ignore[arg-type]
+    service = WorkflowService(":memory:")
+    service.get_authoring_record = store.get_authoring_record  # type: ignore[method-assign]
     applied: list[str] = []
     service.list_registered_sources = lambda: [  # type: ignore[method-assign]
         {"workflow_uuid": PARENT_UUID},

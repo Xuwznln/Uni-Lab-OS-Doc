@@ -1,4 +1,4 @@
-"""SQLModel 行映射与不可变 SQLite migration 的结构一致性。"""
+"""验证 SQLModel 行映射与声明式 SQLite schema 的结构一致性。"""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from unilabos.server.database.tables.telemetry import TelemetryEventRecord
 
 
 @pytest.mark.parametrize("database_key", tuple(DATABASE_SPECS))
-def test_sqlmodel_tables_match_migrated_sqlite_schema(
+def test_sqlmodel_tables_match_declared_sqlite_schema(
     database_key: str, tmp_path
 ) -> None:
-    """每张表的名称、字段顺序和复合主键都必须与已落库 v1 一致。"""
+    """每张表的名称、字段顺序和复合主键与数据库声明一致。"""
 
     spec = DATABASE_SPECS[database_key]
     models = DATABASE_TABLE_MODELS[database_key]
@@ -42,8 +42,8 @@ def test_every_declared_database_has_a_sqlmodel_table_set() -> None:
     assert DATABASE_TABLE_MODELS.keys() == DATABASE_SPECS.keys()
 
 
-def test_sqlmodel_can_round_trip_json_against_migrated_schema(tmp_path) -> None:
-    """ORM 可直接读写 migration 建出的表，JSON TEXT 对调用方仍是 Python 对象。"""
+def test_sqlmodel_can_round_trip_json_against_initialized_schema(tmp_path) -> None:
+    """ORM 可读写初始化后的表，JSON TEXT 对调用方表现为 Python 对象。"""
 
     spec = DATABASE_SPECS["telemetry"]
     path = tmp_path / spec.filename

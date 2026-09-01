@@ -1,12 +1,11 @@
 """runtime.v1 endpoint 能力快照组装。
 
-把执行适配器（ROS2 HostNode / HostLinkExecutionAdapter，均经
-``adapter_registry`` 暴露）维护的在线设备与 ``action_value_mappings``
-投影成 runtime.v1 的 ``device_routes`` + ``action_capabilities``。
+把执行适配器（经 ``adapter_registry`` 暴露）维护的在线设备与
+``action_value_mappings`` 投影成 runtime.v1 的
+``device_routes`` + ``action_capabilities``。
 
-微前端的设备页、单点动作参数表单与工作流画布节点目录都以
-``GET /api/v1/runtime/endpoints`` 返回的这份快照为唯一数据源；此前
-coordinator 只上报身份字段，能力列表恒为空，本模块补齐该缺口。
+``GET /api/v1/runtime/endpoints`` 返回该快照，供微前端的设备页、单点动作
+参数表单与工作流画布节点目录使用。
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from unilabos.server.database.tables.runtime import (
     DeviceActionCapability,
     DeviceRoute,
 )
-from unilabos.protocol.common import canonical_hash
+from unilabos.protocol.base import canonical_hash
 
 # descriptor 白名单：registry action config 里对前端有用且 JSON-safe 的字段。
 # `type`（动作消息类型）在运行期可能被 resolve 成类对象，单独字符串化为
@@ -49,7 +48,7 @@ def build_endpoint_capabilities(
 ) -> Tuple[List[DeviceRoute], List[DeviceActionCapability]]:
     """从执行适配器构建 (device_routes, action_capabilities)。
 
-    适配器契约（HostNode 与 HostLinkExecutionAdapter 均满足）：
+    HostNode 的两种 transport 形态均满足以下适配器契约：
     ``devices_names``（device_id → namespace）为在线设备面，
     ``_action_value_mappings``（device_id → action_name → config）为动作面。
     """

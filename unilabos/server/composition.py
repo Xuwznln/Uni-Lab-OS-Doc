@@ -1,4 +1,4 @@
-"""微后端四库服务的进程级组合根。"""
+"""微后端多库服务的进程级组合根。"""
 
 from __future__ import annotations
 
@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from unilabos.server.database import ServerDatabasePaths
-from unilabos.server.database.repositories import (
-    HistoryRepository,
-    MaterialsRepository,
-    RuntimeRepository,
-    TelemetryRepository,
-)
+from unilabos.server.services.materials.graph import GraphService
 from unilabos.server.services.history import HistoryService
 from unilabos.server.services.materials import MaterialsService
 from unilabos.server.services.runtime import RuntimeService
@@ -21,13 +16,14 @@ from unilabos.server.services.telemetry import TelemetryService
 
 @dataclass
 class ServerServices:
-    """四个独立 writer；跨库只通过服务层和规范 UUID 协作。"""
+    """四个物理数据库的服务集合；跨库只通过服务层和规范 UUID 协作。"""
 
     paths: ServerDatabasePaths
     runtime: RuntimeService
     materials: MaterialsService
     telemetry: TelemetryService
     history: HistoryService
+    graph: GraphService
 
     @classmethod
     def open(cls, paths: ServerDatabasePaths) -> "ServerServices":
@@ -36,21 +32,19 @@ class ServerServices:
 
         opened: list[object] = []
         try:
-            runtime_repository = RuntimeRepository(paths.runtime_db)
-            opened.append(runtime_repository)
-            materials_repository = MaterialsRepository(paths.materials_db)
-            opened.append(materials_repository)
-            telemetry_repository = TelemetryRepository(paths.telemetry_db)
-            opened.append(telemetry_repository)
-            history_repository = HistoryRepository(paths.history_db)
-            opened.append(history_repository)
-            runtime = RuntimeService(runtime_repository)
-            materials = MaterialsService(materials_repository)
-            telemetry = TelemetryService(telemetry_repository)
-            history = HistoryService(history_repository)
+            runtime = RuntimeService(paths.runtime_db)
+            opened.append(runtime)
+            materials = MaterialsService(paths.materials_db)
+            opened.append(materials)
+            telemetry = TelemetryService(paths.telemetry_db)
+            opened.append(telemetry)
+            history = HistoryService(paths.history_db)
+            opened.append(history)
+            # 图快照与物料共用 materials.db 的连接和写锁。
+            graph = GraphService(materials)
         except BaseException:
-            for repository in reversed(opened):
-                repository.close()  # type: ignore[attr-defined]
+            for opened_domain in reversed(opened):
+                opened_domain.close()  # type: ignore[attr-defined]
             raise
         return cls(
             paths=paths,
@@ -58,18 +52,19 @@ class ServerServices:
             materials=materials,
             telemetry=telemetry,
             history=history,
+            graph=graph,
         )
 
     def close(self) -> None:
-        """按与打开相反的顺序释放四个 SQLite connection。"""
+        """按与打开相反的顺序释放各 SQLite connection。
 
-        for repository in (
-            self.history.repository,
-            self.telemetry.repository,
-            self.materials.repository,
-            self.runtime.repository,
-        ):
-            repository.close()
+        graph 与 materials 共用同一条连接，只关一次。
+        """
+
+        self.history.close()
+        self.telemetry.close()
+        self.materials.close()
+        self.runtime.close()
 
 
 _lock = threading.RLock()

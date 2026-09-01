@@ -1,7 +1,7 @@
 import ast
 from typing import Dict, List, Any, Tuple, Optional
 
-from unilabos.server.services.workflow.common import WorkflowGraph, RegistryAdapter
+from unilabos.server.services.runtime.workflow.common import WorkflowGraph, RegistryAdapter
 
 Json = Dict[str, Any]
 

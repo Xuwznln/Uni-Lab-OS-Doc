@@ -23,7 +23,9 @@ def test_mirrored_registry_status_policy_is_resolved_and_normalized(
         devices_config=SimpleNamespace(
             all_nodes=[
                 SimpleNamespace(
-                    res_content=SimpleNamespace(id=device_id, klass=registry_name)
+                    res_content=SimpleNamespace(
+                        id=device_id, template_name=registry_name, klass=""
+                    )
                 )
             ]
         ),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from unilabos.server.services.workflow.execution_plan_graph import (
+from unilabos.server.services.runtime.workflow.execution_plan_graph import (
     CompositeExecutionPlanError,
     CompositeExecutionPlanNormalizer,
 )

@@ -8,7 +8,7 @@ from unilabos.server.backend.scheduler.materials import (
     extract_material_uuids,
     material_uuids_for_parameters,
 )
-from unilabos.protocol.control import ExecuteJobContent
+from unilabos.protocol.runtime.control import ExecuteJobContent
 from unilabos.protocol.materials import InventoryRequirement
 
 

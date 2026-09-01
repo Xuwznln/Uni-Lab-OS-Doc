@@ -1,4 +1,4 @@
-"""新 runtime authority 的协议、幂等、错误 gate 与可靠 outbox 测试。"""
+"""Runtime authority protocol, idempotency, error-gate, and outbox tests."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import time
 
 import pytest
 
-from unilabos.server.database.repositories.runtime import RuntimeRepository
 from unilabos.server.database.tables.runtime import DeviceRoute
 from unilabos.protocol.runtime import (
     AdapterCommandAck,
@@ -86,7 +85,7 @@ def _command(
 
 
 def test_backend_session_and_endpoint_snapshot_upsert(tmp_path) -> None:
-    service = RuntimeService(RuntimeRepository(tmp_path / "runtime.db"))
+    service = RuntimeService(tmp_path / "runtime.db")
     try:
         _session(service)
         session = service.get_backend_session("session")
@@ -131,11 +130,11 @@ def test_backend_session_and_endpoint_snapshot_upsert(tmp_path) -> None:
         assert changed.endpoint.version == 2
         assert changed.endpoint.adapter_event_cursor == 0
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_command_inbox_is_idempotent_and_sequence_ordered(tmp_path) -> None:
-    service = RuntimeService(RuntimeRepository(tmp_path / "runtime.db"))
+    service = RuntimeService(tmp_path / "runtime.db")
     try:
         _session(service)
         first = _command(service, 1, "reconcile", "reconcile", job_uuid=None)
@@ -159,11 +158,11 @@ def test_command_inbox_is_idempotent_and_sequence_ordered(tmp_path) -> None:
 
         assert service.get_backend_session("session").command_cursor == 1
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_error_gate_release_and_backend_owned_retry(tmp_path) -> None:
-    service = RuntimeService(RuntimeRepository(tmp_path / "runtime.db"))
+    service = RuntimeService(tmp_path / "runtime.db")
     try:
         _session(service)
         _endpoint(service)
@@ -248,7 +247,7 @@ def test_error_gate_release_and_backend_owned_retry(tmp_path) -> None:
         assert released.status == "terminal_waiting"
         assert released.terminal_gate_state == "released_failed"
         assert (
-            service.repository.get_adapter_command("adapter-release-1").status
+            service.get_adapter_command("adapter-release-1").status
             == "pending"
         )
 
@@ -282,11 +281,11 @@ def test_error_gate_release_and_backend_owned_retry(tmp_path) -> None:
         assert retry.attempt_no == 2
         assert retry.job_uuid != failed.job_uuid
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_adapter_and_backend_outboxes_claim_retry_and_ack(tmp_path) -> None:
-    service = RuntimeService(RuntimeRepository(tmp_path / "runtime.db"))
+    service = RuntimeService(tmp_path / "runtime.db")
     try:
         _session(service)
         _endpoint(service)
@@ -387,8 +386,8 @@ def test_adapter_and_backend_outboxes_claim_retry_and_ack(tmp_path) -> None:
             )
             == 0
         )
-        assert service.repository.get_backend_event("backend-event").status == (
+        assert service.get_backend_event("backend-event").status == (
             "acknowledged"
         )
     finally:
-        service.repository.close()
+        service.close()

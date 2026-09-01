@@ -1,4 +1,4 @@
-"""后端受控微后端与 HostLink/ROS2 执行 bridge 的装配层。"""
+"""调度权威、运行控制服务与 HostLink/ROS2 执行适配器的装配层。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from unilabos.server.backend.execution import (
 from unilabos.server.backend.coordinator import WorkflowBusinessCoordinator
 from unilabos.server.backend.scheduler.service import BackendScheduler
 from unilabos.server.backend.telemetry import TelemetryDeviceStateProjection
-from unilabos.protocol.common import canonical_json
+from unilabos.protocol.base import canonical_json
 from unilabos.protocol.history import HistoryEventAppend, InlinePayloadWrite
 from unilabos.server.services.history import HistoryService
 from unilabos.server.services.materials import MaterialsService
@@ -42,7 +42,7 @@ def _status_incident_history_listener(
     *,
     endpoint_uuid: str,
 ):
-    """把实时状态联锁事实追加到既有 history_event。"""
+    """把实时状态联锁事实追加到 ``history_event``。"""
 
     def append(event: dict[str, Any]) -> None:
         incident = event.get("incident") or {}
@@ -132,14 +132,16 @@ def get_workflow_service() -> Any:
 
 def setup_local_scheduler(
     *,
-    database_path: str | Path,
     backend: Any = None,
 ) -> Any:
     """装配本机默认的 Workflow Authority（``local_scheduler`` profile）。
 
-    未配置云端地址的 Host 默认由本进程 BackendScheduler 持有 WorkflowTask
-    权威；接入云端后调度权威在远端 Backend，本函数不再被调用。复用同一
-    JobExecutionBackend 下发到 HostLink。
+    本地调度模式由当前进程的 ``BackendScheduler`` 持有 WorkflowTask 权威，
+    并复用 ``JobExecutionBackend`` 向执行适配器派发任务。Backend-controlled
+    模式由远端 Backend 持有调度权威，不装配该服务。
+
+    Workflow 表落 ``runtime.db``：WorkflowService 复用 RuntimeService 的
+    connection 与 write_lock，保持单库单连接单写者。
     """
 
     global _workflow_service, _scheduler
@@ -150,11 +152,15 @@ def setup_local_scheduler(
         raise RuntimeError("job execution backend must be ready first")
 
     from unilabos.server.backend.scheduler.authority import SchedulerAuthorityProfile
-    from unilabos.server.services.workflow.service import WorkflowService
-    from unilabos.server.database.repositories.workflow import WorkflowStore
+    from unilabos.server.composition import get_server_services
+    from unilabos.server.services.runtime.workflow.service import WorkflowService
+
+    services = get_server_services()
+    if services is None:
+        raise RuntimeError("server services must be configured first")
 
     service = WorkflowService(
-        WorkflowStore(database_path),
+        services.runtime,
         authority_profile=SchedulerAuthorityProfile.LOCAL_SCHEDULER,
     )
     scheduler = BackendScheduler(
@@ -170,8 +176,7 @@ def setup_local_scheduler(
     _workflow_service = service
     _scheduler = scheduler
     logger.info(
-        "[WorkflowIntegration] local Workflow Authority ready (%s)",
-        database_path,
+        "[WorkflowIntegration] local Workflow Authority ready (runtime.db shared)",
     )
     return service
 
@@ -213,7 +218,7 @@ def setup_execution_backend(
     database_paths: Optional[ServerDatabasePaths] = None,
     materials_gateway: Any = None,
 ) -> JobExecutionBackend:
-    """启动只消费后端命令的微后端，不创建本地 DAG 或旧 Store。"""
+    """装配 Job 执行面、运行时协调器及设备状态投影。"""
 
     global _backend, _coordinator, _device_state_projection
     if _backend is not None:

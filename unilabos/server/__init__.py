@@ -2,7 +2,7 @@
 
 子包按职责划分，请直接从深路径导入：
 
-- ``unilabos.server.database``：四个物理 SQLite 文件的 schema、布局与 Repository。
+- ``unilabos.server.database``：四个物理 SQLite 文件的表模型、schema 与布局。
 - ``unilabos.server.services``：materials / runtime / telemetry / history 四域服务。
 - ``unilabos.server.composition``：``ServerServices`` 装配入口。
 - ``unilabos.server.backend``：调度器与云端 Backend 执行协调（区别于

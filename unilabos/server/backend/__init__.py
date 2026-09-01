@@ -1,18 +1,6 @@
-"""微后端与上游 Backend 的连接、HTTP 数据面和数据同步。"""
+"""微后端执行域：调度权威、执行 bridge 与 Edge 控制面。
 
-from unilabos.server.backend.http import BackendHTTPClient, BackendHTTPError
-from unilabos.server.backend.session import (
-    BackendSessionFactory,
-    BaseBackendClient,
-    get_backend_client,
-)
-from unilabos.server.backend.websocket import BackendWebSocketClient
-
-__all__ = [
-    "BackendHTTPClient",
-    "BackendHTTPError",
-    "BackendSessionFactory",
-    "BackendWebSocketClient",
-    "BaseBackendClient",
-    "get_backend_client",
-]
+云端 Backend 的兼容连接位于
+``unilabos.server.backend.legacy_adaptor``，包含连接会话、WS/HTTP 客户端
+和数据同步实现。
+"""

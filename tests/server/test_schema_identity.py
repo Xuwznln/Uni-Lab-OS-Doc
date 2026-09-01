@@ -1,4 +1,4 @@
-"""每个物理数据库保有稳定职责；schema 变化时删除重建（未发布期约定）。"""
+"""验证数据库职责身份与 checksum 驱动的 schema 重建策略。"""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def test_one_database_file_cannot_change_role(tmp_path) -> None:
 
 
 def test_schema_drift_rebuilds_database(tmp_path) -> None:
-    """checksum 不一致时不再报错，而是删除文件重建。"""
+    """checksum 不一致时删除数据库文件并按当前声明重建。"""
     path = tmp_path / "runtime.db"
     connection = initialize_database(path, DATABASE_SPECS["runtime"])
     with connection:
@@ -51,7 +51,7 @@ def test_schema_drift_rebuilds_database(tmp_path) -> None:
             "SELECT database_key, checksum FROM schema_identity"
         ).fetchone()
         assert tuple(row) == ("runtime", DATABASE_SPECS["runtime"].checksum)
-        # 旧文件（含 drift_marker 表）随重建一起被丢弃
+        # drift_marker 属于被替换的文件，不应出现在重建后的 schema 中。
         tables = {
             r[0]
             for r in connection.execute(
@@ -63,11 +63,11 @@ def test_schema_drift_rebuilds_database(tmp_path) -> None:
         connection.close()
 
 
-def test_legacy_database_without_identity_is_rebuilt(tmp_path) -> None:
-    """schema_migration 时代或未知来源的库直接重建。"""
-    path = tmp_path / "legacy.db"
+def test_unidentified_database_is_rebuilt(tmp_path) -> None:
+    """缺少 schema_identity 的数据库按当前声明重建。"""
+    path = tmp_path / "unidentified.db"
     connection = sqlite3.connect(path)
-    connection.execute("CREATE TABLE legacy_fact(uuid TEXT PRIMARY KEY)")
+    connection.execute("CREATE TABLE foreign_fact(uuid TEXT PRIMARY KEY)")
     connection.commit()
     connection.close()
 
@@ -79,7 +79,7 @@ def test_legacy_database_without_identity_is_rebuilt(tmp_path) -> None:
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         }
-        assert "legacy_fact" not in tables
+        assert "foreign_fact" not in tables
         assert "schema_identity" in tables
     finally:
         connection.close()

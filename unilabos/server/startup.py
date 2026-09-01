@@ -26,7 +26,7 @@ class HostServerStack:
 def resolve_database_paths(
     args: Mapping[str, Any], *, working_dir: str | Path
 ) -> ServerDatabasePaths:
-    """解析五库路径并一次性绑定到进程配置。"""
+    """解析四库路径并一次性绑定到进程配置。"""
 
     root = str(
         args.get("server_database_root")
@@ -39,7 +39,6 @@ def resolve_database_paths(
             "materials": args.get("materials_db"),
             "telemetry": args.get("telemetry_db"),
             "history": args.get("history_db"),
-            "workflow": args.get("workflow_db"),
         }.items()
         if value is not None and str(value).strip()
     }
@@ -96,17 +95,14 @@ def setup_host_server_stack(
         )
         # 调度权威归属：未显式配置云端地址时本机是默认权威（本地 Scheduler +
         # Workflow API）；配置后调度在远端 Backend，本机纯执行。
-        from unilabos.server.backend.url import build_backend_websocket_url
+        from unilabos.server.backend.legacy_adaptor.url import build_backend_websocket_url
 
         if not build_backend_websocket_url():
             from unilabos.server.backend.composition import (
                 setup_local_scheduler,
             )
 
-            setup_local_scheduler(
-                database_path=paths.workflow_db,
-                backend=execution_backend,
-            )
+            setup_local_scheduler(backend=execution_backend)
 
         host_network = None
         if args.get("backend") == "ros2":

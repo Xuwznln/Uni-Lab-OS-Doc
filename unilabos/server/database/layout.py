@@ -1,4 +1,4 @@
-"""微后端五个 SQLite 文件的集中路径解析与隔离校验。"""
+"""微后端四个 SQLite 文件的集中路径解析与隔离校验。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from unilabos.server.database.tables import (
     MATERIALS_DATABASE,
     RUNTIME_DATABASE,
     TELEMETRY_DATABASE,
-    WORKFLOW_DATABASE,
 )
 
 
@@ -25,7 +24,6 @@ _SPECS = (
     MATERIALS_DATABASE,
     TELEMETRY_DATABASE,
     HISTORY_DATABASE,
-    WORKFLOW_DATABASE,
 )
 
 
@@ -60,14 +58,17 @@ def validate_distinct_database_paths(paths: Mapping[str, Path]) -> None:
 
 @dataclass(frozen=True)
 class ServerDatabasePaths:
-    """由组合根一次解析并注入各数据库 writer 的五库路径。"""
+    """由组合根解析并注入四个数据库 writer 的路径。
+
+    ``runtime.db`` 保存运行控制、工作流和注册表数据；``materials.db`` 保存
+    物料、拓扑边和设备图快照。Telemetry 与 History 分别使用各自的数据库。
+    """
 
     root: Path
     runtime_db: Path
     materials_db: Path
     telemetry_db: Path
     history_db: Path
-    workflow_db: Path
 
     @classmethod
     def resolve(
@@ -101,7 +102,6 @@ class ServerDatabasePaths:
             materials_db=resolved["materials"],
             telemetry_db=resolved["telemetry"],
             history_db=resolved["history"],
-            workflow_db=resolved["workflow"],
         )
 
     def as_mapping(self) -> dict[str, Path]:
@@ -110,7 +110,6 @@ class ServerDatabasePaths:
             "materials": self.materials_db,
             "telemetry": self.telemetry_db,
             "history": self.history_db,
-            "workflow": self.workflow_db,
         }
 
 

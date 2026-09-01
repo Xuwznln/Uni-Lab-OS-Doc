@@ -8,9 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from unilabos.client.materials import LocalMaterialsClient, bind_payload
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.api.materials import install_materials_api
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     InventoryLotInbound,
     InventoryRequirement,
@@ -33,8 +32,7 @@ from unilabos.server.services.materials import (
     InsufficientInventoryError,
     MaterialsService,
 )
-from unilabos.server.services.workflow.service import WorkflowService
-from unilabos.server.database.repositories.workflow import WorkflowStore
+from unilabos.server.services.runtime.workflow.service import WorkflowService
 
 
 def _mutation(operation: str, *, job_uuid: str | None = None) -> InventoryMutation:
@@ -134,7 +132,7 @@ def _reservation(
 def test_execution_rejects_stale_or_changed_inventory_reservation(
     tmp_path,
 ) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     try:
         _template(service, "plate-template", "plate")
@@ -188,11 +186,11 @@ def test_execution_rejects_stale_or_changed_inventory_reservation(
 
         assert coordinator.prepare(payload) == reservation
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_reserve_and_consume_material_and_reagent_atomically(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "plate-template", "plate")
         _template(service, "reagent-template", "reagent")
@@ -224,11 +222,11 @@ def test_reserve_and_consume_material_and_reagent_atomically(tmp_path) -> None:
             for lot in service.list_inventory_lots()
         ] == [("lot-a", 0, 0, 0), ("lot-b", 3, 3, 0)]
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_insufficient_reservation_rolls_back_the_complete_set(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "plate-template", "plate")
         _template(service, "reagent-template", "reagent")
@@ -247,11 +245,11 @@ def test_insufficient_reservation_rolls_back_the_complete_set(tmp_path) -> None:
         )
         assert service.list_inventory_reservations() == []
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_task_batch_reservation_is_all_or_nothing_across_jobs(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "plate-template", "plate")
         _template(service, "reagent-template", "reagent")
@@ -309,11 +307,11 @@ def test_task_batch_reservation_is_all_or_nothing_across_jobs(tmp_path) -> None:
         ]
         assert service.get_inventory_lot("lot-a").quantity_available == 1
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_inventory_http_protocol_uses_the_same_authority_transitions(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     app = FastAPI()
     install_materials_api(app, service)
     try:
@@ -378,7 +376,7 @@ def test_inventory_http_protocol_uses_the_same_authority_transitions(tmp_path) -
                 "/api/v1/materials/reservations/by-job/job-http"
             ).json()["status"] == "consumed"
     finally:
-        service.repository.close()
+        service.close()
 
 
 class _InventoryAwareAdapter:
@@ -419,7 +417,7 @@ class _RecordingAdapter:
 def test_execution_consumes_scheduler_reservation_before_driver_call(
     tmp_path,
 ) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     try:
         _template(service, "plate-template", "plate")
@@ -485,11 +483,11 @@ def test_execution_consumes_scheduler_reservation_before_driver_call(
         finally:
             backend.stop()
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_failed_action_quarantines_consumed_material_without_refund(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     try:
         _template(service, "plate-template", "plate")
@@ -555,11 +553,11 @@ def test_failed_action_quarantines_consumed_material_without_refund(tmp_path) ->
         finally:
             backend.stop()
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_execution_rejects_unreserved_warehouse_requirement(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     adapter = _RecordingAdapter()
     try:
@@ -595,11 +593,11 @@ def test_execution_rejects_unreserved_warehouse_requirement(tmp_path) -> None:
         finally:
             backend.stop()
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_status_hold_rejects_and_releases_scheduler_reservation(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     incidents = StatusIncidentManager()
     try:
@@ -665,7 +663,7 @@ def test_status_hold_rejects_and_releases_scheduler_reservation(tmp_path) -> Non
         finally:
             backend.stop()
     finally:
-        service.repository.close()
+        service.close()
 
 
 class _ListenerOnlyBackend:
@@ -674,7 +672,7 @@ class _ListenerOnlyBackend:
 
 
 def test_backend_scheduler_reserves_complete_task_before_dispatch(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     client = LocalMaterialsClient(service)
     try:
         _template(service, "reagent-template", "reagent")
@@ -720,7 +718,7 @@ def test_backend_scheduler_reserves_complete_task_before_dispatch(tmp_path) -> N
         ] == ["released", "released"]
         assert service.get_inventory_lot("lot-a").quantity_available == 5
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_workflow_plan_freezes_inventory_requirements() -> None:
@@ -752,7 +750,7 @@ def test_workflow_plan_freezes_inventory_requirements() -> None:
         ],
         "handle_templates": [],
     }
-    workflow = WorkflowService(WorkflowStore(":memory:"))
+    workflow = WorkflowService(":memory:")
     try:
         plan, jobs = workflow._build_execution_plan(  # noqa: SLF001
             graph,

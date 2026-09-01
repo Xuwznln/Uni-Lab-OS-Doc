@@ -13,13 +13,12 @@ from fastapi.testclient import TestClient
 
 from unilabos.server.backend.scheduler.authority import SchedulerAuthorityProfile
 from unilabos.server.backend.scheduler.service import BackendScheduler
-from unilabos.server.api.workflow import create_workflow_app
-from unilabos.server.services.workflow.service import (
+from unilabos.server.api.runtime.workflow import create_workflow_app
+from unilabos.server.services.runtime.workflow.service import (
     WorkflowConflict,
     WorkflowError,
     WorkflowService,
 )
-from unilabos.server.database.repositories.workflow import WorkflowStore
 
 
 class _ExecutorStub:
@@ -29,7 +28,7 @@ class _ExecutorStub:
 
 @pytest.fixture()
 def service() -> WorkflowService:
-    instance = WorkflowService(WorkflowStore(":memory:"))
+    instance = WorkflowService(":memory:")
     try:
         yield instance
     finally:
@@ -106,7 +105,7 @@ def test_ad_hoc_task_idempotency_and_fingerprint_conflict(
 
 def test_ad_hoc_task_validation_and_authority_gate() -> None:
     service = WorkflowService(
-        WorkflowStore(":memory:"),
+        ":memory:",
         authority_profile=SchedulerAuthorityProfile.BACKEND_CONTROLLED,
     )
     try:

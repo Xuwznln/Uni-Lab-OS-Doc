@@ -9,10 +9,10 @@ import uuid
 from dataclasses import asdict, is_dataclass
 from typing import Any, Callable, Optional
 
-from unilabos.server.backend.http import BackendHTTPClient
+from unilabos.server.backend.legacy_adaptor.http import BackendHTTPClient
 from unilabos.server.database.tables.runtime import ExecutionJobRecord
-from unilabos.protocol.common import canonical_hash, canonical_json
-from unilabos.protocol.control import (
+from unilabos.protocol.base import canonical_hash, canonical_json
+from unilabos.protocol.runtime.control import (
     BackendCommandNotice,
     BackendSessionNotice,
     CancelJobContent,

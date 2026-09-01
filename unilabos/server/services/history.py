@@ -1,18 +1,24 @@
-"""``history.db`` payload 与 append-only 历史流业务服务。"""
+"""``history.db`` payload 与 append-only 历史流业务服务（持连接 + 业务 API 单层）。
+
+``find_*`` 返回 Optional，``get_*`` 在缺失时抛 ``HistoryNotFoundError``。
+"""
 
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import time
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
-from unilabos.server.database.repositories.history import HistoryRepository
+from unilabos.server.database.sqlite_domain import DomainDatabase, SqliteDomain
 from unilabos.server.database.tables.history import (
+    HISTORY_DATABASE,
     HistoryEventRecord,
     PayloadObjectRecord,
 )
+from unilabos.protocol.base import canonical_json
 from unilabos.protocol.history import (
     ExternalPayloadWrite,
     HistoryEventAppend,
@@ -39,13 +45,139 @@ class HistoryValidationError(HistoryServiceError):
     """请求跨记录约束不成立。"""
 
 
-class HistoryService:
+class HistoryService(SqliteDomain):
     """新 ``history.db`` 的唯一业务入口，不依赖旧 workflow store。"""
 
-    def __init__(self, repository: HistoryRepository):
-        if not isinstance(repository, HistoryRepository):
-            raise TypeError("repository must be a HistoryRepository")
-        self.repository = repository
+    def __init__(self, database: DomainDatabase):
+        super().__init__(database, HISTORY_DATABASE)
+
+    # -- 行映射 -----------------------------------------------------------
+
+    @staticmethod
+    def _payload(row: sqlite3.Row) -> PayloadObjectRecord:
+        values = dict(row)
+        if values["inline_payload"] is not None:
+            values["inline_payload"] = bytes(values["inline_payload"])
+        return PayloadObjectRecord.model_validate(values)
+
+    @staticmethod
+    def _event(row: sqlite3.Row) -> HistoryEventRecord:
+        values = dict(row)
+        values["summary"] = json.loads(values.pop("summary_json"))
+        return HistoryEventRecord.model_validate(values)
+
+    # -- payload 读写 ------------------------------------------------------
+
+    def find_payload(self, payload_uuid: str) -> Optional[PayloadObjectRecord]:
+        row = self.connection.execute(
+            "SELECT * FROM payload_object WHERE payload_uuid=?",
+            (payload_uuid,),
+        ).fetchone()
+        return self._payload(row) if row is not None else None
+
+    def find_payload_by_content(
+        self, sha256: str, byte_length: int
+    ) -> Optional[PayloadObjectRecord]:
+        row = self.connection.execute(
+            """
+            SELECT * FROM payload_object
+            WHERE sha256=? AND byte_length=?
+            ORDER BY created_at_ms,payload_uuid
+            LIMIT 1
+            """,
+            (sha256, byte_length),
+        ).fetchone()
+        return self._payload(row) if row is not None else None
+
+    def _insert_payload(self, record: PayloadObjectRecord) -> None:
+        values = record.model_dump(mode="python")
+        self.connection.execute(
+            """
+            INSERT INTO payload_object(
+                payload_uuid,media_type,encoding,compression,byte_length,sha256,
+                storage_kind,inline_payload,external_uri,created_at_ms,expires_at_ms
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                values["payload_uuid"],
+                values["media_type"],
+                values["encoding"],
+                values["compression"],
+                values["byte_length"],
+                values["sha256"],
+                values["storage_kind"],
+                values["inline_payload"],
+                values["external_uri"],
+                values["created_at_ms"],
+                values["expires_at_ms"],
+            ),
+        )
+
+    # -- event 读写 --------------------------------------------------------
+
+    def find_event(self, event_uuid: str) -> Optional[HistoryEventRecord]:
+        row = self.connection.execute(
+            "SELECT * FROM history_event WHERE event_uuid=?",
+            (event_uuid,),
+        ).fetchone()
+        return self._event(row) if row is not None else None
+
+    def get_superseding_event(self, event_uuid: str) -> Optional[HistoryEventRecord]:
+        row = self.connection.execute(
+            """
+            SELECT * FROM history_event
+            WHERE supersedes_event_uuid=?
+            ORDER BY sequence
+            LIMIT 1
+            """,
+            (event_uuid,),
+        ).fetchone()
+        return self._event(row) if row is not None else None
+
+    def latest_state_version(self, job_uuid: str, event_type: str) -> int:
+        row = self.connection.execute(
+            """
+            SELECT COALESCE(MAX(state_version),0)
+            FROM history_event
+            WHERE job_uuid=? AND event_type=?
+            """,
+            (job_uuid, event_type),
+        ).fetchone()
+        return int(row[0])
+
+    def _insert_event(self, record: HistoryEventRecord) -> HistoryEventRecord:
+        values = record.model_dump(mode="python")
+        cursor = self.connection.execute(
+            """
+            INSERT INTO history_event(
+                event_uuid,event_type,job_uuid,endpoint_uuid,device_uuid,action_name,
+                event_key,job_sequence,state_version,payload_uuid,summary_json,severity,
+                actor_type,actor_uuid,supersedes_event_uuid,occurred_at_ms,recorded_at_ms
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                values["event_uuid"],
+                values["event_type"],
+                values["job_uuid"],
+                values["endpoint_uuid"],
+                values["device_uuid"],
+                values["action_name"],
+                values["event_key"],
+                values["job_sequence"],
+                values["state_version"],
+                values["payload_uuid"],
+                canonical_json(values["summary"]),
+                values["severity"],
+                values["actor_type"],
+                values["actor_uuid"],
+                values["supersedes_event_uuid"],
+                values["occurred_at_ms"],
+                values["recorded_at_ms"],
+            ),
+        )
+        return record.model_copy(update={"sequence": int(cursor.lastrowid)})
+
+    # -- 业务方法 ----------------------------------------------------------
 
     @staticmethod
     def _now_ms() -> int:
@@ -100,9 +232,9 @@ class HistoryService:
             created_at_ms=created_at_ms,
             expires_at_ms=request.expires_at_ms,
         )
-        with self.repository.write():
+        with self.write():
             if request.payload_uuid is not None:
-                existing = self.repository.get_payload(request.payload_uuid)
+                existing = self.find_payload(request.payload_uuid)
                 if existing is not None:
                     if self._same_payload(existing, candidate):
                         return existing
@@ -110,7 +242,7 @@ class HistoryService:
                         f"payload_uuid {request.payload_uuid!r} already has other content"
                     )
 
-            duplicate = self.repository.find_payload_by_content(
+            duplicate = self.find_payload_by_content(
                 candidate.sha256, candidate.byte_length
             )
             if duplicate is not None:
@@ -124,11 +256,11 @@ class HistoryService:
                     )
                 return duplicate
 
-            self.repository.insert_payload(candidate)
+            self._insert_payload(candidate)
             return candidate
 
     def get_payload(self, payload_uuid: str) -> PayloadObjectRecord:
-        payload = self.repository.get_payload(payload_uuid)
+        payload = self.find_payload(payload_uuid)
         if payload is None:
             raise HistoryNotFoundError(f"payload {payload_uuid!r} was not found")
         return payload
@@ -152,7 +284,7 @@ class HistoryService:
         target_uuid = request.supersedes_event_uuid
         if target_uuid is None:
             return None
-        target = self.repository.get_event(target_uuid)
+        target = self.find_event(target_uuid)
         if target is None:
             raise HistoryNotFoundError(
                 f"superseded event {target_uuid!r} was not found"
@@ -167,7 +299,7 @@ class HistoryService:
             )
         if request.job_uuid is None:
             raise HistoryValidationError("a result replacement requires job_uuid")
-        if self.repository.get_superseding_event(target.event_uuid) is not None:
+        if self.get_superseding_event(target.event_uuid) is not None:
             raise HistoryConflictError(
                 f"event {target.event_uuid!r} is not the replacement chain tail"
             )
@@ -177,11 +309,11 @@ class HistoryService:
 
     def _append_event_locked(self, request: HistoryEventAppend) -> HistoryEventRecord:
         event_uuid = request.event_uuid or str(uuid.uuid4())
-        if self.repository.get_event(event_uuid) is not None:
+        if self.find_event(event_uuid) is not None:
             raise HistoryConflictError(f"event_uuid {event_uuid!r} already exists")
         if (
             request.payload_uuid is not None
-            and self.repository.get_payload(request.payload_uuid) is None
+            and self.find_payload(request.payload_uuid) is None
         ):
             raise HistoryNotFoundError(
                 f"payload {request.payload_uuid!r} was not found"
@@ -194,7 +326,7 @@ class HistoryService:
             if job_uuid is None:  # 已由 _validate_replacement 拒绝，仅用于类型收窄。
                 raise HistoryValidationError("a result replacement requires job_uuid")
             expected_version = (
-                self.repository.latest_state_version(job_uuid, "job_result") + 1
+                self.latest_state_version(job_uuid, "job_result") + 1
             )
             if state_version is None:
                 state_version = expected_version
@@ -224,7 +356,7 @@ class HistoryService:
             recorded_at_ms=recorded_at_ms,
         )
         try:
-            return self.repository.insert_event(record)
+            return self._insert_event(record)
         except sqlite3.IntegrityError as exc:
             raise HistoryConflictError(
                 f"history event conflicts with the stream: {exc}"
@@ -233,7 +365,7 @@ class HistoryService:
     def append_event(self, request: HistoryEventAppend) -> HistoryEventRecord:
         """追加事件；不提供更新或删除已有历史的入口。"""
 
-        with self.repository.write():
+        with self.write():
             return self._append_event_locked(request)
 
     def append_replacement(
@@ -241,8 +373,8 @@ class HistoryService:
     ) -> HistoryEventRecord:
         """在当前 ``job_result`` 链尾追加人工替换结果。"""
 
-        with self.repository.write():
-            target = self.repository.get_event(request.supersedes_event_uuid)
+        with self.write():
+            target = self.find_event(request.supersedes_event_uuid)
             if target is None:
                 raise HistoryNotFoundError(
                     f"superseded event {request.supersedes_event_uuid!r} was not found"
@@ -268,7 +400,7 @@ class HistoryService:
             return self._append_event_locked(event_request)
 
     def get_event(self, event_uuid: str) -> HistoryEventRecord:
-        event = self.repository.get_event(event_uuid)
+        event = self.find_event(event_uuid)
         if event is None:
             raise HistoryNotFoundError(f"history event {event_uuid!r} was not found")
         return event
@@ -277,17 +409,35 @@ class HistoryService:
         self, query: Optional[HistoryEventQuery] = None
     ) -> list[HistoryEventRecord]:
         value = query or HistoryEventQuery()
-        return self.repository.query_events(
-            after_sequence=value.after_sequence,
-            limit=value.limit,
-            event_types=value.event_types,
-            job_uuid=value.job_uuid,
-            endpoint_uuid=value.endpoint_uuid,
-            device_uuid=value.device_uuid,
-            event_key=value.event_key,
-            occurred_from_ms=value.occurred_from_ms,
-            occurred_through_ms=value.occurred_through_ms,
-        )
+        clauses = ["sequence>?"]
+        params: list[Any] = [value.after_sequence]
+        if value.event_types:
+            placeholders = ",".join("?" for _ in value.event_types)
+            clauses.append(f"event_type IN ({placeholders})")
+            params.extend(value.event_types)
+        for column, filter_value in (
+            ("job_uuid", value.job_uuid),
+            ("endpoint_uuid", value.endpoint_uuid),
+            ("device_uuid", value.device_uuid),
+            ("event_key", value.event_key),
+        ):
+            if filter_value is not None:
+                clauses.append(f"{column}=?")
+                params.append(filter_value)
+        if value.occurred_from_ms is not None:
+            clauses.append("occurred_at_ms>=?")
+            params.append(value.occurred_from_ms)
+        if value.occurred_through_ms is not None:
+            clauses.append("occurred_at_ms<=?")
+            params.append(value.occurred_through_ms)
+        params.append(value.limit)
+        rows = self.connection.execute(
+            "SELECT * FROM history_event WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY sequence LIMIT ?",
+            params,
+        ).fetchall()
+        return [self._event(row) for row in rows]
 
     def replacement_chain(self, event_uuid: str) -> list[HistoryEventRecord]:
         """从链上任意事件返回完整、按追加顺序排列的替换链。"""
@@ -304,7 +454,7 @@ class HistoryService:
         chain = [current]
         seen = {current.event_uuid}
         while True:
-            replacement = self.repository.get_superseding_event(current.event_uuid)
+            replacement = self.get_superseding_event(current.event_uuid)
             if replacement is None:
                 return chain
             if replacement.event_uuid in seen:

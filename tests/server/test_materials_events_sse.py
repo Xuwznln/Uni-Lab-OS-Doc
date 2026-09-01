@@ -16,8 +16,7 @@ from fastapi import APIRouter, HTTPException
 
 from unilabos.client.materials import bind_payload
 from unilabos.server.api.materials import create_materials_router
-from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import ResourceTemplateWrite
 from unilabos.server.services.materials import MaterialsService
 
@@ -40,8 +39,7 @@ def _mutation(operation: str) -> InventoryMutation:
 
 
 def _events_endpoint(router: APIRouter):
-    # 新版 FastAPI include_router 不再把子路由展开进 app.routes，
-    # 因此直接从 materials router 的路由表取端点函数。
+    # include_router 可能保留子路由包装，直接从 materials router 取端点。
     route = next(
         r
         for r in router.routes
@@ -51,7 +49,7 @@ def _events_endpoint(router: APIRouter):
 
 
 def _build_router(tmp_path) -> tuple[APIRouter, MaterialsService]:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     return create_materials_router(service), service
 
 
@@ -90,7 +88,7 @@ def test_materials_events_sse_replays_from_cursor(tmp_path) -> None:
         # Last-Event-ID: 0 → 从账本头部续传，应立即重放刚写入的变更
         joined = "".join(asyncio.run(_collect_sse(router, "0")))
     finally:
-        service.repository.close()
+        service.close()
 
     assert "event: materials.changed" in joined
     data_line = next(
@@ -115,4 +113,4 @@ def test_materials_events_rejects_invalid_cursor(tmp_path) -> None:
             )
         assert exc_info.value.status_code == 422
     finally:
-        service.repository.close()
+        service.close()

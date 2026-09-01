@@ -1,49 +1,100 @@
 # 微后端数据库边界
 
-微后端使用五个独立 SQLite 文件，每库一个 writer。分库是为了隔离关键控制、
-物料事务、高频设备状态、大历史写入和工作流权威；不是为了把每个数据模型字段
-再拆成表。业务代码不得使用 `ATTACH DATABASE` 或跨库外键。
+微后端使用四个独立 SQLite 文件，每库一个 writer。分库是为了隔离关键控制、
+物料事务、高频设备状态和大历史写入；不是为了把每个数据模型字段再拆成表。
+运行过程产生的事实同域同库：workflow authority 与 registry 快照落
+`runtime.db`（复用 RuntimeService 的连接与写锁），拓扑边与 lab graph
+快照落 `materials.db`。业务代码不得使用 `ATTACH DATABASE` 或跨库外键。
 
 代码命名空间统一归属微后端：工作流领域服务（编排、authoring、组合展开、
-上传）位于 `unilabos.server.services.workflow`，线上 DTO 契约位于
-`unilabos.protocol.workflow`（图结构校验在 `unilabos.protocol.workflow_validation`），
+上传）位于 `unilabos.server.services.runtime.workflow`，线上 DTO 契约位于
+`unilabos.protocol.runtime.workflow`（图结构校验在 `unilabos.protocol.utils.workflow_validation`），
 调度与执行期 DAG 位于 `unilabos.server.backend.scheduler`，
 四库组合根位于 `unilabos.server.composition`，运行时装配位于
 `unilabos.server.backend.composition`。
-不保留 `unilabos.server.storage` 或 `unilabos.server.workflow`，也不保留顶层
-`unilabos.workflow`、`unilabos.scheduler` 或 `unilabos.storage`；旧库不会被
-探测、打开或迁移。
+启动过程只解析下表所列四个数据库路径，不自动发现或导入其他数据库文件。
 
 | 数据库 | 权威内容 | 表数（含 identity） |
 | --- | --- | ---: |
-| `runtime.db` | 后端命令、执行 job、endpoint 与可靠收发 | 8 |
-| `materials.db` | 资源模板、物料、Site、预留与库存账本 | 11 |
+| `runtime.db` | 后端命令、执行 job、endpoint 与可靠收发；工作流定义/任务/job 与前端事件；edge 注册表版本快照 | 27 |
+| `materials.db` | 资源模板、物料、Site、拓扑边、lab graph 快照、预留与库存账本 | 13 |
 | `telemetry.db` | 设备最新状态和高频追加事件 | 4 |
 | `history.db` | 大 payload 和统一执行历史流 | 3 |
-| `workflow.db` | 工作流定义、模板、任务/job 执行事实与前端事件 | 17 |
 
-五库合计 43 张表，其中 5 张是各库自己的 `schema_identity`。
+四库合计 47 张表，其中 4 张是各库自己的 `schema_identity`。
+
+## 目录即库
+
+持久化到调用端的整条链（`tables` / `services` / `api` / `client`）目录都
+严格按四库划分，导入只看表：需要拆分的库做成子包、经 `__init__` 聚合，
+`workflow` 与 `registry` 归 runtime 库域，`graph` 与快照对比归 materials
+库域。
+
+```
+server/database/
+├── tables/                  # 行模型 + 建表 DDL（唯一来源）
+│   ├── base.py              # 公共类型与 TableObject
+│   ├── runtime/             # runtime.db（子包聚合）
+│   │   ├── __init__.py      #   RUNTIME_DATABASE / RUNTIME_TABLE_MODELS + 全部表重导出
+│   │   ├── data.py          #   运行控制表（backend_session/command_inbox/execution_job 等）
+│   │   ├── workflow.py      #   Workflow Authority 16 张表
+│   │   └── registry.py      #   注册表快照三表
+│   ├── materials.py         # materials.db
+│   ├── telemetry.py         # telemetry.db
+│   └── history.py           # history.db
+├── schema.py                # DatabaseSpec / initialize_database / 身份校验
+└── sqlite_domain.py         # SqliteDomain：单连接、单写者、同库共存域基座
+
+server/services/             # 领域服务（单层持库：service 即 writer）
+├── runtime/                 # RuntimeService（继承 SqliteDomain）/ workflow 子包 / RegistryService
+│   ├── data.py              #   RuntimeService：运行控制 SQL + 状态机
+│   ├── workflow/            #   WorkflowService（继承 store.WorkflowStore）
+│   │   ├── store.py         #     存储基座（行 CRUD、事务、稳定错误码）
+│   │   ├── errors.py
+│   │   └── service.py       #     编排/authoring/上传等业务
+│   └── registry.py          #   RegistryService（借用 runtime 连接）
+├── materials/               # materials.db 域
+│   ├── store.py             #   MaterialsRepository：行 CRUD 基座（Service 继承它）
+│   ├── core.py              #   MaterialsService(MaterialsRepository)
+│   ├── graph.py             #   GraphService(MaterialsRepository)，借用 materials 连接
+│   └── snapshot.py
+├── telemetry.py             # TelemetryService（继承 SqliteDomain）
+└── history.py               # HistoryService（继承 SqliteDomain）
+
+server/api/                  # HTTP 路由（app.py 为装配面，非库域）
+├── runtime/                 # data.py（runtime.v1 数据面）/ control.py（业务控制面）
+│                            #   / diagnostics.py / workflow.py / registry.py
+├── materials/               # core.py / graph.py
+├── telemetry.py
+└── history.py
+
+client/                      # 出站客户端（http/session/envelope/output 为基础设施）
+├── runtime/                 # data.py / workflow.py
+├── materials/               # core.py / graph.py
+├── telemetry.py
+└── history.py
+```
 
 ## 持久化代码收敛
 
 - `database/tables/` 是持久化行模型、建表 DDL 和 SQLAlchemy metadata 的唯一来源；
   模型使用 SQLModel，同时承担 Pydantic 构造校验和 SQLite 字段映射，DDL 以
-  `TableSpec`/`DatabaseSpec` 与行模型放在同一文件，不再保留平行的
-  `server/models/` 或 migration 目录。
-- 未发布阶段不维护 migration 链：`schema_identity` 记录库身份与 DDL checksum，
-  打开时 checksum 与代码声明不一致直接删除文件重建；身份属于其他库则报
+  `TableSpec`/`DatabaseSpec` 与行模型放在同一文件。
+- 数据库采用 checksum 驱动的重建策略，不维护 migration 链：
+  `schema_identity` 记录库身份与 DDL checksum；打开时 checksum 与代码声明
+  不一致则删除文件并重建，身份属于其他库则报
   `DatabaseIdentityConflict` 拒绝打开。
-- `database/repositories/` 只负责连接、事务、行映射、CRUD 和批量 SQL，不再声明
-  第二套数据模型。幂等、游标推进和状态机规则属于 `services/`。
-  Workflow Authority 的 `workflow.db` 存储层位于
-  `database/repositories/workflow/`（错误与 `WorkflowStore` 拆分为子模块，
-  经 `__init__` 导出）；建表 DDL 与行模型和其他四库一样只在
-  `database/tables/workflow.py` 声明，不再保留平行的 `ddl.py` 或
-  user_version 迁移链。
+- 各域 Service 直接继承存储基座持库
+  （`SqliteDomain` 或域内 store 类），SQL、事务与业务规则同类分层——行级
+  读写方法与业务覆写同名时经 `基座类.方法(self, ...)` 显式限定调用。
+  建表 DDL 与行模型只在 `tables/` 声明。
 - `protocol/` 只保留线上请求、响应和跨表聚合 DTO。协议形状与单表行完全相同时直接
-  复用表模型，不再继承或复制一遍字段。
-- CI 以真实 DDL 创建五个 SQLite 文件，并逐表核对 SQLModel metadata 的表名、
+  复用表模型。
+- CI 以真实 DDL 创建四个 SQLite 文件，并逐表核对 SQLModel metadata 的表名、
   字段顺序和复合主键，防止表模型与落库结构漂移。
+- 同库多组件共享连接：`WorkflowService` 与 `RegistryService` 在生产组合根
+  借用 `RuntimeService` 的 connection 与 `write_lock`，`GraphService` 借用
+  `MaterialsService`；每个物理文件始终只有一个连接和一把进程内写锁。
 
 ## 表目录
 
@@ -59,6 +110,11 @@
 | `adapter_command_outbox` | 发往 HostLink/ROS2 的可靠命令 |
 | `adapter_event_inbox` | adapter 控制事件、ACK 和 endpoint snapshot |
 | `backend_event_outbox` | 发往后端的可靠领域事件 |
+| `registry_entry` | 注册表条目级不可变版本行（任何字段变化自增版本，全量 payload copy） |
+| `registry_entry_state` | 条目可变状态：active/pending 版本、pending 冲突、软移除与不可用标记 |
+| `registry_report` | 每次 edge 上报的批次统计（新增/更新/挂起/移除/不可用） |
+
+workflow authority 的 16 张表同样落在 `runtime.db`（见下节）。
 
 ### `materials.db`
 
@@ -72,6 +128,8 @@
 | `material_data` | Material 的 1:1 杂项动态 `data`、内容版本和状态来源 |
 | `material_substance` | `material_data` 的 1:N 当前内容物；每行是 `name/quantity/quantity_unit` 三元组 |
 | `site` | 完整 ResourceSite 当前快照，包含 category 提示和 occupant |
+| `material_link` | 物料/设备间拓扑边（node-link 的 link），身份为两端+handle+类型的稳定 uuid |
+| `lab_graph` | 命名、版本化的设备图快照（node-link JSON 全量 payload） |
 | `inventory_reservation` | 每个 backend job 一行，items 是 JSON 数组字段 |
 | `inventory_command_effect` | materials command 的跨重启幂等状态 |
 | `inventory_ledger` | append-only 事实账本，同时承担向后端投递状态 |
@@ -93,11 +151,10 @@
 | `payload_object` | 最大 256 KiB inline payload；更大内容使用外部对象存储 |
 | `history_event` | transition/feedback/result/log/error/decision 的统一追加历史流 |
 
-### `workflow.db`
+### workflow authority 表（落 `runtime.db`）
 
 | 表 | 职责 |
 | --- | --- |
-| `schema_identity` | 数据库身份和 schema checksum |
 | `workflow` | 工作流聚合根：名称、标签与 revision |
 | `workflow_node_template` | 节点模板：goal/feedback/result schema 与展示属性 |
 | `workflow_handle_template` | 节点模板的输入输出 handle 定义 |
@@ -115,8 +172,8 @@
 | `workflow_authoring` | 草稿观测、候选与 writeback 状态 |
 | `frontend_event` | 面向前端的追加事件流 |
 
-`workflow_runs` 与 `job_runs` 是随建库一起创建的只读投影视图，服务外部旧审计
-消费方；不属于表模型，也不参与 SQLModel 核对。
+`workflow_runs` 与 `job_runs` 是随建库一起创建的只读审计投影视图；不属于
+表模型，也不参与 SQLModel 核对。
 
 ## 聚合与数据模型原则
 
@@ -131,12 +188,10 @@
   Site 顺序；`site_index` 是业务索引，不能用标签排序替代序列化顺序。
 - PLR child 的 `resource_id` 使用根资源内的转义路径形成全局稳定键；展示名仍保存在
   `name`，实例身份由微后端分配的 `material_uuid` 决定。
-- `ResourceDict.liquids` 改以 `substances` 表达，保存在 `material_data` 下的 1:N
-  `material_substance`；每项 `(name, quantity, quantity_unit)` 对应现有
-  `(liquid_name, amount, unit)` 三元组。单位不在数据库枚举，当前 Edge 写入侧主要使用
-  `ul`（液体）和 `ug`（固体）。
-- 内容物变化历史统一进入 append-only `inventory_ledger`，不再重复建立
-  `substance_history`。
+- `ResourceDict.substances` 是规范内容物字段，保存在 `material_data` 下的 1:N
+  `material_substance`；每项为 `(name, quantity, quantity_unit)` 三元组。
+  单位不在数据库枚举，Edge 写入侧主要使用 `ul`（液体）和 `ug`（固体）。
+- 内容物变化历史进入 append-only `inventory_ledger`。
 - route/capability/availability 跟 endpoint snapshot 同步重建，直接保存在
   `executor_endpoint`。
 - material bindings、错误 gate 和 terminal decision 跟一次 job 同生命周期，直接保存在
@@ -150,8 +205,8 @@
   实体物料进入 `quarantined`。这组事实统一进入 `inventory_ledger`。
 - `inventory_lot` 是 Scheduler 可用量权威；`material_substance` 是容器当前内容物快照，
   由 PLR 原子 observer 更新。Scheduler consume 不同时改 substance，避免双重扣减。
-- latest 与 append-only history 读写模式不同，因此设备状态保留
-  `device_state_latest` + `telemetry_event` 两张表；不同事件类型不再各建一张表。
+- latest 与 append-only history 读写模式不同，因此设备状态使用
+  `device_state_latest` + `telemetry_event` 两张表。
 
 ## 跨库关联
 
@@ -167,9 +222,9 @@
 
 ## 调度和错误边界
 
-- 后端调度器是唯一调度权威；执行侧四库（runtime/materials/telemetry/history）
-  不保存本地 DAG、待调度队列或本地 retry。调度权威的 DAG 与队列事实只落在
-  `workflow.db`（execution_plan 与 task/job 状态机）。
+- 后端调度器是唯一调度权威；执行侧不保存本地 DAG、待调度队列或本地 retry。
+  调度权威的 DAG 与队列事实只落在 `runtime.db` 的 workflow 表
+  （execution_plan 与 task/job 状态机）。
 - retry 是新的后端命令和新的 `job_uuid`，通过 `retry_of_job_uuid` 关联原 job。
 - action availability 是 endpoint 快照字段，不是 edge 调度锁。
 - 非人工错误把 job 置为 `terminal_waiting` 并打开 gate；收到后端确认调度已更新的
@@ -178,19 +233,21 @@
   `supersedes_event_uuid` 关联，不覆盖原始历史。
 - Site category 仅供前端画布识别，不参与 materials writer 的占用准入。
 
-## 五库业务接口
+## 四库业务接口
 
-五个数据库都只通过各自 Repository（Workflow 为 `WorkflowStore`）和 Service
-写入，并提供同构的 FastAPI、Local client 与 HTTP client。公共安装入口是
+四个数据库都通过各自 Service 写入；materials 与 workflow 域分别使用
+`MaterialsRepository`、`WorkflowStore` 作为行级存储基座。对外提供同构的
+FastAPI、Local client 与 HTTP client。公共安装入口是
 `unilabos.server.api.install_server_apis`，一次挂载以下命名空间：
 
 | 数据库 | HTTP 前缀 | 写入语义 |
 | --- | --- | --- |
 | `runtime.db` | `/api/v1/runtime` | session/endpoint upsert、命令和 job 状态机、gate 与可靠 outbox |
-| `materials.db` | `/api/v1/materials` | 模板/物料聚合 CRUD、transfer/snapshot、lot 入库、Task/Job reservation 转换与 ledger ACK |
+| `runtime.db`（workflow 表） | `/api/v1/workflows`、`/api/v1/workflow-tasks`、`/api/v1/workflow-node-jobs`、`/api/v1/events` | 工作流图 CRUD 与全图 reconcile、任务提交/控制命令、job result/feedback 幂等落地 |
+| `runtime.db`（registry 三表） | `/api/v1/resource-templates`、`/api/v1/registry/*` | edge 注册表条目级上报替换、pending 确认/驳回、历史还原与批次统计 |
+| `materials.db` | `/api/v1/materials`、`/api/v1/graphs` | 模板/物料聚合 CRUD、transfer/snapshot、拓扑边、lab graph 快照、lot 入库、Task/Job reservation 转换与 ledger ACK |
 | `telemetry.db` | `/api/v1/telemetry` | event ingest 推进 cursor/latest，另提供只读查询 |
 | `history.db` | `/api/v1/history` | payload 保存、event 追加和人工 replacement chain |
-| `workflow.db` | `/api/v1/workflows`、`/api/v1/workflow-tasks`、`/api/v1/workflow-node-jobs`、`/api/v1/events` | 工作流图 CRUD 与全图 reconcile、任务提交/控制命令、job result/feedback 幂等落地 |
 
 `telemetry_event`、`history_event`、runtime outbox 与 workflow 的
 result/feedback/frontend_event 是追加式数据，不提供任意 PUT/PATCH/DELETE。
@@ -199,29 +256,30 @@ Runtime job 更新必须经过合法 transition/error gate；这些约束在 Loc
 
 ## workflow authority 实现入口
 
-`workflow.db` 的 writer 生命周期与调度权威绑定：未配置云端地址时由
-`unilabos.server.backend.composition.setup_local_scheduler` 在本进程装配；
-配置云端后调度权威在远端 Backend，本机不打开该库。
+workflow 表落 `runtime.db`，writer 生命周期与调度权威绑定：未配置云端地址时由
+`unilabos.server.backend.composition.setup_local_scheduler` 在本进程装配
+（`WorkflowService` 复用 `RuntimeService` 的连接与写锁）；配置云端后调度权威
+在远端 Backend，本机不装配 `WorkflowService`。
 
 | 层 | 入口 | 职责 |
 | --- | --- | --- |
-| 通信协议 | `unilabos.protocol.workflow` | 节点/边写入 DTO、JSON 值约束与 UUID 规范化 |
-| 图结构校验 | `unilabos.protocol.workflow_validation` | 全图 reconcile 前的结构与模板一致性校验 |
-| 持久化 | `unilabos.server.database.repositories.workflow` | `WorkflowStore` 单 writer：行 CRUD、事务与稳定错误码 |
-| 领域服务 | `unilabos.server.services.workflow` | `WorkflowService` 编排、authoring/组合展开/发布运行时、上传管道 |
+| 通信协议 | `unilabos.protocol.runtime.workflow` | 节点/边写入 DTO、JSON 值约束与 UUID 规范化 |
+| 图结构校验 | `unilabos.protocol.utils.workflow_validation` | 全图 reconcile 前的结构与模板一致性校验 |
+| 持久化 | `unilabos.server.services.runtime.workflow.store` | `WorkflowStore` 单 writer：行 CRUD、事务与稳定错误码（Service 继承它） |
+| 领域服务 | `unilabos.server.services.runtime.workflow` | `WorkflowService` 编排、authoring/组合展开/发布运行时、上传管道 |
 | 调度 | `unilabos.server.backend.scheduler` | `BackendScheduler` 消费 execution_plan 并驱动 job 状态机 |
-| HTTP / Client | `unilabos.server.api.workflow`、`unilabos.client.workflow` | workflow 命名空间路由与同构 client |
+| HTTP / Client | `unilabos.server.api.runtime.workflow`、`unilabos.client.runtime.workflow` | workflow 命名空间路由与同构 client |
 
 ## materials authority 实现入口
 
-`materials.db` 已经通过下列分层接入运行时，不再要求调用方直接拼 SQL：
+`materials.db` 通过下列分层接入运行时，调用方不直接拼接 SQL：
 
 | 层 | 入口 | 职责 |
 | --- | --- | --- |
 | 通信协议 | `unilabos.protocol.materials` | `materials.v1` DTO、写命令信封、版本前置条件和结果 |
-| 持久化 | `unilabos.server.database.repositories.materials` | 表行 CRUD、`BEGIN IMMEDIATE` 单 writer、ledger/outbox |
+| 持久化 | `unilabos.server.services.materials.store` | 表行 CRUD、`BEGIN IMMEDIATE` 单 writer、ledger/outbox（Service 继承它） |
 | 聚合服务 | `unilabos.server.services.materials` | 模板、Material Tree、Position/Data/Substance、Site move 和软删除 |
-| 快照 | `unilabos.server.services.material_snapshot` | 规范哈希、逐 section diff 和一次事务应用 |
+| 快照 | `unilabos.server.services.materials.snapshot` | 规范哈希、逐 section diff 和一次事务应用 |
 | PLR 边界 | `unilabos.resources.adapters.plr_materials` | PLR 创建草稿、权威 UUID 回填、上传和下载 |
 | Registry 边界 | `unilabos.resources.adapters.registry_materials` | Registry/lab_resources 定义登记和模板 UUID 映射 |
 | Helper | `unilabos.resources.materials` | `materials.create(plr_resource)`，按 Host/Slave 角色选择权威链路 |
@@ -245,10 +303,7 @@ Runtime job 更新必须经过合法 transition/error gate；这些约束在 Loc
 代发到当前微后端 Materials Authority。Host 的运行时 ResourceTreeSet 只是工作副本，
 不能作为查询 fallback，也不能分配或接受实例 UUID。
 
-Edge 侧始终只有一个物料信息中心：微后端。设备、Host、Slave 和 Edge API 均不允许
-根据配置切换为直连正式 Backend。后续正式 Backend 接入时，创建等需要全局权威的写接口
-由微后端代为转发；微后端接收 Backend 返回的 UUID/版本后更新本地权威投影，再向调用方
-返回同一份回执。查询和 snapshot 比对仍先进入微后端。本版本不实现该 Backend 转发，
-当前创建由微后端本地完成。旧 `/resources/add|update|delete|list` ROS 服务和通用 HTTP
-client 的 Backend 物料写入方法已经删除；保留的 ROS 资源树内部消息也统一调用
-`ResourceService`，不能绕过微后端。
+Edge 侧的物料信息入口是微后端。设备、Host、Slave 和 Edge API 均通过
+`ResourceService` 或 materials client 访问该入口；本地服务负责分配 UUID、
+维护版本并执行 snapshot 比对。Host 的运行时资源树只是工作副本，不能作为查询
+回退或绕过权威服务写入。

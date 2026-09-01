@@ -14,7 +14,7 @@ from collections.abc import Callable
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid5
 
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     InventoryReservationCreate,
     InventoryReservationTransition,
@@ -41,7 +41,7 @@ from unilabos.server.backend.scheduler.resource_manager import (
     ResourceNotFound,
     SchedulerResourceManager,
 )
-from unilabos.server.services.workflow.service import WorkflowService
+from unilabos.server.services.runtime.workflow.service import WorkflowService
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,25 @@ class BackendScheduler:
         self._job_specs: Dict[str, Dict[str, Any]] = {}
         self._waiting_resource_jobs: Dict[str, tuple[Dict[str, Any], DagNode]] = {}
         self._dispatched_jobs: set[str] = set()
+        self._dispatch_paused = False
         self.executor.add_job_finished_listener(self._on_executor_finished)
+
+    @property
+    def dispatch_paused(self) -> bool:
+        return self._dispatch_paused
+
+    def pause_dispatch(self) -> None:
+        """暂停新 Job 派发（安静点重启用）；已派发的 Job 不受影响。"""
+        with self._guard:
+            self._dispatch_paused = True
+
+    def resume_dispatch(self) -> None:
+        """恢复派发并立即重算等待集合，被闸门拦下的 Job 原样继续。"""
+        with self._guard:
+            if not self._dispatch_paused:
+                return
+            self._dispatch_paused = False
+        self._reconcile_resources()
 
     def start(self, *, recover: bool = True) -> None:
         with self._guard:
@@ -375,6 +393,10 @@ class BackendScheduler:
         """下发一个已经持有完整动作/物料集合的节点。"""
 
         with self._guard:
+            if self._dispatch_paused:
+                # 安静点重启闸门：节点保持在等待集合，resume 后由
+                # _reconcile_resources 原样派发，不产生失败。
+                return
             if node.node_id in self._dispatched_jobs:
                 return
             record = self.resources.request_for_owner(node.node_id)

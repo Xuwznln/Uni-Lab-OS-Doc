@@ -8,6 +8,7 @@ from pydantic import JsonValue, field_validator, model_validator
 from sqlalchemy import Text
 from sqlmodel import Field
 
+from unilabos.protocol.base import JsonArray
 from unilabos.server.database.tables.base import (
     JsonObject,
     NonEmptyStr,
@@ -389,6 +390,68 @@ class SiteRecord(TableObject, table=True):
         return self
 
 
+class MaterialLinkRecord(TableObject, table=True):
+    """物料/设备节点间的一条拓扑边（node-link 的 link 对象）。
+
+    ``link_uuid`` 由 (source, target, handles, type) uuid5 稳定派生，
+    开机图对齐幂等 upsert；原始 link 对象的其余字段原样入 ``extra_json``。
+    边是运行态拓扑（管路/电气/handle 连接），随权威演化，可运行时增删。
+    """
+
+    __tablename__: ClassVar[str] = "material_link"
+
+    link_uuid: NonEmptyStr = Field(primary_key=True)
+    source_material_uuid: NonEmptyStr
+    target_material_uuid: NonEmptyStr
+    link_type: str = ""
+    source_handle: str = ""
+    target_handle: str = ""
+    extra_json: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("extra_json", default_json="{}"),
+    )
+    created_at_ms: UnixMilliseconds
+    updated_at_ms: UnixMilliseconds
+    version: PositiveVersion = 1
+
+    @model_validator(mode="after")
+    def _validate_link(self) -> "MaterialLinkRecord":
+        if self.updated_at_ms < self.created_at_ms:
+            raise ValueError("updated_at_ms cannot precede created_at_ms")
+        return self
+
+
+class LabGraphRecord(TableObject, table=True):
+    """命名设备图快照（node-link JSON）。
+
+    与 material/material_link 的运行当前态互补：payload 是上传/启动时刻的
+    版本化存档（revision 递增、软删可复活），供 ``unilab -g <名称|uuid>``
+    复用与回滚；当前真实拓扑经 material + material_link 实时序列化导出。
+    """
+
+    __tablename__: ClassVar[str] = "lab_graph"
+
+    uuid: NonEmptyStr = Field(primary_key=True)
+    create_time: NonEmptyStr
+    update_time: NonEmptyStr
+    deleted_at: Optional[str] = None
+    description: Optional[str] = None
+    meta_data: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("meta_data", default_json="{}"),
+    )
+    name: NonEmptyStr
+    tags: JsonArray = Field(
+        default_factory=list,
+        sa_column=json_text_column("tags", default_json="[]"),
+    )
+    payload: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("payload", default_json="{}"),
+    )
+    revision: int = Field(default=1, ge=1)
+
+
 ReservationStatus = Literal[
     "active", "consumed", "released", "canceled", "expired", "quarantined"
 ]
@@ -509,6 +572,8 @@ MATERIALS_TABLE_MODELS = (
     MaterialDataTable,
     MaterialSubstanceRecord,
     SiteRecord,
+    MaterialLinkRecord,
+    LabGraphRecord,
     InventoryReservationRecord,
     InventoryCommandEffectRecord,
     InventoryLedgerRecord,
@@ -918,6 +983,83 @@ MATERIALS_TABLES = (
         ),
     ),
     TableSpec(
+        "material_link",
+        """
+        CREATE TABLE IF NOT EXISTS material_link (
+            link_uuid TEXT PRIMARY KEY CHECK (TRIM(link_uuid) <> ''),
+            source_material_uuid TEXT NOT NULL CHECK (
+                TRIM(source_material_uuid) <> ''
+            ),
+            target_material_uuid TEXT NOT NULL CHECK (
+                TRIM(target_material_uuid) <> ''
+            ),
+            link_type TEXT NOT NULL DEFAULT '',
+            source_handle TEXT NOT NULL DEFAULT '',
+            target_handle TEXT NOT NULL DEFAULT '',
+            extra_json TEXT NOT NULL DEFAULT '{}' CHECK (
+                json_valid(extra_json) AND json_type(extra_json) = 'object'
+            ),
+            created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+            updated_at_ms INTEGER NOT NULL CHECK (updated_at_ms >= created_at_ms),
+            version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+            FOREIGN KEY(source_material_uuid) REFERENCES material(material_uuid)
+                ON DELETE RESTRICT,
+            FOREIGN KEY(target_material_uuid) REFERENCES material(material_uuid)
+                ON DELETE RESTRICT
+        )
+        """,
+        (
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_material_link_identity
+            ON material_link(
+                source_material_uuid, target_material_uuid,
+                source_handle, target_handle, link_type
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_material_link_source
+            ON material_link(source_material_uuid)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_material_link_target
+            ON material_link(target_material_uuid)
+            """,
+        ),
+    ),
+    TableSpec(
+        "lab_graph",
+        """
+        CREATE TABLE IF NOT EXISTS lab_graph (
+            uuid TEXT PRIMARY KEY,
+            create_time TEXT NOT NULL,
+            update_time TEXT NOT NULL,
+            deleted_at TEXT,
+            description TEXT,
+            meta_data TEXT NOT NULL CHECK (
+                json_valid(meta_data) AND json_type(meta_data) = 'object'
+            ),
+            name TEXT NOT NULL,
+            tags TEXT NOT NULL CHECK (
+                json_valid(tags) AND json_type(tags) = 'array'
+            ),
+            payload TEXT NOT NULL CHECK (
+                json_valid(payload) AND json_type(payload) = 'object'
+            ),
+            revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
+        )
+        """,
+        (
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_lab_graph_name_active
+            ON lab_graph(LOWER(name)) WHERE deleted_at IS NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_lab_graph_created_active
+            ON lab_graph(create_time DESC, uuid DESC) WHERE deleted_at IS NULL
+            """,
+        ),
+    ),
+    TableSpec(
         "inventory_reservation",
         """
         CREATE TABLE IF NOT EXISTS inventory_reservation (
@@ -1060,7 +1202,7 @@ MATERIALS_TABLES = (
 MATERIALS_DATABASE = DatabaseSpec(
     key="materials",
     filename="materials.db",
-    role="resource, material, site and inventory authority",
+    role="resource, material, site, topology link and lab graph authority",
     synchronous="FULL",
     tables=MATERIALS_TABLES,
 )
@@ -1070,8 +1212,10 @@ __all__ = [
     "InventoryLedgerRecord",
     "InventoryLotRecord",
     "InventoryReservationRecord",
+    "LabGraphRecord",
     "MaterialDataRecord",
     "MaterialDataTable",
+    "MaterialLinkRecord",
     "MaterialRecord",
     "MaterialPositionRecord",
     "MaterialSubstanceRecord",

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from unilabos.server.services.workflow.value_schema import schema_is_assignable
-from unilabos.server.services.workflow.value_schema import (
+from unilabos.server.services.runtime.workflow.value_schema import schema_is_assignable
+from unilabos.server.services.runtime.workflow.value_schema import (
     normalize_value_schema,
     validate_value,
 )
-from unilabos.server.services.workflow.workflow_io import (
+from unilabos.server.services.runtime.workflow.workflow_io import (
     WorkflowIOValidationError,
     validate_workflow_graph_io,
 )

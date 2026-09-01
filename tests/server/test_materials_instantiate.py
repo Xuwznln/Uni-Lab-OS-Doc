@@ -15,8 +15,7 @@ from fastapi.testclient import TestClient
 
 from unilabos.registry.registry import lab_registry
 from unilabos.server.api.materials import install_materials_api
-from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.server.services.materials import MaterialsService
 
 REGISTRY_CLASS = "test_prcxi_300ul_tips"
@@ -52,7 +51,7 @@ def _mutation_body(operation: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 def test_registry_classes_lists_instantiable_entries(
     tmp_path, registry_entry
 ) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     app = FastAPI()
     install_materials_api(app, service)
     try:
@@ -66,11 +65,11 @@ def test_registry_classes_lists_instantiable_entries(
             )
             assert row["display_name"] == "PRCXI 300ul 枪头盒"
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_instantiate_creates_authoritative_tree(tmp_path, registry_entry) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     app = FastAPI()
     install_materials_api(app, service)
     try:
@@ -99,14 +98,14 @@ def test_instantiate_creates_authoritative_tree(tmp_path, registry_entry) -> Non
             assert fetched.status_code == 200
             assert fetched.json()["material"]["name"] == "tips_outbound_1"
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_instantiate_with_barcode_writes_root_barcode(
     tmp_path, registry_entry
 ) -> None:
     """带 barcode 出库：条码只写入根节点，子节点不带。"""
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     app = FastAPI()
     install_materials_api(app, service)
     try:
@@ -142,11 +141,11 @@ def test_instantiate_with_barcode_writes_root_barcode(
             assert fetched.status_code == 200
             assert fetched.json()["material"]["barcode"] == "BC-20260830-001"
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_instantiate_unknown_registry_class_rejected(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     app = FastAPI()
     install_materials_api(app, service)
     try:
@@ -160,4 +159,4 @@ def test_instantiate_unknown_registry_class_rejected(tmp_path) -> None:
             )
             assert resp.status_code == 422
     finally:
-        service.repository.close()
+        service.close()

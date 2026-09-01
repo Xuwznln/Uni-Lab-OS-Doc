@@ -35,7 +35,7 @@ from unilabos.registry.action_policy import (
     resolve_error_options_by_names,
 )
 from unilabos.registry.material_locks import normalize_material_parameter_names
-from unilabos.utils.type_check import serialize_result_info
+from unilabos.utils.serialization import serialize_result_info
 from unilabos.utils.tracing import (
     add_event,
     capture_context,
@@ -334,7 +334,7 @@ class JobExecutionBackend:
             self._release_terminal(item, "failed", return_info, {})
 
     def add_job_finished_listener(self, listener: Callable[..., None]) -> None:
-        """注册完成回调；兼容 3 参 (job_id, success, ret_value) 旧签名。"""
+        """注册完成回调；支持三参数或包含 ``suc_type`` 的四参数签名。"""
         import inspect
 
         try:
@@ -574,7 +574,7 @@ class JobExecutionBackend:
                     )
 
     def execution_adapter(self) -> Any:
-        """当前执行适配器（HostNode / HostLinkExecutionAdapter），未就绪返回 None。"""
+        """返回当前 Host 执行适配器；尚未就绪时返回 ``None``。"""
 
         try:
             return self._host_node_getter()
@@ -1398,13 +1398,13 @@ def make_device_status_policy_resolver(
         wrapper = getattr(host_node, "devices_instances", {}).get(device_id)
         device_config = getattr(wrapper, "device_config", None)
         content = getattr(device_config, "res_content", None)
-        name = getattr(content, "klass", "")
+        name = getattr(content, "template_name", "")
         if isinstance(name, str) and name:
             return name
         for node in getattr(getattr(host_node, "devices_config", None), "all_nodes", []):
             content = getattr(node, "res_content", None)
             if getattr(content, "id", None) == device_id:
-                value = getattr(content, "klass", "")
+                value = getattr(content, "template_name", "")
                 return value if isinstance(value, str) else ""
         return ""
 

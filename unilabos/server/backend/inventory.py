@@ -6,7 +6,9 @@ import threading
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from unilabos.protocol.common import InventoryMutation, canonical_hash
+from unilabos.protocol.base import canonical_hash
+
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     InventoryRequirement,
     InventoryReservationCreate,

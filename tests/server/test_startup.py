@@ -6,7 +6,6 @@ import pytest
 
 from unilabos.config.config import BasicConfig, HTTPConfig
 from unilabos.client.materials import LocalMaterialsClient
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.backend.composition import (
     get_materials_gateway,
     get_materials_service,
@@ -90,7 +89,7 @@ def test_host_stack_uses_embedded_materials_when_address_is_empty(tmp_path) -> N
 def test_host_stack_uses_external_materials_as_the_only_authority(
     tmp_path, monkeypatch
 ) -> None:
-    external_service = MaterialsService(MaterialsRepository(tmp_path / "external-materials.db"))
+    external_service = MaterialsService(tmp_path / "external-materials.db")
     external_client = LocalMaterialsClient(external_service)
     monkeypatch.setattr(
         "unilabos.client.materials.HTTPMaterialsClient",
@@ -115,7 +114,7 @@ def test_host_stack_uses_external_materials_as_the_only_authority(
         assert get_materials_service() is None
         assert len(external_client.list_templates()) == 1
     finally:
-        external_service.repository.close()
+        external_service.close()
 
 
 def test_host_stack_mounts_local_scheduler_by_default(tmp_path) -> None:

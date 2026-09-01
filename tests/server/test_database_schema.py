@@ -17,6 +17,27 @@ EXPECTED_TABLES = {
         "adapter_command_outbox",
         "adapter_event_inbox",
         "backend_event_outbox",
+        # workflow authority（调度产物与运行控制同库）
+        "workflow",
+        "workflow_node_template",
+        "workflow_handle_template",
+        "workflow_node",
+        "workflow_edge",
+        "workflow_task",
+        "workflow_node_job",
+        "workflow_task_command",
+        "execution_lock_lease",
+        "workflow_node_job_result",
+        "workflow_node_job_feedback_history",
+        "workflow_intervention",
+        "workflow_manual_confirmation",
+        "workflow_source_registration",
+        "workflow_authoring",
+        "frontend_event",
+        # registry authority（edge 注册表版本快照）
+        "registry_entry",
+        "registry_entry_state",
+        "registry_report",
     },
     "materials": {
         "schema_identity",
@@ -27,6 +48,8 @@ EXPECTED_TABLES = {
         "material_data",
         "material_substance",
         "site",
+        "material_link",
+        "lab_graph",
         "inventory_reservation",
         "inventory_command_effect",
         "inventory_ledger",
@@ -148,11 +171,13 @@ def test_aggregate_fields_and_material_storage_exceptions(tmp_path) -> None:
 
 
 def test_total_table_count_stays_small() -> None:
+    # 图域并入 materials：material_link（拓扑边）+ lab_graph（命名快照）；
+    # workflow / registry 并入 runtime：调度产物与注册表条目版本同库单写者
+    # （registry 为条目级版本三表：entry / entry_state / report）。
     assert {key: len(spec.table_names) for key, spec in DATABASE_SPECS.items()} == {
-        "runtime": 8,
-        "materials": 11,
+        "runtime": 27,
+        "materials": 13,
         "telemetry": 4,
         "history": 3,
-        "workflow": 17,
     }
-    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 43
+    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 47

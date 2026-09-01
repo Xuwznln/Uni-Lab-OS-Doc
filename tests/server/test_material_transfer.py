@@ -7,9 +7,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from unilabos.client.materials import bind_payload
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.api.materials import create_materials_router
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     MaterialIdentityWrite,
     MaterialMove,
@@ -97,7 +96,7 @@ class _DeviceProjection:
 
 
 def _prepared_transfer(tmp_path):
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     source_uuid = _create_material(
         service,
         resource_id="source-mount",
@@ -169,7 +168,7 @@ def test_transfer_commits_before_unload_then_load_and_replays_idempotently(
             "target-device": {material_uuid},
         }
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_transfer_load_reply_loss_keeps_single_mount_and_recovers_on_retry(
@@ -199,7 +198,7 @@ def test_transfer_load_reply_loss_keeps_single_mount_and_recovers_on_retry(
             "target-device": {material_uuid},
         }
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_materials_api_exposes_authoritative_transfer(tmp_path) -> None:
@@ -225,4 +224,4 @@ def test_materials_api_exposes_authoritative_transfer(tmp_path) -> None:
         )
         assert [item.action for item in projection.calls] == ["unload", "load"]
     finally:
-        service.repository.close()
+        service.close()

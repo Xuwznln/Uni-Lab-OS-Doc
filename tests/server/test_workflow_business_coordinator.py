@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from unilabos.server.database.repositories.runtime import RuntimeRepository
-from unilabos.server.database.repositories.history import HistoryRepository
-from unilabos.protocol.common import canonical_hash
-from unilabos.protocol.control import (
+from unilabos.protocol.base import canonical_hash
+from unilabos.protocol.runtime.control import (
     BackendCommandDocument,
     BackendCommandNotice,
 )
@@ -108,8 +106,8 @@ def _document(
 
 
 def _coordinator(tmp_path):
-    runtime = RuntimeService(RuntimeRepository(tmp_path / "runtime.db"))
-    history = HistoryService(HistoryRepository(tmp_path / "history.db"))
+    runtime = RuntimeService(tmp_path / "runtime.db")
+    history = HistoryService(tmp_path / "history.db")
     executor = _Executor()
     data_plane = _DataPlane()
     coordinator = WorkflowBusinessCoordinator(

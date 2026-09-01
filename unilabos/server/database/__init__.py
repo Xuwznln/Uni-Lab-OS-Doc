@@ -1,4 +1,4 @@
-"""微后端五个物理 SQLite 文件的独立 schema。"""
+"""微后端四个物理 SQLite 文件的独立 schema。"""
 
 from unilabos.server.database.layout import (
     DatabaseLayoutConflict,
@@ -17,7 +17,6 @@ from unilabos.server.database.tables import (
     MATERIALS_DATABASE,
     RUNTIME_DATABASE,
     TELEMETRY_DATABASE,
-    WORKFLOW_DATABASE,
 )
 
 
@@ -28,7 +27,6 @@ DATABASE_SPECS = {
         MATERIALS_DATABASE,
         TELEMETRY_DATABASE,
         HISTORY_DATABASE,
-        WORKFLOW_DATABASE,
     )
 }
 
@@ -44,7 +42,6 @@ __all__ = [
     "RUNTIME_DATABASE",
     "ServerDatabasePaths",
     "TELEMETRY_DATABASE",
-    "WORKFLOW_DATABASE",
     "TableSpec",
     "initialize_database",
     "validate_distinct_database_paths",

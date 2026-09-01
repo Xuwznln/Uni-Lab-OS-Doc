@@ -1,10 +1,9 @@
-"""新 telemetry authority 的 cursor、latest 和事件流测试。"""
+"""Telemetry authority cursor, latest-state, and event-stream tests."""
 
 from __future__ import annotations
 
 import pytest
 
-from unilabos.server.database.repositories.telemetry import TelemetryRepository
 from unilabos.protocol.telemetry import (
     DeviceStateSnapshot,
     TelemetryEventQuery,
@@ -55,7 +54,7 @@ def _state(value: str, *, observed_at_ms: int) -> DeviceStateSnapshot:
 def test_ingest_atomically_advances_cursor_appends_event_and_upserts_latest(
     tmp_path,
 ) -> None:
-    service = TelemetryService(TelemetryRepository(tmp_path / "telemetry.db"))
+    service = TelemetryService(tmp_path / "telemetry.db")
     try:
         first = service.ingest_event(
             _event(1), device_state=_state("idle", observed_at_ms=1)
@@ -75,11 +74,11 @@ def test_ingest_atomically_advances_cursor_appends_event_and_upserts_latest(
         assert second.device_state.version == 2
         assert service.get_device_state("endpoint", "device") == (second.device_state)
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_exact_event_retry_replays_without_new_row_or_version(tmp_path) -> None:
-    service = TelemetryService(TelemetryRepository(tmp_path / "telemetry.db"))
+    service = TelemetryService(tmp_path / "telemetry.db")
     try:
         event = _event(1, event_uuid="stable-event")
         state = _state("idle", observed_at_ms=1)
@@ -96,11 +95,11 @@ def test_exact_event_retry_replays_without_new_row_or_version(tmp_path) -> None:
         assert retry.device_state.version == 1
         assert len(service.query_events()) == 1
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_invalid_latest_snapshot_rolls_back_event_and_cursor(tmp_path) -> None:
-    service = TelemetryService(TelemetryRepository(tmp_path / "telemetry.db"))
+    service = TelemetryService(tmp_path / "telemetry.db")
     try:
         invalid_state = _state("idle", observed_at_ms=1).model_copy(
             update={"state_hash": "wrong-hash"}
@@ -113,13 +112,13 @@ def test_invalid_latest_snapshot_rolls_back_event_and_cursor(tmp_path) -> None:
         assert service.get_source_cursor("endpoint") is None
         assert service.get_device_state("endpoint", "device") is None
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_duplicate_event_or_source_position_with_different_content_is_rejected(
     tmp_path,
 ) -> None:
-    service = TelemetryService(TelemetryRepository(tmp_path / "telemetry.db"))
+    service = TelemetryService(tmp_path / "telemetry.db")
     try:
         service.ingest_event(_event(1, event_uuid="event"))
 
@@ -133,13 +132,13 @@ def test_duplicate_event_or_source_position_with_different_content_is_rejected(
         assert len(service.query_events()) == 1
         assert service.get_source_cursor("endpoint").source_sequence == 1
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_stale_sequence_is_rejected_but_generation_and_new_epoch_can_restart(
     tmp_path,
 ) -> None:
-    service = TelemetryService(TelemetryRepository(tmp_path / "telemetry.db"))
+    service = TelemetryService(tmp_path / "telemetry.db")
     try:
         service.ingest_event(_event(3))
         with pytest.raises(StaleTelemetryError, match="monotonically"):
@@ -159,13 +158,13 @@ def test_stale_sequence_is_rejected_but_generation_and_new_epoch_can_restart(
         with pytest.raises(StaleTelemetryError, match="superseded"):
             service.ingest_event(_event(4, epoch="epoch-1", generation=2))
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_event_query_filters_append_stream_and_pages_by_database_sequence(
     tmp_path,
 ) -> None:
-    service = TelemetryService(TelemetryRepository(tmp_path / "telemetry.db"))
+    service = TelemetryService(tmp_path / "telemetry.db")
     try:
         service.ingest_event(_event(1, event_type="state"))
         service.ingest_event(_event(2, event_type="alarm"))
@@ -178,4 +177,4 @@ def test_event_query_filters_append_stream_and_pages_by_database_sequence(
         assert [item.source_sequence for item in page] == [2]
         assert [item.sequence for item in service.query_events()] == [1, 2, 3]
     finally:
-        service.repository.close()
+        service.close()

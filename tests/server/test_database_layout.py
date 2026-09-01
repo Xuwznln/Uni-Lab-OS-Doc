@@ -1,4 +1,4 @@
-"""五个数据库职责必须由组合根解析到互不相同的物理文件。"""
+"""四个数据库职责必须由组合根解析到互不相同的物理文件。"""
 
 from __future__ import annotations
 
@@ -17,8 +17,7 @@ def test_database_paths_are_resolved_once_from_root(tmp_path) -> None:
     assert paths.materials_db == (tmp_path / "materials.db").resolve()
     assert paths.telemetry_db == (tmp_path / "high-write/device-telemetry.db").resolve()
     assert paths.history_db == (tmp_path / "history.db").resolve()
-    assert paths.workflow_db == (tmp_path / "workflow.db").resolve()
-    assert len(set(paths.as_mapping().values())) == 5
+    assert len(set(paths.as_mapping().values())) == 4
 
 
 def test_database_roles_cannot_share_one_file(tmp_path) -> None:

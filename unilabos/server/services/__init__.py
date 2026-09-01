@@ -1,4 +1,10 @@
-"""微后端领域服务。"""
+"""微后端领域服务（目录严格按四库划分）。
+
+- ``services/runtime/``：runtime.db（RuntimeService / workflow 子包 / RegistryService）
+- ``services/materials/``：materials.db（MaterialsService / GraphService / 快照对比）
+- ``services/telemetry.py``：telemetry.db
+- ``services/history.py``：history.db
+"""
 
 from unilabos.server.services.history import HistoryService
 from unilabos.server.services.materials import (
@@ -9,8 +15,6 @@ from unilabos.server.services.materials import (
     MaterialsService,
     MaterialsServiceError,
     RejectedMutationError,
-)
-from unilabos.server.services.material_snapshot import (
     compare_material_snapshot,
     snapshot_state_hash,
 )

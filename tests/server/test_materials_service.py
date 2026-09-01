@@ -1,4 +1,4 @@
-"""新 materials authority 的聚合与协议测试。"""
+"""Materials authority aggregation and protocol tests."""
 
 from __future__ import annotations
 
@@ -6,8 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.protocol.common import AggregatePrecondition, InventoryMutation
+from unilabos.protocol.materials import AggregatePrecondition, InventoryMutation
 from unilabos.protocol.materials import (
     MaterialDataWrite,
     MaterialDelete,
@@ -89,7 +88,7 @@ def _node(
 
 
 def test_template_and_material_tree_roundtrip_is_authoritative(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "deck-template", "deck", with_site=True)
         _template(service, "tube-template", "tube")
@@ -120,7 +119,7 @@ def test_template_and_material_tree_roundtrip_is_authoritative(tmp_path) -> None
         assert replay.replayed is True
         assert replay.data == result.data
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_material_display_name_defaults_and_patch(tmp_path) -> None:
@@ -128,7 +127,7 @@ def test_material_display_name_defaults_and_patch(tmp_path) -> None:
     显式值保留，且可经 patch 单独修改。"""
     from unilabos.protocol.materials import MaterialPatch
 
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "deck-template", "deck", with_site=True)
         _template(service, "tube-template", "tube")
@@ -149,7 +148,7 @@ def test_material_display_name_defaults_and_patch(tmp_path) -> None:
         assert patched.data.material.display_name == "主甲板"
         assert patched.data.material.name == "root"
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_create_tree_adopts_explicit_material_uuid(tmp_path) -> None:
@@ -157,7 +156,7 @@ def test_create_tree_adopts_explicit_material_uuid(tmp_path) -> None:
 
     这是开机图物料对齐（materials.ensure）与出库扣减产物落库的服务端契约。
     """
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "deck-template", "deck", with_site=True)
         _template(service, "tube-template", "tube")
@@ -191,7 +190,7 @@ def test_create_tree_adopts_explicit_material_uuid(tmp_path) -> None:
         with pytest.raises(MaterialConflictError, match="already exists"):
             service.create_tree(_mutation("create_material_tree"), conflict)
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_create_tree_rejects_duplicate_explicit_uuid_in_one_tree() -> None:
@@ -211,7 +210,7 @@ def test_create_tree_rejects_duplicate_explicit_uuid_in_one_tree() -> None:
 
 
 def test_position_update_checks_material_version(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "tube-template", "tube")
         created = service.create_tree(
@@ -254,11 +253,11 @@ def test_position_update_checks_material_version(tmp_path) -> None:
                 MaterialPosition(position_x=4, position_y=5, position_z=6),
             )
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_move_clears_source_and_sets_destination_atomically(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "deck-template", "deck", with_site=True)
         _template(service, "tube-template", "tube")
@@ -300,17 +299,17 @@ def test_move_clears_source_and_sets_destination_atomically(tmp_path) -> None:
         assert moved.data.material.parent_material_uuid == (
             second.data.root_material_uuid
         )
-        assert service.repository.get_site(source_site_uuid).occupied_material_uuid is None
+        assert service.get_site(source_site_uuid).occupied_material_uuid is None
         assert (
-            service.repository.get_site(destination_site_uuid).occupied_material_uuid
+            service.get_site(destination_site_uuid).occupied_material_uuid
             == child_uuid
         )
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_snapshot_diff_and_apply_increment_material_once(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "tube-template", "tube")
         created = service.create_tree(
@@ -365,11 +364,11 @@ def test_snapshot_diff_and_apply_increment_material_once(tmp_path) -> None:
             item.aggregate_uuid for item in result.affected
         } == {updated.material.material_uuid}
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_recursive_delete_and_change_feed_are_aggregate_based(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "deck-template", "deck", with_site=True)
         _template(service, "tube-template", "tube")
@@ -400,11 +399,11 @@ def test_recursive_delete_and_change_feed_are_aggregate_based(tmp_path) -> None:
         assert service.acknowledge_changes(changes[-1].sequence) == len(changes)
         assert all(item.delivery_status == "acknowledged" for item in service.changes())
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_snapshot_moves_between_sites_in_one_transaction(tmp_path) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "root-template", "root")
         _template(service, "carrier-template", "carrier", with_site=True)
@@ -490,14 +489,14 @@ def test_snapshot_moves_between_sites_in_one_transaction(tmp_path) -> None:
             if node.material.material_uuid == identities["tube"]
         )
         assert tube.material.parent_material_uuid == identities["carrier-2"]
-        assert service.repository.get_site(
+        assert service.get_site(
             carrier_1.sites[0].site_uuid
         ).occupied_material_uuid is None
-        assert service.repository.get_site(
+        assert service.get_site(
             carrier_2.sites[0].site_uuid
         ).occupied_material_uuid == identities["tube"]
     finally:
-        service.repository.close()
+        service.close()
 
 
 def test_search_materials_by_name_returns_list(tmp_path) -> None:
@@ -506,7 +505,7 @@ def test_search_materials_by_name_returns_list(tmp_path) -> None:
     根物料 name 有唯一索引（ux_material_root_name_active），但子物料可以与
     其他根同名，search 需要把根与子节点的命中都返回。
     """
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "deck-template", "deck", with_site=True)
         _template(service, "tube-template", "tube")
@@ -540,4 +539,4 @@ def test_search_materials_by_name_returns_list(tmp_path) -> None:
         }
         assert service.search_materials("missing-name") == []
     finally:
-        service.repository.close()
+        service.close()

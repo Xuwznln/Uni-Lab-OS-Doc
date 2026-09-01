@@ -1,7 +1,7 @@
 """四个独立 SQLite 文件共用的声明式 schema 与建库入口。
 
-未发布阶段不维护 migration 链：库内 checksum 与当前代码声明不一致时，
-直接删除数据库文件重建。
+数据库采用 checksum 驱动的重建策略：库内 schema 与当前声明不一致时，
+删除对应数据库文件并按声明重建。
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ def _needs_rebuild(connection: sqlite3.Connection, spec: DatabaseSpec) -> bool:
     if not tables:
         return False
     if "schema_identity" not in tables:
-        # 旧格式（schema_migration 时代）或未知来源，未发布期直接重建
+        # 无法验证身份和 schema 的数据库按当前声明重建。
         return True
     rows = connection.execute(
         "SELECT database_key, checksum FROM schema_identity"
@@ -143,7 +143,7 @@ def initialize_database(
     *,
     timeout: float = 30.0,
 ) -> sqlite3.Connection:
-    """创建或打开一个独立后端数据库；schema 变化时删除文件重建。"""
+    """创建或打开一个领域数据库；schema 变化时删除文件并重建。"""
 
     database_path = Path(path).expanduser().resolve()
     database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +156,7 @@ def initialize_database(
     if rebuild:
         connection.close()
         logger.warning(
-            "数据库 %s 的 schema 与当前代码不一致，删除重建（未发布期约定）",
+            "数据库 %s 的 schema 与当前代码不一致，正在删除并重建",
             database_path,
         )
         _delete_database_files(database_path)

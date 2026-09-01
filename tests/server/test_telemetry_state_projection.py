@@ -1,14 +1,13 @@
-"""执行 bridge 的设备属性只写入新 telemetry authority。"""
+"""Device property projection writes exclusively to the telemetry authority."""
 
 from __future__ import annotations
 
-from unilabos.server.database.repositories.telemetry import TelemetryRepository
 from unilabos.server.backend.telemetry import TelemetryDeviceStateProjection
 from unilabos.server.services.telemetry import TelemetryService
 
 
 def test_projection_persists_latest_properties_and_events(tmp_path) -> None:
-    service = TelemetryService(TelemetryRepository(tmp_path / "telemetry.db"))
+    service = TelemetryService(tmp_path / "telemetry.db")
     projection = TelemetryDeviceStateProjection(service, endpoint_uuid="host")
     try:
         assert projection.set("pump", "temperature", 20.0) is True
@@ -40,4 +39,4 @@ def test_projection_persists_latest_properties_and_events(tmp_path) -> None:
         assert len(service.query_events()) == 3
         assert not (tmp_path / "device_state.db").exists()
     finally:
-        service.repository.close()
+        service.close()

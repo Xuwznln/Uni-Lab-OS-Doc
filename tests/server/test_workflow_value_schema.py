@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from unilabos.server.services.workflow.value_schema import (
+from unilabos.server.services.runtime.workflow.value_schema import (
     WorkflowValueSchemaError,
     validate_value,
 )

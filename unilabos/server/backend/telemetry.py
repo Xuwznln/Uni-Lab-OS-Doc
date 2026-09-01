@@ -143,7 +143,7 @@ class TelemetryDeviceStateProjection:
         since_ms: int = 0,
         limit: int = 200,
     ) -> list[dict[str, Any]]:
-        """Project telemetry.v1 property samples into the legacy read shape."""
+        """Project telemetry.v1 property samples into the facade read model."""
 
         return [
             self._history_row(event)

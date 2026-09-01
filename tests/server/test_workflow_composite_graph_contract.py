@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from unilabos.protocol.workflow_validation import validate_graph
-from unilabos.protocol.workflow import WorkflowNodeWrite
-from unilabos.server.services.workflow.service import WorkflowService
-from unilabos.server.database.repositories.workflow import WorkflowStore
+from unilabos.protocol.utils.workflow_validation import validate_graph
+from unilabos.protocol.runtime.workflow import WorkflowNodeWrite
+from unilabos.server.services.runtime.workflow.service import WorkflowService
 
 INVOCATION_UUID = "75000000-0000-4000-8000-000000000001"
 TEMPLATE_UUID = "75000000-0000-4000-8000-000000000002"
@@ -132,7 +131,7 @@ def test_disabled_composite_suppresses_all_expanded_descendant_jobs() -> None:
             },
         ],
     }
-    service = WorkflowService(WorkflowStore(":memory:"))
+    service = WorkflowService(":memory:")
     try:
         plan, jobs = service._build_execution_plan(  # noqa: SLF001
             graph,

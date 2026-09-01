@@ -1,4 +1,4 @@
-"""新 history.db 协议、Repository 与 Service 测试。"""
+"""History protocol and service tests with a single connection owner."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from typing import Iterator
 import pytest
 from pydantic import ValidationError
 
-from unilabos.server.database.repositories.history import HistoryRepository
 from unilabos.server.database.tables.history import INLINE_PAYLOAD_LIMIT_BYTES
 from unilabos.protocol.history import (
     ExternalPayloadWrite,
@@ -27,8 +26,8 @@ from unilabos.server.services.history import (
 
 @contextmanager
 def _history_service(database) -> Iterator[HistoryService]:
-    with HistoryRepository(database) as repository:
-        yield HistoryService(repository)
+    with HistoryService(database) as service:
+        yield service
 
 
 def test_inline_payload_limit_and_external_reference(tmp_path) -> None:
@@ -89,7 +88,7 @@ def test_payload_is_deduplicated_by_hash_and_length(tmp_path) -> None:
 
         assert duplicate.payload_uuid == first.payload_uuid
         assert (
-            service.repository.connection.execute(
+            service.connection.execute(
                 "SELECT COUNT(*) FROM payload_object"
             ).fetchone()[0]
             == 1

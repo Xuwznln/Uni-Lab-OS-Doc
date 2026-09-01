@@ -5,11 +5,14 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from unilabos.server.backend.http import BackendHTTPClient
-from unilabos.server.backend.sync import InstanceSynchronizer, TemplateSynchronizer
-from unilabos.server.backend.websocket import BackendWebSocketClient
-from unilabos.protocol.common import canonical_hash
-from unilabos.protocol.control import BackendCommandNotice
+from unilabos.server.backend.legacy_adaptor.http import BackendHTTPClient
+from unilabos.server.backend.legacy_adaptor.sync import (
+    InstanceSynchronizer,
+    TemplateSynchronizer,
+)
+from unilabos.server.backend.legacy_adaptor.websocket import BackendWebSocketClient
+from unilabos.protocol.base import canonical_hash
+from unilabos.protocol.runtime.control import BackendCommandNotice
 
 
 class _Response:
@@ -60,7 +63,7 @@ def test_http_client_fetches_full_document_from_uuid_derived_path() -> None:
     body = {
         "code": 0,
         "data": {
-            "protocol_version": "control.v1",
+            "protocol_version": "runtime.v1",
             "command": {
                 "command_uuid": "command/1",
                 "session_uuid": "session-1",
@@ -84,8 +87,11 @@ def test_http_client_fetches_full_document_from_uuid_derived_path() -> None:
     assert session.calls[0][0].endswith("/edge/commands/command%2F1")
 
 
-def test_backend_package_owns_transport_and_data_sync() -> None:
-    assert BackendWebSocketClient.__module__ == "unilabos.server.backend.websocket"
-    assert BackendHTTPClient.__module__ == "unilabos.server.backend.http"
-    assert InstanceSynchronizer.__module__ == "unilabos.server.backend.sync.instances"
-    assert TemplateSynchronizer.__module__ == "unilabos.server.backend.sync.templates"
+def test_backend_adaptor_owns_transport_and_data_sync() -> None:
+    """Backend 传输与同步实现归属 ``legacy_adaptor`` 命名空间。"""
+
+    prefix = "unilabos.server.backend.legacy_adaptor"
+    assert BackendWebSocketClient.__module__ == f"{prefix}.websocket"
+    assert BackendHTTPClient.__module__ == f"{prefix}.http"
+    assert InstanceSynchronizer.__module__ == f"{prefix}.sync.instances"
+    assert TemplateSynchronizer.__module__ == f"{prefix}.sync.templates"

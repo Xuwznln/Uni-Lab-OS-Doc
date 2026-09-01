@@ -1,6 +1,6 @@
 ﻿"""runtime.v1 endpoint 能力快照上报契约测试。
 
-执行适配器（HostNode / HostLinkExecutionAdapter）的 devices_names 与
+执行编排节点（ros2 / hostlink 各自的 HostNode）的 devices_names 与
 action_value_mappings 投影为 device_routes + action_capabilities，微前端
 设备页、单点动作表单与工作流画布节点目录以此为唯一数据源。
 """
@@ -11,8 +11,6 @@ from typing import Any
 
 from unilabos.server.backend.capabilities import build_endpoint_capabilities
 from unilabos.server.backend.coordinator import WorkflowBusinessCoordinator
-from unilabos.server.database.repositories.history import HistoryRepository
-from unilabos.server.database.repositories.runtime import RuntimeRepository
 from unilabos.server.services.history import HistoryService
 from unilabos.server.services.runtime import RuntimeService
 
@@ -92,8 +90,8 @@ def test_build_endpoint_capabilities_projects_devices_and_actions() -> None:
 
 
 def test_coordinator_publishes_capability_snapshot(tmp_path) -> None:
-    runtime = RuntimeService(RuntimeRepository(tmp_path / "runtime.db"))
-    history = HistoryService(HistoryRepository(tmp_path / "history.db"))
+    runtime = RuntimeService(tmp_path / "runtime.db")
+    history = HistoryService(tmp_path / "history.db")
     adapter = _FakeAdapter()
     coordinator = WorkflowBusinessCoordinator(
         runtime,
@@ -118,7 +116,7 @@ def test_coordinator_publishes_capability_snapshot(tmp_path) -> None:
     }
     first_version = endpoint.version
 
-    # 内容未变化：哈希去重，不再写库
+    # 相同内容由哈希去重，版本保持不变。
     coordinator.publish_endpoint_capabilities()
     assert runtime.get_endpoint_snapshot("hostlink:edge-1").version == first_version
 
