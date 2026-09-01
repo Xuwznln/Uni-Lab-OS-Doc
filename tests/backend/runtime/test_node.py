@@ -192,7 +192,7 @@ def test_run_async_func_propagates_error_to_future_and_trace_callback() -> None:
         node.stop()
 
 
-def test_migrated_virtual_driver_imports_without_ros() -> None:
+def test_virtual_drivers_import_without_ros() -> None:
     code = (
         "import sys; "
         "import unilabos.devices.virtual.virtual_centrifuge; "

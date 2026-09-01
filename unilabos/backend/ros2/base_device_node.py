@@ -68,7 +68,7 @@ from unilabos.backend.runtime.driver_creator import (
 from rclpy.task import Task, Future
 from unilabos.utils.import_manager import default_manager
 from unilabos.utils.log import info, debug, warning, error, critical, logger, trace
-from unilabos.utils.type_check import TypeEncoder, serialize_result_info
+from unilabos.utils.serialization import TypeEncoder, serialize_result_info
 from unilabos.backend.runtime.exception import ActionResultError, DeviceActionError
 
 if TYPE_CHECKING:
@@ -463,8 +463,8 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
             res.response = ""
             return res
 
-        # 下行链路（物料挂载、资源树同步、material_sync、设备管理）不再注册 ROS service：
-        # 本进程由 Host 直调实例方法，跨机经 HostLink 下行 RPC（见 ros/hostlink_bridge.py）。
+        # 物料挂载、资源树同步、material_sync 与设备管理使用实例协程；
+        # 本进程由 Host 直调，跨机由 hostlink.downlink 通过 HostLink RPC 分发。
         # noinspection PyTypeChecker
         self._service_server: Dict[str, Service] = {
             "re_register_device": self.create_service(
@@ -486,7 +486,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         await ROS2DeviceNode.async_wait_for(self, rel_time, callback_group)
 
     def create_task(self, coroutine, trace_error=True, **kwargs) -> Task:
-        """Schedule a coroutine while accepting the legacy async-function form."""
+        """调度协程对象，或调用异步函数并传入 ``kwargs`` 后调度。"""
 
         if callable(coroutine):
             return self.run_async_func(
@@ -500,7 +500,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         return rclpy.get_global_executor().create_task(coroutine)
 
     # update_resource / get_resource / get_resource_by_id / get_resource_with_dir /
-    # transfer_resource_to_another / transfer_to_new_resource / append_resource /
+    # transfer_to_new_resource / append_resource /
     # apply_resource_tree_update / material_sync / device_manage 均继承自 DeviceNode
     # （runtime/node.py）：入口本进程直调 / 跨机 HostLink，权威读写经
     # ResourceService（Slave 自动 HostLink 代理），全链路不依赖 ROS。
@@ -692,8 +692,8 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
 
         - 目标动作有专用原生 action server（非 UniLabJsonCommand / 非 auto- 动作）→ 走**原生通道**
           ``/devices/<id>/<action_name>``，``convert_to_ros_msg`` 按 Goal 字段填充。
-        - 否则 → 走 serial JSON 指令通道 ``_execute_driver_command``，入参 json dump 过去、
-          结果 json dump 回来。
+        - 否则 → 走 serial JSON 指令通道 ``_execute_driver_command``，请求参数和结果
+          均使用 JSON 序列化。
 
         可显式传 ``action_type``（某 ROS Action 类型）强制走原生通道、跳过自动探测。
 
@@ -937,7 +937,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
             return
         self.lab_logger().trace(f"发布动作: {action_name}, 类型: {str_action_type}")
 
-    # 跨设备订阅时发布者可能尚未就绪，按该周期(秒)循环延迟重试解析消息类型，直到订上（不设上限）
+    # 发布者未就绪时按该周期重试解析跨设备订阅的消息类型。
     _SUBSCRIBE_RETRY_PERIOD = 10.0
 
     def _setup_decorated_subscribers(self):
@@ -949,7 +949,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         """解析 @subscribe 目标并建立订阅；msg_type 未知时起定时器循环重试，建立成功即停。
 
         重试周期取 ``retry_interval``（未设置时用 ``_SUBSCRIBE_RETRY_PERIOD``，默认 10s），
-        不设上限、一直重试直到订上。订上之后不再判活/轮询——断线重连交给 DDS，真出问题等报错暴露。
+        不设重试上限。订阅建立后的连接恢复由 DDS 负责。
         """
         try:
             topic = self._resolve_subscription_target(config)
@@ -1267,6 +1267,15 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                     try:
                         self.lab_logger().trace(f"异步执行动作 {ACTION}")
 
+                        async def _guarded_action(**kwargs):
+                            # rclpy executor 会把 Task 异常重新抛给 spin 线程；
+                            # 驱动异常改为结果对象回传，统一走下方 BaseException
+                            # 结果分支，保证错误进入 action 结果通道而非炸执行器。
+                            try:
+                                return await ACTION(**kwargs)
+                            except Exception as exc:
+                                return exc
+
                         def _handle_future_exception(fut: Future):
                             nonlocal execution_error, execution_success, action_return_value
                             try:
@@ -1283,7 +1292,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                                     f"异步任务 {ACTION.__name__} 报错了\n{traceback.format_exc()}\n原始输入：{action_kwargs}"
                                 )
 
-                        future = self.run_async_func(ACTION, trace_error=False, **action_kwargs)
+                        future = self.run_async_func(_guarded_action, trace_error=False, **action_kwargs)
                         future.add_done_callback(_handle_future_exception)
                     except Exception as e:
                         execution_error = traceback.format_exc()
@@ -1547,8 +1556,6 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
                                     f"转换ResourceSlot列表参数 {arg_name} 失败: {e}\n{traceback.format_exc()}"
                                 )
                                 raise JsonCommandInitError(f"ResourceSlot列表参数转换失败: {arg_name}")
-
-            # todo: 默认反报送
             return function(**function_args)
         except KeyError as ex:
             raise JsonCommandInitError(
@@ -1556,19 +1563,19 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
             )
 
     def _convert_resources_sync(self, *uuids: str) -> List["ResourcePLR"]:
-        """同步转换资源 UUID 为实例
+        """同步把资源 UUID 转换为本地或新装配的资源实例。
 
         Args:
             *uuids: 一个或多个资源 UUID
 
         Returns:
-            单个 UUID 时返回单个资源实例，多个 UUID 时返回资源实例列表
+            与输入 UUID 顺序一致的资源实例列表。
         """
         if not uuids:
             raise ValueError("至少需要提供一个 UUID")
 
         uuids_list = list(uuids)
-        # 同步直连权威（Slave 经 HostLink 代理），不再经 host 的 ROS srv 中转
+        # ResourceService 负责权威查询；Slave 会自动使用 HostLink 代理。
         tree_set = self._require_resource_service().get_resources_sync(uuids_list, with_children=True)
         if not len(tree_set.trees):
             raise Exception(f"资源查询返回空树: {uuids_list}")
@@ -1620,7 +1627,12 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         return plr
 
     def _resolve_slot_value_sync(self, value: Any) -> Any:
-        """同步剥离并解析单个 ResourceSlot 的 wire 输入（str/dict/list/PLR 实例）。"""
+        """同步剥离并解析单个 ResourceSlot 的 wire 输入（str/dict/list/PLR 实例）。
+
+        可选 ResourceSlot 的空值（None/""）语义是「未指定」，归一化为 None。
+        """
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
         kind, payload = parse_resource_slot(value)
         if kind == SLOT_KIND_PLR:
             return payload
@@ -1632,7 +1644,12 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         return self._convert_resources_sync(slot_uuid)[0]
 
     async def _resolve_slot_value_async(self, value: Any) -> Any:
-        """异步剥离并解析单个 ResourceSlot 的 wire 输入（str/dict/list/PLR 实例）。"""
+        """异步剥离并解析单个 ResourceSlot 的 wire 输入（str/dict/list/PLR 实例）。
+
+        可选 ResourceSlot 的空值（None/""）语义是「未指定」，归一化为 None。
+        """
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
         kind, payload = parse_resource_slot(value)
         if kind == SLOT_KIND_PLR:
             return payload
@@ -1796,7 +1813,7 @@ class ROS2DeviceNode:
 
     @classmethod
     def run_async_func(cls, func, trace_error=True, inner_trace_callback=None, **kwargs) -> Task:
-        """兼容旧调用；新驱动应使用当前 DeviceNode 实例的同名方法。"""
+        """在全局 ROS2 executor 上调度异步函数。"""
 
         return schedule_async_func(
             rclpy.get_global_executor().create_task,
@@ -1880,12 +1897,11 @@ class ROS2DeviceNode:
 
         if driver_is_ros:
             driver_params["device_id"] = device_id
-            driver_params["registry_name"] = device_config.res_content.klass
+            driver_params["registry_name"] = device_config.res_content.template_name
             driver_params["resource_tracker"] = self.resource_tracker
         else:
-            # 与 HostLink 运行时对齐（local_runtime._create_driver）：构造签名声明
-            # device_id/**kwargs 的纯 Python 驱动注入实例 id，驱动据此以图中的
-            # 设备 id 访问物料权威等实例级资源；声明 id 的旧驱动同样兼容。
+            # 纯 Python 驱动按构造签名接收 device_id；仅声明 id 的驱动使用
+            # 同一个图实例标识。该规则与 HostLink 驱动工厂一致。
             init_signature = inspect.signature(driver_class.__init__)
             init_parameters = {
                 name: parameter
@@ -1916,7 +1932,7 @@ class ROS2DeviceNode:
                 children=children,
                 driver_instance=self._driver_instance,  # type: ignore
                 device_id=device_id,
-                registry_name=device_config.res_content.klass,
+                registry_name=device_config.res_content.template_name,
                 resource_uuid=resource_uuid,
                 status_types=status_types,
                 action_value_mappings=action_value_mappings,
@@ -1928,7 +1944,7 @@ class ROS2DeviceNode:
             self._ros_node = BaseROS2DeviceNode(
                 driver_instance=self._driver_instance,
                 device_id=device_id,
-                registry_name=device_config.res_content.klass,
+                registry_name=device_config.res_content.template_name,
                 resource_uuid=resource_uuid,
                 status_types=status_types,
                 action_value_mappings=action_value_mappings,

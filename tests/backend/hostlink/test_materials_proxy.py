@@ -9,8 +9,7 @@ from unilabos.config.config import BasicConfig, HostLinkConfig
 from unilabos.backend.hostlink.backend import HostLinkBackend
 from unilabos.backend.hostlink.client import HostLinkClient
 from unilabos.devices.virtual.heating_platform import VirtualHeatingPlatform
-from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     MaterialDataWrite,
     MaterialIdentityWrite,
@@ -35,7 +34,7 @@ def _mutation(operation: str) -> InventoryMutation:
 def test_hostlink_proxy_supports_demo_template_create_and_passive_data_put(
     tmp_path, monkeypatch
 ) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     set_materials_gateway(LocalMaterialsClient(service))
     monkeypatch.setattr(BasicConfig, "is_host_mode", True)
     monkeypatch.setattr(HostLinkConfig, "enable", True)
@@ -113,13 +112,13 @@ def test_hostlink_proxy_supports_demo_template_create_and_passive_data_put(
             client.close()
         runtime.stop()
         set_materials_gateway(None)
-        service.repository.close()
+        service.close()
 
 
 def test_remote_heating_demo_provisions_after_connect_and_writes_host_materials(
     tmp_path, monkeypatch
 ) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "remote-materials.db"))
+    service = MaterialsService(tmp_path / "remote-materials.db")
     set_materials_gateway(LocalMaterialsClient(service))
     monkeypatch.setattr(HostLinkConfig, "enable", True)
     monkeypatch.setattr(HostLinkConfig, "bind", "127.0.0.1")
@@ -194,4 +193,4 @@ def test_remote_heating_demo_provisions_after_connect_and_writes_host_materials(
             slave.stop()
         host.stop()
         set_materials_gateway(None)
-        service.repository.close()
+        service.close()

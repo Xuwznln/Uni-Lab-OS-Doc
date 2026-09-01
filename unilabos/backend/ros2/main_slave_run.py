@@ -4,6 +4,7 @@ import os
 # from nt import device_encoding
 import threading
 import time
+import traceback
 from typing import Optional, Dict, Any, List
 import uuid
 
@@ -22,8 +23,25 @@ from unilabos.registry.registry import lab_registry
 from unilabos.backend.ros2.initialize_device import initialize_device_from_dict
 from unilabos.backend.ros2.presets.host_node import HostNode
 from unilabos.utils import logger
-from unilabos.config.config import BasicConfig
-from unilabos.utils.type_check import TypeEncoder
+from unilabos.config.config import BasicConfig, resolve_host_node_name
+from unilabos.utils.serialization import TypeEncoder
+
+
+def _spin_forever(executor) -> None:
+    """守护式 spin：任何回调/协程异常都不允许终结 executor 线程。
+
+    rclpy 的 spin 会把 Task 异常重新抛给调用线程（rclpy 设计如此）；executor
+    线程一旦退出，本进程所有 ROS 回调停摆、进行中的 action 永远不会完成。
+    异常在此记录后继续 spin，错误传播交由各动作自身的结果通道完成。
+    """
+    while rclpy.ok():
+        try:
+            executor.spin()
+            return
+        except Exception:
+            logger.error(
+                f"[ROS executor] 回调异常已捕获，executor 继续运行\n{traceback.format_exc()}"
+            )
 
 
 def _init_rclpy(args: List[str], domain_id: Optional[int]) -> None:
@@ -85,12 +103,11 @@ def main(
     domain_id = int(raw_domain_id) if raw_domain_id else None
     _init_rclpy(rclpy_init_args, domain_id)
     executor = rclpy.__executor = MultiThreadedExecutor(num_threads=max(os.cpu_count() * 4, 48))
-    # 创建主机节点
+    # 创建主机节点；实例名支持 --host_node_id 重命名（注册表类型固定 host_node）
     host_node = HostNode(
-        "host_node",
+        resolve_host_node_name(),
         devices_config,
         resources_config,
-        resources_edge_config,
         graph,
         controllers_config,
         bridges,
@@ -121,7 +138,7 @@ def main(
         executor.add_node(joint_republisher)
         # executor.add_node(lh_joint_pub)
 
-    thread = threading.Thread(target=executor.spin, daemon=True, name="host_executor_thread")
+    thread = threading.Thread(target=_spin_forever, args=(executor,), daemon=True, name="host_executor_thread")
     thread.start()
 
     while True:
@@ -156,7 +173,7 @@ def slave(
         executor = rclpy.__executor = MultiThreadedExecutor(num_threads=max(os.cpu_count() * 4, 48))
 
     # 1.5 启动 executor 线程
-    thread = threading.Thread(target=executor.spin, daemon=True, name="slave_executor_thread")
+    thread = threading.Thread(target=_spin_forever, args=(executor,), daemon=True, name="slave_executor_thread")
     thread.start()
 
     # 2. 创建 Slave Machine Node
@@ -189,9 +206,8 @@ def slave(
         sclient.call_async(request).result()
         logger.info("Slave node info updated.")
 
-        # 3.2 物料权威对齐：与 host 语义一致——开机不再上报创建、不再换 uuid。
-        # 图中物料自带权威 uuid；权威已有则直接采用，没有则以原 uuid 显式创建
-        # （materials.ensure，经 HostLink 访问 Host 上的微后端权威）。
+        # 3.2 物料权威对齐：图中的 UUID 作为实例身份。materials.ensure
+        # 复用已有权威记录，缺失时经 HostLink 以该 UUID 创建。
         # --disable_hostlink 是显式的纯 ROS2 降级模式：无链路可达物料权威，
         # 跳过对齐（资源仅存在于本地图），不阻断设备启动。
         if resources_config and _hostlink_client is None:
@@ -221,7 +237,7 @@ def slave(
     # 4.5 物料下行链路（append_resource / 资源树同步）走 HostLink，不建 ROS service：
     # 把下行 handler 挂到 HostLink client，Host 的分发经此调用本进程设备节点实例。
     if _hostlink_client is not None:
-        from unilabos.backend.ros2.hostlink_bridge import register_hostlink_resource_handlers
+        from unilabos.backend.hostlink.downlink import register_hostlink_resource_handlers
 
         register_hostlink_resource_handlers(_hostlink_client)
         logger.info("HostLink 物料下行 handler 已注册（资源树同步 / 物料挂载）。")

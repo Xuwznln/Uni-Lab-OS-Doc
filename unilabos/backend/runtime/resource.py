@@ -24,10 +24,7 @@ from unilabos.resources.adapters.plr_materials import (
     resource_tree_to_create,
     resource_tree_to_snapshot,
 )
-from unilabos.protocol.common import (
-    AggregatePrecondition,
-    InventoryMutation,
-)
+from unilabos.protocol.materials import AggregatePrecondition, InventoryMutation
 from unilabos.protocol.materials import MaterialDelete, MaterialMove
 
 

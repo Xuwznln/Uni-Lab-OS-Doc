@@ -513,24 +513,6 @@ class DeviceNode(ABC):
             f"{self.__class__.__name__} does not support dynamic device removal"
         )
 
-    async def transfer_resource_to_another(
-        self,
-        plr_resources: list[Any],
-        target_device_id: str,
-        target_resources: list[Any],
-        sites: list[Optional[str]],
-    ) -> Any:
-        from unilabos.resources.materials import transfer
-
-        return await transfer(
-            plr_resources,
-            target_device_id,
-            target_resources,
-            sites,
-            source_device_id=self.device_id,
-            source_device_uuid=self.resource_uuid,
-        )
-
     # ------------------------------------------------------------------
     # 物料下行（Host → 设备）：append_resource / apply_resource_tree_update
     #
@@ -608,7 +590,7 @@ class DeviceNode(ABC):
             )
             return None
         try:
-            # 特殊兼容所有plr的物料的assign方法，和create_resource append_resource后期同步
+            # 将 UniLab 的 site/slot 元数据转换为 PLR 挂载参数。
             additional_params: Dict[str, Any] = {}
             extra = getattr(plr_resource, "unilabos_extra", {})
             if len(extra):
@@ -620,21 +602,20 @@ class DeviceNode(ABC):
             selector = additional_add_params.get("site") or additional_add_params.get("slot")
             spec = inspect.signature(parent_resource.assign_child_resource)
             if "spot" in spec.parameters:
-                # _site_spot 全形态解析（uuid / label / 索引）；未指定返回 None
-                # 由父级默认排布，指定却解析不出则直接抛错（不再静默回退）。
+                # _site_spot 解析 uuid、label 或索引；未指定时由父级选择默认位置，
+                # 无法解析的显式选择器直接报错。
                 additional_params["spot"] = self._site_spot(parent_resource, selector)
             old_parent = plr_resource.parent
             if old_parent is not None:
-                # plr并不支持同一个deck的加载和卸载
+                # PLR 资源在重新挂载前必须先从当前父资源解除。
                 self.lab_logger().warning(f"物料{plr_resource}请求从{old_parent}卸载")
                 old_parent.unassign_child_resource(plr_resource)
             self.lab_logger().warning(
                 f"物料{plr_resource}请求挂载到{parent_resource}，额外参数：{additional_params}"
             )
 
-            # ⭐ assign 之前，需要从 resources 列表中移除
-            # 因为资源将不再是顶级资源，而是成为 parent_resource 的子资源
-            # 如果不移除，figure_resource 会找到两次：一次在 resources，一次在 parent 的 children
+            # 挂载后资源属于 parent_resource；先从顶级列表移除可避免
+            # figure_resource 同时从顶级列表和 children 命中同一实例。
             resource_id = id(plr_resource)
             for i, r in enumerate(self.resource_tracker.resources):
                 if id(r) == resource_id:
@@ -648,7 +629,7 @@ class DeviceNode(ABC):
 
             func = getattr(self._resource_driver(), "resource_tree_transfer", None)
             if callable(func):
-                # 分别是 物料的原来父节点，当前物料的状态，物料的新父节点（此时物料已经重新assign了）
+                # 驱动回调接收原父资源、已挂载实例和新父资源。
                 func(old_parent, plr_resource, parent_resource)
             return parent_resource
         except Exception:
@@ -944,7 +925,7 @@ class DeviceNode(ABC):
                         site_index = None
                         try:
                             # sites 可能是 ItemizedCarrier 的 Resource 列表，或 PRCXI 的 ResourceSite 列表。
-                            # 只有itemized_carrier在使用，准备弃用
+                            # Resource 列表通过对象身份直接定位。
                             site_index = sites.index(original_instance)
                         except ValueError:
                             # canonical Site 只按占用物料 UUID 匹配。
@@ -995,6 +976,8 @@ class DeviceNode(ABC):
 
         def _dedupe_roots(resources: List[Any]) -> ResourceTreeSet:
             """按对象身份去重并补全根 parent 后生成上报树集。"""
+            from unilabos.config.config import resolve_host_node_name
+
             de_dupe = []
             seen_ids = set()
             for item in resources:
@@ -1003,8 +986,10 @@ class DeviceNode(ABC):
                 seen_ids.add(id(item))
                 de_dupe.append(item)
             new_tree_set = ResourceTreeSet.from_plr_resources(de_dupe)
+            # host 服务设备实例可重命名（--host_node_id），按解析后的实例名判断。
+            is_host_device = self._short_device_id() == resolve_host_node_name()
             for tree in new_tree_set.trees:
-                if tree.root_node.res_content.uuid_parent is None and self._short_device_id() != "host_node":
+                if tree.root_node.res_content.uuid_parent is None and not is_host_device:
                     tree.root_node.res_content.parent_uuid = self.resource_uuid
             return new_tree_set
 
@@ -1018,8 +1003,8 @@ class DeviceNode(ABC):
                 resources_uuid = [resources_uuid]
             additional_add_params = i.get("additional_add_params", {})  # 额外参数
             self.lab_logger().debug(f"[资源同步] 处理 {action}, " f"resources count: {len(resources_uuid)}")
-            # NOTE: 当前仅按请求中显式传入的 uuid 加锁。
-            # 如果后续操作会修改未出现在请求里的父节点或子节点，需要把这些关联 uuid 一并纳入锁集合。
+            # 锁范围由请求中的 UUID 决定；调用方必须同时传入会被修改的关联
+            # 父节点或子节点 UUID。
             resource_locks = await self._acquire_resource_tree_uuid_locks(
                 resources_uuid, tag=f"{action}:{','.join(map(str, resources_uuid))}"
             )

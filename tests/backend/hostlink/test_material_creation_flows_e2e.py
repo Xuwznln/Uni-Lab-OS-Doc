@@ -1,6 +1,6 @@
 """物料三种创建来源 + transfer 换位的端到端（host + slave，纯 HostLink）。
 
-全部走 ``materials.*`` 门面（逐函数，供逐项 check）::
+全部走 ``materials.*`` 门面，关键调用路径如下::
 
     [1] Syncer：本地接管的外部物料系统（事实源在设备侧），实时上报
         注册+接管 materials.create(plr, node=node, gateway=HostLink client)
@@ -28,8 +28,8 @@
                 挂载走 Host 下发 RESOURCE_APPEND（跨机 RPC 与 assign 同语义）
         分支 B  扣减产物权威缺失：materials.ensure -> resource_tree_to_create(
                 adopt_uuid=True) -> create_tree（显式 uuid，带条件创建=adopt）
-                挂载走 materials.assign(node, uuid 字符串, ...)：设备此前不持有
-                实例 -> get_resource 按 uuid 权威拉取实例化 -> resource_tree_add
+                挂载走 materials.assign(node, uuid 字符串, ...)：本地未命中
+                实例 -> get_resource 按 uuid 从权威加载 -> resource_tree_add
 
     [4] materials.transfer 换位（同设备 source==target，跨设备编排一致）
         materials.transfer(uuid, DEVICE_ID, deck_uuid, "T4", source_device_id=...)
@@ -59,7 +59,6 @@ from unilabos.backend.hostlink.protocol import ActionType
 from unilabos.resources import materials
 from unilabos.resources.objects.site import ResourceSite
 from unilabos.server.backend.composition import set_materials_gateway
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.services.materials import MaterialsService
 
 
@@ -173,7 +172,7 @@ def _normalize_liquids(liquids) -> list[tuple]:
 
 def test_material_creation_flows_host_plus_slave(tmp_path, monkeypatch) -> None:
     # ---- 服务端权威（微后端）：Host 进程持有 materials gateway ----
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     gateway = LocalMaterialsClient(service)
     set_materials_gateway(gateway)
 
@@ -329,7 +328,7 @@ def test_material_creation_flows_host_plus_slave(tmp_path, monkeypatch) -> None:
         assert ensured.trees[0].root_node.res_content.uuid == stock_uuid
         assert service.get_material(stock_uuid).material.version == stock_version
 
-        # 第二步：RESOURCE_APPEND 挂载（设备此前不持有 -> 权威拉取实例化）
+        # 第二步：RESOURCE_APPEND 挂载（本地未命中 -> 从权威加载实例）
         _append_via_hostlink(host, stock_uuid, bind_parent_id="PRCXI_Deck", slot="T3")
         stock_inst = node.resource_tracker.uuid_to_resources[stock_uuid]
         assert stock_inst.parent is deck_inst
@@ -357,7 +356,7 @@ def test_material_creation_flows_host_plus_slave(tmp_path, monkeypatch) -> None:
         assert ensured_b.trees[0].root_node.res_content.uuid == deducted_uuid
         assert service.get_material(deducted_uuid).material.name == "deducted_tips"
 
-        # 挂载门面也接受裸 uuid 字符串（设备此前不持有 -> 权威拉取实例化）
+        # 挂载门面接受裸 uuid 字符串，并在本地未命中时从权威加载实例。
         materials.assign(
             node, deducted_uuid, parent="PRCXI_Deck", slot="T1"
         )
@@ -416,4 +415,4 @@ def test_material_creation_flows_host_plus_slave(tmp_path, monkeypatch) -> None:
         slave.stop()
         host.stop()
         set_materials_gateway(None)
-        service.repository.close()
+        service.close()

@@ -4,12 +4,12 @@
 300ul tip rack、96 孔板（A1 预置 100ul Water），逐个经 HostLink 下行
 RESOURCE_APPEND 挂载到 Slave 上的 prcxi 设备，双端断言。
 
-物料通信与同步全链路（生产路径逐函数对照，供逐项 check）::
+物料通信与同步的关键调用路径::
 
     [A1] 已有定义的 deck：materials.ensure（adopt uuid，即开机图对齐语义）
         materials.ensure(deck, gateway=...)                    resources/materials.py
           -> gateway.get_material(root_uuid) 未命中
-          -> resource_tree_to_create(tree, adopt_uuid=True)    server/adapters/plr_materials.py
+          -> resource_tree_to_create(tree, adopt_uuid=True)    resources/adapters/plr_materials.py
           -> gateway.create_tree -> MaterialsService.create_tree
              · 显式 uuid（adopt）：uuid 已占用即冲突（带条件创建）
              · deck 携带 canonical ResourceSite（T1/T2）直接落库
@@ -17,7 +17,7 @@ RESOURCE_APPEND 挂载到 Slave 上的 prcxi 设备，双端断言。
 
     [A2] 新物料 tips / plate：materials.create（权威发 uuid）
         materials.create(plr, gateway=...)                     resources/materials.py
-          -> create_plr_materials(gateway, mutation, [plr])    server/adapters/plr_materials.py
+          -> create_plr_materials(gateway, mutation, [plr])    resources/adapters/plr_materials.py
              -> plr_resources_to_create: 校验草稿无 uuid -> MaterialTreeCreate
              -> gateway.create_tree -> MaterialsService.create_tree（权威发 uuid，
                 模板缺失时按节点身份自动登记隐式模板 source=material_create）
@@ -33,7 +33,7 @@ RESOURCE_APPEND 挂载到 Slave 上的 prcxi 设备，双端断言。
     [C] Slave 设备侧挂载  DeviceNode.append_resource            runtime/node.py
         1. self.get_resource(resources_uuid=[...])
              -> AuthorityResourceService.get_resources          runtime/resource.py
-             -> HostLinkMaterialsClient.get_tree（上行 MATERIAL_GET_TREE）client/materials.py
+             -> HostLinkMaterialsClient.get_tree（上行 MATERIAL_GET_TREE）client/materials/core.py
              -> Host 侧 handler -> get_materials_gateway() -> MaterialsService.get_tree
         2. tree_set.to_plr_resources() 实例化 + resource_tracker.add_resource
            transfer_to_new_resource(plr, tree, params)
@@ -54,7 +54,7 @@ RESOURCE_APPEND 挂载到 Slave 上的 prcxi 设备，双端断言。
              -> AuthorityResourceService.update_resources -> _update_sync
                 -> 按权威 root 分组（move 后 tips/plate 归入 deck 根）
                 -> gateway.get_tree(root) 基线
-                -> resource_tree_to_snapshot(partial, base)     server/adapters/plr_materials.py
+                -> resource_tree_to_snapshot(partial, base)     resources/adapters/plr_materials.py
                      · 设备 parent 被剥离；物料父子与权威 move 后一致
                      · position / data.substances / sites 按运行时覆盖
                 -> gateway.compare_snapshot / apply_snapshot -> MaterialsService.apply_snapshot
@@ -63,7 +63,7 @@ RESOURCE_APPEND 挂载到 Slave 上的 prcxi 设备，双端断言。
     [D] 换位（重复挂载同一 uuid，目标位变更）
         再次 RESOURCE_APPEND(tips, slot="2" 即 T3)：DeviceNode.append_resource
         发现 uuid 已在 resource_tracker -> 复用现有 PLR 实例（不重新实例化、
-        不再触发 resource_tree_add），transfer_to_new_resource 先
+        跳过 resource_tree_add），transfer_to_new_resource 先
         old_parent.unassign_child_resource 再 assign 到新 spot；
         权威 move（MaterialsService._apply_material_move）原子完成：
         vacate 旧 Site(T1) -> parent 保持 deck -> occupy 新 Site(T3)。
@@ -130,7 +130,6 @@ from unilabos.backend.hostlink.protocol import ActionType
 from unilabos.resources import materials
 from unilabos.resources.objects.site import ResourceSite
 from unilabos.server.backend.composition import set_materials_gateway
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.services.materials import MaterialsService
 
 
@@ -202,8 +201,8 @@ def _dispatch_device(
 ) -> dict:
     """Host 侧统一下行：本进程设备直调节点协程，跨机设备走 HostLink RPC。
 
-    与生产分发（execution_adapter.notify_resource_tree_update /
-    hostlink_bridge 的 *_to_device helpers）同语义。
+    与生产分发（hostlink.downlink 的 notify_resource_tree_update 与
+    *_to_device helpers）同语义。
     """
 
     node = host.local.devices.get(device_id)
@@ -291,7 +290,7 @@ def _normalize_liquids(liquids) -> list[tuple]:
 
 def test_prcxi_deck_tiprack_plate_e2e_host_plus_slave(tmp_path, monkeypatch) -> None:
     # ---- 服务端权威（微后端）：Host 进程持有 materials gateway ----
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     gateway = LocalMaterialsClient(service)
     set_materials_gateway(gateway)
 
@@ -725,4 +724,4 @@ def test_prcxi_deck_tiprack_plate_e2e_host_plus_slave(tmp_path, monkeypatch) -> 
         slave.stop()
         host.stop()
         set_materials_gateway(None)
-        service.repository.close()
+        service.close()

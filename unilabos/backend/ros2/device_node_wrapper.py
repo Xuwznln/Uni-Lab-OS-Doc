@@ -54,7 +54,7 @@ def ros2_device_node(
             "read": "read_data",
             "extra_info": [],
         }
-    # FIXME 后面要删除
+    # 从公共 property 及其 get_/set_ 方法补全状态与动作映射。
     for k, v in cls.__dict__.items():
         if not k.startswith("_") and isinstance(v, property):
             # noinspection PyUnresolvedReferences

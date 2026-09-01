@@ -1,19 +1,20 @@
-"""dora 运行时辅助：定位 dora CLI、启动/监督 dataflow（自包含 run 模式 + 常驻 daemon 模式）。
+"""Dora 运行时辅助：定位 CLI，并启动或监督 dataflow。
 
-背景（macOS + conda）：dora CLI 与 pip 版 pyarrow 的原生扩展都链接系统
+在 macOS + conda 环境中，dora CLI 与 pip 版 pyarrow 的原生扩展链接系统
 `/usr/lib/libiconv.2.dylib`（需要符号 `_iconv`），但 conda 自带的 GNU libiconv
-只导出 `_libiconv`，且会被 dyld 按叶名 coalesce，导致 `Symbol not found: _iconv`。
-经验证，`DYLD_INSERT_LIBRARIES` 在不同 spawn 上下文下并不稳定，因此改为**确定性修复**：
-用 `scripts/fix_macos_libiconv.sh` 为 dora_cli / pyarrow 生成一个 `libiconv_compat.dylib`
-兼容垫片（把 `_iconv*` 转发到 GNU `_libiconv*`）并改写其依赖。修复后无需任何 DYLD 变量。
+只导出 `_libiconv`，可能因 dyld 按叶名合并而触发 `Symbol not found: _iconv`。
+`scripts/fix_macos_libiconv.sh` 为 dora_cli / pyarrow 生成
+`libiconv_compat.dylib` 垫片，将 `_iconv*` 转发到 GNU `_libiconv*`，
+并改写对应依赖。处理后的二进制不依赖 DYLD 注入变量。
 
 两种启动方式：
-  - `run_dataflow`：`dora run`，每次冷启动 coordinator+daemon+建图+spawn，一把梭（简单，适合一次性）。
-  - 常驻模式 `ensure_up`/`build_dataflow`/`start_dataflow`/`destroy`：daemon 常驻、dataflow 预建图，
-    `start` 只做 spawn，把冷启动编排从每次启动的关键路径上摊薄（适合生产/频繁重启）。
+  - `run_dataflow`：通过 `dora run` 完成 coordinator、daemon、建图和节点启动，
+    适合一次性运行。
+  - 常驻模式 `ensure_up`/`build_dataflow`/`start_dataflow`/`destroy`：
+    daemon 常驻且 dataflow 预先建图，`start` 仅启动节点，适合频繁运行。
 
 进程组：所有 `dora` 子进程都以 `start_new_session=True` 起在**独立进程组**，`terminate_process`
-会对整组发信号，避免 daemon 派生的子节点进程泄漏（否则每次运行都残留一批 python 节点进程）。
+会向整个进程组发送信号，确保 daemon 派生的节点一并退出。
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ def _require_binary() -> str:
 
 
 def patched_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """返回运行 dora 所需的环境变量副本（原生库已确定性修复，无需注入 DYLD）。"""
+    """返回运行 Dora 所需的环境变量副本。"""
     env = os.environ.copy()
     if extra:
         env.update(extra)

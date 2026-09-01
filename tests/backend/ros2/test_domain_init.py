@@ -23,7 +23,7 @@ def test_rclpy_receives_explicit_domain_id(monkeypatch) -> None:
     assert main_slave_run.os.environ["ROS_DOMAIN_ID"] == "47"
 
 
-def test_old_rclpy_falls_back_to_environment_path(monkeypatch) -> None:
+def test_rclpy_without_domain_id_keyword_uses_environment(monkeypatch) -> None:
     calls = []
     monkeypatch.delenv("ROS_DOMAIN_ID", raising=False)
     monkeypatch.setattr(main_slave_run.rclpy, "ok", lambda: False)

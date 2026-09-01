@@ -1,9 +1,11 @@
-"""物料下行链路桥（ros/hostlink_bridge）行为测试。
+"""物料下行链路（hostlink/downlink）行为测试。
 
-覆盖三条路径：
+覆盖四条路径：
 - 协程桥 run_node_coroutine（成功 / 异常 / 超时）；
-- 本进程分发 local_resource_tree_sync / local_resource_append（查 registered_devices）；
-- Host 侧 sync_resource_tree_to_device 本地优先，跨机经 HostLinkServer.request_device。
+- 本进程分发 local_resource_tree_sync / local_resource_append
+  （ros2 形态查 registered_devices，hostlink 形态查 HostLinkLocalRuntime）；
+- Host 侧 sync_resource_tree_to_device 本地优先，跨机经 HostLinkServer.request_device；
+- 模块级 notify_resource_tree_update 的 True / False / None 语义。
 """
 
 import asyncio
@@ -13,10 +15,11 @@ from typing import Any, Dict, List
 import pytest
 
 from unilabos.backend.hostlink.protocol import ActionType
-from unilabos.backend.ros2 import hostlink_bridge
-from unilabos.backend.ros2.hostlink_bridge import (
+from unilabos.backend.hostlink import downlink
+from unilabos.backend.hostlink.downlink import (
     local_resource_append,
     local_resource_tree_sync,
+    notify_resource_tree_update,
     register_hostlink_resource_handlers,
     run_node_coroutine,
     sync_resource_tree_to_device,
@@ -155,6 +158,27 @@ def test_local_dispatch_unknown_device_raises() -> None:
         local_resource_tree_sync({"device_id": "ghost", "operations": []})
 
 
+def test_get_local_device_node_queries_hostlink_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """hostlink 形态：本进程设备表来自 HostLinkLocalRuntime，而非 registered_devices。"""
+    from unilabos.config.config import BasicConfig
+
+    node = _FakeNode("hl_dev")
+
+    class _FakeLocal:
+        def get_device(self, device_id: str) -> Any:
+            return node if device_id == "hl_dev" else None
+
+    class _FakeRuntime:
+        local = _FakeLocal()
+
+    monkeypatch.setattr(BasicConfig, "backend", "hostlink")
+    monkeypatch.setattr(
+        "unilabos.backend.hostlink.main_hostlink_run.get_runtime", lambda: _FakeRuntime()
+    )
+    assert downlink.get_local_device_node("hl_dev") is node
+    assert downlink.get_local_device_node("ghost") is None
+
+
 def test_register_hostlink_resource_handlers_binds_both_actions() -> None:
     handlers: Dict[str, Any] = {}
 
@@ -182,7 +206,7 @@ def test_sync_resource_tree_prefers_local_then_hostlink(
             remote_calls.append((device_id, action_type, data, timeout))
             return {"results": [], "total": 0}
 
-    monkeypatch.setattr(hostlink_bridge, "get_hostlink_server", lambda: _FakeServer())
+    monkeypatch.setattr(downlink, "get_hostlink_server", lambda: _FakeServer())
     sync_resource_tree_to_device("remote_dev", [{"action": "add", "data": ["u2"]}], timeout=7.0)
     assert remote_calls == [
         (
@@ -195,6 +219,30 @@ def test_sync_resource_tree_prefers_local_then_hostlink(
 
 
 def test_sync_resource_tree_without_hostlink_server_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hostlink_bridge, "get_hostlink_server", lambda: None)
+    monkeypatch.setattr(downlink, "get_hostlink_server", lambda: None)
     with pytest.raises(RuntimeError, match="HostLink server 未启动"):
         sync_resource_tree_to_device("remote_dev", [])
+
+
+def test_notify_resource_tree_update_semantics(
+    fake_device: _FakeNode, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """模块级 notify：本进程命中 True，不可达 None，分发失败 False。"""
+    # 本进程命中 → True
+    assert notify_resource_tree_update(fake_device.device_id, "remove", ["u1"]) is True
+    assert fake_device.tree_sync_calls == [[{"action": "remove", "data": ["u1"]}]]
+
+    # 不可达（无 server）→ None（有意跳过）
+    monkeypatch.setattr(downlink, "get_hostlink_server", lambda: None)
+    assert notify_resource_tree_update("ghost", "add", ["u2"]) is None
+
+    # 在线表命中但分发失败 → False
+    class _BrokenServer:
+        def has_device(self, device_id: str) -> bool:
+            return True
+
+        def request_device(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+            raise RuntimeError("downlink broken")
+
+    monkeypatch.setattr(downlink, "get_hostlink_server", lambda: _BrokenServer())
+    assert notify_resource_tree_update("remote_dev", "add", ["u3"]) is False

@@ -68,16 +68,16 @@ def resolve_host_node_name(value: Optional[str] = None) -> str:
 class WSConfig:
     reconnect_interval = 5  # 重连间隔（秒）
     max_reconnect_attempts = 999  # 最大重连次数
-    # 注意：字段名带 ws_ 前缀，是为了让旧客户端遗留的 local_config 中旧字段(ping_interval/ping_timeout)失效，
-    # 从而强制采用下面的新默认值。请勿改回旧名。
+    # 心跳配置使用 ws_ 命名空间，避免被 local_config 中的通用 ping 字段覆盖。
     ws_ping_interval = 5  # ping间隔（秒），对齐服务端 PingPeriod
     ws_ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
 
 
 # HTTP配置
 class HTTPConfig:
-    # 云端 Backend 地址。为空（默认）时本机是调度权威（本地 Scheduler + Workflow API）；
-    # 显式配置（config 文件或 --address）后进入 Backend-controlled 纯执行模式。
+    # Backend 地址（云端或本机 --role backend 进程）。为空（默认）时本进程是调度
+    # 权威（本地 Scheduler + Workflow API）；显式配置（config 文件或 --address）后
+    # 进入 Backend-controlled 执行模式。
     # 不内置任何云端默认地址；环境快捷选项仅保留在 UniLabOS-Launcher。
     remote_addr = ""
     # 独立部署的低层覆盖；CLI 只暴露统一 --address。为空时从 remote_addr 派生。
@@ -85,6 +85,10 @@ class HTTPConfig:
     # Edge 只访问微后端物料中心；可选择进程内或独立部署的微后端。
     material_microbackend_addr = ""
     material_query_timeout = 10
+    # --role backend 进程侧：Edge 数据面地址（拉取 durable 事件正文），
+    # 以及 backend 管理 API 监听端口。
+    edge_data_addr = "http://127.0.0.1:8002"
+    backend_port = 8081
 
 
 # Host/Slave 控制通道。ROS2 backend 用它同步发现参数；hostlink backend 还会

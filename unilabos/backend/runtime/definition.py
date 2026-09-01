@@ -5,12 +5,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from unilabos.config.config import HOST_NODE_REGISTRY_NAME
 from unilabos.registry.init_enforce import merge_init_param_enforce
 from unilabos.registry.material_locks import normalize_material_parameter_names
-from unilabos.resources.device_site_adapter import apply_device_available_sites
+from unilabos.resources.adapters.device_site import apply_device_available_sites
 from unilabos.resources.resource_tracker import ResourceDictInstance
 from unilabos.backend.runtime.exception import DeviceClassInvalid
 from unilabos.utils.import_manager import default_manager
+
+
+def is_host_node_config(content: Any, device_id: str = "") -> bool:
+    """按注册表模板名判断是否 host 服务设备（实例 id 可重命名）。
+
+    ``template_name == "host_node"`` 是唯一判据（旧图的 ``class`` 已在图读取
+    边界回填为 template_name）；``device_id`` 仅兼容未声明模板的旧图节点
+    （template_name 回退为 type，id 与配置的实例名一致时视为 host node）。
+    """
+
+    template_name = str(content.template_name or "")
+    if template_name == HOST_NODE_REGISTRY_NAME:
+        return True
+    undeclared = template_name in ("", str(content.type or ""))
+    return bool(device_id) and content.id == device_id and undeclared
 
 
 @dataclass(frozen=True)
@@ -80,20 +96,20 @@ def resolve_device_definition(
     *,
     backend_name: str | None = None,
 ) -> DeviceDefinition:
-    """解析一次 registry；HostLink 与 ROS2 不再各自解释同一份 YAML。"""
+    """将 Registry YAML 解析为 HostLink 与 ROS2 共用的设备定义。"""
 
     from unilabos.registry.registry import lab_registry
 
-    registry_name = device_config.res_content.klass
+    registry_name = device_config.res_content.template_name
     if not isinstance(registry_name, str):
         raise DeviceClassInvalid(
-            f"Device [{device_id}] class must be a registry name string, "
+            f"Device [{device_id}] template_name must be a registry name string, "
             f"but {type(registry_name).__name__} got. {device_config}"
         )
     registry_name = registry_name.strip()
     if not registry_name:
         raise DeviceClassInvalid(
-            f"Device [{device_id}] class cannot be empty. {device_config}"
+            f"Device [{device_id}] template_name cannot be empty. {device_config}"
         )
     registry_entry = lab_registry.device_type_registry.get(registry_name)
     if registry_entry is None:
@@ -138,7 +154,7 @@ def resolve_device_definition(
         device_id=str(device_id),
         resource_uuid=str(device_config.res_content.uuid or ""),
         registry_name=registry_name,
-        display_name=str(registry_entry.get("displayname") or registry_name),
+        display_name=str(registry_entry.get("display_name") or registry_name),
         driver_class=default_manager.get_class(module.strip()),
         driver_config=dict(driver_config),
         runtime_config=runtime_config,
@@ -179,6 +195,7 @@ def iter_device_config_entries(devices_config: Any) -> Iterator[DeviceConfigEntr
 __all__ = [
     "DeviceConfigEntry",
     "DeviceDefinition",
+    "is_host_node_config",
     "iter_device_config_entries",
     "resolve_device_definition",
 ]

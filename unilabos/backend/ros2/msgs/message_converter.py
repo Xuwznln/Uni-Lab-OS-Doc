@@ -129,8 +129,8 @@ for py_msgtype in imsg.__all__:
 def _resource_to_ros(x: Any) -> Any:
     """资源整体 JSON 化后放进 ``Resource.data`` 单字段传输。
 
-    ``id``/``name`` 仅冗余填充便于抓包排查；其余结构化字段不再承载数据，
-    接收端只解析 ``data``。
+    ``id``/``name`` 冗余填充以便抓包排查；完整结构保存在 ``data``，
+    接收端也只解析该字段。
     """
 
     if isinstance(x, BaseModel):
@@ -154,8 +154,7 @@ def _joint_state_to_ros(x: Any) -> Any:
     )
 
 
-# Python到ROS消息转换器
-# todo: ros2的resource转换后续移除，走str解析
+# Python 值到 ROS 消息的显式转换器。
 _msg_converter: Dict[Type, Any] = {
     float: float,
     Float64: lambda x: Float64(data=float(x)),
@@ -383,7 +382,8 @@ def convert_to_ros_msg(ros_msg_type: Union[Type, Any], obj: Any) -> Any:
                     setattr(ros_msg, key, value)
                 else:
                     logger.warning(f"Not Supported type: {td}")
-                    setattr(ros_msg, key, [])  # FIXME
+                    # 未支持的序列元素类型使用空列表，避免构造无效 ROS 消息。
+                    setattr(ros_msg, key, [])
             elif "array.array" in str(type(attr)):
                 if attr.typecode == "f" or attr.typecode == "d":
                     setattr(ros_msg, key, [float(i) for i in value])
@@ -527,68 +527,50 @@ def convert_from_ros_msg_with_mapping(ros_msg: Any, value_mapping: Dict[str, str
     """
     data: Dict[str, Any] = {}
 
-    # # 🔧 添加调试信息
-    # print(f"🔍 convert_from_ros_msg_with_mapping 开始")
-    # print(f"🔍 ros_msg 类型: {type(ros_msg)}")
-    # print(f"🔍 ros_msg 内容: {ros_msg}")
-    # print(f"🔍 value_mapping: {value_mapping}")
-    # print("-" * 60)
-
     for msg_name, attr_name in value_mapping.items():
-        #    print(f"🔍 处理映射: {msg_name} -> {attr_name}")
-
         msg_path = msg_name.split(".")
         current = ros_msg
-
-        # print(f"🔍 msg_path: {msg_path}")
-        # print(f"🔍 current 初始值: {current} (类型: {type(current)})")
 
         try:
             if not attr_name.endswith("[]"):
                 # 处理单值映射
-                # print(f"🔍 处理单值映射")
-                for i, name in enumerate(msg_path):
-                    # print(f"🔍 步骤 {i}: 获取属性 '{name}' 从 {type(current)}")
+                field_missing = False
+                for name in msg_path:
                     if hasattr(current, name):
                         current = getattr(current, name)
-                        # print(f"🔍 获取到: {current} (类型: {type(current)})")
                     else:
-                        # print(f"❌ 属性 '{name}' 不存在于 {type(current)}")
+                        field_missing = True
                         break
+                if field_missing:
+                    # 注册表映射与消息定义漂移（字段不存在）：跳过该项让驱动
+                    # 默认值生效，绝不把整个消息透传给单个参数。
+                    logger.warning(
+                        f"goal 映射字段 {msg_name!r} 在 {type(ros_msg).__name__} 中不存在，已跳过"
+                    )
+                    continue
 
                 converted_value = convert_from_ros_msg(current)
-                # print(f"🔍 转换后的值: {converted_value} (类型: {type(converted_value)})")
                 data[attr_name] = converted_value
-                # print(f"✅ 设置 data['{attr_name}'] = {converted_value}")
             else:
                 # 处理列表值映射
-                # print(f"🔍 处理列表值映射")
                 for i, name in enumerate(msg_path):
-                    # print(f"🔍 列表步骤 {i}: 处理 '{name}' 从 {type(current)}")
                     if name.endswith("[]"):
                         base_name = name[:-2]
-                        # print(f"🔍 数组字段 base_name: '{base_name}'")
                         if hasattr(current, base_name):
                             current = list(getattr(current, base_name))
-                            # print(f"🔍 获取数组: {current} (长度: {len(current)})")
                         else:
-                            # print(f"❌ 数组字段 '{base_name}' 不存在")
                             current = []
                             break
                     else:
                         if isinstance(current, list):
-                            # print(f"🔍 从列表中获取属性 '{name}'")
                             next_level = []
                             for item in current:
                                 if hasattr(item, name):
                                     next_level.append(getattr(item, name))
                             current = next_level
-                            # print(f"🔍 列表处理结果: {current} (长度: {len(current)})")
                         elif hasattr(current, name):
                             current = getattr(current, name)
-                            # print(f"🔍 获取到属性: {current} (类型: {type(current)})")
                         else:
-                            # print(f"❌ 属性 '{name}' 不存在")
                             current = []
                             break
 
@@ -596,20 +578,12 @@ def convert_from_ros_msg_with_mapping(ros_msg: Any, value_mapping: Dict[str, str
                 if current:
                     converted_list = [convert_from_ros_msg(item) for item in current]
                     data[attr_key] = converted_list
-                    # print(f"✅ 设置 data['{attr_key}'] = {converted_list}")
                 else:
                     print(f"⚠️ 列表为空，跳过 '{attr_key}'")
         except (AttributeError, TypeError) as e:
-            # print(f"❌ 映射转换错误 {msg_name} -> {attr_name}: {e}")
             logger.debug(f"Mapping conversion error for {msg_name} -> {attr_name}")
             continue
 
-    #    print(f"🔍 当前 data 状态: {data}")
-    #    print("-" * 40)
-
-    # print(f"🔍 convert_from_ros_msg_with_mapping 结束")
-    # print(f"🔍 最终 data: {data}")
-    # print("=" * 60)
     return data
 
 
@@ -705,27 +679,6 @@ def ros_field_type_to_json_schema(
         return {}
     else:
         return ros_message_to_json_schema(type_info, field_name)
-    # # 处理数组类型
-    # if field_type.endswith('[]'):
-    #     item_type = field_type[:-2]
-    #     return {
-    #         'type': 'array',
-    #         'items': ros_field_type_to_json_schema(item_type)
-    #     }
-
-    # # 处理复杂类型（尝试加载并处理）
-    # try:
-    #     # 如果它是一个完整的消息类型规范 (包名/msg/类型名)
-    #     if '/' in field_type:
-    #         msg_class = get_ros_type_by_msgname(field_type)
-    #         return ros_message_to_json_schema(msg_class)
-    #     else:
-    #         # 可能是相对引用或简单名称
-    #         return {'type': 'object', 'description': f'复合类型: {field_type}'}
-    # except Exception as e:
-    #     # 如果无法解析，返回通用对象类型
-    #     logger.debug(f"无法解析类型 {field_type}: {str(e)}")
-    # return {'type': 'object', 'description': f'未知类型: {field_type}'}
 
 
 def _strip_rosidl_descriptions(schema: Any) -> None:
@@ -795,7 +748,7 @@ def ros_action_to_json_schema(
     Args:
         action_class: ROS Action 类
         description: 描述
-        previous_schema: 之前的 schema，用于保留 goal/feedback/result 下一级字段的 description
+        previous_schema: 已有 schema，用于保留 goal/feedback/result 子字段说明
 
     Returns:
         完整的 JSON Schema 定义
@@ -831,7 +784,7 @@ def ros_action_to_json_schema(
 
     _strip_rosidl_descriptions(schema)
 
-    # 保留之前 schema 中 goal/feedback/result 下一级字段的 description
+    # 合并已有 schema 中 goal/feedback/result 子字段的 description。
     if previous_schema:
         _preserve_field_descriptions(schema, previous_schema)
 
@@ -842,11 +795,11 @@ def _preserve_field_descriptions(
     new_schema: Dict[str, Any], previous_schema: Dict[str, Any]
 ) -> None:
     """
-    保留之前 schema 中 goal/feedback/result 下一级字段的 description 和 title
+    保留已有 schema 中 goal/feedback/result 子字段的 description 和 title。
 
     Args:
-        new_schema: 新生成的 schema（会被修改）
-        previous_schema: 之前的 schema
+        new_schema: 待补充的 schema（会被修改）
+        previous_schema: 提供说明文本的已有 schema
     """
     for section in ["goal", "feedback", "result"]:
         new_section = new_schema.get("properties", {}).get(section, {})
@@ -917,10 +870,5 @@ if __name__ == "__main__":
         schema = convert_ros_action_to_jsonschema(NavigateToPose)
         print(json.dumps(schema, indent=2, ensure_ascii=False))
 
-        # 保存到文件
-        # convert_ros_action_to_jsonschema(NavigateToPose, "navigate_to_pose_schema.json")
-
-        # 或者使用字符串形式的 action 名称
-        # schema = convert_ros_action_to_jsonschema("nav2_msgs/action/NavigateToPose")
     except ImportError:
         print("无法导入 NavigateToPose action，请确保已安装相关 ROS 包。")

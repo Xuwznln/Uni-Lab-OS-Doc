@@ -83,12 +83,12 @@ BACKEND_NAMES: tuple[str, ...] = tuple(BACKEND_PROFILES)
 
 DEFAULT_PYTHON_DRIVER_BACKENDS = ("hostlink", "ros2")
 
-_REMOVED_BACKENDS: dict[str, str] = {
-    "automancer": "automancer 从未实现，现已移除",
-    "basic": "basic backend 已移除，请使用 backend 'hostlink'",
-    "simple": "simple/basic backend 已移除，请使用 backend 'hostlink'",
+_UNSUPPORTED_BACKENDS: dict[str, str] = {
+    "automancer": "automancer 不是受支持的 backend",
+    "basic": "basic 不是受支持的 backend，请使用 'hostlink'",
+    "simple": "simple 不是受支持的 backend，请使用 'hostlink'",
     "dora": "dora 是实验运行时，不是公开 backend",
-    "ros": "ros 旧别名已移除，请使用 backend 'ros2'",
+    "ros": "ros 不是受支持的 backend 名称，请使用 'ros2'",
 }
 
 
@@ -96,8 +96,8 @@ def normalize_backend_name(value: str) -> str:
     """校验并返回公开 backend 名称。"""
 
     name = str(value or "").strip().lower()
-    if name in _REMOVED_BACKENDS:
-        raise BackendConfigurationError(_REMOVED_BACKENDS[name])
+    if name in _UNSUPPORTED_BACKENDS:
+        raise BackendConfigurationError(_UNSUPPORTED_BACKENDS[name])
     if name not in BACKEND_PROFILES:
         supported = ", ".join(BACKEND_NAMES)
         raise BackendConfigurationError(

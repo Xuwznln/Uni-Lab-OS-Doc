@@ -187,7 +187,7 @@ class HostNetworkService:
                     "[EdgeMicrobackend] Fast DDS directed discovery listening on UDP %s",
                     self._discovery_server.port,
                 )
-            except Exception as exc:  # noqa: BLE001 - retain legacy ROS discovery
+            except Exception as exc:  # noqa: BLE001 - fall back to ROS discovery policy
                 logger.error(
                     "[EdgeMicrobackend] directed DDS discovery unavailable; "
                     "falling back to the existing ROS discovery policy: %s",
@@ -276,7 +276,7 @@ class HostNetworkService:
     def _material_template_create(
         self, data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import ResourceTemplateWrite
 
         mutation = InventoryMutation.model_validate(data)
@@ -288,7 +288,7 @@ class HostNetworkService:
     def _material_data_put(
         self, data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialDataWrite
 
         material_uuid = str(data.get("material_uuid") or "").strip()
@@ -307,7 +307,7 @@ class HostNetworkService:
     ) -> dict[str, Any]:
         """Validate a Slave create intent and proxy it to the Host authority."""
 
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialTreeCreate
 
         mutation = InventoryMutation.model_validate(data)
@@ -350,7 +350,7 @@ class HostNetworkService:
     def _material_move(
         self, data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialMove
 
         mutation = InventoryMutation.model_validate(data)
@@ -363,7 +363,7 @@ class HostNetworkService:
     def _material_transfer(
         self, data: dict[str, Any], peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialTransfer
 
         mutation = InventoryMutation.model_validate(data)
@@ -386,7 +386,7 @@ class HostNetworkService:
         物料链路不走 ROS service 发现，与资源树同步 / 挂载下行同构。
         """
 
-        from unilabos.backend.ros2.hostlink_bridge import material_sync_to_device
+        from unilabos.backend.hostlink.downlink import material_sync_to_device
 
         data = command.model_dump(mode="json", exclude_none=False)
         device_id = str(data["device_id"])
@@ -400,7 +400,7 @@ class HostNetworkService:
     def _material_delete(
         self, data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialDelete
 
         mutation = InventoryMutation.model_validate(data)
@@ -423,7 +423,7 @@ class HostNetworkService:
     def _material_apply_snapshot(
         self, data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialSnapshot
 
         mutation = InventoryMutation.model_validate(data)
@@ -471,17 +471,11 @@ def setup_host_network_service(
             if material_gateway is not None:
                 _host_service.attach_material_gateway(material_gateway)
             return _host_service
-        try:
-            _host_service = HostNetworkService.from_config(
-                material_gateway,
-            ).start()
-            _register_process_cleanup()
-        except Exception as exc:  # noqa: BLE001 - ROS fallback remains available
-            logger.error(
-                "[EdgeMicrobackend] HostLink start failed (ROS-only fallback): %s",
-                exc,
-            )
-            _host_service = None
+        # HostLink 是物料/控制下行的唯一链路，起不来就 fail fast，不降级为纯 ROS。
+        _host_service = HostNetworkService.from_config(
+            material_gateway,
+        ).start()
+        _register_process_cleanup()
         return _host_service
 
 

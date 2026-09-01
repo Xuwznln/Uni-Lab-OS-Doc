@@ -6,40 +6,51 @@
 
 import inspect
 
-
-def test_host_node_no_longer_owns_material_creation() -> None:
-    """host 不再提供 create_resource / create_resource_detailed（创建入口在微后端）。"""
-    from unilabos.backend.ros2.presets.host_node import HostNode
-
-    assert not hasattr(HostNode, "create_resource")
-    assert not hasattr(HostNode, "create_resource_detailed")
+import pytest
 
 
-def test_host_node_keeps_append_and_notify_orchestration() -> None:
-    """host 保留统一下行通道（_material_dispatch）与变更分发（notify_resource_tree_update）。"""
-    from unilabos.backend.ros2.presets.host_node import HostNode
+def test_microbackend_owns_material_creation() -> None:
+    """物料创建由微后端提供，HostNode 只负责执行编排（双 backend 同契约）。"""
+    from unilabos.backend.hostlink.host_node import HostNode as HostLinkHostNode
+    from unilabos.backend.ros2.presets.host_node import HostNode as ROS2HostNode
 
-    assert inspect.iscoroutinefunction(HostNode._material_dispatch)
-    dispatch_source = inspect.getsource(HostNode._material_dispatch)
+    for cls in (ROS2HostNode, HostLinkHostNode):
+        assert not hasattr(cls, "create_resource")
+        assert not hasattr(cls, "create_resource_detailed")
+
+
+def test_host_exposes_shared_append_and_notification_dispatch() -> None:
+    """host 提供统一下行通道与资源树变更分发。
+
+    下行通道与变更分发都不绑定任何 host 编排类——它们是 hostlink.downlink 的
+    模块级函数，HostServices 零参构造时默认落到 material_dispatch，微后端
+    直接调用 notify_resource_tree_update。
+    """
+    from unilabos.backend.hostlink import downlink
+
+    assert inspect.iscoroutinefunction(downlink.material_dispatch)
+    dispatch_source = inspect.getsource(downlink.material_dispatch)
     assert "RESOURCE_APPEND" in dispatch_source
     assert "RESOURCE_TREE_SYNC" in dispatch_source
 
-    notify_params = inspect.signature(HostNode.notify_resource_tree_update).parameters
-    assert list(notify_params)[1:4] == ["device_id", "action", "resource_uuid_list"]
+    notify_params = inspect.signature(downlink.notify_resource_tree_update).parameters
+    assert list(notify_params) == ["device_id", "action", "resource_uuid_list"]
 
 
-def test_material_downlink_no_longer_uses_ros_services() -> None:
-    """物料下行不再走 ROS service：设备侧不注册、host 侧不调用这两个 srv 地址。"""
+def test_material_downlink_uses_direct_or_hostlink_dispatch() -> None:
+    """物料下行通过本进程直调或 HostLink RPC 分发。"""
+    from unilabos.backend.hostlink import host_node as hostlink_host_node
     from unilabos.backend.ros2 import base_device_node
-    from unilabos.backend.ros2.presets import host_node
+    from unilabos.backend.ros2.presets import host_node as ros2_host_node
 
     device_source = inspect.getsource(base_device_node)
     assert "/append_resource" not in device_source
     assert "/s2c_resource_tree" not in device_source
 
-    host_source = inspect.getsource(host_node)
-    assert "/append_resource" not in host_source
-    assert "/s2c_resource_tree" not in host_source
+    for module in (ros2_host_node, hostlink_host_node):
+        host_source = inspect.getsource(module)
+        assert "/append_resource" not in host_source
+        assert "/s2c_resource_tree" not in host_source
 
 
 def test_device_exposes_downlink_coroutines() -> None:
@@ -57,11 +68,10 @@ def test_device_exposes_downlink_coroutines() -> None:
     assert callable(DeviceNode.transfer_to_new_resource)
     for name in ("append_resource", "apply_resource_tree_update", "transfer_to_new_resource"):
         assert name not in vars(BaseROS2DeviceNode), f"{name} 不应在 ROS 层重复实现"
-    # 旧 srv 回调签名不应存在
+    # DeviceNode 不暴露 transport 专用的 ROS 回调。
     assert not hasattr(BaseROS2DeviceNode, "s2c_resource_tree")
 
-    # DeviceNode 的实现不依赖 ROS：挂载后的快照上报直连权威（update_resource），
-    # 不再经 host 的 /c2s_update_resource_tree srv 中转
+    # DeviceNode 的实现不依赖 ROS，挂载后的快照通过 update_resource 写入权威。
     for method in (DeviceNode.append_resource, DeviceNode.apply_resource_tree_update):
         source = inspect.getsource(method)
         assert "rclpy" not in source
@@ -75,10 +85,9 @@ def test_device_exposes_downlink_coroutines() -> None:
 
 
 def test_device_append_resource_requires_authority_uuid() -> None:
-    """设备侧挂载新协议只接受带 uuid 的引用（微后端权威已创建）。
+    """设备侧挂载只接受带权威 uuid 的物料引用。
 
-    锁定请求契约的关键词，防止回退到「本地 initialize + add 上报」的旧协议；
-    assign 统一复用 transfer_to_new_resource（含 site/spot 探测）。
+    assign 复用 transfer_to_new_resource，并按 site/spot 选择挂载位置。
     """
     import unilabos.backend.runtime.node as device_node_module
     from unilabos.backend.ros2 import base_device_node
@@ -87,14 +96,14 @@ def test_device_append_resource_requires_authority_uuid() -> None:
     source = inspect.getsource(base_device_node.BaseROS2DeviceNode.append_resource)
     assert '"resource_uuid"' in source or "'resource_uuid'" in source
     assert "transfer_to_new_resource" in source
-    # 旧协议关键字段不应再出现在 append 流程中
+    # append 请求不包含本地初始化字段。
     assert "initialize_full" not in inspect.getsource(base_device_node)
     assert "initialize_full" not in inspect.getsource(device_node_module)
 
 
 def test_resource_tree_mutex_is_backend_neutral() -> None:
     """资源树互斥锁泛化为 DeviceAsyncMutex：唤醒经 node.create_task 调度，
-    等待经 node.create_wait_future 挂起，ROS 层不再保留 rclpy 专用锁。"""
+    等待经 node.create_wait_future 挂起，且不依赖 rclpy。"""
     from unilabos.backend.runtime.async_utils import DeviceAsyncMutex
     from unilabos.backend.ros2 import base_device_node
 
@@ -111,13 +120,16 @@ def test_resource_tree_mutex_is_backend_neutral() -> None:
 
 
 def test_resource_query_goes_through_authority_not_ros() -> None:
-    """物料查询（uuid / resource id）统一在 DeviceNode 上直连权威，不再有 /resources/get srv。"""
+    """物料查询在 DeviceNode 上通过 ResourceService 访问权威。"""
     import unilabos.backend.runtime.node as device_node_module
+    from unilabos.backend.hostlink import host_node as hostlink_host_node
+    from unilabos.backend.hostlink import workstation as hostlink_workstation
     from unilabos.backend.runtime.node import DeviceNode
     from unilabos.backend.ros2 import base_device_node
-    from unilabos.backend.ros2.presets import host_node, workstation
+    from unilabos.backend.ros2.presets import host_node as ros2_host_node
+    from unilabos.backend.ros2.presets import workstation as ros2_workstation
 
-    # DeviceNode 暴露查询协程；ROS 层不再 override
+    # DeviceNode 暴露 transport 中立的查询协程。
     assert inspect.iscoroutinefunction(DeviceNode.get_resource)
     assert inspect.iscoroutinefunction(DeviceNode.get_resource_by_id)
     assert inspect.iscoroutinefunction(DeviceNode.get_resource_with_dir)
@@ -127,8 +139,14 @@ def test_resource_query_goes_through_authority_not_ros() -> None:
     # DeviceNode 的实现不依赖 ROS
     assert "rclpy" not in inspect.getsource(device_node_module.DeviceNode.get_resource_by_id)
 
-    # 全链路不再出现 /resources/get srv 地址
-    for module in (base_device_node, host_node, workstation):
+    # 查询链路不注册 /resources/get ROS 服务。
+    for module in (
+        base_device_node,
+        ros2_host_node,
+        hostlink_host_node,
+        ros2_workstation,
+        hostlink_workstation,
+    ):
         assert "/resources/get" not in inspect.getsource(module), f"{module.__name__} 仍引用 /resources/get"
 
 
@@ -155,20 +173,18 @@ def test_materials_module_exposes_get_and_search() -> None:
     assert ActionType.MATERIAL_SEARCH == "material.search"
 
 
-def test_c2s_update_resource_tree_fully_retired() -> None:
-    """/c2s_update_resource_tree 全链路退役。
+def test_material_update_path_uses_materials_authority() -> None:
+    """资源树更新通过 materials API 访问同一权威。
 
-    其语义内化为 materials.* 工具函数（create/ensure/get/update/remove），
-    host / slave 设备语义一致（Slave 经 HostLink 访问同一权威）：
-    - host 不再注册该 srv，四个 action 回调全部删除；
-    - slave 开机不再上报物料、不再拿 uuid_mapping 换 uuid，改 materials.ensure 对齐；
-    - doctor 假设备诊断不再探测该 srv。
+    create/ensure/get/update/remove 提供统一入口，Slave 经 HostLink 访问权威，
+    启动时使用 materials.ensure 对齐图中的 UUID。
     """
     from unilabos.backend.hostlink import doctor
+    from unilabos.backend.hostlink import host_node as hostlink_host_node
     from unilabos.backend.ros2 import main_slave_run
-    from unilabos.backend.ros2.presets import host_node
+    from unilabos.backend.ros2.presets import host_node as ros2_host_node
 
-    for module in (host_node, main_slave_run, doctor):
+    for module in (ros2_host_node, hostlink_host_node, main_slave_run, doctor):
         assert "c2s_update_resource_tree" not in inspect.getsource(module), module.__name__
 
     for name in (
@@ -178,7 +194,8 @@ def test_c2s_update_resource_tree_fully_retired() -> None:
         "_resource_tree_action_update_callback",
         "_resource_tree_action_remove_callback",
     ):
-        assert not hasattr(host_node.HostNode, name), f"{name} 应随 srv 一并退役"
+        assert not hasattr(ros2_host_node.HostNode, name), f"{name} 不属于 HostNode"
+        assert not hasattr(hostlink_host_node.HostNode, name), f"{name} 不属于 HostNode"
 
     slave_source = inspect.getsource(main_slave_run)
     assert "materials.ensure" in slave_source
@@ -206,7 +223,7 @@ def test_boot_material_alignment_is_shared_between_host_and_slave() -> None:
 
 def test_apply_deduct_resource_lands_material_via_materials_protocol() -> None:
     """出库扣减走 materials 协议：挂载/透传前经 materials.ensure 把扣减产物
-    （带 uuid）落权威（相当于 create 带条件），不再假设云端已同步微后端。"""
+    （带 uuid）写入权威，再投影到设备。"""
     from unilabos.backend import host_material_actions
 
     source = inspect.getsource(host_material_actions.deduct_resource)
@@ -214,19 +231,20 @@ def test_apply_deduct_resource_lands_material_via_materials_protocol() -> None:
 
 
 def test_host_material_actions_shared_by_both_backends() -> None:
-    """host 物料 API 固定为四动作，业务实现唯一（host_material_actions，
-    全走 materials.*）；两种 backend 的 host_node 都是薄壳：
+    """host 物料 API 固定为四动作，动作定义与业务实现都只有一份：
 
-    - ROS2 HostNode @action 与 HostLink 内置 host 服务设备的四个方法体
-      均调用共享实现，不各自维护编排逻辑；
-    - transfer_manual 退役——人工闸门由系统自带的 manual_confirm 承担；
+    - 动作定义位于 backend 无关的 HostServices（@device/@action 扫描源），
+      两种 backend 都经通用设备
+      管线从外部初始化同一个类（ROS2 initialize_device_from_dict /
+      HostLink register_host_services）；
+    - 实现唯一：方法体全部调用 host_material_actions（全走 materials.*）；
+    - 人工闸门由系统自带的 manual_confirm 承担；
     - 共享实现按 materials.resolve 统一解析 ResourceSlot 入参。
     """
     from unilabos.backend import host_material_actions
-    from unilabos.backend.hostlink.host_services import (
-        HOST_SERVICE_ACTIONS,
-        HostLinkHostServices,
-    )
+    from unilabos.backend.host_services import HOST_SERVICE_ACTIONS, HostServices
+    from unilabos.backend.hostlink import host_services as hostlink_assembly
+    from unilabos.backend.hostlink.host_node import HostNode as HostLinkHostNode
     from unilabos.backend.ros2.presets.host_node import HostNode
     from unilabos.resources import materials
 
@@ -239,13 +257,35 @@ def test_host_material_actions_shared_by_both_backends() -> None:
     assert set(HOST_SERVICE_ACTIONS) == {
         *host_material_actions.HOST_MATERIAL_ACTIONS,
         "manual_confirm",
+        "auto-test_resource",
+        "test_latency",
     }
 
-    # transfer_manual 全链路退役
+    # 人工确认与物料转移是两个独立动作。
     assert not hasattr(HostNode, "transfer_manual")
-    assert not hasattr(HostLinkHostServices, "transfer_manual")
+    assert not hasattr(HostServices, "transfer_manual")
 
-    # 两端薄壳都指向共享实现
+    # HostNode 只负责执行适配；host_node 服务设备由通用设备管线初始化。
+    # test_latency 例外：动作定义在 HostServices（委托适配器），ping-pong
+    # 实现在适配器共享基类 HostAdapterBase 上，两种 backend 复用。
+    for action_name in HOST_SERVICE_ACTIONS:
+        if action_name == "test_latency":
+            continue
+        for cls in (HostNode, HostLinkHostNode):
+            assert not hasattr(cls, action_name), (
+                f"{cls.__module__} 不应定义 {action_name}（定义位于 HostServices）"
+            )
+    from unilabos.backend.runtime.host_adapter import HostAdapterBase
+
+    assert HostNode.test_latency is HostAdapterBase.test_latency
+    assert HostLinkHostNode.test_latency is HostAdapterBase.test_latency
+    assert "get_execution_adapter" in inspect.getsource(HostServices.test_latency)
+    assert hostlink_assembly.HostServices is HostServices
+    init_source = inspect.getsource(HostNode.__init__)
+    assert "initialize_device(self.device_id, host_node_instance)" in init_source
+    assert "HostServices(" not in init_source
+
+    # 方法体指向共享实现
     pairs = {
         "apply_deduct_resource": "deduct_resource",
         "set_substance": "set_substance",
@@ -253,11 +293,10 @@ def test_host_material_actions_shared_by_both_backends() -> None:
         "transfer_resource": "transfer_resource",
     }
     for method_name, shared_name in pairs.items():
-        for owner in (HostNode, HostLinkHostServices):
-            source = inspect.getsource(getattr(owner, method_name))
-            assert f"host_material_actions.{shared_name}" in source, (
-                f"{owner.__name__}.{method_name} 应调用共享实现 {shared_name}"
-            )
+        source = inspect.getsource(getattr(HostServices, method_name))
+        assert f"host_material_actions.{shared_name}" in source, (
+            f"HostServices.{method_name} 应调用共享实现 {shared_name}"
+        )
 
     # 共享实现全走 materials.* 门面（出库=创建：registry_class 现场创建 /
     # 带 uuid 产物 ensure adopt，两种来源都在 deduct_resource 内闭环；
@@ -292,15 +331,95 @@ def test_host_material_actions_shared_by_both_backends() -> None:
     assert discard_params["device_id"].default == ""
 
 
+def test_host_node_registry_is_single_scan_source() -> None:
+    """host_node 注册表唯一定义源：默认扫描 exclude + 单独处理。
+
+    - ``@device(id="host_node")`` 只落在 backend 无关的 HostServices 上；
+    - host_services.py 不进默认启动扫描（exclude），registry 单独扫描该文件
+      并由 _setup_host_node 登记注册表条目（module 指向 HostServices）；
+    - 两个编排类 HostNode（ros2/presets 与 hostlink）都不携带 @device，
+      两种 backend 使用同一个注册表 entry。
+    """
+    import unilabos.backend.hostlink.host_node as hostlink_orchestrator_module
+    import unilabos.backend.ros2.presets.host_node as ros2_orchestrator_module
+    import unilabos.registry.registry as registry_module
+    from unilabos.backend import host_services
+
+    assert '@device(id="host_node"' in inspect.getsource(host_services)
+
+    # Registry 被 @singleton 装饰，直接对模块源码断言：
+    # host_services.py 进默认扫描 exclude、单独扫描产出 _host_node_ast_entry、
+    # 覆写条目的 module 指向 HostServices。
+    registry_source = inspect.getsource(registry_module)
+    assert 'exclude_files = {"host_services.py"}' in registry_source
+    assert "_host_node_ast_entry" in registry_source
+    assert "unilabos.backend.host_services:HostServices" in registry_source
+
+    for module in (ros2_orchestrator_module, hostlink_orchestrator_module):
+        assert "@device(" not in inspect.getsource(module), module.__name__
+
+
+def test_ensure_host_node_resource_reuses_graph_identity_or_inserts_default() -> None:
+    """host node 按 template_name 判别且全图唯一；实例 id 以 ``--host_node_id`` 为准。
+
+    图中声明时复用其 uuid（实例 id 可重命名，如 host_node_8523）；未声明时
+    插入运行时默认树；声明多个直接报错。
+    """
+    from uuid import uuid4
+
+    from unilabos.backend.ros2.presets.host_node import ensure_host_node_resource
+    from unilabos.resources.resource_tracker import ResourceTreeSet
+
+    def _host_payload(node_id: str) -> dict:
+        return {
+            "id": node_id,
+            "uuid": str(uuid4()),
+            "name": node_id,
+            "type": "device",
+            "class": "host_node",
+            "template_name": "host_node",
+            "config": {},
+            "data": {},
+            "extra": {},
+        }
+
+    renamed_id = "host_node_8523"
+    graph_payload = _host_payload("host_node")
+    host_uuid = graph_payload["uuid"]
+    tree_set = ResourceTreeSet.from_raw_dict_list([graph_payload])
+    # 图中按 template_name 声明的 host node，id 与配置实例名不同：以配置为准重命名。
+    reused = ensure_host_node_resource(tree_set, renamed_id)
+    assert reused.res_content.id == renamed_id
+    assert reused.res_content.name == renamed_id
+    assert reused.res_content.uuid == host_uuid
+    assert reused.res_content.klass == "host_node"
+    assert reused.res_content.template_name == "host_node"
+    assert reused.res_content.sites_initialized is True
+    assert len(tree_set.trees) == 1
+
+    empty = ResourceTreeSet([])
+    created = ensure_host_node_resource(empty, renamed_id)
+    assert created.res_content.id == renamed_id
+    assert created.res_content.klass == "host_node"
+    assert created.res_content.template_name == "host_node"
+    assert len(empty.trees) == 1
+
+    duplicated = ResourceTreeSet.from_raw_dict_list(
+        [_host_payload("host_node"), _host_payload("host_node_backup")]
+    )
+    with pytest.raises(ValueError, match="只能声明一个 host node"):
+        ensure_host_node_resource(duplicated, renamed_id)
+
+
 def test_run_node_coroutine_is_backend_neutral() -> None:
     """协程桥 run_node_coroutine 定义在 runtime（不依赖 rclpy），
-    ROS 的 hostlink_bridge 复用同一实现而非各自维护。"""
+    hostlink.downlink 复用同一实现而非各自维护。"""
     import unilabos.backend.runtime.async_utils as async_utils_module
     from unilabos.backend.runtime.async_utils import run_node_coroutine
-    from unilabos.backend.ros2 import hostlink_bridge
+    from unilabos.backend.hostlink import downlink
 
     assert "import rclpy" not in inspect.getsource(async_utils_module)
-    assert hostlink_bridge.run_node_coroutine is run_node_coroutine
+    assert downlink.run_node_coroutine is run_node_coroutine
 
 
 def test_pure_hostlink_slave_registers_material_downlink_handlers() -> None:
@@ -321,33 +440,43 @@ def test_pure_hostlink_slave_registers_material_downlink_handlers() -> None:
         assert "rclpy" not in source
 
 
-def test_pure_hostlink_adapter_dispatches_resource_tree_update() -> None:
-    """纯 HostLink host 的 notify_resource_tree_update 不再是 stub：
-    本进程设备直调 apply_resource_tree_update，跨机经 RESOURCE_TREE_SYNC 下行，
-    不可达返回 None（与 ROS HostNode 语义一致）。"""
-    from unilabos.backend.hostlink.execution_adapter import HostLinkExecutionAdapter
+def test_notify_resource_tree_update_is_module_level_and_backend_neutral() -> None:
+    """变更分发是模块级函数（不挂在任何 host 编排类上），双 backend 同一份：
 
-    source = inspect.getsource(HostLinkExecutionAdapter.notify_resource_tree_update)
-    assert "apply_resource_tree_update" in source
-    assert "RESOURCE_TREE_SYNC" in source
-    assert "has_device" in source
-    assert "del device_id" not in source
+    本进程设备直调 apply_resource_tree_update（ros2 查 registered_devices、
+    hostlink 查 HostLinkLocalRuntime），跨机经 RESOURCE_TREE_SYNC 下行，
+    不可达返回 None。执行编排类与基类不承载 notify_* 方法。"""
+    from unilabos.backend.hostlink import downlink
+    from unilabos.backend.hostlink.host_node import HostNode as HostLinkHostNode
+    from unilabos.backend.ros2.presets.host_node import HostNode as ROS2HostNode
+    from unilabos.backend.runtime.host_adapter import HostAdapterBase
+
+    notify_source = inspect.getsource(downlink.notify_resource_tree_update)
+    assert "sync_resource_tree_to_device" in notify_source
+    assert "has_device" in notify_source
+
+    local_source = inspect.getsource(downlink.get_local_device_node)
+    assert "registered_devices" in local_source
+    assert "get_runtime" in local_source
+
+    for cls in (HostAdapterBase, ROS2HostNode, HostLinkHostNode):
+        assert not hasattr(cls, "notify_resource_tree_update"), cls.__name__
+        assert not hasattr(cls, "notify_device_manage"), cls.__name__
 
 
-def test_material_sync_retired_per_device_service() -> None:
-    """material_sync 从 per-device service 退役，统一为 MATERIAL_SYNC 下行 RPC：
+def test_material_sync_uses_shared_downlink_rpc() -> None:
+    """material_sync 使用统一的 MATERIAL_SYNC 下行 RPC：
 
     - 设备侧只保留实例协程 material_sync(dict) -> dict；
     - ROS / 纯 HostLink slave 均注册 MATERIAL_SYNC handler；
-    - 两种 host 的 dispatcher 本进程直调、跨机 HostLink RPC，不再有
-      ROS create_client/wait_for_service 或 hostlink service-bus 调用。
+    - 两种 host 的 dispatcher 本进程直调、跨机使用 HostLink RPC。
     """
     from unilabos.backend.runtime.node import DeviceNode
     from unilabos.backend.hostlink import local_runtime
     from unilabos.backend.hostlink.backend import HostLinkBackend
     from unilabos.backend.hostlink.network import HostNetworkService
     from unilabos.backend.hostlink.protocol import ActionType
-    from unilabos.backend.ros2 import hostlink_bridge
+    from unilabos.backend.hostlink import downlink
     from unilabos.backend.ros2 import base_device_node
 
     assert inspect.iscoroutinefunction(DeviceNode.material_sync)
@@ -356,15 +485,15 @@ def test_material_sync_retired_per_device_service() -> None:
 
     assert ActionType.MATERIAL_SYNC == "material.sync"
 
-    # 设备侧不再注册 per-device service（srv 地址与 setup 方法均不存在；注释提及不算）
+    # 设备侧不注册 per-device material_sync 服务。
     assert "/material_sync" not in inspect.getsource(base_device_node)
     assert "setup_material_sync_service" not in inspect.getsource(local_runtime)
 
     # slave 两侧均注册下行 handler
-    assert "MATERIAL_SYNC" in inspect.getsource(hostlink_bridge.register_hostlink_resource_handlers)
+    assert "MATERIAL_SYNC" in inspect.getsource(downlink.register_hostlink_resource_handlers)
     assert "MATERIAL_SYNC" in inspect.getsource(HostLinkBackend._start_slave)
 
-    # host 两侧 dispatcher 不再依赖 service 发现
+    # 两种 host dispatcher 均不依赖 ROS service 发现。
     ros_dispatch = inspect.getsource(HostNetworkService.dispatch_material_sync)
     assert "wait_for_service" not in ros_dispatch
     assert "create_client" not in ros_dispatch
@@ -375,53 +504,46 @@ def test_material_sync_retired_per_device_service() -> None:
     assert "MATERIAL_SYNC" in hostlink_dispatch
 
 
-def test_s2c_device_manage_fully_retired() -> None:
-    """/s2c_device_manage 全链路退役，设备管理与物料下行同构：
+def test_device_management_uses_shared_downlink_rpc() -> None:
+    """设备管理与物料操作使用同构的下行链路：
 
     - 设备侧只保留实例协程 device_manage(dict) -> dict（含 create/destroy_device
       默认实现），定义在 backend 无关的 DeviceNode 上；
     - ROS / 纯 HostLink slave 均注册 DEVICE_MANAGE handler；
-    - 两种 host 的 notify_device_manage 本进程直调、跨机 HostLink RPC，
-      不再有 ROS create_client/wait_for_service。
+    - host 侧分发是模块级 device_manage_to_device（本进程直调、跨机 HostLink
+      RPC）。
     """
     from unilabos.backend.runtime.node import DeviceNode
     from unilabos.backend.hostlink.backend import HostLinkBackend
-    from unilabos.backend.hostlink.execution_adapter import HostLinkExecutionAdapter
     from unilabos.backend.hostlink.protocol import ActionType
-    from unilabos.backend.ros2 import hostlink_bridge
+    from unilabos.backend.hostlink import downlink
     from unilabos.backend.ros2 import base_device_node
-    from unilabos.backend.ros2.presets.host_node import HostNode
 
     assert inspect.iscoroutinefunction(DeviceNode.device_manage)
     assert callable(DeviceNode.create_device)
     assert callable(DeviceNode.destroy_device)
     assert ActionType.DEVICE_MANAGE == "device.manage"
 
-    # ROS 侧不再有 srv 回调 / srv 地址 / 重复的默认实现
+    # ROS 层不定义 transport 专用回调或重复的默认实现。
     device_source = inspect.getsource(base_device_node)
     assert "s2c_device_manage" not in device_source
     for name in ("device_manage", "create_device", "destroy_device"):
         assert name not in vars(base_device_node.BaseROS2DeviceNode), f"{name} 不应在 ROS 层重复实现"
 
     # slave 两侧均注册下行 handler
-    assert "DEVICE_MANAGE" in inspect.getsource(hostlink_bridge.register_hostlink_resource_handlers)
+    assert "DEVICE_MANAGE" in inspect.getsource(downlink.register_hostlink_resource_handlers)
     assert "DEVICE_MANAGE" in inspect.getsource(HostLinkBackend._start_slave)
 
-    # host 两侧分发不依赖 ROS service 发现
-    ros_notify = inspect.getsource(HostNode.notify_device_manage)
-    assert "wait_for_service" not in ros_notify
-    assert "create_client" not in ros_notify
-    assert "device_manage_to_device" in ros_notify
-
-    hostlink_notify = inspect.getsource(HostLinkExecutionAdapter.notify_device_manage)
-    assert "device_manage" in hostlink_notify
-    assert "DEVICE_MANAGE" in hostlink_notify
-    assert "del target_node_id" not in hostlink_notify
+    # host 侧分发不依赖 ROS service 发现。
+    manage_source = inspect.getsource(downlink.device_manage_to_device)
+    assert "wait_for_service" not in manage_source
+    assert "create_client" not in manage_source
+    assert "DEVICE_MANAGE" in manage_source
 
 
 def test_resource_tree_driver_hooks_are_uniformly_async_aware() -> None:
     """资源树驱动回调（add/update/remove）统一经 _invoke_resource_hook 触发，
-    同步/协程驱动实现均可；不再有绕过它的 getattr 直调。"""
+    并同时支持同步与协程实现。"""
     from unilabos.backend.runtime.node import DeviceNode
 
     apply_source = inspect.getsource(DeviceNode.apply_resource_tree_update)

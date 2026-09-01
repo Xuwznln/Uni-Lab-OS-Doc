@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import threading
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
+from unilabos.backend.runtime.host_adapter import execution_result_bridges
 
 _adapter_condition = threading.Condition()
 _active_adapter: Optional[Any] = None
@@ -30,39 +31,16 @@ def clear_execution_adapter(adapter: Optional[Any] = None) -> None:
 
 
 def get_execution_adapter(timeout: Optional[float] = 0) -> Optional[Any]:
-    """返回当前 transport adapter，并兼容尚未显式注册的 ROS2 HostNode。"""
-
-    from unilabos.config.config import BasicConfig
+    """返回当前 HostNode（ros2 / hostlink 各自实现）注册的执行适配器。"""
 
     wait_timeout = 0.0 if timeout is None else max(float(timeout), 0.0)
     with _adapter_condition:
-        if _active_adapter is not None:
-            return _active_adapter
-        if BasicConfig.backend == "hostlink":
-            if wait_timeout:
-                _adapter_condition.wait_for(
-                    lambda: _active_adapter is not None,
-                    timeout=wait_timeout,
-                )
-            return _active_adapter
-
-    try:
-        from unilabos.backend.ros2.presets.host_node import HostNode
-    except ImportError:
-        return None
-    return HostNode.get_instance(timeout)
-
-
-def execution_result_bridges(bridges: Iterable[Any]) -> list[Any]:
-    """存在微后端生命周期 owner 时，只把原始执行结果交给该 owner。"""
-
-    values = list(bridges)
-    owners = [
-        bridge
-        for bridge in values
-        if bool(getattr(bridge, "owns_job_lifecycle", False))
-    ]
-    return owners or values
+        if _active_adapter is None and wait_timeout:
+            _adapter_condition.wait_for(
+                lambda: _active_adapter is not None,
+                timeout=wait_timeout,
+            )
+        return _active_adapter
 
 
 __all__ = [

@@ -261,7 +261,7 @@ def _setup_ros(info: RosNetworkInfo, source: str) -> None:
     if not rclpy.ok():
         try:
             rclpy.init(domain_id=info.domain_id)
-        except TypeError:  # 旧版 rclpy 无 domain_id 形参
+        except TypeError:  # 兼容不接受 domain_id 参数的 rclpy。
             rclpy.init()
 
 

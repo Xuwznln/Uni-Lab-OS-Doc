@@ -8,7 +8,6 @@ from unilabos.backend.runtime.resource import AuthorityResourceService
 from unilabos.backend.hostlink.backend import HostLinkBackend
 from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
 from unilabos.resources.presets.container import RegularContainer
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.backend.composition import set_materials_gateway
 from unilabos.server.services.materials import MaterialsService
 
@@ -48,7 +47,7 @@ def test_hostlink_runtime_transfer_is_committed_and_dispatched_by_authority(
     tmp_path,
     monkeypatch,
 ) -> None:
-    materials = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    materials = MaterialsService(tmp_path / "materials.db")
     gateway = LocalMaterialsClient(materials)
     set_materials_gateway(gateway)
     monkeypatch.setattr(BasicConfig, "is_host_mode", True)
@@ -72,12 +71,16 @@ def test_hostlink_runtime_transfer_is_committed_and_dispatched_by_authority(
     backend = HostLinkBackend(runtime, is_slave=False)
     try:
         backend.start()
+        from unilabos.resources import materials as materials_helper
+
         result = asyncio.run(
-            source.transfer_resource_to_another(
+            materials_helper.transfer(
                 [material],
                 "target",
                 [mount],
                 [None],
+                source_device_id=source.device_id,
+                source_device_uuid=source.resource_uuid,
             )
         )
 
@@ -96,4 +99,4 @@ def test_hostlink_runtime_transfer_is_committed_and_dispatched_by_authority(
     finally:
         backend.stop()
         set_materials_gateway(None)
-        materials.repository.close()
+        materials.close()

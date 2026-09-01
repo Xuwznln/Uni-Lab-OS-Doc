@@ -286,7 +286,7 @@ class HostLinkDeviceNode(DeviceNode):
 
     @property
     def ros_node_instance(self) -> "HostLinkDeviceNode":
-        """兼容用 ``ros_node_instance`` 表示运行节点的工作站代码。"""
+        """以工作站通用属性名返回当前运行节点。"""
 
         return self
 
@@ -732,6 +732,14 @@ class HostLinkDeviceNode(DeviceNode):
             raise AttributeError(
                 f"HostLink 设备 {self.device_id!r} 没有动作 {action_name!r}"
             )
+        # workstation 的 XDL protocol 动作没有 driver 方法，路由到协议编排器
+        # （unilabos.backend.hostlink.workstation.WorkstationNode）。
+        orchestrator = self.__dict__.get("_workstation_protocols")
+        if orchestrator is not None:
+            protocol_action = orchestrator.protocol_action(action_name)
+            if protocol_action is not None:
+                context = action_context or ActionContext()
+                return protocol_action, context, dict(kwargs), {}
         method_name = action_name.removeprefix("auto-")
         action = getattr(self.driver, method_name, None)
         if not callable(action):
@@ -770,7 +778,7 @@ class HostLinkDeviceNode(DeviceNode):
                 continue
             target_name = parameter_name.removesuffix("[]")
             if target_name not in signature.parameters and not accepts_kwargs:
-                # 兼容旧注册表中仅作为描述信息保存、与驱动签名不一致的映射。
+                # 仅用于描述且不匹配驱动签名的映射不参与实参转换。
                 continue
             value = _read_path(arguments, str(wire_name))
             if value is _MISSING:
@@ -805,6 +813,22 @@ class HostLinkDeviceNode(DeviceNode):
 
         matches = self.resource_tracker.figure_resource(payload, try_mode=True)
         if not matches:
+            # 本地快照未命中 → 按 uuid 回权威拉取（与 ROS2 _convert_resources_sync
+            # 兜底一致）；host 服务设备等无台面节点的 ResourceSlot 输入靠此闭环
+            slot_uuid = str(payload.get("uuid") or "").strip()
+            if slot_uuid:
+                tree_set = self._require_resource_service().get_resources_sync(
+                    [slot_uuid], with_children=True
+                )
+                if len(tree_set.trees):
+                    resource = tree_set.to_plr_resources()[0]
+                    refigured = self.resource_tracker.figure_resource(resource, try_mode=True)
+                    if len(refigured) == 1:
+                        return refigured[0]
+                    self._logger.warning(
+                        "ResourceSlot %s 未索引到本地实例，使用权威装配实例", slot_uuid
+                    )
+                    return resource
             identity = payload.get("uuid") or payload.get("id") or payload.get("name")
             raise ValueError(
                 f"设备 {self.device_id!r} 的本地资源快照中找不到 {identity!r}；"
@@ -827,7 +851,13 @@ class HostLinkDeviceNode(DeviceNode):
                 continue
             shape = _resource_slot_shape(parameter.annotation)
             if shape == "single":
-                resolved[name] = self._resolve_resource_slot(resolved[name])
+                value = resolved[name]
+                # 可选 ResourceSlot 的空值（None/""）语义是「未指定」，归一化为
+                # None 交给动作实现（与 ROS2 goal 缺省字段行为一致），不强行解析
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    resolved[name] = None
+                else:
+                    resolved[name] = self._resolve_resource_slot(value)
             elif shape == "list":
                 values = resolved[name]
                 if not isinstance(values, list):
@@ -1068,6 +1098,9 @@ class HostLinkLocalRuntime:
     def __init__(self) -> None:
         self.backend_name = "hostlink"
         self.devices: dict[str, HostLinkDeviceNode] = {}
+        #: 图中声明的 host_node 身份（device_id -> 资源 uuid），供内置 host
+        #: 服务设备注册时复用，保证图导出与权威身份一致。
+        self.graph_host_resource_uuids: dict[str, str] = {}
         self.topic_bus = LocalTopicBus()
         self.service_bus = LocalServiceBus()
         self._resource_service: ResourceService | None = None
@@ -1203,6 +1236,17 @@ class HostLinkLocalRuntime:
         node.set_service_bus(self.service_bus)
         node.children = list(spec.device_config.children) if spec.device_config else []
         node.__dict__["_hostlink_runtime"] = self
+        # workstation 声明了 XDL protocol：挂载协议编排器（步骤生成与资源
+        # 展开/回写逻辑与 ROS2 共用 runtime.workstation_protocol），
+        # 动作解析时把 protocol 名路由给它。
+        protocol_type = (spec.config or {}).get("protocol_type")
+        if node.driver_is_workstation and protocol_type:
+            from unilabos.backend.hostlink.workstation import WorkstationNode
+
+            node.__dict__["_workstation_protocols"] = WorkstationNode(
+                protocol_type,
+                host_device_node=node,
+            )
         if parent is not None:
             parent.sub_devices[spec.device_id] = node
             if "serial_" in spec.device_id or "io_" in spec.device_id:

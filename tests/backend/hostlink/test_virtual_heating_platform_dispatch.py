@@ -9,10 +9,8 @@ from unilabos.client.materials import LocalMaterialsClient
 from unilabos.config.config import BasicConfig
 from unilabos.devices.virtual.heating_platform import VirtualHeatingPlatform
 from unilabos.backend.hostlink.backend import HostLinkBackend
-from unilabos.backend.hostlink.execution_adapter import HostLinkExecutionAdapter
+from unilabos.backend.hostlink.host_node import HostNode
 from unilabos.server.backend.execution_queue import QueueItem
-from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.server.database.repositories.telemetry import TelemetryRepository
 from unilabos.server.backend.execution import JobExecutionBackend
 from unilabos.server.backend.telemetry import TelemetryDeviceStateProjection
 from unilabos.server.backend.composition import set_materials_gateway
@@ -65,11 +63,9 @@ def test_test_mode_executes_only_explicit_virtual_simulator_and_records_status_h
 ) -> None:
     monkeypatch.setattr(BasicConfig, "test_mode", True)
     monkeypatch.setattr(BasicConfig, "is_host_mode", True)
-    material_service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    material_service = MaterialsService(tmp_path / "materials.db")
     set_materials_gateway(LocalMaterialsClient(material_service))
-    telemetry_service = TelemetryService(
-        TelemetryRepository(tmp_path / "telemetry.db")
-    )
+    telemetry_service = TelemetryService(tmp_path / "telemetry.db")
     device_state = TelemetryDeviceStateProjection(
         telemetry_service,
         endpoint_uuid="heating-test",
@@ -108,16 +104,11 @@ def test_test_mode_executes_only_explicit_virtual_simulator_and_records_status_h
         device_state_store=device_state,
         result_bridges=[recording],
     )
-    adapter = HostLinkExecutionAdapter(
-        runtime,
-        devices_config=object(),
-        resources_config=object(),
-        bridges=[backend],
-    )
-    backend._host_node_getter = lambda: adapter
+    adapter = None
     try:
         runtime.start()
-        adapter.start()
+        adapter = HostNode("host_node", runtime, bridges=[backend])
+        backend._host_node_getter = lambda: adapter
         backend.start()
 
         physical = _item("physical-heater", "heat")
@@ -190,8 +181,10 @@ def test_test_mode_executes_only_explicit_virtual_simulator_and_records_status_h
         assert material.data.source_job_uuid == virtual.job_id
     finally:
         backend.stop()
-        adapter.stop()
+        if adapter is not None:
+            adapter.stop()
+        HostNode.reset_state()
         runtime.stop()
-        telemetry_service.repository.close()
+        telemetry_service.close()
         set_materials_gateway(None)
-        material_service.repository.close()
+        material_service.close()

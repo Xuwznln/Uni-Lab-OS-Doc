@@ -10,14 +10,23 @@ initialize_device = pytest.importorskip(
 )
 
 
-def _device_config(klass):
+def _device_config(template_name, klass=""):
     return SimpleNamespace(
         res_content=SimpleNamespace(
+            template_name=template_name,
             klass=klass,
             uuid="local-device-uuid",
             config={},
         )
     )
+
+
+def test_device_registry_name_is_read_from_template_name_not_class():
+    """运行态只读 template_name；class 仅在图读取边界回填，不在此处兜底。"""
+    with pytest.raises(initialize_device.DeviceClassInvalid, match="cannot be empty"):
+        initialize_device.initialize_device_from_dict(
+            "device-1", _device_config("", klass="legacy_registry_name")
+        )
 
 
 def test_device_class_input_must_be_registry_name_string():

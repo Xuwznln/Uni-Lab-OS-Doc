@@ -216,7 +216,7 @@ class HostLinkBackend:
     def _handle_material_template_create(
         data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import ResourceTemplateWrite
         from unilabos.server.backend.composition import get_materials_gateway
 
@@ -235,7 +235,7 @@ class HostLinkBackend:
     ) -> dict[str, Any]:
         """Proxy Slave creation through the Host-selected authority."""
 
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialTreeCreate
         from unilabos.server.backend.composition import get_materials_gateway
 
@@ -300,7 +300,7 @@ class HostLinkBackend:
     def _handle_material_data_put(
         data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialDataWrite
         from unilabos.server.backend.composition import get_materials_gateway
 
@@ -322,7 +322,7 @@ class HostLinkBackend:
     def _handle_material_move(
         data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialMove
         from unilabos.server.backend.composition import get_materials_gateway
 
@@ -339,7 +339,7 @@ class HostLinkBackend:
     def _handle_material_transfer(
         data: dict[str, Any], peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialTransfer
         from unilabos.server.backend.composition import get_materials_gateway
 
@@ -398,7 +398,7 @@ class HostLinkBackend:
     def _handle_material_delete(
         data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialDelete
         from unilabos.server.backend.composition import get_materials_gateway
 
@@ -430,7 +430,7 @@ class HostLinkBackend:
     def _handle_material_apply_snapshot(
         data: dict[str, Any], _peer: dict[str, Any]
     ) -> dict[str, Any]:
-        from unilabos.protocol.common import InventoryMutation
+        from unilabos.protocol.materials import InventoryMutation
         from unilabos.protocol.materials import MaterialSnapshot
         from unilabos.server.backend.composition import get_materials_gateway
 
@@ -444,7 +444,7 @@ class HostLinkBackend:
         )
 
     # ------------------------------------------------------------------
-    # 物料下行链路（Host → 设备投影），与 ros/hostlink_bridge 的本地执行语义一致
+    # 物料下行链路（Host → 设备投影），与 presets/downlink 的本地执行语义一致
     # ------------------------------------------------------------------
 
     def _require_local_resource_node(self, device_id: str) -> Any:

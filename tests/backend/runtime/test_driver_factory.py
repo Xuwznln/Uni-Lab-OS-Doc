@@ -4,7 +4,10 @@ from types import SimpleNamespace
 
 from unilabos.backend.hostlink.main_hostlink_run import build_runtime
 from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
-from unilabos.backend.runtime.definition import iter_device_config_entries
+from unilabos.backend.runtime.definition import (
+    is_host_node_config,
+    iter_device_config_entries,
+)
 from unilabos.backend.runtime.driver_creator import select_driver_creator
 from unilabos.devices.workstation.workstation_base import WorkstationBase
 from unilabos.resources.resource_tracker import (
@@ -93,11 +96,31 @@ def test_device_tree_iterator_initializes_subdevices_with_graph_identity() -> No
 
 def test_hostlink_does_not_instantiate_ros_host_node() -> None:
     host_node = _node("host_node")
-    host_node.res_content.klass = "host_node"
+    host_node.res_content.template_name = "host_node"
+    host_node.res_content.uuid = "host-uuid"
 
     runtime = build_runtime(SimpleNamespace(root_nodes=[host_node]))
 
     assert runtime.devices == {}
+    # 图中声明的 host 身份被记录，供 backend.start() 注册服务设备时复用。
+    assert runtime.graph_host_resource_uuids == {"host_node": "host-uuid"}
+
+
+def test_host_node_is_identified_by_template_name_only() -> None:
+    """host 判别只看 template_name；class 是旧字段，仅在图读取边界回填。"""
+    declared = SimpleNamespace(type="device", id="host_a", template_name="host_node", klass="")
+    assert is_host_node_config(declared) is True
+
+    legacy_class_only = SimpleNamespace(
+        type="device", id="host_b", template_name="device", klass="host_node"
+    )
+    assert is_host_node_config(legacy_class_only) is False
+    # 未声明模板的旧图节点：template_name 回退为 type，按配置实例 id 兼容判别。
+    assert is_host_node_config(legacy_class_only, "host_b") is True
+    assert is_host_node_config(legacy_class_only, "other") is False
+
+    other_device = SimpleNamespace(type="device", id="pump", template_name="pump_demo", klass="")
+    assert is_host_node_config(other_device, "pump") is False
 
 
 def test_hostlink_runtime_uses_same_factory_for_dynamic_subdevice(monkeypatch) -> None:

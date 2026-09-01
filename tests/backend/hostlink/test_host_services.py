@@ -42,7 +42,6 @@ from unilabos.registry.registry import lab_registry
 from unilabos.resources import materials
 from unilabos.resources.objects.site import ResourceSite
 from unilabos.server.backend.composition import set_materials_gateway
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.services.materials import MaterialsService
 from unilabos.server.services.materials import MaterialNotFoundError
 
@@ -88,6 +87,10 @@ def _host_node_registry_entry() -> dict:
                 "manual_confirm": _identity_mapping(
                     "timeout_seconds", "assignee_user_ids",
                 ),
+                "auto-test_resource": _identity_mapping(
+                    "sample_uuids", "resource", "resources", "device", "devices",
+                ),
+                "test_latency": _identity_mapping(),
             }
         }
     }
@@ -144,7 +147,7 @@ def test_register_host_services_skipped_without_registry_entry(monkeypatch) -> N
 
 def test_host_services_visible_in_endpoint_capabilities(monkeypatch) -> None:
     """host_node 物料动作应进入 runtime.v1 能力快照（画布/单点动作目录）。"""
-    from unilabos.backend.hostlink.execution_adapter import HostLinkExecutionAdapter
+    from unilabos.backend.hostlink.host_node import HostNode
     from unilabos.server.backend.capabilities import build_endpoint_capabilities
 
     monkeypatch.setitem(
@@ -159,11 +162,10 @@ def test_host_services_visible_in_endpoint_capabilities(monkeypatch) -> None:
         HostLinkDriverSpec(DEV_A, _WarehouseDriver, {}, resource_uuid=DEV_A_UUID)
     )
     host = HostLinkBackend(runtime, is_slave=False)
-    adapter: HostLinkExecutionAdapter | None = None
+    adapter: HostNode | None = None
     try:
         host.start()
-        adapter = HostLinkExecutionAdapter(host, devices_config=[], resources_config=[])
-        adapter.refresh_devices(initial=True, notify_ready=False)
+        adapter = HostNode("host_node", host)
 
         routes, capabilities = build_endpoint_capabilities(
             adapter, observed_at_ms=int(time.time() * 1000)
@@ -182,11 +184,12 @@ def test_host_services_visible_in_endpoint_capabilities(monkeypatch) -> None:
     finally:
         if adapter is not None:
             adapter.stop()
+            type(adapter).reset_state()
         host.stop()
 
 
 def test_host_services_material_actions(tmp_path, monkeypatch) -> None:
-    service = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    service = MaterialsService(tmp_path / "materials.db")
     gateway = LocalMaterialsClient(service)
     set_materials_gateway(gateway)
 

@@ -74,7 +74,7 @@ def _device_config(
             "uuid": f"{device_id}-uuid",
             "name": device_id,
             "type": "device",
-            "class": registry_name,
+            "template_name": registry_name,
         }
     )
 
@@ -86,11 +86,11 @@ def _definition(
     backend_name: str | None = None,
 ) -> SimpleNamespace:
     assert backend_name == "hostlink"
-    is_station = device_config.res_content.klass == "test.workstation"
+    is_station = device_config.res_content.template_name == "test.workstation"
     return SimpleNamespace(
         driver_class=_Workstation if is_station else _ServiceStatusDriver,
         runtime_config={"protocol_type": []} if is_station else {},
-        registry_name=str(device_config.res_content.klass),
+        registry_name=str(device_config.res_content.template_name),
         display_name=device_id,
         action_value_mappings=(
             {}

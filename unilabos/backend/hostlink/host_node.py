@@ -1,70 +1,96 @@
-"""HostLink device execution adapter.
+"""HostLink 形态的 Host 执行编排节点。
 
-This module is deliberately transport-only.  Job lifecycle and failure
-decisions are owned by the Edge microbackend.
+「host_node」在系统中拆成两层：
+
+1. **host_node 服务设备** —— :class:`unilabos.backend.host_services.HostServices`
+   是唯一的动作定义源（registry 单独扫描 ``backend/host_services.py``），
+   HostLink 形态经 :func:`unilabos.backend.hostlink.host_services.register_host_services`
+   装进本进程 runtime；
+2. **执行编排（本类）** —— 本地驱动线程池执行、设备快照刷新、结果规范化。
+   ROS2 对应物是 :class:`unilabos.backend.ros2.presets.host_node.HostNode`，
+   两者共享 :class:`HostAdapterBase` 的簿记/桥接通知/ping-pong/test_mode 逻辑。
+
+物料/设备管理下行是 :mod:`unilabos.backend.hostlink.downlink` 的模块级函数，
+不挂在本类上。微后端只依赖 ``adapter_registry.get_execution_adapter()`` 契约。
 """
 
 from __future__ import annotations
 
 import asyncio
-import collections
 import json
 import threading
 import time
 import traceback
+
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional
 
-from unilabos.config.config import BasicConfig
-from unilabos.backend.runtime.action import ActionCancelled, ActionContext
-from unilabos.backend.hostlink.adapter_registry import execution_result_bridges
-from unilabos.backend.hostlink.backend import HostLinkBackend, to_wire_value
+from unilabos.backend.hostlink.adapter_registry import set_execution_adapter
+from unilabos.backend.hostlink.backend import to_wire_value
 from unilabos.backend.hostlink.protocol import RemoteError
+from unilabos.backend.runtime.action import ActionCancelled, ActionContext
+from unilabos.backend.runtime.host_adapter import (
+    HostAdapterBase,
+    execution_result_bridges,
+)
+from unilabos.config.config import BasicConfig
+from unilabos.registry.action_policy import SUCCESS_TYPE_CANCELLATION
 from unilabos.resources.resource_tracker import PARAM_SAMPLE_UUIDS
 from unilabos.utils import logger
-from unilabos.utils.type_check import serialize_result_info
-from unilabos.registry.action_policy import SUCCESS_TYPE_CANCELLATION
+from unilabos.utils.serialization import serialize_result_info
 
 if TYPE_CHECKING:
+    from unilabos.backend.hostlink.backend import HostLinkBackend
     from unilabos.server.backend.execution_queue import QueueItem
 
 
-@dataclass
-class _DeviceActionStatus:
-    job_ids: Dict[str, float] = field(default_factory=dict)
+class HostNode(HostAdapterBase):
+    """HostLink 的 host 执行编排节点（单例）。
 
+    构造即启动：注册执行适配器、刷新设备快照并启动监控线程；
+    结束时调用 :meth:`stop`。
+    """
 
-class HostLinkExecutionAdapter:
-    """Execute device actions through HostLink and emit raw results."""
+    _instance: ClassVar[Optional["HostNode"]] = None
+    _ready_event: ClassVar[threading.Event] = threading.Event()
 
-    namespace = "/devices"
+    @classmethod
+    def get_instance(cls, timeout=None) -> Optional["HostNode"]:
+        if cls._ready_event.wait(timeout):
+            return cls._instance
+        return None
+
+    @classmethod
+    def reset_state(cls) -> None:
+        """重置单例状态（销毁实例后调用，供重启/干净退出）。"""
+        cls._instance = None
+        cls._ready_event.clear()
+        logger.info("[Host Node] State reset complete")
 
     def __init__(
         self,
-        runtime: HostLinkBackend,
-        devices_config: Any,
-        resources_config: Any,
-        *,
-        bridges: Optional[list[Any]] = None,
-    ) -> None:
+        device_id: str,
+        runtime: "HostLinkBackend",
+        bridges: Optional[List[Any]] = None,
+    ):
+        """初始化 HostLink 主机编排节点。
+
+        Args:
+            device_id: host_node 服务设备的 device_id
+            runtime: HostLink backend 实例
+            bridges: 桥接器列表
+        """
+        if self._instance is not None:
+            self._instance.lab_logger().critical("[Host Node] HostNode instance already exists.")
+        self.__class__._instance = self
+
+        # 共享簿记（devices_names / device_status / ping / goal 状态等）
+        HostAdapterBase.__init__(self, bridges=bridges)
+        self.device_id = device_id
+
         self.runtime = runtime
-        self.device_id = BasicConfig.host_node_name
-        self.devices_config = devices_config
-        self.resources_config = resources_config
-        self.resources_edge_config: list[dict[str, Any]] = []
-        self.server_latest_timestamp = 0.0
-        self.devices_names: Dict[str, str] = {}
-        self.device_machine_names: Dict[str, str] = {}
-        self._online_devices: set[str] = set()
-        self._action_value_mappings: Dict[str, Dict[str, Any]] = {}
         self._device_descriptors: Dict[str, Dict[str, Any]] = {}
-        self.device_status: Dict[str, Dict[str, Any]] = {}
-        self.device_status_timestamps: Dict[str, Dict[str, float]] = {}
-        self._subscribed_topics: set[str] = set()
-        self._ping_lock = threading.Lock()
-        self._ping_responses: Dict[str, Dict[str, Any]] = {}
         self._contexts: Dict[str, ActionContext] = {}
         self._contexts_lock = threading.RLock()
         self._executor = ThreadPoolExecutor(
@@ -73,43 +99,24 @@ class HostLinkExecutionAdapter:
         )
         self._stop_event = threading.Event()
         self._monitor_thread: Optional[threading.Thread] = None
-        self.bridges = list(bridges or [])
-        self._goals: Dict[str, Any] = {}
-        self._inflight_goal_jobs: set[str] = set()
-        self._state_lock = threading.RLock()
-        self._canceled_jobs: set[str] = set()
-        self._device_action_status = collections.defaultdict(_DeviceActionStatus)
 
-    def _publish_result(
-        self,
-        item: "QueueItem",
-        status: str,
-        return_info: Dict[str, Any],
-        result_data: Dict[str, Any],
-    ) -> None:
-        """Emit an unmodified transport result to the microbackend bridge."""
-
-        self._goals.pop(item.job_id, None)
-        self._inflight_goal_jobs.discard(item.job_id)
-        with self._state_lock:
-            self._canceled_jobs.discard(item.job_id)
-        for bridge in execution_result_bridges(self.bridges):
-            publish_status = getattr(bridge, "publish_job_status", None)
-            if callable(publish_status):
-                publish_status(result_data, item, status, return_info)
-
-    def start(self) -> None:
         for node in self.runtime.local.devices.values():
             node.add_status_listener(self._on_local_status)
         self.refresh_devices(initial=True, notify_ready=False)
         self._monitor_thread = threading.Thread(
             target=self._monitor_devices,
-            name="hostlink-execution-adapter",
+            name="hostlink-host-node",
             daemon=True,
         )
         self._monitor_thread.start()
 
+        self.lab_logger().info("[Host Node] Host node initialized (backend=hostlink).")
+        HostNode._ready_event.set()
+        set_execution_adapter(self)
+        self.notify_ready()
+
     def stop(self) -> None:
+        """停止执行编排（关闭监控线程与动作线程池）。"""
         self._stop_event.set()
         monitor = self._monitor_thread
         if monitor is not None and monitor is not threading.current_thread():
@@ -132,12 +139,16 @@ class HostLinkExecutionAdapter:
             drained = not self._contexts
         self._executor.shutdown(wait=drained, cancel_futures=True)
 
+    # ------------------------------------------------------------------
+    # 设备快照与状态
+    # ------------------------------------------------------------------
+
     def _monitor_devices(self) -> None:
         while not self._stop_event.wait(0.5):
             try:
                 self.refresh_devices(initial=False, notify_ready=True)
             except Exception:  # noqa: BLE001 - monitor must remain alive
-                logger.exception("[HostLink Adapter] 设备状态刷新失败")
+                logger.exception("[Host Node] 设备状态刷新失败")
 
     def _device_snapshot(self, *, initial: bool) -> Dict[str, Dict[str, Any]]:
         if initial:
@@ -159,25 +170,14 @@ class HostLinkExecutionAdapter:
                 result.setdefault(device_id, remote)
         return result
 
-    def refresh_devices(
-        self,
-        *,
-        initial: bool = False,
-        notify_ready: bool = False,
-    ) -> None:
+    def refresh_devices(self, *, initial: bool = False, notify_ready: bool = False) -> None:
         snapshot = self._device_snapshot(initial=initial)
-        self._subscribed_topics = set(
-            self.runtime.local.topic_bus.subscribed_topics()
-        )
+        self._subscribed_topics = set(self.runtime.local.topic_bus.subscribed_topics())
         old_devices = set(self.devices_names)
         current_devices = set(snapshot)
 
-        self.devices_names = {
-            device_id: self.namespace for device_id in sorted(current_devices)
-        }
-        self._online_devices = {
-            f"{self.namespace}/{device_id}" for device_id in current_devices
-        }
+        self.devices_names = {device_id: self.namespace for device_id in sorted(current_devices)}
+        self._online_devices = {f"{self.namespace}/{device_id}" for device_id in current_devices}
         self.device_machine_names = {}
         self._action_value_mappings = {}
         self._device_descriptors = {}
@@ -186,9 +186,7 @@ class HostLinkExecutionAdapter:
             descriptor = dict(info.get("device") or {"id": device_id})
             self._device_descriptors[device_id] = descriptor
             mappings = descriptor.get("action_value_mappings")
-            self._action_value_mappings[device_id] = (
-                dict(mappings) if isinstance(mappings, dict) else {}
-            )
+            self._action_value_mappings[device_id] = dict(mappings) if isinstance(mappings, dict) else {}
             if info.get("location") == "local":
                 machine_name = BasicConfig.machine_name or "本地"
             else:
@@ -211,9 +209,7 @@ class HostLinkExecutionAdapter:
                     try:
                         publish_ready()
                     except Exception:  # noqa: BLE001 - reconnect will retry
-                        logger.exception(
-                            "[HostLink Adapter] host_ready 更新失败"
-                        )
+                        logger.exception("[Host Node] host_ready 更新失败")
 
     def _on_local_status(self, device_id: str, name: str, value: Any) -> None:
         self._update_device_status(device_id, name, to_wire_value(value))
@@ -230,28 +226,9 @@ class HostLinkExecutionAdapter:
             if callable(publish_status):
                 publish_status(self.device_status, device_id, name)
 
-    def notify_ready(self) -> None:
-        """Tell connected application bridges that the Host is usable."""
-
-        for bridge in self.bridges:
-            method_names = (
-                ("publish_host_ready",)
-                if callable(getattr(bridge, "publish_host_ready", None))
-                else (
-                    "report_action_error_decisions",
-                    "report_all_action_locks",
-                )
-            )
-            for method_name in method_names:
-                method = getattr(bridge, method_name, None)
-                if callable(method):
-                    try:
-                        method()
-                    except Exception:  # noqa: BLE001 - bridge may be offline
-                        logger.exception(
-                            "[HostLink Adapter] bridge %s 初始化通知失败",
-                            method_name,
-                        )
+    # ------------------------------------------------------------------
+    # 动作派发（线程池执行）
+    # ------------------------------------------------------------------
 
     def _action_descriptor(self, device_id: str) -> Dict[str, Any]:
         return self._device_descriptors.get(device_id, {})
@@ -285,14 +262,13 @@ class HostLinkExecutionAdapter:
         sample_material: Dict[str, Any],
         server_info: Optional[Dict[str, Any]] = None,
     ) -> None:
-        with self._state_lock:
+        with self._goal_state_lock:
             if item.job_id in self._canceled_jobs:
+                self.lab_logger().info(f"[Host Node] Skip canceled goal {item.job_id[:8]}")
                 return
-
         if item.action_name == "test_latency" and server_info is not None:
-            self.server_latest_timestamp = float(
-                server_info.get("send_timestamp", 0.0)
-            )
+            self.server_latest_timestamp = float(server_info.get("send_timestamp", 0.0))
+
         if item.device_id not in self.devices_names:
             self.refresh_devices(initial=False, notify_ready=False)
         if item.device_id not in self.devices_names:
@@ -304,33 +280,17 @@ class HostLinkExecutionAdapter:
             and getattr(local_node.driver, "run_in_test_mode", False) is True
         )
         if BasicConfig.test_mode and not run_simulator:
-            result = self._build_test_mode_return(
-                item.device_id,
-                item.action_name,
-                action_kwargs,
-            )
+            result = self._build_test_mode_return(item.device_id, item.action_name, action_kwargs)
             return_info = serialize_result_info("", True, result)
             result_data = self._result_data(item, result, return_info)
-            self._publish_result(
-                item,
-                "success",
-                return_info,
-                result_data,
-            )
+            self._publish_terminal_result(item, "success", return_info, result_data)
             return
 
         context = ActionContext(
             action_id=item.job_id,
-            feedback_callback=lambda _action_id, feedback: self._publish_feedback(
-                item,
-                feedback,
-            ),
+            feedback_callback=lambda _action_id, feedback: self._publish_feedback(item, feedback),
         )
-        kwargs = self._prepare_action_kwargs(
-            item,
-            action_kwargs,
-            sample_material,
-        )
+        kwargs = self._prepare_action_kwargs(item, action_kwargs, sample_material)
         with self._contexts_lock:
             self._contexts[item.job_id] = context
         self._inflight_goal_jobs.add(item.job_id)
@@ -368,11 +328,7 @@ class HostLinkExecutionAdapter:
                     **action_kwargs,
                 )
             )
-            status, return_info = self._normalize_result(
-                item,
-                action_type,
-                result,
-            )
+            status, return_info = self._normalize_result(item, action_type, result)
             result_data = self._result_data(item, result, return_info)
         except ActionCancelled:
             status = "failed"
@@ -399,7 +355,7 @@ class HostLinkExecutionAdapter:
                 self._contexts.pop(item.job_id, None)
             self._inflight_goal_jobs.discard(item.job_id)
 
-        with self._state_lock:
+        with self._goal_state_lock:
             canceled = item.job_id in self._canceled_jobs
         if canceled and status != "canceled":
             status = "failed"
@@ -411,7 +367,7 @@ class HostLinkExecutionAdapter:
             )
             result_data = self._result_data(item, {}, return_info)
 
-        self._publish_result(item, status, return_info, result_data)
+        self._publish_terminal_result(item, status, return_info, result_data)
 
     def _result_data(
         self,
@@ -423,10 +379,7 @@ class HostLinkExecutionAdapter:
             "return_value": to_wire_value(result),
             "return_info": json.dumps(return_info, ensure_ascii=False),
         }
-        mapping = self._action_value_mappings.get(item.device_id, {}).get(
-            item.action_name,
-            {},
-        )
+        mapping = self._action_value_mappings.get(item.device_id, {}).get(item.action_name, {})
         result_mapping = mapping.get("result") if isinstance(mapping, dict) else None
         if not isinstance(result_mapping, dict):
             return data
@@ -453,7 +406,6 @@ class HostLinkExecutionAdapter:
     @staticmethod
     def _set_result_path(target: Dict[str, Any], path: str, value: Any) -> None:
         """Set a dotted ROS result field on the transport result dictionary."""
-
         parts = [part for part in path.split(".") if part]
 
         def write(current: Dict[str, Any], index: int, current_value: Any) -> None:
@@ -520,9 +472,7 @@ class HostLinkExecutionAdapter:
         source = result if isinstance(result, dict) else {}
         error_info = {
             "action_name": str(source.get("action_name") or item.action_name),
-            "exception_type": str(
-                source.get("exception_type") or "ActionResultError"
-            ),
+            "exception_type": str(source.get("exception_type") or "ActionResultError"),
             "exception_mro": list(
                 source.get("exception_mro")
                 or [
@@ -585,135 +535,14 @@ class HostLinkExecutionAdapter:
             context = self._contexts.get(job_id)
         if context is None:
             return False
-        with self._state_lock:
+        with self._goal_state_lock:
             self._canceled_jobs.add(job_id)
         context.request_cancel()
         try:
             return bool(self.runtime.cancel_action(job_id))
         except Exception:  # noqa: BLE001 - context cancellation is still active
-            logger.exception(
-                "[HostLink Adapter] 取消动作失败：%s",
-                job_id,
-            )
+            logger.exception("[Host Node] 取消动作失败：%s", job_id)
             return False
 
-    def cancel_goal(self, goal_uuid: str) -> bool:
-        return self.cancel_job(goal_uuid)
 
-    def get_goal_status(self, job_id: str) -> int:
-        if job_id in self._inflight_goal_jobs:
-            return 2
-        return 0
-
-    def handle_pong_response(self, pong_data: Dict[str, Any]) -> None:
-        ping_id = str(pong_data.get("ping_id") or "")
-        if not ping_id:
-            return
-        with self._ping_lock:
-            self._ping_responses[ping_id] = dict(pong_data)
-
-    def notify_resource_tree_update(
-        self,
-        device_id: str,
-        action: str,
-        resource_uuid_list: list[str],
-    ) -> Optional[bool]:
-        """把权威已完成的物料变更（前端经微后端）分发到目标设备。
-
-        本进程设备直接调度实例协程；跨机（Slave）设备经 HostLink 下行 RPC。
-        设备不可达时返回 None（有意跳过），失败返回 False。
-        """
-        from unilabos.backend.runtime.async_utils import run_node_coroutine
-        from unilabos.backend.hostlink.protocol import ActionType
-
-        operations = [{"action": str(action), "data": list(resource_uuid_list)}]
-        try:
-            node = self.runtime.local.get_device(device_id)
-            if node is not None:
-                run_node_coroutine(node, node.apply_resource_tree_update(operations))
-                return True
-            server = self.runtime.server
-            if server is None or not server.has_device(device_id):
-                logger.info(
-                    "[HostLink adapter] 设备 %s 不在本进程、也不在 HostLink 在线表，跳过资源树 %s 分发",
-                    device_id,
-                    action,
-                )
-                return None
-            server.request_device(
-                str(device_id),
-                ActionType.RESOURCE_TREE_SYNC,
-                {"device_id": str(device_id), "operations": operations},
-            )
-            return True
-        except Exception:
-            logger.exception(
-                "[HostLink adapter] 资源树 %s 分发到 %s 失败", action, device_id
-            )
-            return False
-
-    def notify_device_manage(
-        self,
-        target_node_id: str,
-        action: str,
-        device_config: Dict[str, Any],
-    ) -> Optional[bool]:
-        """把 add/remove 设备指令分发到目标节点（本进程直调 / 跨机 HostLink 下行）。"""
-        from unilabos.backend.runtime.async_utils import run_node_coroutine
-        from unilabos.backend.hostlink.protocol import ActionType
-
-        command = {"action": str(action), "data": dict(device_config)}
-        try:
-            node = self.runtime.local.get_device(target_node_id)
-            if node is not None:
-                result = run_node_coroutine(node, node.device_manage(command))
-                return bool(result.get("success"))
-            server = self.runtime.server
-            if server is None or not server.has_device(target_node_id):
-                logger.info(
-                    "[HostLink adapter] 设备 %s 不在本进程、也不在 HostLink 在线表，跳过设备 %s 分发",
-                    target_node_id,
-                    action,
-                )
-                return None
-            result = server.request_device(
-                str(target_node_id),
-                ActionType.DEVICE_MANAGE,
-                {"device_id": str(target_node_id), **command},
-            )
-            return bool(isinstance(result, dict) and result.get("success"))
-        except Exception:
-            logger.exception(
-                "[HostLink adapter] 设备 %s 分发到 %s 失败", action, target_node_id
-            )
-            return False
-
-    def _build_test_mode_return(
-        self,
-        device_id: str,
-        action_name: str,
-        action_kwargs: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
-            "test_mode": True,
-            "action_name": action_name,
-        }
-        mapping = self._action_value_mappings.get(device_id, {}).get(
-            action_name,
-            {},
-        )
-        handles = mapping.get("handles", {}) if isinstance(mapping, dict) else {}
-        if isinstance(handles, dict):
-            for output_handle in handles.get("output", []):
-                data_key = str(output_handle.get("data_key") or "")
-                handler_key = str(output_handle.get("handler_key") or "")
-                if not handler_key:
-                    continue
-                value: Any = {}
-                for _ in range(data_key.count("@flatten")):
-                    value = [value]
-                result[handler_key] = value
-        return result
-
-
-__all__ = ["HostLinkExecutionAdapter"]
+__all__ = ["HostNode"]

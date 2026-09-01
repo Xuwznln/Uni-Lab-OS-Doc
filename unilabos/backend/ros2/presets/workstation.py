@@ -1,125 +1,159 @@
+"""ROS2 形态的工作站节点。
+
+workstation 按「驱动 / 编排」分层：
+
+1. **工作站驱动** —— :class:`unilabos.devices.workstation.workstation_base.WorkstationBase`
+   及其子类是注册表的扫描源（本编排类不绑定 @device，需要被具体工作站
+   节点承载，不进注册表）；
+2. **工作站编排（本类）** —— 继承 :class:`BaseROS2DeviceNode` 作为设备节点壳，
+   负责子设备初始化、硬件接口代理、XDL protocol ActionServer 与子设备
+   ActionClient。HostLink 对应物是
+   :class:`unilabos.backend.hostlink.workstation.WorkstationNode`。
+
+protocol 步骤生成、协议名/模型解析与资源展开/回写是 backend 无关共享逻辑
+（:mod:`unilabos.backend.runtime.workstation_protocol` 与
+:mod:`unilabos.experiments.compile`），双 backend 同一份。
+"""
+
+from __future__ import annotations
+
 import json
 import time
 import traceback
 from pprint import pformat
-from typing import List, Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import rclpy
+from rclpy.action import ActionClient, ActionServer
+from rclpy.action.server import ServerGoalHandle
 from rosidl_runtime_py import message_to_ordereddict
 
-from unilabos.experiments.models import *  # type: ignore  # protocol names
-from rclpy.action import ActionServer, ActionClient
-from rclpy.action.server import ServerGoalHandle
-
-from unilabos.experiments.compile import action_protocol_generators
+from unilabos.backend.ros2.base_device_node import (
+    BaseROS2DeviceNode,
+    DeviceNodeResourceTracker,
+    ROS2DeviceNode,
+)
 from unilabos.backend.ros2.initialize_device import initialize_device_from_dict
 from unilabos.backend.ros2.msgs.message_converter import (
-    get_action_type,
-    convert_to_ros_msg,
     convert_from_ros_msg_with_mapping,
+    convert_to_ros_msg,
+    get_action_type,
 )
-from unilabos.backend.ros2.base_device_node import BaseROS2DeviceNode, DeviceNodeResourceTracker, ROS2DeviceNode
-from unilabos.resources.objects.resource import ResourceDictType
-from unilabos.resources.resource_tracker import ResourceTreeSet, ResourceDictInstance
-from unilabos.utils.type_check import serialize_result_info
+from unilabos.backend.runtime.workstation_protocol import (
+    WorkstationNodeTempError,
+    expand_resource_value,
+    protocol_model,
+    setup_protocol_names,
+    update_protocol_resources,
+)
+from unilabos.config.config import BasicConfig
+from unilabos.experiments.compile import action_protocol_generators
+from unilabos.utils.serialization import serialize_result_info
 
 if TYPE_CHECKING:
     from unilabos.devices.workstation.workstation_base import WorkstationBase
-
-
-class ROS2WorkstationNodeTempError(Exception):
-    pass
+    from unilabos.resources.resource_tracker import ResourceDictInstance
 
 
 class ROS2WorkstationNode(BaseROS2DeviceNode):
-    """
-    ROS2WorkstationNode代表管理ROS2环境中设备通信和动作的协议节点。
-    它初始化设备节点，处理动作客户端，并基于指定的协议执行工作流。
-    它还物理上代表一组协同工作的设备，如带夹持器的机械臂，带传送带的CNC机器等。
+    """ROS2 的工作站编排节点。
+
+    设备节点壳 + 子设备初始化/ActionClient + 硬件接口代理 +
+    protocol ActionServer。
     """
 
     driver_instance: "WorkstationBase"
 
     def __init__(
         self,
-        protocol_type: List[str],
-        children: List[ResourceDictInstance],
+        protocol_type: Any,
+        children: Optional[List["ResourceDictInstance"]] = None,
         *,
-        driver_instance: "WorkstationBase",
-        device_id: str,
-        registry_name: str,
-        resource_uuid: str,
-        status_types: Dict[str, Any],
-        action_value_mappings: Dict[str, Any],
-        hardware_interface: Dict[str, Any],
-        print_publish=True,
+        driver_instance: Optional["WorkstationBase"] = None,
+        device_id: str = "",
+        registry_name: str = "",
+        resource_uuid: str = "",
+        status_types: Optional[Dict[str, Any]] = None,
+        action_value_mappings: Optional[Dict[str, Any]] = None,
+        hardware_interface: Optional[Dict[str, Any]] = None,
+        print_publish: bool = True,
         resource_tracker: Optional["DeviceNodeResourceTracker"] = None,
     ):
-        self._setup_protocol_names(protocol_type)
+        self.protocol_names = setup_protocol_names(protocol_type)
 
-        # 初始化非BaseROSNode的属性
-        self.children = children
+        # protocol 的 ROS action 类型（ActionServer 建立用）
+        self.protocol_action_mappings: Dict[str, Any] = {}
+        for protocol_name in self.protocol_names:
+            self.protocol_action_mappings[protocol_name] = get_action_type(
+                protocol_model(protocol_name)
+            )
+
+        self.children = children or []
         # 初始化基类，让基类处理常规动作
-        super().__init__(
+        BaseROS2DeviceNode.__init__(
+            self,
             driver_instance=driver_instance,
             device_id=device_id,
             registry_name=registry_name,
             resource_uuid=resource_uuid,
-            status_types=status_types,
-            action_value_mappings={**action_value_mappings, **self.protocol_action_mappings},
-            hardware_interface=hardware_interface,
+            status_types=status_types or {},
+            action_value_mappings={**(action_value_mappings or {}), **self.protocol_action_mappings},
+            hardware_interface=hardware_interface or {},
             print_publish=print_publish,
             resource_tracker=resource_tracker,
         )
 
         self._busy = False
-        self.sub_devices = {}
-        self._action_clients = {}
+        self.sub_devices: Dict[str, Any] = {}
+        self._action_clients: Dict[str, Any] = {}
 
         # 初始化子设备
-        self.communication_node_id_to_instance = {}
+        self.communication_node_id_to_instance: Dict[str, Any] = {}
 
         for device_config in self.children:
-            device_id = device_config.res_content.id
+            child_device_id = device_config.res_content.id
             if device_config.res_content.type != "device":
                 self.lab_logger().debug(
-                    f"[Protocol Node] Skipping type {device_config.res_content.type} {device_id} already existed, skipping."
+                    f"[Workstation] Skipping type {device_config.res_content.type} {child_device_id}."
                 )
                 continue
             try:
-                d = self.initialize_device(device_id, device_config)
+                d = self.initialize_device(child_device_id, device_config)
             except Exception as ex:
                 self.lab_logger().error(
-                    f"[Protocol Node] Failed to initialize device {device_id}: {ex}\n{traceback.format_exc()}"
+                    f"[Workstation] Failed to initialize device {child_device_id}: {ex}\n{traceback.format_exc()}"
                 )
                 d = None
             if d is None:
                 continue
 
-            if "serial_" in device_id or "io_" in device_id:
-                self.communication_node_id_to_instance[device_id] = d
+            if "serial_" in child_device_id or "io_" in child_device_id:
+                self.communication_node_id_to_instance[child_device_id] = d
                 continue
 
         for device_config in self.children:
-            device_id = device_config.res_content.id
+            child_device_id = device_config.res_content.id
             if device_config.res_content.type != "device":
                 continue
             # 设置硬件接口代理
-            if device_id not in self.sub_devices:
-                self.lab_logger().error(f"[Protocol Node] {device_id} 还没有正确初始化，跳过...")
+            if child_device_id not in self.sub_devices:
+                self.lab_logger().error(f"[Workstation] {child_device_id} 还没有正确初始化，跳过...")
                 continue
-            d = self.sub_devices[device_id]
+            d = self.sub_devices[child_device_id]
             if d:
-                hardware_interface = d.ros_node_instance._hardware_interface
+                child_hardware_interface = d.ros_node_instance._hardware_interface
                 if (
-                    hasattr(d.driver_instance, hardware_interface["name"])
-                    and hasattr(d.driver_instance, hardware_interface["write"])
-                    and (hardware_interface["read"] is None or hasattr(d.driver_instance, hardware_interface["read"]))
+                    hasattr(d.driver_instance, child_hardware_interface["name"])
+                    and hasattr(d.driver_instance, child_hardware_interface["write"])
+                    and (
+                        child_hardware_interface["read"] is None
+                        or hasattr(d.driver_instance, child_hardware_interface["read"])
+                    )
                 ):
 
-                    name = getattr(d.driver_instance, hardware_interface["name"])
-                    read = hardware_interface.get("read", None)
-                    write = hardware_interface.get("write", None)
+                    name = getattr(d.driver_instance, child_hardware_interface["name"])
+                    read = child_hardware_interface.get("read", None)
+                    write = child_hardware_interface.get("write", None)
 
                     # 如果硬件接口是字符串，通过通信设备提供
                     if isinstance(name, str) and name in self.sub_devices:
@@ -127,31 +161,17 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
                         communicate_hardware_info = communicate_device.ros_node_instance._hardware_interface
                         self._setup_hardware_proxy(d, self.sub_devices[name], read, write)
                         self.lab_logger().info(
-                            f"\n通信代理：为子设备{device_id}\n    "
+                            f"\n通信代理：为子设备{child_device_id}\n    "
                             f"添加了{read}方法(来源：{name} {communicate_hardware_info['write']}) \n    "
                             f"添加了{write}方法(来源：{name} {communicate_hardware_info['read']})"
                         )
 
-        self.lab_logger().info(f"ROS2WorkstationNode {device_id} initialized with protocols: {self.protocol_names}")
+        self.lab_logger().info(
+            f"ROS2WorkstationNode {device_id} initialized with protocols: {self.protocol_names}"
+        )
 
-    def _setup_protocol_names(self, protocol_type):
-        # 处理协议类型
-        if isinstance(protocol_type, str):
-            if "," not in protocol_type:
-                self.protocol_names = [protocol_type]
-            else:
-                self.protocol_names = [protocol.strip() for protocol in protocol_type.split(",")]
-        else:
-            self.protocol_names = protocol_type
-        # 准备协议相关的动作值映射
-        self.protocol_action_mappings = {}
-        for protocol_name in self.protocol_names:
-            protocol_type = globals()[protocol_name]
-            self.protocol_action_mappings[protocol_name] = get_action_type(protocol_type)
-
-    def initialize_device(self, device_id, device_config):
-        """初始化设备并创建相应的动作客户端"""
-        # device_id_abs = f"{self.device_id}/{device_id}"
+    def initialize_device(self, device_id: str, device_config: "ResourceDictInstance"):
+        """初始化子设备并创建相应的动作客户端。"""
         device_id_abs = f"{device_id}"
         self.lab_logger().info(f"初始化子设备: {device_id_abs}")
         d = self.sub_devices[device_id] = initialize_device_from_dict(device_id_abs, device_config)
@@ -177,8 +197,8 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
                     self.lab_logger().trace(f"为子设备 {device_id} 创建动作客户端: {action_name}")
         return d
 
-    def create_device(self, device_id: str, config: ResourceDictType) -> dict:
-        """Dynamically add a sub-device to this workstation."""
+    def create_device(self, device_id: str, config: Any) -> dict:
+        """动态添加子设备。"""
         if not device_id:
             return {"success": False, "error": "device_id required"}
 
@@ -186,7 +206,8 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
             return {"success": False, "error": f"Sub-device {device_id} already exists"}
 
         try:
-            from unilabos.config.config import BasicConfig
+            from unilabos.resources.resource_tracker import ResourceDictInstance, ResourceTreeSet
+
             config.setdefault("id", device_id)
             config.setdefault("type", "device")
             config.setdefault("machine_name", BasicConfig.machine_name or "本地")
@@ -202,6 +223,7 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
             # Add to resource tracker
             try:
                 from unilabos.resources.resource_tracker import ResourceTreeInstance
+
                 tree = ResourceTreeInstance(res_dict)
                 for plr_resource in ResourceTreeSet([tree]).to_plr_resources():
                     self.resource_tracker.add_resource(plr_resource)
@@ -217,7 +239,7 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
             return {"success": False, "error": str(e)}
 
     def destroy_device(self, device_id: str) -> dict:
-        """Dynamically remove a sub-device from this workstation."""
+        """动态移除子设备。"""
         if not device_id:
             return {"success": False, "error": "device_id required"}
 
@@ -226,10 +248,7 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
 
         try:
             # Remove from children config list
-            self.children = [
-                c for c in self.children
-                if c.res_content.id != device_id
-            ]
+            self.children = [c for c in self.children if c.res_content.id != device_id]
 
             # Remove from resource tracker
             try:
@@ -275,7 +294,7 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
             return {"success": False, "error": str(e)}
 
     def create_ros_action_server(self, action_name, action_value_mapping):
-        """创建ROS动作服务器"""
+        """创建ROS动作服务器；protocol 动作走协议编排回调。"""
         if action_name not in self.protocol_names:
             # 非protocol方法调用父类注册
             return super().create_ros_action_server(action_name, action_value_mapping)
@@ -283,7 +302,7 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
         protocol_name = action_name
         action_type = action_value_mapping["type"]
         str_action_type = str(action_type)[8:-2]
-        protocol_type = globals()[protocol_name]
+        protocol_type = protocol_model(protocol_name)
         protocol_steps_generator = action_protocol_generators[protocol_type]
 
         self._action_servers[action_name] = ActionServer(
@@ -307,43 +326,22 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
             action_value_mapping = self._action_value_mappings[protocol_name]
             step_results = []
             try:
-                self.lab_logger().warning("+" * 30)
                 self.lab_logger().info(protocol_steps_generator)
                 # 从目标消息中提取参数, 并调用Protocol生成器(根据设备连接图)生成action步骤
                 goal = goal_handle.request
                 protocol_kwargs = convert_from_ros_msg_with_mapping(goal, action_value_mapping["goal"])
 
-                # # 🔧 添加调试信息
-                # print(f"🔍 转换后的 protocol_kwargs: {protocol_kwargs}")
-                # print(f"🔍 vessel 在转换后: {protocol_kwargs.get('vessel', 'NOT_FOUND')}")
-
-                # # 🔧 完全禁用Host查询，直接使用转换后的数据
-                # print(f"🔧 跳过Host查询，直接使用转换后的数据")
-                # 向Host查询物料当前状态
+                # 向权威查询物料当前状态（Resource 字段展开为完整资源树）
                 for k, v in goal.get_fields_and_field_types().items():
                     if v in ["unilabos_msgs/Resource", "sequence<unilabos_msgs/Resource>"]:
                         self.lab_logger().info(f"{protocol_name} 查询资源状态: Key: {k} Type: {v}")
-
                         try:
-                            # 统一处理单个或多个资源
-                            resource_id = (
-                                protocol_kwargs[k]["id"]
-                                if v == "unilabos_msgs/Resource"
-                                else protocol_kwargs[k][0]["id"]
+                            protocol_kwargs[k] = await expand_resource_value(
+                                self, protocol_kwargs[k]
                             )
-                            resource_uuid = protocol_kwargs[k].get("uuid", None)
-                            # 直接向微后端权威查询（uuid 优先，其次 resource id）
-                            if resource_uuid:
-                                tree_set = await self.get_resource([resource_uuid], with_children=True)
-                            else:
-                                tree_set = await self.get_resource_by_id(resource_id, with_children=True)
-                            target = tree_set.dump()
-                            protocol_kwargs[k] = target[0][0] if v == "unilabos_msgs/Resource" else target
                         except Exception as ex:
                             self.lab_logger().error(f"查询资源失败: {k}, 错误: {ex}\n{traceback.format_exc()}")
                             raise
-
-                self.lab_logger().info(f"🔍 最终的 vessel: {protocol_kwargs.get('vessel', 'NOT_FOUND')}")
 
                 from unilabos.resources.graphio import physical_setup_graph
 
@@ -361,12 +359,10 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
                 )
 
                 time_start = time.time()
-                time_overall = 100
                 self._busy = True
 
                 # 逐步执行工作流
                 for i, action in enumerate(protocol_steps):
-                    # self.get_logger().info(f"Running step {i + 1}: {action}")
                     if isinstance(action, dict):
                         # 如果是单个动作，直接执行
                         if action["action_name"] == "wait":
@@ -379,7 +375,7 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
                                 ret_info = json.loads(getattr(result, "return_info", "{}"))
                                 if not ret_info.get("suc", False):
                                     raise RuntimeError(f"Step {i + 1} failed.")
-                            except ROS2WorkstationNodeTempError as ex:
+                            except WorkstationNodeTempError as ex:
                                 step_results.append(
                                     {"step": i + 1, "action": action["action_name"], "result": ex.args[0]}
                                 )
@@ -398,56 +394,17 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
                             }
                         )
 
-                # 向Host更新物料当前状态
-                for k, v in goal.get_fields_and_field_types().items():
-                    if v not in ["unilabos_msgs/Resource", "sequence<unilabos_msgs/Resource>"]:
-                        continue
-                    self.lab_logger().info(f"更新资源状态: {k}")
-                    try:
-                        # 去重：使用 seen 集合获取唯一的资源对象
-                        seen = set()
-                        unique_resources = []
-
-                        # 获取资源数据，统一转换为列表
-                        resource_data = protocol_kwargs[k]
-                        is_sequence = v != "unilabos_msgs/Resource"
-                        if not is_sequence:
-                            resource_list = [resource_data] if isinstance(resource_data, dict) else resource_data
-                        else:
-                            # 处理序列类型，可能是嵌套列表
-                            resource_list = []
-                            if isinstance(resource_data, list):
-                                for item in resource_data:
-                                    if isinstance(item, list):
-                                        resource_list.extend(item)
-                                    else:
-                                        resource_list.append(item)
-                            else:
-                                resource_list = [resource_data]
-
-                        for res_data in resource_list:
-                            if not isinstance(res_data, dict):
-                                continue
-                            res_name = res_data.get("id") or res_data.get("name")
-                            if not res_name:
-                                continue
-
-                            # 使用 resource_tracker 获取本地 PLR 实例
-                            plr = self.resource_tracker.figure_resource({"name": res_name}, try_mode=False)
-                            # 获取父资源
-                            res = self.resource_tracker.parent_resource(plr)
-                            if res is None:
-                                res = plr
-                            if id(res) not in seen:
-                                seen.add(id(res))
-                                unique_resources.append(res)
-
-                        # 使用新的资源树接口更新
-                        if unique_resources:
-                            await self.update_resource(unique_resources)
-                    except Exception as e:
-                        self.lab_logger().error(f"资源更新失败: {e}")
-                        self.lab_logger().error(traceback.format_exc())
+                # 向权威更新物料当前状态
+                resource_values = [
+                    protocol_kwargs[k]
+                    for k, v in goal.get_fields_and_field_types().items()
+                    if v in ["unilabos_msgs/Resource", "sequence<unilabos_msgs/Resource>"]
+                ]
+                try:
+                    await update_protocol_resources(self, resource_values)
+                except Exception as e:
+                    self.lab_logger().error(f"资源更新失败: {e}")
+                    self.lab_logger().error(traceback.format_exc())
 
                 # 设置成功状态和返回值
                 execution_success = True
@@ -510,11 +467,11 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
         return execute_protocol
 
     async def execute_single_action(self, device_id, action_name, action_kwargs):
-        """执行单个动作"""
+        """执行单个动作（经子设备 ActionClient）。"""
         # 构建动作ID
         if action_name == "log_message":
             self.lab_logger().info(f"[Protocol Log] {action_kwargs}")
-            raise ROS2WorkstationNodeTempError(f"[Protocol Log] {action_kwargs}")
+            raise WorkstationNodeTempError(f"[Protocol Log] {action_kwargs}")
         if device_id in ["", None, "self"]:
             action_id = f"/devices/{self.device_id}/{action_name}"
         else:
@@ -529,7 +486,6 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
         action_client = self._action_clients[action_id]
         goal_msg = convert_to_ros_msg(action_client._action_type.Goal(), action_kwargs)
 
-        ##### self.lab_logger().info(f"发送动作请求到: {action_id}")
         action_client.wait_for_server()
 
         # 等待动作完成
@@ -541,14 +497,11 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
             return None
 
         result_future = await handle.get_result_async()
-        ##### self.lab_logger().info(f"动作完成: {action_name}")
 
         return result_future.result
 
-    """还没有改过的部分"""
-
     def _setup_hardware_proxy(
-        self, device: ROS2DeviceNode, communication_device: ROS2DeviceNode, read_method, write_method
+        self, device: "ROS2DeviceNode", communication_device: "ROS2DeviceNode", read_method, write_method
     ):
         """为设备设置硬件接口代理。
 
@@ -609,3 +562,6 @@ class ROS2WorkstationNode(BaseROS2DeviceNode):
 
         if write_method and write_func is not None:
             setattr(driver_instance, write_method, _write)
+
+
+__all__ = ["ROS2WorkstationNode", "WorkstationNodeTempError"]

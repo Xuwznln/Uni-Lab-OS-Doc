@@ -13,7 +13,6 @@ from unilabos.backend.runtime.resource import (
 from unilabos.resources.presets.container import RegularContainer
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.client.materials import LocalMaterialsClient
-from unilabos.server.database.repositories.materials import MaterialsRepository
 from unilabos.server.services.materials import MaterialsService
 
 
@@ -32,7 +31,7 @@ def _container(name: str) -> RegularContainer:
 
 
 def test_resource_service_create_get_and_partial_snapshot_update(tmp_path) -> None:
-    materials = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    materials = MaterialsService(tmp_path / "materials.db")
     service = AuthorityResourceService(LocalMaterialsClient(materials))
     parent = _container("parent")
     child = _container("child")
@@ -88,7 +87,7 @@ def test_resource_service_create_get_and_partial_snapshot_update(tmp_path) -> No
         assert set(deleted) == {parent_uuid, child_uuid}
         assert materials.list_materials() == []
     finally:
-        materials.repository.close()
+        materials.close()
 
 
 def test_resource_service_has_no_implicit_runtime_store() -> None:
@@ -97,7 +96,7 @@ def test_resource_service_has_no_implicit_runtime_store() -> None:
 
 
 def test_resource_service_accepts_internal_create_draft(tmp_path) -> None:
-    materials = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    materials = MaterialsService(tmp_path / "materials.db")
     service = AuthorityResourceService(LocalMaterialsClient(materials))
     draft = ResourceTreeSet.from_plr_resources(
         [_container("draft")], known_random_uuid=True
@@ -112,13 +111,13 @@ def test_resource_service_accepts_internal_create_draft(tmp_path) -> None:
             "node-0": created.tree.all_nodes_uuid[0]
         }
     finally:
-        materials.repository.close()
+        materials.close()
 
 
 def test_snapshot_observer_diffs_the_complete_root_with_all_descendants(
     tmp_path,
 ) -> None:
-    materials = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    materials = MaterialsService(tmp_path / "materials.db")
     service = AuthorityResourceService(LocalMaterialsClient(materials))
     draft_root = _container("rack")
     draft_left = _container("left")
@@ -194,11 +193,11 @@ def test_snapshot_observer_diffs_the_complete_root_with_all_descendants(
     try:
         asyncio.run(run())
     finally:
-        materials.repository.close()
+        materials.close()
 
 
 def test_strict_snapshot_rejects_a_child_only_partial_tree(tmp_path) -> None:
-    materials = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    materials = MaterialsService(tmp_path / "materials.db")
     service = AuthorityResourceService(LocalMaterialsClient(materials))
     parent = _container("parent")
     parent.assign_child_resource(_container("child"), Coordinate.zero())
@@ -220,4 +219,4 @@ def test_strict_snapshot_rejects_a_child_only_partial_tree(tmp_path) -> None:
     try:
         asyncio.run(run())
     finally:
-        materials.repository.close()
+        materials.close()

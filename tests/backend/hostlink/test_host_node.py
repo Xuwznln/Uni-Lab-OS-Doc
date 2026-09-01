@@ -11,9 +11,8 @@ import pytest
 from unilabos.backend.hostlink.adapter_registry import (
     clear_execution_adapter,
     get_execution_adapter,
-    set_execution_adapter,
 )
-from unilabos.backend.hostlink.execution_adapter import HostLinkExecutionAdapter
+from unilabos.backend.hostlink.host_node import HostNode
 from unilabos.server.backend.execution import JobExecutionBackend
 from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
 from unilabos.backend.runtime.action import ActionContext
@@ -21,9 +20,8 @@ from unilabos.backend.hostlink.backend import HostLinkBackend
 from unilabos.server.backend.execution_queue import QueueItem
 from unilabos.registry.action_policy import normalize_error_policy
 from unilabos.server.backend.scheduler.service import BackendScheduler
-from unilabos.protocol.workflow import WorkflowNodeWrite
-from unilabos.server.services.workflow.service import WorkflowService
-from unilabos.server.database.repositories.workflow import WorkflowStore
+from unilabos.protocol.runtime.workflow import WorkflowNodeWrite
+from unilabos.server.services.runtime.workflow.service import WorkflowService
 
 
 class CommunicationError(RuntimeError):
@@ -153,20 +151,14 @@ def _item(action_name: str, *, retry_count: int = 0) -> QueueItem:
 def execution_stack():
     runtime, driver = _runtime()
     bridge = RecordingBridge()
-    adapter = HostLinkExecutionAdapter(
-        runtime,
-        devices_config=object(),
-        resources_config=object(),
-        bridges=[],
-    )
+    # HostLink HostNode：构造即启动并自行注册 adapter。
+    adapter = HostNode("host_node", runtime, bridges=[])
     microbackend = JobExecutionBackend(
         host_node_getter=lambda: adapter,
         result_bridges=[bridge],
     )
     adapter.bridges = [microbackend]
-    adapter.start()
     microbackend.start()
-    set_execution_adapter(adapter)
     try:
         yield adapter, microbackend, driver, bridge
     finally:
@@ -174,6 +166,7 @@ def execution_stack():
         microbackend.stop()
         adapter.stop()
         runtime.stop()
+        HostNode.reset_state()
 
 
 def test_hostlink_adapter_executes_microbackend_job(
@@ -207,7 +200,7 @@ def test_local_demo_workflow_task_dispatches_parameterized_hostlink_action(
     execution_stack,
 ) -> None:
     _adapter, microbackend, driver, _bridge = execution_stack
-    service = WorkflowService(WorkflowStore(":memory:"))
+    service = WorkflowService(":memory:")
     executor = BackendScheduler(service, microbackend)
     service.set_task_submitter(executor.submit)
     executor.start(recover=True)

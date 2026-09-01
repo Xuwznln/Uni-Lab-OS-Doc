@@ -41,11 +41,11 @@ def _resolve_devices(devices_config) -> List[Dict[str, Any]]:
         rc = node.res_content
         if getattr(rc, "type", None) != "device":
             continue
-        klass = rc.klass
-        if not isinstance(klass, str) or klass not in lab_registry.device_type_registry:
-            logger.warning(f"[dora] 设备 {rc.id} 的类 {klass} 未在注册表中，跳过")
+        registry_name = rc.template_name
+        if not isinstance(registry_name, str) or registry_name not in lab_registry.device_type_registry:
+            logger.warning(f"[dora] 设备 {rc.id} 的模板 {registry_name} 未在注册表中，跳过")
             continue
-        entry = lab_registry.device_type_registry[klass]
+        entry = lab_registry.device_type_registry[registry_name]
         class_conf = entry.get("class", {})
         module_spec = class_conf.get("module") if isinstance(class_conf, dict) else None
         if not module_spec or ":" not in module_spec:
@@ -104,7 +104,7 @@ def _launch(devices: List[Dict[str, Any]], device_tick_ms: int = 100, persistent
                     return
 
     if not persistent:
-        # 自包含模式：dora run 一把梭（内部拉起 coordinator/daemon）
+        # 自包含模式由 dora run 启动 coordinator 和 daemon。
         proc = runtime.run_dataflow(path)
         logger.info(f"[dora] dora run 已启动 pid={proc.pid}")
         try:

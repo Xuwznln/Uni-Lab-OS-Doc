@@ -13,8 +13,7 @@ from unilabos.backend.hostlink.backend import HostLinkBackend
 from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
 from unilabos.backend.hostlink.protocol import RemoteError
 from unilabos.resources.presets.container import RegularContainer
-from unilabos.server.database.repositories.materials import MaterialsRepository
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import MaterialTransfer, MaterialTransferItem
 from unilabos.server.backend.composition import set_materials_gateway
 from unilabos.server.services.materials import MaterialsService
@@ -68,7 +67,7 @@ def test_slave_transfer_is_authorized_by_host_and_loads_target_service(
     tmp_path,
     monkeypatch,
 ) -> None:
-    materials = MaterialsService(MaterialsRepository(tmp_path / "materials.db"))
+    materials = MaterialsService(tmp_path / "materials.db")
     gateway = LocalMaterialsClient(materials)
     set_materials_gateway(gateway)
     monkeypatch.setattr(HostLinkConfig, "enable", True)
@@ -142,11 +141,13 @@ def test_slave_transfer_is_authorized_by_host_and_loads_target_service(
         )
 
         result = asyncio.run(
-            source_node.transfer_resource_to_another(
+            materials_helper.transfer(
                 [source_material],
                 "target",
                 [target_mount],
                 [None],
+                source_device_id=source_node.device_id,
+                source_device_uuid=source_node.resource_uuid,
             )
         )
 
@@ -166,4 +167,4 @@ def test_slave_transfer_is_authorized_by_host_and_loads_target_service(
         source.stop()
         host.stop()
         set_materials_gateway(None)
-        materials.repository.close()
+        materials.close()

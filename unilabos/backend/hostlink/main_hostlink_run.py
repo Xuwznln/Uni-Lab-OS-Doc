@@ -4,12 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from unilabos.backend.hostlink.adapter_registry import (
-    clear_execution_adapter,
-    set_execution_adapter,
-)
-from unilabos.backend.hostlink.execution_adapter import HostLinkExecutionAdapter
+from unilabos.backend.hostlink.adapter_registry import clear_execution_adapter
 from unilabos.backend.runtime.definition import (
+    is_host_node_config,
     iter_device_config_entries,
     resolve_device_definition,
 )
@@ -22,7 +19,7 @@ from unilabos.utils import logger
 
 
 _runtime: Optional[HostLinkBackend] = None
-_execution_adapter: Optional[HostLinkExecutionAdapter] = None
+_host_node: Optional[Any] = None
 
 
 def validate_environment() -> None:
@@ -31,10 +28,6 @@ def validate_environment() -> None:
 
 def get_runtime() -> Optional[HostLinkBackend]:
     return _runtime
-
-
-def get_execution_adapter() -> Optional[HostLinkExecutionAdapter]:
-    return _execution_adapter
 
 
 def build_runtime(devices_config: Any) -> HostLinkLocalRuntime:
@@ -47,9 +40,20 @@ def build_runtime(devices_config: Any) -> HostLinkLocalRuntime:
     for entry in iter_device_config_entries(devices_config):
         device_id = entry.device_id
         node = entry.config
-        if node.res_content.klass == "host_node":
+        if is_host_node_config(node.res_content):
+            # host node 按 template_name 判别且全图只能有一个；服务设备由
+            # backend.start() 注册，这里只记录图中声明的身份（uuid），
+            # 注册时复用，保证图导出与权威身份一致。
+            if runtime.graph_host_resource_uuids:
+                raise ValueError(
+                    "图中只能声明一个 host node（template_name=host_node），当前有: "
+                    + ", ".join(
+                        [*runtime.graph_host_resource_uuids, device_id]
+                    )
+                )
+            runtime.graph_host_resource_uuids[device_id] = node.res_content.uuid
             logger.debug(
-                "[HostLink] 跳过图中的 host_node；Host 生命周期由微后端管理"
+                "[HostLink] 图中的 host node 由内置 host 服务承载，跳过驱动创建"
             )
             continue
         definition = resolve_device_definition(
@@ -83,7 +87,7 @@ def _run(
     is_slave: bool,
     bridges: Optional[list[Any]] = None,
 ) -> None:
-    global _execution_adapter, _runtime
+    global _host_node, _runtime
     runtime = HostLinkBackend(
         build_runtime(devices_config),
         is_slave=is_slave,
@@ -92,8 +96,8 @@ def _run(
     try:
         runtime.start()
         if is_slave:
-            # Slave 开机物料权威对齐（与 Host 的 materials.ensure 语义一致）：
-            # 不上报创建、不换 uuid；权威缺失时以图中 uuid 显式创建（经 HostLink）。
+            # Slave 通过 HostLink 调用 materials.ensure：采用图中的物料 UUID，
+            # 并在权威缺失时以该 UUID 创建记录。
             from unilabos.config.config import BasicConfig
 
             if (
@@ -109,22 +113,23 @@ def _run(
                     len(ensured.trees),
                 )
         if not is_slave:
-            _execution_adapter = HostLinkExecutionAdapter(
+            from unilabos.backend.hostlink.host_node import HostNode
+            from unilabos.config.config import BasicConfig
+
+            # HostNode 构造时注册执行适配器、刷新设备快照并启动监控；
+            # finally 负责关闭其生命周期。
+            _host_node = HostNode(
+                BasicConfig.host_node_name,
                 runtime,
-                devices_config,
-                resources_config,
                 bridges=bridges,
             )
-            _execution_adapter.start()
-            set_execution_adapter(_execution_adapter)
-            _execution_adapter.notify_ready()
         while not runtime.local.wait(timeout=1.0):
             pass
     finally:
-        adapter, _execution_adapter = _execution_adapter, None
-        if adapter is not None:
-            clear_execution_adapter(adapter)
-            adapter.stop()
+        host_node, _host_node = _host_node, None
+        if host_node is not None:
+            clear_execution_adapter(host_node)
+            host_node.stop()
         runtime.stop()
         if _runtime is runtime:
             _runtime = None
@@ -184,7 +189,6 @@ def slave(
 
 
 __all__ = [
-    "get_execution_adapter",
     "get_runtime",
     "main",
     "slave",

@@ -1,13 +1,8 @@
-"""ROS2/HostLink compatibility facade backed by the Edge microbackend.
+"""ROS2 networking facade backed by the Edge microbackend.
 
-The ROS backend used to own a second HostLink server/client implementation in
-this module.  That split made the declared microbackend networking service
-dead code and allowed the two lifecycle owners to drift.  Keep the historical
-function names for embedders, but delegate every operation to
-``unilabos.backend.hostlink.network``.
-
-The direct ``hostlink`` backend does not use this facade; its
-``HostLinkBackend`` owns the transport that executes Python drivers.
+The public setup helpers delegate lifecycle ownership to
+``unilabos.backend.hostlink.network``. The direct ``hostlink`` backend uses
+``HostLinkBackend`` as the transport for Python drivers.
 """
 
 from __future__ import annotations
