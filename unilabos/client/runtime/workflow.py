@@ -14,7 +14,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Optional, Protocol
 from uuid import uuid4
 
-from unilabos.client.envelope import EnvelopeError
+from unilabos.client.utils.envelope import EnvelopeError
 from unilabos.client.http import HTTPClient, HTTPClientConfig
 from unilabos.utils.address import (
     derive_websocket_address,

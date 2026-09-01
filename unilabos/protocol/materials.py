@@ -1,17 +1,102 @@
-"""``materials.v1`` 物料传输模型。
+"""``materials.v1`` 物料传输模型与写请求幂等信封。
 
 数据库 Record 描述表行；这里的模型描述稳定的通信协议，因此 JSON 字段在
 线协议中不带 ``_json`` 后缀，substance 也始终是具名对象而不是三元组。
+所有写请求共用 ``InventoryMutation`` 幂等信封，成功结果以
+``MutationResult`` 携带 ledger sequence 范围与受影响聚合版本。
 """
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Union
+from typing import Generic, Literal, Optional, TypeVar, Union
 
 from pydantic import Field, JsonValue, model_validator
 
 from unilabos.protocol.base import JsonObject, NonEmptyStr, ServerObject
 from unilabos.server.database.tables.materials import ResourceTemplateHandle
+
+
+PROTOCOL_VERSION = "materials.v1"
+
+
+AggregateType = Literal[
+    "resource_template", "material", "site", "lot", "reservation"
+]
+
+
+class AggregatePrecondition(ServerObject):
+    aggregate_type: AggregateType
+    aggregate_uuid: NonEmptyStr
+    expected_version: Optional[int] = Field(default=None, ge=0)
+    expected_state_hash: Optional[NonEmptyStr] = None
+
+    @model_validator(mode="after")
+    def _require_condition(self) -> "AggregatePrecondition":
+        if self.expected_version is None and self.expected_state_hash is None:
+            raise ValueError("precondition requires expected_version or state hash")
+        return self
+
+
+class InventoryMutation(ServerObject):
+    """所有写请求共用的幂等信封。"""
+
+    protocol_version: Literal["materials.v1"] = PROTOCOL_VERSION
+    command_uuid: NonEmptyStr
+    effect_key: NonEmptyStr
+    operation: NonEmptyStr
+    actor_type: NonEmptyStr = "edge"
+    actor_uuid: Optional[NonEmptyStr] = None
+    job_uuid: Optional[NonEmptyStr] = None
+    observed_at_ms: int = Field(default=0, ge=0)
+    preconditions: list[AggregatePrecondition] = Field(default_factory=list)
+    payload: JsonObject = Field(default_factory=dict)
+
+
+class AggregateVersion(ServerObject):
+    aggregate_type: AggregateType
+    aggregate_uuid: NonEmptyStr
+    version: int = Field(ge=1)
+    state_hash: NonEmptyStr
+
+
+class InventoryChange(ServerObject):
+    sequence: int = Field(ge=1)
+    event_uuid: NonEmptyStr
+    aggregate_type: AggregateType
+    aggregate_uuid: NonEmptyStr
+    operation: NonEmptyStr
+    previous_version: int = Field(ge=0)
+    aggregate_version: int = Field(ge=1)
+    state_hash: NonEmptyStr
+    delta: JsonObject = Field(default_factory=dict)
+    job_uuid: Optional[NonEmptyStr] = None
+    command_uuid: Optional[NonEmptyStr] = None
+    effect_key: Optional[NonEmptyStr] = None
+    actor_type: NonEmptyStr
+    actor_uuid: Optional[NonEmptyStr] = None
+    occurred_at_ms: int = Field(ge=0)
+    delivery_status: Literal["pending", "sent", "acknowledged", "dead_letter"]
+
+
+ResultT = TypeVar("ResultT")
+
+
+class MutationResult(ServerObject, Generic[ResultT]):
+    protocol_version: Literal["materials.v1"] = PROTOCOL_VERSION
+    command_uuid: NonEmptyStr
+    effect_key: NonEmptyStr
+    replayed: bool = False
+    changed: bool = True
+    ledger_sequence_start: int = Field(ge=1)
+    ledger_sequence_end: int = Field(ge=1)
+    affected: list[AggregateVersion] = Field(default_factory=list)
+    data: ResultT
+
+    @model_validator(mode="after")
+    def _validate_ledger_range(self) -> "MutationResult[ResultT]":
+        if self.ledger_sequence_end < self.ledger_sequence_start:
+            raise ValueError("ledger sequence range is reversed")
+        return self
 
 
 class ResourceTemplateWrite(ServerObject):
@@ -555,10 +640,17 @@ class MaterialSnapshotDiff(ServerObject):
 
 
 __all__ = [
+    "AggregatePrecondition",
+    "AggregateType",
+    "AggregateVersion",
     "InventoryAllocation",
+    "InventoryChange",
     "InventoryLotInbound",
     "InventoryLotRead",
+    "InventoryMutation",
     "InventoryRequirement",
+    "MutationResult",
+    "PROTOCOL_VERSION",
     "InventoryReservationCreate",
     "InventoryReservationRead",
     "InventoryReservationTransition",

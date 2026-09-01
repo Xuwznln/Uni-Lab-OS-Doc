@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, Optional
 
 import httpx
 
-from .envelope import EnvelopeError, unwrap_envelope
+from .utils.envelope import EnvelopeError, unwrap_envelope
 
 
 @dataclass

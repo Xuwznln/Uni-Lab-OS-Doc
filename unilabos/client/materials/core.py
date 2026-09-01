@@ -8,11 +8,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from unilabos.protocol.common import (
-    InventoryChange,
-    InventoryMutation,
-    MutationResult,
-)
+from unilabos.protocol.materials import InventoryChange, InventoryMutation, MutationResult
 from unilabos.protocol.materials import (
     InventoryLotInbound,
     InventoryLotRead,

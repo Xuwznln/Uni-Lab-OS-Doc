@@ -2,7 +2,7 @@
 
 The models in this module are deliberately transport-independent.  They use
 the frozen Backend field spelling, validate stable UUID identities at the
-boundary, and never carry legacy Run identifiers.
+boundary, and represent execution through Workflow Task and Job identities.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from unilabos.protocol.json_codec import MAX_BACKEND_JSON_DEPTH
+from unilabos.protocol.utils.json_codec import MAX_BACKEND_JSON_DEPTH
 
 JsonObject = Dict[str, Any]
 JsonArray = List[Any]
@@ -95,8 +95,7 @@ class WorkflowNodeWrite(BaseModel):
     parent_uuid: Optional[str] = None
     material_uuid: Optional[str] = None
     name: str
-    # Backend 自 c35d821 起已移除 WorkflowNode.status，d552078 仍保持该语义；保留的默认值仅供旧本地
-    # Store 内部兼容，公共读写 DTO 不要求或返回该字段。
+    # status 是 Store 使用的内部默认值；公共读写 DTO 不要求或返回该字段。
     status: str = "idle"
     type: str
     icon: Optional[str] = None

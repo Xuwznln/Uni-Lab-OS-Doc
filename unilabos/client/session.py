@@ -19,7 +19,6 @@ from unilabos.utils.file_lock import (
     acquire_exclusive_file_lock,
     release_file_lock,
 )
-from unilabos.utils.address import resolve_address
 
 
 @dataclass
@@ -69,12 +68,6 @@ class SessionState:
             auth=AuthInfo(**data.get("auth", {})),
             context=ContextInfo(**data.get("context", {})),
         )
-
-
-def resolve_addr(addr: str) -> str:
-    """兼容旧调用名；新代码统一使用 ``resolve_address``。"""
-
-    return resolve_address(addr)
 
 
 class SessionManager:

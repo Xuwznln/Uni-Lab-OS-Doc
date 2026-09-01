@@ -8,8 +8,8 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Mapping
 
-from unilabos.protocol.json_codec import encode_json, strict_json_equal
-from unilabos.protocol.workflow import WorkflowEdgeWrite, WorkflowNodeWrite
+from unilabos.protocol.utils.json_codec import encode_json, strict_json_equal
+from unilabos.protocol.runtime.workflow import WorkflowEdgeWrite, WorkflowNodeWrite
 
 _MAX_SCHEMA_DEPTH = 64
 _MAX_TIMEOUT_SECONDS = (2**63 - 1) // 1_000_000_000

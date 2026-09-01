@@ -1,7 +1,8 @@
-"""``runtime.v1`` 的微后端控制协议。
+"""``runtime.v1`` 数据/执行边界：后端、微后端与执行 adapter 间的请求对象。
 
-这里的对象描述后端、微后端与执行 adapter 之间的稳定请求边界；数据库
-Record 由 :mod:`unilabos.server.database.tables.runtime` 定义。
+会话、endpoint 快照、Job 生命周期与命令/事件队列等运行数据的稳定边界；
+业务控制面见同包 :mod:`unilabos.protocol.runtime.control`，数据库 Record
+由 :mod:`unilabos.server.database.tables.runtime` 定义。
 """
 
 from __future__ import annotations

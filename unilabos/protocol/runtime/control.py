@@ -1,4 +1,10 @@
-"""Backend/Edge 业务控制面的轻通知与 HTTP 权威文档协议。"""
+"""``runtime.v1`` 业务控制面：Backend/Edge 的轻通知与 HTTP 权威文档协议。
+
+Edge 与 runtime（微后端/Backend）之间只有一个协议版本 ``runtime.v1``：
+:mod:`unilabos.protocol.runtime.data` 承载数据/执行边界，本模块承载
+业务控制面（命令下发通知、命令正文、事件回收）。替换后端时数据源与
+控制源整体切换，不做独立版本协商。
+"""
 
 from __future__ import annotations
 
@@ -9,10 +15,10 @@ from pydantic import Field, JsonValue, model_validator
 from unilabos.protocol.base import JsonObject, NonEmptyStr, ServerObject
 from unilabos.server.database.tables.runtime import MaterialBinding, Transport
 from unilabos.protocol.materials import InventoryRequirement
-from unilabos.protocol.runtime import CommandEnvelope
-
-
-CONTROL_PROTOCOL_VERSION = "control.v1"
+from unilabos.protocol.runtime.data import (
+    RUNTIME_PROTOCOL_VERSION,
+    CommandEnvelope,
+)
 
 CommandType = Literal[
     "execute_job",
@@ -27,7 +33,7 @@ CommandType = Literal[
 class BackendSessionNotice(ServerObject):
     """WS 连接建立后的短握手，用于恢复 durable event outbox。"""
 
-    protocol_version: Literal["control.v1"] = CONTROL_PROTOCOL_VERSION
+    protocol_version: Literal["runtime.v1"] = RUNTIME_PROTOCOL_VERSION
     session_uuid: NonEmptyStr
     edge_uuid: NonEmptyStr
     authority_epoch: NonEmptyStr
@@ -38,7 +44,7 @@ class BackendSessionNotice(ServerObject):
 class BackendCommandNotice(ServerObject):
     """WS 只携带“哪个命令变了”，不携带执行参数或决策正文。"""
 
-    protocol_version: Literal["control.v1"] = CONTROL_PROTOCOL_VERSION
+    protocol_version: Literal["runtime.v1"] = RUNTIME_PROTOCOL_VERSION
     notice_uuid: NonEmptyStr
     change_type: Literal["command.available"] = "command.available"
     command_uuid: NonEmptyStr
@@ -55,7 +61,7 @@ class BackendCommandNotice(ServerObject):
 class BackendCommandDocument(ServerObject):
     """Edge 经 HTTP 拉取的完整、权威命令。"""
 
-    protocol_version: Literal["control.v1"] = CONTROL_PROTOCOL_VERSION
+    protocol_version: Literal["runtime.v1"] = RUNTIME_PROTOCOL_VERSION
     command: CommandEnvelope
     payload: JsonObject
 
@@ -117,7 +123,7 @@ class CancelJobContent(ServerObject):
 class EdgeChangeNotice(ServerObject):
     """Edge 出站 WS 通知；正文由 Backend 从 Edge HTTP API 拉取。"""
 
-    protocol_version: Literal["control.v1"] = CONTROL_PROTOCOL_VERSION
+    protocol_version: Literal["runtime.v1"] = RUNTIME_PROTOCOL_VERSION
     change_type: Literal["runtime.event"] = "runtime.event"
     session_uuid: NonEmptyStr
     event_uuid: NonEmptyStr
@@ -131,7 +137,7 @@ class EdgeChangeNotice(ServerObject):
 
 
 class EdgeChangeAck(ServerObject):
-    protocol_version: Literal["control.v1"] = CONTROL_PROTOCOL_VERSION
+    protocol_version: Literal["runtime.v1"] = RUNTIME_PROTOCOL_VERSION
     session_uuid: NonEmptyStr
     through_sequence: int = Field(ge=0)
     acknowledged_at_ms: int = Field(default=0, ge=0)
@@ -142,7 +148,6 @@ __all__ = [
     "BackendCommandNotice",
     "BackendSessionNotice",
     "CancelJobContent",
-    "CONTROL_PROTOCOL_VERSION",
     "CommandType",
     "EdgeChangeAck",
     "EdgeChangeNotice",
