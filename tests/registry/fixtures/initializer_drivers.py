@@ -1,4 +1,4 @@
-"""Plan 09 Task 3: mock drivers for initializer tests."""
+"""Mock drivers for external Registry initializer tests."""
 
 
 class MockBackend:

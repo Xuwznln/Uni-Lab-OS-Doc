@@ -13,7 +13,7 @@ from unilabos.registry.placeholder_type import (
     PLACEHOLDER_SITES,
     SiteSlot,
 )
-from unilabos.registry.utils import (
+from unilabos.registry.utils.tools import (
     SLOT_TYPES,
     detect_placeholder_keys,
     detect_slot_type,
@@ -65,12 +65,12 @@ def test_detect_placeholder_keys_maps_site_slot() -> None:
 
 
 def test_host_transfer_actions_declare_site_slot() -> None:
-    """transfer_resource 的 site 参数应是 SiteSlot 注解。"""
+    """transfer_resource 的 site 参数应是 SiteSlot 注解（唯一定义在 HostServices）。"""
 
     import inspect
 
-    from unilabos.backend.ros2.presets import host_node as host_node_module
+    from unilabos.backend.host_services import HostServices
 
-    method = host_node_module.HostNode.transfer_resource
+    method = HostServices.transfer_resource
     parameters = inspect.signature(method).parameters
     assert parameters["site"].annotation is SiteSlot

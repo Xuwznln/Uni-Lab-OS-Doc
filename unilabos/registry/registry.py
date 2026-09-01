@@ -1,8 +1,7 @@
-"""
-统一注册表系统
+"""设备、资源与工作流注册表的构建和查询入口。
 
-合并了原 Registry (YAML 加载) 和 DecoratorRegistry (装饰器/AST 扫描) 的功能，
-提供单一入口来构建、验证和查询设备/资源注册表。
+注册表同时接收装饰器的 AST 扫描结果与 YAML 声明，并负责类型解析、完整性
+校验和运行时索引。
 """
 
 import copy
@@ -21,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
 
 from unilabos.config.config import BasicConfig
-from unilabos.registry.backend_metadata import normalize_supported_backends
+from unilabos.registry.utils.backend_metadata import normalize_supported_backends
 from unilabos.registry.material_locks import normalize_material_parameter_names
 from unilabos.registry.decorators import (
     get_device_meta,
@@ -38,8 +37,8 @@ from unilabos.registry.decorators import (
 )
 from unilabos.registry.init_enforce import validate_init_param_enforce
 from unilabos.registry.status_policy import normalize_status_policy
-from unilabos.registry.yaml_ref import resolve_yaml_refs
-from unilabos.registry.utils import (
+from unilabos.registry.utils.yaml_ref import resolve_yaml_refs
+from unilabos.registry.utils.tools import (
     ROSMsgNotFound,
     parse_docstring,
     get_json_schema_type,
@@ -64,26 +63,25 @@ from unilabos.utils import logger
 from unilabos.utils.decorator import singleton
 from unilabos.utils.cls_creator import import_class
 from unilabos.utils.import_manager import get_enhanced_class_info
-from unilabos.utils.type_check import NoAliasDumper
+from unilabos.utils.serialization import NoAliasDumper
 from msgcenterpy.instances.json_schema_instance import JSONSchemaMessageInstance
 
-_HOSTLINK_SCHEMA_ONLY = BasicConfig.backend == "hostlink"
+# AST discovery is backend-neutral. This flag only controls optional ROS
+# message-class enrichment required by the ROS2 runtime.
+_ROS_TYPE_RESOLUTION_ENABLED = BasicConfig.backend == "ros2"
 
-if not _HOSTLINK_SCHEMA_ONLY:
-    from unilabos_msgs.msg import Resource
+if _ROS_TYPE_RESOLUTION_ENABLED:
     from unilabos.backend.ros2.msgs.message_converter import (
         msg_converter_manager,
         ros_action_result_mapping,
         ros_action_to_json_schema,
         String,
-        ros_message_to_json_schema,
     )
     from msgcenterpy.instances.ros2_instance import ROS2MessageInstance
 else:
     # HostLink transmits JSON descriptors and values.  ROS message classes are
-    # intentionally absent on this path; legacy ROS actions remain as string
-    # metadata and are not executable by the JSON-only demo registry.
-    Resource = None
+    # intentionally absent on this path; ROS action types remain string
+    # descriptors and execution is routed through Python driver methods.
     msg_converter_manager = None
     ROS2MessageInstance = None
     String = str
@@ -144,13 +142,13 @@ class Registry:
 
     核心流程:
       1. AST 静态扫描 @device/@resource 装饰器 (快速, 无需 import)
-      2. 加载 YAML 注册表 (兼容旧格式)
+      2. 加载 YAML 注册表
       3. 设置 host_node 内置设备
       4. verify & resolve (实际 import 验证 + 类型解析)
     """
 
     def __init__(self, registry_paths=None):
-        if not _HOSTLINK_SCHEMA_ONLY:
+        if _ROS_TYPE_RESOLUTION_ENABLED:
             import ctypes
 
             try:
@@ -214,7 +212,7 @@ class Registry:
         # 2. Host node 内置设备
         self._setup_host_node()
 
-        # 3. YAML 注册表加载 (兼容旧格式) — external_only 模式下跳过
+        # 3. 加载内置 YAML 注册表；external_only 模式只保留外部声明。
         if external_only:
             logger.info("[UniLab Registry] external_only 模式: 跳过内置 YAML 注册表加载")
         else:
@@ -246,72 +244,36 @@ class Registry:
     # ------------------------------------------------------------------
 
     def _setup_host_node(self):
-        """设置 host_node 内置设备 — 基于 _run_ast_scan 已扫描的结果进行覆写。"""
-        # 从 AST 扫描结果中取出 host_node 的 action_value_mappings
-        ast_entry = self.device_type_registry.get("host_node", {})
-        if _HOSTLINK_SCHEMA_ONLY:
-            # HostLink Host 生命周期由微后端管理，图中也不会实例化 ROS
-            # HostNode。保留 AST 生成的 JSON 描述即可。
-            if ast_entry:
-                self.device_type_registry["host_node"] = ast_entry
+        """设置 host_node 内置设备 — 基于单独扫描的结果覆写注册表。
+
+        host_services.py 不进默认启动扫描（exclude），其 AST 描述由
+        ``_run_ast_scan`` 末尾的单独扫描产出（``self._host_node_ast_entry``），
+        本方法自行登记 host_node 注册表条目。
+        """
+        ast_entry = getattr(self, "_host_node_ast_entry", None) or {}
+        if not ast_entry:
+            logger.error("[UniLab Registry] host_services.py 未生成 host_node 定义")
             return
-        ast_actions = ast_entry.get("class", {}).get("action_value_mappings", {})
 
-        # 取出 AST 生成的 action entries, 补充特定覆写
-        test_latency_action = ast_actions.get("auto-test_latency", {})
-        test_resource_action = ast_actions.get("auto-test_resource", {})
-        manual_confirm_action = ast_actions.get("manual_confirm", {})
-        apply_deduct_resource_action = ast_actions.get("apply_deduct_resource", {})
-        set_substance_action = ast_actions.get("set_substance", {})
-        discard_resource_action = ast_actions.get("discard_resource", {})
-        transfer_resource_action = ast_actions.get("transfer_resource", {})
-        test_resource_action["handles"] = {
-            "input": [
-                {
-                    "handler_key": "input_resources",
-                    "data_type": "resource",
-                    "label": "InputResources",
-                    "data_source": "handle",
-                    "data_key": "resources",
-                },
-            ]
-        }
+        # Both runtimes publish the same AST-derived definition. Runtime-specific
+        # ROS type objects are added later and are not a second schema source.
+        host_entry = copy.deepcopy(ast_entry)
+        class_config = host_entry.setdefault("class", {})
+        class_config["module"] = "unilabos.backend.host_services:HostServices"
+        action_mappings = class_config.setdefault("action_value_mappings", {})
+        # Accept cached metadata produced before test_latency was explicitly
+        # decorated, but publish only its stable public action name.
+        legacy_latency = action_mappings.pop("auto-test_latency", None)
+        if "test_latency" not in action_mappings and legacy_latency is not None:
+            action_mappings["test_latency"] = legacy_latency
+        class_config["action_value_mappings"] = dict(sorted(action_mappings.items()))
+        self.device_type_registry["host_node"] = host_entry
 
-        # 覆写: 保留硬编码的 ROS2 action + AST 生成的 auto-method
-        # 注: 物料创建只发生在微后端（POST /api/v1/materials/trees），host 不再提供
-        # create_resource action；创建后经 notify_resource_tree_update("add") 分发到设备。
-        self.device_type_registry["host_node"] = {
-            "class": {
-                "module": "unilabos.backend.ros2.presets.host_node:HostNode",
-                "status_types": {},
-                "status_policies": {},
-                "action_value_mappings": {
-                    "test_latency": test_latency_action,
-                    "auto-test_resource": test_resource_action,
-                    "manual_confirm": manual_confirm_action,
-                    "apply_deduct_resource": apply_deduct_resource_action,
-                    "set_substance": set_substance_action,
-                    "discard_resource": discard_resource_action,
-                    "transfer_resource": transfer_resource_action,
-                },
-                "init_params": {},
-            },
-            "version": "1.0.0",
-            "category": [],
-            "config_info": [],
-            "icon": "icon_device.webp",
-            "registry_type": "device",
-            "description": "Host Node",
-            "handles": [],
-            "available_sites": [],
-            "init_param_schema": {},
-            "file_path": "/",
-        }
-        for action_config in self.device_type_registry["host_node"]["class"][
+        for action_config in host_entry["class"][
             "action_value_mappings"
         ].values():
             action_config.setdefault("error_policy", {})
-        self._add_builtin_actions(self.device_type_registry["host_node"], "host_node")
+        self._add_builtin_actions(host_entry, "host_node")
 
     # ------------------------------------------------------------------
     # AST 静态扫描
@@ -374,19 +336,12 @@ class Registry:
                 extra_dirs.append(d_path)
 
         # 主扫描
+        # host_services.py 一律不进默认启动扫描：host_node 注册表由
+        # _setup_host_node 基于下方的单独扫描结果自行处理。
         if external_only:
             core_files = [
-                # host_node 的动作 schema 两种 backend 都需要：ROS2 实例化
-                # HostNode，HostLink 由内置 host 服务设备复用同一份描述。
-                # AST 扫描不 import 模块，schema-only 模式下同样安全。
-                pkg_root / "backend" / "ros2" / "presets" / "host_node.py",
                 pkg_root / "resources" / "container.py",
             ]
-            # 虚拟加热平台是纯虚拟设备，无硬件依赖；始终纳入核心扫描，
-            # 保证 external_only 模式下演示图可直接运行。
-            core_files.append(
-                pkg_root / "devices" / "virtual" / "heating_platform.py"
-            )
             scan_result = scan_directory(
                 scan_root, python_path=python_path, executor=self._startup_executor,
                 cache=ast_cache, include_files=core_files,
@@ -396,16 +351,28 @@ class Registry:
                 f"({', '.join(f.name for f in core_files)})"
             )
         else:
-            exclude_files = {"lab_resources.py"} if not BasicConfig.extra_resource else None
+            exclude_files = {"host_services.py"}
+            if not BasicConfig.extra_resource:
+                exclude_files.add("lab_resources.py")
             scan_result = scan_directory(
                 scan_root, python_path=python_path, executor=self._startup_executor,
                 exclude_files=exclude_files, cache=ast_cache,
             )
-            if exclude_files:
-                logger.info(
-                    f"[UniLab Registry] 排除扫描文件: {exclude_files} "
-                    f"(可通过 --extra_resource 启用加载)"
-                )
+            logger.info(
+                f"[UniLab Registry] 排除扫描文件: {exclude_files} "
+                f"(host_services.py 由 host_node 单独扫描处理)"
+            )
+
+        # host_node 的动作 schema 单独扫描（不进默认扫描与 build 缓存）：
+        # AST 扫描不 import 模块，schema-only 模式下同样安全。
+        host_scan = scan_directory(
+            scan_root, python_path=python_path, executor=self._startup_executor,
+            cache=ast_cache, include_files=[pkg_root / "backend" / "host_services.py"],
+        )
+        host_meta = host_scan.get("devices", {}).get("host_node")
+        self._host_node_ast_entry = (
+            self._build_device_entry_from_ast("host_node", host_meta) if host_meta else {}
+        )
 
         # 合并缓存统计
         total_stats = scan_result.pop("_cache_stats", {"hits": 0, "misses": 0, "total": 0})
@@ -535,7 +502,7 @@ class Registry:
         """将类型名称替换为实际的 ROS 消息类对象（带缓存）"""
         if not type_name or type_name == "":
             return type_name
-        if _HOSTLINK_SCHEMA_ONLY:
+        if not _ROS_TYPE_RESOLUTION_ENABLED:
             return type_name
 
         cached = self._type_resolve_cache.get(type_name)
@@ -589,7 +556,6 @@ class Registry:
             return String
 
     # ---- 类型字符串 -> JSON Schema type ----
-    # (常量和工具函数已移至 unilabos.registry.utils)
 
     def _generate_schema_from_info(
         self, param_name: str, param_type: Union[str, Tuple[str]], param_default: Any,
@@ -884,7 +850,7 @@ class Registry:
 
     def _add_builtin_actions(self, device_config: Dict[str, Any], device_id: str):
         """为设备添加内置的驱动命令动作（运行时需要，上报注册表时会过滤掉）"""
-        if _HOSTLINK_SCHEMA_ONLY:
+        if not _ROS_TYPE_RESOLUTION_ENABLED:
             return
         str_single_input = self._replace_type_with_class("StrSingleInput", device_id, "内置动作")
         for additional_action in ["_execute_driver_command", "_execute_driver_command_async"]:
@@ -1096,8 +1062,12 @@ class Registry:
             # 尝试 import ROS2 action type 获取 feedback/result/schema/goal_default, 以及 goal fallback
             if ":" not in action_type:
                 action_type = imap.get(action_type, action_type)
-            action_type_obj = resolve_type_object(action_type) if ":" in action_type else None
-            if action_type_obj is None:
+            action_type_obj = (
+                resolve_type_object(action_type)
+                if _ROS_TYPE_RESOLUTION_ENABLED and ":" in action_type
+                else None
+            )
+            if action_type_obj is None and _ROS_TYPE_RESOLUTION_ENABLED:
                 logger.warning(
                     f"[AST] device action '{action_name}': resolve_type_object('{action_type}') returned None"
                 )
@@ -1297,13 +1267,13 @@ class Registry:
 
     @staticmethod
     def _resource_reference_schema(param_name: str) -> Dict[str, Any]:
-        if _HOSTLINK_SCHEMA_ONLY:
-            return {
-                "type": "object",
-                "title": param_name,
-                "description": "materials.v1 resource reference",
-            }
-        return ros_message_to_json_schema(Resource, param_name)
+        # ResourceSlot is an authority reference, not a transport-specific ROS
+        # message. Keep the public action schema identical across backends.
+        return {
+            "type": "object",
+            "title": param_name,
+            "description": "materials.v1 resource reference",
+        }
 
     def _generate_status_schema_from_ast(
         self, status_properties: Dict[str, Any],
@@ -1777,9 +1747,9 @@ class Registry:
 
         仅做 ROS2 消息类型查找，不 import 任何设备模块，速度快且无副作用。
         """
-        if _HOSTLINK_SCHEMA_ONLY:
+        if not _ROS_TYPE_RESOLUTION_ENABLED:
             logger.info(
-                "[UniLab Registry] HostLink JSON 模式：保留消息类型字符串，跳过 ROS 类型解析"
+                "[UniLab Registry] 保留消息类型字符串，跳过 ROS 运行时类型增强"
             )
             return
         t0 = time.time()
@@ -1794,7 +1764,7 @@ class Registry:
         )
 
     # ------------------------------------------------------------------
-    # YAML 注册表加载 (兼容旧格式)
+    # YAML 注册表加载
     # ------------------------------------------------------------------
 
     def _load_single_resource_file(
@@ -1993,8 +1963,7 @@ class Registry:
         try:
             with open(file, encoding="utf-8", mode="r") as f:
                 raw_data = yaml.safe_load(io.StringIO(f.read()))
-            # Plan 09 Task 4: expand external-registry YAML $ref (shared contracts)
-            # before per-device normalization. No-op for files without $ref.
+            # Expand shared YAML contracts before normalizing each device entry.
             data = resolve_yaml_refs(raw_data, base_file=file)
         except Exception as e:
             logger.warning(f"[UniLab Registry] 读取设备文件失败: {file}, 错误: {e}")
@@ -2291,7 +2260,9 @@ class Registry:
                             except ROSMsgNotFound:
                                 continue
                             action_str_type_mapping[action_type_str] = target_type
-                            if target_type is not None:
+                            if target_type is not None and not isinstance(
+                                target_type, str
+                            ):
                                 try:
                                     action_config["goal_default"] = ROS2MessageInstance(
                                         target_type.Goal()
@@ -2305,7 +2276,7 @@ class Registry:
                                     if "description" in prev_schema:
                                         action_config["schema"]["description"] = prev_schema["description"]
                                 action_config["schema"].setdefault("description", "")
-                            else:
+                            elif target_type is None:
                                 logger.warning(
                                     f"[UniLab Registry] 设备 {device_id} 的动作 {action_name} 类型为空，跳过替换"
                                 )

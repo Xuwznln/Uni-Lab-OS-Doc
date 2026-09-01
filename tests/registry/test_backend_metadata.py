@@ -238,7 +238,7 @@ def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
 
     cache = load_scan_cache(cache_path)
 
-    assert _CACHE_VERSION == 13
+    assert _CACHE_VERSION == 15
     assert cache == {"version": _CACHE_VERSION, "files": {}}
 
 
@@ -264,7 +264,15 @@ def test_registry_run_ast_scan_invalidates_stale_scan_and_build_caches(
     saved_cache = {}
     built_devices = []
 
-    def fake_scan_directory(*_args, cache, **_kwargs):
+    def fake_scan_directory(*_args, cache, include_files=None, **_kwargs):
+        # host_services.py 的单独扫描（include_files）返回空结果即可，
+        # 不参与本测试对主扫描缓存失效的断言。
+        if include_files is not None:
+            return {
+                "devices": {},
+                "resources": {},
+                "_cache_stats": {"hits": 0, "misses": 0, "total": 0},
+            }
         assert cache == {"version": _CACHE_VERSION, "files": {}}
         cache["files"]["fresh.py"] = {
             "devices": [{"device_id": "fresh-device"}],

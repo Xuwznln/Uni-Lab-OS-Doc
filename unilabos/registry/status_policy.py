@@ -166,8 +166,8 @@ def normalize_status_policy(
             },
         }
 
-    ``healthy_values`` 是 ``normal_values`` 的兼容别名。``error_values`` 是
-    compact 迁移格式，并继承顶层 ``code/severity/message/hold`` 默认值。
+    ``healthy_values`` 是 ``normal_values`` 的输入别名。``error_values`` 是
+    incidents 的紧凑写法，并继承顶层 ``code/severity/message/hold`` 默认值。
     配置 ``unknown_incident`` 后，所有未被显式列出的合法标量都会触发它。
 
     ``None`` 与空映射表示未配置。其他 malformed 值会立即报错，避免把损坏的
@@ -235,7 +235,7 @@ def normalize_status_policy(
     for index, raw_value in enumerate(raw_error_values):
         value = _scalar(raw_value, f"status_policy.error_values[{index}]")
         key = _scalar_key(value)
-        # compact 迁移形式允许与显式 incident 重叠，由显式配置优先。
+        # 紧凑写法允许与显式 incident 重叠，并以显式配置为准。
         if key not in incident_keys:
             append_incident(
                 value,

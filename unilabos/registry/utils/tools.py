@@ -644,7 +644,7 @@ def wrap_action_schema(
 
 
 def preserve_field_descriptions(new_schema: Dict[str, Any], prev_schema: Dict[str, Any]):
-    """递归保留之前 schema 中各字段的 description / title。
+    """将已有 schema 的 description / title 合并到新 schema。
 
     覆盖顶层以及嵌套 properties（如 goal.properties.xxx.description）。
     """

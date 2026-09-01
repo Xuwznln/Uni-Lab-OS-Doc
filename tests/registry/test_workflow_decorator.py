@@ -20,8 +20,7 @@ from unilabos.registry.workflows import (
     workflow_uuid_for,
     _step_node_uuid,
 )
-from unilabos.server.database.repositories.workflow import WorkflowStore
-from unilabos.server.services.workflow.service import WorkflowService
+from unilabos.server.services.runtime.workflow.service import WorkflowService
 
 
 @pytest.fixture(autouse=True)
@@ -143,7 +142,7 @@ def test_report_workflows_is_idempotent_upsert() -> None:
         ctx.run("device-1/succeed", {"value": 6})
 
     definition = next(iter(get_registered_workflows().values()))
-    service = WorkflowService(WorkflowStore(":memory:"))
+    service = WorkflowService(":memory:")
     try:
         catalog = _catalog()
         first = report_workflows_to_service(service, catalog)
@@ -230,16 +229,13 @@ class OrderedDriver:
 def test_workflow_end_to_end_runs_via_local_scheduler() -> None:
     """@workflow -> 上报 -> 创建任务 -> HostLink 执行栈真实跑通并按序执行。"""
 
-    from unilabos.backend.hostlink.adapter_registry import (
-        clear_execution_adapter,
-        set_execution_adapter,
-    )
+    from unilabos.backend.hostlink.adapter_registry import clear_execution_adapter
     from unilabos.backend.hostlink.backend import HostLinkBackend
-    from unilabos.backend.hostlink.execution_adapter import HostLinkExecutionAdapter
     from unilabos.backend.hostlink.local_runtime import (
         HostLinkDriverSpec,
         HostLinkLocalRuntime,
     )
+    from unilabos.backend.hostlink.host_node import HostNode
     from unilabos.server.backend.execution import JobExecutionBackend
     from unilabos.server.backend.scheduler.service import BackendScheduler
 
@@ -255,19 +251,12 @@ def test_workflow_end_to_end_runs_via_local_scheduler() -> None:
     )
     runtime = HostLinkBackend(local, is_slave=False)
     local.start()
-    adapter = HostLinkExecutionAdapter(
-        runtime,
-        devices_config=object(),
-        resources_config=object(),
-        bridges=[],
-    )
+    adapter = HostNode("host_node", runtime, bridges=[])
     microbackend = JobExecutionBackend(host_node_getter=lambda: adapter)
     adapter.bridges = [microbackend]
-    adapter.start()
     microbackend.start()
-    set_execution_adapter(adapter)
 
-    service = WorkflowService(WorkflowStore(":memory:"))
+    service = WorkflowService(":memory:")
     scheduler = BackendScheduler(service, microbackend)
     service.set_task_submitter(scheduler.submit)
     scheduler.start(recover=True)
@@ -312,4 +301,5 @@ def test_workflow_end_to_end_runs_via_local_scheduler() -> None:
         clear_execution_adapter(adapter)
         microbackend.stop()
         adapter.stop()
+        HostNode.reset_state()
         runtime.stop()

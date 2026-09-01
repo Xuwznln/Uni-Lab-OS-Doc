@@ -1,4 +1,4 @@
-"""Resolve YAML ``$ref`` pointers in external registry files (Plan 09 Task 2).
+"""Resolve YAML ``$ref`` pointers in external Registry files.
 
 Supports ``relative/path.yaml#/json/pointer`` references so multiple device
 variants can share one action/status contract. Detects reference cycles.

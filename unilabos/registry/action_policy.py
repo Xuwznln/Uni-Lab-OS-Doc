@@ -87,8 +87,8 @@ def normalize_error_policy(
 ) -> Dict[str, Any] | None:
     """Validate and copy a policy into a registry-safe representation.
 
-    ``options`` is keyed by exception class name. A legacy flat option list is
-    accepted as the ``"*"`` fallback to ease selective migration.
+    ``options`` is keyed by exception class name. A flat option list is accepted
+    as shorthand for the ``"*"`` fallback.
     """
 
     if not policy:

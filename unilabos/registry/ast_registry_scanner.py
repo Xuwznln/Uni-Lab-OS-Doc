@@ -26,9 +26,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from unilabos.registry.backend_metadata import normalize_supported_backends
+from unilabos.registry.utils.backend_metadata import normalize_supported_backends
 from unilabos.registry.material_locks import normalize_material_parameter_names
-from unilabos.registry.utils import resolve_registry_display_name
+from unilabos.registry.utils.tools import resolve_registry_display_name
 from unilabos.resources.objects.site import normalize_available_sites
 
 
@@ -39,7 +39,9 @@ from unilabos.resources.objects.site import normalize_available_sites
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
 _CACHE_VERSION = 15      # 缓存/entry 构建格式版本号，格式变更时递增
-_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
+# 允许点号分段（如 liquid_handler.prcxi），与内置 YAML 注册表的命名先例一致；
+# 点号只用于注册表模板名，设备实例 id（图节点）另有约束。
+_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$")
 
 # 合法的装饰器来源模块
 _REGISTRY_DECORATOR_MODULE = "unilabos.registry.decorators"
@@ -81,7 +83,7 @@ def _validate_device_ids(device_ids: List[str]) -> None:
     invalid_ids = [device_id for device_id in device_ids if not _DEVICE_ID_RE.fullmatch(device_id)]
     if invalid_ids:
         raise ValueError(
-            "@device id 只能包含英文、数字、下划线: "
+            "@device id 只能包含英文、数字、下划线（可用点号分段）: "
             + ", ".join(repr(device_id) for device_id in invalid_ids)
         )
 
@@ -110,19 +112,6 @@ def load_scan_cache(cache_path: Optional[Path]) -> Dict[str, Any]:
         return data
     except Exception:
         return {"version": _CACHE_VERSION, "files": {}}
-
-
-def save_scan_cache(cache_path: Optional[Path], cache: Dict[str, Any]) -> None:
-    """Persist *cache* to *cache_path* (atomic-ish via temp file)."""
-    if cache_path is None:
-        return
-    try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(cache_path)
-    except Exception:
-        pass
 
 
 def _is_cache_hit(entry: Dict[str, Any], fp: Dict[str, Any]) -> bool:
@@ -259,7 +248,13 @@ def scan_directory(
 
         try:
             devs, ress, flows = _parse_file(py_file, python_path)
-        except (SyntaxError, Exception):
+        except Exception as exc:
+            # 解析失败的文件不能静默丢弃：装饰器写错时用户需要看到原因。
+            import logging
+
+            logging.getLogger("unilabos.registry.ast_scan").warning(
+                "AST 扫描文件失败，已跳过 %s: %s", py_file, exc
+            )
             devs, ress, flows = [], [], []
 
         cache_files[key] = {
@@ -374,7 +369,8 @@ def _parse_file(
     Returns:
         (devices, resources, workflows) -- three lists of metadata dicts.
     """
-    source = filepath.read_text(encoding="utf-8", errors="replace")
+    # utf-8-sig：Windows 工具链写入的 BOM 不应让文件被跳过。
+    source = filepath.read_text(encoding="utf-8-sig", errors="replace")
     tree = ast.parse(source, filename=str(filepath))
 
     # Derive module path from file path

@@ -191,6 +191,8 @@ class DeviceCatalog:
 
     - by_device_id: device_id -> {"class": registry 设备类 id, "uuid": 资源 uuid}
     - by_class: 设备类 id -> [device_id ...]
+
+    设备类 id 取节点 ``template_name``（图契约字段；旧图 ``class`` 已在读取边界回填）。
     """
 
     by_device_id: Dict[str, Dict[str, str]] = field(default_factory=dict)
@@ -207,7 +209,7 @@ class DeviceCatalog:
             content = node.res_content
             if str(getattr(content, "type", "")) != "device":
                 continue
-            klass = str(getattr(content, "klass", "") or "")
+            klass = str(getattr(content, "template_name", "") or "")
             if not klass:
                 continue
             device_id = str(content.id)

@@ -111,14 +111,8 @@ def test_host_material_actions_declare_their_authoritative_locks() -> None:
     """框架自带的物料动作不能只支持锁协议，却忘记实际声明。"""
 
     repo_root = Path(__file__).parents[2]
-    source = (
-        repo_root
-        / "unilabos"
-        / "backend"
-        / "ros2"
-        / "presets"
-        / "host_node.py"
-    )
+    # host_node 动作的唯一 @device/@action 扫描源（backend 无关的 HostServices）
+    source = repo_root / "unilabos" / "backend" / "host_services.py"
     devices, _resources, _workflows = _parse_file(source, repo_root)
     host = next(
         device for device in devices if device["device_id"] == "host_node"

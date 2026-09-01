@@ -52,14 +52,15 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from unilabos.registry.backend_metadata import normalize_supported_backends
+from unilabos.registry.utils.backend_metadata import normalize_supported_backends
 from unilabos.resources.objects.site import (
     SiteDefinitionInput,
     normalize_available_sites,
 )
 
 F = TypeVar("F", bound=Callable[..., Any])
-_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
+# 允许点号分段（如 liquid_handler.prcxi），与内置 YAML 注册表命名先例一致。
+_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$")
 
 # ---------------------------------------------------------------------------
 # 枚举
@@ -327,7 +328,7 @@ def device(
     invalid_ids = [did for did in device_ids if not _DEVICE_ID_RE.fullmatch(did)]
     if invalid_ids:
         raise ValueError(
-            "@device id 只能包含英文、数字、下划线: "
+            "@device id 只能包含英文、数字、下划线（可用点号分段）: "
             + ", ".join(repr(did) for did in invalid_ids)
         )
 
@@ -619,12 +620,6 @@ def get_all_registered_devices() -> Dict[str, type]:
 def get_all_registered_resources() -> Dict[str, Any]:
     """获取所有已注册的资源"""
     return _registered_resources.copy()
-
-
-def clear_registry():
-    """清空全局注册表 (用于测试)"""
-    _registered_devices.clear()
-    _registered_resources.clear()
 
 
 # ---------------------------------------------------------------------------
