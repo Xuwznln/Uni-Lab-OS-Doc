@@ -129,7 +129,7 @@ def find_connected_pump(G, valve_node):
 
     # 🔧 关键修复：检查节点类型，电磁阀不应该查找泵
     node_data = G.nodes.get(valve_node, {})
-    node_class = node_data.get("class", "") or ""
+    node_class = node_data.get("template_name", "") or ""
 
     debug_print(f"  - 阀门类型: {node_class}")
 
@@ -143,9 +143,9 @@ def find_connected_pump(G, valve_node):
         debug_print(f"  - {valve_node} 是多通阀，查找连接的泵...")
         # 方法1：直接相邻的泵
         for neighbor in G.neighbors(valve_node):
-            neighbor_class = G.nodes[neighbor].get("class", "") or ""
+            neighbor_class = G.nodes[neighbor].get("template_name", "") or ""
             # 排除非 电磁阀 和 泵 的邻居
-            debug_print(f"    - 检查邻居 {neighbor}, class: {neighbor_class}")
+            debug_print(f"    - 检查邻居 {neighbor}, template: {neighbor_class}")
             if "pump" in neighbor_class.lower():
                 debug_print(f"    ✅ 找到直接相连的泵: {neighbor}")
                 return neighbor
@@ -156,7 +156,7 @@ def find_connected_pump(G, valve_node):
         # 获取所有泵节点
         pump_nodes = []
         for node_id in G.nodes():
-            node_class = G.nodes[node_id].get("class", "") or ""
+            node_class = G.nodes[node_id].get("template_name", "") or ""
             if "pump" in node_class.lower():
                 pump_nodes.append(node_id)
 
@@ -195,7 +195,7 @@ def build_pump_valve_maps(G, pump_backbone):
     filtered_backbone = []
     for node in pump_backbone:
         node_data = G.nodes.get(node, {})
-        node_class = node_data.get("class", "") or ""
+        node_class = node_data.get("template_name", "") or ""
 
         # 跳过电磁阀
         if ("solenoid" in node_class.lower() or "solenoid_valve" in node.lower()):
@@ -208,7 +208,7 @@ def build_pump_valve_maps(G, pump_backbone):
 
     for node in filtered_backbone:
         node_data = G.nodes.get(node, {})
-        node_class = node_data.get("class", "") or ""
+        node_class = node_data.get("template_name", "") or ""
         if is_integrated_pump(node_class, node):
             pumps_from_node[node] = node
             valve_from_node[node] = node
@@ -281,7 +281,7 @@ def generate_pump_protocol(
 
         # 跳过电磁阀（电磁阀不参与泵操作）
         node_data = G.nodes.get(node, {})
-        node_class = node_data.get("class", "") or ""
+        node_class = node_data.get("template_name", "") or ""
         if ("solenoid" in node_class.lower() or "solenoid_valve" in node.lower()):
             debug_print(f"PUMP_TRANSFER: 跳过电磁阀 {node}")
             continue

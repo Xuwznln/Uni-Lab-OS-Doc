@@ -331,66 +331,6 @@ def generate_add_protocol(
 # === 便捷函数 ===
 # 🔧 修改便捷函数的参数类型
 
-def add_liquid_volume(G: nx.DiGraph, vessel: dict, reagent: str, volume: Union[str, float], 
-                     time: Union[str, float] = 0.0, rate_spec: str = "") -> List[Dict[str, Any]]:
-    """添加指定体积的液体试剂"""
-    vessel_id = vessel["id"]
-    debug_print(f"💧 快速添加液体: {reagent} ({volume}) → {vessel_id}")
-    return generate_add_protocol(
-        G, vessel, reagent, 
-        volume=volume, 
-        time=time, 
-        rate_spec=rate_spec
-    )
-
-def add_solid_mass(G: nx.DiGraph, vessel: dict, reagent: str, mass: Union[str, float], 
-                   event: str = "") -> List[Dict[str, Any]]:
-    """添加指定质量的固体试剂"""
-    vessel_id = vessel["id"]
-    debug_print(f"🧂 快速添加固体: {reagent} ({mass}) → {vessel_id}")
-    return generate_add_protocol(
-        G, vessel, reagent, 
-        mass=mass, 
-        event=event
-    )
-
-def add_solid_moles(G: nx.DiGraph, vessel: dict, reagent: str, mol: str, 
-                    event: str = "") -> List[Dict[str, Any]]:
-    """按摩尔数添加固体试剂"""
-    vessel_id = vessel["id"]
-    debug_print(f"🧬 按摩尔数添加固体: {reagent} ({mol}) → {vessel_id}")
-    return generate_add_protocol(
-        G, vessel, reagent, 
-        mol=mol, 
-        event=event
-    )
-
-def add_dropwise_liquid(G: nx.DiGraph, vessel: dict, reagent: str, volume: Union[str, float], 
-                        time: Union[str, float] = "20 min", event: str = "") -> List[Dict[str, Any]]:
-    """滴加液体试剂"""
-    vessel_id = vessel["id"]
-    debug_print(f"💧 滴加液体: {reagent} ({volume}) → {vessel_id} (用时: {time})")
-    return generate_add_protocol(
-        G, vessel, reagent, 
-        volume=volume, 
-        time=time, 
-        rate_spec="dropwise", 
-        event=event
-    )
-
-def add_portionwise_solid(G: nx.DiGraph, vessel: dict, reagent: str, mass: Union[str, float], 
-                          time: Union[str, float] = "1 h", event: str = "") -> List[Dict[str, Any]]:
-    """分批添加固体试剂"""
-    vessel_id = vessel["id"]
-    debug_print(f"🧂 分批添加固体: {reagent} ({mass}) → {vessel_id} (用时: {time})")
-    return generate_add_protocol(
-        G, vessel, reagent, 
-        mass=mass, 
-        time=time, 
-        rate_spec="portionwise", 
-        event=event
-    )
-
 # 测试函数
 def test_add_protocol():
     """测试添加协议的各种参数解析"""

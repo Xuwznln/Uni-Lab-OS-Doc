@@ -291,39 +291,6 @@ def generate_dry_protocol(
 
 
 # 🔧 新增：便捷函数
-def generate_quick_dry_protocol(G: nx.DiGraph, vessel: dict, compound: str = "", 
-                               temp: float = 40.0, time: float = 30.0) -> List[Dict[str, Any]]:
-    """快速干燥：低温短时间"""
-    vessel_id = vessel["id"]
-    print(f"🌡️ 快速干燥: {compound or '化合物'} → {vessel_id} @ {temp}°C ({time}min)")
-    
-    # 临时修改默认参数
-    import types
-    temp_func = types.FunctionType(
-        generate_dry_protocol.__code__, 
-        generate_dry_protocol.__globals__
-    )
-    
-    # 直接调用原函数，但修改内部参数
-    return generate_dry_protocol(G, vessel, compound)
-
-
-def generate_thorough_dry_protocol(G: nx.DiGraph, vessel: dict, compound: str = "", 
-                                  temp: float = 80.0, time: float = 120.0) -> List[Dict[str, Any]]:
-    """深度干燥：高温长时间"""
-    vessel_id = vessel["id"]
-    print(f"🔥 深度干燥: {compound or '化合物'} → {vessel_id} @ {temp}°C ({time}min)")
-    return generate_dry_protocol(G, vessel, compound)
-
-
-def generate_gentle_dry_protocol(G: nx.DiGraph, vessel: dict, compound: str = "", 
-                                temp: float = 30.0, time: float = 180.0) -> List[Dict[str, Any]]:
-    """温和干燥：低温长时间"""
-    vessel_id = vessel["id"]
-    print(f"🌡️ 温和干燥: {compound or '化合物'} → {vessel_id} @ {temp}°C ({time}min)")
-    return generate_dry_protocol(G, vessel, compound)
-
-
 # 测试函数
 def test_dry_protocol():
     """测试干燥协议"""

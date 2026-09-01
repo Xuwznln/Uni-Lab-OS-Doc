@@ -391,67 +391,6 @@ def generate_stop_stir_protocol(
     return action_sequence
 
 # 🔧 新增：便捷函数
-def stir_briefly(G: nx.DiGraph, vessel: Union[str, dict], 
-                speed: float = 300.0) -> List[Dict[str, Any]]:
-    """短时间搅拌（30秒）"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"⚡ 短时间搅拌: {vessel_display} @ {speed}RPM (30s)")
-    return generate_stir_protocol(G, vessel, time="30", stir_speed=speed)
-
-def stir_slowly(G: nx.DiGraph, vessel: Union[str, dict], 
-               time: Union[str, float] = "10 min") -> List[Dict[str, Any]]:
-    """慢速搅拌"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🐌 慢速搅拌: {vessel_display} @ 150RPM")
-    return generate_stir_protocol(G, vessel, time=time, stir_speed=150.0)
-
-def stir_vigorously(G: nx.DiGraph, vessel: Union[str, dict], 
-                   time: Union[str, float] = "5 min") -> List[Dict[str, Any]]:
-    """剧烈搅拌"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"💨 剧烈搅拌: {vessel_display} @ 800RPM")
-    return generate_stir_protocol(G, vessel, time=time, stir_speed=800.0)
-
-def stir_for_reaction(G: nx.DiGraph, vessel: Union[str, dict], 
-                     time: Union[str, float] = "1 h") -> List[Dict[str, Any]]:
-    """反应搅拌（标准速度，长时间）"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🧪 反应搅拌: {vessel_display} @ 400RPM")
-    return generate_stir_protocol(G, vessel, time=time, stir_speed=400.0)
-
-def stir_for_dissolution(G: nx.DiGraph, vessel: Union[str, dict], 
-                        time: Union[str, float] = "15 min") -> List[Dict[str, Any]]:
-    """溶解搅拌（中等速度）"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"💧 溶解搅拌: {vessel_display} @ 500RPM")
-    return generate_stir_protocol(G, vessel, time=time, stir_speed=500.0)
-
-def stir_gently(G: nx.DiGraph, vessel: Union[str, dict], 
-               time: Union[str, float] = "30 min") -> List[Dict[str, Any]]:
-    """温和搅拌"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🍃 温和搅拌: {vessel_display} @ 200RPM")
-    return generate_stir_protocol(G, vessel, time=time, stir_speed=200.0)
-
-def stir_overnight(G: nx.DiGraph, vessel: Union[str, dict]) -> List[Dict[str, Any]]:
-    """过夜搅拌（模拟时缩短为2小时）"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🌙 过夜搅拌（模拟2小时）: {vessel_display} @ 300RPM")
-    return generate_stir_protocol(G, vessel, time="2 h", stir_speed=300.0)
-
-def start_continuous_stirring(G: nx.DiGraph, vessel: Union[str, dict], 
-                             speed: float = 300.0, purpose: str = "continuous stirring") -> List[Dict[str, Any]]:
-    """开始连续搅拌"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🔄 开始连续搅拌: {vessel_display} @ {speed}RPM")
-    return generate_start_stir_protocol(G, vessel, stir_speed=speed, purpose=purpose)
-
-def stop_all_stirring(G: nx.DiGraph, vessel: Union[str, dict]) -> List[Dict[str, Any]]:
-    """停止所有搅拌"""
-    vessel_display = get_vessel_display_info(vessel)
-    debug_print(f"🛑 停止搅拌: {vessel_display}")
-    return generate_stop_stir_protocol(G, vessel)
-
 # 测试函数
 def test_stir_protocol():
     """测试搅拌协议"""

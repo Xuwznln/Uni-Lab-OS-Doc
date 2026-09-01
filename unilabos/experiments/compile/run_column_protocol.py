@@ -751,52 +751,6 @@ def generate_run_column_protocol(
     return action_sequence
 
 # 🔧 新增：便捷函数
-def generate_ethyl_acetate_hexane_column_protocol(G: nx.DiGraph, from_vessel: dict, to_vessel: dict, 
-                                                 column: str, ratio: str = "30:70") -> List[Dict[str, Any]]:
-    """乙酸乙酯-己烷柱层析（常用组合）"""
-    from_vessel_id = from_vessel["id"]
-    to_vessel_id = to_vessel["id"]
-    debug_print(f"🧪⛽ 乙酸乙酯-己烷柱层析: {from_vessel_id} → {to_vessel_id} @ {ratio}")
-    return generate_run_column_protocol(G, from_vessel, to_vessel, column, 
-                                      solvent1="ethyl_acetate", solvent2="hexane", ratio=ratio)
-
-def generate_methanol_dcm_column_protocol(G: nx.DiGraph, from_vessel: dict, to_vessel: dict, 
-                                        column: str, ratio: str = "5:95") -> List[Dict[str, Any]]:
-    """甲醇-二氯甲烷柱层析"""
-    from_vessel_id = from_vessel["id"]
-    to_vessel_id = to_vessel["id"]
-    debug_print(f"🧪🧪 甲醇-DCM柱层析: {from_vessel_id} → {to_vessel_id} @ {ratio}")
-    return generate_run_column_protocol(G, from_vessel, to_vessel, column, 
-                                      solvent1="methanol", solvent2="dichloromethane", ratio=ratio)
-
-def generate_gradient_column_protocol(G: nx.DiGraph, from_vessel: dict, to_vessel: dict, 
-                                    column: str, start_ratio: str = "10:90", 
-                                    end_ratio: str = "50:50") -> List[Dict[str, Any]]:
-    """梯度洗脱柱层析（中等比例）"""
-    from_vessel_id, _ = get_vessel(from_vessel)
-    to_vessel_id, _ = get_vessel(to_vessel)
-    debug_print(f"📈 梯度柱层析: {from_vessel_id} → {to_vessel_id} ({start_ratio} → {end_ratio})")
-    # 使用中间比例作为近似
-    return generate_run_column_protocol(G, from_vessel, to_vessel, column, ratio="30:70")
-
-def generate_polar_column_protocol(G: nx.DiGraph, from_vessel: dict, to_vessel: dict, 
-                                 column: str) -> List[Dict[str, Any]]:
-    """极性化合物柱层析（高极性溶剂比例）"""
-    from_vessel_id, _ = get_vessel(from_vessel)
-    to_vessel_id, _ = get_vessel(to_vessel)
-    debug_print(f"⚡ 极性化合物柱层析: {from_vessel_id} → {to_vessel_id}")
-    return generate_run_column_protocol(G, from_vessel, to_vessel, column, 
-                                      solvent1="ethyl_acetate", solvent2="hexane", ratio="70:30")
-
-def generate_nonpolar_column_protocol(G: nx.DiGraph, from_vessel: dict, to_vessel: dict, 
-                                    column: str) -> List[Dict[str, Any]]:
-    """非极性化合物柱层析（低极性溶剂比例）"""
-    from_vessel_id, _ = get_vessel(from_vessel)
-    to_vessel_id, _ = get_vessel(to_vessel)
-    debug_print(f"🛢️ 非极性化合物柱层析: {from_vessel_id} → {to_vessel_id}")
-    return generate_run_column_protocol(G, from_vessel, to_vessel, column, 
-                                      solvent1="ethyl_acetate", solvent2="hexane", ratio="5:95")
-
 # 测试函数
 def test_run_column_protocol():
     """测试柱层析协议"""

@@ -476,10 +476,6 @@ class StirProtocol(BaseModel):
         multiplier = unit_multipliers.get(unit, 60.0)  # 默认按分钟计算
         return value * multiplier
     
-    def get_time_in_seconds(self) -> float:
-        """获取时间（秒）"""
-        return self._parse_time_string(self.time)
-
 class StartStirProtocol(BaseModel):
     # === 必需参数 ===
     vessel: dict = Field(..., description="搅拌容器名称")

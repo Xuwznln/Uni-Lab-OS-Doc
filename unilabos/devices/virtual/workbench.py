@@ -602,11 +602,15 @@ class VirtualWorkbench:
             target_device[目标设备]: 接收资源的目标设备 ID。
             mount_resource[目标孔位]: 目标设备上的挂载孔位列表。
         """
-        return await self._ros_node.transfer_resource_to_another(
-            plr_resources=resource,
-            target_device_id=target_device,
-            target_resources=mount_resource,
-            sites=[None] * len(mount_resource),
+        from unilabos.resources import materials
+
+        return await materials.transfer(
+            resource,
+            target_device,
+            mount_resource,
+            [None] * len(mount_resource),
+            source_device_id=self._ros_node.device_id,
+            source_device_uuid=self._ros_node.resource_uuid,
         )
 
     @action(

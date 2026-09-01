@@ -331,34 +331,6 @@ def generate_reset_handling_protocol(
 
 # === 便捷函数 ===
 
-def reset_main_reactor(G: nx.DiGraph, solvent: str = "methanol", **kwargs) -> List[Dict[str, Any]]:
-    """重置主反应器 (默认行为)"""
-    debug_print(f"🔄 重置主反应器，使用溶剂: {solvent}")
-    return generate_reset_handling_protocol(G, solvent=solvent, vessel=None, **kwargs)
-
-def reset_custom_vessel(G: nx.DiGraph, vessel: str, solvent: str = "methanol", **kwargs) -> List[Dict[str, Any]]:
-    """重置指定容器"""
-    debug_print(f"🔄 重置指定容器: {vessel}，使用溶剂: {solvent}")
-    return generate_reset_handling_protocol(G, solvent=solvent, vessel=vessel, **kwargs)
-
-def reset_with_water(G: nx.DiGraph, vessel: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
-    """使用水重置容器"""
-    target = vessel or "main_reactor"
-    debug_print(f"💧 使用水重置容器: {target}")
-    return generate_reset_handling_protocol(G, solvent="water", vessel=vessel, **kwargs)
-
-def reset_with_methanol(G: nx.DiGraph, vessel: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
-    """使用甲醇重置容器"""
-    target = vessel or "main_reactor"
-    debug_print(f"🧪 使用甲醇重置容器: {target}")
-    return generate_reset_handling_protocol(G, solvent="methanol", vessel=vessel, **kwargs)
-
-def reset_with_ethanol(G: nx.DiGraph, vessel: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
-    """使用乙醇重置容器"""
-    target = vessel or "main_reactor"
-    debug_print(f"🧪 使用乙醇重置容器: {target}")
-    return generate_reset_handling_protocol(G, solvent="ethanol", vessel=vessel, **kwargs)
-
 # 测试函数
 def test_reset_handling_protocol():
     """测试重置处理协议"""

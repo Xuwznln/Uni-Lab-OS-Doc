@@ -718,30 +718,6 @@ def generate_evacuateandrefill_protocol(
 
 # === 便捷函数 ===
 
-def generate_nitrogen_purge_protocol(G: nx.DiGraph, vessel: dict, **kwargs) -> List[Dict[str, Any]]:  # 🔧 修改参数类型
-    """生成氮气置换协议"""
-    vessel_id = vessel["id"]
-    debug_print(f"💨 生成氮气置换协议: {vessel_id}")
-    return generate_evacuateandrefill_protocol(G, vessel, "nitrogen", **kwargs)
-
-def generate_argon_purge_protocol(G: nx.DiGraph, vessel: dict, **kwargs) -> List[Dict[str, Any]]:  # 🔧 修改参数类型
-    """生成氩气置换协议"""
-    vessel_id = vessel["id"]
-    debug_print(f"💨 生成氩气置换协议: {vessel_id}")
-    return generate_evacuateandrefill_protocol(G, vessel, "argon", **kwargs)
-
-def generate_air_purge_protocol(G: nx.DiGraph, vessel: dict, **kwargs) -> List[Dict[str, Any]]:  # 🔧 修改参数类型
-    """生成空气置换协议"""
-    vessel_id = vessel["id"]
-    debug_print(f"💨 生成空气置换协议: {vessel_id}")
-    return generate_evacuateandrefill_protocol(G, vessel, "air", **kwargs)
-
-def generate_inert_atmosphere_protocol(G: nx.DiGraph, vessel: dict, gas: str = "nitrogen", **kwargs) -> List[Dict[str, Any]]:  # 🔧 修改参数类型
-    """生成惰性气氛协议"""
-    vessel_id = vessel["id"]
-    debug_print(f"🛡️ 生成惰性气氛协议: {vessel_id} (使用 {gas})")
-    return generate_evacuateandrefill_protocol(G, vessel, gas, **kwargs)
-
 # 测试函数
 def test_evacuateandrefill_protocol():
     """测试抽真空充气协议"""

@@ -4,13 +4,6 @@ from .utils.vessel_parser import get_vessel, find_solvent_vessel
 from .pump_protocol import generate_pump_protocol
 
 
-def find_solvent_vessel_by_any_match(G: nx.DiGraph, solvent: str) -> str:
-    """
-    增强版溶剂容器查找，支持各种匹配方式的别名函数
-    """
-    return find_solvent_vessel(G, solvent)
-
-
 def find_waste_vessel(G: nx.DiGraph) -> str:
     """
     查找废液容器
@@ -318,60 +311,6 @@ def generate_clean_vessel_protocol(
 
 
 # 便捷函数：常用清洗方案
-def generate_quick_clean_protocol(
-    G: nx.DiGraph, 
-    vessel: dict,  # 🔧 修改：从字符串改为字典类型
-    solvent: str = "water", 
-    volume: float = 100.0
-) -> List[Dict[str, Any]]:
-    """快速清洗：室温，单次清洗"""
-    return generate_clean_vessel_protocol(G, vessel, solvent, volume, 25.0, 1)
-
-
-def generate_thorough_clean_protocol(
-    G: nx.DiGraph, 
-    vessel: dict,  # 🔧 修改：从字符串改为字典类型
-    solvent: str = "water", 
-    volume: float = 150.0,
-    temp: float = 60.0
-) -> List[Dict[str, Any]]:
-    """深度清洗：加热，多次清洗"""
-    return generate_clean_vessel_protocol(G, vessel, solvent, volume, temp, 3)
-
-
-def generate_organic_clean_protocol(
-    G: nx.DiGraph, 
-    vessel: dict,  # 🔧 修改：从字符串改为字典类型
-    volume: float = 100.0
-) -> List[Dict[str, Any]]:
-    """有机清洗：先用有机溶剂，再用水清洗"""
-    action_sequence = []
-    
-    # 第一步：有机溶剂清洗
-    try:
-        organic_actions = generate_clean_vessel_protocol(
-            G, vessel, "acetone", volume, 25.0, 2
-        )
-        action_sequence.extend(organic_actions)
-    except ValueError:
-        # 如果没有丙酮，尝试乙醇
-        try:
-            organic_actions = generate_clean_vessel_protocol(
-                G, vessel, "ethanol", volume, 25.0, 2
-            )
-            action_sequence.extend(organic_actions)
-        except ValueError:
-            print("警告：未找到有机溶剂，跳过有机清洗步骤")
-    
-    # 第二步：水清洗
-    water_actions = generate_clean_vessel_protocol(
-        G, vessel, "water", volume, 25.0, 2
-    )
-    action_sequence.extend(water_actions)
-    
-    return action_sequence
-
-
 def get_vessel_liquid_volume(G: nx.DiGraph, vessel: str) -> float:
     """获取容器中的液体体积（修复版）"""
     if vessel not in G.nodes():
@@ -390,60 +329,3 @@ def get_vessel_liquid_volume(G: nx.DiGraph, vessel: str) -> float:
     return total_volume
 
 
-def get_vessel_liquid_types(G: nx.DiGraph, vessel: str) -> List[str]:
-    """获取容器中所有液体的类型"""
-    if vessel not in G.nodes():
-        return []
-    
-    vessel_data = G.nodes[vessel].get('data', {})
-    liquids = vessel_data.get('liquid', [])
-    
-    liquid_types = []
-    for liquid in liquids:
-        if isinstance(liquid, dict):
-            # 支持两种格式的液体类型字段
-            liquid_type = liquid.get('liquid_type') or liquid.get('name', '')
-            if liquid_type:
-                liquid_types.append(liquid_type)
-    
-    return liquid_types
-
-
-def find_vessel_by_content(G: nx.DiGraph, content: str) -> List[str]:
-    """
-    根据内容物查找所有匹配的容器
-    返回匹配容器的ID列表
-    """
-    matching_vessels = []
-    
-    for node_id in G.nodes():
-        if G.nodes[node_id].get('type') == 'container':
-            # 检查容器名称匹配
-            node_name = G.nodes[node_id].get('name', '').lower()
-            if content.lower() in node_id.lower() or content.lower() in node_name:
-                matching_vessels.append(node_id)
-                continue
-            
-            # 检查液体类型匹配
-            vessel_data = G.nodes[node_id].get('data', {})
-            liquids = vessel_data.get('liquid', [])
-            config_data = G.nodes[node_id].get('config', {})
-            
-            # 检查 reagent_name 和 config.reagent
-            reagent_name = vessel_data.get('reagent_name', '').lower()
-            config_reagent = config_data.get('reagent', '').lower()
-            
-            if (content.lower() == reagent_name or 
-                content.lower() == config_reagent):
-                matching_vessels.append(node_id)
-                continue
-            
-            # 检查液体列表
-            for liquid in liquids:
-                if isinstance(liquid, dict):
-                    liquid_type = liquid.get('liquid_type') or liquid.get('name', '')
-                    if liquid_type.lower() == content.lower():
-                        matching_vessels.append(node_id)
-                        break
-    
-    return matching_vessels

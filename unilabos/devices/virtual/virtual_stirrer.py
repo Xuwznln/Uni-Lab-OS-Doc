@@ -80,7 +80,7 @@ class VirtualStirrer:
     async def stir(self, stir_time: float, stir_speed: float, settling_time: float, **kwargs) -> bool:
         """Execute stir action - 定时搅拌 + 沉降 🌪️"""
         
-        # 🔧 类型转换 - 确保所有参数都是数字类型
+        # 统一数值参数类型。
         try:
             stir_time = float(stir_time)
             stir_speed = float(stir_speed)
@@ -212,7 +212,7 @@ class VirtualStirrer:
     async def start_stir(self, vessel: str, stir_speed: float, purpose: str = "") -> bool:
         """Start stir action - 开始持续搅拌 🔄"""
         
-        # 🔧 类型转换
+        # 统一数值参数类型。
         try:
             stir_speed = float(stir_speed)
             vessel = str(vessel)
@@ -257,7 +257,7 @@ class VirtualStirrer:
     async def stop_stir(self, vessel: str) -> bool:
         """Stop stir action - 停止搅拌 🛑"""
         
-        # 🔧 类型转换
+        # 统一数值参数类型。
         try:
             vessel = str(vessel)
         except (ValueError, TypeError) as e:

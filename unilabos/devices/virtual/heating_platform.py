@@ -26,7 +26,7 @@ from unilabos.resources.objects.pose import (
     ResourceDictPositionSize,
 )
 from unilabos.resources.objects.site import SiteDefinition
-from unilabos.protocol.common import InventoryMutation
+from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     MaterialDataWrite,
     MaterialIdentityWrite,
