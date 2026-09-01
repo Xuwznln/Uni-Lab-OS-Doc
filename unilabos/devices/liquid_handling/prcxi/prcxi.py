@@ -66,7 +66,9 @@ from unilabos.devices.liquid_handling.liquid_handler_abstract import (
     SetLiquidFromPlateReturn,
     TransferLiquidReturn,
 )
+from unilabos.registry.decorators import action, device, not_action
 from unilabos.registry.placeholder_type import ResourceSlot
+from unilabos.resources.objects.resource import ResourceDict
 from unilabos.resources.objects.site import ResourceSite
 from unilabos.resources.resource_tracker import (
     ResourceTreeSet,
@@ -720,6 +722,87 @@ class PRCXI9300PlateAdapter(PlateAdapter):
         return data
 
 
+class PickUpTipsReturn(TypedDict):
+    tip_spots: List[List[ResourceDict]]
+
+
+class DropTipsReturn(TypedDict):
+    tip_spots: List[List[ResourceDict]]
+
+
+class DiscardTipsReturn(TypedDict):
+    use_channels: List[int]
+
+
+class SetTiprackReturn(TypedDict):
+    tip_racks: List[List[ResourceDict]]
+
+
+class MixReturn(TypedDict):
+    targets: List[List[ResourceDict]]
+
+
+class MovePlateReturn(TypedDict):
+    plate: List[List[ResourceDict]]
+
+
+class AddLiquidReturn(TypedDict):
+    targets: List[List[ResourceDict]]
+
+
+class RemoveLiquidReturn(TypedDict):
+    sources: List[List[ResourceDict]]
+
+
+class SetGroupReturn(TypedDict):
+    group_name: str
+    wells: List[List[ResourceDict]]
+    volumes: List[float]
+
+
+class ProtocolReturn(TypedDict):
+    protocol_name: str
+
+
+class RunProtocolReturn(TypedDict):
+    success: bool
+
+
+class DelayReturn(TypedDict):
+    seconds: float
+    msg: str
+
+
+class TouchTipReturn(TypedDict):
+    targets: List[List[ResourceDict]]
+
+
+class MoveToReturn(TypedDict):
+    well: List[List[ResourceDict]]
+    dis_to_top: float
+    channel: int
+
+
+class ShakerActionReturn(TypedDict):
+    time: int
+    module_no: int
+    amplitude: int
+    is_wait: bool
+
+
+class HeaterActionReturn(TypedDict):
+    temperature: float
+    time: int
+
+
+@device(
+    id="liquid_handler.prcxi",
+    display_name="PRCXI 移液工作站",
+    category=["liquid_handler"],
+    description="prcxi液体处理器设备，基于pylabrobot控制",
+    icon="icon_yiyezhan.webp",
+    supported_backends=["hostlink", "ros2"],
+)
 class PRCXI9300Handler(LiquidHandlerAbstract):
     support_touch_tip = False
 
@@ -774,20 +857,44 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         super().post_init(ros_node)
         self._unilabos_backend.post_init(ros_node)
 
-    def set_liquid(self, wells: list[Well], liquid_names: list[str], volumes: list[float]) -> SetLiquidReturn:
+    @action(description="设置孔内液体（名称与体积）")
+    def set_liquid(
+        self, wells: List[ResourceSlot], liquid_names: list[str], volumes: list[float]
+    ) -> SetLiquidReturn:
         return super().set_liquid(wells, liquid_names, volumes)
 
+    @action(description="按孔名批量设置板内液体")
     def set_liquid_from_plate(
         self, plate: ResourceSlot, well_names: list[str], liquid_names: list[str], volumes: list[float]
     ) -> SetLiquidFromPlateReturn:
         return super().set_liquid_from_plate(plate, well_names, liquid_names, volumes)
 
-    def set_group(self, group_name: str, wells: List[Well], volumes: List[float]):
-        return super().set_group(group_name, wells, volumes)
+    @action(auto_prefix=True, description="按组名登记一组孔并设置液体")
+    def set_group(
+        self, group_name: str, wells: List[ResourceSlot], volumes: List[float]
+    ) -> SetGroupReturn:
+        super().set_group(group_name, wells, volumes)
+        return SetGroupReturn(
+            group_name=group_name,
+            wells=ResourceTreeSet.from_plr_resources(list(wells)).dump(),  # type: ignore
+            volumes=list(volumes),
+        )
 
-    async def transfer_group(self, source_group_name: str, target_group_name: str, unit_volume: float):
-        return await super().transfer_group(source_group_name, target_group_name, unit_volume)
+    @action(auto_prefix=True, description="按组名在两组孔之间转移单位体积液体")
+    async def transfer_group(
+        self, source_group_name: str, target_group_name: str, unit_volume: float
+    ) -> TransferLiquidReturn:
+        await super().transfer_group(source_group_name, target_group_name, unit_volume)
+        return TransferLiquidReturn(
+            sources=ResourceTreeSet.from_plr_resources(
+                list(self.group_info.get(source_group_name, []))
+            ).dump(),  # type: ignore
+            targets=ResourceTreeSet.from_plr_resources(
+                list(self.group_info.get(target_group_name, []))
+            ).dump(),  # type: ignore
+        )
 
+    @action(auto_prefix=True, description="新建协议（后续步骤累积到该协议）")
     async def create_protocol(
         self,
         protocol_name: str = "",
@@ -797,17 +904,20 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         protocol_date: str = "",
         protocol_type: str = "",
         none_keys: List[str] = [],
-    ):
+    ) -> ProtocolReturn:
         self._unilabos_backend.create_protocol(protocol_name)
+        return ProtocolReturn(protocol_name=protocol_name)
 
-    async def run_protocol(self):
-        return self._unilabos_backend.run_protocol()
+    @action(auto_prefix=True, description="下发并运行当前协议")
+    async def run_protocol(self) -> RunProtocolReturn:
+        return RunProtocolReturn(success=bool(self._unilabos_backend.run_protocol()))
 
+    @action(description="移除液体（吸取到废液）")
     async def remove_liquid(
         self,
         vols: List[float],
-        sources: Sequence[Container],
-        waste_liquid: Optional[Container] = None,
+        sources: List[ResourceSlot],
+        waste_liquid: ResourceSlot = None,
         *,
         use_channels: Optional[List[int]] = None,
         flow_rates: Optional[List[Optional[float]]] = None,
@@ -819,8 +929,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         is_96_well: Optional[bool] = False,
         top: Optional[List[float]] = None,
         none_keys: List[str] = [],
-    ):
-        return await super().remove_liquid(
+    ) -> RemoveLiquidReturn:
+        await super().remove_liquid(
             vols,
             sources,
             waste_liquid,
@@ -835,13 +945,17 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             top=top,
             none_keys=none_keys,
         )
+        return RemoveLiquidReturn(
+            sources=ResourceTreeSet.from_plr_resources(list(sources)).dump()  # type: ignore
+        )
 
+    @action(description="加注液体（从试剂源分配到目标孔）")
     async def add_liquid(
         self,
         asp_vols: Union[List[float], float],
         dis_vols: Union[List[float], float],
-        reagent_sources: Sequence[Container],
-        targets: Sequence[Container],
+        reagent_sources: List[ResourceSlot],
+        targets: List[ResourceSlot],
         *,
         use_channels: Optional[List[int]] = None,
         flow_rates: Optional[List[Optional[float]]] = None,
@@ -856,8 +970,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         mix_rate: Optional[int] = None,
         mix_liquid_height: Optional[float] = None,
         none_keys: List[str] = [],
-    ):
-        return await super().add_liquid(
+    ) -> AddLiquidReturn:
+        await super().add_liquid(
             asp_vols,
             dis_vols,
             reagent_sources,
@@ -876,12 +990,16 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             mix_liquid_height=mix_liquid_height,
             none_keys=none_keys,
         )
+        return AddLiquidReturn(
+            targets=ResourceTreeSet.from_plr_resources(list(targets)).dump()  # type: ignore
+        )
 
+    @action(description="转移液体（自动识别一对多/多对一/一对一模式）")
     async def transfer_liquid(
         self,
-        sources: Sequence[Container],
-        targets: Sequence[Container],
-        tip_racks: Sequence[TipRack],
+        sources: List[ResourceSlot],
+        targets: List[ResourceSlot],
+        tip_racks: List[ResourceSlot],
         *,
         use_channels: Optional[List[int]] = None,
         asp_vols: Union[List[float], float],
@@ -926,45 +1044,61 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             none_keys=none_keys,
         )
 
-    async def custom_delay(self, seconds=0, msg=None):
-        return await super().custom_delay(seconds, msg)
+    @action(auto_prefix=True, description="延时等待")
+    async def custom_delay(self, seconds: float = 0, msg: Optional[str] = None) -> DelayReturn:
+        await super().custom_delay(seconds, msg)
+        return DelayReturn(seconds=float(seconds or 0), msg=msg or "")
 
-    async def touch_tip(self, targets: Sequence[Container]):
-        return await super().touch_tip(targets)
+    @action(auto_prefix=True, description="吸头触壁")
+    async def touch_tip(self, targets: List[ResourceSlot]) -> TouchTipReturn:
+        await super().touch_tip(targets)
+        return TouchTipReturn(
+            targets=ResourceTreeSet.from_plr_resources(list(targets)).dump()  # type: ignore
+        )
 
+    @action(description="混匀目标孔内液体")
     async def mix(
         self,
-        targets: Sequence[Container],
+        targets: List[ResourceSlot],
         mix_time: int = None,
         mix_vol: Optional[int] = None,
         height_to_bottom: Optional[float] = None,
         offsets: Optional[Coordinate] = None,
         mix_rate: Optional[float] = None,
         none_keys: List[str] = [],
-    ):
-        return await self._unilabos_backend.mix(
+    ) -> MixReturn:
+        await self._unilabos_backend.mix(
             targets, mix_time, mix_vol, height_to_bottom, offsets, mix_rate, none_keys
         )
+        return MixReturn(
+            targets=ResourceTreeSet.from_plr_resources(list(targets)).dump()  # type: ignore
+        )
 
+    @not_action
     def iter_tips(self, tip_racks: Sequence[TipRack]) -> Iterator[Resource]:
         return super().iter_tips(tip_racks)
 
+    @action(description="拾取吸头")
     async def pick_up_tips(
         self,
-        tip_spots: List[TipSpot],
+        tip_spots: List[ResourceSlot],
         use_channels: Optional[List[int]] = None,
         offsets: Optional[List[Coordinate]] = None,
         **backend_kwargs,
-    ):
+    ) -> PickUpTipsReturn:
         if self.step_mode:
             await self.create_protocol(f"单点动作{time.time()}")
             await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
             await self.run_protocol()
-        return await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
+        await super().pick_up_tips(tip_spots, use_channels, offsets, **backend_kwargs)
+        return PickUpTipsReturn(
+            tip_spots=ResourceTreeSet.from_plr_resources(list(tip_spots)).dump()  # type: ignore
+        )
 
+    @action(description="吸取液体")
     async def aspirate(
         self,
-        resources: Sequence[Container],
+        resources: List[ResourceSlot],
         vols: List[float],
         use_channels: Optional[List[int]] = None,
         flow_rates: Optional[List[Optional[float]]] = None,
@@ -973,7 +1107,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         blow_out_air_volume: Optional[List[Optional[float]]] = None,
         spread: Literal["wide", "tight", "custom"] = "wide",
         **backend_kwargs,
-    ):
+    ) -> SimpleReturn:
 
         return await super().aspirate(
             resources,
@@ -987,19 +1121,24 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             **backend_kwargs,
         )
 
+    @action(description="退回吸头到指定位置")
     async def drop_tips(
         self,
-        tip_spots: Sequence[Union[TipSpot, Trash]],
+        tip_spots: List[ResourceSlot],
         use_channels: Optional[List[int]] = None,
         offsets: Optional[List[Coordinate]] = None,
         allow_nonzero_volume: bool = False,
         **backend_kwargs,
-    ):
-        return await super().drop_tips(tip_spots, use_channels, offsets, allow_nonzero_volume, **backend_kwargs)
+    ) -> DropTipsReturn:
+        await super().drop_tips(tip_spots, use_channels, offsets, allow_nonzero_volume, **backend_kwargs)
+        return DropTipsReturn(
+            tip_spots=ResourceTreeSet.from_plr_resources(list(tip_spots)).dump()  # type: ignore
+        )
 
+    @action(description="分配液体")
     async def dispense(
         self,
-        resources: Sequence[Container],
+        resources: List[ResourceSlot],
         vols: List[float],
         use_channels: Optional[List[int]] = None,
         flow_rates: Optional[List[Optional[float]]] = None,
@@ -1008,7 +1147,7 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         blow_out_air_volume: Optional[List[Optional[float]]] = None,
         spread: Literal["wide", "tight", "custom"] = "wide",
         **backend_kwargs,
-    ):
+    ) -> SimpleReturn:
         return await super().dispense(
             resources,
             vols,
@@ -1021,31 +1160,54 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             **backend_kwargs,
         )
 
+    @action(description="丢弃吸头到废弃槽")
     async def discard_tips(
         self,
         use_channels: Optional[List[int]] = None,
         allow_nonzero_volume: bool = True,
         offsets: Optional[List[Coordinate]] = None,
         **backend_kwargs,
-    ):
-        return await super().discard_tips(use_channels, allow_nonzero_volume, offsets, **backend_kwargs)
+    ) -> DiscardTipsReturn:
+        await super().discard_tips(use_channels, allow_nonzero_volume, offsets, **backend_kwargs)
+        return DiscardTipsReturn(use_channels=list(use_channels or []))
 
-    def set_tiprack(self, tip_racks: Sequence[TipRack]):
+    @action(description="设置当前使用的吸头盒")
+    def set_tiprack(self, tip_racks: List[ResourceSlot]) -> SetTiprackReturn:
         super().set_tiprack(tip_racks)
+        return SetTiprackReturn(
+            tip_racks=ResourceTreeSet.from_plr_resources(list(tip_racks)).dump()  # type: ignore
+        )
 
-    async def move_to(self, well: Well, dis_to_top: float = 0, channel: int = 0):
-        return await super().move_to(well, dis_to_top, channel)
+    @action(auto_prefix=True, description="单通道移动到指定孔上方")
+    async def move_to(
+        self, well: ResourceSlot, dis_to_top: float = 0, channel: int = 0
+    ) -> MoveToReturn:
+        await super().move_to(well, dis_to_top, channel)
+        return MoveToReturn(
+            well=ResourceTreeSet.from_plr_resources([well]).dump(),  # type: ignore
+            dis_to_top=dis_to_top,
+            channel=channel,
+        )
 
-    async def shaker_action(self, time: int, module_no: int, amplitude: int, is_wait: bool):
-        return await self._unilabos_backend.shaker_action(time, module_no, amplitude, is_wait)
+    @action(auto_prefix=True, description="振荡模块动作")
+    async def shaker_action(
+        self, time: int, module_no: int, amplitude: int, is_wait: bool
+    ) -> ShakerActionReturn:
+        await self._unilabos_backend.shaker_action(time, module_no, amplitude, is_wait)
+        return ShakerActionReturn(
+            time=time, module_no=module_no, amplitude=amplitude, is_wait=is_wait
+        )
 
-    async def heater_action(self, temperature: float, time: int):
-        return await self._unilabos_backend.heater_action(temperature, time)
+    @action(auto_prefix=True, description="加热模块动作")
+    async def heater_action(self, temperature: float, time: int) -> HeaterActionReturn:
+        await self._unilabos_backend.heater_action(temperature, time)
+        return HeaterActionReturn(temperature=temperature, time=time)
 
+    @action(description="移动板到目标位置")
     async def move_plate(
         self,
-        plate: Plate,
-        to: Resource,
+        plate: ResourceSlot,
+        to: ResourceSlot,
         intermediate_locations: Optional[List[Coordinate]] = None,
         pickup_offset: Coordinate = Coordinate.zero(),
         destination_offset: Coordinate = Coordinate.zero(),
@@ -1053,9 +1215,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         pickup_direction: GripDirection = GripDirection.FRONT,
         pickup_distance_from_top: float = 13.2 - 3.33,
         **backend_kwargs,
-    ):
+    ) -> MovePlateReturn:
 
-        return await super().move_plate(
+        await super().move_plate(
             plate,
             to,
             intermediate_locations,
@@ -1066,6 +1228,9 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             pickup_distance_from_top,
             target_plate_number=to,
             **backend_kwargs,
+        )
+        return MovePlateReturn(
+            plate=ResourceTreeSet.from_plr_resources([plate]).dump()  # type: ignore
         )
 
 
@@ -2547,6 +2712,7 @@ if __name__ == "__main__":
                 "parent": None,
                 "type": "device",
                 "class": "liquid_handler.prcxi",
+                "template_name": "liquid_handler.prcxi",
                 "position": {"x": 0, "y": 0, "z": 0},
                 "config": {
                     "deck": {
@@ -2565,7 +2731,6 @@ if __name__ == "__main__":
                     "is_9320": True,
                 },
                 "data": {},
-                "children": ["PRCXI_Deck"],
             },
         )
         A[1]["parent"] = "PRCXI"
