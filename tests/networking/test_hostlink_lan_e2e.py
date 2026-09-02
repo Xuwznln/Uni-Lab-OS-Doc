@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import multiprocessing
-import os
-from pathlib import Path
 from queue import Empty
 import socket
 import time
@@ -16,6 +14,7 @@ from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLink
 from unilabos.config.config import BasicConfig, HostLinkConfig
 from unilabos.backend.hostlink.backend import HostLinkBackend
 
+from tests.e2e.readme_demos import DEMOS_BY_REPO, resolve_demo_source
 from tests.networking.hostlink_lan_virtual_devices import (
     HOST_NODE_ID,
     SUB_DEVICE_ID,
@@ -223,13 +222,15 @@ def test_host_node_and_device_complete_network_subscribe_and_action_loop(
 def test_readme_lan_demo_actual_drivers_close_the_hostlink_loop(
     monkeypatch,
 ) -> None:
-    """Run the pinned LabDeviceLanDemo drivers when CI checked them out."""
+    """Drive the pinned LabDeviceLanDemo drivers in-process over a real HostLink link.
 
-    examples_root = os.environ.get("UNILABOS_README_EXAMPLES_ROOT")
-    if not examples_root:
-        pytest.skip("README 外部设备包只在 CI 检出后运行")
-    package_root = Path(examples_root) / "LabDeviceLanDemo"
-    assert package_root.is_dir(), f"缺少 README LAN 示例仓库：{package_root}"
+    仓库来源与 ``tests/e2e`` 共用同一份引用清单（预检出目录 > 同级目录 > pinned 克隆）。
+    """
+
+    try:
+        package_root, _source = resolve_demo_source(DEMOS_BY_REPO["LabDeviceLanDemo"])
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
     monkeypatch.syspath_prepend(str(package_root))
 
     from lan_demo.hub_node import HubNodeDemo
