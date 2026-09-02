@@ -311,16 +311,19 @@ class BackendScheduler:
                     f"workflow node {workflow_node_uuid} lacks material_uuid/device action"
                 )
             run_uuid = str(run["uuid"])
+            policy = run.get("execution_policy") or {}
             dag_nodes[run_uuid] = DagNode(
                 node_id=run_uuid,
                 device_id=device_id,
                 action=action,
                 action_type=str(source.get("action_type") or ""),
                 action_args=param,
-                always_free=bool((run.get("execution_policy") or {}).get("always_free")),
+                always_free=bool(policy.get("always_free")),
             )
             specs[run_uuid] = {
                 "workflow_node_uuid": workflow_node_uuid,
+                # 节点显式声明优先；未声明时派发前按注册表 @action(always_free) 解析
+                "always_free_policy": policy.get("always_free"),
                 "base_param": param,
                 "edges": list(plan.get("edges") or []),
                 "runs_by_node": {
@@ -392,6 +395,7 @@ class BackendScheduler:
         material_uuids.update(spec.get("reserved_material_uuids") or ())
         spec["resolved_action_args"] = args
         spec["materials_need_lock"] = parameter_names
+        spec["always_free"] = self._action_always_free(node, spec)
         job_uuid = spec["current_job_uuid"]
         # 资源申请以当前 attempt 为 owner：acquire 对同一 owner 幂等重放，重试
         # 的新 attempt 必须是新的申请才能重新排队获取。
@@ -404,7 +408,7 @@ class BackendScheduler:
                     device_id=node.device_id,
                     action_name=node.action,
                 ),
-                always_free=node.always_free,
+                always_free=spec["always_free"],
                 material_lock_claims=[
                     MaterialLockClaim(material_uuid=material_uuid)
                     for material_uuid in sorted(material_uuids)
@@ -468,7 +472,7 @@ class BackendScheduler:
                 node_run_uuid=node.node_id,
                 attempt_no=spec["attempt_no"],
             )
-            payload["always_free"] = node.always_free
+            payload["always_free"] = spec.get("always_free", node.always_free)
             self.executor.dispatch(payload)
         except Exception:
             with self._guard:
@@ -525,6 +529,21 @@ class BackendScheduler:
         if not callable(resolver):
             return []
         return list(resolver(device_id, action_name) or [])
+
+    def _action_always_free(self, node: DagNode, spec: Dict[str, Any]) -> bool:
+        """节点是否免动作锁：节点 execution_policy 显式声明优先，否则取注册表 ``@action(always_free)``。
+
+        与 ``materials_need_lock`` 一样在派发前解析：此时执行适配器已就绪，注册表副本
+        （含 slave 远端设备）完整。
+        """
+
+        explicit = spec.get("always_free_policy")
+        if explicit is not None:
+            return bool(explicit)
+        resolver = getattr(self.executor, "resolve_action_always_free", None)
+        if not callable(resolver):
+            return node.always_free
+        return bool(resolver(node.device_id, node.action))
 
     def _release_job_resources(self, job_uuid: str, *, canceled: bool) -> None:
         """释放一个 attempt 持有的资源申请。"""

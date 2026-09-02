@@ -249,6 +249,18 @@ class JobExecutionBackend:
                 "SchedulerDispatchConflict",
             )
 
+    def _action_mapping(self, device_id: str, action_name: str) -> Optional[Dict[str, Any]]:
+        """执行适配器持有的注册表动作声明（Host 侧权威副本，含 slave 远端设备）。"""
+
+        adapter = self._host_node_getter()
+        mappings = getattr(adapter, "_action_value_mappings", {}) if adapter else {}
+        actions = mappings.get(device_id, {}) if isinstance(mappings, dict) else {}
+        for candidate in (action_name, f"auto-{action_name}"):
+            mapping = actions.get(candidate)
+            if isinstance(mapping, dict):
+                return mapping
+        return None
+
     def resolve_material_lock_parameters(
         self, device_id: str, action_name: str
     ) -> List[str]:
@@ -256,16 +268,16 @@ class JobExecutionBackend:
             return list(
                 self._materials_need_lock_resolver(device_id, action_name) or []
             )
-        adapter = self._host_node_getter()
-        mappings = getattr(adapter, "_action_value_mappings", {}) if adapter else {}
-        actions = mappings.get(device_id, {}) if isinstance(mappings, dict) else {}
-        for candidate in (action_name, f"auto-{action_name}"):
-            mapping = actions.get(candidate)
-            if isinstance(mapping, dict):
-                return normalize_material_parameter_names(
-                    mapping.get("materials_need_lock")
-                )
-        return []
+        mapping = self._action_mapping(device_id, action_name)
+        if mapping is None:
+            return []
+        return normalize_material_parameter_names(mapping.get("materials_need_lock"))
+
+    def resolve_action_always_free(self, device_id: str, action_name: str) -> bool:
+        """``@action(always_free=True)`` 声明：该动作不占用 ``(device_id, action_name)`` 动作锁。"""
+
+        mapping = self._action_mapping(device_id, action_name)
+        return bool(mapping.get("always_free", False)) if mapping is not None else False
 
     def _safe_inventory_cancel(self, job_id: str, *, reason: str) -> None:
         if self._inventory_authority is None:

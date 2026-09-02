@@ -238,6 +238,36 @@ def test_foreign_job_finish_is_ignored() -> None:
     assert workflow.terminal == []
 
 
+def test_always_free_is_resolved_from_the_action_registry_unless_the_node_declares_it() -> None:
+    """注册表 @action(always_free) 让同设备同动作并行；节点 execution_policy 显式声明优先。"""
+
+    workflow = _Workflow()
+    executor = _Executor()
+    executor.resolve_action_always_free = (  # type: ignore[attr-defined]
+        lambda device_id, action: (device_id, action) == ("device-a", "peek")
+    )
+    scheduler = BackendScheduler(workflow, executor)  # type: ignore[arg-type]
+    task = {"uuid": "task-1", "workflow_uuid": "workflow-1"}
+    first = DagNode(node_id="run-1", device_id="device-a", action="peek")
+    second = DagNode(node_id="run-2", device_id="device-a", action="peek")
+    pinned = DagNode(node_id="run-3", device_id="device-a", action="peek")
+    for node in (first, second, pinned):
+        _attach(scheduler, workflow, task, node)
+        scheduler._run_specs[node.node_id]["base_param"] = {}  # noqa: SLF001
+    scheduler._run_specs["run-3"]["always_free_policy"] = False  # noqa: SLF001
+
+    scheduler._start_node(task, first)  # noqa: SLF001
+    scheduler._start_node(task, second)  # noqa: SLF001
+    scheduler._start_node(task, pinned)  # noqa: SLF001
+
+    # 两个注册表 always_free 的 peek 同时持有（无动作锁身份）；显式关闭的第三个申请动作锁并立即获得
+    assert [item["job_id"] for item in executor.dispatched] == ["run-1-a1", "run-2-a1", "run-3-a1"]
+    assert all(item["always_free"] for item in executor.dispatched[:2])
+    assert executor.dispatched[2]["always_free"] is False
+    assert scheduler.resources.request_for_owner("run-1-a1").identifiers == []
+    assert [i.kind for i in scheduler.resources.request_for_owner("run-3-a1").identifiers] == ["action"]
+
+
 def test_dispatch_waits_for_the_execution_adapter_and_resumes_on_host_ready() -> None:
     """执行适配器未注册（ROS2 host node 晚于管理 API 就绪）时不派发，host ready 后原样派发。"""
 

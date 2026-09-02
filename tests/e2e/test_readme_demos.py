@@ -39,6 +39,7 @@ from tests.e2e.readme_demos import (
     subprocess_env,
     unilab_command,
     wait_until,
+    workflow_batches,
 )
 
 CLI_TIMEOUT = 300.0
@@ -206,10 +207,10 @@ class _DemoProcesses:
             handle.close()
 
 
-def _run_workflow(
+def _submit_workflow(
     port: int, expectation: WorkflowExpectation, *, timeout: float, abort
-) -> dict[str, Any]:
-    """经管理 API 找到 @workflow 上报的模板、创建任务并等待终态，返回任务与 job 证据。"""
+) -> tuple[dict[str, Any], str]:
+    """经管理 API 找到 @workflow 上报的模板并创建任务（网页"运行"按钮）。"""
 
     def find_workflow():
         listing = api_request(port, "/workflows?page=1&page_size=100")
@@ -222,7 +223,63 @@ def _run_workflow(
     task = api_request(
         port, "/workflow-tasks", {"workflow_uuid": workflow["uuid"], "run_mode": "normal"}
     )
-    task_uuid = task["uuid"]
+    return workflow, str(task["uuid"])
+
+
+def _run_workflow_batch(
+    port: int, batch: list[WorkflowExpectation], *, timeout: float, abort
+) -> list[dict[str, Any]]:
+    """一个并发批次：先全部创建任务，再观察调度器排队，最后逐个等待终态。"""
+
+    submitted = [
+        _submit_workflow(port, expectation, timeout=timeout, abort=abort)
+        for expectation in batch
+    ]
+    for expectation, (_workflow, task_uuid) in zip(batch, submitted):
+        if expectation.expect_waiting:
+            _assert_task_queued(port, expectation, task_uuid, timeout=timeout, abort=abort)
+    return [
+        _await_workflow(port, expectation, workflow, task_uuid, timeout=timeout, abort=abort)
+        for expectation, (workflow, task_uuid) in zip(batch, submitted)
+    ]
+
+
+def _assert_task_queued(
+    port: int, expectation: WorkflowExpectation, task_uuid: str, *, timeout: float, abort
+) -> None:
+    """统一调度器的锁排队证据：该任务的资源申请处于 waiting，blockers 指向持锁的 attempt。"""
+
+    def queued_request():
+        snapshot = api_request(port, "/scheduler/resources")
+        for request in snapshot.get("requests", []):
+            if (
+                request.get("task_uuid") == task_uuid
+                and request.get("status") == "waiting"
+                and request.get("blockers")
+            ):
+                return request
+        return None
+
+    request = wait_until(
+        queued_request,
+        timeout=timeout,
+        abort=abort,
+        description=f"工作流 {expectation.name!r} 的资源申请在调度器排队（waiting + blockers）",
+    )
+    kinds = {identifier["kind"] for identifier in request["identifiers"]}
+    assert kinds <= {"action", "material"}, request
+
+
+def _await_workflow(
+    port: int,
+    expectation: WorkflowExpectation,
+    workflow: dict[str, Any],
+    task_uuid: str,
+    *,
+    timeout: float,
+    abort,
+) -> dict[str, Any]:
+    """等待任务终态并核对节点运行 / attempt 历史，返回任务与节点运行证据。"""
 
     decision = None
     if expectation.error_decision:
@@ -408,12 +465,13 @@ def test_readme_demo_end_to_end_via_unilab_cli_and_management_api(
                 item["name"] for item in listing["items"]
             }
 
-            # 6) 管理 API 运行 @workflow 上报的工作流并断言终态
+            # 6) 管理 API 运行 @workflow 上报的工作流并断言终态；同 group 的批次并发提交
             results = [
-                _run_workflow(
-                    port, expectation, timeout=spec.runtime_timeout, abort=processes.any_exited
+                result
+                for batch in workflow_batches(spec.workflows)
+                for result in _run_workflow_batch(
+                    port, batch, timeout=spec.runtime_timeout, abort=processes.any_exited
                 )
-                for expectation in spec.workflows
             ]
             assert [result["workflow"]["name"] for result in results] == [
                 expectation.name for expectation in spec.workflows

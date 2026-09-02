@@ -62,6 +62,12 @@ class WorkflowExpectation:
     #: （``{"action": "abort"}``、``{"action": "retry"}`` 或携带 ``result`` 的
     #: ``operator_intervention``）。
     error_decision: Optional[dict[str, Any]] = None
+    #: 并发组：相邻且同名 group 的工作流先全部创建任务再逐个等待终态，
+    #: 复现"网页上连点几个运行"的调度竞争（动作锁 / 物料锁 / always_free）。
+    group: Optional[str] = None
+    #: 期望该任务在组内竞争时被调度器排队：``/scheduler/resources`` 里出现
+    #: 该 task 的 ``waiting`` 申请且 ``blockers`` 非空。
+    expect_waiting: bool = False
 
     def expected_node_statuses(self) -> tuple[str, ...]:
         return self.node_statuses or tuple("succeeded" for _ in range(self.node_count))
@@ -185,6 +191,24 @@ DEMOS: tuple[DemoSpec, ...] = (
 )
 
 DEMOS_BY_REPO = {spec.repo: spec for spec in DEMOS}
+
+
+def workflow_batches(
+    expectations: tuple[WorkflowExpectation, ...],
+) -> list[list[WorkflowExpectation]]:
+    """按 ``group`` 把相邻工作流合并成并发提交批次；无 group 的各成一批。"""
+
+    batches: list[list[WorkflowExpectation]] = []
+    for expectation in expectations:
+        if (
+            expectation.group is not None
+            and batches
+            and batches[-1][0].group == expectation.group
+        ):
+            batches[-1].append(expectation)
+        else:
+            batches.append([expectation])
+    return batches
 
 
 # ---------------------------------------------------------------------------
