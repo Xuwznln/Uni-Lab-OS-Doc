@@ -107,7 +107,7 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceExceptionDemo",
         url="https://github.com/Xuwznln/LabDeviceExceptionDemo",
-        ref="df9a8feb5498f4820a4ace3a7f2f48df21fcaa1e",
+        ref="b0355efc8066b299575273979f3c7c338b6011d7",
         package="exception_demo",
         host_graph="graph/exception_demo.json",
         # 该 demo 设备内不自跑闭环：全部路径都是网页式工作流提交 + 决策链。
