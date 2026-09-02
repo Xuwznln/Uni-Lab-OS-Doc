@@ -161,8 +161,10 @@ def test_scheduler_dispatch_gate_keeps_waiting_jobs() -> None:
     scheduler.pause_dispatch()
     assert scheduler.dispatch_paused is True
 
-    node = SimpleNamespace(node_id="job-1", device_id="d", action="a", always_free=False)
+    # DAG 节点键是节点运行 uuid，等待集合/派发集合以当前 attempt 的 job uuid 为键
+    node = SimpleNamespace(node_id="run-1", device_id="d", action="a", always_free=False)
     task = {"uuid": "task-1"}
+    scheduler._run_specs["run-1"] = {"current_job_uuid": "job-1"}
     scheduler._waiting_resource_jobs["job-1"] = (task, node)
 
     scheduler._dispatch_held_node(task, node)

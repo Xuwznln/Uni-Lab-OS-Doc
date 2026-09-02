@@ -689,26 +689,28 @@ def test_backend_scheduler_reserves_complete_task_before_dispatch(tmp_path) -> N
             quantity=2,
             unit="ul",
         ).model_dump(mode="json", exclude_none=False)
+        # reservation 绑定当前 attempt 的 job uuid（执行器按 job_id 校验），键是节点运行
         specs = {
-            "job-a": {
+            "run-a": {
                 "workflow_node_uuid": "node-a",
                 "inventory_requirements": [requirement],
                 "scheduler_revision": 1,
+                "current_job_uuid": "run-a-attempt-1",
             },
-            "job-b": {
+            "run-b": {
                 "workflow_node_uuid": "node-b",
                 "inventory_requirements": [requirement],
                 "scheduler_revision": 1,
+                "current_job_uuid": "run-b-attempt-1",
             },
         }
 
         scheduler._reserve_task_inventory({"uuid": "task-local"}, specs)  # noqa: SLF001
 
         assert all(spec.get("inventory_reservation_uuid") for spec in specs.values())
-        assert [
-            item.status
-            for item in service.list_inventory_reservations(task_uuid="task-local")
-        ] == ["active", "active"]
+        reservations = service.list_inventory_reservations(task_uuid="task-local")
+        assert [item.status for item in reservations] == ["active", "active"]
+        assert {item.job_uuid for item in reservations} == {"run-a-attempt-1", "run-b-attempt-1"}
         assert service.get_inventory_lot("lot-a").quantity_available == 1
 
         scheduler._release_unconsumed_task_inventory("task-local")  # noqa: SLF001

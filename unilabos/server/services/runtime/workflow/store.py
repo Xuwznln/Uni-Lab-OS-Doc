@@ -736,34 +736,185 @@ class WorkflowStore:
                     _json(input_value),
                 ),
             )
-            for job in jobs:
-                conn.execute(
-                    """
-                    INSERT INTO workflow_node_job(
-                        uuid, create_time, update_time, deleted_at, description,
-                        meta_data, workflow_task_uuid, workflow_node_uuid,
-                        material_uuid, feedback_sequence, topological_index,
-                        executor_kind, execution_policy,
-                        execution_timeout_seconds, status, attempt, param,
-                        feedback_data, return_info, control_data, error_info
-                    ) VALUES (?, ?, ?, NULL, NULL, '{}', ?, ?, ?, 0, ?, ?, ?,
-                              ?, 'pending', 1, ?, '{}', '{}', '{}', '[]')
-                    """,
-                    (
-                        job["uuid"],
-                        now,
-                        now,
-                        task_uuid,
-                        job["workflow_node_uuid"],
-                        job.get("material_uuid"),
-                        job["topological_index"],
-                        job["executor_kind"],
-                        _json(job.get("execution_policy") or {}),
-                        int(job.get("execution_timeout_seconds") or 0),
-                        _json(job.get("param") or {}),
-                    ),
-                )
+            for spec in jobs:
+                self._insert_node_run(conn, task_uuid=task_uuid, spec=spec, now=now)
         return self.get_task(task_uuid)
+
+    # 节点运行（run）与 attempt（job）-------------------------------------------
+
+    _RUN_TERMINAL = frozenset({"succeeded", "failed", "skipped", "canceled", "timeout"})
+    _RUN_IN_FLIGHT = frozenset(
+        {"dispatched", "running", "intervention_required", "cancel_requested", "execution_unknown"}
+    )
+
+    def _insert_node_run(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        task_uuid: str,
+        spec: Dict[str, Any],
+        now: str,
+    ) -> str:
+        """写入一个节点运行及其 attempt 1；整图任务与单点任务共用。
+
+        ``spec["uuid"]`` 是节点运行（DAG 节点）的稳定身份，attempt 另取新 uuid。
+        """
+
+        run_uuid = str(spec["uuid"])
+        job_uuid = str(uuid4())
+        conn.execute(
+            """
+            INSERT INTO workflow_node_run(
+                uuid, create_time, update_time, deleted_at, description, meta_data,
+                workflow_task_uuid, workflow_node_uuid, topological_index,
+                executor_kind, execution_policy, execution_timeout_seconds, param,
+                material_uuid, status, current_job_uuid, attempt_count,
+                return_info, error_info, feedback_data, control_data
+            ) VALUES (?, ?, ?, NULL, NULL, '{}', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, 1,
+                      '{}', '[]', '{}', '{}')
+            """,
+            (
+                run_uuid,
+                now,
+                now,
+                task_uuid,
+                spec["workflow_node_uuid"],
+                int(spec.get("topological_index") or 0),
+                spec["executor_kind"],
+                _json(spec.get("execution_policy") or {}),
+                int(spec.get("execution_timeout_seconds") or 0),
+                _json(spec.get("param") or {}),
+                spec.get("material_uuid"),
+                job_uuid,
+            ),
+        )
+        self._insert_attempt(
+            conn,
+            job_uuid=job_uuid,
+            run_uuid=run_uuid,
+            task_uuid=task_uuid,
+            node_uuid=str(spec["workflow_node_uuid"]),
+            attempt_no=1,
+            retry_of_job_uuid=None,
+            trigger="initial",
+            param=spec.get("param") or {},
+            now=now,
+        )
+        return run_uuid
+
+    @staticmethod
+    def _insert_attempt(
+        conn: sqlite3.Connection,
+        *,
+        job_uuid: str,
+        run_uuid: str,
+        task_uuid: str,
+        node_uuid: str,
+        attempt_no: int,
+        retry_of_job_uuid: Optional[str],
+        trigger: str,
+        param: Dict[str, Any],
+        now: str,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO workflow_node_job(
+                uuid, create_time, update_time, deleted_at, description, meta_data,
+                workflow_node_run_uuid, workflow_task_uuid, workflow_node_uuid,
+                attempt_no, retry_of_job_uuid, trigger, feedback_sequence, status, param,
+                feedback_data, return_info, error_resolution, control_data, error_info
+            ) VALUES (?, ?, ?, NULL, NULL, '{}', ?, ?, ?, ?, ?, ?, 0, 'pending', ?,
+                      '{}', '{}', '{}', '{}', '[]')
+            """,
+            (
+                job_uuid,
+                now,
+                now,
+                run_uuid,
+                task_uuid,
+                node_uuid,
+                int(attempt_no),
+                retry_of_job_uuid,
+                trigger,
+                _json(param),
+            ),
+        )
+
+    def _sync_run_projection(
+        self, conn: sqlite3.Connection, run_uuid: str, now: str
+    ) -> Dict[str, Any]:
+        """把当前 attempt 的状态/结果投影到节点运行，并发节点运行变更事件。"""
+
+        run = conn.execute(
+            "SELECT * FROM workflow_node_run WHERE uuid=? AND deleted_at IS NULL",
+            (run_uuid,),
+        ).fetchone()
+        if run is None:
+            raise StoreNotFound(f"workflow node run {run_uuid} not found")
+        job = conn.execute(
+            "SELECT * FROM workflow_node_job WHERE uuid=? AND deleted_at IS NULL",
+            (run["current_job_uuid"],),
+        ).fetchone()
+        if job is None:
+            raise StoreConflict(f"workflow node run {run_uuid} has no current attempt")
+        finished_at = job["finished_at"] if job["status"] in self._RUN_TERMINAL else None
+        conn.execute(
+            """
+            UPDATE workflow_node_run
+            SET status=?, return_info=?, error_info=?, feedback_data=?,
+                started_at=COALESCE(started_at, ?), finished_at=?, update_time=?
+            WHERE uuid=?
+            """,
+            (
+                job["status"],
+                job["return_info"],
+                job["error_info"],
+                job["feedback_data"],
+                job["started_at"],
+                finished_at,
+                now,
+                run_uuid,
+            ),
+        )
+        self._append_event(
+            conn,
+            event="workflow.node_run.changed",
+            data={
+                "workflow_node_run_uuid": run_uuid,
+                "workflow_task_uuid": run["workflow_task_uuid"],
+                "workflow_node_uuid": run["workflow_node_uuid"],
+                "status": job["status"],
+                "current_job_uuid": job["uuid"],
+                "attempt_count": int(run["attempt_count"]),
+            },
+            now=now,
+        )
+        return self._run_row(
+            conn.execute(
+                "SELECT * FROM workflow_node_run WHERE uuid=?", (run_uuid,)
+            ).fetchone()
+        )
+
+    def _emit_job_changed(
+        self,
+        conn: sqlite3.Connection,
+        job: sqlite3.Row,
+        status: str,
+        now: str,
+        **extra: Any,
+    ) -> None:
+        self._append_event(
+            conn,
+            event="workflow.node_job.changed",
+            data={
+                "workflow_node_job_uuid": job["uuid"],
+                "workflow_node_run_uuid": job["workflow_node_run_uuid"],
+                "attempt_no": int(job["attempt_no"]),
+                "status": status,
+                **extra,
+            },
+            now=now,
+        )
 
     def create_ad_hoc_task_with_job(
         self,
@@ -781,7 +932,7 @@ class WorkflowStore:
         idempotency_key: str,
         request_fingerprint: str,
     ) -> Dict[str, Any]:
-        """单点设备动作任务：无 workflow 定义，task+单 job 一次落库。
+        """单点设备动作任务：无 workflow 定义，task + 单个节点运行（attempt 1）一次落库。
 
         snapshot/plan 按调度器 `_build_dag` 的消费面构造（snapshot.nodes 提供
         action_name/action_type/target_device_id，plan.nodes 提供 param），
@@ -832,29 +983,19 @@ class WorkflowStore:
                         request_fingerprint,
                     ),
                 )
-                conn.execute(
-                    """
-                    INSERT INTO workflow_node_job(
-                        uuid, create_time, update_time, deleted_at, description,
-                        meta_data, workflow_task_uuid, workflow_node_uuid,
-                        material_uuid, feedback_sequence, topological_index,
-                        executor_kind, execution_policy,
-                        execution_timeout_seconds, status, attempt, param,
-                        feedback_data, return_info, control_data, error_info
-                    ) VALUES (?, ?, ?, NULL, NULL, '{}', ?, ?, NULL, 0, 0,
-                              'device_action', ?, ?, 'pending', 1, ?,
-                              '{}', '{}', '{}', '[]')
-                    """,
-                    (
-                        str(uuid4()),
-                        now,
-                        now,
-                        task_uuid,
-                        node_uuid,
-                        _json(execution_policy),
-                        int(execution_timeout_seconds),
-                        _json(param),
-                    ),
+                self._insert_node_run(
+                    conn,
+                    task_uuid=task_uuid,
+                    spec={
+                        "uuid": str(uuid4()),
+                        "workflow_node_uuid": node_uuid,
+                        "topological_index": 0,
+                        "executor_kind": "device_action",
+                        "execution_policy": execution_policy,
+                        "execution_timeout_seconds": execution_timeout_seconds,
+                        "param": param,
+                    },
+                    now=now,
                 )
         except sqlite3.IntegrityError as exc:
             # 幂等键唯一索引命中：并发同键提交由 service 读回先到者
@@ -928,14 +1069,81 @@ class WorkflowStore:
             "page_size": page_size,
         }
 
-    def list_jobs(self, task_uuid: str) -> List[Dict[str, Any]]:
+    def list_node_runs(
+        self, task_uuid: str, *, include_attempts: bool = True
+    ) -> List[Dict[str, Any]]:
+        """任务的节点运行，每个工作流节点一条，按拓扑序；可内嵌 attempt 历史。"""
+
         self.get_task(task_uuid)
         with self._lock:
             rows = self._conn.execute(
                 """
-                SELECT * FROM workflow_node_job
+                SELECT * FROM workflow_node_run
                 WHERE workflow_task_uuid = ? AND deleted_at IS NULL
                 ORDER BY topological_index, create_time, uuid
+                """,
+                (task_uuid,),
+            ).fetchall()
+            runs = [self._run_row(row) for row in rows]
+            if include_attempts:
+                attempts = self._attempts_by_run(
+                    self._conn,
+                    "job.workflow_task_uuid = ?",
+                    (task_uuid,),
+                )
+                for run in runs:
+                    run["attempts"] = attempts.get(run["uuid"], [])
+        return runs
+
+    def get_node_run(
+        self, run_uuid: str, *, include_attempts: bool = True
+    ) -> Dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM workflow_node_run WHERE uuid = ? AND deleted_at IS NULL",
+                (run_uuid,),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound(f"workflow node run {run_uuid} not found")
+            run = self._run_row(row)
+            if include_attempts:
+                run["attempts"] = self._attempts_by_run(
+                    self._conn,
+                    "job.workflow_node_run_uuid = ?",
+                    (run_uuid,),
+                ).get(run_uuid, [])
+        return run
+
+    def _attempts_by_run(
+        self,
+        conn: sqlite3.Connection,
+        where: str,
+        params: tuple,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        rows = conn.execute(
+            f"""
+            SELECT job.* FROM workflow_node_job AS job
+            WHERE {where} AND job.deleted_at IS NULL
+            ORDER BY job.workflow_node_run_uuid, job.attempt_no
+            """,
+            params,
+        ).fetchall()
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            grouped.setdefault(row["workflow_node_run_uuid"], []).append(self._job_row(row))
+        return grouped
+
+    def list_jobs(self, task_uuid: str) -> List[Dict[str, Any]]:
+        """任务的全部 attempt（物理执行）平铺：按节点拓扑序、attempt 序号。"""
+
+        self.get_task(task_uuid)
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT job.* FROM workflow_node_job AS job
+                JOIN workflow_node_run AS run ON run.uuid = job.workflow_node_run_uuid
+                WHERE job.workflow_task_uuid = ? AND job.deleted_at IS NULL
+                ORDER BY run.topological_index, run.create_time, run.uuid, job.attempt_no
                 """,
                 (task_uuid,),
             ).fetchall()
@@ -953,86 +1161,6 @@ class WorkflowStore:
         if row is None:
             raise StoreNotFound(f"workflow node job {job_uuid} not found")
         return self._job_row(row)
-
-    @staticmethod
-    def latest_attempts(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """每个工作流节点只保留 attempt 最大的 job（失败重试后的当前 attempt）。"""
-
-        latest: Dict[str, Dict[str, Any]] = {}
-        for job in jobs:
-            node_uuid = str(job["workflow_node_uuid"])
-            current = latest.get(node_uuid)
-            if current is None or int(job.get("attempt") or 1) > int(current.get("attempt") or 1):
-                latest[node_uuid] = job
-        return list(latest.values())
-
-    def create_job_retry(self, job_uuid: str) -> Dict[str, Any]:
-        """为已失败的 attempt 追加同节点的新 attempt（重试）。
-
-        旧 attempt 原样保留为 failed 事实；新行复制节点归属、参数与执行策略，
-        ``attempt`` 递增，``meta_data.retry_of`` 指回上一 attempt。
-        """
-
-        now = utc_now()
-        with self.transaction() as conn:
-            row = conn.execute(
-                "SELECT * FROM workflow_node_job WHERE uuid=? AND deleted_at IS NULL",
-                (job_uuid,),
-            ).fetchone()
-            if row is None:
-                raise StoreNotFound(f"workflow node job {job_uuid} not found")
-            if row["status"] != "failed":
-                raise StoreConflict(
-                    f"workflow node job {job_uuid} cannot be retried from {row['status']}"
-                )
-            latest = conn.execute(
-                """
-                SELECT MAX(attempt) FROM workflow_node_job
-                WHERE workflow_task_uuid = ? AND workflow_node_uuid = ? AND deleted_at IS NULL
-                """,
-                (row["workflow_task_uuid"], row["workflow_node_uuid"]),
-            ).fetchone()[0]
-            new_uuid = str(uuid4())
-            conn.execute(
-                """
-                INSERT INTO workflow_node_job(
-                    uuid, create_time, update_time, deleted_at, description,
-                    meta_data, workflow_task_uuid, workflow_node_uuid,
-                    material_uuid, feedback_sequence, topological_index,
-                    executor_kind, execution_policy,
-                    execution_timeout_seconds, status, attempt, param,
-                    feedback_data, return_info, control_data, error_info
-                ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'pending', ?, ?,
-                          '{}', '{}', '{}', '[]')
-                """,
-                (
-                    new_uuid,
-                    now,
-                    now,
-                    row["description"],
-                    _json({**_load(row["meta_data"], {}), "retry_of": job_uuid}),
-                    row["workflow_task_uuid"],
-                    row["workflow_node_uuid"],
-                    row["material_uuid"],
-                    row["topological_index"],
-                    row["executor_kind"],
-                    row["execution_policy"],
-                    row["execution_timeout_seconds"],
-                    int(latest or row["attempt"]) + 1,
-                    row["param"],
-                ),
-            )
-            self._append_event(
-                conn,
-                event="workflow.node_job.changed",
-                data={
-                    "workflow_node_job_uuid": new_uuid,
-                    "status": "pending",
-                    "retry_of": job_uuid,
-                },
-                now=now,
-            )
-        return self.get_job(new_uuid)
 
     @staticmethod
     def _runtime_limit_clause(limit: Optional[int], offset: int) -> tuple[str, tuple[int, ...]]:
@@ -1163,10 +1291,12 @@ class WorkflowStore:
         return [self._task_row(row) for row in rows]
 
     def prepare_task_execution(self, task_uuid: str) -> Dict[str, Any]:
-        """认领/恢复任务，并以 job 终态作为持久 completed cursor。
+        """认领/恢复任务，并以节点运行终态作为持久 completed cursor。
 
-        已成功 job 不会重跑。崩溃时处于 dispatched/running 的 job 无法证明设备
-        是否已经产生副作用，必须转 execution_unknown 等待对账，禁止盲目重放。
+        判定单元是节点运行（当前 attempt 的投影），历史 failed attempt 不参与。
+        已成功节点不会重跑。崩溃时处于 dispatched/running 的 attempt 无法证明设备
+        是否已经产生副作用，attempt 与节点运行同时转 execution_unknown 等待对账，
+        禁止盲目重放。
         """
 
         now = utc_now()
@@ -1178,54 +1308,40 @@ class WorkflowStore:
             if task_row is None:
                 raise StoreNotFound(f"workflow task {task_uuid} not found")
             task = self._task_row(task_row)
-            jobs_rows = conn.execute(
-                "SELECT * FROM workflow_node_job WHERE workflow_task_uuid = ? "
+            run_rows = conn.execute(
+                "SELECT * FROM workflow_node_run WHERE workflow_task_uuid = ? "
                 "AND deleted_at IS NULL ORDER BY topological_index, create_time, uuid",
                 (task_uuid,),
             ).fetchall()
-            jobs = [self._job_row(row) for row in jobs_rows]
+            runs = [self._run_row(row) for row in run_rows]
             if task["status"] in {
                 "succeeded",
                 "failed",
                 "canceled",
                 "timeout",
             }:
-                return {"state": "terminal", "task": task, "jobs": jobs}
+                return {"state": "terminal", "task": task, "runs": runs}
             if task["control_status"] != "active":
-                return {"state": task["control_status"], "task": task, "jobs": jobs}
+                return {"state": task["control_status"], "task": task, "runs": runs}
 
-            # 重试后同一节点存在多个 attempt：节点的当前事实以最新 attempt 为准，
-            # 早先的 failed attempt 只是历史记录，不能把任务判为终态。
-            statuses = {job["status"] for job in self.latest_attempts(jobs)}
-            uncertain = {
-                "dispatched",
-                "running",
-                "intervention_required",
-                "cancel_requested",
-                "execution_unknown",
-            }
-            if statuses & uncertain:
+            statuses = {run["status"] for run in runs}
+            if statuses & self._RUN_IN_FLIGHT:
                 reason = "process restarted with an in-flight workflow node job"
-                conn.execute(
-                    """
-                    UPDATE workflow_node_job
-                    SET status = CASE
-                            WHEN status IN ('dispatched', 'running', 'cancel_requested')
-                            THEN 'execution_unknown'
-                            ELSE status
-                        END,
-                        uncertainty_reason = CASE
-                            WHEN status IN ('dispatched', 'running', 'cancel_requested')
-                            THEN ? ELSE uncertainty_reason END,
-                        update_time = ?
-                    WHERE workflow_task_uuid = ? AND deleted_at IS NULL
-                      AND status IN (
-                          'dispatched', 'running', 'cancel_requested',
-                          'execution_unknown', 'intervention_required'
-                      )
-                    """,
-                    (reason, now, task_uuid),
-                )
+                in_flight_runs = [
+                    run for run in runs if run["status"] in self._RUN_IN_FLIGHT
+                ]
+                for run in in_flight_runs:
+                    conn.execute(
+                        """
+                        UPDATE workflow_node_job
+                        SET status = 'execution_unknown', uncertainty_reason = ?,
+                            update_time = ?
+                        WHERE uuid = ? AND deleted_at IS NULL
+                          AND status IN ('dispatched', 'running', 'cancel_requested')
+                        """,
+                        (reason, now, run["current_job_uuid"]),
+                    )
+                    self._sync_run_projection(conn, run["uuid"], now)
                 conn.execute(
                     """
                     UPDATE workflow_task
@@ -1246,7 +1362,7 @@ class WorkflowStore:
                     now=now,
                 )
                 state = "waiting_reconciliation"
-            elif not jobs or statuses <= {"succeeded", "skipped"}:
+            elif not runs or statuses <= {"succeeded", "skipped"}:
                 conn.execute(
                     "UPDATE workflow_task SET status='succeeded', output='{}', "
                     "finished_at=?, update_time=? WHERE uuid=?",
@@ -1279,11 +1395,11 @@ class WorkflowStore:
         return {
             "state": state,
             "task": self.get_task(task_uuid),
-            "jobs": self.list_jobs(task_uuid),
+            "runs": self.list_node_runs(task_uuid, include_attempts=False),
         }
 
     def mark_job_running(self, job_uuid: str) -> Dict[str, Any]:
-        """在发送设备副作用前持久化 job running。"""
+        """在发送设备副作用前持久化 attempt running，并投影到节点运行。"""
 
         now = utc_now()
         with self.transaction() as conn:
@@ -1293,9 +1409,7 @@ class WorkflowStore:
             ).fetchone()
             if row is None:
                 raise StoreNotFound(f"workflow node job {job_uuid} not found")
-            if row["status"] in {
-                "succeeded", "failed", "skipped", "canceled", "timeout"
-            }:
+            if row["status"] in self._RUN_TERMINAL:
                 return self._job_row(row)
             if row["status"] not in {"pending", "dispatched", "running"}:
                 raise StoreConflict(
@@ -1309,6 +1423,8 @@ class WorkflowStore:
                 """,
                 (now, now, job_uuid),
             )
+            self._emit_job_changed(conn, row, "running", now)
+            self._sync_run_projection(conn, row["workflow_node_run_uuid"], now)
         return self.get_job(job_uuid)
 
     def record_job_terminal(
@@ -1318,11 +1434,21 @@ class WorkflowStore:
         status: str,
         return_info: Dict[str, Any],
         error_info: List[Dict[str, Any]],
+        error_resolution: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """先持久化节点终态，再允许 DAG 释放后继依赖。"""
+        """持久化 attempt 终态并投影到节点运行；``retry`` 决策在同一事务里追加新 attempt。
 
-        if status not in {"succeeded", "failed", "skipped", "canceled", "timeout"}:
+        返回 ``{"job", "run", "next_job"}``：``next_job`` 非空表示节点运行没有终结，
+        调度器应以它为新的执行器 job 重新申请资源并下发；否则以 ``run["status"]``
+        收敛 DAG 节点。已终态的 attempt 幂等返回，不重复投影。
+        """
+
+        if status not in self._RUN_TERMINAL:
             raise ValueError(f"invalid terminal workflow node job status: {status}")
+        resolution = dict(error_resolution or {})
+        retry_requested = (
+            status == "failed" and str(resolution.get("selected_action") or "") == "retry"
+        )
         now = utc_now()
         with self.transaction() as conn:
             row = conn.execute(
@@ -1331,32 +1457,85 @@ class WorkflowStore:
             ).fetchone()
             if row is None:
                 raise StoreNotFound(f"workflow node job {job_uuid} not found")
-            if row["status"] in {
-                "succeeded", "failed", "skipped", "canceled", "timeout"
-            }:
-                return self._job_row(row)
+            run_uuid = row["workflow_node_run_uuid"]
+            if row["status"] in self._RUN_TERMINAL:
+                run = self.get_node_run(run_uuid, include_attempts=False)
+                return {"job": self._job_row(row), "run": run, "next_job": None}
             conn.execute(
                 """
                 UPDATE workflow_node_job
-                SET status=?, return_info=?, error_info=?, finished_at=?, update_time=?
+                SET status=?, return_info=?, error_info=?, error_resolution=?,
+                    finished_at=?, update_time=?
                 WHERE uuid=?
                 """,
                 (
                     status,
                     _json(return_info),
                     _json(error_info),
+                    _json(resolution),
                     now,
                     now,
                     job_uuid,
                 ),
             )
-            self._append_event(
-                conn,
-                event="workflow.node_job.changed",
-                data={"workflow_node_job_uuid": job_uuid, "status": status},
-                now=now,
+            self._emit_job_changed(conn, row, status, now)
+            next_job_uuid: Optional[str] = None
+            if retry_requested:
+                # 失败 attempt 保留为事实；同一节点运行追加下一 attempt 并切换 current，
+                # 节点运行回到 pending 而不是 failed——任务不中断。
+                next_job_uuid = str(uuid4())
+                self._insert_attempt(
+                    conn,
+                    job_uuid=next_job_uuid,
+                    run_uuid=run_uuid,
+                    task_uuid=row["workflow_task_uuid"],
+                    node_uuid=row["workflow_node_uuid"],
+                    attempt_no=int(row["attempt_no"]) + 1,
+                    retry_of_job_uuid=job_uuid,
+                    trigger="retry_decision",
+                    param=_load(row["param"], {}),
+                    now=now,
+                )
+                conn.execute(
+                    """
+                    UPDATE workflow_node_run
+                    SET current_job_uuid=?, attempt_count=attempt_count + 1, update_time=?
+                    WHERE uuid=?
+                    """,
+                    (next_job_uuid, now, run_uuid),
+                )
+            run = self._sync_run_projection(conn, run_uuid, now)
+            job = self._job_row(
+                conn.execute(
+                    "SELECT * FROM workflow_node_job WHERE uuid=?", (job_uuid,)
+                ).fetchone()
             )
-        return self.get_job(job_uuid)
+            next_job = (
+                self._job_row(
+                    conn.execute(
+                        "SELECT * FROM workflow_node_job WHERE uuid=?", (next_job_uuid,)
+                    ).fetchone()
+                )
+                if next_job_uuid is not None
+                else None
+            )
+        return {"job": job, "run": run, "next_job": next_job}
+
+    def close_node_run(self, run_uuid: str, *, status: str) -> Dict[str, Any]:
+        """DAG 收敛（取消/上游失败）时给尚未终结的节点运行记终态：作用于当前 attempt。"""
+
+        if status not in self._RUN_TERMINAL:
+            raise ValueError(f"invalid terminal workflow node run status: {status}")
+        current = self.get_node_run(run_uuid, include_attempts=False)
+        if current["status"] in self._RUN_TERMINAL:
+            return current
+        outcome = self.record_job_terminal(
+            str(current["current_job_uuid"]),
+            status=status,
+            return_info={},
+            error_info=([] if status == "succeeded" else [{"code": status}]),
+        )
+        return outcome["run"]
 
     def finish_task(
         self,
@@ -1826,6 +2005,7 @@ class WorkflowStore:
             "workflow_node",
             "workflow_edge",
             "workflow_task",
+            "workflow_node_run",
             "workflow_node_job",
             "workflow_task_command",
             "workflow_node_job_feedback_history",
@@ -1989,28 +2169,49 @@ class WorkflowStore:
         return result
 
     @classmethod
-    def _job_row(cls, row: sqlite3.Row) -> Dict[str, Any]:
+    def _run_row(cls, row: sqlite3.Row) -> Dict[str, Any]:
         result = {
             **cls._base(row),
             "workflow_task_uuid": row["workflow_task_uuid"],
             "workflow_node_uuid": row["workflow_node_uuid"],
-            "feedback_sequence": row["feedback_sequence"],
             "topological_index": row["topological_index"],
             "executor_kind": row["executor_kind"],
             "execution_policy": _load(row["execution_policy"], {}),
             "execution_timeout_seconds": row["execution_timeout_seconds"],
+            "param": _load(row["param"], {}),
             "status": row["status"],
-            "attempt": row["attempt"],
+            "current_job_uuid": row["current_job_uuid"],
+            "attempt_count": row["attempt_count"],
+            "return_info": _load(row["return_info"], {}),
+            "error_info": _load(row["error_info"], []),
+            "feedback_data": _load(row["feedback_data"], {}),
+            "control_data": _load(row["control_data"], {}),
+        }
+        cls._add_optional(result, row, "material_uuid", "started_at", "finished_at")
+        return result
+
+    @classmethod
+    def _job_row(cls, row: sqlite3.Row) -> Dict[str, Any]:
+        result = {
+            **cls._base(row),
+            "workflow_node_run_uuid": row["workflow_node_run_uuid"],
+            "workflow_task_uuid": row["workflow_task_uuid"],
+            "workflow_node_uuid": row["workflow_node_uuid"],
+            "attempt_no": row["attempt_no"],
+            "trigger": row["trigger"],
+            "feedback_sequence": row["feedback_sequence"],
+            "status": row["status"],
             "param": _load(row["param"], {}),
             "feedback_data": _load(row["feedback_data"], {}),
             "return_info": _load(row["return_info"], {}),
+            "error_resolution": _load(row["error_resolution"], {}),
             "control_data": _load(row["control_data"], {}),
             "error_info": _load(row["error_info"], []),
         }
         cls._add_optional(
             result,
             row,
-            "material_uuid",
+            "retry_of_job_uuid",
             ("edge_agent_uuid", "edge_uuid"),
             "edge_command_uuid",
             "dispatch_deadline_at",

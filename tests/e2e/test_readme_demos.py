@@ -248,29 +248,42 @@ def _run_workflow(
     assert final["status"] == expectation.task_status, (
         f"工作流 {expectation.name!r} 终态 {final['status']!r}，期望 {expectation.task_status!r}"
     )
-    jobs = api_request(port, f"/workflow-tasks/{task_uuid}/jobs")
-    statuses = [job["status"] for job in jobs]
-    assert statuses == list(expectation.expected_job_statuses()), (
-        f"工作流 {expectation.name!r} job 终态 {statuses}，期望 {expectation.expected_job_statuses()}"
+    node_runs = api_request(port, f"/workflow-tasks/{task_uuid}/node-runs")
+    statuses = [run["status"] for run in node_runs]
+    assert statuses == list(expectation.expected_node_statuses()), (
+        f"工作流 {expectation.name!r} 节点运行终态 {statuses}，期望 {expectation.expected_node_statuses()}"
     )
-    _assert_retry_attempt_chain(expectation, jobs)
-    return {"workflow": workflow, "task": final, "jobs": jobs, "decision": decision}
+    attempt_counts = [int(run["attempt_count"]) for run in node_runs]
+    assert attempt_counts == list(expectation.expected_attempt_counts()), (
+        f"工作流 {expectation.name!r} attempt 数 {attempt_counts}，期望 {expectation.expected_attempt_counts()}"
+    )
+    for run in node_runs:
+        _assert_attempt_history(expectation, run)
+    # attempt 平铺视图与节点运行内嵌历史是同一批 job
+    jobs = api_request(port, f"/workflow-tasks/{task_uuid}/jobs")
+    assert [job["uuid"] for job in jobs] == [a["uuid"] for run in node_runs for a in run["attempts"]]
+    return {"workflow": workflow, "task": final, "node_runs": node_runs, "decision": decision}
 
 
-def _assert_retry_attempt_chain(expectation: WorkflowExpectation, jobs: list[dict]) -> None:
-    """同一节点多行 = retry 历史：attempt 递增、旧 attempt 保留为 failed、新行指回上一 attempt。"""
+def _assert_attempt_history(expectation: WorkflowExpectation, run: dict) -> None:
+    """节点运行 = 当前 attempt 的投影 + attempts 历史：序号连续、被重试的 attempt 保留为 failed 并
+    记录 retry 决策、后一 attempt 指回前一 attempt、当前结果等于最后一个 attempt。"""
 
-    by_node: dict[str, list[dict]] = {}
-    for job in jobs:
-        by_node.setdefault(str(job["workflow_node_uuid"]), []).append(job)
-    for node_uuid, attempts in by_node.items():
-        assert [int(job.get("attempt") or 1) for job in attempts] == list(range(1, len(attempts) + 1)), (
-            f"工作流 {expectation.name!r} 节点 {node_uuid} attempt 序号不连续: {attempts}"
-        )
-        for previous, current in zip(attempts, attempts[1:]):
-            assert previous["status"] == "failed", f"被重试的 attempt 必须保留为 failed: {previous}"
-            assert previous["return_info"]["error_resolution"]["selected_action"] == "retry", previous
-            assert (current.get("meta_data") or {}).get("retry_of") == previous["uuid"], current
+    attempts = run["attempts"]
+    assert len(attempts) == run["attempt_count"], run
+    assert [int(a["attempt_no"]) for a in attempts] == list(range(1, len(attempts) + 1)), (
+        f"工作流 {expectation.name!r} 节点运行 {run['uuid']} attempt 序号不连续: {attempts}"
+    )
+    assert attempts[0]["trigger"] == "initial" and "retry_of_job_uuid" not in attempts[0]
+    for previous, current in zip(attempts, attempts[1:]):
+        assert previous["status"] == "failed", f"被重试的 attempt 必须保留为 failed: {previous}"
+        assert previous["error_resolution"]["selected_action"] == "retry", previous
+        assert current["retry_of_job_uuid"] == previous["uuid"], current
+        assert current["trigger"] == "retry_decision", current
+    last = attempts[-1]
+    assert run["status"] == last["status"], (run["status"], last["status"])
+    assert run["return_info"] == last["return_info"], run
+    assert run["current_job_uuid"] == last["uuid"]
 
 
 @pytest.mark.parametrize("spec", DEMOS, ids=[spec.repo for spec in DEMOS])

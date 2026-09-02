@@ -609,18 +609,20 @@ class WorkflowService(WorkflowStore):
         status: str,
         return_info: Optional[Dict[str, Any]] = None,
         error_info: Optional[List[Dict[str, Any]]] = None,
+        error_resolution: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """attempt 终态 + 节点运行投影；返回 ``{"job", "run", "next_job"}``（见 store）。"""
+
         return self.record_job_terminal(
             job_uuid,
             status=status,
             return_info=return_info or {},
             error_info=error_info or [],
+            error_resolution=error_resolution,
         )
 
-    def retry_workflow_node_job(self, job_uuid: str) -> Dict[str, Any]:
-        """失败 attempt 保留为事实，为同一节点追加新 attempt（重试）。"""
-
-        return self.create_job_retry(job_uuid)
+    def close_workflow_node_run(self, run_uuid: str, *, status: str) -> Dict[str, Any]:
+        return self.close_node_run(run_uuid, status=status)
 
     def finish_workflow_task(
         self,
@@ -690,7 +692,25 @@ class WorkflowService(WorkflowStore):
             cleanup_status=cleanup_status,
         )
 
+    def list_workflow_node_runs(self, task_uuid: str) -> List[Dict[str, Any]]:
+        """节点运行视图：每节点一条，当前 attempt 的结果 + ``attempts`` 历史。"""
+
+        identity = self.get_workflow_task(task_uuid)["uuid"]
+        return self.list_node_runs(identity)
+
+    def get_workflow_node_run(self, run_uuid: str) -> Dict[str, Any]:
+        try:
+            identity = validate_uuid(run_uuid)
+        except ValueError:
+            raise WorkflowError("invalid_input") from None
+        try:
+            return self.get_node_run(identity)
+        except StoreNotFound:
+            raise WorkflowError("not_found") from None
+
     def list_workflow_node_jobs(self, task_uuid: str) -> List[Dict[str, Any]]:
+        """attempt（物理执行）平铺视图。"""
+
         identity = self.get_workflow_task(task_uuid)["uuid"]
         return self.list_jobs(identity)
 

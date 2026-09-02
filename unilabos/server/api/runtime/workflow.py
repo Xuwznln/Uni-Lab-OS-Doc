@@ -350,8 +350,20 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
     def get_workflow_task(task_uuid: str) -> JSONResponse:
         return _success(service.get_workflow_task(task_uuid))
 
+    @router.get("/workflow-tasks/{task_uuid}/node-runs")
+    def list_workflow_node_runs(task_uuid: str) -> JSONResponse:
+        """节点运行视图：每节点一条，status/return_info 为当前 attempt，attempts 为历史。"""
+
+        return _success(service.list_workflow_node_runs(task_uuid))
+
+    @router.get("/workflow-node-runs/{run_uuid}")
+    def get_workflow_node_run(run_uuid: str) -> JSONResponse:
+        return _success(service.get_workflow_node_run(run_uuid))
+
     @router.get("/workflow-tasks/{task_uuid}/jobs")
     def list_workflow_node_jobs(task_uuid: str) -> JSONResponse:
+        """attempt（物理执行）平铺视图；job uuid 与执行器/错误决策的 job_id 一致。"""
+
         return _success(service.list_workflow_node_jobs(task_uuid))
 
     @router.get("/workflow-node-jobs/{job_uuid}")

@@ -24,6 +24,7 @@ EXPECTED_TABLES = {
         "workflow_node",
         "workflow_edge",
         "workflow_task",
+        "workflow_node_run",
         "workflow_node_job",
         "workflow_task_command",
         "execution_lock_lease",
@@ -173,11 +174,12 @@ def test_aggregate_fields_and_material_storage_exceptions(tmp_path) -> None:
 def test_total_table_count_stays_small() -> None:
     # 图域并入 materials：material_link（拓扑边）+ lab_graph（命名快照）；
     # workflow / registry 并入 runtime：调度产物与注册表条目版本同库单写者
-    # （registry 为条目级版本三表：entry / entry_state / report）。
+    # （registry 为条目级版本三表：entry / entry_state / report）；
+    # workflow 节点执行为两级：workflow_node_run（节点运行）+ workflow_node_job（attempt）。
     assert {key: len(spec.table_names) for key, spec in DATABASE_SPECS.items()} == {
-        "runtime": 27,
+        "runtime": 28,
         "materials": 13,
         "telemetry": 4,
         "history": 3,
     }
-    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 47
+    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 48

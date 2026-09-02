@@ -22,8 +22,15 @@ def build_job_start_payload(
     inventory_requirements: Optional[List[Dict[str, Any]]] = None,
     inventory_reservation_uuid: Optional[str] = None,
     scheduler_revision: int = 0,
+    node_run_uuid: str = "",
+    attempt_no: int = 1,
 ) -> DispatchPayload:
-    """构造执行器消费的 Backend ``execute_job`` 载荷。"""
+    """构造执行器消费的 Backend ``execute_job`` 载荷。
+
+    ``job_id`` 是本次 attempt 的 uuid；``node_run_uuid`` 是所属节点运行
+    （≡ runtime.v1 ``attempt_group_uuid``），``attempt_no`` 从 1 计，执行器据此
+    在错误决策报告里给出 ``retry_count``。
+    """
     return DispatchPayload(
         job_id=job_id,
         task_id=task_id,
@@ -37,6 +44,9 @@ def build_job_start_payload(
         inventory_requirements=list(inventory_requirements or []),
         inventory_reservation_uuid=inventory_reservation_uuid,
         scheduler_revision=scheduler_revision,
+        node_run_uuid=node_run_uuid,
+        attempt_no=int(attempt_no),
+        retry_count=max(int(attempt_no) - 1, 0),
         sample_material={},
     )
 

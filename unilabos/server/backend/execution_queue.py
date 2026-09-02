@@ -48,6 +48,7 @@ class QueueItem:
     notebook_id: str
     device_action_key: str
     node_id: str = ""
+    node_run_uuid: str = ""
     next_run_time: float = 0
     retry_count: int = 0
     trace_context: dict[str, Any] = field(default_factory=dict)
@@ -68,6 +69,7 @@ class JobInfo:
     last_update_time: float = field(default_factory=time.time)
     always_free: bool = False
     node_id: str = ""
+    node_run_uuid: str = ""
     retry_count: int = 0
     action_type: str = ""
     action_args: dict[str, Any] = field(default_factory=dict)

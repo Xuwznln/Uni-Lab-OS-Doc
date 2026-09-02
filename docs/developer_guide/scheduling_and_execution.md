@@ -61,20 +61,40 @@ Authority，再创建执行层，因此不存在执行器先于库存权威工�
 1. `PUT /api/v1/workflows/{uuid}/graph` 保存节点和边。
 2. `POST /api/v1/workflow-tasks` 固化 `workflow_snapshot` 和 `execution_plan`。
 3. `WorkflowService` 调用已绑定的 `BackendScheduler.submit(task_uuid)`。
-4. Scheduler 从持久化 Task/Node Job 构建 `TaskDag`，恢复已完成节点后开始走图。
+4. Scheduler 从持久化 Task/节点运行构建 `TaskDag`，恢复已完成节点后开始走图。
 
 `/workflows` 表示 Workflow 定义；执行需另行创建 Workflow Task。
 
+#### 节点运行与 attempt
+
+任务内每个工作流节点对应一个**节点运行**（`workflow_node_run`，≡ runtime.v1
+`attempt_group_uuid`），它是 DAG 节点键、画布节点和任务 `output` 引用的稳定身份。每次
+物理执行是一个 **attempt**（`workflow_node_job`，≡ runtime.v1 `job_uuid`，即执行器
+`job_id`）。节点运行上的 `status / return_info / error_info / current_job_uuid /
+attempt_count` 是当前 attempt 的投影，只由 store 在同一事务里随 attempt 变更写；
+结果、反馈历史、干预记录都挂在 attempt 上。
+
+- `GET /api/v1/workflow-tasks/{uuid}/node-runs`：每节点一条，`return_info` 是当前
+  （重试后的）结果，`attempts` 按 `attempt_no` 升序是运行历史。画布与结果读取用它。
+- `GET /api/v1/workflow-tasks/{uuid}/jobs`、`/workflow-node-jobs/{job_uuid}`
+  （含 `/results`、`/feedback-history`）：attempt 粒度，与 `/error-decisions` 报告里的
+  `job_id` 一致；报告同时携带 `node_run_uuid`。
+- 事件：`workflow.node_run.changed`（节点级）与 `workflow.node_job.changed`（attempt 级）。
+
 失败 attempt 进入错误决策链（`/api/v1/error-decisions`）后，本机调度器按决策收敛：
 
-- `abort`：attempt 记 failed，节点 FAILED，任务 fail-fast。
-- `operator_intervention`：以人工提供的 `result` 成功放行（`suc_type=operator_intervention`）。
-- `retry`：当前 attempt 如实记 failed（`return_info.error_resolution.selected_action=retry`）
-  并保留在 `workflow_node_job` 表里；调度器为同一 Task/节点追加 `attempt+1` 的新 job
-  （`meta_data.retry_of` 指回上一 attempt），重新申请资源并下发，DAG 节点保持运行中，
-  任务不中断。`GET /api/v1/workflow-tasks/{uuid}/jobs` 列出每个 attempt；任务恢复与
-  上游输出解析都以节点的最新 attempt 为准。带仓储 `inventory_requirements` 的节点
-  暂不支持 retry（reservation 绑定 job uuid 且失败即隔离），按 failed 收敛。
+- `abort`：attempt 记 failed，节点运行投影为 failed，任务 fail-fast。
+- `operator_intervention`：同一 attempt 以人工提供的 `result` 成功放行
+  （`suc_type=operator_intervention`），不产生新 attempt。
+- `retry`：store 在**一个事务**里把当前 attempt 记 failed（`error_resolution.selected_action=retry`）、
+  为同一节点运行插入 `attempt_no+1` 的新 attempt（`retry_of_job_uuid` 指回、
+  `trigger=retry_decision`）并把节点运行切回 `pending`；调度器拿到 `next_job` 后为新 attempt
+  重新预留库存、申请资源并下发，DAG 节点保持运行中，任务不中断。节点运行永远不会因
+  retry 而显示 failed。重试上限由注册表 `error_policy.max_retries` 决定（缺省 3），
+  Host 报告只如实携带 `retry_count / max_retries`，超限的 `retry` 在本机放行时被拒绝。
+
+任务恢复（进程重启）以节点运行为判定单元：在飞的 attempt 与其节点运行同时转
+`execution_unknown`；历史 failed attempt 不参与判定。
 
 ### 4.2 Backend-controlled（接入云端）
 

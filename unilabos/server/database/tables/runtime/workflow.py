@@ -226,8 +226,15 @@ class WorkflowTaskRecord(TableObject, table=True):
     request_fingerprint: str = ""
 
 
-class WorkflowNodeJobRecord(TableObject, table=True):
-    __tablename__: ClassVar[str] = "workflow_node_job"
+class WorkflowNodeRunRecord(TableObject, table=True):
+    """节点运行：任务内每个工作流节点唯一的执行单元（≡ runtime.v1 ``attempt_group_uuid``）。
+
+    定义列在建任务时写死；``status / return_info / error_info / current_job_uuid /
+    attempt_count`` 等是当前 attempt 的投影，只由 store 在同一事务里随 attempt 变更同步写。
+    DAG、画布节点、任务 output 都以本表的 uuid 为稳定身份。
+    """
+
+    __tablename__: ClassVar[str] = "workflow_node_run"
 
     uuid: NonEmptyStr = Field(primary_key=True)
     create_time: NonEmptyStr
@@ -240,11 +247,6 @@ class WorkflowNodeJobRecord(TableObject, table=True):
     )
     workflow_task_uuid: NonEmptyStr
     workflow_node_uuid: NonEmptyStr
-    material_uuid: Optional[str] = None
-    edge_agent_uuid: Optional[str] = None
-    edge_command_uuid: Optional[str] = None
-    job_access_token_hash: str = ""
-    feedback_sequence: int = Field(default=0, ge=0)
     topological_index: int = Field(default=0, ge=0)
     executor_kind: str = "compute"
     execution_policy: JsonObject = Field(
@@ -252,8 +254,63 @@ class WorkflowNodeJobRecord(TableObject, table=True):
         sa_column=json_text_column("execution_policy", default_json="{}"),
     )
     execution_timeout_seconds: int = Field(default=0, ge=0)
+    param: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("param", default_json="{}"),
+    )
+    material_uuid: Optional[str] = None
     status: str = "pending"
-    attempt: int = Field(default=1, ge=1)
+    current_job_uuid: Optional[str] = None
+    attempt_count: int = Field(default=0, ge=0)
+    return_info: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("return_info", default_json="{}"),
+    )
+    error_info: JsonArray = Field(
+        default_factory=list,
+        sa_column=json_text_column("error_info", default_json="[]"),
+    )
+    feedback_data: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("feedback_data", default_json="{}"),
+    )
+    control_data: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("control_data", default_json="{}"),
+    )
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class WorkflowNodeJobRecord(TableObject, table=True):
+    """节点运行的一次物理执行（attempt，≡ runtime.v1 ``job_uuid`` = 执行器 job_id）。
+
+    结果、反馈历史、干预记录都挂在 attempt 上；``retry_of_job_uuid`` 把重试链接成链，
+    ``error_resolution`` 记录该 attempt 失败后的决策（abort / retry / operator_intervention）。
+    """
+
+    __tablename__: ClassVar[str] = "workflow_node_job"
+
+    uuid: NonEmptyStr = Field(primary_key=True)
+    create_time: NonEmptyStr
+    update_time: NonEmptyStr
+    deleted_at: Optional[str] = None
+    description: Optional[str] = None
+    meta_data: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("meta_data", default_json="{}"),
+    )
+    workflow_node_run_uuid: NonEmptyStr
+    workflow_task_uuid: NonEmptyStr
+    workflow_node_uuid: NonEmptyStr
+    attempt_no: int = Field(default=1, ge=1)
+    retry_of_job_uuid: Optional[str] = None
+    trigger: str = "initial"
+    edge_agent_uuid: Optional[str] = None
+    edge_command_uuid: Optional[str] = None
+    job_access_token_hash: str = ""
+    feedback_sequence: int = Field(default=0, ge=0)
+    status: str = "pending"
     param: JsonObject = Field(
         default_factory=dict,
         sa_column=json_text_column("param", default_json="{}"),
@@ -265,6 +322,10 @@ class WorkflowNodeJobRecord(TableObject, table=True):
     return_info: JsonObject = Field(
         default_factory=dict,
         sa_column=json_text_column("return_info", default_json="{}"),
+    )
+    error_resolution: JsonObject = Field(
+        default_factory=dict,
+        sa_column=json_text_column("error_resolution", default_json="{}"),
     )
     control_data: JsonObject = Field(
         default_factory=dict,
@@ -507,6 +568,7 @@ WORKFLOW_TABLE_MODELS = (
     WorkflowNodeRecord,
     WorkflowEdgeRecord,
     WorkflowTaskRecord,
+    WorkflowNodeRunRecord,
     WorkflowNodeJobRecord,
     WorkflowTaskCommandRecord,
     ExecutionLockLeaseRecord,
@@ -529,9 +591,9 @@ _LEGACY_PROJECTION_VIEWS = (
         COALESCE(json_extract(task.meta_data, '$.lab_id'), '') AS lab_id,
         COALESCE(json_extract(task.meta_data, '$.priority'), '') AS priority,
         (
-            SELECT COUNT(*) FROM workflow_node_job AS job
-            WHERE job.workflow_task_uuid = task.uuid
-              AND job.deleted_at IS NULL
+            SELECT COUNT(*) FROM workflow_node_run AS run
+            WHERE run.workflow_task_uuid = task.uuid
+              AND run.deleted_at IS NULL
         ) AS node_count,
         CASE task.status WHEN 'succeeded' THEN 'success' ELSE task.status END AS state,
         (julianday(REPLACE(task.create_time, 'Z', '+00:00')) - 2440587.5)
@@ -557,11 +619,11 @@ _LEGACY_PROJECTION_VIEWS = (
         job.uuid AS job_id,
         job.workflow_task_uuid AS workflow_id,
         job.workflow_node_uuid AS node_id,
-        COALESCE(job.edge_agent_uuid, job.material_uuid, '') AS device_id,
+        COALESCE(job.edge_agent_uuid, run.material_uuid, '') AS device_id,
         COALESCE(json_extract(job.param, '$.action'), '') AS action_name,
         CASE
-            WHEN COALESCE(job.edge_agent_uuid, job.material_uuid, '') = '' THEN ''
-            ELSE COALESCE(job.edge_agent_uuid, job.material_uuid, '') || ':' ||
+            WHEN COALESCE(job.edge_agent_uuid, run.material_uuid, '') = '' THEN ''
+            ELSE COALESCE(job.edge_agent_uuid, run.material_uuid, '') || ':' ||
                  COALESCE(json_extract(job.param, '$.action'), '')
         END AS device_action_key,
         COALESCE(
@@ -586,6 +648,7 @@ _LEGACY_PROJECTION_VIEWS = (
         CASE job.status WHEN 'skipped' THEN 'skip' ELSE 'normal' END AS suc_type,
         job.return_info AS ret_json
     FROM workflow_node_job AS job
+    LEFT JOIN workflow_node_run AS run ON run.uuid = job.workflow_node_run_uuid
     WHERE job.deleted_at IS NULL
     """,
 )
@@ -916,9 +979,9 @@ WORKFLOW_TABLES = (
         ),
     ),
     TableSpec(
-        "workflow_node_job",
+        "workflow_node_run",
         """
-        CREATE TABLE IF NOT EXISTS workflow_node_job (
+        CREATE TABLE IF NOT EXISTS workflow_node_run (
             uuid TEXT PRIMARY KEY,
             create_time TEXT NOT NULL,
             update_time TEXT NOT NULL,
@@ -927,11 +990,6 @@ WORKFLOW_TABLES = (
             meta_data TEXT NOT NULL CHECK (json_valid(meta_data) AND json_type(meta_data) = 'object'),
             workflow_task_uuid TEXT NOT NULL,
             workflow_node_uuid TEXT NOT NULL,
-            material_uuid TEXT,
-            edge_agent_uuid TEXT,
-            edge_command_uuid TEXT,
-            job_access_token_hash TEXT NOT NULL DEFAULT '',
-            feedback_sequence INTEGER NOT NULL DEFAULT 0 CHECK (feedback_sequence >= 0),
             topological_index INTEGER NOT NULL DEFAULT 0 CHECK (topological_index >= 0),
             executor_kind TEXT NOT NULL DEFAULT 'compute' CHECK (executor_kind IN (
                 'device_action', 'compute', 'condition', 'script', 'tool_call',
@@ -943,12 +1001,83 @@ WORKFLOW_TABLES = (
             execution_timeout_seconds INTEGER NOT NULL DEFAULT 0 CHECK (
                 execution_timeout_seconds >= 0
             ),
+            param TEXT NOT NULL DEFAULT '{}' CHECK (
+                json_valid(param) AND json_type(param) = 'object'
+            ),
+            material_uuid TEXT,
             status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
                 'pending', 'dispatched', 'running', 'intervention_required',
                 'cancel_requested', 'execution_unknown', 'succeeded', 'failed',
                 'skipped', 'canceled', 'timeout'
             )),
-            attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt > 0),
+            current_job_uuid TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+            return_info TEXT NOT NULL DEFAULT '{}' CHECK (
+                json_valid(return_info) AND json_type(return_info) = 'object'
+            ),
+            error_info TEXT NOT NULL DEFAULT '[]' CHECK (
+                json_valid(error_info) AND json_type(error_info) = 'array'
+            ),
+            feedback_data TEXT NOT NULL DEFAULT '{}' CHECK (
+                json_valid(feedback_data) AND json_type(feedback_data) = 'object'
+            ),
+            control_data TEXT NOT NULL DEFAULT '{}' CHECK (
+                json_valid(control_data) AND json_type(control_data) = 'object'
+            ),
+            started_at TEXT,
+            finished_at TEXT,
+            FOREIGN KEY(workflow_task_uuid) REFERENCES workflow_task(uuid)
+        )
+        """,
+        (
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_node_run_task_node_active
+            ON workflow_node_run(workflow_task_uuid, workflow_node_uuid)
+            WHERE deleted_at IS NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_workflow_node_run_task_topology_active
+            ON workflow_node_run(workflow_task_uuid, topological_index, uuid)
+            WHERE deleted_at IS NULL
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_workflow_node_run_local_recovery
+            ON workflow_node_run(update_time, uuid)
+            WHERE deleted_at IS NULL
+              AND executor_kind IN (
+                  'compute', 'condition', 'script', 'tool_call', 'manual_confirm'
+              )
+              AND status IN ('dispatched', 'running')
+            """,
+        ),
+    ),
+    TableSpec(
+        "workflow_node_job",
+        """
+        CREATE TABLE IF NOT EXISTS workflow_node_job (
+            uuid TEXT PRIMARY KEY,
+            create_time TEXT NOT NULL,
+            update_time TEXT NOT NULL,
+            deleted_at TEXT,
+            description TEXT,
+            meta_data TEXT NOT NULL CHECK (json_valid(meta_data) AND json_type(meta_data) = 'object'),
+            workflow_node_run_uuid TEXT NOT NULL,
+            workflow_task_uuid TEXT NOT NULL,
+            workflow_node_uuid TEXT NOT NULL,
+            attempt_no INTEGER NOT NULL DEFAULT 1 CHECK (attempt_no > 0),
+            retry_of_job_uuid TEXT,
+            trigger TEXT NOT NULL DEFAULT 'initial' CHECK (trigger IN (
+                'initial', 'retry_decision', 'recovery'
+            )),
+            edge_agent_uuid TEXT,
+            edge_command_uuid TEXT,
+            job_access_token_hash TEXT NOT NULL DEFAULT '',
+            feedback_sequence INTEGER NOT NULL DEFAULT 0 CHECK (feedback_sequence >= 0),
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
+                'pending', 'dispatched', 'running', 'intervention_required',
+                'cancel_requested', 'execution_unknown', 'succeeded', 'failed',
+                'skipped', 'canceled', 'timeout'
+            )),
             param TEXT NOT NULL DEFAULT '{}' CHECK (
                 json_valid(param) AND json_type(param) = 'object'
             ),
@@ -957,6 +1086,9 @@ WORKFLOW_TABLES = (
             ),
             return_info TEXT NOT NULL DEFAULT '{}' CHECK (
                 json_valid(return_info) AND json_type(return_info) = 'object'
+            ),
+            error_resolution TEXT NOT NULL DEFAULT '{}' CHECK (
+                json_valid(error_resolution) AND json_type(error_resolution) = 'object'
             ),
             control_data TEXT NOT NULL DEFAULT '{}' CHECK (
                 json_valid(control_data) AND json_type(control_data) = 'object'
@@ -972,13 +1104,19 @@ WORKFLOW_TABLES = (
             uncertainty_reason TEXT,
             started_at TEXT,
             finished_at TEXT,
+            CHECK (retry_of_job_uuid IS NULL OR retry_of_job_uuid <> uuid),
+            CHECK (
+                (retry_of_job_uuid IS NULL AND attempt_no = 1)
+                OR (retry_of_job_uuid IS NOT NULL AND attempt_no > 1)
+            ),
+            FOREIGN KEY(workflow_node_run_uuid) REFERENCES workflow_node_run(uuid),
             FOREIGN KEY(workflow_task_uuid) REFERENCES workflow_task(uuid)
         )
         """,
         (
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_node_job_attempt_active
-            ON workflow_node_job(workflow_task_uuid, workflow_node_uuid, attempt)
+            ON workflow_node_job(workflow_node_run_uuid, attempt_no)
             WHERE deleted_at IS NULL
             """,
             """
@@ -987,9 +1125,9 @@ WORKFLOW_TABLES = (
             WHERE deleted_at IS NULL
             """,
             """
-            CREATE INDEX IF NOT EXISTS idx_workflow_node_job_task_topology_active
-            ON workflow_node_job(workflow_task_uuid, topological_index, uuid)
-            WHERE deleted_at IS NULL
+            CREATE INDEX IF NOT EXISTS idx_workflow_node_job_retry_of
+            ON workflow_node_job(retry_of_job_uuid)
+            WHERE deleted_at IS NULL AND retry_of_job_uuid IS NOT NULL
             """,
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_workflow_node_job_edge_command_active
@@ -1013,15 +1151,6 @@ WORKFLOW_TABLES = (
             ON workflow_node_job(
                 cancel_ack_deadline_at, cancel_complete_deadline_at, uuid
             ) WHERE deleted_at IS NULL AND status = 'cancel_requested'
-            """,
-            """
-            CREATE INDEX IF NOT EXISTS idx_workflow_node_job_local_recovery
-            ON workflow_node_job(update_time, uuid)
-            WHERE deleted_at IS NULL
-              AND executor_kind IN (
-                  'compute', 'condition', 'script', 'tool_call', 'manual_confirm'
-              )
-              AND status IN ('dispatched', 'running')
             """,
             """
             CREATE INDEX IF NOT EXISTS idx_workflow_node_job_in_flight
@@ -1424,6 +1553,7 @@ __all__ = [
     "WorkflowNodeJobRecord",
     "WorkflowNodeJobResultRecord",
     "WorkflowNodeRecord",
+    "WorkflowNodeRunRecord",
     "WorkflowNodeTemplateRecord",
     "WorkflowRecord",
     "WorkflowSourceRegistrationRecord",

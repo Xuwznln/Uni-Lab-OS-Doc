@@ -150,6 +150,7 @@ class JobExecutionBackend:
             sample_material=payload.get("sample_material", {}) or {},
             server_info=payload.get("server_info"),
             node_id=payload.get("node_id", ""),
+            node_run_uuid=str(payload.get("node_run_uuid", "") or ""),
             retry_count=int(payload.get("retry_count", 0) or 0),
         )
         if self.device_manager.get_job_info(job_info.job_id) is not None:
@@ -305,17 +306,7 @@ class JobExecutionBackend:
         """把微后端无法接受的调度命令作为该 attempt 的 failed 回报。"""
 
         self._safe_inventory_cancel(job.job_id, reason="job_rejected_before_execution")
-        item = QueueItem(
-            task_type="job_call_back_status",
-            device_id=job.device_id,
-            action_name=job.action_name,
-            task_id=job.task_id,
-            job_id=job.job_id,
-            notebook_id=job.notebook_id,
-            device_action_key=job.device_action_key,
-            node_id=job.node_id,
-            retry_count=job.retry_count,
-        )
+        item = self._queue_item_for(job)
         item.trace_context = getattr(job, "trace_context", {})
         return_info = serialize_result_info(
             message,
@@ -444,17 +435,7 @@ class JobExecutionBackend:
         if not self.device_manager.cancel_job(job_id):
             return False
         self._safe_inventory_cancel(job_id, reason="job_canceled")
-        item = QueueItem(
-            task_type="job_call_back_status",
-            device_id=job.device_id,
-            action_name=job.action_name,
-            task_id=job.task_id,
-            job_id=job.job_id,
-            notebook_id=job.notebook_id,
-            device_action_key=job.device_action_key,
-            node_id=job.node_id,
-            retry_count=job.retry_count,
-        )
+        item = self._queue_item_for(job)
         return_info = serialize_result_info(
             "Job was cancelled",
             False,
@@ -489,17 +470,7 @@ class JobExecutionBackend:
         for job in cancelled_jobs:
             job_id = job.job_id
             self._safe_inventory_cancel(job_id, reason="task_canceled")
-            item = QueueItem(
-                task_type="job_call_back_status",
-                device_id=job.device_id,
-                action_name=job.action_name,
-                task_id=job.task_id,
-                job_id=job.job_id,
-                notebook_id=job.notebook_id,
-                device_action_key=job.device_action_key,
-                node_id=job.node_id,
-                retry_count=job.retry_count,
-            )
+            item = self._queue_item_for(job)
             cancel_info = serialize_result_info(
                 "Job was cancelled",
                 False,
@@ -509,6 +480,23 @@ class JobExecutionBackend:
             self._publish_to_result_bridges({}, item, "failed", cancel_info)
             self._notify_finished(job_id, False, None, "normal", cancel_info)
         return [job.job_id for job in cancelled_jobs]
+
+    @staticmethod
+    def _queue_item_for(job: JobInfo) -> QueueItem:
+        """由已接受的 JobInfo 构造回调/决策链使用的执行引用。"""
+
+        return QueueItem(
+            task_type="job_call_back_status",
+            device_id=job.device_id,
+            action_name=job.action_name,
+            task_id=job.task_id,
+            job_id=job.job_id,
+            notebook_id=job.notebook_id,
+            device_action_key=job.device_action_key,
+            node_id=job.node_id,
+            node_run_uuid=job.node_run_uuid,
+            retry_count=job.retry_count,
+        )
 
     def busy_device_action_keys(self) -> Set[str]:
         """当前被占用的 device_action_key（供调度器做锁视图合并）。"""
@@ -767,6 +755,7 @@ class JobExecutionBackend:
             "task_id": item.task_id,
             "job_id": item.job_id,
             "node_id": str(getattr(item, "node_id", "") or ""),
+            "node_run_uuid": str(getattr(item, "node_run_uuid", "") or ""),
             "exception_type": error_info.get("exception_type", "Exception"),
             "error_message": error_info.get(
                 "error_message", return_info.get("error", "")
@@ -1021,6 +1010,18 @@ class JobExecutionBackend:
         )
         if pending is None:
             return False
+        if str(decision.get("action") or "") == "retry" and int(
+            pending.get("retry_count") or 0
+        ) >= int(pending.get("max_retries") or 0):
+            # Host 报告只如实携带 retry_count/max_retries；上限由调度权威在放行时执行。
+            # 本机 Workflow Authority 就是这个权威：超限的 retry 不放行。
+            logger.warning(
+                "[JobExecutionBackend] retry rejected for decision %s: attempt limit "
+                "%s reached",
+                decision_id,
+                pending.get("max_retries"),
+            )
+            return False
         payload = {
             "decision_id": decision_id,
             "job_id": str(pending.get("job_id") or ""),
@@ -1210,17 +1211,7 @@ class JobExecutionBackend:
             )
             return
         job_log = format_job_log(job.job_id, job.task_id, job.device_id, job.action_name)
-        queue_item = QueueItem(
-            task_type="job_call_back_status",
-            device_id=job.device_id,
-            action_name=job.action_name,
-            task_id=job.task_id,
-            job_id=job.job_id,
-            notebook_id=job.notebook_id,
-            device_action_key=job.device_action_key,
-            node_id=job.node_id,
-            retry_count=job.retry_count,
-        )
+        queue_item = self._queue_item_for(job)
         # QueueItem 不是 wire schema；动态附加只读追踪上下文供回调恢复。
         queue_item.trace_context = {}
         inject_trace_context(queue_item.trace_context)
@@ -1323,14 +1314,15 @@ class JobExecutionBackend:
                     "action.success.type": suc_type,
                 },
             )
-
-            self._notify_finished(job_id, success, ret_value, suc_type, return_info)
         finally:
+            # 本 attempt 的库存 reservation 先收敛（失败即隔离/释放），再通知调度器：
+            # retry 的新 attempt 需要在旧 reservation 处置之后重新预留。
             self._safe_inventory_terminal(
                 job_id,
                 success=success,
                 reason="action_finished",
             )
+        self._notify_finished(job_id, success, ret_value, suc_type, return_info)
 
     @staticmethod
     def _default_host_getter() -> Any:

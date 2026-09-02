@@ -75,13 +75,15 @@ def test_create_ad_hoc_task_persists_task_and_single_job(
         "site": "site-1",
     }
 
-    jobs = service.list_workflow_node_jobs(task["uuid"])
-    assert len(jobs) == 1
-    job = jobs[0]
-    assert job["executor_kind"] == "device_action"
-    assert job["workflow_node_uuid"] == snapshot_nodes[0]["uuid"]
-    assert job["param"] == plan_nodes[0]["param"]
-    assert job["execution_policy"] == {"always_free": True}
+    # 单点任务 = 一个节点运行 + attempt 1
+    (run,) = service.list_workflow_node_runs(task["uuid"])
+    assert run["executor_kind"] == "device_action"
+    assert run["workflow_node_uuid"] == snapshot_nodes[0]["uuid"]
+    assert run["param"] == plan_nodes[0]["param"]
+    assert run["execution_policy"] == {"always_free": True}
+    (attempt,) = run["attempts"]
+    assert attempt["attempt_no"] == 1 and attempt["uuid"] == run["current_job_uuid"]
+    assert [job["uuid"] for job in service.list_workflow_node_jobs(task["uuid"])] == [attempt["uuid"]]
 
 
 def test_ad_hoc_task_idempotency_and_fingerprint_conflict(
@@ -136,10 +138,12 @@ def test_scheduler_build_dag_consumes_ad_hoc_task(service: WorkflowService) -> N
 
     scheduler = BackendScheduler(service, _ExecutorStub())
     dag, specs = scheduler._build_dag(  # noqa: SLF001 - 契约验证
-        prepared["task"], prepared["jobs"]
+        prepared["task"], prepared["runs"]
     )
     assert len(dag.nodes) == 1
     node = next(iter(dag.nodes.values()))
+    # DAG 节点键 = 节点运行 uuid（稳定），执行器 job 是 attempt
+    assert node.node_id == prepared["runs"][0]["uuid"]
     assert node.device_id == "host_node"
     assert node.action == "transfer_resource"
     assert node.action_args == {"resource": {"uuid": "m-1"}, "site": "site-1"}

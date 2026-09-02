@@ -47,7 +47,11 @@ UniLabOS 的微后端数据面和调度职责如下：
 - `/api/v1/workflows` 管理定义；
 - `/api/v1/workflows/{uuid}/graph` 管理整图；
 - `/api/v1/workflow-tasks` 创建一次运行；
-- `/api/v1/workflow-tasks/{uuid}/jobs` 查询节点 Job。
+- `/api/v1/workflow-tasks/{uuid}/node-runs` 查询节点运行：每节点一条，`status /
+  return_info` 是当前（重试后的）attempt 的结果，`attempts` 是该节点的执行历史——画布
+  节点状态与结果读取用它；
+- `/api/v1/workflow-tasks/{uuid}/jobs`、`/api/v1/workflow-node-jobs/{job_uuid}` 查询
+  attempt（物理执行），`job_uuid` 与 `/error-decisions` 报告、执行事件里的 `job_id` 一致。
 
 UI 的工作流写链路是：保存 Workflow 定义，保存 Graph，再创建 Workflow Task。
 Backend-controlled 模式不挂载本地 Workflow 写 API；图由 Backend 持有，Edge
@@ -69,7 +73,9 @@ UI 的恢复基线来自四库 API，而不是进程内事件缓存：
 
 1. Workflow 执行使用“定义 → Graph → Task”写链路。
 2. Timeline 组合 Runtime、History 和 Telemetry 的持久化投影。
-3. retry 必须表现为 Backend 创建的新 attempt/job；Edge 不在原 Job 上本地重排。
+3. retry 必须表现为调度权威创建的新 attempt/job（Backend-controlled 下是 Backend，
+   本机调度下是 Workflow Authority 的同一事务）；Edge 不在原 Job 上本地重排。画布以
+   节点运行为单位展示：当前状态来自节点运行投影，历史来自 `attempts`。
 4. 调度资源页面要识别 `/scheduler/resources` 的 503：这表示该 Host 已接入云端、
    调度权威在远端 Backend，不是服务故障。
 

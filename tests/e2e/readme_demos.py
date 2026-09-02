@@ -38,18 +38,23 @@ class WorkflowExpectation:
     """一个 ``@workflow`` 模板经管理 API 运行后的期望终态。"""
 
     name: str
-    #: ``/workflow-tasks/{uuid}/jobs`` 的行数；retry 后同一节点的每个 attempt 各占一行。
-    job_count: int
+    #: ``/workflow-tasks/{uuid}/node-runs`` 的条数 = 工作流节点数（每节点一个节点运行）。
+    node_count: int
     task_status: str = "succeeded"
-    #: 缺省表示全部 job 都应 succeeded。
-    job_statuses: Optional[tuple[str, ...]] = None
+    #: 节点运行终态（当前 attempt 的投影）；缺省表示全部 succeeded。
+    node_statuses: Optional[tuple[str, ...]] = None
+    #: 每个节点运行的 attempt 数；缺省全部为 1。retry 过的节点 > 1，历史留在 ``attempts``。
+    attempt_counts: Optional[tuple[int, ...]] = None
     #: 期望失败 attempt 先进入错误决策链；给出网页式决策 payload
     #: （``{"action": "abort"}``、``{"action": "retry"}`` 或携带 ``result`` 的
     #: ``operator_intervention``）。
     error_decision: Optional[dict[str, Any]] = None
 
-    def expected_job_statuses(self) -> tuple[str, ...]:
-        return self.job_statuses or tuple("succeeded" for _ in range(self.job_count))
+    def expected_node_statuses(self) -> tuple[str, ...]:
+        return self.node_statuses or tuple("succeeded" for _ in range(self.node_count))
+
+    def expected_attempt_counts(self) -> tuple[int, ...]:
+        return self.attempt_counts or tuple(1 for _ in range(self.node_count))
 
 
 @dataclass(frozen=True)
@@ -87,7 +92,7 @@ DEMOS: tuple[DemoSpec, ...] = (
             "LAN_DEMO_COUNT_RATE": "100",
             "LAN_DEMO_CYCLE_PAUSE": "60",
         },
-        workflows=(WorkflowExpectation(name="LAN 远程轮次控制", job_count=3),),
+        workflows=(WorkflowExpectation(name="LAN 远程轮次控制", node_count=3),),
     ),
     DemoSpec(
         repo="LabDeviceWorkstationDemo",
@@ -97,7 +102,7 @@ DEMOS: tuple[DemoSpec, ...] = (
         host_graph="graph/workstation_demo.json",
         proof_env={"WORKSTATION_DEMO_PROOF_FILE": "proof.json"},
         extra_env={"WORKSTATION_DEMO_START_DELAY": "0.2"},
-        workflows=(WorkflowExpectation(name="工作站演示流水", job_count=3),),
+        workflows=(WorkflowExpectation(name="工作站演示流水", node_count=3),),
     ),
     DemoSpec(
         repo="LabDeviceExceptionDemo",
@@ -109,25 +114,25 @@ DEMOS: tuple[DemoSpec, ...] = (
         workflows=(
             WorkflowExpectation(
                 name="异常传播演示",
-                job_count=4,
+                node_count=4,
                 task_status="failed",
-                job_statuses=("succeeded", "succeeded", "succeeded", "failed"),
+                node_statuses=("succeeded", "succeeded", "succeeded", "failed"),
                 error_decision={"action": "abort", "reason": "readme demo e2e 放行失败结果"},
             ),
             WorkflowExpectation(
                 name="人工替换恢复演示",
-                job_count=2,
+                node_count=2,
                 error_decision={
                     "action": "operator_intervention",
                     "reason": "readme demo e2e 人工替换结果",
                     "result": {"success": True, "step_name": "flaky", "replaced_by": "operator"},
                 },
             ),
-            # retry：attempt 1 如实记 failed 并保留，同节点 attempt 2 重跑成功，任务不中断
+            # retry：节点运行的当前结果是 attempt 2 的成功，attempt 1 的失败留在历史里，任务不中断
             WorkflowExpectation(
                 name="重试恢复演示",
-                job_count=3,
-                job_statuses=("failed", "succeeded", "succeeded"),
+                node_count=2,
+                attempt_counts=(2, 1),
                 error_decision={"action": "retry", "reason": "readme demo e2e 重试瞬时故障"},
             ),
         ),
@@ -145,8 +150,8 @@ DEMOS: tuple[DemoSpec, ...] = (
         },
         extra_env={"SITE_DEMO_START_DELAY": "0.5"},
         workflows=(
-            WorkflowExpectation(name="位点操作演示", job_count=3),
-            WorkflowExpectation(name="物料流转演示", job_count=5),
+            WorkflowExpectation(name="位点操作演示", node_count=3),
+            WorkflowExpectation(name="物料流转演示", node_count=5),
         ),
         timeout=90.0,
     ),
