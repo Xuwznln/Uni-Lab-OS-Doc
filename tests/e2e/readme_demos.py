@@ -9,6 +9,10 @@ unilabos 侧在这里固定引用四个 demo 仓库（URL + 已验证提交）�
 
 pinned 提交与各 demo 仓库 CI 里固定的 Uni-Lab-OS 提交互相锁定：core 有破坏性
 改动时先改 demo 并推送，再在此处 bump。
+
+运行时后端由 ``UNILABOS_E2E_BACKEND``（``hostlink`` 缺省 / ``ros2``）选择。ros2 模式
+下 HostLink 仍然开启（承载物料权威与 host 服务，与 Site demo 的 ros2 形态一致），
+设备动作与 Topic 走 ROS 2；每个用例用独立的 ``ROS_DOMAIN_ID`` 隔离。
 """
 
 from __future__ import annotations
@@ -31,6 +35,15 @@ import unilabos
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_CONFIG = Path(unilabos.__file__).resolve().parent / "config" / "example_config.py"
 TERMINAL_TASK_STATUSES = {"succeeded", "failed"}
+
+E2E_BACKEND = os.environ.get("UNILABOS_E2E_BACKEND", "hostlink").strip().lower()
+if E2E_BACKEND not in {"hostlink", "ros2"}:
+    raise RuntimeError(f"UNILABOS_E2E_BACKEND 必须是 hostlink 或 ros2，当前: {E2E_BACKEND!r}")
+#: 只属于测试夹具的控制变量。``UNILABOS_`` 前缀在运行时进程里是配置覆盖协议
+#: （``UNILABOS_<Config类>_<字段>``），这些变量不能泄漏进被测进程。
+HARNESS_ENV_VARS = ("UNILABOS_E2E_BACKEND", "UNILABOS_README_EXAMPLES_ROOT")
+#: ROS 2 节点启动与发现比 HostLink 慢，闭环与工作流等待窗口相应放宽。
+_ROS2_TIMEOUT_SCALE = 1.5
 
 
 @dataclass(frozen=True)
@@ -69,6 +82,8 @@ class DemoSpec:
     #: 环境变量名 -> 设备闭环写出的 proof 文件名（相对运行临时目录）。
     proof_env: dict[str, str] = field(default_factory=dict)
     extra_env: dict[str, str] = field(default_factory=dict)
+    #: ros2 后端下覆盖 extra_env 的项（demo 自带 smoke 在 ros2 下放宽的启动延时）。
+    extra_env_ros2: dict[str, str] = field(default_factory=dict)
     timeout: float = 60.0
 
     @property
@@ -76,6 +91,16 @@ class DemoSpec:
         """``-g <文件>`` 启动时登记进 Graph Authority 的图名（文件 stem）。"""
 
         return Path(self.host_graph).stem
+
+    @property
+    def runtime_env(self) -> dict[str, str]:
+        if E2E_BACKEND == "ros2":
+            return {**self.extra_env, **self.extra_env_ros2}
+        return dict(self.extra_env)
+
+    @property
+    def runtime_timeout(self) -> float:
+        return self.timeout * (_ROS2_TIMEOUT_SCALE if E2E_BACKEND == "ros2" else 1.0)
 
 
 DEMOS: tuple[DemoSpec, ...] = (
@@ -102,6 +127,7 @@ DEMOS: tuple[DemoSpec, ...] = (
         host_graph="graph/workstation_demo.json",
         proof_env={"WORKSTATION_DEMO_PROOF_FILE": "proof.json"},
         extra_env={"WORKSTATION_DEMO_START_DELAY": "0.2"},
+        extra_env_ros2={"WORKSTATION_DEMO_START_DELAY": "2.0"},
         workflows=(WorkflowExpectation(name="工作站演示流水", node_count=3),),
     ),
     DemoSpec(
@@ -149,6 +175,7 @@ DEMOS: tuple[DemoSpec, ...] = (
             "SITE_DEMO_BENCH_PROOF_FILE": "bench-proof.json",
         },
         extra_env={"SITE_DEMO_START_DELAY": "0.5"},
+        extra_env_ros2={"SITE_DEMO_START_DELAY": "2.0"},
         workflows=(
             WorkflowExpectation(name="位点操作演示", node_count=3),
             WorkflowExpectation(name="物料流转演示", node_count=5),
@@ -233,6 +260,12 @@ def unilab_command(*args: str) -> list[str]:
     return [sys.executable, "-m", "unilabos", *args]
 
 
+def ros_domain_id(hostlink_port: int) -> str:
+    """由本用例的 HostLink 端口派生一个独立 ROS_DOMAIN_ID，避免并行用例互相发现。"""
+
+    return str(10 + hostlink_port % 190)
+
+
 def runtime_command(
     *,
     package_dir: Path,
@@ -241,12 +274,17 @@ def runtime_command(
     management_port: int,
     hostlink_port: int,
     is_slave: bool,
+    backend: str = E2E_BACKEND,
 ) -> list[str]:
-    """按 demo README 记录的启动形态组装 ``unilab`` 运行时命令（hostlink 后端）。"""
+    """按 demo README 记录的启动形态组装 ``unilab`` 运行时命令。
+
+    两种后端都保留 HostLink（host 绑定 / slave 接入）：hostlink 模式承载全部通信，
+    ros2 模式承载物料权威与 host 服务，设备动作、Topic 走 ROS 2。
+    """
 
     command = unilab_command(
         "--backend",
-        "hostlink",
+        backend,
         "--skip_env_check",
         "--devices",
         str(package_dir),
@@ -275,11 +313,15 @@ def runtime_command(
         ]
     else:
         command += ["--hostlink_bind", "127.0.0.1", "--hostlink_port", str(hostlink_port)]
+    if backend == "ros2":
+        command += ["--ros_domain_id", ros_domain_id(hostlink_port)]
     return command
 
 
 def subprocess_env(extra: dict[str, str]) -> dict[str, str]:
-    environment = os.environ.copy()
+    environment = {
+        key: value for key, value in os.environ.items() if key not in HARNESS_ENV_VARS
+    }
     environment.update(
         {"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
     )

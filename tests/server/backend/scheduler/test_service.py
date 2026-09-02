@@ -238,6 +238,33 @@ def test_foreign_job_finish_is_ignored() -> None:
     assert workflow.terminal == []
 
 
+def test_dispatch_waits_for_the_execution_adapter_and_resumes_on_host_ready() -> None:
+    """执行适配器未注册（ROS2 host node 晚于管理 API 就绪）时不派发，host ready 后原样派发。"""
+
+    workflow = _Workflow()
+    executor = _Executor()
+    executor.ready = False
+    executor.host_ready = lambda: executor.ready  # type: ignore[attr-defined]
+    scheduler = BackendScheduler(workflow, executor)  # type: ignore[arg-type]
+    task = {"uuid": "task-1", "workflow_uuid": "workflow-1"}
+    node = DagNode(node_id="run-1", device_id="device-a", action="use")
+    _attach(scheduler, workflow, task, node)
+
+    scheduler._start_node(task, node)  # noqa: SLF001
+
+    # 资源已持有，但没有派发、没有标 running、没有失败
+    assert scheduler.resources.request_for_owner("run-1-a1").status == "held"
+    assert executor.dispatched == []
+    assert workflow.running == []
+    assert "run-1-a1" in scheduler._waiting_resource_jobs  # noqa: SLF001
+
+    executor.ready = True
+    scheduler.resume_pending_dispatches()
+
+    assert [item["job_id"] for item in executor.dispatched] == ["run-1-a1"]
+    assert workflow.running == ["run-1-a1"]
+
+
 def test_scheduler_owns_local_jobs_and_marks_pending_decisions() -> None:
     """调度器是本机 job 的生命周期 owner：派发载荷带 origin，挂起决策时节点运行进入 intervention_required。"""
 

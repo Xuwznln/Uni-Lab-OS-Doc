@@ -25,6 +25,7 @@ import pytest
 
 from tests.e2e.readme_demos import (
     DEMOS,
+    E2E_BACKEND,
     TERMINAL_TASK_STATUSES,
     DemoSpec,
     WorkflowExpectation,
@@ -32,6 +33,7 @@ from tests.e2e.readme_demos import (
     free_port,
     hostlink_port_open,
     resolve_demo_source,
+    ros_domain_id,
     runtime_command,
     stop_process,
     subprocess_env,
@@ -107,9 +109,13 @@ class _DemoProcesses:
         self.proof_paths = {
             env_name: work_root / filename for env_name, filename in spec.proof_env.items()
         }
-        self.env = subprocess_env(
-            {**{name: str(path) for name, path in self.proof_paths.items()}, **spec.extra_env}
-        )
+        runtime_env = {
+            **{name: str(path) for name, path in self.proof_paths.items()},
+            **spec.runtime_env,
+        }
+        if E2E_BACKEND == "ros2":
+            runtime_env["ROS_DOMAIN_ID"] = ros_domain_id(self.hostlink_port)
+        self.env = subprocess_env(runtime_env)
         self.host_log = work_root / "host.log"
         self.slave_log = work_root / "slave.log"
         self._handles: list[Any] = []
@@ -150,7 +156,7 @@ class _DemoProcesses:
         wait_until(
             lambda: api_request(self.management_port, "/health").get("status") == "ok"
             and hostlink_port_open(self.hostlink_port),
-            timeout=min(60.0, spec.timeout),
+            timeout=min(90.0, spec.runtime_timeout),
             abort=self.any_exited,
             description="host 管理 API 与 HostLink 端口就绪",
         )
@@ -169,7 +175,7 @@ class _DemoProcesses:
         )
         wait_until(
             lambda: len(api_request(self.management_port, "/hostlink/peers")["peers"]) >= 1,
-            timeout=min(60.0, spec.timeout),
+            timeout=min(90.0, spec.runtime_timeout),
             abort=self.any_exited,
             description="slave 经 HostLink 接入 host",
         )
@@ -177,7 +183,7 @@ class _DemoProcesses:
     def wait_proofs(self) -> dict[str, dict[str, Any]]:
         wait_until(
             lambda: all(path.is_file() for path in self.proof_paths.values()),
-            timeout=self.spec.timeout,
+            timeout=self.spec.runtime_timeout,
             abort=self.any_exited,
             description=f"闭环 proof {sorted(self.proof_paths)}",
         )
@@ -345,7 +351,7 @@ def test_readme_demo_end_to_end_via_unilab_cli_and_management_api(
             proofs = processes.wait_proofs()
             for name, proof in proofs.items():
                 assert proof.get("success") is True, f"{name} 闭环失败: {proof}"
-                assert proof.get("backend") == "hostlink", f"{name} backend 不匹配: {proof}"
+                assert proof.get("backend") == E2E_BACKEND, f"{name} backend 不匹配: {proof}"
 
             # 5) Graph Authority：启动登记的图可经 API/CLI 读回，骨架可经 CLI 上传
             record = api_request(port, f"/graphs/{spec.host_graph_name}")
@@ -405,7 +411,7 @@ def test_readme_demo_end_to_end_via_unilab_cli_and_management_api(
             # 6) 管理 API 运行 @workflow 上报的工作流并断言终态
             results = [
                 _run_workflow(
-                    port, expectation, timeout=spec.timeout, abort=processes.any_exited
+                    port, expectation, timeout=spec.runtime_timeout, abort=processes.any_exited
                 )
                 for expectation in spec.workflows
             ]

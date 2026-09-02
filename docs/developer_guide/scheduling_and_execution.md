@@ -1,6 +1,6 @@
 # 调度与执行架构
 
-本文描述 UniLabOS 当前微后端、统一调度器、库存与 Edge 执行链路。实现入口以
+本文描述 Uni-Lab-OS 当前微后端、统一调度器、库存与 Edge 执行链路。实现入口以
 `unilabos/server/backend/` 为准；数据库边界和表目录见
 `unilabos/server/database/DESIGN.md`。
 
@@ -80,6 +80,11 @@ attempt_count` 是当前 attempt 的投影，只由 store 在同一事务里随 
   （含 `/results`、`/feedback-history`）：attempt 粒度，与 `/error-decisions` 报告里的
   `job_id` 一致；报告同时携带 `node_run_uuid`。
 - 事件：`workflow.node_run.changed`（节点级）与 `workflow.node_job.changed`（attempt 级）。
+
+派发以执行适配器就绪为前提：`JobExecutionBackend.host_ready()` 为假（ROS 2 host node 在
+全部设备初始化后才注册适配器，晚于管理 API 与 `@workflow` 模板就绪）时，已持有资源的节点
+留在等待集合，不派发也不判失败；适配器 `notify_ready` → `publish_host_ready` →
+`BackendScheduler.resume_pending_dispatches` 后原样派发。
 
 执行面按 job 的生命周期 owner（派发载荷里的 `origin`）路由 started / status / 决策挂起
 回调：本机调度器拥有 `local_scheduler`，`WorkflowBusinessCoordinator` 拥有 `backend_control`，

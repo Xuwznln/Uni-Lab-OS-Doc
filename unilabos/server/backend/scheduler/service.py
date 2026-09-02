@@ -418,15 +418,27 @@ class BackendScheduler:
         if record.status == "held":
             self._dispatch_held_node(task, node)
 
+    def _executor_ready(self) -> bool:
+        """执行适配器（HostLink / ROS2 host node）是否已注册；未就绪时不派发。"""
+
+        ready = getattr(self.executor, "host_ready", None)
+        return not callable(ready) or bool(ready())
+
+    def resume_pending_dispatches(self) -> None:
+        """执行适配器就绪（``publish_host_ready``）：重算等待集合，派发被闸住的节点。"""
+
+        self._reconcile_resources()
+
     def _dispatch_held_node(self, task: Dict[str, Any], node: DagNode) -> None:
         """下发一个已经持有完整动作/物料集合的节点运行（当前 attempt）。"""
 
         with self._guard:
             spec = self._run_specs[node.node_id]
             job_uuid = spec["current_job_uuid"]
-            if self._dispatch_paused:
-                # 安静点重启闸门：节点保持在等待集合，resume 后由
-                # _reconcile_resources 原样派发，不产生失败。
+            if self._dispatch_paused or not self._executor_ready():
+                # 安静点重启闸门 / 执行适配器尚未就绪（ROS2 host node 在设备初始化
+                # 完成后才注册）：节点保持在等待集合并继续持有资源，resume /
+                # host ready 后由 _reconcile_resources 原样派发，不产生失败。
                 return
             if job_uuid in self._dispatched_jobs:
                 return
