@@ -1640,7 +1640,7 @@ python -m unilabos.app.main \
 
 `--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 与 `LabDeviceSiteDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
 
-> 这四个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可。主仓库 CI 会在固定提交上校验这四个包的注册表，各仓库 CI 则固定在指定 Uni-Lab-OS 提交上跑双运行时 smoke。
+> 这四个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可。主仓库在 `tests/e2e/readme_demos.py` 固定引用这四个包的已验证提交，CI 里逐个端到端跑通（`--check_mode`、`unilab graph create`、真实 `unilab -g` 起微后端、`unilab graph` 读写 Graph Authority、管理 API 运行 `@workflow`）；各仓库 CI 则反向固定在指定 Uni-Lab-OS 提交上跑双运行时 smoke。
 
 ---
 

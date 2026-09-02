@@ -107,7 +107,9 @@ cd Uni-Lab-OS
 
 每个仓库的 README 都附带分步启动教程及实测输出，并自带可终止的双运行时 smoke
 （`python -m <包名>.smoke --backend hostlink|ros2`），由各仓库 CI 固定在指定 Uni-Lab-OS 提交上运行；
-主仓库 CI 也会在固定提交上校验这四个包的注册表。底层的通信共享机制见
+主仓库则在 `tests/e2e/readme_demos.py` 固定引用这四个包的已验证提交，并在 CI 里逐个端到端跑通：
+注册表 `--check_mode`、`unilab graph create` 建图、真实 `unilab -g` 起微后端（双进程 demo 含 slave）、
+`unilab graph list/download/upload` 读写 Graph Authority、管理 HTTP API 运行上报的 `@workflow`。底层的通信共享机制见
 [最佳实践指南 §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)；
 从零编写新驱动见[添加设备](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html)。
 

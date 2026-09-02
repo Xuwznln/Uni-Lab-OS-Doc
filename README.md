@@ -112,9 +112,13 @@ carries a terminating dual-runtime smoke (`python -m <pkg>.smoke --backend hostl
 own CI runs against a pinned Uni-Lab-OS revision. For the underlying communication-sharing mechanism
 see [Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
 to write a new driver from scratch see [Add Device](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html).
-The main repository CI validates the registries of all four packages at pinned revisions. It also runs
-the LAN demo shape as separate HostLink Host/Slave processes over loopback and an available
-non-loopback LAN IPv4, covering cross-device `@subscribe` followed by a remote device action.
+The main repository pins all four packages in `tests/e2e/readme_demos.py` and drives each of them end
+to end in CI (`tests/e2e`): registry `--check_mode`, `unilab graph create`, a real `unilab -g` runtime
+with the microbackend (host plus slave where the demo is dual-process), Graph Authority round trips
+through `unilab graph list/download/upload`, and the reported `@workflow` templates executed through
+the management HTTP API. It also runs the LAN demo shape as separate HostLink Host/Slave processes
+over loopback and an available non-loopback LAN IPv4, covering cross-device `@subscribe` followed by
+a remote device action.
 
 ## Message Format
 
