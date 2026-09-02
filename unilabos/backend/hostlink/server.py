@@ -462,7 +462,10 @@ class HostLinkServer:
             peer = self._touch_peer(peer_key, action, data)
             return new_response(request_id, True, handler(data, peer))
         except Exception as exc:  # noqa: BLE001 - protocol boundary
-            logger.warning(f"[HostLink] {action} from {peer_key} failed: {exc}")
+            # not_found 是客户端探测存在性（materials.ensure / 删除后复查）的正常结果，
+            # 不是服务端故障。
+            log = logger.debug if getattr(exc, "code", None) == "not_found" else logger.warning
+            log(f"[HostLink] {action} from {peer_key} failed: {exc}")
             return new_response(
                 request_id,
                 False,

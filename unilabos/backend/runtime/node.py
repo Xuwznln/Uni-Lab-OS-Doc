@@ -624,6 +624,11 @@ class DeviceNode(ABC):
                         f"从顶级资源列表中移除 {plr_resource.name}（即将成为 {parent_resource.name} 的子资源）"
                     )
                     break
+            # 成为子资源后由父根树统一快照；若继续按独立根树观察，其子树的状态
+            # 变化会以"半棵树"提交并被权威判为结构漂移。
+            observer = getattr(self.resource_tracker, "_material_snapshot_observer", None)
+            if observer is not None:
+                observer.unobserve(plr_resource)
 
             parent_resource.assign_child_resource(plr_resource, location=None, **additional_params)
 
@@ -712,35 +717,39 @@ class DeviceNode(ABC):
             plr_instances: List[Any] = []
             added_instances: List[Any] = []
             report_roots: List[Any] = []
-            for tree, draft in zip(tree_set.trees, drafts):
-                tree.root_node.res_content.parent_uuid = parent_uuid
-                root_uuid = tree.root_node.res_content.uuid
-                plr_instance = self.resource_tracker.uuid_to_resources.get(root_uuid)
-                if plr_instance is None:
-                    plr_instance = draft
-                    self.resource_tracker.add_resource(plr_instance)
-                    added_instances.append(plr_instance)
-                else:
-                    # 已在本设备台面上（换位/重复挂载）：物理上是同一物件，复用
-                    # 现有实例，transfer 内先从旧父位卸载再挂新位。重新实例化会
-                    # 造成同 uuid 双实例且旧 spot 不释放。
-                    self.lab_logger().info(f"[AR:{tag}] 物料 {root_uuid} 已在台面，按换位处理")
-                if parent_uuid == self.resource_uuid:
-                    # 根树上台面：extra 登记所属设备，随第 4 步快照落权威，供
-                    # materials.owner_device_of 推断（挂到已有树时归属跟随其根，无需写）
-                    extra = getattr(plr_instance, "unilabos_extra", None) or {}
-                    extra[EXTRA_BOUND_DEVICE] = self._short_device_id()
-                    plr_instance.unilabos_extra = extra
-                plr_instances.append(plr_instance)
-                parent = self.transfer_to_new_resource(plr_instance, tree, dict(additional_params))
-                if parent is None and parent_uuid != self.resource_uuid:
-                    raise ValueError(f"物料 {plr_instance.name} 挂载到 {bind_parent_id} 失败（详见设备日志）")
-                if plr_instance.location is None:
-                    # 未经 site/spot 排布时回退显式挂载坐标（默认原点）
-                    plr_instance.location = bind_location
-                root = parent if parent is not None else plr_instance
-                if all(id(root) != id(existing) for existing in report_roots):
-                    report_roots.append(root)
+            # 本流程自身就是权威的投影方，且第 4 步会显式回报快照：物理挂载触发的
+            # PLR assign/state 回调不得再排队一份自动快照，否则同一事件双写，
+            # 必然造成一次乐观锁冲突或"结构漂移"丢弃。
+            with self.material_authority_sync():
+                for tree, draft in zip(tree_set.trees, drafts):
+                    tree.root_node.res_content.parent_uuid = parent_uuid
+                    root_uuid = tree.root_node.res_content.uuid
+                    plr_instance = self.resource_tracker.uuid_to_resources.get(root_uuid)
+                    if plr_instance is None:
+                        plr_instance = draft
+                        self.resource_tracker.add_resource(plr_instance)
+                        added_instances.append(plr_instance)
+                    else:
+                        # 已在本设备台面上（换位/重复挂载）：物理上是同一物件，复用
+                        # 现有实例，transfer 内先从旧父位卸载再挂新位。重新实例化会
+                        # 造成同 uuid 双实例且旧 spot 不释放。
+                        self.lab_logger().info(f"[AR:{tag}] 物料 {root_uuid} 已在台面，按换位处理")
+                    if parent_uuid == self.resource_uuid:
+                        # 根树上台面：extra 登记所属设备，随第 4 步快照落权威，供
+                        # materials.owner_device_of 推断（挂到已有树时归属跟随其根，无需写）
+                        extra = getattr(plr_instance, "unilabos_extra", None) or {}
+                        extra[EXTRA_BOUND_DEVICE] = self._short_device_id()
+                        plr_instance.unilabos_extra = extra
+                    plr_instances.append(plr_instance)
+                    parent = self.transfer_to_new_resource(plr_instance, tree, dict(additional_params))
+                    if parent is None and parent_uuid != self.resource_uuid:
+                        raise ValueError(f"物料 {plr_instance.name} 挂载到 {bind_parent_id} 失败（详见设备日志）")
+                    if plr_instance.location is None:
+                        # 未经 site/spot 排布时回退显式挂载坐标（默认原点）
+                        plr_instance.location = bind_location
+                    root = parent if parent is not None else plr_instance
+                    if all(id(root) != id(existing) for existing in report_roots):
+                        report_roots.append(root)
             if added_instances:
                 # 换位不重复触发 add 回调；transfer 已在挂载时回调 resource_tree_transfer
                 await self._invoke_resource_hook("resource_tree_add", added_instances)

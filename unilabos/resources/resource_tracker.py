@@ -1119,6 +1119,7 @@ class ResourceTreeSet(object):
             "well": "Well",
             "deck": "Deck",
             "container": "RegularContainer",
+            "tip_rack": "TipRack",
             "tip_spot": "TipSpot",
         }
 

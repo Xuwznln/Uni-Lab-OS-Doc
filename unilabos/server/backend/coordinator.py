@@ -428,7 +428,9 @@ class WorkflowBusinessCoordinator:
         try:
             job = self.runtime.get_execution_job(str(item.job_id))
         except RuntimeNotFoundError:
-            logger.warning("ignored start callback for unknown job %s", item.job_id)
+            # 本机调度 / 旧协议 Backend 派发的 job 不经 runtime.v1 execute_job 建档，
+            # 协调器不持有其生命周期，属正常路径。
+            logger.debug("ignored start callback for unknown job %s", item.job_id)
             return
         if job.status == "dispatch_pending":
             job = self.runtime.transition_execution_job(
@@ -450,7 +452,7 @@ class WorkflowBusinessCoordinator:
         try:
             job = self.runtime.get_execution_job(str(item.job_id))
         except RuntimeNotFoundError:
-            logger.warning("ignored status callback for unknown job %s", item.job_id)
+            logger.debug("ignored status callback for unknown job %s", item.job_id)
             return
         if status == "running":
             if job.status == "dispatch_pending":
@@ -541,7 +543,7 @@ class WorkflowBusinessCoordinator:
         try:
             job = self.runtime.get_execution_job(str(item.job_id))
         except RuntimeNotFoundError:
-            logger.warning("ignored error callback for unknown job %s", item.job_id)
+            logger.debug("ignored error callback for unknown job %s", item.job_id)
             return False
         item_data = asdict(item) if is_dataclass(item) else dict(vars(item))
         item_data.pop("trace_context", None)
