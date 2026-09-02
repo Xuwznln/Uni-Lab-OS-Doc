@@ -955,6 +955,86 @@ class WorkflowStore:
         return self._job_row(row)
 
     @staticmethod
+    def latest_attempts(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """每个工作流节点只保留 attempt 最大的 job（失败重试后的当前 attempt）。"""
+
+        latest: Dict[str, Dict[str, Any]] = {}
+        for job in jobs:
+            node_uuid = str(job["workflow_node_uuid"])
+            current = latest.get(node_uuid)
+            if current is None or int(job.get("attempt") or 1) > int(current.get("attempt") or 1):
+                latest[node_uuid] = job
+        return list(latest.values())
+
+    def create_job_retry(self, job_uuid: str) -> Dict[str, Any]:
+        """为已失败的 attempt 追加同节点的新 attempt（重试）。
+
+        旧 attempt 原样保留为 failed 事实；新行复制节点归属、参数与执行策略，
+        ``attempt`` 递增，``meta_data.retry_of`` 指回上一 attempt。
+        """
+
+        now = utc_now()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM workflow_node_job WHERE uuid=? AND deleted_at IS NULL",
+                (job_uuid,),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound(f"workflow node job {job_uuid} not found")
+            if row["status"] != "failed":
+                raise StoreConflict(
+                    f"workflow node job {job_uuid} cannot be retried from {row['status']}"
+                )
+            latest = conn.execute(
+                """
+                SELECT MAX(attempt) FROM workflow_node_job
+                WHERE workflow_task_uuid = ? AND workflow_node_uuid = ? AND deleted_at IS NULL
+                """,
+                (row["workflow_task_uuid"], row["workflow_node_uuid"]),
+            ).fetchone()[0]
+            new_uuid = str(uuid4())
+            conn.execute(
+                """
+                INSERT INTO workflow_node_job(
+                    uuid, create_time, update_time, deleted_at, description,
+                    meta_data, workflow_task_uuid, workflow_node_uuid,
+                    material_uuid, feedback_sequence, topological_index,
+                    executor_kind, execution_policy,
+                    execution_timeout_seconds, status, attempt, param,
+                    feedback_data, return_info, control_data, error_info
+                ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'pending', ?, ?,
+                          '{}', '{}', '{}', '[]')
+                """,
+                (
+                    new_uuid,
+                    now,
+                    now,
+                    row["description"],
+                    _json({**_load(row["meta_data"], {}), "retry_of": job_uuid}),
+                    row["workflow_task_uuid"],
+                    row["workflow_node_uuid"],
+                    row["material_uuid"],
+                    row["topological_index"],
+                    row["executor_kind"],
+                    row["execution_policy"],
+                    row["execution_timeout_seconds"],
+                    int(latest or row["attempt"]) + 1,
+                    row["param"],
+                ),
+            )
+            self._append_event(
+                conn,
+                event="workflow.node_job.changed",
+                data={
+                    "workflow_node_job_uuid": new_uuid,
+                    "status": "pending",
+                    "retry_of": job_uuid,
+                },
+                now=now,
+            )
+        return self.get_job(new_uuid)
+
+    @staticmethod
     def _runtime_limit_clause(limit: Optional[int], offset: int) -> tuple[str, tuple[int, ...]]:
         if limit is None:
             return "LIMIT -1 OFFSET ?", (offset,)
@@ -1114,7 +1194,9 @@ class WorkflowStore:
             if task["control_status"] != "active":
                 return {"state": task["control_status"], "task": task, "jobs": jobs}
 
-            statuses = {job["status"] for job in jobs}
+            # 重试后同一节点存在多个 attempt：节点的当前事实以最新 attempt 为准，
+            # 早先的 failed attempt 只是历史记录，不能把任务判为终态。
+            statuses = {job["status"] for job in self.latest_attempts(jobs)}
             uncertain = {
                 "dispatched",
                 "running",

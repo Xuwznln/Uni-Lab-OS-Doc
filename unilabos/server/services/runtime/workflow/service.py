@@ -617,6 +617,11 @@ class WorkflowService(WorkflowStore):
             error_info=error_info or [],
         )
 
+    def retry_workflow_node_job(self, job_uuid: str) -> Dict[str, Any]:
+        """失败 attempt 保留为事实，为同一节点追加新 attempt（重试）。"""
+
+        return self.create_job_retry(job_uuid)
+
     def finish_workflow_task(
         self,
         task_uuid: str,

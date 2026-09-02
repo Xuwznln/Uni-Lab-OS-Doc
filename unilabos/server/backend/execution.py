@@ -334,7 +334,12 @@ class JobExecutionBackend:
             self._release_terminal(item, "failed", return_info, {})
 
     def add_job_finished_listener(self, listener: Callable[..., None]) -> None:
-        """注册完成回调；支持三参数或包含 ``suc_type`` 的四参数签名。"""
+        """注册完成回调。
+
+        兼容三种签名：``(job_id, success, ret_value)``、追加 ``suc_type`` 的四参数，
+        以及再追加 ``return_info``（含 ``error_resolution``，调度器据此识别 retry
+        决策）的五参数。
+        """
         import inspect
 
         try:
@@ -342,20 +347,42 @@ class JobExecutionBackend:
                 p for p in inspect.signature(listener).parameters.values()
                 if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)
             ]
-            accepts_suc_type = any(p.kind == p.VAR_POSITIONAL for p in params) or len(params) >= 4
+            arity = 5 if any(p.kind == p.VAR_POSITIONAL for p in params) else min(len(params), 5)
         except (TypeError, ValueError):
-            accepts_suc_type = True
-        if accepts_suc_type:
-            self._listeners.append(listener)
-        else:
-            self._listeners.append(
-                lambda job_id, success, ret_value, _suc_type: listener(job_id, success, ret_value)
-            )
+            arity = 5
+
+        def wrapped(job_id, success, ret_value, suc_type, return_info):
+            if arity >= 5:
+                listener(job_id, success, ret_value, suc_type, return_info)
+            elif arity == 4:
+                listener(job_id, success, ret_value, suc_type)
+            else:
+                listener(job_id, success, ret_value)
+
+        wrapped._source = listener  # type: ignore[attr-defined]
+        self._listeners.append(wrapped)
 
     def remove_job_finished_listener(self, listener: JobFinishedListener) -> None:
         """解绑组合根拥有的 listener（关停/测试重装时避免重复回调）。"""
 
-        self._listeners = [item for item in self._listeners if item != listener]
+        self._listeners = [
+            item for item in self._listeners
+            if item is not listener and getattr(item, "_source", None) is not listener
+        ]
+
+    def _notify_finished(
+        self,
+        job_id: str,
+        success: bool,
+        ret_value: Any,
+        suc_type: str = "normal",
+        return_info: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        for listener in self._listeners:
+            try:
+                listener(job_id, success, ret_value, suc_type, return_info or {})
+            except Exception:  # noqa: BLE001 - 单个 listener 异常不阻断其他
+                logger.exception("[JobExecutionBackend] job finished listener failed")
 
     def _cancel_pending_error_decisions(self, job_ids: Set[str]) -> None:
         """取消 job 时由微后端原子消费 pending，并留下幂等审计。"""
@@ -435,13 +462,7 @@ class JobExecutionBackend:
             suc_type=SUCCESS_TYPE_CANCELLATION,
         )
         self._publish_to_result_bridges({}, item, "failed", return_info)
-        for listener in self._listeners:
-            try:
-                listener(job_id, False, None, "normal")
-            except Exception:  # noqa: BLE001 - cancellation must continue
-                logger.exception(
-                    "[JobExecutionBackend] cancellation listener failed"
-                )
+        self._notify_finished(job_id, False, None, "normal", return_info)
         return True
 
     def cancel_task(self, task_id: str) -> List[str]:
@@ -479,24 +500,14 @@ class JobExecutionBackend:
                 node_id=job.node_id,
                 retry_count=job.retry_count,
             )
-            self._publish_to_result_bridges(
+            cancel_info = serialize_result_info(
+                "Job was cancelled",
+                False,
                 {},
-                item,
-                "failed",
-                serialize_result_info(
-                    "Job was cancelled",
-                    False,
-                    {},
-                    suc_type=SUCCESS_TYPE_CANCELLATION,
-                ),
+                suc_type=SUCCESS_TYPE_CANCELLATION,
             )
-            for listener in self._listeners:
-                try:
-                    listener(job_id, False, None, "normal")
-                except Exception:  # noqa: BLE001 - cancellation must continue
-                    logger.exception(
-                        "[JobExecutionBackend] cancellation listener failed"
-                    )
+            self._publish_to_result_bridges({}, item, "failed", cancel_info)
+            self._notify_finished(job_id, False, None, "normal", cancel_info)
         return [job.job_id for job in cancelled_jobs]
 
     def busy_device_action_keys(self) -> Set[str]:
@@ -652,7 +663,7 @@ class JobExecutionBackend:
         suc_type = str(return_info.get("suc_type") or "normal")
         parent = extract_trace_context(getattr(item, "trace_context", {}))
         self._put_event(
-            ("finished", item.job_id, status == "success", ret_value, suc_type),
+            ("finished", item.job_id, status == "success", ret_value, suc_type, return_info),
             context=parent,
         )
 
@@ -1179,7 +1190,10 @@ class JobExecutionBackend:
                             self._start_goal(event[1])
                         elif event[0] == "finished":
                             suc_type = event[4] if len(event) > 4 else "normal"
-                            self._handle_finished(event[1], event[2], event[3], suc_type)
+                            return_info = event[5] if len(event) > 5 else None
+                            self._handle_finished(
+                                event[1], event[2], event[3], suc_type, return_info
+                            )
                         elif event[0] == "device_status":
                             self._write_device_property(event[1], event[2], event[3])
             except Exception:  # noqa: BLE001 - worker 不允许死
@@ -1287,7 +1301,12 @@ class JobExecutionBackend:
                 self._release_terminal(queue_item, "failed", return_info, {})
 
     def _handle_finished(
-        self, job_id: str, success: bool, ret_value: Any, suc_type: str = "normal"
+        self,
+        job_id: str,
+        success: bool,
+        ret_value: Any,
+        suc_type: str = "normal",
+        return_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         finished_job = self.device_manager.get_job_info(job_id)
         try:
@@ -1305,11 +1324,7 @@ class JobExecutionBackend:
                 },
             )
 
-            for listener in self._listeners:
-                try:
-                    listener(job_id, success, ret_value, suc_type)
-                except Exception:  # noqa: BLE001 - 单个 listener 异常不阻断其他
-                    logger.exception("[JobExecutionBackend] job finished listener failed")
+            self._notify_finished(job_id, success, ret_value, suc_type, return_info)
         finally:
             self._safe_inventory_terminal(
                 job_id,

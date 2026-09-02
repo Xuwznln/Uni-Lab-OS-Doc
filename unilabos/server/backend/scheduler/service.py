@@ -79,10 +79,28 @@ class BackendScheduler:
         self._scheduled: set[str] = set()
         self._job_to_task: Dict[str, str] = {}
         self._job_specs: Dict[str, Dict[str, Any]] = {}
+        # DAG 节点键 = 建图时该节点最新 attempt 的 job uuid；retry 后节点键不变，
+        # 当前 attempt 换成新 job uuid：_node_attempts 节点键 -> 当前 attempt，
+        # _attempt_nodes 反查，_node_context 保存重派发所需的 (task, DagNode)。
+        self._node_attempts: Dict[str, str] = {}
+        self._attempt_nodes: Dict[str, str] = {}
+        self._node_context: Dict[str, tuple[Dict[str, Any], DagNode]] = {}
+        # 资源申请、等待/已派发集合、执行器 job_id 一律以当前 attempt 的 uuid 为键。
         self._waiting_resource_jobs: Dict[str, tuple[Dict[str, Any], DagNode]] = {}
         self._dispatched_jobs: set[str] = set()
         self._dispatch_paused = False
         self.executor.add_job_finished_listener(self._on_executor_finished)
+
+    def _current_job(self, node_key: str) -> str:
+        """节点键（或任一 attempt uuid）-> 当前 attempt 的 job uuid。"""
+
+        with self._guard:
+            node_key = self._attempt_nodes.get(node_key, node_key)
+            return self._node_attempts.get(node_key, node_key)
+
+    def _node_key_of(self, job_uuid: str) -> str:
+        with self._guard:
+            return self._attempt_nodes.get(job_uuid, job_uuid)
 
     @property
     def dispatch_paused(self) -> bool:
@@ -155,7 +173,7 @@ class BackendScheduler:
 
         completed = [
             str(job["uuid"])
-            for job in jobs
+            for job in self.workflow.latest_attempts(jobs)
             if job["status"] in {"succeeded", "skipped"}
         ]
         walk = DagWalk(dag, completed=completed)
@@ -174,6 +192,7 @@ class BackendScheduler:
             self._job_specs.update(specs)
             for job_id in specs:
                 self._job_to_task[job_id] = task_uuid
+                self._node_attempts[job_id] = job_id
         try:
             result = await runner.run()
             for job_id, state in result.items():
@@ -187,13 +206,14 @@ class BackendScheduler:
                     else "canceled"
                 )
             )
+            current_jobs = {
+                job_id: self.workflow.get_workflow_node_job(self._current_job(job_id))
+                for job_id in specs
+            }
             output = {
-                spec["workflow_node_uuid"]: self.workflow.get_workflow_node_job(
-                    job_id
-                ).get("return_info", {})
+                spec["workflow_node_uuid"]: current_jobs[job_id].get("return_info", {})
                 for job_id, spec in specs.items()
-                if self.workflow.get_workflow_node_job(job_id)["status"]
-                in {"succeeded", "skipped"}
+                if current_jobs[job_id]["status"] in {"succeeded", "skipped"}
             }
             self.workflow.finish_workflow_task(
                 task_uuid,
@@ -212,8 +232,14 @@ class BackendScheduler:
             with self._guard:
                 self._runners.pop(task_uuid, None)
                 for job_id in specs:
-                    self._job_to_task.pop(job_id, None)
                     self._job_specs.pop(job_id, None)
+                    self._node_context.pop(job_id, None)
+                    self._node_attempts.pop(job_id, None)
+                for job_id in [
+                    key for key, owner in self._job_to_task.items() if owner == task_uuid
+                ]:
+                    self._job_to_task.pop(job_id, None)
+                    self._attempt_nodes.pop(job_id, None)
                     self._waiting_resource_jobs.pop(job_id, None)
                     self._dispatched_jobs.discard(job_id)
 
@@ -264,7 +290,11 @@ class BackendScheduler:
         planned_nodes = {
             str(node["uuid"]): node for node in plan.get("nodes", [])
         }
-        jobs_by_node = {str(job["workflow_node_uuid"]): job for job in jobs}
+        # 恢复/建图只看每个节点最新的 attempt；早先 failed 的 attempt 是历史。
+        jobs_by_node = {
+            str(job["workflow_node_uuid"]): job
+            for job in self.workflow.latest_attempts(jobs)
+        }
         scheduler_revision = int(
             (task.get("meta_data") or {}).get("scheduler_revision") or 1
         )
@@ -314,6 +344,7 @@ class BackendScheduler:
                 ),
                 "reserved_material_uuids": [],
                 "scheduler_revision": scheduler_revision,
+                "attempt": int(job.get("attempt") or 1),
             }
 
         dag_edges = []
@@ -368,10 +399,13 @@ class BackendScheduler:
         material_uuids.update(spec.get("reserved_material_uuids") or ())
         spec["resolved_action_args"] = args
         spec["materials_need_lock"] = parameter_names
+        job_uuid = self._current_job(node.node_id)
+        # 资源申请以当前 attempt 为 owner：acquire 对同一 owner 幂等重放，重试
+        # 的新 attempt 必须是新的申请才能重新排队获取。
         record = self.resources.acquire(
             SchedulerResourceRequest(
-                request_uuid=f"resource:{node.node_id}",
-                owner_uuid=node.node_id,
+                request_uuid=f"resource:{job_uuid}",
+                owner_uuid=job_uuid,
                 task_uuid=str(task["uuid"]),
                 current_action=ActionLockClaim(
                     device_id=node.device_id,
@@ -385,31 +419,33 @@ class BackendScheduler:
             )
         )
         with self._guard:
-            self._waiting_resource_jobs[node.node_id] = (task, node)
+            self._node_context[node.node_id] = (task, node)
+            self._waiting_resource_jobs[job_uuid] = (task, node)
         if record.status == "held":
             self._dispatch_held_node(task, node)
 
     def _dispatch_held_node(self, task: Dict[str, Any], node: DagNode) -> None:
-        """下发一个已经持有完整动作/物料集合的节点。"""
+        """下发一个已经持有完整动作/物料集合的节点（当前 attempt）。"""
 
+        job_uuid = self._current_job(node.node_id)
         with self._guard:
             if self._dispatch_paused:
                 # 安静点重启闸门：节点保持在等待集合，resume 后由
                 # _reconcile_resources 原样派发，不产生失败。
                 return
-            if node.node_id in self._dispatched_jobs:
+            if job_uuid in self._dispatched_jobs:
                 return
-            record = self.resources.request_for_owner(node.node_id)
+            record = self.resources.request_for_owner(job_uuid)
             if record.status != "held":
                 return
-            self._waiting_resource_jobs.pop(node.node_id, None)
-            self._dispatched_jobs.add(node.node_id)
+            self._waiting_resource_jobs.pop(job_uuid, None)
+            self._dispatched_jobs.add(job_uuid)
             spec = self._job_specs[node.node_id]
             args = dict(spec["resolved_action_args"])
         try:
-            self.workflow.mark_workflow_node_job_running(node.node_id)
+            self.workflow.mark_workflow_node_job_running(job_uuid)
             payload = build_job_start_payload(
-                job_id=node.node_id,
+                job_id=job_uuid,
                 task_id=str(task["uuid"]),
                 workflow_id=str(task.get("workflow_uuid") or ""),
                 node_id=spec["workflow_node_uuid"],
@@ -425,13 +461,14 @@ class BackendScheduler:
                 scheduler_revision=spec["scheduler_revision"],
             )
             payload["always_free"] = node.always_free
+            payload["retry_count"] = int(spec.get("attempt") or 1) - 1
             self.executor.dispatch(payload)
         except Exception:
             with self._guard:
-                self._dispatched_jobs.discard(node.node_id)
+                self._dispatched_jobs.discard(job_uuid)
             try:
                 self.resources.cancel_owner(
-                    node.node_id,
+                    job_uuid,
                     reason="dispatch_failed",
                 )
             except ResourceNotFound:
@@ -460,11 +497,12 @@ class BackendScheduler:
                 self._notify_start_failure(job_uuid)
 
     def _notify_start_failure(self, job_uuid: str) -> None:
+        node_key = self._node_key_of(job_uuid)
         with self._guard:
-            task_uuid = self._job_to_task.get(job_uuid)
+            task_uuid = self._job_to_task.get(node_key)
             runner = self._runners.get(task_uuid or "")
         if runner is not None:
-            runner.notify_terminal(job_uuid, NodeState.FAILED)
+            runner.notify_terminal(node_key, NodeState.FAILED)
 
     def _material_lock_parameters(
         self,
@@ -483,18 +521,26 @@ class BackendScheduler:
         return list(resolver(device_id, action_name) or [])
 
     def _release_job_resources(self, job_uuid: str, *, canceled: bool) -> None:
+        """释放某个 attempt 持有的资源；传节点键时释放其当前 attempt。"""
+
+        with self._guard:
+            owner = (
+                job_uuid
+                if job_uuid in self._attempt_nodes
+                else self._node_attempts.get(job_uuid, job_uuid)
+            )
         try:
-            record = self.resources.request_for_owner(job_uuid)
+            record = self.resources.request_for_owner(owner)
         except ResourceNotFound:
             return
         if record.status not in {"released", "canceled"}:
             if canceled:
-                self.resources.cancel_owner(job_uuid, reason="job_canceled")
+                self.resources.cancel_owner(owner, reason="job_canceled")
             else:
-                self.resources.release(job_uuid, reason="job_terminal")
+                self.resources.release(owner, reason="job_terminal")
         with self._guard:
-            self._waiting_resource_jobs.pop(job_uuid, None)
-            self._dispatched_jobs.discard(job_uuid)
+            self._waiting_resource_jobs.pop(owner, None)
+            self._dispatched_jobs.discard(owner)
         self._reconcile_resources()
 
     def _cancel_task(self, task_uuid: str) -> None:
@@ -633,7 +679,10 @@ class BackendScheduler:
             )
             if not source_job_id:
                 raise ParamResolveError("source workflow job is missing")
-            source_job = self.workflow.get_workflow_node_job(source_job_id)
+            # 上游节点若经历过 retry，其输出在当前 attempt 上。
+            source_job = self.workflow.get_workflow_node_job(
+                self._current_job(source_job_id)
+            )
             value: Any = (source_job.get("return_info") or {}).get("return_value")
             exists, value = json_get_exists(value, source_key)
             if not exists:
@@ -656,30 +705,105 @@ class BackendScheduler:
         success: bool,
         ret_value: Any,
         suc_type: str = "normal",
+        return_info: Optional[Dict[str, Any]] = None,
     ) -> None:
+        node_key = self._node_key_of(job_id)
         with self._guard:
-            task_uuid = self._job_to_task.get(job_id)
+            task_uuid = self._job_to_task.get(node_key)
             runner = self._runners.get(task_uuid or "")
         if task_uuid is None or runner is None:
             return
         job_status = "skipped" if success and suc_type == "skip" else (
             "succeeded" if success else "failed"
         )
+        terminal_info: Dict[str, Any] = {
+            "suc": success,
+            "suc_type": suc_type,
+            "return_value": ret_value,
+        }
+        resolution = (
+            (return_info or {}).get("error_resolution")
+            if isinstance(return_info, dict)
+            else None
+        )
+        if isinstance(resolution, dict):
+            terminal_info["error_resolution"] = dict(resolution)
+        # 当前 attempt 的终态如实落表（retry 也先记 failed），再决定节点走向。
         self.workflow.record_workflow_node_job_terminal(
             job_id,
             status=job_status,
-            return_info={
-                "suc": success,
-                "suc_type": suc_type,
-                "return_value": ret_value,
-            },
+            return_info=terminal_info,
             error_info=[] if success else [{"code": "action_failed"}],
         )
         self._release_job_resources(job_id, canceled=False)
+        if (
+            not success
+            and isinstance(resolution, dict)
+            and str(resolution.get("selected_action") or "") == "retry"
+            and self._retry_node(node_key, job_id)
+        ):
+            # 节点在 DAG 中保持运行中，等待新 attempt 的结果；任务不中断。
+            return
         runner.notify_terminal(
-            job_id,
+            node_key,
             NodeState.SUCCESS if success else NodeState.FAILED,
         )
+
+    def _retry_node(self, node_key: str, failed_job_uuid: str) -> bool:
+        """retry 决策：为同一节点追加新 attempt 并重新申请资源、下发。
+
+        失败 attempt 已落表为 failed；新 attempt 是单节点重新执行，仍归属
+        原任务与原 DAG 节点。返回 False 表示无法重试（由调用方按 failed 收敛）。
+        """
+
+        with self._guard:
+            context = self._node_context.get(node_key)
+            spec = self._job_specs.get(node_key)
+            task_uuid = self._job_to_task.get(node_key)
+        if context is None or spec is None or task_uuid is None:
+            return False
+        if spec.get("inventory_requirements"):
+            # 库存 reservation 按 job uuid 绑定且失败即隔离；新 attempt 需要重新
+            # 预留，当前调度器尚未实现，按 failed 收敛而不是带着失效 reservation 重跑。
+            logger.warning(
+                "workflow node %s has inventory requirements; retry is not supported yet",
+                spec["workflow_node_uuid"],
+            )
+            return False
+        try:
+            new_job = self.workflow.retry_workflow_node_job(failed_job_uuid)
+        except Exception:  # noqa: BLE001 - 无法建新 attempt 时按 failed 收敛
+            logger.exception(
+                "workflow node %s could not create a retry attempt for job %s",
+                spec["workflow_node_uuid"],
+                failed_job_uuid,
+            )
+            return False
+        new_uuid = str(new_job["uuid"])
+        with self._guard:
+            self._node_attempts[node_key] = new_uuid
+            self._attempt_nodes[new_uuid] = node_key
+            self._job_to_task[new_uuid] = task_uuid
+            spec["attempt"] = int(new_job.get("attempt") or 1)
+        logger.info(
+            "workflow node %s retrying as attempt %s (job %s -> %s)",
+            spec["workflow_node_uuid"],
+            spec["attempt"],
+            failed_job_uuid,
+            new_uuid,
+        )
+        task, node = context
+        try:
+            self._start_node(task, node)
+        except Exception:  # noqa: BLE001 - 重派发失败按节点失败收敛
+            logger.exception(
+                "workflow node %s failed to start retry attempt %s",
+                spec["workflow_node_uuid"],
+                new_uuid,
+            )
+            self._persist_terminal_if_needed(node_key, NodeState.FAILED)
+            return False
+        return True
 
     def _on_node_terminal(self, job_id: str, state: NodeState) -> None:
         self._persist_terminal_if_needed(job_id, state)
@@ -689,7 +813,8 @@ class BackendScheduler:
         )
 
     def _persist_terminal_if_needed(self, job_id: str, state: NodeState) -> None:
-        job = self.workflow.get_workflow_node_job(job_id)
+        current_uuid = self._current_job(job_id)
+        job = self.workflow.get_workflow_node_job(current_uuid)
         if job["status"] in _JOB_TERMINAL:
             return
         status = {
@@ -700,7 +825,7 @@ class BackendScheduler:
         if status is None:
             return
         self.workflow.record_workflow_node_job_terminal(
-            job_id,
+            current_uuid,
             status=status,
             return_info={},
             error_info=([] if status == "succeeded" else [{"code": status}]),
