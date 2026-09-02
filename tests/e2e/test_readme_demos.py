@@ -253,7 +253,24 @@ def _run_workflow(
     assert statuses == list(expectation.expected_job_statuses()), (
         f"工作流 {expectation.name!r} job 终态 {statuses}，期望 {expectation.expected_job_statuses()}"
     )
+    _assert_retry_attempt_chain(expectation, jobs)
     return {"workflow": workflow, "task": final, "jobs": jobs, "decision": decision}
+
+
+def _assert_retry_attempt_chain(expectation: WorkflowExpectation, jobs: list[dict]) -> None:
+    """同一节点多行 = retry 历史：attempt 递增、旧 attempt 保留为 failed、新行指回上一 attempt。"""
+
+    by_node: dict[str, list[dict]] = {}
+    for job in jobs:
+        by_node.setdefault(str(job["workflow_node_uuid"]), []).append(job)
+    for node_uuid, attempts in by_node.items():
+        assert [int(job.get("attempt") or 1) for job in attempts] == list(range(1, len(attempts) + 1)), (
+            f"工作流 {expectation.name!r} 节点 {node_uuid} attempt 序号不连续: {attempts}"
+        )
+        for previous, current in zip(attempts, attempts[1:]):
+            assert previous["status"] == "failed", f"被重试的 attempt 必须保留为 failed: {previous}"
+            assert previous["return_info"]["error_resolution"]["selected_action"] == "retry", previous
+            assert (current.get("meta_data") or {}).get("retry_of") == previous["uuid"], current
 
 
 @pytest.mark.parametrize("spec", DEMOS, ids=[spec.repo for spec in DEMOS])

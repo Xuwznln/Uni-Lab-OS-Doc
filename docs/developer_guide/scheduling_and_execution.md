@@ -65,6 +65,17 @@ Authority，再创建执行层，因此不存在执行器先于库存权威工�
 
 `/workflows` 表示 Workflow 定义；执行需另行创建 Workflow Task。
 
+失败 attempt 进入错误决策链（`/api/v1/error-decisions`）后，本机调度器按决策收敛：
+
+- `abort`：attempt 记 failed，节点 FAILED，任务 fail-fast。
+- `operator_intervention`：以人工提供的 `result` 成功放行（`suc_type=operator_intervention`）。
+- `retry`：当前 attempt 如实记 failed（`return_info.error_resolution.selected_action=retry`）
+  并保留在 `workflow_node_job` 表里；调度器为同一 Task/节点追加 `attempt+1` 的新 job
+  （`meta_data.retry_of` 指回上一 attempt），重新申请资源并下发，DAG 节点保持运行中，
+  任务不中断。`GET /api/v1/workflow-tasks/{uuid}/jobs` 列出每个 attempt；任务恢复与
+  上游输出解析都以节点的最新 attempt 为准。带仓储 `inventory_requirements` 的节点
+  暂不支持 retry（reservation 绑定 job uuid 且失败即隔离），按 failed 收敛。
+
 ### 4.2 Backend-controlled（接入云端）
 
 显式配置云端地址后，Edge 不接收也不保存整张工作流图，本机 Workflow 写 API 不
@@ -77,8 +88,8 @@ Authority，再创建执行层，因此不存在执行器先于库存权威工�
 5. 创建或恢复 `runtime.execution_job`，推进到 `dispatch_pending`。
 6. 将规范化执行 payload 交给 `JobExecutionBackend`。
 
-Edge 不根据单个 Job 反推整图，也不在本地创建 retry。retry 是 Backend 新建的
-attempt 和新 `job_uuid`。
+Edge 不根据单个 Job 反推整图，也不在本地创建 retry。此模式下 retry 是 Backend 新建的
+attempt 和新 `job_uuid`（与 4.1 本机调度器的 retry 语义相同，只是调度权威在远端）。
 
 ## 5. 一轮统一调度如何进行
 

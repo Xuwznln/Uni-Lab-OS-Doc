@@ -38,12 +38,14 @@ class WorkflowExpectation:
     """一个 ``@workflow`` 模板经管理 API 运行后的期望终态。"""
 
     name: str
+    #: ``/workflow-tasks/{uuid}/jobs`` 的行数；retry 后同一节点的每个 attempt 各占一行。
     job_count: int
     task_status: str = "succeeded"
     #: 缺省表示全部 job 都应 succeeded。
     job_statuses: Optional[tuple[str, ...]] = None
     #: 期望失败 attempt 先进入错误决策链；给出网页式决策 payload
-    #: （``{"action": "abort"}`` 或携带 ``result`` 的 ``operator_intervention``）。
+    #: （``{"action": "abort"}``、``{"action": "retry"}`` 或携带 ``result`` 的
+    #: ``operator_intervention``）。
     error_decision: Optional[dict[str, Any]] = None
 
     def expected_job_statuses(self) -> tuple[str, ...]:
@@ -100,7 +102,7 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceExceptionDemo",
         url="https://github.com/Xuwznln/LabDeviceExceptionDemo",
-        ref="63cbdad4248004440c215beb00088b70920d5e61",
+        ref="df9a8feb5498f4820a4ace3a7f2f48df21fcaa1e",
         package="exception_demo",
         host_graph="graph/exception_demo.json",
         # 该 demo 设备内不自跑闭环：全部路径都是网页式工作流提交 + 决策链。
@@ -120,6 +122,13 @@ DEMOS: tuple[DemoSpec, ...] = (
                     "reason": "readme demo e2e 人工替换结果",
                     "result": {"success": True, "step_name": "flaky", "replaced_by": "operator"},
                 },
+            ),
+            # retry：attempt 1 如实记 failed 并保留，同节点 attempt 2 重跑成功，任务不中断
+            WorkflowExpectation(
+                name="重试恢复演示",
+                job_count=3,
+                job_statuses=("failed", "succeeded", "succeeded"),
+                error_decision={"action": "retry", "reason": "readme demo e2e 重试瞬时故障"},
             ),
         ),
     ),
