@@ -172,6 +172,9 @@ def setup_local_scheduler(
         ),
     )
     service.set_task_submitter(scheduler.submit)
+    # 本机调度器是其派发 job 的生命周期 owner：失败 attempt 挂起等待决策时由它
+    # 把 attempt/节点运行置为 intervention_required（执行面按 origin 路由）。
+    execution_backend.result_bridges.append(scheduler)
     scheduler.start(recover=True)
     _workflow_service = service
     _scheduler = scheduler
@@ -302,6 +305,8 @@ def shutdown_backend_services() -> None:
         shutdown_network_services()
     if _scheduler is not None:
         _scheduler.stop()
+        if _backend is not None and _scheduler in _backend.result_bridges:
+            _backend.result_bridges.remove(_scheduler)
     if _workflow_service is not None:
         _workflow_service.set_task_submitter(None)
         _workflow_service.close()

@@ -1427,6 +1427,57 @@ class WorkflowStore:
             self._sync_run_projection(conn, row["workflow_node_run_uuid"], now)
         return self.get_job(job_uuid)
 
+    def mark_job_decision_pending(
+        self, job_uuid: str, report: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """失败 attempt 被执行面挂起等待决策：attempt 与节点运行进入 ``intervention_required``。
+
+        决策报告摘要写入 ``control_data.pending_decision``，画布据此展示"待决策"并
+        跳转到决策链；放行后由 ``record_job_terminal`` 收敛。
+        """
+
+        now = utc_now()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM workflow_node_job WHERE uuid=? AND deleted_at IS NULL",
+                (job_uuid,),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound(f"workflow node job {job_uuid} not found")
+            if row["status"] in self._RUN_TERMINAL:
+                return self._job_row(row)
+            control_data = _load(row["control_data"], {})
+            control_data["pending_decision"] = {
+                "decision_id": report.get("decision_id"),
+                "exception_type": report.get("exception_type"),
+                "error_message": report.get("error_message"),
+                "options": [
+                    str(option.get("action"))
+                    for option in report.get("options") or []
+                    if isinstance(option, dict)
+                ],
+                "retry_count": report.get("retry_count"),
+                "max_retries": report.get("max_retries"),
+                "expires_at": report.get("expires_at"),
+            }
+            conn.execute(
+                """
+                UPDATE workflow_node_job
+                SET status='intervention_required', control_data=?, update_time=?
+                WHERE uuid=?
+                """,
+                (_json(control_data), now, job_uuid),
+            )
+            self._emit_job_changed(
+                conn,
+                row,
+                "intervention_required",
+                now,
+                decision_id=report.get("decision_id"),
+            )
+            self._sync_run_projection(conn, row["workflow_node_run_uuid"], now)
+        return self.get_job(job_uuid)
+
     def record_job_terminal(
         self,
         job_uuid: str,

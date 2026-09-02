@@ -139,6 +139,51 @@ def test_retry_decision_appends_attempt_in_one_transaction(service: WorkflowServ
     assert again["next_job"] is None and again["run"]["attempt_count"] == 2
 
 
+def test_pending_decision_puts_attempt_and_run_into_intervention_required(
+    service: WorkflowService,
+) -> None:
+    _task, run = _single_node_task(service)
+    job_uuid = run["current_job_uuid"]
+    service.mark_workflow_node_job_running(job_uuid)
+
+    pending = service.mark_workflow_node_job_decision_pending(
+        job_uuid,
+        {
+            "decision_id": "d-1",
+            "exception_type": "RuntimeError",
+            "error_message": "boom",
+            "options": [{"action": "retry"}, {"action": "abort"}],
+            "retry_count": 0,
+            "max_retries": 3,
+            "expires_at": 123.0,
+        },
+    )
+    assert pending["status"] == "intervention_required"
+    assert pending["control_data"]["pending_decision"] == {
+        "decision_id": "d-1",
+        "exception_type": "RuntimeError",
+        "error_message": "boom",
+        "options": ["retry", "abort"],
+        "retry_count": 0,
+        "max_retries": 3,
+        "expires_at": 123.0,
+    }
+    projected = service.get_workflow_node_run(run["uuid"])
+    assert projected["status"] == "intervention_required"
+
+    # 决策放行后正常收敛（这里选 retry）：attempt failed，新 attempt pending
+    outcome = service.record_workflow_node_job_terminal(
+        job_uuid,
+        status="failed",
+        error_info=[{"code": "action_failed"}],
+        error_resolution={"decision_id": "d-1", "selected_action": "retry"},
+    )
+    assert outcome["job"]["status"] == "failed"
+    assert outcome["job"]["control_data"]["pending_decision"]["decision_id"] == "d-1"
+    assert outcome["run"]["status"] == "pending"
+    assert outcome["next_job"]["attempt_no"] == 2
+
+
 def test_abort_decision_projects_failed_without_new_attempt(service: WorkflowService) -> None:
     _task, run = _single_node_task(service)
     job_uuid = run["current_job_uuid"]

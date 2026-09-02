@@ -25,6 +25,7 @@ from unilabos.protocol.materials import (
     InventoryReservationTransition,
     InventoryTaskReservationCreate,
 )
+from unilabos.server.backend.execution_queue import JOB_ORIGIN_LOCAL_SCHEDULER
 from unilabos.server.backend.scheduler.payloads import build_job_start_payload
 from unilabos.server.backend.scheduler.materials import (
     material_uuids_for_parameters,
@@ -58,7 +59,14 @@ class BackendSchedulingError(RuntimeError):
 
 
 class BackendScheduler:
-    """持久化 WorkflowTask 的唯一 DAG、资源和库存调度权威。"""
+    """持久化 WorkflowTask 的唯一 DAG、资源和库存调度权威。
+
+    同时是本机派发 job 的生命周期 owner（``job_origins``）：执行面把失败 attempt 挂起
+    等待决策时通知本调度器，attempt 与节点运行随之进入 ``intervention_required``；
+    终态经 finished 监听回到 :meth:`_on_executor_finished`。
+    """
+
+    job_origins = frozenset({JOB_ORIGIN_LOCAL_SCHEDULER})
 
     def __init__(
         self,
@@ -778,6 +786,17 @@ class BackendScheduler:
                 if run["status"] in {"succeeded", "skipped"}
                 else NodeState.FAILED,
             )
+
+    def publish_job_error_decision_required(self, report: Dict[str, Any]) -> bool:
+        """执行面决策桥：本机派发的 attempt 失败并挂起等待决策。"""
+
+        job_uuid = str(report.get("job_id") or "")
+        with self._guard:
+            owned = job_uuid in self._job_runs
+        if not owned:
+            return False
+        self.workflow.mark_workflow_node_job_decision_pending(job_uuid, report)
+        return True
 
     def _on_node_terminal(self, run_uuid: str, state: NodeState) -> None:
         self._persist_terminal_if_needed(run_uuid, state)

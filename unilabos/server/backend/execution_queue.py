@@ -36,6 +36,12 @@ class JobStatus(str, Enum):
     ENDED = "ended"
 
 
+#: Job 生命周期 owner（origin）。执行面只按 origin 把生命周期回调路由给声明了
+#: ``job_origins`` 的 bridge；未声明的 bridge 是观察者，收到全部 job。
+JOB_ORIGIN_LOCAL_SCHEDULER = "local_scheduler"
+JOB_ORIGIN_BACKEND_CONTROL = "backend_control"
+
+
 @dataclass
 class QueueItem:
     """HostLink/ROS2 Adapter 使用的执行引用；名称保留线侧兼容语义。"""
@@ -49,6 +55,7 @@ class QueueItem:
     device_action_key: str
     node_id: str = ""
     node_run_uuid: str = ""
+    origin: str = ""
     next_run_time: float = 0
     retry_count: int = 0
     trace_context: dict[str, Any] = field(default_factory=dict)
@@ -70,6 +77,7 @@ class JobInfo:
     always_free: bool = False
     node_id: str = ""
     node_run_uuid: str = ""
+    origin: str = ""
     retry_count: int = 0
     action_type: str = ""
     action_args: dict[str, Any] = field(default_factory=dict)
@@ -165,6 +173,8 @@ class DeviceActionManager:
 
 __all__ = [
     "DeviceActionManager",
+    "JOB_ORIGIN_BACKEND_CONTROL",
+    "JOB_ORIGIN_LOCAL_SCHEDULER",
     "JobInfo",
     "JobStatus",
     "QueueItem",

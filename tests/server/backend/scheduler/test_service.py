@@ -56,6 +56,12 @@ class _Workflow:
     def get_workflow_node_run(self, run_uuid: str) -> dict[str, Any]:
         return dict(self.runs[run_uuid])
 
+    def mark_workflow_node_job_decision_pending(self, job_uuid: str, report: dict[str, Any]) -> dict[str, Any]:
+        run = self.runs[self.jobs[job_uuid]]
+        run["status"] = "intervention_required"
+        run["pending_decision"] = report.get("decision_id")
+        return dict(run)
+
 
 class _Executor:
     def __init__(self) -> None:
@@ -230,3 +236,26 @@ def test_foreign_job_finish_is_ignored() -> None:
     scheduler._on_executor_finished("execution-job-from-backend", True, None, "normal", {})  # noqa: SLF001
 
     assert workflow.terminal == []
+
+
+def test_scheduler_owns_local_jobs_and_marks_pending_decisions() -> None:
+    """调度器是本机 job 的生命周期 owner：派发载荷带 origin，挂起决策时节点运行进入 intervention_required。"""
+
+    workflow = _Workflow()
+    executor = _Executor()
+    scheduler = BackendScheduler(workflow, executor)  # type: ignore[arg-type]
+    task = {"uuid": "task-1", "workflow_uuid": "workflow-1"}
+    node = DagNode(node_id="run-1", device_id="device-a", action="use")
+    _attach(scheduler, workflow, task, node)
+    scheduler._start_node(task, node)  # noqa: SLF001
+
+    assert "local_scheduler" in scheduler.job_origins
+    assert executor.dispatched[0]["origin"] == "local_scheduler"
+
+    assert scheduler.publish_job_error_decision_required(
+        {"job_id": "run-1-a1", "decision_id": "d-1", "options": [{"action": "retry"}]}
+    ) is True
+    assert workflow.runs["run-1"]["status"] == "intervention_required"
+    assert workflow.runs["run-1"]["pending_decision"] == "d-1"
+    # 不是本调度器派发的 job：不认领
+    assert scheduler.publish_job_error_decision_required({"job_id": "someone-else"}) is False

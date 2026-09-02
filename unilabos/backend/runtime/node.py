@@ -574,13 +574,14 @@ class DeviceNode(ABC):
 
         parent_uuid = tree.root_node.res_content.parent_uuid
         if not parent_uuid:
-            self.lab_logger().warning(
-                f"物料{plr_resource} parent未知，挂载到当前节点下，额外参数：{additional_add_params}"
+            # 根级物料：图里没有父节点，直接归属当前设备节点，不需要 PLR assign
+            self.lab_logger().info(
+                f"物料{plr_resource}无父物料，作为{self.identifier}的根级物料，额外参数：{additional_add_params}"
             )
             return None
         if parent_uuid == self.resource_uuid:
-            self.lab_logger().warning(
-                f"物料{plr_resource}请求挂载到{self.identifier}，额外参数：{additional_add_params}"
+            self.lab_logger().info(
+                f"物料{plr_resource}挂载到{self.identifier}，额外参数：{additional_add_params}"
             )
             return None
         parent_resource = self.resource_tracker.uuid_to_resources.get(parent_uuid)
@@ -608,10 +609,10 @@ class DeviceNode(ABC):
             old_parent = plr_resource.parent
             if old_parent is not None:
                 # PLR 资源在重新挂载前必须先从当前父资源解除。
-                self.lab_logger().warning(f"物料{plr_resource}请求从{old_parent}卸载")
+                self.lab_logger().info(f"物料{plr_resource}从{old_parent}卸载")
                 old_parent.unassign_child_resource(plr_resource)
-            self.lab_logger().warning(
-                f"物料{plr_resource}请求挂载到{parent_resource}，额外参数：{additional_params}"
+            self.lab_logger().info(
+                f"物料{plr_resource}挂载到{parent_resource}，额外参数：{additional_params}"
             )
 
             # 挂载后资源属于 parent_resource；先从顶级列表移除可避免

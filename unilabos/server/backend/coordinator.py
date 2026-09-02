@@ -9,6 +9,7 @@ import uuid
 from dataclasses import asdict, is_dataclass
 from typing import Any, Callable, Optional
 
+from unilabos.server.backend.execution_queue import JOB_ORIGIN_BACKEND_CONTROL
 from unilabos.server.backend.legacy_adaptor.http import BackendHTTPClient
 from unilabos.server.database.tables.runtime import ExecutionJobRecord
 from unilabos.protocol.base import canonical_hash, canonical_json
@@ -51,6 +52,10 @@ logger = logging.getLogger(__name__)
 
 class WorkflowBusinessCoordinator:
     """只执行 Backend 已调度的 attempt，不在 Edge 构建 DAG 或 retry。"""
+
+    #: 只拥有自己经 runtime.v1 ``execute_job`` 建档并派发的 job 的生命周期；
+    #: 本机调度 / 旧协议派发的 job 不会路由到这里。
+    job_origins = frozenset({JOB_ORIGIN_BACKEND_CONTROL})
 
     def __init__(
         self,
@@ -327,7 +332,10 @@ class WorkflowBusinessCoordinator:
                 "scheduler_revision": content.scheduler_revision,
                 "server_info": content.server_info,
                 "notebook_id": content.notebook_uuid,
+                "node_run_uuid": content.attempt_group_uuid,
+                "attempt_no": content.attempt_no,
                 "retry_count": content.attempt_no - 1,
+                "origin": JOB_ORIGIN_BACKEND_CONTROL,
                 "always_free": self._action_always_free(
                     content.device_uuid, content.action_name
                 ),
@@ -424,13 +432,21 @@ class WorkflowBusinessCoordinator:
 
     # -- Executor result bridge ----------------------------------------
 
-    def publish_job_started(self, item: Any) -> None:
+    def _owned_job(self, item: Any, callback: str) -> Optional[ExecutionJobRecord]:
+        """执行面只把本协调器派发（origin=backend_control）的 job 路由到这里；
+        查不到建档记录说明 execute_job 建档与派发之间出现了不一致。"""
+
         try:
-            job = self.runtime.get_execution_job(str(item.job_id))
+            return self.runtime.get_execution_job(str(item.job_id))
         except RuntimeNotFoundError:
-            # 本机调度 / 旧协议 Backend 派发的 job 不经 runtime.v1 execute_job 建档，
-            # 协调器不持有其生命周期，属正常路径。
-            logger.debug("ignored start callback for unknown job %s", item.job_id)
+            logger.warning(
+                "%s callback for job %s has no execution_job record", callback, item.job_id
+            )
+            return None
+
+    def publish_job_started(self, item: Any) -> None:
+        job = self._owned_job(item, "start")
+        if job is None:
             return
         if job.status == "dispatch_pending":
             job = self.runtime.transition_execution_job(
@@ -449,10 +465,8 @@ class WorkflowBusinessCoordinator:
         status: str,
         return_info: Optional[dict[str, Any]] = None,
     ) -> None:
-        try:
-            job = self.runtime.get_execution_job(str(item.job_id))
-        except RuntimeNotFoundError:
-            logger.debug("ignored status callback for unknown job %s", item.job_id)
+        job = self._owned_job(item, "status")
+        if job is None:
             return
         if status == "running":
             if job.status == "dispatch_pending":
@@ -540,10 +554,8 @@ class WorkflowBusinessCoordinator:
     ) -> bool:
         """先持久化完整失败快照，再打开 Backend 控制的终态闸门。"""
 
-        try:
-            job = self.runtime.get_execution_job(str(item.job_id))
-        except RuntimeNotFoundError:
-            logger.debug("ignored error callback for unknown job %s", item.job_id)
+        job = self._owned_job(item, "error")
+        if job is None:
             return False
         item_data = asdict(item) if is_dataclass(item) else dict(vars(item))
         item_data.pop("trace_context", None)

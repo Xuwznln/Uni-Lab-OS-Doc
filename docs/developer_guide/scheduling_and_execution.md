@@ -81,6 +81,12 @@ attempt_count` 是当前 attempt 的投影，只由 store 在同一事务里随 
   `job_id` 一致；报告同时携带 `node_run_uuid`。
 - 事件：`workflow.node_run.changed`（节点级）与 `workflow.node_job.changed`（attempt 级）。
 
+执行面按 job 的生命周期 owner（派发载荷里的 `origin`）路由 started / status / 决策挂起
+回调：本机调度器拥有 `local_scheduler`，`WorkflowBusinessCoordinator` 拥有 `backend_control`，
+未声明 `job_origins` 的 bridge（如旧协议镜像客户端）是观察者。失败 attempt 被挂起等待决策时，
+本机调度器把 attempt 与节点运行置为 `intervention_required`，并在 attempt 的
+`control_data.pending_decision` 记录决策摘要（decision_id / 选项 / retry_count / 截止时间）。
+
 失败 attempt 进入错误决策链（`/api/v1/error-decisions`）后，本机调度器按决策收敛：
 
 - `abort`：attempt 记 failed，节点运行投影为 failed，任务 fail-fast。

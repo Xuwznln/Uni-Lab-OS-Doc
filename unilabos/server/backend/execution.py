@@ -151,6 +151,7 @@ class JobExecutionBackend:
             server_info=payload.get("server_info"),
             node_id=payload.get("node_id", ""),
             node_run_uuid=str(payload.get("node_run_uuid", "") or ""),
+            origin=str(payload.get("origin", "") or ""),
             retry_count=int(payload.get("retry_count", 0) or 0),
         )
         if self.device_manager.get_job_info(job_info.job_id) is not None:
@@ -495,8 +496,20 @@ class JobExecutionBackend:
             device_action_key=job.device_action_key,
             node_id=job.node_id,
             node_run_uuid=job.node_run_uuid,
+            origin=job.origin,
             retry_count=job.retry_count,
         )
+
+    def _bridges_for(self, item: Any) -> List[Any]:
+        """按 job 的生命周期 owner（origin）路由：声明了 ``job_origins`` 的 bridge 只收
+        自己派发的 job，未声明的 bridge 是观察者，收到全部 job。"""
+
+        origin = str(getattr(item, "origin", "") or "")
+        return [
+            bridge
+            for bridge in self.result_bridges
+            if (owned := getattr(bridge, "job_origins", None)) is None or origin in owned
+        ]
 
     def busy_device_action_keys(self) -> Set[str]:
         """当前被占用的 device_action_key（供调度器做锁视图合并）。"""
@@ -562,7 +575,7 @@ class JobExecutionBackend:
     def publish_job_started(self, item: QueueItem) -> None:
         """Forward an adapter acknowledgement without transferring ownership."""
 
-        for bridge in self.result_bridges:
+        for bridge in self._bridges_for(item):
             callback = getattr(bridge, "publish_job_started", None)
             if callable(callback):
                 try:
@@ -623,7 +636,7 @@ class JobExecutionBackend:
         status: str,
         return_info: Optional[Dict[str, Any]] = None,
     ) -> None:
-        for bridge in self.result_bridges:
+        for bridge in self._bridges_for(item):
             callback = getattr(bridge, "publish_job_status", None)
             if callable(callback):
                 try:
@@ -719,7 +732,7 @@ class JobExecutionBackend:
                 return False
         decision_bridges = [
             bridge
-            for bridge in self.result_bridges
+            for bridge in self._bridges_for(item)
             if (
                 callable(getattr(bridge, "publish_job_error_pending", None))
                 or callable(

@@ -270,7 +270,8 @@ def main():
                 print_status("设备包依赖检查失败，程序退出", "error")
                 os._exit(1)
     else:
-        print_status("跳过环境依赖检查", "warning")
+        # 显式请求（--skip_env_check / check_mode / backend 角色）的跳过是既定行为，不是告警
+        print_status("按启动参数跳过环境依赖检查", "info")
 
     # 加载配置文件，优先加载config，然后从env读取
     config_path = args_dict.get("config")

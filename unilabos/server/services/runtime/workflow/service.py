@@ -602,6 +602,11 @@ class WorkflowService(WorkflowStore):
     def mark_workflow_node_job_running(self, job_uuid: str) -> Dict[str, Any]:
         return self.mark_job_running(job_uuid)
 
+    def mark_workflow_node_job_decision_pending(
+        self, job_uuid: str, report: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return self.mark_job_decision_pending(job_uuid, report)
+
     def record_workflow_node_job_terminal(
         self,
         job_uuid: str,
