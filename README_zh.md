@@ -94,7 +94,7 @@ cd Uni-Lab-OS
 
 ## 参考驱动实现
 
-我们提供了两个可直接运行的示例设备包，均作为独立 GitHub 仓库维护（由
+我们提供了四个可直接运行的示例设备包，均作为独立 GitHub 仓库维护（由
 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆任一仓库，用
 `--devices <包目录> --external_devices_only` 加载，编写自己的驱动时可启动运行、对照学习：
 
@@ -102,8 +102,12 @@ cd Uni-Lab-OS
 |----------|----------|
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo) | 跨设备 `@subscribe` 订阅 + `call_device_action` 远程调用的局域网闭环（hub/sub 双进程） |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo) | `hardware_interface` 代理——同一工作站内多个子设备共享同一通信端点：共享串口（默认 IO 方法名）与 Modbus `extra_info`（按设备注入各自 `slave_id`） |
+| [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo) | 两条异常传播路径——点对点 `call_device_action` 的异常直接回到调用方 `try/except`；工作流任务失败则进入 Backend 错误决策链（`/api/v1/error-decisions`：重试 / 终止 / 人工介入）；另有业务级守卫返回与故障后可用性验证 |
+| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo) | host/slave 双进程——`@device(available_sites=...)` 固定位点（声明 → 注册表模板 → 权威位点实例 → 占用流转）、`@resource` 物料配合 `materials.*` 门面跨 HostLink 做物料 CRUD、`SiteSlot` 动作参数（前端 Site 选择器 uuid 或 label 便捷形态） |
 
-每个仓库的 README 都附带分步启动教程及实测输出。底层的通信共享机制见
+每个仓库的 README 都附带分步启动教程及实测输出，并自带可终止的双运行时 smoke
+（`python -m <包名>.smoke --backend hostlink|ros2`），由各仓库 CI 固定在指定 Uni-Lab-OS 提交上运行；
+主仓库 CI 也会在固定提交上校验这四个包的注册表。底层的通信共享机制见
 [最佳实践指南 §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)；
 从零编写新驱动见[添加设备](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html)。
 

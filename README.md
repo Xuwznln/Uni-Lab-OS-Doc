@@ -96,21 +96,25 @@ See [Best Practice Guide](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/b
 
 ## Reference Driver Implementations
 
-Two runnable example device packages are maintained as standalone GitHub repositories (generated
-from [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate)). Clone either one, load it
+Four runnable example device packages are maintained as standalone GitHub repositories (generated
+from [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate)). Clone any of them, load it
 with `--devices <pkg> --external_devices_only`, and read it when writing your own drivers:
 
 | Example repository | Demonstrates |
 |--------------------|--------------|
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo) | Cross-device `@subscribe` + remote `call_device_action` LAN closed loop (hub/sub as two processes) |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo) | `hardware_interface` proxy — multiple sub-devices share one communication endpoint: shared serial (default IO method names) and Modbus `extra_info` (per-device `slave_id` injection) |
+| [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo) | The two exception paths — a point-to-point `call_device_action` error propagates back to the caller's `try/except`, while a failed workflow job is held in the Backend error-decision chain (`/api/v1/error-decisions`: retry / abort / operator intervention); plus business-level guarded returns and post-fault availability |
+| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo) | Host/slave dual process — `@device(available_sites=...)` fixed sites (declaration → registry template → authoritative site instances → occupancy), `@resource` labware with the `materials.*` CRUD facade across HostLink, and `SiteSlot` action parameters (frontend Site picker uuid or label shorthand) |
 
-Each repository README ships a step-by-step launch tutorial with verified output. For the underlying
-communication-sharing mechanism see [Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
+Each repository README ships a step-by-step launch tutorial with verified output, and every package
+carries a terminating dual-runtime smoke (`python -m <pkg>.smoke --backend hostlink|ros2`) that its
+own CI runs against a pinned Uni-Lab-OS revision. For the underlying communication-sharing mechanism
+see [Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
 to write a new driver from scratch see [Add Device](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html).
-The main repository CI validates pinned revisions of both packages. It also runs the LAN demo shape
-as separate HostLink Host/Slave processes over loopback and an available non-loopback LAN IPv4,
-covering cross-device `@subscribe` followed by a remote device action.
+The main repository CI validates the registries of all four packages at pinned revisions. It also runs
+the LAN demo shape as separate HostLink Host/Slave processes over loopback and an available
+non-loopback LAN IPv4, covering cross-device `@subscribe` followed by a remote device action.
 
 ## Message Format
 

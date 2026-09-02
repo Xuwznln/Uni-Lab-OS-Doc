@@ -1616,12 +1616,14 @@ solenoid_valve:
 
 ### 11.6 参考驱动实现（可运行示例仓库）
 
-为了让上述机制有可直接运行、可对照学习的范本，我们提供了两个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，建议在编写自己的驱动前先跑一遍。
+为了让上述机制有可直接运行、可对照学习的范本，我们提供了四个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，并自带可终止的双运行时 smoke（`python -m <包名>.smoke --backend hostlink|ros2`），建议在编写自己的驱动前先跑一遍。
 
 | 示例仓库                                                                          | 演示要点                                           | 关键技术                                                                                                |
 | --------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo)                   | 局域网跨设备闭环：中枢 hub 与子设备 sub 分进程运行 | 跨设备 `@subscribe` 订阅、`call_device_action` 远程 ros action 调用、自动 `msg_type` 解析、轮次复位检测  |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo)   | 工作站内 `hardware_interface` 代理：多子设备共享同一通信端点 | 共享串口（默认 IO 方法名 `send_command`/`read_data`）、Modbus `extra_info` 按设备注入 `slave_id`（即本章 §11.5） |
+| [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo)       | 两条异常传播路径各在哪里被捕获                     | 点对点 `call_device_action` 异常回到调用方 `try/except`；工作流任务失败进入 Backend 错误决策链（`/api/v1/error-decisions` 重试 / 终止 / 人工介入）；业务级守卫返回；故障后 `stats` 仍可服务 |
+| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo)                 | host/slave 双进程：固定位点与物料 CRUD 两条权威链   | `@device(available_sites=...)` 声明 → 注册表模板 → 权威位点实例 → 占用流转；`@resource` 物料 + `materials.*` 门面跨 HostLink 创建/赋值/转移/删除；`SiteSlot` 参数（uuid 或 label） |
 
 **快速启动（通用形式，单进程）：**
 
@@ -1636,9 +1638,9 @@ python -m unilabos.app.main \
   -g <仓库内提供的图文件>
 ```
 
-`--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
+`--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 与 `LabDeviceSiteDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
 
-> 这两个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可。
+> 这四个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可。主仓库 CI 会在固定提交上校验这四个包的注册表，各仓库 CI 则固定在指定 Uni-Lab-OS 提交上跑双运行时 smoke。
 
 ---
 
