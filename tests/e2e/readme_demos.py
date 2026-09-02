@@ -42,8 +42,9 @@ class WorkflowExpectation:
     task_status: str = "succeeded"
     #: 缺省表示全部 job 都应 succeeded。
     job_statuses: Optional[tuple[str, ...]] = None
-    #: 期望失败 attempt 先进入错误决策链；给出放行动作（如 ``abort``）。
-    resolve_error_decision: Optional[str] = None
+    #: 期望失败 attempt 先进入错误决策链；给出网页式决策 payload
+    #: （``{"action": "abort"}`` 或携带 ``result`` 的 ``operator_intervention``）。
+    error_decision: Optional[dict[str, Any]] = None
 
     def expected_job_statuses(self) -> tuple[str, ...]:
         return self.job_statuses or tuple("succeeded" for _ in range(self.job_count))
@@ -99,18 +100,26 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceExceptionDemo",
         url="https://github.com/Xuwznln/LabDeviceExceptionDemo",
-        ref="8b68d5d1ec8eac87fc30750ccc6119f2a3afc752",
+        ref="63cbdad4248004440c215beb00088b70920d5e61",
         package="exception_demo",
         host_graph="graph/exception_demo.json",
-        proof_env={"EXCEPTION_DEMO_PROOF_FILE": "proof.json"},
-        extra_env={"EXCEPTION_DEMO_START_DELAY": "0.2"},
+        # 该 demo 设备内不自跑闭环：全部路径都是网页式工作流提交 + 决策链。
         workflows=(
             WorkflowExpectation(
                 name="异常传播演示",
-                job_count=3,
+                job_count=4,
                 task_status="failed",
-                job_statuses=("succeeded", "succeeded", "failed"),
-                resolve_error_decision="abort",
+                job_statuses=("succeeded", "succeeded", "succeeded", "failed"),
+                error_decision={"action": "abort", "reason": "readme demo e2e 放行失败结果"},
+            ),
+            WorkflowExpectation(
+                name="人工替换恢复演示",
+                job_count=2,
+                error_decision={
+                    "action": "operator_intervention",
+                    "reason": "readme demo e2e 人工替换结果",
+                    "result": {"success": True, "step_name": "flaky", "replaced_by": "operator"},
+                },
             ),
         ),
     ),

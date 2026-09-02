@@ -1622,7 +1622,7 @@ solenoid_valve:
 | --------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo)                   | 局域网跨设备闭环：中枢 hub 与子设备 sub 分进程运行 | 跨设备 `@subscribe` 订阅、`call_device_action` 远程 ros action 调用、自动 `msg_type` 解析、轮次复位检测  |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo)   | 工作站内 `hardware_interface` 代理：多子设备共享同一通信端点 | 共享串口（默认 IO 方法名 `send_command`/`read_data`）、Modbus `extra_info` 按设备注入 `slave_id`（即本章 §11.5） |
-| [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo)       | 两条异常传播路径各在哪里被捕获                     | 点对点 `call_device_action` 异常回到调用方 `try/except`；工作流任务失败进入 Backend 错误决策链（`/api/v1/error-decisions` 重试 / 终止 / 人工介入）；业务级守卫返回；故障后 `stats` 仍可服务 |
+| [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo)       | 网页式工作流提交路径上的异常传播与决策             | 异常穿出动作边界 → 错误决策链 `abort`；点对点 `call_device_action` 异常在调用侧捕获（作为工作流节点）；业务级守卫返回；`operator_intervention` 人工替换结果让任务 `succeeded`；故障后 `stats` 仍可服务 |
 | [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo)                 | host/slave 双进程：固定位点与物料 CRUD 两条权威链   | `@device(available_sites=...)` 声明 → 注册表模板 → 权威位点实例 → 占用流转；`@resource` 物料 + `materials.*` 门面跨 HostLink 创建/赋值/转移/删除；`SiteSlot` 参数（uuid 或 label） |
 
 **快速启动（通用形式，单进程）：**

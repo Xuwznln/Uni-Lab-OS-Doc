@@ -219,7 +219,7 @@ def _run_workflow(
     task_uuid = task["uuid"]
 
     decision = None
-    if expectation.resolve_error_decision:
+    if expectation.error_decision:
 
         def pending_decision():
             items = api_request(port, "/error-decisions")["items"]
@@ -229,18 +229,14 @@ def _run_workflow(
         report = wait_until(
             pending_decision, timeout=timeout, abort=abort, description="失败 attempt 进入错误决策链"
         )
+        # 网页式决策：payload 由 demo 清单给出，job/device 三元组回带给服务端校验。
         resolved = api_request(
             port,
             f"/error-decisions/{report['decision_id']}",
-            {
-                "action": expectation.resolve_error_decision,
-                "reason": "readme demo e2e 放行失败结果",
-                "job_id": report["job_id"],
-                "device_id": report["device_id"],
-            },
+            {**expectation.error_decision, "job_id": report["job_id"], "device_id": report["device_id"]},
         )
         assert resolved["status"] == "resolved", resolved
-        decision = {**report, "resolved_action": expectation.resolve_error_decision}
+        decision = {**report, "resolved_action": expectation.error_decision["action"]}
 
     def terminal_task():
         current = api_request(port, f"/workflow-tasks/{task_uuid}")
