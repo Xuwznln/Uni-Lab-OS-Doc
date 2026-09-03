@@ -631,7 +631,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         流程：
 
         1. 先用 ``convert_from_ros_msg`` 把 ROS 结果消息**转成 dict**（与 callback 解析消息同一套）。
-        2. 若结果带 ``return_info``（serial 指令 / UniLab @action）：解析其中 JSON 的
+        2. 若结果带 ``return_info``（serial 指令 / Uni-Lab-OS @action）：解析其中 JSON 的
            ``suc / error / return_value``——失败抛 :class:`DeviceActionError`、成功返回 ``return_value``。
         3. 若无 ``return_info``（纯原生 ROS action）：按 ``success`` 字段判定，返回整份结果 dict。
 
@@ -698,7 +698,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         可显式传 ``action_type``（某 ROS Action 类型）强制走原生通道、跳过自动探测。
 
         结果解析两通道统一（``_parse_action_result``）：先 ``convert_from_ros_msg`` 转成 dict，
-        带 ``return_info`` 的（serial / UniLab @action）返回其中的 ``return_value``，
+        带 ``return_info`` 的（serial / Uni-Lab-OS @action）返回其中的 ``return_value``，
         纯原生 action 返回整份结果 dict。
 
         Args:

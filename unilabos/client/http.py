@@ -15,6 +15,10 @@ import httpx
 from .utils.envelope import EnvelopeError, unwrap_envelope
 
 
+def _looks_like_json(response: httpx.Response) -> bool:
+    return "json" in str(response.headers.get("content-type") or "").lower()
+
+
 @dataclass
 class HTTPClientConfig:
     """HTTP 客户端配置"""
@@ -89,6 +93,15 @@ class HTTPClient:
                 if isinstance(e, EnvelopeError):
                     raise
                 if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
+                    if e.response.status_code == 404 and not _looks_like_json(e.response):
+                        # 路由不存在（纯文本 404）：多半是把微后端 API 指向了
+                        # 旧云端 Backend，给出可操作的提示而不是堆栈。
+                        raise EnvelopeError(
+                            404,
+                            f"{self.config.base_url} 不提供 {path.split('?')[0]}；"
+                            "该接口仅微后端 / --role backend 支持，"
+                            "旧云端 Backend 请使用网页端操作或去掉 --remote",
+                        ) from e
                     raise
 
                 retries += 1

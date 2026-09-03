@@ -1,4 +1,4 @@
-"""UniLabOS 统一出站客户端。
+"""Uni-Lab-OS 统一出站客户端。
 
 包含上游 Backend 的 HTTP/会话能力，以及微后端四库的
 Local/HTTP/HostLink 等价 client。服务端 API 与数据模型仍归属

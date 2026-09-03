@@ -716,7 +716,7 @@ def ros_action_result_mapping(action_class: Any) -> Dict[str, str]:
     """生成 action Result 字段映射，并消除跨 ROS 发行版的不稳定字段。
 
     ``NavigateThroughPoses.Result`` 在 Humble 中包装 ``std_msgs/Empty``，在
-    Jazzy 中则是 ``error_code/error_msg``。UniLabOS 的轨迹动作不读取这些
+    Jazzy 中则是 ``error_code/error_msg``。Uni-Lab-OS 的轨迹动作不读取这些
     字段，因此统一声明为无结果映射，避免共享 registry 随发行版来回变化。
     """
     if action_class is NavigateThroughPoses:

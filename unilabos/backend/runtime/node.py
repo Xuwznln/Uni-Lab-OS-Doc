@@ -591,7 +591,7 @@ class DeviceNode(ABC):
             )
             return None
         try:
-            # 将 UniLab 的 site/slot 元数据转换为 PLR 挂载参数。
+            # 将 Uni-Lab-OS 的 site/slot 元数据转换为 PLR 挂载参数。
             additional_params: Dict[str, Any] = {}
             extra = getattr(plr_resource, "unilabos_extra", {})
             if len(extra):
