@@ -86,11 +86,107 @@ git clone https://github.com/deepmodeling/Uni-Lab-OS.git
 cd Uni-Lab-OS
 ```
 
-3. Start Uni-Lab System
+### 3. Start Uni-Lab
 
-Please refer to [Documentation - Boot Examples](https://deepmodeling.github.io/Uni-Lab-OS/boot_examples/index.html)
+An Edge process owns a device graph and exposes two separate local endpoints:
+the management/HTTP API (default `8002`) and the HostLink TCP channel (default
+`7302`). The default `hostlink` backend does not require DDS or a ROS 2 daemon;
+the `ros2` backend runs device actions and topics through ROS 2.
 
-4. Best Practice
+```bash
+# HostLink runtime (the default)
+unilab -g path/to/graph.json --backend hostlink --port 8002 --hostlink-port 7302
+
+# ROS 2 Jazzy runtime (activate the Conda environment containing Jazzy first)
+mamba activate unilab
+unilab -g path/to/graph.json --backend ros2 --port 8002
+
+# Validate/import the registry without starting devices
+unilab --check-mode --complete-registry --skip-env-check
+```
+
+For a split deployment, start the scheduler/workflow authority separately and
+point one or more Edge processes at it:
+
+```bash
+# Terminal 1: Backend authority (no device graph or device executor)
+unilab --role backend --port 8081
+
+# Terminal 2: Edge execution process
+unilab -g path/to/graph.json --backend hostlink \
+  --address http://127.0.0.1:8081 --port 8002
+```
+
+The Edge can also start with an empty graph (omit `-g`) when devices will be
+added through the driver-package or managed-device APIs. A Slave still needs
+its own graph and connects with `--is-slave --host-node-ip <host>`.
+
+### 4. Connect to an existing or legacy Backend
+
+Use one explicit `--address` for an existing cloud or on-premise Backend. The
+value may be the service root or its `/api/v1` root; `--ak` and `--sk` provide
+the laboratory credentials:
+
+```bash
+unilab -g path/to/graph.json --backend hostlink \
+  --address https://legacy.example.com/api/v1 \
+  --ak "$AK" --sk "$SK"
+```
+
+At startup Uni-Lab probes the HTTP routes and selects `runtime.v1` or the
+legacy adapter. To pin an older Backend explicitly, put this in the
+`local_config.py` loaded with `--config` (or placed in the working directory):
+
+```python
+class HTTPConfig:
+    remote_addr = "https://legacy.example.com/api/v1"
+    backend_protocol = "legacy"
+```
+
+Do not start `--role backend` for an old cloud Backend; that role starts the
+new local `runtime.v1` authority. In both modes the browser-facing API is HTTP.
+The new `control.v1` Edge↔Backend WebSocket carries short notifications and
+the complete authoritative content is fetched over HTTP; the legacy adapter
+keeps the old message families working.
+
+### 5. Use a custom UI
+
+Uni-Lab is backend-only: an Edge process does not host a SPA. Build or deploy
+your UI separately (OpenLab is one example), and configure its API base URL to
+the management endpoint:
+
+| Deployment | UI API base URL |
+|------------|-----------------|
+| Local single-process Edge | `http://127.0.0.1:8002` |
+| Split deployment | `http://127.0.0.1:8081` (the Backend authority) |
+| Existing/legacy Backend | the address passed to `--address` |
+
+Use the generated contract at `/api/openapi.json` and the interactive docs at
+`/api/docs`. A Vite-style static UI can be developed and served independently:
+
+```bash
+pnpm install
+pnpm dev --host 0.0.0.0       # development server
+pnpm build
+python -m http.server 4173 --directory dist  # simple local preview
+```
+
+The exact environment-variable name for the API base is framework-specific;
+set it to one of the URLs above and use `/api/v1/...` for typed HTTP calls.
+For live invalidation, a browser UI may use SSE/EventSource and then refetch
+the authoritative record over HTTP. That browser notification channel is
+separate from the Backend↔Edge `control.v1` WebSocket. Do not point a browser
+UI at the HostLink TCP port `7302`.
+
+External device packages can be installed from an exact Git revision and are
+mounted on the next process restart:
+
+```bash
+unilab package install \
+  "git+https://github.com/<org>/<device-package>.git@<commit-sha>"
+```
+
+### 6. Best Practice
 
 See [Best Practice Guide](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)
 
@@ -114,7 +210,7 @@ carries a terminating dual-runtime smoke (`python -m <pkg>.smoke --backend hostl
 own CI runs against a pinned Uni-Lab-OS revision. For the underlying communication-sharing mechanism
 see [Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
 to write a new driver from scratch see [Add Device](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html).
-The main repository pins all four packages in `tests/e2e/readme_demos.py` and drives each of them end
+The main repository pins all six packages in `tests/e2e/readme_demos.py` and drives each of them end
 to end in CI (`tests/e2e`): registry `--check_mode`, `unilab graph create`, a real `unilab -g` runtime
 with the microbackend (host plus slave where the demo is dual-process), Graph Authority round trips
 through `unilab graph list/download/upload`, and the reported `@workflow` templates executed through
