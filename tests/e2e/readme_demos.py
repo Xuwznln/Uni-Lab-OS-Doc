@@ -221,7 +221,7 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceInventoryDemo",
         url="https://github.com/Xuwznln/LabDeviceInventoryDemo",
-        ref="660e29a3c971ef48cddc508fd451dfde2e55e716",
+        ref="09fa17e179ed980550b1214b51db8c801b929646",
         package="inventory_demo",
         host_graph="graph/inventory_demo.json",
         # 每次 e2e 都是全新数据库：入库 100 → 出库 40 → 500 被拒 → 盘点 60/60/0
