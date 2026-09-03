@@ -65,8 +65,8 @@ def allocation_arguments(items: Any) -> Dict[str, Dict[str, Any]]:
 
     - ``material``：一个需求恰好选出一个物料实例，值是 ResourceSlot 引用形态
       ``{"uuid": material_uuid, ...}``，框架在 send_goal 解析为 PLR 实例；
-    - ``reagent``：同一需求可能按 FIFO 拆到多个 lot，值给出合计数量与 lot 明细
-      ``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``。
+    - ``reagent``（按量计量的 lot 库存，不限于试剂）：同一需求可能按 FIFO 拆到多个
+      lot，值给出合计数量与 lot 明细 ``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``。
     """
 
     arguments: Dict[str, Dict[str, Any]] = {}
@@ -135,8 +135,13 @@ class BackendScheduler:
         self._job_runs: Dict[str, str] = {}
         self._waiting_resource_jobs: Dict[str, tuple[Dict[str, Any], DagNode]] = {}
         self._dispatched_jobs: set[str] = set()
+        # 已建立 durable 人工确认单、但尚未收到决策的 attempt。
+        self._manual_confirmation_jobs: set[str] = set()
         self._dispatch_paused = False
         self.executor.add_job_finished_listener(self._on_executor_finished)
+        resolver = getattr(self.workflow, "set_manual_confirmation_resolver", None)
+        if callable(resolver):
+            resolver(self._on_manual_confirmation_decided)
 
     @property
     def dispatch_paused(self) -> bool:
@@ -277,13 +282,23 @@ class BackendScheduler:
                         self._job_runs.pop(job_uuid, None)
                         self._waiting_resource_jobs.pop(job_uuid, None)
                         self._dispatched_jobs.discard(job_uuid)
+                        self._manual_confirmation_jobs.discard(job_uuid)
 
     def stop(self) -> None:
         with self._guard:
-            runners = list(self._runners.values())
+            runners = list(self._runners.items())
             loop = self._loop
-        for runner in runners:
-            runner.cancel()
+            # 人工确认是可跨进程恢复的 pending 事实；优雅停机时不要把它
+            # 误转成 canceled，下一进程会按 job_uuid 幂等读回原确认单。
+            manual_task_ids = {
+                task_uuid
+                for job_uuid in self._manual_confirmation_jobs
+                if (run_uuid := self._job_runs.get(job_uuid)) is not None
+                if (task_uuid := self._run_to_task.get(run_uuid)) is not None
+            }
+        for task_uuid, runner in runners:
+            if task_uuid not in manual_task_ids:
+                runner.cancel()
         if loop is not None and loop.is_running():
             loop.call_soon_threadsafe(loop.stop)
         thread = self._thread
@@ -383,6 +398,9 @@ class BackendScheduler:
                 "attempt_no": int(run.get("attempt_count") or 1),
                 "job_uuids": [str(run["current_job_uuid"])],
             }
+            manual_meta = source_meta.get("manual_confirm")
+            if isinstance(manual_meta, dict):
+                specs[run_uuid]["manual_confirm"] = dict(manual_meta)
 
         dag_edges = []
         seen_edges: set[tuple[str, str]] = set()
@@ -498,6 +516,51 @@ class BackendScheduler:
             self._waiting_resource_jobs.pop(job_uuid, None)
             self._dispatched_jobs.add(job_uuid)
             args = dict(spec["resolved_action_args"])
+            is_manual_confirmation = node.action.strip().lower() == "manual_confirm"
+            if is_manual_confirmation:
+                self._manual_confirmation_jobs.add(job_uuid)
+        if is_manual_confirmation:
+            try:
+                # 缺少 key 与显式 [] 必须区分：前者是编辑器未完成配置，
+                # 后者表示 unrestricted（任何人可确认）。
+                if "assignee_user_ids" not in args:
+                    raise BackendSchedulingError(
+                        "manual_confirm requires explicit assignee_user_ids; use [] for unrestricted"
+                    )
+                timeout = args.get("timeout_seconds", 3600)
+                if isinstance(timeout, bool) or not isinstance(timeout, int):
+                    raise BackendSchedulingError(
+                        "manual_confirm timeout_seconds must be an integer"
+                    )
+                if timeout <= 0:
+                    timeout = 3600
+                manual_meta = spec.get("manual_confirm") or {}
+                label = str(manual_meta.get("label") or "人工确认").strip()
+                prompt = str(manual_meta.get("prompt") or "").strip()
+                confirmation = self.workflow.open_workflow_manual_confirmation(
+                    job_uuid,
+                    param=args,
+                    description=(f"{label}：{prompt}" if prompt else label),
+                    meta_data={
+                        "workflow_task_uuid": str(task["uuid"]),
+                        "workflow_node_uuid": str(spec["workflow_node_uuid"]),
+                        "target_device_id": node.device_id,
+                    },
+                    timeout_seconds=timeout,
+                )
+                # 进程恢复时，决策可能已在 scheduler 尚未重新接管期间提交；
+                # 对已终态的幂等读回立即收敛，不重复调用设备。
+                if confirmation.get("status") != "pending":
+                    self._on_manual_confirmation_decided(confirmation)
+                return
+            except Exception:
+                with self._guard:
+                    self._manual_confirmation_jobs.discard(job_uuid)
+                try:
+                    self.resources.cancel_owner(job_uuid, reason="manual_open_failed")
+                except ResourceNotFound:
+                    pass
+                raise
         try:
             self.workflow.mark_workflow_node_job_running(job_uuid)
             payload = build_job_start_payload(
@@ -597,6 +660,10 @@ class BackendScheduler:
         try:
             record = self.resources.request_for_owner(job_uuid)
         except ResourceNotFound:
+            with self._guard:
+                self._waiting_resource_jobs.pop(job_uuid, None)
+                self._dispatched_jobs.discard(job_uuid)
+                self._manual_confirmation_jobs.discard(job_uuid)
             return
         if record.status not in {"released", "canceled"}:
             if canceled:
@@ -606,10 +673,28 @@ class BackendScheduler:
         with self._guard:
             self._waiting_resource_jobs.pop(job_uuid, None)
             self._dispatched_jobs.discard(job_uuid)
+            self._manual_confirmation_jobs.discard(job_uuid)
         self._reconcile_resources()
 
     def _cancel_task(self, task_uuid: str) -> None:
         self.executor.cancel_task(task_uuid)
+        with self._guard:
+            manual_jobs = [
+                job_uuid
+                for job_uuid in self._manual_confirmation_jobs
+                if (run_uuid := self._job_runs.get(job_uuid)) is not None
+                and self._run_to_task.get(run_uuid) == task_uuid
+            ]
+        for job_uuid in manual_jobs:
+            try:
+                self.workflow.decide_workflow_manual_confirmation(
+                    str(self.workflow.get_manual_confirmation_for_job(job_uuid)["uuid"]),
+                    action="cancel",
+                    confirmed_by="scheduler",
+                    decision_idempotency_key=f"scheduler-cancel:{job_uuid}",
+                )
+            except Exception:  # noqa: BLE001 - 任务取消仍由 run/job 收敛兜底
+                logger.exception("failed to cancel manual confirmation for job %s", job_uuid)
         self._cleanup_task_resources(task_uuid)
 
     def _cleanup_task_resources(self, task_uuid: str) -> None:
@@ -782,6 +867,85 @@ class BackendScheduler:
                     )
             result = json_set(result, keys[-1], value)
         return dict(result)
+
+    def _on_manual_confirmation_decided(
+        self, confirmation: Dict[str, Any]
+    ) -> None:
+        """消费 durable 人工决策，将对应 attempt 收敛为节点终态。"""
+
+        status = str(confirmation.get("status") or "pending")
+        if status == "pending":
+            return
+        job_uuid = str(confirmation.get("workflow_node_job_uuid") or "")
+        if not job_uuid:
+            return
+        with self._guard:
+            run_uuid = self._job_runs.get(job_uuid)
+            task_uuid = self._run_to_task.get(run_uuid or "")
+            runner = self._runners.get(task_uuid or "")
+        # 决策可以先于新进程接管到达；事实已在 DB，恢复时 _dispatch_held_node
+        # 会再次读到终态并调用本方法，此处不凭空修改未知任务。
+        if run_uuid is None or task_uuid is None:
+            return
+
+        decision_action = str(
+            (confirmation.get("meta_data") or {}).get("decision_action") or ""
+        ).strip().lower()
+        if status == "approved":
+            job_status = "skipped" if decision_action == "skip" else "succeeded"
+            node_state = NodeState.SUCCESS
+        elif status == "rejected":
+            job_status = "failed"
+            node_state = NodeState.FAILED
+        elif status == "timed_out":
+            job_status = "timeout"
+            node_state = NodeState.FAILED
+        elif status == "canceled":
+            job_status = "canceled"
+            node_state = NodeState.CANCELLED
+        else:
+            logger.warning(
+                "ignore unknown manual confirmation status %s for job %s",
+                status,
+                job_uuid,
+            )
+            return
+
+        try:
+            outcome = self.workflow.record_workflow_node_job_terminal(
+                job_uuid,
+                status=job_status,
+                return_info={
+                    "suc": job_status in {"succeeded", "skipped"},
+                    "suc_type": "manual_confirm",
+                    "return_value": {
+                        "confirmation_uuid": confirmation.get("uuid"),
+                        "status": status,
+                        "decision_action": decision_action or None,
+                        "confirmed_by": confirmation.get("confirmed_by"),
+                        "comment": confirmation.get("comment"),
+                    },
+                },
+                error_info=(
+                    []
+                    if job_status in {"succeeded", "skipped", "canceled"}
+                    else [{"code": f"manual_confirmation_{status}"}]
+                ),
+            )
+        except Exception:  # noqa: BLE001 - 保留 durable 决策，等待恢复重试
+            logger.exception(
+                "failed to settle manual confirmation %s for job %s",
+                confirmation.get("uuid"),
+                job_uuid,
+            )
+            return
+        self._release_job_resources(
+            job_uuid,
+            canceled=job_status in {"failed", "timeout", "canceled"},
+        )
+        run = outcome.get("run") or {}
+        if runner is not None and str(run.get("status") or "") in _RUN_TERMINAL:
+            runner.notify_terminal(run_uuid, node_state)
 
     def _on_executor_finished(
         self,

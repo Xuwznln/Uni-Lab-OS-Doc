@@ -299,8 +299,8 @@ class ImportManager:
             if param.kind == param.VAR_KEYWORD:  # **kwargs
                 continue
 
-            # 跳过 sample_uuids 参数（由系统自动注入，registry 补全时跳过）
-            if skip_unilabos_params and param_name == PARAM_SAMPLE_UUIDS:
+            # 跳过系统注入参数（sample_uuids / action_context），registry 补全时跳过
+            if skip_unilabos_params and param_name in (PARAM_SAMPLE_UUIDS, "action_context"):
                 continue
 
             is_required = param.default == inspect.Parameter.empty

@@ -84,6 +84,30 @@ ensured = materials.ensure(deck)
 注意：adopt 要求**全树每个节点都带 uuid**（含 tip spot / well 等后代），
 缺失会直接报错。
 
+### 2.2.1 变更来源（`actor_type` / `actor_uuid`）
+
+每条物料变更都以 `InventoryMutation.actor_type` / `actor_uuid` 落进账本
+（`GET /api/v1/materials/changes` 每行都带），前端物料变更列表按 `actor_type`
+渲染"来源" tag。规范取值定义在 `unilabos.protocol.materials`（`ACTOR_*` 常量，
+`KNOWN_ACTOR_TYPES`）：
+
+| `actor_type`     | 含义                                             | `actor_uuid`          | 写点                                              |
+| ---------------- | ------------------------------------------------ | --------------------- | ------------------------------------------------- |
+| `human`          | 前端 / 操作员直接编辑                            | 用户 id（前端自填）   | 浏览器请求 `POST/PATCH /materials/*`，**前端须显式携带** |
+| `graph`          | 开机图物料对齐（模板 Site 实例化随之落库）       | 图 uuid / slave 机器名 | Host `unilab -g`、Slave 启动 `materials.ensure`   |
+| `registry`       | Registry 资源模板同步                            | 模板 id               | `sync_template`                                   |
+| `device`         | 设备驱动创建 / 快照 / 转移                       | 设备 id 或 uuid       | `materials.create(node=)`、`update`、`transfer`   |
+| `virtual_device` | 虚拟设备                                         | 设备 id               | 虚拟设备驱动                                      |
+| `scheduler`      | 调度器库存预留 / 释放                            | —                     | Scheduler                                         |
+| `workflow`       | 工作流物料动作（出库 `apply_deduct_resource` 等） | host_node id          | `host_material_actions`                           |
+| `backend`        | 云端 / 旧后端同步进来的变更                      | Backend 地址          | legacy adaptor                                    |
+| `edge`           | 未细分的 Edge 进程内写点（兜底默认值）           | —                     | 未传 actor 的脚本调用                             |
+
+前端展示建议：`edge` 显示为"Edge 上报"而不是"本地权威"（权威本来就是本进程，
+这个词区分不了来源）；`graph` 显示"开机图 / 模板"；`human` 显示"手动编辑"。
+`materials.create` / `materials.ensure` 都接受 `actor_type=` / `actor_uuid=`
+覆盖；`create(node=)` 不传时自动记为 `device` + 该设备。
+
 ### 2.3 查询
 
 ```python

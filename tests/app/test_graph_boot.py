@@ -8,7 +8,11 @@ import pytest
 
 from unilabos.app.main import (
     _materialize_graph_from_authority,
+    _read_graph_json,
     _register_graph_file_to_authority,
+)
+from unilabos.server.backend.legacy_adaptor.legacy.startup import (
+    upgrade_startup_graph_payload,
 )
 from unilabos.server.database.layout import ServerDatabasePaths
 from unilabos.server.services.materials.graph import GraphError, GraphService
@@ -148,23 +152,27 @@ class TestUpsertReconcile:
         assert again["revision"] == stored["revision"]
         assert again["payload"]["nodes"][0]["sites"][0]["uuid"] == site["uuid"]
 
-    def test_legacy_class_is_promoted_to_template_name(self, authority) -> None:
-        """旧图只写 class：读取/登记边界回填 template_name，不改 ResourceDict。"""
+    def test_authority_does_not_upgrade_legacy_fields(self, authority) -> None:
+        """微后端只认当前契约：class 不回填 template_name，根级 position 直接拒绝。"""
         service, _paths = authority
         stored = service.upsert_graph(
             name="lab",
-            payload={
-                "nodes": [
-                    {"id": "pump", "type": "device", "class": "pump_demo"},
-                ]
-            },
+            payload={"nodes": [{"id": "pump", "type": "device", "class": "pump_demo"}]},
         )
         node = stored["payload"]["nodes"][0]
         assert node["class"] == "pump_demo"
-        assert node["template_name"] == "pump_demo"
+        assert "template_name" not in node
 
-    def test_legacy_children_lists_are_stripped(self, authority) -> None:
-        """层级只由 parent 表达：旧图的 children 列表不入库。"""
+        with pytest.raises(GraphError) as excinfo:
+            service.upsert_graph(
+                name="lab2",
+                payload={"nodes": [{"id": "pump", "position": {"x": 1, "y": 2, "z": 0}}]},
+            )
+        assert excinfo.value.code == "invalid_payload"
+        assert "根字段 position" in excinfo.value.message
+
+    def test_children_lists_are_stripped(self, authority) -> None:
+        """层级只由 parent 表达：派生的 children 列表不入库。"""
         service, _paths = authority
         stored = service.upsert_graph(
             name="lab",
@@ -213,3 +221,47 @@ class TestRegisterGraphFileToAuthority:
         )
         assert second == cache_path
         assert service.get_graph("my_lab")["revision"] == 1
+
+    def test_legacy_file_is_converted_at_reception(
+        self, authority, tmp_path, capsys
+    ) -> None:
+        """旧格式启动图在读取边界转成当前契约；Graph Authority 只收到当前契约。"""
+        service, _paths = authority
+        legacy = {
+            "nodes": [
+                {
+                    "id": "host_node",
+                    "type": "device",
+                    "class": "host_node",
+                    "children": ["pump"],
+                    "position": {"x": 1, "y": 2, "z": 0},
+                    "pose": {"position_3d": {"x": 1, "y": 2, "z": 0}},
+                },
+                {"id": "pump", "type": "device", "class": "pump_demo", "parent": "host_node"},
+            ],
+            "edges": [
+                {"source": "host_node", "target": "pump", "source_handle": "out", "target_handle": "in"}
+            ],
+        }
+        graph_file = tmp_path / "old_lab.json"
+        graph_file.write_text(json.dumps(legacy), encoding="utf-8")
+        args_dict = {"server_database_root": str(tmp_path)}
+
+        payload = upgrade_startup_graph_payload(
+            _read_graph_json(str(graph_file)), str(graph_file)
+        )
+        assert "使用旧格式图字段" in capsys.readouterr().out
+        cache_path = _register_graph_file_to_authority(
+            str(graph_file), args_dict, str(tmp_path), payload
+        )
+        assert cache_path is not None
+        with open(cache_path, encoding="utf-8") as stream:
+            cached = json.load(stream)
+        host = next(n for n in cached["nodes"] if n["id"] == "host_node")
+        assert host["template_name"] == "host_node"
+        assert "position" not in host and "children" not in host
+        assert host["pose"]["position"] == {"x": 1, "y": 2, "z": 0}
+        assert host["pose"]["position3d"] == {"x": 1, "y": 2, "z": 0}
+        assert cached["links"][0]["sourceHandle"] == "out"
+        assert "source_handle" not in cached["links"][0]
+        assert service.get_graph("old_lab")["revision"] == 1

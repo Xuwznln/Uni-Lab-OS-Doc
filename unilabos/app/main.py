@@ -401,8 +401,6 @@ def main():
         else BasicConfig.port
     )
     BasicConfig.disable_browser = args_dict["disable_browser"] or BasicConfig.disable_browser
-    if args_dict.get("ui_dir"):
-        HTTPConfig.ui_dist_dir = os.path.expanduser(str(args_dict["ui_dir"]))
     BasicConfig.is_host_mode = not is_slave
     BasicConfig.slave_no_host = args_dict.get("slave_no_host", False)
     BasicConfig.no_update_feedback = args_dict.get("no_update_feedback", False)
@@ -551,11 +549,17 @@ def main():
     if file_path is None:
         file_path = _resolve_graph_file_path(args_dict.get("graph") or BasicConfig.startup_json_path)
     if file_path is None:
+        # 不带 -g：Host 以空图启动（只有 host_node），设备随后经驱动包 / 受管设备进程
+        # 或其它 Slave 接入；Slave 没有设备就没有存在意义，仍然要求 -g。
+        if is_slave:
+            print_status("Slave 必须用 -g 指定要接入的设备图", "error")
+            os._exit(1)
         print_status(
-            "未指定设备加载文件；请使用 -g 指定本地图",
-            "error",
+            "未指定 -g，以空图启动（仅 host_node）。设备可稍后从驱动包页安装并作为受管进程接入，"
+            "或用 unilab -g <图文件.json> 重启。",
+            "info",
         )
-        os._exit(1)
+        graph, resource_tree_set, resource_links = read_node_link_json({"nodes": [], "links": []})
     else:
         if (
             file_path.endswith(".json")
@@ -681,10 +685,20 @@ def main():
         # 开机图物料权威对齐（与 Slave 的 materials.ensure 语义一致）：
         # 权威已有同 uuid 的物料则直接采用，没有则以图中 uuid 显式创建。
         if resource_tree_set.trees:
+            from unilabos.protocol.materials import ACTOR_GRAPH
             from unilabos.resources import materials as materials_helper
 
+            # 账本来源记为开机图；权威缓存文件名即图 uuid，本地文件则退化为文件名。
+            graph_ref = (
+                os.path.splitext(os.path.basename(str(file_path)))[0]
+                if file_path
+                else None
+            )
             ensured = materials_helper.ensure(
-                resource_tree_set, gateway=server_stack.materials_gateway
+                resource_tree_set,
+                gateway=server_stack.materials_gateway,
+                actor_type=ACTOR_GRAPH,
+                actor_uuid=graph_ref,
             )
             print_status(
                 f"开机物料权威对齐完成: {len(ensured.trees)} 棵树（uuid 与图一致）",
@@ -737,8 +751,10 @@ def main():
                     "info",
                 )
 
-        # Backend-controlled 模式下，Edge 启动时上报完整注册表快照。服务端
-        # 按条目版本化变更，并挂起会影响活跃 workflow 的 action 变更。
+        # 启动时上报完整注册表快照给 Registry Authority：服务端按条目版本化变更，
+        # 并挂起会影响活跃 workflow 的 action 变更。权威在远端（--address）时走
+        # HTTP；本机持有调度权威时直接写进程内服务，两条路径共用同一投影。
+        registry_report = None
         if HTTPConfig.remote_addr:
             from unilabos.server.backend.legacy_adaptor.session import BackendSessionFactory
 
@@ -761,20 +777,33 @@ def main():
                 registry_report = report_registry_snapshot(
                     lab_registry, HTTPConfig.remote_addr
                 )
-                if registry_report is not None:
-                    counts = (registry_report.summary or {}).get("counts", {})
-                    print_status(
-                        f"注册表已上报: 设备 {registry_report.device_count} "
-                        f"资源 {registry_report.resource_count}"
-                        + (
-                            f"（新增 {counts.get('added', 0)} 更新 {counts.get('updated', 0)} "
-                            f"挂起 {counts.get('pending', 0)} 移除 {counts.get('removed', 0)} "
-                            f"不可用 {counts.get('unusable', 0)}）"
-                            if counts
-                            else "（服务端未返回条目级统计）"
-                        ),
-                        "info",
-                    )
+        else:
+            from unilabos.server.backend.legacy_adaptor.sync.templates import (
+                report_registry_snapshot_local,
+            )
+            from unilabos.server.services.runtime.registry import get_registry_service
+
+            local_registry_service = get_registry_service()
+            if local_registry_service is not None:
+                registry_report = report_registry_snapshot_local(
+                    lab_registry,
+                    local_registry_service,
+                    edge_uuid=BasicConfig.machine_name or BasicConfig.host_node_name or "",
+                )
+        if registry_report is not None:
+            counts = (registry_report.summary or {}).get("counts", {})
+            print_status(
+                f"注册表已上报: 设备 {registry_report.device_count} "
+                f"资源 {registry_report.resource_count}"
+                + (
+                    f"（新增 {counts.get('added', 0)} 更新 {counts.get('updated', 0)} "
+                    f"挂起 {counts.get('pending', 0)} 移除 {counts.get('removed', 0)} "
+                    f"不可用 {counts.get('unusable', 0)}）"
+                    if counts
+                    else "（服务端未返回条目级统计）"
+                ),
+                "info",
+            )
 
         # 微后端必须先于控制链路接收命令，避免首个 job_start 绕过生命周期权威。
         comm_client.start()

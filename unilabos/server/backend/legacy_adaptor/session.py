@@ -112,9 +112,14 @@ class BaseBackendClient(ABC):
 
 
 class BackendSessionFactory:
-    """创建唯一的 ``runtime.v1`` 控制面 Backend WebSocket 客户端。"""
+    """按目标 Backend 的线协议创建唯一的 WebSocket 客户端。
+
+    ``runtime.v1``（微后端 / ``--role backend``）用轻通知客户端；旧云端
+    Backend 用 ``legacy`` 适配客户端（``job_start`` / ``host_node_ready``）。
+    """
 
     _client_cache: Optional[BaseBackendClient] = None
+    _protocol: str = ""
 
     @classmethod
     def create_client(cls) -> BaseBackendClient:
@@ -125,6 +130,20 @@ class BackendSessionFactory:
             通信客户端实例
         """
         return cls._create_backend_client()
+
+    @classmethod
+    def protocol(cls) -> str:
+        """当前进程判定的 Backend 协议名（未连接云端时为 ``runtime.v1``）。"""
+
+        if not cls._protocol:
+            from unilabos.server.backend.legacy_adaptor.probe import detect_backend_protocol
+
+            cls._protocol = detect_backend_protocol()
+        return cls._protocol
+
+    @classmethod
+    def is_legacy(cls) -> bool:
+        return cls.protocol() == "legacy"
 
     @classmethod
     def get_client(cls) -> BaseBackendClient:
@@ -145,7 +164,14 @@ class BackendSessionFactory:
 
     @classmethod
     def _create_backend_client(cls) -> BaseBackendClient:
-        """创建微后端使用的 Backend WebSocket 轻通知客户端。"""
+        """按协议创建 Backend WebSocket 客户端。"""
+
+        if cls.is_legacy():
+            from unilabos.server.backend.legacy_adaptor.legacy.ws import (
+                LegacyBackendWebSocketClient,
+            )
+
+            return LegacyBackendWebSocketClient()
 
         from unilabos.server.backend.legacy_adaptor.websocket import BackendWebSocketClient
 
@@ -153,7 +179,7 @@ class BackendSessionFactory:
 
     @classmethod
     def reset_client(cls):
-        """重置客户端缓存（用于测试或重新配置）"""
+        """重置客户端缓存与协议判定（用于测试或重新配置）"""
         if cls._client_cache:
             try:
                 cls._client_cache.stop()
@@ -161,6 +187,10 @@ class BackendSessionFactory:
                 logger.warning(f"[CommunicationFactory] Error stopping client: {str(e)}")
 
         cls._client_cache = None
+        cls._protocol = ""
+        from unilabos.server.backend.legacy_adaptor.probe import reset_probe_cache
+
+        reset_probe_cache()
         logger.info("[BackendSession] Client cache reset")
 
 

@@ -111,10 +111,17 @@ class BackendWebSocketClient(BaseBackendClient):
         """Job 结果由业务协调器持久化并产生 ``edge_change``。"""
 
     def send_ping(self, ping_id: str, timestamp: float) -> None:
-        """保留网络诊断所需的短 ping，不携带业务正文。"""
+        """保留网络诊断所需的短 ping，不携带业务正文。
+
+        字段名与 ``HostAdapterBase.handle_pong_response`` 消费的 pong 一致
+        （``ping_id`` / ``client_timestamp`` / ``server_timestamp``）。
+        """
 
         self._queue_message(
-            {"action": "ping", "data": {"id": ping_id, "timestamp": timestamp}}
+            {
+                "action": "ping",
+                "data": {"ping_id": ping_id, "client_timestamp": timestamp},
+            }
         )
 
     def publish_host_ready(self) -> None:
@@ -194,15 +201,18 @@ class BackendWebSocketClient(BaseBackendClient):
                     outbox_pump = asyncio.create_task(
                         self._outbox_handler(), name="control-protocol-outbox"
                     )
+                    session_watch = asyncio.create_task(
+                        self._session_watchdog(), name="control-protocol-session"
+                    )
                     try:
                         async for raw_message in websocket:
                             await self._handle_raw_message(raw_message)
                     finally:
                         self._connected = False
                         self._session_bound_for_connection = False
-                        for task in (sender, outbox_pump):
+                        for task in (sender, outbox_pump, session_watch):
                             task.cancel()
-                        for task in (sender, outbox_pump):
+                        for task in (sender, outbox_pump, session_watch):
                             try:
                                 await task
                             except asyncio.CancelledError:
@@ -242,7 +252,16 @@ class BackendWebSocketClient(BaseBackendClient):
         if not isinstance(data, dict):
             logger.warning("[ControlProtocol] Ignore %s with non-object data", action)
             return
-        await self._process_message(action, data)
+        try:
+            await self._process_message(action, data)
+        except Exception:  # noqa: BLE001 - 单条坏消息不能触发断线重连循环
+            # 命令权威仍在 Backend；校验失败（身份/哈希不匹配、拉取失败）只
+            # 记录并丢弃这条通知，Backend 重发或人工介入时再处理。
+            logger.error(
+                "[ControlProtocol] 处理 %s 失败，已丢弃该通知:\n%s",
+                action,
+                traceback.format_exc(),
+            )
 
     async def _process_message(
         self, action: str, data: dict[str, Any]
@@ -290,6 +309,20 @@ class BackendWebSocketClient(BaseBackendClient):
             if self._session_bound_for_connection:
                 await asyncio.to_thread(self.publish_runtime_events)
             await asyncio.sleep(1)
+
+    _SESSION_BIND_WARN_SECONDS = 30.0
+
+    async def _session_watchdog(self) -> None:
+        """连上却始终收不到 ``backend_session``：对端多半不是 runtime.v1 后端。"""
+
+        await asyncio.sleep(self._SESSION_BIND_WARN_SECONDS)
+        if self._connected and not self._session_bound_for_connection:
+            logger.warning(
+                "[ControlProtocol] 已连接 %s 但 %.0fs 内未收到 backend_session；"
+                "对端可能是旧协议 Backend，请检查 HTTPConfig.backend_protocol 或 --address",
+                self.websocket_url,
+                self._SESSION_BIND_WARN_SECONDS,
+            )
 
     def _discard_queued_notices(self) -> None:
         """断线后丢弃内存副本；未 ACK 事件由 durable outbox 重放。"""

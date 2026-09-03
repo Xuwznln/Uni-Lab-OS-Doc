@@ -82,6 +82,10 @@ class HTTPConfig:
     remote_addr = ""
     # 独立部署的低层覆盖；CLI 只暴露统一 --address。为空时从 remote_addr 派生。
     schedule_addr = ""
+    # Backend 线协议："runtime.v1"（微后端 / --role backend）或 "legacy"（旧云端
+    # Backend：job_start / host_node_ready / /lab/resource 消息族）。为空时启动期
+    # 按 HTTP 路由自动探测。
+    backend_protocol = ""
     # Edge 只访问微后端物料中心；可选择进程内或独立部署的微后端。
     material_microbackend_addr = ""
     material_query_timeout = 10
@@ -89,6 +93,11 @@ class HTTPConfig:
     # 以及 backend 管理 API 监听端口。
     edge_data_addr = "http://127.0.0.1:8002"
     backend_port = 8081
+    # 驱动包索引镜像（JSON，结构同 https://github.com/Xuwznln/awesome-lab-devices 的 index.json）。
+    # 官方索引默认由 OpenLab 前端在浏览器里直接读取；只有浏览器出不了网、需要 Edge 侧
+    # 内网镜像时才配这里。为空时 /driver-packages/catalog 只并入本地
+    # <working_dir>/driver_package_catalog.json。
+    driver_package_index_url = ""
 
 
 # Host/Slave 控制通道。ROS2 backend 用它同步发现参数；hostlink backend 还会

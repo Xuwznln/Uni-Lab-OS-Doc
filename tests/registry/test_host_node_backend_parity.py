@@ -89,11 +89,11 @@ def test_host_node_registry_definition_is_backend_neutral(tmp_path) -> None:
     )
     assert set(hostlink["definition"]["class"]["action_value_mappings"]) == {
         "apply_deduct_resource",
-        "auto-test_resource",
         "discard_resource",
         "manual_confirm",
         "set_substance",
         "test_latency",
+        "test_resource",
         "transfer_resource",
     }
     assert hostlink["yaml_valid"] is True

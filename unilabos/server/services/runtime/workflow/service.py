@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import signal
@@ -50,6 +51,8 @@ from unilabos.server.services.runtime.workflow.errors import (
 )
 from unilabos.server.services.runtime.workflow.store import WorkflowStore, utc_now
 from unilabos.server.database.sqlite_domain import DomainDatabase
+
+logger = logging.getLogger(__name__)
 
 _ERRORS = {
     "invalid_input": (400, "提交内容格式不正确"),
@@ -287,6 +290,10 @@ class WorkflowService(WorkflowStore):
         self._locks_guard = threading.Lock()
         self._authoring_locks: Dict[str, threading.RLock] = {}
         self._task_submitter: Optional[Callable[[str], None]] = None
+        # Scheduler 绑定此回调消费 durable 人工确认决策；Service 本身不依赖调度器。
+        self._manual_confirmation_resolver: Optional[
+            Callable[[Dict[str, Any]], None]
+        ] = None
 
     @property
     def authority_profile(self) -> SchedulerAuthorityProfile:
@@ -299,6 +306,28 @@ class WorkflowService(WorkflowStore):
         """绑定唯一运行 Adapter；定义/任务事实仍由本服务持有。"""
 
         self._task_submitter = submitter
+
+    def set_manual_confirmation_resolver(
+        self,
+        resolver: Optional[Callable[[Dict[str, Any]], None]],
+    ) -> None:
+        """绑定人工确认决策消费者；决策事实始终先落 runtime.db。"""
+
+        self._manual_confirmation_resolver = resolver
+
+    def _notify_manual_confirmation_resolver(
+        self, confirmation: Dict[str, Any]
+    ) -> None:
+        resolver = self._manual_confirmation_resolver
+        if resolver is None:
+            return
+        try:
+            resolver(confirmation)
+        except Exception:  # noqa: BLE001 - durable 决策不可因执行器暂时异常丢失
+            logger.exception(
+                "人工确认 %s 已持久化，但调度器消费失败",
+                confirmation.get("uuid"),
+            )
 
     # Workflow 与 Graph --------------------------------------------------
 
@@ -746,9 +775,91 @@ class WorkflowService(WorkflowStore):
     ) -> List[Dict[str, Any]]:
         identity = self.get_workflow_task(task_uuid)["uuid"]
         limit, offset = self._normalize_runtime_window(limit, offset)
+        # 读回时顺手收敛已到期单，保证 UI 不会永久看到 pending。
+        self.expire_workflow_manual_confirmations()
         return self.list_manual_confirmations(
             identity, limit=limit, offset=offset
         )
+
+    def get_workflow_manual_confirmation(
+        self, confirmation_uuid: str
+    ) -> Dict[str, Any]:
+        try:
+            identity = validate_uuid(confirmation_uuid)
+        except ValueError:
+            raise WorkflowError("invalid_input") from None
+        try:
+            return self.get_manual_confirmation(identity)
+        except StoreNotFound:
+            raise WorkflowError("not_found") from None
+
+    def open_workflow_manual_confirmation(
+        self,
+        job_uuid: str,
+        *,
+        param: Dict[str, Any],
+        description: Optional[str] = None,
+        meta_data: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[int] = 3600,
+        confirmation_uuid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """为 scheduler 暂停的 manual_confirm attempt 建立确认单。"""
+
+        try:
+            result = self.open_manual_confirmation(
+                job_uuid,
+                param=param,
+                description=description,
+                meta_data=meta_data,
+                timeout_seconds=timeout_seconds,
+                confirmation_uuid=confirmation_uuid,
+            )
+        except StoreNotFound:
+            raise WorkflowError("not_found") from None
+        except (StoreConflict, TypeError, ValueError):
+            raise WorkflowConflict("conflict") from None
+        return result
+
+    def decide_workflow_manual_confirmation(
+        self,
+        confirmation_uuid: str,
+        *,
+        action: str,
+        confirmed_by: Optional[str] = None,
+        comment: Optional[str] = None,
+        decision_idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """记录人工确认决策，并通知当前 scheduler（若已装配）。"""
+
+        try:
+            identity = validate_uuid(confirmation_uuid)
+        except ValueError:
+            raise WorkflowError("invalid_input") from None
+        try:
+            result = self.decide_manual_confirmation(
+                identity,
+                action=action,
+                confirmed_by=confirmed_by,
+                comment=comment,
+                decision_idempotency_key=decision_idempotency_key,
+            )
+        except StoreNotFound:
+            raise WorkflowError("not_found") from None
+        except (StoreConflict, TypeError, ValueError):
+            raise WorkflowConflict("conflict") from None
+        self._notify_manual_confirmation_resolver(result)
+        return result
+
+    def expire_workflow_manual_confirmations(
+        self, *, now: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        try:
+            result = self.expire_due_manual_confirmations(now=now)
+        except (StoreConflict, TypeError, ValueError):
+            raise WorkflowError("invalid_input") from None
+        for confirmation in result:
+            self._notify_manual_confirmation_resolver(confirmation)
+        return result
 
     def list_task_interventions(
         self, task_uuid: str, *, limit: Optional[int] = None, offset: int = 0
@@ -853,6 +964,24 @@ class WorkflowService(WorkflowStore):
             if self._dependency_only(source_handle):
                 planned_edge["dependency_only"] = True
             planned_edges.append(planned_edge)
+
+        # execution_policy.depends_on：无 handle 数据流的纯执行序依赖（@workflow 声明式
+        # 步骤、编排画布的顺序连线）。不生成计划边，但参与拓扑排序与环检测，
+        # 这样 topological_index / 节点运行顺序与调度器实际的 DAG 一致。
+        ordering_pairs = {(edge["source_node_uuid"], edge["target_node_uuid"]) for edge in planned_edges}
+        for target_uuid, node in enabled.items():
+            depends_on = (node.get("execution_policy") or {}).get("depends_on") or []
+            if not isinstance(depends_on, list):
+                continue
+            for upstream in depends_on:
+                source_uuid = str(upstream)
+                if source_uuid not in enabled or source_uuid == target_uuid:
+                    continue
+                if (source_uuid, target_uuid) in ordering_pairs:
+                    continue
+                ordering_pairs.add((source_uuid, target_uuid))
+                outgoing[source_uuid].append(target_uuid)
+                indegree[target_uuid] += 1
 
         available = sorted(
             (node_uuid for node_uuid, degree in indegree.items() if degree == 0),

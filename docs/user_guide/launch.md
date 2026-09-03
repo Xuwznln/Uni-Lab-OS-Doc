@@ -16,8 +16,8 @@ options:
   --working_dir WORKING_DIR
                         Path to the working directory
   --backend {hostlink,ros2}
-                        Communication backend: hostlink (distributed, no DDS) or
-                        ros2 (default).
+                        Communication backend: hostlink (default; distributed over
+                        HostLink TCP, no DDS/ROS 2 required) or ros2.
   --is_slave, --is-slave
                         Run the backend as slave node (without host privileges).
   --slave_no_host, --slave-no-host

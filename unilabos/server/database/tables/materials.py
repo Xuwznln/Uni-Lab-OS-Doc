@@ -1205,6 +1205,10 @@ MATERIALS_DATABASE = DatabaseSpec(
     role="resource, material, site, topology link and lab graph authority",
     synchronous="FULL",
     tables=MATERIALS_TABLES,
+    # v2：inventory_command_effect 的请求信封改为携带 actor_type=registry /
+    # actor_uuid=<模板名>，且 sync_template 的 command_uuid 改为按整条请求派生；
+    # 旧库中的效果行与新请求同键不同哈希，必须整库重建。
+    contract_version=2,
 )
 
 __all__ = [

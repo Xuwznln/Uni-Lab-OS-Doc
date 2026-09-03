@@ -178,10 +178,39 @@ def setup_local_scheduler(
     scheduler.start(recover=True)
     _workflow_service = service
     _scheduler = scheduler
+    _setup_registry_authority(services.runtime)
     logger.info(
         "[WorkflowIntegration] local Workflow Authority ready (runtime.db shared)",
     )
     return service
+
+
+def _setup_registry_authority(runtime_service: Any) -> None:
+    """Registry Authority 与 Workflow Authority 同生命周期：谁持有调度权威，谁维护
+    注册表条目版本。三个注册表表与 RuntimeService 共用 runtime.db 的连接和写锁；
+    影响活跃 workflow 的动作变更进入待确认状态，其余变更直接生效。"""
+
+    from unilabos.server.services.runtime.registry import (
+        RegistryService,
+        get_registry_service,
+        set_registry_service,
+    )
+
+    if get_registry_service() is not None:
+        return
+
+    def _workflow_action_reference_rows():
+        workflow_service = get_workflow_service()
+        if workflow_service is None:
+            return []
+        return workflow_service.list_template_action_references()
+
+    set_registry_service(
+        RegistryService(
+            runtime_service,
+            reference_rows_resolver=_workflow_action_reference_rows,
+        )
+    )
 
 
 def setup_materials_service(
@@ -281,6 +310,10 @@ def setup_execution_backend(
         ),
     )
     backend.result_bridges.append(coordinator)
+    # 旧协议 Backend 客户端不是生命周期 owner，但要把微后端释放的 job 结果
+    # 镜像成 job_status 回旧后端，因此也挂为 result bridge。
+    if control_client is not None and getattr(control_client, "mirrors_job_results", False):
+        backend.result_bridges.append(control_client)
     _coordinator = coordinator
     backend.start()
     backend.rebuild_status_incidents()
@@ -309,9 +342,18 @@ def shutdown_backend_services() -> None:
             _backend.result_bridges.remove(_scheduler)
     if _workflow_service is not None:
         _workflow_service.set_task_submitter(None)
+        set_resolver = getattr(
+            _workflow_service, "set_manual_confirmation_resolver", None
+        )
+        if callable(set_resolver):
+            set_resolver(None)
         _workflow_service.close()
     if _backend is not None:
         _backend.stop()
+    # RegistryService 共享 RuntimeService 的连接，随组合根一起关闭。
+    from unilabos.server.services.runtime.registry import set_registry_service
+
+    set_registry_service(None)
     shutdown_server_services()
 
     _backend = None

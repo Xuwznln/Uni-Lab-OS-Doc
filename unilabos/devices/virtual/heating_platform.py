@@ -447,6 +447,7 @@ class VirtualHeatingPlatform:
         )
 
     @action(
+        display_name="工位加热",
         description="按工位、目标温度和时长加热；实时写回物料 data.temperature_c",
         goal_default={
             "site_id": 1,

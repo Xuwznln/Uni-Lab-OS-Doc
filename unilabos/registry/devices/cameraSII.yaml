@@ -57,7 +57,7 @@ cameracontroller_device:
     module: unilabos.devices.cameraSII.cameraUSB:CameraController
     status_policies: {}
     status_types:
-      status: Dict[str, Any]
+      status: str
     supported_backends:
     - hostlink
     - ros2
@@ -111,7 +111,7 @@ cameracontroller_device:
     data:
       properties:
         status:
-          type: object
+          type: string
       required:
       - status
       type: object

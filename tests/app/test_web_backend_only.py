@@ -10,7 +10,7 @@ def test_web_root_is_a_backend_frontend_catalog() -> None:
     with TestClient(app) as client:
         response = client.get("/")
         assert response.status_code == 200
-        assert "UniLab Microbackend" in response.text
+        assert "Uni-Lab-OS Microbackend" in response.text
         assert "https://xuwznln.github.io/OpenLab-site/" in response.text
         assert "/api/docs" in response.text
         assert "https://deepmodeling.github.io/Uni-Lab-OS/" in response.text
@@ -21,7 +21,7 @@ def test_web_root_signposts_backend_when_edge_is_backend_controlled(monkeypatch)
     with TestClient(app) as client:
         response = client.get("/")
         assert response.status_code == 200
-        assert "UniLab Edge 进程" in response.text
+        assert "Uni-Lab-OS Edge 进程" in response.text
         assert "http://127.0.0.1:8081/" in response.text
         # Edge 侧不再宣传社区前端，前端应连接调度权威地址。
         assert "https://xuwznln.github.io/OpenLab-site/" not in response.text

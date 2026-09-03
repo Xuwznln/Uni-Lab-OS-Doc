@@ -23,6 +23,7 @@ from unilabos.protocol.base import canonical_hash
 # `type`（动作消息类型）在运行期可能被 resolve 成类对象，单独字符串化为
 # action_type，不进 descriptor。
 _DESCRIPTOR_FIELDS = (
+    "display_name",
     "schema",
     "goal_default",
     "handles",
@@ -35,6 +36,69 @@ _DESCRIPTOR_FIELDS = (
     "feedback",
     "result",
 )
+
+_HOST_NODE_REGISTRY_NAME = "host_node"
+
+
+def _registry_name_for_device(adapter: Any, device_id: str) -> str:
+    """从两种执行适配器的运行对象读取设备 registry 名。
+
+    runtime.v1 的设备 route 原本只有 ``device_uuid``，不能可靠地区分
+    ``host_node/manual_confirm`` 与普通设备恰好提供的同名动作。HostLink
+    已有 ``_device_descriptors``；ROS2 HostNode 则把通用包装节点放在
+    ``devices_instances``。这里仅做只读探测，旧/精简测试适配器没有这些
+    属性时由稳定的 host_node id 约定兜底。
+    """
+
+    registry_names = getattr(adapter, "device_registry_names", None)
+    if isinstance(registry_names, dict):
+        value = registry_names.get(device_id)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    descriptors = getattr(adapter, "_device_descriptors", None)
+    if isinstance(descriptors, dict):
+        descriptor = descriptors.get(device_id)
+        if isinstance(descriptor, dict):
+            for key in ("registry_name", "template_name", "class"):
+                value = descriptor.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+
+    instances = getattr(adapter, "devices_instances", None)
+    if isinstance(instances, dict):
+        instance = instances.get(device_id)
+        candidates = (
+            instance,
+            getattr(instance, "_ros_node", None),
+            getattr(instance, "ros_node_instance", None),
+        )
+        for candidate in candidates:
+            value = getattr(candidate, "registry_name", None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+    runtime = getattr(adapter, "runtime", None)
+    local = getattr(runtime, "local", None)
+    local_devices = getattr(local, "devices", None)
+    if isinstance(local_devices, dict):
+        instance = local_devices.get(device_id)
+        value = getattr(instance, "registry_name", None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return ""
+
+
+def _is_host_node_device(adapter: Any, device_id: str) -> tuple[bool, str]:
+    registry_name = _registry_name_for_device(adapter, device_id)
+    # 配置允许把 host 服务实例重命名；没有 registry 元数据的旧适配器
+    # 仍遵循 host_node / host_node_* 的兼容约定。
+    is_host_node = registry_name == _HOST_NODE_REGISTRY_NAME or (
+        not registry_name
+        and (device_id == _HOST_NODE_REGISTRY_NAME or device_id.startswith("host_node_"))
+    )
+    return is_host_node, registry_name
 
 
 def _json_safe(value: Any) -> Any:
@@ -60,6 +124,14 @@ def build_endpoint_capabilities(
     routes: List[DeviceRoute] = []
     capabilities: List[DeviceActionCapability] = []
     for device_id in sorted(devices_names):
+        is_host_node, registry_name = _is_host_node_device(adapter, device_id)
+        route_config: Dict[str, Any] = {}
+        if registry_name:
+            route_config["registry_name"] = registry_name
+        if is_host_node:
+            # 这是 route 元数据而非新的数据库列：旧快照仍可按空 config
+            # 读取，新前端据此只把真正的 host_node 放入人工确认候选。
+            route_config["is_host_node"] = True
         routes.append(
             DeviceRoute(
                 route_uuid=f"route:{device_id}",
@@ -67,7 +139,8 @@ def build_endpoint_capabilities(
                 driver_key=device_id,
                 enabled=True,
                 selected=True,
-                config_hash=canonical_hash({}),
+                config_hash=canonical_hash(route_config),
+                config=route_config,
             )
         )
         device_actions = mappings.get(device_id) or {}

@@ -20,6 +20,12 @@ class _FakeAdapter:
 
     def __init__(self) -> None:
         self.devices_names = {"host_node": "/devices", "prcxi": "/devices"}
+        # route 元数据应能区分真正的 host_node 与同样暴露
+        # manual_confirm 的普通设备。
+        self._device_descriptors = {
+            "host_node": {"registry_name": "host_node"},
+            "prcxi": {"registry_name": "virtual_workbench"},
+        }
         self._action_value_mappings = {
             "host_node": {
                 "transfer_resource": {
@@ -62,6 +68,8 @@ def test_build_endpoint_capabilities_projects_devices_and_actions() -> None:
     )
     assert [route.device_uuid for route in routes] == ["host_node", "prcxi"]
     assert all(route.enabled and route.selected for route in routes)
+    assert routes[0].config == {"registry_name": "host_node", "is_host_node": True}
+    assert routes[1].config == {"registry_name": "virtual_workbench"}
 
     by_key = {
         (item.device_uuid, item.action_name): item for item in capabilities

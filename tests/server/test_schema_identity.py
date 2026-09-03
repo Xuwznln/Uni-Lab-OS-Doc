@@ -34,7 +34,7 @@ def test_one_database_file_cannot_change_role(tmp_path) -> None:
 
 
 def test_schema_drift_rebuilds_database(tmp_path) -> None:
-    """checksum 不一致时删除数据库文件并按当前声明重建。"""
+    """checksum 不一致时把旧库改名保留（.bak-时间戳）并按当前声明重建。"""
     path = tmp_path / "runtime.db"
     connection = initialize_database(path, DATABASE_SPECS["runtime"])
     with connection:
@@ -59,6 +59,53 @@ def test_schema_drift_rebuilds_database(tmp_path) -> None:
             )
         }
         assert "drift_marker" not in tables
+    finally:
+        connection.close()
+
+    # 旧库没有被删：带时间戳的备份仍可打开，drift_marker 还在里面
+    backups = sorted(tmp_path.glob("runtime.db.bak-*"))
+    backups = [item for item in backups if not item.name.endswith(("-wal", "-shm"))]
+    assert len(backups) == 1, backups
+    old = sqlite3.connect(backups[0])
+    try:
+        names = {r[0] for r in old.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "drift_marker" in names
+    finally:
+        old.close()
+
+
+def test_contract_version_bump_rebuilds_database(tmp_path) -> None:
+    """DDL 不变、只是行内容契约变化时，contract_version +1 同样触发删库重建。"""
+    from dataclasses import replace
+
+    spec = DATABASE_SPECS["materials"]
+    previous = replace(spec, contract_version=spec.contract_version - 1)
+    assert previous.checksum != spec.checksum
+
+    path = tmp_path / spec.filename
+    connection = initialize_database(path, previous)
+    with connection:
+        connection.execute(
+            """
+            INSERT INTO inventory_command_effect(
+                command_uuid, effect_key, operation, request_json, request_hash,
+                status, result_json, error_code, error_message,
+                started_at_ms, updated_at_ms, completed_at_ms
+            ) VALUES ('cmd', 'sync_template:x', 'sync_template', '{}', 'h',
+                      'rejected', '{}', 'conflict', 'stale', 1, 1, 1)
+            """
+        )
+    connection.close()
+
+    connection = initialize_database(path, spec)
+    try:
+        row = connection.execute(
+            "SELECT database_key, checksum FROM schema_identity"
+        ).fetchone()
+        assert tuple(row) == ("materials", spec.checksum)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM inventory_command_effect"
+        ).fetchone()[0] == 0
     finally:
         connection.close()
 

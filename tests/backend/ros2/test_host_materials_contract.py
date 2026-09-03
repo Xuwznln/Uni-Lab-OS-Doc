@@ -257,7 +257,7 @@ def test_host_material_actions_shared_by_both_backends() -> None:
     assert set(HOST_SERVICE_ACTIONS) == {
         *host_material_actions.HOST_MATERIAL_ACTIONS,
         "manual_confirm",
-        "auto-test_resource",
+        "test_resource",
         "test_latency",
     }
 
@@ -345,7 +345,11 @@ def test_host_node_registry_is_single_scan_source() -> None:
     import unilabos.registry.registry as registry_module
     from unilabos.backend import host_services
 
-    assert '@device(id="host_node"' in inspect.getsource(host_services)
+    host_services_source = inspect.getsource(host_services)
+    # 装饰器允许按格式化工具拆成多行；这里只验证 AST 扫描依赖的语义字段，
+    # 不把源码排版形式当成注册表契约。
+    assert "@device(" in host_services_source
+    assert 'id="host_node"' in host_services_source
 
     # Registry 被 @singleton 装饰，直接对模块源码断言：
     # host_services.py 进默认扫描 exclude、单独扫描产出 _host_node_ast_entry、

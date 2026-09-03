@@ -24,6 +24,42 @@ AggregateType = Literal[
 ]
 
 
+#: ``InventoryMutation.actor_type`` 的规范取值。字段仍是开放字符串（兼容旧
+#: 客户端），但进程内写点应从这里取值，前端据此渲染变更来源 tag：
+#:
+#: - ``human``          前端/操作员直接编辑（浏览器请求应显式携带）；
+#: - ``graph``          开机图物料对齐（``materials.ensure``，actor_uuid=图 uuid）；
+#: - ``registry``       Registry 资源模板同步（``sync_template``）；
+#: - ``device``         设备驱动创建/快照/转移（actor_uuid=设备 id/uuid）；
+#: - ``virtual_device`` 虚拟设备；
+#: - ``scheduler``      调度器库存预留/释放；
+#: - ``workflow``       工作流动作（如出库扣减 ``apply_deduct_resource``）；
+#: - ``backend``        云端/旧后端同步进来的变更；
+#: - ``edge``           未细分的 Edge 进程内写点（兜底默认值）。
+ACTOR_HUMAN = "human"
+ACTOR_GRAPH = "graph"
+ACTOR_REGISTRY = "registry"
+ACTOR_DEVICE = "device"
+ACTOR_VIRTUAL_DEVICE = "virtual_device"
+ACTOR_SCHEDULER = "scheduler"
+ACTOR_WORKFLOW = "workflow"
+ACTOR_BACKEND = "backend"
+ACTOR_EDGE = "edge"
+KNOWN_ACTOR_TYPES: frozenset[str] = frozenset(
+    {
+        ACTOR_HUMAN,
+        ACTOR_GRAPH,
+        ACTOR_REGISTRY,
+        ACTOR_DEVICE,
+        ACTOR_VIRTUAL_DEVICE,
+        ACTOR_SCHEDULER,
+        ACTOR_WORKFLOW,
+        ACTOR_BACKEND,
+        ACTOR_EDGE,
+    }
+)
+
+
 class AggregatePrecondition(ServerObject):
     aggregate_type: AggregateType
     aggregate_uuid: NonEmptyStr
@@ -44,7 +80,8 @@ class InventoryMutation(ServerObject):
     command_uuid: NonEmptyStr
     effect_key: NonEmptyStr
     operation: NonEmptyStr
-    actor_type: NonEmptyStr = "edge"
+    #: 变更来源，取值见 ``KNOWN_ACTOR_TYPES``；前端按此渲染来源 tag。
+    actor_type: NonEmptyStr = ACTOR_EDGE
     actor_uuid: Optional[NonEmptyStr] = None
     job_uuid: Optional[NonEmptyStr] = None
     observed_at_ms: int = Field(default=0, ge=0)
@@ -449,7 +486,11 @@ class MaterialDeviceSync(ServerObject):
 
 
 class InventoryLotInbound(ServerObject):
-    """登记或补充一批可按数量扣减的试剂/耗材。"""
+    """登记或补充一批按量计量的库存（散装试剂或散装耗材，只记数量/单位/有效期）。
+
+    需要逐件追踪、放到位点的物料（枪头盒、孔板、试剂瓶等）不走 lot，而是作为
+    material 实例创建。
+    """
 
     lot_uuid: Optional[NonEmptyStr] = None
     template_uuid: NonEmptyStr
@@ -477,8 +518,11 @@ class InventoryLotRead(ServerObject):
 class InventoryRequirement(ServerObject):
     """调度器冻结的一项库存需求。
 
-    ``material`` 表示独立物料实例，只改变生命周期而不扣数量；``reagent``
-    表示可计量库存，按 lot FIFO 从 available 预留并在动作开始时扣减。
+    两种 kind 区分的是账目形态而不是物料种类：``material`` 表示独立物料实例
+    （有 uuid、可放到位点的个体，例如枪头盒、孔板、试剂瓶），只改变生命周期而不
+    扣数量；``reagent`` 表示按量计量的 ``inventory_lot`` 库存（散装试剂、散装耗材
+    等），按 lot FIFO 从 available 预留并在动作开始时扣减。``reagent`` 是历史
+    命名，耗材同样可以走这一形态。
     """
 
     key: NonEmptyStr
@@ -640,6 +684,16 @@ class MaterialSnapshotDiff(ServerObject):
 
 
 __all__ = [
+    "ACTOR_BACKEND",
+    "ACTOR_DEVICE",
+    "ACTOR_EDGE",
+    "ACTOR_GRAPH",
+    "ACTOR_HUMAN",
+    "ACTOR_REGISTRY",
+    "ACTOR_SCHEDULER",
+    "ACTOR_VIRTUAL_DEVICE",
+    "ACTOR_WORKFLOW",
+    "KNOWN_ACTOR_TYPES",
     "AggregatePrecondition",
     "AggregateType",
     "AggregateVersion",

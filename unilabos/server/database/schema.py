@@ -1,7 +1,7 @@
 """四个独立 SQLite 文件共用的声明式 schema 与建库入口。
 
 数据库采用 checksum 驱动的重建策略：库内 schema 与当前声明不一致时，
-删除对应数据库文件并按声明重建。
+把旧文件改名保留为 ``<file>.bak-<时间戳>``，再按声明重建空库。
 """
 
 from __future__ import annotations
@@ -9,9 +9,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +32,19 @@ class TableSpec:
 
 @dataclass(frozen=True)
 class DatabaseSpec:
-    """一个物理 SQLite 文件的完整 schema。"""
+    """一个物理 SQLite 文件的完整 schema。
+
+    ``contract_version`` 表示表结构之外的行内容契约（JSON 列的形状、幂等键的
+    派生规则、枚举取值等）。这类变化不改 DDL，但旧行已经无法被当前代码正确
+    解释，同样走删库重建；变更时把版本号 +1 并在旁边注明原因。
+    """
 
     key: str
     filename: str
     role: str
     synchronous: str
     tables: tuple[TableSpec, ...]
+    contract_version: int = 1
 
     @property
     def table_names(self) -> tuple[str, ...]:
@@ -50,7 +57,9 @@ class DatabaseSpec:
 
     @property
     def checksum(self) -> str:
-        canonical = "\n\n".join(self.statements()).encode("utf-8")
+        canonical = "\n\n".join(
+            (f"-- contract_version={self.contract_version}", *self.statements())
+        ).encode("utf-8")
         return hashlib.sha256(canonical).hexdigest()
 
 
@@ -116,11 +125,30 @@ def _needs_rebuild(connection: sqlite3.Connection, spec: DatabaseSpec) -> bool:
     return str(rows[0][1]) != spec.checksum
 
 
-def _delete_database_files(path: Path) -> None:
+def _retire_database_files(path: Path) -> Optional[Path]:
+    """把旧库改名为 ``<file>.bak-<时间戳>`` 而不是直接删除：schema 漂移重建不应该悄悄丢数据。
+
+    WAL / SHM 跟着主文件一起改名（保持 ``<file>-wal`` 后缀约定），旧库仍可用 sqlite 直接打开。
+    返回备份主文件路径；没有旧文件时返回 None。
+    """
+
+    if not path.exists():
+        for suffix in ("-wal", "-shm"):
+            stale = Path(f"{path}{suffix}")
+            if stale.exists():
+                stale.unlink()
+        return None
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = Path(f"{path}.bak-{stamp}")
+    counter = 1
+    while backup.exists():
+        backup = Path(f"{path}.bak-{stamp}-{counter}")
+        counter += 1
     for suffix in ("", "-wal", "-shm"):
-        target = Path(f"{path}{suffix}")
-        if target.exists():
-            target.unlink()
+        source = Path(f"{path}{suffix}")
+        if source.exists():
+            source.replace(Path(f"{backup}{suffix}"))
+    return backup
 
 
 def _apply_schema(connection: sqlite3.Connection, spec: DatabaseSpec) -> None:
@@ -155,11 +183,12 @@ def initialize_database(
         raise
     if rebuild:
         connection.close()
+        backup = _retire_database_files(database_path)
         logger.warning(
-            "数据库 %s 的 schema 与当前代码不一致，正在删除并重建",
+            "数据库 %s 的 schema 与当前代码不一致，已重建；旧库保留为 %s（确认不需要后可删除）",
             database_path,
+            backup or "（无旧文件）",
         )
-        _delete_database_files(database_path)
         connection = _open_connection(database_path, spec, timeout)
     try:
         _apply_schema(connection, spec)

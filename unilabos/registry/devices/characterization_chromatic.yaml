@@ -249,29 +249,23 @@ hplc.agilent-zhida:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: EmptyIn
+          title: abort参数
           type: object
         type: EmptyIn
       auto-close:
@@ -358,46 +352,37 @@ hplc.agilent-zhida:
           string: string
           text: text
         goal_default:
-          string: ''
+          text: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                string:
+                text:
                   type: string
+              required:
+              - text
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
               type: object
           required:
           - goal
-          title: StrSingleInput
+          title: start参数
           type: object
         type: StrSingleInput
     module: unilabos.devices.zhida_hplc.zhida:ZhidaClient
     status_policies: {}
     status_types:
-      methods: dict
-      status: dict
+      methods: str
+      status: str
     supported_backends:
     - hostlink
     - ros2
@@ -425,9 +410,9 @@ hplc.agilent-zhida:
     data:
       properties:
         methods:
-          type: object
+          type: string
         status:
-          type: object
+          type: string
       required:
       - methods
       - status

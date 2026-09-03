@@ -102,23 +102,6 @@ def test_root_class_is_not_used_as_template_name():
     assert resource.template_name == "RegularContainer"
 
 
-def test_normalize_legacy_graph_node_copies_class_only_when_template_name_missing():
-    from unilabos.resources.objects.resource import normalize_legacy_graph_node
-
-    upgraded = normalize_legacy_graph_node({"id": "pump", "class": "pump_demo"})
-    assert upgraded["template_name"] == "pump_demo"
-    assert upgraded["class"] == "pump_demo"
-
-    kept = normalize_legacy_graph_node(
-        {"id": "pump", "class": "legacy_name", "template_name": "pump_demo"}
-    )
-    assert kept["template_name"] == "pump_demo"
-    assert kept["class"] == "legacy_name"
-
-    blank = normalize_legacy_graph_node({"id": "pump", "class": "  "})
-    assert "template_name" not in blank
-
-
 def test_template_name_rejects_conflicting_extra():
     with pytest.raises(ValidationError, match="template_name.*extra.*冲突"):
         ResourceDict.model_validate(

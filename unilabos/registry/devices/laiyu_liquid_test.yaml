@@ -662,7 +662,7 @@ xyz_stepper_controller:
     module: unilabos.devices.liquid_handling.laiyu.drivers.xyz_stepper_driver:XYZStepperController
     status_policies: {}
     status_types:
-      all_positions: Dict[MotorAxis, MotorPosition]
+      all_positions: str
     supported_backends:
     - hostlink
     - ros2
@@ -693,9 +693,7 @@ xyz_stepper_controller:
     data:
       properties:
         all_positions:
-          additionalProperties:
-            type: object
-          type: object
+          type: string
       required:
       - all_positions
       type: object

@@ -39,6 +39,7 @@ EXPECTED_TABLES = {
         "registry_entry",
         "registry_entry_state",
         "registry_report",
+        "lab_layout",
     },
     "materials": {
         "schema_identity",
@@ -175,11 +176,12 @@ def test_total_table_count_stays_small() -> None:
     # 图域并入 materials：material_link（拓扑边）+ lab_graph（命名快照）；
     # workflow / registry 并入 runtime：调度产物与注册表条目版本同库单写者
     # （registry 为条目级版本三表：entry / entry_state / report）；
-    # workflow 节点执行为两级：workflow_node_run（节点运行）+ workflow_node_job（attempt）。
+    # workflow 节点执行为两级：workflow_node_run（节点运行）+ workflow_node_job（attempt）；
+    # lab_layout：实验室布局（区域 / 围墙）单行文档。
     assert {key: len(spec.table_names) for key, spec in DATABASE_SPECS.items()} == {
-        "runtime": 28,
+        "runtime": 29,
         "materials": 13,
         "telemetry": 4,
         "history": 3,
     }
-    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 48
+    assert sum(len(spec.table_names) for spec in DATABASE_SPECS.values()) == 49

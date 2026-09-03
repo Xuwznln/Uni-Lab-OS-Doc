@@ -388,7 +388,10 @@ class VirtualWorkbench:
         无需自订阅自己的 topic（@subscribe 仅用于跨设备订阅）。"""
         return int(time.time() - self._start_time) * 10
 
-    @action(description="跨设备调用演示: 调用目标设备的某个函数并返回其结果")
+    @action(
+        display_name="跨设备调用演示",
+        description="跨设备调用演示: 调用目标设备的某个函数并返回其结果",
+    )
     def call_peer(
         self,
         target_device: str,
@@ -413,6 +416,8 @@ class VirtualWorkbench:
         return {"success": True, "target_device": target_device, "function_name": function_name, "return_value": return_value}
 
     @action(
+        display_name="人工确认转移与扣电参数",
+        description="人工确认物料转移目标与扣电测试参数，确认后原样透传给下游节点",
         always_free=True,
         node_type=NodeType.MANUAL_CONFIRM,
         placeholder_keys={"assignee_user_ids": "unilabos_manual_confirm"},
@@ -563,7 +568,8 @@ class VirtualWorkbench:
         return kwargs
 
     @action(
-        description="转移物料",
+        display_name="转移物料",
+        description="转移物料到目标设备的目标孔位",
         handles=[
             ActionInputHandle(
                 key="target_device",
@@ -614,6 +620,7 @@ class VirtualWorkbench:
         )
 
     @action(
+        display_name="启动扣电测试",
         description="扣电测试启动",
         handles=[
             ActionInputHandle(
@@ -689,6 +696,7 @@ class VirtualWorkbench:
 
     @action(
         auto_prefix=True,
+        display_name="批量准备物料",
         description="批量准备物料 - 虚拟起始节点, 生成A1-A5物料, 输出5个handle供后续节点使用",
         handles=[
             ActionOutputHandle(key="channel_1", data_type="workbench_material", label="实验1", data_key="material_1", data_source=DataSource.EXECUTOR),  # noqa: E501
@@ -743,6 +751,7 @@ class VirtualWorkbench:
 
     @action(
         auto_prefix=True,
+        display_name="移动物料到加热台",
         description="将物料从An位置移动到空闲加热台, 返回分配的加热台ID",
         handles=[
             ActionInputHandle(
@@ -877,6 +886,7 @@ class VirtualWorkbench:
     @action(
         auto_prefix=True,
         always_free=True,
+        display_name="启动加热",
         description="启动指定加热台的加热程序",
         handles=[
             ActionInputHandle(
@@ -1068,6 +1078,7 @@ class VirtualWorkbench:
 
     @action(
         auto_prefix=True,
+        display_name="移动物料到输出位",
         description="将物料从加热台移动到输出位置Cn",
         handles=[
             ActionInputHandle(

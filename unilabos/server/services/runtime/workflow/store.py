@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 from uuid import uuid4
@@ -42,6 +42,20 @@ def _load(value: Optional[str], fallback: Any) -> Any:
     if value is None or value == "":
         return fallback
     return decode_json_bytes(value.encode("utf-8"))
+
+
+def _parse_utc(value: Optional[str]) -> Optional[datetime]:
+    """解析本地生成的 UTC ISO 时间；坏值按无期限处理，避免读接口崩溃。"""
+
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class WorkflowStore:
@@ -1184,6 +1198,487 @@ class WorkflowStore:
                 (task_uuid, *paging),
             ).fetchall()
         return [self._manual_confirmation_row(row) for row in rows]
+
+    def get_manual_confirmation(self, confirmation_uuid: str) -> Dict[str, Any]:
+        """读取一条人工确认事实；不把数据库行直接暴露给调用方。"""
+
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM workflow_manual_confirmation
+                WHERE uuid = ? AND deleted_at IS NULL
+                """,
+                (confirmation_uuid,),
+            ).fetchone()
+        if row is None:
+            raise StoreNotFound(
+                f"workflow manual confirmation {confirmation_uuid} not found"
+            )
+        return self._manual_confirmation_row(row)
+
+    def get_manual_confirmation_for_job(
+        self, job_uuid: str
+    ) -> Optional[Dict[str, Any]]:
+        """按 attempt 查确认单；一个 job 最多一张单。"""
+
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT * FROM workflow_manual_confirmation
+                WHERE workflow_node_job_uuid = ? AND deleted_at IS NULL
+                ORDER BY create_time, uuid
+                LIMIT 1
+                """,
+                (job_uuid,),
+            ).fetchone()
+        return None if row is None else self._manual_confirmation_row(row)
+
+    @staticmethod
+    def _normalize_manual_assignees(value: Any) -> List[str]:
+        """校验并规范人工确认指派列表；显式 ``[]`` 是合法且有意义的值。"""
+
+        if not isinstance(value, list):
+            raise StoreConflict("assignee_user_ids must be an explicit list")
+        result: List[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise StoreConflict("assignee_user_ids must contain strings")
+            normalized = item.strip()
+            if normalized and normalized not in result:
+                result.append(normalized)
+        return result
+
+    @staticmethod
+    def _manual_decision_status(action: str) -> tuple[str, str]:
+        """返回持久化状态与审计用的规范动作名。"""
+
+        normalized = str(action or "").strip().lower()
+        aliases = {
+            "approve": ("approved", "approve"),
+            "approved": ("approved", "approve"),
+            "confirm": ("approved", "approve"),
+            "confirmed": ("approved", "approve"),
+            "skip": ("approved", "skip"),
+            "skipped": ("approved", "skip"),
+            "reject": ("rejected", "reject"),
+            "rejected": ("rejected", "reject"),
+            "deny": ("rejected", "reject"),
+            "cancel": ("canceled", "cancel"),
+            "canceled": ("canceled", "cancel"),
+            "timeout": ("timed_out", "timeout"),
+            "timed_out": ("timed_out", "timeout"),
+            "expire": ("timed_out", "timeout"),
+            "expired": ("timed_out", "timeout"),
+        }
+        try:
+            return aliases[normalized]
+        except KeyError as exc:
+            raise StoreConflict(f"unsupported manual confirmation action: {action!r}") from exc
+
+    def open_manual_confirmation(
+        self,
+        job_uuid: str,
+        *,
+        param: Dict[str, Any],
+        description: Optional[str] = None,
+        meta_data: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[int] = 3600,
+        confirmation_uuid: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """为一个 pending attempt 建立 durable 人工确认闸门。
+
+        这里刻意要求 ``param`` 中存在 ``assignee_user_ids``：缺 key 代表编辑器
+        尚未完成配置，显式 ``[]`` 才代表“不指派，任何人可确认”。数据库列本身
+        始终是 JSON array，完整原始动作参数则保存在 ``param``。
+        """
+
+        if not isinstance(param, dict):
+            raise StoreConflict("manual confirmation param must be an object")
+        if "assignee_user_ids" not in param:
+            raise StoreConflict(
+                "manual confirmation requires explicit assignee_user_ids (use [] for unrestricted)"
+            )
+        assignees = self._normalize_manual_assignees(param["assignee_user_ids"])
+        normalized_param = dict(param)
+        normalized_param["assignee_user_ids"] = assignees
+        if timeout_seconds is not None:
+            if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int):
+                raise StoreConflict("timeout_seconds must be an integer")
+            if timeout_seconds <= 0:
+                raise StoreConflict("timeout_seconds must be positive")
+        if meta_data is not None and not isinstance(meta_data, dict):
+            raise StoreConflict("manual confirmation meta_data must be an object")
+        normalized_description = (
+            str(description).strip() if description is not None else None
+        ) or None
+        requested_uuid = str(confirmation_uuid or uuid4()).strip()
+        if not requested_uuid:
+            raise StoreConflict("manual confirmation uuid must not be blank")
+
+        with self.transaction() as conn:
+            job = conn.execute(
+                """
+                SELECT * FROM workflow_node_job
+                WHERE uuid = ? AND deleted_at IS NULL
+                """,
+                (job_uuid,),
+            ).fetchone()
+            if job is None:
+                raise StoreNotFound(f"workflow node job {job_uuid} not found")
+            task = conn.execute(
+                """
+                SELECT * FROM workflow_task
+                WHERE uuid = ? AND deleted_at IS NULL
+                """,
+                (job["workflow_task_uuid"],),
+            ).fetchone()
+            if task is None:
+                raise StoreNotFound(
+                    f"workflow task {job['workflow_task_uuid']} not found"
+                )
+
+            existing = conn.execute(
+                """
+                SELECT * FROM workflow_manual_confirmation
+                WHERE workflow_node_job_uuid = ? AND deleted_at IS NULL
+                ORDER BY create_time, uuid
+                LIMIT 1
+                """,
+                (job_uuid,),
+            ).fetchone()
+            if existing is not None:
+                if existing["workflow_task_uuid"] != job["workflow_task_uuid"]:
+                    raise StoreConflict("manual confirmation task/job mismatch")
+                return self._manual_confirmation_row(existing)
+
+            if task["status"] in {"succeeded", "failed", "canceled", "timeout"}:
+                raise StoreConflict("cannot open confirmation for a terminal task")
+            if job["status"] in self._RUN_TERMINAL:
+                raise StoreConflict("cannot open confirmation for a terminal job")
+
+            now = utc_now()
+            deadline = None
+            if timeout_seconds is not None:
+                deadline = (
+                    datetime.now(timezone.utc)
+                    + timedelta(seconds=timeout_seconds)
+                ).isoformat().replace("+00:00", "Z")
+            marker = {
+                "uuid": requested_uuid,
+                "status": "pending",
+                "assignee_user_ids": assignees,
+                "opened_at": now,
+                "deadline_at": deadline,
+            }
+            conn.execute(
+                """
+                INSERT INTO workflow_manual_confirmation(
+                    uuid, create_time, update_time, deleted_at, description, meta_data,
+                    workflow_task_uuid, workflow_node_job_uuid, status,
+                    assignee_user_ids, param, opened_at, deadline_at
+                ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                """,
+                (
+                    requested_uuid,
+                    now,
+                    now,
+                    normalized_description,
+                    _json(dict(meta_data or {})),
+                    job["workflow_task_uuid"],
+                    job_uuid,
+                    _json(assignees),
+                    _json(normalized_param),
+                    now,
+                    deadline,
+                ),
+            )
+            control_data = _load(job["control_data"], {})
+            if not isinstance(control_data, dict):
+                control_data = {}
+            control_data["manual_confirmation"] = marker
+            conn.execute(
+                """
+                UPDATE workflow_node_job
+                SET control_data = ?, update_time = ?
+                WHERE uuid = ?
+                """,
+                (_json(control_data), now, job_uuid),
+            )
+            self._emit_job_changed(
+                conn,
+                job,
+                job["status"],
+                now,
+                manual_confirmation_uuid=requested_uuid,
+                manual_confirmation_status="pending",
+            )
+            run = conn.execute(
+                "SELECT * FROM workflow_node_run WHERE uuid = ? AND deleted_at IS NULL",
+                (job["workflow_node_run_uuid"],),
+            ).fetchone()
+            if run is not None:
+                run_control = _load(run["control_data"], {})
+                if not isinstance(run_control, dict):
+                    run_control = {}
+                run_control["manual_confirmation"] = marker
+                conn.execute(
+                    "UPDATE workflow_node_run SET control_data = ?, update_time = ? WHERE uuid = ?",
+                    (_json(run_control), now, run["uuid"]),
+                )
+                self._sync_run_projection(conn, run["uuid"], now)
+            self._append_event(
+                conn,
+                event="workflow.manual_confirmation.changed",
+                data={
+                    "uuid": requested_uuid,
+                    "task_uuid": job["workflow_task_uuid"],
+                    "workflow_task_uuid": job["workflow_task_uuid"],
+                    "workflow_node_job_uuid": job_uuid,
+                    "status": "pending",
+                    "assignee_user_ids": assignees,
+                },
+                now=now,
+            )
+            row = conn.execute(
+                "SELECT * FROM workflow_manual_confirmation WHERE uuid = ?",
+                (requested_uuid,),
+            ).fetchone()
+            assert row is not None
+            return self._manual_confirmation_row(row)
+
+    def _transition_manual_confirmation_locked(
+        self,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        status: str,
+        action: str,
+        confirmed_by: Optional[str],
+        comment: Optional[str],
+        decision_idempotency_key: str,
+        now: str,
+        expired_before_decision: bool = False,
+    ) -> Dict[str, Any]:
+        metadata = _load(row["meta_data"], {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata["decision_action"] = action
+        if expired_before_decision:
+            metadata["expired_before_decision"] = True
+        conn.execute(
+            """
+            UPDATE workflow_manual_confirmation
+            SET status = ?, confirmed_by = ?, comment = ?,
+                decision_idempotency_key = ?, decided_at = ?,
+                meta_data = ?, update_time = ?
+            WHERE uuid = ? AND deleted_at IS NULL
+            """,
+            (
+                status,
+                confirmed_by,
+                comment,
+                decision_idempotency_key,
+                now,
+                _json(metadata),
+                now,
+                row["uuid"],
+            ),
+        )
+        job = conn.execute(
+            "SELECT * FROM workflow_node_job WHERE uuid = ? AND deleted_at IS NULL",
+            (row["workflow_node_job_uuid"],),
+        ).fetchone()
+        if job is not None:
+            control_data = _load(job["control_data"], {})
+            if not isinstance(control_data, dict):
+                control_data = {}
+            marker = control_data.get("manual_confirmation")
+            if not isinstance(marker, dict):
+                marker = {"uuid": row["uuid"]}
+            marker.update(
+                {
+                    "status": status,
+                    "decision_action": action,
+                    "confirmed_by": confirmed_by,
+                    "comment": comment,
+                    "decision_idempotency_key": decision_idempotency_key,
+                    "decided_at": now,
+                }
+            )
+            control_data["manual_confirmation"] = marker
+            conn.execute(
+                "UPDATE workflow_node_job SET control_data = ?, update_time = ? WHERE uuid = ?",
+                (_json(control_data), now, job["uuid"]),
+            )
+            self._emit_job_changed(
+                conn,
+                job,
+                job["status"],
+                now,
+                manual_confirmation_uuid=row["uuid"],
+                manual_confirmation_status=status,
+                decision_action=action,
+            )
+            run = conn.execute(
+                "SELECT * FROM workflow_node_run WHERE uuid = ? AND deleted_at IS NULL",
+                (job["workflow_node_run_uuid"],),
+            ).fetchone()
+            if run is not None:
+                run_control = _load(run["control_data"], {})
+                if not isinstance(run_control, dict):
+                    run_control = {}
+                run_marker = run_control.get("manual_confirmation")
+                if not isinstance(run_marker, dict):
+                    run_marker = {"uuid": row["uuid"]}
+                run_marker.update(marker)
+                run_control["manual_confirmation"] = run_marker
+                conn.execute(
+                    "UPDATE workflow_node_run SET control_data = ?, update_time = ? WHERE uuid = ?",
+                    (_json(run_control), now, run["uuid"]),
+                )
+                self._sync_run_projection(conn, run["uuid"], now)
+        self._append_event(
+            conn,
+            event="workflow.manual_confirmation.changed",
+            data={
+                "uuid": row["uuid"],
+                "task_uuid": row["workflow_task_uuid"],
+                "workflow_task_uuid": row["workflow_task_uuid"],
+                "workflow_node_job_uuid": row["workflow_node_job_uuid"],
+                "status": status,
+                "decision_action": action,
+                "confirmed_by": confirmed_by,
+            },
+            now=now,
+        )
+        updated = conn.execute(
+            "SELECT * FROM workflow_manual_confirmation WHERE uuid = ?",
+            (row["uuid"],),
+        ).fetchone()
+        assert updated is not None
+        return self._manual_confirmation_row(updated)
+
+    def decide_manual_confirmation(
+        self,
+        confirmation_uuid: str,
+        *,
+        action: str,
+        confirmed_by: Optional[str] = None,
+        comment: Optional[str] = None,
+        decision_idempotency_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """原子地记录人工确认决策；调度器随后消费该事实完成 job。"""
+
+        status, normalized_action = self._manual_decision_status(action)
+        actor = str(confirmed_by or "").strip() or None
+        normalized_comment = (
+            str(comment).strip() if comment is not None else None
+        ) or None
+        supplied_key = (
+            str(decision_idempotency_key).strip()
+            if decision_idempotency_key is not None
+            else None
+        )
+        if supplied_key == "":
+            raise StoreConflict("decision_idempotency_key must not be blank")
+
+        with self.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM workflow_manual_confirmation
+                WHERE uuid = ? AND deleted_at IS NULL
+                """,
+                (confirmation_uuid,),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound(
+                    f"workflow manual confirmation {confirmation_uuid} not found"
+                )
+            stored_key = row["decision_idempotency_key"]
+            if row["status"] != "pending":
+                if supplied_key is not None and stored_key not in {None, supplied_key}:
+                    raise StoreConflict("manual confirmation already has another decision")
+                return self._manual_confirmation_row(row)
+
+            assignees = self._normalize_manual_assignees(
+                _load(row["assignee_user_ids"], [])
+            )
+            # 取消/超时由调度器或运维触发，不受人工指派人限制；批准/拒绝/跳过
+            # 在非空列表时必须由名单中的用户作出。
+            if status not in {"canceled", "timed_out"}:
+                effective_actor = actor or ("operator" if not assignees else "")
+                if assignees and effective_actor not in assignees:
+                    raise StoreConflict("confirmed_by is not an assignee")
+                actor = effective_actor or None
+            elif actor is None:
+                actor = "scheduler"
+
+            now_dt = datetime.now(timezone.utc)
+            deadline = _parse_utc(row["deadline_at"])
+            expired = deadline is not None and deadline <= now_dt
+            if expired and status not in {"canceled", "timed_out"}:
+                status = "timed_out"
+                normalized_action = "timeout"
+
+            key = supplied_key or str(uuid4())
+            collision = conn.execute(
+                """
+                SELECT uuid FROM workflow_manual_confirmation
+                WHERE decision_idempotency_key = ? AND uuid <> ?
+                """,
+                (key, confirmation_uuid),
+            ).fetchone()
+            if collision is not None:
+                raise StoreConflict("decision_idempotency_key already used")
+            return self._transition_manual_confirmation_locked(
+                conn,
+                row,
+                status=status,
+                action=normalized_action,
+                confirmed_by=actor,
+                comment=normalized_comment,
+                decision_idempotency_key=key,
+                now=utc_now(),
+                expired_before_decision=expired,
+            )
+
+    def expire_due_manual_confirmations(
+        self, *, now: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """把到期 pending 单原子收敛为 timed_out，供 API/调度器 watchdog 调用。"""
+
+        effective_now = now or utc_now()
+        effective_dt = _parse_utc(effective_now)
+        if effective_dt is None:
+            raise StoreConflict("invalid expiration timestamp")
+        expired_rows: List[Dict[str, Any]] = []
+        with self.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM workflow_manual_confirmation
+                WHERE status = 'pending' AND deleted_at IS NULL
+                  AND deadline_at IS NOT NULL
+                ORDER BY deadline_at, uuid
+                """
+            ).fetchall()
+            for row in rows:
+                deadline = _parse_utc(row["deadline_at"])
+                if deadline is None or deadline > effective_dt:
+                    continue
+                expired_rows.append(
+                    self._transition_manual_confirmation_locked(
+                        conn,
+                        row,
+                        status="timed_out",
+                        action="timeout",
+                        confirmed_by="scheduler",
+                        comment=None,
+                        decision_idempotency_key=str(uuid4()),
+                        now=effective_now,
+                        expired_before_decision=True,
+                    )
+                )
+        return expired_rows
 
     def list_interventions(
         self, task_uuid: str, *, limit: Optional[int] = None, offset: int = 0

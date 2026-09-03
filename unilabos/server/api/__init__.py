@@ -17,7 +17,12 @@ from unilabos.server.api.materials import (
     install_graph_api,
     install_materials_api,
 )
-from unilabos.server.api.runtime import create_runtime_router, install_runtime_api
+from unilabos.server.api.runtime import (
+    create_lab_router,
+    create_runtime_router,
+    install_lab_api,
+    install_runtime_api,
+)
 from unilabos.server.api.telemetry import (
     create_telemetry_router,
     install_telemetry_api,
@@ -38,6 +43,7 @@ def install_server_apis(
     """
 
     install_runtime_api(app, services.runtime)
+    install_lab_api(app, services.lab)
     if include_materials:
         install_materials_api(app, services.materials)
     install_telemetry_api(app, services.telemetry)
@@ -50,12 +56,14 @@ __all__ = [
     "create_debug_router",
     "create_graph_router",
     "create_history_router",
+    "create_lab_router",
     "create_materials_router",
     "create_runtime_router",
     "create_telemetry_router",
     "install_debug_api",
     "install_graph_api",
     "install_history_api",
+    "install_lab_api",
     "install_materials_api",
     "install_runtime_api",
     "install_server_apis",

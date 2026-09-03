@@ -105,9 +105,14 @@ def _run(
                 and getattr(resources_config, "trees", None)
                 and not BasicConfig.slave_no_host
             ):
+                from unilabos.protocol.materials import ACTOR_GRAPH
                 from unilabos.resources import materials
 
-                ensured = materials.ensure(resources_config)
+                ensured = materials.ensure(
+                    resources_config,
+                    actor_type=ACTOR_GRAPH,
+                    actor_uuid=BasicConfig.machine_name or None,
+                )
                 logger.info(
                     "[HostLink] Slave 物料权威对齐完成: %s 棵树（uuid 与图一致）",
                     len(ensured.trees),

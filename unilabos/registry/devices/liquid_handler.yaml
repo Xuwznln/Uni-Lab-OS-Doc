@@ -26,265 +26,115 @@ liquid_handler:
           targets: targets
           use_channels: use_channels
         goal_default:
-          asp_vols: []
-          blow_out_air_volume: []
-          dis_vols: []
-          flow_rates: []
+          asp_vols: null
+          blow_out_air_volume: null
+          delays: null
+          dis_vols: null
+          flow_rates: null
           is_96_well: false
-          liquid_height: []
-          mix_liquid_height: 0.0
-          mix_rate: 0
-          mix_time: 0
-          mix_vol: 0
+          liquid_height: null
+          mix_liquid_height: null
+          mix_rate: null
+          mix_time: null
+          mix_vol: null
           none_keys: []
-          offsets: []
-          reagent_sources: []
-          spread: ''
-          targets: []
-          use_channels: []
+          offsets: null
+          reagent_sources: null
+          spread: wide
+          targets: null
+          use_channels: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           reagent_sources: unilabos_resources
           targets: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerAdd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 asp_vols:
-                  items:
-                    type: number
-                  type: array
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 blow_out_air_volume:
                   items:
                     type: number
                   type: array
-                dis_vols:
+                delays:
                   items:
-                    type: number
+                    type: integer
                   type: array
+                dis_vols:
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 flow_rates:
                   items:
                     type: number
                   type: array
                 is_96_well:
+                  default: false
                   type: boolean
                 liquid_height:
                   items:
                     type: number
                   type: array
                 mix_liquid_height:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_rate:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_time:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_vol:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 reagent_sources:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 spread:
+                  default: wide
+                  enum:
+                  - wide
+                  - tight
+                  - custom
                   type: string
                 targets:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 use_channels:
                   items:
                     type: integer
                   type: array
+              required:
+              - asp_vols
+              - dis_vols
+              - reagent_sources
+              - targets
               title: LiquidHandlerAdd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerAdd_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerAdd
+          title: add_liquid参数
           type: object
         type: LiquidHandlerAdd
       aspirate:
@@ -681,7 +531,7 @@ liquid_handler:
                       type: string
                     extra:
                       additionalProperties: true
-                      description: UniLab communication and conversion metadata
+                      description: Uni-Lab-OS communication and conversion metadata
                       title: Extra
                       type: object
                     icon:
@@ -1101,83 +951,7 @@ liquid_handler:
                     type: string
                   type: array
                 plate:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
+                  description: materials.v1 resource reference
                   title: plate
                   type: object
                 volumes:
@@ -1238,7 +1012,7 @@ liquid_handler:
                       type: string
                     extra:
                       additionalProperties: true
-                      description: UniLab communication and conversion metadata
+                      description: Uni-Lab-OS communication and conversion metadata
                       title: Extra
                       type: object
                     icon:
@@ -2260,152 +2034,52 @@ liquid_handler:
           offsets: offsets
           targets: targets
         goal_default:
-          height_to_bottom: 0.0
-          mix_rate: 0.0
-          mix_time: 0
-          mix_vol: 0
+          height_to_bottom: null
+          mix_rate: null
+          mix_time: null
+          mix_vol: null
           none_keys: []
-          offsets: []
-          targets: []
+          offsets: null
+          targets: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerMix_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 height_to_bottom:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_rate:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_time:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_vol:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
                 offsets:
-                  items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
-                    type: object
-                  type: array
+                  type: object
                 targets:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
+              required:
+              - targets
               title: LiquidHandlerMix_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerMix_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerMix
+          title: mix参数
           type: object
         type: LiquidHandlerMix
       move_lid:
@@ -3406,163 +3080,44 @@ liquid_handler:
           well: well
         goal_default:
           channel: 0
-          dis_to_top: 0.0
-          well:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          dis_to_top: 0
+          well: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerMoveTo_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 channel:
+                  default: 0
                   description: int
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 dis_to_top:
+                  default: 0
                   description: 'float
 
                     Height in mm to move to relative to the well top.'
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 well:
-                  additionalProperties: false
                   description: 'Well
 
                     The target well.'
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: well
                   type: object
+              required:
+              - well
               title: LiquidHandlerMoveTo_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerMoveTo_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerMoveTo
+          title: move_to参数
           type: object
         type: LiquidHandlerMoveTo
       pick_up_tips:
@@ -4185,55 +3740,31 @@ liquid_handler:
           vols: vols
           waste_liquid: waste_liquid
         goal_default:
-          blow_out_air_volume: []
-          delays: []
-          flow_rates: []
+          blow_out_air_volume: null
+          delays: null
+          flow_rates: null
           is_96_well: false
-          liquid_height: []
+          liquid_height: null
           none_keys: []
-          offsets: []
-          sources: []
-          spread: ''
-          top: []
-          use_channels: []
-          vols: []
-          waste_liquid:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          offsets: null
+          sources: null
+          spread: wide
+          top: null
+          use_channels: null
+          vols: null
+          waste_liquid: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           sources: unilabos_resources
           waste_liquid: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerRemove_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 blow_out_air_volume:
                   items:
@@ -4248,105 +3779,31 @@ liquid_handler:
                     type: number
                   type: array
                 is_96_well:
+                  default: false
                   type: boolean
                 liquid_height:
                   items:
                     type: number
                   type: array
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 sources:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 spread:
+                  default: wide
+                  enum:
+                  - wide
+                  - tight
+                  - custom
                   type: string
                 top:
                   items:
@@ -4361,110 +3818,18 @@ liquid_handler:
                     type: number
                   type: array
                 waste_liquid:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: waste_liquid
                   type: object
+              required:
+              - vols
+              - sources
               title: LiquidHandlerRemove_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerRemove_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerRemove
+          title: remove_liquid参数
           type: object
         type: LiquidHandlerRemove
       return_tips:
@@ -4944,27 +4309,27 @@ liquid_handler:
           touch_tip: touch_tip
           use_channels: use_channels
         goal_default:
-          asp_flow_rates: []
-          asp_vols: []
-          blow_out_air_volume: []
-          delays: []
-          dis_flow_rates: []
-          dis_vols: []
+          asp_flow_rates: null
+          asp_vols: null
+          blow_out_air_volume: null
+          delays: null
+          dis_flow_rates: null
+          dis_vols: null
           is_96_well: false
-          liquid_height: []
-          mix_liquid_height: 0.0
-          mix_rate: 0
-          mix_stage: ''
-          mix_times: 0
-          mix_vol: 0
+          liquid_height: null
+          mix_liquid_height: null
+          mix_rate: null
+          mix_stage: none
+          mix_times: null
+          mix_vol: null
           none_keys: []
-          offsets: []
-          sources: []
-          spread: ''
-          targets: []
-          tip_racks: []
+          offsets: null
+          sources: null
+          spread: wide
+          targets: null
+          tip_racks: null
           touch_tip: false
-          use_channels: []
+          use_channels: null
         handles:
           input:
           - data_key: sources
@@ -4998,27 +4363,24 @@ liquid_handler:
           sources: unilabos_resources
           targets: unilabos_resources
           tip_racks: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerTransfer_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 asp_flow_rates:
                   items:
                     type: number
                   type: array
                 asp_vols:
-                  items:
-                    type: number
-                  type: array
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 blow_out_air_volume:
                   items:
                     type: number
@@ -5032,296 +4394,516 @@ liquid_handler:
                     type: number
                   type: array
                 dis_vols:
-                  items:
-                    type: number
-                  type: array
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 is_96_well:
+                  default: false
                   type: boolean
                 liquid_height:
                   items:
                     type: number
                   type: array
                 mix_liquid_height:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_rate:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_stage:
+                  default: none
+                  enum:
+                  - none
+                  - before
+                  - after
+                  - both
                   type: string
                 mix_times:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_vol:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 sources:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 spread:
+                  default: wide
+                  enum:
+                  - wide
+                  - tight
+                  - custom
                   type: string
                 targets:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 tip_racks:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 touch_tip:
+                  default: false
                   type: boolean
                 use_channels:
                   items:
                     type: integer
                   type: array
+              required:
+              - sources
+              - targets
+              - tip_racks
+              - asp_vols
+              - dis_vols
               title: LiquidHandlerTransfer_Goal
               type: object
             result:
-              additionalProperties: false
+              $defs:
+                JsonValue: {}
+                ResourceDict:
+                  description: 资源实例的唯一规范快照；运行时树行为留在 ``resource_tracker``。
+                  properties:
+                    barcode:
+                      default: ''
+                      description: Material barcode
+                      title: Barcode
+                      type: string
+                    barcode_symbology:
+                      default: ''
+                      description: Barcode symbology / 码制
+                      title: Barcode Symbology
+                      type: string
+                    class:
+                      description: Resource class name
+                      title: Class
+                      type: string
+                    config:
+                      additionalProperties: true
+                      description: Resource configuration
+                      title: Config
+                      type: object
+                    data:
+                      additionalProperties: true
+                      description: 'Resource data, eg: container data without liquids,
+                        since liquids are tracked separately'
+                      title: Data
+                      type: object
+                    description:
+                      default: ''
+                      description: Resource description
+                      title: Description
+                      type: string
+                    display_name:
+                      default: ''
+                      description: Display name; authority falls back to name when
+                        empty
+                      title: Display Name
+                      type: string
+                    extra:
+                      additionalProperties: true
+                      description: Uni-Lab-OS communication and conversion metadata
+                      title: Extra
+                      type: object
+                    icon:
+                      default: ''
+                      description: Resource icon
+                      title: Icon
+                      type: string
+                    id:
+                      description: Resource ID
+                      title: Id
+                      type: string
+                    joint_state:
+                      anyOf:
+                      - $ref: '#/$defs/ResourceJointState'
+                      - type: 'null'
+                      default: null
+                      description: Frequently changing device joint state; independent
+                        from pose
+                    liquid_history:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - anyOf:
+                            - type: string
+                            - type: 'null'
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: VolumeTracker (liquid_name, delta, unit) event
+                        history
+                      title: Liquid History
+                    machine_name:
+                      default: ''
+                      description: Machine this resource belongs to
+                      title: Machine Name
+                      type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      description: Canonical resource metadata
+                      title: Meta Data
+                      type: object
+                    model:
+                      additionalProperties: true
+                      description: Resource model
+                      title: Model
+                      type: object
+                    name:
+                      description: Resource name
+                      title: Name
+                      type: string
+                    parent:
+                      anyOf:
+                      - $ref: '#/$defs/ResourceDict'
+                      - type: 'null'
+                      default: null
+                      description: Parent resource object
+                    parent_uuid:
+                      anyOf:
+                      - type: string
+                      - type: 'null'
+                      default: null
+                      description: Parent resource uuid
+                      title: Parent Uuid
+                    pose:
+                      $ref: '#/$defs/ResourceDictPosition'
+                      description: Resource pose relative to its parent, plus geometry/layout
+                        metadata
+                    resource_template_uuid:
+                      default: ''
+                      description: Micro-backend ResourceTemplate UUID
+                      title: Resource Template Uuid
+                      type: string
+                    schema:
+                      additionalProperties: true
+                      description: Resource schema
+                      title: Schema
+                      type: object
+                    sites:
+                      anyOf:
+                      - items:
+                          $ref: '#/$defs/ResourceSite'
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Carrier site definitions / 载架位点
+                      title: Sites
+                    sites_initialized:
+                      default: false
+                      description: Whether site preparation has run for this resource
+                        instance
+                      title: Sites Initialized
+                      type: boolean
+                    substances:
+                      anyOf:
+                      - items:
+                          maxItems: 3
+                          minItems: 3
+                          prefixItems:
+                          - type: string
+                          - type: number
+                          - type: string
+                          type: array
+                        type: array
+                      - type: 'null'
+                      default: null
+                      description: Current (substance_name, quantity, unit) entries
+                      title: Substances
+                    template_name:
+                      default: ''
+                      description: Edge resource template name
+                      title: Template Name
+                      type: string
+                    type:
+                      anyOf:
+                      - const: device
+                        type: string
+                      - type: string
+                      description: Resource type
+                      title: Type
+                    unknown_counter:
+                      anyOf:
+                      - minimum: 0
+                        type: integer
+                      - type: 'null'
+                      default: null
+                      description: Unnamed liquid counter
+                      title: Unknown Counter
+                    uuid:
+                      description: Resource UUID
+                      title: Uuid
+                      type: string
+                  required:
+                  - id
+                  - uuid
+                  - name
+                  - type
+                  - class
+                  - config
+                  - data
+                  - extra
+                  title: ResourceDict
+                  type: object
+                ResourceDictPosition:
+                  additionalProperties: false
+                  properties:
+                    cross_section_type:
+                      default: rectangle
+                      description: Cross section type
+                      enum:
+                      - rectangle
+                      - circle
+                      - rounded_rectangle
+                      title: Cross Section Type
+                      type: string
+                    extra:
+                      anyOf:
+                      - additionalProperties: true
+                        type: object
+                      - type: 'null'
+                      default: null
+                      description: Extra data
+                      title: Extra
+                    layout:
+                      default: x-y
+                      description: Resource layout
+                      enum:
+                      - 2d
+                      - x-y
+                      - z-y
+                      - x-z
+                      title: Layout
+                      type: string
+                    position:
+                      anyOf:
+                      - $ref: '#/$defs/ResourceDictPositionObject'
+                      - type: 'null'
+                      default: null
+                      description: Actual position relative to the parent resource
+                    position3d:
+                      $ref: '#/$defs/ResourceDictPositionObject'
+                      description: 3D layout/visualization position; not a second
+                        runtime position
+                    rotation:
+                      $ref: '#/$defs/ResourceDictPositionObject'
+                      description: Resource rotation
+                    scale:
+                      $ref: '#/$defs/ResourceDictPositionScale'
+                      description: Resource scale
+                    size:
+                      $ref: '#/$defs/ResourceDictPositionSize'
+                      description: Resource size
+                  title: ResourceDictPosition
+                  type: object
+                ResourceDictPositionObject:
+                  additionalProperties: false
+                  properties:
+                    x:
+                      description: X coordinate
+                      title: X
+                      type: number
+                    y:
+                      description: Y coordinate
+                      title: Y
+                      type: number
+                    z:
+                      description: Z coordinate
+                      title: Z
+                      type: number
+                  required:
+                  - x
+                  - y
+                  - z
+                  title: ResourceDictPositionObject
+                  type: object
+                ResourceDictPositionScale:
+                  additionalProperties: false
+                  properties:
+                    x:
+                      description: x scale
+                      title: X
+                      type: number
+                    y:
+                      description: y scale
+                      title: Y
+                      type: number
+                    z:
+                      description: z scale
+                      title: Z
+                      type: number
+                  required:
+                  - x
+                  - y
+                  - z
+                  title: ResourceDictPositionScale
+                  type: object
+                ResourceDictPositionSize:
+                  additionalProperties: false
+                  properties:
+                    depth:
+                      description: Depth
+                      minimum: 0.0
+                      title: Depth
+                      type: number
+                    height:
+                      description: Height
+                      minimum: 0.0
+                      title: Height
+                      type: number
+                    width:
+                      description: Width
+                      minimum: 0.0
+                      title: Width
+                      type: number
+                  required:
+                  - depth
+                  - width
+                  - height
+                  title: ResourceDictPositionSize
+                  type: object
+                ResourceJointState:
+                  additionalProperties: false
+                  description: 设备关节的瞬时状态；不属于资源在父坐标系中的 ``pose``。
+                  properties:
+                    effort:
+                      description: Joint efforts; empty when unavailable
+                      items:
+                        type: number
+                      title: Effort
+                      type: array
+                    name:
+                      description: Joint names
+                      items:
+                        type: string
+                      title: Name
+                      type: array
+                    position:
+                      description: Joint positions in the joint-defined unit
+                      items:
+                        type: number
+                      title: Position
+                      type: array
+                    velocity:
+                      description: Joint velocities; empty when unavailable
+                      items:
+                        type: number
+                      title: Velocity
+                      type: array
+                  title: ResourceJointState
+                  type: object
+                ResourceSite:
+                  additionalProperties: false
+                  description: 'Edge、微后端和 PLR Adapter 共用的唯一 Site 实例模型。
+
+
+                    PLR 特有但需要往返保留的字段进入显式 ``extra``；canonical v1 仍拒绝
+
+                    未声明的顶层字段，避免 Adapter 形状反向污染微后端协议。'
+                  properties:
+                    allowed_resource_categories:
+                      description: ResourceTemplate category hints for frontend canvas
+                        filtering only; not an Edge/backend mount constraint
+                      items:
+                        type: string
+                      title: Allowed Resource Categories
+                      type: array
+                    description:
+                      default: ''
+                      title: Description
+                      type: string
+                    extra:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Extra
+                      type: object
+                    index:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      title: Index
+                    label:
+                      title: Label
+                      type: string
+                    material_uuid:
+                      title: Material Uuid
+                      type: string
+                    meta_data:
+                      additionalProperties:
+                        $ref: '#/$defs/JsonValue'
+                      title: Meta Data
+                      type: object
+                    occupied_material_uuid:
+                      anyOf:
+                      - type: string
+                      - type: 'null'
+                      default: null
+                      title: Occupied Material Uuid
+                    parent_link:
+                      default: ''
+                      title: Parent Link
+                      type: string
+                    pose:
+                      $ref: '#/$defs/ResourceDictPosition'
+                    schema_version:
+                      const: 1
+                      default: 1
+                      title: Schema Version
+                      type: integer
+                    template_name:
+                      title: Template Name
+                      type: string
+                    uuid:
+                      title: Uuid
+                      type: string
+                    visible:
+                      default: true
+                      title: Visible
+                      type: boolean
+                  required:
+                  - uuid
+                  - template_name
+                  - material_uuid
+                  - index
+                  - label
+                  title: ResourceSite
+                  type: object
               properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
-              title: LiquidHandlerTransfer_Result
+                sources:
+                  items:
+                    items:
+                      $ref: '#/$defs/ResourceDict'
+                    type: array
+                  title: Sources
+                  type: array
+                targets:
+                  items:
+                    items:
+                      $ref: '#/$defs/ResourceDict'
+                    type: array
+                  title: Targets
+                  type: array
+              required:
+              - sources
+              - targets
+              title: TransferLiquidReturn
               type: object
           required:
           - goal
-          title: LiquidHandlerTransfer
+          title: transfer_liquid参数
           type: object
         type: LiquidHandlerTransfer
     module: unilabos.devices.liquid_handling.liquid_handler_abstract:LiquidHandlerAbstract
@@ -5541,28 +5123,25 @@ liquid_handler.biomek:
           protocol_version: protocol_version
         goal_default:
           none_keys: []
-          protocol_author: ''
-          protocol_date: ''
-          protocol_description: ''
-          protocol_name: ''
-          protocol_type: ''
-          protocol_version: ''
+          protocol_author: null
+          protocol_date: null
+          protocol_description: null
+          protocol_name: null
+          protocol_type: null
+          protocol_version: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerProtocolCreation_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 none_keys:
+                  default: []
                   description: 需要设置为None的键列表
                   items:
                     type: string
@@ -5585,18 +5164,20 @@ liquid_handler.biomek:
                 protocol_version:
                   description: 协议版本
                   type: string
+              required:
+              - protocol_name
+              - protocol_description
+              - protocol_version
+              - protocol_author
+              - protocol_date
+              - protocol_type
               title: LiquidHandlerProtocolCreation_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: LiquidHandlerProtocolCreation_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerProtocolCreation
+          title: create_protocol参数
           type: object
         type: LiquidHandlerProtocolCreation
       incubation_biomek:
@@ -5605,7 +5186,7 @@ liquid_handler.biomek:
         goal:
           time: time
         goal_default:
-          time: 0
+          time: null
         handles:
           input:
           - data_key: liquid
@@ -5621,37 +5202,25 @@ liquid_handler.biomek:
             label: plate
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerIncubateBiomek_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 time:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
+              required:
+              - time
               title: LiquidHandlerIncubateBiomek_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerIncubateBiomek_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerIncubateBiomek
+          title: incubation_biomek参数
           type: object
         type: LiquidHandlerIncubateBiomek
       move_biomek:
@@ -5663,8 +5232,8 @@ liquid_handler.biomek:
           target: target
           targets: targets
         goal_default:
-          sources: ''
-          targets: ''
+          source: null
+          target: null
         handles:
           input:
           - data_key: liquid
@@ -5680,37 +5249,28 @@ liquid_handler.biomek:
             label: targets
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerMoveBiomek_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                sources:
+                source:
                   type: string
-                targets:
+                target:
                   type: string
+              required:
+              - source
+              - target
               title: LiquidHandlerMoveBiomek_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerMoveBiomek_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerMoveBiomek
+          title: move_biomek参数
           type: object
         type: LiquidHandlerMoveBiomek
       oscillation_biomek:
@@ -5720,8 +5280,8 @@ liquid_handler.biomek:
           rpm: rpm
           time: time
         goal_default:
-          rpm: 0
-          time: 0
+          rpm: null
+          time: null
         handles:
           input:
           - data_key: liquid
@@ -5737,41 +5297,28 @@ liquid_handler.biomek:
             label: plate
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerOscillateBiomek_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 rpm:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 time:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
+              required:
+              - rpm
+              - time
               title: LiquidHandlerOscillateBiomek_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerOscillateBiomek_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerOscillateBiomek
+          title: oscillation_biomek参数
           type: object
         type: LiquidHandlerOscillateBiomek
       run_protocol:
@@ -5782,29 +5329,22 @@ liquid_handler.biomek:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: run_protocol参数
           type: object
         type: EmptyIn
       transfer_biomek:
@@ -5822,12 +5362,12 @@ liquid_handler.biomek:
           tip_rack: tip_rack
           volume: volume
         goal_default:
-          aspirate_technique: ''
-          dispense_technique: ''
-          sources: ''
-          targets: ''
-          tip_rack: ''
-          volume: 0.0
+          aspirate_techniques: null
+          dispense_techniques: null
+          source: null
+          target: null
+          tip_rack: null
+          volume: null
         handles:
           input:
           - data_key: liquid
@@ -5858,47 +5398,40 @@ liquid_handler.biomek:
             label: targets
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerTransferBiomek_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                aspirate_technique:
+                aspirate_techniques:
                   type: string
-                dispense_technique:
+                dispense_techniques:
                   type: string
-                sources:
+                source:
                   type: string
-                targets:
+                target:
                   type: string
                 tip_rack:
                   type: string
                 volume:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
+              required:
+              - source
+              - target
+              - tip_rack
+              - volume
+              - aspirate_techniques
+              - dispense_techniques
               title: LiquidHandlerTransferBiomek_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerTransferBiomek_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerTransferBiomek
+          title: transfer_biomek参数
           type: object
         type: LiquidHandlerTransferBiomek
       transfer_liquid:
@@ -5927,27 +5460,27 @@ liquid_handler.biomek:
           touch_tip: touch_tip
           use_channels: use_channels
         goal_default:
-          asp_flow_rates: []
-          asp_vols: []
-          blow_out_air_volume: []
-          delays: []
-          dis_flow_rates: []
-          dis_vols: []
+          asp_flow_rates: null
+          asp_vols: null
+          blow_out_air_volume: null
+          delays: null
+          dis_flow_rates: null
+          dis_vols: null
           is_96_well: false
-          liquid_height: []
-          mix_liquid_height: 0.0
-          mix_rate: 0
-          mix_stage: ''
-          mix_times: 0
-          mix_vol: 0
+          liquid_height: null
+          mix_liquid_height: null
+          mix_rate: null
+          mix_stage: none
+          mix_times: null
+          mix_vol: null
           none_keys: []
-          offsets: []
-          sources: []
-          spread: ''
-          targets: []
-          tip_racks: []
+          offsets: null
+          sources: null
+          spread: wide
+          targets: null
+          tip_racks: null
           touch_tip: false
-          use_channels: []
+          use_channels: null
         handles:
           input:
           - data_key: sources
@@ -5983,27 +5516,24 @@ liquid_handler.biomek:
           sources: unilabos_resources
           targets: unilabos_resources
           tip_racks: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerTransfer_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 asp_flow_rates:
                   items:
                     type: number
                   type: array
                 asp_vols:
-                  items:
-                    type: number
-                  type: array
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 blow_out_air_volume:
                   items:
                     type: number
@@ -6017,302 +5547,88 @@ liquid_handler.biomek:
                     type: number
                   type: array
                 dis_vols:
-                  items:
-                    type: number
-                  type: array
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 is_96_well:
+                  default: false
                   type: boolean
                 liquid_height:
                   items:
                     type: number
                   type: array
                 mix_liquid_height:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_rate:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_stage:
+                  default: none
+                  enum:
+                  - none
+                  - before
+                  - after
+                  - both
                   type: string
                 mix_times:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_vol:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 sources:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 spread:
+                  default: wide
+                  enum:
+                  - wide
+                  - tight
+                  - custom
                   type: string
                 targets:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 tip_racks:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 touch_tip:
+                  default: false
                   type: boolean
                 use_channels:
                   items:
                     type: integer
                   type: array
+              required:
+              - sources
+              - targets
+              - tip_racks
+              - asp_vols
+              - dis_vols
               title: LiquidHandlerTransfer_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerTransfer_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerTransfer
+          title: transfer_liquid参数
           type: object
         type: LiquidHandlerTransfer
     module: unilabos.devices.liquid_handling.biomek:LiquidHandlerBiomek
     status_policies: {}
     status_types:
-      success: ''
+      success: str
     supported_backends:
     - hostlink
     - ros2
@@ -6364,265 +5680,115 @@ liquid_handler.laiyu:
           targets: targets
           use_channels: use_channels
         goal_default:
-          asp_vols: []
-          blow_out_air_volume: []
-          dis_vols: []
-          flow_rates: []
+          asp_vols: null
+          blow_out_air_volume: null
+          delays: null
+          dis_vols: null
+          flow_rates: null
           is_96_well: false
-          liquid_height: []
-          mix_liquid_height: 0.0
-          mix_rate: 0
-          mix_time: 0
-          mix_vol: 0
+          liquid_height: null
+          mix_liquid_height: null
+          mix_rate: null
+          mix_time: null
+          mix_vol: null
           none_keys: []
-          offsets: []
-          reagent_sources: []
-          spread: ''
-          targets: []
-          use_channels: []
+          offsets: null
+          reagent_sources: null
+          spread: wide
+          targets: null
+          use_channels: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           reagent_sources: unilabos_resources
           targets: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerAdd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 asp_vols:
-                  items:
-                    type: number
-                  type: array
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 blow_out_air_volume:
                   items:
                     type: number
                   type: array
-                dis_vols:
+                delays:
                   items:
-                    type: number
+                    type: integer
                   type: array
+                dis_vols:
+                  anyOf:
+                  - items:
+                      type: number
+                    type: array
+                  - type: number
                 flow_rates:
                   items:
                     type: number
                   type: array
                 is_96_well:
+                  default: false
                   type: boolean
                 liquid_height:
                   items:
                     type: number
                   type: array
                 mix_liquid_height:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_rate:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_time:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_vol:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 reagent_sources:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 spread:
+                  default: wide
+                  enum:
+                  - wide
+                  - tight
+                  - custom
                   type: string
                 targets:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 use_channels:
                   items:
                     type: integer
                   type: array
+              required:
+              - asp_vols
+              - dis_vols
+              - reagent_sources
+              - targets
               title: LiquidHandlerAdd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerAdd_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerAdd
+          title: add_liquid参数
           type: object
         type: LiquidHandlerAdd
       aspirate:
@@ -6638,30 +5804,25 @@ liquid_handler.laiyu:
           use_channels: use_channels
           vols: vols
         goal_default:
-          blow_out_air_volume: []
-          flow_rates: []
-          liquid_height: []
-          offsets: []
-          resources: []
-          spread: ''
-          use_channels: []
-          vols: []
+          blow_out_air_volume: null
+          flow_rates: null
+          liquid_height: null
+          offsets: null
+          resources: null
+          spread: wide
+          use_channels: null
+          vols: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           resources: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerAspirate_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 blow_out_air_volume:
                   items:
@@ -6677,94 +5838,18 @@ liquid_handler.laiyu:
                   type: array
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 resources:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 spread:
+                  default: wide
+                  enum:
+                  - wide
+                  - tight
+                  - custom
                   type: string
                 use_channels:
                   items:
@@ -6774,20 +5859,16 @@ liquid_handler.laiyu:
                   items:
                     type: number
                   type: array
+              required:
+              - resources
+              - vols
               title: LiquidHandlerAspirate_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerAspirate_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerAspirate
+          title: aspirate参数
           type: object
         type: LiquidHandlerAspirate
       auto-transfer_liquid:
@@ -6940,128 +6021,52 @@ liquid_handler.laiyu:
           use_channels: use_channels
           vols: vols
         goal_default:
-          blow_out_air_volume: []
-          flow_rates: []
-          offsets: []
-          resources: []
-          spread: ''
-          use_channels: []
-          vols: []
+          blow_out_air_volume: null
+          flow_rates: null
+          liquid_height: null
+          offsets: null
+          resources: null
+          spread: wide
+          use_channels: null
+          vols: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           resources: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerDispense_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 blow_out_air_volume:
                   items:
-                    type: integer
+                    type: number
                   type: array
                 flow_rates:
                   items:
                     type: number
                   type: array
+                liquid_height:
+                  items:
+                    type: number
+                  type: array
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 resources:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 spread:
+                  default: wide
+                  enum:
+                  - wide
+                  - tight
+                  - custom
                   type: string
                 use_channels:
                   items:
@@ -7071,20 +6076,16 @@ liquid_handler.laiyu:
                   items:
                     type: number
                   type: array
+              required:
+              - resources
+              - vols
               title: LiquidHandlerDispense_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerDispense_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerDispense
+          title: dispense参数
           type: object
         type: LiquidHandlerDispense
       drop_tips:
@@ -7097,135 +6098,47 @@ liquid_handler.laiyu:
           use_channels: use_channels
         goal_default:
           allow_nonzero_volume: false
-          offsets: []
-          tip_spots: []
-          use_channels: []
+          offsets: null
+          tip_spots: null
+          use_channels: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           tip_spots: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerDropTips_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 allow_nonzero_volume:
+                  default: false
                   type: boolean
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 tip_spots:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
-                    type: object
+                    anyOf:
+                    - type: object
+                    - type: object
                   type: array
                 use_channels:
                   items:
                     type: integer
                   type: array
+              required:
+              - tip_spots
               title: LiquidHandlerDropTips_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerDropTips_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerDropTips
+          title: drop_tips参数
           type: object
         type: LiquidHandlerDropTips
       mix:
@@ -7240,153 +6153,53 @@ liquid_handler.laiyu:
           offsets: offsets
           targets: targets
         goal_default:
-          height_to_bottom: 0.0
-          mix_rate: 0.0
-          mix_time: 0
-          mix_vol: 0
+          height_to_bottom: null
+          mix_rate: null
+          mix_time: null
+          mix_vol: null
           none_keys: []
-          offsets: []
-          targets: []
+          offsets: null
+          targets: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           targets: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerMix_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 height_to_bottom:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_rate:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 mix_time:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 mix_vol:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
                 none_keys:
+                  default: []
                   items:
                     type: string
                   type: array
                 offsets:
-                  items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
-                    type: object
-                  type: array
+                  type: object
                 targets:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
+              required:
+              - targets
               title: LiquidHandlerMix_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerMix_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerMix
+          title: mix参数
           type: object
         type: LiquidHandlerMix
       pick_up_tips:
@@ -7397,133 +6210,42 @@ liquid_handler.laiyu:
           tip_spots: tip_spots
           use_channels: use_channels
         goal_default:
-          offsets: []
-          tip_spots: []
-          use_channels: []
+          offsets: null
+          tip_spots: null
+          use_channels: null
         handles: {}
         materials_need_lock: []
         placeholder_keys:
           tip_spots: unilabos_resources
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: LiquidHandlerPickUpTips_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 offsets:
                   items:
-                    properties:
-                      x:
-                        type: number
-                      y:
-                        type: number
-                      z:
-                        type: number
-                    required:
-                    - x
-                    - y
-                    - z
                     type: object
                   type: array
                 tip_spots:
                   items:
-                    properties:
-                      category:
-                        type: string
-                      children:
-                        items:
-                          type: string
-                        type: array
-                      config:
-                        type: string
-                      data:
-                        type: string
-                      id:
-                        type: string
-                      name:
-                        type: string
-                      parent:
-                        type: string
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                      sample_id:
-                        type: string
-                      type:
-                        type: string
-                    required:
-                    - id
-                    - name
-                    - sample_id
-                    - children
-                    - parent
-                    - type
-                    - category
-                    - pose
-                    - config
-                    - data
                     type: object
                   type: array
                 use_channels:
                   items:
                     type: integer
                   type: array
+              required:
+              - tip_spots
               title: LiquidHandlerPickUpTips_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: LiquidHandlerPickUpTips_Result
-              type: object
           required:
           - goal
-          title: LiquidHandlerPickUpTips
+          title: pick_up_tips参数
           type: object
         type: LiquidHandlerPickUpTips
     module: unilabos.devices.liquid_handling.laiyu.laiyu:TransformXYZHandler
@@ -7580,167 +6302,49 @@ liquid_handler.revvity:
     action_value_mappings:
       run:
         error_policy: {}
-        feedback:
-          gantt: gantt
-          status: status
+        feedback: {}
         goal:
           file_path: file_path
           params: params
           resource: resource
           wf_name: wf_name
         goal_default:
-          params: ''
+          file_path: null
+          params: null
           resource:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          wf_name: ''
+            AichemecoHiwo:
+              id: AichemecoHiwo
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                gantt:
-                  type: string
-                status:
-                  type: string
               title: WorkStationRun_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
+                file_path:
+                  type: string
                 params:
                   type: string
                 resource:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  default:
+                    AichemecoHiwo:
+                      id: AichemecoHiwo
                   title: resource
                   type: object
-                wf_name:
-                  type: string
+              required:
+              - file_path
+              - params
               title: WorkStationRun_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: WorkStationRun_Result
-              type: object
           required:
           - goal
-          title: WorkStationRun
+          title: run参数
           type: object
         type: WorkStationRun
     module: unilabos.devices.liquid_handling.revvity:Revvity

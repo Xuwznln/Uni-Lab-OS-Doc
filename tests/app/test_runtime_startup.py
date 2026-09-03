@@ -1,47 +1,56 @@
+﻿"""Host 启动提示与管理端端口预检。"""
+
 from __future__ import annotations
 
-from unilabos.app.runtime_startup import run_runtime
-from unilabos.config.config import BasicConfig
+import socket
+
+import pytest
+
+from unilabos.app.cli.parser import build_parser
+from unilabos.app.runtime_startup import build_slave_launch_command
+from unilabos.server.api.app import ManagementPortInUseError, ensure_port_available
 
 
-class _Thread:
-    def __init__(self) -> None:
-        self.join_count = 0
-
-    def join(self) -> None:
-        self.join_count += 1
+def test_cli_defaults_to_hostlink_backend() -> None:
+    args = build_parser().parse_args(["-g", "graph.json"])
+    assert args.backend == "hostlink"
 
 
-def test_slave_runtime_waits_for_backend_without_starting_web(monkeypatch) -> None:
-    thread = _Thread()
-    monkeypatch.setattr(BasicConfig, "is_host_mode", False)
-    monkeypatch.setattr(
-        "unilabos.backend.start_backend",
-        lambda **_args: thread,
+def test_slave_launch_command_uses_hostlink_target() -> None:
+    command = build_slave_launch_command(
+        backend="hostlink",
+        host_ip="192.168.1.10",
+        hostlink_port=7302,
+        hostlink_enabled=True,
+    )
+    assert command == (
+        "unilab --backend hostlink --is_slave --host_node_ip 192.168.1.10 "
+        "--hostlink_port 7302 -g <图文件.json>"
     )
 
-    assert run_runtime({"visual": "disable"}) is None
-    assert thread.join_count == 1
 
-
-def test_host_runtime_starts_management_api(monkeypatch) -> None:
-    import unilabos.server.api.app as web
-
-    thread = _Thread()
-    calls = []
-    monkeypatch.setattr(BasicConfig, "is_host_mode", True)
-    monkeypatch.setattr(BasicConfig, "disable_browser", True)
-    monkeypatch.setattr(BasicConfig, "port", 9002)
-    monkeypatch.setattr(
-        "unilabos.backend.start_backend",
-        lambda **_args: thread,
+def test_slave_launch_command_without_hostlink_falls_back_to_dds() -> None:
+    command = build_slave_launch_command(
+        backend="ros2",
+        host_ip="192.168.1.10",
+        hostlink_port=7302,
+        hostlink_enabled=False,
     )
-    monkeypatch.setattr(
-        web,
-        "start_server",
-        lambda **kwargs: calls.append(kwargs) or True,
-    )
+    assert command == "unilab --backend ros2 --is_slave --disable_hostlink -g <图文件.json>"
 
-    assert run_runtime({"visual": "disable"}) is None
-    assert thread.join_count == 0
-    assert calls == [{"open_browser": False, "port": 9002}]
+
+def test_port_check_reports_actionable_hint_when_in_use() -> None:
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    try:
+        with pytest.raises(ManagementPortInUseError) as excinfo:
+            ensure_port_available("127.0.0.1", port)
+    finally:
+        holder.close()
+    message = excinfo.value.strerror
+    assert str(port) in message
+    assert f"--port {port + 1}" in message
+    # 端口释放后预检必须放行
+    ensure_port_available("127.0.0.1", port)

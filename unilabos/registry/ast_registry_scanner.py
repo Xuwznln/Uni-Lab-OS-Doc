@@ -38,7 +38,7 @@ from unilabos.resources.objects.site import normalize_available_sites
 
 MAX_SCAN_DEPTH = 10      # 最大目录递归深度
 MAX_SCAN_FILES = 1000    # 最大扫描文件数量
-_CACHE_VERSION = 15      # 缓存/entry 构建格式版本号，格式变更时递增
+_CACHE_VERSION = 16      # 缓存/entry 构建格式版本号，格式变更时递增（16：跳过 action_context）
 # 允许点号分段（如 liquid_handler.prcxi），与内置 YAML 注册表的命名先例一致；
 # 点号只用于注册表模板名，设备实例 id（图节点）另有约束。
 _DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$")
@@ -1110,7 +1110,9 @@ def _extract_class_body(
 # ---------------------------------------------------------------------------
 
 
-_PARAM_SKIP_NAMES = frozenset({"sample_uuids"})
+#: 由运行时注入、不属于动作契约的参数：``sample_uuids``（样品映射）与
+#: ``action_context``（反馈/取消上下文，HostLink 执行器按签名注入）。
+_PARAM_SKIP_NAMES = frozenset({"sample_uuids", "action_context"})
 
 
 def _extract_method_params(

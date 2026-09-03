@@ -16,7 +16,7 @@
 
 | 数据库 | 权威内容 | 表数（含 identity） |
 | --- | --- | ---: |
-| `runtime.db` | 后端命令、执行 job、endpoint 与可靠收发；工作流定义/任务/job 与前端事件；edge 注册表版本快照 | 27 |
+| `runtime.db` | 后端命令、执行 job、endpoint 与可靠收发；工作流定义/任务/job 与前端事件；edge 注册表版本快照；实验室布局 | 29 |
 | `materials.db` | 资源模板、物料、Site、拓扑边、lab graph 快照、预留与库存账本 | 13 |
 | `telemetry.db` | 设备最新状态和高频追加事件 | 4 |
 | `history.db` | 大 payload 和统一执行历史流 | 3 |
@@ -81,9 +81,11 @@ client/                      # 出站客户端（http/session/envelope/output �
   模型使用 SQLModel，同时承担 Pydantic 构造校验和 SQLite 字段映射，DDL 以
   `TableSpec`/`DatabaseSpec` 与行模型放在同一文件。
 - 数据库采用 checksum 驱动的重建策略，不维护 migration 链：
-  `schema_identity` 记录库身份与 DDL checksum；打开时 checksum 与代码声明
+  `schema_identity` 记录库身份与 checksum；打开时 checksum 与代码声明
   不一致则删除文件并重建，身份属于其他库则报
-  `DatabaseIdentityConflict` 拒绝打开。
+  `DatabaseIdentityConflict` 拒绝打开。checksum 由 DDL 与 `DatabaseSpec.contract_version`
+  共同构成：不改表结构、只改行内容契约（JSON 列形状、幂等键派生规则、枚举取值等）
+  时把 `contract_version` +1 并注明原因，旧库同样整库重建，不写兼容/迁移代码。
 - 各域 Service 直接继承存储基座持库
   （`SqliteDomain` 或域内 store 类），SQL、事务与业务规则同类分层——行级
   读写方法与业务覆写同名时经 `基座类.方法(self, ...)` 显式限定调用。
@@ -113,6 +115,7 @@ client/                      # 出站客户端（http/session/envelope/output �
 | `registry_entry` | 注册表条目级不可变版本行（任何字段变化自增版本，全量 payload copy） |
 | `registry_entry_state` | 条目可变状态：active/pending 版本、pending 冲突、软移除与不可用标记 |
 | `registry_report` | 每次 edge 上报的批次统计（新增/更新/挂起/移除/不可用） |
+| `lab_layout` | 实验室布局（区域 / 围墙像素格）单行文档：`cell_size`、`zones`、`walls`，`revision` 乐观锁；一个 Host 一份，所有前端共享 |
 
 workflow authority 的 16 张表同样落在 `runtime.db`（见下节）。
 

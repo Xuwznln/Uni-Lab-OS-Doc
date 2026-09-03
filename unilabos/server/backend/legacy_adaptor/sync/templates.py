@@ -58,20 +58,8 @@ class TemplateSynchronizer:
     def sync(self, registry: Any) -> TemplateSyncReport:
         """收集设备和器材模板，并通过一次 HTTP 请求事务性同步。"""
 
-        from unilabos.app.register import collect_devices_and_resources
-
-        device_definitions, resource_definitions = collect_devices_and_resources(
-            registry
-        )
-        devices = _collect_templates(
-            device_definitions.values(), expected_type="device"
-        )
-        resources = _collect_templates(
-            resource_definitions.values(), expected_type="resource"
-        )
+        devices, resources = collect_registry_templates(registry)
         definitions = [*devices, *resources]
-        if not definitions:
-            raise TemplateSyncError("Edge Registry does not contain any templates")
 
         payload = {"resources": definitions}
         encoded = json.dumps(
@@ -110,29 +98,77 @@ class TemplateSynchronizer:
             except Exception:  # noqa: BLE001 - tracing must remain fail-open
                 pass
 
-        result = _decode_sync_response(response)
-        template_uuids = {
-            str(identity["name"]): str(identity["uuid"])
-            for identity in result.get("templates", [])
-            if isinstance(identity, Mapping)
-            and identity.get("name")
-            and identity.get("uuid")
-        }
-        expected_names = {definition["id"] for definition in definitions}
-        if set(template_uuids) != expected_names:
-            missing = sorted(expected_names - set(template_uuids))
-            raise TemplateSyncError(
-                f"backend response is missing template identities: {missing}"
-            )
-        report_id = result.get("report_id")
-        summary = result.get("summary")
-        return TemplateSyncReport(
-            device_count=len(devices),
-            resource_count=len(resources),
-            template_uuids=template_uuids,
-            report_id=int(report_id) if isinstance(report_id, int) else None,
-            summary=dict(summary) if isinstance(summary, Mapping) else {},
+        return _build_report(_decode_sync_response(response), devices, resources)
+
+
+def collect_registry_templates(
+    registry: Any,
+) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+    """把 Edge Registry 投影成 Registry Authority 的 ``(devices, resources)`` 模板定义。
+
+    HTTP 上报与进程内上报共用这一份投影，保证两种部署形态下条目内容逐字节一致。
+    """
+
+    from unilabos.app.register import collect_devices_and_resources
+
+    device_definitions, resource_definitions = collect_devices_and_resources(registry)
+    devices = _collect_templates(device_definitions.values(), expected_type="device")
+    resources = _collect_templates(
+        resource_definitions.values(), expected_type="resource"
+    )
+    if not devices and not resources:
+        raise TemplateSyncError("Edge Registry does not contain any templates")
+    return devices, resources
+
+
+def _build_report(
+    result: Mapping[str, Any],
+    devices: list[Dict[str, Any]],
+    resources: list[Dict[str, Any]],
+) -> TemplateSyncReport:
+    template_uuids = {
+        str(identity["name"]): str(identity["uuid"])
+        for identity in result.get("templates", [])
+        if isinstance(identity, Mapping)
+        and identity.get("name")
+        and identity.get("uuid")
+    }
+    expected_names = {definition["id"] for definition in (*devices, *resources)}
+    if set(template_uuids) != expected_names:
+        missing = sorted(expected_names - set(template_uuids))
+        raise TemplateSyncError(
+            f"backend response is missing template identities: {missing}"
         )
+    report_id = result.get("report_id")
+    summary = result.get("summary")
+    return TemplateSyncReport(
+        device_count=len(devices),
+        resource_count=len(resources),
+        template_uuids=template_uuids,
+        report_id=int(report_id) if isinstance(report_id, int) else None,
+        summary=dict(summary) if isinstance(summary, Mapping) else {},
+    )
+
+
+def report_registry_snapshot_local(
+    registry: Any,
+    registry_service: Any,
+    *,
+    edge_uuid: str = "",
+) -> Optional[TemplateSyncReport]:
+    """本机持有 Registry Authority 时，把自身扫描结果直接写入进程内服务（fail-open）。
+
+    与 :func:`report_registry_snapshot` 走同一投影和同一 ``RegistryService.report``
+    入口，只是不经过 HTTP；默认 Host 与 ``--role backend`` 因此维护同一套条目版本。
+    """
+
+    try:
+        devices, resources = collect_registry_templates(registry)
+        result = registry_service.report([*devices, *resources], edge_uuid=edge_uuid)
+        return _build_report(result, devices, resources)
+    except Exception as exc:  # noqa: BLE001 - 注册表镜像缺失不阻断启动
+        logger.warning("[Registry Sync] 本机注册表上报失败（不阻断启动）: %s", exc)
+        return None
 
 
 def report_registry_snapshot(

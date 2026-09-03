@@ -39,6 +39,8 @@ from unilabos.resources.adapters.plr_materials import (
 )
 from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
+    ACTOR_DEVICE,
+    ACTOR_EDGE,
     MaterialTransfer,
     MaterialTransferItem,
 )
@@ -624,6 +626,8 @@ def create(
     unwrap_single: bool = True,
     mutation: InventoryMutation | None = None,
     gateway: MaterialGateway | None = None,
+    actor_type: str | None = None,
+    actor_uuid: str | None = None,
 ) -> Any | CreatedPLRMaterials:
     """创建一棵 PLR 物料树，不修改输入。
 
@@ -643,6 +647,10 @@ def create(
     :class:`CreatedPLRMaterials`。
 
     一次 create 只允许一个根；根的所有 children 仍属于同一棵创建树。
+
+    变更来源（账本 ``actor_type`` / ``actor_uuid``，前端据此渲染来源 tag）：
+    未显式给出时，带 ``node=`` 视为设备创建（``device`` + 设备 id），否则
+    落 ``edge`` 兜底；传入 ``mutation=`` 时以其自带的 actor 为准。
     """
 
     if isinstance(plr_resource, str):
@@ -660,11 +668,26 @@ def create(
             f"实际收到 {len(resources)} 个根"
         )
     command_uuid = str(uuid4())
-    request = mutation or InventoryMutation(
-        command_uuid=command_uuid,
-        effect_key="create_material_tree",
-        operation="create_material_tree",
-    )
+    if mutation is None:
+        bound_device_id = (
+            str(node.device_id).split("/")[-1] if node is not None else None
+        )
+        resolved_actor_type = actor_type or (
+            ACTOR_DEVICE if node is not None else ACTOR_EDGE
+        )
+        resolved_actor_uuid = actor_uuid or (
+            str(getattr(node, "resource_uuid", "") or "") or bound_device_id
+            if node is not None
+            else None
+        )
+        mutation = InventoryMutation(
+            command_uuid=command_uuid,
+            effect_key="create_material_tree",
+            operation="create_material_tree",
+            actor_type=resolved_actor_type,
+            actor_uuid=resolved_actor_uuid or None,
+        )
+    request = mutation
     created = create_plr_materials(
         gateway or resolve_materials_gateway(),
         request,
@@ -779,12 +802,19 @@ def ensure(
     resources: Union[ResourceTreeSet, PLRResource, Sequence[PLRResource]],
     *,
     gateway: MaterialGateway | None = None,
+    actor_type: str = ACTOR_EDGE,
+    actor_uuid: str | None = None,
+    job_uuid: str | None = None,
 ) -> ResourceTreeSet:
     """确保权威中存在与输入 uuid「一模一样」的物料树，返回权威形态。
 
     逐棵树按根 uuid 询问权威：已存在直接取权威树（以权威为准）；不存在则以
     原 uuid 显式创建（带条件的 create，adopt 语义）。host / slave 开机图物料
     对齐、出库扣减产物落库共用此入口；Slave 侧 gateway 自动经 HostLink。
+
+    ``actor_type`` / ``actor_uuid`` 落账本变更来源（前端来源 tag）：开机图对齐
+    传 ``graph`` + 图 uuid，云端同步传 ``backend``，工作流出库传 ``workflow`` +
+    ``job_uuid``；不传则为 ``edge`` 兜底。
     """
 
     gw = gateway or resolve_materials_gateway()
@@ -807,6 +837,9 @@ def ensure(
             command_uuid=command_uuid,
             effect_key=f"ensure_material_tree:{root_uuid}:{command_uuid}",
             operation="create_material_tree",
+            actor_type=actor_type,
+            actor_uuid=actor_uuid or None,
+            job_uuid=job_uuid or None,
         )
         request = resource_tree_to_create(
             ResourceTreeSet([tree]), adopt_uuid=True

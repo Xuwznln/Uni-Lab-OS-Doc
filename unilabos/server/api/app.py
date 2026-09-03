@@ -1,5 +1,7 @@
 """微后端 HTTP Application 与 Uvicorn 生命周期。"""
 
+import errno
+import socket
 import webbrowser
 
 from fastapi import FastAPI, Request
@@ -11,6 +13,9 @@ from unilabos.config.config import HTTPConfig
 from unilabos.utils.fastapi.log_adapter import setup_fastapi_logging
 from unilabos.utils.log import info, error
 from unilabos.utils.tracing import install_http_tracing
+
+# 优雅停机上限（秒）：等在途 HTTP 请求收尾，但不为 SSE 长连接无限等待。
+GRACEFUL_SHUTDOWN_TIMEOUT_S = 5
 
 RECOMMENDED_FRONTENDS = (
     {
@@ -44,7 +49,7 @@ DEVELOPER_LINKS = (
 )
 
 app = FastAPI(
-    title="UniLab Microbackend API",
+    title="Uni-Lab-OS Microbackend API",
     description="Backend-only API service for Uni-Lab frontends and schedulers.",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -56,6 +61,8 @@ edge_routes_mounted = False
 materials_routes_mounted = False
 server_routes_mounted = False
 workflow_routes_mounted = False
+registry_routes_mounted = False
+driver_packages_mounted = False
 
 # noinspection PyTypeChecker
 app.add_middleware(
@@ -72,6 +79,18 @@ async def log_requests(request: Request, call_next) -> Response:
     """执行 HTTP 请求链，为应用级请求中间件保留统一入口。"""
 
     return await call_next(request)
+
+
+@app.middleware("http")
+async def allow_private_network(request: Request, call_next) -> Response:
+    """公网托管的前端（GitHub Pages）访问局域网微后端时，Chrome 的 Private Network Access
+    预检会带 ``Access-Control-Request-Private-Network: true``，必须原样应答否则请求被丢弃。
+    CORSMiddleware 不认识这个头，这里单独补上。"""
+
+    response = await call_next(request)
+    if request.headers.get("access-control-request-private-network", "").lower() == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 
 def _render_cards(items) -> str:
@@ -122,6 +141,7 @@ def _render_catalog_page(title: str, intro: str, sections) -> str:
 async def frontend_catalog() -> str:
     """返回社区前端与开发工具的入口导航。
 
+    前端只以独立静态站（GitHub Pages）形式部署，本进程不托管页面。
     Backend-controlled 模式（配置了 --address）下本进程只是 Edge 执行面，
     Workflow/调度 API 不在本端口；页面退化为指向调度权威的路标，
     避免用户把前端连到本进程。
@@ -143,23 +163,50 @@ async def frontend_catalog() -> str:
             ("本进程调试（仅设备侧 API）", DEVELOPER_LINKS),
         )
         return _render_catalog_page(
-            "UniLab Edge 进程",
+            "Uni-Lab-OS Edge 进程",
             f"本进程运行设备执行与数据面，调度权威位于 <code>{remote}</code>。"
             "工作流编排与前端请访问调度权威地址。",
             sections,
         )
     return _render_catalog_page(
-        "UniLab Microbackend",
-        "此进程提供 UniLab 后端 API。请选择 API 工具，或使用部署在 GitHub "
+        "Uni-Lab-OS Microbackend",
+        "此进程提供 Uni-Lab-OS 后端 API。请选择 API 工具，或使用部署在 GitHub "
         "Pages 上的社区前端连接当前地址。",
         (("推荐前端", RECOMMENDED_FRONTENDS), ("开发与接入", DEVELOPER_LINKS)),
     )
 
 
+def _has_execution_face() -> bool:
+    """本进程是否带设备执行面（Host）；--role backend 为 False。"""
+    try:
+        from unilabos.server.backend.composition import get_execution_backend
+
+        return get_execution_backend() is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def setup_server() -> FastAPI:
     """幂等挂载当前运行角色所需的 API 路由。"""
     global edge_routes_mounted, materials_routes_mounted, server_routes_mounted
-    global workflow_routes_mounted
+    global workflow_routes_mounted, registry_routes_mounted, driver_packages_mounted
+
+    # 驱动包台账 / 受管设备进程：只在带执行面（加载注册表、跑 HostLink server）的
+    # Host 进程有意义，--role backend 不挂载。
+    if not driver_packages_mounted and _has_execution_face():
+        try:
+            from unilabos.server.api.device_processes import create_device_processes_router
+            from unilabos.server.api.driver_package_graphs import (
+                create_driver_package_graphs_router,
+            )
+            from unilabos.server.api.driver_packages import create_driver_packages_router
+
+            app.include_router(create_driver_packages_router())
+            app.include_router(create_driver_package_graphs_router())
+            app.include_router(create_device_processes_router())
+            driver_packages_mounted = True
+        except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
+            error(f"[Microbackend] 挂载驱动包 / 设备进程路由失败: {exc}")
 
     # Backend 诊断面不复制 Runtime/History/Telemetry 数据 API。
     if not edge_routes_mounted:
@@ -193,6 +240,19 @@ def setup_server() -> FastAPI:
                 workflow_routes_mounted = True
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
             error(f"[Microbackend] 挂载本机 Workflow Authority 失败: {exc}")
+
+    # Registry Authority 与 Workflow Authority 同归属：本机持有调度权威（默认 Host
+    # 或 --role backend）时挂载条目级注册表版本 API；接入云端后由远端持有，不挂载。
+    if not registry_routes_mounted:
+        try:
+            from unilabos.server.api.runtime.registry import install_registry_api
+            from unilabos.server.services.runtime.registry import get_registry_service
+
+            if get_registry_service() is not None:
+                install_registry_api(app)
+                registry_routes_mounted = True
+        except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
+            error(f"[Microbackend] 挂载 Registry Authority 失败: {exc}")
 
     if not server_routes_mounted:
         try:
@@ -262,6 +322,45 @@ def browser_landing_url(host: str, port: int) -> str:
     return f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}/"
 
 
+class ManagementPortInUseError(OSError):
+    """管理端 HTTP 端口已被其他进程占用。"""
+
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        super().__init__(
+            errno.EADDRINUSE,
+            f"管理端 HTTP 端口 {host}:{port} 已被占用。"
+            f"请关闭占用该端口的程序（可能是上一个未退出的 Uni-Lab 进程），"
+            f"或用 --port <其他端口> 换一个端口重新启动，例如 --port {port + 1}",
+        )
+
+
+_ADDR_IN_USE_ERRNOS = {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", 10048)}
+
+
+def _is_addr_in_use(exc: OSError) -> bool:
+    return exc.errno in _ADDR_IN_USE_ERRNOS or getattr(exc, "winerror", None) == 10048
+
+
+def ensure_port_available(host: str, port: int) -> None:
+    """启动 Uvicorn 之前先试绑一次端口，把 WinError 10048 之类的原始错误换成可操作的提示。
+
+    Raises:
+        ManagementPortInUseError: 端口已被占用。
+    """
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    probe = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+    except OSError as exc:
+        if _is_addr_in_use(exc):
+            raise ManagementPortInUseError(host, port) from exc
+        # 其他绑定失败（无权限、地址不存在）交给 uvicorn 报原始错误
+    finally:
+        probe.close()
+
+
 def start_server(host: str = "0.0.0.0", port: int = 8002, open_browser: bool = True) -> None:
     """
     启动服务器
@@ -271,8 +370,12 @@ def start_server(host: str = "0.0.0.0", port: int = 8002, open_browser: bool = T
         port: 服务器端口
         open_browser: 是否自动打开浏览器
 
+    Raises:
+        ManagementPortInUseError: 端口已被占用，消息中包含 --port 的修改建议。
     """
     from uvicorn import Config, Server
+
+    ensure_port_available(host, port)
 
     # 设置服务器
     setup_server()
@@ -292,13 +395,28 @@ def start_server(host: str = "0.0.0.0", port: int = 8002, open_browser: bool = T
     # 启动服务器
     info(f"[Microbackend] 启动 FastAPI: {host}:{port}")
 
-    config = Config(app=app, host=host, port=port, log_config=log_config)
+    # 浏览器长期挂着 SSE（/events、/materials/events），uvicorn 默认优雅停机会一直
+    # "Waiting for connections to close"，安静点重启就永远走不到拉起新进程那一步。
+    # 给个上限：超过后强制关闭剩余连接（前端 EventSource 会自动重连）。
+    config = Config(
+        app=app,
+        host=host,
+        port=port,
+        log_config=log_config,
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_S,
+    )
     server = Server(config)
 
     global _uvicorn_server
     _uvicorn_server = server
     try:
         server.run()
+    except SystemExit:
+        # uvicorn 绑定失败时自行 sys.exit(1)；预检和真正绑定之间端口仍可能被抢占，
+        # 再探测一次即可区分「端口被占」与其他启动失败。
+        if not server.started:
+            ensure_port_available(host, port)
+        raise
     finally:
         _uvicorn_server = None
 

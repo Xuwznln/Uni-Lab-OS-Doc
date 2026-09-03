@@ -213,7 +213,7 @@ def create_backend_app(
     get_scheduler: Callable[[], Any] = lambda: None,
     get_execution_backend: Callable[[], Any] = lambda: None,
 ) -> FastAPI:
-    app = FastAPI(title="UniLabOS Backend Diagnostics")
+    app = FastAPI(title="Uni-Lab-OS Backend Diagnostics")
     app.include_router(create_backend_router(get_scheduler, get_execution_backend))
     return app
 

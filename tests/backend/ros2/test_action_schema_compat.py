@@ -6,7 +6,7 @@ from unilabos.backend.ros2.msgs.message_converter import (
 
 
 def test_navigate_through_poses_result_contract_is_distro_independent() -> None:
-    """Humble/Jazzy 的原始 Result 不同，但 UniLabOS 对外合同必须一致。"""
+    """Humble/Jazzy 的原始 Result 不同，但 Uni-Lab-OS 对外合同必须一致。"""
     native_fields = set(
         NavigateThroughPoses.Result.get_fields_and_field_types()
     )

@@ -118,6 +118,62 @@ def test_local_scheduler_and_registry_share_runtime_database(
         reset_for_test()
 
 
+def test_local_scheduler_publishes_registry_authority_and_mounts_api(
+    tmp_path, monkeypatch
+) -> None:
+    """默认 Host 与 --role backend 同一路径：调度权威就绪即带 Registry Authority，
+    setup_server() 挂载 /api/v1/registry/*，本机扫描结果直写进程内服务。"""
+
+    from fastapi.testclient import TestClient
+
+    from unilabos.server.api import app as app_module
+    from unilabos.server.backend.composition import setup_local_scheduler
+    from unilabos.server.backend.legacy_adaptor.sync.templates import (
+        report_registry_snapshot_local,
+    )
+    from unilabos.server.services.runtime.registry import get_registry_service
+
+    paths = ServerDatabasePaths.resolve(tmp_path)
+    monkeypatch.setattr(BasicConfig, "backend", "hostlink")
+    monkeypatch.setattr(BasicConfig, "machine_name", "test-host")
+    monkeypatch.setattr(BasicConfig, "server_database_paths", paths)
+    monkeypatch.setattr(app_module, "registry_routes_mounted", False)
+    assert get_registry_service() is None
+    try:
+        backend = setup_execution_backend(database_paths=paths)
+        setup_local_scheduler(backend=backend)
+        registry_service = get_registry_service()
+        assert registry_service is not None
+
+        class _Registry:
+            device_type_registry = {
+                "pump": {
+                    "id": "pump",
+                    "registry_type": "device",
+                    "class": {"module": "m:Pump", "type": "python",
+                              "action_value_mappings": {}},
+                }
+            }
+            resource_type_registry: dict = {}
+
+        monkeypatch.setattr(
+            "unilabos.app.register.collect_devices_and_resources",
+            lambda registry: (registry.device_type_registry, registry.resource_type_registry),
+        )
+        report = report_registry_snapshot_local(_Registry(), registry_service, edge_uuid="host")
+        assert report is not None and report.device_count == 1
+        assert report.summary["counts"]["added"] == 1
+
+        app = app_module.setup_server()
+        with TestClient(app) as client:
+            response = client.get("/api/v1/registry/entries")
+        assert response.status_code == 200
+        assert [entry["name"] for entry in response.json()["data"]["entries"]] == ["pump"]
+    finally:
+        reset_for_test()
+        assert get_registry_service() is None
+
+
 def test_host_startup_uses_four_writers_without_local_scheduler(
     tmp_path, monkeypatch
 ) -> None:

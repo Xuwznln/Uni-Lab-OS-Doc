@@ -59,7 +59,7 @@ from unilabos.resources.resource_tracker import ResourceTreeSet
 HOST_SERVICE_ACTIONS = (
     *host_material_actions.HOST_MATERIAL_ACTIONS,
     "manual_confirm",
-    "auto-test_resource",
+    "test_resource",
     "test_latency",
 )
 
@@ -112,7 +112,13 @@ class TestLatencyReturn(TypedDict):
     status: str
 
 
-@device(id="host_node", category=[], description="Host Node", icon="icon_device.webp")
+@device(
+    id="host_node",
+    category=[],
+    description="Host Node",
+    display_name="主机服务节点",
+    icon="icon_device.webp",
+)
 class HostServices:
     """host_node 服务设备驱动（backend 无关）。
 
@@ -188,12 +194,14 @@ class HostServices:
     # 动作定义（schema / placeholder / handles 的唯一来源）
     # ------------------------------------------------------------------
 
-    @action(always_free=True, node_type=NodeType.MANUAL_CONFIRM, placeholder_keys={
-        "assignee_user_ids": PLACEHOLDER_MANUAL_CONFIRM
-    }, goal_default={
-        "timeout_seconds": 3600,
-        "assignee_user_ids": []
-    })
+    @action(
+        display_name="人工确认",
+        description="通用人工确认：等待指定用户在前端确认后继续",
+        always_free=True,
+        node_type=NodeType.MANUAL_CONFIRM,
+        placeholder_keys={"assignee_user_ids": PLACEHOLDER_MANUAL_CONFIRM},
+        goal_default={"timeout_seconds": 3600, "assignee_user_ids": []},
+    )
     def manual_confirm(self, timeout_seconds: int, assignee_user_ids: list[str], **kwargs) -> dict:
         """通用人工确认动作的注册表入口。
 
@@ -203,6 +211,7 @@ class HostServices:
         return kwargs
 
     @action(
+        display_name="物料出库并挂载",
         description="申请扣减物料并挂载（接收服务端已扣减的单个根物料，挂载到目标设备的目标物料上）",
         always_free=True,
         placeholder_keys={
@@ -298,6 +307,7 @@ class HostServices:
         )
 
     @action(
+        display_name="设置物料内容物",
         description="设置物料内容物（液体/固体，默认单位 微升/微克）；接收单个物料，设置后输出",
         always_free=True,
         materials_need_lock=["resource"],
@@ -351,6 +361,7 @@ class HostServices:
         )
 
     @action(
+        display_name="废弃物料",
         description="废弃台面物料（指定设备 + uuid：云端销毁并通知该设备本地移除）",
         always_free=True,
         materials_need_lock=["resource"],
@@ -396,6 +407,7 @@ class HostServices:
         )
 
     @action(
+        display_name="转移物料",
         description="转移物料（系统派发）：把已物理就位的物料在系统中改挂到目标设备的目标孔位（人工/机械臂工作流的统一末步）",
         always_free=True,
         materials_need_lock=["resource", "mount_resource"],
@@ -493,13 +505,14 @@ class HostServices:
     # ------------------------------------------------------------------
 
     @action(
-        auto_prefix=True,
+        display_name="测试物料传递",
+        description="诊断动作：回显传入的物料 / 设备 / 样品，用于验证 ResourceSlot、DeviceSlot 与 handle 链路",
         always_free=True,
         handles=[
             ActionInputHandle(
                 key="input_resources",
                 data_type="resource",
-                label="InputResources",
+                label="输入物料",
                 data_key="resources",
                 data_source=DataSource.HANDLE,
             ),
@@ -513,6 +526,16 @@ class HostServices:
         device: DeviceSlot = None,
         devices: List[DeviceSlot] = None,
     ) -> TestResourceReturn:
+        """
+        回显传入的物料、设备与样品，用于验证 ResourceSlot / DeviceSlot 解析与 handle 链路。
+
+        Args:
+            sample_uuids[样品]: 样品 uuid 到物料内容的映射，原样转成 LabSample 返回。
+            resource[物料引用]: 单个物料（可选；不传时用一个占位容器代替）。
+            resources[物料引用（多选）]: 多个物料，可由上游 handle 连入。
+            device[设备引用]: 单个设备 id（可选）。
+            devices[设备引用（多选）]: 多个设备 id（可选）。
+        """
         if resources is None:
             resources = []
         if devices is None:
@@ -532,7 +555,11 @@ class HostServices:
             ],
         }
 
-    @action(always_free=True)
+    @action(
+        display_name="测试通讯延迟",
+        description="诊断动作：与执行适配器 ping-pong 多次，统计往返时延与时钟偏差",
+        always_free=True,
+    )
     def test_latency(self) -> TestLatencyReturn:
         """委托当前执行适配器的共享实现（HostAdapterBase.test_latency）。"""
         from unilabos.backend.hostlink.adapter_registry import get_execution_adapter

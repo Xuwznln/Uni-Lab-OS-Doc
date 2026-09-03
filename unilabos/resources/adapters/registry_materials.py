@@ -12,6 +12,7 @@ from unilabos.server.database.tables.materials import ResourceTemplateHandle
 from unilabos.protocol.base import canonical_hash
 from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
+    ACTOR_REGISTRY,
     ResourceTemplateRead,
     ResourceTemplateWrite,
 )
@@ -218,13 +219,23 @@ def register_resource_definitions(
         ):
             identities[name] = current.template_uuid
             continue
-        definition_hash = canonical_hash(value)
+        envelope = {
+            "effect_key": f"sync_template:{name}",
+            "operation": "sync_template",
+            "actor_type": ACTOR_REGISTRY,
+            "actor_uuid": name,
+        }
+        # 幂等键必须覆盖服务端 request_hash 的全部输入（信封 + 正文）：只按定义
+        # 派生时，信封字段一旦变化（如 actor_type 从 edge 改为 registry），同一
+        # command_uuid 会命中旧库里的效果行并被判定为"同键不同请求"而拒绝。
+        request_hash = canonical_hash(
+            {**envelope, "payload": value.model_dump(mode="json", exclude_none=False)}
+        )
         mutation = InventoryMutation(
             command_uuid=str(
-                uuid5(_REGISTRY_SYNC_NAMESPACE, f"{name}:{definition_hash}")
+                uuid5(_REGISTRY_SYNC_NAMESPACE, f"{name}:{request_hash}")
             ),
-            effect_key=f"sync_template:{name}",
-            operation="sync_template",
+            **envelope,
         )
         result = (
             gateway.put_template(mutation, value)

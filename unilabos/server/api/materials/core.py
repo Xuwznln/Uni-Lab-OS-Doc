@@ -114,8 +114,19 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
         return _call(service.put_template, mutation, value)
 
     @router.get("/templates")
-    async def list_templates():
-        return _call(service.list_templates)
+    async def list_templates(
+        include_definition: bool = Query(
+            default=True,
+            description=(
+                "false 时省略 registry 全量 definition（全注册表可达十几 MB），"
+                "只返回名称 / 类型 / 分类 / 位点 / 版本等目录字段，供前端选择器使用。"
+            ),
+        ),
+    ):
+        templates = _call(service.list_templates)
+        if include_definition:
+            return templates
+        return [item.model_copy(update={"definition": {}}) for item in templates]
 
     @router.get("/templates/{template_uuid}")
     async def get_template(template_uuid: str):

@@ -30,6 +30,7 @@ from typing import Any, Awaitable, Callable, Dict, Sequence
 
 from unilabos.backend.hostlink.protocol import ActionType
 from unilabos.backend.runtime.async_utils import run_blocking as _run_blocking
+from unilabos.protocol.materials import ACTOR_WORKFLOW
 from unilabos.resources import materials
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.utils.log import logger
@@ -150,6 +151,8 @@ async def deduct_resource(
             str(registry_class),
             name=str(material_name),
             node=None if mounting else node,
+            actor_type=ACTOR_WORKFLOW,
+            actor_uuid=_edge_id(getattr(node, "device_id", "")) or None,
         )
         # create 已在权威落库（发号），无需再 ensure
         deduct_tree_set = ResourceTreeSet.from_plr_resources([plr])
@@ -167,7 +170,12 @@ async def deduct_resource(
         # 出库扣减走 materials 协议：权威缺失时以原 uuid 显式创建（adopt），
         # 已存在则直接采用权威记录；之后设备侧按 uuid 拉取必然命中。
         deduct_tree_set = ResourceTreeSet.from_plr_resources([plr])
-        await _run_blocking(materials.ensure, deduct_tree_set)
+        await _run_blocking(
+            materials.ensure,
+            deduct_tree_set,
+            actor_type=ACTOR_WORKFLOW,
+            actor_uuid=_edge_id(getattr(node, "device_id", "")) or None,
+        )
     dumped = deduct_tree_set.dump()
     if not dumped:
         raise ValueError(f"物料 {getattr(plr, 'name', plr)} 序列化为空")

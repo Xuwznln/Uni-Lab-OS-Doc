@@ -75,11 +75,11 @@ def _register_runtime_arguments(parser: argparse.ArgumentParser) -> None:
         "--backend",
         type=backend_cli_value,
         choices=BACKEND_NAMES,
-        default="ros2",
+        default="hostlink",
         metavar="{hostlink,ros2}",
         help=(
-            "Communication backend: hostlink (distributed, no DDS) or "
-            "ros2 (default)."
+            "Communication backend: hostlink (default; distributed over "
+            "HostLink TCP, no DDS/ROS 2 required) or ros2."
         ),
     )
     _add(
@@ -134,15 +134,6 @@ def _register_runtime_arguments(parser: argparse.ArgumentParser) -> None:
         "--disable_browser",
         action="store_true",
         help="禁止启动时自动打开浏览器；管理端 HTTP API 仍会启动。",
-    )
-    _add(
-        group,
-        "--ui_dir",
-        default=None,
-        help=(
-            "前端构建产物目录（含 index.html）。配置后在管理端口的 /ui/ 托管前端，"
-            "页面与 API 同源、只需一个地址；不配置则首页只给出路标。"
-        ),
     )
     _add(
         group,

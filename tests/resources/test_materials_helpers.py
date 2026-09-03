@@ -126,3 +126,48 @@ def test_materials_ensure_adopts_graph_uuid_and_is_idempotent(tmp_path) -> None:
         assert len(roots) == 1
     finally:
         service.close()
+
+
+def test_materials_ensure_records_actor_in_ledger(tmp_path) -> None:
+    """ensure 的调用方身份落到账本 actor_type/actor_uuid，前端据此渲染来源 tag。
+
+    未显式传入时兜底 ``edge``；开机图对齐传 ``graph`` + 图 uuid。
+    """
+    from unilabos.protocol.materials import ACTOR_EDGE, ACTOR_GRAPH
+
+    def _rows_for(service: MaterialsService, root_uuid: str):
+        return [
+            row
+            for row in service.changes(after_sequence=0, limit=100)
+            if row.aggregate_uuid == root_uuid
+        ]
+
+    # 根物料名在同一权威内唯一，两种来源各用一份 db。
+    default_service = MaterialsService(tmp_path / "default.db")
+    try:
+        default_root = str(uuid4())
+        materials.ensure(
+            _graph_tree(default_root, str(uuid4())),
+            gateway=LocalMaterialsClient(default_service),
+        )
+        default_rows = _rows_for(default_service, default_root)
+        assert default_rows
+        assert {row.actor_type for row in default_rows} == {ACTOR_EDGE}
+    finally:
+        default_service.close()
+
+    graph_service = MaterialsService(tmp_path / "graph.db")
+    try:
+        graph_root = str(uuid4())
+        materials.ensure(
+            _graph_tree(graph_root, str(uuid4())),
+            gateway=LocalMaterialsClient(graph_service),
+            actor_type=ACTOR_GRAPH,
+            actor_uuid="graph-uuid-1",
+        )
+        graph_rows = _rows_for(graph_service, graph_root)
+        assert graph_rows
+        assert {row.actor_type for row in graph_rows} == {ACTOR_GRAPH}
+        assert {row.actor_uuid for row in graph_rows} == {"graph-uuid-1"}
+    finally:
+        graph_service.close()

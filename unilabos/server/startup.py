@@ -94,7 +94,7 @@ def setup_host_server_stack(
             materials_gateway=materials_gateway,
         )
         # 调度权威归属：未显式配置云端地址时本机是默认权威（本地 Scheduler +
-        # Workflow API）；配置后调度在远端 Backend，本机纯执行。
+        # Workflow API）；配置后调度在远端 Backend（runtime.v1 或旧协议）,本机纯执行。
         from unilabos.server.backend.legacy_adaptor.url import build_backend_websocket_url
 
         if not build_backend_websocket_url():

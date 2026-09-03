@@ -110,7 +110,7 @@ class ResourceDict(BaseModel):
     config: Dict[str, Any] = Field(description="Resource configuration")
     data: Dict[str, Any] = Field(description="Resource data, eg: container data without liquids, since liquids are tracked separately")
     extra: Dict[str, Any] = Field(
-        description="UniLab communication and conversion metadata"
+        description="Uni-Lab-OS communication and conversion metadata"
     )
     meta_data: Dict[str, JsonValue] = Field(
         description="Canonical resource metadata", default_factory=dict
@@ -585,24 +585,6 @@ PLR_CONFIG_ROOT_KEYS = (
 )
 
 
-def normalize_legacy_graph_node(node: Dict[str, Any]) -> Dict[str, Any]:
-    """图读取边界的旧字段兼容：``template_name`` 缺失时取旧图的 ``class``。
-
-    图契约字段是 ``template_name``，运行态消费点（注册表解析、host 判别、
-    拓扑编译等）只读它；旧图只写 ``class``。这里就地回填、绝不覆盖已有值，
-    让旧图无需改文件即可加载，并使登记进 Graph Authority 的 payload 自然升级
-    为带 ``template_name`` 的形态。只在图读取/导入入口调用（graphio 装配、
-    Graph Authority upsert），不进 ``ResourceDict`` 校验器——运行态、PLR 与
-    数据库来源不做此推导。
-    """
-
-    if not str(node.get("template_name") or "").strip():
-        legacy_class = str(node.get("class") or "").strip()
-        if legacy_class:
-            node["template_name"] = legacy_class
-    return node
-
-
 def assemble_tracker_state(resource: ResourceDict) -> Dict[str, Any]:
     state = copy.deepcopy(resource.data)
     for state_key in TRACKER_STATE_KEYS:
@@ -627,5 +609,4 @@ __all__ = [
     "ResourceDict",
     "ResourceDictType",
     "assemble_tracker_state",
-    "normalize_legacy_graph_node",
 ]

@@ -23,7 +23,6 @@ from unilabos.resources.objects.resource import (
     EXTRA_RESOURCE_META_DATA,
     EXTRA_RESOURCE_POSE,
     RESOURCE_ROOT_FIELDS,
-    normalize_legacy_graph_node,
 )
 from unilabos.resources.objects.site import ResourceSite
 from unilabos.resources.objects.state import TRACKER_STATE_KEYS
@@ -88,9 +87,7 @@ def canonicalize_nodes_data(
         if node.get("label") is not None:
             node_id = node.pop("label")
             node["id"] = node["name"] = node_id
-        # 旧图只写 class；模型校验器不做该推导，图读取边界在此兼容。
-        normalize_legacy_graph_node(node)
-        # 父子关系只由 parent/parent_uuid 表达；旧图的 children 列表是派生字段，读取时丢弃。
+        # 父子关系只由 parent/parent_uuid 表达；children 是派生字段，读取时丢弃。
         node.pop("children", None)
         if not isinstance(node.get("config"), dict):
             node["config"] = {}
@@ -148,7 +145,9 @@ def canonicalize_nodes_data(
             # print_status(f"DeviceId: {node['id']}, Class: {node['class']}", "info")
             # 使用标准化方法
             resource_instance = ResourceDictInstance.get_resource_instance_from_dict(node)
-            known_nodes[node["id"]] = resource_instance
+            # 不同父节点下的子物料可以同名（多块板各有 A1 孔）；id 只在
+            # 无 parent_uuid 时作回退键，uuid 才是身份。
+            known_nodes.setdefault(node["id"], resource_instance)
             uuid_to_instance[resource_instance.res_content.uuid] = resource_instance
             standardized_instances.append(resource_instance)
         except Exception as e:
@@ -157,11 +156,9 @@ def canonicalize_nodes_data(
 
     # 第四步：建立 parent 和 children 关系
     for node in nodes:
-        node_id = node["id"]
-        if node_id not in known_nodes:
+        current_instance = uuid_to_instance.get(str(node.get("uuid") or ""))
+        if current_instance is None:
             continue
-
-        current_instance = known_nodes[node_id]
 
         # 优先使用 parent_uuid 进行匹配，如果不存在则使用 parent
         parent_uuid = node.get("parent_uuid")
@@ -204,7 +201,9 @@ def canonicalize_links_ports(links: List[Dict[str, Any]], resource_tree_set: Res
         id_to_uuid[node.res_content.id] = node.res_content.uuid
         uuid_to_id[node.res_content.uuid] = node.res_content.id
 
-    # 第三遍处理：为每个 link 添加 source_uuid 和 target_uuid
+    # 第三遍处理：为每个 link 补齐 source/target 与 source_uuid/target_uuid
+    # （Graph Authority 导出的边两者都有；只带其一时按节点集合补出另一方）。
+    resolved_links: List[Dict[str, Any]] = []
     for link in links:
         source_id = link.get("source")
         target_id = link.get("target")
@@ -227,6 +226,14 @@ def canonicalize_links_ports(links: List[Dict[str, Any]], resource_tree_set: Res
         # 添加 target_uuid
         if target_uuid and target_uuid in uuid_to_id:
             link["target"] = uuid_to_id[target_uuid]
+
+        if not link.get("source") or not link.get("target"):
+            logger.warning(
+                f"[GraphIO] 边 {link} 的端点不在节点集合中，已忽略"
+            )
+            continue
+        resolved_links.append(link)
+    links[:] = resolved_links
 
     # 第一遍处理：将字符串类型的port转换为字典格式
     for link in links:
@@ -1472,7 +1479,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                     "quantity": 0
                 }
             ]
-            logger.debug(f"🔄 [PLR→Bioyond] 坐标转换: {resource.name} 在 {carrier_parent.name}[{site_in_parent['identifier']}] → UniLab(列={site_in_parent['x']},行={site_in_parent['y']},层={site_in_parent['z']}) → Bioyond(x={bioyond_x},y={bioyond_y},z={site_in_parent['z'] + 1})")
+            logger.debug(f"🔄 [PLR→Bioyond] 坐标转换: {resource.name} 在 {carrier_parent.name}[{site_in_parent['identifier']}] → Uni-Lab-OS(列={site_in_parent['x']},行={site_in_parent['y']},层={site_in_parent['z']}) → Bioyond(x={bioyond_x},y={bioyond_y},z={site_in_parent['z'] + 1})")
 
         bioyond_materials.append(material)
     return bioyond_materials

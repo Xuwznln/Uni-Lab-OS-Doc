@@ -110,47 +110,33 @@ rotavap.one:
         type: UniLabJsonCommand
       set_timer:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_timer参数
           type: object
         type: SendCmd
     module: unilabos.devices.rotavap.rotavap_one:RotavapOne
@@ -275,8 +261,7 @@ separator.homemade:
         type: UniLabJsonCommand
       stir:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           event: event
           settling_time: settling_time
@@ -286,225 +271,73 @@ separator.homemade:
           time_spec: time_spec
           vessel: vessel
         goal_default:
-          event: ''
-          settling_time: ''
-          stir_speed: 0.0
-          stir_time: 0.0
-          time: ''
-          time_spec: ''
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          settling_time: 10
+          stir_speed: 300
+          stir_time: 10
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: Stir_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                event:
-                  type: string
                 settling_time:
+                  default: 10
                   description: The duration for which to settle after stirring, in
                     seconds. Defaults to 10.
-                  type: string
+                  type: number
                 stir_speed:
+                  default: 300
                   description: The speed of stirring, in RPM. Defaults to 300.
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 stir_time:
+                  default: 10
                   description: The duration for which to stir, in seconds. Defaults
                     to 10.
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
-                time:
-                  type: string
-                time_spec:
-                  type: string
-                vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
-                  title: vessel
-                  type: object
+              required: []
               title: Stir_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Stir_Result
-              type: object
           required:
           - goal
-          title: Stir
+          title: stir参数
           type: object
         type: Stir
       valve_open_cmd:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: valve_open_cmd参数
           type: object
         type: SendCmd
     module: unilabos.devices.separator.homemade_grbl_conductivity:SeparatorController

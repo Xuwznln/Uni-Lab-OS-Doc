@@ -229,6 +229,35 @@ def test_registry_completion_publishes_backend_site_and_policy_defaults(
     ] == {}
 
 
+def test_ast_scanner_skips_runtime_injected_parameters(tmp_path) -> None:
+    """``action_context`` / ``sample_uuids`` 由执行器注入，不得进入动作契约。"""
+
+    source = tmp_path / "ctx_driver.py"
+    source.write_text(
+        "\n".join(
+            [
+                "from unilabos.registry.decorators import device, action",
+                "from unilabos.backend.runtime.action import ActionContext",
+                "",
+                "@device(id='ctx_ast_test', category=['test'])",
+                "class Driver:",
+                "    @action()",
+                "    def heat(self, site_id: int, duration_seconds: float, action_context: ActionContext, sample_uuids: dict = None) -> dict:",
+                "        return {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = scan_directory(tmp_path, python_path=tmp_path, executor=executor)
+
+    metadata = result["devices"]["ctx_ast_test"]
+    heat = metadata["actions"]["heat"]
+    names = [param["name"] for param in heat["params"]]
+    assert names == ["site_id", "duration_seconds"]
+
+
 def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
     cache_path = tmp_path / "ast_scan_cache.json"
     cache_path.write_text(
@@ -238,7 +267,7 @@ def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
 
     cache = load_scan_cache(cache_path)
 
-    assert _CACHE_VERSION == 15
+    assert _CACHE_VERSION == 16
     assert cache == {"version": _CACHE_VERSION, "files": {}}
 
 

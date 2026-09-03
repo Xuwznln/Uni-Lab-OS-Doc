@@ -991,7 +991,8 @@ def test_site_snapshot_merge_is_uuid_based_and_never_deletes_missing_sites():
         merge_resource_sites(current, conflicting)
 
 
-def test_graphio_promotes_legacy_class_to_template_name():
+def test_graphio_does_not_promote_class_to_template_name():
+    """graphio 只认当前契约：class 不再回填 template_name（旧图由 legacy 适配层转换）。"""
     graphio = pytest.importorskip(
         "unilabos.resources.graphio",
         reason="GraphIO 依赖 ROS Jazzy 生成的 unilabos_msgs",
@@ -1002,7 +1003,8 @@ def test_graphio_promotes_legacy_class_to_template_name():
     dumped = graphio.canonicalize_nodes_data([node]).dump()[0][0]
 
     assert dumped["class"] == "virtual_workbench"
-    assert dumped["template_name"] == "virtual_workbench"
+    # template_name 只按 ResourceDict 自己的规则推导（这里来自 config.type）。
+    assert dumped["template_name"] == "StrictCarrier"
 
 
 def test_graphio_keeps_protocol_fields_at_resource_root():
@@ -1058,9 +1060,14 @@ def test_graphio_keeps_protocol_fields_at_resource_root():
     unknown_tree = graphio.canonicalize_nodes_data([unknown_position])
     assert unknown_tree.dump()[0][0]["pose"]["position"] is None
 
-    conflicting_position = _resource_payload(position=None, x=1)
+    # 根级 position 不属于当前契约（旧格式图在 -g 读取边界由 legacy 适配层转换）。
+    legacy_root_position = _resource_payload(position={"x": 1, "y": 2, "z": 3})
     with pytest.raises(ValueError, match="根字段 position 不受支持"):
-        graphio.canonicalize_nodes_data([conflicting_position])
+        graphio.canonicalize_nodes_data([legacy_root_position])
+
+    conflicting_xyz = _resource_payload(x=1)
+    with pytest.raises(ValueError, match="与旧 x/y/z 坐标冲突"):
+        graphio.canonicalize_nodes_data([conflicting_xyz])
 
 
 def test_graphio_keeps_graph_defined_host_node_and_links():

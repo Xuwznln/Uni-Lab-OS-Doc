@@ -201,39 +201,31 @@ neware_battery_test_system:
           plate_id: plate_id
           string: string
         goal_default:
-          string: ''
+          plate_id: P1
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                string:
+                plate_id:
+                  default: P1
+                  description: 盘号标识，如"P1"或"P2"
                   type: string
+              required: []
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
               type: object
           required:
           - goal
-          title: StrSingleInput
+          title: query_plate_action参数
           type: object
         type: StrSingleInput
       submit_from_csv:
@@ -346,9 +338,9 @@ neware_battery_test_system:
     module: unilabos.devices.neware_battery_test_system.neware_battery_test_system:NewareBatteryTestSystem
     status_policies: {}
     status_types:
-      channel_status: Dict[int, Dict]
-      connection_info: Dict[str, str]
-      device_summary: dict
+      channel_status: str
+      connection_info: str
+      device_summary: str
       status: str
       total_channels: int
     supported_backends:
@@ -402,15 +394,11 @@ neware_battery_test_system:
     data:
       properties:
         channel_status:
-          additionalProperties:
-            type: object
-          type: object
+          type: string
         connection_info:
-          additionalProperties:
-            type: string
-          type: object
+          type: string
         device_summary:
-          type: object
+          type: string
         status:
           type: string
         total_channels:

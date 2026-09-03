@@ -238,5 +238,11 @@ def test_restart_coordinator_uses_edge_scope_and_inflight_view() -> None:
 
 def test_ping_is_answered_with_pong() -> None:
     service = _service()
-    reply = service.handle_message("ping", {"id": "p1", "timestamp": 1.0})
-    assert reply == {"action": "pong", "data": {"id": "p1", "timestamp": 1.0}}
+    reply = service.handle_message(
+        "ping", {"ping_id": "p1", "client_timestamp": 1.0}
+    )
+    assert reply["action"] == "pong"
+    # 回显 Edge 字段并补 server_timestamp，供 host test_latency 计算时钟偏差
+    assert reply["data"]["ping_id"] == "p1"
+    assert reply["data"]["client_timestamp"] == 1.0
+    assert isinstance(reply["data"]["server_timestamp"], float)

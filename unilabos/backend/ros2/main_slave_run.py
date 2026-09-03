@@ -215,9 +215,14 @@ def slave(
                 f"HostLink 未启用，跳过 Slave 物料权威对齐: {len(resources_config.trees)} 棵树仅存在于本地图"
             )
         elif resources_config:
+            from unilabos.protocol.materials import ACTOR_GRAPH
             from unilabos.resources import materials
 
-            ensured = materials.ensure(resources_config)
+            ensured = materials.ensure(
+                resources_config,
+                actor_type=ACTOR_GRAPH,
+                actor_uuid=BasicConfig.machine_name or None,
+            )
             logger.info(f"Slave 物料权威对齐完成: {len(ensured.trees)} 棵树（uuid 与图一致）")
         else:
             logger.info("No resources to add.")

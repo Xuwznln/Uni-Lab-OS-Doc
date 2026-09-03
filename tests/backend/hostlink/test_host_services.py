@@ -87,7 +87,7 @@ def _host_node_registry_entry() -> dict:
                 "manual_confirm": _identity_mapping(
                     "timeout_seconds", "assignee_user_ids",
                 ),
-                "auto-test_resource": _identity_mapping(
+                "test_resource": _identity_mapping(
                     "sample_uuids", "resource", "resources", "device", "devices",
                 ),
                 "test_latency": _identity_mapping(),

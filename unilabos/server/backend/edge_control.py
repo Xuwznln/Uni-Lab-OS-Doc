@@ -187,12 +187,16 @@ class EdgeControlService:
         Backend 预占阶段的互斥精度。
         """
 
-        if self._registry_service is None:
+        registry_service = self._registry_service
+        if registry_service is None:
+            # 未显式注入时取进程内 Registry Authority（随本机调度权威一起装配）。
+            from unilabos.server.services.runtime.registry import get_registry_service
+
+            registry_service = get_registry_service()
+        if registry_service is None:
             return []
         try:
-            return self._registry_service.material_lock_parameters(
-                device_id, action_name
-            )
+            return registry_service.material_lock_parameters(device_id, action_name)
         except Exception:  # noqa: BLE001 - 预占精度问题不能阻断调度
             logger.exception("[EdgeControl] 解析物料锁参数失败: %s/%s", device_id, action_name)
             return []
@@ -360,7 +364,12 @@ class EdgeControlService:
         """处理一条 Edge 上行消息，返回需要回发的消息（如 ack/pong）。"""
 
         if action == "ping":
-            return {"action": "pong", "data": data}
+            # Edge 的 test_latency 用 server_timestamp 估算时钟偏差；回显原字段
+            # 的同时补上服务端时刻。
+            return {
+                "action": "pong",
+                "data": {**data, "server_timestamp": time.time()},
+            }
         if action == "pong":
             return None
         if action == "edge_change":

@@ -88,6 +88,26 @@ else:
 
 _module_hash_cache: Dict[str, Optional[str]] = {}
 
+_DICT_LIKE_TYPE_NAMES = frozenset({"dict", "mapping", "mutablemapping", "ordereddict", "typeddict"})
+
+
+def _normalize_status_return_type(return_type: Any) -> str:
+    """把 --complete_registry 从驱动注解抓到的 status 返回类型归一为 registry 里的声明类型。
+
+    字典类状态（``Dict[str, Any]`` 等）没有对应的 ROS 消息，展示和传输一律走 JSON 字符串，
+    所以 yaml 里直接声明为 ``str``，避免每次启动都要在运行期把泛型再映射一遍。
+    """
+    text = str(return_type or "").strip()
+    if not text:
+        return "str"
+    base = text.split("[", 1)[0].strip()
+    if base.lower() == "optional" and "[" in text:
+        text = text.split("[", 1)[1].rsplit("]", 1)[0].strip()
+        base = text.split("[", 1)[0].strip()
+    if base.lower() in _DICT_LIKE_TYPE_NAMES:
+        return "str"
+    return text
+
 
 def _normalize_status_policy_map(
     policies: Any,
@@ -155,7 +175,7 @@ class Registry:
                 # noinspection PyUnusedImports
                 import unilabos_msgs
             except ImportError:
-                logger.error("[UniLab Registry] unilabos_msgs模块未找到，请确保已根据官方文档安装unilabos_msgs包。")
+                logger.error("[Uni-Lab-OS Registry] unilabos_msgs模块未找到，请确保已根据官方文档安装unilabos_msgs包。")
                 sys.exit(1)
             try:
                 ctypes.CDLL(str(Path(unilabos_msgs.__file__).parent / "unilabos_msgs_s__rosidl_typesupport_c.pyd"))
@@ -165,7 +185,7 @@ class Registry:
         self.registry_paths = [Path(__file__).absolute().parent]
         if registry_paths:
             self.registry_paths.extend(registry_paths)
-            logger.debug(f"[UniLab Registry] registry_paths: {self.registry_paths}")
+            logger.debug(f"[Uni-Lab-OS Registry] registry_paths: {self.registry_paths}")
 
         self.device_type_registry: Dict[str, Any] = {}
         self.resource_type_registry: Dict[str, Any] = {}
@@ -191,7 +211,7 @@ class Registry:
     ):
         """统一构建注册表入口。"""
         if self._setup_called:
-            logger.critical("[UniLab Registry] setup方法已被调用过，不允许多次调用")
+            logger.critical("[Uni-Lab-OS Registry] setup方法已被调用过，不允许多次调用")
             return
 
         self._startup_executor = ThreadPoolExecutor(
@@ -214,19 +234,19 @@ class Registry:
 
         # 3. 加载内置 YAML 注册表；external_only 模式只保留外部声明。
         if external_only:
-            logger.info("[UniLab Registry] external_only 模式: 跳过内置 YAML 注册表加载")
+            logger.info("[Uni-Lab-OS Registry] external_only 模式: 跳过内置 YAML 注册表加载")
         else:
             self.registry_paths = [Path(path).absolute() for path in self.registry_paths]
             for i, path in enumerate(self.registry_paths):
                 sys_path = path.parent
-                logger.trace(f"[UniLab Registry] Path {i+1}/{len(self.registry_paths)}: {sys_path}")
+                logger.trace(f"[Uni-Lab-OS Registry] Path {i+1}/{len(self.registry_paths)}: {sys_path}")
                 sys.path.append(str(sys_path))
                 self.load_device_types(path, complete_registry=complete_registry)
                 if BasicConfig.enable_resource_load:
                     self.load_resource_types(path, upload_registry, complete_registry=complete_registry)
                 else:
                     logger.warning(
-                        "[UniLab Registry] 资源加载已禁用 (enable_resource_load=False)，跳过资源注册表加载"
+                        "[Uni-Lab-OS Registry] 资源加载已禁用 (enable_resource_load=False)，跳过资源注册表加载"
                     )
 
         # 4. --devices 目录内嵌的同构注册表 (devices/ resources/ device_comms/) — 两种模式下都加载
@@ -237,7 +257,7 @@ class Registry:
         self._startup_executor.shutdown(wait=True)
         self._startup_executor = None
         self._setup_called = True
-        logger.trace(f"[UniLab Registry] ----------Setup Complete----------")
+        logger.trace(f"[Uni-Lab-OS Registry] ----------Setup Complete----------")
 
     # ------------------------------------------------------------------
     # Host node 设置
@@ -252,7 +272,7 @@ class Registry:
         """
         ast_entry = getattr(self, "_host_node_ast_entry", None) or {}
         if not ast_entry:
-            logger.error("[UniLab Registry] host_services.py 未生成 host_node 定义")
+            logger.error("[Uni-Lab-OS Registry] host_services.py 未生成 host_node 定义")
             return
 
         # Both runtimes publish the same AST-derived definition. Runtime-specific
@@ -327,12 +347,12 @@ class Registry:
             for d in devices_dirs:
                 d_path = Path(d).resolve()
                 if not d_path.is_dir():
-                    logger.warning(f"[UniLab Registry] --devices 路径不存在或不是目录: {d_path}")
+                    logger.warning(f"[Uni-Lab-OS Registry] --devices 路径不存在或不是目录: {d_path}")
                     continue
                 parent_dir = str(d_path.parent)
                 if parent_dir not in sys.path:
                     sys.path.insert(0, parent_dir)
-                    logger.info(f"[UniLab Registry] 添加 Python 路径: {parent_dir}")
+                    logger.info(f"[Uni-Lab-OS Registry] 添加 Python 路径: {parent_dir}")
                 extra_dirs.append(d_path)
 
         # 主扫描
@@ -347,7 +367,7 @@ class Registry:
                 cache=ast_cache, include_files=core_files,
             )
             logger.info(
-                f"[UniLab Registry] external_only 模式: 仅扫描核心文件 "
+                f"[Uni-Lab-OS Registry] external_only 模式: 仅扫描核心文件 "
                 f"({', '.join(f.name for f in core_files)})"
             )
         else:
@@ -358,10 +378,7 @@ class Registry:
                 scan_root, python_path=python_path, executor=self._startup_executor,
                 exclude_files=exclude_files, cache=ast_cache,
             )
-            logger.info(
-                f"[UniLab Registry] 排除扫描文件: {exclude_files} "
-                f"(host_services.py 由 host_node 单独扫描处理)"
-            )
+            logger.info(f"[Uni-Lab-OS Registry] 排除扫描文件: {exclude_files} ")
 
         # host_node 的动作 schema 单独扫描（不进默认扫描与 build 缓存）：
         # AST 扫描不 import 模块，schema-only 模式下同样安全。
@@ -391,7 +408,7 @@ class Registry:
             # 社区包目录：把扫描到的 id 命名空间化为 community.<ns>.<id>，直接作为注册表 key
             ns = community_namespaces.get(str(d_path))
             if ns:
-                logger.info(f"[UniLab Registry] 社区包命名空间化: {d_path} -> {ns}.<id>")
+                logger.info(f"[Uni-Lab-OS Registry] 社区包命名空间化: {d_path} -> {ns}.<id>")
 
             for did, dmeta in extra_result.get("devices", {}).items():
                 key = f"{ns}.{did}" if ns else did
@@ -423,7 +440,7 @@ class Registry:
         # 缓存命中统计
         if total_stats["total"] > 0:
             logger.info(
-                f"[UniLab Registry] AST 缓存统计: "
+                f"[Uni-Lab-OS Registry] AST 缓存统计: "
                 f"{total_stats['hits']}/{total_stats['total']} 命中, "
                 f"{total_stats['misses']} 重新解析"
             )
@@ -433,7 +450,7 @@ class Registry:
         self.workflow_registry.update(scan_result.get("workflows", {}))
         if self.workflow_registry:
             logger.info(
-                f"[UniLab Registry] 发现 {len(self.workflow_registry)} 个 @workflow 默认子工作流定义"
+                f"[Uni-Lab-OS Registry] 发现 {len(self.workflow_registry)} 个 @workflow 默认子工作流定义"
             )
 
         # build 结果缓存：当所有 AST 文件命中时跳过 _build_*_entry_from_ast
@@ -447,7 +464,7 @@ class Registry:
                 self.device_type_registry.update(cached_devices)
                 self.resource_type_registry.update(cached_resources)
                 logger.info(
-                    f"[UniLab Registry] build 缓存命中: 跳过 {len(cached_devices)} 设备 + "
+                    f"[Uni-Lab-OS Registry] build 缓存命中: 跳过 {len(cached_devices)} 设备 + "
                     f"{len(cached_resources)} 资源的 entry 构建"
                 )
             else:
@@ -467,7 +484,7 @@ class Registry:
                     self.resource_type_registry[resource_id] = entry
 
             build_elapsed = _time.perf_counter() - build_t0
-            logger.info(f"[UniLab Registry] entry 构建耗时: {build_elapsed:.2f}s")
+            logger.info(f"[Uni-Lab-OS Registry] entry 构建耗时: {build_elapsed:.2f}s")
 
             unified_cache["_build_results"] = {
                 "devices": {k: v for k, v in self.device_type_registry.items() if k in ast_devices},
@@ -486,7 +503,7 @@ class Registry:
         scan_elapsed = _time.perf_counter() - scan_t0
         if ast_device_count > 0 or ast_resource_count > 0:
             logger.info(
-                f"[UniLab Registry] AST 扫描完成: {ast_device_count} 设备, "
+                f"[Uni-Lab-OS Registry] AST 扫描完成: {ast_device_count} 设备, "
                 f"{ast_resource_count} 资源 (耗时 {scan_elapsed:.2f}s)"
             )
 
@@ -530,7 +547,8 @@ class Registry:
                 cls = msg_converter_manager.search_class(mapped)
                 if cls:
                     return cls
-            logger.debug(
+            # Dict/嵌套泛型按设计走 JSON 字符串传输，属正常路径，不在 DEBUG 下逐条刷屏
+            logger.trace(
                 f"[Registry] 设备 {device_id} 的 {field_name} "
                 f"泛型类型 '{type_name}' 映射为 String"
             )
@@ -1388,7 +1406,7 @@ class Registry:
             tmp.write_bytes(pickle.dumps(cache, protocol=pickle.HIGHEST_PROTOCOL))
             tmp.replace(cache_path)
         except Exception as e:
-            logger.debug(f"[UniLab Registry] 缓存保存失败: {e}")
+            logger.debug(f"[Uni-Lab-OS Registry] 缓存保存失败: {e}")
 
     @staticmethod
     def _module_source_hash(module_str: str) -> Optional[str]:
@@ -1487,7 +1505,7 @@ class Registry:
                     dumped = tree_set.dump()
                     return resource_id, dumped[0] if dumped else []
             except Exception as e:
-                logger.warning(f"[UniLab Registry] 资源 {resource_id} config_info 生成失败: {e}")
+                logger.warning(f"[Uni-Lab-OS Registry] 资源 {resource_id} config_info 生成失败: {e}")
             return resource_id, []
 
         # Separate into cache-hit vs cache-miss
@@ -1522,7 +1540,7 @@ class Registry:
                     }
                 except Exception as e:
                     rid = future_to_rid[future]
-                    logger.warning(f"[UniLab Registry] 资源 {rid} config_info 线程异常: {e}")
+                    logger.warning(f"[Uni-Lab-OS Registry] 资源 {rid} config_info 线程异常: {e}")
 
         if own_cache:
             self._save_config_cache(config_cache)
@@ -1530,7 +1548,7 @@ class Registry:
         elapsed = _time.perf_counter() - t0
         total = cache_hits + cache_misses
         logger.info(
-            f"[UniLab Registry] config_info 缓存统计: "
+            f"[Uni-Lab-OS Registry] config_info 缓存统计: "
             f"{cache_hits}/{total} 命中, {cache_misses} 重新生成 "
             f"(耗时 {elapsed:.2f}s)"
         )
@@ -1568,12 +1586,12 @@ class Registry:
                 try:
                     self.resolve_types_for_device(device_id, cls)
                 except Exception as e:
-                    logger.debug(f"[UniLab Registry/Verify] 设备 {device_id} 类型解析失败: {e}")
+                    logger.debug(f"[Uni-Lab-OS Registry/Verify] 设备 {device_id} 类型解析失败: {e}")
 
                 return None
             except Exception as e:
                 logger.warning(
-                    f"[UniLab Registry/Verify] 设备 {device_id}: "
+                    f"[Uni-Lab-OS Registry/Verify] 设备 {device_id}: "
                     f"导入模块 {module_str} 失败: {e}"
                 )
                 return f"device:{device_id}: {e}"
@@ -1593,7 +1611,7 @@ class Registry:
                 return None
             except Exception as e:
                 logger.warning(
-                    f"[UniLab Registry/Verify] 资源 {resource_id}: "
+                    f"[Uni-Lab-OS Registry/Verify] 资源 {resource_id}: "
                     f"导入模块 {module_str} 失败: {e}"
                 )
                 return f"resource:{resource_id}: {e}"
@@ -1626,12 +1644,12 @@ class Registry:
 
         if errors:
             logger.warning(
-                f"[UniLab Registry/Verify] 验证完成: {import_success_count}/{total_items} 成功, "
+                f"[Uni-Lab-OS Registry/Verify] 验证完成: {import_success_count}/{total_items} 成功, "
                 f"{len(errors)} 个错误"
             )
         else:
             logger.info(
-                f"[UniLab Registry/Verify] 验证完成: {import_success_count}/{total_items} 全部通过, "
+                f"[Uni-Lab-OS Registry/Verify] 验证完成: {import_success_count}/{total_items} 全部通过, "
                 f"{resolved_count} 设备类型已解析"
             )
 
@@ -1749,7 +1767,7 @@ class Registry:
         """
         if not _ROS_TYPE_RESOLUTION_ENABLED:
             logger.info(
-                "[UniLab Registry] 保留消息类型字符串，跳过 ROS 运行时类型增强"
+                "[Uni-Lab-OS Registry] 保留消息类型字符串，跳过 ROS 运行时类型增强"
             )
             return
         t0 = time.time()
@@ -1759,7 +1777,7 @@ class Registry:
             except Exception as e:
                 logger.debug(f"[Registry] 设备 {device_id} 类型解析失败: {e}")
         logger.info(
-            f"[UniLab Registry] 类型解析完成: {len(self.device_type_registry)} 设备 "
+            f"[Uni-Lab-OS Registry] 类型解析完成: {len(self.device_type_registry)} 设备 "
             f"(耗时 {time.time() - t0:.2f}s)"
         )
 
@@ -1780,7 +1798,7 @@ class Registry:
             with open(file, encoding="utf-8", mode="r") as f:
                 data = yaml.safe_load(io.StringIO(f.read()))
         except Exception as e:
-            logger.warning(f"[UniLab Registry] 读取资源文件失败: {file}, 错误: {e}")
+            logger.warning(f"[Uni-Lab-OS Registry] 读取资源文件失败: {file}, 错误: {e}")
             return {}, {}, False
 
         if not data:
@@ -1795,7 +1813,7 @@ class Registry:
             # AST 已有该资源 → 跳过，提示冗余
             if self.resource_type_registry.get(resource_id):
                 logger.warning(
-                    f"[UniLab Registry] 资源 '{resource_id}' 已由 AST 扫描注册，"
+                    f"[Uni-Lab-OS Registry] 资源 '{resource_id}' 已由 AST 扫描注册，"
                     f"YAML 定义冗余，跳过 YAML 处理"
                 )
                 skip_ids.add(resource_id)
@@ -1842,7 +1860,7 @@ class Registry:
                 with open(file, "w", encoding="utf-8") as f:
                     yaml.dump(write_data, f, allow_unicode=True, default_flow_style=False, Dumper=NoAliasDumper)
             except Exception as e:
-                logger.warning(f"[UniLab Registry] 写入资源文件失败: {file}, 错误: {e}")
+                logger.warning(f"[Uni-Lab-OS Registry] 写入资源文件失败: {file}, 错误: {e}")
 
         return data, complete_data, True
 
@@ -1851,7 +1869,7 @@ class Registry:
         resources_path = abs_path / "resources"
         files = list(resources_path.rglob("*.yaml"))
         logger.trace(
-            f"[UniLab Registry] resources: {resources_path.exists()}, total: {len(files)}"
+            f"[Uni-Lab-OS Registry] resources: {resources_path.exists()}, total: {len(files)}"
         )
 
         if not files:
@@ -1911,7 +1929,7 @@ class Registry:
                     file_key = str(file.absolute()).replace("\\", "/")
                     yaml_file_rids[file_key] = list(complete_data.keys())
             except Exception as e:
-                logger.warning(f"[UniLab Registry] 加载资源文件失败: {file}, 错误: {e}")
+                logger.warning(f"[Uni-Lab-OS Registry] 加载资源文件失败: {file}, 错误: {e}")
 
         # upload 模式下，统一利用线程池为 pylabrobot 资源生成 config_info
         if upload_registry:
@@ -1946,7 +1964,7 @@ class Registry:
         total_yaml = yaml_cache_hits + yaml_cache_misses
         if upload_registry and total_yaml > 0:
             logger.info(
-                f"[UniLab Registry] YAML 资源缓存: "
+                f"[Uni-Lab-OS Registry] YAML 资源缓存: "
                 f"{yaml_cache_hits}/{total_yaml} 文件命中, "
                 f"{yaml_cache_misses} 重新加载"
             )
@@ -1966,7 +1984,7 @@ class Registry:
             # Expand shared YAML contracts before normalizing each device entry.
             data = resolve_yaml_refs(raw_data, base_file=file)
         except Exception as e:
-            logger.warning(f"[UniLab Registry] 读取设备文件失败: {file}, 错误: {e}")
+            logger.warning(f"[Uni-Lab-OS Registry] 读取设备文件失败: {file}, 错误: {e}")
             return {}, {}, False, []
 
         if not data:
@@ -2013,7 +2031,7 @@ class Registry:
                 # --- AST 已有该设备 → 跳过，提示冗余 ---
                 if self.device_type_registry.get(device_id):
                     logger.warning(
-                        f"[UniLab Registry] 设备 '{device_id}' 已由 AST 扫描注册，"
+                        f"[Uni-Lab-OS Registry] 设备 '{device_id}' 已由 AST 扫描注册，"
                         f"YAML 定义冗余，跳过 YAML 处理"
                     )
                     skip_ids.add(device_id)
@@ -2056,7 +2074,9 @@ class Registry:
                     enhanced_import_map = enhanced_info.get("import_map", {})
                     for st_k, st_v in enhanced_info["status_methods"].items():
                         if st_k in original_status_keys:
-                            device_config["class"]["status_types"][st_k] = st_v["return_type"]
+                            device_config["class"]["status_types"][st_k] = _normalize_status_return_type(
+                                st_v["return_type"]
+                            )
 
                 # --- status_types: 字符串 → class 映射 ---
                 for status_name, status_type in device_config["class"]["status_types"].items():
@@ -2278,7 +2298,7 @@ class Registry:
                                 action_config["schema"].setdefault("description", "")
                             elif target_type is None:
                                 logger.warning(
-                                    f"[UniLab Registry] 设备 {device_id} 的动作 {action_name} 类型为空，跳过替换"
+                                    f"[Uni-Lab-OS Registry] 设备 {device_id} 的动作 {action_name} 类型为空，跳过替换"
                                 )
 
                 # deepcopy 保存可序列化的 complete_data（此时 type 字段仍为字符串）
@@ -2312,7 +2332,7 @@ class Registry:
                 with open(file, "w", encoding="utf-8") as f:
                     yaml.dump(write_data, f, allow_unicode=True, default_flow_style=False, Dumper=NoAliasDumper)
             except Exception as e:
-                logger.warning(f"[UniLab Registry] 写入设备文件失败: {file}, 错误: {e}")
+                logger.warning(f"[Uni-Lab-OS Registry] 写入设备文件失败: {file}, 错误: {e}")
 
         return data, complete_data, True, device_ids
 
@@ -2351,7 +2371,7 @@ class Registry:
         device_comms_path = abs_path / "device_comms"
         files = list(devices_path.glob("*.yaml")) + list(device_comms_path.glob("*.yaml"))
         logger.trace(
-            f"[UniLab Registry] devices: {devices_path.exists()}, device_comms: {device_comms_path.exists()}, "
+            f"[Uni-Lab-OS Registry] devices: {devices_path.exists()}, device_comms: {device_comms_path.exists()}, "
             + f"total: {len(files)}"
         )
 
@@ -2413,7 +2433,7 @@ class Registry:
                     except OSError:
                         pass
             except Exception as e:
-                logger.warning(f"[UniLab Registry] 加载设备文件失败: {file}, 错误: {e}")
+                logger.warning(f"[Uni-Lab-OS Registry] 加载设备文件失败: {file}, 错误: {e}")
 
         if uncached_files and yaml_dev_cache:
             latest_cache = self._load_config_cache()
@@ -2423,7 +2443,7 @@ class Registry:
         total = len(files)
         extra = " (complete_registry 跳过缓存)" if complete_registry else ""
         logger.info(
-            f"[UniLab Registry] YAML 设备加载: "
+            f"[Uni-Lab-OS Registry] YAML 设备加载: "
             f"{cache_hits}/{total} 缓存命中, "
             f"{len(uncached_files)} 重新加载 "
             f"(耗时 {time.time() - t0:.2f}s){extra}"
@@ -2454,7 +2474,7 @@ class Registry:
                     reg_file, complete_registry=False
                 )
             except Exception as e:
-                logger.warning(f"[UniLab Registry] 社区包 registry.yaml 加载失败: {reg_file}, 错误: {e}")
+                logger.warning(f"[Uni-Lab-OS Registry] 社区包 registry.yaml 加载失败: {reg_file}, 错误: {e}")
                 continue
             if not is_valid:
                 continue
@@ -2469,12 +2489,12 @@ class Registry:
                 self.device_type_registry.update(runtime_data)
                 loaded_total += len(runtime_data)
                 logger.info(
-                    f"[UniLab Registry] 社区包 registry.yaml 设备加载: {reg_file} -> "
+                    f"[Uni-Lab-OS Registry] 社区包 registry.yaml 设备加载: {reg_file} -> "
                     f"{', '.join(sorted(runtime_data))}"
                 )
 
         if loaded_total:
-            logger.info(f"[UniLab Registry] 社区包 registry.yaml 设备加载完成: 共 {loaded_total} 个")
+            logger.info(f"[Uni-Lab-OS Registry] 社区包 registry.yaml 设备加载完成: 共 {loaded_total} 个")
 
     @staticmethod
     def _is_registry_root(p: Path) -> bool:
@@ -2538,13 +2558,13 @@ class Registry:
                 if key in seen or not self._is_registry_root(root):
                     continue
                 seen.add(key)
-                logger.info(f"[UniLab Registry] 加载 --devices 内嵌注册表: {root}")
+                logger.info(f"[Uni-Lab-OS Registry] 加载 --devices 内嵌注册表: {root}")
                 self.load_device_types(root, complete_registry=complete_registry)
                 if BasicConfig.enable_resource_load:
                     self.load_resource_types(root, upload_registry, complete_registry=complete_registry)
                 else:
                     logger.warning(
-                        "[UniLab Registry] 资源加载已禁用 (enable_resource_load=False)，"
+                        "[Uni-Lab-OS Registry] 资源加载已禁用 (enable_resource_load=False)，"
                         f"跳过内嵌注册表资源: {root}"
                     )
                 if root not in self.registry_paths:
@@ -2599,7 +2619,7 @@ class Registry:
                                     "type": "string",
                                     "default": "",
                                     "title": "设备ID",
-                                    "description": "UniLabOS设备ID，用于指定执行动作的具体设备实例",
+                                    "description": "Uni-Lab-OS设备ID，用于指定执行动作的具体设备实例",
                                 },
                                 **schema["properties"]["goal"]["properties"],
                             }
@@ -2696,7 +2716,7 @@ def build_registry(
     """
     构建或获取Registry单例实例
     """
-    logger.info("[UniLab Registry] 构建注册表实例")
+    logger.info("[Uni-Lab-OS Registry] 构建注册表实例")
 
     global lab_registry
 
