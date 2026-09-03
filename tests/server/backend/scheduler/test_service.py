@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from unilabos.protocol.materials import InventoryAllocation
 from unilabos.server.backend.scheduler.dag.models import DagNode, NodeState
-from unilabos.server.backend.scheduler.service import BackendScheduler
+from unilabos.server.backend.scheduler.service import BackendScheduler, allocation_arguments
 
 
 class _Workflow:
@@ -266,6 +267,55 @@ def test_always_free_is_resolved_from_the_action_registry_unless_the_node_declar
     assert executor.dispatched[2]["always_free"] is False
     assert scheduler.resources.request_for_owner("run-1-a1").identifiers == []
     assert [i.kind for i in scheduler.resources.request_for_owner("run-3-a1").identifiers] == ["action"]
+
+
+def test_allocation_arguments_merge_reagent_lots_and_reference_materials() -> None:
+    """权威分配 → 动作参数：material 给 ResourceSlot 引用，reagent 按 key 合计并列出 lot 明细。"""
+
+    items = [
+        InventoryAllocation(key="water", kind="reagent", template_uuid="t-water", lot_uuid="lot-1", quantity=30, unit="ml"),
+        InventoryAllocation(key="water", kind="reagent", template_uuid="t-water", lot_uuid="lot-2", quantity=10, unit="ml"),
+        InventoryAllocation(key="plate", kind="material", template_uuid="t-plate", material_uuid="m-1"),
+    ]
+
+    arguments = allocation_arguments(items)
+
+    assert arguments["water"] == {
+        "key": "water",
+        "kind": "reagent",
+        "template_uuid": "t-water",
+        "unit": "ml",
+        "quantity": 40.0,
+        "lots": [{"lot_uuid": "lot-1", "quantity": 30.0}, {"lot_uuid": "lot-2", "quantity": 10.0}],
+    }
+    assert arguments["plate"] == {"key": "plate", "kind": "material", "uuid": "m-1", "template_uuid": "t-plate"}
+
+
+def test_start_node_injects_resolved_inventory_into_action_args() -> None:
+    """InventoryRequirement 是节点声明；派发给设备的是权威解析出的出库内容（按 key 注入同名参数）。"""
+
+    workflow = _Workflow()
+    executor = _Executor()
+    scheduler = BackendScheduler(workflow, executor)  # type: ignore[arg-type]
+    task = {"uuid": "task-1", "workflow_uuid": "workflow-1"}
+    node = DagNode(node_id="run-1", device_id="dispenser", action="dispense")
+    _attach(scheduler, workflow, task, node)
+    scheduler._run_specs["run-1"].update(  # noqa: SLF001
+        {
+            "base_param": {"target": "beaker"},
+            "inventory_allocations": {
+                "water": {"key": "water", "kind": "reagent", "template_uuid": "t", "unit": "ml", "quantity": 40.0, "lots": [{"lot_uuid": "lot-1", "quantity": 40.0}]}
+            },
+        }
+    )
+
+    scheduler._start_node(task, node)  # noqa: SLF001
+
+    (payload,) = executor.dispatched
+    assert payload["action_args"] == {
+        "target": "beaker",
+        "water": {"key": "water", "kind": "reagent", "template_uuid": "t", "unit": "ml", "quantity": 40.0, "lots": [{"lot_uuid": "lot-1", "quantity": 40.0}]},
+    }
 
 
 def test_dispatch_waits_for_the_execution_adapter_and_resumes_on_host_ready() -> None:

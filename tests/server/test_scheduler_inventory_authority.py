@@ -712,6 +712,17 @@ def test_backend_scheduler_reserves_complete_task_before_dispatch(tmp_path) -> N
         assert [item.status for item in reservations] == ["active", "active"]
         assert {item.job_uuid for item in reservations} == {"run-a-attempt-1", "run-b-attempt-1"}
         assert service.get_inventory_lot("lot-a").quantity_available == 1
+        # 权威解析出的出库内容按需求 key 留在 spec，派发时注入同名动作参数
+        assert specs["run-a"]["inventory_allocations"] == {
+            "solvent": {
+                "key": "solvent",
+                "kind": "reagent",
+                "template_uuid": "reagent-template",
+                "unit": "ul",
+                "quantity": 2.0,
+                "lots": [{"lot_uuid": "lot-a", "quantity": 2.0}],
+            }
+        }
 
         scheduler._release_unconsumed_task_inventory("task-local")  # noqa: SLF001
         assert [

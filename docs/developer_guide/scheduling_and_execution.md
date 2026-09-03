@@ -181,7 +181,11 @@ attempt 和新 `job_uuid`（与 4.1 本机调度器的 retry 语义相同，只�
    `canceled`，设备不被调用；这是调度的正常业务终态，调度器只记 WARNING。
    需求来源有两处：画布节点 `meta_data.inventory_requirements`，或 `@workflow` 步骤的
    `ctx.run(..., inventory=[...])`（声明时按 `InventoryRequirement` 校验，`lot_uuid`
-   指定批次，`template_uuid` 由权威按 FIFO 选批次）。
+   指定批次，`template_uuid` 由权威按 FIFO 选批次）。`InventoryRequirement` 只是节点上的
+   声明，不是设备参数：权威预留后解析出的**出库内容**由调度器按需求 `key` 注入同名动作参数
+   （`material` → ResourceSlot 引用 `{"uuid": material_uuid, ...}`，框架在 `send_goal`
+   解析成 PLR 实例；`reagent` → `{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}`），
+   设备拿到的已经是具体分配，不需要也不应该自己选 lot 或扣数量。
 2. **每轮资源重算都带入物料**：每个 Node 的完整资源申请包含 action 参数物料和
    reservation 分配出的实体物料，所以不同设备也不能同时操作同一物料。
 3. **驱动调用前只消费一次**：`ExecutionInventoryCoordinator` 校验 reservation

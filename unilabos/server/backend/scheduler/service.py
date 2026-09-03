@@ -60,6 +60,41 @@ class BackendSchedulingError(RuntimeError):
     """A persisted execution plan cannot be mapped to the local executor."""
 
 
+def allocation_arguments(items: Any) -> Dict[str, Dict[str, Any]]:
+    """把权威的 InventoryAllocation 列表按需求 key 归并成动作参数值。
+
+    - ``material``：一个需求恰好选出一个物料实例，值是 ResourceSlot 引用形态
+      ``{"uuid": material_uuid, ...}``，框架在 send_goal 解析为 PLR 实例；
+    - ``reagent``：同一需求可能按 FIFO 拆到多个 lot，值给出合计数量与 lot 明细
+      ``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``。
+    """
+
+    arguments: Dict[str, Dict[str, Any]] = {}
+    for item in items:
+        if item.kind == "material":
+            arguments[item.key] = {
+                "key": item.key,
+                "kind": "material",
+                "uuid": item.material_uuid,
+                "template_uuid": item.template_uuid,
+            }
+            continue
+        current = arguments.setdefault(
+            item.key,
+            {
+                "key": item.key,
+                "kind": "reagent",
+                "template_uuid": item.template_uuid,
+                "unit": item.unit,
+                "quantity": 0.0,
+                "lots": [],
+            },
+        )
+        current["quantity"] = float(current["quantity"]) + float(item.quantity or 0)
+        current["lots"].append({"lot_uuid": item.lot_uuid, "quantity": float(item.quantity or 0)})
+    return arguments
+
+
 class BackendScheduler:
     """持久化 WorkflowTask 的唯一 DAG、资源和库存调度权威。
 
@@ -391,7 +426,11 @@ class BackendScheduler:
     def _start_node(self, task: Dict[str, Any], node: DagNode) -> None:
         """为节点运行的当前 attempt 申请完整资源集合；``held`` 即下发。"""
 
+        spec = self._run_specs[node.node_id]
         args = self._resolve_action_args(node.node_id)
+        # InventoryRequirement 是节点上的声明；权威预留后解析出的具体出库内容
+        # （物料 uuid / lot 与数量）按需求 key 注入同名动作参数，设备拿到的已是具体引用。
+        args.update(spec.get("inventory_allocations") or {})
         parameter_names = self._material_lock_parameters(
             node.device_id,
             node.action,
@@ -399,7 +438,6 @@ class BackendScheduler:
         material_uuids = set(
             material_uuids_for_parameters(parameter_names, args)
         )
-        spec = self._run_specs[node.node_id]
         material_uuids.update(spec.get("reserved_material_uuids") or ())
         spec["resolved_action_args"] = args
         spec["materials_need_lock"] = parameter_names
@@ -655,6 +693,8 @@ class BackendScheduler:
                         and item.material_uuid is not None
                     }
                 )
+                # 权威解析出的出库内容：按需求 key 归并，派发时注入同名动作参数
+                spec["inventory_allocations"] = allocation_arguments(reservation.items)
 
     def _reserve_task_inventory(
         self,
@@ -876,4 +916,4 @@ class BackendScheduler:
         )
 
 
-__all__ = ["BackendScheduler", "BackendSchedulingError"]
+__all__ = ["BackendScheduler", "BackendSchedulingError", "allocation_arguments"]
