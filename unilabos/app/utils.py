@@ -1,5 +1,5 @@
 """
-UniLabOS 应用工具函数
+Uni-Lab-OS 应用工具函数
 
 提供 Windows ROS2 环境修复工具
 """
@@ -125,22 +125,22 @@ def _print_restart_banner(patched_files):
                 pass
 
     bar = "#" * 78
-    files_lines = [f"[UniLabOS]   - {p}" for p in patched_files]
+    files_lines = [f"[Uni-Lab-OS]   - {p}" for p in patched_files]
     body = "\n".join(
         [
             "",
             bar,
             bar,
             "##",
-            "##  [UniLabOS] Windows + conda 下检测到 DLL 加载失败，已自动打补丁。",
-            "##  [UniLabOS] DLL load failure detected on Windows + conda;",
-            "##  [UniLabOS] the following files have been auto-patched:",
+            "##  [Uni-Lab-OS] Windows + conda 下检测到 DLL 加载失败，已自动打补丁。",
+            "##  [Uni-Lab-OS] DLL load failure detected on Windows + conda;",
+            "##  [Uni-Lab-OS] the following files have been auto-patched:",
             "##",
             *[f"##  {line}" for line in files_lines],
             "##",
-            "##  [UniLabOS] 当前进程的 rclpy 状态已损坏，补丁需要在新进程才生效。",
-            "##  [UniLabOS] The current process is unusable; the patch only takes",
-            "##  [UniLabOS] effect on a fresh process.",
+            "##  [Uni-Lab-OS] 当前进程的 rclpy 状态已损坏，补丁需要在新进程才生效。",
+            "##  [Uni-Lab-OS] The current process is unusable; the patch only takes",
+            "##  [Uni-Lab-OS] effect on a fresh process.",
             "##",
             "##  >>> 请重新运行刚才的命令 / Please re-run the same command. <<<",
             "##",

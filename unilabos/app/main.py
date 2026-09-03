@@ -55,7 +55,7 @@ def load_config_from_file(config_path):
         else:
             load_config(config_path)
     else:
-        print_status(f"启动 UniLab-OS时，配置文件参数未正确传入 --config '{config_path}' 尝试本地配置...", "warning")
+        print_status(f"启动 Uni-Lab-OS时，配置文件参数未正确传入 --config '{config_path}' 尝试本地配置...", "warning")
         load_config(config_path)
 
 
@@ -138,8 +138,26 @@ def _registry_device_site_templates() -> Dict[str, Any]:
     }
 
 
+def _read_graph_json(file_path: str) -> Dict[str, Any]:
+    """读取 ``-g`` JSON 文件；读不出或不是对象即退出。"""
+
+    try:
+        with open(file_path, encoding="utf-8") as stream:
+            payload = json.load(stream)
+    except (OSError, json.JSONDecodeError) as exc:
+        print_status(f"读取 graph JSON 失败: {exc}", "error")
+        os._exit(1)
+    if not isinstance(payload, dict):
+        print_status(f"graph JSON 必须是对象: {file_path}", "error")
+        os._exit(1)
+    return payload
+
+
 def _register_graph_file_to_authority(
-    file_path: str, args_dict: Dict[str, Any], working_dir: str
+    file_path: str,
+    args_dict: Dict[str, Any],
+    working_dir: str,
+    graph_payload: Dict[str, Any] | None = None,
 ) -> str | None:
     """``-g <文件>.json``：先经 Graph Authority 创建/对账，再以权威 payload 启动。
 
@@ -149,6 +167,9 @@ def _register_graph_file_to_authority(
     （fail-closed）；基础设施异常（数据库不可用等）告警后回退为直接装配
     原文件（fail-open）。必须在 ``build_registry`` 之后调用。
 
+    Args:
+        graph_payload: 调用方已读取（并按需转换）的 payload；缺省时在此读取文件。
+
     Returns:
         权威 payload 的缓存文件路径；fail-open 回退时返回 ``None``。
     """
@@ -156,12 +177,8 @@ def _register_graph_file_to_authority(
     from unilabos.server.startup import resolve_database_paths
     from unilabos.server.services.materials.graph import GraphError, GraphService
 
-    try:
-        with open(file_path, encoding="utf-8") as stream:
-            graph_payload = json.load(stream)
-    except (OSError, json.JSONDecodeError) as exc:
-        print_status(f"读取 graph JSON 失败: {exc}", "error")
-        os._exit(1)
+    if graph_payload is None:
+        graph_payload = _read_graph_json(file_path)
 
     graph_name = Path(str(file_path)).stem
     try:
@@ -220,7 +237,7 @@ def _register_graph_file_to_authority(
 
 
 def main():
-    """运行 UniLabOS CLI，并在需要时启动设备运行时。"""
+    """运行 Uni-Lab-OS CLI，并在需要时启动设备运行时。"""
     parser = build_parser()
     args = parser.parse_args()
     args_dict = vars(args)
@@ -384,6 +401,8 @@ def main():
         else BasicConfig.port
     )
     BasicConfig.disable_browser = args_dict["disable_browser"] or BasicConfig.disable_browser
+    if args_dict.get("ui_dir"):
+        HTTPConfig.ui_dist_dir = os.path.expanduser(str(args_dict["ui_dir"]))
     BasicConfig.is_host_mode = not is_slave
     BasicConfig.slave_no_host = args_dict.get("slave_no_host", False)
     BasicConfig.no_update_feedback = args_dict.get("no_update_feedback", False)
@@ -467,11 +486,29 @@ def main():
             # 社区包设备直接以 community.<ns>.<id> 注册（扫描期命名空间化），不做 alias 桥接
             args_dict["_community_namespaces"] = community_result.namespaces
 
+    # 管理 API 装的驱动包（unilabos_data/driver_packages.json 中已启用者）并入扫描目录，
+    # 安装后安静点重启即可加载，不用改启动命令。
+    if not check_mode:
+        from unilabos.server.services.driver_packages import enabled_package_dirs
+
+        ledger_dirs = [
+            item
+            for item in enabled_package_dirs(working_dir)
+            if item not in (args_dict.get("devices") or [])
+        ]
+        if ledger_dirs:
+            args_dict["devices"] = (args_dict.get("devices") or []) + ledger_dirs
+            print_status(f"驱动包台账挂载目录: {', '.join(ledger_dirs)}", "info")
+
     # Step 0: AST 分析优先 + YAML 注册表加载
     # Host 的模板同步需要完整 config_info；check_mode 也执行实际 import 验证。
     devices_dirs = args_dict.get("devices", None)
     complete_registry = args_dict.get("complete_registry", False) or check_mode
     external_only = args_dict.get("external_devices_only", False)
+    if not check_mode:
+        from unilabos.server.services.driver_packages import get_driver_package_service
+
+        get_driver_package_service().configure(list(devices_dirs or []), bool(external_only))
     lab_registry = build_registry(
         registry_paths=args_dict["registry_path"],
         devices_dirs=devices_dirs,
@@ -525,16 +562,26 @@ def main():
             and not args_dict.get("_graph_from_authority")
             and os.path.isfile(file_path)
         ):
-            # -g 本地 JSON 是创建入口：注册表就绪后先经 Graph Authority
-            # 对账/发号/模板 Site 实例化，再以权威 payload 装配启动。
+            # -g 本地 JSON 是创建入口：旧格式图在读取边界由 legacy 适配层转成
+            # 当前契约，注册表就绪后先经 Graph Authority 对账/发号/模板 Site
+            # 实例化，再以权威 payload 装配启动。
+            from unilabos.server.backend.legacy_adaptor.legacy.startup import (
+                upgrade_startup_graph_payload,
+            )
+
+            graph_payload = upgrade_startup_graph_payload(_read_graph_json(file_path), file_path)
             registered_path = _register_graph_file_to_authority(
-                file_path, args_dict, working_dir
+                file_path, args_dict, working_dir, graph_payload
             )
             if registered_path is not None:
                 file_path = registered_path
                 args_dict["_graph_file_path"] = registered_path
                 args_dict["_graph_from_authority"] = True
-        if file_path.endswith(".json"):
+                graph, resource_tree_set, resource_links = read_node_link_json(file_path)
+            else:
+                # fail-open：Graph Authority 不可用时直接装配（已转换的）启动文件。
+                graph, resource_tree_set, resource_links = read_node_link_json(graph_payload)
+        elif file_path.endswith(".json"):
             graph, resource_tree_set, resource_links = read_node_link_json(file_path)
         else:
             graph, resource_tree_set, resource_links = read_graphml(file_path)
@@ -693,27 +740,41 @@ def main():
         # Backend-controlled 模式下，Edge 启动时上报完整注册表快照。服务端
         # 按条目版本化变更，并挂起会影响活跃 workflow 的 action 变更。
         if HTTPConfig.remote_addr:
-            from unilabos.server.backend.legacy_adaptor.sync.templates import (
-                report_registry_snapshot,
-            )
+            from unilabos.server.backend.legacy_adaptor.session import BackendSessionFactory
 
-            registry_report = report_registry_snapshot(
-                lab_registry, HTTPConfig.remote_addr
-            )
-            if registry_report is not None:
-                counts = (registry_report.summary or {}).get("counts", {})
-                print_status(
-                    f"注册表已上报: 设备 {registry_report.device_count} "
-                    f"资源 {registry_report.resource_count}"
-                    + (
-                        f"（新增 {counts.get('added', 0)} 更新 {counts.get('updated', 0)} "
-                        f"挂起 {counts.get('pending', 0)} 移除 {counts.get('removed', 0)} "
-                        f"不可用 {counts.get('unusable', 0)}）"
-                        if counts
-                        else "（服务端未返回条目级统计）"
-                    ),
-                    "info",
+            if BackendSessionFactory.is_legacy():
+                # 旧云端 Backend：注册表上报与物料镜像全部在 legacy 适配层内完成。
+                from unilabos.server.backend.legacy_adaptor.legacy.startup import (
+                    start_legacy_uplink,
                 )
+
+                args_dict["_legacy_material_mirror"] = start_legacy_uplink(
+                    lab_registry,
+                    materials_gateway=server_stack.materials_gateway,
+                    resource_links=resource_edge_info,
+                )
+            else:
+                from unilabos.server.backend.legacy_adaptor.sync.templates import (
+                    report_registry_snapshot,
+                )
+
+                registry_report = report_registry_snapshot(
+                    lab_registry, HTTPConfig.remote_addr
+                )
+                if registry_report is not None:
+                    counts = (registry_report.summary or {}).get("counts", {})
+                    print_status(
+                        f"注册表已上报: 设备 {registry_report.device_count} "
+                        f"资源 {registry_report.resource_count}"
+                        + (
+                            f"（新增 {counts.get('added', 0)} 更新 {counts.get('updated', 0)} "
+                            f"挂起 {counts.get('pending', 0)} 移除 {counts.get('removed', 0)} "
+                            f"不可用 {counts.get('unusable', 0)}）"
+                            if counts
+                            else "（服务端未返回条目级统计）"
+                        ),
+                        "info",
+                    )
 
         # 微后端必须先于控制链路接收命令，避免首个 job_start 绕过生命周期权威。
         comm_client.start()
@@ -740,6 +801,9 @@ def main():
     try:
         run_runtime(args_dict)
     finally:
+        legacy_mirror = args_dict.get("_legacy_material_mirror")
+        if legacy_mirror is not None:
+            legacy_mirror.stop()
         if comm_client is not None:
             comm_client.stop()
         if BasicConfig.is_host_mode:

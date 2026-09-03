@@ -9,6 +9,18 @@ from unilabos.config.config import BasicConfig
 from unilabos.utils.banner_print import print_status
 
 
+def _start_managed_device_processes() -> None:
+    """Host 就绪后拉起台账里 auto_start 的受管 Slave 子进程（崩溃由服务看护重启）。"""
+    try:
+        from unilabos.server.services.device_processes import get_device_process_service
+
+        started = get_device_process_service().start_auto()
+        if started:
+            print_status(f"已拉起 {len(started)} 个受管设备进程", "info")
+    except Exception as exc:  # noqa: BLE001 - 受管进程失败不影响 Host 本体
+        print_status(f"受管设备进程启动失败: {exc}", "warning")
+
+
 def _run_management_or_wait(backend_thread: threading.Thread) -> None:
     if not BasicConfig.is_host_mode:
         backend_thread.join()
@@ -16,6 +28,7 @@ def _run_management_or_wait(backend_thread: threading.Thread) -> None:
 
     from unilabos.server.api.app import start_server
 
+    _start_managed_device_processes()
     start_server(
         open_browser=not BasicConfig.disable_browser,
         port=BasicConfig.port,
@@ -51,6 +64,7 @@ def run_runtime(args: dict[str, Any]) -> None:
     if BasicConfig.is_host_mode:
         from unilabos.server.api.app import start_server
 
+        _start_managed_device_processes()
         threading.Thread(
             target=start_server,
             kwargs={

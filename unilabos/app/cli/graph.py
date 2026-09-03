@@ -18,6 +18,7 @@ from unilabos.client import (
     print_error,
     print_output,
     print_success,
+    print_warning,
 )
 from unilabos.client.materials.graph import HTTPGraphClient
 from unilabos.config.config import BasicConfig
@@ -54,6 +55,8 @@ def _create_graph_client(
 
 
 def _load_graph_file(file_path: str) -> dict[str, Any]:
+    """读取待上传的图文件；旧格式图在此转成当前契约，Graph Authority 只收当前契约。"""
+
     path = Path(file_path)
     if not path.is_file():
         print_error(f"graph 文件不存在: {file_path}")
@@ -67,7 +70,12 @@ def _load_graph_file(file_path: str) -> dict[str, Any]:
     if not isinstance(payload, dict) or not isinstance(payload.get("nodes"), list):
         print_error("graph payload 必须是含 nodes 数组的 JSON 对象")
         raise SystemExit(1)
-    return payload
+
+    from unilabos.server.backend.legacy_adaptor.legacy.graph import upgrade_legacy_graph_payload
+
+    return upgrade_legacy_graph_payload(
+        payload, source=f"graph 文件 {file_path}", report=print_warning
+    )
 
 
 def _cmd_create(args: Any) -> None:

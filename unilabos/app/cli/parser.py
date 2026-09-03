@@ -1,4 +1,4 @@
-"""UniLab 顶层命令行解析器。
+"""Uni-Lab-OS 顶层命令行解析器。
 
 这里只定义 CLI 契约，不加载配置、Registry、ROS2 或设备运行时。
 """
@@ -134,6 +134,15 @@ def _register_runtime_arguments(parser: argparse.ArgumentParser) -> None:
         "--disable_browser",
         action="store_true",
         help="禁止启动时自动打开浏览器；管理端 HTTP API 仍会启动。",
+    )
+    _add(
+        group,
+        "--ui_dir",
+        default=None,
+        help=(
+            "前端构建产物目录（含 index.html）。配置后在管理端口的 /ui/ 托管前端，"
+            "页面与 API 同源、只需一个地址；不配置则首页只给出路标。"
+        ),
     )
     _add(
         group,
