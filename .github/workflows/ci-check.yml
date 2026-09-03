@@ -63,9 +63,12 @@ jobs:
       - name: Build unilabos_msgs for ${{ matrix.ros_distro }}/cp312
         run: |
           call conda activate check-env
-          colcon build --base-paths unilabos_msgs --build-base build\unilabos_msgs --install-base install\unilabos_msgs --merge-install --packages-select unilabos_msgs --cmake-args -DBUILD_TESTING=OFF
+          if /I "%ROS_DISTRO%"=="humble" python -m pip install empy==3.3.4
+          set "CMAKE_PYTHON=%CONDA_PREFIX:\=/%/python.exe"
+          colcon build --base-paths unilabos_msgs --build-base build\unilabos_msgs --install-base install\unilabos_msgs --merge-install --packages-select unilabos_msgs --cmake-args -DBUILD_TESTING=OFF -DPython3_EXECUTABLE="%CMAKE_PYTHON%"
+          if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
           call install\unilabos_msgs\setup.bat
-          python -c "import os; from unilabos_msgs.msg import Resource; print('unilabos_msgs ' + os.environ['ROS_DISTRO'] + '/cp312: OK')"
+          python -c "import os; from rosidl_generator_py import import_type_support_impl; from unilabos_msgs.msg import Resource; import_type_support_impl.import_type_support('unilabos_msgs'); print('unilabos_msgs ' + os.environ['ROS_DISTRO'] + '/cp312 typesupport: OK')"
 
       - name: Install pip dependencies and unilabos
         run: |
@@ -78,8 +81,8 @@ jobs:
           uv pip install pytest
           uv pip install .
 
-      # README 中列出的四个外部设备示例随主仓库接口一起端到端验证：
-      # tests/e2e/readme_demos.py 固定引用四个仓库的已验证提交（示例仓库 CI 反向
+      # README 中列出的六个外部设备示例随主仓库接口一起端到端验证：
+      # tests/e2e/readme_demos.py 固定引用六个仓库的已验证提交（示例仓库 CI 反向
       # 固定 Uni-Lab-OS 提交，两侧互相锁定），用例按 pinned 提交克隆源码，再走
       # check_mode -> unilab graph create -> unilab -g 起微后端 -> 管理 API 跑工作流。
       - name: Validate README example device packages end to end
