@@ -177,6 +177,60 @@ def _observer_cast_code(value) -> str:
     return str(value).strip() or "N/A"
 
 
+def _log_coin_cell_record(
+    mode: str,
+    record_index: int,
+    device_count: int,
+    snapshot: Dict[str, Any],
+    csv_file: str,
+) -> None:
+    """按统一格式记录一颗已成功写入 CSV 的扣电数据。"""
+    def _cast_or_default(caster, value, default):
+        try:
+            return caster(value)
+        except Exception:
+            return default
+
+    payload = {
+        "mode": mode,
+        "record_index": _cast_or_default(_observer_cast_int, record_index, 0),
+        "device_count": _cast_or_default(_observer_cast_int, device_count, 0),
+        "time": str(snapshot.get("time", snapshot.get("Time", ""))),
+        "coin_cell_code": _cast_or_default(
+            _observer_cast_code, snapshot.get("coin_cell_code"), "N/A"
+        ),
+        "electrolyte_code": _cast_or_default(
+            _observer_cast_code, snapshot.get("electrolyte_code"), "N/A"
+        ),
+        "open_circuit_voltage": _cast_or_default(
+            _observer_cast_float, snapshot.get("open_circuit_voltage"), 0.0
+        ),
+        "pole_weight": _cast_or_default(
+            _observer_cast_float, snapshot.get("pole_weight"), 0.0
+        ),
+        "assembly_time": _cast_or_default(
+            _observer_cast_float, snapshot.get("assembly_time"), 0.0
+        ),
+        "target_assembly_pressure": _cast_or_default(
+            _observer_cast_int, snapshot.get("target_assembly_pressure"), 0
+        ),
+        "real_assembly_pressure": _cast_or_default(
+            _observer_cast_int, snapshot.get("real_assembly_pressure"), 0
+        ),
+        "electrolyte_volume": _cast_or_default(
+            _observer_cast_int, snapshot.get("electrolyte_volume"), 0
+        ),
+        "data_coin_type": _cast_or_default(
+            _observer_cast_int, snapshot.get("data_coin_type"), 0
+        ),
+        "csv_file": str(csv_file),
+    }
+    logger.info(
+        f"[扣电完成][mode={mode}] "
+        f"{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
 class CoinCellAssemblyWorkstation(WorkstationBase):
     def __init__(self, 
         config: dict = None, 
@@ -1936,6 +1990,25 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             ])
             #立刻写入磁盘
             csvfile.flush()
+        self._software_battery_counter = getattr(self, "_software_battery_counter", 0) + 1
+        _log_coin_cell_record(
+            mode="coin_cell_start",
+            record_index=self._software_battery_counter,
+            device_count=data_battery_number,
+            snapshot={
+                "time": timestamp,
+                "coin_cell_code": data_coin_cell_code,
+                "electrolyte_code": data_electrolyte_code,
+                "open_circuit_voltage": data_open_circuit_voltage,
+                "pole_weight": data_pole_weight,
+                "assembly_time": data_assembly_time,
+                "target_assembly_pressure": target_assembly_pressure,
+                "real_assembly_pressure": data_assembly_pressure,
+                "electrolyte_volume": data_electrolyte_volume,
+                "data_coin_type": data_coin_type,
+            },
+            csv_file=self.csv_export_file,
+        )
         self.success = True
         return self.success
 
@@ -2675,10 +2748,12 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
                         try:
                             self._observer_write_row(row_snapshot, assembly_file, neware_file, battery_system)
                             collected += 1
-                            logger.info(
-                                f"[旁观采集] 第 {collected} 颗已记录: 计数={count}, "
-                                f"电池码={row_snapshot['coin_cell_code']}, 电解液码={row_snapshot['electrolyte_code']}, "
-                                f"极片重={row_snapshot['pole_weight']}"
+                            _log_coin_cell_record(
+                                mode="observer",
+                                record_index=collected,
+                                device_count=count,
+                                snapshot=row_snapshot,
+                                csv_file=assembly_file,
                             )
                         except Exception as e:
                             logger.error(f"[旁观采集] 写入 CSV 失败（跳过本颗，不中断采集）: {e}")
