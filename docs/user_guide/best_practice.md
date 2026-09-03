@@ -1616,7 +1616,7 @@ solenoid_valve:
 
 ### 11.6 参考驱动实现（可运行示例仓库）
 
-为了让上述机制有可直接运行、可对照学习的范本，我们提供了五个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，并自带可终止的双运行时 smoke（`python -m <包名>.smoke --backend hostlink|ros2`），建议在编写自己的驱动前先跑一遍。
+为了让上述机制有可直接运行、可对照学习的范本，我们提供了六个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，并自带可终止的双运行时 smoke（`python -m <包名>.smoke --backend hostlink|ros2`），建议在编写自己的驱动前先跑一遍。
 
 | 示例仓库                                                                          | 演示要点                                           | 关键技术                                                                                                |
 | --------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -1625,6 +1625,7 @@ solenoid_valve:
 | [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo)       | 网页式工作流提交路径上的异常传播与决策             | 异常穿出动作边界 → 错误决策链 `abort`；点对点 `call_device_action` 异常在调用侧捕获（作为工作流节点）；业务级守卫返回；`operator_intervention` 人工替换结果让任务 `succeeded`；故障后 `stats` 仍可服务 |
 | [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo)                 | host/slave 双进程：固定位点与物料 CRUD 两条权威链   | `@device(available_sites=...)` 声明 → 注册表模板 → 权威位点实例 → 占用流转；`@resource` 物料 + `materials.*` 门面跨 HostLink 创建/赋值/转移/删除；`SiteSlot` 参数（uuid 或 label） |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo)                 | 调度器锁语义：并发提交工作流制造竞争，账本区间即证据 | `(device, action)` 动作锁串行、先提交先执行（`/api/v1/scheduler/resources` 的 `waiting` + `blockers`）；`@action(always_free=True)` 同一动作两次并行；`materials_need_lock=["plate"]` 按权威 `material_uuid` 互斥；`lock_auditor` 点对点读账本核对四条结论 |
+| [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo)       | 按数量计量的库存：入库、带预留的出库、数量不足拒绝 | `@resource` 试剂模板同步为权威模板；`restock` → `inbound_inventory_lot`（固定 lot）；`ctx.run(..., inventory=[...])` 声明试剂需求 → 任务启动 all-or-nothing 预留 → 动作开始扣减；不足时任务 `plan_not_executable` 且库存不变 |
 
 **快速启动（通用形式，单进程）：**
 

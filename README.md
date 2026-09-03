@@ -96,7 +96,7 @@ See [Best Practice Guide](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/b
 
 ## Reference Driver Implementations
 
-Five runnable example device packages are maintained as standalone GitHub repositories (generated
+Six runnable example device packages are maintained as standalone GitHub repositories (generated
 from [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate)). Clone any of them, load it
 with `--devices <pkg> --external_devices_only`, and read it when writing your own drivers:
 
@@ -107,6 +107,7 @@ with `--devices <pkg> --external_devices_only`, and read it when writing your ow
 | [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo) | Exception propagation driven entirely through web-style workflow submission (`/api/v1/workflow-tasks` + `/api/v1/error-decisions`): an exception escaping the action boundary is held for an `abort` / `operator_intervention` decision, a point-to-point `call_device_action` error is caught on the caller side as a workflow node, business-level guarded returns, and an operator-replaced result letting the task finish `succeeded` |
 | [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo) | Host/slave dual process — `@device(available_sites=...)` fixed sites (declaration → registry template → authoritative site instances → occupancy), `@resource` labware with the `materials.*` CRUD facade across HostLink, and `SiteSlot` action parameters (frontend Site picker uuid or label shorthand) |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo) | Scheduler lock semantics made observable through concurrently submitted workflows: the `(device, action)` action lock serializes two `occupy` calls in submission order (the second shows up `waiting` with `blockers` in `/api/v1/scheduler/resources`), `@action(always_free=True)` lets two `peek` calls of the same action overlap, and `materials_need_lock=["plate"]` locks per authoritative plate uuid (two devices on one plate serialize, one device on two plates runs in parallel); a `lock_auditor` node reads the probes' ledgers and fails the task if any conclusion does not hold |
+| [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo) | Quantity-based inventory through workflows: a registry `@resource` reagent template, `restock` as the web's `POST /api/v1/materials/lots/inbound` (100 ml into a fixed lot), a `dispense` step whose `inventory=[...]` requirement is reserved all-or-nothing at task start and deducted right before the action (device reports the lot after deduction, `60 / 60 / 0`), and a 500 ml requirement refused at reservation time — task `failed` / `plan_not_executable` ("short by 440 ml"), node `canceled`, device never called, lot unchanged |
 
 Each repository README ships a step-by-step launch tutorial with verified output, and every package
 carries a terminating dual-runtime smoke (`python -m <pkg>.smoke --backend hostlink|ros2`) that its

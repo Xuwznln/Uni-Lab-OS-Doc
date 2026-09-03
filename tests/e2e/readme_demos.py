@@ -218,6 +218,28 @@ DEMOS: tuple[DemoSpec, ...] = (
             WorkflowExpectation(name="锁账本审计", node_count=1),
         ),
     ),
+    DemoSpec(
+        repo="LabDeviceInventoryDemo",
+        url="https://github.com/Xuwznln/LabDeviceInventoryDemo",
+        ref="660e29a3c971ef48cddc508fd451dfde2e55e716",
+        package="inventory_demo",
+        host_graph="graph/inventory_demo.json",
+        # 每次 e2e 都是全新数据库：入库 100 → 出库 40 → 500 被拒 → 盘点 60/60/0
+        workflows=(
+            WorkflowExpectation(name="试剂入库：水 100 ml", node_count=1),
+            WorkflowExpectation(name="出库成功：分液 40 ml", node_count=2),
+            # 库存不足：任务在派发前 failed，节点运行 canceled，设备未被调用
+            WorkflowExpectation(
+                name="出库不足：分液 500 ml",
+                node_count=1,
+                task_status="failed",
+                node_statuses=("canceled",),
+                task_error_code="plan_not_executable",
+                task_error_contains="short by 440",
+            ),
+            WorkflowExpectation(name="库存盘点", node_count=1),
+        ),
+    ),
 )
 
 DEMOS_BY_REPO = {spec.repo: spec for spec in DEMOS}

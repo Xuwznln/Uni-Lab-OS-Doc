@@ -175,7 +175,13 @@ attempt 和新 `job_uuid`（与 4.1 本机调度器的 retry 语义相同，只�
 
 1. **Task 准入时一次性预留**：Scheduler 将该 Task 所有声明的
    `inventory_requirements` 交给 `MaterialsService.reserve_task_inventory()`，使用
-   一个事务 all-or-nothing 创建 Job reservation。
+   一个事务 all-or-nothing 创建 Job reservation。数量不足（`InsufficientInventoryError`）
+   或设备/动作缺失时，任务在派发前落 `failed` + `error_info[0].code=plan_not_executable`
+   （message 为权威原文，如 ``requirement 'water' is short by 440 ml``），节点运行
+   `canceled`，设备不被调用；这是调度的正常业务终态，调度器只记 WARNING。
+   需求来源有两处：画布节点 `meta_data.inventory_requirements`，或 `@workflow` 步骤的
+   `ctx.run(..., inventory=[...])`（声明时按 `InventoryRequirement` 校验，`lot_uuid`
+   指定批次，`template_uuid` 由权威按 FIFO 选批次）。
 2. **每轮资源重算都带入物料**：每个 Node 的完整资源申请包含 action 参数物料和
    reservation 分配出的实体物料，所以不同设备也不能同时操作同一物料。
 3. **驱动调用前只消费一次**：`ExecutionInventoryCoordinator` 校验 reservation
