@@ -8,7 +8,7 @@ import serial.tools.list_ports
 from serial import Serial
 from serial.serialutil import SerialException
 
-from unilabos.device_runtime.node import DeviceNode
+from unilabos.backend.runtime.node import DeviceNode
 
 
 class RunzeSyringePumpMode(Enum):

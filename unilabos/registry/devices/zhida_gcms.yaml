@@ -10,30 +10,25 @@ zhida_gcms:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: EmptyIn
+          title: abort参数
           type: object
         type: EmptyIn
       auto-close:
@@ -42,6 +37,7 @@ zhida_gcms:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -64,6 +60,7 @@ zhida_gcms:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -86,6 +83,7 @@ zhida_gcms:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         result: {}
         schema:
           description: ''
@@ -116,6 +114,7 @@ zhida_gcms:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         result: {}
         schema:
           description: ''
@@ -146,6 +145,7 @@ zhida_gcms:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         result: {}
         schema:
           description: ''
@@ -176,30 +176,25 @@ zhida_gcms:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: EmptyIn
+          title: put_tray参数
           type: object
         type: EmptyIn
       start:
@@ -209,39 +204,34 @@ zhida_gcms:
           string: string
           text: text
         goal_default:
-          string: ''
+          string: null
+          text: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 string:
                   description: Base64编码的CSV数据（ROS2参数名）
                   type: string
+                text:
+                  description: Base64编码的CSV数据（兼容旧接口）
+                  type: string
+              required: []
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
               type: object
           required:
           - goal
-          title: StrSingleInput
+          title: start参数
           type: object
         type: StrSingleInput
       start_with_csv_file:
@@ -251,53 +241,49 @@ zhida_gcms:
           csv_file_path: csv_file_path
           string: string
         goal_default:
-          string: ''
+          csv_file_path: null
+          string: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
+                csv_file_path:
+                  description: CSV文件路径（兼容旧接口）
+                  type: string
                 string:
                   description: CSV文件路径（ROS2参数名）
                   type: string
+              required: []
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
               type: object
           required:
           - goal
-          title: StrSingleInput
+          title: start_with_csv_file参数
           type: object
         type: StrSingleInput
     module: unilabos.devices.zhida_gcms.zhida:ZhidaClient
+    status_policies: {}
     status_types:
-      methods: dict
+      methods: str
       status: str
-      version: dict
+      version: str
     supported_backends:
     - hostlink
     - ros2
     type: python
   config_info: []
   description: 智达气相色谱-质谱联用（GC-MS）分析设备，通过 TCP 通信实现远程控制与状态监控，支持方法管理与任务启动等功能。
-  displayname: zhida_gcms
+  display_name: 智达 GC-MS 气质联用仪
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -321,11 +307,11 @@ zhida_gcms:
     data:
       properties:
         methods:
-          type: object
+          type: string
         status:
           type: string
         version:
-          type: object
+          type: string
       required:
       - methods
       - status

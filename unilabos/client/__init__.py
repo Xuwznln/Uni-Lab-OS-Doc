@@ -1,23 +1,23 @@
-"""HTTP 客户端模块
+"""Uni-Lab-OS 统一出站客户端。
 
-提供与 uni-lab-backend HTTP API 通信的能力：
-- HTTPClient: 基于 httpx 的 HTTP 客户端（ak/sk 鉴权）
-- SessionManager: 会话状态管理
-- 响应信封解析
-- 输出格式化
+包含上游 Backend 的 HTTP/会话能力，以及微后端四库的
+Local/HTTP/HostLink 等价 client。服务端 API 与数据模型仍归属
+``unilabos.server``，调用入口统一归属本命名空间。
+
+横切辅助（响应封套解析、CLI 输出格式化）收纳在 ``utils`` 子包
+（与 ``unilabos.protocol.utils`` 同范式），本层顶层保持 re-export。
 """
 
-from .envelope import Envelope, EnvelopeError, parse_envelope, unwrap_envelope
+from .utils.envelope import Envelope, EnvelopeError, parse_envelope, unwrap_envelope
 from .http import HTTPClient, HTTPClientConfig
 from .session import (
     SessionManager,
     SessionState,
     AuthInfo,
     ContextInfo,
-    DEFAULT_BASE_URL,
-    resolve_addr,
 )
-from .output import (
+from unilabos.utils.address import resolve_address
+from .utils.output import (
     OutputFormat,
     OutputFormatter,
     set_output_format,
@@ -27,6 +27,7 @@ from .output import (
     print_error,
     print_warning,
 )
+from .runtime.workflow import HTTPWorkflowClient, WorkflowClientError
 
 __all__ = [
     "Envelope",
@@ -39,8 +40,7 @@ __all__ = [
     "SessionState",
     "AuthInfo",
     "ContextInfo",
-    "DEFAULT_BASE_URL",
-    "resolve_addr",
+    "resolve_address",
     "OutputFormat",
     "OutputFormatter",
     "set_output_format",
@@ -49,4 +49,6 @@ __all__ = [
     "print_success",
     "print_error",
     "print_warning",
+    "HTTPWorkflowClient",
+    "WorkflowClientError",
 ]

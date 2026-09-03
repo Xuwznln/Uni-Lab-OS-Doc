@@ -21,7 +21,7 @@ from unilabos.registry.decorators import device, topic_config
     id="mock_gripper",
     category=["gripper"],
     description="Mock Gripper",
-    displayname="模拟夹爪",
+    display_name="模拟夹爪",
 )
 class MockGripper:
     def __init__(self):
@@ -181,7 +181,7 @@ my_device:
   schema: {} # 自动生成
 ```
 
-> 💡 **提示：** 详细的注册表编写指南和高级配置，请参考 {doc}`03_add_device_registry`。
+> 💡 **提示：** 详细的注册表编写指南和高级配置，请参考 {doc}`add_registry`。
 
 ---
 
@@ -197,7 +197,7 @@ from unilabos.registry.decorators import device, topic_config
     id="my_device",
     category=["general"],
     description="My Device",
-    displayname="我的设备",
+    display_name="我的设备",
 )
 class MyDevice:
     """设备类文档字符串
@@ -290,7 +290,7 @@ def get_sensor_data(self) -> Dict[str, float]:
 - 添加到注册表的 `status_types`
 - 定期发布到 ROS2 topic
 
-> **⚠️ 重要：** 仅有 `@property` 装饰器而没有 `@topic_config` 的属性**不会**被广播。这是一个 Breaking Change。
+> **⚠️ 重要：** 仅有 `@property` 装饰器而没有 `@topic_config` 的属性**不会**被广播。
 
 ### 动作方法
 
@@ -318,7 +318,7 @@ async def async_operation(self, duration: float) -> Dict[str, Any]:
     Args:
         duration: 持续时间(秒)
     """
-    # node 由 post_init 注入；该写法兼容 ROS 与 HostLink/simple backend
+    # node 由 post_init 注入；该写法兼容 ROS2 与 HostLink backend
     await self._node.sleep(duration)
     return {"success": True}
 ```
@@ -817,7 +817,7 @@ async def long_operation(self, duration: float) -> Dict[str, Any]:
 > `BaseROS2DeviceNode`。`node.sleep()`、`node.create_task()`、Topic 和设备 Action
 > API 会由当前 backend 实现。
 >
-> - HostLink/simple backend 使用标准 Python `asyncio` 事件循环，可使用
+> - HostLink backend 使用标准 Python `asyncio` 事件循环，可使用
 >   `asyncio.gather()`、`asyncio.wait_for()` 等原生能力。
 > - ROS backend 由 rclpy executor 调度。需要同时支持两类 backend 的驱动，优先使用
 >   `DeviceNode` 提供的 `sleep()` 和 `create_task()`。
@@ -828,7 +828,7 @@ async def long_operation(self, duration: float) -> Dict[str, Any]:
 >
 > ```python
 > async def complex_operation(self, duration: float) -> Dict[str, Any]:
->     """同一份驱动可在 ROS 和 HostLink/simple backend 中运行。"""
+>     """同一份驱动可在 ROS2 和 HostLink backend 中运行。"""
 >     self._status = "processing"
 >
 >     await self._node.sleep(duration)
@@ -850,8 +850,8 @@ async def long_operation(self, duration: float) -> Dict[str, Any]:
 >
 > **后端差异：**
 >
-> HostLink/simple 为每个设备维护标准 Python 事件循环；ROS backend 使用 rclpy
-> executor。只在 HostLink/simple 中运行的驱动可以直接使用 Python `asyncio`；需要在
+> HostLink 为每个设备维护标准 Python 事件循环；ROS backend 使用 rclpy
+> executor。只在 HostLink 中运行的驱动可以直接使用 Python `asyncio`；需要在
 > 两类 backend 中运行时，通过 `DeviceNode` 调度即可，不需要在驱动中写 backend 判断。
 
 ## 错误处理
@@ -917,7 +917,7 @@ from unilabos.registry.decorators import device
     id="my_heating_device",
     category=["heating"],
     description="My Heating Device",
-    displayname="加热设备",
+    display_name="加热设备",
     icon="heater.webp",
 )
 class MyDevice:
@@ -927,7 +927,7 @@ class MyDevice:
 - `id`：设备唯一标识符，用于注册表匹配；只能包含英文大小写字母、数字、下划线，不能包含中文、空格、短横线、点号或其他符号
 - `category`：分类列表，前端用于分组显示
 - `description`：设备描述
-- `displayname`：设备显示名称，用于 UI 展示中文名或更友好的名称；不要把显示名写进 `id`
+- `display_name`：设备显示名称，用于 UI 展示中文名或更友好的名称；不要把显示名写进 `id`
 - `icon`：图标文件名（可选）
 
 ### 2. 使用 `@topic_config` 声明需要广播的状态
@@ -1077,8 +1077,7 @@ return {
 
 进阶主题：
 
-- {doc}`03_add_device_registry` - 了解如何配置注册表
-- {doc}`04_add_device_testing` - 学习如何测试设备
+- {doc}`add_registry` - 了解如何配置注册表
 - {doc}`add_old_device` - 没有 SDK 时如何开发设备驱动
 
 ## 参考

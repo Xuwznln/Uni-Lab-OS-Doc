@@ -4,7 +4,7 @@ import time as time_module  # 重命名time模块，避免与参数冲突
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 class VirtualHeatChill:
     """Virtual heat chill device for HeatChillProtocol testing 🌡️"""
@@ -77,9 +77,9 @@ class VirtualHeatChill:
     
     async def heat_chill(self, temp: float, time, stir: bool,
                         stir_speed: float, purpose: str, vessel: dict = {}) -> bool:
-        """Execute heat chill action - 🔧 修复：确保参数类型正确"""
+        """执行温控动作，并规范化数值与布尔参数。"""
         
-        # 🔧 关键修复：确保所有参数类型正确
+        # 统一动作输入类型。
         try:
             temp = float(temp)
             time_value = float(time)  # 强制转换为浮点数
@@ -143,7 +143,7 @@ class VirtualHeatChill:
             })
             return False
         
-        # 🔧 修复：使用转换后的时间值
+        # 使用规范化后的浮点时间。
         start_time = time_module.time()
         total_time = time_value  # 使用转换后的浮点数
         
@@ -212,7 +212,7 @@ class VirtualHeatChill:
     async def heat_chill_start(self, temp: float, purpose: str, vessel: dict = {}) -> bool:
         """Start continuous heat chill 🔄"""
         
-        # 🔧 添加类型转换
+        # 统一动作输入类型。
         try:
             temp = float(temp)
             purpose = str(purpose)

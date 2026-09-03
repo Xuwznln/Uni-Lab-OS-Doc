@@ -1,7 +1,7 @@
 """
-UniLabOS 应用工具函数
+Uni-Lab-OS 应用工具函数
 
-提供清理、重启等工具函数
+提供 Windows ROS2 环境修复工具
 """
 
 import glob
@@ -109,7 +109,7 @@ def _apply_dll_patch(file_path: str, lib_bin: str, preload_pyd: str = "") -> boo
 def _print_restart_banner(patched_files):
     """打印重启提示并以 EX_TEMPFAIL 退出。
 
-    - 不使用 ANSI 颜色码：Windows 旧版 cmd / PowerShell 5 默认不开 VT 处理，
+    - 不使用 ANSI 颜色码：Windows cmd / PowerShell 5 可能未启用 VT 处理，
       会把 ``\\033[1;33m`` 当做字面字符显示，反而让用户看不到正文。
     - 同时写入 stderr 与 stdout：某些上层 launcher / supervisor 只重定向
       其中一路，写两遍能保证用户至少看到一份。
@@ -125,22 +125,22 @@ def _print_restart_banner(patched_files):
                 pass
 
     bar = "#" * 78
-    files_lines = [f"[UniLabOS]   - {p}" for p in patched_files]
+    files_lines = [f"[Uni-Lab-OS]   - {p}" for p in patched_files]
     body = "\n".join(
         [
             "",
             bar,
             bar,
             "##",
-            "##  [UniLabOS] Windows + conda 下检测到 DLL 加载失败，已自动打补丁。",
-            "##  [UniLabOS] DLL load failure detected on Windows + conda;",
-            "##  [UniLabOS] the following files have been auto-patched:",
+            "##  [Uni-Lab-OS] Windows + conda 下检测到 DLL 加载失败，已自动打补丁。",
+            "##  [Uni-Lab-OS] DLL load failure detected on Windows + conda;",
+            "##  [Uni-Lab-OS] the following files have been auto-patched:",
             "##",
             *[f"##  {line}" for line in files_lines],
             "##",
-            "##  [UniLabOS] 当前进程的 rclpy 状态已损坏，补丁需要在新进程才生效。",
-            "##  [UniLabOS] The current process is unusable; the patch only takes",
-            "##  [UniLabOS] effect on a fresh process.",
+            "##  [Uni-Lab-OS] 当前进程的 rclpy 状态已损坏，补丁需要在新进程才生效。",
+            "##  [Uni-Lab-OS] The current process is unusable; the patch only takes",
+            "##  [Uni-Lab-OS] effect on a fresh process.",
             "##",
             "##  >>> 请重新运行刚才的命令 / Please re-run the same command. <<<",
             "##",
@@ -171,8 +171,8 @@ def patch_rclpy_dll_windows():
     ``os.add_dll_directory`` 才能找到它们。当从快捷方式 / IDE / 子进程 /
     没激活的 shell 启动 ``unilab`` 时，会出现 ``DLL load failed``。
 
-    RoboStack Humble 和 Jazzy 的 ``rclpy`` / ``rpyutils`` 都使用相同的加载
-    入口，因此两种发行版共用这一套文件补丁，不再维护两种修复路径。
+    RoboStack Humble 和 Jazzy 的 ``rclpy`` / ``rpyutils`` 使用相同的加载
+    入口，因此两种发行版共用这套文件补丁。
 
     本函数会:
         1) 修补 ``rclpy/impl/implementation_singleton.py`` —— rclpy 自身的 C 扩展入口；
@@ -225,144 +225,3 @@ def patch_rclpy_dll_windows():
         return
 
     _print_restart_banner(patched)
-
-
-patch_rclpy_dll_windows()
-
-import gc
-import threading
-import time
-
-from unilabos.utils.banner_print import print_status
-
-
-def cleanup_for_restart() -> bool:
-    """
-    Clean up all resources for restart without exiting the process.
-
-    This function prepares the system for re-initialization by:
-    1. Stopping all communication clients
-    2. Destroying ROS nodes
-    3. Resetting singletons
-    4. Waiting for threads to finish
-
-    Returns:
-        bool: True if cleanup was successful, False otherwise
-    """
-    print_status("[Restart] Starting cleanup for restart...", "info")
-
-    # Step 1: Stop WebSocket communication client
-    print_status("[Restart] Step 1: Stopping WebSocket client...", "info")
-    try:
-        from unilabos.app.communication import get_communication_client
-
-        comm_client = get_communication_client()
-        if comm_client is not None:
-            comm_client.stop()
-            print_status("[Restart] WebSocket client stopped", "info")
-    except Exception as e:
-        print_status(f"[Restart] Error stopping WebSocket: {e}", "warning")
-
-    # Step 2: Get HostNode and cleanup ROS
-    print_status("[Restart] Step 2: Cleaning up ROS nodes...", "info")
-    try:
-        from unilabos.ros.nodes.presets.host_node import HostNode
-        import rclpy
-        from rclpy.timer import Timer
-
-        host_instance = HostNode.get_instance(timeout=5)
-        if host_instance is not None:
-            print_status(f"[Restart] Found HostNode: {host_instance.device_id}", "info")
-
-            # Gracefully shutdown background threads
-            print_status("[Restart] Shutting down background threads...", "info")
-            HostNode.shutdown_background_threads(timeout=5.0)
-            print_status("[Restart] Background threads shutdown complete", "info")
-
-            # Stop discovery timer
-            if hasattr(host_instance, "_discovery_timer") and isinstance(host_instance._discovery_timer, Timer):
-                host_instance._discovery_timer.cancel()
-                print_status("[Restart] Discovery timer cancelled", "info")
-
-            # Destroy device nodes
-            device_count = len(host_instance.devices_instances)
-            print_status(f"[Restart] Destroying {device_count} device instances...", "info")
-            for device_id, device_node in list(host_instance.devices_instances.items()):
-                try:
-                    if hasattr(device_node, "ros_node_instance") and device_node.ros_node_instance is not None:
-                        device_node.ros_node_instance.destroy_node()
-                        print_status(f"[Restart] Device {device_id} destroyed", "info")
-                except Exception as e:
-                    print_status(f"[Restart] Error destroying device {device_id}: {e}", "warning")
-
-            # Clear devices instances
-            host_instance.devices_instances.clear()
-            host_instance.devices_names.clear()
-
-            # Destroy host node
-            try:
-                host_instance.destroy_node()
-                print_status("[Restart] HostNode destroyed", "info")
-            except Exception as e:
-                print_status(f"[Restart] Error destroying HostNode: {e}", "warning")
-
-            # Reset HostNode state
-            HostNode.reset_state()
-            print_status("[Restart] HostNode state reset", "info")
-
-        # Shutdown executor first (to stop executor.spin() gracefully)
-        if hasattr(rclpy, "__executor") and rclpy.__executor is not None:
-            try:
-                rclpy.__executor.shutdown()
-                rclpy.__executor = None  # Clear for restart
-                print_status("[Restart] ROS executor shutdown complete", "info")
-            except Exception as e:
-                print_status(f"[Restart] Error shutting down executor: {e}", "warning")
-
-        # Shutdown rclpy
-        if rclpy.ok():
-            rclpy.shutdown()
-            print_status("[Restart] rclpy shutdown complete", "info")
-
-    except ImportError as e:
-        print_status(f"[Restart] ROS modules not available: {e}", "warning")
-    except Exception as e:
-        print_status(f"[Restart] Error in ROS cleanup: {e}", "warning")
-        return False
-
-    # Step 3: Reset communication client singleton
-    print_status("[Restart] Step 3: Resetting singletons...", "info")
-    try:
-        from unilabos.app import communication
-
-        if hasattr(communication, "_communication_client"):
-            communication._communication_client = None
-            print_status("[Restart] Communication client singleton reset", "info")
-    except Exception as e:
-        print_status(f"[Restart] Error resetting communication singleton: {e}", "warning")
-
-    # Step 4: Wait for threads to finish
-    print_status("[Restart] Step 4: Waiting for threads to finish...", "info")
-    time.sleep(3)  # Give threads time to finish
-
-    # Check remaining threads
-    remaining_threads = []
-    for t in threading.enumerate():
-        if t.name != "MainThread" and t.is_alive():
-            remaining_threads.append(t.name)
-
-    if remaining_threads:
-        print_status(
-            f"[Restart] Warning: {len(remaining_threads)} threads still running: {remaining_threads}", "warning"
-        )
-    else:
-        print_status("[Restart] All threads stopped", "info")
-
-    # Step 5: Force garbage collection
-    print_status("[Restart] Step 5: Running garbage collection...", "info")
-    gc.collect()
-    gc.collect()  # Run twice for weak references
-    print_status("[Restart] Garbage collection complete", "info")
-
-    print_status("[Restart] Cleanup complete. Ready for re-initialization.", "info")
-    return True

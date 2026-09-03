@@ -10,6 +10,7 @@ gripper.misumi_rz:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -32,6 +33,7 @@ gripper.misumi_rz:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -57,6 +59,7 @@ gripper.misumi_rz:
           pos: null
           speed: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -88,6 +91,7 @@ gripper.misumi_rz:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -111,6 +115,7 @@ gripper.misumi_rz:
         goal_default:
           data: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -143,6 +148,7 @@ gripper.misumi_rz:
           spin_pos: null
           spin_v: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -184,6 +190,7 @@ gripper.misumi_rz:
         goal_default:
           cmd: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -210,6 +217,7 @@ gripper.misumi_rz:
         goal_default:
           cmd: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -238,6 +246,7 @@ gripper.misumi_rz:
           data_len: null
           id: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -272,6 +281,7 @@ gripper.misumi_rz:
           pos: null
           speed: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -307,6 +317,7 @@ gripper.misumi_rz:
           fun: null
           id: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -341,6 +352,7 @@ gripper.misumi_rz:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -363,6 +375,7 @@ gripper.misumi_rz:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -385,6 +398,7 @@ gripper.misumi_rz:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -409,6 +423,7 @@ gripper.misumi_rz:
         goal_default:
           command: ''
         handles: {}
+        materials_need_lock: []
         result:
           success: success
         schema:
@@ -443,6 +458,7 @@ gripper.misumi_rz:
           type: object
         type: SendCmd
     module: unilabos.devices.motor.Grasp:EleGripper
+    status_policies: {}
     status_types:
       status: str
     supported_backends:
@@ -451,7 +467,7 @@ gripper.misumi_rz:
     type: python
   config_info: []
   description: Misumi RZ系列电子夹爪设备，集成旋转和抓取双重功能的精密夹爪系统。该设备通过Modbus RTU协议与控制系统通信，支持位置、速度、力矩的精确控制。具备高精度的位置反馈、实时状态监控和故障检测功能。适用于需要精密抓取和旋转操作的实验室自动化场景，如样品管理、精密装配、器件操作等应用。
-  displayname: gripper.misumi_rz
+  display_name: Misumi RZ 电动旋转夹爪
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -496,6 +512,7 @@ gripper.mock:
             Gripper1: {}
           wf_name: gripper_run
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -524,91 +541,48 @@ gripper.mock:
         type: UniLabJsonCommand
       push_to:
         error_policy: {}
-        feedback:
-          effort: effort
-          position: position
-          reached_goal: reached_goal
-          stalled: stalled
+        feedback: {}
         goal:
           command: command
           position: position
           torque: torque
           velocity: velocity
         goal_default:
-          command:
-            max_effort: 0.0
-            position: 0.0
+          position: null
+          torque: null
+          velocity: 0.0
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          effort: effort
-          position: position
-          reached_goal: reached_goal
-          stalled: stalled
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                effort:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                position:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                reached_goal:
-                  type: boolean
-                stalled:
-                  type: boolean
               title: GripperCommand_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                command:
-                  additionalProperties: false
-                  properties:
-                    max_effort:
-                      maximum: 1.7976931348623157e+308
-                      minimum: -1.7976931348623157e+308
-                      type: number
-                    position:
-                      maximum: 1.7976931348623157e+308
-                      minimum: -1.7976931348623157e+308
-                      type: number
-                  required:
-                  - position
-                  - max_effort
-                  title: command
-                  type: object
+                position:
+                  type: number
+                torque:
+                  type: number
+                velocity:
+                  default: 0.0
+                  type: number
+              required:
+              - position
+              - torque
               title: GripperCommand_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                effort:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                position:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                reached_goal:
-                  type: boolean
-                stalled:
-                  type: boolean
               title: GripperCommand_Result
-              type: object
           required:
           - goal
-          title: GripperCommand
+          title: push_to参数
           type: object
         type: GripperCommand
     module: unilabos.devices.gripper.mock:MockGripper
+    status_policies: {}
     status_types:
       position: float
       status: str
@@ -620,7 +594,7 @@ gripper.mock:
     type: python
   config_info: []
   description: 模拟夹爪设备，用于系统测试和开发调试。该设备模拟真实夹爪的位置、速度、力矩等物理特性，支持虚拟的抓取和移动操作。提供与真实夹爪相同的接口和状态反馈，便于在没有实际硬件的情况下进行系统集成测试和算法验证。适用于软件开发、系统调试和培训演示等场景。
-  displayname: gripper.mock
+  display_name: 模拟夹爪
   handles: []
   icon: ''
   init_param_enforce: {}

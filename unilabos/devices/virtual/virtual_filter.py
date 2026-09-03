@@ -3,9 +3,9 @@ import logging
 import time as time_module
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from unilabos.compile.utils.vessel_parser import get_vessel
+from unilabos.experiments.compile.utils.vessel_parser import get_vessel
 if TYPE_CHECKING:
-    from unilabos.device_runtime.node import DeviceNode
+    from unilabos.backend.runtime.node import DeviceNode
 
 
 class VirtualFilter:
@@ -80,7 +80,7 @@ class VirtualFilter:
         vessel_id, _ = get_vessel(vessel)
         filtrate_vessel_id, _ = get_vessel(filtrate_vessel) if filtrate_vessel else (f"{vessel_id}_filtrate", {})
 
-        # 🔧 新增：温度自动调整
+        # 将温度限制到虚拟设备支持的最低值。
         original_temp = temp
         if temp == 0.0:
             temp = 25.0  # 0度自动设置为室温

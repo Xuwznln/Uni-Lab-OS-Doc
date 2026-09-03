@@ -3,20 +3,19 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
 from pylabrobot.resources import Carrier, Coordinate, Resource, ResourceHolder
 
-from unilabos.resources.itemized_carrier import ItemizedCarrier
+from unilabos.resources.presets.itemized_carrier import ItemizedCarrier
 from unilabos.resources.objects.pose import ResourceDictPositionObject
 from unilabos.resources.objects.resource import ResourceDict
 from unilabos.resources.objects.site import ResourceSite
-from unilabos.resources.site_definition import normalize_available_sites
+from unilabos.resources.objects.site import normalize_available_sites
 from unilabos.resources.resource_tracker import (
     EXTRA_RESOURCE_CLASS,
-    EXTRA_RESOURCE_META_DATA,
     EXTRA_SITES,
     DeviceNodeResourceTracker,
     ResourceTreeSet,
@@ -274,7 +273,7 @@ def test_plr_offline_uuid_migration_updates_site_sidecar_references():
     assert resource["extra"][EXTRA_SITES]["A1"] == resource["sites"][0]
 
 
-def test_legacy_site_geometry_is_promoted_to_shared_pose():
+def test_flat_site_geometry_is_promoted_to_shared_pose():
     owner_uuid = str(uuid4())
     occupant_uuid = str(uuid4())
     resource = ResourceDict.model_validate(
@@ -328,7 +327,9 @@ def test_legacy_site_geometry_is_promoted_to_shared_pose():
     assert dumped["sites_initialized"] is True
 
 
-def test_old_experiment_without_strict_identity_is_rejected_at_edge_import():
+def test_bundled_experiment_without_strict_identity_is_rejected_at_edge_import():
+    # 内置图已升级为新契约（全节点带 UUID）；此处剥离 uuid 构造非法变体，
+    # 验证 strict import 仍拒绝缺身份的图。
     experiment_path = (
         Path(__file__).resolve().parents[2]
         / "unilabos"
@@ -337,12 +338,16 @@ def test_old_experiment_without_strict_identity_is_rejected_at_edge_import():
         / "prcxi_9320_slim.json"
     )
     raw = json.loads(experiment_path.read_text(encoding="utf-8"))
+    nodes = deepcopy(raw["nodes"])
+    for node in nodes:
+        node.pop("uuid", None)
+        (node.get("data") or {}).pop("unilabos_uuid", None)
 
     with pytest.raises((ValueError, ValidationError), match="UUID|Field required"):
-        ResourceTreeSet.from_raw_dict_list(deepcopy(raw["nodes"]))
+        ResourceTreeSet.from_raw_dict_list(nodes)
 
 
-def test_registry_available_sites_normalizes_legacy_geometry_without_entering_instance():
+def test_registry_available_sites_normalizes_flat_geometry_without_entering_instance():
     definitions = normalize_available_sites(
         [
             {
@@ -423,7 +428,7 @@ def test_canonical_site_rejects_unknown_or_conflicting_fields():
     assert not hasattr(resource, "position")
     assert resource.pose.position.model_dump() == {"x": 9.0, "y": 8.0, "z": 7.0}
 
-    with pytest.raises(ValidationError, match="根字段 position 已删除"):
+    with pytest.raises(ValidationError, match="根字段 position 不受支持"):
         ResourceDict.model_validate(
             _resource_payload(position={"x": 1, "y": 2, "z": 3})
         )
@@ -438,8 +443,8 @@ def test_pose_position_can_be_unknown_without_zero_default():
     assert ResourceDict.model_validate(dumped).pose.position is None
 
 
-def test_legacy_full_root_position_shape_is_rejected():
-    with pytest.raises(ValidationError, match="根字段 position 已删除"):
+def test_full_root_position_shape_is_rejected():
+    with pytest.raises(ValidationError, match="根字段 position 不受支持"):
         ResourceDict.model_validate(
             _resource_payload(
                 position={
@@ -451,7 +456,7 @@ def test_legacy_full_root_position_shape_is_rejected():
         )
 
 
-def test_legacy_occupied_name_is_rejected():
+def test_occupied_by_name_is_rejected():
     owner_uuid = str(uuid4())
     raw = [
         _resource_payload(
@@ -468,7 +473,7 @@ def test_legacy_occupied_name_is_rejected():
             ],
         )
     ]
-    with pytest.raises(ValidationError, match="occupied_by 已停用"):
+    with pytest.raises(ValidationError, match="occupied_by 不受支持"):
         ResourceTreeSet.from_raw_dict_list(raw)
 
 
@@ -520,8 +525,8 @@ def test_itemized_carrier_uses_native_sites_and_injected_extra_metadata():
     set_plr_template_name(carrier, "StrictCarrier")
     assert carrier.unilabos_extra[EXTRA_RESOURCE_CLASS] == "StrictCarrier"
 
-    with pytest.raises(ValueError, match="canonical ResourceSite 快照"):
-        carrier.serialize()
+    # 与 PRCXI9300Deck 一致：PLR payload 不承载 canonical Site。
+    assert "sites" not in carrier.serialize()
 
     backend_sites = [
         ResourceSite(
@@ -549,11 +554,14 @@ def test_itemized_carrier_uses_native_sites_and_injected_extra_metadata():
     apply_plr_site_metadata(carrier, {carrier.name: backend_sites})
 
     serialized = carrier.serialize()
-    assert serialized["sites"] == [site.model_dump() for site in backend_sites]
-    assert set(serialized["sites"][0]) == set(ResourceSite.model_fields)
+    assert "sites" not in serialized
 
     extracted = extract_plr_sites(carrier, serialized)
     assert extracted is not None
+    assert [site.model_dump() for site in extracted] == [
+        site.model_dump() for site in backend_sites
+    ]
+    assert set(extracted[0].model_dump()) == set(ResourceSite.model_fields)
     injected_site = extracted[0].model_copy(
         deep=True,
         update={
@@ -567,13 +575,35 @@ def test_itemized_carrier_uses_native_sites_and_injected_extra_metadata():
     apply_plr_site_metadata(carrier, {carrier.name: [injected_site, extracted[1]]})
 
     assert carrier.unilabos_extra[EXTRA_SITES]["A1"]["uuid"] == injected_site.uuid
-    assert carrier.serialize()["sites"][0]["uuid"] == injected_site.uuid
+    assert carrier.resource_sites is not None
+    assert carrier.resource_sites[0].uuid == injected_site.uuid
     restored = extract_plr_sites(carrier, carrier.serialize())
     assert restored is not None
     assert restored[0].allowed_resource_categories == ["plate"]
     assert restored[0].parent_link == "deck/main"
     assert restored[0].meta_data == {"vendor": {"slot": "A1"}}
     assert restored[0].pose.position.model_dump() == {"x": 101.0, "y": 102.0, "z": 0.0}
+
+
+def test_known_random_uuid_seeds_itemized_carrier_draft_sites():
+    carrier = ItemizedCarrier(
+        name="carrier",
+        size_x=100,
+        size_y=100,
+        size_z=20,
+        sites={0: None, "A2": None},
+        model="StrictCarrier",
+    )
+
+    tree = ResourceTreeSet.from_plr_resources([carrier], known_random_uuid=True)
+
+    sites = tree.root_nodes[0].res_content.sites
+    assert sites is not None
+    assert [site.label for site in sites] == ["0", "A2"]
+    assert all(site.template_name == "StrictCarrier" for site in sites)
+    assert all(site.material_uuid == carrier.unilabos_uuid for site in sites)
+    assert all(UUID(site.uuid) for site in sites)
+    assert carrier.resource_sites == sites
 
 
 def test_itemized_carrier_rejects_canonical_site_not_in_native_layout():
@@ -626,11 +656,43 @@ def test_itemized_carrier_deserialization_uses_canonical_shape():
         size_z=20,
         sites=native,
     )
-    assert carrier.serialize()["sites"] == native
+    assert "sites" not in carrier.serialize()
+    extracted = extract_plr_sites(carrier, carrier.serialize())
+    assert extracted is not None
+    assert [restored.model_dump() for restored in extracted] == native
 
-    restored = Resource.deserialize(carrier.serialize(), allow_marshal=True)
-    assert isinstance(restored, ItemizedCarrier)
-    assert restored.serialize()["sites"] == native
+
+def test_itemized_carrier_resource_tree_roundtrip_preserves_sites():
+    owner_uuid = str(uuid4())
+    site = ResourceSite(
+        uuid=str(uuid4()),
+        template_name="StrictCarrier",
+        material_uuid=owner_uuid,
+        index=0,
+        label="A1",
+        pose={
+            "position": {"x": 1, "y": 2, "z": 3},
+            "position3d": {"x": 1, "y": 2, "z": 3},
+            "size": {"width": 4, "height": 5, "depth": 6},
+        },
+    )
+    carrier = ItemizedCarrier(
+        name="carrier",
+        size_x=100,
+        size_y=100,
+        size_z=20,
+        sites=[site],
+    )
+    carrier.unilabos_uuid = owner_uuid
+    set_plr_template_name(carrier, "StrictCarrier")
+
+    tree = ResourceTreeSet.from_plr_resources([carrier])
+    restored_tree = ResourceTreeSet.load(tree.dump())
+    restored_carrier = restored_tree.to_plr_resources()[0]
+
+    assert "sites" not in restored_carrier.serialize()
+    restored_sites = extract_plr_sites(restored_carrier, restored_carrier.serialize())
+    assert restored_sites == [site]
 
 
 def test_itemized_carrier_site_boundary_has_only_canonical_fields():
@@ -658,10 +720,8 @@ def test_itemized_carrier_site_boundary_has_only_canonical_fields():
     assert "occupied_by" not in native
     assert native["occupied_material_uuid"] == site.occupied_material_uuid
     assert site.pose.position.model_dump() == {"x": 101.0, "y": 102.0, "z": 0.0}
-    with pytest.raises(ValidationError, match="occupied_by 已停用"):
-        ResourceSite.model_validate(
-            {**native, "occupied_by": "plate-1"}
-        )
+    with pytest.raises(ValidationError, match="occupied_by 不受支持"):
+        ResourceSite.model_validate({**native, "occupied_by": "plate-1"})
 
 
 def test_resource_models_are_reusable_and_nested_xyz_is_required():
@@ -847,7 +907,7 @@ def test_standard_plr_carrier_site_roundtrip_preserves_identity_and_metadata():
     )
     apply_plr_site_metadata(carrier, {carrier.name: [backend_site]})
 
-    tree = ResourceTreeSet.from_plr_resources([carrier], known_newly_created=True)
+    tree = ResourceTreeSet.from_plr_resources([carrier])
     site = tree.root_nodes[0].res_content.sites[0]
     assert site.template_name == "carrier-model"
     assert site.index == 7
@@ -931,6 +991,22 @@ def test_site_snapshot_merge_is_uuid_based_and_never_deletes_missing_sites():
         merge_resource_sites(current, conflicting)
 
 
+def test_graphio_does_not_promote_class_to_template_name():
+    """graphio 只认当前契约：class 不再回填 template_name（旧图由 legacy 适配层转换）。"""
+    graphio = pytest.importorskip(
+        "unilabos.resources.graphio",
+        reason="GraphIO 依赖 ROS Jazzy 生成的 unilabos_msgs",
+        exc_type=ImportError,
+    )
+    node = _resource_payload(**{"class": "virtual_workbench"})
+    node.pop("template_name", None)
+    dumped = graphio.canonicalize_nodes_data([node]).dump()[0][0]
+
+    assert dumped["class"] == "virtual_workbench"
+    # template_name 只按 ResourceDict 自己的规则推导（这里来自 config.type）。
+    assert dumped["template_name"] == "StrictCarrier"
+
+
 def test_graphio_keeps_protocol_fields_at_resource_root():
     graphio = pytest.importorskip(
         "unilabos.resources.graphio",
@@ -984,205 +1060,162 @@ def test_graphio_keeps_protocol_fields_at_resource_root():
     unknown_tree = graphio.canonicalize_nodes_data([unknown_position])
     assert unknown_tree.dump()[0][0]["pose"]["position"] is None
 
-    conflicting_position = _resource_payload(position=None, x=1)
-    with pytest.raises(ValueError, match="根字段 position 已删除"):
-        graphio.canonicalize_nodes_data([conflicting_position])
+    # 根级 position 不属于当前契约（旧格式图在 -g 读取边界由 legacy 适配层转换）。
+    legacy_root_position = _resource_payload(position={"x": 1, "y": 2, "z": 3})
+    with pytest.raises(ValueError, match="根字段 position 不受支持"):
+        graphio.canonicalize_nodes_data([legacy_root_position])
+
+    conflicting_xyz = _resource_payload(x=1)
+    with pytest.raises(ValueError, match="与旧 x/y/z 坐标冲突"):
+        graphio.canonicalize_nodes_data([conflicting_xyz])
 
 
-def test_ros_resource_config_transport_normalizes_root_site_fields():
+def test_graphio_keeps_graph_defined_host_node_and_links():
+    """图可显式声明 host_node（多主机设计），导入导出必须保留其身份与连接。"""
+
+    graphio = pytest.importorskip(
+        "unilabos.resources.graphio",
+        reason="GraphIO 依赖 ROS Jazzy 生成的 unilabos_msgs",
+        exc_type=ImportError,
+    )
+    host_uuid = str(uuid4())
+    device = _resource_payload(
+        id="device-1",
+        name="device-1",
+        type="device",
+        template_name="dummy_device",
+        parent="host_node",
+        parent_uuid=host_uuid,
+        **{"class": "dummy_device"},
+    )
+    graph, tree, links = graphio.read_node_link_json(
+        {
+            "nodes": [
+                {
+                    "id": "host_node",
+                    "uuid": host_uuid,
+                    "name": "host_node",
+                    "type": "device",
+                    "class": "host_node",
+                    "config": {},
+                    "data": {},
+                },
+                device,
+            ],
+            "links": [
+                {
+                    "source": "host_node",
+                    "target": "device-1",
+                    "type": "communication",
+                }
+            ],
+        }
+    )
+
+    assert [node.res_content.id for node in tree.root_nodes] == ["host_node"]
+    host_root = tree.root_nodes[0]
+    assert host_root.res_content.uuid == host_uuid
+    assert [child.res_content.id for child in host_root.children] == ["device-1"]
+    assert set(graph.nodes) == {"host_node", "device-1"}
+    assert len(links) == 1
+    assert links[0]["source_uuid"] == host_uuid
+
+
+def test_ros_resource_transport_roundtrip_single_json_field():
+    """Resource msg 整 JSON 单字段传输：``data`` 承载全部内容并无损往返。"""
+
     message_converter = pytest.importorskip(
-        "unilabos.ros.msgs.message_converter",
+        "unilabos.backend.ros2.msgs.message_converter",
         reason="ROS 消息转换依赖 Jazzy 版 unilabos_msgs.Resource",
         exc_type=ImportError,
     )
     site_uuid = str(uuid4())
     owner_uuid = str(uuid4())
-    config = message_converter.obtain_config_with_root_fields(
-        {
-            "config": {
-                "available_sites": [
-                    {
-                        "index": "A1",
-                        "label": "A1",
-                        "position": {"x": 1, "y": 0, "z": 0},
-                    }
-                ]
-            },
-            "template_name": "StrictCarrier",
-            "resource_template_uuid": "template-uuid",
-            "barcode": "BC-ROS-001",
-            "barcode_symbology": "code128",
-            "meta_data": {"vendor": {"lot": "A-1"}},
-            "pose": {
-                "size": {"width": 100, "height": 200, "depth": 30},
-                "position": {"x": 1, "y": 2, "z": 3},
-                "position3d": {"x": 10, "y": 20, "z": 30},
-            },
-            "available_sites": [
-                {
-                    "index": "A1",
-                    "label": "A1",
-                    "pose": {
-                        "position": {"x": 1, "y": 0, "z": 0},
-                        "position3d": {"x": 1, "y": 0, "z": 0},
-                    },
-                }
-            ],
-            "sites": [
-                ResourceSite(
-                    uuid=site_uuid,
-                    template_name="StrictCarrier",
-                    material_uuid=owner_uuid,
-                    index="A1",
-                    label="A1",
-                    pose={
-                        "position": {"x": 1, "y": 0, "z": 0},
-                        "position3d": {"x": 1, "y": 0, "z": 0},
-                    },
-                )
-            ],
-            "sites_initialized": True,
-        }
-    )
-
-    assert "available_sites" not in config
-    assert config["resource_template_uuid"] == "template-uuid"
-    assert config["barcode"] == {
-        "data": "BC-ROS-001",
-        "symbology": "code128",
-        "position_on_resource": "front",
-    }
-    assert config[EXTRA_RESOURCE_META_DATA] == {"vendor": {"lot": "A-1"}}
-    assert "position" not in config["pose"]
-    assert config["pose"]["position3d"] == {"x": 10.0, "y": 20.0, "z": 30.0}
-    assert config["sites"][0]["uuid"] == site_uuid
-    assert config["sites_initialized"] is True
-
-    restored = ResourceDict.model_validate(
-        _resource_payload(
-            uuid=owner_uuid,
-            template_name="StrictCarrier",
-            pose={
-                "size": {"width": 100, "height": 200, "depth": 30},
-                "position": {"x": 40, "y": 50, "z": 60},
-                "position3d": {"x": 10, "y": 20, "z": 30},
-            },
-            config=config,
-        )
-    )
-    assert "pose" not in restored.config
-    assert "barcode" not in restored.config
-    assert restored.barcode == "BC-ROS-001"
-    assert restored.barcode_symbology == "code128"
-    assert restored.pose.position.model_dump() == {"x": 40.0, "y": 50.0, "z": 60.0}
-    assert restored.pose.position3d.model_dump() == {"x": 10.0, "y": 20.0, "z": 30.0}
-
-    with pytest.raises(ValueError, match="barcode.*冲突"):
-        message_converter.obtain_config_with_root_fields(
+    payload = {
+        "id": "carrier",
+        "uuid": owner_uuid,
+        "name": "carrier",
+        "type": "carrier",
+        "class": "",
+        "template_name": "StrictCarrier",
+        "resource_template_uuid": "template-uuid",
+        "barcode": "BC-ROS-001",
+        "barcode_symbology": "code128",
+        "meta_data": {"vendor": {"lot": "A-1"}},
+        "pose": {
+            "size": {"width": 100, "height": 200, "depth": 30},
+            "position": {"x": 1, "y": 2, "z": 3},
+            "position3d": {"x": 10, "y": 20, "z": 30},
+        },
+        "config": {"type": "StrictCarrier"},
+        "data": {},
+        "extra": {},
+        "sites": [
             {
-                "barcode": "ROOT",
-                "config": {
-                    "barcode": {
-                        "data": "CONFIG",
-                        "symbology": "code128",
-                    }
+                "schema_version": 1,
+                "uuid": site_uuid,
+                "template_name": "StrictCarrier",
+                "material_uuid": owner_uuid,
+                "index": "A1",
+                "label": "A1",
+                "pose": {
+                    "position": {"x": 1, "y": 0, "z": 0},
+                    "position3d": {"x": 1, "y": 0, "z": 0},
                 },
             }
-        )
-
-    unknown_config = message_converter.obtain_config_with_root_fields(
-        {"config": {}, "pose": {"position": None}}
-    )
-    assert unknown_config[message_converter.ROS_CONFIG_POSE_POSITION_UNKNOWN] is True
+        ],
+        "sites_initialized": True,
+    }
 
     ros_resource = message_converter.convert_to_ros_msg(
-        message_converter.Resource,
-        {
-            "id": "unknown-position",
-            "uuid": owner_uuid,
-            "name": "unknown-position",
-            "type": "carrier",
-            "class": "",
-            "pose": {"position": None},
-            "meta_data": {"vendor": {"lot": "A-1"}},
-            "config": {},
-            "data": {},
-        },
+        message_converter.Resource, payload
     )
-    restored_transport = message_converter.convert_from_ros_msg(ros_resource)
-    assert restored_transport["pose"]["position"] is None
-    assert restored_transport["meta_data"] == {"vendor": {"lot": "A-1"}}
-    assert EXTRA_RESOURCE_META_DATA not in restored_transport["config"]
-    assert (
-        message_converter.ROS_CONFIG_POSE_POSITION_UNKNOWN
-        not in restored_transport["config"]
-    )
+    # id/name 仅冗余填充便于排查；全部数据都在 data 单字段里
+    assert ros_resource.id == "carrier"
+    assert ros_resource.name == "carrier"
+    assert ros_resource.config == ""
+    assert json.loads(ros_resource.data) == payload
 
-    ros_resource.pose.position.x = 1.0
-    ros_resource.pose.position.z = float("inf")
-    restored_padding = message_converter.convert_from_ros_msg(ros_resource)
-    assert restored_padding["pose"]["position"] is None
+    restored = message_converter.convert_from_ros_msg(ros_resource)
+    assert restored == payload
 
-    known_resource = message_converter.convert_to_ros_msg(
-        message_converter.Resource,
-        {
-            "id": "known-position",
-            "uuid": owner_uuid,
-            "name": "known-position",
-            "type": "carrier",
-            "class": "",
-            "pose": {"position": {"x": 1, "y": 2, "z": 3}},
-            "config": {},
-            "data": {},
-        },
-    )
-    known_resource.pose.position.z = float("inf")
-    with pytest.raises(ValueError, match="position 必须是有限 xyz"):
-        message_converter.convert_from_ros_msg(known_resource)
+    canonical = ResourceDict.model_validate(restored)
+    assert canonical.uuid == owner_uuid
+    assert canonical.template_name == "StrictCarrier"
+    assert canonical.barcode == "BC-ROS-001"
+    assert canonical.meta_data == {"vendor": {"lot": "A-1"}}
+    assert canonical.pose.position.model_dump() == {"x": 1.0, "y": 2.0, "z": 3.0}
+    assert canonical.sites[0].uuid == site_uuid
 
 
-@pytest.mark.parametrize("legacy_source", ["config", "data"])
-def test_ros_missing_metadata_sidecar_allows_legacy_promotion(legacy_source):
+def test_ros_resource_transport_preserves_unknown_position():
+    """pose.position=None 通过完整 JSON 保持为空。"""
+
     message_converter = pytest.importorskip(
-        "unilabos.ros.msgs.message_converter",
+        "unilabos.backend.ros2.msgs.message_converter",
         reason="ROS 消息转换依赖 Jazzy 版 unilabos_msgs.Resource",
         exc_type=ImportError,
     )
     owner_uuid = str(uuid4())
-    legacy_meta_data = {"vendor": {"lot": f"legacy-{legacy_source}"}}
+    payload = {
+        "id": "unknown-position",
+        "uuid": owner_uuid,
+        "name": "unknown-position",
+        "type": "carrier",
+        "class": "",
+        "pose": {"position": None},
+        "meta_data": {"vendor": {"lot": "A-1"}},
+        "config": {},
+        "data": {},
+        "extra": {},
+    }
     ros_resource = message_converter.convert_to_ros_msg(
-        message_converter.Resource,
-        {
-            "id": f"legacy-{legacy_source}",
-            "uuid": owner_uuid,
-            "name": f"legacy-{legacy_source}",
-            "type": "carrier",
-            "class": "",
-            "pose": {"position": {"x": 1, "y": 2, "z": 3}},
-            "config": {},
-            "data": {},
-        },
+        message_converter.Resource, payload
     )
-    config = json.loads(ros_resource.config)
-    config.pop(EXTRA_RESOURCE_META_DATA)
-    data = json.loads(ros_resource.data)
-    if legacy_source == "config":
-        config["meta_data"] = legacy_meta_data
-    else:
-        data["meta_data"] = legacy_meta_data
-    ros_resource.config = json.dumps(config)
-    ros_resource.data = json.dumps(data)
-
     restored = message_converter.convert_from_ros_msg(ros_resource)
-    assert "meta_data" not in restored
-    canonical = ResourceDict.model_validate(
-        _resource_payload(
-            uuid=owner_uuid,
-            config=restored["config"],
-            data=restored["data"],
-            pose=restored["pose"],
-        )
-    )
-    assert canonical.meta_data == legacy_meta_data
-    assert "meta_data" not in canonical.config
-    assert "meta_data" not in canonical.data
+    assert restored == payload
+    assert restored["pose"]["position"] is None
+
+    canonical = ResourceDict.model_validate(restored)
+    assert canonical.pose.position is None
+    assert canonical.meta_data == {"vendor": {"lot": "A-1"}}

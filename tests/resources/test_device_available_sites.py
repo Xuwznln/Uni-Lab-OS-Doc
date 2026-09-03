@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from unilabos.registry.ast_registry_scanner import _parse_file, scan_directory
 from unilabos.registry.decorators import device, get_device_meta
 from unilabos.devices.virtual.workbench import VirtualWorkbench
-from unilabos.resources.device_site_adapter import (
+from unilabos.resources.adapters.device_site import (
     apply_device_available_sites,
     prepare_devices_for_report,
 )
@@ -22,7 +22,7 @@ from unilabos.resources.resource_tracker import (
     ResourceTreeInstance,
     ResourceTreeSet,
 )
-from unilabos.resources.site_definition import SiteDefinition, normalize_available_sites
+from unilabos.resources.objects.site import SiteDefinition, normalize_available_sites
 
 
 AVAILABLE_SITES = [
@@ -58,7 +58,9 @@ def _device_resource(**overrides) -> ResourceDictInstance:
     return ResourceDictInstance(ResourceDict.model_validate(payload))
 
 
-def _instantiated_sites(owner_uuid: str, template_name: str, definitions=AVAILABLE_SITES):
+def _instantiated_sites(
+    owner_uuid: str, template_name: str, definitions=AVAILABLE_SITES
+):
     return [
         {
             **definition,
@@ -88,7 +90,12 @@ def test_device_decorator_emits_root_available_sites_without_instance_identity()
     assert site["pose"]["size"]["height"] == 20
     assert site["pose"]["rotation"]["z"] == 90
     assert site["allowed_resource_categories"] == ["plate"]
-    assert {"uuid", "material_uuid", "occupied_material_uuid", "template_name"}.isdisjoint(site)
+    assert {
+        "uuid",
+        "material_uuid",
+        "occupied_material_uuid",
+        "template_name",
+    }.isdisjoint(site)
 
 
 def test_available_sites_accepts_declared_sequence_and_mapping_inputs():
@@ -123,7 +130,9 @@ def test_site_pose_rejects_unknown_geometry_fields():
 def test_virtual_workbench_available_sites_validate_backend_instance_sites():
     from unilabos.devices.virtual.workbench import VIRTUAL_WORKBENCH_AVAILABLE_SITES
 
-    assert all(isinstance(site, SiteDefinition) for site in VIRTUAL_WORKBENCH_AVAILABLE_SITES)
+    assert all(
+        isinstance(site, SiteDefinition) for site in VIRTUAL_WORKBENCH_AVAILABLE_SITES
+    )
     meta = get_device_meta(VirtualWorkbench, "virtual_workbench")
     assert meta is not None
     assert [site["label"] for site in meta["available_sites"]] == [
@@ -132,7 +141,9 @@ def test_virtual_workbench_available_sites_validate_backend_instance_sites():
         "heating_station_3",
     ]
     assert all(
-        {"uuid", "material_uuid", "occupied_material_uuid", "template_name"}.isdisjoint(site)
+        {"uuid", "material_uuid", "occupied_material_uuid", "template_name"}.isdisjoint(
+            site
+        )
         for site in meta["available_sites"]
     )
 
@@ -190,7 +201,7 @@ def test_ast_scanner_parses_available_sites(tmp_path):
         encoding="utf-8",
     )
 
-    devices, _ = _parse_file(source, tmp_path)
+    devices, _, _ = _parse_file(source, tmp_path)
     assert len(devices) == 1
     site = devices[0]["available_sites"][0]
     assert site["index"] == 0
@@ -206,7 +217,7 @@ def test_ast_scanner_parses_typed_site_definition_constant(tmp_path):
         "\n".join(
             [
                 "from unilabos.registry.decorators import device",
-                "from unilabos.resources.site_definition import SiteDefinition",
+                "from unilabos.resources.objects.site import SiteDefinition",
                 "",
                 "DEVICE_SITES: list[SiteDefinition] = [SiteDefinition(",
                 "    index='A1',",
@@ -226,7 +237,7 @@ def test_ast_scanner_parses_typed_site_definition_constant(tmp_path):
         encoding="utf-8",
     )
 
-    devices, _ = _parse_file(source, tmp_path)
+    devices, _, _ = _parse_file(source, tmp_path)
     assert len(devices) == 1
     site = devices[0]["available_sites"][0]
     assert site["index"] == "A1"
@@ -259,7 +270,7 @@ def test_ast_scanner_parses_real_workbench_typed_pose_models():
             for site in metadata["available_sites"]
         ] == expected_sites
 
-    devices, _ = _parse_file(source, repository_root)
+    devices, _, _ = _parse_file(source, repository_root)
     metadata = next(
         device for device in devices if device["device_id"] == "virtual_workbench"
     )
@@ -309,9 +320,12 @@ def test_device_site_adapter_only_validates_identity_and_preserves_occupancy():
     assert resource.sites[0].material_uuid == resource.uuid
     occupant_uuid = resource.sites[0].occupied_material_uuid
     assert occupant_uuid is not None
-    assert {"uuid", "material_uuid", "occupied_material_uuid", "template_name"}.isdisjoint(
-        registry_entry["available_sites"][0]
-    )
+    assert {
+        "uuid",
+        "material_uuid",
+        "occupied_material_uuid",
+        "template_name",
+    }.isdisjoint(registry_entry["available_sites"][0])
 
     apply_device_available_sites(
         device_config,
@@ -381,6 +395,24 @@ def test_device_report_accepts_authoritative_empty_snapshot_without_expansion():
     assert device_config.res_content.template_name == "available_sites_test_device"
     assert device_config.res_content.sites == []
     assert device_config.res_content.sites_initialized is True
+
+
+def test_device_report_resolves_registry_by_template_name_not_class():
+    """运行态注册表解析只读 template_name；class 为空的新图节点照常通过。"""
+    by_template = _device_resource(**{"class": ""})
+    registry = {"available_sites_test_device": {"available_sites": []}}
+
+    assert prepare_devices_for_report(
+        ResourceTreeSet([ResourceTreeInstance(by_template)]), registry
+    ) == 1
+
+    legacy_class_only = _device_resource(
+        **{"class": "available_sites_test_device", "template_name": "other_template"}
+    )
+    with pytest.raises(ValueError, match="template_name='other_template' 不在注册表中"):
+        prepare_devices_for_report(
+            ResourceTreeSet([ResourceTreeInstance(legacy_class_only)]), registry
+        )
 
 
 def test_device_report_rejects_uninitialized_template_sites():

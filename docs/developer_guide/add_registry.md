@@ -15,11 +15,11 @@
 
 ## 快速开始：使用注册表编辑器
 
-推荐使用 UniLabOS 自带的可视化编辑器，它能帮你自动生成大部分配置，省去手写的麻烦。
+推荐使用 Uni-Lab-OS 自带的可视化编辑器，它能帮你自动生成大部分配置，省去手写的麻烦。
 
 ### 使用步骤
 
-1. 启动 UniLabOS
+1. 启动 Uni-Lab-OS
 2. 在浏览器中打开"注册表编辑器"页面
 3. 上传你的 Python 设备驱动文件
 4. 点击"分析文件"，让系统读取类信息
@@ -849,7 +849,7 @@ class MyDevice:
 1. 先编写 Python 驱动类
 2. 使用注册表编辑器自动生成 yaml 配置
 3. 保存生成的文件到 `devices/` 目录
-4. 重启 UniLabOS 即可使用
+4. 重启 Uni-Lab-OS 即可使用
 
 ### 方法二：手动编写（简化版）
 
@@ -1005,7 +1005,7 @@ resource.type      # "resource"
 1. 确认 `class.module` 路径是否正确
 2. 确认 Python 驱动类能否正常导入
 3. 使用 yaml 验证器检查文件格式
-4. 查看 UniLabOS 启动日志中的错误信息
+4. 查看 Uni-Lab-OS 启动日志中的错误信息
 
 ### Q6: 自动生成失败
 
@@ -1166,7 +1166,6 @@ def method(
 ## 参考资料
 
 - {doc}`add_device` - 设备驱动编写指南
-- {doc}`04_add_device_testing` - 设备测试指南
 - Python [typing 模块](https://docs.python.org/3/library/typing.html)
 - [YAML 语法](https://yaml.org/)
 - [JSON Schema](https://json-schema.org/)

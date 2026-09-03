@@ -28,6 +28,7 @@ from unilabos.resources.objects.site import ResourceSite, ResourceSiteType
 from unilabos.resources.objects.state import (
     LiquidHistoryEntry,
     LiquidStateEntry,
+    SubstanceStateEntry,
     TRACKER_STATE_KEYS,
 )
 from unilabos.utils.log import logger
@@ -42,12 +43,15 @@ EXTRA_RESOURCE_META_DATA = "unilabos_resource_meta_data"
 EXTRA_SAMPLE_UUID = "sample_uuid"
 EXTRA_UNILABOS_SAMPLE_UUID = "unilabos_sample_uuid"
 EXTRA_SITES = "sites"
+#: 权威根物料 extra 中登记的所属设备 id（host 动作自动推断来源/目标设备的依据）。
+EXTRA_BOUND_DEVICE = "unilabos_bound_device_id"
 
 
 class ResourceDictType(TypedDict):
     id: str
     uuid: str
     name: str
+    display_name: str
     description: str
     resource_schema: Dict[str, Any]
     model: Dict[str, Any]
@@ -69,7 +73,7 @@ class ResourceDictType(TypedDict):
     joint_state: Optional[ResourceJointStateType]
     sites: Optional[List[ResourceSiteType]]
     sites_initialized: bool
-    liquids: Optional[List[LiquidStateEntry]]
+    substances: Optional[List[SubstanceStateEntry]]
     liquid_history: Optional[List[LiquidHistoryEntry]]
     unknown_counter: Optional[int]
 
@@ -80,6 +84,10 @@ class ResourceDict(BaseModel):
     id: str = Field(description="Resource ID")
     uuid: str = Field(description="Resource UUID")
     name: str = Field(description="Resource name")
+    display_name: str = Field(
+        description="Display name; authority falls back to name when empty",
+        default="",
+    )
     description: str = Field(description="Resource description", default="")
     resource_schema: Dict[str, Any] = Field(
         description="Resource schema",
@@ -102,7 +110,7 @@ class ResourceDict(BaseModel):
     config: Dict[str, Any] = Field(description="Resource configuration")
     data: Dict[str, Any] = Field(description="Resource data, eg: container data without liquids, since liquids are tracked separately")
     extra: Dict[str, Any] = Field(
-        description="UniLab communication and conversion metadata"
+        description="Uni-Lab-OS communication and conversion metadata"
     )
     meta_data: Dict[str, JsonValue] = Field(
         description="Canonical resource metadata", default_factory=dict
@@ -123,12 +131,12 @@ class ResourceDict(BaseModel):
     sites: Optional[List[ResourceSite]] = Field(
         description="Carrier site definitions / 载架位点", default=None
     )
-    sites_initialized: bool = Field(  # todo: 有可能删除
+    sites_initialized: bool = Field(
         description="Whether site preparation has run for this resource instance",
         default=False,
     )
-    liquids: Optional[List[LiquidStateEntry]] = Field(  # todo: 修改为substances
-        description="Current (liquid_name, amount, unit) entries", default=None
+    substances: Optional[List[SubstanceStateEntry]] = Field(
+        description="Current (substance_name, quantity, unit) entries", default=None
     )
     liquid_history: Optional[List[LiquidHistoryEntry]] = Field(
         description="VolumeTracker (liquid_name, delta, unit) event history",
@@ -138,7 +146,7 @@ class ResourceDict(BaseModel):
         description="Unnamed liquid counter", default=None, ge=0
     )
 
-    @field_validator("liquids", "liquid_history", mode="before")
+    @field_validator("substances", "liquid_history", mode="before")
     @classmethod
     def _normalize_tracker_entries(cls, value: Any, info: ValidationInfo):
         if value is None:
@@ -154,11 +162,11 @@ class ResourceDict(BaseModel):
                 )
             name, amount = item[0], item[1]
             unit = item[2] if len(item) == 3 else "ul"
-            if name is None and info.field_name == "liquids":
-                raise ValueError(f"liquids[{ordinal}].liquid_name 不能为空")
+            if name is None and info.field_name == "substances":
+                raise ValueError(f"substances[{ordinal}].name 不能为空")
             if name is not None and (not isinstance(name, str) or not name.strip()):
                 raise ValueError(
-                    f"{info.field_name}[{ordinal}].liquid_name 必须是非空字符串或 null"
+                    f"{info.field_name}[{ordinal}].name 必须是非空字符串或 null"
                 )
             if not isinstance(unit, str) or not unit.strip():
                 raise ValueError(f"{info.field_name}[{ordinal}].unit 必须是非空字符串")
@@ -198,6 +206,44 @@ class ResourceDict(BaseModel):
                 "资源缺少 UUID；请先通过微后端 runtime create 或 strict import"
             )
         content["uuid"] = resolved_uuid
+
+        # display_name=None 归一化为空字符串，不在此处回退到 name；权威写入层
+        # 负责默认值，避免快照上传覆盖用户自定义展示名。
+        if content.get("display_name") is None:
+            content["display_name"] = ""
+
+        # substances 是规范内容物字段。仅在缺少 substances 时才用 liquids
+        # 作为输入回退；根级与 data 级 substances 同时存在时必须一致。
+        root_substances = content.get("substances")
+        root_liquids = content.pop("liquids", None)
+        data_substances = data.pop("substances", None)
+        data_liquids = data.pop("liquids", None)
+        if root_substances is None:
+            root_substances = (
+                data_substances
+                if data_substances is not None
+                else (root_liquids if root_liquids is not None else data_liquids)
+            )
+        elif data_substances is not None:
+            def normalize_substances(entries: Any) -> Any:
+                if not isinstance(entries, (list, tuple)):
+                    return entries
+                return [
+                    (
+                        item[0],
+                        item[1],
+                        item[2] if len(item) >= 3 else "ul",
+                    )
+                    if isinstance(item, (list, tuple)) and len(item) >= 2
+                    else item
+                    for item in entries
+                ]
+
+            normalized_root = normalize_substances(root_substances)
+            normalized_data = normalize_substances(data_substances)
+            if normalized_root != normalized_data:
+                raise ValueError("根字段 substances 与 data.substances 冲突")
+        content["substances"] = root_substances
 
         extra_template_name = extra.pop(EXTRA_RESOURCE_CLASS, None)
         extra_joint_state = extra.pop(EXTRA_RESOURCE_JOINT_STATE, None)
@@ -414,7 +460,7 @@ class ResourceDict(BaseModel):
             content["sites"] = []
 
         if "position" in content:
-            raise ValueError("根字段 position 已删除，请使用 pose.position")
+            raise ValueError("根字段 position 不受支持，请使用 pose.position")
         content["pose"] = normalized_pose or {}
 
         owner_uuid = content.get("uuid")
@@ -507,6 +553,21 @@ class ResourceDict(BaseModel):
     @property
     def is_root_node(self) -> bool:
         return self.parent is None
+
+    @property
+    def liquids(self) -> Optional[List[LiquidStateEntry]]:
+        """从 substances 返回非质量单位的兼容液体视图。"""
+
+        if self.substances is None:
+            return None
+        mass_units = {"ng", "ug", "mg", "g", "kg"}
+        return [
+            item for item in self.substances if item[2].strip().lower() not in mass_units
+        ]
+
+    @liquids.setter
+    def liquids(self, value: Optional[List[LiquidStateEntry]]) -> None:
+        self.substances = value
 
 
 RESOURCE_ROOT_FIELDS: tuple[str, ...] = tuple(

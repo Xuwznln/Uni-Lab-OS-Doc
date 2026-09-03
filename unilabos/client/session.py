@@ -21,9 +21,6 @@ from unilabos.utils.file_lock import (
 )
 
 
-DEFAULT_BASE_URL = "https://leap-lab.bohrium.com/api/v1"
-
-
 @dataclass
 class AuthInfo:
     """认证信息（基于 ak/sk）"""
@@ -52,8 +49,8 @@ class ContextInfo:
 
 @dataclass
 class SessionState:
-    """会话状态"""
-    base_url: str = DEFAULT_BASE_URL
+    """会话状态。base_url 为空表示未指定后端地址（本机权威模式）。"""
+    base_url: str = ""
     auth: AuthInfo = field(default_factory=AuthInfo)
     context: ContextInfo = field(default_factory=ContextInfo)
 
@@ -67,28 +64,10 @@ class SessionState:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionState":
         return cls(
-            base_url=data.get("base_url", DEFAULT_BASE_URL),
+            base_url=data.get("base_url", ""),
             auth=AuthInfo(**data.get("auth", {})),
             context=ContextInfo(**data.get("context", {})),
         )
-
-
-def resolve_addr(addr: str) -> str:
-    """解析 --addr 参数
-
-    支持别名：
-      test  → https://leap-lab.test.bohrium.com/api/v1
-      uat   → https://leap-lab.uat.bohrium.com/api/v1
-      local → http://127.0.0.1:48197/api/v1
-      其他  → 直接作为 URL 使用
-    """
-    aliases = {
-        "test": "https://leap-lab.test.bohrium.com/api/v1",
-        "uat": "https://leap-lab.uat.bohrium.com/api/v1",
-        "local": "http://127.0.0.1:48197/api/v1",
-        "prod": DEFAULT_BASE_URL,
-    }
-    return aliases.get(addr, addr)
 
 
 class SessionManager:

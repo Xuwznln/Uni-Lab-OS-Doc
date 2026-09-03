@@ -48,7 +48,7 @@ from unilabos.registry.decorators import device, topic_config, not_action
 from unilabos.devices.workstation.workstation_base import WorkstationBase
 
 try:
-    from unilabos.ros.nodes.presets.workstation import ROS2WorkstationNode
+    from unilabos.backend.ros2.presets.workstation import ROS2WorkstationNode
 except ImportError:
     ROS2WorkstationNode = None
 
@@ -141,7 +141,7 @@ class MyWorkstation(WorkstationBase):
 
 `ROS2WorkstationNode` 初始化时分两轮遍历子设备（`workstation.py`）：
 
-**第一轮 — 初始化所有子设备**：按 `children` 顺序调用 `initialize_device()`，通信设备（`serial_` / `io_` 开头的 id）优先完成初始化，创建 `serial.Serial()` 实例。其他子设备此时 `self.hardware_interface = "serial_pump"`（字符串）。
+**第一轮 — 初始化所有子设备**：按子设备在图 `nodes` 数组中的出现顺序调用 `initialize_device()`，通信设备（`serial_` / `io_` 开头的 id）优先完成初始化，创建 `serial.Serial()` 实例。其他子设备此时 `self.hardware_interface = "serial_pump"`（字符串）。
 
 **第二轮 — 代理替换**：遍历所有已初始化的子设备，读取子设备的 `_hardware_interface` 配置：
 
@@ -159,7 +159,7 @@ hardware_interface = d.ros_node_instance._hardware_interface
 
 - **通信设备 id 必须与子设备 config 中填的字符串完全一致**（如 `"serial_pump"`）
 - **通信设备 id 必须以 `serial_` 或 `io_` 开头**（否则第一轮不会被识别为通信设备）
-- **通信设备必须在 `children` 列表中排在最前面**，确保先初始化
+- **通信设备节点必须在图 `nodes` 数组中排在其他子设备之前**，确保先初始化
 
 ### HardwareInterface 参数说明
 
@@ -184,7 +184,7 @@ HardwareInterface(
 
 #### 默认值：方法名用约定名时可整段省略
 
-不在 `@device` 写 `hardware_interface` 时，系统使用默认值（见 `unilabos/ros/initialize_device.py`）：
+不在 `@device` 写 `hardware_interface` 时，系统使用默认值（见 `unilabos/backend/ros2/initialize_device.py`）：
 
 ```python
 {"name": "hardware_interface", "write": "send_command", "read": "read_data", "extra_info": []}
@@ -307,7 +307,7 @@ class ModbusBus:
 
 ### Serial 通信设备（class="serial"）
 
-`serial` 是 Uni-Lab-OS 内置的通信代理设备，代码位于 `unilabos/ros/nodes/presets/serial_node.py`：
+`serial` 是 Uni-Lab-OS 内置的通信代理设备，代码位于 `unilabos/backend/ros2/presets/serial_node.py`：
 
 ```python
 from serial import Serial, SerialException
@@ -356,7 +356,7 @@ class ROS2SerialNode(BaseROS2DeviceNode):
 
 ### 图文件配置
 
-**通信设备必须在 `children` 列表中排在最前面**，确保先于其他子设备初始化：
+层级只由子节点的 `parent` 表达（不写 `children`）；**通信设备节点必须在 `nodes` 数组中排在其他子设备之前**，确保先于其他子设备初始化：
 
 ```json
 {
@@ -364,7 +364,6 @@ class ROS2SerialNode(BaseROS2DeviceNode):
     {
       "id": "my_station",
       "class": "workstation",
-      "children": ["serial_pump", "pump_1", "pump_2"],
       "config": { "protocol_type": ["PumpTransferProtocol"] }
     },
     {
@@ -475,7 +474,7 @@ def __init__(self, config=None, deck=None, protocol_type=None, **kwargs):
 
 #### Deck 节点（图文件中）
 
-Deck 节点作为设备的 `children` 之一，`parent` 指向设备 id：
+Deck 节点通过 `parent` 挂到设备下（层级只由 `parent` 表达，不写 `children`）：
 
 ```json
 {
@@ -483,7 +482,6 @@ Deck 节点作为设备的 `children` 之一，`parent` 指向设备 id：
     "parent": "PRCXI",
     "type": "deck",
     "class": "",
-    "children": [],
     "config": {
         "type": "PRCXI9300Deck",
         "size_x": 542, "size_y": 374, "size_z": 0,
@@ -495,12 +493,12 @@ Deck 节点作为设备的 `children` 之一，`parent` 指向设备 id：
 ```
 
 - `config` 中的字段会传入 Deck 类的 `__init__`（因此 `__init__` 必须能接受所有 `serialize()` 输出的字段）
-- `children` 初始为空时，由同步器或手动初始化填充
+- Deck 上的物料是 `parent` 指向 Deck 的独立节点；图中不列时由同步器或手动初始化填充
 - `config.type` 填 Deck 类名
 
 ### 2. Deck 为空时自行初始化
 
-如果 Deck 节点的 `children` 为空，工作站需在 `post_init` 或首次同步时自行初始化内容：
+如果图中没有挂在 Deck 下的物料节点，工作站需在 `post_init` 或首次同步时自行初始化内容：
 
 ```python
 @not_action
@@ -631,7 +629,6 @@ class MyPlate(Plate):
       "parent": "my_station",
       "type": "deck",
       "class": "",
-      "children": [],
       "config": {
         "type": "MyLabDeck",
         "size_x": 542,
@@ -660,7 +657,7 @@ Deck 节点要点：
 
 - `config.type` 填 Deck 类名（如 `"PRCXI9300Deck"`）
 - `config.sites` 完整列出所有 site（从 Deck 类的 `serialize()` 输出获取）
-- `children` 初始为空（由同步器或手动初始化填充）
+- Deck 上的物料以 `parent` 指向 Deck 的独立节点表达；图中不列时由同步器或手动初始化填充
 - 设备节点 `config.deck._resource_type` 指向 Deck 类的完整模块路径
 
 ---
@@ -671,8 +668,8 @@ Deck 节点要点：
 
 子设备约束：
 
-- 图文件中 `parent` 指向工作站 ID
-- 在工作站 `children` 数组中列出
+- 图文件中 `parent` 指向工作站 ID（工作站节点不写 `children`）
+- 初始化顺序即子设备在 `nodes` 数组中的出现顺序
 
 ---
 

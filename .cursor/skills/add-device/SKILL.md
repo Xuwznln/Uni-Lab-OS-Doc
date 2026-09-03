@@ -112,7 +112,7 @@ from unilabos.registry.decorators import device
     id="my_device_vendor",           # 注册表唯一标识（必填，只能包含英文、数字、下划线）
     category=["temperature"],         # 分类标签列表（必填）
     description="设备描述",            # 设备描述
-    displayname="显示名称",            # UI 显示名称（默认用 id）
+    display_name="显示名称",            # UI 显示名称（默认用 id）
     icon="DeviceIcon.webp",           # 图标文件名
     version="1.0.0",                  # 版本号
     device_type="python",             # "python" 或 "ros2"
@@ -125,8 +125,8 @@ from unilabos.registry.decorators import device
 @device(
     ids=["pump_vendor_model_A", "pump_vendor_model_B"],
     id_meta={
-        "pump_vendor_model_A": {"handles": [...], "description": "型号 A", "displayname": "泵型号 A"},
-        "pump_vendor_model_B": {"handles": [...], "description": "型号 B", "displayname": "泵型号 B"},
+        "pump_vendor_model_A": {"handles": [...], "description": "型号 A", "display_name": "泵型号 A"},
+        "pump_vendor_model_B": {"handles": [...], "description": "型号 B", "display_name": "泵型号 B"},
     },
     category=["pump_and_valve"],
 )
@@ -135,7 +135,7 @@ from unilabos.registry.decorators import device
 **ID 与显示名规则：**
 - `id` / `ids` 是注册表稳定标识，只能包含英文大小写字母、数字、下划线，推荐格式为 `vendor_model` 或 `category_vendor_model`。
 - `id` / `ids` 不能包含中文、空格、短横线、点号或其他符号；不要把中文设备名放进 id。
-- 中文名、品牌型号展示名、UI 友好名称使用 `displayname`，不要塞进 `id`。
+- 中文名、品牌型号展示名、UI 友好名称使用 `display_name`，不要塞进 `id`。
 
 ### @action — 动作方法装饰器
 
@@ -278,7 +278,7 @@ def on_counter(self, value) -> None:           # 首参 = 收到的值（经 con
 
 ```python
 import json
-from unilabos.utils.exception import DeviceActionError
+from unilabos.backend.runtime.exception import DeviceActionError
 
 @not_action
 def post_init(self, ros_node: BaseROS2DeviceNode) -> None:
@@ -317,7 +317,7 @@ def call_peer(self, target_device: str, function_name: str, function_args: str =
   - 可显式传 `action_type=<某 ROS Action 类型>` 强制走原生通道并跳过探测。
 - 入参 `action_kwargs` **必须是 dict**（`None` 视为 `{}`）；序列化（dump）统一由 `call_device_action` 内部按通道完成——调用方**不要自己 `json.dumps`**。若入参来自前端 JSON 字符串，先 `json.loads` 成 dict 再传。
 - **结果解析两通道统一**（与 host_node `get_result_callback` 一致）：先 `convert_from_ros_msg` 把 ROS 结果消息**转成 dict**，再看是否带 `return_info`——带的（serial / UniLab `@action`）解析出真正的 `return_value` 返回；纯原生 action 返回整份结果 dict。所以**拿到的恒为 dict / python 值**，不用自己再解析 ROS 消息。
-- 失败统一抛 `unilabos.utils.exception.DeviceActionError`，按需 try/except 转成本设备的业务处理。
+- 失败统一抛 `unilabos.backend.runtime.exception.DeviceActionError`，按需 try/except 转成本设备的业务处理。
 
 ---
 
@@ -327,14 +327,14 @@ def call_peer(self, target_device: str, function_name: str, function_args: str =
 import logging
 from typing import Any, Dict, Optional
 
-from unilabos.ros.nodes.base_device_node import BaseROS2DeviceNode
+from unilabos.backend.ros2.base_device_node import BaseROS2DeviceNode
 from unilabos.registry.decorators import action, device, not_action, topic_config
 
 @device(
     id="my_device",
     category=["my_category"],
     description="设备描述",
-    displayname="设备显示名",
+    display_name="设备显示名",
 )
 class MyDevice:
     """设备类说明。"""
@@ -502,17 +502,16 @@ unilab --check_mode --skip_env_check
 
 ## 图文件节点模板
 
-实验图 JSON 中的 `class` 对应 `@device(id=...)`。`config` 中的字段应对应 `__init__` 的同名基础类型参数，不要只定义一个 `config: dict` 参数承载所有配置：
+实验图 JSON 中的 `template_name` 对应 `@device(id=...)`（旧图字段 `class`，读取时自动回填）。层级只由子节点的 `parent` 表达，不写 `children`。`config` 中的字段应对应 `__init__` 的同名基础类型参数，不要只定义一个 `config: dict` 参数承载所有配置：
 
 ```json
 {
   "id": "my_device_1",
   "name": "我的设备",
-  "children": [],
   "parent": null,
   "type": "device",
-  "class": "my_device",
-  "position": {"x": 0, "y": 0, "z": 0},
+  "template_name": "my_device",
+  "pose": {"position": {"x": 0, "y": 0, "z": 0}},
   "config": {
     "port": "/dev/ttyUSB0",
     "baudrate": 9600
@@ -521,7 +520,7 @@ unilab --check_mode --skip_env_check
 }
 ```
 
-工作站需要同时配置 `deck` 和 `children`：
+工作站需要配置 `deck`，Deck 节点通过 `parent` 挂到工作站下：
 
 ```json
 {
@@ -529,8 +528,7 @@ unilab --check_mode --skip_env_check
     {
       "id": "my_station",
       "type": "device",
-      "class": "my_workstation",
-      "children": ["my_deck"],
+      "template_name": "my_workstation",
       "config": {},
       "deck": {
         "data": {
@@ -542,7 +540,7 @@ unilab --check_mode --skip_env_check
     {
       "id": "my_deck",
       "type": "deck",
-      "class": "MyDeckClass",
+      "template_name": "MyDeckClass",
       "parent": "my_station",
       "config": {"type": "MyDeckClass", "setup": true}
     }
@@ -555,7 +553,7 @@ unilab --check_mode --skip_env_check
 ## 常见错误清单
 
 - 缺少 `@device`：设备不会被 AST 扫描发现。
-- `@device(id=...)` 使用中文、点号、短横线或空格：id 必须只包含英文、数字、下划线，显示名称用 `displayname`。
+- `@device(id=...)` 使用中文、点号、短横线或空格：id 必须只包含英文、数字、下划线，显示名称用 `display_name`。
 - 只有 `@property` 没有 `@topic_config()`：属性不会稳定广播到 `status_types`。
 - `post_init` 没有 `@not_action`：会被误暴露为动作。
 - `self.data = {}`：空字典会导致属性读取和 schema 初始数据不稳定，必须预填充每个状态键。

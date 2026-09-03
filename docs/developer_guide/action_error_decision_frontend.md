@@ -27,6 +27,9 @@ Device             Host                 Scheduler Backend          Frontend
 
 `retry` 时，后端在 release 前为同一 `node_id` 创建新的 attempt/job；旧 job 仍由 Host
 如实上报 failed。`skip`、`abort`、fallback/补偿也由后端更新调度，Host 不创建新 goal。
+本机调度（默认 profile）下"后端"就是同进程的 Workflow Authority：它在同一事务里把失败
+attempt 记 failed、为同一节点运行追加 `attempt_no+1` 的新 job，并保持节点运行为
+pending；节点运行（`node_run_uuid`）是画布节点的稳定身份，attempt 是它的历史。
 
 ## 3. Host → Backend
 
@@ -39,6 +42,7 @@ Device             Host                 Scheduler Backend          Frontend
     "decision_id": "decision-uuid",
     "task_id": "workflow-run-id",
     "node_id": "logical-node-id",
+    "node_run_uuid": "node-run-uuid（≡ attempt_group_uuid，本机调度时给出）",
     "job_id": "attempt-job-id",
     "device_id": "pump-1",
     "action_name": "transfer",

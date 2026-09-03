@@ -12,9 +12,9 @@ import sys
 # 将项目的根目录添加到 sys.path 中，以便 Sphinx 能够找到 unilabos 包
 sys.path.insert(0, os.path.abspath(".."))
 
-project = "Uni-Lab"
-copyright = "2025, Uni-Lab Community, DP Technology & Peking University"
-author = "Uni-Lab Community, DP Technology & Peking University"
+project = "Uni-Lab-OS"
+copyright = "2026, Uni-Lab-OS Community"
+author = "Uni-Lab-OS Community"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -69,9 +69,6 @@ html_theme_options = {
     "home_page_in_toc": True,
     "logo_only": False,
 }
-
-# 设置 HTML 文档的静态文件路径
-html_static_path = ["_static"]  # 如果有自定义 CSS，可以放在 _static 目录中
 
 section_titles = {
     "Simple": "## 简单单变量动作函数",

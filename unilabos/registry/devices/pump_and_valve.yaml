@@ -10,6 +10,7 @@ solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -32,6 +33,7 @@ solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -54,6 +56,7 @@ solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -76,6 +79,7 @@ solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -98,6 +102,7 @@ solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -121,6 +126,7 @@ solenoid_valve:
         goal_default:
           command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -147,41 +153,33 @@ solenoid_valve:
           position: position
           string: string
         goal_default:
-          string: ''
+          position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                string:
+                position:
                   type: string
+              required:
+              - position
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
-              type: object
           required:
           - goal
-          title: StrSingleInput
+          title: set_valve_position参数
           type: object
         type: StrSingleInput
     module: unilabos.devices.pump_and_valve.solenoid_valve:SolenoidValve
+    status_policies: {}
     status_types:
       status: str
       valve_position: str
@@ -191,7 +189,7 @@ solenoid_valve:
     type: python
   config_info: []
   description: 电磁阀控制设备，用于精确的流体路径控制和开关操作。该设备通过串口通信控制电磁阀的开关状态，支持远程操作和状态监测。具备快速响应、可靠密封、状态反馈等特性，广泛应用于流体输送、样品进样、路径切换等需要精确流体控制的实验室自动化应用。
-  displayname: solenoid_valve
+  display_name: 电磁阀
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -226,6 +224,7 @@ solenoid_valve.mock:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -248,6 +247,7 @@ solenoid_valve.mock:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -271,6 +271,7 @@ solenoid_valve.mock:
         goal_default:
           position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -296,30 +297,24 @@ solenoid_valve.mock:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: close参数
           type: object
         type: EmptyIn
       open:
@@ -328,33 +323,28 @@ solenoid_valve.mock:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: open参数
           type: object
         type: EmptyIn
     module: unilabos.devices.pump_and_valve.solenoid_valve_mock:SolenoidValveMock
+    status_policies: {}
     status_types:
       status: str
       valve_position: str
@@ -364,7 +354,7 @@ solenoid_valve.mock:
     type: python
   config_info: []
   description: 模拟电磁阀设备，用于系统测试和开发调试。该设备模拟真实电磁阀的开关操作和状态变化，提供与实际设备相同的控制接口和反馈机制。支持流体路径的虚拟控制，便于在没有实际硬件的情况下进行流体系统的集成测试和算法验证。适用于系统开发、流程调试和培训演示等场景。
-  displayname: solenoid_valve.mock
+  display_name: 模拟电磁阀
   handles:
   - data_type: fluid
     handler_key: in
@@ -409,6 +399,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -431,6 +422,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -453,6 +445,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -476,6 +469,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal_default:
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -503,6 +497,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal_default:
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -529,6 +524,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -551,6 +547,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -573,6 +570,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -595,6 +593,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -617,6 +616,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -640,6 +640,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal_default:
           full_command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -666,6 +667,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal_default:
           baudrate: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -692,6 +694,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal_default:
           velocity: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -719,6 +722,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
           max_velocity: null
           position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -749,6 +753,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal_default:
           position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -778,6 +783,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal_default:
           velocity: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -805,6 +811,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -827,6 +834,7 @@ syringe_pump_with_valve.runze.SY03B-T06:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -848,23 +856,24 @@ syringe_pump_with_valve.runze.SY03B-T06:
       read: send_command
       write: send_command
     module: unilabos.devices.pump_and_valve.runze_backbone:RunzeSyringePump
+    status_policies: {}
     status_types:
       max_velocity: float
       mode: int
-      plunger_position: ''
+      plunger_position: str
       position: float
       status: str
       valve_position: str
-      velocity_end: ''
-      velocity_grade: ''
-      velocity_init: ''
+      velocity_end: str
+      velocity_grade: str
+      velocity_init: str
     supported_backends:
     - hostlink
     - ros2
     type: python
   config_info: []
   description: 润泽精密注射泵设备，集成阀门控制的高精度流体输送系统。该设备通过串口通信控制，支持多种运行模式和精确的体积控制。具备可变速度控制、精密定位、阀门切换、实时状态监控等功能。适用于微量液体输送、精密进样、流速控制、化学反应进料等需要高精度流体操作的实验室自动化应用。
-  displayname: syringe_pump_with_valve.runze.SY03B-T06
+  display_name: 润泽带阀注射泵 SY03B-T06
   handles:
   - data_key: fluid_port_1
     data_source: executor
@@ -984,6 +993,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1006,6 +1016,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1028,6 +1039,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1051,6 +1063,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal_default:
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1078,6 +1091,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal_default:
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1104,6 +1118,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1126,6 +1141,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1148,6 +1164,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1170,6 +1187,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1192,6 +1210,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1215,6 +1234,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal_default:
           full_command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1241,6 +1261,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal_default:
           baudrate: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1267,6 +1288,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal_default:
           velocity: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1294,6 +1316,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
           max_velocity: null
           position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1324,6 +1347,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal_default:
           position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1353,6 +1377,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal_default:
           velocity: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1380,6 +1405,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1402,6 +1428,7 @@ syringe_pump_with_valve.runze.SY03B-T08:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1423,23 +1450,24 @@ syringe_pump_with_valve.runze.SY03B-T08:
       read: send_command
       write: send_command
     module: unilabos.devices.pump_and_valve.runze_backbone:RunzeSyringePump
+    status_policies: {}
     status_types:
       max_velocity: float
       mode: int
-      plunger_position: ''
+      plunger_position: str
       position: float
       status: str
       valve_position: str
-      velocity_end: ''
-      velocity_grade: ''
-      velocity_init: ''
+      velocity_end: str
+      velocity_grade: str
+      velocity_init: str
     supported_backends:
     - hostlink
     - ros2
     type: python
   config_info: []
   description: 润泽精密注射泵设备，集成阀门控制的高精度流体输送系统。该设备通过串口通信控制，支持多种运行模式和精确的体积控制。具备可变速度控制、精密定位、阀门切换、实时状态监控等功能。适用于微量液体输送、精密进样、流速控制、化学反应进料等需要高精度流体操作的实验室自动化应用。
-  displayname: syringe_pump_with_valve.runze.SY03B-T08
+  display_name: 润泽带阀注射泵 SY03B-T08
   handles:
   - data_key: fluid_port_1
     data_source: executor

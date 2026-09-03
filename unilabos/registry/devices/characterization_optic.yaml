@@ -11,6 +11,7 @@ raman.home_made:
         goal_default:
           int_time: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -37,6 +38,7 @@ raman.home_made:
         goal_default:
           output_voltage_laser: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -64,6 +66,7 @@ raman.home_made:
           int_time: null
           laser_power: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -96,6 +99,7 @@ raman.home_made:
           laser_power: null
           sample_name: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -126,49 +130,37 @@ raman.home_made:
         type: UniLabJsonCommand
       raman_cmd:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: raman_cmd参数
           type: object
         type: SendCmd
     module: unilabos.devices.raman_uv.home_made_raman:RamanObj
+    status_policies: {}
     status_types: {}
     supported_backends:
     - hostlink
@@ -176,7 +168,7 @@ raman.home_made:
     type: python
   config_info: []
   description: 拉曼光谱分析设备，用于物质的分子结构和化学成分表征。该设备集成激光器和CCD检测器，通过串口通信控制激光功率和光谱采集。具备背景扣除、多次平均、自动数据处理等功能，支持高精度的拉曼光谱测量。适用于材料表征、化学分析、质量控制、研究开发等需要分子指纹识别和结构分析的实验应用。
-  displayname: raman.home_made
+  display_name: 自制拉曼光谱仪
   handles: []
   icon: ''
   init_param_enforce: {}

@@ -27,9 +27,11 @@ class ResourceSlot(Resource):
 
 # 单 ResourceSlot 的「原始入参形态」——**仅框架内部解析阶段**使用，用于标注解析前的 raw 值：
 #   - dict：资源引用 {id, uuid}（前端 schema 填写形态，object）→ 按 uuid with_children 拉取；
-#   - list：一棵树的扁平节点组（handle @flatten 运行期形态）→ 装配成一个物料（须恰好单根）。
-# 解析完成后，@action 函数签名拿到的是「一个完整的 Resource 实例」（见 ResourceSlot 文档第 1 条）。
-ResourceSlotRawInput = Union[List[Dict[str, Any]], Dict[str, Any]]
+#   - list：一棵树的扁平节点组（handle @flatten 运行期形态）→ 装配成一个物料（须恰好单根）；
+#   - str：上述两种形态的 JSON 字符串（统一 str 传输形态），或裸 uuid 引用。
+# 统一由 materials.parse_resource_slot 剥离；解析完成后，@action 函数签名拿到的是
+# 「一个完整的 Resource 实例」（见 ResourceSlot 文档第 1 条）。
+ResourceSlotRawInput = Union[List[Dict[str, Any]], Dict[str, Any], str]
 
 
 class DeviceSlot(str):
@@ -37,6 +39,22 @@ class DeviceSlot(str):
     def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
         # DeviceSlot 本质是设备 id 字符串；pydantic 不会把 str 子类当 str 处理，
         # 不声明就会让包含它的 TypedDict 解析失败并回退为 {"type": "object"}。
+        from pydantic_core import core_schema
+
+        return core_schema.str_schema()
+
+
+class SiteSlot(str):
+    """Site 槽位类型——值是权威 ResourceSite 的 uuid。
+
+    与 DeviceSlot 同型（str 子类，框架不做实例装配）：@action 参数标注为
+    SiteSlot 时，registry 生成字符串 schema 并自动注入 PLACEHOLDER_SITES，
+    前端按 Site 选择器渲染（在目标物料的 sites 中选择），提交值为 site uuid。
+    消费侧（materials 权威 / _site_spot）按 uuid 精确定位目标槽位。
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
         from pydantic_core import core_schema
 
         return core_schema.str_schema()
@@ -51,6 +69,8 @@ class DeviceSlot(str):
 PLACEHOLDER_RESOURCES = "unilabos_resources"
 PLACEHOLDER_DEVICES = "unilabos_devices"
 PLACEHOLDER_NODES = "unilabos_nodes"
+# Site 选择：前端在目标物料的 sites 中选择，提交 ResourceSite 的 uuid。
+PLACEHOLDER_SITES = "unilabos_sites"
 PLACEHOLDER_CLASS = "unilabos_class"
 PLACEHOLDER_MANUAL_CONFIRM = "unilabos_manual_confirm"
 # 物料扣减：前端选择资源注册表类型 + 数量，由服务端扣减后回传实例的 uuid。

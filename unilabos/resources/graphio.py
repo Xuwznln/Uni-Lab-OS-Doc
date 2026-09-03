@@ -4,15 +4,14 @@ import inspect
 import json
 import os.path
 import traceback
-from typing import Union, Any, Dict, List, Tuple
+from typing import Union, Any, Dict, List, Optional, Tuple
 import uuid
 import networkx as nx
 from pylabrobot.resources import ResourceHolder
-from unilabos_msgs.msg import Resource
 
 from unilabos.config.config import BasicConfig
-from unilabos.resources.container import RegularContainer
-from unilabos.resources.itemized_carrier import ItemizedCarrier, BottleCarrier
+from unilabos.resources.presets.container import RegularContainer
+from unilabos.resources.presets.itemized_carrier import BottleCarrier, ItemizedCarrier
 from unilabos.resources.objects.joint_state import ResourceJointState
 from unilabos.resources.objects.pose import (
     ResourceDictPosition,
@@ -27,7 +26,6 @@ from unilabos.resources.objects.resource import (
 )
 from unilabos.resources.objects.site import ResourceSite
 from unilabos.resources.objects.state import TRACKER_STATE_KEYS
-from unilabos.ros.msgs.message_converter import convert_to_ros_msg
 from unilabos.resources.resource_tracker import (
     ResourceDictInstance,
     ResourceTreeSet,
@@ -35,11 +33,19 @@ from unilabos.resources.resource_tracker import (
     extract_plr_sites,
     get_plr_template_name,
     plr_class_accepts_serialized_sites,
+    repair_itemized_ordering,
     sites_for_plr_deserialization,
     set_plr_template_name,
 )
 from unilabos.utils import logger
 from unilabos.utils.banner_print import print_status
+
+if BasicConfig.backend == "ros2":
+    from unilabos_msgs.msg import Resource
+    from unilabos.backend.ros2.msgs.message_converter import convert_to_ros_msg
+else:
+    Resource = None
+    convert_to_ros_msg = None
 
 try:
     from pylabrobot.resources.resource import Resource as ResourcePLR
@@ -51,7 +57,8 @@ physical_setup_graph: nx.Graph = None
 
 
 def canonicalize_nodes_data(
-    nodes: List[Dict[str, Any]], parent_relation: Dict[str, List[str]] = {}
+    nodes: List[Dict[str, Any]],
+    parent_relation: Optional[Dict[str, List[str]]] = None,
 ) -> ResourceTreeSet:
     """
     标准化节点数据，使用 ResourceInstanceDictFlatten 进行规范化并创建 ResourceTreeSet
@@ -63,10 +70,10 @@ def canonicalize_nodes_data(
     Returns:
         ResourceTreeSet: 标准化后的资源树集合
     """
+    parent_relation = parent_relation or {}
     print_status(f"{len(nodes)} Resources loaded", "info")
 
     # 第一步：基本预处理（处理graphml的label字段）
-    outer_host_node_id = None
     for node in nodes:
         if not node.get("uuid"):
             transport_uuid = (node.get("data") or {}).get("unilabos_uuid")
@@ -76,12 +83,12 @@ def canonicalize_nodes_data(
                     "-g strict import 必须携带资源/Site UUID"
                 )
             node["uuid"] = str(transport_uuid)
-    for idx, node in enumerate(nodes):
+    for node in nodes:
         if node.get("label") is not None:
             node_id = node.pop("label")
             node["id"] = node["name"] = node_id
-        if node["id"] == "host_node":
-            outer_host_node_id = idx
+        # 父子关系只由 parent/parent_uuid 表达；children 是派生字段，读取时丢弃。
+        node.pop("children", None)
         if not isinstance(node.get("config"), dict):
             node["config"] = {}
         if not node.get("type"):
@@ -92,7 +99,7 @@ def canonicalize_nodes_data(
             print_status(f"Warning: Node {node.get('id', 'unknown')} missing 'name', defaulting to {node['name']}", "warning")
         if "position" in node:
             raise ValueError(
-                f"资源 {node.get('id', node.get('name'))} 的根字段 position 已删除，"
+                f"资源 {node.get('id', node.get('name'))} 的根字段 position 不受支持，"
                 "请使用 pose.position"
             )
         legacy_position = {
@@ -116,21 +123,17 @@ def canonicalize_nodes_data(
         if "sample_id" in node:
             sample_id = node.pop("sample_id")
             if sample_id:
-                logger.error(f"{node}的sample_id参数已弃用，sample_id: {sample_id}")
+                logger.error(f"{node} 的 sample_id 参数不受支持，已忽略: {sample_id}")
         for k in list(node.keys()):
-            if k not in RESOURCE_ROOT_FIELDS and k != "children":
+            if k not in RESOURCE_ROOT_FIELDS:
                 v = node.pop(k)
                 node["config"][k] = v
-    if outer_host_node_id is not None:
-        nodes.pop(outer_host_node_id)
-    # 第二步：处理parent_relation
+    # 第二步：处理parent_relation（GraphML 的 "父::子" 命名）→ 写入子节点 parent
     id2idx = {node["id"]: idx for idx, node in enumerate(nodes)}
     for parent, children in parent_relation.items():
-        if parent in id2idx:
-            nodes[id2idx[parent]]["children"] = children
-            for child in children:
-                if child in id2idx:
-                    nodes[id2idx[child]]["parent"] = parent
+        for child in children:
+            if child in id2idx:
+                nodes[id2idx[child]]["parent"] = parent
 
     # 第三步：使用 ResourceInstanceDictFlatten 标准化每个节点
     standardized_instances = []
@@ -142,7 +145,9 @@ def canonicalize_nodes_data(
             # print_status(f"DeviceId: {node['id']}, Class: {node['class']}", "info")
             # 使用标准化方法
             resource_instance = ResourceDictInstance.get_resource_instance_from_dict(node)
-            known_nodes[node["id"]] = resource_instance
+            # 不同父节点下的子物料可以同名（多块板各有 A1 孔）；id 只在
+            # 无 parent_uuid 时作回退键，uuid 才是身份。
+            known_nodes.setdefault(node["id"], resource_instance)
             uuid_to_instance[resource_instance.res_content.uuid] = resource_instance
             standardized_instances.append(resource_instance)
         except Exception as e:
@@ -151,11 +156,9 @@ def canonicalize_nodes_data(
 
     # 第四步：建立 parent 和 children 关系
     for node in nodes:
-        node_id = node["id"]
-        if node_id not in known_nodes:
+        current_instance = uuid_to_instance.get(str(node.get("uuid") or ""))
+        if current_instance is None:
             continue
-
-        current_instance = known_nodes[node_id]
 
         # 优先使用 parent_uuid 进行匹配，如果不存在则使用 parent
         parent_uuid = node.get("parent_uuid")
@@ -198,7 +201,9 @@ def canonicalize_links_ports(links: List[Dict[str, Any]], resource_tree_set: Res
         id_to_uuid[node.res_content.id] = node.res_content.uuid
         uuid_to_id[node.res_content.uuid] = node.res_content.id
 
-    # 第三遍处理：为每个 link 添加 source_uuid 和 target_uuid
+    # 第三遍处理：为每个 link 补齐 source/target 与 source_uuid/target_uuid
+    # （Graph Authority 导出的边两者都有；只带其一时按节点集合补出另一方）。
+    resolved_links: List[Dict[str, Any]] = []
     for link in links:
         source_id = link.get("source")
         target_id = link.get("target")
@@ -221,6 +226,14 @@ def canonicalize_links_ports(links: List[Dict[str, Any]], resource_tree_set: Res
         # 添加 target_uuid
         if target_uuid and target_uuid in uuid_to_id:
             link["target"] = uuid_to_id[target_uuid]
+
+        if not link.get("source") or not link.get("target"):
+            logger.warning(
+                f"[GraphIO] 边 {link} 的端点不在节点集合中，已忽略"
+            )
+            continue
+        resolved_links.append(link)
+    links[:] = resolved_links
 
     # 第一遍处理：将字符串类型的port转换为字典格式
     for link in links:
@@ -280,16 +293,17 @@ def handle_communications(G: nx.Graph):
     for e, edata in G.edges.items():
         if edata.get("type", "physical") != "communication":
             continue
-        if G.nodes[e[0]].get("class") in available_communication_types:
+        if G.nodes[e[0]].get("template_name") in available_communication_types:
             device_comm, device = e[0], e[1]
-        elif G.nodes[e[1]].get("class") in available_communication_types:
+        elif G.nodes[e[1]].get("template_name") in available_communication_types:
             device_comm, device = e[1], e[0]
         else:
             continue
 
-        if G.nodes[device_comm].get("class") == "serial":
+        comm_template = G.nodes[device_comm].get("template_name")
+        if comm_template == "serial":
             G.nodes[device]["config"]["port"] = device_comm
-        elif G.nodes[device_comm].get("class") == "io_device":
+        elif comm_template == "io_device":
             logger.warning(f'Modify {device}\'s io_device_port to {edata["port"][device_comm]}')
             G.nodes[device]["config"]["io_device_port"] = int(edata["port"][device_comm])
 
@@ -297,8 +311,11 @@ def handle_communications(G: nx.Graph):
 def read_node_link_json(
     json_info: Union[str, Dict[str, Any]],
 ) -> tuple[nx.Graph, ResourceTreeSet, List[Dict[str, Any]]]:
-    """
-    读取节点-边的JSON数据并构建图
+    """把 node-link JSON payload 装配为运行时图结构。
+
+    规范输入是 Graph Authority 导出的权威 payload（``unilab -g <名称|uuid>``
+    的缓存文件即该形态）。``-g`` 本地 JSON 文件在启动早期先经
+    ``GraphService.upsert_graph`` 对账/发号登记，再以权威 payload 进入本函数。
 
     Args:
         json_info: JSON文件路径或字典数据
@@ -440,16 +457,38 @@ def dict_from_graph(graph: nx.Graph) -> dict:
     return nodes_copy
 
 
+def _child_ids_by_parent(nodes: dict) -> dict[str, list[str]]:
+    """按 ``parent`` 派生每个节点的子节点 id 列表（保持输入顺序）。
+
+    扁平节点列表的父子关系只由 ``parent`` 表达；仅当整批节点都没有 parent
+    时才回退读取旧数据的 ``children`` 列表。
+    """
+
+    children: dict[str, list[str]] = {node_id: [] for node_id in nodes}
+    for node_id, node in nodes.items():
+        parent_id = node.get("parent")
+        if isinstance(parent_id, dict):
+            parent_id = parent_id.get("id")
+        if parent_id in children and parent_id != node_id:
+            children[parent_id].append(node_id)
+    if any(children.values()):
+        return children
+    return {
+        node_id: [child for child in (node.get("children") or []) if isinstance(child, str) and child in nodes]
+        for node_id, node in nodes.items()
+    }
+
+
 def dict_to_tree(nodes: dict, devices_only: bool = False) -> list[dict]:
     # 将节点转换为字典，以便通过 ID 快速查找
     nodes_list = [node for node in nodes.values() if node.get("type") == "device" or not devices_only]
-    id_list = [node["id"] for node in nodes_list]
     is_root = {node["id"]: True for node in nodes_list}
+    child_ids = _child_ids_by_parent(nodes)
 
     # 初始化每个节点的 children 为包含节点字典的列表
     for node in nodes_list:
-        node["children"] = [nodes[child_id] for child_id in node.get("children", [])]
-        for child_id in node.get("children", []):
+        node["children"] = [nodes[child_id] for child_id in child_ids[node["id"]]]
+        for child_id in child_ids[node["id"]]:
             if child_id in is_root:
                 is_root[child_id] = False
 
@@ -464,15 +503,16 @@ def dict_to_nested_dict(nodes: dict, devices_only: bool = False) -> dict:
     # 将节点转换为字典，以便通过 ID 快速查找
     nodes_list = [node for node in nodes.values() if node.get("type") == "device" or not devices_only]
     is_root = {node["id"]: True for node in nodes_list}
+    child_ids = _child_ids_by_parent(nodes)
 
     # 初始化每个节点的 children 为包含节点字典的列表
     for node in nodes_list:
         node["children"] = {
             child_id: nodes[child_id]
-            for child_id in node.get("children", [])
+            for child_id in child_ids[node["id"]]
             if nodes[child_id].get("type") == "device" or not devices_only
         }
-        for child_id in node.get("children", []):
+        for child_id in child_ids[node["id"]]:
             if child_id in is_root:
                 is_root[child_id] = False
         if len(node["children"]) > 0 and node["type"].lower() == "device":
@@ -491,20 +531,23 @@ def list_to_nested_dict(nodes: list[dict]) -> dict:
 
 
 def tree_to_list(tree: list[dict]) -> list[dict]:
-    def _tree_to_list(tree: list[dict], result: list[dict]):
+    """嵌套树 → 扁平节点列表；层级只由每个节点的 ``parent`` 表达，不再输出 children。"""
+
+    def _tree_to_list(tree: list[dict], result: list[dict], parent_id: Optional[str]):
         for node_ in tree:
             node = node_.copy()
+            children = node.pop("children", None) or []
+            if not node.get("parent"):
+                node["parent"] = parent_id
             result.append(node)
-            if node.get("children"):
-                _tree_to_list(node["children"], result)
-            node["children"] = [n["id"] for n in node["children"]]
+            _tree_to_list(children, result, node["id"])
 
-    result = []
-    _tree_to_list(tree, result)
+    result: list[dict] = []
+    _tree_to_list(tree, result, None)
     return result
 
 
-def nested_dict_to_list(nested_dict: dict) -> list[dict]:  # FIXME 是tree？
+def nested_dict_to_list(nested_dict: dict) -> list[dict]:
     """
     将嵌套字典转换为扁平列表
 
@@ -734,6 +777,12 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
             if normalized_pose.position is not None
             else None
         )
+        serialized_children = (
+            [resource_ulab_to_plr_inner(child) for child in resource["children"]]
+            if isinstance(resource["children"], list)
+            else [resource_ulab_to_plr_inner(child) for child_id, child in resource["children"].items()]
+        )
+        repair_itemized_ordering(config, serialized_children)
         d = {
             "name": resource["name"],
             "type": config.get("type", resource["type"]),
@@ -745,14 +794,11 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
                 if actual_position is not None
                 else None
             ),
-            "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},  # Resource如果没有rotation，是plr版本太低
+            # PLR 反序列化输入需要显式 rotation 对象。
+            "rotation": {"x": 0, "y": 0, "z": 0, "type": "Rotation"},
             "category": resource["type"],
             "model": config.get("model", None),  # resource中deck没有model
-            "children": (
-                [resource_ulab_to_plr_inner(child) for child in resource["children"]]
-                if isinstance(resource["children"], list)
-                else [resource_ulab_to_plr_inner(child) for child_id, child in resource["children"].items()]
-            ),
+            "children": serialized_children,
             "parent_name": resource["parent"] if resource["parent"] is not None else None,
             **config,
         }
@@ -836,9 +882,14 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
         for state_key in TRACKER_STATE_KEYS:
             if state_key in state:
                 tracker_roots[state_key] = state.pop(state_key)
+        serialized_location = d.get("location")
         actual_position = (
-            {"x": d["location"]["x"], "y": d["location"]["y"], "z": d["location"]["z"]}
-            if d["location"] is not None
+            {
+                "x": serialized_location["x"],
+                "y": serialized_location["y"],
+                "z": serialized_location["z"],
+            }
+            if serialized_location is not None
             else None
         )
         sidecar_position = (
@@ -847,12 +898,13 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
             else missing
         )
         if static_pose is None:
+            serialized_rotation = d.get("rotation") or {"x": 0, "y": 0, "z": 0}
             static_pose = {
                 "size": {"width": d["size_x"], "height": d["size_y"], "depth": d["size_z"]},
                 "rotation": {
-                    "x": d["rotation"]["x"],
-                    "y": d["rotation"]["y"],
-                    "z": d["rotation"]["z"],
+                    "x": serialized_rotation["x"],
+                    "y": serialized_rotation["y"],
+                    "z": serialized_rotation["z"],
                 },
                 "layout": d.get("layout", "x-y"),
                 "cross_section_type": d.get("cross_section_type", "rectangle"),
@@ -876,13 +928,16 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
             "children": (
                 [
                     resource_plr_to_ulab_inner(child_resource, child_dict, all_states)
-                    for child_resource, child_dict in zip(plr_node.children, d["children"])
+                    for child_resource, child_dict in zip(
+                        plr_node.children, d.get("children", [])
+                    )
                 ]
                 if child
                 else []
             ),
-            "parent": d["parent_name"] if d["parent_name"] else parent_name if parent_name else None,
-            "type": replace_plr_type_to_ulab(d.get("category")),  # FIXME plr自带的type是python class name
+            "parent": d.get("parent_name") or parent_name,
+            # PLR category 表示资源用途，需映射到 Uni-Lab-OS 节点类型。
+            "type": replace_plr_type_to_ulab(d.get("category")),
             "class": d.get("class", ""),
             "template_name": get_plr_template_name(plr_node, d),
             "pose": static_pose,
@@ -979,7 +1034,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
         plr_material.code = material.get("code", "") and material.get("barCode", "") or ""
         plr_material.unilabos_uuid = str(uuid.uuid4())
 
-        # ⭐ 保存 Bioyond 原始信息到 unilabos_extra（用于出库时查询）
+        # 保存 Bioyond 标识和名称，供出库查询使用。
         plr_material.unilabos_extra = {
             "material_bioyond_id": material.get("id"),           # Bioyond 物料 UUID
             "material_bioyond_name": material.get("name"),       # Bioyond 原始名称（如 "MDA"）
@@ -990,7 +1045,12 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
 
         # 处理子物料（detail）
         if material.get("detail") and len(material["detail"]) > 0:
-            for bottle in reversed(plr_material.children):
+            existing_resources = (
+                plr_material.get_resources()
+                if isinstance(plr_material, ItemizedCarrier)
+                else list(plr_material.children)
+            )
+            for bottle in reversed(existing_resources):
                 plr_material.unassign_child_resource(bottle)
             child_ids = []
 
@@ -1024,12 +1084,10 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                         # 第一行(x=1)是10%分装小瓶，第二行(x=2)是90%分装小瓶
                         x_pos = detail.get("x", 0)
                         y_pos = detail.get("y", 0)
-                        # logger.debug(f"  └─ [推断类型] {detail['name']} 坐标(x={x_pos}, y={y_pos})")
                         if x_pos == 1:
                             typeName = "10%分装小瓶"
                         elif x_pos == 2:
                             typeName = "90%分装小瓶"
-                        # logger.debug(f"  └─ [推断结果] {detail['name']} → {typeName}")
                     else:
                         typeName = default_detail_type
 
@@ -1047,7 +1105,13 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
         else:
             # 只对有 capacity 属性的容器（液体容器）处理液体追踪
             if hasattr(plr_material, 'capacity'):
-                bottle = plr_material[0] if plr_material.capacity > 0 else plr_material
+                first_item = plr_material[0] if plr_material.capacity > 0 else plr_material
+                bottle = (
+                    first_item.resource
+                    if isinstance(first_item, ResourceHolder)
+                    and first_item.resource is not None
+                    else first_item
+                )
                 bottle.tracker.liquids = [
                     (material["name"], float(material.get("quantity", 0)) if material.get("quantity") else 0)
                 ]
@@ -1059,8 +1123,7 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
             if not locations:
                 logger.debug(f"[物料位置] {unique_name} 没有location信息，跳过warehouse放置")
 
-            # ⭐ 预先检查：如果物料的任何location在竖向warehouse中，提前交换尺寸
-            # 这样可以避免多个location时尺寸不一致的问题
+            # 任一 location 位于竖向 warehouse 时统一交换物料尺寸。
             needs_size_swap = False
             for loc in locations:
                 wh_name_check = loc.get("whName")
@@ -1121,43 +1184,43 @@ def resource_bioyond_to_plr(bioyond_materials: list[dict], type_mapping: Dict[st
                         # - Bioyond的y(1=01,2=02,3=03)对应warehouse的行(row, y方向)，从下到上
                         # vertical-col-major 中: row=0 对应底部，row=n-1 对应顶部
                         # Bioyond y=1(01) 对应底部 → row=0, y=2(02) 对应中间 → row=1
-                        # 索引计算: idx = row * num_cols + col
                         col_idx = x - 1  # Bioyond的x(A,B) → col索引(0,1)
                         row_idx = y - 1  # Bioyond的y(01,02,03) → row索引(0,1,2)
                         layer_idx = z - 1
 
-                        idx = layer_idx * (warehouse.num_items_x * warehouse.num_items_y) + row_idx * warehouse.num_items_y + col_idx
-                        logger.debug(f"🔍 竖向warehouse {wh_name}: Bioyond(x={x},y={y},z={z}) → warehouse(col={col_idx},row={row_idx},layer={layer_idx}) → idx={idx}, capacity={warehouse.capacity}")
-
                     # 普通横向warehouse的处理
                     else:
-                        # 多行warehouse: 根据 layout 使用不同的索引计算
                         row_idx = x - 1  # x表示行: 转为0-based
                         col_idx = y - 1  # y表示列: 转为0-based
                         layer_idx = z - 1  # 转为0-based
 
-                        # 检查 warehouse 的排序方式属性
-                        ordering_layout = getattr(warehouse, 'ordering_layout', 'col-major')
-                        logger.debug(f"🔍 Warehouse {wh_name} layout检测: hasattr={hasattr(warehouse, 'ordering_layout')}, ordering_layout值='{ordering_layout}', warehouse类型={type(warehouse).__name__}")
-
-                        if ordering_layout == "row-major":
-                            # 行优先: A01,A02,A03,A04, B01,B02,B03,B04 (所有Bioyond堆栈)
-                            # 索引计算: idx = (row) * num_cols + (col) + (layer) * (rows * cols)
-                            idx = layer_idx * (warehouse.num_items_x * warehouse.num_items_y) + row_idx * warehouse.num_items_x + col_idx
-                            logger.debug(f"行优先warehouse {wh_name}: x={x}(行),y={y}(列) → row={row_idx},col={col_idx} → idx={idx}")
-                        else:
-                            # 列优先 (后备): A01,B01,C01,D01, A02,B02,C02,D02
-                            # 索引计算: idx = (col) * num_rows + (row) + (layer) * (rows * cols)
-                            idx = layer_idx * (warehouse.num_items_x * warehouse.num_items_y) + col_idx * warehouse.num_items_y + row_idx
-                            logger.debug(f"列优先warehouse {wh_name}: x={x}(行),y={y}(列) → row={row_idx},col={col_idx} → idx={idx}")
-
-                    if 0 <= idx < warehouse.capacity:
-                        if warehouse[idx] is None or isinstance(warehouse[idx], ResourceHolder):
-                            # 物料尺寸已在放入warehouse前根据需要进行了交换
-                            warehouse[idx] = plr_material
-                            logger.debug(f"✅ 物料 {unique_name} 放置到 {wh_name}[{idx}] (Bioyond坐标: x={loc.get('x')}, y={loc.get('y')})")
-                    else:
-                        logger.warning(f"❌ 物料 {unique_name} 的索引 {idx} 超出仓库 {wh_name} 容量 {warehouse.capacity}")
+                    try:
+                        holder = warehouse.get_site_by_layer_position(
+                            row=row_idx,
+                            col=col_idx,
+                            layer=layer_idx,
+                        )
+                    except ValueError as exc:
+                        logger.warning(
+                            f"❌ 物料 {unique_name} 的位置不属于仓库 {wh_name}: {exc}"
+                        )
+                        continue
+                    if holder.resource is not None:
+                        logger.warning(
+                            f"❌ 仓库 {wh_name} 的位置 row={row_idx}, col={col_idx}, "
+                            f"layer={layer_idx} 已被 {holder.resource.name} 占用"
+                        )
+                        continue
+                    site_label = next(
+                        label
+                        for label, site_holder in warehouse._ordering.items()
+                        if site_holder is holder
+                    )
+                    warehouse[site_label] = plr_material
+                    logger.debug(
+                        f"✅ 物料 {unique_name} 放置到 {wh_name}[{site_label}] "
+                        f"(Bioyond坐标: x={loc.get('x')}, y={loc.get('y')}, z={loc.get('z')})"
+                    )
                 else:
                     if wh_name:
                         logger.warning(f"❌ 物料 {unique_name} 的warehouse '{wh_name}' 在deck中不存在。可用warehouses: {list(deck.warehouses.keys()) if hasattr(deck, 'warehouses') else '无'}")
@@ -1212,47 +1275,10 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                 logger.info(f"[PLR→Bioyond] 载架 '{resource.name}' (model: {resource.model}) 自带试剂瓶，不添加 details")
             else:
                 # 处理其他载架类型的子物料
-                for bottle in resource.children:
+                for bottle in resource.get_resources():
                     if isinstance(resource, ItemizedCarrier):
-                        # ⭐ 优化：直接使用 get_child_identifier 获取真实的子物料坐标
-                        # 这个方法会遍历 resource.children 找到 bottle 对象的实际位置
+                        # holder 保存槽位，物料坐标由载架的唯一 Site 映射返回。
                         site = resource.get_child_identifier(bottle)
-
-                        # 🔧 如果 get_child_identifier 失败或返回无效坐标 (0,0)
-                        # 这通常发生在子物料名称使用纯数字后缀时（如 "BTDA_0", "BTDA_4"）
-                        if not site or (site.get("x") == 0 and site.get("y") == 0):
-                            # 方法1: 尝试从名称中提取标识符并解析
-                            bottle_identifier = None
-                            if "_" in bottle.name:
-                                bottle_identifier = bottle.name.split("_")[-1]
-
-                            # 只有非纯数字标识符才尝试解析（如 "A1", "B2"）
-                            if bottle_identifier and not bottle_identifier.isdigit():
-                                try:
-                                    x_idx, y_idx, z_idx = resource._parse_identifier_to_indices(bottle_identifier, 0)
-                                    site = {"x": x_idx, "y": y_idx, "z": z_idx, "identifier": bottle_identifier}
-                                    logger.debug(f"  🔧 [坐标修正-方法1] 从名称 {bottle.name} 解析标识符 {bottle_identifier} → ({x_idx}, {y_idx})")
-                                except Exception as e:
-                                    logger.warning(f"  ⚠️ [坐标解析] 标识符 {bottle_identifier} 解析失败: {e}")
-
-                            # 方法2: 如果方法1失败，使用线性索引反推坐标
-                            if not site or (site.get("x") == 0 and site.get("y") == 0):
-                                # 找到bottle在children中的索引位置
-                                try:
-                                    # 遍历所有槽位找到bottle的实际位置
-                                    for idx in range(resource.num_items_x * resource.num_items_y):
-                                        if resource[idx] is bottle:
-                                            # 根据载架布局计算行列坐标
-                                            # ItemizedCarrier 默认是列优先布局 (A1,B1,C1,D1, A2,B2,C2,D2...)
-                                            col_idx = idx // resource.num_items_y  # 列索引 (0-based)
-                                            row_idx = idx % resource.num_items_y   # 行索引 (0-based)
-                                            site = {"x": col_idx, "y": row_idx, "z": 0, "identifier": str(idx)}
-                                            logger.debug(f"  🔧 [坐标修正-方法2] {bottle.name} 在索引 {idx} → 列={col_idx}, 行={row_idx}")
-                                            break
-                                except Exception as e:
-                                    logger.error(f"  ❌ [坐标计算失败] {bottle.name}: {e}")
-                                    # 最后的兜底：使用 (0,0)
-                                    site = {"x": 0, "y": 0, "z": 0, "identifier": ""}
                     else:
                         site = {"x": bottle.location.x - 1, "y": bottle.location.y - 1, "identifier": ""}
 
@@ -1262,7 +1288,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                         logger.error(f"❌ [PLR→Bioyond] 子物料 '{bottle.name}' 的 model '{bottle.model}' 不在 type_mapping 中")
                         raise ValueError(f"子物料 model '{bottle.model}' 未在 MATERIAL_TYPE_MAPPINGS 中配置")
 
-                    # ⚠️ 坐标系转换说明:
+                    # 坐标系转换：
                     # _parse_identifier_to_indices 返回: x=列索引, y=行索引 (0-based)
                     # Bioyond 系统要求: x=行号, y=列号 (1-based)
                     # 因此需要交换 x 和 y!
@@ -1294,14 +1320,24 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                         "quantity": sum(qty for _, qty, *_ in bottle.tracker.liquids) if hasattr(bottle, "tracker") else 0,
                         "x": bioyond_x,
                         "y": bioyond_y,
-                        "z": 1,
+                        "z": site.get("z", 0) + 1,
                         "unit": "微升",
                         "Parameters": "{}"  # API 实际要求的字段（必需）
                     }
                     material["details"].append(detail_item)
         else:
             # 单个瓶子(非载架)类型的资源
-            bottle = resource[0] if hasattr(resource, "capacity") and resource.capacity > 0 else resource
+            first_item = (
+                resource[0]
+                if hasattr(resource, "capacity") and resource.capacity > 0
+                else resource
+            )
+            bottle = (
+                first_item.resource
+                if isinstance(first_item, ResourceHolder)
+                and first_item.resource is not None
+                else first_item
+            )
 
             # 根据 resource.model 从 type_mapping 获取正确的 typeId
             type_info = type_mapping.get(resource.model)
@@ -1326,7 +1362,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
             else:
                 logger.debug(f"  📭 [单瓶物料] {resource.name} 无液体，使用资源名: {material_name}")
 
-            # 🎯 处理物料默认参数和单位
+            # 处理物料默认参数和单位。
             # 优先级: typeId参数 > 物料名称参数 > 默认值
             default_unit = "个"  # 默认单位
             material_parameters = {}
@@ -1368,7 +1404,7 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
                 "Parameters": parameters_json  # API 实际要求的字段（必需）
             }
 
-        # ⭐ 处理 locations 信息
+        # 处理 locations 信息。
         # 优先级: update_resource_site (位置更新请求) > 当前 parent 位置
         extra_info = getattr(resource, "unilabos_extra", {})
         update_site = extra_info.get("update_resource_site")
@@ -1416,11 +1452,16 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
             else:
                 logger.warning(f"⚠️ [PLR→Bioyond] 未找到库位 {update_site} 的配置")
 
-        elif resource.parent is not None and isinstance(resource.parent, ItemizedCarrier):
+        elif (
+            resource.parent is not None
+            and isinstance(resource.parent, ResourceHolder)
+            and isinstance(resource.parent.parent, ItemizedCarrier)
+        ):
             # 情况2: 使用当前 parent 位置
-            site_in_parent = resource.parent.get_child_identifier(resource)
+            carrier_parent = resource.parent.parent
+            site_in_parent = carrier_parent.get_child_identifier(resource)
 
-            # ⚠️ 坐标系转换说明:
+            # 坐标系转换：
             # get_child_identifier 返回: x_idx=列索引, y_idx=行索引 (0-based)
             # Bioyond 系统要求: x=行号, y=列号 (1-based)
             # 因此需要交换 x 和 y!
@@ -1429,16 +1470,16 @@ def resource_plr_to_bioyond(plr_resources: list[ResourcePLR], type_mapping: dict
 
             material["locations"] = [
                 {
-                    "id": warehouse_mapping[resource.parent.name]["site_uuids"][site_in_parent["identifier"]],
-                    "whid": warehouse_mapping[resource.parent.name]["uuid"],
-                    "whName": resource.parent.name,
+                    "id": warehouse_mapping[carrier_parent.name]["site_uuids"][site_in_parent["identifier"]],
+                    "whid": warehouse_mapping[carrier_parent.name]["uuid"],
+                    "whName": carrier_parent.name,
                     "x": bioyond_x,
                     "y": bioyond_y,
-                    "z": 1,
+                    "z": site_in_parent["z"] + 1,
                     "quantity": 0
                 }
             ]
-            logger.debug(f"🔄 [PLR→Bioyond] 坐标转换: {resource.name} 在 {resource.parent.name}[{site_in_parent['identifier']}] → UniLab(列={site_in_parent['x']},行={site_in_parent['y']}) → Bioyond(x={bioyond_x},y={bioyond_y})")
+            logger.debug(f"🔄 [PLR→Bioyond] 坐标转换: {resource.name} 在 {carrier_parent.name}[{site_in_parent['identifier']}] → Uni-Lab-OS(列={site_in_parent['x']},行={site_in_parent['y']},层={site_in_parent['z']}) → Bioyond(x={bioyond_x},y={bioyond_y},z={site_in_parent['z'] + 1})")
 
         bioyond_materials.append(material)
     return bioyond_materials
@@ -1480,12 +1521,14 @@ def initialize_resource(resource_config: dict, resource_type: Any = None) -> Uni
         if resource_class_config["type"] == "pylabrobot":
             resource_plr = RESOURCE(name=resource_config["name"])
             if resource_type != ResourcePLR:
-                tree_sets = ResourceTreeSet.from_plr_resources([resource_plr], known_newly_created=True)
+                tree_sets = ResourceTreeSet.from_plr_resources([resource_plr])
                 r = tree_sets.dump()
             else:
                 r = resource_plr
         elif resource_class_config["type"] == "unilabos":
             raise ValueError(f"No more support for unilabos Resource class {resource_class_config}")
+            if Resource is None or convert_to_ros_msg is None:
+                raise RuntimeError("HostLink JSON 模式不支持旧 unilabos ROS Resource")
             res_instance: RegularContainer = RESOURCE(id=resource_config["name"])
             res_instance.ulr_resource = convert_to_ros_msg(
                 Resource, {k: v for k, v in resource_config.items() if k != "class"}

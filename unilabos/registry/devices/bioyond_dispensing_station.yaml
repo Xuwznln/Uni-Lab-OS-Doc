@@ -13,6 +13,7 @@ bioyond_dispensing_station:
         goal_default:
           data: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -41,6 +42,7 @@ bioyond_dispensing_station:
           report_request: null
           used_materials: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -73,6 +75,7 @@ bioyond_dispensing_station:
         goal_default:
           order_id: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -100,6 +103,7 @@ bioyond_dispensing_station:
         goal_default:
           material_name: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -127,6 +131,7 @@ bioyond_dispensing_station:
         goal_default:
           workflow_id: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -179,6 +184,7 @@ bioyond_dispensing_station:
             handler_key: BATCH_CREATE_RESULT
             io_type: sink
             label: Complete Batch Create Result JSON (contains order_codes and order_ids)
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -250,6 +256,7 @@ bioyond_dispensing_station:
             handler_key: BATCH_CREATE_RESULT
             io_type: sink
             label: Complete Batch Create Result JSON (contains order_codes and order_ids)
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -329,6 +336,7 @@ bioyond_dispensing_station:
             handler_key: feeding_order
             io_type: sink
             label: Feeding Order Data From Calculation Node
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -417,42 +425,39 @@ bioyond_dispensing_station:
           speed: speed
           temperature: temperature
         goal_default:
-          delay_time: ''
-          hold_m_name: ''
-          order_name: ''
-          percent_10_1_assign_material_name: ''
-          percent_10_1_liquid_material_name: ''
-          percent_10_1_target_weigh: ''
-          percent_10_1_volume: ''
-          percent_10_2_assign_material_name: ''
-          percent_10_2_liquid_material_name: ''
-          percent_10_2_target_weigh: ''
-          percent_10_2_volume: ''
-          percent_10_3_assign_material_name: ''
-          percent_10_3_liquid_material_name: ''
-          percent_10_3_target_weigh: ''
-          percent_10_3_volume: ''
-          percent_90_1_assign_material_name: ''
-          percent_90_1_target_weigh: ''
-          percent_90_2_assign_material_name: ''
-          percent_90_2_target_weigh: ''
-          percent_90_3_assign_material_name: ''
-          percent_90_3_target_weigh: ''
-          speed: ''
-          temperature: ''
+          delay_time: null
+          hold_m_name: null
+          order_name: null
+          percent_10_1_assign_material_name: null
+          percent_10_1_liquid_material_name: null
+          percent_10_1_target_weigh: null
+          percent_10_1_volume: null
+          percent_10_2_assign_material_name: null
+          percent_10_2_liquid_material_name: null
+          percent_10_2_target_weigh: null
+          percent_10_2_volume: null
+          percent_10_3_assign_material_name: null
+          percent_10_3_liquid_material_name: null
+          percent_10_3_target_weigh: null
+          percent_10_3_volume: null
+          percent_90_1_assign_material_name: null
+          percent_90_1_target_weigh: null
+          percent_90_2_assign_material_name: null
+          percent_90_2_target_weigh: null
+          percent_90_3_assign_material_name: null
+          percent_90_3_target_weigh: null
+          speed: null
+          temperature: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: DispenStationVialFeed_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 delay_time:
                   type: string
@@ -500,18 +505,15 @@ bioyond_dispensing_station:
                   type: string
                 temperature:
                   type: string
+              required: []
               title: DispenStationVialFeed_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: DispenStationVialFeed_Result
               type: object
           required:
           - goal
-          title: DispenStationVialFeed
+          title: create_90_10_vial_feeding_task参数
           type: object
         type: DispenStationVialFeed
       create_diamine_solution_task:
@@ -528,34 +530,32 @@ bioyond_dispensing_station:
           temperature: temperature
           volume: volume
         goal_default:
-          delay_time: ''
-          hold_m_name: ''
-          liquid_material_name: ''
-          material_name: ''
-          order_name: ''
-          speed: ''
-          target_weigh: ''
-          temperature: ''
-          volume: ''
+          delay_time: null
+          hold_m_name: null
+          liquid_material_name: NMP
+          material_name: null
+          order_name: null
+          speed: null
+          target_weigh: null
+          temperature: null
+          volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: DispenStationSolnPrep_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 delay_time:
                   type: string
                 hold_m_name:
                   type: string
                 liquid_material_name:
+                  default: NMP
                   type: string
                 material_name:
                   type: string
@@ -569,18 +569,15 @@ bioyond_dispensing_station:
                   type: string
                 volume:
                   type: string
+              required: []
               title: DispenStationSolnPrep_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: DispenStationSolnPrep_Result
               type: object
           required:
           - goal
-          title: DispenStationSolnPrep
+          title: create_diamine_solution_task参数
           type: object
         type: DispenStationSolnPrep
       scheduler_start:
@@ -589,6 +586,7 @@ bioyond_dispensing_station:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -617,6 +615,7 @@ bioyond_dispensing_station:
           target_device_id: null
           transfer_groups: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys:
           target_device_id: unilabos_devices
         result: {}
@@ -669,6 +668,7 @@ bioyond_dispensing_station:
             handler_key: batch_reports_result
             io_type: sink
             label: Batch Order Completion Reports
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -701,6 +701,7 @@ bioyond_dispensing_station:
           type: object
         type: UniLabJsonCommand
     module: unilabos.devices.workstation.bioyond_studio.dispensing_station.dispensing_station:BioyondDispensingStation
+    status_policies: {}
     status_types: {}
     supported_backends:
     - hostlink
@@ -708,7 +709,7 @@ bioyond_dispensing_station:
     type: python
   config_info: []
   description: ''
-  displayname: bioyond_dispensing_station
+  display_name: BIOYOND 分液工作站
   handles: []
   icon: preparation_station.webp
   init_param_enforce: {}

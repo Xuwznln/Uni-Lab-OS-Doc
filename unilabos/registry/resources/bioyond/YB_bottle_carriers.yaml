@@ -3,10 +3,10 @@ YB_100ml_yeti:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_100ml_yeti
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_100ml_yeti
     type: pylabrobot
   description: YB_100ml_yeti
-  displayname: YB_100ml_yeti
+  display_name: 奔耀YB 液体瓶载架 100mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -16,10 +16,10 @@ YB_20ml_fenyepingban:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_20ml_fenyepingban
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_20ml_fenyepingban
     type: pylabrobot
   description: YB_20ml_fenyepingban
-  displayname: YB_20ml_fenyepingban
+  display_name: 奔耀YB 分液瓶板 20mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -29,10 +29,10 @@ YB_5ml_fenyepingban:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_5ml_fenyepingban
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_5ml_fenyepingban
     type: pylabrobot
   description: YB_5ml_fenyepingban
-  displayname: YB_5ml_fenyepingban
+  display_name: 奔耀YB 分液瓶板 5mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -42,10 +42,10 @@ YB_6StockCarrier:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_6StockCarrier
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_6StockCarrier
     type: pylabrobot
   description: YB_6StockCarrier
-  displayname: YB_6StockCarrier
+  display_name: 奔耀YB 6 位储瓶载架
   handles: []
   icon: ''
   init_param_schema: {}
@@ -55,10 +55,10 @@ YB_6VialCarrier:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_6VialCarrier
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_6VialCarrier
     type: pylabrobot
   description: YB_6VialCarrier
-  displayname: YB_6VialCarrier
+  display_name: 奔耀YB 6 位小瓶载架
   handles: []
   icon: ''
   init_param_schema: {}
@@ -68,10 +68,10 @@ YB_gao_nian_ye_Bottle:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottles:YB_gao_nian_ye_Bottle
+    module: unilabos.resources.presets.bioyond.YB_bottles:YB_gao_nian_ye_Bottle
     type: pylabrobot
   description: YB_gao_nian_ye_Bottle
-  displayname: YB_gao_nian_ye_Bottle
+  display_name: 奔耀YB 高粘液瓶 50mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -81,10 +81,10 @@ YB_gaonianye:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_gaonianye
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_gaonianye
     type: pylabrobot
   description: YB_gaonianye
-  displayname: YB_gaonianye
+  display_name: 奔耀YB 高粘液瓶载架
   handles: []
   icon: ''
   init_param_schema: {}
@@ -94,10 +94,10 @@ YB_jia_yang_tou_da_Carrier:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_jia_yang_tou_da_Carrier
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_jia_yang_tou_da_Carrier
     type: pylabrobot
   description: YB_jia_yang_tou_da_Carrier
-  displayname: YB_jia_yang_tou_da_Carrier
+  display_name: 奔耀YB 大加样头载架
   handles: []
   icon: ''
   init_param_schema: {}
@@ -107,10 +107,10 @@ YB_peiyepingdaban:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_peiyepingdaban
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_peiyepingdaban
     type: pylabrobot
   description: YB_peiyepingdaban
-  displayname: YB_peiyepingdaban
+  display_name: 奔耀YB 大配液瓶板
   handles: []
   icon: ''
   init_param_schema: {}
@@ -120,10 +120,10 @@ YB_peiyepingxiaoban:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_peiyepingxiaoban
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_peiyepingxiaoban
     type: pylabrobot
   description: YB_peiyepingxiaoban
-  displayname: YB_peiyepingxiaoban
+  display_name: 奔耀YB 小配液瓶板
   handles: []
   icon: ''
   init_param_schema: {}
@@ -133,10 +133,10 @@ YB_qiang_tou_he:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_qiang_tou_he
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_qiang_tou_he
     type: pylabrobot
   description: YB_qiang_tou_he
-  displayname: YB_qiang_tou_he
+  display_name: 奔耀YB 枪头盒
   handles: []
   icon: ''
   init_param_schema: {}
@@ -146,10 +146,10 @@ YB_shi_pei_qi_kuai:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_shi_pei_qi_kuai
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_shi_pei_qi_kuai
     type: pylabrobot
   description: YB_shi_pei_qi_kuai
-  displayname: YB_shi_pei_qi_kuai
+  display_name: 奔耀YB 适配器块
   handles: []
   icon: ''
   init_param_schema: {}
@@ -159,10 +159,10 @@ YB_ye:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottle_carriers:YB_ye
+    module: unilabos.resources.presets.bioyond.YB_bottle_carriers:YB_ye
     type: pylabrobot
   description: YB_ye_Bottle_Carrier
-  displayname: YB_ye
+  display_name: 奔耀YB 液体瓶载架
   handles: []
   icon: ''
   init_param_schema: {}
@@ -172,10 +172,10 @@ YB_ye_100ml_Bottle:
   - yb3
   - YB_bottle_carriers
   class:
-    module: unilabos.resources.bioyond.YB_bottles:YB_ye_100ml_Bottle
+    module: unilabos.resources.presets.bioyond.YB_bottles:YB_ye_100ml_Bottle
     type: pylabrobot
   description: YB_ye_100ml_Bottle
-  displayname: YB_ye_100ml_Bottle
+  display_name: 奔耀YB 液体瓶 100mL
   handles: []
   icon: ''
   init_param_schema: {}

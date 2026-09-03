@@ -2,10 +2,10 @@ BIOYOND_PolymerPreparationStation_Deck:
   category:
   - deck
   class:
-    module: unilabos.resources.bioyond.decks:BIOYOND_PolymerPreparationStation_Deck
+    module: unilabos.resources.presets.bioyond.decks:BIOYOND_PolymerPreparationStation_Deck
     type: pylabrobot
-  description: BIOYOND PolymerPreparationStation Deck
-  displayname: BIOYOND_PolymerPreparationStation_Deck
+  description: 奔耀PolymerPreparationStation Deck
+  display_name: 奔耀聚合物制备站台面
   handles: []
   icon: 配液站.webp
   init_param_schema: {}
@@ -14,10 +14,10 @@ BIOYOND_PolymerReactionStation_Deck:
   category:
   - deck
   class:
-    module: unilabos.resources.bioyond.decks:BIOYOND_PolymerReactionStation_Deck
+    module: unilabos.resources.presets.bioyond.decks:BIOYOND_PolymerReactionStation_Deck
     type: pylabrobot
-  description: BIOYOND PolymerReactionStation Deck
-  displayname: BIOYOND_PolymerReactionStation_Deck
+  description: 奔耀PolymerReactionStation Deck
+  display_name: 奔耀聚合物反应站台面
   handles: []
   icon: 反应站.webp
   init_param_schema: {}
@@ -26,10 +26,10 @@ BIOYOND_YB_Deck:
   category:
   - deck
   class:
-    module: unilabos.resources.bioyond.decks:YB_Deck
+    module: unilabos.resources.presets.bioyond.decks:YB_Deck
     type: pylabrobot
-  description: BIOYOND ElectrolyteFormulationStation Deck
-  displayname: BIOYOND_YB_Deck
+  description: 奔耀ElectrolyteFormulationStation Deck
+  display_name: 奔耀电解液配制站台面
   handles: []
   icon: 配液站.webp
   init_param_schema: {}
@@ -41,7 +41,7 @@ CoincellDeck:
     module: unilabos.devices.workstation.coin_cell_assembly.YB_YH_materials:YH_Deck
     type: pylabrobot
   description: YIHUA CoinCellAssembly Deck
-  displayname: CoincellDeck
+  display_name: YIHUA 扣式电池组装站台面
   handles: []
   icon: koudian.webp
   init_param_schema: {}

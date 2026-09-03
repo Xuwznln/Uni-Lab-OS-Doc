@@ -11,6 +11,7 @@ cameracontroller_device:
         goal_default:
           config: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -35,6 +36,7 @@ cameracontroller_device:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -53,15 +55,16 @@ cameracontroller_device:
           type: object
         type: UniLabJsonCommand
     module: unilabos.devices.cameraSII.cameraUSB:CameraController
+    status_policies: {}
     status_types:
-      status: Dict[str, Any]
+      status: str
     supported_backends:
     - hostlink
     - ros2
     type: python
   config_info: []
   description: Uni-Lab-OS 摄像头驱动（Linux USB 摄像头版，无 PTZ）
-  displayname: cameracontroller_device
+  display_name: USB 摄像头控制器
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -108,7 +111,7 @@ cameracontroller_device:
     data:
       properties:
         status:
-          type: object
+          type: string
       required:
       - status
       type: object

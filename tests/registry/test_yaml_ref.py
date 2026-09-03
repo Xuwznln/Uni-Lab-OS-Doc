@@ -1,11 +1,11 @@
-"""Plan 09 Task 2: YAML $ref resolution."""
+"""YAML ``$ref`` resolution for Registry device entries."""
 
 from pathlib import Path
 
 import pytest
 import yaml
 
-from unilabos.registry.yaml_ref import YamlRefCycleError, resolve_yaml_refs
+from unilabos.registry.utils.yaml_ref import YamlRefCycleError, resolve_yaml_refs
 
 
 def test_resolve_yaml_refs_loads_relative_file_and_json_pointer():
@@ -20,8 +20,7 @@ def test_resolve_yaml_refs_loads_relative_file_and_json_pointer():
 
 
 def test_resolve_yaml_refs_preserves_same_document_json_schema_refs():
-    """JSON-Schema same-document refs (#/$defs/...) must be left intact, not expanded
-    or treated as file refs (regression: real registry init_param_schema uses these)."""
+    """JSON Schema same-document refs remain intact rather than becoming file refs."""
     data = {
         "init_param_schema": {
             "type": "object",

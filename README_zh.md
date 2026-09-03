@@ -8,10 +8,10 @@
 
 [English](README.md) | **中文**
 
-[![GitHub Stars](https://img.shields.io/github/stars/dptech-corp/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/dptech-corp/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/network/members)
-[![GitHub Issues](https://img.shields.io/github/issues/dptech-corp/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/issues)
-[![GitHub License](https://img.shields.io/github/license/dptech-corp/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/blob/main/LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/deepmodeling/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/deepmodeling/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/network/members)
+[![GitHub Issues](https://img.shields.io/github/issues/deepmodeling/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/issues)
+[![GitHub License](https://img.shields.io/github/license/deepmodeling/Uni-Lab-OS.svg)](https://github.com/deepmodeling/Uni-Lab-OS/blob/main/LICENSE)
 
 Uni-Lab-OS 是一个用于实验室自动化的综合平台，旨在连接和控制各种实验设备，实现实验流程的自动化和标准化。
 
@@ -84,17 +84,108 @@ git clone https://github.com/deepmodeling/Uni-Lab-OS.git
 cd Uni-Lab-OS
 ```
 
-3. 启动 Uni-Lab 系统
+### 3. 启动 Uni-Lab
 
-请见[文档-启动样例](https://deepmodeling.github.io/Uni-Lab-OS/boot_examples/index.html)
+Edge 进程负责设备图，并分别暴露两个本地端口：管理/HTTP API（默认
+`8002`）和 HostLink TCP 通道（默认 `7302`）。默认的 `hostlink` backend
+不需要 DDS 或 ROS 2 守护进程；`ros2` backend 则通过 ROS 2 执行设备动作和
+Topic。
 
-4. 最佳实践
+```bash
+# HostLink 运行时（默认）
+unilab -g path/to/graph.json --backend hostlink --port 8002 --hostlink-port 7302
+
+# ROS 2 Jazzy 运行时（先激活包含 Jazzy 的 Conda 环境）
+mamba activate unilab
+unilab -g path/to/graph.json --backend ros2 --port 8002
+
+# 只验证/导入注册表，不启动设备
+unilab --check-mode --complete-registry --skip-env-check
+```
+
+需要拆分部署时，可以先单独启动调度/工作流权威进程，再让一个或多个 Edge
+进程连接它：
+
+```bash
+# 终端 1：Backend 权威（不加载设备图，也不执行设备）
+unilab --role backend --port 8081
+
+# 终端 2：Edge 执行进程
+unilab -g path/to/graph.json --backend hostlink \
+  --address http://127.0.0.1:8081 --port 8002
+```
+
+省略 `-g` 时 Edge 可以以空图启动，之后通过驱动包或受管设备 API 添加设备。
+Slave 仍需要自己的设备图，并使用 `--is-slave --host-node-ip <host>` 连接 Host。
+
+### 4. 连接已有或旧版 Backend
+
+连接已有的云端或内网 Backend 时，通过一个明确的 `--address` 指定地址；地址
+可以写服务根地址，也可以直接写 `/api/v1` 根地址，实验室凭据通过 `--ak`、
+`--sk` 传入：
+
+```bash
+unilab -g path/to/graph.json --backend hostlink \
+  --address https://legacy.example.com/api/v1 \
+  --ak "$AK" --sk "$SK"
+```
+
+启动时 Uni-Lab 会探测 HTTP 路由，自动选择 `runtime.v1` 或旧版适配器。若要
+明确固定旧 Backend，可在通过 `--config` 加载的 `local_config.py`（或工作目录
+下的同名文件）中写：
+
+```python
+class HTTPConfig:
+    remote_addr = "https://legacy.example.com/api/v1"
+    backend_protocol = "legacy"
+```
+
+旧云端 Backend 不要用 `--role backend` 启动；该角色启动的是新的本地
+`runtime.v1` 权威。在两种模式下，浏览器接入面都是 HTTP。新的
+Backend↔Edge `control.v1` WebSocket 只传短通知，完整权威内容通过 HTTP 拉取；
+旧版适配器则继续兼容旧消息族。
+
+### 5. 使用自定义界面
+
+Uni-Lab 只提供 backend API，Edge 进程不托管 SPA。请单独构建或部署自己的
+前端（OpenLab 是一个示例），并把 API 根地址配置为管理端点：
+
+| 部署方式 | 前端 API 根地址 |
+|----------|----------------|
+| 本地单进程 Edge | `http://127.0.0.1:8002` |
+| 拆分部署 | `http://127.0.0.1:8081`（Backend 权威） |
+| 已有/旧版 Backend | 启动参数 `--address` 指定的地址 |
+
+接口契约见 `/api/openapi.json`，交互式文档见 `/api/docs`。以 Vite 为例，
+自定义静态前端可独立开发和预览：
+
+```bash
+pnpm install
+pnpm dev --host 0.0.0.0       # 开发服务器
+pnpm build
+python -m http.server 4173 --directory dist  # 简单本地预览
+```
+
+API base 的环境变量名称由前端框架自行决定；将它设置为上表地址，并通过
+`/api/v1/...` 发起类型化 HTTP 请求。需要实时刷新时，浏览器前端可以使用
+SSE/EventSource 做失效通知，再通过 HTTP 重新读取权威数据。这个浏览器通知通道
+与 Backend↔Edge 的 `control.v1` WebSocket 是两回事；浏览器不要连接 HostLink
+TCP 端口 `7302`。
+
+外部设备包也可以从精确的 Git 提交安装，并在下一次进程重启后挂载：
+
+```bash
+unilab package install \
+  "git+https://github.com/<org>/<device-package>.git@<commit-sha>"
+```
+
+### 6. 最佳实践
 
 请见[最佳实践指南](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)
 
 ## 参考驱动实现
 
-我们提供了两个可直接运行的示例设备包，均作为独立 GitHub 仓库维护（由
+我们提供了六个可直接运行的示例设备包，均作为独立 GitHub 仓库维护（由
 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆任一仓库，用
 `--devices <包目录> --external_devices_only` 加载，编写自己的驱动时可启动运行、对照学习：
 
@@ -102,8 +193,16 @@ cd Uni-Lab-OS
 |----------|----------|
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo) | 跨设备 `@subscribe` 订阅 + `call_device_action` 远程调用的局域网闭环（hub/sub 双进程） |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo) | `hardware_interface` 代理——同一工作站内多个子设备共享同一通信端点：共享串口（默认 IO 方法名）与 Modbus `extra_info`（按设备注入各自 `slave_id`） |
+| [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo) | 全部经网页式工作流提交路径（`/api/v1/workflow-tasks` + `/api/v1/error-decisions`）演示异常传播：异常穿出动作边界后等待 `abort` / `operator_intervention` 决策；点对点 `call_device_action` 的异常作为工作流节点在调用侧捕获；业务级守卫返回；人工替换结果让任务以 `succeeded` 收尾 |
+| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo) | host/slave 双进程——`@device(available_sites=...)` 固定位点（声明 → 注册表模板 → 权威位点实例 → 占用流转）、`@resource` 物料配合 `materials.*` 门面跨 HostLink 做物料 CRUD、`SiteSlot` 动作参数（前端 Site 选择器 uuid 或 label 便捷形态） |
+| [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo) | 用并发提交的工作流把调度器锁语义变成证据：`(device, action)` 动作锁让两次 `occupy` 按提交顺序串行（第二个在 `/api/v1/scheduler/resources` 里 `waiting` 且 `blockers` 非空）、`@action(always_free=True)` 让同一动作的两次 `peek` 重叠、`materials_need_lock=["plate"]` 按权威板 uuid 互斥（两台设备处理同一块板串行，一台设备处理两块板并行）；`lock_auditor` 节点读探针账本核对，任一结论不成立即任务失败 |
+| [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo) | 用工作流走通按数量计量的库存：注册表 `@resource` 试剂模板、`restock` 即网页"添加试剂"的 `POST /api/v1/materials/lots/inbound`（固定 lot 入库 100 ml）、`dispense` 步骤的 `inventory=[...]` 需求在任务启动时 all-or-nothing 预留、动作开始前扣减（设备回报扣减后的 lot `60 / 60 / 0`）、500 ml 需求在预留阶段被拒——任务 `failed` / `plan_not_executable`（`short by 440 ml`）、节点 `canceled`、设备不被调用、库存不变 |
 
-每个仓库的 README 都附带分步启动教程及实测输出。底层的通信共享机制见
+每个仓库的 README 都附带分步启动教程及实测输出，并自带可终止的双运行时 smoke
+（`python -m <包名>.smoke --backend hostlink|ros2`），由各仓库 CI 固定在指定 Uni-Lab-OS 提交上运行；
+主仓库则在 `tests/e2e/readme_demos.py` 固定引用这六个包的已验证提交，并在 CI 里逐个端到端跑通：
+注册表 `--check_mode`、`unilab graph create` 建图、真实 `unilab -g` 起微后端（双进程 demo 含 slave）、
+`unilab graph list/download/upload` 读写 Graph Authority、管理 HTTP API 运行上报的 `@workflow`。底层的通信共享机制见
 [最佳实践指南 §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)；
 从零编写新驱动见[添加设备](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html)。
 
@@ -141,8 +240,8 @@ Uni-Lab-OS 使用预构建的 `unilabos_msgs` 进行系统通信。您可以在 
 
 ### Stars 趋势
 
-<a href="https://star-history.com/#dptech-corp/Uni-Lab-OS&Date">
-  <img src="https://api.star-history.com/svg?repos=dptech-corp/Uni-Lab-OS&type=Date" alt="Star History Chart" width="600">
+<a href="https://star-history.com/#deepmodeling/Uni-Lab-OS&Date">
+  <img src="https://api.star-history.com/svg?repos=deepmodeling/Uni-Lab-OS&type=Date" alt="Star History Chart" width="600">
 </a>
 
 ## 联系我们

@@ -3,10 +3,10 @@ BIOYOND_PolymerStation_Flask:
   - bottles
   - flasks
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Flask
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Flask
     type: pylabrobot
   description: 聚合站-烧杯容器
-  displayname: BIOYOND_PolymerStation_Flask
+  display_name: 奔耀聚合物站烧瓶 200mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -15,9 +15,9 @@ BIOYOND_PolymerStation_Liquid_Vial:
   category:
   - bottles
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Liquid_Vial
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Liquid_Vial
     type: pylabrobot
-  displayname: BIOYOND_PolymerStation_Liquid_Vial
+  display_name: 奔耀聚合物站液体小瓶 30mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -26,10 +26,10 @@ BIOYOND_PolymerStation_Measurement_Vial:
   category:
   - bottles
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Measurement_Vial
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Measurement_Vial
     type: pylabrobot
   description: 聚合站-测量小瓶（测密度）
-  displayname: BIOYOND_PolymerStation_Measurement_Vial
+  display_name: 奔耀聚合物站测量小瓶 20mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -39,9 +39,9 @@ BIOYOND_PolymerStation_Reactor:
   - bottles
   - reactors
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Reactor
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Reactor
     type: pylabrobot
-  displayname: BIOYOND_PolymerStation_Reactor
+  display_name: 奔耀聚合物站反应器 50mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -50,9 +50,9 @@ BIOYOND_PolymerStation_Reagent_Bottle:
   category:
   - bottles
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Reagent_Bottle
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Reagent_Bottle
     type: pylabrobot
-  displayname: BIOYOND_PolymerStation_Reagent_Bottle
+  display_name: 奔耀聚合物站试剂瓶 500mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -61,9 +61,9 @@ BIOYOND_PolymerStation_Solid_Stock:
   category:
   - bottles
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Solid_Stock
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Solid_Stock
     type: pylabrobot
-  displayname: BIOYOND_PolymerStation_Solid_Stock
+  display_name: 奔耀聚合物站粉末瓶 30mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -72,9 +72,9 @@ BIOYOND_PolymerStation_Solid_Vial:
   category:
   - bottles
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Solid_Vial
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Solid_Vial
     type: pylabrobot
-  displayname: BIOYOND_PolymerStation_Solid_Vial
+  display_name: 奔耀聚合物站固体小瓶 30mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -83,9 +83,9 @@ BIOYOND_PolymerStation_Solution_Beaker:
   category:
   - bottles
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_Solution_Beaker
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_Solution_Beaker
     type: pylabrobot
-  displayname: BIOYOND_PolymerStation_Solution_Beaker
+  display_name: 奔耀聚合物站溶液烧杯 200mL
   handles: []
   icon: ''
   init_param_schema: {}
@@ -95,9 +95,9 @@ BIOYOND_PolymerStation_TipBox:
   - bottles
   - tip_boxes
   class:
-    module: unilabos.resources.bioyond.bottles:BIOYOND_PolymerStation_TipBox
+    module: unilabos.resources.presets.bioyond.bottles:BIOYOND_PolymerStation_TipBox
     type: pylabrobot
-  displayname: BIOYOND_PolymerStation_TipBox
+  display_name: 奔耀聚合物站枪头盒
   handles: []
   icon: ''
   init_param_schema: {}

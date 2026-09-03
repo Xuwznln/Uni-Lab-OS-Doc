@@ -13,7 +13,8 @@ DEFAULT_ERROR_CLASS = "*"
 SUCCESS_TYPE_NORMAL = "normal"
 SUCCESS_TYPE_SKIP = "skip"
 SUCCESS_TYPE_OPERATOR_INTERVENTION = "operator_intervention"
-SuccessType = Literal["normal", "skip", "operator_intervention"]
+SUCCESS_TYPE_CANCELLATION = "cancellation"
+SuccessType = Literal["normal", "skip", "operator_intervention", "cancellation"]
 
 class FallbackAction(TypedDict):
     """Server-side single action executed after operator approval."""
@@ -86,8 +87,8 @@ def normalize_error_policy(
 ) -> Dict[str, Any] | None:
     """Validate and copy a policy into a registry-safe representation.
 
-    ``options`` is keyed by exception class name. A legacy flat option list is
-    accepted as the ``"*"`` fallback to ease selective migration.
+    ``options`` is keyed by exception class name. A flat option list is accepted
+    as shorthand for the ``"*"`` fallback.
     """
 
     if not policy:

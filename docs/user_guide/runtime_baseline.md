@@ -11,13 +11,25 @@
 | NumPy | `>=2,<3` | `>=2,<3` |
 | RoboStack channel | `robostack-jazzy` | `robostack-humble` |
 | ROS 2 distro mutex | `0.15.*` / `jazzy_*` | `0.9.*` / `humble_*` |
-| UniLabOS messages | `ros-jazzy-unilabos-msgs=0.12.0` | `ros-humble-unilabos-msgs=0.12.0` |
+| Uni-Lab-OS messages | `ros-jazzy-unilabos-msgs=0.12.0` | `ros-humble-unilabos-msgs=0.12.0` |
 | Conda build string | `jazzy_1` | `humble_1` |
 
 Jazzy 是默认和推荐发行版；Humble 作为兼容发行版运行相同的 Python 3.12、NumPy 2
 与 microbackend v2 源码。公开通信 backend 只有 `hostlink` 和 `ros2`：HostLink
 内部的本地 Python 执行引擎不依赖具体 ROS 发行版，`ros2` backend 会使用当前
 环境安装的 Humble 或 Jazzy。
+
+## Backend 选择边界
+
+ROS 发行版兼容性与设备 backend 是两个不同维度。`hostlink` 不启动 rclpy/DDS，
+适用于普通 Python 设备驱动，并支持 Action、Service、状态、低中频 JSON Topic、
+Workstation 和 sub-device 的初始化与通信。驱动仅借用 ROS message Python 类作为
+数据结构时，也可以使用 HostLink，但环境中仍需能导入相应的 message 包。
+
+HostLink 与 ROS2 的通用设备接口保持对齐，但并非 100% 等价。MoveIt、RViz、原生
+ROS graph/TF、ROS2 专用高频图像流，以及依赖 QoS、零拷贝或复杂消息图的设备应选择
+`ros2` backend。详细启动参数和选择示例见 {doc}`launch`，组网能力边界见
+{doc}`../developer_guide/networking_overview`。
 
 不要在同一环境中同时配置 `robostack-humble` 与 `robostack-jazzy`。两个 channel
 提供互斥的 `ros2-distro-mutex`，混装或原地切换会导致 ROS 原生扩展 ABI 不一致。
@@ -52,7 +64,7 @@ pip install -e .
 
 ## Windows DLL 加载兼容
 
-UniLabOS 会优先从当前环境的 `ros2-distro-mutex` 元数据识别 ROS 发行版，
+Uni-Lab-OS 会优先从当前环境的 `ros2-distro-mutex` 元数据识别 ROS 发行版，
 不依赖可能尚未由激活脚本设置的 `ROS_DISTRO`：
 
 - Humble 与 Jazzy 仅在实际出现 `DLL load failed` 时，对 rclpy/rpyutils 的加载

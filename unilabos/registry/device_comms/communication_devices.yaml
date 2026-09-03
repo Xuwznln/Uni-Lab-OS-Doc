@@ -12,6 +12,7 @@ serial:
           request: null
           response: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -40,6 +41,7 @@ serial:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -63,6 +65,7 @@ serial:
         goal_default:
           command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -82,7 +85,8 @@ serial:
           title: send_command参数
           type: object
         type: UniLabJsonCommand
-    module: unilabos.ros.nodes.presets.serial_node:ROS2SerialNode
+    module: unilabos.backend.ros2.presets.serial_node:ROS2SerialNode
+    status_policies: {}
     status_types: {}
     supported_backends:
     - ros2
@@ -90,7 +94,7 @@ serial:
   config_info: []
   description: Serial communication interface, used when sharing same serial port
     for multiple devices
-  displayname: serial
+  display_name: 串口通讯
   handles: []
   icon: ''
   init_param_enforce: {}

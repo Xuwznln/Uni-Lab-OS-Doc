@@ -215,6 +215,7 @@ def test_registry_completion_publishes_backend_site_and_policy_defaults(
     ]
     assert completion["native_ros"]["class"]["supported_backends"] == ["ros2"]
     assert completion["ordinary"]["available_sites"] == []
+    assert completion["ordinary"]["class"]["status_policies"] == {}
     assert completion["ordinary"]["class"]["action_value_mappings"]["run"][
         "error_policy"
     ] == {}
@@ -222,9 +223,39 @@ def test_registry_completion_publishes_backend_site_and_policy_defaults(
     yaml_entry = yaml.safe_load(registry.get_yaml_output("ordinary"))["ordinary"]
     assert yaml_entry["available_sites"] == []
     assert yaml_entry["class"]["supported_backends"] == ["hostlink", "ros2"]
+    assert yaml_entry["class"]["status_policies"] == {}
     assert yaml_entry["class"]["action_value_mappings"]["run"][
         "error_policy"
     ] == {}
+
+
+def test_ast_scanner_skips_runtime_injected_parameters(tmp_path) -> None:
+    """``action_context`` / ``sample_uuids`` 由执行器注入，不得进入动作契约。"""
+
+    source = tmp_path / "ctx_driver.py"
+    source.write_text(
+        "\n".join(
+            [
+                "from unilabos.registry.decorators import device, action",
+                "from unilabos.backend.runtime.action import ActionContext",
+                "",
+                "@device(id='ctx_ast_test', category=['test'])",
+                "class Driver:",
+                "    @action()",
+                "    def heat(self, site_id: int, duration_seconds: float, action_context: ActionContext, sample_uuids: dict = None) -> dict:",
+                "        return {}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = scan_directory(tmp_path, python_path=tmp_path, executor=executor)
+
+    metadata = result["devices"]["ctx_ast_test"]
+    heat = metadata["actions"]["heat"]
+    names = [param["name"] for param in heat["params"]]
+    assert names == ["site_id", "duration_seconds"]
 
 
 def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
@@ -236,7 +267,7 @@ def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
 
     cache = load_scan_cache(cache_path)
 
-    assert _CACHE_VERSION == 11
+    assert _CACHE_VERSION == 16
     assert cache == {"version": _CACHE_VERSION, "files": {}}
 
 
@@ -262,7 +293,15 @@ def test_registry_run_ast_scan_invalidates_stale_scan_and_build_caches(
     saved_cache = {}
     built_devices = []
 
-    def fake_scan_directory(*_args, cache, **_kwargs):
+    def fake_scan_directory(*_args, cache, include_files=None, **_kwargs):
+        # host_services.py 的单独扫描（include_files）返回空结果即可，
+        # 不参与本测试对主扫描缓存失效的断言。
+        if include_files is not None:
+            return {
+                "devices": {},
+                "resources": {},
+                "_cache_stats": {"hits": 0, "misses": 0, "total": 0},
+            }
         assert cache == {"version": _CACHE_VERSION, "files": {}}
         cache["files"]["fresh.py"] = {
             "devices": [{"device_id": "fresh-device"}],

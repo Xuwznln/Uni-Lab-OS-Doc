@@ -9,7 +9,7 @@ from typing import List, Sequence, Optional, Union, Literal
 #     Coordinate,
 #     Well
 # )
-# from unilabos.ros.nodes.resource_tracker import DeviceNodeResourceTracker  # type: ignore
+# from unilabos.backend.ros2.resource_tracker import DeviceNodeResourceTracker  # type: ignore
 # from .liquid_handler_abstract import LiquidHandlerAbstract
 
 import json

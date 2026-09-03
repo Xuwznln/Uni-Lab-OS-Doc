@@ -10,6 +10,7 @@ virtual_centrifuge:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -33,6 +34,7 @@ virtual_centrifuge:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -52,193 +54,54 @@ virtual_centrifuge:
         type: UniLabJsonCommandAsync
       centrifuge:
         error_policy: {}
-        feedback:
-          current_speed: current_speed
-          current_status: current_status
-          current_temp: current_temp
-          progress: progress
+        feedback: {}
         goal:
           speed: speed
           temp: temp
           time: time
           vessel: vessel
         goal_default:
-          speed: 0.0
-          temp: 0.0
-          time: 0.0
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          speed: null
+          temp: 25.0
+          time: null
+          vessel: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                current_status:
-                  type: string
-                current_temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
               title: Centrifuge_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 25.0
                   type: number
                 time:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: vessel
-                  type: object
+                  type: string
+              required:
+              - vessel
+              - speed
+              - time
               title: Centrifuge_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Centrifuge_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: Centrifuge
+          title: centrifuge参数
           type: object
         type: Centrifuge
     module: unilabos.devices.virtual.virtual_centrifuge:VirtualCentrifuge
+    status_policies: {}
     status_types:
       centrifuge_state: str
       current_speed: float
@@ -258,7 +121,7 @@ virtual_centrifuge:
     type: python
   config_info: []
   description: Virtual Centrifuge for CentrifugeProtocol Testing
-  displayname: virtual_centrifuge
+  display_name: 虚拟离心机
   handles:
   - data_key: vessel
     data_source: handle
@@ -332,6 +195,7 @@ virtual_column:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -355,6 +219,7 @@ virtual_column:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -374,9 +239,7 @@ virtual_column:
         type: UniLabJsonCommandAsync
       run_column:
         error_policy: {}
-        feedback:
-          progress: progress
-          status: status
+        feedback: {}
         goal:
           column: column
           from_vessel: from_vessel
@@ -388,291 +251,44 @@ virtual_column:
           solvent2: solvent2
           to_vessel: to_vessel
         goal_default:
-          column: ''
-          from_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          pct1: ''
-          pct2: ''
-          ratio: ''
-          rf: ''
-          solvent1: ''
-          solvent2: ''
-          to_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          column: null
+          from_vessel: null
+          to_vessel: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                status:
-                  type: string
               title: RunColumn_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 column:
                   type: string
                 from_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: from_vessel
-                  type: object
-                pct1:
-                  type: string
-                pct2:
-                  type: string
-                ratio:
-                  type: string
-                rf:
-                  type: string
-                solvent1:
-                  type: string
-                solvent2:
                   type: string
                 to_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: to_vessel
-                  type: object
+                  type: string
+              required:
+              - from_vessel
+              - to_vessel
+              - column
               title: RunColumn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: RunColumn_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: RunColumn
+          title: run_column参数
           type: object
         type: RunColumn
     module: unilabos.devices.virtual.virtual_column:VirtualColumn
+    status_policies: {}
     status_types:
       column_diameter: float
       column_length: float
@@ -691,7 +307,7 @@ virtual_column:
     type: python
   config_info: []
   description: Virtual Column Chromatography Device for RunColumn Protocol Testing
-  displayname: virtual_column
+  display_name: 虚拟柱层析装置
   handles:
   - data_key: from_vessel
     data_source: handle
@@ -770,6 +386,7 @@ virtual_filter:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -793,6 +410,7 @@ virtual_filter:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -812,11 +430,7 @@ virtual_filter:
         type: UniLabJsonCommandAsync
       filter:
         error_policy: {}
-        feedback:
-          current_status: current_status
-          current_temp: current_temp
-          filtered_volume: filtered_volume
-          progress: progress
+        feedback: {}
         goal:
           continue_heatchill: continue_heatchill
           filtrate_vessel: filtrate_vessel
@@ -827,298 +441,59 @@ virtual_filter:
           volume: volume
         goal_default:
           continue_heatchill: false
-          filtrate_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          filtrate_vessel: {}
           stir: false
-          stir_speed: 0.0
-          temp: 0.0
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          stir_speed: 300.0
+          temp: 25.0
+          vessel: null
           volume: 0.0
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_status:
-                  type: string
-                current_temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                filtered_volume:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
               title: Filter_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 continue_heatchill:
+                  default: false
                   type: boolean
                 filtrate_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  default: {}
                   title: filtrate_vessel
                   type: object
                 stir:
+                  default: false
                   type: boolean
                 stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 300.0
                   type: number
                 temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 25.0
                   type: number
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: vessel
                   type: object
                 volume:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 0.0
                   type: number
+              required:
+              - vessel
               title: Filter_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Filter_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: Filter
+          title: filter参数
           type: object
         type: Filter
     module: unilabos.devices.virtual.virtual_filter:VirtualFilter
+    status_policies: {}
     status_types:
       current_status: str
       current_temp: float
@@ -1135,7 +510,7 @@ virtual_filter:
     type: python
   config_info: []
   description: Virtual Filter for FilterProtocol Testing
-  displayname: virtual_filter
+  display_name: 虚拟过滤器
   handles:
   - data_key: vessel_in
     data_source: handle
@@ -1216,6 +591,7 @@ virtual_gas_source:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1239,6 +615,7 @@ virtual_gas_source:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1262,6 +639,7 @@ virtual_gas_source:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1284,6 +662,7 @@ virtual_gas_source:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1306,30 +685,24 @@ virtual_gas_source:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: close参数
           type: object
         type: EmptyIn
       open:
@@ -1338,30 +711,24 @@ virtual_gas_source:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: open参数
           type: object
         type: EmptyIn
       set_status:
@@ -1370,41 +737,33 @@ virtual_gas_source:
         goal:
           string: string
         goal_default:
-          string: ''
+          string: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 string:
                   type: string
+              required:
+              - string
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
-              type: object
           required:
           - goal
-          title: StrSingleInput
+          title: set_status参数
           type: object
         type: StrSingleInput
     module: unilabos.devices.virtual.virtual_gas_source:VirtualGasSource
+    status_policies: {}
     status_types:
       status: str
     supported_backends:
@@ -1413,7 +772,7 @@ virtual_gas_source:
     type: python
   config_info: []
   description: Virtual gas source
-  displayname: virtual_gas_source
+  display_name: 虚拟气体源
   handles:
   - data_key: fluid_out
     data_source: executor
@@ -1454,6 +813,7 @@ virtual_heatchill:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1477,6 +837,7 @@ virtual_heatchill:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -1496,8 +857,7 @@ virtual_heatchill:
         type: UniLabJsonCommandAsync
       heat_chill:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           pressure: pressure
           purpose: purpose
@@ -1510,500 +870,131 @@ virtual_heatchill:
           time_spec: time_spec
           vessel: vessel
         goal_default:
-          pressure: ''
-          purpose: ''
-          reflux_solvent: ''
-          stir: false
-          stir_speed: 0.0
-          temp: 0.0
-          temp_spec: ''
-          time: ''
-          time_spec: ''
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          purpose: null
+          stir: null
+          stir_speed: null
+          temp: null
+          time: null
+          vessel: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: HeatChill_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                pressure:
-                  type: string
                 purpose:
-                  type: string
-                reflux_solvent:
                   type: string
                 stir:
                   type: boolean
                 stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
-                temp_spec:
-                  type: string
                 time:
                   type: string
-                time_spec:
-                  type: string
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  default: {}
                   title: vessel
                   type: object
+              required:
+              - temp
+              - time
+              - stir
+              - stir_speed
+              - purpose
               title: HeatChill_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: HeatChill_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: HeatChill
+          title: heat_chill参数
           type: object
         type: HeatChill
       heat_chill_start:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           purpose: purpose
           temp: temp
           vessel: vessel
         goal_default:
-          purpose: ''
-          temp: 0.0
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          purpose: null
+          temp: null
+          vessel: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: HeatChillStart_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 purpose:
                   type: string
                 temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  default: {}
                   title: vessel
                   type: object
+              required:
+              - temp
+              - purpose
               title: HeatChillStart_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: HeatChillStart_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: HeatChillStart
+          title: heat_chill_start参数
           type: object
         type: HeatChillStart
       heat_chill_stop:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           vessel: vessel
         goal_default:
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          vessel: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: HeatChillStop_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  default: {}
                   title: vessel
                   type: object
+              required: []
               title: HeatChillStop_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: HeatChillStop_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: HeatChillStop
+          title: heat_chill_stop参数
           type: object
         type: HeatChillStop
     module: unilabos.devices.virtual.virtual_heatchill:VirtualHeatChill
+    status_policies: {}
     status_types:
       is_stirring: bool
       max_stir_speed: float
@@ -2020,7 +1011,7 @@ virtual_heatchill:
     type: python
   config_info: []
   description: Virtual HeatChill for HeatChillProtocol Testing
-  displayname: virtual_heatchill
+  display_name: 虚拟加热冷却器
   handles:
   - data_key: vessel
     data_source: handle
@@ -2085,6 +1076,7 @@ virtual_multiway_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2108,6 +1100,7 @@ virtual_multiway_valve:
         goal_default:
           port_number: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2135,6 +1128,7 @@ virtual_multiway_valve:
         goal_default:
           position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2161,6 +1155,7 @@ virtual_multiway_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2184,6 +1179,7 @@ virtual_multiway_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2206,6 +1202,7 @@ virtual_multiway_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2229,6 +1226,7 @@ virtual_multiway_valve:
         goal_default:
           port_number: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2255,6 +1253,7 @@ virtual_multiway_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2278,6 +1277,7 @@ virtual_multiway_valve:
         goal_default:
           port_number: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2300,95 +1300,74 @@ virtual_multiway_valve:
         type: UniLabJsonCommand
       set_position:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
+                  anyOf:
+                  - type: integer
+                  - type: string
                   description: 目标位置 (0-8) 或位置字符串
-                  type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_position参数
           type: object
         type: SendCmd
       set_valve_position:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
+                  anyOf:
+                  - type: integer
+                  - type: string
                   description: 目标位置 (0-8) 或位置字符串
-                  type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_valve_position参数
           type: object
         type: SendCmd
     module: unilabos.devices.virtual.virtual_multiway_valve:VirtualMultiwayValve
+    status_policies: {}
     status_types:
       current_port: str
       current_position: int
@@ -2403,7 +1382,7 @@ virtual_multiway_valve:
     type: python
   config_info: []
   description: Virtual 8-Way Valve for flow direction control
-  displayname: virtual_multiway_valve
+  display_name: 虚拟八通阀
   handles:
   - data_key: fluid_in
     data_source: handle
@@ -2536,6 +1515,7 @@ virtual_rotavap:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2559,6 +1539,7 @@ virtual_rotavap:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2578,11 +1559,7 @@ virtual_rotavap:
         type: UniLabJsonCommandAsync
       evaporate:
         error_policy: {}
-        feedback:
-          current_device: current_device
-          status: status
-          time_remaining: time_remaining
-          time_spent: time_spent
+        feedback: {}
         goal:
           pressure: pressure
           solvent: solvent
@@ -2591,207 +1568,55 @@ virtual_rotavap:
           time: time
           vessel: vessel
         goal_default:
-          pressure: 0.0
+          pressure: 0.1
           solvent: ''
-          stir_speed: 0.0
-          temp: 0.0
-          time: ''
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          stir_speed: 100.0
+          temp: 60.0
+          time: 180.0
+          vessel: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_device:
-                  type: string
-                status:
-                  type: string
-                time_remaining:
-                  additionalProperties: false
-                  properties:
-                    nanosec:
-                      maximum: 4294967295
-                      minimum: 0
-                      type: integer
-                    sec:
-                      maximum: 2147483647
-                      minimum: -2147483648
-                      type: integer
-                  required:
-                  - sec
-                  - nanosec
-                  title: time_remaining
-                  type: object
-                time_spent:
-                  additionalProperties: false
-                  properties:
-                    nanosec:
-                      maximum: 4294967295
-                      minimum: 0
-                      type: integer
-                    sec:
-                      maximum: 2147483647
-                      minimum: -2147483648
-                      type: integer
-                  required:
-                  - sec
-                  - nanosec
-                  title: time_spent
-                  type: object
               title: Evaporate_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 pressure:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 0.1
                   type: number
                 solvent:
+                  default: ''
                   type: string
                 stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 100.0
                   type: number
                 temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 60.0
                   type: number
                 time:
-                  type: string
+                  default: 180.0
+                  type: number
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: vessel
-                  type: object
+                  type: string
+              required:
+              - vessel
               title: Evaporate_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Evaporate_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: Evaporate
+          title: evaporate参数
           type: object
         type: Evaporate
     module: unilabos.devices.virtual.virtual_rotavap:VirtualRotavap
+    status_policies: {}
     status_types:
       current_temp: float
       evaporated_volume: float
@@ -2810,7 +1635,7 @@ virtual_rotavap:
     type: python
   config_info: []
   description: Virtual Rotary Evaporator for EvaporateProtocol Testing
-  displayname: virtual_rotavap
+  display_name: 虚拟旋转蒸发仪
   handles:
   - data_key: vessel_in
     data_source: handle
@@ -2928,6 +1753,7 @@ virtual_sample_demo:
             data_type: sample_index
             handler_key: samples_result_out
             label: 样品索引
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -2979,6 +1805,7 @@ virtual_sample_demo:
             data_type: sample_list
             handler_key: absorbance_out
             label: 吸光度列表
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -3031,6 +1858,7 @@ virtual_sample_demo:
             data_type: sample_list
             handler_key: volumes_out
             label: 均分体积
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -3062,6 +1890,7 @@ virtual_sample_demo:
           type: object
         type: UniLabJsonCommandAsync
     module: unilabos.devices.virtual.virtual_sample_demo:VirtualSampleDemo
+    status_policies: {}
     status_types:
       status: str
     supported_backends:
@@ -3070,7 +1899,7 @@ virtual_sample_demo:
     type: python
   config_info: []
   description: Virtual sample tracking demo device
-  displayname: virtual_sample_demo
+  display_name: 虚拟样品追踪演示设备
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -3103,6 +1932,7 @@ virtual_separator:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -3126,6 +1956,7 @@ virtual_separator:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -3145,9 +1976,7 @@ virtual_separator:
         type: UniLabJsonCommandAsync
       separate:
         error_policy: {}
-        feedback:
-          progress: progress
-          status: status
+        feedback: {}
         goal:
           from_vessel: from_vessel
           product_phase: product_phase
@@ -3167,863 +1996,86 @@ virtual_separator:
           waste_phase_to_vessel: waste_phase_to_vessel
           waste_vessel: waste_vessel
         goal_default:
-          from_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          product_phase: ''
-          product_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          purpose: ''
-          repeats: 0
-          separation_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          settling_time: 0.0
+          from_vessel: null
+          product_phase: null
+          purpose: null
+          repeats: 1
+          separation_vessel: null
+          settling_time: 300.0
           solvent: ''
-          solvent_volume: ''
-          stir_speed: 0.0
-          stir_time: 0.0
+          solvent_volume: 50.0
+          stir_speed: 300.0
+          stir_time: 30.0
           through: ''
-          to_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          volume: ''
-          waste_phase_to_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          waste_vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          to_vessel: null
+          waste_phase_to_vessel: ''
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                status:
-                  type: string
               title: Separate_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 from_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: from_vessel
-                  type: object
+                  type: string
                 product_phase:
                   type: string
-                product_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
-                  title: product_vessel
-                  type: object
                 purpose:
                   type: string
                 repeats:
-                  maximum: 2147483647
-                  minimum: -2147483648
+                  default: 1
                   type: integer
                 separation_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: separation_vessel
-                  type: object
+                  type: string
                 settling_time:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 300.0
                   type: number
                 solvent:
+                  default: ''
                   type: string
                 solvent_volume:
-                  type: string
+                  default: 50.0
+                  type: number
                 stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 300.0
                   type: number
                 stir_time:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 30.0
                   type: number
                 through:
+                  default: ''
                   type: string
                 to_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: to_vessel
-                  type: object
-                vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
-                  title: vessel
-                  type: object
-                volume:
                   type: string
                 waste_phase_to_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
+                  default: ''
                   title: waste_phase_to_vessel
-                  type: object
-                waste_vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
-                  title: waste_vessel
-                  type: object
+                  type: string
+              required:
+              - purpose
+              - product_phase
+              - from_vessel
+              - separation_vessel
+              - to_vessel
               title: Separate_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Separate_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: Separate
+          title: separate参数
           type: object
         type: Separate
     module: unilabos.devices.virtual.virtual_separator:VirtualSeparator
+    status_policies: {}
     status_types:
       has_phases: bool
       message: str
@@ -4040,7 +2092,7 @@ virtual_separator:
     type: python
   config_info: []
   description: Virtual Separator for SeparateProtocol Testing
-  displayname: virtual_separator
+  display_name: 虚拟分离器
   handles:
   - data_key: from_vessel
     data_source: handle
@@ -4129,6 +2181,7 @@ virtual_solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4152,6 +2205,7 @@ virtual_solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4175,6 +2229,7 @@ virtual_solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4198,6 +2253,7 @@ virtual_solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4220,6 +2276,7 @@ virtual_solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4242,30 +2299,24 @@ virtual_solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: close参数
           type: object
         type: EmptyIn
       open:
@@ -4274,30 +2325,24 @@ virtual_solenoid_valve:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: open参数
           type: object
         type: EmptyIn
       set_status:
@@ -4306,87 +2351,64 @@ virtual_solenoid_valve:
         goal:
           string: string
         goal_default:
-          string: ''
+          string: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 string:
                   description: '"ON"/"OFF" 或 "OPEN"/"CLOSED"'
                   type: string
+              required: []
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
-              type: object
           required:
           - goal
-          title: StrSingleInput
+          title: set_status参数
           type: object
         type: StrSingleInput
       set_valve_position:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   description: '"OPEN"/"CLOSED" 或其他控制命令'
                   type: string
+              required: []
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_valve_position参数
           type: object
         type: SendCmd
     module: unilabos.devices.virtual.virtual_solenoid_valve:VirtualSolenoidValve
+    status_policies: {}
     status_types:
       is_open: bool
       status: str
@@ -4398,7 +2420,7 @@ virtual_solenoid_valve:
     type: python
   config_info: []
   description: Virtual Solenoid Valve for simple on/off flow control
-  displayname: virtual_solenoid_valve
+  display_name: 虚拟电磁阀
   handles:
   - data_key: fluid_port_in
     data_source: handle
@@ -4452,9 +2474,7 @@ virtual_solid_dispenser:
     action_value_mappings:
       add_solid:
         error_policy: {}
-        feedback:
-          current_status: current_status
-          progress: progress
+        feedback: {}
         goal:
           amount: amount
           equiv: equiv
@@ -4472,205 +2492,52 @@ virtual_solid_dispenser:
           viscous: viscous
           volume: volume
         goal_default:
-          amount: ''
-          equiv: ''
-          event: ''
           mass: ''
           mol: ''
           purpose: ''
-          rate_spec: ''
-          ratio: ''
-          reagent: ''
-          stir: false
-          stir_speed: 0.0
-          time: ''
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
-          viscous: false
-          volume: ''
+          reagent: null
+          vessel: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_status:
-                  type: string
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
               title: Add_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                amount:
-                  type: string
-                equiv:
-                  type: string
-                event:
-                  type: string
                 mass:
+                  default: ''
                   description: 质量字符串 (如 "2.9 g")
                   type: string
                 mol:
+                  default: ''
                   description: 摩尔数字符串 (如 "0.12 mol")
                   type: string
                 purpose:
+                  default: ''
                   description: 添加目的
-                  type: string
-                rate_spec:
-                  type: string
-                ratio:
                   type: string
                 reagent:
                   description: 试剂名称
                   type: string
-                stir:
-                  type: boolean
-                stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                time:
-                  type: string
                 vessel:
-                  additionalProperties: false
                   description: 目标容器
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: vessel
-                  type: object
-                viscous:
-                  type: boolean
-                volume:
                   type: string
+              required:
+              - vessel
+              - reagent
               title: Add_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Add_Result
               type: object
           required:
           - goal
-          title: Add
+          title: add_solid参数
           type: object
         type: Add
       auto-cleanup:
@@ -4679,6 +2546,7 @@ virtual_solid_dispenser:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4703,6 +2571,7 @@ virtual_solid_dispenser:
         goal_default:
           reagent_name: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4729,6 +2598,7 @@ virtual_solid_dispenser:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4753,6 +2623,7 @@ virtual_solid_dispenser:
         goal_default:
           mass_str: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4780,6 +2651,7 @@ virtual_solid_dispenser:
         goal_default:
           mol_str: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4801,6 +2673,7 @@ virtual_solid_dispenser:
           type: object
         type: UniLabJsonCommand
     module: unilabos.devices.virtual.virtual_solid_dispenser:VirtualSolidDispenser
+    status_policies: {}
     status_types:
       current_reagent: str
       dispensed_amount: float
@@ -4813,7 +2686,7 @@ virtual_solid_dispenser:
   config_info: []
   description: Virtual Solid Dispenser for Add Protocol Testing - supports mass and
     molar additions
-  displayname: virtual_solid_dispenser
+  display_name: 虚拟固体分装器
   handles:
   - data_key: solid_out
     data_source: executor
@@ -4871,6 +2744,7 @@ virtual_stirrer:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4894,6 +2768,7 @@ virtual_stirrer:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -4913,183 +2788,50 @@ virtual_stirrer:
         type: UniLabJsonCommandAsync
       start_stir:
         error_policy: {}
-        feedback:
-          current_speed: current_speed
-          current_status: current_status
-          progress: progress
+        feedback: {}
         goal:
           purpose: purpose
           stir_speed: stir_speed
           vessel: vessel
         goal_default:
           purpose: ''
-          stir_speed: 0.0
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          stir_speed: null
+          vessel: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                current_status:
-                  type: string
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
               title: StartStir_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 purpose:
+                  default: ''
                   type: string
                 stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: vessel
-                  type: object
+                  type: string
+              required:
+              - vessel
+              - stir_speed
               title: StartStir_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StartStir_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: StartStir
+          title: start_stir参数
           type: object
         type: StartStir
       stir:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           event: event
           settling_time: settling_time
@@ -5099,341 +2841,79 @@ virtual_stirrer:
           time_spec: time_spec
           vessel: vessel
         goal_default:
-          event: ''
-          settling_time: ''
-          stir_speed: 0.0
-          stir_time: 0.0
-          time: ''
-          time_spec: ''
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          settling_time: null
+          stir_speed: null
+          stir_time: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: Stir_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                event:
-                  type: string
                 settling_time:
-                  type: string
+                  type: number
                 stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 stir_time:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
-                time:
-                  type: string
-                time_spec:
-                  type: string
-                vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
-                  title: vessel
-                  type: object
+              required:
+              - stir_time
+              - stir_speed
+              - settling_time
               title: Stir_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Stir_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: Stir
+          title: stir参数
           type: object
         type: Stir
       stop_stir:
         error_policy: {}
-        feedback:
-          current_status: current_status
-          progress: progress
+        feedback: {}
         goal:
           vessel: vessel
         goal_default:
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          vessel: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_status:
-                  type: string
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
               title: StopStir_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: vessel
-                  type: object
+                  type: string
+              required:
+              - vessel
               title: StopStir_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StopStir_Result
-              type: object
+              type: boolean
           required:
           - goal
-          title: StopStir
+          title: stop_stir参数
           type: object
         type: StopStir
     module: unilabos.devices.virtual.virtual_stirrer:VirtualStirrer
+    status_policies: {}
     status_types:
       current_speed: float
       current_vessel: str
-      device_info: Dict[str, Any]
+      device_info: str
       is_stirring: bool
       max_speed: float
       min_speed: float
@@ -5446,7 +2926,7 @@ virtual_stirrer:
     type: python
   config_info: []
   description: Virtual Stirrer for StirProtocol Testing
-  displayname: virtual_stirrer
+  display_name: 虚拟搅拌器
   handles:
   - data_key: vessel
     data_source: handle
@@ -5474,7 +2954,7 @@ virtual_stirrer:
         current_vessel:
           type: string
         device_info:
-          type: object
+          type: string
         is_stirring:
           type: boolean
         max_speed:
@@ -5513,6 +2993,7 @@ virtual_transfer_pump:
           velocity: null
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5540,6 +3021,7 @@ virtual_transfer_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5565,6 +3047,7 @@ virtual_transfer_pump:
           velocity: null
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5593,6 +3076,7 @@ virtual_transfer_pump:
         goal_default:
           velocity: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5618,6 +3102,7 @@ virtual_transfer_pump:
         goal_default:
           velocity: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5642,6 +3127,7 @@ virtual_transfer_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5665,6 +3151,7 @@ virtual_transfer_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5688,6 +3175,7 @@ virtual_transfer_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5713,6 +3201,7 @@ virtual_transfer_pump:
           velocity: null
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5744,6 +3233,7 @@ virtual_transfer_pump:
           velocity: null
           volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5774,6 +3264,7 @@ virtual_transfer_pump:
         goal_default:
           velocity: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5799,6 +3290,7 @@ virtual_transfer_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -5817,77 +3309,44 @@ virtual_transfer_pump:
         type: UniLabJsonCommandAsync
       set_position:
         error_policy: {}
-        feedback:
-          current_position: current_position
-          progress: progress
-          status: status
+        feedback: {}
         goal:
           max_velocity: max_velocity
           position: position
         goal_default:
-          max_velocity: 0.0
-          position: 0.0
+          max_velocity: null
+          position: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_position:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                status:
-                  type: string
               title: SetPumpPosition_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 max_velocity:
                   description: 移动速度 (ml/s)
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 position:
                   description: 目标位置 (ml)
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
+              required:
+              - position
               title: SetPumpPosition_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SetPumpPosition_Result
-              type: object
           required:
           - goal
-          title: SetPumpPosition
+          title: set_position参数
           type: object
         type: SetPumpPosition
       transfer:
         error_policy: {}
-        feedback:
-          current_status: current_status
-          progress: progress
-          transferred_volume: transferred_volume
+        feedback: {}
         goal:
           amount: amount
           aspirate_velocity: aspirate_velocity
@@ -5902,90 +3361,39 @@ virtual_transfer_pump:
           viscous: viscous
           volume: volume
         goal_default:
-          amount: ''
-          from_vessel: ''
-          rinsing_repeats: 0
-          rinsing_solvent: ''
-          rinsing_volume: 0.0
-          solid: false
-          time: 0.0
-          to_vessel: ''
-          viscous: false
-          volume: 0.0
+          aspirate_velocity: null
+          dispense_velocity: null
+          volume: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_status:
-                  type: string
-                progress:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                transferred_volume:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
               title: Transfer_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                amount:
-                  type: string
-                from_vessel:
-                  type: string
-                rinsing_repeats:
-                  maximum: 2147483647
-                  minimum: -2147483648
-                  type: integer
-                rinsing_solvent:
-                  type: string
-                rinsing_volume:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                aspirate_velocity:
                   type: number
-                solid:
-                  type: boolean
-                time:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                dispense_velocity:
                   type: number
-                to_vessel:
-                  type: string
-                viscous:
-                  type: boolean
                 volume:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
+              required:
+              - volume
               title: Transfer_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Transfer_Result
-              type: object
           required:
           - goal
-          title: Transfer
+          title: transfer参数
           type: object
         type: Transfer
     module: unilabos.devices.virtual.virtual_transferpump:VirtualTransferPump
+    status_policies: {}
     status_types:
       current_volume: float
       max_velocity: float
@@ -5999,7 +3407,7 @@ virtual_transfer_pump:
     type: python
   config_info: []
   description: Virtual Transfer Pump for TransferProtocol Testing (Syringe-style)
-  displayname: virtual_transfer_pump
+  display_name: 虚拟传输泵
   handles:
   - data_key: fluid_port
     data_source: handle
@@ -6057,6 +3465,7 @@ virtual_vacuum_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -6080,6 +3489,7 @@ virtual_vacuum_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -6103,6 +3513,7 @@ virtual_vacuum_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -6125,6 +3536,7 @@ virtual_vacuum_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -6147,30 +3559,24 @@ virtual_vacuum_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: close参数
           type: object
         type: EmptyIn
       open:
@@ -6179,30 +3585,24 @@ virtual_vacuum_pump:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: open参数
           type: object
         type: EmptyIn
       set_status:
@@ -6211,41 +3611,33 @@ virtual_vacuum_pump:
         goal:
           string: string
         goal_default:
-          string: ''
+          string: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 string:
                   type: string
+              required:
+              - string
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
-              type: object
           required:
           - goal
-          title: StrSingleInput
+          title: set_status参数
           type: object
         type: StrSingleInput
     module: unilabos.devices.virtual.virtual_vacuum_pump:VirtualVacuumPump
+    status_policies: {}
     status_types:
       status: str
     supported_backends:
@@ -6254,7 +3646,7 @@ virtual_vacuum_pump:
     type: python
   config_info: []
   description: Virtual vacuum pump
-  displayname: virtual_vacuum_pump
+  display_name: 虚拟真空泵
   handles:
   - data_key: fluid_in
     data_source: handle

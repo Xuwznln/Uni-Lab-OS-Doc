@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TypedDict
 
 from pylabrobot.resources import ResourceHolder, Coordinate, create_ordered_items_2d, Deck, Plate
-from unilabos.device_runtime.node import DeviceNode
+from unilabos.backend.runtime.node import DeviceNode
 
 # ========================
 # OSS 上传工具函数

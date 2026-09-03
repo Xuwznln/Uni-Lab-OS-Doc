@@ -60,7 +60,7 @@ class VirtualMultiwayValve:
                     'default': 默认位置（0号位）
         """
         try:
-            # 🔧 处理特殊字符串命令
+            # 解析字符串形式的阀位命令。
             if isinstance(command, str):
                 command_lower = command.lower().strip()
                 
@@ -187,13 +187,11 @@ class VirtualMultiwayValve:
         Args:
             command: 目标位置 (0-8) 或位置字符串
         """
-        # 删除debug日志：self.logger.debug(f"🎯 兼容性调用: set_valve_position({command})")
         return self.set_position(command)
 
     def is_at_position(self, position: int) -> bool:
         """检查是否在指定位置 🎯"""
         result = self._current_position == position
-        # 删除debug日志：self.logger.debug(f"🎯 位置检查: 当前={self._current_position}, 目标={position}, 匹配={result}")
         return result
 
     def is_at_pump_position(self) -> bool:

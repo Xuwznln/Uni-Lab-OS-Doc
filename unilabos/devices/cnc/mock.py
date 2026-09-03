@@ -2,7 +2,7 @@ import time
 import asyncio
 from pydantic import BaseModel
 
-from unilabos.device_runtime.node import DeviceNode
+from unilabos.backend.runtime.node import DeviceNode
 
 
 class Point3D(BaseModel):

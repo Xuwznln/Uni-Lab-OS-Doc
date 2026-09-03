@@ -2,26 +2,36 @@ import base64
 import traceback
 import os
 import importlib.util
-from typing import Literal
+import re
+from typing import Literal, Optional
 from unilabos.utils import logger
 
 
+HOST_NODE_REGISTRY_NAME = "host_node"
+DEFAULT_HOST_NODE_NAME = HOST_NODE_REGISTRY_NAME
+_ROS_NODE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_REMOVED_CONFIG_FIELDS = {
+    "BasicConfig": frozenset({"app_bridges", "communication_protocol"}),
+}
+
+
 class BasicConfig:
-    # 运行时 backend 名称由 unilabos.app.backend 统一规范化。
+    # 运行时 backend 名称由 unilabos.backend 统一规范化。
     backend: Literal["hostlink", "ros2"] = "ros2"
-    app_bridges: tuple[str, ...] = ("websocket", "fastapi")
     ak = ""
     sk = ""
     working_dir = ""
+    # 由微后端组合根一次解析；四个数据库 writer 不得自行推导路径。
+    server_database_paths = None
     config_path = ""
     is_host_mode = True
     slave_no_host = False  # 是否跳过rclient.wait_for_service()
-    upload_registry = False
+    # 可重命名的 HostNode 运行时实例；注册表类型仍固定为 host_node。
+    host_node_name = "host_node"
     machine_name = "undefined"
     vis_2d_enable = False
     no_update_feedback = False
     enable_resource_load = True
-    communication_protocol = "websocket"
     startup_json_path = None  # 填写绝对路径
     disable_browser = False  # 只禁止浏览器自动打开，不停止管理端服务
     port = 8002  # 管理端 HTTP/Web API 与主微前端服务
@@ -40,21 +50,54 @@ class BasicConfig:
         return base64_target
 
 
+def resolve_host_node_name(value: Optional[str] = None) -> str:
+    """返回可用于 ROS/HostLink 的 HostNode 运行时名称。"""
+
+    name = str(BasicConfig.host_node_name if value is None else value).strip()
+    if not name:
+        name = DEFAULT_HOST_NODE_NAME
+    if not _ROS_NODE_NAME_PATTERN.fullmatch(name):
+        raise ValueError(
+            "HostNode name must start with a letter or underscore and contain "
+            "only ASCII letters, digits, and underscores"
+        )
+    return name
+
+
 # WebSocket配置
 class WSConfig:
     reconnect_interval = 5  # 重连间隔（秒）
     max_reconnect_attempts = 999  # 最大重连次数
-    # 注意：字段名带 ws_ 前缀，是为了让旧客户端遗留的 local_config 中旧字段(ping_interval/ping_timeout)失效，
-    # 从而强制采用下面的新默认值。请勿改回旧名。
+    # 心跳配置使用 ws_ 命名空间，避免被 local_config 中的通用 ping 字段覆盖。
     ws_ping_interval = 5  # ping间隔（秒），对齐服务端 PingPeriod
     ws_ping_timeout = 8  # pong等待超时（秒），对齐服务端 PongWait
 
 
 # HTTP配置
 class HTTPConfig:
-    remote_addr = "https://leap-lab.bohrium.com/api/v1"
-    # schedule 通道（WebSocket）地址；为空时从 remote_addr 派生：带端口则 +1，否则沿用原 netloc
+    # Backend 地址（云端或本机 --role backend 进程）。为空（默认）时本进程是调度
+    # 权威（本地 Scheduler + Workflow API）；显式配置（config 文件或 --address）后
+    # 进入 Backend-controlled 执行模式。
+    # 不内置任何云端默认地址；环境快捷选项仅保留在 UniLabOS-Launcher。
+    remote_addr = ""
+    # 独立部署的低层覆盖；CLI 只暴露统一 --address。为空时从 remote_addr 派生。
     schedule_addr = ""
+    # Backend 线协议："runtime.v1"（微后端 / --role backend）或 "legacy"（旧云端
+    # Backend：job_start / host_node_ready / /lab/resource 消息族）。为空时启动期
+    # 按 HTTP 路由自动探测。
+    backend_protocol = ""
+    # Edge 只访问微后端物料中心；可选择进程内或独立部署的微后端。
+    material_microbackend_addr = ""
+    material_query_timeout = 10
+    # --role backend 进程侧：Edge 数据面地址（拉取 durable 事件正文），
+    # 以及 backend 管理 API 监听端口。
+    edge_data_addr = "http://127.0.0.1:8002"
+    backend_port = 8081
+    # 驱动包索引镜像（JSON，结构同 https://github.com/Xuwznln/awesome-lab-devices 的 index.json）。
+    # 官方索引默认由 OpenLab 前端在浏览器里直接读取；只有浏览器出不了网、需要 Edge 侧
+    # 内网镜像时才配这里。为空时 /driver-packages/catalog 只并入本地
+    # <working_dir>/driver_package_catalog.json。
+    driver_package_index_url = ""
 
 
 # Host/Slave 控制通道。ROS2 backend 用它同步发现参数；hostlink backend 还会
@@ -74,7 +117,30 @@ class HostLinkConfig:
     ros_discovery_range = ""  # SYSTEM_DEFAULT / SUBNET / LOCALHOST / OFF
     ros_static_peers = ""  # 分号分隔
     # 外部 Fast DDS Discovery Server 的 host:port；off 表示明确清除继承值。
+    # 空值由 ROS2 组网微后端托管；0 复用 HostLink 数字端口（TCP/UDP 可共存）。
     ros_discovery_server = ""
+    ros_discovery_port = 0
+
+
+class OTelConfig:
+    """OpenTelemetry 配置；默认关闭且所有调用均 fail-open。"""
+
+    enabled = False
+    endpoint = ""
+    insecure = True
+    service_name = "uni-lab-edge"
+    service_namespace = "unilab"
+    service_version = "0.11.3"
+    deployment_environment = ""
+    headers = ""
+    resource_attributes = ""
+    trace_sampler = "parentbased_always_on"
+    sample_ratio = 1.0
+    max_queue_size = 2048
+    max_export_batch_size = 512
+    schedule_delay_ms = 5000
+    export_timeout_ms = 5000
+    shutdown_timeout_ms = 5000
 
 
 # ROS配置
@@ -96,6 +162,8 @@ def _update_config_from_module(module):
             if hasattr(module, name) and isinstance(getattr(module, name), type):
                 for attr in dir(getattr(module, name)):
                     if not attr.startswith("_"):
+                        if attr in _REMOVED_CONFIG_FIELDS.get(name, ()):
+                            continue
                         setattr(obj, attr, getattr(getattr(module, name), attr))
 
 

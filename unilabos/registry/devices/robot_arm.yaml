@@ -10,6 +10,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -37,6 +38,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           retry: 10
           speed: 1
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -84,6 +86,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           speed: 1
           target_link: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -134,6 +137,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
           parent_link: null
           resource: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -162,6 +166,7 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -180,149 +185,111 @@ robotic_arm.SCARA_with_slider.moveit.virtual:
         type: UniLabJsonCommand
       pick_and_place:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   description: A JSON-formatted string that includes option, target,
                     speed, lift_height, mt_height
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: pick_and_place参数
           type: object
         type: SendCmd
       set_position:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   description: A JSON-formatted string that includes quaternion, speed,
                     position
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_position参数
           type: object
         type: SendCmd
       set_status:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   description: A JSON-formatted string that includes speed
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_status参数
           type: object
         type: SendCmd
     module: unilabos.devices.ros_dev.moveit_interface:MoveitInterface
+    status_policies: {}
     status_types: {}
     supported_backends:
     - ros2
     type: python
   config_info: []
   description: 机械臂与滑块运动系统，基于MoveIt2运动规划框架的多自由度机械臂控制设备。该系统集成机械臂和线性滑块，通过ROS2和MoveIt2实现精确的轨迹规划和协调运动控制。支持笛卡尔空间和关节空间的运动规划、碰撞检测、逆运动学求解等功能。适用于复杂的pick-and-place操作、精密装配、多工位协作等需要高精度多轴协调运动的实验室自动化应用。
-  displayname: robotic_arm.SCARA_with_slider.moveit.virtual
+  display_name: SCARA 机械臂滑轨系统（MoveIt 虚拟）
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -362,6 +329,7 @@ robotic_arm.UR:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -385,6 +353,7 @@ robotic_arm.UR:
         goal_default:
           data: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -411,6 +380,7 @@ robotic_arm.UR:
         goal_default:
           file: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -436,6 +406,7 @@ robotic_arm.UR:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -454,49 +425,37 @@ robotic_arm.UR:
         type: UniLabJsonCommand
       move_pos_task:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: move_pos_task参数
           type: object
         type: SendCmd
     module: unilabos.devices.agv.ur_arm_task:UrArmTask
+    status_policies: {}
     status_types:
       arm_pose: list
       arm_status: str
@@ -508,7 +467,7 @@ robotic_arm.UR:
     type: python
   config_info: []
   description: Universal Robots机械臂设备，用于实验室精密操作和自动化作业。该设备集成了UR机械臂本体、Robotiq夹爪和RTDE通信接口，支持六自由度精确运动控制和力觉反馈。具备实时位置监控、状态反馈、轨迹规划等功能，可执行复杂的多点位运动任务。适用于样品抓取、精密装配、实验器具操作等需要高精度和高重复性的实验室自动化场景。
-  displayname: robotic_arm.UR
+  display_name: UR 机械臂
   handles: []
   icon: ''
   init_param_enforce: {}
@@ -552,6 +511,7 @@ robotic_arm.elite:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -574,6 +534,7 @@ robotic_arm.elite:
         goal: {}
         goal_default: {}
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -599,6 +560,7 @@ robotic_arm.elite:
           start_addr: null
           unit_id: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -631,6 +593,7 @@ robotic_arm.elite:
         goal_default:
           job_id: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -659,6 +622,7 @@ robotic_arm.elite:
           unit_id: null
           value: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -691,6 +655,7 @@ robotic_arm.elite:
         goal_default:
           response: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -717,6 +682,7 @@ robotic_arm.elite:
         goal_default:
           command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
         result: {}
         schema:
@@ -738,51 +704,39 @@ robotic_arm.elite:
         type: UniLabJsonCommand
       modbus_task_cmd:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
+        materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: modbus_task_cmd参数
           type: object
         type: SendCmd
     module: unilabos.devices.arm.elite_robot:EliteRobot
+    status_policies: {}
     status_types:
-      actual_joint_positions: ''
+      actual_joint_positions: str
       arm_pose: list[float]
     supported_backends:
     - hostlink
@@ -790,7 +744,7 @@ robotic_arm.elite:
     type: python
   config_info: []
   description: Elite robot arm
-  displayname: robotic_arm.elite
+  display_name: Elite 机械臂
   handles: []
   icon: ''
   init_param_enforce: {}

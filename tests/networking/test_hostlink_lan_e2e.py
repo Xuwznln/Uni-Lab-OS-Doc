@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import multiprocessing
-import os
-from pathlib import Path
 from queue import Empty
 import socket
 import time
@@ -12,11 +10,14 @@ from typing import Any
 
 import pytest
 
-from unilabos.basic.runtime import BasicDriverSpec, BasicRuntime
+from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
 from unilabos.config.config import BasicConfig, HostLinkConfig
-from unilabos.hostlink.backend import HostLinkBackendRuntime
+from unilabos.backend.hostlink.backend import HostLinkBackend
 
+from tests.e2e.readme_demos import DEMOS_BY_REPO, resolve_demo_source
 from tests.networking.hostlink_lan_virtual_devices import (
+    HOST_NODE_ID,
+    SUB_DEVICE_ID,
     run_virtual_lan_host,
     run_virtual_lan_slave,
 )
@@ -110,11 +111,20 @@ _LAN_IPV4 = _primary_lan_ipv4()
         ),
     ],
 )
-def test_virtual_devices_complete_subscribe_and_action_loop_over_hostlink(
+def test_host_node_and_device_complete_network_subscribe_and_action_loop(
     connection_name: str,
     host_address: str | None,
 ) -> None:
-    """Run a Hub and Reporter as separate processes over loopback and LAN."""
+    """验证真实传输闭环，而不是仅验证 HostLink 端口可连接。
+
+    流程：
+
+    1. Host 进程启动 ``host_node`` 并监听 HostLink；
+    2. Slave 进程携带设备身份加入，Host 确认设备在线；
+    3. Slave 设备反向执行 HostNode action；
+    4. 设备周期发布状态，HostNode 的 ``@subscribe`` 收到状态；
+    5. HostNode 根据状态向设备下发停止 action，并核对远端执行结果。
+    """
 
     assert host_address is not None
     context = multiprocessing.get_context("spawn")
@@ -147,6 +157,24 @@ def test_virtual_devices_complete_subscribe_and_action_loop_over_hostlink(
             seen,
             timeout=8.0,
         )
+        device_online = _wait_for_event(
+            event_queue,
+            "device_online",
+            seen,
+            timeout=8.0,
+        )
+        host_action = _wait_for_event(
+            event_queue,
+            "host_action_executed",
+            seen,
+            timeout=8.0,
+        )
+        device_to_host = _wait_for_event(
+            event_queue,
+            "device_to_host_result",
+            seen,
+            timeout=8.0,
+        )
         closed_loop = _wait_for_event(
             event_queue,
             "closed_loop",
@@ -160,13 +188,27 @@ def test_virtual_devices_complete_subscribe_and_action_loop_over_hostlink(
             timeout=2.0,
         )
 
+        assert host_ready["host_node_id"] == HOST_NODE_ID
         assert slave_ready["host"] == host_address
+        assert device_online == {
+            "device_id": SUB_DEVICE_ID,
+            "location": "remote",
+            "actions": ["stop_counting"],
+        }
+        assert host_action == {
+            "accepted": True,
+            "host_node_id": HOST_NODE_ID,
+            "source_device": SUB_DEVICE_ID,
+        }
+        assert device_to_host == host_action
         assert closed_loop["received_count"] >= 3
         assert closed_loop["result"] == reporter_stopped
         assert closed_loop["result"]["success"] is True
-        assert closed_loop["result"]["device_id"] == "sub_reporter"
-        assert any(kind == "hub_counter" for kind, _payload in seen)
-        assert ("hub_state", "running") in seen
+        assert closed_loop["result"]["device_id"] == SUB_DEVICE_ID
+        assert any(
+            kind == "host_subscribed_counter" for kind, _payload in seen
+        )
+        assert ("host_subscribed_state", "running") in seen
     finally:
         if slave_process is not None:
             _stop_process(slave_process, stop_event)
@@ -180,13 +222,15 @@ def test_virtual_devices_complete_subscribe_and_action_loop_over_hostlink(
 def test_readme_lan_demo_actual_drivers_close_the_hostlink_loop(
     monkeypatch,
 ) -> None:
-    """Run the pinned LabDeviceLanDemo drivers when CI checked them out."""
+    """Drive the pinned LabDeviceLanDemo drivers in-process over a real HostLink link.
 
-    examples_root = os.environ.get("UNILABOS_README_EXAMPLES_ROOT")
-    if not examples_root:
-        pytest.skip("README 外部设备包只在 CI 检出后运行")
-    package_root = Path(examples_root) / "LabDeviceLanDemo"
-    assert package_root.is_dir(), f"缺少 README LAN 示例仓库：{package_root}"
+    仓库来源与 ``tests/e2e`` 共用同一份引用清单（预检出目录 > 同级目录 > pinned 克隆）。
+    """
+
+    try:
+        package_root, _source = resolve_demo_source(DEMOS_BY_REPO["LabDeviceLanDemo"])
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
     monkeypatch.syspath_prepend(str(package_root))
 
     from lan_demo.hub_node import HubNodeDemo
@@ -203,9 +247,9 @@ def test_readme_lan_demo_actual_drivers_close_the_hostlink_loop(
     monkeypatch.setattr(BasicConfig, "machine_name", "readme-lan-demo")
     monkeypatch.setattr(BasicConfig, "slave_no_host", False)
 
-    host_local = BasicRuntime("hostlink")
+    host_local = HostLinkLocalRuntime()
     hub = host_local.add_driver(
-        BasicDriverSpec(
+        HostLinkDriverSpec(
             device_id="hub_node",
             driver_class=HubNodeDemo,
             config={"sub_device": "sub_reporter", "terminate_after": 3},
@@ -213,9 +257,9 @@ def test_readme_lan_demo_actual_drivers_close_the_hostlink_loop(
             status_names=("received_count", "terminations", "last_action"),
         )
     )
-    slave_local = BasicRuntime("hostlink")
+    slave_local = HostLinkLocalRuntime()
     reporter = slave_local.add_driver(
-        BasicDriverSpec(
+        HostLinkDriverSpec(
             device_id="sub_reporter",
             driver_class=StatusReporterDemo,
             config={
@@ -228,8 +272,8 @@ def test_readme_lan_demo_actual_drivers_close_the_hostlink_loop(
             status_names=("counter", "heartbeat", "state"),
         )
     )
-    host = HostLinkBackendRuntime(host_local, is_slave=False)
-    slave = HostLinkBackendRuntime(slave_local, is_slave=True)
+    host = HostLinkBackend(host_local, is_slave=False)
+    slave = HostLinkBackend(slave_local, is_slave=True)
     host.start()
     assert host.server is not None
     HostLinkConfig.port = host.server.port

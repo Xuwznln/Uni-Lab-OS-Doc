@@ -201,7 +201,7 @@ mamba install uni-lab::unilabos -c uni-lab -c conda-forge -c robostack-humble
 - `uni-lab::unilabos`: 安装 unilabos 完整包，开箱即用（推荐）
 - `uni-lab::unilabos-env`: 仅安装环境依赖，适合开发者使用 `pip install -e .`
 - `uni-lab::unilabos-full`: 安装完整包（含 ROS2 Desktop、Gazebo、MoveIt 等）
-- `-c uni-lab -c conda-forge -c robostack-<distro>`: 添加 UniLabOS、通用依赖与对应 ROS 2 软件源
+- `-c uni-lab -c conda-forge -c robostack-<distro>`: 添加 Uni-Lab-OS、通用依赖与对应 ROS 2 软件源
 
 **包选择建议**：
 - **日常使用/生产部署**：安装 `unilabos`（推荐，完整功能，开箱即用）

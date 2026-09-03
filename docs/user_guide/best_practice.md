@@ -155,22 +155,22 @@ Uni-Lab-OS 在安装时已经预置了大量真实的设备图文件示例，无
 
 ```bash
 # 使用简单的工作台示例（推荐新手）
-unilab --ak your_ak --sk your_sk -g test/experiments/workshop.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/workshop.json
 
 # 使用 PRCXI 液体处理工作站示例
-unilab --ak your_ak --sk your_sk -g test/experiments/prcxi_9300.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/prcxi_9320_slim.json
 
 # 使用格林纳德反应工作站示例（有机合成）
-unilab --ak your_ak --sk your_sk -g test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
 
 # 使用 Bioyond 配液站示例
-unilab --ak your_ak --sk your_sk -g test/experiments/dispensing_station_bioyond.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/dispensing_station_bioyond.json
 
 # 使用 HPLC 分析系统示例
-unilab --ak your_ak --sk your_sk -g test/experiments/HPLC.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/HPLC.json
 
 # 使用空设备配置（最小化配置）
-unilab --ak your_ak --sk your_sk -g test/experiments/empty_devices.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/empty_devices.json
 ```
 
 **更多可用示例**：系统预置了 40+ 个组态图文件，涵盖液体处理、有机合成、分析检测等多个领域。完整列表请查看 `unilabos/test/experiments/` 目录。
@@ -210,7 +210,7 @@ unilab --ak your_ak --sk your_sk -g graph.json --disable_browser
 unilab --ak your_ak --sk your_sk -g graph.json --port-management 8080
 
 # 测试环境
-unilab --addr test --ak your_ak --sk your_sk -g graph.json
+unilab --address test --ak your_ak --sk your_sk -g graph.json
 
 # 跳过环境检查（加快启动）
 unilab --ak your_ak --sk your_sk -g graph.json --skip_env_check
@@ -218,35 +218,34 @@ unilab --ak your_ak --sk your_sk -g graph.json --skip_env_check
 
 ---
 
-### 4. 上传注册表（一次性操作）
+### 4. 同步注册表
 
-#### 4.1 什么是注册表上传？
+#### 4.1 什么是注册表同步？
 
-注册表包含您的设备和物料的完整定义。上传到云端后，在线界面才能识别和使用这些设备。
+注册表包含设备和物料的完整定义。Host 启动时会把定义同步到本地微后端，Backend
+和在线界面再通过当前 API 读取这些定义。
 
-#### 4.2 何时需要上传？
+#### 4.2 何时需要重启同步？
 
-**必须上传的情况：**
+**需要重新同步的情况：**
 
 - 首次启动实验室
 - 添加了新的设备类型
 - 修改了设备的注册表定义
 
-#### 4.3 如何上传注册表
+#### 4.3 如何同步注册表
 
 ```bash
-unilab --ak your_ak --sk your_sk -g graph.json --upload_registry
+unilab --ak your_ak --sk your_sk -g graph.json
 ```
 
 **性能影响说明：**
 
-- 上传注册表会增加启动时间（通常 5-15 秒）
-- 上传时间取决于：
+- 同步注册表会增加少量启动时间
+- 同步时间取决于：
   - 设备和物料的数量
-  - 网络速度
-- 建议：开发调试时首次上传，后续本地测试可省略
 
-**验证上传成功：**
+**验证同步成功：**
 
 在 Web 界面的"仪器设备"或"物料耗材"模块中，应该能看到您的设备和物料列表。
 
@@ -271,7 +270,7 @@ Uni-Lab-OS 在安装时已经包含了大量真实的设备图文件，位于 `u
 | ------------------------------------------------ | -------------------- | -------------------- |
 | `workshop.json`                                  | 综合工作台           | 新手入门推荐         |
 | `empty_devices.json`                             | 空设备配置           | 最小化配置，快速启动 |
-| `prcxi_9300.json`                                | PRCXI 液体处理工作站 | 液体处理自动化       |
+| `prcxi_9320_slim.json`                           | PRCXI 液体处理工作站 | 液体处理自动化       |
 | `Grignard_flow_batchreact_single_pumpvalve.json` | 格林纳德反应工作站   | 有机合成流动化学     |
 | `dispensing_station_bioyond.json`                | Bioyond 配液站       | 生物样品配液         |
 | `reaction_station_bioyond.json`                  | Bioyond 反应站       | 生物化学反应         |
@@ -283,16 +282,16 @@ Uni-Lab-OS 在安装时已经包含了大量真实的设备图文件，位于 `u
 
 ```bash
 # 使用简单工作台（推荐新手第一次启动）
-unilab --ak your_ak --sk your_sk -g test/experiments/workshop.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/workshop.json
 
 # 使用 PRCXI 液体处理工作站
-unilab --ak your_ak --sk your_sk -g test/experiments/prcxi_9300.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/prcxi_9320_slim.json
 
 # 使用格林纳德反应工作站（有机合成）
-unilab --ak your_ak --sk your_sk -g test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/Grignard_flow_batchreact_single_pumpvalve.json
 
 # 使用虚拟设备（无需真实硬件，用于学习和测试）
-unilab --ak your_ak --sk your_sk -g test/experiments/mock_devices/mock_all.json
+unilab --ak your_ak --sk your_sk -g unilabos/test/experiments/mock_devices/mock_all.json
 ```
 
 **注意**：所有组态图文件都是真实项目中使用的配置，可以直接学习和参考。完整文件列表请查看 `unilabos/test/experiments/` 目录。
@@ -644,7 +643,7 @@ sudo systemctl stop ufw
 ```bash
 # 在主机（Host）上启动
 conda activate unilab
-unilab --ak your_ak --sk your_sk -g host.json --upload_registry
+unilab --ak your_ak --sk your_sk -g host.json
 ```
 
 **主节点职责：**
@@ -1190,8 +1189,7 @@ my_pump:
 
 ```bash
 unilab --ak your_ak --sk your_sk -g graph.json \
-       --registry_path ./my_lab_devices/registry \
-       --upload_registry
+       --registry_path ./my_lab_devices/registry
 ```
 
 **支持多个注册表路径**（按顺序查找）：
@@ -1511,7 +1509,7 @@ solenoid_valve:
 
     # 使用 io_device_port 字段接收通信设备名
     hardware_interface:
-      name: io_device_port # 例如当前电磁阀修改了name，从默认的hardware_interface改成了io_device_port，那么启动json中就应该对__init__中的io_device_port进行赋值
+      name: io_device_port # 与驱动 __init__ 接收的通信设备参数名保持一致
       read: read_io_coil
       write: write_io_coil
 ```
@@ -1618,12 +1616,16 @@ solenoid_valve:
 
 ### 11.6 参考驱动实现（可运行示例仓库）
 
-为了让上述机制有可直接运行、可对照学习的范本，我们提供了两个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，建议在编写自己的驱动前先跑一遍。
+为了让上述机制有可直接运行、可对照学习的范本，我们提供了六个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，并自带可终止的双运行时 smoke（`python -m <包名>.smoke --backend hostlink|ros2`），建议在编写自己的驱动前先跑一遍。
 
 | 示例仓库                                                                          | 演示要点                                           | 关键技术                                                                                                |
 | --------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo)                   | 局域网跨设备闭环：中枢 hub 与子设备 sub 分进程运行 | 跨设备 `@subscribe` 订阅、`call_device_action` 远程 ros action 调用、自动 `msg_type` 解析、轮次复位检测  |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo)   | 工作站内 `hardware_interface` 代理：多子设备共享同一通信端点 | 共享串口（默认 IO 方法名 `send_command`/`read_data`）、Modbus `extra_info` 按设备注入 `slave_id`（即本章 §11.5） |
+| [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo)       | 网页式工作流提交路径上的异常传播与决策             | 异常穿出动作边界 → 错误决策链 `abort`；点对点 `call_device_action` 异常在调用侧捕获（作为工作流节点）；业务级守卫返回；`operator_intervention` 人工替换结果让任务 `succeeded`；故障后 `stats` 仍可服务 |
+| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo)                 | host/slave 双进程：固定位点与物料 CRUD 两条权威链   | `@device(available_sites=...)` 声明 → 注册表模板 → 权威位点实例 → 占用流转；`@resource` 物料 + `materials.*` 门面跨 HostLink 创建/赋值/转移/删除；`SiteSlot` 参数（uuid 或 label） |
+| [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo)                 | 调度器锁语义：并发提交工作流制造竞争，账本区间即证据 | `(device, action)` 动作锁串行、先提交先执行（`/api/v1/scheduler/resources` 的 `waiting` + `blockers`）；`@action(always_free=True)` 同一动作两次并行；`materials_need_lock=["plate"]` 按权威 `material_uuid` 互斥；`lock_auditor` 点对点读账本核对四条结论 |
+| [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo)       | 按数量计量的库存：入库、带预留的出库、数量不足拒绝 | `@resource` 试剂模板同步为权威模板；`restock` → `inbound_inventory_lot`（固定 lot）；`ctx.run(..., inventory=[...])` 声明试剂需求 → 任务启动 all-or-nothing 预留 → 动作开始扣减；不足时任务 `plan_not_executable` 且库存不变 |
 
 **快速启动（通用形式，单进程）：**
 
@@ -1633,14 +1635,14 @@ git clone https://github.com/Xuwznln/LabDeviceWorkstationDemo.git
 python -m unilabos.app.main \
   --devices <克隆目录下的设备包目录> \
   --external_devices_only \
-  --ak your_ak --sk your_sk --addr test --upload_registry \
+  --ak your_ak --sk your_sk --address test \
   --disable_browser --port-management 8100 \
   -g <仓库内提供的图文件>
 ```
 
-`--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
+`--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 与 `LabDeviceSiteDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
 
-> 这两个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可。
+> 这四个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可。主仓库在 `tests/e2e/readme_demos.py` 固定引用这四个包的已验证提交，CI 里逐个端到端跑通（`--check_mode`、`unilab graph create`、真实 `unilab -g` 起微后端、`unilab graph` 读写 Graph Authority、管理 API 运行 `@workflow`）；各仓库 CI 则反向固定在指定 Uni-Lab-OS 提交上跑双运行时 smoke。
 
 ---
 
@@ -1802,8 +1804,7 @@ properties:
 
 ```bash
 unilab --ak your_ak --sk your_sk -g graph.json \
-       --registry_path ./my_lab_devices/my_lab_devices/registry \
-       --upload_registry
+       --registry_path ./my_lab_devices/my_lab_devices/registry
 ```
 
 2. **在组态图中添加**：
@@ -1919,8 +1920,3 @@ unilab --ak your_ak --sk your_sk -g graph.json \
 2. 在 GitHub 上提问和分享经验
 3. 关注文档更新和新功能发布
 4. 为 Uni-Lab-OS 社区贡献您的设备驱动和最佳实践
-
----
-
-_本指南最后更新：2025-11_
-_Uni-Lab-OS 版本：最新稳定版_
