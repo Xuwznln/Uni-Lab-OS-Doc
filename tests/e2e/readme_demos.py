@@ -188,6 +188,32 @@ DEMOS: tuple[DemoSpec, ...] = (
         ),
         timeout=90.0,
     ),
+    DemoSpec(
+        repo="LabDeviceLockDemo",
+        url="https://github.com/Xuwznln/LabDeviceLockDemo",
+        ref="349c43f9c2c4fbe29ecb32d7874ebfaed8aa848c",
+        package="lock_demo",
+        host_graph="graph/lock_demo.json",
+        # 无设备自跑闭环：锁语义只能在"多个任务同时申请资源"时观察，靠并发组制造竞争。
+        workflows=(
+            WorkflowExpectation(name="锁演示：准备物料", node_count=1),
+            # 动作锁：同设备同动作串行；第二个 occupy 在调度器排队。两次 peek 是 always_free，不排队。
+            WorkflowExpectation(name="动作锁：占用 A（第一次）", node_count=1, group="action-lock"),
+            WorkflowExpectation(
+                name="动作锁：占用 A（第二次）", node_count=1, group="action-lock", expect_waiting=True
+            ),
+            WorkflowExpectation(name="always_free：探测 A（第一次）", node_count=1, group="action-lock"),
+            WorkflowExpectation(name="always_free：探测 A（第二次）", node_count=1, group="action-lock"),
+            # 物料锁：B 处理同一块 P1 排在 A 后面；A 同时处理 P2 与 P1 并行。
+            WorkflowExpectation(name="物料锁：A 处理 P1", node_count=1, group="material-lock"),
+            WorkflowExpectation(
+                name="物料锁：B 处理 P1", node_count=1, group="material-lock", expect_waiting=True
+            ),
+            WorkflowExpectation(name="物料锁：A 处理 P2", node_count=1, group="material-lock"),
+            # 审计器读两台探针的账本：四条结论任一不成立即任务失败
+            WorkflowExpectation(name="锁账本审计", node_count=1),
+        ),
+    ),
 )
 
 DEMOS_BY_REPO = {spec.repo: spec for spec in DEMOS}

@@ -127,7 +127,9 @@ attempt 和新 `job_uuid`（与 4.1 本机调度器的 retry 语义相同，只�
 `BackendScheduler` 对每个 DAG-ready 节点执行以下步骤：
 
 1. 解析上游 Job 输出到当前 action 参数。
-2. 从设备 action 注册信息读取 `materials_need_lock` 参数名。
+2. 从设备 action 注册信息读取 `materials_need_lock` 参数名与 `always_free` 声明
+   （节点 `execution_policy.always_free` 显式声明优先）。`always_free` 只免除该动作自身的
+   `(device_id, action_name)` 隐式动作锁，物料 claim 仍要获取。
 3. 从 action 参数提取权威 `material_uuid`；非权威或缺失 UUID 直接失败。
 4. 合并 Task 仓储 reservation 已分配的实体物料 UUID。
 5. 构造一个 `SchedulerResourceRequest`，其中同时包含：
