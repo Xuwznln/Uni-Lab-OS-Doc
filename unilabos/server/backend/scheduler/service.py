@@ -19,12 +19,14 @@ from collections.abc import Callable
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid5
 
+from unilabos.client.materials.core import MaterialsHTTPError
 from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     InventoryReservationCreate,
     InventoryReservationTransition,
     InventoryTaskReservationCreate,
 )
+from unilabos.server.services.materials.core import MaterialsServiceError
 from unilabos.server.backend.execution_queue import JOB_ORIGIN_LOCAL_SCHEDULER
 from unilabos.server.backend.scheduler.payloads import build_job_start_payload
 from unilabos.server.backend.scheduler.materials import (
@@ -166,9 +168,15 @@ class BackendScheduler:
             dag, specs = self._build_dag(task, runs)
             self._reserve_task_inventory(task, specs)
         except Exception as exc:
+            # 计划不可执行（设备/动作缺失、库存不足…）是调度的正常业务终态：
+            # 任务落 failed + plan_not_executable，不当成进程异常向上抛。
             self._fail_unstarted_task(task_uuid, runs, exc)
             self._release_unconsumed_task_inventory(task_uuid)
-            raise
+            if isinstance(exc, (BackendSchedulingError, MaterialsServiceError, MaterialsHTTPError)):
+                logger.warning("workflow task %s cannot start: %s", task_uuid, exc)
+            else:
+                logger.exception("workflow task %s failed while planning", task_uuid)
+            return {}
 
         completed = [
             str(run["uuid"])

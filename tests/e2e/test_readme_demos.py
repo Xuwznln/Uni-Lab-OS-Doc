@@ -311,6 +311,13 @@ def _await_workflow(
     assert final["status"] == expectation.task_status, (
         f"工作流 {expectation.name!r} 终态 {final['status']!r}，期望 {expectation.task_status!r}"
     )
+    if expectation.task_error_code is not None:
+        errors = final.get("error_info") or []
+        assert errors and errors[0].get("code") == expectation.task_error_code, (
+            f"工作流 {expectation.name!r} 任务错误 {errors}，期望 code={expectation.task_error_code!r}"
+        )
+        if expectation.task_error_contains is not None:
+            assert expectation.task_error_contains in str(errors[0].get("message", "")), errors
     node_runs = api_request(port, f"/workflow-tasks/{task_uuid}/node-runs")
     statuses = [run["status"] for run in node_runs]
     assert statuses == list(expectation.expected_node_statuses()), (

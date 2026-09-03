@@ -12,6 +12,11 @@
 - ``ctx.run("device_id/action_name", params)``：显式指定目标设备实例。
 - ``ctx.run_template("class_name/action_name", params)``：按 registry 设备类
   解析目标设备；该类在设备图中只有一个实例时自动填充，无需确认。
+- 两者都接受 ``inventory=[...]``：该步骤的库存需求（``InventoryRequirement``
+  形态，如 ``{"key": "water", "kind": "reagent", "lot_uuid": ..., "quantity": 40,
+  "unit": "ml"}``），写入节点 ``meta_data.inventory_requirements``；调度器在任务
+  启动时 all-or-nothing 预留，数量不足则任务在派发前失败（``plan_not_executable``），
+  动作开始时由执行面扣减。
 
 工作流 uuid 由函数相对路径（``module:qualname``）经 uuid5 派生，重复启动
 或重复上传保持稳定，权威侧按 uuid 幂等 upsert（存在即覆盖节点图）。
@@ -29,6 +34,7 @@ import uuid as uuid_module
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
+from unilabos.protocol.materials import InventoryRequirement
 from unilabos.utils.log import logger
 
 #: uuid5 命名空间：Uni-Lab 工作流（固定值，保证跨进程/跨机器一致）。
@@ -53,6 +59,8 @@ class WorkflowStep:
     action: str
     params: Dict[str, Any]
     name: str  # 节点显示名，缺省 f"{target}.{action}"
+    #: 已校验的 InventoryRequirement（json 形态），落到节点 meta_data.inventory_requirements
+    inventory: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -88,10 +96,11 @@ class WorkflowBuildContext:
         params: Optional[Dict[str, Any]] = None,
         *,
         name: str = "",
+        inventory: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> WorkflowStep:
         """按 ``"device_id/action_name"`` 追加一步（显式设备实例）。"""
 
-        return self._append("run", target, params, name)
+        return self._append("run", target, params, name, inventory)
 
     def run_template(
         self,
@@ -99,10 +108,11 @@ class WorkflowBuildContext:
         params: Optional[Dict[str, Any]] = None,
         *,
         name: str = "",
+        inventory: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> WorkflowStep:
         """按 ``"class_name/action_name"`` 追加一步（设备类解析，单实例自动填）。"""
 
-        return self._append("run_template", target, params, name)
+        return self._append("run_template", target, params, name, inventory)
 
     def _append(
         self,
@@ -110,6 +120,7 @@ class WorkflowBuildContext:
         target: str,
         params: Optional[Dict[str, Any]],
         name: str,
+        inventory: Optional[Sequence[Mapping[str, Any]]] = None,
     ) -> WorkflowStep:
         head, sep, action = str(target).partition("/")
         head = head.strip()
@@ -124,9 +135,29 @@ class WorkflowBuildContext:
             action=action,
             params=dict(params or {}),
             name=name or f"{head}.{action}",
+            inventory=_normalize_inventory(inventory, f"{head}/{action}"),
         )
         self.steps.append(step)
         return step
+
+
+def _normalize_inventory(
+    inventory: Optional[Sequence[Mapping[str, Any]]], step_label: str
+) -> List[Dict[str, Any]]:
+    """步骤库存需求在声明时就按 InventoryRequirement 校验，键唯一。"""
+
+    if not inventory:
+        return []
+    normalized = [
+        InventoryRequirement.model_validate(dict(item)).model_dump(
+            mode="json", exclude_none=False
+        )
+        for item in inventory
+    ]
+    keys = [item["key"] for item in normalized]
+    if len(keys) != len(set(keys)):
+        raise ValueError(f"工作流步骤 {step_label} 的库存需求 key 重复：{keys}")
+    return normalized
 
 
 def workflow(
@@ -308,6 +339,9 @@ def build_workflow_payload(
             execution_policy["depends_on"] = [
                 _step_node_uuid(definition.uuid, index - 1)
             ]
+        meta_data: Dict[str, Any] = {"target_device_id": device_id}
+        if step.inventory:
+            meta_data["inventory_requirements"] = [dict(item) for item in step.inventory]
         nodes.append(
             {
                 "uuid": _step_node_uuid(definition.uuid, index),
@@ -317,7 +351,7 @@ def build_workflow_payload(
                 "action_name": step.action,
                 "action_type": action_type,
                 "param": dict(step.params),
-                "meta_data": {"target_device_id": device_id},
+                "meta_data": meta_data,
                 "pose": {},
                 "execution_policy": execution_policy,
             }

@@ -68,6 +68,10 @@ class WorkflowExpectation:
     #: 期望该任务在组内竞争时被调度器排队：``/scheduler/resources`` 里出现
     #: 该 task 的 ``waiting`` 申请且 ``blockers`` 非空。
     expect_waiting: bool = False
+    #: 任务级错误：``error_info[0].code`` 与 message 子串（如库存不足时的
+    #: ``plan_not_executable`` / ``short by``）。
+    task_error_code: Optional[str] = None
+    task_error_contains: Optional[str] = None
 
     def expected_node_statuses(self) -> tuple[str, ...]:
         return self.node_statuses or tuple("succeeded" for _ in range(self.node_count))
