@@ -1,17 +1,17 @@
-# 实例：物料教程（Resource）
+﻿# 实例：物料教程（Resource）
 
 > **文档类型**：物料系统完整教程  
 > **适用场景**：物料格式转换、多系统物料对接、资源结构理解  
 > **前置知识**：Python 基础 | JSON 数据结构
 
-本教程面向 Uni-Lab-OS 的开发者，讲解"物料"的核心概念、3种物料格式（UniLab、PyLabRobot、奔耀Bioyond）及其相互转换方法，并说明4种 children 结构表现形式及使用场景。
+本教程面向 Uni-Lab-OS 的开发者，讲解"物料"的核心概念、3种物料格式（Uni-Lab-OS、PyLabRobot、奔耀Bioyond）及其相互转换方法，并说明4种 children 结构表现形式及使用场景。
 
 ---
 
 ## 1. 物料是什么
 
 - **物料（Resource）**：指实验工作站中的实体对象，包括设备（device）、操作甲板 （deck）、试剂、实验耗材，也包括设备上承载的具体物料或者包含的容器（如container/plate/well/瓶/孔/片等）。
-- **物料基本信息**（以 UniLab list格式为例）：
+- **物料基本信息**（以 Uni-Lab-OS list格式为例）：
 
 ```jsonc
 {
@@ -46,16 +46,16 @@
 }
 ```
 
-## 2. 3种物料格式概览(UniLab、PyLabRobot、奔耀Bioyond)
+## 2. 3种物料格式概览(Uni-Lab-OS、PyLabRobot、奔耀Bioyond)
 
-### 2.1 UniLab 物料格式（云端/项目内通用）
+### 2.1 Uni-Lab-OS 物料格式（云端/项目内通用）
 
 - 结构特征：顶层通常是 `nodes` 列表；每个节点是扁平字典，`children` 是子节点 `id` 列表；`parent` 为父节点 `id` 或 `null`。
 - 用途：
   - 云端数据存储、前端可视化、与图结构算法互操作
   - 在上传/下载/部署配置时作为标准交换格式
 
-示例片段（UniLab 物料格式）：
+示例片段（Uni-Lab-OS 物料格式）：
 
 ```jsonc
 {
@@ -186,16 +186,16 @@
   "timestamp": 0
 }
 ```
-### 2.4 3种物料格式关键字段对应(UniLab、PyLabRobot、奔耀Bioyond)
+### 2.4 3种物料格式关键字段对应(Uni-Lab-OS、PyLabRobot、奔耀Bioyond)
 
-| 含义 | UniLab | PyLabRobot (PLR) | 奔耀 Bioyond |
+| 含义 | Uni-Lab-OS | PyLabRobot (PLR) | 奔耀 Bioyond |
 | - | - | - | - |
 | 节点唯一名 | `id`  | `name` | `name` |
 | 父节点引用 | `parent` | `parent_name` | `locations` 坐标（无直接父名，需映射坐标下的物料） |
 | 子节点集合 | `children`（id 列表或对象列表，视结构而定） | `children`（对象列表） | `detail`（明细，非严格树结构，需要自定义映射） |
 | 类型（抽象类别） | `type`（device/container/plate/deck/…） | `category`（plate/well/…），以及类名 `type` | `typeName`（厂商自定义，如“液”、“加样头(大)”） |
 | 运行/业务数据 | `data` | 通过 `serialize_all_state()`/`load_all_state()` 管理的状态 | `quantity`、`lockQuantity` 等业务数值 |
-| 固有配置 | `config`（size_x/size_y/size_z/model/ordering…） | 资源字典中的同名键（反序列化时按构造签名取用） | 厂商自定义字段（需映射入 PLR/UniLab 的 `config` 或 `data`） |
+| 固有配置 | `config`（size_x/size_y/size_z/model/ordering…） | 资源字典中的同名键（反序列化时按构造签名取用） | 厂商自定义字段（需映射入 PLR/Uni-Lab-OS 的 `config` 或 `data`） |
 | 空间位置 | `position`（x/y/z） | `location`（Coordinate） + `rotation`（Rotation） | `locations`（whName、x/y/z），不含旋转 |
 | 条码/标识 | `config.barcode`（可选） | 常放在配置键中（如 `barcode`） | `barCode` |
 | 数量单位 | 无固定键，通常在 `data` | 无固定键，通常在配置或状态中 | `unit` |
@@ -208,7 +208,7 @@
 
 ## 3. children 的四种结构表示
 
-- **list（扁平列表）**：每个节点是扁平字典，`children` 为子节点 `id` 数组。示例：UniLab `nodes` 中的单个节点。
+- **list（扁平列表）**：每个节点是扁平字典，`children` 为子节点 `id` 数组。示例：Uni-Lab-OS `nodes` 中的单个节点。
 
 ```json
 {
@@ -295,34 +295,34 @@ def nested_dict_to_list(nested_dict: dict) -> list[dict]:
 
 常见路径：
 
-- UniLab 扁平列表 → 树：`dict_to_tree({r["id"]: r for r in resources})`
-- 树 → UniLab 扁平列表：`tree_to_list(resources_tree)`
+- Uni-Lab-OS 扁平列表 → 树：`dict_to_tree({r["id"]: r for r in resources})`
+- 树 → Uni-Lab-OS 扁平列表：`tree_to_list(resources_tree)`
 - 扁平列表 ↔ 嵌套字典：`list_to_nested_dict` / `nested_dict_to_list`
 
-### 4.2 UniLab ↔ PyLabRobot（PLR）
+### 4.2 Uni-Lab-OS ↔ PyLabRobot（PLR）
 
 高层封装：
 
 ```339:368:unilabos/resources/graphio.py
 def convert_resources_to_type(resources_list: list[dict], resource_type: Union[type, list[type]], *, plr_model: bool = False):
-    # UniLab -> (NestedDict or PLR)
+    # Uni-Lab-OS -> (NestedDict or PLR)
 ```
 
 ```371:395:unilabos/resources/graphio.py
 def convert_resources_from_type(resources_list, resource_type: Union[type, list[type]], *, is_plr: bool = False):
-    # (NestedDict or PLR) -> UniLab 扁平列表
+    # (NestedDict or PLR) -> Uni-Lab-OS 扁平列表
 ```
 
 底层转换：
 
 ```398:441:unilabos/resources/graphio.py
 def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
-    # UniLab 单节点(树根) -> PLR Resource 对象
+    # Uni-Lab-OS 单节点(树根) -> PLR Resource 对象
 ```
 
 ```443:481:unilabos/resources/graphio.py
 def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, with_children=True):
-    # PLR Resource -> UniLab 单节点(dict)
+    # PLR Resource -> Uni-Lab-OS 单节点(dict)
 ```
 
 示例：
@@ -331,10 +331,10 @@ def resource_plr_to_ulab(resource_plr: "ResourcePLR", parent_name: str = None, w
 from unilabos.resources.graphio import convert_resources_to_type, convert_resources_from_type
 from pylabrobot.resources.resource import Resource as ResourcePLR
 
-# UniLab 扁平列表 -> PLR 根资源对象
+# Uni-Lab-OS 扁平列表 -> PLR 根资源对象
 plr_root = convert_resources_to_type(resources_list=ulab_list, resource_type=ResourcePLR)
 
-# PLR 资源对象 -> UniLab 扁平列表（用于保存/上传）
+# PLR 资源对象 -> Uni-Lab-OS 扁平列表（用于保存/上传）
 ulab_flat = convert_resources_from_type(resources_list=plr_root, resource_type=ResourcePLR)
 ```
 
@@ -343,7 +343,7 @@ ulab_flat = convert_resources_from_type(resources_list=plr_root, resource_type=R
 - `plr_model=True`：保留 `model` 字段（默认会移除）。
 - `with_children=False`：`resource_plr_to_ulab` 仅转换当前节点。
 
-### 4.3 奔耀（Bioyond）→ PLR（及进一步到 UniLab）
+### 4.3 奔耀（Bioyond）→ PLR（及进一步到 Uni-Lab-OS）
 
 转换入口：
 
@@ -370,7 +370,7 @@ type_mapping = {
 
 plr_list = resource_bioyond_to_plr(materials, type_mapping=type_mapping, deck=None)
 
-# 如需上传云端（UniLab 扁平格式）：
+# 如需上传云端（Uni-Lab-OS 扁平格式）：
 ulab_flat = convert_resources_from_type(plr_list, [ResourcePLR])
 ```
 
@@ -383,9 +383,9 @@ ulab_flat = convert_resources_from_type(plr_list, [ResourcePLR])
 
 ## 5. 何时使用哪种格式
 
-- **云端/持久化**：使用 UniLab 物料格式（扁平 `nodes` 列表，children 为 id 列表）。便于版本化、可视化与网络传输。
+- **云端/持久化**：使用 Uni-Lab-OS 物料格式（扁平 `nodes` 列表，children 为 id 列表）。便于版本化、可视化与网络传输。
 - **实验工作流执行**：使用 PyLabRobot（PLR）格式。PLR 运行时依赖严格的树形资源结构与对象 API。
-- **第三方设备/系统（Bioyond）输入**：保持来源格式不变，使用 `resource_bioyond_to_plr` + 人工 `type_mapping` 将其转换为 PLR（必要时再转 UniLab）。
+- **第三方设备/系统（Bioyond）输入**：保持来源格式不变，使用 `resource_bioyond_to_plr` + 人工 `type_mapping` 将其转换为 PLR（必要时再转 Uni-Lab-OS）。
 
 ---
 
@@ -394,13 +394,13 @@ ulab_flat = convert_resources_from_type(plr_list, [ResourcePLR])
 - **children 形态不一致**：不同函数期望不同 children 形态，注意在进入转换前先用“结构互转”工具函数标准化形态。
 - **devices_only**：`dict_to_tree/dict_to_nested_dict` 支持仅保留 `type == device` 的节点。
 - **模型/类型字段**：PLR 对象序列化参数有所差异，`resource_ulab_to_plr` 内部会根据构造签名移除不兼容字段（如 `category`）。
-- **驱动初始化**：`initialize_resource(s)` 支持从注册表/类路径创建 PLR/UniLab 资源或列表。
+- **驱动初始化**：`initialize_resource(s)` 支持从注册表/类路径创建 PLR/Uni-Lab-OS 资源或列表。
 
 参考代码：
 
 ```530:577:unilabos/resources/graphio.py
 def initialize_resource(resource_config: dict, resource_type: Any = None) -> Union[list[dict], ResourcePLR]:
-    # 从注册类/模块反射创建资源，或将 UniLab 字典包装为列表
+    # 从注册类/模块反射创建资源，或将 Uni-Lab-OS 字典包装为列表
 ```
 
 ```580:597:unilabos/resources/graphio.py

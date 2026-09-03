@@ -103,7 +103,7 @@ unilab --devices ./my_package --external_devices_only -g graph.json
 
 **Q3: 设备使用什么通信协议？**
 
-| 协议 | config 参数 | 依赖包 | UniLab 现有抽象 |
+| 协议 | config 参数 | 依赖包 | Uni-Lab-OS 现有抽象 |
 |---|---|---|---|
 | **Serial (RS232/RS485)** | `port`, `baudrate` | `pyserial` | 直接使用 `serial.Serial` |
 | **Modbus RTU** | `port`, `baudrate`, `slave_id` | `pymodbus` | `device_comms/modbus_plc/`（RTUClient） |
@@ -123,7 +123,7 @@ unilab --devices ./my_package --external_devices_only -g graph.json
 
 | 来源 | AI 处理方式 |
 |---|---|
-| **现成 SDK/驱动代码** | 读取代码，提取指令逻辑，包装进 UniLab 框架 |
+| **现成 SDK/驱动代码** | 读取代码，提取指令逻辑，包装进 Uni-Lab-OS 框架 |
 | **协议文档/手册** | 读取文档，解析指令格式 |
 | **用户口述** | 按描述实现指令编解码 |
 | **标准协议** | 直接使用标准实现（Modbus 寄存器表、SCPI 等） |

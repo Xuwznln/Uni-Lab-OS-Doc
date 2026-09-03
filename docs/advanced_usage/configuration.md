@@ -334,8 +334,8 @@ class ROSConfig:
         "control_msgs.msg",       # 控制消息类型
         "control_msgs.action",    # 控制动作类型
         "nav2_msgs.action",       # 导航动作类型
-        "unilabos_msgs.msg",      # UniLab 自定义消息类型
-        "unilabos_msgs.action",   # UniLab 自定义动作类型
+        "unilabos_msgs.msg",      # Uni-Lab-OS 自定义消息类型
+        "unilabos_msgs.action",   # Uni-Lab-OS 自定义动作类型
     ]
 ```
 

@@ -11,7 +11,7 @@
 | NumPy | `>=2,<3` | `>=2,<3` |
 | RoboStack channel | `robostack-jazzy` | `robostack-humble` |
 | ROS 2 distro mutex | `0.15.*` / `jazzy_*` | `0.9.*` / `humble_*` |
-| UniLabOS messages | `ros-jazzy-unilabos-msgs=0.12.0` | `ros-humble-unilabos-msgs=0.12.0` |
+| Uni-Lab-OS messages | `ros-jazzy-unilabos-msgs=0.12.0` | `ros-humble-unilabos-msgs=0.12.0` |
 | Conda build string | `jazzy_1` | `humble_1` |
 
 Jazzy 是默认和推荐发行版；Humble 作为兼容发行版运行相同的 Python 3.12、NumPy 2
@@ -64,7 +64,7 @@ pip install -e .
 
 ## Windows DLL 加载兼容
 
-UniLabOS 会优先从当前环境的 `ros2-distro-mutex` 元数据识别 ROS 发行版，
+Uni-Lab-OS 会优先从当前环境的 `ros2-distro-mutex` 元数据识别 ROS 发行版，
 不依赖可能尚未由激活脚本设置的 `ROS_DISTRO`：
 
 - Humble 与 Jazzy 仅在实际出现 `DLL load failed` 时，对 rclpy/rpyutils 的加载

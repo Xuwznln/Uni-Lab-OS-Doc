@@ -2,7 +2,7 @@
 
 ## 当前边界
 
-UniLabOS 的微后端数据面和调度职责如下：
+Uni-Lab-OS 的微后端数据面和调度职责如下：
 
 | 能力 | 唯一实现 | 说明 |
 | --- | --- | --- |
@@ -15,7 +15,13 @@ UniLabOS 的微后端数据面和调度职责如下：
 | 结果、反馈、错误与人工替换 | `history.db` + `HistoryService` | 使用统一的追加式历史流 |
 | HostLink 网络 | `unilabos/backend/hostlink/` | 与调度实现解耦 |
 
-完整 Host API 默认使用 `:8002`。
+完整 Host API 默认使用 `:8002`（`unilab --port` 可改）。前端有两种接入方式：
+
+- **单端口托管**：`unilab -g graph.json --ui_dir <前端构建产物目录>`，微后端把该目录挂到
+  `/ui/`（根路径 `/` 自动跳转），页面与 `/api` 同源，浏览器只需一个地址；
+- **独立静态站**（GitHub Pages 等）：前端在连接面板里填写进程地址，微后端已放开 CORS。
+
+`--ui_dir` 指向的目录必须含 `index.html`；目录无效时只记日志，API 不受影响。
 
 ## UI 应使用的接口
 

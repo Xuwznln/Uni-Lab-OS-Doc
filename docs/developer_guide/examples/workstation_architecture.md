@@ -106,7 +106,7 @@ graph LR
     end
 
     subgraph "云端系统"
-        CLOUD[UniLab云端<br/>资源管理]
+        CLOUD[Uni-Lab-OS云端<br/>资源管理]
         MONITOR[监控与调度]
     end
 
