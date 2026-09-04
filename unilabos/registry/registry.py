@@ -1379,7 +1379,9 @@ class Registry:
 
     def verify_and_resolve_registry(self):
         """
-        对 AST 扫描得到的注册表执行实际 import 验证（使用共享线程池并行）。
+        对 AST 扫描得到的注册表执行实际 import 验证。
+
+        使用共享线程池收集任务，但将原生模块导入和动态 schema 增强串行化。
         """
         errors = []
         import_success_count = 0
@@ -1390,7 +1392,8 @@ class Registry:
         # importlib、ImportManager 以及部分 ROS/Windows 原生扩展并不保证可并发初始化。
         # 注册表校验只需验证导入和生成 schema，串行化这一段可避免进程级访问冲突；
         # 外层任务结构仍保留，便于统一收集错误。
-        import_lock = threading.Lock()
+        # 使用可重入锁，避免 schema 解析间接触发 import_class 时自锁。
+        import_lock = threading.RLock()
 
         def _verify_device(device_id: str, entry: dict):
             nonlocal import_success_count, resolved_count
