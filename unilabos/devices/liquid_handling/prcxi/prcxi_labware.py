@@ -125,7 +125,7 @@ def PRCXI_BioRad_384_wellplate(name: str) -> PRCXI9300Plate:
         size_z=10.40,
         model="BioRad_384_wellplate_50uL_Vb",
         category="plate",
-        # 2. 注入 Unilab 必须的 UUID 信息
+        # 2. 注入 Uni-Lab-OS 必须的 UUID 信息
         material_info={
             "uuid": "853dcfb6226f476e8b23c250217dc7da",
             "Code": "q3",
@@ -787,8 +787,10 @@ def PRCXI_Adapter(name: str) -> PRCXI9300PlateAdapter:
             }
     )
 def PRCXI_48_DeepWell(name: str) -> PRCXI9300Plate:
-    """ Code: 22 (48孔深孔板) """
-    print("Warning: Code '22' (48孔深孔板) dimensions are null in JSON.")
+    """ Code: 22 (48孔深孔板)
+
+    厂商 JSON 中该型号尺寸为 null，下面的 size/间距为按标准 SBS 48 孔板手工填写的值。
+    """
     return PRCXI9300Plate(
         name=name, 
         size_x=127, 

@@ -350,7 +350,7 @@ class PRCXI9300Plate(Plate):
     """
     专用孔板类：
     1. 继承自 PLR 原生 Plate，保留所有物理特性。
-    2. 增加 material_info 参数，用于在初始化时直接绑定 Unilab UUID。
+    2. 增加 material_info 参数，用于在初始化时直接绑定 Uni-Lab-OS UUID。
     """
 
     def __init__(
@@ -503,9 +503,6 @@ class PRCXI9300Trash(Trash):
         material_info: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
-
-        if name != "trash":
-            print(f"Warning: PRCXI9300Trash usually expects name='trash' for backend logic, but got '{name}'.")
         super().__init__(name, size_x, size_y, size_z, **kwargs)
         self._unilabos_state = {}
         # 初始化时注入 UUID
@@ -1466,8 +1463,8 @@ class PRCXI9300Backend(LiquidHandlerBackend):
             axis = "Right"
         else:
             raise ValueError("Invalid use channels: " + str(_use_channels))
-        # 检查trash #
-        if ops[0].resource.name == "trash":
+        # 检查trash：按类型识别，资源名不必固定为 "trash"
+        if isinstance(ops[0].resource, Trash) or ops[0].resource.name == "trash":
 
             PlateNo = ops[0].resource.parent.parent.children.index(ops[0].resource.parent) + 1
 
