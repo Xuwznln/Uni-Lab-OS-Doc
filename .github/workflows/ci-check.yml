@@ -8,7 +8,9 @@ on:
 
 jobs:
   registry-check:
-    runs-on: windows-latest
+    # ROS Humble 与 Windows 原生扩展依赖固定的 VS 2022 运行时；与构建矩阵
+    # 使用同一映像，避免 latest 漂移后在导入校验阶段触发原生崩溃。
+    runs-on: windows-2022
 
     env:
       # Fix Unicode encoding issue on Windows runner (cp1252 -> utf-8)

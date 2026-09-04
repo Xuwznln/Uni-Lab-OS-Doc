@@ -63,7 +63,9 @@ jobs:
             platform: osx-64
           - os: macos-latest # ARM64
             platform: osx-arm64
-          - os: windows-latest
+          # bld_ament_cmake.bat uses the VS 2022 generator; keep the runner
+          # aligned with the compiler package and its installed generator.
+          - os: windows-2022
             platform: win-64
 
     runs-on: ${{ matrix.os }}
@@ -116,6 +118,9 @@ jobs:
           echo "CONDA_NO_PLUGINS=true" >> "$GITHUB_ENV"
           echo "PYTHONUTF8=1" >> "$GITHUB_ENV"
           echo "PYTHONIOENCODING=utf-8" >> "$GITHUB_ENV"
+          # anaconda-client 1.13+ 将顶层 anaconda CLI 改为插件入口；
+          # 用其兼容的 standalone 入口检查客户端版本。
+          echo "ANACONDA_CLIENT_FORCE_STANDALONE=1" >> "$GITHUB_ENV"
 
       - name: Show environment info
         if: steps.should_build.outputs.should_build == 'true'
@@ -123,7 +128,7 @@ jobs:
           conda info
           conda list -n build-env | grep -E "(rattler-build|anaconda-client)"
           conda run -n build-env rattler-build --version
-          conda run -n build-env anaconda --version
+          conda run -n build-env python -m binstar_client.scripts.cli --version
           echo "Platform: ${{ matrix.platform }}"
           echo "OS: ${{ matrix.os }}"
           echo "Build full package: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_full == 'true' }}"

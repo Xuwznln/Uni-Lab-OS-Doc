@@ -2,10 +2,6 @@ import json
 import serial
 import struct
 import crcmod
-import tkinter as tk
-from tkinter import messagebox
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import time
 
 class RamanObj:
@@ -127,6 +123,8 @@ class RamanObj:
             data = receive_data(serial_port, 4136)
 
             if not data or len(data) != 4136:
+                from tkinter import messagebox
+
                 messagebox.showerror("\u9519\u8bef", "\u63a5\u6536\u6570\u636e\u5931\u8d25\u6216\u6570\u636e\u957f\u5ea6\u4e0d\u6b63\u786e")
                 return
 
@@ -140,6 +138,8 @@ class RamanObj:
             print(f"\u8fd4\u56de\u503c: {values}")
             return values
         except Exception as e:
+            from tkinter import messagebox
+
             messagebox.showerror("\u9519\u8bef", f"\u4e32\u53e3\u521d\u59cb\u5316\u5931\u8d25: {e}")
             return None
 
@@ -182,6 +182,8 @@ class RamanObj:
             raise f"error: {e}"
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
     raman = RamanObj(port_laser='COM20', port_ccd='COM2')
     ccd_data = raman.raman_without_background_average('test44',0.5,3000,1)
 
