@@ -63,7 +63,7 @@ pytest tests/resources/test_resourcetreeset.py::TestClassName::test_method  # si
 
 ### Key Data Flow
 
-1. Graph file → `graphio.read_node_link_json()` → `(nx.Graph, ResourceTreeSet, resource_links)`
+1. Graph file → `graphio.read_node_link_json()` → `(nx.Graph, ResourceTreeSet, resource_links)`. `graphio` and the Graph Authority accept the current node-link contract only; old-format graphs (legacy cloud exports, dev-era examples with `class`/root `position`/`children`) are upgraded once at the `-g` / `unilab graph upload` read boundary by `server/backend/legacy_adaptor/legacy/graph.py`
 2. `ResourceTreeSet` + `Registry` → `initialize_device.initialize_device_from_dict()` → `ROS2DeviceNode` instances
 3. Device nodes communicate via ROS2 topics/actions or HostLink
 4. Backend control notices use `server/backend/legacy_adaptor/websocket.py`; complete state and commands use the microbackend HTTP APIs in `server/api/`
