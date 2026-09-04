@@ -41,9 +41,10 @@ if [[ $target_platform =~ linux.* ]]; then
 fi;
 
 # Apple libc++ 21 hides the C++26-removed conversion helpers by default;
-# Humble's generated rosidl_runtime_cpp headers still use wstring_convert.
+# Humble's generated rosidl_runtime_cpp headers still use wstring_convert and
+# include <codecvt> without the <locale> header that declares the type.
 if [[ $target_platform =~ osx.* ]]; then
-    export CXXFLAGS="${CXXFLAGS} -D_LIBCPP_ENABLE_CXX26_REMOVED_WSTRING_CONVERT"
+    export CXXFLAGS="${CXXFLAGS} -D_LIBCPP_ENABLE_CXX26_REMOVED_WSTRING_CONVERT -include locale"
 fi;
 
 # Needed for qt-gui-cpp ..
