@@ -1387,6 +1387,10 @@ class Registry:
         total_items = len(self.device_type_registry) + len(self.resource_type_registry)
 
         lock = threading.Lock()
+        # importlib、ImportManager 以及部分 ROS/Windows 原生扩展并不保证可并发初始化。
+        # 注册表校验只需验证导入和生成 schema，串行化这一段可避免进程级访问冲突；
+        # 外层任务结构仍保留，便于统一收集错误。
+        import_lock = threading.Lock()
 
         def _verify_device(device_id: str, entry: dict):
             nonlocal import_success_count, resolved_count
@@ -1397,16 +1401,17 @@ class Registry:
                 return None
 
             try:
-                cls = import_class(module_str)
-                with lock:
-                    import_success_count += 1
-                    resolved_count += 1
+                with import_lock:
+                    cls = import_class(module_str)
+                    with lock:
+                        import_success_count += 1
+                        resolved_count += 1
 
-                # 尝试用动态信息增强注册表
-                try:
-                    self.resolve_types_for_device(device_id, cls)
-                except Exception as e:
-                    logger.debug(f"[UniLab Registry/Verify] 设备 {device_id} 类型解析失败: {e}")
+                    # 尝试用动态信息增强注册表
+                    try:
+                        self.resolve_types_for_device(device_id, cls)
+                    except Exception as e:
+                        logger.debug(f"[UniLab Registry/Verify] 设备 {device_id} 类型解析失败: {e}")
 
                 return None
             except Exception as e:
@@ -1425,9 +1430,10 @@ class Registry:
                 return None
 
             try:
-                import_class(module_str)
-                with lock:
-                    import_success_count += 1
+                with import_lock:
+                    import_class(module_str)
+                    with lock:
+                        import_success_count += 1
                 return None
             except Exception as e:
                 logger.warning(
