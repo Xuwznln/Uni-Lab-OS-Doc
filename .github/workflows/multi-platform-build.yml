@@ -69,7 +69,9 @@ jobs:
           - os: macos-latest # ARM64
             platform: osx-arm64
             env_file: unilabos-osx-arm64.yaml
-          - os: windows-latest
+          # bld_ament_cmake.bat uses the VS 2022 generator; windows-latest
+          # moved to an image with VS 2026 and no longer provides that generator.
+          - os: windows-2022
             platform: win-64
             env_file: unilabos-win64.yaml
 

@@ -63,7 +63,9 @@ jobs:
             platform: osx-64
           - os: macos-latest # ARM64
             platform: osx-arm64
-          - os: windows-latest
+          # bld_ament_cmake.bat uses the VS 2022 generator; keep the runner
+          # aligned with the compiler package and its installed generator.
+          - os: windows-2022
             platform: win-64
 
     runs-on: ${{ matrix.os }}

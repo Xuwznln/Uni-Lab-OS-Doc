@@ -40,6 +40,12 @@ if [[ $target_platform =~ linux.* ]]; then
     export CXXFLAGS="${CXXFLAGS} -D__STDC_FORMAT_MACROS=1"
 fi;
 
+# Apple libc++ 21 hides the C++26-removed conversion helpers by default;
+# Humble's generated rosidl_runtime_cpp headers still use wstring_convert.
+if [[ $target_platform =~ osx.* ]]; then
+    export CXXFLAGS="${CXXFLAGS} -D_LIBCPP_ENABLE_CXX26_REMOVED_WSTRING_CONVERT"
+fi;
+
 # Needed for qt-gui-cpp ..
 if [[ $target_platform =~ linux.* ]]; then
   ln -s $GCC ${BUILD_PREFIX}/bin/gcc
