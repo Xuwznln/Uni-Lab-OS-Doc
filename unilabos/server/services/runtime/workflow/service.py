@@ -86,7 +86,23 @@ _ERRORS = {
         409,
         "当前调度权威运行模式不允许创建本地可执行工作流任务",
     ),
+    "manual_confirmation_not_assignee": (
+        409,
+        "确认人不在该确认单的指派名单中，请以被指派的用户身份确认",
+    ),
+    "manual_confirmation_decided": (409, "该人工确认已被处理，请刷新查看结果"),
+    "manual_confirmation_key_used": (
+        409,
+        "决策幂等键已被其他确认单使用，请换一个键重试",
+    ),
     "internal_error": (500, "本地工作流服务出现错误，请重试或查看日志"),
+}
+
+# store 层 StoreConflict 文案 → 面向前端的稳定错误码（人工确认决策）
+_MANUAL_CONFIRMATION_CONFLICTS = {
+    "confirmed_by is not an assignee": "manual_confirmation_not_assignee",
+    "manual confirmation already has another decision": "manual_confirmation_decided",
+    "decision_idempotency_key already used": "manual_confirmation_key_used",
 }
 _HASH_TOKEN = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _NO_EXPECTED_HASH = object()
@@ -845,7 +861,11 @@ class WorkflowService(WorkflowStore):
             )
         except StoreNotFound:
             raise WorkflowError("not_found") from None
-        except (StoreConflict, TypeError, ValueError):
+        except StoreConflict as exc:
+            raise WorkflowConflict(
+                _MANUAL_CONFIRMATION_CONFLICTS.get(str(exc), "conflict")
+            ) from None
+        except (TypeError, ValueError):
             raise WorkflowConflict("conflict") from None
         self._notify_manual_confirmation_resolver(result)
         return result
