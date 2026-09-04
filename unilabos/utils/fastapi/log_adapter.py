@@ -6,7 +6,33 @@
 
 import logging
 
-from unilabos.utils.log import debug, info, warning, error, critical
+from unilabos.utils.log import debug, info, warning, error, critical, trace
+
+# 只读请求：前端轮询与 CORS 预检，每秒数十条，不该出现在控制台
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def access_log_func(record: logging.LogRecord):
+    """按 HTTP 方法与状态码给 uvicorn 访问日志分级。
+
+    写请求（提交工作流、保存图、人工确认……）才是值得在控制台看到的事件，保持 INFO；
+    只读请求降到 TRACE（仍全量落盘）；4xx 说明客户端用错了接口，5xx 是服务端故障。
+    uvicorn 访问日志的 args 固定为 ``(client, method, path, http_version, status)``，
+    形状不符时按 INFO 原样输出。
+    """
+    args = record.args
+    if not isinstance(args, tuple) or len(args) != 5:
+        return info
+    method, status = args[1], args[4]
+    if not isinstance(status, int):
+        return info
+    if status >= 500:
+        return warning
+    if status >= 400:
+        return debug
+    if str(method).upper() in _READ_METHODS:
+        return trace
+    return info
 
 
 class UvicornLogAdapter:
@@ -57,7 +83,10 @@ class UvicornToIlabosHandler(logging.Handler):
         """发送日志记录到ilabos日志系统"""
         try:
             msg = self.format(record)
-            log_func = self.level_map.get(record.levelno, info)
+            if record.name == "uvicorn.access":
+                log_func = access_log_func(record)
+            else:
+                log_func = self.level_map.get(record.levelno, info)
             # 根据日志源添加前缀
             if record.name.startswith("uvicorn"):
                 prefix = "[Uvicorn] "
@@ -78,7 +107,8 @@ def setup_fastapi_logging():
     # 配置Uvicorn的日志
     UvicornLogAdapter.configure()
 
-    # 返回适合uvicorn.run()的日志配置
+    # 返回适合uvicorn.run()的日志配置。着色交给我们自己的 ColoredFormatter，
+    # uvicorn 若再染色，进程号/URL 里的 ANSI 转义会原样写进日志文件。
     return {
         "version": 1,
         "disable_existing_loggers": False,
@@ -86,7 +116,7 @@ def setup_fastapi_logging():
             "default": {
                 "()": "uvicorn.logging.DefaultFormatter",
                 "fmt": "%(message)s",
-                "use_colors": True,
+                "use_colors": False,
             },
         },
         "handlers": {

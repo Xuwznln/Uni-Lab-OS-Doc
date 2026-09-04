@@ -7,6 +7,7 @@ import webbrowser
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 
 from unilabos.config.config import HTTPConfig
@@ -72,6 +73,20 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Last-Event-ID"],
 )
+
+
+@app.exception_handler(ClientDisconnect)
+async def _on_client_disconnect(_request: Request, _exc: ClientDisconnect) -> Response:
+    """客户端在请求体读完之前断开（刷新页面、取消请求）。
+
+    FastAPI 自己解析 body 时会把这种情况吞成 400，但 Workflow / Registry 路由为了
+    按 Backend 规则预读 JSON 会手动 ``await request.body()``，异常就会一路冒到
+    uvicorn 并被打成整段 ``Exception in ASGI application`` 堆栈。响应此时已经发不
+    出去，这里只让请求正常收尾；499 沿用 nginx 的 "Client Closed Request" 语义，
+    仅供中间件与追踪记录。
+    """
+
+    return Response(status_code=499)
 
 
 @app.middleware("http")
