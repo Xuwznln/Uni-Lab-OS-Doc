@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Development installation script for UniLabOS.
+Development installation script for Uni-Lab-OS.
 Auto-detects Chinese locale and uses appropriate mirror.
 
 Usage:
@@ -99,7 +99,7 @@ def check_uv_available() -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Development installation script for UniLabOS")
+    parser = argparse.ArgumentParser(description="Development installation script for Uni-Lab-OS")
     parser.add_argument("--china", action="store_true", help="Force use China mirror (Tsinghua)")
     parser.add_argument("--no-mirror", action="store_true", help="Force use default PyPI (no mirror)")
     parser.add_argument(
@@ -118,7 +118,7 @@ def main():
         sys.exit(1)
 
     print("=" * 60)
-    print("UniLabOS Development Installation")
+    print("Uni-Lab-OS Development Installation")
     print("=" * 60)
     print(f"Project root: {project_root}")
     print()

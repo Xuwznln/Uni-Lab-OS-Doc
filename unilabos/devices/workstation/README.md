@@ -3,7 +3,7 @@
 ### 核心原则
 
 1. **PyLabRobot为物料管理核心**：使用PyLabRobot的Deck系统作为物料管理的基础，利用其成熟的Resource体系
-2. **Graphio转换函数集成**：使用graphio中的`resource_ulab_to_plr`等转换函数实现UniLab与PLR格式的无缝转换
+2. **Graphio转换函数集成**：使用graphio中的`resource_ulab_to_plr`等转换函数实现Uni-Lab-OS与PLR格式的无缝转换
 3. **关注点分离**：基类专注核心物料系统，HTTP服务等功能在子类中实现
 4. **外部系统集成模式**：通过ResourceSynchronizer抽象类提供外部物料系统对接模式
 
@@ -62,9 +62,9 @@ async def handle_external_change(self, change_info: Dict[str, Any]) -> bool:
 
 ### 核心依赖
 - **PyLabRobot**: 物料资源管理核心（Deck, Resource, Coordinate）
-- **GraphIO转换函数**: UniLab ↔ PLR格式转换
-  - `resource_ulab_to_plr`: UniLab格式转PLR格式
-  - `resource_plr_to_ulab`: PLR格式转UniLab格式
+- **GraphIO转换函数**: Uni-Lab-OS ↔ PLR格式转换
+  - `resource_ulab_to_plr`: Uni-Lab-OS格式转PLR格式
+  - `resource_plr_to_ulab`: PLR格式转Uni-Lab-OS格式
   - `convert_resources_to_type`: 通用资源类型转换
 - **ROS2**: 基础设备节点通信（BaseROS2DeviceNode）
 

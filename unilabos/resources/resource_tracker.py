@@ -1271,7 +1271,7 @@ class ResourceTreeSet(object):
                     plr_dict.pop("category", None)
                 plr_resource = sub_cls.deserialize(plr_dict, allow_marshal=True)
                 # PLR 的 Resource.deserialize 仍不恢复自身 location；统一只在
-                # UniLabOS 适配边界补一次，避免再改 PLR 各个子类的 deserialize。
+                # Uni-Lab-OS 适配边界补一次，避免再改 PLR 各个子类的 deserialize。
                 from pylabrobot.resources import Coordinate
                 from pylabrobot.serializer import deserialize
 

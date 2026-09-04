@@ -171,7 +171,7 @@ class BioyondResourceSynchronizer(ResourceSynchronizer):
                 logger.warning("从Bioyond获取的物料数据为空")
                 return False
 
-            # 转换为UniLab格式
+            # 转换为Uni-Lab-OS格式
             unilab_resources = resource_bioyond_to_plr(
                 all_bioyond_data,
                 type_mapping=self.workstation.bioyond_config["material_type_mappings"],
@@ -886,7 +886,7 @@ class BioyondWorkstation(WorkstationBase):
     def resource_tree_remove(self, resources: List[ResourcePLR]) -> None:
         """处理资源删除时的同步（出库操作）
 
-        当 UniLab 前端删除物料时，需要将删除操作同步到 Bioyond 系统（出库）
+        当 Uni-Lab-OS 前端删除物料时，需要将删除操作同步到 Bioyond 系统（出库）
 
         Args:
             resources: 要删除的资源列表
@@ -1033,7 +1033,7 @@ class BioyondWorkstation(WorkstationBase):
 
             # 调用 Bioyond 出库 API
             logger.info(f"[resource_tree_remove] 📤 调用 Bioyond API 出库物料...")
-            logger.info(f"   UniLab 名称: {resource.name}")
+            logger.info(f"   Uni-Lab-OS 名称: {resource.name}")
             if material_bioyond_name and material_bioyond_name != resource.name:
                 logger.info(f"   Bioyond 名称: {material_bioyond_name}")
             logger.info(f"   物料ID: {material_bioyond_id[:8]}...")
@@ -1092,7 +1092,7 @@ class BioyondWorkstation(WorkstationBase):
     def resource_tree_update(self, resources: List[ResourcePLR]) -> None:
         """处理资源更新时的同步（位置移动、属性修改等）
 
-        当 UniLab 前端更新物料信息时（如修改位置），需要将更新操作同步到 Bioyond 系统
+        当 Uni-Lab-OS 前端更新物料信息时（如修改位置），需要将更新操作同步到 Bioyond 系统
 
         Args:
             resources: 要更新的资源列表
@@ -1588,7 +1588,7 @@ class BioyondWorkstation(WorkstationBase):
 
             logger.info(f"从文件加载Bioyond数据: {file_path}")
 
-            # 转换为UniLab格式
+            # 转换为Uni-Lab-OS格式
             unilab_resources = resource_bioyond_to_plr(
                 bioyond_data,
                 type_mapping=self.bioyond_config["material_type_mappings"],

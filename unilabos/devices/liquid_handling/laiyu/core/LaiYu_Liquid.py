@@ -1,7 +1,7 @@
 """
 LaiYu_Liquid 液体处理工作站主要集成文件
 
-该模块实现了 LaiYu_Liquid 与 UniLabOS 系统的集成，提供标准化的液体处理接口。
+该模块实现了 LaiYu_Liquid 与 Uni-Lab-OS 系统的集成，提供标准化的液体处理接口。
 主要包含：
 - LaiYuLiquidBackend: 硬件通信后端
 - LaiYuLiquid: 主要接口类
@@ -252,7 +252,7 @@ def get_module_info():
         "name": "LaiYu_Liquid",
         "version": "1.0.0",
         "description": "LaiYu液体处理工作站模块，提供移液器控制、XYZ轴控制和资源管理功能",
-        "author": "UniLabOS Team",
+        "author": "Uni-Lab-OS Team",
         "capabilities": [
             "移液器控制",
             "XYZ轴运动控制", 

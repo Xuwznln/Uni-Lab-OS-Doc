@@ -2,7 +2,7 @@
 
 ## 概述
 
-LaiYu_Liquid 是一个完全集成到 UniLabOS 系统的自动化液体处理工作站，基于 RS485 通信协议，专为精确的液体分配和转移操作而设计。本模块已完成生产环境部署准备，提供完整的硬件控制、资源管理和标准化接口。
+LaiYu_Liquid 是一个完全集成到 Uni-Lab-OS 系统的自动化液体处理工作站，基于 RS485 通信协议，专为精确的液体分配和转移操作而设计。本模块已完成生产环境部署准备，提供完整的硬件控制、资源管理和标准化接口。
 
 ## 系统组成
 
@@ -15,7 +15,7 @@ LaiYu_Liquid 是一个完全集成到 UniLabOS 系统的自动化液体处理工
 ### 软件架构
 - **驱动层**: 底层硬件通信驱动，支持RS485协议
 - **控制层**: 高级控制逻辑和坐标系管理
-- **抽象层**: 完全符合UniLabOS标准的液体处理接口
+- **抽象层**: 完全符合Uni-Lab-OS标准的液体处理接口
 - **资源层**: 标准化的实验器具和耗材管理
 
 ## 🎯 生产就绪组件
@@ -42,7 +42,7 @@ LaiYu_Liquid 是一个完全集成到 UniLabOS 系统的自动化液体处理工
   - 运动路径优化
   - 安全运动控制
 
-### ✅ UniLabOS集成 (`core/LaiYu_Liquid.py`)
+### ✅ Uni-Lab-OS集成 (`core/LaiYu_Liquid.py`)
 - **完整的液体处理抽象接口**
 - **标准化的资源管理系统**
 - **与PyLabRobot兼容的后端实现**
@@ -275,11 +275,11 @@ print(f"SOPA连接状态: {'成功' if success else '失败'}")
 3. **设备连接**: 检查RS485适配器和设备地址配置
 
 ### 联系方式
-- **技术文档**: 查看UniLabOS官方文档
+- **技术文档**: 查看Uni-Lab-OS官方文档
 - **问题反馈**: 通过GitHub Issues提交问题
-- **社区支持**: 加入UniLabOS开发者社区
+- **社区支持**: 加入Uni-Lab-OS开发者社区
 
 ---
 
 **LaiYu_Liquid v1.0.0** - 生产就绪的液体处理工作站集成模块  
-© 2024 UniLabOS Project. All rights reserved.
+© 2024 Uni-Lab-OS Project. All rights reserved.

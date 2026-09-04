@@ -64,12 +64,12 @@ class Bottle(Well):
 
 ## 2. 序列化与反序列化
 
-### PLR ↔ UniLab 转换
+### PLR ↔ Uni-Lab-OS 转换
 
 | 函数 | 位置 | 方向 |
 |------|------|------|
-| `ResourceTreeSet.from_plr_resources(resources)` | `resource_tracker.py` | PLR → UniLab |
-| `ResourceTreeSet.to_plr_resources()` | `resource_tracker.py` | UniLab → PLR |
+| `ResourceTreeSet.from_plr_resources(resources)` | `resource_tracker.py` | PLR → Uni-Lab-OS |
+| `ResourceTreeSet.to_plr_resources()` | `resource_tracker.py` | Uni-Lab-OS → PLR |
 
 ### `from_plr_resources` 流程
 

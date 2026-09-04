@@ -1,4 +1,4 @@
-"""UniLab HTTP/WS 地址的统一解析工具。"""
+"""Uni-Lab-OS HTTP/WS 地址的统一解析工具。"""
 
 from __future__ import annotations
 

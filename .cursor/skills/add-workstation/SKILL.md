@@ -532,8 +532,8 @@ class MyResourceSynchronizer(ResourceSynchronizer):
         return True
 
     def sync_to_external(self, resource) -> bool:
-        """将 UniLab 侧物料变更同步到外部系统"""
-        # 以 UniLab 为准：将 PLR 资源转为外部格式并推送
+        """将 Uni-Lab-OS 侧物料变更同步到外部系统"""
+        # 以 Uni-Lab-OS 为准：将 PLR 资源转为外部格式并推送
         external_format = self._convert_to_external(resource)
         return self._push_to_external(external_format)
 
@@ -545,7 +545,7 @@ class MyResourceSynchronizer(ResourceSynchronizer):
 同步策略取决于业务场景：
 
 - **以外部工站为准**：从外部 API 查询物料数据，反向创建对应的 PLR 资源实例放到 Deck 上
-- **以 UniLab 为准**：UniLab 侧的物料变更通过 `sync_to_external` 推送到外部系统
+- **以 Uni-Lab-OS 为准**：Uni-Lab-OS 侧的物料变更通过 `sync_to_external` 推送到外部系统
 
 在工作站 `post_init` 中初始化同步器：
 

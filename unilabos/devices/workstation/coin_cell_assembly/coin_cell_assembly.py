@@ -419,7 +419,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             return cmd_feedback[0]
         
     def _unilab_send_finished_cmd(self, num=None):
-        """Unilab发送已知一组组装完成信号"""
+        """Uni-Lab-OS发送已知一组组装完成信号"""
         if num is not None:
             self.success = False
             self.client.use_node('UNILAB_SEND_FINISHED_CMD').write(num)
@@ -430,7 +430,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             return cmd_feedback[0]
 
     def _unilab_rece_finished_cmd(self, num=None):
-        """Unilab接收已知一组组装完成信号"""
+        """Uni-Lab-OS接收已知一组组装完成信号"""
         if num is not None:
             self.success = False
             self.client.use_node('UNILAB_RECE_FINISHED_CMD').write(num)
