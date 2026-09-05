@@ -125,20 +125,13 @@ linear_motion.grbl:
         type: UniLabJsonCommandAsync
       move_through_points:
         error_policy: {}
-        feedback:
-          current_pose: current_pose
-          distance_remaining: distance_remaining
-          estimated_time_remaining: estimated_time_remaining
-          navigation_time: navigation_time
-          number_of_poses_remaining: number_of_poses_remaining
-          number_of_recoveries: number_of_recoveries
+        feedback: {}
         goal:
           behavior_tree: behavior_tree
           poses: poses
           positions: positions
         goal_default:
-          behavior_tree: ''
-          poses: []
+          positions: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
@@ -147,244 +140,35 @@ linear_motion.grbl:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                current_pose:
-                  additionalProperties: false
-                  properties:
-                    header:
-                      additionalProperties: false
-                      properties:
-                        frame_id:
-                          type: string
-                        stamp:
-                          additionalProperties: false
-                          properties:
-                            nanosec:
-                              maximum: 4294967295
-                              minimum: 0
-                              type: integer
-                            sec:
-                              maximum: 2147483647
-                              minimum: -2147483648
-                              type: integer
-                          required:
-                          - sec
-                          - nanosec
-                          title: stamp
-                          type: object
-                      required:
-                      - stamp
-                      - frame_id
-                      title: header
-                      type: object
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                  required:
-                  - header
-                  - pose
-                  title: current_pose
-                  type: object
-                distance_remaining:
-                  maximum: 3.4028235e+38
-                  minimum: -3.4028235e+38
-                  type: number
-                estimated_time_remaining:
-                  additionalProperties: false
-                  properties:
-                    nanosec:
-                      maximum: 4294967295
-                      minimum: 0
-                      type: integer
-                    sec:
-                      maximum: 2147483647
-                      minimum: -2147483648
-                      type: integer
-                  required:
-                  - sec
-                  - nanosec
-                  title: estimated_time_remaining
-                  type: object
-                navigation_time:
-                  additionalProperties: false
-                  properties:
-                    nanosec:
-                      maximum: 4294967295
-                      minimum: 0
-                      type: integer
-                    sec:
-                      maximum: 2147483647
-                      minimum: -2147483648
-                      type: integer
-                  required:
-                  - sec
-                  - nanosec
-                  title: navigation_time
-                  type: object
-                number_of_poses_remaining:
-                  maximum: 32767
-                  minimum: -32768
-                  type: integer
-                number_of_recoveries:
-                  maximum: 32767
-                  minimum: -32768
-                  type: integer
               title: NavigateThroughPoses_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                behavior_tree:
-                  type: string
-                poses:
+                positions:
                   items:
-                    properties:
-                      header:
-                        properties:
-                          frame_id:
-                            type: string
-                          stamp:
-                            properties:
-                              nanosec:
-                                type: integer
-                              sec:
-                                type: integer
-                            required:
-                            - sec
-                            - nanosec
-                            title: stamp
-                            type: object
-                        required:
-                        - stamp
-                        - frame_id
-                        title: header
-                        type: object
-                      pose:
-                        properties:
-                          orientation:
-                            properties:
-                              w:
-                                type: number
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            - w
-                            title: orientation
-                            type: object
-                          position:
-                            properties:
-                              x:
-                                type: number
-                              y:
-                                type: number
-                              z:
-                                type: number
-                            required:
-                            - x
-                            - y
-                            - z
-                            title: position
-                            type: object
-                        required:
-                        - position
-                        - orientation
-                        title: pose
-                        type: object
-                    required:
-                    - header
-                    - pose
                     type: object
                   type: array
+              required:
+              - positions
               title: NavigateThroughPoses_Goal
               type: object
             result:
-              additionalProperties: false
-              properties: {}
               title: NavigateThroughPoses_Result
-              type: object
           required:
           - goal
-          title: NavigateThroughPoses
+          title: move_through_points参数
           type: object
         type: NavigateThroughPoses
       set_spindle_speed:
         error_policy: {}
-        feedback:
-          error: error
-          header: header
-          position: position
-          velocity: velocity
+        feedback: {}
         goal:
           max_velocity: max_velocity
           min_duration: min_duration
           position: position
           spindle_speed: spindle_speed
         goal_default:
-          max_velocity: 0.0
-          min_duration:
-            nanosec: 0
-            sec: 0
-          position: 0.0
+          max_velocity: 500
+          spindle_speed: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
@@ -393,84 +177,23 @@ linear_motion.grbl:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                error:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                header:
-                  additionalProperties: false
-                  properties:
-                    frame_id:
-                      type: string
-                    stamp:
-                      additionalProperties: false
-                      properties:
-                        nanosec:
-                          maximum: 4294967295
-                          minimum: 0
-                          type: integer
-                        sec:
-                          maximum: 2147483647
-                          minimum: -2147483648
-                          type: integer
-                      required:
-                      - sec
-                      - nanosec
-                      title: stamp
-                      type: object
-                  required:
-                  - stamp
-                  - frame_id
-                  title: header
-                  type: object
-                position:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                velocity:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
               title: SingleJointPosition_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 max_velocity:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 500
                   type: number
-                min_duration:
-                  additionalProperties: false
-                  properties:
-                    nanosec:
-                      maximum: 4294967295
-                      minimum: 0
-                      type: integer
-                    sec:
-                      maximum: 2147483647
-                      minimum: -2147483648
-                      type: integer
-                  required:
-                  - sec
-                  - nanosec
-                  title: min_duration
-                  type: object
-                position:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                spindle_speed:
                   type: number
+              required:
+              - spindle_speed
               title: SingleJointPosition_Goal
               type: object
             result:
-              additionalProperties: true
               title: SingleJointPosition_Result
-              type: object
           required:
           - goal
-          title: SingleJointPosition
+          title: set_spindle_speed参数
           type: object
         type: SingleJointPosition
     module: unilabos.devices.cnc.grbl_sync:GrblCNC
@@ -712,142 +435,100 @@ linear_motion.toyo_xyz.sim:
         type: UniLabJsonCommand
       pick_and_place:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   description: A JSON-formatted string that includes option, target,
                     speed, lift_height, mt_height
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: pick_and_place参数
           type: object
         type: SendCmd
       set_position:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   description: A JSON-formatted string that includes quaternion, speed,
                     position
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_position参数
           type: object
         type: SendCmd
       set_status:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   description: A JSON-formatted string that includes speed
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_status参数
           type: object
         type: SendCmd
     module: unilabos.devices.ros_dev.moveit_interface:MoveitInterface

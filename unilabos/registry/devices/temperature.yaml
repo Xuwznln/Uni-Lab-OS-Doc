@@ -129,47 +129,33 @@ chiller:
         type: UniLabJsonCommand
       set_temperature:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_temperature参数
           type: object
         type: SendCmd
     module: unilabos.devices.temperature.chiller:Chiller
@@ -290,8 +276,7 @@ heaterstirrer.dalong:
         type: UniLabJsonCommand
       heatchill:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           pressure: pressure
           purpose: purpose
@@ -304,276 +289,114 @@ heaterstirrer.dalong:
           time_spec: time_spec
           vessel: vessel
         goal_default:
-          pressure: ''
-          purpose: ''
-          reflux_solvent: ''
-          stir: false
-          stir_speed: 0.0
-          temp: 0.0
-          temp_spec: ''
-          time: ''
-          time_spec: ''
-          vessel:
-            category: ''
-            children: []
-            config: ''
-            data: ''
-            id: ''
-            name: ''
-            parent: ''
-            pose:
-              orientation:
-                w: 1.0
-                x: 0.0
-                y: 0.0
-                z: 0.0
-              position:
-                x: 0.0
-                y: 0.0
-                z: 0.0
-            sample_id: ''
-            type: ''
+          purpose: reaction
+          stir: true
+          stir_speed: 300
+          temp: null
+          time: 3600
+          vessel: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          message: message
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: HeatChill_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                pressure:
-                  type: string
                 purpose:
-                  type: string
-                reflux_solvent:
+                  default: reaction
                   type: string
                 stir:
+                  default: true
                   type: boolean
                 stir_speed:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
+                  default: 300
                   type: number
                 temp:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
-                temp_spec:
-                  type: string
                 time:
-                  type: string
-                time_spec:
-                  type: string
+                  default: 3600
+                  type: number
                 vessel:
-                  additionalProperties: false
-                  properties:
-                    category:
-                      type: string
-                    children:
-                      items:
-                        type: string
-                      type: array
-                    config:
-                      type: string
-                    data:
-                      type: string
-                    id:
-                      type: string
-                    name:
-                      type: string
-                    parent:
-                      type: string
-                    pose:
-                      additionalProperties: false
-                      properties:
-                        orientation:
-                          additionalProperties: false
-                          properties:
-                            w:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          - w
-                          title: orientation
-                          type: object
-                        position:
-                          additionalProperties: false
-                          properties:
-                            x:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            y:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                            z:
-                              maximum: 1.7976931348623157e+308
-                              minimum: -1.7976931348623157e+308
-                              type: number
-                          required:
-                          - x
-                          - y
-                          - z
-                          title: position
-                          type: object
-                      required:
-                      - position
-                      - orientation
-                      title: pose
-                      type: object
-                    sample_id:
-                      type: string
-                    type:
-                      type: string
-                  required:
-                  - id
-                  - name
-                  - sample_id
-                  - children
-                  - parent
-                  - type
-                  - category
-                  - pose
-                  - config
-                  - data
                   title: vessel
-                  type: object
+                  type: string
+              required:
+              - vessel
+              - temp
               title: HeatChill_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                message:
-                  type: string
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: HeatChill_Result
-              type: object
           required:
           - goal
-          title: HeatChill
+          title: heatchill参数
           type: object
         type: HeatChill
       set_temp_target:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
           temp: temp
         goal_default:
-          command: ''
+          temp: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                command:
+                temp:
                   type: string
+              required:
+              - temp
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_temp_target参数
           type: object
         type: SendCmd
       set_temp_warning:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
           temp: temp
         goal_default:
-          command: ''
+          temp: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                command:
+                temp:
                   type: string
+              required:
+              - temp
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_temp_warning参数
           type: object
         type: SendCmd
     module: unilabos.devices.heaterstirrer.dalong:HeaterStirrer_DaLong
@@ -756,47 +579,33 @@ tempsensor:
         type: UniLabJsonCommand
       set_warning:
         error_policy: {}
-        feedback:
-          status: status
+        feedback: {}
         goal:
           command: command
         goal_default:
-          command: ''
+          command: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                status:
-                  type: string
               title: SendCmd_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 command:
                   type: string
+              required:
+              - command
               title: SendCmd_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SendCmd_Result
-              type: object
           required:
           - goal
-          title: SendCmd
+          title: set_warning参数
           type: object
         type: SendCmd
     module: unilabos.devices.temperature.sensor_node:TempSensorNode
