@@ -541,89 +541,44 @@ gripper.mock:
         type: UniLabJsonCommand
       push_to:
         error_policy: {}
-        feedback:
-          effort: effort
-          position: position
-          reached_goal: reached_goal
-          stalled: stalled
+        feedback: {}
         goal:
           command: command
           position: position
           torque: torque
           velocity: velocity
         goal_default:
-          command:
-            max_effort: 0.0
-            position: 0.0
+          position: null
+          torque: null
+          velocity: 0.0
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          effort: effort
-          position: position
-          reached_goal: reached_goal
-          stalled: stalled
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: false
-              properties:
-                effort:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                position:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                reached_goal:
-                  type: boolean
-                stalled:
-                  type: boolean
               title: GripperCommand_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
-                command:
-                  additionalProperties: false
-                  properties:
-                    max_effort:
-                      maximum: 1.7976931348623157e+308
-                      minimum: -1.7976931348623157e+308
-                      type: number
-                    position:
-                      maximum: 1.7976931348623157e+308
-                      minimum: -1.7976931348623157e+308
-                      type: number
-                  required:
-                  - position
-                  - max_effort
-                  title: command
-                  type: object
+                position:
+                  type: number
+                torque:
+                  type: number
+                velocity:
+                  default: 0.0
+                  type: number
+              required:
+              - position
+              - torque
               title: GripperCommand_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                effort:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                position:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                reached_goal:
-                  type: boolean
-                stalled:
-                  type: boolean
               title: GripperCommand_Result
-              type: object
           required:
           - goal
-          title: GripperCommand
+          title: push_to参数
           type: object
         type: GripperCommand
     module: unilabos.devices.gripper.mock:MockGripper
