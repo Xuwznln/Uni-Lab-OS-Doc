@@ -407,6 +407,7 @@ def setup_server() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
             error(f"[Microbackend] 挂载 Materials Provider 失败: {exc}")
 
+    _routes_ready.set()
     return app
 
 
@@ -414,6 +415,16 @@ _uvicorn_server = None
 # 不监听端口的 Host 子进程：主线程在这里等停机请求，管理 API 由权威经控制 WS 下发执行
 _control_plane_stop = threading.Event()
 _serving_over_control_plane = False
+# setup_server() 挂完路由才置位。Host 子进程里控制 WS 先于主线程的 setup_server 连上权威，
+# 极快的动作会在路由挂好之前就跑完并上报；权威随即经 backend_http 来拉结果 payload，
+# 若此时对着还没挂 /history 的 app 执行就会 404。代理执行前先等这个事件。
+_routes_ready = threading.Event()
+
+
+def wait_routes_ready(timeout: float) -> bool:
+    """等待本进程管理 API 路由挂载完成；返回是否就绪。"""
+
+    return _routes_ready.wait(timeout)
 
 
 def request_server_shutdown() -> bool:

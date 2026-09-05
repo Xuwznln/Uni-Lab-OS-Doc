@@ -448,8 +448,19 @@ class BackendWebSocketClient(BaseBackendClient):
     async def _execute_local_http(self, request: BackendHttpRequest) -> EdgeHttpResponse:
         import httpx
 
-        from unilabos.server.api.app import app
+        from unilabos.server.api.app import app, wait_routes_ready
 
+        # 控制 WS 先于主线程的 setup_server 连上权威：极快的动作可能在路由挂好前就已上报终态，
+        # 权威随即来拉结果 payload。路由未挂好时对 app 执行只会得到误导性的 404，这里先等。
+        wait_seconds = min(30.0, float(request.timeout_seconds or 30.0))
+        if not await asyncio.to_thread(wait_routes_ready, wait_seconds):
+            body = json.dumps({"detail": "host management routes are not mounted yet"}).encode("utf-8")
+            return EdgeHttpResponse(
+                request_uuid=request.request_uuid,
+                status_code=503,
+                headers={"content-type": "application/json"},
+                body_base64=base64.b64encode(body).decode("ascii"),
+            )
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://host.local") as client:
             upstream = await client.request(
