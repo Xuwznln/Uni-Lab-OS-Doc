@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import itertools
 import json
 import logging
 import ssl as ssl_module
 import threading
+import time
 import traceback
 import uuid
 from collections.abc import Callable
-from queue import Empty, Full, Queue
+from queue import Empty, Full, PriorityQueue
 from typing import Any, Optional
 
 import websockets
@@ -20,9 +23,47 @@ from unilabos.config.config import BasicConfig, WSConfig
 from unilabos.server.backend.legacy_adaptor.session import BaseBackendClient
 from unilabos.server.backend.legacy_adaptor.url import build_backend_websocket_url
 from unilabos.protocol.runtime.data import RUNTIME_PROTOCOL_VERSION
+from unilabos.protocol.runtime.control import (
+    BackendHttpRequest,
+    EdgeHttpResponse,
+    PingNotice,
+    PongNotice,
+)
 from unilabos.utils.log import get_comm_logger
 
 logger = get_comm_logger()
+
+
+class _PriorityMessageQueue(PriorityQueue):
+    """控制面出站队列：应用层 ping/pong 优先于 durable 业务通知。
+
+    对外仍返回原始 dict，保留旧测试和调用方对 ``get_nowait`` 的约定；
+    内部用 priority + 单调序号保证同优先级消息 FIFO。
+    """
+
+    _FAST_ACTIONS = frozenset({"ping", "pong"})
+
+    def __init__(self, maxsize: int = 0) -> None:
+        super().__init__(maxsize=maxsize)
+        self._sequence = itertools.count()
+
+    def put(self, item: dict[str, Any], block: bool = True, timeout: float | None = None) -> None:
+        priority = 0 if item.get("action") in self._FAST_ACTIONS else 1
+        wrapped = (priority, next(self._sequence), item)
+        if priority == 0 and self.maxsize > 0:
+            # 心跳不能因为 durable 业务通知把有限出站队列填满而丢失。
+            # 直接在 Queue 的条件锁下入队，仍维护 unfinished_tasks，使
+            # ``join/task_done`` 语义与普通消息一致；业务消息继续遵守容量。
+            with self.not_full:
+                self._put(wrapped)
+                self.unfinished_tasks += 1
+                self.not_empty.notify()
+            return
+        super().put(wrapped, block=block, timeout=timeout)
+
+    def get(self, block: bool = True, timeout: float | None = None) -> dict[str, Any]:
+        _priority, _sequence, item = super().get(block=block, timeout=timeout)
+        return item
 
 
 def _get_business_coordinator() -> Any:
@@ -54,7 +95,7 @@ class BackendWebSocketClient(BaseBackendClient):
             else build_backend_websocket_url()
         ) or ""
         self._coordinator_getter = coordinator_getter or _get_business_coordinator
-        self._send_queue: Queue[dict[str, Any]] = Queue(maxsize=1000)
+        self._send_queue: PriorityQueue = _PriorityMessageQueue(maxsize=1000)
         self._running = False
         self._connected = False
         self._session_bound_for_connection = False
@@ -62,14 +103,19 @@ class BackendWebSocketClient(BaseBackendClient):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._websocket: Any = None
         self._reconnect_count = 0
+        # 业务通知串行处理，避免 coordinator 的 HTTP 拉取阻塞 WS 接收器。
+        # ping/pong 不进入此队列，始终在接收协程中快速处理。
+        self._business_queue: Optional[
+            asyncio.Queue[tuple[str, dict[str, Any]]]
+        ] = None
 
     def start(self) -> None:
         if self.is_disabled or self._running:
             return
         if not self.websocket_url:
-            # 未配置云端地址是本机调度模式的正常状态，不视为错误。
+            # 没有显式 --address 时调度权威仍随本进程装配，控制通知不需要网络连接。
             logger.info(
-                "[ControlProtocol] 未配置云端 Backend 地址，本机调度模式，不建立控制连接"
+                "[ControlProtocol] 未配置 --address，调度权威随本进程装配，不建立控制 WebSocket"
             )
             return
         self._running = True
@@ -110,18 +156,20 @@ class BackendWebSocketClient(BaseBackendClient):
     ) -> None:
         """Job 结果由业务协调器持久化并产生 ``edge_change``。"""
 
-    def send_ping(self, ping_id: str, timestamp: float) -> None:
+    def send_ping(self, ping_id: str, timestamp: float) -> bool:
         """保留网络诊断所需的短 ping，不携带业务正文。
 
         字段名与 ``HostAdapterBase.handle_pong_response`` 消费的 pong 一致
         （``ping_id`` / ``client_timestamp`` / ``server_timestamp``）。
         """
 
-        self._queue_message(
-            {
-                "action": "ping",
-                "data": {"ping_id": ping_id, "client_timestamp": timestamp},
-            }
+        try:
+            ping = PingNotice(ping_id=ping_id, client_timestamp=timestamp)
+        except Exception as exc:  # noqa: BLE001 - 诊断请求不能污染控制链路
+            logger.warning("[ControlProtocol] 无效 ping 字段: %s", exc)
+            return False
+        return self._queue_message(
+            {"action": "ping", "data": ping.model_dump(mode="json")}
         )
 
     def publish_host_ready(self) -> None:
@@ -204,15 +252,36 @@ class BackendWebSocketClient(BaseBackendClient):
                     session_watch = asyncio.create_task(
                         self._session_watchdog(), name="control-protocol-session"
                     )
+                    # 只缓存短通知；不以有限容量阻塞接收协程，确保 pong
+                    # 在业务通知高峰期仍能即时抵达 HostAdapter。
+                    business_queue: asyncio.Queue[tuple[str, dict[str, Any]]] = (
+                        asyncio.Queue()
+                    )
+                    self._business_queue = business_queue
+                    business_worker = asyncio.create_task(
+                        self._business_message_handler(business_queue),
+                        name="control-protocol-business",
+                    )
                     try:
                         async for raw_message in websocket:
                             await self._handle_raw_message(raw_message)
                     finally:
                         self._connected = False
                         self._session_bound_for_connection = False
-                        for task in (sender, outbox_pump, session_watch):
+                        self._business_queue = None
+                        for task in (
+                            sender,
+                            outbox_pump,
+                            session_watch,
+                            business_worker,
+                        ):
                             task.cancel()
-                        for task in (sender, outbox_pump, session_watch):
+                        for task in (
+                            sender,
+                            outbox_pump,
+                            session_watch,
+                            business_worker,
+                        ):
                             try:
                                 await task
                             except asyncio.CancelledError:
@@ -252,6 +321,32 @@ class BackendWebSocketClient(BaseBackendClient):
         if not isinstance(data, dict):
             logger.warning("[ControlProtocol] Ignore %s with non-object data", action)
             return
+        # 心跳是控制协议的特殊字段，必须绕过可能阻塞的业务协调器。
+        if action in {"ping", "pong"}:
+            try:
+                await self._process_message(action, data)
+            except Exception:  # noqa: BLE001 - 坏心跳只丢弃当前消息
+                logger.error(
+                    "[ControlProtocol] 处理 %s 心跳失败，已丢弃该消息:\n%s",
+                    action,
+                    traceback.format_exc(),
+                )
+            return
+        if action == "backend_http":
+            # Backend 要本进程执行一条 HTTP 请求（本进程不监听端口）：并发执行，不能
+            # 排在串行业务队列里挡住命令，也不能让慢请求（受管进程启动）挡住别的请求。
+            asyncio.create_task(
+                self._serve_backend_http(data), name="control-protocol-backend-http"
+            )
+            return
+
+        business_queue = self._business_queue
+        if business_queue is not None:
+            # 队列 worker 保持 backend_session/backend_change/ack 的顺序；
+            # 接收协程立即回到 async for，后续 pong 不再排队等待 HTTP。
+            await business_queue.put((action, data))
+            return
+
         try:
             await self._process_message(action, data)
         except Exception:  # noqa: BLE001 - 单条坏消息不能触发断线重连循环
@@ -263,18 +358,54 @@ class BackendWebSocketClient(BaseBackendClient):
                 traceback.format_exc(),
             )
 
+    async def _business_message_handler(
+        self, business_queue: "asyncio.Queue[tuple[str, dict[str, Any]]]"
+    ) -> None:
+        """串行消费业务通知；单条通知失败不影响接收和心跳。"""
+
+        while True:
+            action, data = await business_queue.get()
+            try:
+                await self._process_message(action, data)
+            except Exception:  # noqa: BLE001 - 业务通知失败可由 durable outbox 重放
+                logger.error(
+                    "[ControlProtocol] 处理 %s 失败，已丢弃该通知:\n%s",
+                    action,
+                    traceback.format_exc(),
+                )
+            finally:
+                business_queue.task_done()
+
     async def _process_message(
         self, action: str, data: dict[str, Any]
     ) -> None:
-        coordinator = self._coordinator_getter()
         if action == "pong":
+            # 同一份规范化 pong 同时唤醒两类调用方：
+            # 1) BackendSession 的独立控制面诊断（ping_control_link）；
+            # 2) HostAdapter.test_latency 的执行适配器等待者。
+            # 两者各自只接受自己登记过的 ping_id，因此不会互相污染。
+            pong = PongNotice.model_validate(data)
+            normalized = pong.model_dump(mode="json")
+            self.handle_pong(normalized)
             host_node = get_execution_adapter(0)
             if host_node is not None:
-                host_node.handle_pong_response(data)
+                host_node.handle_pong_response(normalized)
             return
         if action == "ping":
-            self._queue_message({"action": "pong", "data": data})
+            ping = PingNotice.model_validate(data)
+            # 反向探测同样使用完整 pong 契约。虽然当前延迟诊断由 Edge
+            # 发起 ping，但 Backend 可能在连接保活/诊断时主动发起 ping；
+            # 缺少 server_timestamp 会让对端把响应当成坏包丢弃。
+            pong = PongNotice(
+                ping_id=ping.ping_id,
+                client_timestamp=ping.client_timestamp,
+                server_timestamp=time.time(),
+            )
+            self._queue_message(
+                {"action": "pong", "data": pong.model_dump(mode="json")}
+            )
             return
+        coordinator = self._coordinator_getter()
         if action not in {"backend_session", "backend_change", "edge_change_ack"}:
             logger.warning("[ControlProtocol] Ignore unsupported action: %s", action)
             return
@@ -288,6 +419,70 @@ class BackendWebSocketClient(BaseBackendClient):
             await asyncio.to_thread(coordinator.handle_backend_notice, data)
         else:
             await asyncio.to_thread(coordinator.acknowledge_edge_changes, data)
+
+    # ── Backend → 本进程 HTTP（本进程不监听端口） ──────────────────────
+
+    _HOP_HEADERS = frozenset({"content-length", "transfer-encoding", "connection", "keep-alive"})
+
+    async def _serve_backend_http(self, data: dict[str, Any]) -> None:
+        """对本进程的 ASGI 应用执行 Backend 下发的请求，并把结果用 HTTP 送回 Backend。"""
+
+        try:
+            request = BackendHttpRequest.model_validate(data)
+        except Exception:  # noqa: BLE001 - 坏请求丢弃，Backend 侧会超时
+            logger.warning("[ControlProtocol] 忽略无效 backend_http 请求")
+            return
+        try:
+            response = await self._execute_local_http(request)
+        except Exception as exc:  # noqa: BLE001 - 执行失败也要回一个响应，别让 Backend 干等
+            logger.exception("[ControlProtocol] backend_http %s %s 执行失败", request.method, request.path)
+            body = json.dumps({"detail": f"host request failed: {exc}"}).encode("utf-8")
+            response = EdgeHttpResponse(
+                request_uuid=request.request_uuid,
+                status_code=500,
+                headers={"content-type": "application/json"},
+                body_base64=base64.b64encode(body).decode("ascii"),
+            )
+        await self._post_http_response(response)
+
+    async def _execute_local_http(self, request: BackendHttpRequest) -> EdgeHttpResponse:
+        import httpx
+
+        from unilabos.server.api.app import app
+
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://host.local") as client:
+            upstream = await client.request(
+                request.method,
+                request.path,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in self._HOP_HEADERS},
+                content=base64.b64decode(request.body_base64) if request.body_base64 else None,
+                timeout=request.timeout_seconds,
+            )
+        return EdgeHttpResponse(
+            request_uuid=request.request_uuid,
+            status_code=upstream.status_code,
+            headers={k: v for k, v in upstream.headers.items() if k.lower() not in self._HOP_HEADERS},
+            body_base64=base64.b64encode(upstream.content).decode("ascii"),
+        )
+
+    async def _post_http_response(self, response: EdgeHttpResponse) -> None:
+        import httpx
+
+        url = f"{self.backend_url()}/api/v1/edge/http-responses/{response.request_uuid}"
+        secret = BasicConfig.auth_secret()
+        headers = {"Authorization": f"Lab {secret}"} if secret else {}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                reply = await client.post(url, json=response.model_dump(mode="json"), headers=headers)
+            if reply.status_code >= 300:
+                logger.warning(
+                    "[ControlProtocol] 回送 backend_http 结果失败: HTTP %s %s",
+                    reply.status_code,
+                    reply.text[:200],
+                )
+        except httpx.HTTPError as exc:
+            logger.warning("[ControlProtocol] 回送 backend_http 结果失败: %s", exc)
 
     async def _send_handler(self) -> None:
         while self._connected and self._websocket is not None:
@@ -319,7 +514,7 @@ class BackendWebSocketClient(BaseBackendClient):
         if self._connected and not self._session_bound_for_connection:
             logger.warning(
                 "[ControlProtocol] 已连接 %s 但 %.0fs 内未收到 backend_session；"
-                "对端可能是旧协议 Backend，请检查 HTTPConfig.backend_protocol 或 --address",
+                "对端不是 runtime.v1 微后端，请检查 --address 指向的服务",
                 self.websocket_url,
                 self._SESSION_BIND_WARN_SECONDS,
             )

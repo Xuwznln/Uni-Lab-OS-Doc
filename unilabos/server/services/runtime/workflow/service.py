@@ -644,6 +644,11 @@ class WorkflowService(WorkflowStore):
     def prepare_workflow_task_execution(self, task_uuid: str) -> Dict[str, Any]:
         return self.prepare_task_execution(task_uuid)
 
+    def settle_workflow_task_reconciliation(self, task_uuid: str) -> Dict[str, Any]:
+        """重启后待裁决的 attempt 全部收敛后恢复任务控制态（见 store）。"""
+
+        return self.settle_task_reconciliation(task_uuid)
+
     def mark_workflow_node_job_running(self, job_uuid: str) -> Dict[str, Any]:
         return self.mark_job_running(job_uuid)
 

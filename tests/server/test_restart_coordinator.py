@@ -52,8 +52,10 @@ def fast_poll(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def clean_restart_flag() -> Any:
     restart_module._restart_requested.clear()
+    restart_module.set_safe_restart_enabled(True)
     yield
     restart_module._restart_requested.clear()
+    restart_module.set_safe_restart_enabled(True)
 
 
 def _make_coordinator(
@@ -146,6 +148,25 @@ def test_request_rejects_unknown_mode() -> None:
         coordinator.request(mode="soft")
 
 
+def test_authority_rejects_whole_process_restart(monkeypatch: pytest.MonkeyPatch) -> None:
+    """调度权威是顶层常驻进程：auto 解析为 edge（只重启 Host），显式 process 被拒绝。"""
+
+    monkeypatch.delenv("UNILABOS_SUPERVISOR_INNER", raising=False)
+    edge_control = SimpleNamespace(active_job_ids=lambda: [], connected=True)
+    monkeypatch.setattr(
+        "unilabos.server.backend.edge_control.get_edge_control_service", lambda: edge_control
+    )
+    coordinator = RestartCoordinator(lambda: None, lambda: _FakeScheduler())
+    assert coordinator.status()["effective_scope"] == "edge"
+    with pytest.raises(ValueError, match="常驻"):
+        coordinator.request(scope="process")
+    # 有父进程（被监督）时才允许整进程重启
+    monkeypatch.setenv("UNILABOS_SUPERVISOR_INNER", "1")
+    status = coordinator.request(mode="quiescent", scope="process")
+    assert status["pending"] is True
+    coordinator.cancel()
+
+
 def test_request_rejects_devices_scope() -> None:
     # 设备与 Host 共用进程，因此 devices 不是可独立重启的作用域。
     coordinator, _, _ = _make_coordinator()
@@ -203,4 +224,27 @@ def test_restart_api_roundtrip(monkeypatch: pytest.MonkeyPatch) -> None:
 
     response = client.post("/api/v1/restart", json={"mode": "bogus"})
     assert response.status_code == 422
+    assert client.get("/api/v1/restart").json()["safe_restart"] is True
     coordinator.cancel()
+
+
+def test_exit_if_restart_requested_uses_supervisor_code() -> None:
+    restart_module._set_restart_requested()
+    with pytest.raises(SystemExit) as exc:
+        restart_module.exit_if_restart_requested()
+    assert exc.value.code == restart_module.RESTART_EXIT_CODE
+
+
+def test_exit_if_restart_requested_stays_down_when_safe_restart_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("UNILABOS_SUPERVISOR_INNER", raising=False)
+    restart_module.set_safe_restart_enabled(False)
+    restart_module._set_restart_requested()
+    with pytest.raises(SystemExit) as exc:
+        restart_module.exit_if_restart_requested()
+    assert exc.value.code == 0
+
+
+def test_exit_if_restart_requested_is_noop_without_flag() -> None:
+    restart_module.exit_if_restart_requested()

@@ -95,19 +95,33 @@ def _materialize_graph_from_authority(
     from unilabos.server.startup import resolve_database_paths
 
     paths = resolve_database_paths(args_dict, working_dir=working_dir)
-    if not os.path.isfile(paths.materials_db):
-        return None
+    record = None
+    if _graph_authority_is_remote():
+        # 权威的 Host 子进程：Graph Authority 在权威的 materials.db，经 HTTP 读取
+        from unilabos.client.materials.graph import HTTPGraphClient
 
-    from unilabos.server.services.materials.graph import GraphError, GraphService
-
-    service = GraphService(paths.materials_db)
-    try:
         try:
-            record = service.get_graph(identity)
-        except GraphError:
+            with HTTPGraphClient(HTTPConfig.remote_addr) as client:
+                record = client.get_graph(identity)
+        except Exception as exc:  # noqa: BLE001 - 读不到即按「不在权威中」处理
+            print_status(f"从调度权威读取图 {identity} 失败: {exc}", "warning")
             return None
-    finally:
-        service.close()
+    else:
+        if not os.path.isfile(paths.materials_db):
+            return None
+
+        from unilabos.server.services.materials.graph import GraphError, GraphService
+
+        service = GraphService(paths.materials_db)
+        try:
+            try:
+                record = service.get_graph(identity)
+            except GraphError:
+                return None
+        finally:
+            service.close()
+    if not isinstance(record, dict) or not record.get("uuid"):
+        return None
 
     cache_path = _write_graph_cache(paths, record["uuid"], record["payload"])
     print_status(
@@ -116,6 +130,17 @@ def _materialize_graph_from_authority(
         "info",
     )
     return cache_path
+
+
+def _graph_authority_is_remote() -> bool:
+    """Graph Authority 是否在别的进程（本进程是调度权威拉起的 Host 子进程）。
+
+    云端 ``--address`` 场景仍读本机库：云端图先 ``unilab graph download --remote``。
+    """
+
+    from unilabos.app.supervisor import is_host_child
+
+    return is_host_child() and bool(str(HTTPConfig.remote_addr or "").strip())
 
 
 def _write_graph_cache(paths, graph_uuid: str, payload: Dict[str, Any]) -> str:
@@ -183,30 +208,58 @@ def _register_graph_file_to_authority(
     graph_name = Path(str(file_path)).stem
     try:
         paths = resolve_database_paths(args_dict, working_dir=working_dir)
-        service = GraphService(paths.materials_db)
     except Exception as exc:
         print_status(f"Graph Authority 不可用（跳过登记，直接装配启动文件）: {exc}", "warning")
         return None
-    try:
+
+    if _graph_authority_is_remote():
+        # 权威的 Host 子进程：经 HTTP 登记到权威的 Graph Authority；模板 Site 用本进程
+        # （刚装的驱动包）注册表，权威注册表可能还没有这些设备类。
+        from unilabos.client.materials.graph import HTTPGraphClient
+        from unilabos.client.utils.envelope import EnvelopeError
+
         try:
-            stored = service.upsert_graph(
-                name=graph_name,
-                payload=graph_payload,
-                device_site_templates=_registry_device_site_templates(),
-            )
-        except GraphError as exc:
-            print_status(
-                f"启动图被 Graph Authority 拒绝 [{exc.code}]: {exc.message}", "error"
-            )
+            with HTTPGraphClient(HTTPConfig.remote_addr) as client:
+                stored = client.upsert_graph(
+                    name=graph_name,
+                    payload=graph_payload,
+                    device_site_templates=_registry_device_site_templates(),
+                )
+        except EnvelopeError as exc:
+            print_status(f"启动图被 Graph Authority 拒绝 [{exc.code}]: {exc.error}", "error")
             os._exit(1)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - 权威暂不可达时 fail-open
             print_status(
                 f"启动图登记 Graph Authority 失败（跳过登记，直接装配启动文件）: {exc}",
                 "warning",
             )
             return None
-    finally:
-        service.close()
+    else:
+        try:
+            service = GraphService(paths.materials_db)
+        except Exception as exc:
+            print_status(f"Graph Authority 不可用（跳过登记，直接装配启动文件）: {exc}", "warning")
+            return None
+        try:
+            try:
+                stored = service.upsert_graph(
+                    name=graph_name,
+                    payload=graph_payload,
+                    device_site_templates=_registry_device_site_templates(),
+                )
+            except GraphError as exc:
+                print_status(
+                    f"启动图被 Graph Authority 拒绝 [{exc.code}]: {exc.message}", "error"
+                )
+                os._exit(1)
+            except Exception as exc:
+                print_status(
+                    f"启动图登记 Graph Authority 失败（跳过登记，直接装配启动文件）: {exc}",
+                    "warning",
+                )
+                return None
+        finally:
+            service.close()
 
     summary = stored.get("summary") or {}
     counts = {
@@ -236,6 +289,23 @@ def _register_graph_file_to_authority(
     return _write_graph_cache(paths, stored["uuid"], stored["payload"])
 
 
+def _runs_local_authority(args_dict: Dict[str, Any]) -> bool:
+    """本进程是否应作为「调度权威 + Host 子进程」的权威一侧运行（默认拓扑）。
+
+    以下情况直接走单进程 Host：``--no-safe-restart``（调试：权威与 Host 同进程）、
+    Slave、配置了 ``--address`` / ``remote_addr``（权威在别处），以及本进程本身就是
+    权威拉起的 Host 子进程。
+    """
+
+    if args_dict.get("no_safe_restart") or args_dict.get("is_slave"):
+        return False
+    if str(HTTPConfig.remote_addr or "").strip():
+        return False
+    from unilabos.app.supervisor import is_host_child
+
+    return not is_host_child()
+
+
 def main():
     """运行 Uni-Lab-OS CLI，并在需要时启动设备运行时。"""
     parser = build_parser()
@@ -244,6 +314,14 @@ def main():
 
     if run_cli_command(args, parser):
         return
+
+    from unilabos.app.supervisor import maybe_supervise
+
+    maybe_supervise(args)
+
+    from unilabos.server.backend.restart import set_safe_restart_enabled
+
+    set_safe_restart_enabled(not bool(args_dict.get("no_safe_restart")))
 
     from unilabos.backend import (
         BackendConfigurationError,
@@ -524,12 +602,16 @@ def main():
         print_status(f"Check mode: 注册表验证完成 ({device_count} 设备, {resource_count} 资源)，退出", "info")
         os._exit(0)
 
-    # backend 角色只装配 scheduler、workflow 和 runtime.v1 控制面；
-    # 设备图与设备运行时由通过 --address 接入的 Edge 进程持有。
-    if args_dict.get("role") == "backend":
+    # 调度权威进程：--role backend 只起权威（Edge 用 --address 接入）；默认拓扑则由
+    # 权威持有管理端口并把 Host 作为子进程拉起，安静点重启只重启 Host。
+    # 设备图与设备运行时都在 Host 进程里，下面的 Host 路径只在 Host 进程走。
+    explicit_backend_role = args_dict.get("role") == "backend"
+    if explicit_backend_role or _runs_local_authority(args_dict):
         from unilabos.app.backend_main import run_backend_process
 
-        run_backend_process(args_dict, lab_registry, working_dir)
+        run_backend_process(
+            args_dict, lab_registry, working_dir, launch_host=not explicit_backend_role
+        )
         return
 
     # 以下导入依赖 ROS2 环境，check_mode 已退出不需要
@@ -653,10 +735,21 @@ def main():
 
         def _exit(signum, frame):
             comm_client.stop()
-            sys.exit(0)
+            from unilabos.server.backend.restart import (
+                RESTART_EXIT_CODE,
+                is_restart_requested,
+            )
+
+            sys.exit(RESTART_EXIT_CODE if is_restart_requested() else 0)
 
         signal.signal(signal.SIGINT, _exit)
         signal.signal(signal.SIGTERM, _exit)
+        # 作为权威的 Host 子进程建在独立进程组，权威用 Ctrl+Break 请它退出；uvicorn 停机后
+        # 会重新抛出该信号，没有处理器时 CRT 直接 _exit(3)，finally / atexit（关库、收受管
+        # 设备进程）都不会跑。
+        sigbreak = getattr(signal, "SIGBREAK", None)
+        if sigbreak is not None:
+            signal.signal(sigbreak, _exit)
 
         from unilabos.server.startup import setup_host_server_stack
 
@@ -725,12 +818,20 @@ def main():
             except Exception as exc:
                 print_status(f"开机拓扑边对齐失败（不影响运行）: {exc}", "warning")
 
-        # @workflow 默认子工作流上报：本机持有 Workflow Authority 时，把设备包
-        # 声明的工作流按稳定 uuid 幂等 upsert，供前端实时创建/运行工作流引用。
+        # @workflow 默认子工作流上报：把设备包声明的工作流按稳定 uuid 幂等 upsert，
+        # 供前端实时创建/运行工作流引用。本机持有 Workflow Authority 时直接写服务；
+        # 作为调度权威的 Host 子进程时经 Workflow HTTP API 写回权威（同一套 upsert 语义）。
         from unilabos.server.backend.composition import get_workflow_service
 
         workflow_service = get_workflow_service()
-        if workflow_service is not None and lab_registry.workflow_registry:
+        workflow_reporter = None
+        if workflow_service is not None:
+            workflow_reporter = workflow_service
+        elif _graph_authority_is_remote():
+            from unilabos.client.runtime.workflow import HTTPWorkflowClient
+
+            workflow_reporter = HTTPWorkflowClient(HTTPConfig.remote_addr)
+        if workflow_reporter is not None and lab_registry.workflow_registry:
             from unilabos.registry.workflows import (
                 DeviceCatalog,
                 import_workflow_modules,
@@ -740,10 +841,14 @@ def main():
             import_workflow_modules(
                 [meta["module"] for meta in lab_registry.workflow_registry.values()]
             )
-            reported_workflows = report_workflows_to_service(
-                workflow_service,
-                DeviceCatalog.from_resource_tree_set(resource_tree_set),
-            )
+            try:
+                reported_workflows = report_workflows_to_service(
+                    workflow_reporter,
+                    DeviceCatalog.from_resource_tree_set(resource_tree_set),
+                )
+            finally:
+                if workflow_reporter is not workflow_service:
+                    workflow_reporter.close()
             if reported_workflows:
                 print_status(
                     f"默认子工作流已上报: {len(reported_workflows)} 个 "
@@ -756,27 +861,16 @@ def main():
         # HTTP；本机持有调度权威时直接写进程内服务，两条路径共用同一投影。
         registry_report = None
         if HTTPConfig.remote_addr:
-            from unilabos.server.backend.legacy_adaptor.session import BackendSessionFactory
+            # 远端模式只接入 runtime.v1 微后端；注册表、物料、工作流和调度
+            # 均由后端权威承接。旧云端字段兼容属于 Backend 侧
+            # ``legacy_adaptor``，不能在 Edge 启动时分叉出第二套上联链路。
+            from unilabos.server.backend.legacy_adaptor.sync.templates import (
+                report_registry_snapshot,
+            )
 
-            if BackendSessionFactory.is_legacy():
-                # 旧云端 Backend：注册表上报与物料镜像全部在 legacy 适配层内完成。
-                from unilabos.server.backend.legacy_adaptor.legacy.startup import (
-                    start_legacy_uplink,
-                )
-
-                args_dict["_legacy_material_mirror"] = start_legacy_uplink(
-                    lab_registry,
-                    materials_gateway=server_stack.materials_gateway,
-                    resource_links=resource_edge_info,
-                )
-            else:
-                from unilabos.server.backend.legacy_adaptor.sync.templates import (
-                    report_registry_snapshot,
-                )
-
-                registry_report = report_registry_snapshot(
-                    lab_registry, HTTPConfig.remote_addr
-                )
+            registry_report = report_registry_snapshot(
+                lab_registry, HTTPConfig.remote_addr
+            )
         else:
             from unilabos.server.backend.legacy_adaptor.sync.templates import (
                 report_registry_snapshot_local,
@@ -830,9 +924,6 @@ def main():
     try:
         run_runtime(args_dict)
     finally:
-        legacy_mirror = args_dict.get("_legacy_material_mirror")
-        if legacy_mirror is not None:
-            legacy_mirror.stop()
         if comm_client is not None:
             comm_client.stop()
         if BasicConfig.is_host_mode:
@@ -840,16 +931,11 @@ def main():
 
             shutdown_backend_services()
 
-    # 安静点重启：端口、数据库等均已在上方退出链路释放，此时用相同参数
-    # 拉起新进程即可让设备驱动获得完整的重新初始化（调试用）。
-    from unilabos.server.backend.restart import (
-        is_restart_requested,
-        spawn_replacement_process,
-    )
+    # 安静点重启：端口、数据库等均已在上方退出链路释放。监督进程看到约定
+    # 退出码后用相同参数拉起新实例；--no-safe-restart 时只退出。
+    from unilabos.server.backend.restart import exit_if_restart_requested
 
-    if is_restart_requested():
-        print_status("安静点重启：正在以相同参数拉起新的 Uni-Lab 进程", "warning")
-        spawn_replacement_process()
+    exit_if_restart_requested()
 
 
 if __name__ == "__main__":

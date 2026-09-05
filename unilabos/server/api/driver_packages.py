@@ -20,12 +20,16 @@ from unilabos.server.services.driver_packages import (
 
 
 class DriverPackageInstallRequest(BaseModel):
-    """pip 规格（name / name==1.2）、git URL（git+https://…）或本地目录。"""
+    """安装来源：GitHub 仓库地址（https://github.com/<owner>/<repo>[@ref]）、zip / tar.gz 归档地址或本机目录。
+
+    源码树落到 unilabos_data/driver_packages/<name>/<version>/（本机目录原地登记），
+    依赖用 uv / pip 预装，不 pip install 包体。
+    """
 
     spec: str = Field(min_length=1)
     enable: bool = True
-    upgrade: bool = Field(default=False, description="pip install --upgrade：重装 / 升级已装的同名包")
-    name: str = Field(default="", description="已知的分发名（索引条目自带）；git / URL 规格靠它可靠登记台账")
+    upgrade: bool = Field(default=False, description="重新下载源码树，并以 --upgrade 重装其依赖")
+    name: str = Field(default="", description="已知的包名（索引条目自带）；源码树没有 pyproject 时用它登记")
 
 
 class DriverPackageEnableRequest(BaseModel):

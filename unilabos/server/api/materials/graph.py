@@ -29,6 +29,9 @@ class GraphUpsertRequest(BaseModel):
     tags: List[Any] = Field(default_factory=list)
     description: Optional[str] = None
     meta_data: Dict[str, Any] = Field(default_factory=dict)
+    #: 调用方（Host 子进程）注册表里的设备模板 Site；缺省用本进程注册表。Host 刚装的
+    #: 驱动包本进程注册表还没有，由 Host 随图带上。
+    device_site_templates: Optional[Dict[str, List[Any]]] = None
 
 
 def _success(data: Any = None) -> JSONResponse:
@@ -67,12 +70,14 @@ def create_graph_router(service: GraphService) -> APIRouter:
     @router.post("/graphs")
     async def upsert_graph(value: GraphUpsertRequest):
         try:
-            from unilabos.registry.registry import lab_registry
+            device_site_templates = value.device_site_templates
+            if device_site_templates is None:
+                from unilabos.registry.registry import lab_registry
 
-            device_site_templates = {
-                device_id: (entry or {}).get("available_sites") or []
-                for device_id, entry in lab_registry.device_type_registry.items()
-            }
+                device_site_templates = {
+                    device_id: (entry or {}).get("available_sites") or []
+                    for device_id, entry in lab_registry.device_type_registry.items()
+                }
             return _success(
                 service.upsert_graph(
                     name=value.name,

@@ -14,7 +14,7 @@ import sys
 _PATCH_MARKER = "# UniLabOS DLL Patch"
 _PATCH_END_MARKER = "# End UniLabOS DLL Patch"
 
-# 75 = EX_TEMPFAIL: 临时失败、重试即可，避免与业务退出码冲突
+# 75 = EX_TEMPFAIL：与安全重启监督进程约定码相同，补丁打完后监督循环会自动再拉起。
 _RESTART_EXIT_CODE = 75
 
 

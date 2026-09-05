@@ -1790,8 +1790,11 @@ class WorkflowStore:
 
         判定单元是节点运行（当前 attempt 的投影），历史 failed attempt 不参与。
         已成功节点不会重跑。崩溃时处于 dispatched/running 的 attempt 无法证明设备
-        是否已经产生副作用，attempt 与节点运行同时转 execution_unknown 等待对账，
-        禁止盲目重放。
+        是否已经产生副作用，attempt 与节点运行同时转 execution_unknown，禁止盲目重放；
+        任务控制态转 ``waiting_reconciliation`` 并返回同名 state——它表示任务**可以**
+        被调度器接管，但这些 attempt 要由人裁决（重试/跳过/替换成功/标记失败），
+        调度器据此向用户开决策而不是重新下发。全部裁决完成后由
+        :meth:`settle_task_reconciliation` 恢复原控制态。
         """
 
         now = utc_now()
@@ -1816,7 +1819,7 @@ class WorkflowStore:
                 "timeout",
             }:
                 return {"state": "terminal", "task": task, "runs": runs}
-            if task["control_status"] != "active":
+            if task["control_status"] not in {"active", "waiting_reconciliation"}:
                 return {"state": task["control_status"], "task": task, "runs": runs}
 
             statuses = {run["status"] for run in runs}
@@ -1837,10 +1840,14 @@ class WorkflowStore:
                         (reason, now, run["current_job_uuid"]),
                     )
                     self._sync_run_projection(conn, run["uuid"], now)
+                # 只可能从 active 进入；记住恢复目标，裁决完成后回到它
                 conn.execute(
                     """
                     UPDATE workflow_task
                     SET control_status = 'waiting_reconciliation',
+                        reconciliation_resume_control_status = COALESCE(
+                            reconciliation_resume_control_status, 'active'
+                        ),
                         attention_reason = ?, update_time = ?
                     WHERE uuid = ?
                     """,
@@ -1893,6 +1900,58 @@ class WorkflowStore:
             "runs": self.list_node_runs(task_uuid, include_attempts=False),
         }
 
+    def settle_task_reconciliation(self, task_uuid: str) -> Dict[str, Any]:
+        """重启后需要裁决的 attempt 全部收敛时，把任务从 ``waiting_reconciliation`` 恢复。
+
+        需要裁决的是在飞 attempt 转成的 execution_unknown，以及失败后等待决策、但执行面
+        的决策上下文已随旧进程丢失的 intervention_required；仍有节点运行处于这两种状态
+        时不改任何状态，任务不在 waiting_reconciliation 时也是 no-op。恢复目标取进入时
+        记下的 ``reconciliation_resume_control_status``（缺省 active）。
+        """
+
+        now = utc_now()
+        with self.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT status, control_status, reconciliation_resume_control_status
+                FROM workflow_task WHERE uuid = ? AND deleted_at IS NULL
+                """,
+                (task_uuid,),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound(f"workflow task {task_uuid} not found")
+            if row["control_status"] == "waiting_reconciliation":
+                pending = conn.execute(
+                    """
+                    SELECT COUNT(*) FROM workflow_node_run
+                    WHERE workflow_task_uuid = ? AND deleted_at IS NULL
+                      AND status IN ('execution_unknown', 'intervention_required')
+                    """,
+                    (task_uuid,),
+                ).fetchone()[0]
+                if int(pending) == 0:
+                    resume = row["reconciliation_resume_control_status"] or "active"
+                    conn.execute(
+                        """
+                        UPDATE workflow_task
+                        SET control_status = ?, reconciliation_resume_control_status = NULL,
+                            attention_reason = NULL, update_time = ?
+                        WHERE uuid = ?
+                        """,
+                        (resume, now, task_uuid),
+                    )
+                    self._append_event(
+                        conn,
+                        event="workflow.task.changed",
+                        data={
+                            "workflow_task_uuid": task_uuid,
+                            "status": row["status"],
+                            "control_status": resume,
+                        },
+                        now=now,
+                    )
+        return self.get_task(task_uuid)
+
     def mark_job_running(self, job_uuid: str) -> Dict[str, Any]:
         """在发送设备副作用前持久化 attempt running，并投影到节点运行。"""
 
@@ -1928,7 +1987,9 @@ class WorkflowStore:
         """失败 attempt 被执行面挂起等待决策：attempt 与节点运行进入 ``intervention_required``。
 
         决策报告摘要写入 ``control_data.pending_decision``，画布据此展示"待决策"并
-        跳转到决策链；放行后由 ``record_job_terminal`` 收敛。
+        跳转到决策链；放行后由 ``record_job_terminal`` 收敛。重启后处于
+        ``execution_unknown`` 的 attempt 开裁决时保持该状态——它表达的是"执行结果
+        未知"而不是"已知失败"，前端据此区分文案。
         """
 
         now = utc_now()
@@ -1941,6 +2002,11 @@ class WorkflowStore:
                 raise StoreNotFound(f"workflow node job {job_uuid} not found")
             if row["status"] in self._RUN_TERMINAL:
                 return self._job_row(row)
+            status = (
+                "execution_unknown"
+                if row["status"] == "execution_unknown"
+                else "intervention_required"
+            )
             control_data = _load(row["control_data"], {})
             control_data["pending_decision"] = {
                 "decision_id": report.get("decision_id"),
@@ -1958,15 +2024,15 @@ class WorkflowStore:
             conn.execute(
                 """
                 UPDATE workflow_node_job
-                SET status='intervention_required', control_data=?, update_time=?
+                SET status=?, control_data=?, update_time=?
                 WHERE uuid=?
                 """,
-                (_json(control_data), now, job_uuid),
+                (status, _json(control_data), now, job_uuid),
             )
             self._emit_job_changed(
                 conn,
                 row,
-                "intervention_required",
+                status,
                 now,
                 decision_id=report.get("decision_id"),
             )

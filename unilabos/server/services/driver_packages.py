@@ -1,36 +1,64 @@
-"""驱动包（设备包）管理：安装台账、安装 / 卸载操作与启动期挂载。
+"""驱动包（设备包）管理：源码树落 unilabos_data、按目录挂载、依赖用 uv 预装。
 
-驱动包 = 含 ``@device`` / ``@resource`` 的 Python 分发（pip 规格、git URL 或本地目录）。
-本模块把 ``unilab package install`` 的能力搬到管理 API 上，并补上两件 CLI 没有的事：
+驱动包 = 含 ``@device`` / ``@resource`` 的 Python 源码树（仓库 / 目录），**不经 pip 安装**，与
+``unilab --devices <目录>`` 是同一套机制：
 
-- **台账**：``<working_dir>/driver_packages.json``（working_dir 即 unilabos_data 目录）记录每个包的分发名、
-  安装规格、版本、包目录、扫描到的设备类与启用状态；
-- **启动期挂载**：``enabled_package_dirs()`` 把已启用的包目录并入 ``--devices`` 扫描
-  目录，安装后只要重启进程（``POST /api/v1/restart``）驱动即可用。
+- **来源**：GitHub 仓库地址（``https://github.com/<owner>/<repo>[@ref]``、``git+https://…``）、
+  zip / tar.gz 归档地址，或本机目录。远端来源下载后解压到
+  ``<working_dir>/driver_packages/<name>/<version>/``（working_dir 即 unilabos_data 目录）；
+  本机目录原地登记、不复制；
+- **依赖**：读源码树 ``pyproject.toml`` 的 ``[project].dependencies``，用 ``uv pip install``
+  （不可用时回退 ``python -m pip``）装进当前解释器——包体本身不装，只装它依赖的第三方库；
+- **台账**：``<working_dir>/driver_packages.json`` 记录每个包的来源、版本、sha256、源码根、
+  要挂载的包目录（顶层 Python 包，其父目录进 ``sys.path``）、扫描到的设备类与启用状态；
+- **挂载**：``enabled_package_dirs()`` 把已启用包的目录并入 Host 的 ``--devices`` 扫描
+  （重启后生效）；受管设备进程按台账把同样的目录传给子进程，不需要重启 Host。
 
 安装 / 卸载是后台线程里的长操作，用 operation 记录进度与日志供前端轮询。
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import threading
 import time
 import uuid
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from unilabos.utils import logger
 
 LEDGER_FILENAME = "driver_packages.json"
 CATALOG_FILENAME = "driver_package_catalog.json"
+PACKAGES_DIRNAME = "driver_packages"
 OPERATION_HISTORY_LIMIT = 30
-INSTALL_TIMEOUT_S = 900
+DOWNLOAD_TIMEOUT_S = 120
+DEPENDENCY_INSTALL_TIMEOUT_S = 900
 CATALOG_FETCH_TIMEOUT_S = 8
+MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+
+#: 源码树里不当作驱动包目录的顶层目录名。
+_NON_PACKAGE_DIRS = frozenset(
+    {"tests", "test", "docs", "doc", "examples", "example", "graph", "graphs", "build", "dist", "scripts", "node_modules"}
+)
+#: 依赖里跳过的名字：包体自身与 unilabos 本体由部署流程管理。
+_SKIP_DEPENDENCIES = frozenset({"unilabos", "uni-lab-os", "unilab"})
+
+_GITHUB_REPO_RE = re.compile(
+    r"^(?:git\+)?https?://github\.com/(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+?)(?:\.git)?"
+    r"(?:/tree/(?P<tree>[^\s]+?))?/?(?:@(?P<at>[^\s]+))?$"
+)
+_ARCHIVE_URL_RE = re.compile(r"^https?://\S+\.(zip|tar\.gz|tgz|tar)(\?\S*)?$", re.IGNORECASE)
 
 
 class DriverPackageError(RuntimeError):
@@ -42,9 +70,17 @@ class DriverPackageRecord:
     name: str
     spec: str = ""
     version: str = ""
+    #: github | archive | local
+    source_kind: str = ""
+    #: 源码树根目录（含 pyproject.toml）；local 来源即用户给的目录
+    package_root: str = ""
+    #: 挂载给注册表 / 子进程的包目录（顶层 Python 包），父目录进 sys.path
     package_dirs: List[str] = field(default_factory=list)
     device_ids: List[str] = field(default_factory=list)
+    dependencies: List[str] = field(default_factory=list)
+    sha256: str = ""
     enabled: bool = True
+    #: 依赖用什么装的：uv | pip | ""（无依赖）
     installer: str = ""
     installed_at_ms: int = 0
     updated_at_ms: int = 0
@@ -81,6 +117,11 @@ def catalog_path(working_dir: str | Path) -> Path:
     return Path(working_dir) / CATALOG_FILENAME
 
 
+def packages_root(working_dir: str | Path) -> Path:
+    """远端来源解压落盘的根目录：``<working_dir>/driver_packages/<name>/<version>/``。"""
+    return Path(working_dir) / PACKAGES_DIRNAME
+
+
 def _catalog_entries(data: Any) -> List[Dict[str, Any]]:
     """目录 JSON 既接受 ``{"packages": [...]}`` 也接受裸数组。"""
     items = data.get("packages") if isinstance(data, dict) else data
@@ -89,7 +130,7 @@ def _catalog_entries(data: Any) -> List[Dict[str, Any]]:
 
 def _catalog_entry(raw: Dict[str, Any], *, source: str, installed: set[str]) -> Optional[Dict[str, Any]]:
     name = str(raw.get("name") or "").strip()
-    spec = str(raw.get("spec") or name).strip()
+    spec = str(raw.get("spec") or raw.get("source") or raw.get("repo") or "").strip()
     if not name or not spec:
         return None
 
@@ -132,7 +173,7 @@ def load_ledger(working_dir: str | Path) -> Dict[str, DriverPackageRecord]:
 def save_ledger(working_dir: str | Path, records: Dict[str, DriverPackageRecord]) -> None:
     path = ledger_path(working_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"version": 1, "packages": [asdict(record) for record in records.values()]}
+    payload = {"version": 2, "packages": [asdict(record) for record in records.values()]}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
@@ -150,6 +191,21 @@ def enabled_package_dirs(working_dir: str | Path) -> List[str]:
     return dirs
 
 
+# ── 来源解析 ─────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PackageSource:
+    kind: str  # github | archive | local
+    spec: str
+    #: 远端：下载地址候选（按顺序尝试，GitHub 默认分支 main / master）；本地：空
+    urls: Tuple[str, ...] = ()
+    path: Optional[Path] = None
+    #: GitHub 仓库名 / 归档文件名，pyproject 缺失时兜底当包名
+    fallback_name: str = ""
+    ref: str = ""
+
+
 def _spec_looks_like_path(spec: str) -> bool:
     s = spec.strip()
     if s.startswith(("git+", "http://", "https://")):
@@ -162,72 +218,192 @@ def _spec_looks_like_path(spec: str) -> bool:
     )
 
 
-def _spec_distribution_name(spec: str) -> str:
-    """安装规格对应的分发名：本地目录读 pyproject；``name==ver`` 取名字；git/URL 拿不到返回空串。
+def resolve_source(spec: str) -> PackageSource:
+    """把用户给的来源归一：GitHub 仓库 → codeload 归档；归档 URL 原样；本机目录原地登记。"""
 
-    CLI 里的 ``_spec_dist_name`` 只认裸名字，Windows 绝对路径会被它读成盘符 ``C``，所以先判路径。
+    text = spec.strip()
+    if not text:
+        raise DriverPackageError("缺少安装来源：GitHub 仓库地址、zip/tar.gz 归档地址或本机目录")
+    if any(token in text for token in ("\n", "\r", "\x00")):
+        raise DriverPackageError("安装来源含非法字符")
+
+    match = _GITHUB_REPO_RE.match(text)
+    if match and not _ARCHIVE_URL_RE.match(text):
+        owner, repo = match.group("owner"), match.group("repo")
+        ref = (match.group("at") or match.group("tree") or "").strip()
+        base = f"https://codeload.github.com/{owner}/{repo}"
+        if ref:
+            urls = (f"{base}/zip/refs/heads/{ref}", f"{base}/zip/refs/tags/{ref}", f"{base}/zip/{ref}")
+        else:
+            urls = (f"{base}/zip/refs/heads/main", f"{base}/zip/refs/heads/master")
+        return PackageSource(kind="github", spec=text, urls=urls, fallback_name=repo, ref=ref)
+
+    if text.startswith(("http://", "https://")):
+        if not _ARCHIVE_URL_RE.match(text):
+            raise DriverPackageError("远端来源只支持 GitHub 仓库地址或 zip / tar.gz 归档地址")
+        stem = re.sub(r"\.(zip|tar\.gz|tgz|tar)(\?.*)?$", "", text.rsplit("/", 1)[-1], flags=re.IGNORECASE)
+        return PackageSource(kind="archive", spec=text, urls=(text,), fallback_name=stem)
+
+    if text.startswith("git+"):
+        raise DriverPackageError("只支持 GitHub 的 git 地址（git+https://github.com/<owner>/<repo>.git）")
+
+    raw = text[5:] if text.startswith("file:") else text
+    path = Path(raw).expanduser()
+    if not path.is_dir():
+        raise DriverPackageError(f"本机目录不存在：{path}")
+    return PackageSource(kind="local", spec=text, path=path.resolve(), fallback_name=path.resolve().name)
+
+
+# ── 源码树解析 ───────────────────────────────────────────────────
+
+
+def read_project_metadata(root: Path) -> Dict[str, Any]:
+    """源码树的 ``pyproject.toml`` ``[project]``：name / version / dependencies；没有文件时全空。"""
+
+    pyproject = root / "pyproject.toml"
+    if not pyproject.is_file():
+        return {"name": "", "version": "", "dependencies": [], "include": []}
+    from unilabos.app.cli.package import _load_toml
+
+    data = _load_toml(pyproject)
+    project = data.get("project", {}) if isinstance(data, dict) else {}
+    if not isinstance(project, dict):
+        project = {}
+    tool = data.get("tool", {}) if isinstance(data, dict) else {}
+    find = ((tool.get("setuptools") or {}).get("packages") or {}).get("find") if isinstance(tool, dict) else None
+    include = find.get("include") if isinstance(find, dict) else None
+    dependencies = project.get("dependencies")
+    return {
+        "name": str(project.get("name") or "").strip(),
+        "version": str(project.get("version") or "").strip(),
+        "dependencies": [str(item).strip() for item in dependencies if str(item).strip()]
+        if isinstance(dependencies, list)
+        else [],
+        "include": [str(item) for item in include] if isinstance(include, list) else [],
+    }
+
+
+def find_source_root(extracted: Path) -> Path:
+    """解压目录里的源码根：最浅的 ``pyproject.toml`` 所在目录；没有就是唯一的顶层目录 / 解压目录本身。"""
+
+    candidates = sorted(extracted.rglob("pyproject.toml"), key=lambda item: len(item.parts))
+    if candidates:
+        return candidates[0].parent
+    children = [item for item in extracted.iterdir() if item.is_dir() and not item.name.startswith(".")]
+    return children[0] if len(children) == 1 else extracted
+
+
+def detect_package_dirs(root: Path, include_patterns: List[str] | None = None) -> List[str]:
+    """源码树里要挂载的顶层 Python 包目录（有 ``__init__.py``），``src/`` 布局同样识别。
+
+    ``[tool.setuptools.packages.find] include = ["site_demo*"]`` 存在时按前缀过滤；根目录自己就是
+    Python 包（``__init__.py`` 在根）时挂载根目录。
     """
-    from unilabos.app.cli.package import _local_dist_name, _spec_dist_name
 
-    if _spec_looks_like_path(spec):
-        return _local_dist_name(spec)
-    return _spec_dist_name(spec)
+    def _matches(name: str) -> bool:
+        if not include_patterns:
+            return True
+        return any(name == pattern.rstrip("*") or (pattern.endswith("*") and name.startswith(pattern[:-1])) for pattern in include_patterns)
 
-
-def _distribution_snapshot() -> Dict[str, str]:
-    from importlib.metadata import distributions
-
-    snapshot: Dict[str, str] = {}
-    for dist in distributions():
-        try:
-            name = dist.metadata["Name"]
-        except Exception:  # noqa: BLE001
-            continue
-        if name:
-            snapshot[_normalize(name)] = dist.version or ""
-    return snapshot
-
-
-def _dist_package_dirs(dist_name: str) -> List[str]:
-    """已安装分发的顶层包目录（用于 AST 扫描挂载）。"""
-    import importlib.util
-    from importlib.metadata import PackageNotFoundError, distribution
-
-    try:
-        dist = distribution(dist_name)
-    except PackageNotFoundError:
-        return []
-    top_modules: List[str] = []
-    try:
-        top_text = dist.read_text("top_level.txt") or ""
-        top_modules = [line.strip() for line in top_text.splitlines() if line.strip()]
-    except Exception:  # noqa: BLE001
-        top_modules = []
-    if not top_modules:
-        inferred: set[str] = set()
-        for entry in dist.files or []:
-            parts = entry.parts
-            if not parts:
+    if (root / "__init__.py").is_file():
+        return [str(root.resolve())]
+    bases = [root / "src", root] if (root / "src").is_dir() else [root]
+    found: List[str] = []
+    for base in bases:
+        for child in sorted(base.iterdir()):
+            if not child.is_dir() or child.name.startswith((".", "_")) or child.name in _NON_PACKAGE_DIRS:
                 continue
-            head = parts[0]
-            if head in {"..", "__pycache__"} or head.endswith((".dist-info", ".data")):
+            if (child / "__init__.py").is_file() and _matches(child.name):
+                found.append(str(child.resolve()))
+        if found:
+            break
+    return found
+
+
+def scan_device_ids(package_dirs: List[str]) -> List[str]:
+    """AST 扫描包目录里的 ``@device``（不 import），返回设备类 id。"""
+
+    from unilabos.registry.ast_registry_scanner import scan_directory
+
+    ids: List[str] = []
+    executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="DriverPackageScan")
+    try:
+        for item in package_dirs:
+            directory = Path(item)
+            if not directory.is_dir():
                 continue
-            if len(parts) > 1 and "." not in head:
-                inferred.add(head)
-        top_modules = sorted(inferred) or [_normalize(dist_name)]
-    dirs: List[str] = []
-    for module_name in top_modules:
-        try:
-            spec = importlib.util.find_spec(module_name)
-        except (ImportError, ValueError):
+            result = scan_directory(directory, python_path=str(directory.parent), executor=executor)
+            for device_id in result.get("devices", {}):
+                if device_id not in ids:
+                    ids.append(str(device_id))
+    finally:
+        executor.shutdown(wait=True)
+    return sorted(ids)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _assert_safe_member(target: Path, member: str) -> None:
+    root = target.resolve()
+    resolved = (target / member).resolve()
+    if root != resolved and root not in resolved.parents:
+        raise DriverPackageError(f"归档含非法路径：{member}")
+
+
+def extract_archive(archive: Path, target: Path) -> None:
+    if zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as zf:
+            for member in zf.namelist():
+                _assert_safe_member(target, member)
+            zf.extractall(target)
+        return
+    if tarfile.is_tarfile(archive):
+        with tarfile.open(archive) as tf:
+            for member in tf.getmembers():
+                _assert_safe_member(target, member.name)
+            tf.extractall(target)
+        return
+    raise DriverPackageError("归档只支持 zip / tar / tar.gz")
+
+
+def _dependency_filter(dependencies: List[str], package_name: str) -> List[str]:
+    skip = {_normalize(package_name)} | {_normalize(item) for item in _SKIP_DEPENDENCIES}
+    result: List[str] = []
+    for item in dependencies:
+        head = re.split(r"[\s<>=!~;\[]", item, maxsplit=1)[0]
+        if _normalize(head) in skip:
             continue
-        if spec is None:
-            continue
-        for location in spec.submodule_search_locations or []:
-            path = str(Path(location).resolve())
-            if Path(path).is_dir() and path not in dirs:
-                dirs.append(path)
-    return dirs
+        result.append(item)
+    return result
+
+
+def _dependency_install_command(installer: str, dependencies: List[str], upgrade: bool) -> List[str]:
+    """与 environment_check._install_command 同一套约定：uv 显式 --python，中文 locale 走清华源。"""
+
+    from unilabos.utils.environment_check import _is_chinese_locale
+
+    chinese = _is_chinese_locale()
+    if installer == "uv":
+        command = ["uv", "pip", "install", "--python", sys.executable]
+        if upgrade:
+            command.append("--upgrade")
+        command.extend(dependencies)
+        if chinese:
+            command.extend(["--index-url", "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"])
+        return command
+    command = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check"]
+    if upgrade:
+        command.append("--upgrade")
+    command.extend(dependencies)
+    if chinese:
+        command.extend(["-i", "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"])
+    return command
 
 
 class DriverPackageService:
@@ -270,6 +446,7 @@ class DriverPackageService:
         return {
             "python": {"executable": sys.executable, "version": sys.version.split()[0]},
             "working_dir": str(self.working_dir),
+            "packages_root": str(packages_root(self.working_dir)),
             "ledger_path": str(ledger_path(self.working_dir)),
             "scan_dirs": list(self._scan_dirs),
             "external_only": self._external_only,
@@ -283,7 +460,7 @@ class DriverPackageService:
         ``<working_dir>/driver_package_catalog.json``；同名以官方为准，并标出台账里已登记的。
 
         两个来源都是 ``{"packages": [{name, spec, version?, description?, homepage?,
-        devices?, tags?, official?}]}``，``spec`` 直接喂给 install。
+        devices?, tags?, official?}]}``，``spec`` 是安装来源（GitHub 仓库 / 归档地址）。
         """
         installed = set(load_ledger(self.working_dir).keys())
         sources: List[Dict[str, Any]] = []
@@ -366,21 +543,17 @@ class DriverPackageService:
     def start_install(
         self, spec: str, enable: bool = True, upgrade: bool = False, name: str = ""
     ) -> Dict[str, Any]:
-        """``name`` 是调用方已知的分发名（索引条目里带），git / URL 规格靠它可靠登记。"""
-        spec = (spec or "").strip()
-        if not spec:
-            raise DriverPackageError("缺少安装目标：pip 规格（name==version）、git URL 或本地目录")
-        if any(token in spec for token in ("\n", "\r", "\x00")):
-            raise DriverPackageError("安装目标含非法字符")
+        """``name`` 是调用方已知的包名（索引条目里带），源码树没有 pyproject 时用它登记。"""
+        source = resolve_source(spec)
         name = (name or "").strip()
         if name and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
-            raise DriverPackageError(f"分发名不合法：{name}")
-        operation = self._new_operation("install", spec)
+            raise DriverPackageError(f"包名不合法：{name}")
+        operation = self._new_operation("install", source.spec)
         if name:
             operation.package_name = name
         threading.Thread(
             target=self._run_install,
-            args=(operation.operation_id, spec, enable, upgrade, name),
+            args=(operation.operation_id, source, enable, upgrade, name),
             name=f"DriverPackageInstall-{operation.operation_id[:8]}",
             daemon=True,
         ).start()
@@ -437,97 +610,204 @@ class DriverPackageService:
             operation.result = result
             operation.finished_at_ms = _now_ms()
 
-    def _run_pip(self, operation_id: str, args: List[str]) -> int:
-        command = [sys.executable, "-m", "pip", *args]
-        self._append_log(operation_id, "$ " + " ".join(command))
+    # 下面三个是可替换的"外部世界"入口：测试用桩，生产用真实网络 / 子进程。
+
+    def _download(self, url: str, destination: Path, log: Callable[[str], None]) -> None:
+        import urllib.error
+        import urllib.request
+
+        request = urllib.request.Request(url, headers={"User-Agent": "unilabos-driver-packages"})
         try:
-            proc = subprocess.run(command, capture_output=True, text=True, timeout=INSTALL_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            self._append_log(operation_id, f"[timeout] 超过 {INSTALL_TIMEOUT_S}s")
-            return 124
-        self._append_log(operation_id, proc.stdout)
-        self._append_log(operation_id, proc.stderr)
-        return proc.returncode
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_S) as response:  # noqa: S310 - 用户给的来源
+                total = 0
+                with destination.open("wb") as handle:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > MAX_ARCHIVE_BYTES:
+                            raise DriverPackageError(f"归档超过 {MAX_ARCHIVE_BYTES // (1024 * 1024)} MB 上限")
+                        handle.write(chunk)
+        except urllib.error.HTTPError as exc:
+            raise DriverPackageError(f"下载失败 HTTP {exc.code}: {url}") from exc
+        except urllib.error.URLError as exc:
+            raise DriverPackageError(f"下载失败: {exc.reason}") from exc
+        log(f"[download] {url} -> {destination.stat().st_size} bytes")
+
+    def _install_dependencies(self, dependencies: List[str], upgrade: bool, log: Callable[[str], None]) -> str:
+        """返回实际使用的安装器（uv / pip）；无依赖返回空串。"""
+
+        if not dependencies:
+            log("[deps] 没有第三方依赖，跳过")
+            return ""
+        from unilabos.utils.environment_check import _installer_candidates
+
+        last_error = ""
+        for installer in _installer_candidates():
+            command = _dependency_install_command(installer, dependencies, upgrade)
+            log("$ " + " ".join(command))
+            try:
+                proc = subprocess.run(command, capture_output=True, text=True, timeout=DEPENDENCY_INSTALL_TIMEOUT_S)
+            except FileNotFoundError:
+                log(f"[deps] {installer} 不可用，换下一个安装器")
+                continue
+            except subprocess.TimeoutExpired:
+                last_error = f"{installer} 超过 {DEPENDENCY_INSTALL_TIMEOUT_S}s"
+                log(f"[deps] {last_error}")
+                continue
+            log(proc.stdout)
+            log(proc.stderr)
+            if proc.returncode == 0:
+                return installer
+            last_error = f"{installer} 退出码 {proc.returncode}"
+        raise DriverPackageError(f"依赖安装失败（{last_error}）：{', '.join(dependencies)}")
+
+    def _fetch_source_tree(self, source: PackageSource, log: Callable[[str], None]) -> Tuple[Path, Path, str]:
+        """远端来源：下载 + 校验 + 解压到临时目录，返回 (临时根, 源码根, sha256)。"""
+
+        staging = Path(tempfile.mkdtemp(prefix="driver-package-", dir=str(self._staging_root())))
+        archive = staging / "package.archive"
+        errors: List[str] = []
+        for url in source.urls:
+            try:
+                self._download(url, archive, log)
+                break
+            except DriverPackageError as exc:
+                errors.append(str(exc))
+                log(f"[download] 失败，尝试下一个候选：{exc}")
+        else:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise DriverPackageError("；".join(errors) or "没有可用的下载地址")
+        sha256 = _sha256_file(archive)
+        extracted = staging / "extract"
+        extracted.mkdir()
+        extract_archive(archive, extracted)
+        archive.unlink(missing_ok=True)
+        root = find_source_root(extracted)
+        log(f"[extract] 源码根 {root}")
+        return staging, root, sha256
+
+    def _staging_root(self) -> Path:
+        root = packages_root(self.working_dir) / ".staging"
+        root.mkdir(parents=True, exist_ok=True)
+        return root
 
     def _run_install(
-        self, operation_id: str, spec: str, enable: bool, upgrade: bool = False, name_hint: str = ""
+        self, operation_id: str, source: PackageSource, enable: bool, upgrade: bool, name_hint: str = ""
     ) -> None:
+        log = lambda text: self._append_log(operation_id, text)  # noqa: E731
+        staging: Optional[Path] = None
         try:
-            from unilabos.app.cli.package import _installed_device_ids
-
-            before = _distribution_snapshot()
-            code = self._run_pip(operation_id, ["install", *(["--upgrade"] if upgrade else []), spec])
-            if code != 0:
-                self._finish(operation_id, error=f"pip install 退出码 {code}")
-                return
-            after = _distribution_snapshot()
-            changed = [name for name, version in after.items() if before.get(name) != version]
-            named = name_hint or _spec_distribution_name(spec)
-            # 分发名已知（调用方给的 / 规格里看得出）且确实装着 → 以它为准（重复安装同版本
-            # 也照常登记）；git / URL 等看不出名字的，看安装前后多出 / 变化的分发
-            if named and _normalize(named) in after:
-                candidates = [named]
+            if source.kind == "local":
+                root = source.path
+                assert root is not None
+                sha256 = ""
+                log(f"[local] 原地登记目录 {root}")
             else:
-                if name_hint:
-                    self._append_log(operation_id, f"[warn] 环境里没有叫 {name_hint} 的分发，改按安装前后差异识别")
-                candidates = changed
-            if not candidates:
-                self._finish(
-                    operation_id,
-                    error="pip 已退出 0，但没有识别到新安装或版本变化的分发（可能早已是该版本）；"
-                    "如需重新登记请先卸载再装，或改用带名字的 pip 规格",
-                )
-                return
+                staging, root, sha256 = self._fetch_source_tree(source, log)
+
+            project = read_project_metadata(root)
+            name = project["name"] or name_hint or source.fallback_name
+            if not name:
+                raise DriverPackageError("无法确定包名：源码树没有 pyproject.toml，请在请求里给 name")
+            if name_hint and project["name"] and _normalize(name_hint) != _normalize(project["name"]):
+                log(f"[warn] 索引里的包名 {name_hint} 与 pyproject 的 {project['name']} 不同，按 pyproject 登记")
+            version = project["version"] or (source.ref or "local" if source.kind == "local" else source.ref or "main")
+            dependencies = _dependency_filter(project["dependencies"], name)
+            log(f"[project] {name} {version} 依赖 {dependencies or '-'}")
+
+            installer = self._install_dependencies(dependencies, upgrade, log)
+
+            if source.kind == "local":
+                package_root = root
+            else:
+                package_root = self._place_source_tree(root, name, version, log)
+
+            package_dirs = detect_package_dirs(package_root, project["include"])
+            if not package_dirs:
+                raise DriverPackageError(f"源码树里没有可挂载的 Python 包目录（含 __init__.py）：{package_root}")
+            device_ids = scan_device_ids(package_dirs)
+            log(f"[scan] 包目录 {package_dirs} 设备 {', '.join(device_ids) or '-'}")
+
             records = load_ledger(self.working_dir)
-            installed: List[Dict[str, Any]] = []
-            for candidate in candidates:
-                package_dirs = _dist_package_dirs(candidate)
-                device_ids = _installed_device_ids(candidate) if package_dirs else []
-                self._append_log(
-                    operation_id,
-                    f"[scan] {candidate}: dirs={package_dirs or '-'} devices={', '.join(device_ids) or '-'}",
-                )
-                key = _normalize(candidate)
-                previous = records.get(key)
-                record = DriverPackageRecord(
-                    name=candidate,
-                    spec=spec,
-                    version=after.get(key, ""),
-                    package_dirs=package_dirs,
-                    device_ids=device_ids,
-                    enabled=enable if previous is None else previous.enabled,
-                    installer="pip",
-                    installed_at_ms=previous.installed_at_ms if previous else _now_ms(),
-                    updated_at_ms=_now_ms(),
-                )
-                records[key] = record
-                installed.append(asdict(record))
+            key = _normalize(name)
+            previous = records.get(key)
+            record = DriverPackageRecord(
+                name=name,
+                spec=source.spec,
+                version=version,
+                source_kind=source.kind,
+                package_root=str(package_root),
+                package_dirs=package_dirs,
+                device_ids=device_ids,
+                dependencies=dependencies,
+                sha256=sha256,
+                enabled=enable if previous is None else previous.enabled,
+                installer=installer,
+                installed_at_ms=previous.installed_at_ms if previous else _now_ms(),
+                updated_at_ms=_now_ms(),
+            )
+            records[key] = record
             save_ledger(self.working_dir, records)
             self._restart_required = True
             with self._lock:
                 operation = self._operations.get(operation_id)
-                if operation is not None and installed:
-                    operation.package_name = installed[0]["name"]
-            self._finish(operation_id, result={"packages": installed, "restart_required": True})
+                if operation is not None:
+                    operation.package_name = name
+            self._finish(operation_id, result={"packages": [asdict(record)], "restart_required": True})
+        except DriverPackageError as exc:
+            log(f"[error] {exc}")
+            self._finish(operation_id, error=str(exc))
         except Exception as exc:  # noqa: BLE001 - 后台线程兜底
             logger.exception("[DriverPackages] install failed")
-            self._append_log(operation_id, f"[error] {exc}")
+            log(f"[error] {exc}")
             self._finish(operation_id, error=str(exc))
+        finally:
+            if staging is not None:
+                shutil.rmtree(staging, ignore_errors=True)
+
+    def _place_source_tree(self, root: Path, name: str, version: str, log: Callable[[str], None]) -> Path:
+        """把临时目录里的源码根搬到 ``<working_dir>/driver_packages/<name>/<version>/``，清掉同名其它版本。"""
+
+        safe = lambda text: re.sub(r"[^A-Za-z0-9._-]+", "-", text).strip("-") or "unnamed"  # noqa: E731
+        package_home = packages_root(self.working_dir) / safe(name)
+        target = package_home / safe(version)
+        if target.exists():
+            shutil.rmtree(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(root), str(target))
+        for sibling in package_home.iterdir():
+            if sibling.is_dir() and sibling != target:
+                shutil.rmtree(sibling, ignore_errors=True)
+                log(f"[place] 移除旧版本 {sibling.name}")
+        log(f"[place] {target}")
+        return target
 
     def _run_uninstall(self, operation_id: str, name: str) -> None:
+        log = lambda text: self._append_log(operation_id, text)  # noqa: E731
         try:
-            code = self._run_pip(operation_id, ["uninstall", "-y", name])
-            if code != 0:
-                self._finish(operation_id, error=f"pip uninstall 退出码 {code}")
-                return
             records = load_ledger(self.working_dir)
-            records.pop(_normalize(name), None)
+            key = _normalize(name)
+            record = records.get(key)
+            if record is None:
+                raise DriverPackageError(f"driver package not found: {name}")
+            root = Path(record.package_root) if record.package_root else None
+            managed_root = packages_root(self.working_dir).resolve()
+            if record.source_kind != "local" and root is not None and root.exists() and managed_root in root.resolve().parents:
+                shutil.rmtree(root.parent if root.parent != managed_root else root, ignore_errors=True)
+                log(f"[remove] {root}")
+            else:
+                log("[remove] 本机目录原地登记，只移出台账，不删文件")
+            if record.dependencies:
+                log(f"[deps] 保留已装依赖（可能被其他包共用）：{', '.join(record.dependencies)}")
+            records.pop(key, None)
             save_ledger(self.working_dir, records)
             self._restart_required = True
-            self._finish(operation_id, result={"removed": name, "restart_required": True})
+            self._finish(operation_id, result={"removed": record.name, "restart_required": True})
         except Exception as exc:  # noqa: BLE001
             logger.exception("[DriverPackages] uninstall failed")
-            self._append_log(operation_id, f"[error] {exc}")
+            log(f"[error] {exc}")
             self._finish(operation_id, error=str(exc))
 
     @staticmethod
@@ -559,10 +839,17 @@ __all__ = [
     "DriverPackageOperation",
     "DriverPackageRecord",
     "DriverPackageService",
+    "PackageSource",
     "catalog_path",
+    "detect_package_dirs",
     "enabled_package_dirs",
+    "find_source_root",
     "get_driver_package_service",
     "ledger_path",
     "load_ledger",
+    "packages_root",
+    "read_project_metadata",
+    "resolve_source",
     "save_ledger",
+    "scan_device_ids",
 ]

@@ -520,13 +520,12 @@ class InventoryRequirement(ServerObject):
 
     两种 kind 区分的是账目形态而不是物料种类：``material`` 表示独立物料实例
     （有 uuid、可放到位点的个体，例如枪头盒、孔板、试剂瓶），只改变生命周期而不
-    扣数量；``reagent`` 表示按量计量的 ``inventory_lot`` 库存（散装试剂、散装耗材
-    等），按 lot FIFO 从 available 预留并在动作开始时扣减。``reagent`` 是历史
-    命名，耗材同样可以走这一形态。
+    扣数量；``lot`` 表示按量计量的 ``inventory_lot`` 库存（散装试剂、散装耗材等），
+    按 lot FIFO 从 available 预留并在动作开始时扣减。
     """
 
     key: NonEmptyStr
-    kind: Literal["material", "reagent"]
+    kind: Literal["material", "lot"]
     material_uuid: Optional[NonEmptyStr] = None
     template_uuid: Optional[NonEmptyStr] = None
     lot_uuid: Optional[NonEmptyStr] = None
@@ -552,13 +551,13 @@ class InventoryRequirement(ServerObject):
                 )
             return self
         if self.material_uuid is not None or self.parent_material_uuid is not None:
-            raise ValueError("reagent requirement cannot select a material instance")
+            raise ValueError("lot requirement cannot select a material instance")
         if self.quantity is None or self.unit is None:
-            raise ValueError("reagent requirement needs quantity and unit")
+            raise ValueError("lot requirement needs quantity and unit")
         if self.lot_uuid is None and self.template_uuid is None:
-            raise ValueError("reagent requirement needs lot_uuid or template_uuid")
+            raise ValueError("lot requirement needs lot_uuid or template_uuid")
         if self.site_uuid is not None:
-            raise ValueError("reagent requirement cannot carry site_uuid")
+            raise ValueError("lot requirement cannot carry site_uuid")
         return self
 
 
@@ -610,7 +609,7 @@ class InventoryTaskReservationCreate(ServerObject):
 
 class InventoryAllocation(ServerObject):
     key: NonEmptyStr
-    kind: Literal["material", "reagent"]
+    kind: Literal["material", "lot"]
     material_uuid: Optional[NonEmptyStr] = None
     template_uuid: NonEmptyStr
     lot_uuid: Optional[NonEmptyStr] = None

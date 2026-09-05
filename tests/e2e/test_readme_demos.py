@@ -1,4 +1,4 @@
-"""四个 README demo 仓库的端到端：unilab CLI 建图/登记 → 起微后端 → 管理 API 跑工作流。
+"""六个 README demo 仓库的端到端：unilab CLI 建图/登记 → 起微后端 → 管理 API 跑工作流。
 
 每个 demo 走同一条链路（hostlink 后端），全部经真实子进程与 HTTP，不在测试进程内
 拼装运行时：
@@ -7,11 +7,16 @@
 2. ``unilab graph create --devices <pkg>`` 生成图骨架，与 demo 图声明的设备模板对照；
 3. ``unilab -g <demo 图> --devices <pkg> ...`` 启动 host（及 slave）进程——启动即把图
    登记进 Graph Authority、上报 ``@workflow`` 模板、拉起微后端管理 API；
-4. 等待设备后台闭环写出 proof；
+4. 等待设备后台闭环写出 proof（仅 LanDemo：跨设备订阅 + 远程调用本身就是它要演示的
+   设备自发行为；其余 demo 的设备不自跑任何动作，全部由工作流触发）；
 5. ``unilab graph list/download/upload --port_management`` 经管理 API 读写 Graph Authority；
 6. 管理 API 检索工作流、创建任务、（按需）放行错误决策、断言任务与 job 终态。
 
 demo 仓库的引用（URL + pinned 提交）见 :mod:`tests.e2e.readme_demos`。
+
+进程拓扑由 ``UNILABOS_E2E_TOPOLOGY`` 选择：``single``（缺省，``--no_safe_restart``，权威与
+Host 同进程）或 ``split``（默认拓扑：权威进程持有管理端口并看护 Host 子进程，验证浏览器
+只连权威端口时图 / 工作流 / 锁 / 决策链 / 物料投影全部经控制面闭环）。
 """
 
 from __future__ import annotations

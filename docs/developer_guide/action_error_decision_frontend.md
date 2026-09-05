@@ -125,6 +125,12 @@ Host 将 effective result 上报为 success，`suc_type=operator_intervention`�
 - Edge SSE 可观测 `job_error_decision_required`、`job_error_decision_resolved` 和最终
   `job_status`，但不是决策写入口。
 
+本机调度（默认 profile）时调度后端就是同一进程，上述两个 `/error-decisions` 接口即是
+决策的读写入口。除执行面挂起的失败 attempt 外，清单还包含进程重启后执行态未知的
+attempt（`exception_type=ExecutionStateUnknown`，选项 `retry` / `skip` /
+`operator_intervention` / `abort`），提交方式相同，见
+`scheduling_and_execution.md` §4.1 的任务恢复部分。
+
 ## 7. 注册表
 
 每个 action 的 completion 固定包含 `error_policy`；未配置时为 `{}`。策略由后端用于前端

@@ -75,23 +75,24 @@ class WSConfig:
 
 # HTTP配置
 class HTTPConfig:
-    # Backend 地址（云端或本机 --role backend 进程）。为空（默认）时本进程是调度
-    # 权威（本地 Scheduler + Workflow API）；显式配置（config 文件或 --address）后
-    # 进入 Backend-controlled 执行模式。
-    # 不内置任何云端默认地址；环境快捷选项仅保留在 UniLabOS-Launcher。
+    # Host 连接的 Backend（调度权威）地址：config 文件或 --address 给了用给的，为空表示
+    # 本机自己的 Backend 端口（backend_port）。HTTP 数据面与 runtime.v1 控制 WebSocket
+    # 都走这一个地址。不内置任何云端地址；环境快捷选项仅保留在 UniLabOS-Launcher。
     remote_addr = ""
-    # 独立部署的低层覆盖；CLI 只暴露统一 --address。为空时从 remote_addr 派生。
+    # 控制 WebSocket 的低层覆盖；CLI 只暴露统一 --address。为空时从 Backend 地址派生：
+    # runtime.v1 的 WS 控制面与 HTTP API 同 host 同端口。
     schedule_addr = ""
-    # Backend 线协议："runtime.v1"（微后端 / --role backend）或 "legacy"（旧云端
-    # Backend：job_start / host_node_ready / /lab/resource 消息族）。为空时启动期
-    # 按 HTTP 路由自动探测。
+    # 仅供 Backend 侧 legacy 适配层的探测器（legacy_adaptor.probe）读取：
+    # "runtime.v1" 或 "legacy"（旧云端 Backend：job_start / host_node_ready /
+    # /lab/resource 消息族）。Edge 的会话工厂固定 runtime.v1，不读取此项。
     backend_protocol = ""
-    # Edge 只访问微后端物料中心；可选择进程内或独立部署的微后端。
+    # Host 访问的物料权威地址；为空时与 Backend 地址相同。
     material_microbackend_addr = ""
     material_query_timeout = 10
-    # --role backend 进程侧：Edge 数据面地址（拉取 durable 事件正文），
-    # 以及 backend 管理 API 监听端口。
-    edge_data_addr = "http://127.0.0.1:8002"
+    # Backend（--role backend）管理 API / 控制 WebSocket 的监听端口（Host 缺省连接的就是它）。
+    # Backend 不再主动连 Host：Host 不监听端口，Backend 需要的 Host 数据经控制 WS 的
+    # backend_http 请求由 Host 在进程内执行并回送。edge_data_addr 仅为兼容旧配置保留、不再使用。
+    edge_data_addr = ""
     backend_port = 8081
     # 驱动包索引镜像（JSON，结构同 https://github.com/Xuwznln/awesome-lab-devices 的 index.json）。
     # 官方索引默认由 OpenLab 前端在浏览器里直接读取；只有浏览器出不了网、需要 Edge 侧

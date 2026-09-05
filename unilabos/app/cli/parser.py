@@ -94,9 +94,9 @@ def _register_runtime_arguments(parser: argparse.ArgumentParser) -> None:
         choices=["auto", "backend"],
         default="auto",
         help=(
-            "进程角色：auto（默认）按现有语义启动完整 runtime；backend 只启动"
-            "调度权威进程（scheduler + workflow + runtime.v1 控制面服务端，无设备/无 "
-            "ROS），Edge 进程配置 --address 指向它后可独立重启。"
+            "进程角色：auto（默认）启动调度权威进程并把 Host 作为子进程拉起（同机、"
+            "同一管理端口）；backend 只启动调度权威（scheduler + workflow + runtime.v1 "
+            "控制面服务端，无设备/无 ROS），Edge 进程配置 --address 指向它后可独立重启。"
         ),
     )
     _add(
@@ -383,6 +383,17 @@ def _register_development_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         default=False,
         help="Load extra lab_ prefixed labware resource definitions",
+    )
+    _add(
+        group,
+        "--no_safe_restart",
+        action="store_true",
+        default=False,
+        help=(
+            "关闭安全重启编排：调度权威与 Host 跑在同一个进程里，安静点重启只做干净"
+            "退出、不再拉起，便于附加调试器。默认 unilab 进程就是调度权威，持有管理"
+            "端口并把 Host 作为子进程拉起看护，重启只重启 Host。"
+        ),
     )
 
 

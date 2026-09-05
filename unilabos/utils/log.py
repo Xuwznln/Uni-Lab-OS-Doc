@@ -288,6 +288,9 @@ def configure_logger(loglevel=None, working_dir=None):
 
     logging.getLogger("asyncio").setLevel(logging.INFO)
     logging.getLogger("urllib3").setLevel(logging.INFO)
+    # 权威进程转发 Host 路由用 httpx；它的 DEBUG 是逐连接字节级 trace
+    logging.getLogger("httpcore").setLevel(logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     return log_filepath
 
 

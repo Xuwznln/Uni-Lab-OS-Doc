@@ -16,13 +16,17 @@ Edge 与 runtime（微后端/Backend）之间的通信只有一个协议版本
 from unilabos.protocol.runtime.control import (
     BackendCommandDocument,
     BackendCommandNotice,
+    BackendHttpRequest,
     BackendSessionNotice,
     CancelJobContent,
     CommandType,
     EdgeChangeAck,
     EdgeChangeNotice,
+    EdgeHttpResponse,
     ErrorDecisionContent,
     ExecuteJobContent,
+    PingNotice,
+    PongNotice,
 )
 from unilabos.protocol.runtime.data import (
     RUNTIME_PROTOCOL_VERSION,
@@ -95,13 +99,17 @@ __all__ = [
     # control（runtime.v1 业务控制面）
     "BackendCommandDocument",
     "BackendCommandNotice",
+    "BackendHttpRequest",
     "BackendSessionNotice",
     "CancelJobContent",
     "CommandType",
     "EdgeChangeAck",
     "EdgeChangeNotice",
+    "EdgeHttpResponse",
     "ErrorDecisionContent",
     "ExecuteJobContent",
+    "PingNotice",
+    "PongNotice",
     # workflow
     "CandidateChangeset",
     "CandidateCompilation",

@@ -1,7 +1,9 @@
 """微后端 HTTP Application 与 Uvicorn 生命周期。"""
 
 import errno
+import json
 import socket
+import threading
 import webbrowser
 
 from fastapi import FastAPI, Request
@@ -18,6 +20,7 @@ from unilabos.utils.tracing import install_http_tracing
 # 优雅停机上限（秒）：等在途 HTTP 请求收尾，但不为 SSE 长连接无限等待。
 GRACEFUL_SHUTDOWN_TIMEOUT_S = 5
 
+#: 内置兜底：索引读不到（离线 / 内网）时「推荐前端」至少有这一张卡。
 RECOMMENDED_FRONTENDS = (
     {
         "name": "OpenLab",
@@ -25,6 +28,12 @@ RECOMMENDED_FRONTENDS = (
         "description": "面向 Uni-Lab OS 微后端的社区实验室前端。",
     },
 )
+
+#: 前端站点索引（awesome-lab-sites/v1）。导航页在浏览器里直接读它补充「推荐前端」
+#: 卡片——与 OpenLab 读 awesome-lab-devices 同一套模式，Edge 进程本身不出网。
+#: 内网部署可改成镜像地址；索引里与兜底卡同 URL 的条目只刷新文案，不重复出卡。
+SITE_INDEX_URL = "https://raw.githubusercontent.com/Xuwznln/awesome-lab-sites/main/index.json"
+SITE_INDEX_REPO_URL = "https://github.com/Xuwznln/awesome-lab-sites"
 
 DEVELOPER_LINKS = (
     {
@@ -64,6 +73,7 @@ server_routes_mounted = False
 workflow_routes_mounted = False
 registry_routes_mounted = False
 driver_packages_mounted = False
+edge_proxy_mounted = False
 
 # noinspection PyTypeChecker
 app.add_middleware(
@@ -119,10 +129,85 @@ def _render_cards(items) -> str:
     )
 
 
-def _render_catalog_page(title: str, intro: str, sections) -> str:
+#: 浏览器侧读取站点索引并补卡。只用 DOM API 写入文本，索引内容不进 innerHTML。
+_SITE_INDEX_SCRIPT = """
+<script>
+(function () {
+  var url = __SITE_INDEX_URL__;
+  var grid = document.getElementById("frontends");
+  var note = document.getElementById("frontends-note");
+  if (!grid || typeof fetch !== "function") return;
+  var controller = typeof AbortController === "function" ? new AbortController() : null;
+  var timer = controller ? setTimeout(function () { controller.abort(); }, 8000) : null;
+  fetch(url, { cache: "no-cache", signal: controller ? controller.signal : undefined })
+    .then(function (response) {
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      return response.json();
+    })
+    .then(function (index) {
+      var sites = index && Array.isArray(index.sites) ? index.sites : [];
+      var byUrl = {};
+      grid.querySelectorAll("a.card").forEach(function (card) { byUrl[card.getAttribute("href")] = card; });
+      sites.forEach(function (site) {
+        if (!site || typeof site.url !== "string" || !/^https:\\/\\//.test(site.url)) return;
+        var name = site.name || site.id || site.url;
+        var existing = byUrl[site.url];
+        if (existing) {
+          existing.querySelector("strong").textContent = name;
+          if (site.description) existing.querySelector("span").textContent = site.description;
+          return;
+        }
+        var card = document.createElement("a");
+        card.className = "card";
+        card.href = site.url;
+        card.target = "_blank";
+        card.rel = "noreferrer";
+        var strong = document.createElement("strong");
+        strong.textContent = name;
+        var span = document.createElement("span");
+        span.textContent = site.description || "";
+        var code = document.createElement("code");
+        code.textContent = site.url;
+        card.appendChild(strong);
+        card.appendChild(span);
+        card.appendChild(code);
+        grid.appendChild(card);
+        byUrl[site.url] = card;
+      });
+      if (note) {
+        note.textContent = " · " + sites.length + " 个站点" + (index.updated_at ? "，更新于 " + index.updated_at : "");
+      }
+    })
+    .catch(function (error) {
+      if (note) note.textContent = " · 不可达（" + ((error && error.message) || error) + "），仅显示内置推荐";
+    })
+    .then(function () { if (timer) clearTimeout(timer); });
+})();
+</script>
+"""
+
+
+def _render_site_index_note(site_index_url: str) -> str:
+    return (
+        '<p class="index-note">站点目录来自 '
+        f'<a href="{SITE_INDEX_REPO_URL}" target="_blank" rel="noreferrer">awesome-lab-sites</a>'
+        f'<span id="frontends-note"></span> · <code>{site_index_url}</code></p>'
+    )
+
+
+def _render_catalog_page(title: str, intro: str, sections, *, site_index_url: str = "") -> str:
+    """``sections`` 为 ``(section_id, heading, items)``；``site_index_url`` 非空时，
+    id 为 ``frontends`` 的分区会在浏览器里读取站点索引补卡。"""
+
     body = "".join(
-        f'<h2>{heading}</h2><section class="grid">{_render_cards(items)}</section>'
-        for heading, items in sections
+        f'<h2>{heading}</h2><section class="grid" id="{section_id}">{_render_cards(items)}</section>'
+        + (_render_site_index_note(site_index_url) if site_index_url and section_id == "frontends" else "")
+        for section_id, heading, items in sections
+    )
+    script = (
+        _SITE_INDEX_SCRIPT.replace("__SITE_INDEX_URL__", json.dumps(site_index_url))
+        if site_index_url
+        else ""
     )
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -142,13 +227,15 @@ def _render_catalog_page(title: str, intro: str, sections) -> str:
     .card:hover {{ border-color: #4c78ff; box-shadow: 0 5px 18px #25385816; }}
     .card span {{ color: #526173; }}
     code {{ color: #3157c8; overflow-wrap: anywhere; }}
+    .index-note {{ margin: 10px 0 0; font-size: 13px; }}
+    .index-note code {{ font-size: 12px; }}
   </style>
 </head>
 <body><main>
   <h1>{title}</h1>
   <p>{intro}</p>
   {body}
-</main></body>
+</main>{script}</body>
 </html>"""
 
 
@@ -157,15 +244,15 @@ async def frontend_catalog() -> str:
     """返回社区前端与开发工具的入口导航。
 
     前端只以独立静态站（GitHub Pages）形式部署，本进程不托管页面。
-    Backend-controlled 模式（配置了 --address）下本进程只是 Edge 执行面，
-    Workflow/调度 API 不在本端口；页面退化为指向调度权威的路标，
-    避免用户把前端连到本进程。
+    配置了 --address 的 Host 只提供执行面，Workflow/调度 API 在它的 Backend 地址上；
+    页面退化为指向 Backend 的路标，避免用户把前端连到本进程。
     """
 
     remote = (HTTPConfig.remote_addr or "").rstrip("/")
     if remote:
         sections = (
             (
+                "authority",
                 "调度权威",
                 (
                     {
@@ -175,7 +262,7 @@ async def frontend_catalog() -> str:
                     },
                 ),
             ),
-            ("本进程调试（仅设备侧 API）", DEVELOPER_LINKS),
+            ("developer", "本进程调试（仅设备侧 API）", DEVELOPER_LINKS),
         )
         return _render_catalog_page(
             "Uni-Lab-OS Edge 进程",
@@ -187,7 +274,11 @@ async def frontend_catalog() -> str:
         "Uni-Lab-OS Microbackend",
         "此进程提供 Uni-Lab-OS 后端 API。请选择 API 工具，或使用部署在 GitHub "
         "Pages 上的社区前端连接当前地址。",
-        (("推荐前端", RECOMMENDED_FRONTENDS), ("开发与接入", DEVELOPER_LINKS)),
+        (
+            ("frontends", "推荐前端", RECOMMENDED_FRONTENDS),
+            ("developer", "开发与接入", DEVELOPER_LINKS),
+        ),
+        site_index_url=SITE_INDEX_URL,
     )
 
 
@@ -205,20 +296,34 @@ def setup_server() -> FastAPI:
     """幂等挂载当前运行角色所需的 API 路由。"""
     global edge_routes_mounted, materials_routes_mounted, server_routes_mounted
     global workflow_routes_mounted, registry_routes_mounted, driver_packages_mounted
+    global edge_proxy_mounted
+
+    from unilabos.server.api.edge_proxy import create_edge_proxy_router, edge_proxy_enabled
+
+    # 调度权威带 Host 子进程：Host 专有路由（runtime / telemetry / history / lab /
+    # graphs / hostlink / status-incidents / 驱动包 / 受管进程）转发给子进程。
+    # 必须最先挂载，才能优先于下面本进程自己的同名路由。
+    proxying = edge_proxy_enabled()
+    if proxying and not edge_proxy_mounted:
+        app.include_router(create_edge_proxy_router())
+        edge_proxy_mounted = True
 
     # 驱动包台账 / 受管设备进程：只在带执行面（加载注册表、跑 HostLink server）的
     # Host 进程有意义，--role backend 不挂载。
-    if not driver_packages_mounted and _has_execution_face():
+    if not driver_packages_mounted and not proxying and _has_execution_face():
         try:
             from unilabos.server.api.device_processes import create_device_processes_router
             from unilabos.server.api.driver_package_graphs import (
                 create_driver_package_graphs_router,
             )
             from unilabos.server.api.driver_packages import create_driver_packages_router
+            from unilabos.server.api.host_relay import create_host_relay_router
 
             app.include_router(create_driver_packages_router())
             app.include_router(create_driver_package_graphs_router())
             app.include_router(create_device_processes_router())
+            # 调度权威（materials 权威）把物料投影下行经这里送到设备
+            app.include_router(create_host_relay_router())
             driver_packages_mounted = True
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
             error(f"[Microbackend] 挂载驱动包 / 设备进程路由失败: {exc}")
@@ -242,8 +347,8 @@ def setup_server() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
             error(f"[Microbackend] 挂载执行观测路由失败: {exc}")
 
-    # 本机调度（默认）时挂载 Workflow Authority 写 API；接入云端后
-    # get_workflow_service() 为 None，不挂载。
+    # 调度权威随本进程装配时挂载 Workflow Authority 写 API；配置了 --address 的 Host
+    # get_workflow_service() 为 None，不挂载（写入口在 Backend 地址上）。
     if not workflow_routes_mounted:
         try:
             from unilabos.server.backend.composition import get_workflow_service
@@ -256,8 +361,8 @@ def setup_server() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
             error(f"[Microbackend] 挂载本机 Workflow Authority 失败: {exc}")
 
-    # Registry Authority 与 Workflow Authority 同归属：本机持有调度权威（默认 Host
-    # 或 --role backend）时挂载条目级注册表版本 API；接入云端后由远端持有，不挂载。
+    # Registry Authority 与 Workflow Authority 同归属：调度权威随本进程装配时挂载
+    # 条目级注册表版本 API；只提供执行面的 Host 不挂载。
     if not registry_routes_mounted:
         try:
             from unilabos.server.api.runtime.registry import install_registry_api
@@ -282,6 +387,7 @@ def setup_server() -> FastAPI:
                     app,
                     services,
                     include_materials=include_materials,
+                    include_host_data=not proxying,
                 )
                 server_routes_mounted = True
                 materials_routes_mounted = include_materials
@@ -305,28 +411,54 @@ def setup_server() -> FastAPI:
 
 
 _uvicorn_server = None
+# 不监听端口的 Host 子进程：主线程在这里等停机请求，管理 API 由权威经控制 WS 下发执行
+_control_plane_stop = threading.Event()
+_serving_over_control_plane = False
 
 
 def request_server_shutdown() -> bool:
     """请求管理 API 停机（安静点重启用）。
 
     uvicorn 主循环每个 tick 检查 ``should_exit``，置位后 ``start_server``
-    返回，main 的正常退出链路（关库、停 backend）随之执行。
+    返回，main 的正常退出链路（关库、停 backend）随之执行；不监听端口的 Host 子进程
+    则唤醒 :func:`serve_over_control_plane` 的等待。
 
     Returns:
-        bool: 服务器正在运行且已收到停机请求。
+        bool: 服务正在运行且已收到停机请求。
     """
     server = _uvicorn_server
-    if server is None:
-        return False
-    server.should_exit = True
-    return True
+    if server is not None:
+        server.should_exit = True
+        return True
+    if _serving_over_control_plane:
+        _control_plane_stop.set()
+        return True
+    return False
+
+
+def serve_over_control_plane() -> None:
+    """Host 子进程形态：挂好路由但不绑端口，阻塞到收到停机请求。
+
+    请求由调度权威经控制 WS（``backend_http``）下发，WS 客户端对本进程的 ASGI 应用
+    在进程内执行；本函数只负责让主线程活着并响应 ``request_server_shutdown``。
+    """
+
+    global _serving_over_control_plane
+    setup_server()
+    _control_plane_stop.clear()
+    _serving_over_control_plane = True
+    try:
+        # 分段等待：Windows 上无限期 wait 收不到信号处理器（Ctrl+Break / SIGTERM）
+        while not _control_plane_stop.wait(0.5):
+            pass
+    finally:
+        _serving_over_control_plane = False
 
 
 def browser_landing_url(host: str, port: int) -> str:
     """启动时浏览器应打开的页面。
 
-    Backend-controlled 模式下直达调度权威的管理页（本进程 / 只是路标）；
+    配置了 --address 的 Host 直达 Backend 的管理页（本进程 / 只是路标）；
     否则打开本进程页面。
     """
 

@@ -14,12 +14,13 @@ legacy（旧云端 Backend：``job_start`` / ``host_node_ready`` 消息族）
     - ``legacy.materials`` 旧后端物料通知 → 微后端权威的翻译；
     - ``legacy.graph``     旧形状图/节点/边 → 当前契约的入站转换（``-g`` 文件与
       ``unilab graph upload`` 的读取边界调用；graphio / Graph Authority 只认当前契约）；
-    - ``legacy.startup``   Edge 启动期接线（启动图转换、旧后端开机上联），``app.main``
-      只保留对它的两处调用。
+    - ``legacy.startup``   启动期接线（启动图转换、旧后端开机上联）；``app.main``
+      只保留对启动图转换的一处调用。
 
-公共部分：``session`` 会话工厂（按 ``probe`` 探测到的协议选客户端）、``url``
-连接地址构建。调度权威、执行 bridge 与 Edge 控制面等本地微后端代码留在
-``server.backend`` 直下，不属于本包。
+公共部分：``session`` 会话工厂（Edge 固定 runtime.v1）、``url`` 连接地址
+构建（runtime.v1 与 HTTP 同端口；``+1`` 只在 ``build_legacy_backend_websocket_url``）。
+``probe`` 与 ``legacy`` 客户端只供 Backend 侧显式兼容旧云端；调度权威、执行
+bridge 与 Edge 控制面等本地微后端代码留在 ``server.backend`` 直下，不属于本包。
 """
 
 from unilabos.server.backend.legacy_adaptor.http import (

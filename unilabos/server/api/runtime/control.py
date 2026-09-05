@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 
+from unilabos.protocol.runtime.control import EdgeHttpResponse
 from unilabos.server.backend.edge_control import (
     EdgeControlService,
     get_edge_control_service,
@@ -44,8 +45,21 @@ def get_edge_command(command_uuid: str) -> dict[str, Any]:
     return document
 
 
+@router.post("/api/v1/edge/http-responses/{request_uuid}", include_in_schema=False)
+def receive_edge_http_response(request_uuid: str, response: EdgeHttpResponse) -> dict[str, Any]:
+    """Edge 把 ``backend_http`` 请求在进程内执行后的结果送回这里（Edge 自己不监听端口）。"""
+
+    if response.request_uuid != request_uuid:
+        raise HTTPException(status_code=422, detail="request_uuid mismatch")
+    accepted = _require_service().complete_http_response(response)
+    return {"accepted": accepted}
+
+
 async def _pump_outgoing(
-    websocket: WebSocket, service: EdgeControlService, epoch: str
+    websocket: WebSocket,
+    service: EdgeControlService,
+    epoch: str,
+    send_lock: Optional[asyncio.Lock] = None,
 ) -> None:
     """把服务的线程安全下行队列泵到当前 WS 连接。"""
 
@@ -54,31 +68,89 @@ async def _pump_outgoing(
             message = await asyncio.to_thread(service.outgoing.get, True, 0.5)
         except queue.Empty:
             continue
-        await websocket.send_text(json.dumps(message, ensure_ascii=False))
+        encoded = json.dumps(message, ensure_ascii=False)
+        if send_lock is None:
+            await websocket.send_text(encoded)
+        else:
+            async with send_lock:
+                await websocket.send_text(encoded)
 
 
 async def _pump_incoming(
-    websocket: WebSocket, service: EdgeControlService, epoch: str
+    websocket: WebSocket,
+    service: EdgeControlService,
+    epoch: str,
+    send_lock: Optional[asyncio.Lock] = None,
 ) -> None:
-    while service.connection_epoch == epoch:
-        raw = await websocket.receive_text()
+    # edge_change 的正文处理可能访问 Edge HTTP 数据面（秒级甚至更久）。
+    # 它们保持 FIFO，但不能占住 receive_text；ping/pong 走下面的快速分支。
+    # 不设有限容量：队列里只有短通知，且限制容量会让 receive_text 在
+    # 高峰期反过来挡住后续 ping。正文仍由 durable HTTP/事件存储限流。
+    business_queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+
+    async def _business_worker() -> None:
+        while True:
+            action, data = await business_queue.get()
+            try:
+                # handle_message 内部可能同步拉取 Edge HTTP payload，放线程池。
+                reply: Optional[dict[str, Any]] = await asyncio.to_thread(
+                    service.handle_message, action, data
+                )
+                if reply is not None and service.connection_epoch == epoch:
+                    encoded = json.dumps(reply, ensure_ascii=False)
+                    if send_lock is None:
+                        await websocket.send_text(encoded)
+                    else:
+                        async with send_lock:
+                            await websocket.send_text(encoded)
+            except Exception:  # noqa: BLE001 - 单条上行事件失败不拖垮心跳
+                logger.exception("[EdgeControl] 处理上行 %s 失败", action)
+            finally:
+                business_queue.task_done()
+
+    worker = asyncio.create_task(
+        _business_worker(), name="edge-control-business"
+    )
+    try:
+        while service.connection_epoch == epoch:
+            raw = await websocket.receive_text()
+            try:
+                envelope = json.loads(raw)
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                logger.warning("[EdgeControl] 忽略无效 JSON 上行消息")
+                continue
+            if not isinstance(envelope, dict):
+                continue
+            action = str(envelope.get("action") or "")
+            data = envelope.get("data", {})
+            if not isinstance(data, dict):
+                continue
+
+            if action in {"ping", "pong"}:
+                # ping/pong 是协议级特殊字段，必须在接收协程内完成，不能
+                # 等待 edge_change / backend 业务 handler。
+                try:
+                    reply = service.handle_message(action, data)
+                except Exception:  # noqa: BLE001 - 坏心跳只丢弃当前消息
+                    logger.exception("[EdgeControl] 处理 %s 心跳失败", action)
+                    continue
+                if reply is not None and service.connection_epoch == epoch:
+                    encoded = json.dumps(reply, ensure_ascii=False)
+                    if send_lock is None:
+                        await websocket.send_text(encoded)
+                    else:
+                        async with send_lock:
+                            await websocket.send_text(encoded)
+                continue
+
+            # 业务消息只入队；接收循环马上继续读取后续 ping。
+            await business_queue.put((action, data))
+    finally:
+        worker.cancel()
         try:
-            envelope = json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            logger.warning("[EdgeControl] 忽略无效 JSON 上行消息")
-            continue
-        if not isinstance(envelope, dict):
-            continue
-        action = str(envelope.get("action") or "")
-        data = envelope.get("data", {})
-        if not isinstance(data, dict):
-            continue
-        # handle_message 内部可能同步拉取 Edge HTTP payload，放线程池
-        reply: Optional[dict[str, Any]] = await asyncio.to_thread(
-            service.handle_message, action, data
-        )
-        if reply is not None and service.connection_epoch == epoch:
-            await websocket.send_text(json.dumps(reply, ensure_ascii=False))
+            await worker
+        except asyncio.CancelledError:
+            pass
 
 
 @router.websocket("/api/v1/ws/schedule")
@@ -91,11 +163,18 @@ async def edge_schedule_socket(websocket: WebSocket) -> None:
     epoch, session_message = service.attach_connection()
     try:
         await websocket.send_text(json.dumps(session_message, ensure_ascii=False))
+        send_lock = asyncio.Lock()
         incoming = asyncio.create_task(
-            _pump_incoming(websocket, service, epoch), name="edge-control-incoming"
+            _pump_incoming(
+                websocket, service, epoch, send_lock
+            ),
+            name="edge-control-incoming",
         )
         outgoing = asyncio.create_task(
-            _pump_outgoing(websocket, service, epoch), name="edge-control-outgoing"
+            _pump_outgoing(
+                websocket, service, epoch, send_lock
+            ),
+            name="edge-control-outgoing",
         )
         done, pending = await asyncio.wait(
             {incoming, outgoing}, return_when=asyncio.FIRST_COMPLETED

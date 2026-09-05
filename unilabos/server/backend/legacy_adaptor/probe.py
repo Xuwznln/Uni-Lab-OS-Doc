@@ -1,9 +1,9 @@
-"""判定 ``--address`` 指向的是 runtime.v1 微后端还是旧云端 Backend。
+"""判定显式 legacy 适配目标（仅供 Backend 侧兼容层使用）。
 
-两种后端共用同一个 ``/api/v1/ws/schedule`` WebSocket 路径，但 HTTP 数据面
-完全不同：runtime.v1 提供 ``/edge/commands/{uuid}``，旧 Backend 提供
-``/edge/lab/info``。启动时各探一次，结果在进程内缓存；显式配置
-``HTTPConfig.backend_protocol`` 时跳过探测。
+旧云端与 runtime.v1 的 HTTP 数据面完全不同：runtime.v1 提供
+``/edge/commands/{uuid}``，旧 Backend 提供 ``/edge/lab/info``。这个探测器
+保留给 Backend 侧的兼容入口；Edge 的 ``BackendSessionFactory`` 不再调用
+它，也不会根据探测结果切换线协议。
 """
 
 from __future__ import annotations

@@ -3,8 +3,8 @@
     python -m unilabos.server.openapi_export [--output openapi.json] [--indent 2]
 
 运行中的进程只挂当前角色需要的路由（``GET /api/openapi.json`` 因而是「本进程视角」）；
-这里在临时目录里装配**两种角色的全部路由**，不需要设备、不需要起 uvicorn，输出的是
-契约全集，并给每个 operation 打上 ``x-openlab-role``（``host`` / ``backend`` / ``any``），
+这里在临时目录里装配 **Host 与 Backend 两个角色的全部路由**，不需要设备、不需要起 uvicorn，
+输出的是契约全集，并给每个 operation 打上 ``x-openlab-role``（``host`` / ``backend`` / ``any``），
 供 OpenLab 的 ``@openlab/protocol`` 生成类型并与 ``catalog.ts`` 对账。
 
 角色映射是显式表：新增路由如果属于某一角色专属，必须在这里登记，否则按 ``any`` 导出，

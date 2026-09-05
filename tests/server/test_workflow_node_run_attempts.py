@@ -225,12 +225,85 @@ def test_recovery_marks_in_flight_attempt_and_run_execution_unknown(
     service.mark_workflow_node_job_running(run["current_job_uuid"])
 
     prepared = service.prepare_workflow_task_execution(task["uuid"])
+    # waiting_reconciliation：任务可被调度器接管，但在飞 attempt 要由人裁决而不是重放
     assert prepared["state"] == "waiting_reconciliation"
+    assert prepared["task"]["control_status"] == "waiting_reconciliation"
+    assert prepared["task"]["attention_reason"]
+    assert prepared["task"]["reconciliation_resume_control_status"] == "active"
     (recovered,) = prepared["runs"]
     assert recovered["status"] == "execution_unknown"
     attempt = service.get_workflow_node_job(run["current_job_uuid"])
     assert attempt["status"] == "execution_unknown"
     assert attempt["uncertainty_reason"]
+
+    # 再次重启（仍未裁决）不会把任务当成不可恢复：状态原样、reason 不被覆盖
+    again = service.prepare_workflow_task_execution(task["uuid"])
+    assert again["state"] == "waiting_reconciliation"
+    assert again["runs"][0]["status"] == "execution_unknown"
+    assert again["task"]["reconciliation_resume_control_status"] == "active"
+
+
+def test_reconciliation_decision_keeps_execution_unknown_until_settled(
+    service: WorkflowService,
+) -> None:
+    """开裁决时 attempt 保持 execution_unknown（不是已知失败）；retry 收敛后任务控制态恢复。"""
+
+    task, run = _single_node_task(service)
+    job_uuid = run["current_job_uuid"]
+    service.mark_workflow_node_job_running(job_uuid)
+    service.prepare_workflow_task_execution(task["uuid"])
+
+    # 尚有待裁决 attempt：settle 是 no-op
+    still = service.settle_workflow_task_reconciliation(task["uuid"])
+    assert still["control_status"] == "waiting_reconciliation"
+
+    pending = service.mark_workflow_node_job_decision_pending(
+        job_uuid,
+        {"decision_id": "r-1", "exception_type": "ExecutionStateUnknown", "options": [{"action": "retry"}]},
+    )
+    assert pending["status"] == "execution_unknown"
+    assert pending["control_data"]["pending_decision"]["decision_id"] == "r-1"
+    assert service.get_workflow_node_run(run["uuid"])["status"] == "execution_unknown"
+
+    outcome = service.record_workflow_node_job_terminal(
+        job_uuid,
+        status="failed",
+        error_info=[{"code": "execution_unknown"}],
+        error_resolution={"decision_id": "r-1", "selected_action": "retry"},
+    )
+    assert outcome["next_job"]["attempt_no"] == 2
+    assert outcome["run"]["status"] == "pending"
+
+    settled = service.settle_workflow_task_reconciliation(task["uuid"])
+    assert settled["control_status"] == "active"
+    assert "attention_reason" not in settled
+    assert "reconciliation_resume_control_status" not in settled
+    # 恢复后的任务对调度器就是普通 ready 任务，新 attempt 正常派发
+    assert service.prepare_workflow_task_execution(task["uuid"])["state"] == "ready"
+
+
+def test_reconciliation_skip_and_replace_settle_without_new_attempt(
+    service: WorkflowService,
+) -> None:
+    for status, return_info in (
+        ("skipped", {"suc": True, "suc_type": "skip", "return_value": None}),
+        ("succeeded", {"suc": True, "suc_type": "operator_intervention", "return_value": {"ok": 1}}),
+    ):
+        task, run = _single_node_task(service)
+        job_uuid = run["current_job_uuid"]
+        service.mark_workflow_node_job_running(job_uuid)
+        service.prepare_workflow_task_execution(task["uuid"])
+
+        outcome = service.record_workflow_node_job_terminal(
+            job_uuid,
+            status=status,
+            return_info=return_info,
+            error_resolution={"decision_id": "r", "selected_action": return_info["suc_type"]},
+        )
+        assert outcome["next_job"] is None
+        assert outcome["run"]["status"] == status
+        assert outcome["run"]["attempt_count"] == 1
+        assert service.settle_workflow_task_reconciliation(task["uuid"])["control_status"] == "active"
 
 
 def test_node_run_api_returns_current_result_with_attempt_history(service: WorkflowService) -> None:

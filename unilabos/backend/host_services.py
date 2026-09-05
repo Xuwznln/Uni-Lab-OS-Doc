@@ -101,7 +101,7 @@ class TransferResourceReturn(TypedDict):
 
 
 class TestLatencyReturn(TypedDict):
-    """test_latency方法的返回值类型"""
+    """test_latency 的返回值：顶层是主链路（HTTP，退回 WS）的统计，links 给每条链路明细。"""
 
     avg_rtt_ms: float
     avg_time_diff_ms: float
@@ -109,7 +109,15 @@ class TestLatencyReturn(TypedDict):
     task_delay_ms: float
     raw_delay_ms: float
     test_count: int
+    #: success | all_timeout | backend_unreachable
     status: str
+    #: Edge 连接的 Backend 地址（HTTP 与控制 WS 同地址）
+    backend_url: str
+    #: configured（--address 指定）| default（本机 Backend 端口 HTTPConfig.backend_port）
+    address_source: str
+    #: 会话描述的每条链路：{"http": {transport, target, status, avg_rtt_ms, …},
+    #: "control": {transport: websocket, status: success | all_timeout | not_connected, …}}
+    links: Dict[str, Any]
 
 
 @device(
@@ -557,11 +565,18 @@ class HostServices:
 
     @action(
         display_name="测试通讯延迟",
-        description="诊断动作：与执行适配器 ping-pong 多次，统计往返时延与时钟偏差",
+        description=(
+            "诊断动作：对本执行端连接的 Backend（--address，缺省本机 Backend 端口）做 5 次 ping-pong——"
+            "同地址上的 HTTP 数据面与 runtime.v1 控制 WebSocket 各一条链路，"
+            "统计往返时延、时钟偏差与任务下发延迟"
+        ),
         always_free=True,
     )
     def test_latency(self) -> TestLatencyReturn:
-        """委托当前执行适配器的共享实现（HostAdapterBase.test_latency）。"""
+        """委托当前执行适配器的共享实现（HostAdapterBase.test_latency）。
+
+        测的是 Edge ↔ Backend 的链路（按部署形态自动选目标），不是本机执行适配器本身。
+        """
         from unilabos.backend.hostlink.adapter_registry import get_execution_adapter
 
         adapter = get_execution_adapter(timeout=5.0)

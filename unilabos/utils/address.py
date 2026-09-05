@@ -40,12 +40,14 @@ def derive_websocket_address(
     *,
     websocket_address: Optional[str] = None,
     endpoint: str = "/api/v1/ws/schedule",
-    port_offset: int = 1,
+    port_offset: int = 0,
 ) -> str:
     """从统一 HTTP 地址派生 WebSocket 地址。
 
-    默认沿用既有 Backend 部署约定：显式端口加一；未显式指定端口时
-    沿用同一 netloc。独立部署可通过 ``websocket_address`` 覆盖。
+    runtime.v1 控制面与 HTTP 数据面是同一个服务，默认使用同端口。旧
+    Backend 的 ``+1`` 约定只能由 legacy 适配器显式传入 ``port_offset=1``；
+    这样普通的微后端/工作流客户端不会误连到另一个端口。独立部署仍可
+    通过 ``websocket_address`` 覆盖。
     """
 
     explicit = str(websocket_address or "").strip()

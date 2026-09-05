@@ -13,7 +13,7 @@
 - ``ctx.run_template("class_name/action_name", params)``：按 registry 设备类
   解析目标设备；该类在设备图中只有一个实例时自动填充，无需确认。
 - 两者都接受 ``inventory=[...]``：该步骤的库存需求（``InventoryRequirement``
-  形态，如 ``{"key": "water", "kind": "reagent", "lot_uuid": ..., "quantity": 40,
+  形态，如 ``{"key": "water", "kind": "lot", "lot_uuid": ..., "quantity": 40,
   "unit": "ml"}``），写入节点 ``meta_data.inventory_requirements``；调度器在任务
   启动时 all-or-nothing 预留，数量不足则任务在派发前失败（``plan_not_executable``），
   动作开始时由执行面扣减。
@@ -423,8 +423,12 @@ def _upsert_workflow(service: Any, payload: Dict[str, Any]) -> None:
             meta_data={},
             workflow_uuid=workflow_uuid_value,
         )
-    except Exception:  # noqa: BLE001 - 已存在（conflict）则走更新
-        record = service.get_workflow(workflow_uuid_value)
+    except Exception as create_error:  # noqa: BLE001 - 已存在（conflict）则走更新
+        try:
+            record = service.get_workflow(workflow_uuid_value)
+        except Exception as lookup_error:  # noqa: BLE001
+            # 不是"已存在"：把 create 的真实错误抛出去，别让 404 盖住格式/校验问题
+            raise create_error from lookup_error
         service.update_workflow(
             workflow_uuid_value,
             name=payload["name"],

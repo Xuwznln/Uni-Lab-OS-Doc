@@ -1623,7 +1623,7 @@ solenoid_valve:
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo)                   | 局域网跨设备闭环：中枢 hub 与子设备 sub 分进程运行 | 跨设备 `@subscribe` 订阅、`call_device_action` 远程 ros action 调用、自动 `msg_type` 解析、轮次复位检测  |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo)   | 工作站内 `hardware_interface` 代理：多子设备共享同一通信端点 | 共享串口（默认 IO 方法名 `send_command`/`read_data`）、Modbus `extra_info` 按设备注入 `slave_id`（即本章 §11.5） |
 | [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo)       | 网页式工作流提交路径上的异常传播与决策             | 异常穿出动作边界 → 错误决策链 `abort`；点对点 `call_device_action` 异常在调用侧捕获（作为工作流节点）；业务级守卫返回；`operator_intervention` 人工替换结果让任务 `succeeded`；故障后 `stats` 仍可服务 |
-| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo)                 | host/slave 双进程：固定位点与物料 CRUD 两条权威链   | `@device(available_sites=...)` 声明 → 注册表模板 → 权威位点实例 → 占用流转；`@resource` 物料 + `materials.*` 门面跨 HostLink 创建/赋值/转移/删除；`SiteSlot` 参数（uuid 或 label） |
+| [LabDeviceMaterialsDemo](https://github.com/Xuwznln/LabDeviceMaterialsDemo)                 | host/slave 双进程：固定位点、物料 CRUD、出库装板三条权威链 | `@device(available_sites=...)` 声明 → 注册表模板 → 权威位点实例 → 占用流转；`@resource` 物料 + `materials.*` 门面跨 HostLink 创建/赋值/转移/删除；`SiteSlot` 参数（uuid 或 label）；全 HTTP 的出库装板：按件 `POST /materials/instantiate` + 按量 `POST /materials/lots/inbound` 登记 → `POST /workflows` + `PUT graph` 上传三节点图（`host_node/apply_deduct_resource` 带 `kind: "material"` 需求、`mount_resource={"name": ...}` 只按名字引用台面 → `fill_well` 带 `kind: "lot"` 需求 → 报告）→ 首次提交整任务预留失败 `plan_not_executable`（板与水都无预留痕迹）→ 补料再提交成功（板 `active → in_use` 跨进程挂到 slave 台面、lot 扣减、孔位内容物落权威） |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo)                 | 调度器锁语义：并发提交工作流制造竞争，账本区间即证据 | `(device, action)` 动作锁串行、先提交先执行（`/api/v1/scheduler/resources` 的 `waiting` + `blockers`）；`@action(always_free=True)` 同一动作两次并行；`materials_need_lock=["plate"]` 按权威 `material_uuid` 互斥；`lock_auditor` 点对点读账本核对四条结论 |
 | [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo)       | 按数量计量的库存：入库、带预留的出库、数量不足拒绝 | `@resource` 试剂模板同步为权威模板；`restock` → `inbound_inventory_lot`（固定 lot）；`ctx.run(..., inventory=[...])` 声明试剂需求 → 任务启动 all-or-nothing 预留 → 动作开始扣减；不足时任务 `plan_not_executable` 且库存不变 |
 
@@ -1640,9 +1640,11 @@ python -m unilabos.app.main \
   -g <仓库内提供的图文件>
 ```
 
-`--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 与 `LabDeviceSiteDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
+`--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 与 `LabDeviceMaterialsDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
 
-> 这四个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可。主仓库在 `tests/e2e/readme_demos.py` 固定引用这四个包的已验证提交，CI 里逐个端到端跑通（`--check_mode`、`unilab graph create`、真实 `unilab -g` 起微后端、`unilab graph` 读写 Graph Authority、管理 API 运行 `@workflow`）；各仓库 CI 则反向固定在指定 Uni-Lab-OS 提交上跑双运行时 smoke。
+**一键安装（不克隆源码）：** 六个包都收录在驱动包索引 [awesome-lab-devices](https://github.com/Xuwznln/awesome-lab-devices)（`index.json`）。先用空图起一个 Host（`unilab --backend hostlink`，不带 `-g`），打开 [OpenLab](https://xuwznln.github.io/OpenLab-site/) 连接 `http://127.0.0.1:8002`，在「驱动包」页点「安装到 Edge」——浏览器直接读索引，把 `spec`（`git+https://github.com/Xuwznln/LabDevice…Demo.git`）下发给微后端 `POST /api/v1/driver-packages/install` 执行 `pip install`；装完后「启动」即把随包设备图作为受管设备进程拉起，不需要重启 Host。命令行等价形式是 `unilab package install "<spec>"` 后重启。索引本身是浏览器读取的，Edge 不需要出网；内网可把 `index.json` 放镜像并在 `local_config.py` 设 `HTTPConfig.driver_package_index_url`，或在 `unilabos_data/driver_package_catalog.json` 登记实验室自用包。
+
+> 这六个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可，再给 awesome-lab-devices 提 PR 收录。六个示例都在主仓库 CI 中端到端验证，各仓库自己的 CI 也会跑双运行时 smoke。
 
 ---
 
@@ -1660,6 +1662,12 @@ python -m unilabos.app.main \
 - **容器**：孔板、试管、烧杯、反应瓶
 - **耗材**：枪头、移液管、过滤器
 - **试剂**：溶剂、试剂、样品
+
+登记到库存时按**账目形态**而不是按上述分类选择入口：有 uuid、要放到位点、逐件追踪的走「按件登记」
+（`POST /api/v1/materials/instantiate`，成为 `material` 实例，工作流用 `kind: "material"` 需求选取）；
+只记数量 / 单位 / 有效期、按量扣减的走「按量登记」（`POST /api/v1/materials/lots/inbound`，成为
+`inventory_lot`，工作流用 `kind: "lot"` 需求预留与扣减）。一盒枪头、一瓶试剂都可以按件记，
+散装枪头、散装溶剂都可以按量记。
 
 #### 12.2 创建自定义物料类型
 

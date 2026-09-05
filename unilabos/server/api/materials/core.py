@@ -383,7 +383,10 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
         )
 
     @router.post("/transfer")
-    async def transfer_material(mutation: InventoryMutation):
+    def transfer_material(mutation: InventoryMutation):
+        """transfer 提交权威位置后同步等设备完成 unload/load 投影；设备在此期间会回头
+        读权威（tree.get），所以必须走线程池（def），不能占住事件循环。"""
+
         return _call(
             service.transfer_material,
             mutation,

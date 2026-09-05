@@ -316,6 +316,24 @@ materials.assign(node, deducted_uuid, parent="PRCXI_Deck", slot="T3")
 - `discard_resource`：只给 `resource`，所属设备自动推断；
 - `apply_deduct_resource`：给了 `mount_resource` 即可挂载，目标设备自动推断。
 
+**ResourceSlot 引用不必带 uuid**。`{"uuid": ...}`、`{"id"/"name": ...}` 与裸字符串三种
+形态两种 backend 一致：执行端先查本设备 tracker，未命中回权威——带 uuid 按 uuid 取树，
+只有 id / name（或非 uuid 形态的裸字符串）按 resource id 取树（ROS2 走
+`_convert_resource_async`，HostLink 走 `HostLinkDeviceNode._resolve_resource_slot`）。
+host_node 的 tracker 不镜像 Slave 物料，所以工作流里 `mount_resource={"name": "bench_deck"}`
+这种只按名字引用 Slave 侧台面的写法就靠这条兜底：host_node 取到台面树 → 按根 extra 的归属
+推断目标设备 → 下发 `RESOURCE_APPEND`（`bind_parent_id` 即台面名）→ Slave 用自己的 tracker
+按名字定位台面并挂载。权威树里外部设备包自定义的资源类（如 Slave 侧的 `DemoBenchDeck`）
+在 Host 进程可能尚未 import：`ResourceTreeSet.to_plr_resources` 经
+`find_plr_resource_class` 按注册表条目的 `module:ClassName` 懒加载后再反序列化，不要求
+Host 图里也声明该资源。
+
+与库存需求配合时 `resource` 参数留空即可：节点 `meta_data.inventory_requirements` 里声明
+`{"key": "resource", "kind": "material", "template_uuid": ...}`，调度器预留成功后把选中的
+实例引用 `{"uuid": ...}` 注入同名参数（见 [调度与执行 §7](../scheduling_and_execution.md)）。
+LabDeviceMaterialsDemo 的「出库装板并加液」阶段是这条路径的可运行范本：按件 / 按量登记 →
+经 API 上传工作流 → 预留失败 → 补料 → 出库挂载成功。
+
 人工确认（`manual_confirm`）是系统自带的通用动作，不属于物料 API；人工搬运
 工作流为 `apply_deduct_resource → manual_confirm（人工搬运到位）→
 transfer_resource`，与机械臂 pick/place 流使用同一转移语义。

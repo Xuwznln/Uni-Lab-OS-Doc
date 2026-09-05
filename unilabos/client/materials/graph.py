@@ -68,18 +68,21 @@ class HTTPGraphClient:
         tags: Sequence[Any] = (),
         description: Optional[str] = None,
         meta_data: Optional[Mapping[str, Any]] = None,
+        device_site_templates: Optional[Mapping[str, Sequence[Any]]] = None,
     ) -> dict[str, Any]:
-        return self._http.post(
-            "/graphs",
-            json={
-                "name": name,
-                "payload": dict(payload),
-                "uuid": uuid,
-                "tags": list(tags),
-                "description": description,
-                "meta_data": dict(meta_data or {}),
-            },
-        )
+        body: dict[str, Any] = {
+            "name": name,
+            "payload": dict(payload),
+            "uuid": uuid,
+            "tags": list(tags),
+            "description": description,
+            "meta_data": dict(meta_data or {}),
+        }
+        if device_site_templates is not None:
+            body["device_site_templates"] = {
+                key: list(value) for key, value in device_site_templates.items()
+            }
+        return self._http.post("/graphs", json=body)
 
     def get_graph(self, identity: str) -> dict[str, Any]:
         return self._http.get(f"/graphs/{identity}")

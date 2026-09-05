@@ -279,6 +279,17 @@ class JobExecutionBackend:
         mapping = self._action_mapping(device_id, action_name)
         return bool(mapping.get("always_free", False)) if mapping is not None else False
 
+    def resolve_action_error_policy(self, device_id: str, action_name: str) -> Dict[str, Any]:
+        """注册表为该动作声明的 ``error_policy``（未配置为 ``{}``）。
+
+        调度器在重启后的执行态裁决里用它取 ``max_retries``，与执行面放行失败
+        决策时的重试上限口径一致。
+        """
+
+        mapping = self._action_mapping(device_id, action_name)
+        policy = mapping.get("error_policy") if mapping is not None else None
+        return dict(policy) if isinstance(policy, Mapping) else {}
+
     def _safe_inventory_cancel(self, job_id: str, *, reason: str) -> None:
         if self._inventory_authority is None:
             return

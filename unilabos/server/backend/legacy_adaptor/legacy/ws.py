@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import itertools
 import json
 import logging
 import ssl as ssl_module
@@ -32,7 +33,7 @@ import traceback
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from queue import Empty, Full, Queue
+from queue import Empty, Full, PriorityQueue
 from typing import Any, Dict, List, Optional, Tuple
 
 import websockets
@@ -41,7 +42,10 @@ from unilabos.backend.hostlink.adapter_registry import get_execution_adapter
 from unilabos.config.config import BasicConfig, WSConfig
 from unilabos.server.backend.execution_queue import QueueItem, format_job_log
 from unilabos.server.backend.legacy_adaptor.session import BaseBackendClient
-from unilabos.server.backend.legacy_adaptor.url import build_backend_websocket_url
+from unilabos.server.backend.legacy_adaptor.url import (
+    build_legacy_backend_websocket_url,
+)
+from unilabos.protocol.runtime.control import PingNotice, PongNotice
 from unilabos.utils.log import get_comm_logger
 from unilabos.utils.serialization import serialize_result_info
 
@@ -60,6 +64,42 @@ _JOB_KEEPALIVE_NEED_MORE = 11
 #: 旧后端把工作流节点 schema 里的设备选择器原样放进 action_args；它只用于
 #: 路由（job_start.device_id 已经是解析结果），驱动函数签名里没有这个参数。
 _CONTROL_ACTION_ARGS = frozenset({"unilabos_device_id"})
+
+
+class _PriorityMessageQueue(PriorityQueue):
+    """旧协议出站队列：心跳优先，业务通知保持 FIFO。"""
+
+    _FAST_ACTIONS = frozenset({"ping", "pong"})
+
+    def __init__(self, maxsize: int = 0) -> None:
+        super().__init__(maxsize=maxsize)
+        self._sequence = itertools.count()
+
+    def put(
+        self,
+        item: dict[str, Any],
+        block: bool = True,
+        timeout: float | None = None,
+    ) -> None:
+        priority = 0 if item.get("action") in self._FAST_ACTIONS else 1
+        wrapped = (priority, next(self._sequence), item)
+        if priority == 0 and self.maxsize > 0:
+            # 旧协议也可能在锁/状态镜像高峰期填满队列；ping/pong 属于
+            # 控制面快速路径，不能被业务通知的容量限制挡住。
+            with self.not_full:
+                self._put(wrapped)
+                self.unfinished_tasks += 1
+                self.not_empty.notify()
+            return
+        super().put(wrapped, block=block, timeout=timeout)
+
+    def get(
+        self,
+        block: bool = True,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        _priority, _sequence, item = super().get(block=block, timeout=timeout)
+        return item
 
 
 def _execution_backend() -> Any:
@@ -104,11 +144,14 @@ class LegacyBackendWebSocketClient(BaseBackendClient):
         self.client_id = str(uuid.uuid4())
         self.session_id = self.client_id[:6]
         self.websocket_url = (
-            websocket_url if websocket_url is not None else build_backend_websocket_url()
+            websocket_url
+            if websocket_url is not None
+            else build_legacy_backend_websocket_url()
         ) or ""
         self._execution_backend_getter = execution_backend_getter or _execution_backend
         self._adapter_getter = adapter_getter or (lambda: get_execution_adapter(0))
-        self._send_queue: "Queue[dict[str, Any]]" = Queue(maxsize=2000)
+        # 旧协议仍可能有大量锁/状态镜像；心跳必须能越过这些通知。
+        self._send_queue: PriorityQueue = _PriorityMessageQueue(maxsize=2000)
         self._running = False
         self._connected = False
         self._thread: Optional[threading.Thread] = None
@@ -116,6 +159,11 @@ class LegacyBackendWebSocketClient(BaseBackendClient):
         self._websocket: Any = None
         self._reconnect_count = 0
         self._lock = threading.RLock()
+        # 与 runtime.v1 客户端一致：旧协议业务处理（物料 HTTP、job dispatch）
+        # 串行放到独立 worker，不能阻塞接收协程读取 pong。
+        self._business_queue: Optional[
+            asyncio.Queue[tuple[str, Any]]
+        ] = None
         self._jobs: Dict[Tuple[str, str], _JobRecord] = {}
         self._running_last_sent: Dict[str, Tuple[float, Any]] = {}
         self._host_ready_sent_for_connection = False
@@ -287,12 +335,17 @@ class LegacyBackendWebSocketClient(BaseBackendClient):
             )
         return bool(resolved)
 
-    def send_ping(self, ping_id: str, timestamp: float) -> None:
+    def send_ping(self, ping_id: str, timestamp: float) -> bool:
         if not self.is_connected():
             logger.warning("[LegacyWS] 未连接，无法发送 ping")
-            return
-        self._queue_message(
-            {"action": "ping", "data": {"ping_id": ping_id, "client_timestamp": timestamp}}
+            return False
+        try:
+            ping = PingNotice(ping_id=ping_id, client_timestamp=timestamp)
+        except Exception as exc:  # noqa: BLE001 - 坏诊断参数不能污染发送队列
+            logger.warning("[LegacyWS] 无效 ping 字段: %s", exc)
+            return False
+        return self._queue_message(
+            {"action": "ping", "data": ping.model_dump(mode="json")}
         )
 
     def publish_action_lock(self, device_id: str, action_name: str, free: bool) -> None:
@@ -461,19 +514,96 @@ class LegacyBackendWebSocketClient(BaseBackendClient):
         ):
             logger.debug("[LegacyWS] 跳过归属其它会话 %s 的 %s", edge_session, action)
             return
+
+        # 心跳是控制面特殊消息，必须在接收协程内即时处理；旧协议的
+        # job/material 兼容逻辑可能触发同步 HTTP 或执行器调用，放入业务
+        # worker 后不会再形成 receive-side head-of-line blocking。
+        if action in {"ping", "pong"}:
+            try:
+                await self._process_message(action, data)
+            except Exception:  # noqa: BLE001 - 坏心跳只丢弃当前消息
+                logger.error(
+                    "[LegacyWS] 处理 %s 心跳失败，已丢弃该消息:\n%s",
+                    action,
+                    traceback.format_exc(),
+                )
+            return
+
+        business_queue = self._business_queue
+        if business_queue is not None:
+            await business_queue.put((action, data))
+            return
         try:
             await self._process_message(action, data)
         except Exception:  # noqa: BLE001 - 单条消息失败不能断开连接
             logger.error("[LegacyWS] 处理 %s 失败:\n%s", action, traceback.format_exc())
 
+    async def _business_message_handler(
+        self, business_queue: "asyncio.Queue[tuple[str, Any]]"
+    ) -> None:
+        """串行处理旧协议业务消息；失败只影响当前消息。"""
+
+        while True:
+            action, data = await business_queue.get()
+            try:
+                await self._process_message(action, data)
+            except Exception:  # noqa: BLE001 - 旧字段转换失败可继续收心跳
+                logger.error(
+                    "[LegacyWS] 处理 %s 失败，已丢弃该消息:\n%s",
+                    action,
+                    traceback.format_exc(),
+                )
+            finally:
+                business_queue.task_done()
+
+    @staticmethod
+    def _legacy_ping_data(data: Any) -> dict[str, Any]:
+        """把旧云端的 ``id/timestamp`` 别名收敛为 canonical ping 字段。"""
+
+        if not isinstance(data, dict):
+            raise ValueError("legacy ping data must be an object")
+        normalized = {
+            "ping_id": data.get("ping_id") or data.get("id"),
+            "client_timestamp": (
+                data.get("client_timestamp")
+                if data.get("client_timestamp") is not None
+                else data.get("timestamp")
+            ),
+        }
+        return PingNotice.model_validate(normalized).model_dump(mode="json")
+
     async def _process_message(self, action: str, data: Any) -> None:
         if action == "pong":
+            normalized = self._legacy_ping_data(data)
+            # 旧云端的 pong 也可能使用 ``server_time``；别名只在此
+            # 适配器边界转换，runtime.v1 客户端不接受旧字段。
+            if isinstance(data, dict):
+                server_timestamp = data.get("server_timestamp")
+                if server_timestamp is None:
+                    server_timestamp = data.get("server_time")
+                if server_timestamp is None:
+                    # 极旧实现只回显 id/timestamp，没有服务端时钟；
+                    # 用收到时刻兜底，至少让诊断完成而不阻塞后续轮次。
+                    server_timestamp = time.time()
+                normalized["server_timestamp"] = server_timestamp
+            pong = PongNotice.model_validate(normalized)
+            normalized_pong = pong.model_dump(mode="json")
+            # 同时唤醒通用会话诊断和 HostAdapter.test_latency；两张簿记表
+            # 都按 ping_id 过滤迟到包，不会互相消费。
+            self.handle_pong(normalized_pong)
             adapter = self._adapter_getter()
-            if adapter is not None and isinstance(data, dict):
-                adapter.handle_pong_response(data)
+            if adapter is not None:
+                adapter.handle_pong_response(normalized_pong)
             return
         if action == "ping":
-            self._queue_message({"action": "pong", "data": data if isinstance(data, dict) else {}})
+            ping = self._legacy_ping_data(data)
+            pong = PongNotice(
+                **ping,
+                server_timestamp=time.time(),
+            )
+            self._queue_message(
+                {"action": "pong", "data": pong.model_dump(mode="json")}
+            )
             return
         if action == "job_start":
             await asyncio.to_thread(self._handle_job_start, dict(data or {}))
@@ -497,6 +627,39 @@ class LegacyBackendWebSocketClient(BaseBackendClient):
             logger.debug("[LegacyWS] 未知消息类型: %s", action)
 
     # -- job_start / cancel ------------------------------------------------
+
+    @staticmethod
+    def _legacy_attempt_fields(
+        data: Dict[str, Any], *, job_id: str, node_id: str
+    ) -> tuple[str, int, Optional[str]]:
+        """把旧 ``job_start`` 里的 attempt 别名收敛成执行面字段。
+
+        旧 Backend 并不保证携带 runtime.v1 的 attempt 元数据；缺省时仍按
+        一次初始执行处理，但只要它携带了节点运行组/重试链，就不能在适配
+        边界把这些字段丢掉。这里不猜测缺失的 retry parent，避免伪造重试链。
+        """
+
+        raw_attempt = data.get("attempt_no")
+        try:
+            attempt_no = int(raw_attempt or 1)
+        except (TypeError, ValueError):
+            attempt_no = 1
+        attempt_no = max(attempt_no, 1)
+
+        raw_retry = data.get("retry_of_job_uuid") or data.get("retry_of")
+        retry_of = str(raw_retry).strip() if raw_retry not in (None, "") else None
+        # runtime.v1 的一致性约束：初始 attempt 不得携带 retry parent。
+        if attempt_no == 1:
+            retry_of = None
+
+        group = (
+            data.get("node_run_uuid")
+            or data.get("attempt_group_uuid")
+            or data.get("workflow_node_run_uuid")
+            or node_id
+            or job_id
+        )
+        return str(group), attempt_no, retry_of
 
     def _handle_job_start(self, data: Dict[str, Any]) -> None:
         job_id = str(data.get("job_id") or "")
@@ -542,28 +705,59 @@ class LegacyBackendWebSocketClient(BaseBackendClient):
                 {}, item, "failed", serialize_result_info("execution backend unavailable", False, {})
             )
             return
+
+        node_id = str(data.get("node_id") or "")
+        node_run_uuid, attempt_no, retry_of_job_uuid = self._legacy_attempt_fields(
+            data, job_id=job_id, node_id=node_id
+        )
         server_info = data.get("server_info")
-        if not isinstance(server_info, dict) or not server_info:
-            server_info = {"send_timestamp": time.time()}
-        action_args = {
-            key: value
-            for key, value in dict(data.get("action_args") or {}).items()
-            if key not in _CONTROL_ACTION_ARGS
-        }
+        if isinstance(server_info, dict):
+            server_info = dict(server_info)
+        else:
+            server_info = None
+        # ``test_latency`` 的 server_info 是控制面特殊元数据，类似
+        # manual_confirm 的调度字段；普通动作不应被适配器凭空注入时间戳。
+        if action_name.strip().lower() == "test_latency":
+            if not isinstance(server_info, dict) or not server_info.get(
+                "send_timestamp"
+            ):
+                server_info = dict(server_info or {})
+                server_info["send_timestamp"] = time.time()
+        raw_action_args = data.get("action_args")
+        action_args = (
+            {
+                key: value
+                for key, value in raw_action_args.items()
+                if key not in _CONTROL_ACTION_ARGS
+            }
+            if isinstance(raw_action_args, dict)
+            else {}
+        )
+        workflow_id = str(
+            data.get("workflow_id") or data.get("workflow_uuid") or ""
+        )
         payload = {
             "job_id": job_id,
             "task_id": task_id,
-            "node_id": str(data.get("node_id") or ""),
-            "workflow_id": "",
+            "node_id": node_id,
+            "workflow_id": workflow_id,
             "device_id": device_id,
             "action": action_name,
             "action_type": str(data.get("action_type") or ""),
             "action_args": action_args,
-            "sample_material": dict(data.get("sample_material") or {}),
-            "server_info": server_info,
+            "sample_material": dict(data.get("sample_material") or {})
+            if isinstance(data.get("sample_material") or {}, dict)
+            else {},
             "notebook_id": str(data.get("notebook_id") or ""),
+            "node_run_uuid": node_run_uuid,
+            "attempt_no": attempt_no,
+            "retry_count": attempt_no - 1,
             "always_free": self._action_always_free(device_id, action_name),
         }
+        if server_info is not None:
+            payload["server_info"] = server_info
+        if retry_of_job_uuid is not None:
+            payload["retry_of_job_uuid"] = retry_of_job_uuid
         # 旧后端自己不持有微后端库存预占，这里不传 inventory_* 字段。
         logger.info("[LegacyWS] job_start %s -> 微后端 dispatch", job_log)
         self.publish_action_lock(device_id, action_name, free=False)
@@ -754,12 +948,19 @@ class LegacyBackendWebSocketClient(BaseBackendClient):
                     keepalive = asyncio.create_task(
                         self._job_keepalive_loop(), name="legacy-ws-keepalive"
                     )
-                    background = (sender, ready_watch, keepalive)
+                    business_queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+                    self._business_queue = business_queue
+                    business_worker = asyncio.create_task(
+                        self._business_message_handler(business_queue),
+                        name="legacy-ws-business",
+                    )
+                    background = (sender, ready_watch, keepalive, business_worker)
                     try:
                         async for raw_message in websocket:
                             await self._handle_raw_message(raw_message)
                     finally:
                         self._connected = False
+                        self._business_queue = None
                         for task in background:
                             task.cancel()
                         for task in background:

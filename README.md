@@ -121,33 +121,30 @@ The Edge can also start with an empty graph (omit `-g`) when devices will be
 added through the driver-package or managed-device APIs. A Slave still needs
 its own graph and connects with `--is-slave --host-node-ip <host>`.
 
-### 4. Connect to an existing or legacy Backend
+### 4. Connect to a remote Backend
 
-Use one explicit `--address` for an existing cloud or on-premise Backend. The
-value may be the service root or its `/api/v1` root; `--ak` and `--sk` provide
-the laboratory credentials:
+Use one explicit `--address` for a remote Backend. The value may be the service
+root or its `/api/v1` root; `--ak` and `--sk` provide the laboratory
+credentials:
 
 ```bash
 unilab -g path/to/graph.json --backend hostlink \
-  --address https://legacy.example.com/api/v1 \
+  --address https://backend.example.com/api/v1 \
   --ak "$AK" --sk "$SK"
 ```
 
-At startup Uni-Lab probes the HTTP routes and selects `runtime.v1` or the
-legacy adapter. To pin an older Backend explicitly, put this in the
-`local_config.py` loaded with `--config` (or placed in the working directory):
+An Edge speaks only `runtime.v1` to that address: HTTP `/api/v1/*` and the
+`/api/v1/ws/schedule` control WebSocket live on the same host and port, and the
+Backend owns scheduling, workflows, materials and the registry. The WebSocket
+carries short notifications; the complete authoritative content is fetched over
+HTTP. `--role backend` starts exactly such an authority.
 
-```python
-class HTTPConfig:
-    remote_addr = "https://legacy.example.com/api/v1"
-    backend_protocol = "legacy"
-```
-
-Do not start `--role backend` for an old cloud Backend; that role starts the
-new local `runtime.v1` authority. In both modes the browser-facing API is HTTP.
-The new `control.v1` Edge↔Backend WebSocket carries short notifications and
-the complete authoritative content is fetched over HTTP; the legacy adapter
-keeps the old message families working.
+Compatibility with the old cloud Backend (the `job_start` / `host_node_ready`
+message family, `/ws/schedule` on HTTP port `+1`) is not selected on the Edge
+any more. It lives in `unilabos.server.backend.legacy_adaptor.legacy` and is
+wired explicitly on the Backend side (`BackendSessionFactory.create_legacy_client()`,
+`build_legacy_backend_websocket_url()`), so neither address derivation nor the
+Edge connection factory branches on a legacy probe.
 
 ### 5. Use a custom UI
 
@@ -159,7 +156,7 @@ the management endpoint:
 |------------|-----------------|
 | Local single-process Edge | `http://127.0.0.1:8002` |
 | Split deployment | `http://127.0.0.1:8081` (the Backend authority) |
-| Existing/legacy Backend | the address passed to `--address` |
+| Remote Backend | the address passed to `--address` |
 
 Use the generated contract at `/api/openapi.json` and the interactive docs at
 `/api/docs`. A Vite-style static UI can be developed and served independently:
@@ -201,22 +198,17 @@ with `--devices <pkg> --external_devices_only`, and read it when writing your ow
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo) | Cross-device `@subscribe` + remote `call_device_action` LAN closed loop (hub/sub as two processes) |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo) | `hardware_interface` proxy — multiple sub-devices share one communication endpoint: shared serial (default IO method names) and Modbus `extra_info` (per-device `slave_id` injection) |
 | [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo) | Exception propagation driven entirely through web-style workflow submission (`/api/v1/workflow-tasks` + `/api/v1/error-decisions`): an exception escaping the action boundary is held for an `abort` / `operator_intervention` decision, a point-to-point `call_device_action` error is caught on the caller side as a workflow node, business-level guarded returns, and an operator-replaced result letting the task finish `succeeded` |
-| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo) | Host/slave dual process — `@device(available_sites=...)` fixed sites (declaration → registry template → authoritative site instances → occupancy), `@resource` labware with the `materials.*` CRUD facade across HostLink, and `SiteSlot` action parameters (frontend Site picker uuid or label shorthand) |
+| [LabDeviceMaterialsDemo](https://github.com/Xuwznln/LabDeviceMaterialsDemo) | Host/slave dual process — `@device(available_sites=...)` fixed sites (declaration → registry template → authoritative site instances → occupancy), `@resource` labware with the `materials.*` CRUD facade across HostLink, and `SiteSlot` action parameters (frontend Site picker uuid or label shorthand); outbound plate + fill entirely over the web-style HTTP API — `POST /materials/instantiate` two plates per item, `POST /materials/lots/inbound` (deliberately too little) water by quantity, `POST /workflows` + `PUT graph` a three-node graph (`host_node/apply_deduct_resource` with a `material` requirement and `mount_resource={"name": ...}` referencing the deck by name only → device `fill_well` with a `lot` requirement → report); the first submission fails whole-task reservation with `plan_not_executable` (neither plate nor water left reserved, device never called), restock and resubmit succeeds — plate `active → in_use` mounted cross-process on the slave deck, lot deducted, well contents in the authority |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo) | Scheduler lock semantics made observable through concurrently submitted workflows: the `(device, action)` action lock serializes two `occupy` calls in submission order (the second shows up `waiting` with `blockers` in `/api/v1/scheduler/resources`), `@action(always_free=True)` lets two `peek` calls of the same action overlap, and `materials_need_lock=["plate"]` locks per authoritative plate uuid (two devices on one plate serialize, one device on two plates runs in parallel); a `lock_auditor` node reads the probes' ledgers and fails the task if any conclusion does not hold |
 | [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo) | Quantity-based inventory through workflows: a registry `@resource` reagent template, `restock` as the web's `POST /api/v1/materials/lots/inbound` (100 ml into a fixed lot), a `dispense` step whose `inventory=[...]` requirement is reserved all-or-nothing at task start and deducted right before the action (device reports the lot after deduction, `60 / 60 / 0`), and a 500 ml requirement refused at reservation time — task `failed` / `plan_not_executable` ("short by 440 ml"), node `canceled`, device never called, lot unchanged |
 
-Each repository README ships a step-by-step launch tutorial with verified output, and every package
-carries a terminating dual-runtime smoke (`python -m <pkg>.smoke --backend hostlink|ros2`) that its
-own CI runs against a pinned Uni-Lab-OS revision. For the underlying communication-sharing mechanism
-see [Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
+Every example starts its devices with `unilab -g` and then runs workflows through the management
+HTTP API (`POST /api/v1/workflow-tasks`); each repository README ships a step-by-step launch
+tutorial with verified output, and every package carries a terminating dual-runtime smoke
+(`python -m <pkg>.smoke --backend hostlink|ros2`). All six are also verified end to end in this
+repository's CI. For the underlying communication-sharing mechanism see
+[Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
 to write a new driver from scratch see [Add Device](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html).
-The main repository pins all six packages in `tests/e2e/readme_demos.py` and drives each of them end
-to end in CI (`tests/e2e`): registry `--check_mode`, `unilab graph create`, a real `unilab -g` runtime
-with the microbackend (host plus slave where the demo is dual-process), Graph Authority round trips
-through `unilab graph list/download/upload`, and the reported `@workflow` templates executed through
-the management HTTP API. It also runs the LAN demo shape as separate HostLink Host/Slave processes
-over loopback and an available non-loopback LAN IPv4, covering cross-device `@subscribe` followed by
-a remote device action.
 
 ## Message Format
 

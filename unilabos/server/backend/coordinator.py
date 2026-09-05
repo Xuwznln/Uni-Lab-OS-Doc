@@ -44,7 +44,11 @@ from unilabos.protocol.runtime import (
     ExecutionJobTransition,
 )
 from unilabos.server.services.history import HistoryService
-from unilabos.server.services.runtime import RuntimeNotFoundError, RuntimeService
+from unilabos.server.services.runtime import (
+    RuntimeConflictError,
+    RuntimeNotFoundError,
+    RuntimeService,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -334,6 +338,7 @@ class WorkflowBusinessCoordinator:
                 "notebook_id": content.notebook_uuid,
                 "node_run_uuid": content.attempt_group_uuid,
                 "attempt_no": content.attempt_no,
+                "retry_of_job_uuid": content.retry_of_job_uuid,
                 "retry_count": content.attempt_no - 1,
                 "origin": JOB_ORIGIN_BACKEND_CONTROL,
                 "always_free": self._action_always_free(
@@ -500,24 +505,38 @@ class WorkflowBusinessCoordinator:
             "failed": "failed",
             "canceled": "canceled",
         }[status]
-        latest = self.runtime.transition_execution_job(
-            latest.job_uuid,
-            ExecutionJobTransition(
-                expected_version=latest.version,
-                status=target_status,
-                result_uuid=result_payload.payload_uuid,
-                error_code=(
-                    str((return_info or {}).get("error_info", {}).get("exception_type") or "execution_error")
-                    if target_status == "failed"
-                    else None
-                ),
-                error_summary=(
-                    str((return_info or {}).get("error") or "execution failed")
-                    if target_status == "failed"
-                    else None
-                ),
+        transition = ExecutionJobTransition(
+            expected_version=latest.version,
+            status=target_status,
+            result_uuid=result_payload.payload_uuid,
+            error_code=(
+                str((return_info or {}).get("error_info", {}).get("exception_type") or "execution_error")
+                if target_status == "failed"
+                else None
+            ),
+            error_summary=(
+                str((return_info or {}).get("error") or "execution failed")
+                if target_status == "failed"
+                else None
             ),
         )
+        # 极快的动作里 running 与终态回调可能在不同线程几乎同时到达：乐观版本冲突时
+        # 重读记录再提交，而不是让 job 永远停在非终态。
+        for _attempt in range(5):
+            try:
+                latest = self.runtime.transition_execution_job(latest.job_uuid, transition)
+                break
+            except RuntimeConflictError as exc:
+                if "version" not in str(exc):
+                    raise
+                latest = self.runtime.get_execution_job(job.job_uuid)
+                if latest.status in {"succeeded", "failed", "canceled", "rejected"}:
+                    return
+                transition = transition.model_copy(update={"expected_version": latest.version})
+        else:
+            raise RuntimeConflictError(
+                f"job {job.job_uuid} terminal transition kept conflicting on version"
+            )
         event_uuid = str(uuid.uuid4())
         if latest.terminal_gate_state == "result_replaced":
             raw_event = self._raw_failure_event(latest.job_uuid)
