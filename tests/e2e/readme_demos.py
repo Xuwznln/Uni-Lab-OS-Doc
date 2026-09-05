@@ -194,7 +194,7 @@ DEMOS: tuple[DemoSpec, ...] = (
         # （纯 HTTP 上传的工作流由其自带 smoke 覆盖，这里只跑 @workflow 上报的四条）+ 库存需求
         # kind reagent -> lot。阶段三依赖本仓库的 HostLink id/name ResourceSlot 兜底与注册表懒加载
         # PLR 类，@workflow 四条不依赖。
-        ref="c0751d42871289852d028c9fc2167c4ca4644972",
+        ref="940509d53bd41cad45b8c5bb6f88a9ca81720bf5",
         package="materials_demo",
         host_graph="graph/host.json",
         slave_graph="graph/slave.json",
@@ -237,7 +237,7 @@ DEMOS: tuple[DemoSpec, ...] = (
         repo="LabDeviceInventoryDemo",
         url="https://github.com/Xuwznln/LabDeviceInventoryDemo",
         # b142910b：库存需求 kind reagent -> lot（与本仓库 InventoryRequirement 的 Literal 同步）。
-        ref="b142910b0c49c428993a1b42dec3b72d27029858",
+        ref="90778e7b860d36fe4a4c75e8b89262391a6be271",
         package="inventory_demo",
         host_graph="graph/inventory_demo.json",
         # 每次 e2e 都是全新数据库：入库 100 → 出库 40 → 500 被拒 → 盘点 60/60/0
