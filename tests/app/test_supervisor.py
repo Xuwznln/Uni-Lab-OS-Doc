@@ -282,6 +282,8 @@ def test_host_child_serves_backend_http_in_process(monkeypatch: pytest.MonkeyPat
         return {"echo": await request.json(), "probe": request.headers.get("x-probe")}
 
     monkeypatch.setattr(app_module, "app", host_app)
+    # 路由已由 setup_server 挂好（真实进程里由 serve_over_control_plane 置位）
+    monkeypatch.setattr(app_module, "wait_routes_ready", lambda timeout: True)
     posted: list[EdgeHttpResponse] = []
     client = BackendWebSocketClient(websocket_url="ws://authority/api/v1/ws/schedule")
 
@@ -310,6 +312,54 @@ def test_host_child_serves_backend_http_in_process(monkeypatch: pytest.MonkeyPat
     # 坏路径也要回一个响应（404），权威侧不会干等
     asyncio.run(client._serve_backend_http({"request_uuid": "req-2", "method": "GET", "path": "/nope"}))
     assert posted[-1].status_code == 404
+
+
+def test_host_child_backend_http_waits_for_routes_before_executing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """控制 WS 先于 setup_server 连上权威：路由没挂好之前不能对 app 执行（否则把"还没挂 /history"
+    误报成 404，权威拉结果 payload 会拿到空）；等不到就回 503 而不是 404。"""
+
+    import asyncio
+
+    from unilabos.protocol.runtime.control import EdgeHttpResponse
+    from unilabos.server.api import app as app_module
+    from unilabos.server.backend.legacy_adaptor.websocket import BackendWebSocketClient
+
+    host_app = FastAPI()
+
+    @host_app.get("/api/v1/history/payloads/p1")
+    async def payload():
+        return {"inline_payload": "e30="}
+
+    monkeypatch.setattr(app_module, "app", host_app)
+    waited: list[float] = []
+
+    def not_ready(timeout: float) -> bool:
+        waited.append(timeout)
+        return False
+
+    monkeypatch.setattr(app_module, "wait_routes_ready", not_ready)
+    posted: list[EdgeHttpResponse] = []
+    client = BackendWebSocketClient(websocket_url="ws://authority/api/v1/ws/schedule")
+
+    async def capture(response: EdgeHttpResponse) -> None:
+        posted.append(response)
+
+    monkeypatch.setattr(client, "_post_http_response", capture)
+    asyncio.run(
+        client._serve_backend_http(
+            {"request_uuid": "req-3", "method": "GET", "path": "/api/v1/history/payloads/p1", "timeout_seconds": 5}
+        )
+    )
+    assert waited == [5.0]
+    assert posted[-1].status_code == 503
+    assert "not mounted" in json.loads(posted[-1].body_bytes())["detail"]
+
+    # 路由就绪后同一请求正常执行
+    monkeypatch.setattr(app_module, "wait_routes_ready", lambda timeout: True)
+    asyncio.run(
+        client._serve_backend_http({"request_uuid": "req-4", "method": "GET", "path": "/api/v1/history/payloads/p1"})
+    )
+    assert posted[-1].status_code == 200
 
 
 def test_runs_local_authority_decision(monkeypatch: pytest.MonkeyPatch) -> None:
