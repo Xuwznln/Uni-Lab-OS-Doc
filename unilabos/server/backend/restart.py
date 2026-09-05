@@ -1,25 +1,28 @@
-"""安静点重启协调器（调试用）。
+"""安静点重启协调器。
 
 重启请求登记后先暂停本地调度派发，等执行端 active job 清空（"执行完最后一个
 任务"或"任务都处于等待"）再执行重启，作用域按运行形态自动选择：
 
 ``edge``
-    ``--role backend`` 分离模式：通知 Edge 进程整进程重启（HTTP 调 Edge 管理
-    API），本进程（调度权威）常驻；Edge 重连 runtime.v1 控制面会话后自动恢复派发。
+    调度权威进程（默认拓扑的 ``unilab``，或 ``--role backend``）：通知 Host 进程整进程
+    重启（HTTP 调 Host 管理 API），本进程与管理端口常驻，前端连接不断；Host 重连
+    runtime.v1 控制面会话后自动恢复派发。默认拓扑里 Host 是本进程看护的子进程，
+    退出码 75 即被原参数再拉起。
 ``process``
-    同进程模式（Host 与设备同进程）：停管理 API → 走 main 的正常退出链路
-    （关库、停 backend）→ CLI 入口用相同参数拉起新进程。等待/未派发的任务由
-    调度器 ``start(recover=True)`` 在新进程里恢复，不会失败。
+    本进程整体重启：停管理 API → 走 main 的正常退出链路（关库、停 backend）→ 以约定
+    退出码退出，由父进程用相同参数拉起（Host 子进程的父进程是权威；接远端 Backend 的
+    顶层 Host 由薄监督进程拉起）。等待/未派发的任务由调度器 ``start(recover=True)``
+    恢复，不会失败。调度权威自己是顶层常驻进程，显式请求 ``process`` 会被拒绝（422）。
 """
 
 from __future__ import annotations
 
 import logging
-import subprocess
-import sys
 import threading
 import time
 from typing import Any, Callable, Optional
+
+from unilabos.app.supervisor import RESTART_EXIT_CODE, is_supervised
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +88,7 @@ class RestartCoordinator:
                 "effective_scope": self._resolve_scope(),
                 "requested_at": self._requested_at,
                 "restarting": self._restarting,
+                "safe_restart": is_safe_restart_enabled() or is_supervised(),
                 "active_jobs": self.active_job_ids(),
                 "dispatch_paused": self._scheduler_paused(),
             }
@@ -101,7 +105,16 @@ class RestartCoordinator:
         if scope not in ("auto", "edge", "process"):
             raise ValueError(f"unsupported restart scope: {scope!r}")
         if scope == "edge" and self._edge_control_service() is None:
-            raise ValueError("restart scope 'edge' requires --role backend mode")
+            raise ValueError("restart scope 'edge' requires a scheduling authority process")
+        if (
+            scope == "process"
+            and self._edge_control_service() is not None
+            and not is_supervised()
+        ):
+            # 调度权威就是顶层进程，没有谁能把它再拉起来；整进程重启只会变成退出。
+            raise ValueError(
+                "调度权威进程常驻，不支持整进程重启；重启 Host 请用 scope=edge（默认 auto）"
+            )
         with self._lock:
             if self._restarting:
                 return self.status()
@@ -172,27 +185,25 @@ class RestartCoordinator:
             self._execute_process_restart()
 
     def _execute_edge_restart(self) -> None:
-        """通知 Edge 进程整进程重启；调度权威常驻，重连后恢复派发。"""
+        """经控制面通知 Edge 进程整进程重启；调度权威常驻，重连后恢复派发。"""
 
-        import requests
+        import json
 
-        from unilabos.config.config import HTTPConfig
+        from unilabos.server.api.edge_proxy import edge_http
 
-        edge_addr = str(HTTPConfig.edge_data_addr or "").rstrip("/")
-        logger.warning(
-            "[Restart] 执行端已安静，通知 Edge 进程整进程重启 (%s)", edge_addr
+        logger.warning("[Restart] 执行端已安静，经控制面通知 Edge 进程整进程重启")
+        response = edge_http(
+            "POST",
+            "/api/v1/restart",
+            headers={"content-type": "application/json"},
+            body=json.dumps({"mode": "immediate", "scope": "process"}).encode("utf-8"),
+            timeout=10,
         )
-        try:
-            response = requests.post(
-                f"{edge_addr}/api/v1/restart",
-                json={"mode": "immediate", "scope": "process"},
-                timeout=10,
-            )
-            response.raise_for_status()
-        except requests.RequestException:
-            logger.exception(
-                "[Restart] 无法通知 Edge 重启，派发保持暂停；"
-                "确认 Edge 状态后可 DELETE /api/v1/restart 手动恢复"
+        if response is None or response.status_code >= 300:
+            logger.error(
+                "[Restart] 无法通知 Edge 重启（%s），派发保持暂停；"
+                "确认 Edge 状态后可 DELETE /api/v1/restart 手动恢复",
+                "Edge 未在线" if response is None else f"HTTP {response.status_code}",
             )
             with self._lock:
                 self._restarting = False
@@ -253,6 +264,7 @@ class RestartCoordinator:
 # ── 进程级重启标记与再拉起 ──────────────────────────────────────
 
 _restart_requested = threading.Event()
+_safe_restart_enabled = True
 
 
 def _set_restart_requested() -> None:
@@ -263,17 +275,36 @@ def is_restart_requested() -> bool:
     return _restart_requested.is_set()
 
 
+def set_safe_restart_enabled(enabled: bool) -> None:
+    """``--no-safe-restart`` 时关闭：安静退出后不再由监督进程拉起。"""
+
+    global _safe_restart_enabled
+    _safe_restart_enabled = bool(enabled)
+
+
+def is_safe_restart_enabled() -> bool:
+    return _safe_restart_enabled
+
+
+def exit_if_restart_requested() -> None:
+    """正常退出链路走完后调用：有重启标记则按约定码退出，交给监督进程拉起。"""
+
+    if not is_restart_requested():
+        return
+    if is_supervised() or _safe_restart_enabled:
+        logger.warning(
+            "[Restart] 本进程退出，监督进程将拉起新实例 (code=%s)",
+            RESTART_EXIT_CODE,
+        )
+        raise SystemExit(RESTART_EXIT_CODE)
+    logger.warning("[Restart] 已关闭安全重启，进程退出后不再拉起")
+    raise SystemExit(0)
+
+
 def spawn_replacement_process() -> None:
-    """用相同参数在同一控制台拉起新的 edge 进程。
+    """兼容旧名：真正拉起由监督进程完成，这里只按约定退出码退出。"""
 
-    使用 ``python -m unilabos.app.main`` 而不是 ``os.execv``：Windows 的 execv
-    是 spawn+exit 模拟，会把 listening socket 等句柄继承给新进程；这里在旧进程
-    完整退出链路（端口、数据库均已释放）之后启动，且默认 close_fds 不继承句柄。
-    """
-
-    command = [sys.executable, "-m", "unilabos.app.main", *sys.argv[1:]]
-    logger.warning("[Restart] 正在拉起新进程: %s", " ".join(command))
-    subprocess.Popen(command)
+    exit_if_restart_requested()
 
 
 _coordinator: Optional[RestartCoordinator] = None
@@ -297,8 +328,12 @@ def get_restart_coordinator() -> RestartCoordinator:
 
 
 __all__ = [
+    "RESTART_EXIT_CODE",
     "RestartCoordinator",
+    "exit_if_restart_requested",
     "get_restart_coordinator",
     "is_restart_requested",
+    "is_safe_restart_enabled",
+    "set_safe_restart_enabled",
     "spawn_replacement_process",
 ]

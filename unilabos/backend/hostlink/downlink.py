@@ -25,6 +25,51 @@ from unilabos.utils import logger
 
 DEFAULT_DOWNLINK_TIMEOUT = 30.0
 
+# 调度权威进程没有设备也没有 HostLink server：物料投影下行经控制面 WS 交给 Host 进程
+# 在进程内执行 /api/v1/hostlink/{material-sync,notify-device}（server/api/host_relay.py）。
+_remote_device_relay = False
+
+
+def configure_remote_device_relay(enabled: bool) -> None:
+    global _remote_device_relay
+    _remote_device_relay = bool(enabled)
+
+
+def remote_device_relay() -> bool:
+    return _remote_device_relay
+
+
+def _relay_post(path: str, payload: Dict[str, Any], timeout: float) -> Any:
+    import json
+
+    from unilabos.server.api.edge_proxy import edge_http
+
+    response = edge_http(
+        "POST",
+        path,
+        headers={"content-type": "application/json"},
+        body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        timeout=timeout,
+    )
+    if response is None:
+        raise RuntimeError(f"Host 进程不在线，无法经控制面执行 {path}")
+    text = response.body_bytes().decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(text) if text else None
+    except ValueError:
+        parsed = None
+    if response.status_code >= 300:
+        detail = parsed.get("detail", text) if isinstance(parsed, dict) else text
+        raise RuntimeError(f"Host 中继 {path} 返回 HTTP {response.status_code}: {detail}")
+    return parsed
+
+
+def remote_material_sync_dispatcher(command: Any) -> Dict[str, Any]:
+    """materials 权威的 resource-sync dispatcher：经 Host 中继投影到设备。"""
+
+    data = command.model_dump(mode="json", exclude_none=False)
+    return _relay_post("/api/v1/hostlink/material-sync", data, DEFAULT_DOWNLINK_TIMEOUT)
+
 
 def get_local_device_node(device_id: str) -> Optional[Any]:
     """按 device_id 取本进程的设备节点实例（DeviceNode 子类，含 host_node）。
@@ -208,6 +253,8 @@ def material_sync_to_device(
         return local_material_sync(payload)
     server = get_hostlink_server()
     if server is None:
+        if _remote_device_relay:
+            return _relay_post("/api/v1/hostlink/material-sync", payload, timeout)
         raise RuntimeError(f"HostLink server 未启动，无法向跨机设备 {device_id!r} 分发物料同步")
     return server.request_device(str(device_id), ActionType.MATERIAL_SYNC, payload, timeout)
 
@@ -248,6 +295,15 @@ def notify_resource_tree_update(
     try:
         if get_local_device_node(device_id) is None:
             server = get_hostlink_server()
+            if server is None and _remote_device_relay:
+                # 调度权威进程：设备都在 Host 进程里，整条通知转交 Host 中继
+                result = _relay_post(
+                    "/api/v1/hostlink/notify-device",
+                    {"device_id": str(device_id), "action": str(action), "resource_uuids": list(resource_uuid_list)},
+                    DEFAULT_DOWNLINK_TIMEOUT,
+                )
+                notified = result.get("notified") if isinstance(result, dict) else None
+                return notified if notified is None else bool(notified)
             if server is None or not server.has_device(device_id):
                 logger.info(
                     "[Downlink] 设备 %s 不在本进程、也不在 HostLink 在线表，跳过资源树 %s 分发",
@@ -265,6 +321,7 @@ def notify_resource_tree_update(
 __all__ = [
     "DEFAULT_DOWNLINK_TIMEOUT",
     "append_resource_via_hostlink",
+    "configure_remote_device_relay",
     "device_manage_to_device",
     "get_local_device_node",
     "iter_local_device_nodes",
@@ -276,6 +333,8 @@ __all__ = [
     "material_sync_to_device",
     "notify_resource_tree_update",
     "register_hostlink_resource_handlers",
+    "remote_device_relay",
+    "remote_material_sync_dispatcher",
     "run_node_coroutine",
     "sync_resource_tree_to_device",
 ]

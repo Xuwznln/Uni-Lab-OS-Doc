@@ -119,7 +119,7 @@ def _reservation(
                 ),
                 InventoryRequirement(
                     key="solvent",
-                    kind="reagent",
+                    kind="lot",
                     template_uuid="reagent-template",
                     quantity=quantity,
                     unit="ul",
@@ -152,7 +152,7 @@ def test_execution_rejects_stale_or_changed_inventory_reservation(
             ).model_dump(mode="json", exclude_none=False),
             InventoryRequirement(
                 key="solvent",
-                kind="reagent",
+                kind="lot",
                 template_uuid="reagent-template",
                 quantity=12,
                 unit="ul",
@@ -189,7 +189,7 @@ def test_execution_rejects_stale_or_changed_inventory_reservation(
         service.close()
 
 
-def test_reserve_and_consume_material_and_reagent_atomically(tmp_path) -> None:
+def test_reserve_and_consume_material_and_lot_atomically(tmp_path) -> None:
     service = MaterialsService(tmp_path / "materials.db")
     try:
         _template(service, "plate-template", "plate")
@@ -275,7 +275,7 @@ def test_task_batch_reservation_is_all_or_nothing_across_jobs(tmp_path) -> None:
                             ),
                             InventoryRequirement(
                                 key="solvent",
-                                kind="reagent",
+                                kind="lot",
                                 template_uuid="reagent-template",
                                 quantity=quantity,
                                 unit="ul",
@@ -339,7 +339,7 @@ def test_inventory_http_protocol_uses_the_same_authority_transitions(tmp_path) -
                 requirements=[
                     InventoryRequirement(
                         key="solvent",
-                        kind="reagent",
+                        kind="lot",
                         template_uuid="reagent-template",
                         quantity=3,
                         unit="ul",
@@ -455,7 +455,7 @@ def test_execution_consumes_scheduler_reservation_before_driver_call(
                         ).model_dump(mode="json", exclude_none=False),
                         InventoryRequirement(
                             key="solvent",
-                            kind="reagent",
+                            kind="lot",
                             template_uuid="reagent-template",
                             quantity=4,
                             unit="ul",
@@ -524,7 +524,7 @@ def test_failed_action_quarantines_consumed_material_without_refund(tmp_path) ->
                         ).model_dump(mode="json", exclude_none=False),
                         InventoryRequirement(
                             key="solvent",
-                            kind="reagent",
+                            kind="lot",
                             template_uuid="reagent-template",
                             quantity=4,
                             unit="ul",
@@ -617,7 +617,7 @@ def test_status_hold_rejects_and_releases_scheduler_reservation(tmp_path) -> Non
 
         requirement = InventoryRequirement(
             key="solvent",
-            kind="reagent",
+            kind="lot",
             template_uuid="reagent-template",
             quantity=2,
             unit="ul",
@@ -684,7 +684,7 @@ def test_backend_scheduler_reserves_complete_task_before_dispatch(tmp_path) -> N
         )
         requirement = InventoryRequirement(
             key="solvent",
-            kind="reagent",
+            kind="lot",
             template_uuid="reagent-template",
             quantity=2,
             unit="ul",
@@ -716,7 +716,7 @@ def test_backend_scheduler_reserves_complete_task_before_dispatch(tmp_path) -> N
         assert specs["run-a"]["inventory_allocations"] == {
             "solvent": {
                 "key": "solvent",
-                "kind": "reagent",
+                "kind": "lot",
                 "template_uuid": "reagent-template",
                 "unit": "ul",
                 "quantity": 2.0,
@@ -739,7 +739,7 @@ def test_workflow_plan_freezes_inventory_requirements() -> None:
     template_uuid = "20000000-0000-4000-8000-000000000001"
     requirement = {
         "key": "solvent",
-        "kind": "reagent",
+        "kind": "lot",
         "template_uuid": "reagent-template",
         "quantity": 2,
         "unit": "ul",

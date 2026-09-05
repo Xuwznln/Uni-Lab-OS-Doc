@@ -83,14 +83,24 @@ def print_slave_launch_hint() -> None:
 def _fail_on_port_in_use(exc: OSError) -> None:
     """管理端端口被占用属于用户可修复的启动错误：只打印修改建议，不打印堆栈。"""
 
+    from unilabos.app.supervisor import PORT_IN_USE_EXIT_CODE
+
     print_status(exc.strerror or str(exc), "error")
-    raise SystemExit(1) from exc
+    raise SystemExit(PORT_IN_USE_EXIT_CODE) from exc
+
+
+def _serves_over_control_plane() -> bool:
+    """调度权威拉起的 Host 子进程不监听端口：管理 API 由权威经控制 WS 下发、在进程内执行。"""
+
+    from unilabos.app.supervisor import is_host_child
+
+    return is_host_child()
 
 
 def _ensure_management_port_available() -> None:
     """Host 模式下在拉起设备 runtime 之前先确认管理端端口可用，避免设备起来后再失败。"""
 
-    if not BasicConfig.is_host_mode:
+    if not BasicConfig.is_host_mode or _serves_over_control_plane():
         return
     from unilabos.server.api.app import ManagementPortInUseError, ensure_port_available
 
@@ -101,8 +111,12 @@ def _ensure_management_port_available() -> None:
 
 
 def _start_management_server() -> None:
-    from unilabos.server.api.app import ManagementPortInUseError, start_server
+    from unilabos.server.api.app import ManagementPortInUseError, serve_over_control_plane, start_server
 
+    if _serves_over_control_plane():
+        print_status("Host 子进程不监听端口：管理 API 由调度权威经控制面 WS 下发、在本进程内执行", "info")
+        serve_over_control_plane()
+        return
     try:
         start_server(
             open_browser=not BasicConfig.disable_browser,

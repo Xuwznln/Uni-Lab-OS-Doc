@@ -251,9 +251,10 @@ def test_workflow_watch_uses_ws_only_as_invalidation_then_pulls_http() -> None:
     ]
     assert all(event["task"]["status"] != "forged" for event in events)
     assert events[-1]["cursor"] == 9
+    # 通知 WS 与 HTTP API 是同一个微后端服务：同 host 同端口。
     assert connections == [
         (
-            "ws://microbackend:8003/api/v1/ws/schedule",
+            "ws://microbackend:8002/api/v1/ws/schedule",
             {"Accept": "application/json"},
             1,
         )
@@ -369,3 +370,65 @@ def test_workflow_client_roundtrips_through_the_microbackend_api() -> None:
     assert [job["workflow_node_uuid"] for job in inspected["jobs"]] == [
         node_uuid
     ]
+
+
+def test_host_child_reports_workflow_templates_over_http() -> None:
+    """Host 子进程没有本地 Workflow Authority，@workflow 模板经 HTTP 客户端按稳定 uuid
+    幂等 upsert 到权威：首次 create 带 workflow_uuid，再次上报走 update + save_graph。"""
+
+    from uuid import uuid4
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from unilabos.client.utils.envelope import EnvelopeError
+    from unilabos.registry.workflows import _upsert_workflow
+    from unilabos.server.api.runtime.workflow import install_workflow_api
+    from unilabos.server.services.runtime.workflow.service import WorkflowService
+
+    service = WorkflowService(":memory:")
+    app = FastAPI()
+    install_workflow_api(app, service)
+    api = TestClient(app)
+
+    class _AuthorityHTTP:
+        @staticmethod
+        def _data(response: Any) -> Any:
+            envelope = response.json()
+            if response.status_code >= 400 or envelope.get("code", 0) != 0:
+                raise EnvelopeError(envelope.get("code", response.status_code), str(envelope.get("error")))
+            return envelope["data"]
+
+        def get(self, path: str, **kwargs: Any) -> Any:
+            return self._data(api.get(f"/api/v1{path}", params=kwargs.get("params")))
+
+        def post(self, path: str, **kwargs: Any) -> Any:
+            return self._data(api.post(f"/api/v1{path}", json=kwargs.get("json")))
+
+        def put(self, path: str, **kwargs: Any) -> Any:
+            return self._data(api.put(f"/api/v1{path}", json=kwargs.get("json")))
+
+    client = HTTPWorkflowClient(
+        "http://authority:8002",
+        http_client=_AuthorityHTTP(),
+        notice_connector=lambda *_args: _FakeNoticeContext([]),
+    )
+    stable_uuid = str(uuid4())
+    payload = {
+        "workflow_uuid": stable_uuid,
+        "name": "默认子工作流",
+        "tags": ["demo"],
+        "description": "由 @workflow 声明",
+        "nodes": [{"uuid": str(uuid4()), "name": "人工确认", "type": "manual_confirm"}],
+        "edges": [],
+    }
+    _upsert_workflow(client, payload)
+    stored = service.get_workflow(stable_uuid)
+    assert stored["name"] == "默认子工作流"
+    assert [node["name"] for node in service.get_graph(stable_uuid)["nodes"]] == ["人工确认"]
+
+    # 再次上报（Host 重启）：同 uuid 走更新，不会重复创建
+    payload["description"] = "第二次上报"
+    _upsert_workflow(client, payload)
+    assert service.get_workflow(stable_uuid)["description"] == "第二次上报"
+    assert service.list_workflows(page=1, page_size=10, name="默认子工作流")["total"] == 1

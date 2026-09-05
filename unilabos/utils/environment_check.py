@@ -1,6 +1,6 @@
 """
 环境检查模块
-用于检查并自动安装 UniLabOS 运行所需的 Python 包
+用于检查并自动安装 Uni-Lab-OS 运行所需的 Python 包
 """
 
 import argparse
@@ -290,7 +290,7 @@ def check_device_package_requirements(devices_dirs: list[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# UniLabOS 核心环境检查
+# Uni-Lab-OS 核心环境检查
 # ---------------------------------------------------------------------------
 
 class EnvironmentChecker:
@@ -470,7 +470,7 @@ def check_environment(auto_install: bool = True, show_details: bool = True) -> b
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="UniLabOS 环境依赖检查工具")
+    parser = argparse.ArgumentParser(description="Uni-Lab-OS 环境依赖检查工具")
     parser.add_argument("--no-auto-install", action="store_true", help="仅检查环境，不自动安装缺失的包")
     parser.add_argument("--silent", action="store_true", help="静默模式，不显示详细信息")
 

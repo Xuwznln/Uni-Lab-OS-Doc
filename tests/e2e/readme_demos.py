@@ -1,6 +1,7 @@
-"""README 示例设备包（四个 demo 仓库）的引用清单、源码解析与运行时驻留工具。
+"""README 示例设备包（六个 demo 仓库）的引用清单、源码解析与运行时驻留工具。
 
-unilabos 侧在这里固定引用四个 demo 仓库（URL + 已验证提交），e2e 用例按以下
+unilabos 侧在这里固定引用六个 demo 仓库（URL + 已验证提交；同一份清单也收录在
+awesome-lab-devices 索引里供 OpenLab 一键安装），e2e 用例按以下
 顺序取得仓库源码：
 
 1. ``UNILABOS_README_EXAMPLES_ROOT/<仓库名>``（外部预先 checkout）；
@@ -13,6 +14,10 @@ pinned 提交与各 demo 仓库 CI 里固定的 Uni-Lab-OS 提交互相锁定：
 运行时后端由 ``UNILABOS_E2E_BACKEND``（``hostlink`` 缺省 / ``ros2``）选择。ros2 模式
 下 HostLink 仍然开启（承载物料权威与 host 服务，与 Site demo 的 ros2 形态一致），
 设备动作与 Topic 走 ROS 2；每个用例用独立的 ``ROS_DOMAIN_ID`` 隔离。
+
+进程拓扑由 ``UNILABOS_E2E_TOPOLOGY``（``single`` 缺省 / ``split``）选择：``single`` 加
+``--no_safe_restart`` 让调度权威与 Host 同进程；``split`` 走 ``unilab`` 默认的
+「监督进程 → 调度权威 → Host 子进程」，用例仍只连权威端口。
 """
 
 from __future__ import annotations
@@ -39,9 +44,19 @@ TERMINAL_TASK_STATUSES = {"succeeded", "failed"}
 E2E_BACKEND = os.environ.get("UNILABOS_E2E_BACKEND", "hostlink").strip().lower()
 if E2E_BACKEND not in {"hostlink", "ros2"}:
     raise RuntimeError(f"UNILABOS_E2E_BACKEND 必须是 hostlink 或 ros2，当前: {E2E_BACKEND!r}")
+#: 进程拓扑：``single``（缺省）加 ``--no_safe_restart``，调度权威与 Host 同进程，用例直接
+#: 管这个进程的生死；``split`` 走默认拓扑（监督进程 → 调度权威 → Host 子进程），
+#: 验证浏览器只连权威端口时六个 demo 的图 / 工作流 / 决策链仍完整。
+E2E_TOPOLOGY = os.environ.get("UNILABOS_E2E_TOPOLOGY", "single").strip().lower()
+if E2E_TOPOLOGY not in {"single", "split"}:
+    raise RuntimeError(f"UNILABOS_E2E_TOPOLOGY 必须是 single 或 split，当前: {E2E_TOPOLOGY!r}")
 #: 只属于测试夹具的控制变量。``UNILABOS_`` 前缀在运行时进程里是配置覆盖协议
 #: （``UNILABOS_<Config类>_<字段>``），这些变量不能泄漏进被测进程。
-HARNESS_ENV_VARS = ("UNILABOS_E2E_BACKEND", "UNILABOS_README_EXAMPLES_ROOT")
+HARNESS_ENV_VARS = (
+    "UNILABOS_E2E_BACKEND",
+    "UNILABOS_E2E_TOPOLOGY",
+    "UNILABOS_README_EXAMPLES_ROOT",
+)
 #: ROS 2 节点启动与发现比 HostLink 慢，闭环与工作流等待窗口相应放宽。
 _ROS2_TIMEOUT_SCALE = 1.5
 
@@ -132,13 +147,12 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceWorkstationDemo",
         url="https://github.com/Xuwznln/LabDeviceWorkstationDemo",
-        ref="04a8c24e6e6eff1dfc061e9272229eecfbf5e0bb",
+        # b9da1ae6：设备不自跑 proof，inspect_endpoints 成为第四步。
+        ref="b9da1ae65bcf8e912c2255695cb1f7d220f5fc03",
         package="workstation_demo",
         host_graph="graph/workstation_demo.json",
-        proof_env={"WORKSTATION_DEMO_PROOF_FILE": "proof.json"},
-        extra_env={"WORKSTATION_DEMO_START_DELAY": "0.2"},
-        extra_env_ros2={"WORKSTATION_DEMO_START_DELAY": "2.0"},
-        workflows=(WorkflowExpectation(name="工作站演示流水", node_count=3),),
+        # 设备不自跑闭环：串口回环 / 双传感器探测 / 共享端点计数全部由 @workflow 经 API 触发
+        workflows=(WorkflowExpectation(name="工作站演示流水", node_count=4),),
     ),
     DemoSpec(
         repo="LabDeviceExceptionDemo",
@@ -174,23 +188,24 @@ DEMOS: tuple[DemoSpec, ...] = (
         ),
     ),
     DemoSpec(
-        repo="LabDeviceSiteDemo",
-        url="https://github.com/Xuwznln/LabDeviceSiteDemo",
-        ref="84262c3ff67cfcd1719d756c93705344eaf30e78",
-        package="site_demo",
+        repo="LabDeviceMaterialsDemo",
+        url="https://github.com/Xuwznln/LabDeviceMaterialsDemo",
+        # c0751d42：改名 + 设备不自跑（两轮闭环都是 @workflow）+ 阶段三「出库装板并加液」
+        # （纯 HTTP 上传的工作流由其自带 smoke 覆盖，这里只跑 @workflow 上报的四条）+ 库存需求
+        # kind reagent -> lot。阶段三依赖本仓库的 HostLink id/name ResourceSlot 兜底与注册表懒加载
+        # PLR 类，@workflow 四条不依赖。
+        ref="c0751d42871289852d028c9fc2167c4ca4644972",
+        package="materials_demo",
         host_graph="graph/host.json",
         slave_graph="graph/slave.json",
-        proof_env={
-            "SITE_DEMO_PROOF_FILE": "rack-proof.json",
-            "SITE_DEMO_BENCH_PROOF_FILE": "bench-proof.json",
-        },
-        extra_env={"SITE_DEMO_START_DELAY": "0.5"},
-        extra_env_ros2={"SITE_DEMO_START_DELAY": "2.0"},
+        # 设备不自跑闭环：两轮位点 / 物料闭环全部是 @workflow，经 API 顺序运行
         workflows=(
+            WorkflowExpectation(name="位点闭环演示", node_count=4),
+            WorkflowExpectation(name="物料闭环演示", node_count=6),
             WorkflowExpectation(name="位点操作演示", node_count=3),
             WorkflowExpectation(name="物料流转演示", node_count=5),
         ),
-        timeout=90.0,
+        timeout=120.0,
     ),
     DemoSpec(
         repo="LabDeviceLockDemo",
@@ -221,7 +236,8 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceInventoryDemo",
         url="https://github.com/Xuwznln/LabDeviceInventoryDemo",
-        ref="09fa17e179ed980550b1214b51db8c801b929646",
+        # b142910b：库存需求 kind reagent -> lot（与本仓库 InventoryRequirement 的 Literal 同步）。
+        ref="b142910b0c49c428993a1b42dec3b72d27029858",
         package="inventory_demo",
         host_graph="graph/inventory_demo.json",
         # 每次 e2e 都是全新数据库：入库 100 → 出库 40 → 500 被拒 → 盘点 60/60/0
@@ -389,6 +405,9 @@ def runtime_command(
         ]
     else:
         command += ["--hostlink_bind", "127.0.0.1", "--hostlink_port", str(hostlink_port)]
+        if E2E_TOPOLOGY == "single":
+            # 用例自己管这个进程的生死，不要监督进程 / Host 子进程再套层
+            command.append("--no_safe_restart")
     if backend == "ros2":
         command += ["--ros_domain_id", ros_domain_id(hostlink_port)]
     return command

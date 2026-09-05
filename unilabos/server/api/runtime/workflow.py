@@ -91,6 +91,9 @@ class WorkflowCreateRequest(_BackendModel):
     tags: List[Any] = Field(default_factory=list)
     description: Optional[str] = None
     meta_data: Dict[str, Any] = Field(default_factory=dict)
+    #: 可选的稳定 uuid：Host 子进程上报 ``@workflow`` 默认子工作流时用声明式 uuid
+    #: 幂等 upsert（同 uuid 已存在返回冲突，调用方转 PUT）。浏览器创建时不传。
+    workflow_uuid: Optional[str] = None
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -215,6 +218,9 @@ def _error(error: WorkflowError) -> _BackendJSONResponse:
         "candidate_not_ready",
         "draft_invalid",
         "candidate_invalid",
+        "manual_confirmation_not_assignee",
+        "manual_confirmation_decided",
+        "manual_confirmation_key_used",
     }
     if error.code == "invalid_input":
         business_code = 1000
@@ -279,7 +285,11 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
         workflow_uuid: str,
         body: WorkflowUpdateRequest,
     ) -> JSONResponse:
-        return _success(service.update_workflow(workflow_uuid, **body.model_dump()))
+        return _success(
+            service.update_workflow(
+                workflow_uuid, **body.model_dump(exclude={"workflow_uuid"})
+            )
+        )
 
     @router.delete("/workflows/{workflow_uuid}")
     def delete_workflow(workflow_uuid: str) -> JSONResponse:

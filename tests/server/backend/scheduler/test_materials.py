@@ -65,7 +65,7 @@ def test_execute_job_protocol_preserves_scheduler_material_contract() -> None:
         inventory_requirements=[
             InventoryRequirement(
                 key="solvent",
-                kind="reagent",
+                kind="lot",
                 template_uuid="solvent-template",
                 quantity=10,
                 unit="ul",

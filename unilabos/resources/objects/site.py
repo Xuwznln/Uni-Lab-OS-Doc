@@ -1,4 +1,4 @@
-"""UniLabOS 唯一的 canonical Site 模型与适配函数。
+"""Uni-Lab-OS 唯一的 canonical Site 模型与适配函数。
 
 ``SiteDefinition`` 是 Registry 中不含实例身份的静态槽位规格；
 ``ResourceSite`` 是微后端实例化后带 UUID、owner 和占用关系的 Site 快照。

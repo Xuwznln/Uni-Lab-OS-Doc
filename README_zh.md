@@ -118,32 +118,28 @@ unilab -g path/to/graph.json --backend hostlink \
 省略 `-g` 时 Edge 可以以空图启动，之后通过驱动包或受管设备 API 添加设备。
 Slave 仍需要自己的设备图，并使用 `--is-slave --host-node-ip <host>` 连接 Host。
 
-### 4. 连接已有或旧版 Backend
+### 4. 连接远端 Backend
 
-连接已有的云端或内网 Backend 时，通过一个明确的 `--address` 指定地址；地址
-可以写服务根地址，也可以直接写 `/api/v1` 根地址，实验室凭据通过 `--ak`、
-`--sk` 传入：
+连接远端 Backend 时，通过一个明确的 `--address` 指定地址；地址可以写服务根
+地址，也可以直接写 `/api/v1` 根地址，实验室凭据通过 `--ak`、`--sk` 传入：
 
 ```bash
 unilab -g path/to/graph.json --backend hostlink \
-  --address https://legacy.example.com/api/v1 \
+  --address https://backend.example.com/api/v1 \
   --ak "$AK" --sk "$SK"
 ```
 
-启动时 Uni-Lab 会探测 HTTP 路由，自动选择 `runtime.v1` 或旧版适配器。若要
-明确固定旧 Backend，可在通过 `--config` 加载的 `local_config.py`（或工作目录
-下的同名文件）中写：
+Edge 对该地址只使用 `runtime.v1`：HTTP `/api/v1/*` 与 `/api/v1/ws/schedule`
+控制 WebSocket 是同一个服务、同 host 同端口；调度、工作流、物料与注册表都由
+Backend 权威承接。WebSocket 只传短通知，完整权威内容通过 HTTP 拉取。
+`--role backend` 启动的正是这样一个权威。
 
-```python
-class HTTPConfig:
-    remote_addr = "https://legacy.example.com/api/v1"
-    backend_protocol = "legacy"
-```
-
-旧云端 Backend 不要用 `--role backend` 启动；该角色启动的是新的本地
-`runtime.v1` 权威。在两种模式下，浏览器接入面都是 HTTP。新的
-Backend↔Edge `control.v1` WebSocket 只传短通知，完整权威内容通过 HTTP 拉取；
-旧版适配器则继续兼容旧消息族。
+对旧云端 Backend（`job_start` / `host_node_ready` 消息族、`/ws/schedule` 在
+HTTP 端口 `+1`）的兼容不再由 Edge 自动选择：它收敛在
+`unilabos.server.backend.legacy_adaptor.legacy`，由 Backend 侧显式装配
+（`BackendSessionFactory.create_legacy_client()`、
+`build_legacy_backend_websocket_url()`）。地址派生与 Edge 连接工厂都不再按
+legacy 探测分叉。
 
 ### 5. 使用自定义界面
 
@@ -154,7 +150,7 @@ Uni-Lab 只提供 backend API，Edge 进程不托管 SPA。请单独构建或部
 |----------|----------------|
 | 本地单进程 Edge | `http://127.0.0.1:8002` |
 | 拆分部署 | `http://127.0.0.1:8081`（Backend 权威） |
-| 已有/旧版 Backend | 启动参数 `--address` 指定的地址 |
+| 远端 Backend | 启动参数 `--address` 指定的地址 |
 
 接口契约见 `/api/openapi.json`，交互式文档见 `/api/docs`。以 Vite 为例，
 自定义静态前端可独立开发和预览：
@@ -194,15 +190,14 @@ unilab package install \
 | [LabDeviceLanDemo](https://github.com/Xuwznln/LabDeviceLanDemo) | 跨设备 `@subscribe` 订阅 + `call_device_action` 远程调用的局域网闭环（hub/sub 双进程） |
 | [LabDeviceWorkstationDemo](https://github.com/Xuwznln/LabDeviceWorkstationDemo) | `hardware_interface` 代理——同一工作站内多个子设备共享同一通信端点：共享串口（默认 IO 方法名）与 Modbus `extra_info`（按设备注入各自 `slave_id`） |
 | [LabDeviceExceptionDemo](https://github.com/Xuwznln/LabDeviceExceptionDemo) | 全部经网页式工作流提交路径（`/api/v1/workflow-tasks` + `/api/v1/error-decisions`）演示异常传播：异常穿出动作边界后等待 `abort` / `operator_intervention` 决策；点对点 `call_device_action` 的异常作为工作流节点在调用侧捕获；业务级守卫返回；人工替换结果让任务以 `succeeded` 收尾 |
-| [LabDeviceSiteDemo](https://github.com/Xuwznln/LabDeviceSiteDemo) | host/slave 双进程——`@device(available_sites=...)` 固定位点（声明 → 注册表模板 → 权威位点实例 → 占用流转）、`@resource` 物料配合 `materials.*` 门面跨 HostLink 做物料 CRUD、`SiteSlot` 动作参数（前端 Site 选择器 uuid 或 label 便捷形态） |
+| [LabDeviceMaterialsDemo](https://github.com/Xuwznln/LabDeviceMaterialsDemo) | host/slave 双进程——`@device(available_sites=...)` 固定位点（声明 → 注册表模板 → 权威位点实例 → 占用流转）、`@resource` 物料配合 `materials.*` 门面跨 HostLink 做物料 CRUD、`SiteSlot` 动作参数（前端 Site 选择器 uuid 或 label 便捷形态）；出库装板并加液：全部经网页式 HTTP API——`POST /materials/instantiate` 按件登记两块板、`POST /materials/lots/inbound` 按量登记（故意不够的）水、`POST /workflows` + `PUT graph` 上传三节点图（`host_node/apply_deduct_resource` 带 `material` 需求、`mount_resource={"name": ...}` 只按名字引用台面 → 设备 `fill_well` 带 `lot` 需求 → 报告），提交后整任务预留失败 `plan_not_executable`（板与水都无预留痕迹、设备未被调用），补料再提交成功——板 `active → in_use` 跨进程挂到 slave 台面、lot 扣减、孔位内容物落权威 |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo) | 用并发提交的工作流把调度器锁语义变成证据：`(device, action)` 动作锁让两次 `occupy` 按提交顺序串行（第二个在 `/api/v1/scheduler/resources` 里 `waiting` 且 `blockers` 非空）、`@action(always_free=True)` 让同一动作的两次 `peek` 重叠、`materials_need_lock=["plate"]` 按权威板 uuid 互斥（两台设备处理同一块板串行，一台设备处理两块板并行）；`lock_auditor` 节点读探针账本核对，任一结论不成立即任务失败 |
 | [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo) | 用工作流走通按数量计量的库存：注册表 `@resource` 试剂模板、`restock` 即网页"添加试剂"的 `POST /api/v1/materials/lots/inbound`（固定 lot 入库 100 ml）、`dispense` 步骤的 `inventory=[...]` 需求在任务启动时 all-or-nothing 预留、动作开始前扣减（设备回报扣减后的 lot `60 / 60 / 0`）、500 ml 需求在预留阶段被拒——任务 `failed` / `plan_not_executable`（`short by 440 ml`）、节点 `canceled`、设备不被调用、库存不变 |
 
-每个仓库的 README 都附带分步启动教程及实测输出，并自带可终止的双运行时 smoke
-（`python -m <包名>.smoke --backend hostlink|ros2`），由各仓库 CI 固定在指定 Uni-Lab-OS 提交上运行；
-主仓库则在 `tests/e2e/readme_demos.py` 固定引用这六个包的已验证提交，并在 CI 里逐个端到端跑通：
-注册表 `--check_mode`、`unilab graph create` 建图、真实 `unilab -g` 起微后端（双进程 demo 含 slave）、
-`unilab graph list/download/upload` 读写 Graph Authority、管理 HTTP API 运行上报的 `@workflow`。底层的通信共享机制见
+每个示例都用 `unilab -g` 按图启动设备，再经管理 HTTP API（`POST /api/v1/workflow-tasks`）运行工作流；
+仓库 README 附带分步启动教程与实测输出，并自带可终止的双运行时 smoke
+（`python -m <包名>.smoke --backend hostlink|ros2`）。这六个示例同时在主仓库 CI 中端到端验证。
+底层的通信共享机制见
 [最佳实践指南 §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)；
 从零编写新驱动见[添加设备](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html)。
 

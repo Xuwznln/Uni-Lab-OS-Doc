@@ -1,14 +1,13 @@
-"""旧云端 Backend 相关的 Edge 启动期接线。
-
-``unilabos.app.main`` 只在两处触碰旧后端支持，两处都只是对本模块的一次调用：
+"""旧云端 Backend 相关的启动期接线。
 
 - :func:`upgrade_startup_graph_payload` —— ``-g`` 启动图读取边界：旧后端导出图 /
   dev 时代示例图在这里整图转成当前 node-link 契约，之后的 Graph Authority 与
-  graphio 只见当前契约；
-- :func:`start_legacy_uplink` —— 探测到旧协议 Backend 后的开机上联：注册表上报、
-  物料全量镜像与增量镜像线程。
+  graphio 只见当前契约。这是 ``unilabos.app.main`` 唯一触碰旧后端的地方；
+- :func:`start_legacy_uplink` —— 显式接入旧协议 Backend 时的开机上联：注册表
+  上报、物料全量镜像与增量镜像线程。Edge 启动不再调用它；由 Backend 侧的
+  legacy 兼容入口与 :meth:`BackendSessionFactory.create_legacy_client` 一起装配。
 
-剥离旧后端支持时删除本模块与 ``main`` 里的两个调用点即可。
+剥离旧后端支持时删除本模块与 ``main`` 里的启动图调用点即可。
 """
 
 from __future__ import annotations
@@ -48,7 +47,7 @@ def start_legacy_uplink(
     """
 
     print_status(
-        f"检测到旧协议 Backend: {HTTPConfig.remote_addr}，启用 legacy 适配",
+        f"显式接入旧协议 Backend: {HTTPConfig.remote_addr}，启用 legacy 适配",
         "warning",
     )
     client = LegacyBackendHTTPClient()

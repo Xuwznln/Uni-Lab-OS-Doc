@@ -12,23 +12,29 @@ zhida_gcms:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: EmptyIn_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: true
               title: EmptyIn_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: abort参数
+          title: EmptyIn
           type: object
         type: EmptyIn
       auto-close:
@@ -178,23 +184,29 @@ zhida_gcms:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: EmptyIn_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: true
               title: EmptyIn_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: put_tray参数
+          title: EmptyIn
           type: object
         type: EmptyIn
       start:
@@ -204,34 +216,40 @@ zhida_gcms:
           string: string
           text: text
         goal_default:
-          string: null
-          text: null
+          string: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: StrSingleInput_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
                 string:
                   description: Base64编码的CSV数据（ROS2参数名）
                   type: string
-                text:
-                  description: Base64编码的CSV数据（兼容旧接口）
-                  type: string
-              required: []
               title: StrSingleInput_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: StrSingleInput_Result
               type: object
           required:
           - goal
-          title: start参数
+          title: StrSingleInput
           type: object
         type: StrSingleInput
       start_with_csv_file:
@@ -241,34 +259,40 @@ zhida_gcms:
           csv_file_path: csv_file_path
           string: string
         goal_default:
-          csv_file_path: null
-          string: null
+          string: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: StrSingleInput_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
-                csv_file_path:
-                  description: CSV文件路径（兼容旧接口）
-                  type: string
                 string:
                   description: CSV文件路径（ROS2参数名）
                   type: string
-              required: []
               title: StrSingleInput_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: StrSingleInput_Result
               type: object
           required:
           - goal
-          title: start_with_csv_file参数
+          title: StrSingleInput
           type: object
         type: StrSingleInput
     module: unilabos.devices.zhida_gcms.zhida:ZhidaClient

@@ -2,7 +2,7 @@
 set -e
 
 echo "================================================"
-echo "UniLabOS Environment Installation Script"
+echo "Uni-Lab-OS Environment Installation Script"
 echo "================================================"
 echo ""
 
@@ -97,7 +97,7 @@ else
 fi
 
 echo ""
-echo "Checking UniLabOS entry point..."
+echo "Checking Uni-Lab-OS entry point..."
 # Check if unilab script exists in bin directory
 UNILAB_SCRIPT="$ENV_PATH/bin/unilab"
 if [ ! -f "$UNILAB_SCRIPT" ]; then

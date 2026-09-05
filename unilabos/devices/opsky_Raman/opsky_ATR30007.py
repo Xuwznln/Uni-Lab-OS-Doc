@@ -29,7 +29,7 @@ logger.addHandler(ch)
 
 class opsky_ATR30007:
     """
-    封装 UniLabOS 设备动作逻辑，兼容 pymodbus 2.x / 3.x。
+    封装 Uni-Lab-OS 设备动作逻辑，兼容 pymodbus 2.x / 3.x。
     放在独立文件中：opsky_atr30007.py
     """
 

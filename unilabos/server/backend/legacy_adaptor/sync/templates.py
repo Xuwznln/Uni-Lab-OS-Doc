@@ -291,6 +291,13 @@ def _action_definition(raw_action: Any) -> Dict[str, Any]:
     node_type = str(action.get("node_type") or "").strip()
     if node_type:
         definition["node_type"] = node_type
+    # 调度权威在派发前要用它们解析动作锁（always_free 不占 (device, action) 锁）与
+    # 失败决策的重试上限；与 Host 本地 _action_value_mappings 口径一致。
+    if action.get("always_free"):
+        definition["always_free"] = True
+    error_policy = action.get("error_policy")
+    if isinstance(error_policy, Mapping) and error_policy:
+        definition["error_policy"] = copy.deepcopy(dict(error_policy))
     return definition
 
 

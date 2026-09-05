@@ -162,17 +162,18 @@ class RuntimeService(SqliteDomain):
         with self.write():
             current = self.find_session(value.session_uuid)
             if current is not None:
+                # session 跨 WS 重连稳定：同一 session 每次连接换 connection_epoch 是常态
+                # （Edge 重启 / 网络抖动后重连），只有归属（edge / backend / 权威代际）
+                # 变了才算被另一个 Backend 绑走。
                 current_identity = (
                     current.edge_uuid,
                     current.backend_uri,
                     current.authority_epoch,
-                    current.connection_epoch,
                 )
                 requested_identity = (
                     value.edge_uuid,
                     value.backend_uri,
                     value.authority_epoch,
-                    value.connection_epoch,
                 )
                 if current_identity != requested_identity:
                     raise RuntimeConflictError(

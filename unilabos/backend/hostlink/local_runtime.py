@@ -813,30 +813,51 @@ class HostLinkDeviceNode(DeviceNode):
 
         matches = self.resource_tracker.figure_resource(payload, try_mode=True)
         if not matches:
-            # 本地快照未命中 → 按 uuid 回权威拉取（与 ROS2 _convert_resources_sync
-            # 兜底一致）；host 服务设备等无台面节点的 ResourceSlot 输入靠此闭环
-            slot_uuid = str(payload.get("uuid") or "").strip()
-            if slot_uuid:
-                tree_set = self._require_resource_service().get_resources_sync(
-                    [slot_uuid], with_children=True
-                )
-                if len(tree_set.trees):
-                    resource = tree_set.to_plr_resources()[0]
-                    refigured = self.resource_tracker.figure_resource(resource, try_mode=True)
-                    if len(refigured) == 1:
-                        return refigured[0]
-                    self._logger.warning(
-                        "ResourceSlot %s 未索引到本地实例，使用权威装配实例", slot_uuid
-                    )
-                    return resource
+            # 本地快照未命中 → 回权威拉取（与 ROS2 _convert_resource_async 兜底一致）：
+            # 带 uuid 按 uuid 查；只有 id / name（含非 uuid 形态的裸字符串）按 resource id 查。
+            # host 服务设备等无台面节点的 ResourceSlot 输入靠此闭环——host_node 的 tracker
+            # 不镜像 Slave 物料，Slave 侧台面只能这样解析到。
             identity = payload.get("uuid") or payload.get("id") or payload.get("name")
+            tree_set = self._fetch_reference_from_authority(payload)
+            if tree_set is not None and len(tree_set.trees):
+                resource = tree_set.to_plr_resources()[0]
+                refigured = self.resource_tracker.figure_resource(resource, try_mode=True)
+                if len(refigured) == 1:
+                    return refigured[0]
+                self._logger.warning(
+                    "ResourceSlot %s 未索引到本地实例，使用权威装配实例", identity
+                )
+                return resource
             raise ValueError(
-                f"设备 {self.device_id!r} 的本地资源快照中找不到 {identity!r}；"
+                f"设备 {self.device_id!r} 的本地资源快照中找不到 {identity!r}，权威中也不存在；"
                 "应由微后端下发完整资源树，或把资源挂到该设备图中"
             )
         if len(matches) > 1:
             raise ValueError(f"ResourceSlot 匹配到多个本地资源：{matches}")
         return matches[0]
+
+    def _fetch_reference_from_authority(self, payload: Dict[str, Any]) -> Optional[ResourceTreeSet]:
+        """按 ``{uuid}`` 或 ``{id/name}`` 引用向权威取完整树；两种身份都未命中返回 None。"""
+
+        from unilabos.resources.materials import _looks_like_uuid
+
+        service = self._require_resource_service()
+        slot_uuid = str(payload.get("uuid") or "").strip()
+        if slot_uuid and _looks_like_uuid(slot_uuid):
+            try:
+                return service.get_resources_sync([slot_uuid], with_children=True)
+            except Exception as exc:  # noqa: BLE001 - 权威未命中形态因网关而异，统一按未找到处理
+                self._logger.debug("ResourceSlot uuid=%s 权威查询失败: %s", slot_uuid, exc)
+                return None
+        # parse_resource_slot 把裸字符串统一包成 {"uuid": ...}；非 uuid 形态即 resource id
+        res_id = str(payload.get("id") or payload.get("name") or slot_uuid or "").strip()
+        if not res_id:
+            return None
+        try:
+            return service.get_resource_by_id_sync(res_id, with_children=True)
+        except Exception as exc:  # noqa: BLE001
+            self._logger.debug("ResourceSlot id=%s 权威查询失败: %s", res_id, exc)
+            return None
 
     def _resolve_action_resources(
         self,

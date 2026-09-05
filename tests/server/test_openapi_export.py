@@ -28,6 +28,7 @@ def test_export_contains_both_roles_and_annotates_every_operation() -> None:
     assert "GET /api/v1/status-incidents" in operations
     assert "GET /api/v1/registry/entries" in operations
     assert "GET /api/v1/health" in operations
+    assert "GET /api/v1/ping" in operations
     assert "GET /api/v1/materials/instances" in operations
     assert "GET /api/v1/workflow-tasks/{task_uuid}/node-runs" in operations
     assert "GET /api/v1/events" in operations  # SSE 在 OpenAPI 里是 GET

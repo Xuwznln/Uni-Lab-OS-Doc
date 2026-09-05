@@ -15,7 +15,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any, Dict, Optional
 from uuid import UUID, uuid5
 
@@ -54,6 +56,32 @@ from unilabos.server.services.runtime.workflow.service import WorkflowService
 logger = logging.getLogger(__name__)
 
 _RUN_TERMINAL = {"succeeded", "failed", "skipped", "canceled", "timeout"}
+# 上一进程留下、必须由人裁决而不能重放的节点运行状态（与 store 口径一致）
+_RUN_NEEDS_RECONCILIATION = frozenset({"execution_unknown", "intervention_required"})
+# 同一 attempt 的裁决 id 跨进程稳定：再次重启后前端拿着旧 id 仍能提交
+_RECONCILIATION_NAMESPACE = UUID("5b1d3f8a-6c2e-4e0b-9f3a-7d4c2a1e8b60")
+_RECONCILIATION_OPTIONS = (
+    {
+        "action": "retry",
+        "label": "重试",
+        "description": "创建新的执行 attempt 重新下发该动作",
+    },
+    {
+        "action": "skip",
+        "label": "跳过",
+        "description": "视为已完成但不产生结果，下游节点继续执行",
+    },
+    {
+        "action": "operator_intervention",
+        "label": "替换为成功",
+        "description": "人工确认动作已经完成，可附带 result 作为该节点的返回值",
+    },
+    {
+        "action": "abort",
+        "label": "标记失败",
+        "description": "记为失败，任务按失败收敛",
+    },
+)
 
 
 class BackendSchedulingError(RuntimeError):
@@ -65,8 +93,8 @@ def allocation_arguments(items: Any) -> Dict[str, Dict[str, Any]]:
 
     - ``material``：一个需求恰好选出一个物料实例，值是 ResourceSlot 引用形态
       ``{"uuid": material_uuid, ...}``，框架在 send_goal 解析为 PLR 实例；
-    - ``reagent``（按量计量的 lot 库存，不限于试剂）：同一需求可能按 FIFO 拆到多个
-      lot，值给出合计数量与 lot 明细 ``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``。
+    - ``lot``（按量计量的 inventory_lot 库存）：同一需求可能按 FIFO 拆到多个 lot，
+      值给出合计数量与 lot 明细 ``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``。
     """
 
     arguments: Dict[str, Dict[str, Any]] = {}
@@ -83,7 +111,7 @@ def allocation_arguments(items: Any) -> Dict[str, Dict[str, Any]]:
             item.key,
             {
                 "key": item.key,
-                "kind": "reagent",
+                "kind": "lot",
                 "template_uuid": item.template_uuid,
                 "unit": item.unit,
                 "quantity": 0.0,
@@ -137,6 +165,9 @@ class BackendScheduler:
         self._dispatched_jobs: set[str] = set()
         # 已建立 durable 人工确认单、但尚未收到决策的 attempt。
         self._manual_confirmation_jobs: set[str] = set()
+        # 进程重启后执行态未知 / 决策上下文丢失的 attempt：decision_id -> 待裁决记录。
+        # 与执行面的失败决策一起从 /error-decisions 暴露，由本调度器直接收敛。
+        self._reconciliation_decisions: Dict[str, Dict[str, Any]] = {}
         self._dispatch_paused = False
         self.executor.add_job_finished_listener(self._on_executor_finished)
         resolver = getattr(self.workflow, "set_manual_confirmation_resolver", None)
@@ -200,7 +231,9 @@ class BackendScheduler:
 
     async def run_task(self, task_uuid: str) -> Dict[str, NodeState]:
         prepared = self.workflow.prepare_workflow_task_execution(task_uuid)
-        if prepared["state"] != "ready":
+        # waiting_reconciliation：任务可接管，但上一进程在飞的 attempt 要由人裁决；
+        # DAG 照常构建，这些节点在起跑时改为开决策（见 _start_node），不重放。
+        if prepared["state"] not in {"ready", "waiting_reconciliation"}:
             return {}
         task = prepared["task"]
         runs = prepared["runs"]
@@ -212,6 +245,7 @@ class BackendScheduler:
             # 任务落 failed + plan_not_executable，不当成进程异常向上抛。
             self._fail_unstarted_task(task_uuid, runs, exc)
             self._release_unconsumed_task_inventory(task_uuid)
+            self._settle_task_reconciliation(task_uuid)
             if isinstance(exc, (BackendSchedulingError, MaterialsServiceError, MaterialsHTTPError)):
                 logger.warning("workflow task %s cannot start: %s", task_uuid, exc)
             else:
@@ -283,6 +317,11 @@ class BackendScheduler:
                         self._waiting_resource_jobs.pop(job_uuid, None)
                         self._dispatched_jobs.discard(job_uuid)
                         self._manual_confirmation_jobs.discard(job_uuid)
+                for decision_id, pending in list(self._reconciliation_decisions.items()):
+                    if pending["task_uuid"] == task_uuid:
+                        self._reconciliation_decisions.pop(decision_id, None)
+            # 任务终结（含取消）后不再有待裁决 attempt，控制态不能停留在 waiting_reconciliation
+            self._settle_task_reconciliation(task_uuid)
 
     def stop(self) -> None:
         with self._guard:
@@ -378,6 +417,17 @@ class BackendScheduler:
                 action_args=param,
                 always_free=bool(policy.get("always_free")),
             )
+            current_job_uuid = str(run["current_job_uuid"])
+            current_job = self._current_job_metadata(current_job_uuid)
+            attempt_no = int(
+                (current_job or {}).get("attempt_no")
+                or run.get("attempt_count")
+                or 1
+            )
+            retry_of_job_uuid = (
+                (current_job or {}).get("retry_of_job_uuid")
+                or run.get("retry_of_job_uuid")
+            )
             specs[run_uuid] = {
                 "workflow_node_uuid": workflow_node_uuid,
                 # 节点显式声明优先；未声明时派发前按注册表 @action(always_free) 解析
@@ -394,13 +444,19 @@ class BackendScheduler:
                 "reserved_material_uuids": [],
                 "scheduler_revision": scheduler_revision,
                 # 当前 attempt：执行器 job_id / 资源 owner / 库存 reservation 的键
-                "current_job_uuid": str(run["current_job_uuid"]),
-                "attempt_no": int(run.get("attempt_count") or 1),
-                "job_uuids": [str(run["current_job_uuid"])],
+                "current_job_uuid": current_job_uuid,
+                "attempt_no": attempt_no,
+                "retry_of_job_uuid": (
+                    str(retry_of_job_uuid) if retry_of_job_uuid else None
+                ),
+                "job_uuids": [current_job_uuid],
             }
             manual_meta = source_meta.get("manual_confirm")
             if isinstance(manual_meta, dict):
                 specs[run_uuid]["manual_confirm"] = dict(manual_meta)
+            if run["status"] in _RUN_NEEDS_RECONCILIATION:
+                # 上一进程留下的 attempt：起跑时不下发设备，改为向用户开裁决
+                specs[run_uuid]["recovered_status"] = str(run["status"])
 
         dag_edges = []
         seen_edges: set[tuple[str, str]] = set()
@@ -441,10 +497,31 @@ class BackendScheduler:
             specs,
         )
 
+    def _current_job_metadata(self, job_uuid: str) -> Dict[str, Any]:
+        """读取当前 attempt 的 retry 元数据；兼容精简测试替身。"""
+
+        getter = getattr(self.workflow, "get_workflow_node_job", None)
+        if not callable(getter):
+            return {}
+        try:
+            value = getter(job_uuid)
+        except Exception:  # noqa: BLE001 - 元数据缺失不应阻断 DAG 构建
+            return {}
+        return value if isinstance(value, dict) else {}
+
     def _start_node(self, task: Dict[str, Any], node: DagNode) -> None:
-        """为节点运行的当前 attempt 申请完整资源集合；``held`` 即下发。"""
+        """为节点运行的当前 attempt 申请完整资源集合；``held`` 即下发。
+
+        重启恢复的 execution_unknown / intervention_required attempt 不申请资源也不
+        下发：设备可能已经执行过，盲目重放会产生第二次副作用，改为开裁决等用户决定。
+        retry 决策追加的新 attempt 再走正常路径。
+        """
 
         spec = self._run_specs[node.node_id]
+        recovered_status = spec.pop("recovered_status", None)
+        if recovered_status is not None:
+            self._open_reconciliation_decision(task, node, spec, recovered_status)
+            return
         args = self._resolve_action_args(node.node_id)
         # InventoryRequirement 是节点上的声明；权威预留后解析出的具体出库内容
         # （物料 uuid / lot 与数量）按需求 key 注入同名动作参数，设备拿到的已是具体引用。
@@ -580,6 +657,7 @@ class BackendScheduler:
                 scheduler_revision=spec["scheduler_revision"],
                 node_run_uuid=node.node_id,
                 attempt_no=spec["attempt_no"],
+                retry_of_job_uuid=spec.get("retry_of_job_uuid"),
             )
             payload["always_free"] = spec.get("always_free", node.always_free)
             self.executor.dispatch(payload)
@@ -956,12 +1034,8 @@ class BackendScheduler:
         return_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         with self._guard:
-            run_uuid = self._job_runs.get(job_id)
-            task_uuid = self._run_to_task.get(run_uuid or "")
-            runner = self._runners.get(task_uuid or "")
-            context = self._run_context.get(run_uuid or "")
-            spec = self._run_specs.get(run_uuid or "")
-        if run_uuid is None or task_uuid is None or runner is None or spec is None:
+            owned = job_id in self._job_runs
+        if not owned:
             # 非本调度器派发的 job（如 Backend-controlled 下发的 execution_job）
             return
         job_status = "skipped" if success and suc_type == "skip" else (
@@ -972,17 +1046,44 @@ class BackendScheduler:
             if isinstance(return_info, dict)
             else None
         )
-        # attempt 终态先落表并投影到节点运行；retry 决策由 store 在同一事务里追加新 attempt
-        outcome = self.workflow.record_workflow_node_job_terminal(
+        self._settle_attempt(
             job_id,
-            status=job_status,
+            job_status=job_status,
             return_info={
                 "suc": success,
                 "suc_type": suc_type,
                 "return_value": ret_value,
             },
             error_info=[] if success else [{"code": "action_failed"}],
-            error_resolution=resolution if isinstance(resolution, dict) else None,
+            resolution=resolution if isinstance(resolution, dict) else None,
+        )
+
+    def _settle_attempt(
+        self,
+        job_id: str,
+        *,
+        job_status: str,
+        return_info: Dict[str, Any],
+        error_info: list[Dict[str, Any]],
+        resolution: Optional[Dict[str, Any]],
+    ) -> None:
+        """attempt 终态收敛的唯一入口：执行器回报与重启后的人工裁决都走这里。"""
+
+        with self._guard:
+            run_uuid = self._job_runs.get(job_id)
+            task_uuid = self._run_to_task.get(run_uuid or "")
+            runner = self._runners.get(task_uuid or "")
+            context = self._run_context.get(run_uuid or "")
+            spec = self._run_specs.get(run_uuid or "")
+        if run_uuid is None or task_uuid is None or runner is None or spec is None:
+            return
+        # attempt 终态先落表并投影到节点运行；retry 决策由 store 在同一事务里追加新 attempt
+        outcome = self.workflow.record_workflow_node_job_terminal(
+            job_id,
+            status=job_status,
+            return_info=return_info,
+            error_info=error_info,
+            error_resolution=resolution,
         )
         run = outcome["run"]
         self._release_job_resources(job_id, canceled=False)
@@ -995,6 +1096,11 @@ class BackendScheduler:
             with self._guard:
                 spec["current_job_uuid"] = str(next_job["uuid"])
                 spec["attempt_no"] = int(next_job.get("attempt_no") or spec["attempt_no"] + 1)
+                # store 在 retry 决策事务中会写入该字段；缺失时用当前
+                # attempt 作为保守兜底，保证 runtime.v1 的 retry 链仍可验证。
+                spec["retry_of_job_uuid"] = str(
+                    next_job.get("retry_of_job_uuid") or job_id
+                )
                 spec["job_uuids"].append(str(next_job["uuid"]))
                 spec.pop("inventory_reservation_uuid", None)
                 spec["reserved_material_uuids"] = []
@@ -1040,6 +1146,211 @@ class BackendScheduler:
             return False
         self.workflow.mark_workflow_node_job_decision_pending(job_uuid, report)
         return True
+
+    # ── 重启后的执行态裁决 ──────────────────────────────────────
+
+    def _open_reconciliation_decision(
+        self,
+        task: Dict[str, Any],
+        node: DagNode,
+        spec: Dict[str, Any],
+        recovered_status: str,
+    ) -> None:
+        """把上一进程留下的 attempt 变成一条待裁决记录，报告形状与执行面的失败决策一致。"""
+
+        job_uuid = str(spec["current_job_uuid"])
+        task_uuid = str(task["uuid"])
+        try:
+            job = self.workflow.get_workflow_node_job(job_uuid)
+        except Exception:  # noqa: BLE001 - 读不到明细也要能开裁决
+            job = {}
+        attempt_no = int(job.get("attempt_no") or spec.get("attempt_no") or 1)
+        previous = (job.get("control_data") or {}).get("pending_decision") or {}
+        if recovered_status == "execution_unknown":
+            exception_type = "ExecutionStateUnknown"
+            detail = str(
+                job.get("uncertainty_reason")
+                or "process restarted with an in-flight workflow node job"
+            )
+            error_message = (
+                f"进程重启时该动作正在执行（attempt {attempt_no}），无法确认设备是否已完成"
+                f"：{detail}。请核对设备实际状态后选择重试、跳过、替换为成功或标记失败。"
+            )
+            category = "execution_state_unknown"
+        else:
+            exception_type = str(previous.get("exception_type") or "DeviceActionError")
+            original = str(previous.get("error_message") or "").strip()
+            error_message = "该动作失败后等待决策，进程重启导致原决策上下文丢失，请重新裁决" + (
+                f"：{original}" if original else ""
+            )
+            category = "execution"
+        decision_id = str(uuid5(_RECONCILIATION_NAMESPACE, job_uuid))
+        report: Dict[str, Any] = {
+            "decision_id": decision_id,
+            "device_id": node.device_id,
+            "action_name": node.action,
+            "task_id": task_uuid,
+            "job_id": job_uuid,
+            "node_id": str(spec["workflow_node_uuid"]),
+            "node_run_uuid": node.node_id,
+            "exception_type": exception_type,
+            "error_message": error_message,
+            "traceback": "",
+            "options": [dict(option) for option in _RECONCILIATION_OPTIONS],
+            "retry_count": max(attempt_no - 1, 0),
+            "max_retries": self._action_max_retries(node.device_id, node.action),
+            "created_at": time.time(),
+            "require_confirmation": True,
+            "category": category,
+            "severity": "warning",
+            "recovered_status": recovered_status,
+        }
+        with self._guard:
+            self._run_context[node.node_id] = (task, node)
+            self._job_runs[job_uuid] = node.node_id
+            self._reconciliation_decisions[decision_id] = {
+                "report": report,
+                "job_uuid": job_uuid,
+                "run_uuid": node.node_id,
+                "task_uuid": task_uuid,
+            }
+        self.workflow.mark_workflow_node_job_decision_pending(job_uuid, report)
+        logger.info(
+            "workflow node %s awaits reconciliation decision %s after restart "
+            "(job %s was %s)",
+            spec["workflow_node_uuid"],
+            decision_id,
+            job_uuid,
+            recovered_status,
+        )
+
+    def _action_max_retries(self, device_id: str, action_name: str) -> int:
+        resolver = getattr(self.executor, "resolve_action_error_policy", None)
+        policy: Any = {}
+        if callable(resolver):
+            try:
+                policy = resolver(device_id, action_name) or {}
+            except Exception:  # noqa: BLE001 - 注册表读取失败退回缺省上限
+                policy = {}
+        try:
+            return int(policy.get("max_retries", 3))
+        except (AttributeError, TypeError, ValueError):
+            return 3
+
+    def list_reconciliation_decisions(self) -> list[Dict[str, Any]]:
+        """待裁决的重启遗留 attempt；与执行面的 ``list_error_decisions`` 同形。"""
+
+        with self._guard:
+            return [
+                deepcopy(pending["report"])
+                for pending in self._reconciliation_decisions.values()
+            ]
+
+    def has_reconciliation_decision(self, decision_id: str) -> bool:
+        with self._guard:
+            return decision_id in self._reconciliation_decisions
+
+    def resolve_reconciliation_decision(
+        self, decision_id: str, decision: Dict[str, Any]
+    ) -> bool:
+        """按用户选择收敛一个重启遗留 attempt；返回 False 表示拒绝或已不在等待。
+
+        retry 由 store 追加新 attempt 正常派发；skip 记 skipped 放行下游；
+        operator_intervention 以人工给出的 ``result``（可缺省）记 succeeded；
+        abort 记 failed。所有裁决收敛后任务控制态从 waiting_reconciliation 恢复。
+        """
+
+        with self._guard:
+            pending = self._reconciliation_decisions.get(decision_id)
+        if pending is None:
+            return False
+        report = pending["report"]
+        job_uuid = pending["job_uuid"]
+        if decision.get("job_id") and str(decision["job_id"]) != job_uuid:
+            return False
+        if decision.get("device_id") and str(decision["device_id"]) != report["device_id"]:
+            return False
+        option = decision.get("option")
+        if isinstance(option, dict):
+            selected = str(option.get("action") or "")
+            for key in ("result", "return_value"):
+                if key not in decision and key in option:
+                    decision[key] = option[key]
+        else:
+            selected = str(decision.get("action") or option or "")
+        if selected not in {str(item["action"]) for item in report["options"]}:
+            return False
+        if selected == "retry" and int(report["retry_count"]) >= int(report["max_retries"]):
+            logger.warning(
+                "retry rejected for reconciliation decision %s: attempt limit %s reached",
+                decision_id,
+                report["max_retries"],
+            )
+            return False
+        with self._guard:
+            if self._reconciliation_decisions.pop(decision_id, None) is None:
+                return False
+
+        resolution = {
+            "decision_id": decision_id,
+            "selected_action": selected,
+            "reason": str(decision.get("reason") or ""),
+            "scheduler_updated": True,
+        }
+        error_info: list[Dict[str, Any]] = []
+        if selected == "operator_intervention":
+            job_status = "succeeded"
+            return_info = {
+                "suc": True,
+                "suc_type": "operator_intervention",
+                "return_value": decision.get("result", decision.get("return_value")),
+            }
+        elif selected == "skip":
+            job_status = "skipped"
+            return_info = {"suc": True, "suc_type": "skip", "return_value": None}
+        else:
+            # retry / abort 都先把当前 attempt 记 failed；retry 由 store 在同一事务追加新 attempt
+            job_status = "failed"
+            return_info = {
+                "suc": False,
+                "suc_type": "normal",
+                "return_value": None,
+                "error": report["error_message"],
+            }
+            error_info = [
+                {
+                    "code": (
+                        "execution_unknown"
+                        if report.get("recovered_status") == "execution_unknown"
+                        else "action_failed"
+                    ),
+                    "message": report["error_message"],
+                }
+            ]
+        logger.info(
+            "reconciliation decision %s for job %s resolved as %s",
+            decision_id,
+            job_uuid,
+            selected,
+        )
+        self._settle_attempt(
+            job_uuid,
+            job_status=job_status,
+            return_info=return_info,
+            error_info=error_info,
+            resolution=resolution,
+        )
+        self._settle_task_reconciliation(pending["task_uuid"])
+        return True
+
+    def _settle_task_reconciliation(self, task_uuid: str) -> None:
+        settle = getattr(self.workflow, "settle_workflow_task_reconciliation", None)
+        if not callable(settle):
+            return
+        try:
+            settle(task_uuid)
+        except Exception:  # noqa: BLE001 - 控制态恢复失败不影响已落表的 attempt 事实
+            logger.exception("failed to settle reconciliation state for task %s", task_uuid)
 
     def _on_node_terminal(self, run_uuid: str, state: NodeState) -> None:
         self._persist_terminal_if_needed(run_uuid, state)

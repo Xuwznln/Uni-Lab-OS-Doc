@@ -35,19 +35,26 @@ def install_server_apis(
     services: ServerServices,
     *,
     include_materials: bool = True,
+    include_host_data: bool = True,
 ) -> None:
     """安装进程持有的数据库 API。
 
     外部微后端作为物料权威时，本进程仍会打开多库组合供 runtime 等服务使用，
     但不得暴露本地 materials writer，避免出现第二个可写物料中心。
+
+    ``include_host_data=False``：调度权威进程带 Host 子进程时，runtime / telemetry /
+    history 这些 Host 数据面路由由 ``edge_proxy`` 转发到子进程，本进程不再用自己的库
+    回答，避免浏览器看到两套数据；graphs（Graph Authority）与 lab（布局）留在权威。
     """
 
-    install_runtime_api(app, services.runtime)
+    if include_host_data:
+        install_runtime_api(app, services.runtime)
     install_lab_api(app, services.lab)
     if include_materials:
         install_materials_api(app, services.materials)
-    install_telemetry_api(app, services.telemetry)
-    install_history_api(app, services.history)
+    if include_host_data:
+        install_telemetry_api(app, services.telemetry)
+        install_history_api(app, services.history)
     install_graph_api(app, services.graph)
     install_debug_api(app, services.paths)
 

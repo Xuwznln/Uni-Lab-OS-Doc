@@ -15,27 +15,31 @@ import queue
 import threading
 import time
 import uuid
-from typing import Any, Callable, Dict, List, Optional
-
-import requests
+from copy import deepcopy
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from unilabos.protocol.base import canonical_hash
 from unilabos.protocol.runtime.control import (
     BackendCommandDocument,
     BackendCommandNotice,
+    BackendHttpRequest,
     BackendSessionNotice,
     CancelJobContent,
     EdgeChangeAck,
     EdgeChangeNotice,
+    EdgeHttpResponse,
+    ErrorDecisionContent,
     ExecuteJobContent,
+    PingNotice,
+    PongNotice,
 )
 from unilabos.protocol.runtime import CommandEnvelope
 from unilabos.server.backend.scheduler.payloads import DispatchPayload
 
 logger = logging.getLogger(__name__)
 
-# listener 签名与 JobExecutionBackend 一致：(job_id, success, ret_value, suc_type)
-JobFinishedListener = Callable[[str, bool, Any, str], None]
+# listener 签名与 JobExecutionBackend 一致：(job_id, success, ret_value, suc_type, return_info)
+JobFinishedListener = Callable[..., None]
 
 _TERMINAL_EVENT_STATUS = {
     "execution.succeeded": ("succeeded", True),
@@ -48,35 +52,52 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-class EdgePayloadClient:
-    """从 Edge 管理 API 拉取 durable 事件正文。"""
+def _decode_payload_document(body: Any) -> Optional[Any]:
+    """``GET /api/v1/history/payloads/{uuid}`` 的正文 → 原始 JSON。"""
 
-    def __init__(self, base_url: str, timeout: float = 10.0) -> None:
-        self.base_url = base_url.rstrip("/")
+    if not isinstance(body, dict):
+        return None
+    inline = body.get("inline_payload")
+    if inline is None:
+        return None
+    raw = base64.b64decode(inline)
+    encoding = str(body.get("encoding") or "utf-8")
+    if encoding == "binary":
+        encoding = "utf-8"
+    return json.loads(raw.decode(encoding))
+
+
+class EdgePayloadClient:
+    """经控制 WS 让 Edge 在进程内读出 durable 事件正文（Edge 不监听端口）。"""
+
+    def __init__(self, service: "EdgeControlService", timeout: float = 15.0) -> None:
+        self._service = service
         self.timeout = timeout
-        self.session = requests.Session()
 
     def fetch_json(self, payload_uuid: str) -> Optional[Any]:
-        response = self.session.get(
-            f"{self.base_url}/api/v1/history/payloads/{payload_uuid}",
-            timeout=self.timeout,
+        response = self._service.http_request(
+            "GET", f"/api/v1/history/payloads/{payload_uuid}", timeout=self.timeout
         )
-        if response.status_code != 200:
+        if response is None or response.status_code != 200:
             logger.warning(
-                "[EdgeControl] 拉取 payload %s 失败: HTTP %s",
+                "[EdgeControl] 拉取 payload %s 失败: %s",
                 payload_uuid,
-                response.status_code,
+                "Edge 未响应" if response is None else f"HTTP {response.status_code}",
             )
             return None
-        body = response.json()
-        inline = body.get("inline_payload")
-        if inline is None:
+        try:
+            return _decode_payload_document(json.loads(response.body_bytes().decode("utf-8")))
+        except (ValueError, UnicodeDecodeError):
+            logger.warning("[EdgeControl] payload %s 正文不是合法 JSON", payload_uuid)
             return None
-        raw = base64.b64decode(inline)
-        encoding = str(body.get("encoding") or "utf-8")
-        if encoding == "binary":
-            encoding = "utf-8"
-        return json.loads(raw.decode(encoding))
+
+
+class _HttpWaiter:
+    __slots__ = ("event", "response")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.response: Optional["EdgeHttpResponse"] = None
 
 
 class EdgeControlService:
@@ -86,8 +107,7 @@ class EdgeControlService:
         self,
         *,
         edge_uuid: str = "local-edge",
-        edge_data_addr: str = "http://127.0.0.1:8002",
-        payload_client: Optional[EdgePayloadClient] = None,
+        payload_client: Optional[Any] = None,
         registry_service: Optional[Any] = None,
     ) -> None:
         self.edge_uuid = edge_uuid
@@ -95,7 +115,9 @@ class EdgeControlService:
         # session 跨 WS 重连稳定，Edge durable outbox 依赖它恢复重放
         self.session_uuid = str(uuid.uuid4())
         self.connection_epoch = str(uuid.uuid4())
-        self._payloads = payload_client or EdgePayloadClient(edge_data_addr)
+        self._payloads = payload_client or EdgePayloadClient(self)
+        # Backend → Edge 的进程内 HTTP 请求（backend_http）等待表：request_uuid -> waiter
+        self._http_waiters: Dict[str, _HttpWaiter] = {}
         # Edge 上报的 Registry Authority 快照用于解析调度预占参数。
         self._registry_service = registry_service
         self._lock = threading.RLock()
@@ -105,10 +127,73 @@ class EdgeControlService:
         self._fetched: set[str] = set()
         self._inflight: Dict[str, Dict[str, Any]] = {}
         self._listeners: List[JobFinishedListener] = []
+        # 与 JobExecutionBackend 同形：调度器把自己挂进来后，Edge（重新）接入时收到
+        # resume_pending_dispatches，重算等待集合并派发被闸住的节点；Edge 报上来的
+        # 失败决策经 publish_job_error_decision_required 让节点运行进入 intervention_required。
+        self.result_bridges: List[Any] = []
+        # Edge 打开终态闸门、等 Backend 放行的失败：decision_id -> {job_uuid, report, required_scheduler_revision}
+        self._pending_decisions: Dict[str, Dict[str, Any]] = {}
         self._last_edge_sequence = 0
         # WS 下行通道：线程安全队列，由 API 层的发送协程消费
         self.outgoing: "queue.Queue[dict[str, Any]]" = queue.Queue()
         self._connected = False
+
+    # ── Backend → Edge 进程内 HTTP（Edge 不监听端口） ────────────
+
+    def http_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Optional[Mapping[str, str]] = None,
+        body: bytes = b"",
+        timeout: float = 60.0,
+    ) -> Optional["EdgeHttpResponse"]:
+        """让 Edge 对它自己的 ASGI 应用执行一条请求并等结果；Edge 不在线 / 超时返回 None。"""
+
+        waiter = _HttpWaiter()
+        request_uuid = str(uuid.uuid4())
+        with self._lock:
+            if not self._connected:
+                return None
+            self._http_waiters[request_uuid] = waiter
+        request = BackendHttpRequest(
+            request_uuid=request_uuid,
+            method=str(method).upper(),
+            path=path,
+            headers={str(k): str(v) for k, v in (headers or {}).items()},
+            body_base64=base64.b64encode(body).decode("ascii") if body else "",
+            timeout_seconds=float(timeout),
+        )
+        self.outgoing.put(
+            {"action": "backend_http", "data": request.model_dump(mode="json", exclude_none=True)}
+        )
+        try:
+            if not waiter.event.wait(timeout):
+                logger.warning("[EdgeControl] Edge 未在 %.0fs 内响应 %s %s", timeout, method, path)
+                return None
+            return waiter.response
+        finally:
+            with self._lock:
+                self._http_waiters.pop(request_uuid, None)
+
+    def complete_http_response(self, response: "EdgeHttpResponse") -> bool:
+        """Edge 用 HTTP 送回的执行结果；找不到等待者（超时已放弃）返回 False。"""
+
+        with self._lock:
+            waiter = self._http_waiters.get(response.request_uuid)
+        if waiter is None:
+            return False
+        waiter.response = response
+        waiter.event.set()
+        return True
+
+    def _fail_http_waiters(self) -> None:
+        with self._lock:
+            waiters = list(self._http_waiters.values())
+            self._http_waiters.clear()
+        for waiter in waiters:
+            waiter.event.set()
 
     # ── executor 契约（BackendScheduler 消费） ────────────────
 
@@ -126,13 +211,21 @@ class EdgeControlService:
         """把调度器 execute_job 载荷转为 runtime.v1 控制面命令并通知 Edge。"""
 
         job_uuid = str(payload["job_id"])
+        attempt_no = int(payload.get("attempt_no") or 1)
+        retry_of_job_uuid = payload.get("retry_of_job_uuid")
+        if retry_of_job_uuid in (None, ""):
+            retry_of_job_uuid = None
+        else:
+            retry_of_job_uuid = str(retry_of_job_uuid)
         content = ExecuteJobContent(
             job_uuid=job_uuid,
             task_uuid=str(payload["task_id"]),
             node_uuid=str(payload["node_id"]),
-            attempt_group_uuid=job_uuid,
-            retry_of_job_uuid=None,
-            attempt_no=1,
+            # 一个 workflow node run 可以有多个 execution attempt；不能把
+            # attempt 自身的 job uuid 当作 group，否则 Backend 无法校验重试链。
+            attempt_group_uuid=str(payload.get("node_run_uuid") or job_uuid),
+            retry_of_job_uuid=retry_of_job_uuid,
+            attempt_no=attempt_no,
             device_uuid=str(payload["device_id"]),
             action_name=str(payload["action"]),
             action_type=str(payload.get("action_type") or ""),
@@ -141,6 +234,10 @@ class EdgeControlService:
             sample_material=dict(payload.get("sample_material") or {}),
             server_info=payload.get("server_info"),
             notebook_uuid=str(payload.get("notebook_id") or ""),
+            route_uuid=payload.get("route_uuid"),
+            endpoint_uuid=payload.get("endpoint_uuid"),
+            transport=payload.get("transport"),
+            material_bindings=list(payload.get("material_bindings") or []),
             inventory_requirements=list(payload.get("inventory_requirements") or []),
             inventory_reservation_uuid=payload.get("inventory_reservation_uuid"),
             scheduler_revision=int(payload.get("scheduler_revision") or 0),
@@ -149,6 +246,8 @@ class EdgeControlService:
             self._inflight[job_uuid] = {
                 "task_uuid": content.task_uuid,
                 "dispatched_at_ms": _now_ms(),
+                # Edge 打开终态闸门时要求 confirmed_scheduler_revision >= 该值 + 1
+                "scheduler_revision": content.scheduler_revision,
             }
         self._issue_command(
             command_type="execute_job",
@@ -177,6 +276,42 @@ class EdgeControlService:
             payload=content.model_dump(mode="json", exclude_none=True),
         )
 
+    # ── 注册表解析（BackendScheduler 的可选 executor 契约，与 JobExecutionBackend 同名） ──
+
+    def _registry(self) -> Any:
+        registry_service = self._registry_service
+        if registry_service is None:
+            # 未显式注入时取进程内 Registry Authority（随本机调度权威一起装配）。
+            from unilabos.server.services.runtime.registry import get_registry_service
+
+            registry_service = get_registry_service()
+        return registry_service
+
+    @staticmethod
+    def _device_class(device_id: str) -> str:
+        """调度器给的是设备实例（物料 uuid / resource_id）；注册表按设备类记条目。"""
+
+        from unilabos.server.backend.composition import get_materials_service
+
+        service = get_materials_service()
+        if service is not None:
+            for lookup in (service.get_material, service.get_material_by_resource_id):
+                try:
+                    return str(lookup(str(device_id)).material.template_name)
+                except Exception:  # noqa: BLE001 - 不是该形态的标识就换下一种
+                    continue
+        return str(device_id)
+
+    def _action_definition(self, device_id: str, action_name: str) -> Optional[Mapping[str, Any]]:
+        registry_service = self._registry()
+        if registry_service is None:
+            return None
+        try:
+            return registry_service.action_definition(self._device_class(device_id), action_name)
+        except Exception:  # noqa: BLE001 - 注册表查询失败按未声明处理
+            logger.exception("[EdgeControl] 解析动作声明失败: %s/%s", device_id, action_name)
+            return None
+
     def resolve_material_lock_parameters(
         self, device_id: str, action_name: str
     ) -> list[str]:
@@ -187,19 +322,108 @@ class EdgeControlService:
         Backend 预占阶段的互斥精度。
         """
 
-        registry_service = self._registry_service
-        if registry_service is None:
-            # 未显式注入时取进程内 Registry Authority（随本机调度权威一起装配）。
-            from unilabos.server.services.runtime.registry import get_registry_service
+        action = self._action_definition(device_id, action_name)
+        names = action.get("materials_need_lock") if action is not None else None
+        if not isinstance(names, (list, tuple)):
+            return []
+        return [str(item) for item in names if str(item).strip()]
 
-            registry_service = get_registry_service()
-        if registry_service is None:
-            return []
-        try:
-            return registry_service.material_lock_parameters(device_id, action_name)
-        except Exception:  # noqa: BLE001 - 预占精度问题不能阻断调度
-            logger.exception("[EdgeControl] 解析物料锁参数失败: %s/%s", device_id, action_name)
-            return []
+    def resolve_action_always_free(self, device_id: str, action_name: str) -> bool:
+        action = self._action_definition(device_id, action_name)
+        return bool(action.get("always_free", False)) if action is not None else False
+
+    def resolve_action_error_policy(self, device_id: str, action_name: str) -> dict[str, Any]:
+        action = self._action_definition(device_id, action_name)
+        policy = action.get("error_policy") if action is not None else None
+        return dict(policy) if isinstance(policy, Mapping) else {}
+
+    # ── 失败决策（Edge 打开终态闸门，Backend 放行） ─────────────────
+
+    def list_error_decisions(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [deepcopy(item["report"]) for item in self._pending_decisions.values()]
+
+    def resolve_error_decision(self, decision_id: str, decision: Mapping[str, Any]) -> bool:
+        """把网页式决策变成 runtime.v1 放行命令：operator_intervention 带结果 → replace_result，
+        其余（abort / skip / retry …）→ release_failed，selected_action 原样带给 Edge；Edge
+        终态回来时 return_info.error_resolution 让调度器决定是否追加重试 attempt。"""
+
+        with self._lock:
+            pending = self._pending_decisions.get(decision_id)
+        if pending is None:
+            return False
+        report = pending["report"]
+        option = decision.get("option")
+        if isinstance(option, Mapping):
+            selected = str(option.get("action") or "abort")
+            result = option.get("result", option.get("return_value"))
+        else:
+            selected = str(decision.get("action") or option or "abort")
+            result = None
+        if "result" in decision or "return_value" in decision:
+            result = decision.get("result", decision.get("return_value"))
+        options = {
+            str(item.get("action"))
+            for item in (report.get("options") or (report.get("error_info") or {}).get("options") or [])
+            if isinstance(item, Mapping)
+        }
+        if options and selected not in options:
+            return False
+        if selected == "retry" and int(report.get("retry_count") or 0) >= int(
+            report.get("max_retries") or 0
+        ):
+            logger.warning(
+                "[EdgeControl] retry rejected for decision %s: attempt limit %s reached",
+                decision_id,
+                report.get("max_retries"),
+            )
+            return False
+        replace = selected == "operator_intervention" and result is not None
+        content = ErrorDecisionContent(
+            decision_uuid=decision_id,
+            confirmed_scheduler_revision=int(pending["required_scheduler_revision"]),
+            adapter_command_uuid=str(uuid.uuid4()),
+            selected_action=selected,
+            reason=str(decision.get("reason") or ""),
+            result=result if replace else None,
+            actor_uuid=str(decision.get("actor_uuid") or "") or None,
+        )
+        with self._lock:
+            self._pending_decisions.pop(decision_id, None)
+        self._issue_command(
+            command_type="replace_result" if replace else "release_failed",
+            job_uuid=str(pending["job_uuid"]),
+            payload=content.model_dump(mode="json", exclude_none=True),
+        )
+        return True
+
+    def _record_error_pending(self, notice: EdgeChangeNotice) -> None:
+        job_uuid = notice.job_uuid or notice.aggregate_uuid
+        snapshot = (
+            self._payloads.fetch_json(notice.detail_payload_uuid)
+            if notice.detail_payload_uuid
+            else None
+        )
+        report = snapshot.get("report") if isinstance(snapshot, dict) else None
+        if not isinstance(report, dict) or not report.get("decision_id"):
+            logger.warning("[EdgeControl] job %s 的失败决策快照不完整，无法登记", job_uuid)
+            return
+        decision_id = str(report["decision_id"])
+        with self._lock:
+            inflight = self._inflight.get(job_uuid) or {}
+            self._pending_decisions[decision_id] = {
+                "job_uuid": job_uuid,
+                "report": deepcopy(report),
+                "required_scheduler_revision": int(inflight.get("scheduler_revision") or 0) + 1,
+            }
+        logger.info("[EdgeControl] job %s 失败等待决策 (decision=%s)", job_uuid, decision_id)
+        for bridge in list(self.result_bridges):
+            callback = getattr(bridge, "publish_job_error_decision_required", None)
+            if callable(callback):
+                try:
+                    callback(deepcopy(report))
+                except Exception:  # noqa: BLE001 - 单个 bridge 失败不影响决策登记
+                    logger.exception("[EdgeControl] publish_job_error_decision_required 失败")
 
     def wait_idle(self, timeout: float = 5.0) -> bool:
         deadline = time.time() + timeout
@@ -213,6 +437,20 @@ class EdgeControlService:
     def active_job_ids(self) -> list[str]:
         with self._lock:
             return list(self._inflight)
+
+    def host_ready(self) -> bool:
+        """执行端是否可派发：Edge 控制面已连接。"""
+
+        return self.connected
+
+    def _publish_host_ready(self) -> None:
+        for bridge in list(self.result_bridges):
+            callback = getattr(bridge, "resume_pending_dispatches", None)
+            if callable(callback):
+                try:
+                    callback()
+                except Exception:  # noqa: BLE001 - 下次重连仍可恢复
+                    logger.exception("[EdgeControl] resume_pending_dispatches 失败")
 
     # ── 命令签发与文档服务 ───────────────────────────────────
 
@@ -319,6 +557,10 @@ class EdgeControlService:
                     "data": resend.model_dump(mode="json", exclude_none=True),
                 }
             )
+        # attach 在 WS 事件循环线程里被调用；重算等待集合会碰数据库，放到独立线程
+        threading.Thread(
+            target=self._publish_host_ready, name="EdgeControlHostReady", daemon=True
+        ).start()
         return epoch, {
             "action": "backend_session",
             "data": notice.model_dump(mode="json", exclude_none=True),
@@ -334,6 +576,8 @@ class EdgeControlService:
             # 未消费的下行通知随连接作废：命令权威仍在 _commands，
             # 重连 attach 时按未拉取集合补发。
             self._drain_outgoing()
+        # 正在等 Edge 回 HTTP 结果的调用方立刻拿到 None，而不是干等到超时
+        self._fail_http_waiters()
         logger.info("[EdgeControl] Edge 连接已断开")
 
     def _drain_outgoing(self) -> None:
@@ -364,13 +608,22 @@ class EdgeControlService:
         """处理一条 Edge 上行消息，返回需要回发的消息（如 ack/pong）。"""
 
         if action == "ping":
-            # Edge 的 test_latency 用 server_timestamp 估算时钟偏差；回显原字段
-            # 的同时补上服务端时刻。
+            # ping/pong 是控制面的快速诊断消息，不经过命令/事件协调器。
+            # 严格重建字段，避免把旧协议或业务正文透传到 runtime.v1。
+            ping = PingNotice.model_validate(data)
+            pong = PongNotice(
+                ping_id=ping.ping_id,
+                client_timestamp=ping.client_timestamp,
+                server_timestamp=time.time(),
+            )
             return {
                 "action": "pong",
-                "data": {**data, "server_timestamp": time.time()},
+                "data": pong.model_dump(mode="json"),
             }
         if action == "pong":
+            # Backend 不需要消费 Edge 的 pong，但仍校验其特殊字段，避免
+            # malformed 心跳进入业务处理路径。
+            PongNotice.model_validate(data)
             return None
         if action == "edge_change":
             return self._handle_edge_change(data)
@@ -403,6 +656,9 @@ class EdgeControlService:
         }
 
     def _apply_edge_event(self, notice: EdgeChangeNotice) -> None:
+        if notice.event_type == "execution.error_pending":
+            self._record_error_pending(notice)
+            return
         terminal = _TERMINAL_EVENT_STATUS.get(notice.event_type)
         if terminal is None:
             logger.debug(
@@ -428,6 +684,10 @@ class EdgeControlService:
         suc_type = str(return_info.get("suc_type") or "normal")
         with self._lock:
             self._inflight.pop(job_uuid, None)
+            for decision_id in [
+                key for key, item in self._pending_decisions.items() if item["job_uuid"] == job_uuid
+            ]:
+                self._pending_decisions.pop(decision_id, None)
             finished_commands = [
                 command_uuid
                 for command_uuid, document in self._commands.items()
@@ -445,9 +705,11 @@ class EdgeControlService:
             success,
             suc_type,
         )
+        # 与 JobExecutionBackend._notify_finished 同一签名：return_info 里的 error_resolution
+        # 让调度器知道这是 retry 决策后的失败，从而追加新 attempt 而不是判定任务失败。
         for listener in listeners:
             try:
-                listener(job_uuid, success, ret_value, suc_type)
+                listener(job_uuid, success, ret_value, suc_type, return_info)
             except Exception:  # noqa: BLE001 - 与本地执行端一致，回调互不影响
                 logger.exception("[EdgeControl] job finished listener 失败")
 

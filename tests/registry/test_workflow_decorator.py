@@ -132,7 +132,7 @@ def test_step_inventory_requirements_land_in_node_meta_data() -> None:
 
     requirement = {
         "key": "water",
-        "kind": "reagent",
+        "kind": "lot",
         "lot_uuid": "30000000-0000-4000-8000-000000000001",
         "quantity": 40,
         "unit": "ml",
@@ -147,15 +147,15 @@ def test_step_inventory_requirements_land_in_node_meta_data() -> None:
     nodes = build_workflow_payload(definition, _catalog())["nodes"]
     frozen = nodes[0]["meta_data"]["inventory_requirements"]
     assert len(frozen) == 1
-    assert frozen[0]["key"] == "water" and frozen[0]["kind"] == "reagent"
+    assert frozen[0]["key"] == "water" and frozen[0]["kind"] == "lot"
     assert frozen[0]["quantity"] == 40 and frozen[0]["unit"] == "ml"
     assert frozen[0]["lot_uuid"] == requirement["lot_uuid"]
     assert "inventory_requirements" not in nodes[1]["meta_data"]
 
     ctx = WorkflowBuildContext()
     with pytest.raises(ValueError):
-        # reagent 需求缺 quantity/unit：声明时即拒绝，而不是等到任务启动
-        ctx.run("device-1/dispense", {}, inventory=[{"key": "water", "kind": "reagent", "lot_uuid": "x"}])
+        # lot 需求缺 quantity/unit：声明时即拒绝，而不是等到任务启动
+        ctx.run("device-1/dispense", {}, inventory=[{"key": "water", "kind": "lot", "lot_uuid": "x"}])
     with pytest.raises(ValueError, match="key 重复"):
         ctx.run("device-1/dispense", {}, inventory=[requirement, requirement])
 

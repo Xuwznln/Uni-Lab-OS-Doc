@@ -595,7 +595,7 @@ class MaterialsService(MaterialsRepository):
         mutation: InventoryMutation,
         value: InventoryReservationCreate,
     ) -> MutationResult[InventoryReservationRead]:
-        """为一个调度 Job 原子预留全部物料实例和试剂数量。"""
+        """为一个调度 Job 原子预留全部物料实例（material）和按量库存（lot）。"""
 
         if mutation.operation != "reserve_inventory":
             raise MaterialValidationError("inventory reservation operation is invalid")
@@ -656,7 +656,7 @@ class MaterialsService(MaterialsRepository):
                     allocations.append(
                         InventoryAllocation(
                             key=requirement.key,
-                            kind="reagent",
+                            kind="lot",
                             template_uuid=lot.template_uuid,
                             lot_uuid=lot.lot_uuid,
                             quantity=take,
@@ -1016,7 +1016,7 @@ class MaterialsService(MaterialsRepository):
             lot_quantities: dict[str, float] = {}
             material_uuids: set[str] = set()
             for item in allocations:
-                if item.kind == "reagent" and item.lot_uuid is not None:
+                if item.kind == "lot" and item.lot_uuid is not None:
                     lot_quantities[item.lot_uuid] = (
                         lot_quantities.get(item.lot_uuid, 0.0)
                         + float(item.quantity or 0)

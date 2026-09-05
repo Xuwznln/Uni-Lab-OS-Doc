@@ -23,9 +23,15 @@ from unilabos.server.backend.legacy_adaptor.legacy.sync import (
     legacy_material_node,
     upload_registry_snapshot,
 )
-from unilabos.server.backend.legacy_adaptor.legacy.ws import LegacyBackendWebSocketClient
+from unilabos.server.backend.legacy_adaptor.legacy.ws import (
+    LegacyBackendWebSocketClient,
+    _PriorityMessageQueue as LegacyPriorityMessageQueue,
+)
 from unilabos.server.backend.legacy_adaptor.session import BackendSessionFactory
-from unilabos.server.backend.legacy_adaptor.websocket import BackendWebSocketClient
+from unilabos.server.backend.legacy_adaptor.websocket import (
+    BackendWebSocketClient,
+    _PriorityMessageQueue as RuntimePriorityMessageQueue,
+)
 
 
 # ── 测试替身 ─────────────────────────────────────────────────────
@@ -133,10 +139,12 @@ def _connected_client(backend: _Backend, adapter: _Adapter) -> LegacyBackendWebS
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     BackendSessionFactory.reset_client()
+    probe.reset_probe_cache()
     monkeypatch.setattr(BasicConfig, "machine_name", "M1")
     monkeypatch.setattr(HTTPConfig, "backend_protocol", "")
     yield
     BackendSessionFactory.reset_client()
+    probe.reset_probe_cache()
 
 
 # ── 协议探测 ─────────────────────────────────────────────────────
@@ -152,8 +160,28 @@ def test_probe_detects_legacy_backend_by_http_routes(monkeypatch):
     )
     monkeypatch.setattr(HTTPConfig, "remote_addr", "https://legacy.example/api/v1")
     assert probe.detect_backend_protocol(session=session, force=True) == "legacy"
-    assert BackendSessionFactory.is_legacy()
-    assert isinstance(BackendSessionFactory.create_client(), LegacyBackendWebSocketClient)
+
+
+def test_edge_factory_never_switches_to_legacy_on_probe(monkeypatch):
+    """Edge 的会话工厂固定 runtime.v1；旧云端兼容只能由 Backend 侧显式装配。"""
+
+    monkeypatch.setattr(HTTPConfig, "remote_addr", "https://legacy.example/api/v1")
+    monkeypatch.setattr(HTTPConfig, "backend_protocol", "legacy")
+    assert probe.detect_backend_protocol(force=True) == "legacy"
+    assert BackendSessionFactory.protocol() == "runtime.v1"
+    assert not BackendSessionFactory.is_legacy()
+    assert isinstance(BackendSessionFactory.create_client(), BackendWebSocketClient)
+    legacy_client = BackendSessionFactory.create_legacy_client()
+    assert isinstance(legacy_client, LegacyBackendWebSocketClient)
+    # 显式 legacy 客户端沿用旧云端 ``+1`` 端口；runtime.v1 客户端同端口。
+    monkeypatch.setattr(HTTPConfig, "remote_addr", "https://legacy.example:8002/api/v1")
+    monkeypatch.setattr(HTTPConfig, "schedule_addr", "")
+    assert BackendSessionFactory.create_legacy_client().websocket_url == (
+        "wss://legacy.example:8003/api/v1/ws/schedule"
+    )
+    assert BackendSessionFactory.create_client().websocket_url == (
+        "wss://legacy.example:8002/api/v1/ws/schedule"
+    )
 
 
 def test_probe_detects_runtime_v1_backend(monkeypatch):
@@ -236,6 +264,54 @@ def test_job_start_strips_workflow_device_selector_from_action_args():
     assert backend.dispatched[-1]["action_args"] == {}
 
 
+def test_legacy_job_start_preserves_attempt_metadata_and_latency_special_field():
+    """legacy 只负责字段兼容；attempt 链和 ping-pong 元数据交给微后端执行面。"""
+
+    backend, adapter = _Backend(), _Adapter()
+    client = _connected_client(backend, adapter)
+    asyncio.run(
+        client._process_message(
+            "job_start",
+            {
+                "job_id": "job-retry",
+                "task_id": "task-3",
+                "workflow_id": "workflow-3",
+                "node_id": "node-3",
+                "node_run_uuid": "run-3",
+                "attempt_no": "2",
+                "retry_of_job_uuid": "job-first",
+                "device_id": "pump",
+                "action": "transfer",
+                "action_args": {"volume": 5},
+            },
+        )
+    )
+    retry_payload = backend.dispatched[-1]
+    assert retry_payload["workflow_id"] == "workflow-3"
+    assert retry_payload["node_run_uuid"] == "run-3"
+    assert retry_payload["attempt_no"] == 2
+    assert retry_payload["retry_count"] == 1
+    assert retry_payload["retry_of_job_uuid"] == "job-first"
+    assert "server_info" not in retry_payload
+
+    asyncio.run(
+        client._process_message(
+            "job_start",
+            {
+                "job_id": "job-latency",
+                "task_id": "task-4",
+                "node_id": "node-4",
+                "device_id": "host_node",
+                "action": "test_latency",
+                "action_args": {},
+            },
+        )
+    )
+    latency_payload = backend.dispatched[-1]
+    assert isinstance(latency_payload["server_info"]["send_timestamp"], float)
+    assert latency_payload["server_info"]["send_timestamp"] > 0
+
+
 def test_duplicate_job_start_replays_cached_terminal_result():
     backend, adapter = _Backend(), _Adapter()
     client = _connected_client(backend, adapter)
@@ -292,7 +368,10 @@ def test_host_node_ready_is_preceded_by_full_lock_snapshot():
     client.publish_host_ready()
     messages = _drain(client)
     assert [m["action"] for m in messages] == ["report_action_lock", "host_node_ready"]
-    locks = {(l["device_id"], l["action_name"]): l["free"] for l in messages[0]["data"]["locks"]}
+    locks = {
+        (lock_item["device_id"], lock_item["action_name"]): lock_item["free"]
+        for lock_item in messages[0]["data"]["locks"]
+    }
     assert ("host_node", "_execute_driver_command") not in locks
     assert locks[("pump", "transfer")] is False
     assert locks[("pump", "auto-status")] is True
@@ -311,10 +390,31 @@ def test_pong_is_routed_to_adapter_and_ping_uses_legacy_fields():
         )
     )
     assert adapter.pongs == [{"ping_id": "p1", "client_timestamp": 1.0, "server_timestamp": 2.0}]
-    client.send_ping("p2", 3.0)
+    assert client.send_ping("p2", 3.0) is True
     assert _drain(client) == [
         {"action": "ping", "data": {"ping_id": "p2", "client_timestamp": 3.0}}
     ]
+
+
+def test_legacy_heartbeat_aliases_are_normalized_at_the_adaptor_boundary():
+    """旧云端的 ``id/timestamp/server_time`` 只在 legacy 适配器内转换为 canonical 字段。"""
+
+    adapter = _Adapter()
+    client = _connected_client(_Backend(), adapter)
+    asyncio.run(
+        client._process_message(
+            "pong", {"id": "p1", "timestamp": 1.0, "server_time": 2.0}
+        )
+    )
+    assert adapter.pongs == [{"ping_id": "p1", "client_timestamp": 1.0, "server_timestamp": 2.0}]
+    asyncio.run(client._process_message("ping", {"id": "b1", "timestamp": 4.0}))
+    reply = _drain(client)[-1]
+    assert reply["action"] == "pong"
+    assert reply["data"]["ping_id"] == "b1" and reply["data"]["client_timestamp"] == 4.0
+    assert isinstance(reply["data"]["server_timestamp"], float)
+    # 未连接时同样快速失败。
+    client._connected = False
+    assert client.send_ping("p3", 5.0) is False
 
 
 def test_cancel_and_query_action_state():
@@ -457,11 +557,118 @@ def test_legacy_client_is_registered_as_execution_result_bridge(tmp_path, monkey
 def test_runtime_v1_ping_uses_pong_compatible_fields():
     client = BackendWebSocketClient("ws://backend/api/v1/ws/schedule", coordinator_getter=lambda: None)
     client._connected = True
-    client.send_ping("p1", 5.0)
+    assert client.send_ping("p1", 5.0) is True
     assert client._send_queue.get_nowait() == {
         "action": "ping",
         "data": {"ping_id": "p1", "client_timestamp": 5.0},
     }
+
+
+def test_runtime_v1_send_ping_fails_fast_when_not_connected():
+    """未连接时 send_ping 立即返回 False，test_latency 不会盲等 10 秒。"""
+
+    client = BackendWebSocketClient("ws://backend/api/v1/ws/schedule", coordinator_getter=lambda: None)
+    assert client.send_ping("p1", 5.0) is False
+    assert client._send_queue.empty()
+    client._connected = True
+    assert client.send_ping("", 5.0) is False
+    assert client._send_queue.empty()
+
+
+def test_runtime_v1_heartbeat_is_sent_before_queued_business_notices():
+    client = BackendWebSocketClient("ws://backend/api/v1/ws/schedule", coordinator_getter=lambda: None)
+    client._connected = True
+    client._queue_message({"action": "edge_change", "data": {"event_sequence": 1}})
+    client._queue_message({"action": "edge_change", "data": {"event_sequence": 2}})
+    client.send_ping("p1", 5.0)
+    drained = []
+    while not client._send_queue.empty():
+        drained.append(client._send_queue.get_nowait())
+    assert [m["action"] for m in drained] == ["ping", "edge_change", "edge_change"]
+    # 同优先级消息保持 FIFO。
+    assert [m["data"]["event_sequence"] for m in drained[1:]] == [1, 2]
+
+
+@pytest.mark.parametrize("queue_type", [RuntimePriorityMessageQueue, LegacyPriorityMessageQueue])
+def test_heartbeat_queue_bypasses_business_capacity(queue_type):
+    """业务通知填满有限队列时，控制面 ping 仍必须能入队并优先发送。"""
+
+    queue = queue_type(maxsize=1)
+    queue.put_nowait({"action": "edge_change", "data": {"event_sequence": 1}})
+    queue.put_nowait(
+        {
+            "action": "ping",
+            "data": {"ping_id": "p1", "client_timestamp": 1.0},
+        }
+    )
+    assert queue.get_nowait()["action"] == "ping"
+    assert queue.get_nowait()["action"] == "edge_change"
+
+
+def test_runtime_v1_heartbeat_bypasses_business_queue(monkeypatch):
+    """pong 在接收协程内直接投递给适配器；业务通知只入队、由 worker 串行消费。"""
+
+    from unilabos.server.backend.legacy_adaptor import websocket as ws_module
+
+    adapter = _Adapter()
+    monkeypatch.setattr(ws_module, "get_execution_adapter", lambda _index: adapter)
+    notices: list[dict] = []
+    coordinator = SimpleNamespace(handle_backend_notice=notices.append)
+    client = BackendWebSocketClient(
+        "ws://backend/api/v1/ws/schedule", coordinator_getter=lambda: coordinator
+    )
+
+    async def scenario():
+        business_queue: asyncio.Queue = asyncio.Queue()
+        client._business_queue = business_queue
+        await client._handle_raw_message(
+            json.dumps({"action": "backend_change", "data": {"command_uuid": "c1"}})
+        )
+        await client._handle_raw_message(
+            json.dumps(
+                {
+                    "action": "pong",
+                    "data": {"ping_id": "p1", "client_timestamp": 1.0, "server_timestamp": 2.0},
+                }
+            )
+        )
+        # 业务通知还在队列里等 worker，pong 已经送达适配器。
+        assert notices == []
+        assert business_queue.qsize() == 1
+        assert adapter.pongs == [
+            {"ping_id": "p1", "client_timestamp": 1.0, "server_timestamp": 2.0}
+        ]
+        worker = asyncio.create_task(client._business_message_handler(business_queue))
+        await business_queue.join()
+        worker.cancel()
+        assert notices == [{"command_uuid": "c1"}]
+
+    asyncio.run(scenario())
+
+
+def test_runtime_v1_answers_backend_ping_and_drops_malformed_pong(monkeypatch):
+    from unilabos.server.backend.legacy_adaptor import websocket as ws_module
+
+    adapter = _Adapter()
+    monkeypatch.setattr(ws_module, "get_execution_adapter", lambda _index: adapter)
+    client = BackendWebSocketClient("ws://backend/api/v1/ws/schedule", coordinator_getter=lambda: None)
+    client._connected = True
+    asyncio.run(
+        client._handle_raw_message(
+            json.dumps({"action": "ping", "data": {"ping_id": "b1", "client_timestamp": 7.0}})
+        )
+    )
+    reply = client._send_queue.get_nowait()
+    assert reply["action"] == "pong"
+    assert reply["data"]["ping_id"] == "b1" and reply["data"]["client_timestamp"] == 7.0
+    assert isinstance(reply["data"]["server_timestamp"], float)
+    # 缺 server_timestamp 的 pong 不进入适配器，也不抛出到接收循环。
+    asyncio.run(
+        client._handle_raw_message(
+            json.dumps({"action": "pong", "data": {"ping_id": "p1", "client_timestamp": 1.0}})
+        )
+    )
+    assert adapter.pongs == []
 
 
 def test_runtime_v1_poison_notice_does_not_propagate():
@@ -778,6 +985,6 @@ def test_start_legacy_uplink_reports_registry_then_mirrors_materials(monkeypatch
     assert events == ["registry:http-client", "upload_full:2", "start"]
     assert mirror.known_templates == {"pump", "plate"} and mirror.gateway == "gateway"
     out = capsys.readouterr().out
-    assert "检测到旧协议 Backend" in out
+    assert "显式接入旧协议 Backend" in out
     assert "设备 2 资源 3（未变化）" in out
     assert "物料全量镜像到旧 Backend 失败" in out

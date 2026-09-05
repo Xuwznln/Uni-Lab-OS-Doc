@@ -115,12 +115,14 @@ def test_assignee_enforcement_and_expiration_are_durable() -> None:
             run["current_job_uuid"],
             param=run["param"],
         )
-        with pytest.raises(WorkflowConflict):
+        with pytest.raises(WorkflowConflict) as not_assignee:
             service.decide_workflow_manual_confirmation(
                 confirmation["uuid"],
                 action="approve",
                 confirmed_by="bob",
             )
+        # 前端拿到的是具体原因（指派名单），而不是笼统的"资源冲突"
+        assert not_assignee.value.code == "manual_confirmation_not_assignee"
         approved = service.decide_workflow_manual_confirmation(
             confirmation["uuid"],
             action="confirm",

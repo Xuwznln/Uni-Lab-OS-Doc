@@ -399,8 +399,7 @@ def find_solid_dispenser(G: nx.DiGraph) -> str:
 
 def generate_dissolve_protocol(
     G: nx.DiGraph,
-    vessel: dict,  # 🔧 修改：从字符串改为字典类型
-    # 🔧 修复：按照checklist.md的DissolveProtocol参数
+    vessel: dict,
     solvent: str = "",
     volume: Union[str, float] = 0.0,
     amount: str = "",

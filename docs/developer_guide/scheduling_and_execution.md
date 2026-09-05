@@ -1,8 +1,9 @@
 # 调度与执行架构
 
 本文描述 Uni-Lab-OS 当前微后端、统一调度器、库存与 Edge 执行链路。实现入口以
-`unilabos/server/backend/` 为准；数据库边界和表目录见
-`unilabos/server/database/DESIGN.md`。
+`unilabos/server/backend/` 为准；四个 SQLite 库（`runtime.db` / `materials.db` /
+`telemetry.db` / `history.db`）的建表 DDL 与行模型以 `unilabos/server/database/tables/`
+为唯一来源，各库通过对应 Service 单 writer 写入，业务代码不跨库外键、不 `ATTACH`。
 
 ## 1. 核心约束
 
@@ -105,7 +106,22 @@ attempt_count` 是当前 attempt 的投影，只由 store 在同一事务里随 
   Host 报告只如实携带 `retry_count / max_retries`，超限的 `retry` 在本机放行时被拒绝。
 
 任务恢复（进程重启）以节点运行为判定单元：在飞的 attempt 与其节点运行同时转
-`execution_unknown`；历史 failed attempt 不参与判定。
+`execution_unknown`；历史 failed attempt 不参与判定。设备是否已经做过这一步无法证明，
+所以调度器**不重放**这些 attempt，而是把它们当成异常交给人处理：
+
+- 任务控制态转 `waiting_reconciliation`（`attention_reason` 说明原因），调度器照常接管
+  DAG；已成功节点不重跑，不依赖未知节点的分支照常执行。
+- 每个 `execution_unknown` attempt（以及失败后等待决策、但决策上下文随旧进程丢失的
+  `intervention_required` attempt）在 `GET /api/v1/error-decisions` 里出现一条与失败决策
+  同形的报告：`exception_type=ExecutionStateUnknown`、`category=execution_state_unknown`、
+  `recovered_status`，选项固定为 `retry` / `skip` / `operator_intervention` / `abort`。
+  attempt 自身保持 `execution_unknown`，`control_data.pending_decision` 记录 `decision_id`。
+  同一 attempt 的 `decision_id` 跨进程稳定（再次重启后旧 id 仍可提交）。
+- `POST /api/v1/error-decisions/{decision_id}` 提交裁决，由本机调度器直接收敛：`retry`
+  追加新 attempt 正常派发；`skip` 记 `skipped` 放行下游；`operator_intervention` 以人工给出的
+  `result`（可缺省）记 `succeeded`；`abort` 记 `failed`。重试上限仍取注册表
+  `error_policy.max_retries`。
+- 该任务的裁决全部收敛后控制态恢复为进入前的值（`active`），任务继续走图。
 
 ### 4.2 Backend-controlled（接入云端）
 
@@ -184,8 +200,16 @@ attempt 和新 `job_uuid`（与 4.1 本机调度器的 retry 语义相同，只�
    指定批次，`template_uuid` 由权威按 FIFO 选批次）。`InventoryRequirement` 只是节点上的
    声明，不是设备参数：权威预留后解析出的**出库内容**由调度器按需求 `key` 注入同名动作参数
    （`material` → ResourceSlot 引用 `{"uuid": material_uuid, ...}`，框架在 `send_goal`
-   解析成 PLR 实例；`reagent` → `{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}`），
-   设备拿到的已经是具体分配，不需要也不应该自己选 lot 或扣数量。
+   解析成 PLR 实例；`lot` → `{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}`），
+   设备拿到的已经是具体分配，不需要也不应该自己选 lot 或扣数量。两种 `kind` 区分的是账目
+   形态而不是物料种类：`material` 是有 uuid、可放到位点的实例（按件登记，
+   `active → reserved → in_use`，不扣数量）；`lot` 是 `inventory_lot` 的按量库存
+   （`available → reserved`，动作开始 `total/reserved` 同减），耗材同样可以走这一形态。
+   `material` 需求不带 `material_uuid` 时权威按 `(created_at_ms, uuid)` 顺序选第一个
+   `active` 且模板匹配的实例，不区分它是否已挂在某个台面上；要"从仓库取一件"就给该模板
+   单独的实例，或用 `parent_material_uuid` / `site_uuid` 选择器限定。同一张任务同时含
+   `material` 与 `lot` 需求时任一不足整张回滚——LabDeviceMaterialsDemo 的出库装板阶段
+   即以此证明"板够、水不够 → 板也不会被预留"。
 2. **每轮资源重算都带入物料**：每个 Node 的完整资源申请包含 action 参数物料和
    reservation 分配出的实体物料，所以不同设备也不能同时操作同一物料。
 3. **驱动调用前只消费一次**：`ExecutionInventoryCoordinator` 校验 reservation

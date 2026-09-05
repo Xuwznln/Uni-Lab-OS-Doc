@@ -146,9 +146,32 @@ class HTTPWorkflowClient:
         tags: list[Any],
         description: Optional[str],
         meta_data: Optional[dict[str, Any]] = None,
+        workflow_uuid: Optional[str] = None,
     ) -> dict[str, Any]:
-        return self._http.post(
-            "/workflows",
+        body: dict[str, Any] = {
+            "name": name,
+            "tags": tags,
+            "description": description,
+            "meta_data": meta_data or {},
+        }
+        if workflow_uuid:
+            body["workflow_uuid"] = workflow_uuid
+        return self._http.post("/workflows", json=body)
+
+    def get_workflow(self, workflow_uuid: str) -> dict[str, Any]:
+        return self._http.get(f"/workflows/{workflow_uuid}")
+
+    def update_workflow(
+        self,
+        workflow_uuid: str,
+        *,
+        name: str,
+        tags: list[Any],
+        description: Optional[str],
+        meta_data: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        return self._http.put(
+            f"/workflows/{workflow_uuid}",
             json={
                 "name": name,
                 "tags": tags,
@@ -157,8 +180,20 @@ class HTTPWorkflowClient:
             },
         )
 
-    def get_workflow(self, workflow_uuid: str) -> dict[str, Any]:
-        return self._http.get(f"/workflows/{workflow_uuid}")
+    def save_graph(
+        self,
+        workflow_uuid: str,
+        *,
+        revision: int,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """与 ``WorkflowService.save_graph`` 同签名，便于 ``report_workflows_to_service``
+        经 HTTP 向远端 Workflow Authority 上报 ``@workflow`` 模板。"""
+
+        return self.save_workflow_graph(
+            workflow_uuid, revision=revision, nodes=nodes, edges=edges
+        )
 
     def get_workflow_graph(self, workflow_uuid: str) -> dict[str, Any]:
         return self._http.get(f"/workflows/{workflow_uuid}/graph")

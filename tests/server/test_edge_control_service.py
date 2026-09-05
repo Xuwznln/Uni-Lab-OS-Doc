@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import threading
 from typing import Any
 
 import pytest
@@ -20,6 +23,7 @@ from unilabos.server.backend.edge_control import (
     set_edge_control_service,
 )
 from unilabos.server.backend.scheduler.payloads import build_job_start_payload
+from unilabos.server.api.runtime.control import _pump_incoming
 
 
 class _FakePayloadClient:
@@ -105,6 +109,34 @@ def test_dispatch_issues_notice_and_document_that_pass_edge_validation() -> None
     assert service.active_job_ids() == ["job-1"]
 
 
+def test_dispatch_preserves_attempt_group_and_retry_link() -> None:
+    service = _service()
+    service.attach_connection()
+    service.dispatch(
+        build_job_start_payload(
+            job_id="job-2",
+            task_id="task-1",
+            workflow_id="workflow-1",
+            node_id="node-1",
+            node_run_uuid="run-1",
+            attempt_no=2,
+            retry_of_job_uuid="job-1",
+            device_id="device-1",
+            action_name="pick",
+            action_type="UniAction",
+            action_args={"volume": 5},
+        )
+    )
+    notice = BackendCommandNotice.model_validate(service.outgoing.get_nowait()["data"])
+    document = BackendCommandDocument.model_validate(
+        service.get_command_document(notice.command_uuid)
+    )
+    content = ExecuteJobContent.model_validate(document.payload)
+    assert content.attempt_group_uuid == "run-1"
+    assert content.attempt_no == 2
+    assert content.retry_of_job_uuid == "job-1"
+
+
 def test_terminal_event_invokes_listener_with_local_semantics() -> None:
     detail = {
         "status": "success",
@@ -120,9 +152,10 @@ def test_terminal_event_invokes_listener_with_local_semantics() -> None:
     service.attach_connection()
     service.dispatch(_dispatch_payload())
     finished: list[tuple] = []
+    # 与 JobExecutionBackend._notify_finished 同签名：第五个参数是 return_info
     service.add_job_finished_listener(
-        lambda job_id, success, ret, suc_type: finished.append(
-            (job_id, success, ret, suc_type)
+        lambda job_id, success, ret, suc_type, return_info: finished.append(
+            (job_id, success, ret, suc_type, return_info)
         )
     )
 
@@ -130,11 +163,175 @@ def test_terminal_event_invokes_listener_with_local_semantics() -> None:
 
     assert reply is not None and reply["action"] == "edge_change_ack"
     assert reply["data"]["through_sequence"] == 1
-    assert finished == [("job-1", True, {"mass": 1.5}, "normal")]
+    assert finished == [("job-1", True, {"mass": 1.5}, "normal", detail["return_info"])]
     assert service.active_job_ids() == []
     # 终态后命令存储被清理
     notice = service.outgoing.get_nowait()
     assert service.get_command_document(notice["data"]["command_uuid"]) is None
+
+
+def test_error_pending_event_becomes_decision_and_release_command() -> None:
+    """Edge 打开终态闸门 → 权威登记决策并通知调度器；决策后签发 release_failed，
+    confirmed_scheduler_revision 满足闸门要求；operator_intervention 带结果走 replace_result。"""
+
+    from unilabos.protocol.runtime.control import ErrorDecisionContent
+
+    report = {
+        "decision_id": "decision-1",
+        "job_id": "job-1",
+        "device_id": "device-1",
+        "action_name": "pick",
+        "options": [{"action": "abort"}, {"action": "retry"}, {"action": "operator_intervention"}],
+        "retry_count": 0,
+        "max_retries": 3,
+    }
+    service = _service({"snapshot-1": {"report": report, "item": {}, "return_info": {}}})
+    service.attach_connection()
+    service.dispatch(_dispatch_payload())
+    service.outgoing.get_nowait()
+    required: list[dict[str, Any]] = []
+    service.result_bridges.append(
+        type("Bridge", (), {"publish_job_error_decision_required": lambda self, r: required.append(r)})()
+    )
+
+    reply = service.handle_message(
+        "edge_change",
+        _edge_change(1, event_type="execution.error_pending", detail_payload_uuid="snapshot-1"),
+    )
+    assert reply["action"] == "edge_change_ack"
+    assert [item["decision_id"] for item in service.list_error_decisions()] == ["decision-1"]
+    assert required and required[0]["decision_id"] == "decision-1"
+    # job 仍在途：重启协调器据此等待
+    assert service.active_job_ids() == ["job-1"]
+
+    assert service.resolve_error_decision("missing", {"action": "abort"}) is False
+    assert service.resolve_error_decision("decision-1", {"action": "not-an-option"}) is False
+
+    assert service.resolve_error_decision("decision-1", {"action": "retry", "reason": "瞬时故障"}) is True
+    notice = BackendCommandNotice.model_validate(service.outgoing.get_nowait()["data"])
+    assert notice.command_type == "release_failed"
+    document = BackendCommandDocument.model_validate(service.get_command_document(notice.command_uuid))
+    content = ErrorDecisionContent.model_validate(document.payload)
+    assert content.decision_uuid == "decision-1"
+    assert content.selected_action == "retry"
+    # dispatch 时 scheduler_revision=3，Edge 闸门要求 >= 4
+    assert content.confirmed_scheduler_revision == 4
+    assert service.list_error_decisions() == []
+
+    # 人工替换结果 → replace_result 且带 result
+    service.handle_message(
+        "edge_change",
+        _edge_change(2, event_type="execution.error_pending", detail_payload_uuid="snapshot-1"),
+    )
+    assert service.resolve_error_decision(
+        "decision-1", {"action": "operator_intervention", "result": {"ok": True}}
+    ) is True
+    notice = BackendCommandNotice.model_validate(service.outgoing.get_nowait()["data"])
+    assert notice.command_type == "replace_result"
+    content = ErrorDecisionContent.model_validate(
+        BackendCommandDocument.model_validate(service.get_command_document(notice.command_uuid)).payload
+    )
+    assert content.result == {"ok": True}
+
+
+def test_retry_decision_respects_attempt_limit() -> None:
+    report = {
+        "decision_id": "decision-2",
+        "job_id": "job-1",
+        "device_id": "device-1",
+        "options": [{"action": "retry"}, {"action": "abort"}],
+        "retry_count": 3,
+        "max_retries": 3,
+    }
+    service = _service({"snapshot-2": {"report": report}})
+    service.attach_connection()
+    service.dispatch(_dispatch_payload())
+    service.handle_message(
+        "edge_change",
+        _edge_change(1, event_type="execution.error_pending", detail_payload_uuid="snapshot-2"),
+    )
+    assert service.resolve_error_decision("decision-2", {"action": "retry"}) is False
+    assert service.resolve_error_decision("decision-2", {"action": "abort"}) is True
+
+
+def test_backend_http_roundtrip_over_control_plane() -> None:
+    """权威把一条 HTTP 请求下发到 WS 队列；Edge 用 HTTP 送回结果后等待者拿到响应。"""
+
+    from unilabos.protocol.runtime.control import BackendHttpRequest, EdgeHttpResponse
+
+    service = _service()
+    service.attach_connection()
+
+    def _edge_side() -> None:
+        # 模拟 Edge：从下行队列取到请求，执行后回送
+        message = service.outgoing.get(timeout=2)
+        assert message["action"] == "backend_http"
+        request = BackendHttpRequest.model_validate(message["data"])
+        assert request.method == "POST" and request.path == "/api/v1/restart"
+        assert json.loads(request_body := __import__("base64").b64decode(request.body_base64)) == {"mode": "immediate"}
+        service.complete_http_response(
+            EdgeHttpResponse(
+                request_uuid=request.request_uuid,
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body_base64=__import__("base64").b64encode(b'{"ok": true}').decode(),
+            )
+        )
+
+    worker = threading.Thread(target=_edge_side, daemon=True)
+    worker.start()
+    response = service.http_request(
+        "POST", "/api/v1/restart", headers={"content-type": "application/json"},
+        body=b'{"mode": "immediate"}', timeout=5,
+    )
+    worker.join(timeout=5)
+    assert response is not None and response.status_code == 200
+    assert json.loads(response.body_bytes()) == {"ok": True}
+    # 迟到 / 未知的响应被忽略
+    assert service.complete_http_response(
+        EdgeHttpResponse(request_uuid="unknown", status_code=200)
+    ) is False
+
+
+def test_backend_http_fails_fast_when_edge_offline() -> None:
+    service = _service()
+    assert service.http_request("GET", "/api/v1/health", timeout=1) is None
+
+    epoch, _ = service.attach_connection()
+    results: list = []
+    worker = threading.Thread(
+        target=lambda: results.append(service.http_request("GET", "/api/v1/health", timeout=10)),
+        daemon=True,
+    )
+    worker.start()
+    service.outgoing.get(timeout=2)
+    # 连接断开：等待中的请求立刻返回 None，而不是等到超时
+    service.detach_connection(epoch)
+    worker.join(timeout=3)
+    assert results == [None]
+
+
+def test_payload_client_reads_history_payload_via_backend_http() -> None:
+    from unilabos.protocol.runtime.control import BackendHttpRequest, EdgeHttpResponse
+
+    service = EdgeControlService()
+    service.attach_connection()
+    document = {"inline_payload": __import__("base64").b64encode(b'{"status": "success"}').decode(), "encoding": "utf-8"}
+
+    def _edge_side() -> None:
+        message = service.outgoing.get(timeout=2)
+        request = BackendHttpRequest.model_validate(message["data"])
+        assert request.path == "/api/v1/history/payloads/payload-9"
+        service.complete_http_response(
+            EdgeHttpResponse(
+                request_uuid=request.request_uuid,
+                status_code=200,
+                body_base64=__import__("base64").b64encode(json.dumps(document).encode()).decode(),
+            )
+        )
+
+    threading.Thread(target=_edge_side, daemon=True).start()
+    assert service._payloads.fetch_json("payload-9") == {"status": "success"}
 
 
 def test_duplicate_edge_events_ack_but_apply_once() -> None:
@@ -242,7 +439,121 @@ def test_ping_is_answered_with_pong() -> None:
         "ping", {"ping_id": "p1", "client_timestamp": 1.0}
     )
     assert reply["action"] == "pong"
-    # 回显 Edge 字段并补 server_timestamp，供 host test_latency 计算时钟偏差
+    # 回显 Edge 字段并补 server_timestamp，供 host test_latency 计算时钟偏差；
+    # pong 按 PongNotice 严格重建，只有契约里的三个字段。
+    assert set(reply["data"]) == {"ping_id", "client_timestamp", "server_timestamp"}
     assert reply["data"]["ping_id"] == "p1"
     assert reply["data"]["client_timestamp"] == 1.0
     assert isinstance(reply["data"]["server_timestamp"], float)
+
+
+def test_malformed_heartbeat_is_rejected_before_business_handlers() -> None:
+    from pydantic import ValidationError
+
+    service = _service()
+    with pytest.raises(ValidationError):
+        service.handle_message("ping", {"client_timestamp": 1.0})
+    # 心跳契约不接受业务正文或旧协议别名混入。
+    with pytest.raises(ValidationError):
+        service.handle_message(
+            "ping", {"ping_id": "p1", "client_timestamp": 1.0, "action_args": {}}
+        )
+    with pytest.raises(ValidationError):
+        service.handle_message("pong", {"ping_id": "p1", "client_timestamp": 1.0})
+    assert service.handle_message(
+        "pong", {"ping_id": "p1", "client_timestamp": 1.0, "server_timestamp": 2.0}
+    ) is None
+
+
+def test_scheduler_stamps_server_info_only_for_test_latency() -> None:
+    plain = _dispatch_payload()
+    assert "server_info" not in plain
+    latency = build_job_start_payload(
+        job_id="job-2",
+        task_id="task-1",
+        workflow_id="workflow-1",
+        node_id="node-2",
+        device_id="host_node",
+        action_name="test_latency",
+        action_type="UniLabJsonCommand",
+        action_args={},
+    )
+    # host_node 用它计算“服务端下发 → 客户端开始”的任务延迟。
+    assert isinstance(latency["server_info"]["send_timestamp"], float)
+    assert latency["server_info"]["send_timestamp"] > 0
+
+
+def test_server_receive_loop_answers_ping_while_business_handler_is_blocked() -> None:
+    """慢 edge_change 处理不能占住 WS receive loop，导致后续 ping 超时。"""
+
+    async def scenario() -> None:
+        business_started = threading.Event()
+        business_release = threading.Event()
+
+        class _Service:
+            connection_epoch = "epoch-1"
+
+            def handle_message(self, action: str, data: dict[str, Any]):
+                if action == "edge_change":
+                    business_started.set()
+                    business_release.wait(timeout=2)
+                    return None
+                if action == "ping":
+                    return {
+                        "action": "pong",
+                        "data": {
+                            "ping_id": data["ping_id"],
+                            "client_timestamp": data["client_timestamp"],
+                            "server_timestamp": 2.0,
+                        },
+                    }
+                return None
+
+        class _Socket:
+            def __init__(self) -> None:
+                self.incoming: asyncio.Queue[str] = asyncio.Queue()
+                self.sent: list[dict[str, Any]] = []
+                self.sent_event = asyncio.Event()
+
+            async def receive_text(self) -> str:
+                return await self.incoming.get()
+
+            async def send_text(self, value: str) -> None:
+                self.sent.append(json.loads(value))
+                self.sent_event.set()
+
+        service = _Service()
+        socket = _Socket()
+        pump = asyncio.create_task(_pump_incoming(socket, service, "epoch-1"))
+        try:
+            await socket.incoming.put(
+                json.dumps({"action": "edge_change", "data": {"event_sequence": 1}})
+            )
+            assert await asyncio.to_thread(business_started.wait, 1)
+            await socket.incoming.put(
+                json.dumps(
+                    {
+                        "action": "ping",
+                        "data": {"ping_id": "p1", "client_timestamp": 1.0},
+                    }
+                )
+            )
+            await asyncio.wait_for(socket.sent_event.wait(), timeout=0.5)
+            assert socket.sent == [
+                {
+                    "action": "pong",
+                    "data": {
+                        "ping_id": "p1",
+                        "client_timestamp": 1.0,
+                        "server_timestamp": 2.0,
+                    },
+                }
+            ]
+            assert not business_release.is_set()
+        finally:
+            business_release.set()
+            pump.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pump
+
+    asyncio.run(scenario())

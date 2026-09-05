@@ -8,7 +8,7 @@ LaiYu液体处理设备核心模块
 - abstract_protocol.py: 抽象协议定义
 - laiyu_liquid_res.py: 设备资源管理
 
-作者: UniLab团队
+作者: Uni-Lab-OS团队
 版本: 2.0.0
 """
 

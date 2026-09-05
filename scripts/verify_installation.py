@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-UniLabOS Installation Verification Script
+Uni-Lab-OS Installation Verification Script
 =========================================
 
-This script verifies that UniLabOS and its dependencies are correctly installed.
+This script verifies that Uni-Lab-OS and its dependencies are correctly installed.
 Run this script after installing the conda-pack environment to ensure everything works.
 
 Usage:
@@ -93,7 +93,7 @@ def main():
     """Run all verification checks."""
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="Verify UniLabOS installation",
+        description="Verify Uni-Lab-OS installation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -104,7 +104,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("UniLabOS Installation Verification")
+    print("Uni-Lab-OS Installation Verification")
     print("=" * 60)
     if args.auto_install:
         print("Mode: Auto-install missing packages")
@@ -127,11 +127,11 @@ def main():
     print()
 
     # Run environment checker from unilabos
-    print("Checking UniLabOS and dependencies...")
+    print("Checking Uni-Lab-OS and dependencies...")
     try:
         from unilabos.utils.environment_check import check_environment
 
-        print(f"  {CHECK_MARK} UniLabOS installed")
+        print(f"  {CHECK_MARK} Uni-Lab-OS installed")
 
         # Check environment with optional auto-install
         # Set show_details=False to suppress detailed Chinese output that may cause encoding issues
@@ -144,7 +144,7 @@ def main():
             if not args.auto_install:
                 print("  Hint: Run with --auto-install to automatically install missing packages")
     except ImportError:
-        print(f"  {CROSS_MARK} UniLabOS not installed")
+        print(f"  {CROSS_MARK} Uni-Lab-OS not installed")
         all_passed = False
     except Exception as e:
         print(f"  {CROSS_MARK} Environment check failed: {str(e)}")
@@ -156,7 +156,7 @@ def main():
     print("=" * 60)
 
     if all_passed:
-        print(f"\n{CHECK_MARK} All checks passed! Your UniLabOS installation is ready.")
+        print(f"\n{CHECK_MARK} All checks passed! Your Uni-Lab-OS installation is ready.")
         print("\nNext steps:")
         print("  1. Review the documentation: docs/user_guide/launch.md")
         print("  2. Try the examples: docs/boot_examples/")

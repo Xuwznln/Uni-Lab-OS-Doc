@@ -38,6 +38,51 @@ JSON_UNILABOS_PARAM = "unilabos_param"
 RETURN_UNILABOS_SAMPLES = "unilabos_samples"
 
 
+def find_plr_resource_class(class_name: str) -> Optional[type]:
+    """按类名查 PLR 资源类；本进程尚未 import 时按注册表条目懒加载后再查。
+
+    外部设备包（``--devices`` / 驱动包）的注册表由 AST 扫描得到，不 import 模块；
+    Host 侧 host_node 动作按 uuid 从权威拉取 Slave 侧物料（如外部包自定义的 Deck）
+    时，类只在注册表条目里有 ``module:ClassName`` 路径。先按类名精确匹配条目，
+    再兜底 import 全部 pylabrobot 类型资源条目的模块（函数式 ``@resource`` 返回的
+    自定义类在条目里看不到类名）。找不到返回 None，由调用方决定如何报错。
+    """
+
+    from pylabrobot.resources import Resource as PLRResource
+    from pylabrobot.utils.object_parsing import find_subclass
+
+    found = find_subclass(class_name, PLRResource)
+    if found is not None:
+        return found
+    try:
+        from unilabos.registry.registry import lab_registry
+    except Exception:  # noqa: BLE001 - 注册表不可用时只能按已加载类查
+        return None
+    if lab_registry is None:
+        return None
+    exact: List[str] = []
+    fallback: List[str] = []
+    for entry in lab_registry.resource_type_registry.values():
+        cls = entry.get("class") if isinstance(entry, dict) else None
+        module = str(cls.get("module") or "") if isinstance(cls, dict) else ""
+        if not isinstance(cls, dict) or cls.get("type") != "pylabrobot" or ":" not in module:
+            continue
+        module_path, _, name = module.rpartition(":")
+        (exact if name == class_name else fallback).append(module_path)
+    import importlib
+
+    for module_path in dict.fromkeys([*exact, *fallback]):
+        try:
+            importlib.import_module(module_path)
+        except Exception as exc:  # noqa: BLE001 - 单个模块导入失败不影响继续查找
+            logger.debug(f"按注册表懒加载资源模块 {module_path} 失败: {exc}")
+            continue
+        found = find_subclass(class_name, PLRResource)
+        if found is not None:
+            return found
+    return None
+
+
 def plr_class_accepts_serialized_sites(plr_cls: type) -> bool:
     """判断 PLR 类构造器是否直接消费项目的 ``sites[]`` 列表。"""
 
@@ -1110,8 +1155,6 @@ class ResourceTreeSet(object):
             List[PLRResource]: PLR 资源实例列表
         """
         register()
-        from pylabrobot.resources import Resource as PLRResource
-        from pylabrobot.utils.object_parsing import find_subclass
 
         # 类型映射
         TYPE_MAP = {
@@ -1213,7 +1256,7 @@ class ResourceTreeSet(object):
             if has_model:
                 d["model"] = res.config.get("model", None)
             if res.sites is not None:
-                site_cls = find_subclass(d["type"], PLRResource)
+                site_cls = find_plr_resource_class(d["type"])
                 if site_cls is not None and plr_class_accepts_serialized_sites(
                     site_cls
                 ):
@@ -1258,7 +1301,7 @@ class ResourceTreeSet(object):
             has_model = tree.root_node.res_content.type != "deck"
             plr_dict = node_to_plr_dict(tree.root_node, has_model)
             try:
-                sub_cls = find_subclass(plr_dict["type"], PLRResource)
+                sub_cls = find_plr_resource_class(plr_dict["type"])
                 if skip_devices and plr_dict["type"] == "device":
                     logger.info(f"跳过更新 {plr_dict['name']} 设备是class")
                     continue
@@ -1271,7 +1314,7 @@ class ResourceTreeSet(object):
                     plr_dict.pop("category", None)
                 plr_resource = sub_cls.deserialize(plr_dict, allow_marshal=True)
                 # PLR 的 Resource.deserialize 仍不恢复自身 location；统一只在
-                # UniLabOS 适配边界补一次，避免再改 PLR 各个子类的 deserialize。
+                # Uni-Lab-OS 适配边界补一次，避免再改 PLR 各个子类的 deserialize。
                 from pylabrobot.resources import Coordinate
                 from pylabrobot.serializer import deserialize
 

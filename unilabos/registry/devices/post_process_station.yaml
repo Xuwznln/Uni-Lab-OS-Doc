@@ -87,62 +87,93 @@ post_process_station:
         type: UniLabJsonCommand
       disconnect:
         error_policy: {}
-        feedback: {}
+        feedback:
+          status: status
         goal:
           command: command
-        goal_default: {}
+        goal_default:
+          command: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: false
+              properties:
+                status:
+                  type: string
               title: SendCmd_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: false
+              properties:
+                command:
+                  type: string
               title: SendCmd_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: SendCmd_Result
+              type: object
           required:
           - goal
-          title: disconnect参数
+          title: SendCmd
           type: object
         type: SendCmd
       read_node:
         error_policy: {}
-        feedback: {}
+        feedback:
+          status: status
         goal:
           command: command
           node_name: node_name
         goal_default:
-          node_name: null
+          command: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
-              title: SendCmd_Feedback
-            goal:
+              additionalProperties: false
               properties:
-                node_name:
+                status:
                   type: string
-              required:
-              - node_name
+              title: SendCmd_Feedback
+              type: object
+            goal:
+              additionalProperties: false
+              properties:
+                command:
+                  type: string
               title: SendCmd_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: SendCmd_Result
-              type: string
+              type: object
           required:
           - goal
-          title: read_node参数
+          title: SendCmd
           type: object
         type: SendCmd
       trigger_cleaning_action:

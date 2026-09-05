@@ -62,10 +62,10 @@ def get_readme_content(platform: str, branch: str) -> str:
   3. Run: bash install_unilab.sh"""
 
     # Generate README content
-    readme = f"""UniLabOS Conda-Pack Environment
+    readme = f"""Uni-Lab-OS Conda-Pack Environment
 ================================
 
-This package contains a pre-built UniLabOS environment.
+This package contains a pre-built Uni-Lab-OS environment.
 
 Installation Instructions:
 --------------------------
@@ -87,9 +87,9 @@ Verification:
 The verify_installation.py script will check:
   - Python version (3.12.13 / cp312)
   - ROS2 rclpy installation
-  - UniLabOS installation and dependencies
+  - Uni-Lab-OS installation and dependencies
 
-If all checks pass, you're ready to use UniLabOS!
+If all checks pass, you're ready to use Uni-Lab-OS!
 
 Package Contents:
 -----------------
@@ -131,7 +131,7 @@ For more help:
 License:
 --------
 
-UniLabOS is licensed under GPL-3.0-only.
+Uni-Lab-OS is licensed under GPL-3.0-only.
 See LICENSE file for details.
 
 Repository: https://github.com/deepmodeling/Uni-Lab-OS

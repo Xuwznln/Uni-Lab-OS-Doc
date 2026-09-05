@@ -316,7 +316,7 @@ def call_peer(self, target_device: str, function_name: str, function_args: str =
   - 否则 → 走 serial JSON 指令通道 `_execute_driver_command`，把入参包成 json 命令 `str dumps` 过去、结果 json 解析回来，返回远端 `return_value`（通常是 dict）。
   - 可显式传 `action_type=<某 ROS Action 类型>` 强制走原生通道并跳过探测。
 - 入参 `action_kwargs` **必须是 dict**（`None` 视为 `{}`）；序列化（dump）统一由 `call_device_action` 内部按通道完成——调用方**不要自己 `json.dumps`**。若入参来自前端 JSON 字符串，先 `json.loads` 成 dict 再传。
-- **结果解析两通道统一**（与 host_node `get_result_callback` 一致）：先 `convert_from_ros_msg` 把 ROS 结果消息**转成 dict**，再看是否带 `return_info`——带的（serial / UniLab `@action`）解析出真正的 `return_value` 返回；纯原生 action 返回整份结果 dict。所以**拿到的恒为 dict / python 值**，不用自己再解析 ROS 消息。
+- **结果解析两通道统一**（与 host_node `get_result_callback` 一致）：先 `convert_from_ros_msg` 把 ROS 结果消息**转成 dict**，再看是否带 `return_info`——带的（serial / Uni-Lab-OS `@action`）解析出真正的 `return_value` 返回；纯原生 action 返回整份结果 dict。所以**拿到的恒为 dict / python 值**，不用自己再解析 ROS 消息。
 - 失败统一抛 `unilabos.backend.runtime.exception.DeviceActionError`，按需 try/except 转成本设备的业务处理。
 
 ---

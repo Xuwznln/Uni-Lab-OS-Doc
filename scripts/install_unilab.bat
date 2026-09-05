@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo ================================================
-echo UniLabOS Environment Installation Script
+echo Uni-Lab-OS Environment Installation Script
 echo ================================================
 echo.
 
@@ -162,7 +162,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo Checking UniLabOS entry point...
+echo Checking Uni-Lab-OS entry point...
 REM Check if unilab-script.py exists
 set "UNILAB_SCRIPT=%ENV_PATH%\Scripts\unilab-script.py"
 if not exist "%UNILAB_SCRIPT%" (

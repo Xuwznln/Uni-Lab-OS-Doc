@@ -31,6 +31,7 @@ from unilabos.resources.resource_tracker import (
     ResourceTreeSet,
     apply_plr_site_metadata,
     extract_plr_sites,
+    find_plr_resource_class,
     get_plr_template_name,
     plr_class_accepts_serialized_sites,
     repair_itemized_ordering,
@@ -803,9 +804,7 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
             **config,
         }
         if root_sites is not None:
-            from pylabrobot.utils.object_parsing import find_subclass
-
-            site_cls = find_subclass(d["type"], ResourcePLR)
+            site_cls = find_plr_resource_class(d["type"])
             if site_cls is not None and plr_class_accepts_serialized_sites(site_cls):
                 d["sites"] = sites_for_plr_deserialization(root_sites)
         if not plr_model:
@@ -814,9 +813,9 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
 
     d = resource_ulab_to_plr_inner(resource)
     """无法通过Resource进行反序列化，例如TipSpot必须内部序列化好，直接用TipSpot序列化会多参数，导致出错"""
-    from pylabrobot.utils.object_parsing import find_subclass
-
-    sub_cls = find_subclass(d["type"], ResourcePLR)
+    sub_cls = find_plr_resource_class(d["type"])
+    if sub_cls is None:
+        raise ValueError(f"无法找到类型 {d['type']} 对应的 PLR 资源类：{d.get('name')!r}")
     spect = inspect.signature(sub_cls)
     if "category" not in spect.parameters:
         d.pop("category")

@@ -84,6 +84,40 @@ def _command(
     )
 
 
+def test_backend_session_reconnect_keeps_session_but_rejects_other_authority(tmp_path) -> None:
+    """同一 session 换 connection_epoch 重连（Edge 重启）必须成功；换权威代际才算冲突。"""
+
+    service = RuntimeService(tmp_path / "runtime.db")
+    try:
+        _session(service)
+        reconnected = service.upsert_backend_session(
+            BackendSessionUpsert(
+                session_uuid="session",
+                edge_uuid="edge",
+                backend_uri="wss://backend",
+                authority_epoch="authority",
+                connection_epoch="connection-after-restart",
+                state="active",
+            )
+        )
+        assert reconnected.connection_epoch == "connection-after-restart"
+        assert reconnected.version == 2
+
+        with pytest.raises(RuntimeConflictError, match="another backend connection"):
+            service.upsert_backend_session(
+                BackendSessionUpsert(
+                    session_uuid="session",
+                    edge_uuid="edge",
+                    backend_uri="wss://backend",
+                    authority_epoch="authority-2",
+                    connection_epoch="connection-3",
+                    state="active",
+                )
+            )
+    finally:
+        service.close()
+
+
 def test_backend_session_and_endpoint_snapshot_upsert(tmp_path) -> None:
     service = RuntimeService(tmp_path / "runtime.db")
     try:

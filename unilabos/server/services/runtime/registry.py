@@ -587,21 +587,29 @@ class RegistryService(SqliteDomain):
             )
         return reports, total
 
-    def material_lock_parameters(self, device_id: str, action_name: str) -> List[str]:
-        """从生效条目镜像解析动作的 ``materials_need_lock``。
+    def action_definition(
+        self, device_class: str, action_name: str
+    ) -> Optional[Mapping[str, Any]]:
+        """生效条目里某个动作的声明（``action_value_mappings`` 条目）。
 
         语义与 Edge 本地 Registry 查询对齐：动作名找不到时尝试 ``auto-`` 前缀。
         """
 
         with self._lock:
-            entry = self._active.get(str(device_id or ""))
+            entry = self._active.get(str(device_class or ""))
         if not entry:
-            return []
+            return None
         mappings = _action_definitions(entry)
         action = mappings.get(str(action_name or ""))
         if not isinstance(action, Mapping):
             action = mappings.get(f"auto-{action_name}")
-        if not isinstance(action, Mapping):
+        return action if isinstance(action, Mapping) else None
+
+    def material_lock_parameters(self, device_class: str, action_name: str) -> List[str]:
+        """从生效条目镜像解析动作的 ``materials_need_lock``。"""
+
+        action = self.action_definition(device_class, action_name)
+        if action is None:
             return []
         names = action.get("materials_need_lock")
         if not isinstance(names, (list, tuple)):

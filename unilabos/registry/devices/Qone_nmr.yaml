@@ -151,17 +151,22 @@ Qone_nmr:
         goal:
           string: string
         goal_default:
-          string: null
+          string: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: StrSingleInput_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
                 string:
                   description: '包含多个字符串的输入数据，支持两种格式：
@@ -172,15 +177,20 @@ Qone_nmr:
 
                     X 10 Y 20 Z 30"'
                   type: string
-              required: []
               title: StrSingleInput_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: StrSingleInput_Result
               type: object
           required:
           - goal
-          title: start参数
+          title: StrSingleInput
           type: object
         type: StrSingleInput
     module: unilabos.devices.Qone_nmr.Qone_nmr:Qone_nmr

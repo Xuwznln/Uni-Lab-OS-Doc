@@ -30,6 +30,23 @@ CommandType = Literal[
 ]
 
 
+class PingNotice(ServerObject):
+    """runtime.v1 控制面应用层 ping 的唯一字段契约。
+
+    这不是 WebSocket 协议自带的 control frame，而是 ``action=ping`` 的
+    数据段。它必须保持极小且可直接处理，不能混入命令/业务正文。
+    """
+
+    ping_id: NonEmptyStr
+    client_timestamp: float = Field(ge=0)
+
+
+class PongNotice(PingNotice):
+    """runtime.v1 ``action=pong`` 的回显字段与服务端时间戳。"""
+
+    server_timestamp: float = Field(ge=0)
+
+
 class BackendSessionNotice(ServerObject):
     """WS 连接建立后的短握手，用于恢复 durable event outbox。"""
 
@@ -143,14 +160,51 @@ class EdgeChangeAck(ServerObject):
     acknowledged_at_ms: int = Field(default=0, ge=0)
 
 
+class BackendHttpRequest(ServerObject):
+    """Backend 经控制 WS（``action=backend_http``）让 Edge 在进程内执行的一条 HTTP 请求。
+
+    Edge 不监听任何端口：Backend 需要 Edge 专有的数据面 / 执行面（遥测、历史正文、
+    驱动包、受管进程、设备投影中继、重启）时，把请求下发过去，Edge 对自己的 ASGI 应用
+    执行后用 HTTP ``POST /api/v1/edge/http-responses/{request_uuid}`` 把结果送回 Backend。
+    """
+
+    protocol_version: Literal["runtime.v1"] = RUNTIME_PROTOCOL_VERSION
+    request_uuid: NonEmptyStr
+    method: NonEmptyStr
+    #: 含 query string 的路径，如 ``/api/v1/telemetry/states?limit=50``
+    path: NonEmptyStr
+    headers: dict[str, str] = Field(default_factory=dict)
+    body_base64: str = ""
+    timeout_seconds: float = Field(default=60.0, gt=0)
+
+
+class EdgeHttpResponse(ServerObject):
+    """Edge 对 :class:`BackendHttpRequest` 的执行结果。"""
+
+    protocol_version: Literal["runtime.v1"] = RUNTIME_PROTOCOL_VERSION
+    request_uuid: NonEmptyStr
+    status_code: int = Field(ge=100, le=599)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body_base64: str = ""
+
+    def body_bytes(self) -> bytes:
+        import base64
+
+        return base64.b64decode(self.body_base64) if self.body_base64 else b""
+
+
 __all__ = [
     "BackendCommandDocument",
     "BackendCommandNotice",
+    "BackendHttpRequest",
     "BackendSessionNotice",
     "CancelJobContent",
     "CommandType",
     "EdgeChangeAck",
     "EdgeChangeNotice",
+    "EdgeHttpResponse",
     "ErrorDecisionContent",
     "ExecuteJobContent",
+    "PingNotice",
+    "PongNotice",
 ]

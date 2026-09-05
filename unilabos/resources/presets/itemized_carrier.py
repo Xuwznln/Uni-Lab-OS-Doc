@@ -1,4 +1,4 @@
-"""UniLabOS 预设的按位载架与瓶子资源。"""
+"""Uni-Lab-OS 预设的按位载架与瓶子资源。"""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ T = TypeVar("T", bound=ResourceHolder)
 
 
 class ItemizedCarrier(Carrier[ResourceHolder]):
-    """UniLabOS 按位载架。
+    """Uni-Lab-OS 按位载架。
 
     与 PLR ``Carrier`` 保持相同语义：``carrier[item]`` 返回
     :class:`ResourceHolder`，槽位中的物料通过 ``carrier[item].resource`` 访问。
