@@ -52,6 +52,18 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _positive_seconds(value: Any) -> Optional[float]:
+    """调度器载荷里的超时秒数：正数才有意义，其余视为未声明。"""
+
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
 def _decode_payload_document(body: Any) -> Optional[Any]:
     """``GET /api/v1/history/payloads/{uuid}`` 的正文 → 原始 JSON。"""
 
@@ -241,6 +253,10 @@ class EdgeControlService:
             inventory_requirements=list(payload.get("inventory_requirements") or []),
             inventory_reservation_uuid=payload.get("inventory_reservation_uuid"),
             scheduler_revision=int(payload.get("scheduler_revision") or 0),
+            timeout_seconds=_positive_seconds(payload.get("timeout_seconds")),
+            execution_timeout_seconds=_positive_seconds(
+                payload.get("execution_timeout_seconds")
+            ),
         )
         with self._lock:
             self._inflight[job_uuid] = {
@@ -337,6 +353,55 @@ class EdgeControlService:
         policy = action.get("error_policy") if action is not None else None
         return dict(policy) if isinstance(policy, Mapping) else {}
 
+    def resolve_action_timeouts(
+        self,
+        device_id: str,
+        action_name: str,
+        action_args: Optional[Mapping[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """从 Edge 上报的注册表快照解析 ``@action(timeout / execution_timeout)``，
+        软超时表达式按 ``goal_default`` 叠加 ``action_args`` 求值；与 JobExecutionBackend 同形。"""
+
+        from unilabos.registry.action_timeout import (
+            TimeoutExpressionError,
+            evaluate_execution_timeout,
+            normalize_action_timeout,
+            normalize_execution_timeout,
+        )
+
+        action = self._action_definition(device_id, action_name) or {}
+        resolved: dict[str, Any] = {
+            "timeout": None,
+            "execution_timeout": None,
+            "execution_timeout_spec": None,
+            "error": None,
+        }
+        label = f"{device_id}.{action_name}"
+        try:
+            resolved["timeout"] = normalize_action_timeout(action.get("timeout"), action_name=label)
+        except (TypeError, ValueError) as exc:
+            resolved["error"] = f"timeout 声明无效: {exc}"
+        spec = action.get("execution_timeout")
+        if spec is None:
+            return resolved
+        try:
+            normalized = normalize_execution_timeout(spec, action_name=label)
+        except (TypeError, ValueError) as exc:
+            resolved["error"] = f"execution_timeout 声明无效: {exc}"
+            return resolved
+        resolved["execution_timeout_spec"] = normalized
+        defaults = action.get("goal_default")
+        values: dict[str, Any] = dict(defaults) if isinstance(defaults, Mapping) else {}
+        values.update(dict(action_args or {}))
+        try:
+            resolved["execution_timeout"] = evaluate_execution_timeout(
+                normalized, values, action_name=label
+            )
+        except TimeoutExpressionError as exc:
+            resolved["error"] = str(exc)
+            logger.warning("[EdgeControl] execution_timeout 求值失败，放弃软超时: %s", exc)
+        return resolved
+
     # ── 失败决策（Edge 打开终态闸门，Backend 放行） ─────────────────
 
     def list_error_decisions(self) -> list[dict[str, Any]]:
@@ -390,12 +455,61 @@ class EdgeControlService:
         )
         with self._lock:
             self._pending_decisions.pop(decision_id, None)
+        if selected == "wait":
+            # execution_timeout 软超时：动作仍在执行，Edge 关闭闸门并重新计时；
+            # 调度器把 attempt / 节点运行从 intervention_required 收回 running。
+            self._issue_command(
+                command_type="resume_pending",
+                job_uuid=str(pending["job_uuid"]),
+                payload=content.model_dump(mode="json", exclude_none=True),
+            )
+            self._publish_decision_resumed(
+                {
+                    **report,
+                    "selected_action": "wait",
+                    "reason": content.reason,
+                    "resolved_at": time.time(),
+                }
+            )
+            return True
         self._issue_command(
             command_type="replace_result" if replace else "release_failed",
             job_uuid=str(pending["job_uuid"]),
             payload=content.model_dump(mode="json", exclude_none=True),
         )
         return True
+
+    def _publish_decision_resumed(self, report: Mapping[str, Any]) -> None:
+        for bridge in list(self.result_bridges):
+            callback = getattr(bridge, "publish_job_error_decision_resumed", None)
+            if callable(callback):
+                try:
+                    callback(deepcopy(dict(report)))
+                except Exception:  # noqa: BLE001 - 单个 bridge 失败不影响其他 bridge
+                    logger.exception("[EdgeControl] publish_job_error_decision_resumed 失败")
+
+    def _record_error_resumed(self, notice: EdgeChangeNotice) -> None:
+        """Edge 自行收回了软超时决策（动作在等待期间真实完成，或 wait 已落地）。"""
+
+        job_uuid = notice.job_uuid or notice.aggregate_uuid
+        with self._lock:
+            resumed = [
+                (decision_id, item)
+                for decision_id, item in self._pending_decisions.items()
+                if item["job_uuid"] == job_uuid
+            ]
+            for decision_id, _ in resumed:
+                self._pending_decisions.pop(decision_id, None)
+        for decision_id, item in resumed:
+            logger.info("[EdgeControl] job %s 的软超时决策 %s 已收回", job_uuid, decision_id)
+            self._publish_decision_resumed(
+                {
+                    **item["report"],
+                    "selected_action": "superseded",
+                    "reason": "execution.error_resumed",
+                    "resolved_at": time.time(),
+                }
+            )
 
     def _record_error_pending(self, notice: EdgeChangeNotice) -> None:
         job_uuid = notice.job_uuid or notice.aggregate_uuid
@@ -658,6 +772,9 @@ class EdgeControlService:
     def _apply_edge_event(self, notice: EdgeChangeNotice) -> None:
         if notice.event_type == "execution.error_pending":
             self._record_error_pending(notice)
+            return
+        if notice.event_type == "execution.error_resumed":
+            self._record_error_resumed(notice)
             return
         terminal = _TERMINAL_EVENT_STATUS.get(notice.event_type)
         if terminal is None:

@@ -2039,6 +2039,79 @@ class WorkflowStore:
             self._sync_run_projection(conn, row["workflow_node_run_uuid"], now)
         return self.get_job(job_uuid)
 
+    def set_node_run_execution_timeout(self, run_uuid: str, seconds: int) -> Dict[str, Any]:
+        """写回调度器派发前解析出的业务软超时（秒，向上取整）；0 表示未声明。"""
+
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds < 0:
+            raise StoreConflict("execution_timeout_seconds must be a non-negative integer")
+        now = utc_now()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM workflow_node_run WHERE uuid=? AND deleted_at IS NULL",
+                (run_uuid,),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound(f"workflow node run {run_uuid} not found")
+            if int(row["execution_timeout_seconds"] or 0) != seconds:
+                conn.execute(
+                    "UPDATE workflow_node_run SET execution_timeout_seconds=?, update_time=? WHERE uuid=?",
+                    (seconds, now, run_uuid),
+                )
+        return self.get_node_run(run_uuid)
+
+    def mark_job_decision_resumed(
+        self, job_uuid: str, decision_id: str = ""
+    ) -> Dict[str, Any]:
+        """软超时（``execution_timeout``）决策收回：attempt 与节点运行从 ``intervention_required``
+        回到 ``running``，``control_data.pending_decision`` 移入 ``resumed_decisions`` 留痕。
+
+        动作从未停止过，所以不产生新 attempt、不改结果；``execution_unknown`` 与终态
+        attempt 不受影响（幂等返回）。
+        """
+
+        now = utc_now()
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM workflow_node_job WHERE uuid=? AND deleted_at IS NULL",
+                (job_uuid,),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound(f"workflow node job {job_uuid} not found")
+            if row["status"] != "intervention_required":
+                return self._job_row(row)
+            control_data = _load(row["control_data"], {})
+            pending = control_data.pop("pending_decision", None)
+            if pending is not None:
+                history = control_data.get("resumed_decisions")
+                if not isinstance(history, list):
+                    history = []
+                history.append(
+                    {
+                        **pending,
+                        "resumed_at": now,
+                        "resumed_decision_id": decision_id or pending.get("decision_id"),
+                    }
+                )
+                control_data["resumed_decisions"] = history
+            conn.execute(
+                """
+                UPDATE workflow_node_job
+                SET status='running', control_data=?, update_time=?
+                WHERE uuid=?
+                """,
+                (_json(control_data), now, job_uuid),
+            )
+            self._emit_job_changed(
+                conn,
+                row,
+                "running",
+                now,
+                decision_id=decision_id or (pending or {}).get("decision_id"),
+                resumed=True,
+            )
+            self._sync_run_projection(conn, row["workflow_node_run_uuid"], now)
+        return self.get_job(job_uuid)
+
     def record_job_terminal(
         self,
         job_uuid: str,

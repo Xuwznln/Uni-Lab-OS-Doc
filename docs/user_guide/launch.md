@@ -141,8 +141,8 @@ Uni-Lab 对外提供两个设备通信 backend。名称、能力和实现入口�
 
 | Backend | 设备运行时 | 支持的设备能力 | 应选择该 backend 的场景 |
 |---|---|---|---|
-| **hostlink** | 普通 Python 驱动通过 HostLink TCP 组网，不启动 rclpy/DDS | 设备发现、Action、Service、状态、JSON Topic、Workstation 及其 sub-device，以及经 Host 访问微后端物料服务 | 常规仪器控制、低中频状态和命令通信、不依赖 ROS2 图的工作站 |
-| **ros2**（默认） | 完整 ROS 2 分布式运行时 | HostLink 所覆盖的普通设备能力，以及原生 ROS graph、TF、MoveIt、RViz 和高频 ROS2 消息链路 | 运动规划、ROS 可视化、高频图像流或必须接入现有 ROS2 生态的设备 |
+| **hostlink**（默认） | 普通 Python 驱动通过 HostLink TCP 组网，不启动 rclpy/DDS | 设备发现、Action、Service、状态、JSON Topic、Workstation 及其 sub-device，以及经 Host 访问微后端物料服务 | 常规仪器控制、低中频状态和命令通信、不依赖 ROS2 图的工作站 |
+| **ros2** | 完整 ROS 2 分布式运行时 | HostLink 所覆盖的普通设备能力，以及原生 ROS graph、TF、MoveIt、RViz 和高频 ROS2 消息链路 | 运动规划、ROS 可视化、高频图像流或必须接入现有 ROS2 生态的设备 |
 
 `--backend` 只选择设备节点的初始化、执行和节点间通信方式，不选择微后端的
 WebSocket/HTTP 协议。Host 进程在两种 backend 下都可以提供微后端 HTTP API 和前端
@@ -163,7 +163,7 @@ unilab -g host.json --backend hostlink --hostlink-port 7302
 unilab -g slave.json --backend hostlink --is-slave \
   --host-node-ip 192.168.1.10 --hostlink-port 7302
 
-# 完整 ROS 2 运行时；不写 --backend 时也使用 ros2
+# 完整 ROS 2 运行时；不写 --backend 时使用 hostlink，需要 ROS 2 时必须显式指定
 unilab -g graph.json --backend ros2
 ```
 

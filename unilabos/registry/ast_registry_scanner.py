@@ -1051,6 +1051,21 @@ def _extract_class_body(
                 ),
                 action_name=method_name,
             )
+            # 超时字段与装饰器同一套校验：硬超时必须是正数秒；软超时可以是秒或只引用
+            # 动作入参的四则运算表达式（归一化为规范字符串写入注册表）。
+            from unilabos.registry.action_timeout import (
+                normalize_action_timeout,
+                normalize_execution_timeout,
+            )
+
+            action_args["timeout"] = normalize_action_timeout(
+                action_args.get("timeout"), action_name=method_name
+            )
+            action_args["execution_timeout"] = normalize_execution_timeout(
+                action_args.get("execution_timeout"),
+                action_parameter_names=(param["name"] for param in method_params),
+                action_name=method_name,
+            )
             return_type = _get_annotation_str(item.returns, import_map)
             is_async = isinstance(item, ast.AsyncFunctionDef)
             method_doc = ast.get_docstring(item)

@@ -353,16 +353,19 @@ def _validated_input_bindings(
 
 
 def _validate_execution_policy(policy: Mapping[str, Any]) -> None:
-    if "execution_timeout_seconds" not in policy:
-        return
-    value = policy["execution_timeout_seconds"]
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or value < 0
-        or value > _MAX_TIMEOUT_SECONDS
-    ):
-        raise GraphValidationError("execution_timeout_seconds 必须是非负整数")
+    # 节点级超时（秒，0 = 未声明、回退到注册表 @action 声明）：
+    # execution_timeout_seconds 是业务软超时（冻结字段），timeout_seconds 是硬超时。
+    for key in ("execution_timeout_seconds", "timeout_seconds"):
+        if key not in policy:
+            continue
+        value = policy[key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            or value > _MAX_TIMEOUT_SECONDS
+        ):
+            raise GraphValidationError(f"{key} 必须是非负整数")
 
 
 def _parse_schema(raw_schema: Any) -> Any:
