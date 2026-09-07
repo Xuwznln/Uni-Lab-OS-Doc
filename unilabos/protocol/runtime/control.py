@@ -25,6 +25,7 @@ CommandType = Literal[
     "cancel_job",
     "release_failed",
     "replace_result",
+    "resume_pending",
     "inventory_apply",
     "reconcile",
 ]
@@ -107,6 +108,12 @@ class ExecuteJobContent(ServerObject):
     inventory_requirements: list[InventoryRequirement] = Field(default_factory=list)
     inventory_reservation_uuid: Optional[NonEmptyStr] = None
     scheduler_revision: int = Field(ge=0)
+    #: 调度权威解析后的硬超时（秒）：注册表 ``@action(timeout)`` 或节点 ``execution_policy``；
+    #: 缺省由执行面按自己的注册表副本解析。
+    timeout_seconds: Optional[float] = Field(default=None, gt=0)
+    #: 调度权威解析后的业务软超时（秒）：节点 ``execution_policy.execution_timeout_seconds``
+    #: 优先，否则注册表 ``@action(execution_timeout)`` 表达式按最终 action_args 求值。
+    execution_timeout_seconds: Optional[float] = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _validate_attempt_and_route(self) -> "ExecuteJobContent":
@@ -121,7 +128,12 @@ class ExecuteJobContent(ServerObject):
 
 
 class ErrorDecisionContent(ServerObject):
-    """Backend 已完成前端询问和调度更新后的终态放行命令。"""
+    """Backend 已完成前端询问和调度更新后的终态放行命令。
+
+    ``release_failed`` / ``replace_result`` 放行一个失败 attempt；``resume_pending``
+    （``selected_action="wait"``）只用于 ``execution_timeout`` 软超时决策：动作仍在执行，
+    Edge 关闭终态闸门、attempt 回到 running 并重新计时。
+    """
 
     decision_uuid: NonEmptyStr
     confirmed_scheduler_revision: int = Field(ge=0)

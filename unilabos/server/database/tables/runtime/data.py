@@ -148,6 +148,7 @@ class CommandInboxRecord(TableObject, table=True):
         "cancel_job",
         "release_failed",
         "replace_result",
+        "resume_pending",
         "inventory_apply",
         "reconcile",
     ] = Field(sa_type=Text)
@@ -176,6 +177,7 @@ class CommandInboxRecord(TableObject, table=True):
             "cancel_job",
             "release_failed",
             "replace_result",
+            "resume_pending",
         }
         if requires_job != (self.job_uuid is not None):
             raise ValueError("command_type and job_uuid do not agree")
@@ -303,7 +305,12 @@ class AdapterCommandOutboxRecord(TableObject, table=True):
     trigger_event_uuid: Optional[NonEmptyStr] = None
     target_adapter_epoch: Optional[NonEmptyStr] = None
     command_type: Literal[
-        "execute", "cancel", "release_failed", "replace_result", "reconcile_state"
+        "execute",
+        "cancel",
+        "release_failed",
+        "replace_result",
+        "resume_pending",
+        "reconcile_state",
     ] = Field(sa_type=Text)
     payload_uuid: Optional[NonEmptyStr] = None
     status: Literal["pending", "sent", "acknowledged", "failed"] = Field(
@@ -480,7 +487,7 @@ DATA_TABLES = (
             backend_sequence INTEGER NOT NULL CHECK (backend_sequence > 0),
             command_type TEXT NOT NULL CHECK (command_type IN (
                 'execute_job','cancel_job','release_failed','replace_result',
-                'inventory_apply','reconcile'
+                'resume_pending','inventory_apply','reconcile'
             )),
             job_uuid TEXT,
             payload_uuid TEXT,
@@ -500,7 +507,8 @@ DATA_TABLES = (
             version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
             CHECK (
                 (command_type IN (
-                    'execute_job','cancel_job','release_failed','replace_result'
+                    'execute_job','cancel_job','release_failed','replace_result',
+                    'resume_pending'
                 ) AND job_uuid IS NOT NULL)
                 OR command_type = 'inventory_apply'
                 OR (command_type = 'reconcile' AND job_uuid IS NULL)
@@ -670,7 +678,8 @@ DATA_TABLES = (
             trigger_event_uuid TEXT,
             target_adapter_epoch TEXT,
             command_type TEXT NOT NULL CHECK (command_type IN (
-                'execute','cancel','release_failed','replace_result','reconcile_state'
+                'execute','cancel','release_failed','replace_result','resume_pending',
+                'reconcile_state'
             )),
             payload_uuid TEXT,
             status TEXT NOT NULL CHECK (

@@ -29,10 +29,20 @@ from unilabos.server.backend.inventory import (
     ExecutionInventoryCoordinator,
     ExecutionInventoryError,
 )
+from unilabos.backend.runtime.exception import (
+    ExecutionTimeoutException,
+    TimeoutException,
+)
 from unilabos.registry.action_policy import (
     SUCCESS_TYPE_CANCELLATION,
     SUCCESS_TYPE_OPERATOR_INTERVENTION,
     resolve_error_options_by_names,
+)
+from unilabos.registry.action_timeout import (
+    TimeoutExpressionError,
+    evaluate_execution_timeout,
+    normalize_action_timeout,
+    normalize_execution_timeout,
 )
 from unilabos.registry.material_locks import normalize_material_parameter_names
 from unilabos.utils.serialization import serialize_result_info
@@ -50,6 +60,20 @@ logger = logging.getLogger(__name__)
 # listener 签名：(job_id, success, ret_value, suc_type) -> None
 # suc_type 取值 normal / skip / operator_intervention（见 registry.action_policy）
 JobFinishedListener = Callable[[str, bool, Any, str], None]
+
+# 执行面硬超时看门狗比声明值多等这么久：能自己执行 timeout 的运行时（HostLink 本地
+# 运行时用 asyncio.wait_for）会先抛出带完整 traceback 的 TimeoutException，看门狗只兜底。
+HARD_TIMEOUT_GRACE_SECONDS = 1.0
+
+
+def _positive_seconds(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
 
 class JobExecutionBackend:
     """job_start 生命周期微后端。"""
@@ -93,6 +117,11 @@ class JobExecutionBackend:
         self._pending_action_error_decisions: Dict[str, Dict[str, Any]] = {}
         self._resolved_action_error_decisions: Dict[str, Dict[str, Any]] = {}
         self._pending_action_error_decisions_lock = threading.RLock()
+        # @action(timeout / execution_timeout) 看门狗：job_id -> {"hard": Timer, "soft": Timer, ...}
+        self._job_timeouts: Dict[str, Dict[str, Any]] = {}
+        # 终态已由超时闸门决定的 job：之后设备迟到的 feedback / 结果一律忽略
+        self._superseded_jobs: Set[str] = set()
+        self._timeout_lock = threading.RLock()
         self._events: "queue.Queue[tuple[Any, tuple]]" = queue.Queue()
         self._worker: Optional[threading.Thread] = None
         self._running = False
@@ -153,6 +182,10 @@ class JobExecutionBackend:
             node_run_uuid=str(payload.get("node_run_uuid", "") or ""),
             origin=str(payload.get("origin", "") or ""),
             retry_count=int(payload.get("retry_count", 0) or 0),
+            timeout_seconds=_positive_seconds(payload.get("timeout_seconds")),
+            execution_timeout_seconds=_positive_seconds(
+                payload.get("execution_timeout_seconds")
+            ),
         )
         if self.device_manager.get_job_info(job_info.job_id) is not None:
             self._enqueue_job(job_info)
@@ -289,6 +322,257 @@ class JobExecutionBackend:
         mapping = self._action_mapping(device_id, action_name)
         policy = mapping.get("error_policy") if mapping is not None else None
         return dict(policy) if isinstance(policy, Mapping) else {}
+
+    # ── @action(timeout / execution_timeout) ─────────────────
+
+    def resolve_action_timeouts(
+        self,
+        device_id: str,
+        action_name: str,
+        action_args: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """注册表为该动作声明的超时，并用真实参数求出软超时秒数。
+
+        返回 ``{"timeout": 秒|None, "execution_timeout": 秒|None,
+        "execution_timeout_spec": 声明原文|None, "error": 求值失败原因|None}``。
+        软超时表达式按 ``goal_default`` 叠加 ``action_args`` 求值；求值失败不阻断下发，
+        只记录告警并放弃这一道看门狗（硬超时不受影响）。
+        """
+
+        mapping = self._action_mapping(device_id, action_name) or {}
+        resolved: Dict[str, Any] = {
+            "timeout": None,
+            "execution_timeout": None,
+            "execution_timeout_spec": None,
+            "error": None,
+        }
+        label = f"{device_id}.{action_name}"
+        try:
+            resolved["timeout"] = normalize_action_timeout(
+                mapping.get("timeout"), action_name=label
+            )
+        except (TypeError, ValueError) as exc:
+            resolved["error"] = f"timeout 声明无效: {exc}"
+            logger.warning("[JobExecutionBackend] %s", resolved["error"])
+        spec = mapping.get("execution_timeout")
+        if spec is None:
+            return resolved
+        try:
+            normalized_spec = normalize_execution_timeout(spec, action_name=label)
+        except (TypeError, ValueError) as exc:
+            resolved["error"] = f"execution_timeout 声明无效: {exc}"
+            logger.warning("[JobExecutionBackend] %s", resolved["error"])
+            return resolved
+        resolved["execution_timeout_spec"] = normalized_spec
+        defaults = mapping.get("goal_default")
+        values: Dict[str, Any] = dict(defaults) if isinstance(defaults, Mapping) else {}
+        values.update(dict(action_args or {}))
+        try:
+            resolved["execution_timeout"] = evaluate_execution_timeout(
+                normalized_spec, values, action_name=label
+            )
+        except TimeoutExpressionError as exc:
+            resolved["error"] = str(exc)
+            logger.warning(
+                "[JobExecutionBackend] execution_timeout 求值失败，放弃软超时看门狗: %s",
+                exc,
+            )
+        return resolved
+
+    def _arm_job_timeouts(self, job: JobInfo) -> Dict[str, Any]:
+        """动作真正下发后启动硬 / 软超时看门狗；到期事件回到 worker 线程串行处理。
+
+        调度权威随载荷下发的 ``timeout_seconds`` / ``execution_timeout_seconds``（节点
+        ``execution_policy`` 或已按最终参数求值的注册表表达式）优先；缺省按本地注册表副本解析。
+        """
+
+        resolved = self.resolve_action_timeouts(
+            job.device_id, job.action_name, job.action_args
+        )
+        if job.timeout_seconds is not None:
+            resolved["timeout"] = float(job.timeout_seconds)
+            resolved["timeout_source"] = "dispatch"
+        if job.execution_timeout_seconds is not None:
+            resolved["execution_timeout"] = float(job.execution_timeout_seconds)
+            resolved["execution_timeout_source"] = "dispatch"
+        hard = resolved.get("timeout")
+        soft = resolved.get("execution_timeout")
+        if hard is None and soft is None:
+            return resolved
+        if hard is not None and soft is not None and soft >= hard:
+            logger.warning(
+                "[JobExecutionBackend] %s.%s 的 execution_timeout (%.3fs) 不小于 timeout "
+                "(%.3fs)，软超时永远不会先触发",
+                job.device_id,
+                job.action_name,
+                soft,
+                hard,
+            )
+        entry: Dict[str, Any] = {
+            "started_at": time.time(),
+            "hard_seconds": hard,
+            "soft_seconds": soft,
+            "soft_spec": resolved.get("execution_timeout_spec"),
+            "hard": None,
+            "soft": None,
+        }
+        with self._timeout_lock:
+            self._clear_job_timeouts_locked(job.job_id)
+            self._job_timeouts[job.job_id] = entry
+            if hard is not None:
+                entry["hard"] = self._start_timeout_timer(
+                    job, hard, "hard_timeout", entry, delay=hard + HARD_TIMEOUT_GRACE_SECONDS
+                )
+            if soft is not None:
+                entry["soft"] = self._start_timeout_timer(
+                    job, soft, "execution_timeout", entry
+                )
+        return resolved
+
+    def _start_timeout_timer(
+        self,
+        job: JobInfo,
+        seconds: float,
+        event: str,
+        entry: Dict[str, Any],
+        *,
+        delay: Optional[float] = None,
+    ) -> threading.Timer:
+        context = job.trace_context
+
+        def _fire() -> None:
+            self._put_event((event, job.job_id, seconds), context=context)
+
+        timer = threading.Timer(seconds if delay is None else delay, _fire)
+        timer.daemon = True
+        timer.name = f"ActionTimeout-{event}-{job.job_id[:8]}"
+        timer.start()
+        return timer
+
+    def _rearm_execution_timeout(self, job: JobInfo) -> Optional[float]:
+        """操作员选择继续等待：以同样的软超时秒数重新计时。"""
+
+        with self._timeout_lock:
+            entry = self._job_timeouts.get(job.job_id)
+            if entry is None:
+                entry = {
+                    "started_at": time.time(),
+                    "hard_seconds": None,
+                    "soft_seconds": None,
+                    "soft_spec": None,
+                    "hard": None,
+                    "soft": None,
+                }
+                self._job_timeouts[job.job_id] = entry
+            seconds = entry.get("soft_seconds")
+            if seconds is None:
+                return None
+            existing = entry.get("soft")
+            if existing is not None:
+                existing.cancel()
+            entry["soft"] = self._start_timeout_timer(
+                job, float(seconds), "execution_timeout", entry
+            )
+            entry["soft_rearmed_at"] = time.time()
+            return float(seconds)
+
+    def _clear_job_timeouts_locked(self, job_id: str) -> None:
+        entry = self._job_timeouts.pop(job_id, None)
+        if entry is None:
+            return
+        for key in ("hard", "soft"):
+            timer = entry.get(key)
+            if timer is not None:
+                timer.cancel()
+
+    def _clear_job_timeouts(self, job_id: str) -> None:
+        with self._timeout_lock:
+            self._clear_job_timeouts_locked(job_id)
+
+    def _forget_job_timeouts(self, job_id: str) -> None:
+        """job 生命周期结束（终态 / 取消）：停掉看门狗并清除超时闸门标记。"""
+
+        with self._timeout_lock:
+            self._clear_job_timeouts_locked(job_id)
+            self._superseded_jobs.discard(job_id)
+
+    def _supersede_job(self, job_id: str) -> None:
+        """终态改由超时闸门决定：停掉看门狗，之后设备迟到的回调全部忽略。"""
+
+        with self._timeout_lock:
+            self._superseded_jobs.add(job_id)
+            self._clear_job_timeouts_locked(job_id)
+
+    def _is_superseded(self, job_id: str) -> bool:
+        with self._timeout_lock:
+            return job_id in self._superseded_jobs
+
+    def _pending_soft_timeout_for(self, job_id: str) -> Optional[Dict[str, Any]]:
+        with self._pending_action_error_decisions_lock:
+            for pending in self._pending_action_error_decisions.values():
+                if pending.get("job_id") == job_id and pending.get("soft_timeout"):
+                    return pending
+        return None
+
+    def _has_pending_decision(self, job_id: str) -> bool:
+        with self._pending_action_error_decisions_lock:
+            return any(
+                pending.get("job_id") == job_id
+                for pending in self._pending_action_error_decisions.values()
+            )
+
+    def _resume_bridges(self, item: QueueItem) -> List[Any]:
+        """支持把 ``intervention_required`` 收回 ``running`` 的 owner bridge。"""
+
+        return [
+            bridge
+            for bridge in self._bridges_for(item)
+            if callable(getattr(bridge, "publish_job_error_decision_resumed", None))
+        ]
+
+    def _retire_pending_decision(
+        self, pending: Dict[str, Any], *, selected_action: str, reason: str
+    ) -> Optional[Dict[str, Any]]:
+        """把一条 pending 决策变成已解决墓碑（幂等重放用），返回解决报告。"""
+
+        decision_id = str(pending.get("decision_id") or "")
+        item = pending["item"]
+        now = time.time()
+        report = {
+            "decision_id": decision_id,
+            "job_id": pending.get("job_id"),
+            "task_id": item.task_id,
+            "node_id": str(getattr(item, "node_id", "") or ""),
+            "node_run_uuid": str(getattr(item, "node_run_uuid", "") or ""),
+            "device_id": item.device_id,
+            "action_name": item.action_name,
+            "selected_action": selected_action,
+            "reason": reason,
+            "resolved_at": now,
+        }
+        with self._pending_action_error_decisions_lock:
+            if self._pending_action_error_decisions.pop(decision_id, None) is None:
+                return None
+            self._resolved_action_error_decisions[decision_id] = {
+                "report": deepcopy(report),
+                "retain_until": now + self._ACTION_ERROR_DECISION_TOMBSTONE_TTL_SECONDS,
+            }
+        if self._monitor is not None:
+            try:
+                self._monitor.emit("action", "job_error_decision_resolved", report)
+            except Exception:  # noqa: BLE001 - 观测不能阻断执行链路
+                logger.exception("[JobExecutionBackend] failed to emit resolved decision")
+        return report
+
+    def _publish_decision_resumed(self, item: QueueItem, report: Dict[str, Any]) -> None:
+        for bridge in self._resume_bridges(item):
+            try:
+                bridge.publish_job_error_decision_resumed(deepcopy(report))
+            except Exception:  # noqa: BLE001 - 恢复通知失败不影响动作继续执行
+                logger.exception(
+                    "[JobExecutionBackend] failed to publish decision resumed for %s",
+                    report.get("job_id"),
+                )
 
     def _safe_inventory_cancel(self, job_id: str, *, reason: str) -> None:
         if self._inventory_authority is None:
@@ -447,6 +731,7 @@ class JobExecutionBackend:
         job = self.device_manager.get_job_info(job_id)
         if job is None:
             return False
+        self._forget_job_timeouts(job_id)
         adapter = self._host_node_getter()
         if adapter is not None:
             try:
@@ -479,6 +764,8 @@ class JobExecutionBackend:
             if job.task_id == task_id
         ]
         jobs_by_id = {job.job_id: job for job in jobs}
+        for job_id in jobs_by_id:
+            self._forget_job_timeouts(job_id)
         adapter = self._host_node_getter()
         if adapter is not None:
             for job in jobs:
@@ -551,12 +838,55 @@ class JobExecutionBackend:
 
         if self.device_manager.get_job_info(item.job_id) is None:
             return
+        if self._is_superseded(item.job_id):
+            # 终态已由 timeout / execution_timeout 闸门决定：设备迟到的 feedback 与结果只记日志
+            logger.debug(
+                "[JobExecutionBackend] ignore late %s from device for timed-out job %s",
+                status,
+                item.job_id,
+            )
+            return
 
         if status == "running":
             self._publish_to_result_bridges(feedback_data, item, status, return_info)
             return
         if status not in ("success", "failed", "canceled"):
             return
+
+        self._clear_job_timeouts(item.job_id)
+        soft_pending = self._pending_soft_timeout_for(item.job_id)
+        if soft_pending is not None:
+            if not self._resume_bridges(item):
+                # Backend-controlled：终态闸门已在权威侧打开，真实结果只能附在待决策上，
+                # 由操作员以 operator_intervention 放行（缺省结果即设备真实返回值）。
+                with self._pending_action_error_decisions_lock:
+                    soft_pending["late_result"] = {
+                        "status": status,
+                        "return_info": deepcopy(return_info) if isinstance(return_info, dict) else {},
+                        "feedback_data": deepcopy(dict(feedback_data or {})),
+                        "received_at": time.time(),
+                    }
+                logger.info(
+                    "[JobExecutionBackend] job %s finished (%s) while its execution_timeout "
+                    "decision %s is pending on the Backend; result attached to the decision",
+                    item.job_id,
+                    status,
+                    soft_pending.get("decision_id"),
+                )
+                self._safe_inventory_terminal(
+                    item.job_id,
+                    success=status == "success",
+                    reason=f"action_{status}",
+                )
+                return
+            # 本机调度：真实结果优先于软超时决策，先收回 intervention_required 再照常收口
+            resolved = self._retire_pending_decision(
+                soft_pending,
+                selected_action="superseded",
+                reason=f"action_{status}",
+            )
+            if resolved is not None:
+                self._publish_decision_resumed(item, resolved)
 
         # 驱动返回终态后即可推进库存；Job 的业务终态仍可能等待 Backend gate。
         self._safe_inventory_terminal(
@@ -696,8 +1026,15 @@ class JobExecutionBackend:
         item: QueueItem,
         return_info: Dict[str, Any],
         result_data: Dict[str, Any],
+        *,
+        soft_timeout: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Hold a failed attempt until Backend has updated scheduling and releases it."""
+        """Hold a failed attempt until Backend has updated scheduling and releases it.
+
+        ``soft_timeout`` 非空表示这是 ``execution_timeout`` 触发的决策：动作**仍在执行**，
+        没有失败结果可放行；支持恢复的 owner bridge 会多得到一个 ``wait`` 选项，
+        任何终态选项都会先取消动作再按失败处理。
+        """
 
         raw_error_info = return_info.get("error_info")
         if not isinstance(raw_error_info, dict):
@@ -765,6 +1102,17 @@ class JobExecutionBackend:
         ]
         if not decision_bridges:
             return False
+        if soft_timeout is not None and self._resume_bridges(item):
+            # 软超时特有：动作还在跑，操作员可以只是"再等一会"；terminal 选项照旧
+            if "wait" not in {str(option.get("action")) for option in options}:
+                options = [
+                    {
+                        "action": "wait",
+                        "label": "继续等待",
+                        "description": "动作继续执行，按同样的 execution_timeout 重新计时",
+                    },
+                    *options,
+                ]
 
         retry_count = int(getattr(item, "retry_count", 0) or 0)
         max_retries = int(policy.get("max_retries", 3))
@@ -811,6 +1159,14 @@ class JobExecutionBackend:
         for key in ("category", "severity"):
             if error_info.get(key) is not None:
                 report[key] = error_info[key]
+        if soft_timeout is not None:
+            report["action_still_running"] = True
+            report["timeout_seconds"] = soft_timeout.get("seconds")
+            report["timeout_spec"] = soft_timeout.get("spec")
+            report["timeout_kind"] = "execution_timeout"
+        elif error_info.get("timeout_seconds") is not None:
+            report["timeout_seconds"] = error_info["timeout_seconds"]
+            report["timeout_kind"] = "timeout"
         pending = {
             "decision_id": decision_id,
             "job_id": item.job_id,
@@ -822,6 +1178,7 @@ class JobExecutionBackend:
             "resolving": False,
             # 微后端只向 Backend 暴露截止时间，不在本地擅自执行超时策略。
             "timer": None,
+            "soft_timeout": bool(soft_timeout is not None),
         }
         with self._pending_action_error_decisions_lock:
             self._pending_action_error_decisions[decision_id] = pending
@@ -1025,6 +1382,7 @@ class JobExecutionBackend:
                 "report": deepcopy(report),
                 "resolving": False,
                 "timer": None,
+                "soft_timeout": bool(report.get("action_still_running")),
             }
         return True
 
@@ -1170,6 +1528,46 @@ class JobExecutionBackend:
                     "[JobExecutionBackend] failed to emit resolved decision"
                 )
         item = pending["item"]
+        if pending.get("soft_timeout"):
+            late_result = pending.get("late_result")
+            if selected == "wait":
+                # 动作从未停止：收回 intervention_required，按同样的软超时重新计时
+                job = self.device_manager.get_job_info(job_id)
+                if job is not None:
+                    self._rearm_execution_timeout(job)
+                self._publish_decision_resumed(item, resolved_report)
+                logger.info(
+                    "[JobExecutionBackend] execution_timeout decision %s: keep waiting for job %s",
+                    decision_id,
+                    job_id,
+                )
+                return True
+            if late_result is None:
+                # 动作仍在执行：任何终态选项都先协作式取消，再按失败 / 替换结果收口
+                self._supersede_job(job_id)
+                adapter = self._host_node_getter()
+                if adapter is not None:
+                    try:
+                        adapter.cancel_goal(job_id)
+                    except Exception:  # noqa: BLE001 - 本地状态仍要收敛
+                        logger.exception(
+                            "[JobExecutionBackend] cancel goal failed for timed-out job %s",
+                            job_id,
+                        )
+                self._safe_inventory_terminal(
+                    job_id,
+                    success=selected == "operator_intervention",
+                    reason=f"execution_timeout_{selected}",
+                )
+            elif (
+                selected == "operator_intervention"
+                and "result" not in decision
+                and "return_value" not in decision
+                and str(late_result.get("status") or "") == "success"
+            ):
+                # Backend-controlled 下动作已在等待期间真实完成：缺省替换结果就是设备返回值
+                real_info = late_result.get("return_info") or {}
+                decision["result"] = real_info.get("return_value")
         if selected == "operator_intervention" and (
             "result" in decision or "return_value" in decision
         ):
@@ -1233,6 +1631,10 @@ class JobExecutionBackend:
                             )
                         elif event[0] == "device_status":
                             self._write_device_property(event[1], event[2], event[3])
+                        elif event[0] == "hard_timeout":
+                            self._handle_hard_timeout(event[1], float(event[2]))
+                        elif event[0] == "execution_timeout":
+                            self._handle_execution_timeout(event[1], float(event[2]))
             except Exception:  # noqa: BLE001 - worker 不允许死
                 logger.exception("[JobExecutionBackend] event %s failed", event[0])
             finally:
@@ -1304,6 +1706,15 @@ class JobExecutionBackend:
             )
             self.publish_job_started(queue_item)
             logger.info("[JobExecutionBackend] goal sent for job %s", job_log)
+            timeouts = self._arm_job_timeouts(job)
+            if timeouts.get("timeout") is not None or timeouts.get("execution_timeout") is not None:
+                logger.info(
+                    "[JobExecutionBackend] job %s watchdog armed: timeout=%s execution_timeout=%s (%s)",
+                    job_log,
+                    timeouts.get("timeout"),
+                    timeouts.get("execution_timeout"),
+                    timeouts.get("execution_timeout_spec"),
+                )
         except Exception:  # noqa: BLE001 - 启动失败必须走完结流程
             logger.exception("[JobExecutionBackend] send_goal failed for job %s", job_log)
             return_info = serialize_result_info(
@@ -1327,6 +1738,85 @@ class JobExecutionBackend:
             ):
                 self._release_terminal(queue_item, "failed", return_info, {})
 
+    # ── 超时闸门（worker 线程） ──────────────────────────────
+
+    def _handle_hard_timeout(self, job_id: str, seconds: float) -> None:
+        """``@action(timeout=...)`` 到期：协作式取消动作，attempt 以 TimeoutException 进入决策链。"""
+
+        job = self.device_manager.get_job_info(job_id)
+        if job is None or self._is_superseded(job_id):
+            return
+        job_log = format_job_log(job.job_id, job.task_id, job.device_id, job.action_name)
+        item = self._queue_item_for(job)
+        item.trace_context = getattr(job, "trace_context", {}) or {}
+        # 软超时决策若还挂着，被硬超时取代：同一 job 只保留一条待决策
+        soft_pending = self._pending_soft_timeout_for(job_id)
+        if soft_pending is not None:
+            self._retire_pending_decision(
+                soft_pending,
+                selected_action="superseded",
+                reason="hard_timeout",
+            )
+        self._supersede_job(job_id)
+        adapter = self._host_node_getter()
+        if adapter is not None:
+            try:
+                adapter.cancel_goal(job_id)
+            except Exception:  # noqa: BLE001 - 取消失败也要收敛本地状态
+                logger.exception(
+                    "[JobExecutionBackend] cancel goal failed for timed-out job %s", job_log
+                )
+        elapsed = time.time() - float(job.start_time or time.time())
+        error = TimeoutException(
+            job.action_name,
+            seconds,
+            device_id=job.device_id,
+            elapsed_seconds=elapsed,
+        )
+        logger.warning("[JobExecutionBackend] %s: %s", job_log, error)
+        return_info = serialize_result_info(str(error), False, {})
+        return_info["error_info"] = error.to_error_info()
+        self._safe_inventory_terminal(job_id, success=False, reason="action_timeout")
+        if not self._begin_action_error_decision(item, return_info, {}):
+            self._release_terminal(item, "failed", return_info, {})
+
+    def _handle_execution_timeout(self, job_id: str, seconds: float) -> None:
+        """``@action(execution_timeout=...)`` 到期：动作继续执行，只打开一条带 wait 的决策。"""
+
+        job = self.device_manager.get_job_info(job_id)
+        if job is None or self._is_superseded(job_id):
+            return
+        if self._has_pending_decision(job_id):
+            return
+        job_log = format_job_log(job.job_id, job.task_id, job.device_id, job.action_name)
+        item = self._queue_item_for(job)
+        item.trace_context = getattr(job, "trace_context", {}) or {}
+        with self._timeout_lock:
+            entry = self._job_timeouts.get(job_id) or {}
+            spec = entry.get("soft_spec")
+        elapsed = time.time() - float(job.start_time or time.time())
+        error = ExecutionTimeoutException(
+            job.action_name,
+            seconds,
+            device_id=job.device_id,
+            elapsed_seconds=elapsed,
+        )
+        logger.warning("[JobExecutionBackend] %s: %s", job_log, error)
+        return_info = serialize_result_info(str(error), False, {})
+        return_info["error_info"] = error.to_error_info()
+        if not self._begin_action_error_decision(
+            item,
+            return_info,
+            {},
+            soft_timeout={"seconds": seconds, "spec": spec},
+        ):
+            # 没有能决策的 bridge：不能替操作员终止动作，只留告警
+            logger.warning(
+                "[JobExecutionBackend] execution_timeout for %s has no decision bridge; "
+                "action keeps running",
+                job_log,
+            )
+
     def _handle_finished(
         self,
         job_id: str,
@@ -1336,6 +1826,7 @@ class JobExecutionBackend:
         return_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         finished_job = self.device_manager.get_job_info(job_id)
+        self._forget_job_timeouts(job_id)
         try:
             if finished_job is not None:
                 self.device_manager.end_job(job_id)

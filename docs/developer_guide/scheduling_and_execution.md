@@ -104,6 +104,18 @@ attempt_count` 是当前 attempt 的投影，只由 store 在同一事务里随 
   重新预留库存、申请资源并下发，DAG 节点保持运行中，任务不中断。节点运行永远不会因
   retry 而显示 failed。重试上限由注册表 `error_policy.max_retries` 决定（缺省 3），
   Host 报告只如实携带 `retry_count / max_retries`，超限的 `retry` 在本机放行时被拒绝。
+- `wait`（仅 `execution_timeout` 软超时决策，`exception_type=ExecutionTimeoutException`）：
+  动作从未停止，执行面按同样秒数重新计时，调度器把 attempt 与节点运行从
+  `intervention_required` 收回 `running`（`control_data.pending_decision` 移入
+  `resumed_decisions`）；不产生新 attempt。动作在等待期间真实完成时同样收回决策，真实结果
+  照常收口。
+
+超时看门狗在派发前解析：节点 `execution_policy.timeout_seconds` /
+`execution_timeout_seconds`（正整数）显式声明优先，否则取注册表 `@action(timeout /
+execution_timeout)`，软超时表达式（如 `duration * 1.5 + 30`）用最终 `action_args` 求值；
+解析结果随 `execute_job` 载荷下发（`timeout_seconds` / `execution_timeout_seconds`），软超时秒数
+写回节点运行的 `execution_timeout_seconds` 供前端展示。硬超时到期由执行面协作式取消动作并以
+`TimeoutException` 进入本决策链，节点运行 `error_info[0].code=action_timeout`。
 
 任务恢复（进程重启）以节点运行为判定单元：在飞的 attempt 与其节点运行同时转
 `execution_unknown`；历史 failed attempt 不参与判定。设备是否已经做过这一步无法证明，
@@ -137,6 +149,9 @@ attempt_count` 是当前 attempt 的投影，只由 store 在同一事务里随 
 
 Edge 不根据单个 Job 反推整图，也不在本地创建 retry。此模式下 retry 是 Backend 新建的
 attempt 和新 `job_uuid`（与 4.1 本机调度器的 retry 语义相同，只是调度权威在远端）。
+软超时决策的 `wait` 对应 `resume_pending` 命令：Edge 关闭已打开的终态闸门（job 从
+`terminal_waiting` 回到 `running`）、重新计时，并回发 `execution.error_resumed` 事件；动作在等待
+期间真实完成时 Edge 同样先发该事件再发终态事件。
 
 ## 5. 一轮统一调度如何进行
 

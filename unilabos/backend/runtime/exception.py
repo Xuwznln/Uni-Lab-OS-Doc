@@ -1,8 +1,81 @@
-"""设备运行时异常：类解析失败、跨设备动作失败、Action 结果失败。"""
+"""设备运行时异常：类解析失败、跨设备动作失败、Action 结果失败、动作超时。"""
+
+from typing import Any, Dict, List, Optional
 
 
 class DeviceClassInvalid(Exception):
     pass
+
+
+class ActionTimeoutBase(RuntimeError):
+    """``@action`` 超时闸门触发时由执行面构造的异常基类。
+
+    子类通过 ``category`` / ``severity`` 与 ``unilabos.utils.exception`` 异常族同形，
+    :meth:`to_error_info` 产出的字典与 HostLink ``exception_error_info`` 一致，
+    可直接进入错误决策链（``error_policy.options`` 按 ``exception_type`` 匹配）。
+    """
+
+    category = "timeout"
+    severity = "error"
+
+    def __init__(
+        self,
+        action_name: str,
+        timeout_seconds: float,
+        *,
+        device_id: str = "",
+        elapsed_seconds: Optional[float] = None,
+        message: str = "",
+    ) -> None:
+        self.action_name = action_name
+        self.device_id = device_id
+        self.timeout_seconds = float(timeout_seconds)
+        self.elapsed_seconds = elapsed_seconds
+        super().__init__(message or self._default_message())
+
+    def _default_message(self) -> str:
+        target = f"{self.device_id}.{self.action_name}" if self.device_id else self.action_name
+        return f"动作 {target} 执行超时 (>{self.timeout_seconds:g}s)"
+
+    def to_error_info(self) -> Dict[str, Any]:
+        """错误决策报告使用的结构化异常身份。"""
+
+        mro: List[str] = [
+            klass.__name__
+            for klass in type(self).__mro__
+            if klass not in (object, BaseException)
+        ]
+        info: Dict[str, Any] = {
+            "action_name": self.action_name,
+            "exception_type": type(self).__name__,
+            "exception_mro": mro,
+            "error_message": str(self),
+            "traceback": "",
+            "category": self.category,
+            "severity": self.severity,
+            "timeout_seconds": self.timeout_seconds,
+        }
+        if self.elapsed_seconds is not None:
+            info["elapsed_seconds"] = float(self.elapsed_seconds)
+        return info
+
+
+class TimeoutException(ActionTimeoutBase):
+    """``@action(timeout=...)`` 硬超时：执行面已对动作发起协作式取消，attempt 以失败进入决策链。"""
+
+    severity = "error"
+
+    def _default_message(self) -> str:
+        return super()._default_message() + "，已请求取消该动作"
+
+
+class ExecutionTimeoutException(ActionTimeoutBase):
+    """``@action(execution_timeout=...)`` 业务软超时：动作仍在执行，等待操作员决定继续等待或终止。"""
+
+    severity = "warning"
+
+    def _default_message(self) -> str:
+        return super()._default_message() + "，动作仍在执行中，请选择继续等待或终止"
 
 
 class DeviceActionError(RuntimeError):

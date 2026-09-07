@@ -136,3 +136,26 @@ attempt（`exception_type=ExecutionStateUnknown`，选项 `retry` / `skip` /
 每个 action 的 completion 固定包含 `error_policy`；未配置时为 `{}`。策略由后端用于前端
 展示、retry 上限、超时默认动作和 fallback 调度，Host 只负责按异常 MRO 选择并上报对应
 option 列表。
+
+## 8. 超时闸门：`timeout` 与 `execution_timeout`
+
+`@action(timeout=..., execution_timeout=...)`（见 `add_device.md` §动作方法）由执行面
+`JobExecutionBackend` 在动作真正下发后启动看门狗，两者都进入本文的决策链，但语义不同：
+
+| | `timeout`（硬超时） | `execution_timeout`（业务软超时） |
+|---|---|---|
+| 声明 | 正数秒 | 正数秒，或引用动作入参的四则运算表达式，如 `"duration * 1.5 + 30"` |
+| 求值 | 声明即定 | 调度器派发前按**最终** `action_args`（叠加注册表 `goal_default`）求值；节点 `execution_policy.execution_timeout_seconds`（正整数）显式声明优先 |
+| 到期动作 | 协作式取消动作（`cancel_goal`；HostLink 本地运行时同时以 `asyncio.wait_for` 真正取消协程动作） | **不取消**，动作继续执行 |
+| 报告 | `exception_type=TimeoutException`，`category=timeout`，`severity=error`，`timeout_kind=timeout` | `exception_type=ExecutionTimeoutException`，`severity=warning`，`timeout_kind=execution_timeout`，`action_still_running=true` |
+| 选项 | 与普通失败相同（`error_policy` 按异常类名匹配；缺省 `retry` / `abort` / `operator_intervention`） | 额外前置一个 `wait`（继续等待，按同样秒数重新计时）；其余选项先取消动作再按失败放行 |
+| 设备迟到的结果 | 忽略（终态已由闸门决定） | 优先于待决策：决策被自动收回（`selected_action=superseded`），真实结果照常放行 |
+
+`wait` 的收回在两种拓扑下都成立：本机调度时调度器把 attempt 与节点运行从
+`intervention_required` 收回 `running`（`control_data.resumed_decisions` 留痕）；Backend-controlled
+（默认两进程 / `--role backend`）时权威签发 `runtime.v1` 的 `resume_pending` 命令，Edge 关闭终态
+闸门、job 回到 `running` 并回发 `execution.error_resumed` 事件。执行面的报告字段
+`timeout_seconds` / `timeout_spec` 供前端展示阈值与来源。
+
+节点运行的 `error_info` 对超时失败记 `code=action_timeout`（附 `exception_type`、`message`、
+`timeout_seconds`），普通失败仍为 `action_failed`。

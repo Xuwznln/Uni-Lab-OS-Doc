@@ -48,7 +48,7 @@ Usage:
 from enum import Enum
 from functools import wraps
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -394,6 +394,8 @@ def action(
     feedback_interval: Optional[float] = None,
     error_policy: Optional[Dict[str, Any]] = None,
     materials_need_lock: Optional[List[str]] = None,
+    timeout: Optional[float] = None,
+    execution_timeout: Optional[Union[float, str]] = None,
 ):
     """
     动作方法装饰器
@@ -431,6 +433,13 @@ def action(
                       unilabos.registry.action_policy.ErrorPolicy。
         materials_need_lock: 本动作执行期间需要独占的物料参数名列表。参数值
                              必须能解析出由物料权威分配的 UUID。
+        timeout: 硬超时（秒，正数）。到期后执行面协作式取消动作，并以
+                 TimeoutException 进入错误决策链；None 表示不限时。
+        execution_timeout: 业务软超时。秒数，或引用动作入参的四则运算表达式
+                           （如 "duration * 1.5 + 30"，支持 + - * /、括号、一元负号）。
+                           到期后动作继续执行，执行面以 ExecutionTimeoutException 打开
+                           一条带 wait 选项的决策；表达式在下发时按真实 action_args
+                           （叠加 goal_default）求值。详见 unilabos.registry.action_timeout。
     """
 
     def decorator(func: F) -> F:
@@ -478,11 +487,28 @@ def action(
             normalize_material_parameter_names,
         )
 
+        signature_parameters = _inspect.signature(func).parameters
         meta["materials_need_lock"] = normalize_material_parameter_names(
             materials_need_lock,
-            action_parameter_names=_inspect.signature(func).parameters,
+            action_parameter_names=signature_parameters,
             action_name=func.__qualname__,
         )
+        from unilabos.registry.action_timeout import (
+            normalize_action_timeout,
+            normalize_execution_timeout,
+        )
+
+        # 与 feedback_interval / node_type 一样：只在声明了才写入 meta，避免注册表 YAML 全量抖动
+        normalized_timeout = normalize_action_timeout(timeout, action_name=func.__qualname__)
+        if normalized_timeout is not None:
+            meta["timeout"] = normalized_timeout
+        normalized_execution_timeout = normalize_execution_timeout(
+            execution_timeout,
+            action_parameter_names=signature_parameters,
+            action_name=func.__qualname__,
+        )
+        if normalized_execution_timeout is not None:
+            meta["execution_timeout"] = normalized_execution_timeout
         wrapper._action_registry_meta = meta  # type: ignore[attr-defined]
         wrapper._action_error_policy = normalized_error_policy  # type: ignore[attr-defined]
 

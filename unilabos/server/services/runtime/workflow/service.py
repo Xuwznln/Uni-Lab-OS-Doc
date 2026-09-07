@@ -657,6 +657,16 @@ class WorkflowService(WorkflowStore):
     ) -> Dict[str, Any]:
         return self.mark_job_decision_pending(job_uuid, report)
 
+    def mark_workflow_node_job_decision_resumed(
+        self, job_uuid: str, decision_id: str = ""
+    ) -> Dict[str, Any]:
+        return self.mark_job_decision_resumed(job_uuid, decision_id)
+
+    def set_workflow_node_run_execution_timeout(
+        self, run_uuid: str, seconds: int
+    ) -> Dict[str, Any]:
+        return self.set_node_run_execution_timeout(run_uuid, seconds)
+
     def record_workflow_node_job_terminal(
         self,
         job_uuid: str,

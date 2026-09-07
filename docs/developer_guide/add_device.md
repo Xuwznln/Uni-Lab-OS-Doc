@@ -330,6 +330,43 @@ async def async_operation(self, duration: float) -> Dict[str, Any]:
 - 自动注册为设备 Action；ROS backend 使用 ROS2，HostLink 使用 TCP RPC
 - 支持参数和返回值
 
+### 超时：`timeout` 与 `execution_timeout`
+
+`@action` 提供两道彼此独立的超时闸门，都由执行面在动作真正下发后启动看门狗，并在到期时进入
+错误决策链（`/api/v1/error-decisions`）：
+
+```python
+from unilabos.registry.decorators import action
+
+@action(
+    description="升温到目标温度",
+    timeout=600,                              # 硬超时：600 s 后取消动作，attempt 以 TimeoutException 进决策
+    execution_timeout="duration * 1.5 + 30",  # 业务软超时：按入参求值；到期只提醒，动作继续执行
+)
+async def heat_to(self, temperature: float = 25.0, duration: float = 60.0) -> Dict[str, Any]:
+    """升温并保温。
+
+    Args:
+        temperature[目标温度]: 单位摄氏度。
+        duration[保温时长]: 单位秒。
+    """
+    ...
+```
+
+| 参数 | 取值 | 到期行为 |
+|---|---|---|
+| `timeout` | 正数秒 | 执行面对动作发起协作式取消（HostLink 本地运行时同时用 `asyncio.wait_for` 真正取消协程动作；同步方法的线程无法被杀死，只是结果被丢弃）；attempt 以 `exception_type=TimeoutException`（`category=timeout`）进入决策链，选项与普通失败相同 |
+| `execution_timeout` | 正数秒，或只引用**本动作入参**的四则运算表达式（`+ - * /`、括号、一元负号、数字字面量，如 `"duration * 1.5 + 30"`） | 动作**不被取消**；执行面以 `exception_type=ExecutionTimeoutException`（`severity=warning`，报告带 `action_still_running=true`）打开一条决策，选项前置 `wait`（继续等待并按同样秒数重新计时）；选 `abort` / `retry` / `operator_intervention` 时才取消动作。动作在等待期间真实完成则真实结果优先，决策自动收回 |
+
+表达式在声明期只校验语法与参数名（引用了非入参名会在 `@action` 或 `--check_mode` 时报错），
+注册表保存归一化后的字符串（如 `duration * 1.5 + 30`）；派发前由调度器用**最终**
+`action_args`（叠加注册表 `goal_default`，也就是函数签名默认值）求值，参数缺失或不是数字时
+只记录告警、放弃这一道看门狗，不阻断下发。工作流节点还可以用 `execution_policy.timeout_seconds` /
+`execution_policy.execution_timeout_seconds`（正整数，0 = 未声明）覆盖注册表声明。
+
+> `error_policy.options` 按异常类名匹配：需要给超时定制选项时，用 `"TimeoutException"` /
+> `"ExecutionTimeoutException"` 作为键。两个超时可以同时声明，软超时应小于硬超时，否则永远不会先触发。
+
 ### 返回值设计指南
 
 > **⚠️ 重要：返回值会自动显示在前端**

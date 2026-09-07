@@ -34,9 +34,12 @@ graphs / lab / scheduler / restart / health；Host 专有的 `runtime`、`teleme
 Graph Authority（`POST /graphs` 可随请求带 `device_site_templates`，用 Host 自己的注册表实例化
 模板 Site）；Host 的 `@workflow` 默认子工作流经 Workflow API 上报（`POST /workflows` 可带稳定
 `workflow_uuid`）。两侧的控制面在 `runtime.v1` 之内闭环：Host 上报的注册表快照带
-`always_free` / `error_policy`，权威据此解析动作锁与重试上限；Host 失败打开终态闸门后发
+`always_free` / `error_policy` / `timeout` / `execution_timeout`，权威据此解析动作锁、重试上限与
+超时看门狗（软超时表达式按最终参数求值后随 `execute_job` 下发）；Host 失败打开终态闸门后发
 `execution.error_pending`，权威登记为 `error-decisions` 条目并让节点运行进入
 `intervention_required`，前端在权威上决策 → `release_failed` / `replace_result` 命令 → Host 放行；
+`execution_timeout` 软超时的决策多一个 `wait` 选项 → `resume_pending` 命令 → Host 关闭闸门重新计时，
+节点运行收回 `running`（Host 回发 `execution.error_resumed`）；
 权威（物料权威）需要把 transfer 的 unload/load 投影或前端物料变更送到设备时，经 `backend_http` 让
 Host 执行 `POST /api/v1/hostlink/{material-sync,notify-device}`（`server/api/host_relay.py`，不进 OpenAPI）。`GET /api/v1/health` 的 `execution`
 在权威上是 `ready` / `restarting`（Host 子进程是否在线），前端按能力面降级。

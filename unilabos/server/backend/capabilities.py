@@ -32,6 +32,8 @@ _DESCRIPTOR_FIELDS = (
     "feedback_interval",
     "node_type",
     "materials_need_lock",
+    "timeout",
+    "execution_timeout",
     "goal",
     "feedback",
     "result",

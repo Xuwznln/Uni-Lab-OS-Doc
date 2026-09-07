@@ -24,6 +24,7 @@ from typing import (
 )
 
 from unilabos.backend.runtime.action import ActionContext
+from unilabos.backend.runtime.exception import TimeoutException
 from unilabos.backend.runtime.driver_creator import (
     is_workstation_driver,
     select_driver_creator,
@@ -935,6 +936,16 @@ class HostLinkDeviceNode(DeviceNode):
             context.raise_if_cancelled()
             context.publish_feedback(await self._feedback_values(mapping))
 
+    @staticmethod
+    def _hard_timeout_seconds(mapping: Dict[str, Any]) -> Optional[float]:
+        """注册表 ``timeout`` 声明（秒）；无效值按未声明处理，由执行面看门狗兜底。"""
+
+        value = mapping.get("timeout") if isinstance(mapping, dict) else None
+        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        seconds = float(value)
+        return seconds if seconds > 0 else None
+
     async def _execute_action(
         self,
         action: Callable[..., Any],
@@ -947,14 +958,29 @@ class HostLinkDeviceNode(DeviceNode):
             feedback_task = asyncio.create_task(
                 self._poll_action_feedback(context, mapping)
             )
+        hard_timeout = self._hard_timeout_seconds(mapping)
         try:
             context.raise_if_cancelled()
             if inspect.iscoroutinefunction(action):
-                result = await action(**kwargs)
+                pending: Any = action(**kwargs)
             else:
-                result = await asyncio.to_thread(action, **kwargs)
-                if inspect.isawaitable(result):
-                    result = await result
+                pending = asyncio.to_thread(action, **kwargs)
+            try:
+                if hard_timeout is not None:
+                    # @action(timeout=...) 硬超时：协程动作被真正取消；同步动作只能放弃等待，
+                    # 线程继续跑完但结果被丢弃。两种情况都以 TimeoutException 进入决策链。
+                    result = await asyncio.wait_for(pending, timeout=hard_timeout)
+                else:
+                    result = await pending
+            except asyncio.TimeoutError as exc:
+                context.request_cancel()
+                raise TimeoutException(
+                    getattr(action, "__name__", "action"),
+                    hard_timeout or 0.0,
+                    device_id=self.device_id,
+                ) from exc
+            if inspect.isawaitable(result):
+                result = await result
             context.raise_if_cancelled()
             return result
         except AttributeError as exc:

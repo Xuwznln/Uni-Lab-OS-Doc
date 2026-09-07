@@ -21,6 +21,10 @@ import yaml
 
 from unilabos.config.config import BasicConfig
 from unilabos.registry.utils.backend_metadata import normalize_supported_backends
+from unilabos.registry.action_timeout import (
+    normalize_action_timeout,
+    normalize_execution_timeout,
+)
 from unilabos.registry.material_locks import normalize_material_parameter_names
 from unilabos.registry.decorators import (
     get_device_meta,
@@ -89,6 +93,34 @@ else:
 _module_hash_cache: Dict[str, Optional[str]] = {}
 
 _DICT_LIKE_TYPE_NAMES = frozenset({"dict", "mapping", "mutablemapping", "ordereddict", "typeddict"})
+
+
+def _apply_action_timeouts(
+    entry: Dict[str, Any],
+    source: Any,
+    *,
+    action_parameter_names: Any,
+    action_name: str,
+) -> None:
+    """把 ``timeout`` / ``execution_timeout`` 声明写入注册表动作条目。
+
+    与 ``always_free`` 一样只在声明了才写键，未声明的动作条目保持原形状，
+    避免重生成 YAML 时全量抖动。表达式按动作入参名校验并归一化。
+    """
+
+    if not isinstance(source, dict):
+        return
+    parameter_names = list(action_parameter_names)
+    hard = normalize_action_timeout(source.get("timeout"), action_name=action_name)
+    if hard is not None:
+        entry["timeout"] = hard
+    soft = normalize_execution_timeout(
+        source.get("execution_timeout"),
+        action_parameter_names=parameter_names,
+        action_name=action_name,
+    )
+    if soft is not None:
+        entry["execution_timeout"] = soft
 
 
 def _normalize_status_return_type(return_type: Any) -> str:
@@ -1018,6 +1050,12 @@ class Registry:
                 action_parameter_names=(param["name"] for param in params),
                 action_name=action_name,
             )
+            _apply_action_timeouts(
+                entry,
+                action_args or {},
+                action_parameter_names=(param["name"] for param in params),
+                action_name=action_name,
+            )
             nt = normalize_enum_value((action_args or {}).get("node_type"), NodeType)
             if nt:
                 entry["node_type"] = nt
@@ -1167,6 +1205,12 @@ class Registry:
                 action_parameter_names=(
                     param["name"] for param in method_params
                 ),
+                action_name=action_name,
+            )
+            _apply_action_timeouts(
+                action_entry,
+                action_args,
+                action_parameter_names=(param["name"] for param in method_params),
                 action_name=action_name,
             )
             nt = normalize_enum_value(action_args.get("node_type"), NodeType)
@@ -2217,6 +2261,13 @@ class Registry:
                         }
                         if v.get("always_free"):
                             entry["always_free"] = True
+                        # 手写 YAML 里的超时声明同样经校验后保留（表达式归一化）
+                        _apply_action_timeouts(
+                            entry,
+                            old_cfg,
+                            action_parameter_names=(param["name"] for param in v["args"]),
+                            action_name=action_key,
+                        )
                         old_node_type = old_cfg.get("node_type")
                         if old_node_type in [
                             NodeType.ILAB.value,

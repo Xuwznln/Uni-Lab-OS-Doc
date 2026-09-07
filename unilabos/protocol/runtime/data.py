@@ -79,6 +79,7 @@ class CommandEnvelope(ServerObject):
         "cancel_job",
         "release_failed",
         "replace_result",
+        "resume_pending",
         "inventory_apply",
         "reconcile",
     ]
@@ -96,6 +97,7 @@ class CommandEnvelope(ServerObject):
             "cancel_job",
             "release_failed",
             "replace_result",
+            "resume_pending",
         }
         if requires_job != (self.job_uuid is not None):
             raise ValueError("command_type and job_uuid do not agree")
@@ -206,6 +208,29 @@ class ErrorGateDecision(ServerObject):
         return self
 
 
+class ErrorGateResume(ServerObject):
+    """关闭一个 ``execution_timeout`` 软超时打开的终态闸门：动作仍在执行，attempt 回到 running。
+
+    Backend 决策 ``wait`` 时带 ``decision_command_uuid``（``resume_pending`` 命令），并向执行面
+    投递同名 adapter 命令；动作在等待期间真实完成、执行面自行收回决策时不带命令。
+    """
+
+    expected_version: int = Field(ge=1)
+    error_uuid: NonEmptyStr
+    reason: str = ""
+    decision_command_uuid: Optional[NonEmptyStr] = None
+    adapter_command_uuid: Optional[NonEmptyStr] = None
+    payload_uuid: Optional[NonEmptyStr] = None
+    decision: JsonObject = Field(default_factory=dict)
+    resolved_at_ms: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_command(self) -> "ErrorGateResume":
+        if (self.decision_command_uuid is None) != (self.adapter_command_uuid is None):
+            raise ValueError("decision and adapter command uuids must be set together")
+        return self
+
+
 class AdapterCommandEnqueue(ServerObject):
     adapter_command_uuid: NonEmptyStr
     job_uuid: Optional[NonEmptyStr] = None
@@ -214,7 +239,12 @@ class AdapterCommandEnqueue(ServerObject):
     trigger_event_uuid: Optional[NonEmptyStr] = None
     target_adapter_epoch: Optional[NonEmptyStr] = None
     command_type: Literal[
-        "execute", "cancel", "release_failed", "replace_result", "reconcile_state"
+        "execute",
+        "cancel",
+        "release_failed",
+        "replace_result",
+        "resume_pending",
+        "reconcile_state",
     ]
     payload_uuid: Optional[NonEmptyStr] = None
     available_at_ms: int = Field(default=0, ge=0)
@@ -288,6 +318,7 @@ __all__ = [
     "EndpointSnapshotUpsert",
     "ErrorGateDecision",
     "ErrorGateOpen",
+    "ErrorGateResume",
     "ExecutionJobCreate",
     "ExecutionJobCancel",
     "ExecutionJobFeedback",

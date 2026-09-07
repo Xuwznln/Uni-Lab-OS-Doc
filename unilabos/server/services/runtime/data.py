@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from typing import Any, Optional
 
 from unilabos.server.database.sqlite_domain import DomainDatabase, SqliteDomain
@@ -37,6 +38,7 @@ from unilabos.protocol.runtime import (
     EndpointSnapshotUpsert,
     ErrorGateDecision,
     ErrorGateOpen,
+    ErrorGateResume,
     ExecutionJobCancel,
     ExecutionJobCreate,
     ExecutionJobFeedback,
@@ -1177,6 +1179,106 @@ class RuntimeService(SqliteDomain):
                 timestamp=timestamp,
             )
             self._complete_command(command, timestamp=timestamp)
+            return updated
+
+    def resume_error_gate(
+        self, job_uuid: str, value: ErrorGateResume
+    ) -> ExecutionJobRecord:
+        """关闭 ``execution_timeout`` 软超时打开的终态闸门：动作从未停止，job 回到 running。
+
+        与 :meth:`decide_error_gate` 不同，这里不产生终态：闸门字段全部清空，后续真实
+        结果或再次超时都可以重新打开闸门。带 ``decision_command_uuid`` 时是 Backend 的
+        ``resume_pending`` 命令，需向执行面投递同名 adapter 命令让它重新计时；不带时是
+        执行面因动作真实完成而自行收回决策，只需同步本地状态。两种情况都向 Backend 发
+        ``execution.error_resumed`` 事件，让权威撤销待决策并把节点运行收回 running。
+        """
+
+        timestamp = self._now_ms(value.resolved_at_ms)
+        with self.write():
+            current = self.find_job(job_uuid)
+            if current is None:
+                raise RuntimeNotFoundError(f"execution job {job_uuid!r} not found")
+            self._require_version(current.version, value.expected_version, "job")
+            if current.terminal_gate_state not in {"waiting_backend", "backend_confirmed"}:
+                raise RuntimeConflictError("job has no backend-waiting error gate")
+            if current.terminal_error_uuid != value.error_uuid:
+                raise RuntimeConflictError("resume does not match the pending job error")
+            if current.status != "terminal_waiting":
+                raise RuntimeConflictError(
+                    f"job status {current.status!r} cannot resume from an error gate"
+                )
+            command = None
+            if value.decision_command_uuid is not None:
+                command = self.find_command(value.decision_command_uuid)
+                if command is None:
+                    raise RuntimeNotFoundError(
+                        f"decision command {value.decision_command_uuid!r} not found"
+                    )
+                if command.command_type != "resume_pending" or command.job_uuid != job_uuid:
+                    raise RuntimeValidationError(
+                        "resume command type/job_uuid does not match the job"
+                    )
+                if current.endpoint_uuid is None:
+                    raise RuntimeValidationError(
+                        "routed endpoint is required to resume an execution error gate"
+                    )
+
+            updated = current.model_copy(
+                update={
+                    "status": "running",
+                    "error_code": None,
+                    "error_summary": None,
+                    "terminal_gate_state": "none",
+                    "terminal_error_uuid": None,
+                    "terminal_required_scheduler_revision": None,
+                    "terminal_request_event_uuid": None,
+                    "terminal_opened_at_ms": None,
+                    "terminal_confirmed_scheduler_revision": None,
+                    "terminal_decision_command_uuid": None,
+                    "terminal_decision": {},
+                    "terminal_resolved_at_ms": None,
+                    "version": current.version + 1,
+                }
+            )
+            self._update_job(updated, expected_version=current.version)
+            if command is not None and value.adapter_command_uuid is not None:
+                endpoint = self.find_endpoint(current.endpoint_uuid or "")
+                if endpoint is None:
+                    raise RuntimeNotFoundError(
+                        f"endpoint {current.endpoint_uuid!r} not found"
+                    )
+                self._enqueue_adapter_command_locked(
+                    AdapterCommandEnqueue(
+                        adapter_command_uuid=value.adapter_command_uuid,
+                        job_uuid=job_uuid,
+                        endpoint_uuid=current.endpoint_uuid or "",
+                        source_command_uuid=value.decision_command_uuid,
+                        target_adapter_epoch=endpoint.adapter_epoch,
+                        command_type="resume_pending",
+                        payload_uuid=value.payload_uuid,
+                        available_at_ms=timestamp,
+                    ),
+                    timestamp=timestamp,
+                )
+                self._complete_command(command, timestamp=timestamp)
+            self._enqueue_backend_event_locked(
+                BackendEventEnqueue(
+                    event_uuid=str(uuid.uuid4()),
+                    event_type="execution.error_resumed",
+                    aggregate_type="execution_job",
+                    aggregate_uuid=job_uuid,
+                    aggregate_version=updated.version,
+                    job_uuid=job_uuid,
+                    summary={
+                        "status": "running",
+                        "error_uuid": value.error_uuid,
+                        "reason": value.reason,
+                        **value.decision,
+                    },
+                    available_at_ms=timestamp,
+                ),
+                timestamp=timestamp,
+            )
             return updated
 
     # -- Adapter command outbox -----------------------------------------

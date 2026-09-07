@@ -298,6 +298,13 @@ def _action_definition(raw_action: Any) -> Dict[str, Any]:
     error_policy = action.get("error_policy")
     if isinstance(error_policy, Mapping) and error_policy:
         definition["error_policy"] = copy.deepcopy(dict(error_policy))
+    # 超时声明随注册表上报，前端 / 权威据此展示动作的硬超时与软超时（表达式原样保留）。
+    for key in ("timeout", "execution_timeout"):
+        value = action.get(key)
+        if isinstance(value, bool) or value is None:
+            continue
+        if isinstance(value, (int, float)) or (isinstance(value, str) and value.strip()):
+            definition[key] = value
     return definition
 
 

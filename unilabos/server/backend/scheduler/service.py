@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -82,6 +83,28 @@ _RECONCILIATION_OPTIONS = (
         "description": "记为失败，任务按失败收敛",
     },
 )
+
+
+_TIMEOUT_EXCEPTION_TYPES = frozenset({"TimeoutException", "ExecutionTimeoutException"})
+
+
+def _failure_error_info(return_info: Any) -> Dict[str, Any]:
+    """失败 attempt 写入节点运行的 ``error_info`` 条目：超时闸门触发的失败单独成码。"""
+
+    info = (return_info or {}).get("error_info") if isinstance(return_info, dict) else None
+    if not isinstance(info, dict):
+        return {"code": "action_failed"}
+    exception_type = str(info.get("exception_type") or "")
+    if exception_type not in _TIMEOUT_EXCEPTION_TYPES:
+        return {"code": "action_failed"}
+    entry: Dict[str, Any] = {
+        "code": "action_timeout",
+        "exception_type": exception_type,
+        "message": str(info.get("error_message") or ""),
+    }
+    if info.get("timeout_seconds") is not None:
+        entry["timeout_seconds"] = info["timeout_seconds"]
+    return entry
 
 
 class BackendSchedulingError(RuntimeError):
@@ -432,6 +455,8 @@ class BackendScheduler:
                 "workflow_node_uuid": workflow_node_uuid,
                 # 节点显式声明优先；未声明时派发前按注册表 @action(always_free) 解析
                 "always_free_policy": policy.get("always_free"),
+                # 节点级超时（冻结语义 execution_timeout_seconds / 新增 timeout_seconds，0 = 未声明）
+                "execution_policy": dict(policy),
                 "base_param": param,
                 "edges": list(plan.get("edges") or []),
                 "runs_by_node": {
@@ -660,6 +685,12 @@ class BackendScheduler:
                 retry_of_job_uuid=spec.get("retry_of_job_uuid"),
             )
             payload["always_free"] = spec.get("always_free", node.always_free)
+            timeouts = self._action_timeouts(node, spec, args)
+            if timeouts.get("timeout") is not None:
+                payload["timeout_seconds"] = float(timeouts["timeout"])
+            if timeouts.get("execution_timeout") is not None:
+                payload["execution_timeout_seconds"] = float(timeouts["execution_timeout"])
+            self._persist_node_run_timeouts(node.node_id, timeouts)
             self.executor.dispatch(payload)
         except Exception:
             with self._guard:
@@ -731,6 +762,71 @@ class BackendScheduler:
         if not callable(resolver):
             return node.always_free
         return bool(resolver(node.device_id, node.action))
+
+    def _action_timeouts(
+        self, node: DagNode, spec: Dict[str, Any], action_args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """派发前解析该 attempt 的硬 / 软超时（秒）。
+
+        节点 ``execution_policy.timeout_seconds`` / ``execution_timeout_seconds``（正整数）
+        显式声明优先；否则取注册表 ``@action(timeout / execution_timeout)``，软超时表达式
+        用**最终** ``action_args``（含上游 handle 解析结果）求值。任何一步失败都只记录，
+        不阻断派发——超时是安全网，不是准入条件。
+        """
+
+        resolved: Dict[str, Any] = {
+            "timeout": None,
+            "execution_timeout": None,
+            "execution_timeout_spec": None,
+            "source": {},
+        }
+        policy = spec.get("execution_policy") or {}
+        for policy_key, target in (
+            ("timeout_seconds", "timeout"),
+            ("execution_timeout_seconds", "execution_timeout"),
+        ):
+            value = policy.get(policy_key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            if value > 0:
+                resolved[target] = float(value)
+                resolved["source"][target] = "execution_policy"
+        if resolved["timeout"] is not None and resolved["execution_timeout"] is not None:
+            return resolved
+        resolver = getattr(self.executor, "resolve_action_timeouts", None)
+        if not callable(resolver):
+            return resolved
+        try:
+            registry = resolver(node.device_id, node.action, action_args) or {}
+        except Exception:  # noqa: BLE001 - 注册表解析失败不阻断派发
+            logger.exception(
+                "failed to resolve action timeouts for %s.%s", node.device_id, node.action
+            )
+            return resolved
+        for key in ("timeout", "execution_timeout"):
+            if resolved[key] is None and registry.get(key) is not None:
+                resolved[key] = float(registry[key])
+                resolved["source"][key] = "registry"
+        resolved["execution_timeout_spec"] = registry.get("execution_timeout_spec")
+        if registry.get("error"):
+            resolved["error"] = registry["error"]
+        return resolved
+
+    def _persist_node_run_timeouts(self, run_uuid: str, timeouts: Dict[str, Any]) -> None:
+        """把解析出的软超时秒数写回节点运行（冻结字段 ``execution_timeout_seconds``），供前端展示。"""
+
+        seconds = timeouts.get("execution_timeout")
+        if seconds is None:
+            return
+        setter = getattr(self.workflow, "set_workflow_node_run_execution_timeout", None)
+        if not callable(setter):
+            return
+        try:
+            setter(run_uuid, int(math.ceil(float(seconds))))
+        except Exception:  # noqa: BLE001 - 展示字段写失败不影响派发
+            logger.warning(
+                "failed to persist execution_timeout_seconds for node run %s", run_uuid
+            )
 
     def _release_job_resources(self, job_uuid: str, *, canceled: bool) -> None:
         """释放一个 attempt 持有的资源申请。"""
@@ -1054,7 +1150,9 @@ class BackendScheduler:
                 "suc_type": suc_type,
                 "return_value": ret_value,
             },
-            error_info=[] if success else [{"code": "action_failed"}],
+            error_info=(
+                [] if job_status != "failed" else [_failure_error_info(return_info)]
+            ),
             resolution=resolution if isinstance(resolution, dict) else None,
         )
 
@@ -1145,6 +1243,20 @@ class BackendScheduler:
         if not owned:
             return False
         self.workflow.mark_workflow_node_job_decision_pending(job_uuid, report)
+        return True
+
+    def publish_job_error_decision_resumed(self, report: Dict[str, Any]) -> bool:
+        """执行面决策桥：``execution_timeout`` 决策以 ``wait`` 收敛，或动作在等待期间
+        真实完成——attempt 与节点运行从 ``intervention_required`` 收回 ``running``。"""
+
+        job_uuid = str(report.get("job_id") or "")
+        with self._guard:
+            owned = job_uuid in self._job_runs
+        if not owned:
+            return False
+        self.workflow.mark_workflow_node_job_decision_resumed(
+            job_uuid, str(report.get("decision_id") or "")
+        )
         return True
 
     # ── 重启后的执行态裁决 ──────────────────────────────────────

@@ -7,6 +7,7 @@ import logging
 import threading
 import uuid
 from dataclasses import asdict, is_dataclass
+from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 from unilabos.server.backend.execution_queue import JOB_ORIGIN_BACKEND_CONTROL
@@ -38,6 +39,7 @@ from unilabos.protocol.runtime import (
     EndpointSnapshotUpsert,
     ErrorGateDecision,
     ErrorGateOpen,
+    ErrorGateResume,
     ExecutionJobCancel,
     ExecutionJobCreate,
     ExecutionJobFeedback,
@@ -214,6 +216,13 @@ class WorkflowBusinessCoordinator:
                     command.payload_uuid,
                     document.payload,
                 )
+            elif command.command_type == "resume_pending":
+                self._apply_error_resume(
+                    command.command_uuid,
+                    command.job_uuid or "",
+                    command.payload_uuid,
+                    document.payload,
+                )
             elif command.command_type == "cancel_job":
                 self._apply_cancel(
                     command.command_uuid,
@@ -344,6 +353,9 @@ class WorkflowBusinessCoordinator:
                 "always_free": self._action_always_free(
                     content.device_uuid, content.action_name
                 ),
+                # 调度权威已解析的超时；缺省时执行面按本地注册表副本自行解析
+                "timeout_seconds": content.timeout_seconds,
+                "execution_timeout_seconds": content.execution_timeout_seconds,
             }
         )
 
@@ -412,6 +424,77 @@ class WorkflowBusinessCoordinator:
         )
         self._append_decision_audit(updated, payload_uuid, content)
         self.drain_adapter_commands()
+
+    def _apply_error_resume(
+        self,
+        command_uuid: str,
+        job_uuid: str,
+        payload_uuid: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Backend 对 ``execution_timeout`` 软超时决策选择 ``wait``：关闭终态闸门，job 回到 running，
+        再经 adapter outbox 让执行面重新计时。"""
+
+        content = ErrorDecisionContent.model_validate(payload)
+        if content.selected_action != "wait":
+            raise ValueError("resume_pending only carries the wait decision")
+        job = self.runtime.get_execution_job(job_uuid)
+        if content.decision_uuid != job.terminal_error_uuid:
+            raise ValueError("resume does not match the pending job error")
+        decision = content.model_dump(mode="json", exclude_none=True)
+        decision["action"] = "resume_pending"
+        updated = self.runtime.resume_error_gate(
+            job_uuid,
+            ErrorGateResume(
+                expected_version=job.version,
+                error_uuid=content.decision_uuid,
+                reason=content.reason or "wait",
+                decision_command_uuid=command_uuid,
+                adapter_command_uuid=content.adapter_command_uuid,
+                payload_uuid=payload_uuid,
+                decision=decision,
+            ),
+        )
+        self._append_decision_audit(updated, payload_uuid, content)
+        self.drain_adapter_commands()
+
+    def publish_job_error_decision_resumed(self, report: dict[str, Any]) -> bool:
+        """执行面决策桥：软超时决策被收回（``wait`` 已由 adapter 命令落地，或动作在等待期间真实完成）。
+
+        Backend 主导的 ``wait`` 到这里时闸门已经关闭（``_apply_error_resume``），幂等返回；
+        执行面自行收回（真实结果先到）时在此关闭闸门，并让 ``execution.error_resumed`` 事件
+        告知 Backend 撤销待决策。
+        """
+
+        item = SimpleNamespace(job_id=str(report.get("job_id") or ""))
+        job = self._owned_job(item, "resume")
+        if job is None:
+            return False
+        if job.terminal_gate_state == "none":
+            return True
+        decision_id = str(report.get("decision_id") or "")
+        if decision_id and job.terminal_error_uuid not in {None, decision_id}:
+            return False
+        try:
+            self.runtime.resume_error_gate(
+                job.job_uuid,
+                ErrorGateResume(
+                    expected_version=job.version,
+                    error_uuid=str(job.terminal_error_uuid or decision_id),
+                    reason=str(report.get("reason") or report.get("selected_action") or ""),
+                    decision={
+                        "selected_action": str(report.get("selected_action") or ""),
+                        "decision_id": decision_id,
+                    },
+                ),
+            )
+        except RuntimeConflictError as exc:
+            logger.warning(
+                "[Coordinator] cannot resume error gate for job %s: %s", job.job_uuid, exc
+            )
+            return False
+        self._notify()
+        return True
 
     def _apply_cancel(
         self,
@@ -691,6 +774,36 @@ class WorkflowBusinessCoordinator:
                         job.device_uuid,
                     )
                     applied = resolved is not None
+            elif command.command_type == "resume_pending":
+                # 闸门已在 _apply_error_resume 关闭，decision_uuid 只剩命令正文里有
+                content = self._load_json(command.payload_uuid) if command.payload_uuid else None
+                decision_id = (
+                    str(content.get("decision_uuid") or "") if isinstance(content, dict) else ""
+                )
+                wire = {
+                    "decision_id": decision_id,
+                    "job_id": job.job_uuid,
+                    "device_id": job.device_uuid,
+                    "action": "wait",
+                    "reason": (
+                        str(content.get("reason") or "") if isinstance(content, dict) else ""
+                    ),
+                    "scheduler_updated": True,
+                }
+                applied = bool(
+                    self.executor.handle_action_error_decision(decision_id, job.job_uuid, wire)
+                )
+                if not applied:
+                    # 决策已被执行面自行收回（动作在等待期间完成）或已重放：视为落地
+                    resolved = self.executor.get_resolved_action_error_decision(
+                        decision_id, job.job_uuid, job.device_uuid
+                    )
+                    applied = resolved is not None or job.status in {
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "canceled",
+                    }
             elif command.command_type == "cancel":
                 applied = bool(self.executor.cancel_job(job.job_uuid))
             if not applied:
