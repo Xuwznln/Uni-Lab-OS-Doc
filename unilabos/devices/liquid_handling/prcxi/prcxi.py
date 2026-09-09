@@ -5231,8 +5231,8 @@ class PRCXI9300Api:
 
         - 末步 ``State==2`` 且**已正向观测到本轮执行开始**（``seen_active``）→ 成功；
         - 末步 ``State>2``（报错态）→ 失败；
-        - 到 ``start_deadline`` 仍未观测到本轮执行开始：仅空协议（``num==0``）按完成兜底；
-          有步骤但尚未见到未完成态时**继续等待**（不信任上一轮遗留的 stale ``last==2``）。
+        - 到 ``start_deadline`` 仍未观测到本轮执行开始：继续等待，不做“空协议成功”兜底；
+          避免在设备未初始化 / 步骤状态暂不可读时把 ``num==0`` 误判为成功。
 
         关键：``start()`` 后机器的 ``GetStepStateList`` 存在数秒延迟，仍会返回上一轮
         「已完成」列表（``last==2, completed==num``）。若沿用旧的 ``started`` 判定
@@ -5248,10 +5248,9 @@ class PRCXI9300Api:
         if isinstance(last, int) and last > 2:
             return False
         if not seen_active and time.time() >= start_deadline:
-            # 宽限期到仍未观测到本轮执行开始：空协议按完成兜底；有步骤则继续等待，
-            # 绝不用可能是上一轮遗留的 stale last==2 判成功。
-            if num == 0:
-                return True
+            # 宽限期到仍未观测到本轮执行开始：继续等待，绝不用空步骤兜底判成功。
+            # 空协议应由 run_protocol 上游（steps_todo_list 为空）直接返回，不应在 wait 阶段隐式成功。
+            return None
         return None
 
     def _wait_for_finish_v03(self, timeout_s: Optional[float] = None) -> bool:
