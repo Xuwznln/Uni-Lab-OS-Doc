@@ -3530,6 +3530,47 @@ class LiquidHandlerAbstract(LiquidHandlerMiddleware):
             valid_racks = [r for racks in self._tip_racks_by_type.values() for r in racks]
         self.current_tip = self.iter_tips(valid_racks)
 
+    @staticmethod
+    def _resource_contains_tip_rack(resource: Resource) -> bool:
+        """判断被移除的资源自身或其子孙里是否包含 TipRack/TipSpot。
+
+        清台（clear_device_resources）移除的是 deck 直接子节点（枪头架本身），
+        直接命中；这里额外递归子孙以兼容「移除的是包含枪头架的容器」的场景。
+        """
+        if isinstance(resource, (TipRack, TipSpot)):
+            return True
+        try:
+            for child in getattr(resource, "children", []) or []:
+                if LiquidHandlerAbstract._resource_contains_tip_rack(child):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def resource_tree_remove(self, resources: List[Resource]) -> None:
+        """资源树移除回调（由设备节点 s2c_resource_tree 在卸载前调用）。
+
+        工作流「清台 + create_resource」是一次运行的起点：清台会移除台面上的旧枪头架。
+        若本次移除包含枪头架，则让枪头池失效（``_tip_pools_initialized=False``），
+        下次 ``set_tiprack``（新运行的首个 transfer）会重新扫描 deck 上 create_resource
+        新建的满架，消费游标 ``_tip_next_index`` 随之归零——修复「同一进程多次运行后
+        游标累积、误报 Tip rack exhausted」的问题。
+
+        仅在确实移除枪头架时重置，移除普通板 / 管架不受影响。
+        """
+        if not resources:
+            return
+        if any(self._resource_contains_tip_rack(r) for r in resources):
+            self._tip_pools_initialized = False
+            if hasattr(self, "_ros_node") and self._ros_node is not None:
+                try:
+                    self._ros_node.lab_logger().info(
+                        "[枪头池] 检测到台面枪头架被移除（清台），已标记枪头池待重建，"
+                        "下次 set_tiprack 将重新扫描 deck 并把消费游标归零。"
+                    )
+                except Exception:
+                    pass
+
     async def move_to(self, well: Well, dis_to_top: float = 0, channel: int = 0):
         """
         Move a single channel to a specific well with a given z-height.
