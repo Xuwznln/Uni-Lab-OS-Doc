@@ -5,6 +5,8 @@ import os
 import threading
 import time
 import types
+import urllib.error
+import urllib.request
 from datetime import datetime
 from typing import Any, Dict, Optional
 from functools import wraps
@@ -232,6 +234,14 @@ def _log_coin_cell_record(
 
 
 class CoinCellAssemblyWorkstation(WorkstationBase):
+    # ===================== DUCO 机械臂状态采集配置 ======================
+    # 现场机 172.16.28.102 上常驻的 HTTP 服务已采集新松 DUCO 六轴协作机器人状态，本类只读不写。
+    # 采集周期与 ROS 发布周期统一为同一常量，避免"发布快于采集导致重复发同一帧"。
+    _DUCO_STATE_URL = "http://172.16.28.102:8000/api/state"
+    _DUCO_PERIOD_S = 0.5  # 后台轮询间隔 = ROS topic 发布周期（秒）
+    _DUCO_HTTP_TIMEOUT_S = 1.5  # 单次 HTTP 请求超时（秒），与周期独立
+    _DUCO_MAX_FAIL = 3  # 连续失败次数达到该阈值后丢弃缓存（置 None）
+
     def __init__(self, 
         config: dict = None, 
         deck=None, 
@@ -284,6 +294,51 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         self._elec_bottle_num = 0  # 电解液瓶数（下单后由 coin_cell_start 更新）
         self._observer_running = False  # 旁观者采集运行标志（与 csv_export_running 分开，避免互相干扰）
 
+        """ DUCO 机械臂状态采集（独立于 Modbus 业务，debug_mode 下同样轮询以便本地验证） """
+        self._duco_lock = threading.Lock()  # 保护 _duco_state 的读写
+        self._duco_state = None  # 最近一帧 /api/state 原始 JSON，无有效数据时为 None
+        self._duco_fail_count = 0  # 连续请求失败次数
+        self._duco_thread = threading.Thread(
+            target=self._duco_poll_loop, daemon=True, name="duco-state-poller"
+        )
+        self._duco_thread.start()
+
+    # ===================== DUCO 机械臂状态采集 ======================
+
+    def _duco_poll_loop(self) -> None:
+        """后台守护线程：定期拉取 102 上的 DUCO 状态并写入本地缓存。
+
+        任何网络/解析异常只记 warning 并保留上一次缓存，绝不向外抛出，
+        以免影响工站主流程（Modbus 业务）。连续失败达到 _DUCO_MAX_FAIL 次后
+        认为数据已不可信，将缓存置 None。
+        """
+        while True:
+            try:
+                request = urllib.request.Request(self._DUCO_STATE_URL, method="GET")
+                with urllib.request.urlopen(request, timeout=self._DUCO_HTTP_TIMEOUT_S) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError(f"返回体不是 JSON 对象: {type(payload).__name__}")
+                with self._duco_lock:
+                    self._duco_state = payload
+                    self._duco_fail_count = 0
+            except Exception as e:
+                with self._duco_lock:
+                    self._duco_fail_count += 1
+                    fail_count = self._duco_fail_count
+                    # 连续失败超过阈值则丢弃陈旧缓存，避免对外发布过期位置
+                    if fail_count >= self._DUCO_MAX_FAIL:
+                        self._duco_state = None
+                logger.warning(f"[DUCO] 读取机械臂状态失败（连续第 {fail_count} 次）: {e}")
+            time.sleep(self._DUCO_PERIOD_S)
+
+    def _duco_snapshot(self) -> Optional[Dict[str, Any]]:
+        """取一份 DUCO 状态缓存的浅拷贝（加锁），无有效数据时返回 None"""
+        with self._duco_lock:
+            if self._duco_state is None:
+                return None
+            return dict(self._duco_state)
+
     def _ensure_modbus_connected(self) -> None:
         """检查 Modbus TCP 连接是否存活，若已断开则自动重连（防止长时间空闲后连接超时）"""
         if self.debug_mode or self._modbus_client_raw is None:
@@ -321,6 +376,14 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
         ROS2DeviceNode.run_async_func(self._ros_node.update_resource, True, **{
             "resources": [self.deck]
         })
+
+        # DUCO 机械臂位置：把发布周期从框架默认 5 秒调到与 HTTP 轮询一致的 _DUCO_PERIOD_S
+        for name in ("duco_joint_positions", "duco_tcp_pose"):
+            pub = ros_node._property_publishers.get(name)
+            if pub is not None:
+                pub.change_frequency(self._DUCO_PERIOD_S)
+            else:
+                logger.warning(f"[DUCO] 未找到属性发布者 {name}，请检查注册表 status_types 是否已声明")
 
     # 批量操作在这里写
     async def change_hole_sheet_to_2(self, hole: MaterialHole):
@@ -717,6 +780,36 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             logger.error(f"读取Z轴位置失败")
             return 0.0
         return _decode_float32_correct(result.registers)
+
+    # ================== DUCO 机械臂位置（只读 HTTP 缓存） ==================
+    # 返回类型必须是 str：Host 状态回调只接受标量，list/dict 会被框架强转为 String，语义不可靠。
+
+    @property
+    def duco_joint_positions(self) -> str:
+        """DUCO 六轴实际关节角，JSON 字符串，单位 rad；无数据时返回 "{}" """
+        state = self._duco_snapshot()
+        if state is None:
+            return "{}"
+        joints = state.get("joint_actual_position")
+        if not isinstance(joints, list) or len(joints) != 6:
+            return "{}"
+        return json.dumps({"joints_rad": [float(v) for v in joints], "ts": state.get("timestamp")})
+
+    @property
+    def duco_tcp_pose(self) -> str:
+        """DUCO TCP 实际位姿，JSON 字符串，位置单位 m、姿态单位 rad；无数据时返回 "{}" """
+        state = self._duco_snapshot()
+        if state is None:
+            return "{}"
+        pose = state.get("tcp_pose")
+        if not isinstance(pose, list) or len(pose) != 6:
+            return "{}"
+        x, y, z, rx, ry, rz = (float(v) for v in pose)
+        return json.dumps({
+            "x": x, "y": y, "z": z,
+            "rx": rx, "ry": ry, "rz": rz,
+            "ts": state.get("timestamp"),
+        })
 
     @property
     def data_pole_weight(self) -> float:
@@ -1435,7 +1528,7 @@ class CoinCellAssemblyWorkstation(WorkstationBase):
             # 等待初始化完成，同时检测物料搜寻弹窗
             logger.info("等待初始化完成（同时监测物料搜寻弹窗）...")
             dialog_handled = False
-            max_wait_time = 120  # 最多等待120秒
+            max_wait_time = 240 #最多等待240s
             start_wait = time.time()
             
             while (self._sys_init_status()) == False:

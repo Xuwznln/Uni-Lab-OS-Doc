@@ -915,6 +915,7 @@ coincellassemblyworkstation_device:
       data_aluminum_foil_remaining: float
       data_assembly_coin_cell_num: int
       data_assembly_pressure: int
+      data_target_assembly_pressure: int
       data_assembly_time: float
       data_axis_x_pos: float
       data_axis_y_pos: float
@@ -937,6 +938,8 @@ coincellassemblyworkstation_device:
       data_pole_weight: float
       data_positive_shell_remaining: float
       data_spring_washer_remaining: float
+      duco_joint_positions: str
+      duco_tcp_pose: str
       request_rec_msg_status: bool
       request_send_msg_status: bool
       sys_mode: str
@@ -977,6 +980,8 @@ coincellassemblyworkstation_device:
         data_assembly_coin_cell_num:
           type: integer
         data_assembly_pressure:
+          type: integer
+        data_target_assembly_pressure:
           type: integer
         data_assembly_time:
           type: number
@@ -1022,6 +1027,10 @@ coincellassemblyworkstation_device:
           type: number
         data_spring_washer_remaining:
           type: number
+        duco_joint_positions:
+          type: string
+        duco_tcp_pose:
+          type: string
         request_rec_msg_status:
           type: boolean
         request_send_msg_status:
@@ -1040,8 +1049,11 @@ coincellassemblyworkstation_device:
       - data_axis_x_pos
       - data_axis_y_pos
       - data_axis_z_pos
+      - duco_joint_positions
+      - duco_tcp_pose
       - data_pole_weight
       - data_assembly_pressure
+      - data_target_assembly_pressure
       - data_electrolyte_volume
       - data_coin_type
       - data_current_assembling_count
