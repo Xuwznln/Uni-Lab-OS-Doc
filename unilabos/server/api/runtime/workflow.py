@@ -297,6 +297,7 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
     def bind_sites(nodes: List[Any], *, mapped_paths: Optional[Dict[str, List[str]]] = None) -> List[Any]:
         from unilabos.server.backend.composition import get_materials_service
         from unilabos.server.composition import get_server_services
+        from unilabos.server.api.edge_proxy import edge_http, edge_proxy_enabled
         from unilabos.server.services.runtime.registry import get_registry_service
         from unilabos.server.services.runtime.workflow.site_bindings import (
             SiteBindingError, resolve_workflow_sites,
@@ -304,13 +305,27 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
 
         registry = get_registry_service()
         materials = get_materials_service()
-        services = get_server_services()
         try:
+            if edge_proxy_enabled():
+                # 分进程时 endpoint 数据面在 Host 的库；和浏览器读取同一个入口，
+                # 不读取调度权威里为空（或过期）的同名表。
+                response = edge_http("GET", "/api/v1/runtime/endpoints?state=online&limit=1000", timeout=5.0)
+                if response is None or response.status_code != 200:
+                    raise SiteBindingError("Host 动作能力暂不可用，请稍后重试，或用 site_binding_mode=preserve 保存草稿")
+                try:
+                    endpoints = json.loads(response.body_bytes())
+                except (ValueError, UnicodeError) as exc:
+                    raise SiteBindingError("Host 动作能力响应无效，不能校验 Site 绑定") from exc
+                if not isinstance(endpoints, list):
+                    raise SiteBindingError("Host 动作能力响应无效，不能校验 Site 绑定")
+            else:
+                services = get_server_services()
+                endpoints = services.runtime.list_endpoint_snapshots(state="online", limit=1000) if services is not None else []
             return resolve_workflow_sites(
                 nodes, registry=registry,
                 materials=materials.list_materials() if materials is not None else [],
                 mapped_paths=mapped_paths,
-                endpoints=services.runtime.list_endpoint_snapshots(state="online", limit=1000) if services is not None else [],
+                endpoints=endpoints,
             )
         except SiteBindingError as exc:
             raise WorkflowError("site_binding_invalid", detail=str(exc)) from exc
