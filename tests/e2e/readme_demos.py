@@ -190,8 +190,7 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceComplexWorkflowDemo",
         url="https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo",
-        # TODO: 仓库推送后填首个提交 SHA；本地联调走同级目录 ../LabDeviceComplexWorkflowDemo。
-        ref="0000000000000000000000000000000000000000",
+        ref="0785b3ad4dfa4d4b95a527380b16357809386526",
         package="complex_workflow_demo",
         host_graph="graph/complex_workflow_demo.json",
         # 循环容器：循环体节点每轮一个 attempt（trigger=loop_iteration），循环节点自身 1 个 attempt；
@@ -220,7 +219,8 @@ DEMOS: tuple[DemoSpec, ...] = (
         # （纯 HTTP 上传的工作流由其自带 smoke 覆盖，这里只跑 @workflow 上报的四条）+ 库存需求
         # kind reagent -> lot。阶段三依赖本仓库的 HostLink id/name ResourceSlot 兜底与注册表懒加载
         # PLR 类，@workflow 四条不依赖。
-        ref="47e3a5f7a1ef2bd912a8e294f979983e7fa56318",
+        # 默认启动先准备台面，让 API 导入时能把 T1-T4 绑定到已存在的权威 Site。
+        ref="7a9c0434305cbf0070413ca444d20cc0035b0f0e",
         package="materials_demo",
         host_graph="graph/host.json",
         slave_graph="graph/slave.json",
