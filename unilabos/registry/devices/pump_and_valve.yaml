@@ -153,29 +153,39 @@ solenoid_valve:
           position: position
           string: string
         goal_default:
-          position: null
+          string: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: StrSingleInput_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
-                position:
+                string:
                   type: string
-              required:
-              - position
               title: StrSingleInput_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: StrSingleInput_Result
+              type: object
           required:
           - goal
-          title: set_valve_position参数
+          title: StrSingleInput
           type: object
         type: StrSingleInput
     module: unilabos.devices.pump_and_valve.solenoid_valve:SolenoidValve
@@ -299,22 +309,29 @@ solenoid_valve.mock:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: EmptyIn_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: true
               title: EmptyIn_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: EmptyIn_Result
+              type: object
           required:
           - goal
-          title: close参数
+          title: EmptyIn
           type: object
         type: EmptyIn
       open:
@@ -325,22 +342,29 @@ solenoid_valve.mock:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: EmptyIn_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: true
               title: EmptyIn_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: EmptyIn_Result
+              type: object
           required:
           - goal
-          title: open参数
+          title: EmptyIn
           type: object
         type: EmptyIn
     module: unilabos.devices.pump_and_valve.solenoid_valve_mock:SolenoidValveMock
