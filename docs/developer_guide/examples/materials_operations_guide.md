@@ -84,6 +84,35 @@ ensured = materials.ensure(deck)
 注意：adopt 要求**全树每个节点都带 uuid**（含 tip spot / well 等后代），
 缺失会直接报错。
 
+#### 设备的固定位点与它持有的物料（`@device(available_sites=...)`）
+
+设备持有 Site、Site 上的占用物、以及直接挂在设备上的台面；在权威里这三者的身份
+（Site uuid、物料 uuid、父子关系、占用）都只由权威发放，驱动代码**不需要也不应该**
+自己处理。设备装配（`resolve_device_definition`）按权威优先一次取回设备的整棵树：
+
+- 权威已有该设备（开机图对齐 `materials.ensure` 已落库）→ 直接采用权威的 Site 快照，
+  并用权威该设备下的物料替换图中的子节点——图只是创建入口，运行以权威为准：板被
+  工作流移走了就不再装载，被移进来的会装载，容器的液量等状态是权威里最后的真实值；
+- 权威没有 → 以图中 uuid 请权威创建（连同设备下挂的物料子树），Site 定义取注册表
+  `available_sites`，uuid 由权威发放，再取回；
+- 权威不可达（`--slave_no_host` 离线启动、Host 暂时掉线时动态加设备）→ 只核验
+  本地已有的权威快照、沿用图中子节点，Edge 不本地补齐。
+
+三种进程的顺序一致：Host 在 `main.py` 里先 `materials.ensure` 再起设备；ROS2 Slave
+先经 HostLink 对齐再初始化设备；HostLink Slave 由 `HostLinkBackend.start(populate=...)`
+先建链、对齐权威、再装配设备（设备仍反向启动，工作站 `post_init` 前子设备已就绪），
+装配完立刻通告 Host，不等下一个心跳。
+
+`materials.ensure` 是图到权威的对齐入口，按节点级工作：根不存在整棵创建；根已存在
+时，图里新挂到既有设备 / 台面下的物料会补建（adopt 图中 uuid）并 `move` 到图声明的
+父节点与位点（父节点 Site 快照里的 `occupied_material_uuid` 按 label 映射到权威 Site）；
+已在权威别处的物料（运行期被移走）不重建也不挪回。图里尚未实例化 Site 的设备节点同样
+带上注册表定义，因此哪条路径落库的设备都自带位点。
+
+权威里的 Site 与注册表 `available_sites` 必须**一一对应**（label / index 缺失或多余直接
+报错——权威不支持给既有物料补 Site，需删除该设备物料后重启重建）；pose / 描述等定义
+字段以权威首次实例化时为准，注册表后续修改只告警。
+
 ### 2.2.1 变更来源（`actor_type` / `actor_uuid`）
 
 每条物料变更都以 `InventoryMutation.actor_type` / `actor_uuid` 落进账本
@@ -95,7 +124,7 @@ ensured = materials.ensure(deck)
 | ---------------- | ------------------------------------------------ | --------------------- | ------------------------------------------------- |
 | `human`          | 前端 / 操作员直接编辑                            | 用户 id（前端自填）   | 浏览器请求 `POST/PATCH /materials/*`，**前端须显式携带** |
 | `graph`          | 开机图物料对齐（模板 Site 实例化随之落库）       | 图 uuid / slave 机器名 | Host `unilab -g`、Slave 启动 `materials.ensure`   |
-| `registry`       | Registry 资源模板同步                            | 模板 id               | `sync_template`                                   |
+| `registry`       | Registry 资源模板同步（新建 / 定义变更才落账本；hash 一致的重复同步不产生变更） | 模板 id               | `sync_template`                                   |
 | `device`         | 设备驱动创建 / 快照 / 转移                       | 设备 id 或 uuid       | `materials.create(node=)`、`update`、`transfer`   |
 | `virtual_device` | 虚拟设备                                         | 设备 id               | 虚拟设备驱动                                      |
 | `scheduler`      | 调度器库存预留 / 释放                            | —                     | Scheduler                                         |
@@ -146,9 +175,25 @@ materials.assign(node, plate_uuid, parent="PRCXI_Deck", slot="T2")
 # site= 传权威 ResourceSite 的 uuid（机器路径，与 slot 二选一）
 materials.assign(node, plate, parent="PRCXI_Deck", site=site_uuid)
 
-# parent=None：挂到设备自身（只登记 tracker，不做 assign，如顶级 syncer 物料）
-materials.assign(node, plate)
+# parent=None：挂到设备自身（台面 Deck、驻留在设备上的顶级物料）——本地登记 tracker，
+# 权威里该物料的 parent 落为设备物料，前端设备卡片下即可看到它和它的 sites
+materials.assign(node, deck)
 ```
+
+运行期台面（不是 `available_sites` 声明的固定位点）的标准写法是"有则复用、无则创建再挂"，
+且**放在依赖它的每个动作入口**，不要只放在启动钩子里：
+
+```python
+def _ensure_bench(self):
+    node = self._device_node
+    if node.resource_tracker.uuid_to_resources.get(self.deck_uuid) is None:
+        materials.ensure(build_bench_deck(self.deck_name, self.deck_uuid))   # 固定 uuid，幂等
+        materials.assign(node, self.deck_uuid)                               # 挂到设备自身
+    return node.resource_tracker.uuid_to_resources[self.deck_uuid]
+```
+
+创建多件耗材再逐件 `assign` 时，先校验目标位点空闲；挂载失败要 `materials.remove` 掉本轮已经
+发号的物料，否则权威里会留下不挂在任何台面上的孤儿。
 
 目标位参数（二选一）：
 
@@ -189,6 +234,17 @@ tip = tip_spot.get_tip(); tip_spot.empty(); tip_spot.tracker.commit()
 - **自动同步（设备上下文）**：物料在 `node.resource_tracker` 里（`create(node=)` /
   `assign` 都会登记）即被快照观察者监听，`commit()` 触发自动快照上行——
   syncer 场景全程零显式同步。
+- **设备实例是工作真相，上行不读权威，且只报变了的对象**：观察者记下具体哪个节点
+  的 state 变了。只有状态变化（体积、tip、位姿）时走增量 `apply_delta`
+  （`POST /snapshots/delta`、HostLink `material.delta.apply`）：请求里只有变了的节点、
+  只有它们的 data / 位姿段，乐观锁是每个节点自带的 `expected_version`，权威只读写
+  这几行并回 `affected` 版本号——一次单孔变化约几十毫秒，与台面大小无关。本地只维护
+  一张 `uuid → (version, state_hash)` 版本表（首次由一次 `get_tree` 建立，之后由
+  `affected` 和下行刷新）。发生过 assign / unassign（父子、位点占用变化）时走严格
+  整树 `apply_snapshot`，保留结构漂移检测；位点占用不在增量协议里，它与父子关系绑定，
+  由 `move` / `transfer` 原子维护。版本表与整树基线只在乐观锁冲突、结构漂移、以及
+  权威下行（前端/其它设备改了物料 → `RESOURCE_TREE_SYNC` / `MATERIAL_SYNC` / `append`）
+  之后重拉。因此**不要绕过设备直写它持有的物料**——设备的下一次上报会按自己所见覆盖回去。
 - **手动同步（其余场景）**：观察者只监听 `commit()`/assign 回调；绕过 tracker
   的直接赋值、或物料不在设备 tracker 里（纯脚本上下文）时权威不会自动知道，
   操作完成后必须显式同步一次：

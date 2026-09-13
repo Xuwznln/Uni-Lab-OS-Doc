@@ -891,6 +891,30 @@ async def long_operation(self, duration: float) -> Dict[str, Any]:
 > executor。只在 HostLink 中运行的驱动可以直接使用 Python `asyncio`；需要在
 > 两类 backend 中运行时，通过 `DeviceNode` 调度即可，不需要在驱动中写 backend 判断。
 
+### `post_init` 的可选入参：位点与持有的物料
+
+声明了 `available_sites` 或在图中挂了物料的设备，装配时会按物料权威取回它的位点和
+持有的物料。驱动不必再从 `node.resource_tracker` 或物料权威反查——在 `post_init`
+里**按名声明**需要的参数即可，框架按签名注入（只写 `post_init(self, node)` 的驱动不受
+影响；`**kwargs` 不会被隐式注入）：
+
+```python
+def post_init(self, node, sites=None, resources=None, site_resources=None):
+    self._node = node
+    self._site_uuid = {label: site.uuid for label, site in sites.items()}   # 位点 uuid / pose / 占用
+    self.deck = resources["PRCXI_Deck"]                                     # 直接挂在设备上的台面
+    plate = site_resources["slot_1"]                                        # 该位点上的板，空位为 None
+```
+
+| 参数 | 类型 | 内容 |
+|---|---|---|
+| `sites` | `dict[label, ResourceSite]` | 设备自身的位点：`uuid`、`index`、`pose`、`occupied_material_uuid` |
+| `resources` | `dict[name, PLR Resource]` | 设备持有的物料实例：位点上的占用物、直接挂在设备上的台面（与 tracker 里同一份实例） |
+| `site_resources` | `dict[label, PLR Resource \| None]` | 位点 → 占用物的对应 |
+
+三者都以权威为准（不是图文件的初值）。运行期上下料仍经 `resource_tree_add/remove`
+回调与 `materials.*` 门面同步，见 `examples/materials_operations_guide.md`。
+
 ## 错误处理
 
 ### 基本错误处理

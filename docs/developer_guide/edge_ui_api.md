@@ -32,8 +32,11 @@ graphs / lab / scheduler / restart / health；Host 专有的 `runtime`、`teleme
 回给浏览器（Host 不在线返回 503）。权威拉 durable 事件正文、通知 Host 重启、物料投影中继
 （`/api/v1/hostlink/{material-sync,notify-device}`）走的是同一条通道。Host 子进程的 `-g <uuid|名称>` 与启动图登记经 HTTP 走权威的
 Graph Authority（`POST /graphs` 可随请求带 `device_site_templates`，用 Host 自己的注册表实例化
-模板 Site）；Host 的 `@workflow` 默认子工作流经 Workflow API 上报（`POST /workflows` 可带稳定
-`workflow_uuid`）。两侧的控制面在 `runtime.v1` 之内闭环：Host 上报的注册表快照带
+模板 Site；启动登记带 `on_existing="adopt"`——权威已有该图时以权威为准只补新增，前端 / CLI
+上传缺省 `replace` 即编辑）；Host 包里的 `@workflow` 是**工作流模板**，随注册表快照一起上报
+（`POST /resource-templates` 的一个条目，`registry_type=workflow`），不直接落成
+工作流。注册表上报按内容哈希增量进行（先 `GET /registry/digest`，只为权威没有的哈希附完整定义），
+见下文 `/api/v1/registry/*`。两侧的控制面在 `runtime.v1` 之内闭环：Host 上报的注册表快照带
 `always_free` / `error_policy` / `timeout` / `execution_timeout`，权威据此解析动作锁、重试上限与
 超时看门狗（软超时表达式按最终参数求值后随 `execute_job` 下发）；Host 失败打开终态闸门后发
 `execution.error_pending`，权威登记为 `error-decisions` 条目并让节点运行进入
@@ -160,16 +163,34 @@ MUST / SHOULD），`@openlab/protocol` 是它的类型化实现。给微后端�
   `start` 以 `python -m unilabos --is_slave --host_node_ip … -g <图>` 拉起本机子进程，经
   HostLink 接回本 Host；`never / on-failure / always` 三种看护策略，退避重启、超过
   `max_restarts` 停在 `crashed`；`auto_start` 的进程随 Host 启动拉起、Host 退出时终止；
-  `GET /{id}/logs` 读尾部日志。驱动崩溃只影响该子进程，Host 与物料权威不受影响。
+  受管日志统一经 `GET /api/v1/hostlink/logs?source_id=managed:<id>` 读取。驱动崩溃只影响该子进程，Host 与物料权威不受影响。
   这两组路由只在 Host 上挂载（Backend 返回 404），前端按能力缺失降级。协议细节见
   OpenLab 仓库 `docs/protocol/driver-packages.md`。
 - `/api/v1/registry/*`（调度权威所在进程）：条目级注册表版本。与 Workflow Authority
-  同归属、同一 `setup_server()` 挂载：Host 启动时把注册表扫描快照经
-  `POST /resource-templates` 上报，Registry Authority 按条目维护版本并投影模板。
+  同归属、同一 `setup_server()` 挂载。Host 启动时按**内容哈希增量**上报（协议对象见
+  `unilabos.protocol.runtime.registry`）：先 `GET /registry/digest` 取权威持有的
+  `{active: {name: content_sha256}, pending: {…}}`，再 `POST /resource-templates` 发
+  `{entries: [{id, content_sha256, payload?}]}`——每个条目（设备 / 资源 / 包里 `@workflow`
+  声明的工作流模板）都带哈希，集合本身决定哪些既有条目软移除，只有权威没有该哈希的条目
+  才附完整 `payload`。首次上报索引为空即全量，之后每次启动只剩几 KB 的哈希清单；权威对
+  带 payload 的条目自己重算哈希，只发哈希却对不上的条目列入结果的 `missing`，Host 补上
+  payload 再报一次。旧形状 `{resources: [...], workflow_templates: [...]}`（全量定义）仍被接受，
+  Host 遇到没有 digest 端点的旧权威也会退回这种形状。
   `entries` 列条目状态；`pending-impacts` 把挂起冲突映射到受影响的
   workflow 节点；`entries/{name}/apply` 确认待处理版本，`dismiss` 忽略挂起，
   `restore/{version}` 还原历史版本。
   只提供执行面的进程没有该域，前端按 404/503 静默降级。
+- 工作流模板：`GET /api/v1/registry/workflow-templates` 列出生效的 `@workflow` 模板
+  （`uuid` / `display_name` / `roles` / `nodes` / `edges`，与前端「工作流模板」面板的用户模板
+  同形：动作节点用角色占位，`run` 的角色是设备 id、`run_template` 的角色是设备类
+  `class:<name>`，步骤按声明序用 edges 串成链）。`guide`（`preparation` 运行前要在前端做的
+  准备——出库、挂到哪台设备哪个位点、确认设备在线；`expected` 预期效果；`notes` 注意事项）
+  与每步的 `name` / `description` 组成前端模板卡片「流程说明」里的全流程；插入模板绑定角色时
+  也会先列出 `preparation`。前端把它插入画布时绑定角色到设备；脚本 /
+  e2e 用 `POST /api/v1/workflows/from-template {template_uuid, bindings?, name?}` 由权威实例化：
+  类角色在物料权威里恰有一个该类设备时自动填充，否则须在 `bindings` 给出（缺失返回 1000 并
+  带角色名），同一模板 + 同一组绑定幂等复用同一个工作流 uuid。包卸载后模板随条目软移除，
+  列表里不再出现。
 
 Workflow Authority（调度权威）是 edge UI 的写入口：
 
@@ -207,7 +228,109 @@ UI 的恢复基线来自四库 API，而不是进程内事件缓存：
 4. 调度资源页面要识别 `/scheduler/resources` 的 503：这表示所连进程不提供调度权威，
    应去其 Backend 地址读取，不是服务故障。
 
+### 工作流模板参数：预填、确认与 API 导入
+
+本节规范已落实到 OpenLab 前端和微后端导入边界：选择器不再伪造“当前值”选项，默认标签必须
+显式确认；程序化导入会先解析 Site 再保存。需要同时更新微后端和前端的构建。
+
+**模板预填不等于绑定确认。** `SiteSlot`（`unilabos_sites`）的实际引用值是物料权威的
+`site_uuid`，`T1` 只是 Site 标签；解析必须限定在明确的目标物料下。这里的“绑定”指工作流
+参数引用，不是实际挂载、转移或创建物料，确认参数不得触发这些物料写操作。
+普通 `str` 参数如果由动作声明为接受 label（例如 demo 的 `tips_site` / `plate_site`），
+仍遵循该动作的参数语义，不能仅凭字符串长得像 `T1` 就转换成 UUID。
+
+#### 前端交互导入：必须显式确认
+
+- 从模板插入工作流时保留 `T1` 预填值，并提示“已预填，需绑定实际物料与 Site”。即使明确
+  目标物料下只有一个 `T1`，也只能预选候选项，不能自动标记为已确认。
+- 参数省略但动作 `goal_default` 带有非空 Site 建议时，同样需要确认；可选 Site 显式清空
+  或本身没有非空默认值时不计缺项。仅显示建议不会向草稿写入参数。
+- 必须提供绑定确认界面，逐项展示节点、参数、模板默认值、实际目标物料和 Site，能查看其
+  UUID；允许用户修改候选并逐项显式确认，同一流程可在补全窗口统一保存。仅打开表单、加载选项或点击保存草稿
+  不算确认；提交运行时仍有未确认项，应打开确认界面，不能直接跳过执行。
+- 用户确认有效目标后，实例工作流参数写入真实 UUID，模板保留可复用的标签建议。
+  取消确认保留草稿与建议值。已确认的同一绑定再次打开无需重复确认；修改目标物料、Site
+  或绑定失效时需重新确认，不能静默换成另一件同名物料下的 Site。
+- 无候选、同名歧义或目标物料未确定时，保持待绑定；数据加载中或加载失败时显示“待校验”，
+  不清空原值、不把没有校验结果当作通过。
+
+#### API 程序化导入：自动解析替换
+
+- 脚本、CLI、MCP 通过工作流 API 导入时，不需要前端确认界面。导入流程先确定实际目标
+  物料，再在该物料下将 Site 标签（例如 `T1`）唯一解析并替换为权威 `site_uuid`，之后保存
+  实例图。已经提供有效 UUID 的引用保持不变；读回图应能核对转换后的实际引用。
+- 缺少目标物料、标签找不到、出现多个候选或提供的 UUID 已失效时，返回明确的参数绑定问题
+  （指出节点、参数和原因），要求调用方补充目标或 UUID。不得全局取第一个同名 Site、
+  自动创建物料，或把仍含未解析标签的图标记为导入成功且可执行。
+- “API 导入”指程序化导入的业务入口，不是所有 HTTP 请求。前端也通过 HTTP 保存工作流，
+  不能以“请求走了 API”为由跳过交互确认；实现时必须明确区分交互确认与程序化导入流程，
+  不能靠 User-Agent 或是否存在浏览器窗口猜测。这不是新增身份认证或授权方式。
+
+#### 当前请求合同
+
+`POST /api/v1/workflows/from-template` 和 `PUT /api/v1/workflows/{uuid}/graph` 接受
+`site_binding_mode: "resolve" | "preserve"`，默认 `resolve`。脚本 / CLI / MCP 默认自动解析；
+浏览器的草稿与确认后保存都显式传 `preserve`，不允许一次 HTTP 保存自动替用户确认。
+未登记目标设备或尚无生效动作声明时，`resolve` 返回 Backend 业务码 `1000`（HTTP 200），
+要求先登记或显式存为待校验草稿。缺失/歧义 Site 的错误同样包含节点、参数及原因。
+
+解析作用域按以下顺序确定（不做全局标签搜索）：
+
+1. `node.meta_data.site_binding_owners[参数名]` 指定的物料 UUID：仅该物料自身的 Site。
+2. Host 物料动作的 `param.mount_resource`：仅该目标父级自身的 Site；有 UUID 时不再回退名称。
+3. 设备动作的目标设备物料及其子树：只有唯一匹配才解析。多个父级的同名 Site 必须明确 owner。
+
+前端确认和程序化解析均将真实 UUID 写进 `node.param[参数名]`，并保存
+`node.meta_data.site_bindings[参数名] = {site_uuid, owner_material_uuid, device_id, action_name}`。
+这只是确认记录，不是物料锁或权限凭证。重新打开时校验记录、权威目录和当前上下文；
+模板原始标签不变，失效 UUID 不按同名标签回退。
+单点动作提交不属于模板导入：前端同样先确认，程序化调用应直接提供实际 `site_uuid`。
+
+绑定在任何工作流写入前完成；失败不覆盖现有图或 revision。节点卡、流程列表与详情的
+“检查 / 补全参数”共用校验口径，流程补全窗口直接更新原定义，不复制出另一条工作流。
+
+以上是导入期的引用解析约定，不新增 Backend / Edge 对 Site 的 category 强制校验，
+也不改变物料锁与调度的职责。
+
+#### 工作流卡片完整度
+
+所有微前端应采用同一统计口径：动作卡显示“待补全 N 项”，工作流卡汇总节点的待补全参数数，
+点击数字能定位参数及原因。每个参数只计一次：必填未填、引用未绑定 / 无效 / 有歧义，
+以及**模板已预填但用户尚未确认的绑定**都计入。唯一匹配但只完成预选的 `T1` 仍计一项，
+显式确认成功后才移除；可选但已填入无效引用的参数也不能直接跳过检查。
+
+合法的可选空值、由上游输出或调度提供的动态参数不算待填；它们也不能在导入时随意绑定为
+当前某个同名静态对象。尚未取得校验数据时另示“待校验”，不能用数字 `0` 暗示全部通过。
+参数表单、卡片统计与提交前检查必须共用同一套判断结果。
+
+回归至少覆盖：唯一 `T1` 的预选仍需确认 / 取消保留建议、确认后写回 UUID、变更目标后重新
+确认、不同物料拥有同名 Site、API 唯一解析成功与歧义失败、普通标签字符串不被转换，
+以及加载失败和上游动态参数不被误判。
+
 ## 回归重点
+
+### Host / Slave 实时日志
+
+日志正文经 `GET /api/v1/hostlink/logs` 按游标增量读取，来源由
+`GET /api/v1/hostlink/log-sources` 列出。默认分离部署仍通过同一个管理端口与
+原有控制面代理，不为日志新增监听端口、SSE 或数据库表。
+
+- Host：本进程 `configure_logger` 配置的主日志（不含独立通信日志）。
+- 本机受管 Slave：台账对应 `process.log`，包含 stdout / stderr，停止后仍能读取。
+- 外部 Slave：经 HostLink `process.log.read` 读取其当前主日志；裸 stdout 若没有写入
+  主日志则不包含。ROS2 Slave 共用组网 HostLink 控制通道，不依赖 ROS 日志服务。
+- 日志方法是当前协议必备项，无旧接口回退；不接受任意路径。旧后端 `legacy` 适配器不动。
+
+每个页面独立持有不透明 cursor；第一次读尾部，文件切换/截断返回 `reset=true`。
+每次最多扫描 256 KiB、返回 1000 行（默认 300），单行最多 16 Ki 字符并显式截断。
+未结束的短行等待下一次换行，保留多行 traceback 与中文 UTF-8 边界。
+写日志后触发轻通知：Slave 经 HostLink `process.log.changed` 上报，Host 经既有控制 WS 的
+`runtime_logs_changed` 中继；复用 `/api/v1/events` 的 `runtime.logs.changed`，不新增 SSE 连接。
+通知约 200 ms 合并，不写 SSE id/数据库。页面按来源拉增量，空闲无日志查询；恢复可见、暂停或
+重连时读目录并用独立 cursor 补齐。SharedWorker 让两页共用通知连接；窗口限制 2000 行 / 512 Ki 字符。
+日志仅用于可信网络内诊断，可能含设备参数/路径，不应把管理端口直接暴露到公网。
+
+### 业务数据
 
 - 普通 Host 启动时只打开 `runtime.db`、`materials.db`、`telemetry.db`、
   `history.db` 四个 writer；

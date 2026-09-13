@@ -181,7 +181,7 @@ unilab package install \
 
 ## 参考驱动实现
 
-我们提供了六个可直接运行的示例设备包，均作为独立 GitHub 仓库维护（由
+我们提供了七个可直接运行的示例设备包，均作为独立 GitHub 仓库维护（由
 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆任一仓库，用
 `--devices <包目录> --external_devices_only` 加载，编写自己的驱动时可启动运行、对照学习：
 
@@ -193,10 +193,13 @@ unilab package install \
 | [LabDeviceMaterialsDemo](https://github.com/Xuwznln/LabDeviceMaterialsDemo) | host/slave 双进程——`@device(available_sites=...)` 固定位点（声明 → 注册表模板 → 权威位点实例 → 占用流转）、`@resource` 物料配合 `materials.*` 门面跨 HostLink 做物料 CRUD、`SiteSlot` 动作参数（前端 Site 选择器 uuid 或 label 便捷形态）；出库装板并加液：全部经网页式 HTTP API——`POST /materials/instantiate` 按件登记两块板、`POST /materials/lots/inbound` 按量登记（故意不够的）水、`POST /workflows` + `PUT graph` 上传三节点图（`host_node/apply_deduct_resource` 带 `material` 需求、`mount_resource={"name": ...}` 只按名字引用台面 → 设备 `fill_well` 带 `lot` 需求 → 报告），提交后整任务预留失败 `plan_not_executable`（板与水都无预留痕迹、设备未被调用），补料再提交成功——板 `active → in_use` 跨进程挂到 slave 台面、lot 扣减、孔位内容物落权威 |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo) | 用并发提交的工作流把调度器锁语义变成证据：`(device, action)` 动作锁让两次 `occupy` 按提交顺序串行（第二个在 `/api/v1/scheduler/resources` 里 `waiting` 且 `blockers` 非空）、`@action(always_free=True)` 让同一动作的两次 `peek` 重叠、`materials_need_lock=["plate"]` 按权威板 uuid 互斥（两台设备处理同一块板串行，一台设备处理两块板并行）；`lock_auditor` 节点读探针账本核对，任一结论不成立即任务失败 |
 | [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo) | 用工作流走通按数量计量的库存：注册表 `@resource` 试剂模板、`restock` 即网页"添加试剂"的 `POST /api/v1/materials/lots/inbound`（固定 lot 入库 100 ml）、`dispense` 步骤的 `inventory=[...]` 需求在任务启动时 all-or-nothing 预留、动作开始前扣减（设备回报扣减后的 lot `60 / 60 / 0`）、500 ml 需求在预留阶段被拒——任务 `failed` / `plan_not_executable`（`short by 440 ml`）、节点 `canceled`、设备不被调用、库存不变 |
+| [LabDeviceComplexWorkflowDemo](https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo) | 工作流的**运行时控制流**——循环容器由调度器逐轮执行（每轮是循环体节点的一个新 attempt，`trigger=loop_iteration`）：`with ctx.loop_for(3)` 固定轮数、参数里 `{{loop.iteration}}` 生成样品编号；`ctx.loop_while(ctx.device_state("reactor", "temperature_c", "<", 80))` 空循环体按间隔轮询设备状态字段（设备后台升温，"等到某状态"）；`ctx.loop_while(ctx.step_output("取样检测", "ready", "==", False))` 条件引用循环体里的检测步骤（"重复直到达标"）；两层 `for` 板 × 孔嵌套；最后一条把三种循环串成一条流程，「汇总报告」一次验证全部结果 |
 
-每个示例都用 `unilab -g` 按图启动设备，再经管理 HTTP API（`POST /api/v1/workflow-tasks`）运行工作流；
+每个示例都用 `unilab -g` 按图启动设备，再经管理 HTTP API 运行工作流：包里 `@workflow` 声明的是
+**工作流模板**（随注册表上报，`GET /api/v1/registry/workflow-templates`），先经
+`POST /api/v1/workflows/from-template` 把角色绑到设备实例化成工作流，再 `POST /api/v1/workflow-tasks`；
 仓库 README 附带分步启动教程与实测输出，并自带可终止的双运行时 smoke
-（`python -m <包名>.smoke --backend hostlink|ros2`）。这六个示例同时在主仓库 CI 中端到端验证。
+（`python -m <包名>.smoke --backend hostlink|ros2`）。这七个示例同时在主仓库 CI 中端到端验证。
 底层的通信共享机制见
 [最佳实践指南 §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html)；
 从零编写新驱动见[添加设备](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html)。

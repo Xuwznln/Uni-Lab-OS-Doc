@@ -135,6 +135,45 @@ execution_timeout)`，软超时表达式（如 `duration * 1.5 + 30`）用最终
   `error_policy.max_retries`。
 - 该任务的裁决全部收敛后控制态恢复为进入前的值（`active`），任务继续走图。
 
+#### 循环容器（for / while）
+
+图里的控制流除了编辑器提交时求值的条件分支，还有**运行时**执行的循环：`type="loop"` 节点是
+容器，`parent_uuid` 指向它的节点是循环体（可嵌套）。节点 `param` 是 `LoopSpec`
+（`unilabos.protocol.runtime.loop`）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `mode` | `for`（固定 `count` 轮）或 `while`（每轮开始前求值 `condition`，假即结束） |
+| `condition.source` | `device_state`：设备 `device_id` 的状态字段 `field`（telemetry 最新快照，即设备 `@topic_config` / status_fields 上报的值）；`node_output`：节点 `node_uuid` 最近一次成功返回值里的 `data_key`（空串取整个返回值） |
+| `condition.op` / `value` | `==` `!=` `>` `>=` `<` `<=` `contains` `exists`；数值 / 布尔 / 字符串按前端条件分支同一套规则收敛 |
+| `max_iterations` | while 的安全上限（缺省 1000），达到仍未结束按失败收敛（`error_info[0].code=loop_failed`） |
+| `interval_seconds` | 两轮之间的等待；空循环体的 while（"等到某状态"）必须 > 0 |
+
+执行语义与 attempt 模型同构：
+
+- 调度器把每个循环体组装成子 DAG（跨边界的边 / `depends_on` 提升到容器所在层级：外部节点连到
+  循环体里的节点 = 外部节点先于整个循环；容器与自己的后代之间不允许连边）。循环节点自己有一个
+  `executor_kind=loop` 的节点运行，但没有执行器 job，由调度器直接 running → 终态。
+- **每轮**开始时 store（`begin_loop_iteration`）给循环体的每个节点运行追加一个新 attempt
+  （`trigger=loop_iteration`，`retry_of_job_uuid` 为空），节点运行切回 pending 再正常派发；
+  上一轮的 attempt 保留为事实，前端按 attempt 历史看每一轮，`return_info` 是最后一轮的结果。
+  嵌套循环的容器运行同样每轮重臂。
+- 循环节点运行的 `control_data.loop` 记录当前轮次（`iteration` 从 0 起）与摘要，
+  `return_info.return_value` 同步给出 `index / iteration / count`；结束时 `return_value.iterations`
+  是完成的轮数。循环体节点参数里的 `{{loop.index}}` / `{{loop.iteration}}` / `{{loop.count}}`
+  在派发前按最内层循环的当前轮替换（整串恰为占位符时保留 int）。
+- `node_output` 条件引用的节点在本任务里还没有产出时按"继续"处理，循环体至少跑一轮——
+  "重复直到探测达标"就是把探测步骤放进循环体、条件引用它。
+- 循环体节点失败 / 被取消：循环节点同态收敛，外层 fail-fast 与普通节点一致。
+- 重启恢复：在飞的循环 attempt 没有设备副作用，退回 pending 由调度器按
+  `control_data.loop.iteration` 续跑（本轮已成功的循环体节点不重跑）；循环体里在飞的设备
+  attempt 仍走上面的 `execution_unknown` 裁决。
+
+`@workflow` 模板用 `with ctx.loop_for(3):` / `with ctx.loop_while(condition):` 声明循环体，
+条件用 `ctx.device_state(device_id, field, op, value)` 或 `ctx.step_output(step_or_name, data_key,
+op, value)` 构造（循环体里的步骤在 `with` 打开时还没声明，用步骤 `name` 引用，块结束时解析）。
+模板节点 `kind="loop"`，成员带 `parent`；实例化时 `node_key` 换成节点 uuid。
+
 ### 4.2 Backend-controlled（接入云端）
 
 显式配置云端地址后，Edge 不接收也不保存整张工作流图，本机 Workflow 写 API 不
@@ -339,6 +378,25 @@ Backend 必须先更新调度事实，然后下发 `release_failed` 或 replacem
 | HostLink 网络与执行 adapter | `unilabos/backend/hostlink/` |
 
 ## 14. 扩展约束
+
+### 工作流单点放行
+
+`POST /api/v1/workflow-tasks` 使用 `run_mode="step"` 时仅创建任务，初始为 paused。
+运行详情里的 `control_revision` 是已受理控制命令的版本。向
+`POST /api/v1/workflow-tasks/{task_uuid}/commands` 提交
+`{"type":"step","expected_revision":0,"idempotency_key":"本次点击的唯一标识"}`，
+微后端仅给一个依赖就绪的叶动作分配许可，之后再申请原有动作/物料锁。
+执行结束回到 paused；循环体的下一动作或下一轮仍需新的许可。
+逐步运行不是 `single_node` 子图或 ad-hoc 单点任务，Task / NodeRun / Job 身份保持不变。
+
+使用 `type="resume"` 从原进度转自动，不中断正在执行的动作，也不重跑成功节点。
+不提供跳过异常的快捷路径：失败继续由原错误策略处理；retry 追加的新 attempt 也需再次放行。
+同键重传幂等、旧版本及在飞期间重复 step 返回既有业务码 3003（HTTP 200）。
+命令及其 job_uuid / node_run_uuid / target_node_uuid 关联存在既有 workflow_task_command，
+不改 schema、不新增设备锁机制；库存仍按原整任务策略预留。
+停机保留步进进度；恢复时在飞 attempt 走 execution_unknown / waiting_reconciliation，禁止盲目重放。
+
+### 通用约束
 
 - 调度、库存、历史和设备状态能力必须复用对应领域 Service。
 - 数据库表及 DDL 只在 `unilabos/server/database/tables/` 声明。
