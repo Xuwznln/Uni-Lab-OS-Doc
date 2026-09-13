@@ -85,6 +85,12 @@ jobs:
       # tests/e2e/readme_demos.py 固定引用七个仓库的已验证提交（示例仓库 CI 反向
       # 固定 Uni-Lab-OS 提交，两侧互相锁定），用例按 pinned 提交克隆源码，再走
       # check_mode -> unilab graph create -> unilab -g 起微后端 -> 管理 API 跑工作流。
+      - name: Prepare demo evidence directory
+        shell: pwsh
+        run: |
+          # pytest 仅创建 basetemp 的末级目录，不会自动创建父目录。
+          New-Item -ItemType Directory -Path "${{ runner.temp }}/readme-demos" -Force -ErrorAction Stop | Out-Null
+
       - name: Validate README example device packages end to end
         env:
           UNILABOS_E2E_BACKEND: hostlink
