@@ -12,54 +12,37 @@ solid_dispenser.laiyu:
           powder_tube_number: powder_tube_number
           target_tube_position: target_tube_position
         goal_default:
-          compound_mass: 0.0
-          powder_tube_number: 0
-          target_tube_position: ''
+          compound_mass: null
+          powder_tube_number: null
+          target_tube_position: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          actual_mass_mg: actual_mass_mg
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: SolidDispenseAddPowderTube_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 compound_mass:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
+                  type: string
                 powder_tube_number:
-                  maximum: 2147483647
-                  minimum: -2147483648
-                  type: integer
+                  type: string
                 target_tube_position:
                   type: string
+              required:
+              - powder_tube_number
+              - target_tube_position
+              - compound_mass
               title: SolidDispenseAddPowderTube_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                actual_mass_mg:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
-                  type: number
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: SolidDispenseAddPowderTube_Result
-              type: object
           required:
           - goal
-          title: SolidDispenseAddPowderTube
+          title: add_powder_tube参数
           type: object
         type: SolidDispenseAddPowderTube
       auto-calculate_crc:
@@ -124,41 +107,30 @@ solid_dispenser.laiyu:
         goal:
           float_in: float_in
         goal_default:
-          float_in: 0.0
+          float_in: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: FloatSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 float_in:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
+              required:
+              - float_in
               title: FloatSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: FloatSingleInput_Result
               type: object
           required:
           - goal
-          title: FloatSingleInput
+          title: discharge参数
           type: object
         type: FloatSingleInput
       move_to_plate:
@@ -167,39 +139,29 @@ solid_dispenser.laiyu:
         goal:
           string: string
         goal_default:
-          string: ''
+          string: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 string:
                   type: string
+              required:
+              - string
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
-              type: object
           required:
           - goal
-          title: StrSingleInput
+          title: move_to_plate参数
           type: object
         type: StrSingleInput
       move_to_xyz:
@@ -210,51 +172,38 @@ solid_dispenser.laiyu:
           y: y
           z: z
         goal_default:
-          x: 0.0
-          y: 0.0
-          z: 0.0
+          x: null
+          y: null
+          z: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: Point3DSeparateInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 x:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 y:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
                 z:
-                  maximum: 1.7976931348623157e+308
-                  minimum: -1.7976931348623157e+308
                   type: number
+              required:
+              - x
+              - y
+              - z
               title: Point3DSeparateInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: Point3DSeparateInput_Result
               type: object
           required:
           - goal
-          title: Point3DSeparateInput
+          title: move_to_xyz参数
           type: object
         type: Point3DSeparateInput
       pick_powder_tube:
@@ -263,41 +212,30 @@ solid_dispenser.laiyu:
         goal:
           int_input: int_input
         goal_default:
-          int_input: 0
+          int_input: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: IntSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 int_input:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
+              required:
+              - int_input
               title: IntSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: IntSingleInput_Result
               type: object
           required:
           - goal
-          title: IntSingleInput
+          title: pick_powder_tube参数
           type: object
         type: IntSingleInput
       put_powder_tube:
@@ -306,41 +244,30 @@ solid_dispenser.laiyu:
         goal:
           int_input: int_input
         goal_default:
-          int_input: 0
+          int_input: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: IntSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 int_input:
-                  maximum: 2147483647
-                  minimum: -2147483648
                   type: integer
+              required:
+              - int_input
               title: IntSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: IntSingleInput_Result
               type: object
           required:
           - goal
-          title: IntSingleInput
+          title: put_powder_tube参数
           type: object
         type: IntSingleInput
       reset:
@@ -351,29 +278,23 @@ solid_dispenser.laiyu:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: EmptyIn
+          title: reset参数
           type: object
         type: EmptyIn
     module: unilabos.devices.powder_dispense.laiyu:Laiyu
