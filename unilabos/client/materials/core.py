@@ -21,6 +21,8 @@ from unilabos.protocol.materials import (
     MaterialDataWrite,
     MaterialDelete,
     MaterialDeleteResult,
+    MaterialDelta,
+    MaterialDeltaResult,
     MaterialMove,
     MaterialPatch,
     MaterialPosition,
@@ -64,8 +66,12 @@ class LocalMaterialsClient:
     def get_template(self, template_uuid: str):
         return self.service.get_template(template_uuid)
 
-    def list_templates(self):
-        return self.service.list_templates()
+    def list_templates(
+        self, *, name: Optional[str] = None, include_definition: bool = False
+    ):
+        return self.service.list_templates(
+            name=name, include_definition=include_definition
+        )
 
     def delete_template(self, mutation, template_uuid: str):
         value = {"template_uuid": template_uuid}
@@ -176,6 +182,9 @@ class LocalMaterialsClient:
     def apply_snapshot(self, mutation, value):
         return self.service.apply_snapshot(bind_payload(mutation, value), value)
 
+    def apply_delta(self, mutation, value):
+        return self.service.apply_delta(bind_payload(mutation, value), value)
+
     def changes(self, *, after_sequence: int = 0, limit: int = 100):
         return self.service.changes(after_sequence=after_sequence, limit=limit)
 
@@ -189,10 +198,19 @@ class HostLinkMaterialsClient:
     def __init__(self, client: Any):
         self.client = client
 
-    def list_templates(self) -> list[ResourceTemplateRead]:
+    def list_templates(
+        self, *, name: Optional[str] = None, include_definition: bool = False
+    ) -> list[ResourceTemplateRead]:
+        """筛选由 Host 转给权威在服务端完成。默认目录模式（存在性检查 / 按名取 uuid /
+        比 definition_hash 都够用）；只有确实要用 definition 正文的调用方才传
+        ``include_definition=True``，把全注册表的 definition 拖过链路。"""
+
         from unilabos.backend.hostlink.protocol import ActionType
 
-        response = self.client.request(ActionType.MATERIAL_TEMPLATE_LIST, {})
+        query: dict[str, Any] = {"include_definition": include_definition}
+        if name is not None:
+            query["name"] = name
+        response = self.client.request(ActionType.MATERIAL_TEMPLATE_LIST, query)
         return [ResourceTemplateRead.model_validate(item) for item in response]
 
     def create_template(
@@ -332,12 +350,26 @@ class HostLinkMaterialsClient:
         )
         return MutationResult[MaterialTreeRead].model_validate(response)
 
+    def apply_delta(
+        self, mutation: InventoryMutation, value: MaterialDelta
+    ) -> MutationResult[MaterialDeltaResult]:
+        from unilabos.backend.hostlink.protocol import ActionType
+
+        bound = bind_payload(mutation, value)
+        response = self.client.request(
+            ActionType.MATERIAL_APPLY_DELTA,
+            bound.model_dump(mode="json", exclude_none=False),
+        )
+        return MutationResult[MaterialDeltaResult].model_validate(response)
+
 
 class MaterialsHTTPError(RuntimeError):
     def __init__(self, status_code: int, detail: str):
         super().__init__(f"materials API returned {status_code}: {detail}")
         self.status_code = status_code
         self.detail = detail
+        # 与本地物料异常保持一致，HostLink 可识别 ensure 的正常不存在结果。
+        self.code = "not_found" if status_code == 404 else "materials_http_error"
 
 
 class HTTPMaterialsClient:
@@ -403,10 +435,18 @@ class HTTPMaterialsClient:
             self._request("GET", f"/templates/{template_uuid}")
         )
 
-    def list_templates(self) -> list[ResourceTemplateRead]:
+    def list_templates(
+        self, *, name: Optional[str] = None, include_definition: bool = False
+    ) -> list[ResourceTemplateRead]:
+        query: dict[str, str] = {}
+        if name is not None:
+            query["name"] = name
+        if include_definition:
+            query["include_definition"] = "true"
+        path = "/templates" + (f"?{urlencode(query)}" if query else "")
         return [
             ResourceTemplateRead.model_validate(item)
-            for item in self._request("GET", "/templates")
+            for item in self._request("GET", path)
         ]
 
     def delete_template(self, mutation, template_uuid: str):
@@ -620,6 +660,13 @@ class HTTPMaterialsClient:
         return MutationResult[MaterialTreeRead].model_validate(
             self._request(
                 "POST", "/snapshots/apply", bind_payload(mutation, value)
+            )
+        )
+
+    def apply_delta(self, mutation, value: MaterialDelta):
+        return MutationResult[MaterialDeltaResult].model_validate(
+            self._request(
+                "POST", "/snapshots/delta", bind_payload(mutation, value)
             )
         )
 

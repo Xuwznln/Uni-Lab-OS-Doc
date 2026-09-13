@@ -849,18 +849,26 @@ def test_material_mirror_backfills_authority_templates_and_uses_template_as_clas
     )
     client = LegacyBackendHTTPClient("https://legacy.example", session=session)
     gateway = _Gateway()
-    gateway.list_templates = lambda: [
-        SimpleNamespace(
-            name="virtual_heating_sample",
-            display_name="加热样品",
-            resource_type="resource",
-            module_name="",
-            template_version="1",
-            category=["heating_sample"],
-            handles=[],
-            definition={},
-        )
-    ]
+    template_queries: list[dict[str, Any]] = []
+
+    def _list_templates(*, name=None, include_definition=False):
+        template_queries.append({"name": name, "include_definition": include_definition})
+        if name != "virtual_heating_sample":
+            return []
+        return [
+            SimpleNamespace(
+                name="virtual_heating_sample",
+                display_name="加热样品",
+                resource_type="resource",
+                module_name="",
+                template_version="1",
+                category=["heating_sample"],
+                handles=[],
+                definition={},
+            )
+        ]
+
+    gateway.list_templates = _list_templates
     mirror = LegacyMaterialMirror(client=client, gateway=gateway, known_templates={"virtual_heating_platform"})
     monkeypatch.setattr(
         mirror,
@@ -871,7 +879,9 @@ def test_material_mirror_backfills_authority_templates_and_uses_template_as_clas
         ],
     )
     mirror.upload_full()
-    # 1) 模板补报只包含缺失的那一个，且用旧字段名
+    # 1) 模板补报只包含缺失的那一个，且用旧字段名；旧后端要 config_info 正文，
+    #    所以按缺失 name 逐个带 definition 取，不拉整个注册表
+    assert template_queries == [{"name": "virtual_heating_sample", "include_definition": True}]
     assert len(captured["registry"]) == 1
     entry = captured["registry"][0]["resources"][0]
     assert entry["id"] == "virtual_heating_sample" and entry["displayname"] == "加热样品"

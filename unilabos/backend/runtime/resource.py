@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Iterator, Optional, Protocol, Sequence
 from uuid import uuid4
 
@@ -21,33 +21,59 @@ from unilabos.resources.adapters.plr_materials import (
     SnapshotUuidMismatchError,
     create_plr_materials,
     material_tree_to_resource_tree,
+    resource_to_node_delta,
     resource_tree_to_create,
     resource_tree_to_snapshot,
 )
 from unilabos.protocol.materials import AggregatePrecondition, InventoryMutation
-from unilabos.protocol.materials import MaterialDelete, MaterialMove
+from unilabos.protocol.materials import MaterialDelete, MaterialDelta, MaterialMove
 
 
 logger = logging.getLogger(__name__)
 
 
-def _is_conflict_error(exc: BaseException) -> bool:
-    """判定异常是否为权威侧乐观锁冲突（本地或跨 HostLink 均可判别）。
+def _is_service_error(exc: BaseException, code: str, type_name: str) -> bool:
+    """判定权威侧业务异常类型（本地直抛或跨 HostLink 均可判别）。
 
-    本地网关直抛 ``MaterialConflictError``（code="conflict"）；跨 HostLink
-    时服务端把异常 MRO 编入 ``RemoteError.error_info["exception_mro"]``。
+    本地网关直抛带 ``code`` 的 ``MaterialsServiceError``；跨 HostLink 时服务端把
+    异常类型与 MRO 编入 ``RemoteError.error_info``。
     """
 
-    if getattr(exc, "code", None) == "conflict":
+    if getattr(exc, "code", None) == code:
         return True
     info = getattr(exc, "error_info", None)
     if isinstance(info, dict):
-        if info.get("exception_type") == "MaterialConflictError":
+        if info.get("exception_type") == type_name:
             return True
         mro = info.get("exception_mro")
-        if isinstance(mro, list) and "MaterialConflictError" in mro:
+        if isinstance(mro, list) and type_name in mro:
             return True
     return False
+
+
+def _is_conflict_error(exc: BaseException) -> bool:
+    """权威侧乐观锁冲突。"""
+
+    return _is_service_error(exc, "conflict", "MaterialConflictError")
+
+
+def _is_no_change_error(exc: BaseException) -> bool:
+    """权威判定快照与其状态一致（本地基线已过期到"刚好一致"的竞态）。"""
+
+    return _is_service_error(exc, "no_change", "MaterialNoChangeError")
+
+
+def _local_root_uuid(resource: Any) -> Optional[str]:
+    """PLR 实例沿 ``.parent`` 走到顶层持有根的 uuid。
+
+    设备持有的顶层根在权威里 parent 是设备物料，但设备不在 PLR 树里，所以 PLR
+    树的顶层就是快照根——无需向权威反查每个节点的归属。
+    """
+
+    top = resource
+    while getattr(top, "parent", None) is not None:
+        top = top.parent
+    return str(getattr(top, "unilabos_uuid", "") or "") or None
 
 
 class ResourceService(Protocol):
@@ -83,6 +109,16 @@ class ResourceService(Protocol):
         root_resource: Any,
     ) -> ResourceTreeSet:
         """提交一棵 UUID 集合完整的运行时物料树快照。"""
+        ...
+
+    async def apply_node_deltas(
+        self,
+        device_id: str,
+        device_uuid: str,
+        root: Any,
+        nodes: Sequence[Any],
+    ) -> bool:
+        """状态类增量上行：只报根树里变了的节点（data / 内容物 / 位姿）。"""
         ...
 
     async def move_resource(
@@ -149,14 +185,20 @@ class _ObservedMaterialRoot:
     state_callbacks: dict[int, tuple[Any, Callable[[dict[str, Any]], None]]]
     dirty: bool = False
     scheduled: bool = False
+    #: 自上次提交以来 state 变过的节点（id → 节点）；结构没变时只上报这些
+    dirty_nodes: dict[int, Any] = field(default_factory=dict)
+    #: 自上次提交以来发生过 assign / unassign：必须走整树快照
+    structural: bool = False
 
 
 class MaterialSnapshotObserver:
-    """把任意 PLR 后代变更合并成完整根物料树 snapshot。
+    """把 PLR 后代的变更上报给权威：状态变化按节点增量，结构变化整树快照。
 
     PLR 只会向父节点传播 assign/unassign callback，state callback 不传播。
-    因此这里递归监听每个后代的 state，但以根对象为唯一排队键。一次事件循环
-    内连续修改多个孔位只提交一次；提交期间再次发生变化则紧接着再提交一轮。
+    因此这里递归监听每个后代的 state，记下具体哪个节点变了，但以根对象为唯一排队
+    键。一次事件循环内连续修改多个孔位只提交一次；提交期间再次发生变化则紧接着再
+    提交一轮。只有 state 变化时用 ``apply_node_deltas`` 只发变了的节点；发生过
+    assign / unassign（父子、位点占用变化）则用严格整树快照，保留结构漂移检测。
     """
 
     def __init__(
@@ -235,11 +277,11 @@ class MaterialSnapshotObserver:
 
             def did_assign(resource: Any, *, _root_key: int = root_key) -> None:
                 self._observe_state_subtree(_root_key, resource)
-                self._queue(_root_key)
+                self._queue(_root_key, structural=True)
 
             def did_unassign(resource: Any, *, _root_key: int = root_key) -> None:
                 self._drop_state_subtree(_root_key, resource)
-                self._queue(_root_key)
+                self._queue(_root_key, structural=True)
 
             observed = _ObservedMaterialRoot(
                 root=root,
@@ -273,8 +315,9 @@ class MaterialSnapshotObserver:
                     _state: dict[str, Any],
                     *,
                     _root_key: int = root_key,
+                    _node: Any = node,
                 ) -> None:
-                    self._queue(_root_key)
+                    self._queue(_root_key, node=_node)
 
                 observed.state_callbacks[node_key] = (node, state_updated)
             register(state_updated)
@@ -327,7 +370,9 @@ class MaterialSnapshotObserver:
                     pass
         return True
 
-    def _queue(self, root_key: int) -> None:
+    def _queue(
+        self, root_key: int, *, node: Any = None, structural: bool = False
+    ) -> None:
         if self._suppression_depth.get() > 0:
             return
         with self._guard:
@@ -335,6 +380,10 @@ class MaterialSnapshotObserver:
             if observed is None:
                 return
             observed.dirty = True
+            if structural:
+                observed.structural = True
+            elif node is not None:
+                observed.dirty_nodes[id(node)] = node
             if observed.scheduled:
                 return
             observed.scheduled = True
@@ -356,6 +405,7 @@ class MaterialSnapshotObserver:
         # 合并同一个同步 tick 内多个 child 的变化。
         await asyncio.sleep(0)
         conflict_attempts = 0
+        force_full = False
         while True:
             with self._guard:
                 observed = self._roots.get(root_key)
@@ -363,26 +413,60 @@ class MaterialSnapshotObserver:
                     return
                 observed.dirty = False
                 root = observed.root
+                changed_nodes = list(observed.dirty_nodes.values())
+                structural = observed.structural or force_full
+                observed.dirty_nodes.clear()
+                observed.structural = False
+            force_full = False
             try:
-                # 先在设备执行线程冻结整棵 PLR 树，避免后台 I/O 时继续读取
-                # 一半旧、一半新的 child state。
-                runtime_tree = ResourceTreeSet.from_plr_resources([root])
-                snapshot_method = getattr(
-                    self._service, "snapshot_resource_tree", None
-                )
-                if callable(snapshot_method):
-                    await snapshot_method(
-                        self._device_id(),
-                        self._device_uuid(),
-                        runtime_tree,
+                delta_method = getattr(self._service, "apply_node_deltas", None)
+                if (
+                    not structural
+                    and changed_nodes
+                    and callable(delta_method)
+                    and all(
+                        str(getattr(node, "unilabos_uuid", "") or "") for node in changed_nodes
                     )
+                ):
+                    # 只有状态变化：按节点增量上报，不冻结整棵树
+                    try:
+                        await delta_method(
+                            self._device_id(),
+                            self._device_uuid(),
+                            root,
+                            changed_nodes,
+                        )
+                    except Exception as exc:
+                        if not _is_conflict_error(exc):
+                            raise
+                        # 增量版本仍冲突：权威结构可能已变，退回整树快照对齐
+                        logger.info("物料根树增量上报冲突，改走整树快照：%s", exc)
+                        with self._guard:
+                            current = self._roots.get(root_key)
+                            if current is not None:
+                                current.dirty = True
+                        force_full = True
+                        continue
                 else:
-                    # 仅供旧测试替身使用；生产 ResourceService 必须提供严格入口。
-                    await self._service.update_resources(
-                        self._device_id(),
-                        self._device_uuid(),
-                        runtime_tree,
+                    # 先在设备执行线程冻结整棵 PLR 树，避免后台 I/O 时继续读取
+                    # 一半旧、一半新的 child state。
+                    runtime_tree = ResourceTreeSet.from_plr_resources([root])
+                    snapshot_method = getattr(
+                        self._service, "snapshot_resource_tree", None
                     )
+                    if callable(snapshot_method):
+                        await snapshot_method(
+                            self._device_id(),
+                            self._device_uuid(),
+                            runtime_tree,
+                        )
+                    else:
+                        # 仅供旧测试替身使用；生产 ResourceService 必须提供严格入口。
+                        await self._service.update_resources(
+                            self._device_id(),
+                            self._device_uuid(),
+                            runtime_tree,
+                        )
             except asyncio.CancelledError:
                 with self._guard:
                     current = self._roots.get(root_key)
@@ -452,6 +536,12 @@ def _runtime_gateway() -> MaterialGateway:
     return resolve_materials_gateway()
 
 
+def _is_device_material(aggregate: Any) -> bool:
+    """权威物料行是否是设备本身（图里的 type=device 节点），而不是一件耗材 / 台面。"""
+
+    return str(getattr(aggregate.material, "resource_type", "") or "").lower() == "device"
+
+
 def _normalize_plr_resources(resources: Any) -> list[Any]:
     normalized = (
         list(resources)
@@ -476,7 +566,13 @@ def _existing_tree_set(resources: Any) -> ResourceTreeSet:
 
 
 class AuthorityResourceService:
-    """通过嵌入式、HTTP 或 HostLink client 访问同一个微后端权威。"""
+    """通过嵌入式、HTTP 或 HostLink client 访问同一个微后端权威。
+
+    设备侧持有的 PLR 实例是它所持物料的工作真相，权威是被同步的一方：快照
+    上行不为了算归属或算 diff 去读权威——每棵根树的权威基线只在首次、乐观锁
+    冲突、结构漂移和下行变更之后读一次，其余时间用本地缓存的基线做 diff 与
+    precondition；本地 diff 为空的 flush 一次服务器调用都没有。
+    """
 
     def __init__(
         self,
@@ -488,6 +584,12 @@ class AuthorityResourceService:
             raise ValueError("gateway 与 gateway_provider 不能同时提供")
         self._configured_gateway = gateway
         self._gateway_provider = gateway_provider or _runtime_gateway
+        self._baselines: dict[str, Any] = {}
+        # 物料 uuid → (version, state_hash)；位点 uuid → version。增量上报的乐观锁
+        # 只需要这两张小表，不需要整棵基线树。
+        self._versions: dict[str, tuple[int, str]] = {}
+        self._site_versions: dict[str, int] = {}
+        self._baseline_lock = threading.Lock()
 
     def _gateway(self) -> MaterialGateway:
         gateway = self._configured_gateway
@@ -496,6 +598,68 @@ class AuthorityResourceService:
         if gateway is None:
             raise RuntimeError("微后端 Materials Authority 尚未配置")
         return gateway
+
+    # ── 权威基线缓存与版本表 ─────────────────────────────────────
+
+    def remember_baseline(self, tree: Any) -> None:
+        """记住一棵刚从权威拿到的根树（apply 结果、下行拉取），后续 flush 直接用。"""
+
+        root_uuid = str(getattr(tree, "root_material_uuid", "") or "")
+        if not root_uuid:
+            return
+        with self._baseline_lock:
+            self._baselines[root_uuid] = tree
+            for node in getattr(tree, "nodes", None) or []:
+                self._versions[node.material.material_uuid] = (
+                    node.material.version,
+                    node.state_hash,
+                )
+                for site in node.sites:
+                    self._site_versions[site.site_uuid] = site.version
+
+    def record_affected(self, affected: Sequence[Any]) -> None:
+        """用 mutation 返回的 ``affected`` 刷新版本表——不用回整棵树。"""
+
+        with self._baseline_lock:
+            for item in affected:
+                if item.aggregate_type == "material":
+                    self._versions[item.aggregate_uuid] = (item.version, item.state_hash)
+                elif item.aggregate_type == "site":
+                    self._site_versions[item.aggregate_uuid] = item.version
+
+    def invalidate_baselines(self, *root_uuids: str) -> None:
+        """基线过期：不传即全部作废。权威侧结构变了（move / transfer / 下行增删）时调用。
+
+        连同版本表一起作废：过期的版本号只会换来一次冲突再重拉，不如直接重拉。
+        """
+
+        with self._baseline_lock:
+            if not root_uuids:
+                self._baselines.clear()
+                self._versions.clear()
+                self._site_versions.clear()
+                return
+            for root_uuid in root_uuids:
+                tree = self._baselines.pop(str(root_uuid), None)
+                for node in getattr(tree, "nodes", None) or []:
+                    self._versions.pop(node.material.material_uuid, None)
+                    for site in node.sites:
+                        self._site_versions.pop(site.site_uuid, None)
+
+    def _forget_tree(self, root_uuid: str) -> None:
+        """只丢整树缓存、保留版本表：增量 apply 之后基线树里的 data / 位姿已旧。"""
+
+        with self._baseline_lock:
+            self._baselines.pop(root_uuid, None)
+
+    def _baseline(self, gateway: MaterialGateway, root_uuid: str) -> Any:
+        with self._baseline_lock:
+            cached = self._baselines.get(root_uuid)
+        if cached is not None:
+            return cached
+        tree = gateway.get_tree(root_uuid)
+        self.remember_baseline(tree)
+        return tree
 
     @staticmethod
     def _mutation(
@@ -562,6 +726,13 @@ class AuthorityResourceService:
         aggregate_cache: dict[str, Any],
         root_cache: dict[str, str],
     ) -> str:
+        """物料在权威里所属的快照根：沿 parent 链向上，停在第一个设备物料之下。
+
+        设备本身是权威里的一行物料（开机图对齐落的），台面 / 驱动 ensure 的根树挂到
+        设备时 parent 指向它；但设备不是 PLR 树的一部分，快照按"设备下的那棵树"分组
+        提交，而不是把整个设备连同它下面所有台面当成一棵树。
+        """
+
         cached = root_cache.get(material_uuid)
         if cached is not None:
             return cached
@@ -581,10 +752,48 @@ class AuthorityResourceService:
             if parent_uuid is None:
                 root_uuid = current_uuid
                 break
+            parent = aggregate_cache.get(parent_uuid)
+            if parent is None:
+                parent = gateway.get_material(parent_uuid)
+                aggregate_cache[parent_uuid] = parent
+            if _is_device_material(parent):
+                root_uuid = current_uuid
+                break
             current_uuid = parent_uuid
         for item in path:
             root_cache[item] = root_uuid
         return root_uuid
+
+    @staticmethod
+    def _local_roots(resources: Any, runtime: ResourceTreeSet) -> dict[str, str]:
+        """不问权威就能确定的 ``节点 uuid → 快照根 uuid``。
+
+        - 传入 PLR 实例：沿 ``.parent`` 到 PLR 顶层即根，其子树全部归它；
+        - 传入 ResourceTreeSet：``uuid_parent`` 为空的树根就是根（观察者冻结的整棵
+          持有树即此形态）。父在权威里但不在本地树里的子树（脚本传来的局部权威树）
+          留给 ``_root_material_uuid`` 反查。
+        """
+
+        roots: dict[str, str] = {}
+        if isinstance(resources, ResourceTreeSet):
+            for tree in runtime.trees:
+                root = tree.root_node.res_content
+                if root.uuid_parent is None and root.uuid:
+                    for node in tree.get_all_nodes():
+                        roots[node.res_content.uuid] = root.uuid
+            return roots
+        for resource in _normalize_plr_resources(resources):
+            root_uuid = _local_root_uuid(resource)
+            if not root_uuid:
+                continue
+            stack = [resource]
+            while stack:
+                current = stack.pop()
+                node_uuid = str(getattr(current, "unilabos_uuid", "") or "")
+                if node_uuid:
+                    roots[node_uuid] = root_uuid
+                stack.extend(getattr(current, "children", None) or [])
+        return roots
 
     @staticmethod
     def _snapshot_preconditions(base: Any) -> list[AggregatePrecondition]:
@@ -620,7 +829,7 @@ class AuthorityResourceService:
         runtime = _existing_tree_set(resources)
         gateway = self._gateway()
         aggregate_cache: dict[str, Any] = {}
-        root_cache: dict[str, str] = {}
+        root_cache: dict[str, str] = self._local_roots(resources, runtime)
         by_root: dict[str, list[Any]] = defaultdict(list)
         seen_runtime_uuids: set[str] = set()
         for instance in runtime.all_nodes:
@@ -628,7 +837,7 @@ class AuthorityResourceService:
             if material_uuid in seen_runtime_uuids:
                 continue
             seen_runtime_uuids.add(material_uuid)
-            root_uuid = self._root_material_uuid(
+            root_uuid = root_cache.get(material_uuid) or self._root_material_uuid(
                 gateway,
                 material_uuid,
                 aggregate_cache,
@@ -667,28 +876,41 @@ class AuthorityResourceService:
     ) -> Any:
         """把一组节点投影进单棵权威根树，带乐观锁冲突重试。
 
-        观察者快照与显式同步可能并发提交同一根树；precondition 版本冲突时
-        重拉基线重算 diff 再提交。提交内容幂等，先到者落库后重试方 diff
-        变空即直接返回，最终收敛。
+        基线来自本地缓存（首次一次 ``get_tree``），diff 在本地算：没有语义变化的
+        flush 不发任何请求；有变化才 ``apply_snapshot``，成功后用返回的树刷新基线。
+        precondition 版本冲突说明基线过期（权威被并发 move/transfer 推进），作废
+        基线重拉一次再算；本地基线与冻结树结构不一致（刚发生过挂载 / 移走）同样
+        重拉一次，仍不一致才视为真实漂移抛给调用方。
 
         ``conflict_retries=1`` 表示冲突不在本层重试、直接抛给调用方——
         观察者严格快照走该模式：``changed_resources`` 是排队时刻的冻结态，
-        权威被并发 mutation（move/transfer）推进后旧冻结不可重放，必须由
-        观察者重新冻结最新 runtime 树再提交。
+        权威被并发 mutation 推进后旧冻结不可重放，必须由观察者重新冻结最新
+        runtime 树再提交。
         """
 
+        from unilabos.server.services.materials.snapshot import compare_material_snapshot
+
         retries = conflict_retries or self._SNAPSHOT_CONFLICT_RETRIES
-        last_conflict: Exception | None = None
-        for _attempt in range(retries):
-            base = gateway.get_tree(root_uuid)
+        conflicts = 0
+        refreshed_for_drift = False
+        while True:
+            base = self._baseline(gateway, root_uuid)
             # 分组后的节点集合可能跨树引用（site occupied 指向别的权威树），
             # 不构成完整树，直接按 ResourceDict 集合投影快照。
-            snapshot = resource_tree_to_snapshot(
-                changed_resources,
-                base,
-                allow_partial=allow_partial,
-            )
-            diff = gateway.compare_snapshot(snapshot)
+            try:
+                snapshot = resource_tree_to_snapshot(
+                    changed_resources,
+                    base,
+                    allow_partial=allow_partial,
+                )
+            except SnapshotUuidMismatchError:
+                if refreshed_for_drift:
+                    raise
+                # 基线可能只是过期（刚 append / 移走），重拉一次再判断
+                refreshed_for_drift = True
+                self.invalidate_baselines(root_uuid)
+                continue
+            diff = compare_material_snapshot(base, snapshot)
             if not diff.changed:
                 return base
             mutation = self._mutation(
@@ -699,18 +921,26 @@ class AuthorityResourceService:
                 preconditions=self._snapshot_preconditions(base),
             )
             try:
-                return gateway.apply_snapshot(mutation, snapshot).data
+                applied = gateway.apply_snapshot(mutation, snapshot).data
             except Exception as exc:
+                if _is_no_change_error(exc):
+                    # 本地基线落后于权威、而权威恰好已是这个状态：刷新基线即收敛
+                    self.invalidate_baselines(root_uuid)
+                    return self._baseline(gateway, root_uuid)
                 if not _is_conflict_error(exc):
                     raise
-                last_conflict = exc
+                conflicts += 1
+                self.invalidate_baselines(root_uuid)
+                if conflicts >= retries:
+                    raise
                 logger.info(
                     "物料根树 %s snapshot 版本冲突，重拉基线重试（第 %s 次）",
                     root_uuid,
-                    _attempt + 1,
+                    conflicts,
                 )
-        assert last_conflict is not None
-        raise last_conflict
+                continue
+            self.remember_baseline(applied)
+            return applied
 
     async def update_resources(
         self,
@@ -734,6 +964,87 @@ class AuthorityResourceService:
         """同步更新入口，供 materials.update 等无事件循环上下文使用。"""
 
         return self._update_sync(device_id, device_uuid, resources)
+
+    _DELTA_CONFLICT_RETRIES = 2
+
+    def apply_node_deltas_sync(
+        self,
+        device_id: str,
+        device_uuid: str,
+        root: Any,
+        nodes: Sequence[Any],
+    ) -> bool:
+        """状态类增量上报：只把变了的节点（data / 内容物 / 位姿）发给权威，按 uuid 合并。
+
+        乐观锁用本地版本表里每个节点的 version；版本表由基线树、mutation 的
+        ``affected`` 和下行刷新。缺版本的节点先拉一次根树补齐（仅首次）。版本冲突说明
+        权威被别处推进：作废后重拉一次再试，仍冲突则抛给调用方（观察者退回整树快照）。
+        返回权威是否接受了变化（``no_change`` 视为 False）。
+        """
+
+        gateway = self._gateway()
+        root_uuid = _local_root_uuid(root)
+        if not root_uuid:
+            raise ValueError("增量上报的根物料缺少权威 uuid")
+        node_uuids = [str(getattr(node, "unilabos_uuid", "") or "") for node in nodes]
+        if any(not item for item in node_uuids):
+            raise ValueError("增量上报的物料缺少权威 uuid")
+        conflicts = 0
+        while True:
+            with self._baseline_lock:
+                missing = [item for item in node_uuids if item not in self._versions]
+            if missing:
+                self._forget_tree(root_uuid)
+                self._baseline(gateway, root_uuid)
+            deltas = []
+            for node, node_uuid in zip(nodes, node_uuids):
+                with self._baseline_lock:
+                    known = self._versions.get(node_uuid)
+                if known is None:
+                    raise ValueError(f"物料 {node_uuid} 不在权威根树 {root_uuid} 里")
+                serialized = (
+                    ResourceTreeSet.from_plr_resources([node]).trees[0].root_node.res_content
+                )
+                deltas.append(resource_to_node_delta(serialized, expected_version=known[0]))
+            mutation = self._mutation(
+                "apply_material_delta",
+                device_id=device_id,
+                device_uuid=device_uuid,
+                root_material_uuid=root_uuid,
+            )
+            try:
+                result = gateway.apply_delta(
+                    mutation, MaterialDelta(root_material_uuid=root_uuid, nodes=deltas)
+                )
+            except Exception as exc:
+                if _is_no_change_error(exc):
+                    return False
+                if not _is_conflict_error(exc):
+                    raise
+                conflicts += 1
+                self.invalidate_baselines(root_uuid)
+                with self._baseline_lock:
+                    for node_uuid in node_uuids:
+                        self._versions.pop(node_uuid, None)
+                if conflicts >= self._DELTA_CONFLICT_RETRIES:
+                    raise
+                logger.info("物料根树 %s 增量版本冲突，刷新版本表重试", root_uuid)
+                continue
+            self.record_affected(result.affected)
+            # 整树基线里这些节点的 data / 位姿已经旧了；下次结构快照重拉一次
+            self._forget_tree(root_uuid)
+            return bool(result.affected)
+
+    async def apply_node_deltas(
+        self,
+        device_id: str,
+        device_uuid: str,
+        root: Any,
+        nodes: Sequence[Any],
+    ) -> bool:
+        return await run_blocking(
+            self.apply_node_deltas_sync, device_id, device_uuid, root, nodes
+        )
 
     async def snapshot_resource_tree(
         self,
@@ -787,6 +1098,8 @@ class AuthorityResourceService:
                 parent_material_uuid=parent_material_uuid,
             ),
         )
+        # 父子 / 占用关系变了：来源与目标两棵根树的缓存基线都已过期
+        self.invalidate_baselines()
 
     async def move_resource(
         self,
@@ -898,6 +1211,8 @@ class AuthorityResourceService:
                 MaterialDelete(material_uuid=material_uuid, recursive=True),
             )
             deleted.extend(result.data.deleted_material_uuids)
+        if deleted:
+            self.invalidate_baselines()
         return deleted
 
     async def delete_resources(

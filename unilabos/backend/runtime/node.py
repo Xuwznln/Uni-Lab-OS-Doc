@@ -36,10 +36,59 @@ class DeviceNode(ABC):
     # 本设备在权威库（微后端 materials/graph 初始化）分配的资源 UUID；
     # 各 backend 节点构造时必须赋值，运行期不允许再从别处 getattr 兜底。
     resource_uuid: str = ""
+    #: 驱动 ``post_init`` 可按名声明的可选入参，见 :meth:`post_init_kwargs`。
+    POST_INIT_OPTIONAL_ARGUMENTS: tuple[str, ...] = ("sites", "resources", "site_resources")
 
     @property
     def identifier(self) -> str:
         return self.device_id
+
+    def post_init_kwargs(
+        self, post_init: Callable[..., Any], device_config: Any = None
+    ) -> Dict[str, Any]:
+        """按驱动 ``post_init`` 的签名注入可选入参；只写 ``post_init(self, node)`` 的驱动不受影响。
+
+        三个入参都是权威优先装配完成后的设备状态，驱动不必再从
+        ``node.resource_tracker`` 或物料权威反查：
+
+        - ``sites``:          ``{label: ResourceSite}``，设备自身的位点（uuid / pose / 占用）；
+        - ``resources``:      ``{name: PLR 实例}``，设备持有的物料（位点上的占用物、
+          直接挂在设备上的台面）；
+        - ``site_resources``: ``{label: PLR 实例 | None}``，位点 → 占用物的对应。
+
+        ``device_config`` 缺省取节点自身的 ``device_config``（ROS2 的配置在包装节点上，
+        由调用方传入）。
+        """
+
+        try:
+            parameters = inspect.signature(post_init).parameters
+        except (TypeError, ValueError):
+            return {}
+        wanted = [name for name in self.POST_INIT_OPTIONAL_ARGUMENTS if name in parameters]
+        if not wanted:
+            return {}
+
+        config = device_config if device_config is not None else getattr(self, "device_config", None)
+        resource = getattr(config, "res_content", None)
+        sites = list(getattr(resource, "sites", None) or [])
+        tracker = getattr(self, "resource_tracker", None)
+        held = list(getattr(tracker, "resources", None) or [])
+        by_uuid = dict(getattr(tracker, "uuid_to_resources", None) or {})
+        values: Dict[str, Any] = {
+            "sites": {str(site.label): site for site in sites},
+            "resources": {
+                str(item.name): item for item in held if getattr(item, "name", None)
+            },
+            "site_resources": {
+                str(site.label): (
+                    by_uuid.get(site.occupied_material_uuid)
+                    if site.occupied_material_uuid
+                    else None
+                )
+                for site in sites
+            },
+        }
+        return {name: values[name] for name in wanted}
 
     @abstractmethod
     def lab_logger(self) -> Any:
@@ -109,10 +158,19 @@ class DeviceNode(ABC):
         self.__dict__["_material_snapshot_observer"] = observer
         observer.observe_all(list(tracker.resources))
 
+    def _invalidate_material_baselines(self) -> None:
+        """权威侧结构已变（下行投影 / 挂载）：本地缓存的根树基线作废，下次 flush 重拉一次。"""
+
+        service = self.__dict__.get("_device_resource_service")
+        invalidate = getattr(service, "invalidate_baselines", None)
+        if callable(invalidate):
+            invalidate()
+
     @contextmanager
     def material_authority_sync(self) -> Iterator[None]:
         """权威 load/unload 投影本地 PLR 时禁止产生 snapshot 回声。"""
 
+        self._invalidate_material_baselines()
         observer = self.__dict__.get("_material_snapshot_observer")
         context = (
             observer.suppress_authority_projection()
@@ -645,6 +703,32 @@ class DeviceNode(ABC):
             )
             return None
 
+    async def _attach_root_to_device(self, material_uuid: str) -> None:
+        """把一棵根树的权威 parent 设为本设备物料（设备挂载不占 Site，只落父子关系）。
+
+        已经挂在本设备下则无事发生；挂在别的物料 / 设备下的不在这里改父（那是 move /
+        transfer 的事）。设备在权威里没有物料行（旧图 / 未登记）时静默跳过。
+        """
+
+        try:
+            tree_set = await self.get_resource(resources_uuid=[material_uuid], with_children=False)
+        except Exception:  # noqa: BLE001 - 读不到就不改父，挂载本身已完成
+            return
+        if not tree_set.trees:
+            return
+        current_parent = tree_set.trees[0].root_node.res_content.uuid_parent
+        if current_parent:
+            return
+        try:
+            await self._require_resource_service().move_resource(
+                self.device_id,
+                self.resource_uuid,
+                material_uuid,
+                parent_material_uuid=self.resource_uuid,
+            )
+        except Exception as exc:  # noqa: BLE001 - 设备不是权威物料时（未登记）保持原样
+            self.lab_logger().debug(f"[AR:{material_uuid}] 设备挂载未落 parent（{exc}），按根树保留")
+
     @staticmethod
     def _occupied_site_uuid(
         tree_set: Any, owner_uuid: str, occupant_uuid: str
@@ -755,9 +839,11 @@ class DeviceNode(ABC):
                 # 换位不重复触发 add 回调；transfer 已在挂载时回调 resource_tree_transfer
                 await self._invoke_resource_hook("resource_tree_add", added_instances)
             report_tree_set = ResourceTreeSet.from_plr_resources(report_roots)
-            # 3. 挂载的权威事实：物料挂到物料下（设备挂载除外）是 materials.db 的
-            #    父子关系 + Site 占用；快照协议只更新既有聚合、无法表达跨树合并，
-            #    因此先经 move 落库，随后的快照才能按合并后的新树分组对齐。
+            # 3. 挂载的权威事实是 materials.db 的父子关系 + Site 占用；快照协议只更新
+            #    既有聚合、无法表达跨树合并，因此先经 move 落库，随后的快照才能按合并后
+            #    的新树分组对齐。挂到设备自身（台面 Deck、驱动运行期 ensure 的根树）同样
+            #    要落 parent=设备物料：否则它在权威里仍是独立根，前端设备卡片下看不到它
+            #    的 sites，materials.owner_device_of 也只能靠 extra 推断。
             if parent_uuid != self.resource_uuid:
                 for material_uuid in resource_uuids:
                     # site 参数即权威 Site uuid，直传；slot/未指定则从挂载快照反查
@@ -771,6 +857,9 @@ class DeviceNode(ABC):
                             report_tree_set, parent_uuid, material_uuid
                         ),
                     )
+            elif self.resource_uuid:
+                for material_uuid in resource_uuids:
+                    await self._attach_root_to_device(material_uuid)
             # 4. 同步：挂载后的父树经 update_resource 直连权威（权威已有 create 记录，严禁 add）
             for tree in report_tree_set.trees:
                 if tree.root_node.res_content.uuid_parent is None:
@@ -1013,6 +1102,8 @@ class DeviceNode(ABC):
                 resources_uuid = [resources_uuid]
             additional_add_params = i.get("additional_add_params", {})  # 额外参数
             self.lab_logger().debug(f"[资源同步] 处理 {action}, " f"resources count: {len(resources_uuid)}")
+            # 下行说明权威已经改了结构：本地基线作废
+            self._invalidate_material_baselines()
             # 锁范围由请求中的 UUID 决定；调用方必须同时传入会被修改的关联
             # 父节点或子节点 UUID。
             resource_locks = await self._acquire_resource_tree_uuid_locks(

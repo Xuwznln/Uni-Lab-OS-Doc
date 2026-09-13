@@ -259,6 +259,8 @@ class HostLinkDeviceNode(DeviceNode):
         )
         self.parent_device_id = str(parent_device_id or "")
         self.children: list[ResourceDictInstance] = []
+        # 图中本设备节点（含权威优先装配后的 sites）；post_init 可选入参从这里取
+        self.device_config: Optional[ResourceDictInstance] = None
         self.sub_devices: dict[str, HostLinkDeviceNode] = {}
         self.communication_node_id_to_instance: dict[
             str, HostLinkDeviceNode
@@ -596,8 +598,9 @@ class HostLinkDeviceNode(DeviceNode):
             raise RuntimeError(f"HostLink 设备 {self.device_id!r} 事件循环启动超时")
         self._started = True
         try:
-            if hasattr(self.driver, "post_init"):
-                self.driver.post_init(self)
+            post_init = getattr(self.driver, "post_init", None)
+            if callable(post_init):
+                post_init(self, **self.post_init_kwargs(post_init))
             self._setup_decorated_subscriptions()
             setup = getattr(self.driver, "setup", None)
             if callable(setup):
@@ -1282,6 +1285,7 @@ class HostLinkLocalRuntime:
         node.set_topic_bus(self.topic_bus)
         node.set_service_bus(self.service_bus)
         node.children = list(spec.device_config.children) if spec.device_config else []
+        node.device_config = spec.device_config
         node.__dict__["_hostlink_runtime"] = self
         # workstation 声明了 XDL protocol：挂载协议编排器（步骤生成与资源
         # 展开/回写逻辑与 ROS2 共用 runtime.workstation_protocol），

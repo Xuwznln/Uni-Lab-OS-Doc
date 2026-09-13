@@ -26,6 +26,7 @@ from unilabos.backend.hostlink.protocol import (
     new_response,
     read_message,
     send_message,
+    send_response_or_reject,
 )
 from unilabos.backend.hostlink.ros_assist import RosNetworkInfo
 from unilabos.utils import logger
@@ -79,27 +80,34 @@ class HostLinkClient:
             raise ValueError("HostLink host cannot be empty")
         self.host = str(host).strip()
         self.port = int(port)
-        self.machine_name = str(machine_name or "").strip()
+        self.machine_name = str(machine_name or "").strip() or f"slave-{uuid.uuid4().hex}"
         self.heartbeat_interval = float(heartbeat_interval)
         self.connect_timeout = float(connect_timeout)
         self.request_timeout = float(request_timeout)
         self.reconnect_max_backoff = float(reconnect_max_backoff)
         self.on_status_change = on_status_change
         self.heartbeat_payload_provider = heartbeat_payload_provider
-        self.node_id = self.machine_name or f"slave-{uuid.uuid4().hex}"
+        # 节点身份由 machine_name 指定，不能由设备列表推导或随设备增删改变。
+        self.node_id = self.machine_name
         self.device_ids: List[str] = []
         self.device_descriptors: List[Dict[str, Any]] = []
         self.configure_device_ids(device_ids or [])
-        self.configure_device_descriptors(device_descriptors or [])
+        if device_descriptors is not None:
+            self.configure_device_descriptors(device_descriptors)
         self.capabilities = [
             "device-discovery",
             "ros-assist",
             "device-rpc",
             "service-rpc",
             "topic-pubsub",
+            "process-logs",
         ]
         self.hello_info: Dict[str, Any] = {}
         self.handlers: Dict[str, Callable[[Dict[str, Any]], Any]] = {}
+        # 组网控制层即可读取日志，HostLink 与 ROS2 Slave 共用；不要求设备已初始化。
+        from unilabos.utils.runtime_logs import read_current_log
+
+        self.register_handler(ActionType.LOG_READ, read_current_log)
 
         self._sock: Optional[socket.socket] = None
         self._manager_thread: Optional[threading.Thread] = None
@@ -115,11 +123,16 @@ class HostLinkClient:
             max_workers=8,
             thread_name_prefix="hostlink-slave-rpc",
         )
+        self._release_log_notices = None
 
     def start(self) -> "HostLinkClient":
         if self._manager_thread is not None and self._manager_thread.is_alive():
             return self
         self._stop.clear()
+        if self._release_log_notices is None:
+            from unilabos.utils.log_notices import log_notices
+
+            self._release_log_notices = log_notices.subscribe(self._notify_log_append)
         self._manager_thread = threading.Thread(
             target=self._run,
             name="hostlink-client",
@@ -143,6 +156,9 @@ class HostLinkClient:
 
     def close(self) -> None:
         self._stop.set()
+        if self._release_log_notices is not None:
+            self._release_log_notices()
+            self._release_log_notices = None
         with self._status_condition:
             self._status_condition.notify_all()
         self._teardown_socket()
@@ -150,6 +166,11 @@ class HostLinkClient:
             self._manager_thread.join(timeout=3)
         self._manager_thread = None
         self._rpc_executor.shutdown(wait=False, cancel_futures=True)
+
+    def _notify_log_append(self, notice) -> None:
+        if self.online and (notice.all_sources or "host" in notice.source_ids):
+            # 运行在日志通知线程；只发索引，Host 按该连接身份定位 Slave。
+            self.request(ActionType.LOG_CHANGED, {}, timeout=1)
 
     @property
     def online(self) -> bool:
@@ -163,9 +184,7 @@ class HostLinkClient:
                 if str(device_id).strip()
             }
         )
-        if normalized:
-            self.device_ids = normalized
-            self.node_id = f"device:{normalized[0]}"
+        self.device_ids = normalized
 
     def configure_device_descriptors(
         self,
@@ -182,8 +201,7 @@ class HostLinkClient:
             item["id"] = device_id
             normalized.append(item)
         self.device_descriptors = sorted(normalized, key=lambda item: item["id"])
-        if self.device_descriptors:
-            self.configure_device_ids(item["id"] for item in self.device_descriptors)
+        self.configure_device_ids(item["id"] for item in self.device_descriptors)
 
     def register_handler(
         self,
@@ -367,32 +385,41 @@ class HostLinkClient:
         self._set_online(True)
         logger.info(
             f"[HostLink] connected to {self.host}:{self.port}; "
-            f"devices={self.device_ids}"
+            f"machine_name={self.machine_name}; node_id={self.node_id}; devices={self.device_ids}"
         )
+
+    def heartbeat_now(self) -> None:
+        """立刻发一次心跳：把当前设备描述与状态推给 Host，不等下一个心跳周期。
+
+        Slave 在建链之后才装配设备时用它让 Host 马上看到设备，而不是最多等
+        ``heartbeat_interval`` 才出现在 Host 的在线设备表里。
+        """
+
+        payload: Optional[Dict[str, Any]] = None
+        if self.heartbeat_payload_provider is not None:
+            try:
+                payload = self.heartbeat_payload_provider()
+            except Exception:  # noqa: BLE001 - 状态采集不能中断重连
+                logger.exception("[HostLink] heartbeat payload collection failed")
+        response = self.request(
+            ActionType.PING,
+            data=payload,
+            timeout=self.request_timeout,
+        )
+        if isinstance(response, dict) and isinstance(
+            response.get("devices"), list
+        ):
+            self.hello_info["devices"] = [
+                dict(item)
+                for item in response["devices"]
+                if isinstance(item, dict)
+            ]
 
     def _heartbeat_loop(self) -> None:
         while not self._stop.wait(self.heartbeat_interval):
             if self._connection_lost.is_set():
                 raise LinkError("connection closed")
-            payload: Optional[Dict[str, Any]] = None
-            if self.heartbeat_payload_provider is not None:
-                try:
-                    payload = self.heartbeat_payload_provider()
-                except Exception:  # noqa: BLE001 - 状态采集不能中断重连
-                    logger.exception("[HostLink] heartbeat payload collection failed")
-            response = self.request(
-                ActionType.PING,
-                data=payload,
-                timeout=self.request_timeout,
-            )
-            if isinstance(response, dict) and isinstance(
-                response.get("devices"), list
-            ):
-                self.hello_info["devices"] = [
-                    dict(item)
-                    for item in response["devices"]
-                    if isinstance(item, dict)
-                ]
+            self.heartbeat_now()
 
     def _read_loop(self, sock: socket.socket) -> None:
         reader = LineReader(sock)
@@ -465,7 +492,12 @@ class HostLinkClient:
                     )
         try:
             with self._write_lock:
-                send_message(sock, response)
+                send_response_or_reject(
+                    lambda reply: send_message(sock, reply),
+                    message,
+                    response,
+                    f"{self.host}:{self.port}",
+                )
         except OSError:
             self._connection_lost.set()
 

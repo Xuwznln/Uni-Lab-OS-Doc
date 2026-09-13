@@ -9,11 +9,12 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
+from unilabos.client.materials import LocalMaterialsClient
 from unilabos.registry.ast_registry_scanner import _parse_file, scan_directory
 from unilabos.registry.decorators import device, get_device_meta
 from unilabos.devices.virtual.workbench import VirtualWorkbench
 from unilabos.resources.adapters.device_site import (
-    apply_device_available_sites,
+    apply_device_authority_state,
     prepare_devices_for_report,
 )
 from unilabos.resources.resource_tracker import (
@@ -23,6 +24,7 @@ from unilabos.resources.resource_tracker import (
     ResourceTreeSet,
 )
 from unilabos.resources.objects.site import SiteDefinition, normalize_available_sites
+from unilabos.server.services.materials import MaterialsService
 
 
 AVAILABLE_SITES = [
@@ -160,7 +162,7 @@ def test_virtual_workbench_available_sites_validate_backend_instance_sites():
             ),
         }
     )
-    apply_device_available_sites(device_config, meta, "virtual_workbench")
+    apply_device_authority_state(device_config, meta, "virtual_workbench")
 
     sites = device_config.res_content.sites
     assert sites is not None
@@ -305,7 +307,7 @@ def test_device_site_adapter_only_validates_identity_and_preserves_occupancy():
     device_config = _device_resource(uuid=owner_uuid, sites=sites)
     registry_entry = {"available_sites": AVAILABLE_SITES}
 
-    apply_device_available_sites(
+    apply_device_authority_state(
         device_config,
         registry_entry,
         "available_sites_test_device",
@@ -327,7 +329,7 @@ def test_device_site_adapter_only_validates_identity_and_preserves_occupancy():
         "template_name",
     }.isdisjoint(registry_entry["available_sites"][0])
 
-    apply_device_available_sites(
+    apply_device_authority_state(
         device_config,
         registry_entry,
         "available_sites_test_device",
@@ -345,7 +347,7 @@ def test_device_site_adapter_rejects_generic_device_template_name():
         sites=_instantiated_sites(owner_uuid, "device"),
     )
     with pytest.raises(ValueError, match="template_name.*注册表"):
-        apply_device_available_sites(
+        apply_device_authority_state(
             device_config,
             {"available_sites": AVAILABLE_SITES},
             "available_sites_test_device",
@@ -433,7 +435,7 @@ def test_device_site_adapter_rejects_fixed_definition_changes():
         sites=_instantiated_sites(owner_uuid, "available_sites_test_device"),
     )
     registry_entry = {"available_sites": AVAILABLE_SITES}
-    apply_device_available_sites(
+    apply_device_authority_state(
         device_config,
         registry_entry,
         "available_sites_test_device",
@@ -442,11 +444,342 @@ def test_device_site_adapter_rejects_fixed_definition_changes():
     changed = normalize_available_sites(AVAILABLE_SITES)
     changed[0]["pose"]["size"]["width"] = 999
     with pytest.raises(ValueError, match="固定定义.*冲突"):
-        apply_device_available_sites(
+        apply_device_authority_state(
             device_config,
             {"available_sites": changed},
             "available_sites_test_device",
         )
+
+
+# ── 权威优先：设备装配时从物料权威取 / 建 Site ──────────────────────────
+
+
+@pytest.fixture
+def authority(tmp_path):
+    service = MaterialsService(tmp_path / "materials.db")
+    try:
+        yield LocalMaterialsClient(service)
+    finally:
+        service.close()
+
+
+def test_device_missing_in_authority_is_created_from_registry_definition(authority):
+    """权威没有该设备：以图中 uuid + 注册表 available_sites 在权威创建并取回。"""
+
+    owner_uuid = str(uuid4())
+    device_config = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+
+    apply_device_authority_state(
+        device_config,
+        {"available_sites": AVAILABLE_SITES},
+        "available_sites_test_device",
+        gateway=authority,
+    )
+
+    resource = device_config.res_content
+    assert resource.sites_initialized is True
+    assert [site.label for site in resource.sites] == ["A1"]
+    UUID(resource.sites[0].uuid)
+    assert resource.sites[0].material_uuid == owner_uuid
+    assert resource.sites[0].template_name == "available_sites_test_device"
+    assert resource.sites[0].pose.size.width == 10
+
+    # 权威里就是这台设备：同 uuid、type=device，Site uuid 与本地一致
+    aggregate = authority.get_material(owner_uuid)
+    assert aggregate.material.resource_type == "device"
+    assert aggregate.material.resource_id == "device-1"
+    assert aggregate.data.sites_initialized is True
+    assert [site.site_uuid for site in aggregate.sites] == [resource.sites[0].uuid]
+    # 设备模板随之登记，带上注册表槽位定义
+    template = authority.list_templates(name="available_sites_test_device")[0]
+    assert [site["label"] for site in template.available_sites] == ["A1"]
+
+
+def test_device_present_in_authority_adopts_authority_sites(authority):
+    """权威已有该设备（开机图对齐落的）：本地快照被权威 Site 覆盖，不再新建。"""
+
+    owner_uuid = str(uuid4())
+    seed = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    apply_device_authority_state(
+        seed, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+        gateway=authority,
+    )
+    authority_site_uuid = seed.res_content.sites[0].uuid
+
+    # 本地快照带的是别处（如图权威）派生的 Site uuid，和物料权威不一致
+    stale = _device_resource(
+        uuid=owner_uuid,
+        sites=_instantiated_sites(owner_uuid, "available_sites_test_device"),
+    )
+    assert stale.res_content.sites[0].uuid != authority_site_uuid
+
+    apply_device_authority_state(
+        stale, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+        gateway=authority,
+    )
+    assert stale.res_content.sites[0].uuid == authority_site_uuid
+    assert len(authority.list_materials(roots_only=True)) == 1
+
+
+def test_device_created_with_held_materials_subtree(authority):
+    """设备持有物料：权威缺设备时连同下挂子树一起创建，与 materials.ensure 按根对齐一致。"""
+
+    owner_uuid = str(uuid4())
+    device_config = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    child = ResourceDictInstance(
+        ResourceDict.model_validate(
+            {
+                "id": "deck-1",
+                "uuid": str(uuid4()),
+                "name": "deck-1",
+                "type": "deck",
+                "class": "Deck",
+                "template_name": "Deck",
+                "parent_uuid": owner_uuid,
+                "config": {},
+                "data": {},
+                "extra": {},
+            }
+        )
+    )
+    child.res_content.parent = device_config.res_content
+    device_config.children.append(child)
+
+    apply_device_authority_state(
+        device_config,
+        {"available_sites": AVAILABLE_SITES},
+        "available_sites_test_device",
+        gateway=authority,
+    )
+
+    deck = authority.get_material(child.res_content.uuid)
+    assert deck.material.parent_material_uuid == owner_uuid
+    assert deck.material.resource_id == "device-1/deck-1"
+    assert device_config.res_content.sites is not None
+    assert len(device_config.res_content.sites) == 1
+
+
+def test_authority_device_missing_declared_site_is_rejected(authority):
+    """权威里的设备缺注册表声明的槽位：权威不能补 Site，必须报错而不是带 0 个位点跑。"""
+
+    owner_uuid = str(uuid4())
+    device_config = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    apply_device_authority_state(
+        device_config, {"available_sites": []}, "available_sites_test_device",
+        gateway=authority,
+    )
+    assert device_config.res_content.sites == []
+
+    with pytest.raises(ValueError, match="缺少注册表声明的 Site A1"):
+        apply_device_authority_state(
+            _device_resource(uuid=owner_uuid),
+            {"available_sites": AVAILABLE_SITES},
+            "available_sites_test_device",
+            gateway=authority,
+        )
+
+
+def test_authority_definition_drift_warns_but_adopts(authority, caplog):
+    """注册表改了 pose 之类的定义字段：权威保留首次实例化的定义，只告警不阻断。"""
+
+    owner_uuid = str(uuid4())
+    device_config = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    apply_device_authority_state(
+        device_config, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+        gateway=authority,
+    )
+
+    changed = normalize_available_sites(AVAILABLE_SITES)
+    changed[0]["pose"]["size"]["width"] = 999
+    again = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    with caplog.at_level("WARNING"):
+        apply_device_authority_state(
+            again, {"available_sites": changed}, "available_sites_test_device",
+            gateway=authority,
+        )
+    assert again.res_content.sites[0].pose.size.width == 10  # 以权威为准
+    assert "available_sites" in caplog.text and "A1" in caplog.text
+
+
+def test_authority_uuid_belonging_to_other_template_is_rejected(authority):
+    owner_uuid = str(uuid4())
+    seed = _device_resource(
+        uuid=owner_uuid, template_name="other_device", **{"class": "other_device"},
+        sites=None, sites_initialized=False,
+    )
+    apply_device_authority_state(seed, {"available_sites": []}, "other_device", gateway=authority)
+
+    with pytest.raises(ValueError, match="不是设备 device-1"):
+        apply_device_authority_state(
+            _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False),
+            {"available_sites": AVAILABLE_SITES},
+            "available_sites_test_device",
+            gateway=authority,
+        )
+
+
+def _material_payload(material_id: str, material_uuid: str, parent_uuid: str | None = None):
+    payload = {
+        "id": material_id,
+        "uuid": material_uuid,
+        "name": material_id,
+        "type": "container",
+        "class": "Container",
+        "template_name": "test-container-template",
+        "config": {"type": "Container"},
+        "data": {"volume": 0},
+        "extra": {},
+        "sites": [],
+        "sites_initialized": True,
+    }
+    if parent_uuid is not None:
+        payload["parent_uuid"] = parent_uuid
+    return payload
+
+
+def _mutation(operation: str):
+    from unilabos.protocol.materials import InventoryMutation
+
+    command_uuid = str(uuid4())
+    return InventoryMutation(
+        command_uuid=command_uuid, effect_key=f"{operation}:{command_uuid}", operation=operation
+    )
+
+
+def test_device_children_are_seeded_from_authority_not_graph(authority):
+    """设备持有的物料以权威为准：Site 上的占用物、直接挂在设备上的台面一并装载，
+    图中过期的子节点不再装载。"""
+    from unilabos.protocol.materials import MaterialMove
+    from unilabos.resources import materials
+    from unilabos.resources.adapters.plr_materials import resource_tree_to_create
+
+    owner_uuid = str(uuid4())
+    device_config = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    apply_device_authority_state(
+        device_config, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+        gateway=authority,
+    )
+    site_uuid = device_config.res_content.sites[0].uuid
+
+    # 权威侧后来发生的事：一块板放到 A1 位点、一个台面直接挂到设备下
+    plate_uuid, bench_uuid = str(uuid4()), str(uuid4())
+    for material_id, material_uuid in (("plate-1", plate_uuid), ("bench-1", bench_uuid)):
+        authority.create_tree(
+            _mutation("create_material_tree"),
+            resource_tree_to_create(
+                ResourceTreeSet.from_raw_dict_list([_material_payload(material_id, material_uuid)]),
+                adopt_uuid=True,
+            ),
+        )
+    authority.move_material(
+        _mutation("move_material"),
+        MaterialMove(material_uuid=plate_uuid, destination_site_uuid=site_uuid),
+    )
+    authority.move_material(
+        _mutation("move_material"),
+        MaterialMove(material_uuid=bench_uuid, parent_material_uuid=owner_uuid),
+    )
+
+    # 图文件还停留在开机那一刻：设备下只有一块早已不在的旧板
+    stale_uuid = str(uuid4())
+    booted = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    stale = ResourceDictInstance(
+        ResourceDict.model_validate(_material_payload("old-plate", stale_uuid, owner_uuid))
+    )
+    stale.res_content.parent = booted.res_content
+    booted.children.append(stale)
+
+    apply_device_authority_state(
+        booted, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+        gateway=authority,
+    )
+
+    held = {child.res_content.uuid: child for child in booted.children}
+    assert set(held) == {plate_uuid, bench_uuid}
+    assert all(child.res_content.parent is booted.res_content for child in booted.children)
+    assert held[plate_uuid].res_content.name == "plate-1"
+    assert booted.res_content.sites[0].occupied_material_uuid == plate_uuid
+    # 权威树里的形态与运行期 append_resource 装载的一致（materials.get 同源）
+    assert materials.get(plate_uuid, gateway=authority).trees[0].root_node.res_content.uuid_parent == owner_uuid
+
+
+def test_device_children_keep_graph_sub_devices_and_warn_on_orphans(authority, caplog):
+    owner_uuid = str(uuid4())
+    seed = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    apply_device_authority_state(
+        seed, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+        gateway=authority,
+    )
+
+    booted = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    sub_device = _device_resource(
+        id="pump-1", name="pump-1", uuid=str(uuid4()), template_name="pump", **{"class": "pump"},
+        sites=None, sites_initialized=False, parent_uuid=owner_uuid,
+    )
+    sub_device.res_content.parent = booted.res_content
+    orphan = ResourceDictInstance(
+        ResourceDict.model_validate(_material_payload("ghost", str(uuid4()), owner_uuid))
+    )
+    orphan.res_content.parent = booted.res_content
+    booted.children.extend([sub_device, orphan])
+
+    with caplog.at_level("WARNING"):
+        apply_device_authority_state(
+            booted, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+            gateway=authority,
+        )
+    assert booted.children == [sub_device]
+    assert "ghost" in caplog.text and "以权威为准" in caplog.text
+
+
+def test_device_created_with_children_adopts_them_back(authority):
+    """权威缺设备时连子树一起建，随后装载的子节点就是权威发回的那一份。"""
+    owner_uuid, deck_uuid = str(uuid4()), str(uuid4())
+    device_config = _device_resource(uuid=owner_uuid, sites=None, sites_initialized=False)
+    deck = ResourceDictInstance(
+        ResourceDict.model_validate(_material_payload("deck-1", deck_uuid, owner_uuid))
+    )
+    deck.res_content.parent = device_config.res_content
+    device_config.children.append(deck)
+
+    apply_device_authority_state(
+        device_config, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device",
+        gateway=authority,
+    )
+    assert [child.res_content.uuid for child in device_config.children] == [deck_uuid]
+    assert device_config.children[0].res_content.id == "device-1/deck-1"
+    assert device_config.children[0].res_content.name == "deck-1"
+    assert authority.get_material(deck_uuid).material.parent_material_uuid == owner_uuid
+
+
+def test_without_reachable_authority_only_validates_local_snapshot(monkeypatch):
+    """权威不可达（Slave 未连上 / 未装配）：退化为核验本地快照，Edge 不补齐。"""
+
+    from unilabos.resources.adapters import device_site
+
+    monkeypatch.setattr(device_site, "_resolve_optional_gateway", lambda: None)
+    uninitialized = _device_resource(sites=None, sites_initialized=False)
+    with pytest.raises(ValueError, match="微后端实例化"):
+        apply_device_authority_state(
+            uninitialized, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device"
+        )
+
+    owner_uuid = str(uuid4())
+    local = _device_resource(
+        uuid=owner_uuid,
+        sites=_instantiated_sites(owner_uuid, "available_sites_test_device"),
+    )
+    graph_child = ResourceDictInstance(
+        ResourceDict.model_validate(_material_payload("graph-plate", str(uuid4()), owner_uuid))
+    )
+    graph_child.res_content.parent = local.res_content
+    local.children.append(graph_child)
+    local_uuid = local.res_content.sites[0].uuid
+    apply_device_authority_state(
+        local, {"available_sites": AVAILABLE_SITES}, "available_sites_test_device"
+    )
+    assert local.res_content.sites[0].uuid == local_uuid
+    assert local.children == [graph_child]  # 权威不可达：沿用图中子节点
 
 
 def test_material_sites_require_backend_identity_and_drop_available_sites():

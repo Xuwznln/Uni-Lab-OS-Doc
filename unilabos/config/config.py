@@ -13,6 +13,15 @@ _ROS_NODE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _REMOVED_CONFIG_FIELDS = {
     "BasicConfig": frozenset({"app_bridges", "communication_protocol"}),
 }
+# 与配置覆盖共用 UNILABOS_ 前缀、但由进程编排 / 可观测性模块自行读取的环境变量，
+# 不是 ``UNILABOS_<Config类>_<字段>`` 覆盖，解析时直接跳过（不告警）。
+_NON_CONFIG_ENV_KEYS = frozenset(
+    {
+        "UNILABOS_SUPERVISOR_INNER",  # app.supervisor：当前进程处于监督循环内
+        "UNILABOS_HOST_CHILD",  # app.supervisor：由调度权威拉起的 Host 子进程
+        "UNILABOS_OTEL_ENABLED",  # utils.tracing：是否创建 OTLP exporter
+    }
+)
 
 
 class BasicConfig:
@@ -171,7 +180,7 @@ def _update_config_from_module(module):
 def _update_config_from_env():
     prefix = "UNILABOS_"
     for env_key, env_value in os.environ.items():
-        if not env_key.startswith(prefix):
+        if not env_key.startswith(prefix) or env_key in _NON_CONFIG_ENV_KEYS:
             continue
         try:
             key_path = env_key[len(prefix):]  # Remove UNILAB_ prefix

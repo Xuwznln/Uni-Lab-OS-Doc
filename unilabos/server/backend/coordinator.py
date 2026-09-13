@@ -291,6 +291,7 @@ class WorkflowBusinessCoordinator:
                 attempt_group_uuid=content.attempt_group_uuid,
                 retry_of_job_uuid=content.retry_of_job_uuid,
                 attempt_no=content.attempt_no,
+                attempt_trigger=content.attempt_trigger,
                 execute_command_uuid=command_uuid,
                 device_uuid=content.device_uuid,
                 action_name=content.action_name,
@@ -348,7 +349,13 @@ class WorkflowBusinessCoordinator:
                 "node_run_uuid": content.attempt_group_uuid,
                 "attempt_no": content.attempt_no,
                 "retry_of_job_uuid": content.retry_of_job_uuid,
-                "retry_count": content.attempt_no - 1,
+                "attempt_trigger": content.attempt_trigger,
+                # 循环体每轮的 attempt 不是重试：调度权威给出的 retry_count 优先
+                "retry_count": (
+                    content.retry_count
+                    if content.retry_count is not None
+                    else (content.attempt_no - 1 if content.retry_of_job_uuid else 0)
+                ),
                 "origin": JOB_ORIGIN_BACKEND_CONTROL,
                 "always_free": self._action_always_free(
                     content.device_uuid, content.action_name

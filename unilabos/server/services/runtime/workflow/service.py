@@ -15,7 +15,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 from uuid import uuid4
 
 try:  # Linux authoring CAS 使用 file lease；Windows 仍需支持 Workflow Runtime。
@@ -31,6 +31,11 @@ from unilabos.server.services.runtime.workflow.execution_plan_graph import (
     CompositeExecutionPlanNormalizer,
 )
 from unilabos.protocol.utils.workflow_validation import GraphValidationError, validate_graph
+from unilabos.protocol.utils.workflow_hierarchy import (
+    HierarchyError,
+    execution_parents,
+    lift_edge,
+)
 from unilabos.protocol.utils.json_codec import encode_json, strict_json_equal
 from unilabos.protocol.runtime.workflow import (
     CandidateChangeset,
@@ -82,6 +87,16 @@ _ERRORS = {
         503,
         "设备动作模板暂不可用，请稍后重试",
     ),
+    "workflow_template_not_found": (404, "工作流模板不存在或已随设备包移除"),
+    "workflow_template_unavailable": (
+        503,
+        "工作流模板暂不可用（注册表权威未就绪）",
+    ),
+    "template_binding_invalid": (
+        422,
+        "工作流模板的角色未能绑定到设备，请在 bindings 中指定",
+    ),
+    "site_binding_invalid": (422, "工作流 Site 绑定未完成"),
     "local_task_authority_forbidden": (
         409,
         "当前调度权威运行模式不允许创建本地可执行工作流任务",
@@ -211,10 +226,15 @@ _HANDLE_TEMPLATE_REQUIRED_READ_FIELDS = {
 
 
 class WorkflowError(RuntimeError):
-    """面向前端的稳定 Workflow 错误。"""
+    """面向前端的稳定 Workflow 错误。
 
-    def __init__(self, code: str):
+    ``detail`` 追加在稳定文案之后（如具体哪个模板角色没绑到设备），错误码不变。
+    """
+
+    def __init__(self, code: str, *, detail: str = ""):
         status, message = _ERRORS[code]
+        if detail:
+            message = f"{message}：{detail}"
         super().__init__(message)
         self.status = status
         self.code = code
@@ -306,6 +326,7 @@ class WorkflowService(WorkflowStore):
         self._locks_guard = threading.Lock()
         self._authoring_locks: Dict[str, threading.RLock] = {}
         self._task_submitter: Optional[Callable[[str], None]] = None
+        self._task_controller: Optional[Callable[[str], None]] = None
         # Scheduler 绑定此回调消费 durable 人工确认决策；Service 本身不依赖调度器。
         self._manual_confirmation_resolver: Optional[
             Callable[[Dict[str, Any]], None]
@@ -330,6 +351,34 @@ class WorkflowService(WorkflowStore):
         """绑定人工确认决策消费者；决策事实始终先落 runtime.db。"""
 
         self._manual_confirmation_resolver = resolver
+
+    def set_task_controller(self, controller: Optional[Callable[[str], None]]) -> None:
+        """绑定持久化控制命令后的调度唤醒；HTTP 层不直接操作执行器。"""
+        self._task_controller = controller
+
+    def command_workflow_task(
+        self, task_uuid: str, *, command_type: str,
+        expected_revision: int, idempotency_key: str,
+    ) -> Dict[str, Any]:
+        if not self._authority_profile.can_create_local_workflow_task:
+            raise WorkflowError("local_task_authority_forbidden")
+        task_uuid = self.get_workflow_task(task_uuid)["uuid"]
+        if (command_type not in {"step", "resume"} or not idempotency_key.strip()
+                or type(expected_revision) is not int or expected_revision < 0):
+            raise WorkflowError("invalid_input")
+        try:
+            result = self.apply_task_command(task_uuid, command_type=command_type,
+                                             expected_revision=expected_revision,
+                                             idempotency_key=idempotency_key)
+        except StoreConflict as exc:
+            raise WorkflowConflict("conflict", detail=str(exc)) from None
+        if self._task_controller is not None:
+            try:
+                self._task_controller(task_uuid)
+            except Exception:
+                # 命令已落库，执行器暂时不可用时不能误报提交失败；恢复时重新消费。
+                logger.exception("任务 %s 控制已持久化，等待调度器恢复", task_uuid)
+        return result
 
     def _notify_manual_confirmation_resolver(
         self, confirmation: Dict[str, Any]
@@ -481,14 +530,19 @@ class WorkflowService(WorkflowStore):
                     edges=edge_values,
                     protect_reserved_metadata=True,
                 )
-            except ValidationError:
-                raise WorkflowError("invalid_input") from None
+            except ValidationError as exc:
+                detail = "; ".join(
+                    f"{'.'.join(map(str, item['loc']))}: {item['msg']}"
+                    for item in exc.errors(include_input=False, include_url=False)[:5]
+                )
+                raise WorkflowError("invalid_input", detail=detail) from None
             except StoreRevisionConflict:
                 raise WorkflowConflict("conflict") from None
             except StoreNotFound:
                 raise WorkflowError("not_found") from None
-            except StoreConflict:
-                raise WorkflowError("invalid_input") from None
+            except StoreConflict as exc:
+                # 留下 protocol 图校验的具体原因；仅有笼统文案时前端/AI 都无法纠正节点。
+                raise WorkflowError("invalid_input", detail=str(exc)) from None
 
     # WorkflowTask 与 WorkflowNodeJob -----------------------------------
 
@@ -684,6 +738,23 @@ class WorkflowService(WorkflowStore):
             return_info=return_info or {},
             error_info=error_info or [],
             error_resolution=error_resolution,
+        )
+
+    def begin_workflow_loop_iteration(
+        self,
+        loop_run_uuid: str,
+        *,
+        iteration: int,
+        progress: Dict[str, Any],
+        body_run_uuids: Sequence[str],
+    ) -> Dict[str, Any]:
+        """循环节点开始新一轮：循环体节点运行追加 attempt，返回 ``{"run", "next_jobs"}``（见 store）。"""
+
+        return self.begin_loop_iteration(
+            loop_run_uuid,
+            iteration=iteration,
+            progress=progress,
+            body_run_uuids=body_run_uuids,
         )
 
     def close_workflow_node_run(self, run_uuid: str, *, status: str) -> Dict[str, Any]:
@@ -957,6 +1028,7 @@ class WorkflowService(WorkflowStore):
 
         enabled: Dict[str, Dict[str, Any]] = {}
         node_kinds: Dict[str, str] = {}
+        all_kinds: Dict[str, str] = {}
         for node in graph_nodes:
             template = templates.get(node.get("workflow_node_template_uuid"))
             raw_kind = (
@@ -966,13 +1038,36 @@ class WorkflowService(WorkflowStore):
                 # Composite 调用节点只用于画布、追溯和边界映射，不拥有 Job。
                 continue
             kind = self._executor_kind(raw_kind)
+            all_kinds[node["uuid"]] = kind
             if self._node_or_ancestor_disabled(node, node_index) or kind == "group":
                 continue
             enabled[node["uuid"]] = node
             node_kinds[node["uuid"]] = kind
 
+        # 循环容器层级：跨边界的依赖提升到同级，拓扑序/环检测按层级进行
+        try:
+            parents = execution_parents(node_index, all_kinds, enabled=enabled)
+        except HierarchyError as exc:
+            raise StoreConflict(str(exc)) from exc
+
+        def lifted(source: str, target: str) -> Tuple[str, str]:
+            try:
+                return lift_edge(parents, source, target)
+            except HierarchyError as exc:
+                raise StoreConflict(str(exc)) from exc
+
         indegree = {node_uuid: 0 for node_uuid in enabled}
         outgoing: Dict[str, List[str]] = defaultdict(list)
+        ordering_pairs: set[Tuple[str, str]] = set()
+
+        def add_ordering(source: str, target: str) -> None:
+            pair = lifted(source, target)
+            if pair[0] == pair[1] or pair in ordering_pairs:
+                return
+            ordering_pairs.add(pair)
+            outgoing[pair[0]].append(pair[1])
+            indegree[pair[1]] += 1
+
         planned_edges: List[Dict[str, Any]] = []
         for edge in graph_edges:
             source = edge["source_node_uuid"]
@@ -983,8 +1078,7 @@ class WorkflowService(WorkflowStore):
             target_handle = handles.get(edge["target_handle_uuid"])
             if source_handle is None or target_handle is None:
                 raise StoreConflict("workflow edge references a missing handle")
-            outgoing[source].append(target)
-            indegree[target] += 1
+            add_ordering(source, target)
             planned_edge = {
                 "uuid": edge["uuid"],
                 "source_node_uuid": source,
@@ -1003,7 +1097,6 @@ class WorkflowService(WorkflowStore):
         # execution_policy.depends_on：无 handle 数据流的纯执行序依赖（@workflow 声明式
         # 步骤、编排画布的顺序连线）。不生成计划边，但参与拓扑排序与环检测，
         # 这样 topological_index / 节点运行顺序与调度器实际的 DAG 一致。
-        ordering_pairs = {(edge["source_node_uuid"], edge["target_node_uuid"]) for edge in planned_edges}
         for target_uuid, node in enabled.items():
             depends_on = (node.get("execution_policy") or {}).get("depends_on") or []
             if not isinstance(depends_on, list):
@@ -1012,25 +1105,38 @@ class WorkflowService(WorkflowStore):
                 source_uuid = str(upstream)
                 if source_uuid not in enabled or source_uuid == target_uuid:
                     continue
-                if (source_uuid, target_uuid) in ordering_pairs:
-                    continue
-                ordering_pairs.add((source_uuid, target_uuid))
-                outgoing[source_uuid].append(target_uuid)
-                indegree[target_uuid] += 1
+                add_ordering(source_uuid, target_uuid)
 
-        available = sorted(
-            (node_uuid for node_uuid, degree in indegree.items() if degree == 0),
-            key=stable_key,
-        )
-        ordered: List[str] = []
-        while available:
-            node_uuid = available.pop(0)
-            ordered.append(node_uuid)
-            for target in outgoing[node_uuid]:
-                indegree[target] -= 1
-                if indegree[target] == 0:
-                    available.append(target)
-                    available.sort(key=stable_key)
+        # 分层拓扑排序：同级节点按依赖序，容器紧跟着它的循环体，再回到外层的后继。
+        children: Dict[Optional[str], List[str]] = defaultdict(list)
+        for node_uuid in enabled:
+            children[parents.get(node_uuid)].append(node_uuid)
+
+        def order_level(container: Optional[str]) -> List[str]:
+            members = children.get(container, [])
+            remaining = {uuid: indegree[uuid] for uuid in members}
+            available = sorted(
+                (uuid for uuid, degree in remaining.items() if degree == 0),
+                key=stable_key,
+            )
+            result: List[str] = []
+            placed = 0
+            while available:
+                node_uuid = available.pop(0)
+                result.append(node_uuid)
+                placed += 1
+                if node_kinds[node_uuid] == "loop":
+                    result.extend(order_level(node_uuid))
+                for target in outgoing[node_uuid]:
+                    remaining[target] -= 1
+                    if remaining[target] == 0:
+                        available.append(target)
+                        available.sort(key=stable_key)
+            if placed != len(members):
+                raise StoreConflict("workflow graph contains a cycle")
+            return result
+
+        ordered = order_level(None)
         if len(ordered) != len(enabled):
             raise StoreConflict("workflow graph contains a cycle")
         if run_mode == "single_node":
@@ -1040,9 +1146,21 @@ class WorkflowService(WorkflowStore):
                 target_node_uuid = ordered[0]
             if target_node_uuid not in enabled:
                 raise StoreConflict("single_node target is not enabled")
-            ordered = [target_node_uuid]
-            enabled = {target_node_uuid: enabled[target_node_uuid]}
-            planned_edges = []
+            # 单节点运行一个循环：连同整个循环体
+            selected = {target_node_uuid}
+            for node_uuid in ordered:
+                chain = parents.get(node_uuid)
+                while chain is not None and chain not in selected:
+                    chain = parents.get(chain)
+                if chain is not None:
+                    selected.add(node_uuid)
+            ordered = [node_uuid for node_uuid in ordered if node_uuid in selected]
+            enabled = {node_uuid: enabled[node_uuid] for node_uuid in ordered}
+            planned_edges = [
+                edge
+                for edge in planned_edges
+                if edge["source_node_uuid"] in selected and edge["target_node_uuid"] in selected
+            ]
 
         planned_nodes: List[Dict[str, Any]] = []
         jobs: List[Dict[str, Any]] = []
@@ -1111,6 +1229,9 @@ class WorkflowService(WorkflowStore):
                     ) from exc
             if node.get("material_uuid") is not None:
                 planned_node["material_uuid"] = node["material_uuid"]
+            if parents.get(node_uuid) is not None:
+                # 执行父级（最近的循环容器）：调度器据此组装循环体子 DAG
+                planned_node["parent_uuid"] = parents[node_uuid]
             if node.get("script") is not None:
                 planned_node["script"] = node["script"]
             if source_handle_uuids:
@@ -1192,6 +1313,7 @@ class WorkflowService(WorkflowStore):
             "group",
             "tool_call",
             "manual_confirm",
+            "loop",
         }:
             raise StoreConflict(f"unsupported workflow node type {node_type!r}")
         return kind

@@ -207,8 +207,17 @@ class MaterialsRepository:
             available_sites=_load_json(values.pop("available_sites_json"), []),
             handles=_load_json(values.pop("handles_json"), []),
         )
-        values["definition_json"] = _load_json(values["definition_json"], {})
+        # 目录查询不取 definition_json 列：definition 为空对象，definition_hash 仍是权威值
+        values["definition_json"] = _load_json(values.get("definition_json"), {})
         return ResourceTemplateRecord.model_validate(values)
+
+    #: 模板目录字段（不含 definition_json）：全注册表 definition 有十几 MB，
+    #: 前端选择器轮询与注册表同步只看名称 / 身份 / definition_hash。
+    _TEMPLATE_CATALOG_COLUMNS = (
+        "template_uuid,name,display_name,resource_type,class_name,module_name,"
+        "template_version,category_json,available_sites_json,handles_json,"
+        "definition_hash,status,created_at_ms,updated_at_ms,deleted_at_ms,version"
+    )
 
     def get_template(
         self, template_uuid: str, *, include_deleted: bool = False
@@ -230,15 +239,26 @@ class MaterialsRepository:
         return self._template(row) if row is not None else None
 
     def list_templates(
-        self, *, status: Optional[str] = None
+        self,
+        *,
+        status: Optional[str] = None,
+        include_definition: bool = False,
+        name: Optional[str] = None,
     ) -> list[ResourceTemplateRecord]:
+        """模板列表。默认只取目录字段（名称 / 身份 / 分类 / 位点 / ``definition_hash``）：
+        这是"模板存在吗、uuid 是什么、变了没有"这类问题需要的全部信息；
+        ``definition``（注册表全量定义，全库十几 MB）只在 ``include_definition=True`` 时取。"""
         clauses = ["deleted_at_ms IS NULL"]
         params: list[Any] = []
         if status is not None:
             clauses.append("status=?")
             params.append(status)
+        if name is not None:
+            clauses.append("name=?")
+            params.append(name)
+        columns = "*" if include_definition else self._TEMPLATE_CATALOG_COLUMNS
         rows = self.connection.execute(
-            "SELECT * FROM resource_template WHERE "
+            f"SELECT {columns} FROM resource_template WHERE "
             + " AND ".join(clauses)
             + " ORDER BY LOWER(name),template_uuid",
             params,

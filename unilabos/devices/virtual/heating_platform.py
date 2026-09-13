@@ -184,7 +184,8 @@ class VirtualHeatingPlatform:
         available_sites: list[dict[str, Any]] | None = None,
     ) -> None:
         gateway = self._gateway()
-        if any(template.name == name for template in gateway.list_templates()):
+        # 存在性检查交给权威按 name 筛，只回目录字段
+        if gateway.list_templates(name=name):
             return
         value = ResourceTemplateWrite(
             name=name,

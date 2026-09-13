@@ -16,7 +16,9 @@ from unilabos.utils import log as unilab_log
 from unilabos.utils.fastapi import log_adapter
 
 
-def _access_record(method: str, status: int) -> logging.LogRecord:
+def _access_record(
+    method: str, status: int, path: str = "/api/v1/workflow-tasks"
+) -> logging.LogRecord:
     """复刻 uvicorn h11/httptools 两种实现共用的访问日志形状。"""
 
     return logging.LogRecord(
@@ -25,7 +27,7 @@ def _access_record(method: str, status: int) -> logging.LogRecord:
         pathname="h11_impl.py",
         lineno=0,
         msg='%s - "%s %s HTTP/%s" %d',
-        args=("127.0.0.1:1234", method, "/api/v1/workflow-tasks", "1.1", status),
+        args=("127.0.0.1:1234", method, path, "1.1", status),
         exc_info=None,
     )
 
@@ -42,10 +44,23 @@ def _access_record(method: str, status: int) -> logging.LogRecord:
         ("GET", 404, unilab_log.debug),
         ("POST", 422, unilab_log.debug),
         ("GET", 500, unilab_log.warning),
+        ("GET", 503, unilab_log.trace),  # Host 未接入期间的前端轮询：EdgeProxy 已记状态切换
+        ("POST", 503, unilab_log.warning),  # 写请求拿到 503（如物料转移同步失败）是故障
+        ("GET", 502, unilab_log.warning),
     ],
 )
 def test_access_log_level_follows_method_and_status(method, status, expected) -> None:
     assert log_adapter.access_log_func(_access_record(method, status)) is expected
+
+
+def test_access_log_hides_edge_http_response_plumbing() -> None:
+    """Host 把每条被代理请求的结果 POST 回权威，与前端轮询同频，不算业务写操作。"""
+
+    record = _access_record("POST", 200, "/api/v1/edge/http-responses/abc-123")
+    assert log_adapter.access_log_func(record) is unilab_log.trace
+    # 出错仍要看得见
+    record = _access_record("POST", 500, "/api/v1/edge/http-responses/abc-123")
+    assert log_adapter.access_log_func(record) is unilab_log.warning
 
 
 def test_access_log_with_unexpected_shape_stays_info() -> None:
@@ -128,3 +143,50 @@ def test_start_server_bounds_graceful_shutdown(monkeypatch) -> None:
     assert captured["timeout_graceful_shutdown"] == app_module.GRACEFUL_SHUTDOWN_TIMEOUT_S
     assert 0 < app_module.GRACEFUL_SHUTDOWN_TIMEOUT_S <= 30
     assert app_module.request_server_shutdown() is False  # run 返回后已清空引用
+
+
+def test_abort_serving_stops_control_plane_wait_even_before_it_starts(monkeypatch) -> None:
+    """backend 线程往往在主线程进入服务循环之前就失败：abort 必须让随后的等待立刻返回。"""
+
+    import threading
+
+    monkeypatch.setattr(app_module, "setup_server", lambda: app_module.app)
+    app_module._abort_serving.clear()
+    try:
+        app_module.abort_serving()
+        finished = threading.Event()
+
+        def _serve():
+            app_module.serve_over_control_plane()
+            finished.set()
+
+        threading.Thread(target=_serve, daemon=True).start()
+        assert finished.wait(2.0), "serve_over_control_plane 未因 abort 返回"
+
+        # uvicorn 形态：直接不起服务
+        monkeypatch.setattr(app_module, "ensure_port_available", lambda *_: pytest.fail("不应再探测端口"))
+        app_module.start_server(host="127.0.0.1", port=18999, open_browser=False)
+    finally:
+        app_module._abort_serving.clear()
+
+
+def test_backend_thread_failure_is_recorded_and_aborts_serving(monkeypatch) -> None:
+    from unilabos import backend as backend_module
+
+    aborted: list[bool] = []
+    monkeypatch.setattr(app_module, "abort_serving", lambda: aborted.append(True))
+    monkeypatch.setattr(backend_module, "_fatal_failure", None)
+    profile = backend_module.BACKEND_PROFILES["hostlink"]
+
+    def boom(*_args):
+        raise OSError(98, "HostLink 端口被占")
+
+    backend_module._run_entrypoint(profile, boom, (None,))
+    failure = backend_module.backend_fatal_failure()
+    assert isinstance(failure, OSError) and failure.errno == 98
+    assert aborted == [True]
+
+    monkeypatch.setattr(backend_module, "_fatal_failure", None)
+    backend_module._run_entrypoint(profile, lambda *_: None, (None,))
+    assert backend_module.backend_fatal_failure() is None
+    assert aborted == [True]

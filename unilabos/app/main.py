@@ -6,9 +6,11 @@ import shutil
 import signal
 import sys
 from pathlib import Path
-from typing import Dict, Any, List
-import networkx as nx
+from typing import Dict, Any, List, TYPE_CHECKING
 import yaml
+
+if TYPE_CHECKING:  # networkx 导入要 0.6s，运行期只用于一个局部变量标注
+    import networkx as nx
 
 # Windows 中文系统 stdout 默认 GBK，无法编码 banner / emoji 日志中的 Unicode 字符
 # 强制 stdout/stderr 用 UTF-8，避免 print 触发 UnicodeEncodeError 导致进程崩溃
@@ -155,12 +157,9 @@ def _write_graph_cache(paths, graph_uuid: str, payload: Dict[str, Any]) -> str:
 def _registry_device_site_templates() -> Dict[str, Any]:
     """从已构建的注册表提取 ``template_name -> available_sites`` 映射。"""
 
-    from unilabos.registry.registry import lab_registry
+    from unilabos.resources.adapters.device_site import registry_device_site_templates
 
-    return {
-        device_id: (entry or {}).get("available_sites") or []
-        for device_id, entry in lab_registry.device_type_registry.items()
-    }
+    return registry_device_site_templates()
 
 
 def _read_graph_json(file_path: str) -> Dict[str, Any]:
@@ -183,20 +182,27 @@ def _register_graph_file_to_authority(
     args_dict: Dict[str, Any],
     working_dir: str,
     graph_payload: Dict[str, Any] | None = None,
-) -> str | None:
-    """``-g <文件>.json``：先经 Graph Authority 创建/对账，再以权威 payload 启动。
+) -> str:
+    """``-g <文件>.json``：先登记到 Graph Authority，再以权威 payload 启动。
 
-    上传创建即登记：草稿图（节点/Site 无 uuid）在此获得权威身份，设备节点
-    的模板 Site 一并实例化；再次导入按节点 id 复用既有身份并输出 diff 摘要
-    （新建/更新/移除/不变）。身份冲突或 payload 非法时拒绝启动并打印原因
-    （fail-closed）；基础设施异常（数据库不可用等）告警后回退为直接装配
-    原文件（fail-open）。必须在 ``build_registry`` 之后调用。
+    与 ``materials.ensure`` 对启动物料的处理一致——本地文件只是创建入口，运行以
+    权威为准：
+
+    - 权威没有该图 → 整图创建：草稿节点 / Site 在此获得权威身份，设备节点的模板
+      Site 一并实例化；
+    - 权威已有该图 → 沿用权威快照，只把文件里权威没有的节点 / 连线补进来；文件对
+      既有节点的修改（pose / config / 删除）不生效（改图请用前端或
+      ``unilab graph upload``）；
+    - 文件里的 uuid 与权威身份不一致、payload 非法 → 拒绝启动；
+    - Graph Authority 不可达 → 拒绝启动：启动后一切都从权威拉，没有本地兜底。
+
+    必须在 ``build_registry`` 之后调用。
 
     Args:
         graph_payload: 调用方已读取（并按需转换）的 payload；缺省时在此读取文件。
 
     Returns:
-        权威 payload 的缓存文件路径；fail-open 回退时返回 ``None``。
+        权威 payload 的缓存文件路径。
     """
 
     from unilabos.server.startup import resolve_database_paths
@@ -209,8 +215,8 @@ def _register_graph_file_to_authority(
     try:
         paths = resolve_database_paths(args_dict, working_dir=working_dir)
     except Exception as exc:
-        print_status(f"Graph Authority 不可用（跳过登记，直接装配启动文件）: {exc}", "warning")
-        return None
+        print_status(f"Graph Authority 不可用，无法登记启动图: {exc}", "error")
+        os._exit(1)
 
     if _graph_authority_is_remote():
         # 权威的 Host 子进程：经 HTTP 登记到权威的 Graph Authority；模板 Site 用本进程
@@ -224,28 +230,27 @@ def _register_graph_file_to_authority(
                     name=graph_name,
                     payload=graph_payload,
                     device_site_templates=_registry_device_site_templates(),
+                    on_existing="adopt",
                 )
         except EnvelopeError as exc:
             print_status(f"启动图被 Graph Authority 拒绝 [{exc.code}]: {exc.error}", "error")
             os._exit(1)
-        except Exception as exc:  # noqa: BLE001 - 权威暂不可达时 fail-open
-            print_status(
-                f"启动图登记 Graph Authority 失败（跳过登记，直接装配启动文件）: {exc}",
-                "warning",
-            )
-            return None
+        except Exception as exc:  # noqa: BLE001 - 权威不可达同样拒绝启动
+            print_status(f"启动图登记 Graph Authority 失败，拒绝启动: {exc}", "error")
+            os._exit(1)
     else:
         try:
             service = GraphService(paths.materials_db)
         except Exception as exc:
-            print_status(f"Graph Authority 不可用（跳过登记，直接装配启动文件）: {exc}", "warning")
-            return None
+            print_status(f"Graph Authority 不可用，无法登记启动图: {exc}", "error")
+            os._exit(1)
         try:
             try:
                 stored = service.upsert_graph(
                     name=graph_name,
                     payload=graph_payload,
                     device_site_templates=_registry_device_site_templates(),
+                    on_existing="adopt",
                 )
             except GraphError as exc:
                 print_status(
@@ -253,40 +258,43 @@ def _register_graph_file_to_authority(
                 )
                 os._exit(1)
             except Exception as exc:
-                print_status(
-                    f"启动图登记 Graph Authority 失败（跳过登记，直接装配启动文件）: {exc}",
-                    "warning",
-                )
-                return None
+                print_status(f"启动图登记 Graph Authority 失败，拒绝启动: {exc}", "error")
+                os._exit(1)
         finally:
             service.close()
 
+    _print_graph_registration(stored)
+    return _write_graph_cache(paths, stored["uuid"], stored["payload"])
+
+
+def _print_graph_registration(stored: Dict[str, Any]) -> None:
     summary = stored.get("summary") or {}
-    counts = {
-        key: len(summary.get(key) or [])
-        for key in ("created", "updated", "removed", "unchanged")
-    }
+    identity = f"{stored['name']} (uuid={stored['uuid']}, revision={stored['revision']})"
+    created = len(summary.get("created") or [])
     assigned = int(summary.get("uuid_assigned") or 0)
-    if counts["created"] or counts["updated"] or counts["removed"] or assigned:
-        detail = (
-            f"节点 新建 {counts['created']} / 更新 {counts['updated']} / "
-            f"移除 {counts['removed']} / 不变 {counts['unchanged']}"
-        )
+    if not summary.get("existing"):
+        detail = f"节点 {created} 个"
         if assigned:
             detail += f"，发号 {assigned} 个身份"
         print_status(
-            f"启动图已登记 Graph Authority: {stored['name']} "
-            f"(uuid={stored['uuid']}, revision={stored['revision']})，{detail}；"
+            f"启动图已创建到 Graph Authority: {identity}，{detail}；"
             f"可用 unilab -g {stored['name']} 复用",
             "info",
         )
-    else:
-        print_status(
-            f"启动图与 Graph Authority 快照一致: {stored['name']} "
-            f"(uuid={stored['uuid']}, revision={stored['revision']})",
-            "info",
-        )
-    return _write_graph_cache(paths, stored["uuid"], stored["payload"])
+        return
+
+    adopted = len(summary.get("adopted") or [])
+    kept = summary.get("kept") or []
+    detail = f"沿用权威节点 {adopted} 个"
+    if created:
+        detail += f"，文件新增 {created} 个已登记"
+    if kept:
+        detail += f"，权威独有 {len(kept)} 个（{', '.join(kept[:5])}{'…' if len(kept) > 5 else ''}）"
+    print_status(
+        f"启动图以 Graph Authority 为准: {identity}，{detail}；"
+        "文件对既有节点的修改不生效，改图请用前端或 unilab graph upload",
+        "info",
+    )
 
 
 def _runs_local_authority(args_dict: Dict[str, Any]) -> bool:
@@ -490,7 +498,12 @@ def main():
         print_status("启用额外资源加载：将加载lab_开头的labware资源定义", "info")
     BasicConfig.backend = args_dict["backend"]
     # 分布式 slave 等场景通过环境变量显式指定身份；否则用主机名
-    machine_name = os.environ.get("UNILABOS_BASICCONFIG_MACHINE_NAME") or platform.node()
+    machine_name = (
+        args_dict.get("machine_name")
+        or os.environ.get("UNILABOS_BASICCONFIG_MACHINE_NAME")
+        or (BasicConfig.machine_name if BasicConfig.machine_name != "undefined" else None)
+        or platform.node()
+    )
     machine_name = "".join([c if c.isalnum() or c == "_" else "_" for c in machine_name])
     BasicConfig.machine_name = machine_name
     BasicConfig.vis_2d_enable = args_dict["2d_vis"]
@@ -623,7 +636,7 @@ def main():
     from unilabos.server.backend.legacy_adaptor import get_backend_client
     from unilabos.resources.resource_tracker import ResourceTreeSet, ResourceDict
 
-    graph: nx.Graph
+    graph: "nx.Graph"
     resource_tree_set: ResourceTreeSet
     resource_links: List[Dict[str, Any]]
 
@@ -649,24 +662,19 @@ def main():
             and os.path.isfile(file_path)
         ):
             # -g 本地 JSON 是创建入口：旧格式图在读取边界由 legacy 适配层转成
-            # 当前契约，注册表就绪后先经 Graph Authority 对账/发号/模板 Site
-            # 实例化，再以权威 payload 装配启动。
+            # 当前契约，注册表就绪后登记到 Graph Authority（权威没有则创建，已有则
+            # 以权威为准只补新增，冲突 / 不可达拒绝启动），再以权威 payload 装配。
             from unilabos.server.backend.legacy_adaptor.legacy.startup import (
                 upgrade_startup_graph_payload,
             )
 
             graph_payload = upgrade_startup_graph_payload(_read_graph_json(file_path), file_path)
-            registered_path = _register_graph_file_to_authority(
+            file_path = _register_graph_file_to_authority(
                 file_path, args_dict, working_dir, graph_payload
             )
-            if registered_path is not None:
-                file_path = registered_path
-                args_dict["_graph_file_path"] = registered_path
-                args_dict["_graph_from_authority"] = True
-                graph, resource_tree_set, resource_links = read_node_link_json(file_path)
-            else:
-                # fail-open：Graph Authority 不可用时直接装配（已转换的）启动文件。
-                graph, resource_tree_set, resource_links = read_node_link_json(graph_payload)
+            args_dict["_graph_file_path"] = file_path
+            args_dict["_graph_from_authority"] = True
+            graph, resource_tree_set, resource_links = read_node_link_json(file_path)
         elif file_path.endswith(".json"):
             graph, resource_tree_set, resource_links = read_node_link_json(file_path)
         else:
@@ -675,9 +683,16 @@ def main():
 
     graph_res.physical_setup_graph = graph
     resource_edge_info = modify_to_backend_format(resource_links)
-    materials = lab_registry.obtain_registry_resource_info()
-    materials.extend(lab_registry.obtain_registry_device_info())
-    materials = {k["id"]: k for k in materials}
+    # 模板 handle 表只在校验图中的边时才需要；设备条目的投影要几百毫秒，空图 / 无边不算
+    materials: Dict[str, Any] = {}
+    if resource_edge_info:
+        materials = {
+            k["id"]: k
+            for k in [
+                *lab_registry.obtain_registry_resource_info(),
+                *lab_registry.obtain_registry_device_info(),
+            ]
+        }
     # 从 ResourceTreeSet 中获取节点信息
     nodes = {node.res_content.id: node.res_content for node in resource_tree_set.all_nodes}
     edge_info = len(resource_edge_info)
@@ -818,47 +833,11 @@ def main():
             except Exception as exc:
                 print_status(f"开机拓扑边对齐失败（不影响运行）: {exc}", "warning")
 
-        # @workflow 默认子工作流上报：把设备包声明的工作流按稳定 uuid 幂等 upsert，
-        # 供前端实时创建/运行工作流引用。本机持有 Workflow Authority 时直接写服务；
-        # 作为调度权威的 Host 子进程时经 Workflow HTTP API 写回权威（同一套 upsert 语义）。
-        from unilabos.server.backend.composition import get_workflow_service
-
-        workflow_service = get_workflow_service()
-        workflow_reporter = None
-        if workflow_service is not None:
-            workflow_reporter = workflow_service
-        elif _graph_authority_is_remote():
-            from unilabos.client.runtime.workflow import HTTPWorkflowClient
-
-            workflow_reporter = HTTPWorkflowClient(HTTPConfig.remote_addr)
-        if workflow_reporter is not None and lab_registry.workflow_registry:
-            from unilabos.registry.workflows import (
-                DeviceCatalog,
-                import_workflow_modules,
-                report_workflows_to_service,
-            )
-
-            import_workflow_modules(
-                [meta["module"] for meta in lab_registry.workflow_registry.values()]
-            )
-            try:
-                reported_workflows = report_workflows_to_service(
-                    workflow_reporter,
-                    DeviceCatalog.from_resource_tree_set(resource_tree_set),
-                )
-            finally:
-                if workflow_reporter is not workflow_service:
-                    workflow_reporter.close()
-            if reported_workflows:
-                print_status(
-                    f"默认子工作流已上报: {len(reported_workflows)} 个 "
-                    f"({', '.join(reported_workflows.values())})",
-                    "info",
-                )
-
         # 启动时上报完整注册表快照给 Registry Authority：服务端按条目版本化变更，
-        # 并挂起会影响活跃 workflow 的 action 变更。权威在远端（--address）时走
-        # HTTP；本机持有调度权威时直接写进程内服务，两条路径共用同一投影。
+        # 并挂起会影响活跃 workflow 的 action 变更。设备包里的 @workflow 是工作流
+        # **模板**，随同一份快照上报（registry_type=workflow），由前端插入画布或经
+        # POST /workflows/from-template 实例化，不再直接落成工作流。权威在远端
+        # （--address）时走 HTTP；本机持有调度权威时直接写进程内服务，两条路径共用同一投影。
         registry_report = None
         if HTTPConfig.remote_addr:
             # 远端模式只接入 runtime.v1 微后端；注册表、物料、工作流和调度
@@ -888,7 +867,8 @@ def main():
             counts = (registry_report.summary or {}).get("counts", {})
             print_status(
                 f"注册表已上报: 设备 {registry_report.device_count} "
-                f"资源 {registry_report.resource_count}"
+                f"资源 {registry_report.resource_count} "
+                f"工作流模板 {registry_report.workflow_count}"
                 + (
                     f"（新增 {counts.get('added', 0)} 更新 {counts.get('updated', 0)} "
                     f"挂起 {counts.get('pending', 0)} 移除 {counts.get('removed', 0)} "

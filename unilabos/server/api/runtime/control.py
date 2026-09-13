@@ -3,7 +3,7 @@
 Edge 侧对接方式与云端 Backend 完全一致：
 
 - ``WS /api/v1/ws/schedule``：短通知通道（backend_session / backend_change /
-  edge_change / edge_change_ack / ping / pong）
+  edge_change / edge_change_ack / runtime_logs_changed / ping / pong）
 - ``GET /edge/commands/{command_uuid}``：命令权威正文
 """
 
@@ -126,13 +126,12 @@ async def _pump_incoming(
             if not isinstance(data, dict):
                 continue
 
-            if action in {"ping", "pong"}:
-                # ping/pong 是协议级特殊字段，必须在接收协程内完成，不能
-                # 等待 edge_change / backend 业务 handler。
+            if action in {"ping", "pong", "runtime_logs_changed"}:
+                # 心跳和有界日志轻通知不访问数据库，不等待业务 handler。
                 try:
                     reply = service.handle_message(action, data)
-                except Exception:  # noqa: BLE001 - 坏心跳只丢弃当前消息
-                    logger.exception("[EdgeControl] 处理 %s 心跳失败", action)
+                except Exception:  # noqa: BLE001 - 坏通知只丢弃当前消息
+                    logger.exception("[EdgeControl] 处理快速通知 %s 失败", action)
                     continue
                 if reply is not None and service.connection_epoch == epoch:
                     encoded = json.dumps(reply, ensure_ascii=False)

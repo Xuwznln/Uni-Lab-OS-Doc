@@ -37,8 +37,23 @@ _SITE_VOLATILE = {
 }
 
 
-def _semantic(model: Any, excluded: set[str] | None = None) -> dict[str, Any]:
+def _semantic(model: Any, excluded: Any = None) -> dict[str, Any]:
     return model.model_dump(mode="json", exclude=excluded or set(), exclude_none=False)
+
+
+def data_semantic(data: Any) -> dict[str, Any]:
+    """data 段参与比较的部分（快照与增量共用）。
+
+    substance_uuid 是权威给内容物行发的身份，设备侧 PLR tracker 不承载它（上报时
+    为 None）；比较只看内容物本身（名称 / 数量 / 单位 / 相态 / 组成），否则每次
+    apply 后设备与权威都会因 None ≠ uuid 永远"有差异"而反复重写。
+    """
+
+    return data.model_dump(
+        mode="json",
+        exclude={**{key: True for key in _DATA_VOLATILE}, "substances": {"__all__": {"substance_uuid"}}},
+        exclude_none=False,
+    )
 
 
 def material_sections(node: MaterialAggregateRead) -> dict[str, dict[str, Any]]:
@@ -47,7 +62,7 @@ def material_sections(node: MaterialAggregateRead) -> dict[str, dict[str, Any]]:
     return {
         "identity": _semantic(node.material, _IDENTITY_VOLATILE),
         "position": _semantic(node.position),
-        "data": _semantic(node.data, _DATA_VOLATILE),
+        "data": data_semantic(node.data),
     }
 
 

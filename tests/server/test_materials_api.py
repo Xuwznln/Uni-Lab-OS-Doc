@@ -51,6 +51,18 @@ def test_http_protocol_uses_mutation_payload(tmp_path) -> None:
             )
             assert fetched.status_code == 200
             assert fetched.json()["name"] == "beaker"
+
+            # 列表按 name 精确筛选，默认目录模式：存在性检查只回一条、不带 definition
+            listed = client.get(
+                "/api/v1/materials/templates",
+                params={"name": "beaker"},
+            )
+            assert listed.status_code == 200
+            assert [item["template_uuid"] for item in listed.json()] == ["beaker-template"]
+            assert listed.json()[0]["definition"] == {}
+            assert client.get(
+                "/api/v1/materials/templates", params={"name": "flask"}
+            ).json() == []
     finally:
         service.close()
 

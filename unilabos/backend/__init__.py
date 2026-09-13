@@ -210,16 +210,20 @@ def start_backend(
     entrypoint = _load_entrypoint(profile, is_slave)
 
     backend_thread = threading.Thread(
-        target=entrypoint,
+        target=_run_entrypoint,
         args=(
-            devices_config,
-            resources_config,
-            resources_edge_config or [],
-            graph,
-            controllers_config or {},
-            bridges or [],
-            visual,
-            resources_mesh_config or {},
+            profile,
+            entrypoint,
+            (
+                devices_config,
+                resources_config,
+                resources_edge_config or [],
+                graph,
+                controllers_config or {},
+                bridges or [],
+                visual,
+                resources_mesh_config or {},
+            ),
         ),
         name=f"backend-{name}",
         daemon=True,
@@ -227,3 +231,39 @@ def start_backend(
     backend_thread.start()
     logger.info("Backend %s（%s）已启动。", name, profile.display_name)
     return backend_thread
+
+
+_fatal_failure: Optional[BaseException] = None
+
+
+def backend_fatal_failure() -> Optional[BaseException]:
+    """设备 runtime 线程因异常退出时的那个异常；正常运行 / 正常停止为 None。"""
+
+    return _fatal_failure
+
+
+def _run_entrypoint(
+    profile: BackendProfile, entrypoint: Callable[..., Any], entry_args: tuple[Any, ...]
+) -> None:
+    """守护线程里跑 backend 入口。
+
+    入口异常退出意味着设备 runtime 没了（HostLink 端口被占、驱动初始化崩溃……），
+    此时主线程若继续挂着管理 API，进程看起来"就绪"却什么设备都没有。这里记下异常
+    并让主线程的服务循环返回，由 runtime_startup 按异常类型决定退出码。
+    """
+
+    global _fatal_failure
+    try:
+        entrypoint(*entry_args)
+    except Exception as exc:  # noqa: BLE001 - 任何未处理异常都意味着 runtime 已失效
+        _fatal_failure = exc
+        # 端口被占这类 OSError 的原因就在消息里，堆栈只会淹掉可操作的提示
+        logger.critical(
+            "[Backend] %s 设备 runtime 异常退出：%s",
+            profile.display_name,
+            exc,
+            exc_info=not isinstance(exc, OSError),
+        )
+        from unilabos.server.api.app import abort_serving
+
+        abort_serving()

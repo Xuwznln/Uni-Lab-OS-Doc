@@ -2,7 +2,8 @@
 
 画布节点不引用 workflow_node_template：设备动作节点靠 ``type=device_action`` +
 ``material_uuid`` + ``action_name`` 描述，执行顺序用 ``execution_policy.depends_on``
-（与 @workflow 声明式步骤同一套约定），``edges`` 为空。本测试冻结这条 HTTP 路径。
+（与 @workflow 声明式步骤同一套约定），``edges`` 为空。画布显式使用
+``site_binding_mode=preserve``，避免把默认标签当成程序化导入自动确认。本测试冻结这条 HTTP 路径。
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ def test_editor_submit_path_without_node_templates() -> None:
             f"/api/v1/workflows/{workflow['uuid']}/graph",
             json={
                 "revision": workflow["revision"],
+                "site_binding_mode": "preserve",
                 "nodes": [
                     _node(first, "wf-device/record", device_material, "record", [], 1),
                     _node(second, "wf-device/record", device_material, "record", [first], 2),
@@ -75,7 +77,7 @@ def test_editor_submit_path_without_node_templates() -> None:
         # 再存一次要带新 revision；旧 revision 是并发冲突（3003）
         stale = client.put(
             f"/api/v1/workflows/{workflow['uuid']}/graph",
-            json={"revision": workflow["revision"], "nodes": graph["nodes"], "edges": []},
+            json={"revision": workflow["revision"], "nodes": graph["nodes"], "edges": [], "site_binding_mode": "preserve"},
         ).json()
         assert stale["code"] == 3003
 
@@ -111,6 +113,7 @@ def test_depends_on_cycle_is_rejected_at_task_creation() -> None:
             f"/api/v1/workflows/{workflow['uuid']}/graph",
             json={
                 "revision": workflow["revision"],
+                "site_binding_mode": "preserve",
                 "nodes": [_node(a, "a", material, "record", [b], 1), _node(b, "b", material, "record", [a], 2)],
                 "edges": [],
             },
@@ -134,6 +137,7 @@ def test_edges_still_require_templates() -> None:
             f"/api/v1/workflows/{workflow['uuid']}/graph",
             json={
                 "revision": workflow["revision"],
+                "site_binding_mode": "preserve",
                 "nodes": [
                     _node(a, "a", str(uuid.uuid4()), "record", [], 1),
                     _node(b, "b", str(uuid.uuid4()), "record", [], 2),

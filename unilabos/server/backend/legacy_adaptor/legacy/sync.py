@@ -248,18 +248,18 @@ class LegacyMaterialMirror:
         }
         if not missing or not callable(getattr(self.gateway, "list_templates", None)):
             return
-        by_name = {}
+        # 旧后端要的是 config_info / init_param_schema 正文，所以这里必须带
+        # definition；但只按缺失的 name 逐个取，不为一两个模板拉整个注册表
+        entries = []
         try:
-            for template in self.gateway.list_templates():
-                by_name[str(template.name)] = template
+            for name in sorted(missing):
+                for template in self.gateway.list_templates(
+                    name=name, include_definition=True
+                ):
+                    entries.append(legacy_template_from_authority(template))
         except Exception as exc:  # noqa: BLE001 - 模板列表失败只影响本次补报
             logger.warning("[LegacyMaterials] 读取权威模板失败: %s", exc)
             return
-        entries = [
-            legacy_template_from_authority(by_name[name])
-            for name in sorted(missing)
-            if name in by_name
-        ]
         if not entries:
             return
         try:

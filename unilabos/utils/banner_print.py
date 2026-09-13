@@ -51,6 +51,21 @@ class Colors:
     BG_WHITE = "\033[47m"
 
 
+def colors_enabled() -> bool:
+    """遵循 https://no-color.org：设置了非空 NO_COLOR 就不输出 ANSI 着色。
+
+    受管设备子进程的 stdout 进的是文件 / 日志 API 而不是终端，拉起方会设置该变量。
+    """
+
+    return not os.environ.get("NO_COLOR")
+
+
+if not colors_enabled():
+    for _name, _value in list(vars(Colors).items()):
+        if isinstance(_value, str) and _value.startswith("\033"):
+            setattr(Colors, _name, "")
+
+
 def get_version() -> str:
     """
     获取ilabos的版本号

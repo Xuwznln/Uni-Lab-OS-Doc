@@ -61,6 +61,7 @@ from unilabos.resources.resource_tracker import (
     ResourceDictInstance,
     PARAM_SAMPLE_UUIDS,
     JSON_UNILABOS_PARAM,
+    find_resource_by_uuid,
 )
 from unilabos.backend.runtime.driver_creator import (
     select_driver_creator,
@@ -1597,7 +1598,7 @@ class BaseROS2DeviceNode(Node, DeviceNode, Generic[T]):
         for uuid in uuids_list:
             found = None
             for plr_resource in figured_resources:
-                r = self.resource_tracker.loop_find_with_uuid(plr_resource, uuid)
+                r = find_resource_by_uuid(plr_resource, uuid)
                 if r is not None:
                     found = r
                     break
@@ -1958,9 +1959,13 @@ class ROS2DeviceNode:
         self.driver_instance._ros_node = self._ros_node  # type: ignore
         self.driver_instance._execute_driver_command = self._ros_node._execute_driver_command  # type: ignore
         self.driver_instance._execute_driver_command_async = self._ros_node._execute_driver_command_async  # type: ignore
-        if hasattr(self.driver_instance, "post_init"):
+        post_init = getattr(self.driver_instance, "post_init", None)
+        if callable(post_init):
             try:
-                self.driver_instance.post_init(self._ros_node)  # type: ignore
+                post_init(
+                    self._ros_node,
+                    **self._ros_node.post_init_kwargs(post_init, self.device_config),
+                )
             except Exception as e:
                 self._ros_node.lab_logger().error(f"设备后初始化失败: {e}")
 

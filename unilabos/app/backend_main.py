@@ -97,7 +97,16 @@ def run_backend_process(
     args_dict["server_database_root"] = authority_root
     paths = resolve_database_paths(args_dict, working_dir=working_dir)
 
+    from unilabos.server.backend.reset import ResetController, ResetConflict, configure_reset
+    if (paths.root / "reset-pending.json").exists():
+        raise RuntimeError("上次全量重置未完成；请根据 reset-pending.json 恢复或完成归档后再启动")
+    reset_controller = None
+
     host_child: Optional[Any] = None
+    unsubscribe_shutdown: Optional[Any] = None
+    from unilabos.utils.log_notices import set_local_log_source
+
+    previous_log_source = set_local_log_source(None)
     try:
         materials_service = setup_materials_service(database_paths=paths)
         materials_gateway = LocalMaterialsClient(materials_service)
@@ -153,6 +162,45 @@ def run_backend_process(
                 ready_probe=lambda: _authority_listening(port),
             )
             host_child.start()
+            def reset_preflight() -> None:
+                from unilabos.server.backend.composition import get_scheduler
+                from unilabos.server.backend.restart import get_restart_coordinator
+
+                restart = get_restart_coordinator().status()
+                if restart["pending"] or restart["restarting"]:
+                    raise ResetConflict("请等待当前重启完成")
+                scheduler = get_scheduler()
+                already_paused = scheduler.dispatch_paused
+                scheduler.pause_dispatch()
+                try:
+                    if edge_control.active_job_ids():
+                        raise ResetConflict("仍有活跃作业，请先结束或裁决作业后重置")
+                    response = edge_control.http_request("GET", "/api/v1/hostlink/peers")
+                    import json
+                    if response is None or response.status_code != 200:
+                        raise ResetConflict("无法核对 Host 状态，请等待 Host 上线")
+                    peer_status = json.loads(response.body_bytes())
+                    if any(peer.get("online", False) for peer in peer_status.get("peers", [])):
+                        raise ResetConflict("仍有在线 Slave，请先停止全部受管设备进程及外部 Slave 后重置")
+                    response = edge_control.http_request("GET", "/api/v1/driver-packages")
+                    if response is None or response.status_code != 200:
+                        raise ResetConflict("无法核对驱动包操作状态")
+                    if any(op.get("status") == "running" for op in json.loads(response.body_bytes()).get("operations", [])):
+                        raise ResetConflict("请等待驱动包安装或卸载完成")
+                except Exception as exc:
+                    if not already_paused:
+                        scheduler.resume_dispatch()
+                    if isinstance(exc, ResetConflict):
+                        raise
+                    raise ResetConflict(f"无法确认安全重置条件：{exc}") from exc
+
+            reset_controller = ResetController(paths, working_dir, reset_preflight)
+            configure_reset(reset_controller)
+            # 权威一收到 Ctrl+C / SIGTERM 就请 Host 开始退出，两边并行收尾；
+            # finally 里的 stop() 只负责等它结束。
+            from unilabos.server import lifecycle
+
+            unsubscribe_shutdown = lifecycle.on_shutdown(host_child.request_stop)
             print_status(
                 f"调度权威进程就绪：管理端口 {port} 常驻；Host 作为子进程运行"
                 f"（不监听端口，经控制面 WS 受控，四库 {edge_root}），"
@@ -181,6 +229,9 @@ def run_backend_process(
         except KeyboardInterrupt:
             print_status("收到中断，正在停止调度权威进程", "info")
     finally:
+        set_local_log_source(previous_log_source)
+        if unsubscribe_shutdown is not None:
+            unsubscribe_shutdown()
         if host_child is not None:
             print_status("正在停止 Host 子进程", "info")
             host_child.stop()
@@ -189,6 +240,12 @@ def run_backend_process(
         configure_remote_device_relay(False)
         # RegistryService 共享 RuntimeService 的连接，由组合根统一关闭。
         shutdown_backend_services()
+        if reset_controller is not None and reset_controller.pending:
+            if host_child is not None and host_child.alive():
+                raise RuntimeError("Host 未退出，拒绝清空数据库")
+            reset_controller.finish()
+            print_status(f"全部数据已移至 {reset_controller.backup}；重置完成。请不带旧 -g 重新启动 unilab。", "info")
+        configure_reset(None)
 
     from unilabos.server.backend.restart import exit_if_restart_requested
 

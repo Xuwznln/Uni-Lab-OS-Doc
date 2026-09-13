@@ -45,6 +45,8 @@ from unilabos.protocol.materials import (
     MaterialIdentityRead,
     MaterialMove,
     MaterialPatch,
+    MaterialDelta,
+    MaterialDeltaResult,
     MaterialPosition,
     MaterialSnapshot,
     MaterialSnapshotDiff,
@@ -60,6 +62,7 @@ from unilabos.protocol.materials import (
 )
 from unilabos.server.services.materials.snapshot import (
     compare_material_snapshot,
+    data_semantic,
     material_sections,
     site_semantic,
 )
@@ -1279,8 +1282,22 @@ class MaterialsService(MaterialsRepository):
             raise MaterialNotFoundError(f"template not found: {template_uuid}")
         return self._template_read(record)
 
-    def list_templates(self) -> list[ResourceTemplateRead]:
-        return [self._template_read(item) for item in MaterialsRepository.list_templates(self)]
+    def list_templates(
+        self, *, name: Optional[str] = None, include_definition: bool = False
+    ) -> list[ResourceTemplateRead]:
+        """模板列表。``name`` 精确匹配（存在性检查 / 按名取 uuid 只回 0 或 1 条）。
+
+        默认是目录模式：只回 name / template_uuid / display_name / 分类 / 位点 /
+        definition_hash 等字段，``definition`` 为空对象——存在性检查、按名取 uuid、
+        变更判定（比 hash）都只需要这些。要拿注册表全量 ``definition``（几十 KB
+        到十几 MB）的调用方显式传 ``include_definition=True``。"""
+
+        return [
+            self._template_read(item)
+            for item in MaterialsRepository.list_templates(
+                self, name=name, include_definition=include_definition
+            )
+        ]
 
     def delete_template(
         self, mutation: InventoryMutation, template_uuid: str
@@ -2927,9 +2944,14 @@ class MaterialsService(MaterialsRepository):
                             f"snapshot cannot change immutable material field {field}"
                         )
                 if material_uuid == value.root_material_uuid and (
-                    desired.material.parent_material_uuid is not None
+                    desired.material.parent_material_uuid
+                    != current.material.parent_material_uuid
                 ):
-                    raise MaterialValidationError("snapshot root cannot have a parent")
+                    # 快照根可以是挂在设备物料下的台面 / 根树（parent=设备），但快照
+                    # 不能改它的归属——挂载 / 换位走 move / transfer
+                    raise MaterialValidationError(
+                        "snapshot cannot change the parent of its root material"
+                    )
 
             for site_uuid, desired in desired_sites.items():
                 current = current_sites[site_uuid]
@@ -3141,6 +3163,280 @@ class MaterialsService(MaterialsRepository):
         return self._run_mutation(
             mutation, value, MutationResult[MaterialTreeRead], apply
         )
+
+    def apply_delta(
+        self, mutation: InventoryMutation, value: MaterialDelta
+    ) -> MutationResult[MaterialDeltaResult]:
+        """按节点、按段合并设备上报的增量：只读被点名的聚合，只写有变化的段。
+
+        与整树快照同一套规则——不建不删、不改身份、不改根的归属；每个节点 / 位点
+        自带 ``expected_version`` 做乐观锁。未给出的段沿用权威现值，所以一个孔的体积
+        变化只读一行、写一行，与台面大小无关。
+        """
+
+        if mutation.operation != "apply_material_delta":
+            raise MaterialValidationError("material delta operation is invalid")
+
+        def apply(timestamp: int) -> _Applied[MaterialDeltaResult]:
+            root_uuid = value.root_material_uuid
+            if MaterialsRepository.get_material(self, root_uuid) is None:
+                raise MaterialNotFoundError(f"material root not found: {root_uuid}")
+            affected: list[AggregateVersion] = []
+            sequences: list[int] = []
+            applied_materials: list[str] = []
+            applied_sites: list[str] = []
+            unchanged: list[str] = []
+            ancestry_cache: dict[str, Optional[str]] = {}
+
+            for node in value.nodes:
+                current = self.get_material(node.material_uuid)
+                self._require_within_root(node.material_uuid, root_uuid, ancestry_cache)
+                if (
+                    node.expected_version is not None
+                    and current.material.version != node.expected_version
+                ):
+                    raise MaterialConflictError(
+                        f"material {node.material_uuid} version is "
+                        f"{current.material.version}, expected {node.expected_version}"
+                    )
+                if (
+                    node.expected_state_hash is not None
+                    and current.state_hash != node.expected_state_hash
+                ):
+                    raise MaterialConflictError(
+                        f"material {node.material_uuid} state changed"
+                    )
+
+                sections: set[str] = set()
+                if node.data is not None and not node.data.empty:
+                    if self._apply_data_delta(node.material_uuid, current, node.data, mutation, timestamp):
+                        sections.add("data")
+                if node.position is not None and (
+                    node.position.model_dump(mode="json")
+                    != current.position.model_dump(mode="json")
+                ):
+                    position_record = self.get_position(node.material_uuid)
+                    if position_record is None:
+                        raise MaterialValidationError(
+                            f"material aggregate is incomplete: {node.material_uuid}"
+                        )
+                    position_values = node.position.model_dump(mode="json")
+                    position_values["extra_json"] = position_values.pop("extra")
+                    self.replace_position(
+                        MaterialPositionRecord(
+                            material_uuid=node.material_uuid,
+                            updated_at_ms=timestamp,
+                            version=position_record.version + 1,
+                            **position_values,
+                        )
+                    )
+                    sections.add("position")
+
+                changed_sites = self._apply_site_deltas(node, mutation, timestamp, affected, sequences)
+                applied_sites.extend(changed_sites)
+
+                if sections:
+                    record = MaterialsRepository.get_material(self, node.material_uuid)
+                    assert record is not None
+                    updated_record = record.model_copy(
+                        update={"updated_at_ms": timestamp, "version": record.version + 1}
+                    )
+                    self.update_material(updated_record)
+                    aggregate = self.get_material(node.material_uuid)
+                    affected.append(
+                        AggregateVersion(
+                            aggregate_type="material",
+                            aggregate_uuid=node.material_uuid,
+                            version=updated_record.version,
+                            state_hash=aggregate.state_hash,
+                        )
+                    )
+                    sequences.append(
+                        self._ledger(
+                            mutation,
+                            aggregate_type="material",
+                            aggregate_uuid=node.material_uuid,
+                            operation="apply_delta",
+                            previous_version=record.version,
+                            aggregate_version=updated_record.version,
+                            state_hash=aggregate.state_hash,
+                            delta={"sections": sorted(sections)},
+                            timestamp=timestamp,
+                        )
+                    )
+                    applied_materials.append(node.material_uuid)
+                elif not changed_sites:
+                    unchanged.append(node.material_uuid)
+
+            return _Applied(
+                MaterialDeltaResult(
+                    root_material_uuid=root_uuid,
+                    applied_material_uuids=applied_materials,
+                    applied_site_uuids=applied_sites,
+                    unchanged_material_uuids=unchanged,
+                ),
+                affected,
+                sequences,
+            )
+
+        return self._run_mutation(
+            mutation, value, MutationResult[MaterialDeltaResult], apply
+        )
+
+    def _require_within_root(
+        self, material_uuid: str, root_uuid: str, cache: dict[str, Optional[str]]
+    ) -> None:
+        """节点必须在声明的根树里：沿 parent 链向上找根，链长即台面层数，很短。"""
+
+        current = material_uuid
+        seen: set[str] = set()
+        while current is not None:
+            if current == root_uuid:
+                return
+            if current in seen:
+                raise MaterialValidationError("material parent chain is cyclic")
+            seen.add(current)
+            if current not in cache:
+                record = MaterialsRepository.get_material(self, current)
+                cache[current] = record.parent_material_uuid if record is not None else None
+            current = cache[current]
+        raise MaterialValidationError(
+            f"material {material_uuid} is not under root {root_uuid}"
+        )
+
+    def _apply_data_delta(
+        self,
+        material_uuid: str,
+        current: MaterialAggregateRead,
+        delta: Any,
+        mutation: InventoryMutation,
+        timestamp: int,
+    ) -> bool:
+        """把 data 段增量合并到现值上；无语义变化返回 False。"""
+
+        current_data = self.get_data(material_uuid)
+        if current_data is None:
+            raise MaterialValidationError(f"material aggregate is incomplete: {material_uuid}")
+        desired = MaterialDataWrite(
+            data=delta.data if delta.data is not None else current.data.data,
+            substances=(
+                list(delta.substances) if delta.substances is not None else list(current.data.substances)
+            ),
+            sites_initialized=current.data.sites_initialized,
+            unknown_counter=(
+                delta.unknown_counter if delta.unknown_counter is not None else current.data.unknown_counter
+            ),
+            state_status=delta.state_status or current.data.state_status,
+            source_event_uuid=current.data.source_event_uuid,
+            source_job_uuid=mutation.job_uuid or current.data.source_job_uuid,
+            source_command_uuid=mutation.command_uuid,
+            observed_at_ms=max(delta.observed_at_ms, timestamp),
+        )
+        if data_semantic(desired) == data_semantic(current.data):
+            return False
+        content_version = current_data.content_version + 1
+        substances = self._new_substance_records(
+            material_uuid,
+            desired,
+            content_version=content_version,
+            timestamp=timestamp,
+            previous=current_data.substances,
+        )
+        state_hash = self._data_state_hash(
+            {
+                **desired.model_dump(mode="json"),
+                "substances": [self._substance_read(item).model_dump(mode="json") for item in substances],
+            }
+        )
+        self.replace_data(
+            MaterialDataRecord(
+                material_uuid=material_uuid,
+                data_json=desired.data,
+                substances=substances,
+                sites_initialized=desired.sites_initialized,
+                unknown_counter=desired.unknown_counter,
+                state_status=desired.state_status,
+                content_version=content_version,
+                state_hash=state_hash,
+                source_event_uuid=desired.source_event_uuid,
+                source_job_uuid=desired.source_job_uuid,
+                source_command_uuid=desired.source_command_uuid,
+                observed_at_ms=desired.observed_at_ms,
+                updated_at_ms=timestamp,
+                version=current_data.version + 1,
+            )
+        )
+        self.replace_substances(material_uuid, substances)
+        return True
+
+    def _apply_site_deltas(
+        self,
+        node: Any,
+        mutation: InventoryMutation,
+        timestamp: int,
+        affected: list[AggregateVersion],
+        sequences: list[int],
+    ) -> list[str]:
+        """位点增量：可见性 / 元数据（占用关系走 move）；返回实际变化的位点 uuid。"""
+
+        changed: list[str] = []
+        for delta in node.sites:
+            record = self.get_site(delta.site_uuid)
+            if record is None:
+                raise MaterialNotFoundError(f"site not found: {delta.site_uuid}")
+            if record.owner_material_uuid != node.material_uuid:
+                raise MaterialValidationError(
+                    f"site {delta.site_uuid} does not belong to material {node.material_uuid}"
+                )
+            if delta.expected_version is not None and record.version != delta.expected_version:
+                raise MaterialConflictError(
+                    f"site {delta.site_uuid} version is {record.version}, "
+                    f"expected {delta.expected_version}"
+                )
+            updates: dict[str, Any] = {}
+            if delta.visible is not None and delta.visible != record.visible:
+                updates["visible"] = delta.visible
+            if delta.meta_data is not None and delta.meta_data != record.meta_data_json:
+                updates["meta_data_json"] = dict(delta.meta_data)
+            if delta.extra is not None and delta.extra != record.extra_json:
+                updates["extra_json"] = dict(delta.extra)
+            if not updates:
+                continue
+            updated = record.model_copy(
+                update={
+                    **updates,
+                    "changed_by_job_uuid": mutation.job_uuid,
+                    "changed_by_command_uuid": mutation.command_uuid,
+                    "changed_at_ms": timestamp,
+                    "updated_at_ms": timestamp,
+                    "version": record.version + 1,
+                }
+            )
+            self.update_site(updated)
+            state_hash = self._site_state_hash(updated)
+            affected.append(
+                AggregateVersion(
+                    aggregate_type="site",
+                    aggregate_uuid=updated.site_uuid,
+                    version=updated.version,
+                    state_hash=state_hash,
+                )
+            )
+            sequences.append(
+                self._ledger(
+                    mutation,
+                    aggregate_type="site",
+                    aggregate_uuid=updated.site_uuid,
+                    operation="apply_delta",
+                    previous_version=record.version,
+                    aggregate_version=updated.version,
+                    state_hash=state_hash,
+                    delta={"fields": sorted(updates)},
+                    timestamp=timestamp,
+                )
+            )
+            changed.append(updated.site_uuid)
+        return changed
 
     # -- Ledger transport -------------------------------------------------
 

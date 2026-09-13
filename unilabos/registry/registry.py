@@ -485,9 +485,27 @@ class Registry:
                 f"[Uni-Lab-OS Registry] 发现 {len(self.workflow_registry)} 个 @workflow 默认子工作流定义"
             )
 
-        # build 结果缓存：当所有 AST 文件命中时跳过 _build_*_entry_from_ast
+        # build 结果缓存：当所有 AST 文件命中时跳过 _build_*_entry_from_ast。
+        # 按扫描配置分槽：同一 unilabos_data 下权威 / Host（全量扫描）与受管 Slave
+        # （external_only 只扫核心文件 + 驱动包）共用这个 pkl，单槽会被后启动的 Slave 覆盖，
+        # 导致权威每次启动都白白重建一遍 entry。
+        import json as _json
+
+        build_key = _json.dumps(
+            {
+                "external_only": bool(external_only),
+                "extra_resource": bool(BasicConfig.extra_resource),
+                "devices_dirs": sorted(str(d) for d in extra_dirs),
+                "namespaces": sorted(community_namespaces.items()),
+            },
+            sort_keys=True,
+        )
         all_ast_hit = total_stats["misses"] == 0 and total_stats["total"] > 0
-        cached_build = unified_cache.get("_build_results") if all_ast_hit else None
+        cache_dirty = total_stats["misses"] > 0
+        build_results = unified_cache.get("_build_results")
+        if not isinstance(build_results, dict) or "devices" in build_results:
+            build_results = {}  # 旧格式（单槽）或损坏：整体重建
+        cached_build = build_results.get(build_key) if all_ast_hit else None
 
         if cached_build:
             cached_devices = cached_build.get("devices", {})
@@ -518,17 +536,21 @@ class Registry:
             build_elapsed = _time.perf_counter() - build_t0
             logger.info(f"[Uni-Lab-OS Registry] entry 构建耗时: {build_elapsed:.2f}s")
 
-            unified_cache["_build_results"] = {
+            build_results[build_key] = {
                 "devices": {k: v for k, v in self.device_type_registry.items() if k in ast_devices},
                 "resources": {k: v for k, v in self.resource_type_registry.items() if k in ast_resources},
             }
+            unified_cache["_build_results"] = build_results
+            cache_dirty = True
 
         # upload 模式下，利用线程池并行 import pylabrobot 资源并生成 config_info
         if upload_registry:
-            self._populate_resource_config_info(config_cache=unified_cache)
+            regenerated = self._populate_resource_config_info(config_cache=unified_cache)
+            cache_dirty = cache_dirty or bool(regenerated)
 
-        # 统一保存一次
-        self._save_config_cache(unified_cache)
+        # 有变化才落盘：全命中时重写十几 MB 的 pickle 只是白花几百毫秒
+        if cache_dirty:
+            self._save_config_cache(unified_cache)
 
         ast_device_count = len(ast_devices)
         ast_resource_count = len(ast_resources)
@@ -1424,6 +1446,9 @@ class Registry:
         return None
 
     _CACHE_VERSION = 7
+    # 同一进程内的缓存文件快照：(mtime_ns, size, data)。AST / YAML / config_info 几个阶段各自
+    # 加载一次同一个十几 MB 的 pickle 要几百毫秒；文件没变就复用已加载的对象。
+    _config_cache_memo: Optional[Tuple[int, int, dict]] = None
 
     def _load_config_cache(self) -> dict:
         import pickle
@@ -1431,9 +1456,14 @@ class Registry:
         if cache_path is None or not cache_path.is_file():
             return {}
         try:
+            stat = cache_path.stat()
+            memo = self._config_cache_memo
+            if memo is not None and memo[0] == stat.st_mtime_ns and memo[1] == stat.st_size:
+                return memo[2]
             data = pickle.loads(cache_path.read_bytes())
             if not isinstance(data, dict) or data.get("_version") != self._CACHE_VERSION:
                 return {}
+            self._config_cache_memo = (stat.st_mtime_ns, stat.st_size, data)
             return data
         except Exception:
             return {}
@@ -1449,6 +1479,8 @@ class Registry:
             tmp = cache_path.with_suffix(".tmp")
             tmp.write_bytes(pickle.dumps(cache, protocol=pickle.HIGHEST_PROTOCOL))
             tmp.replace(cache_path)
+            stat = cache_path.stat()
+            self._config_cache_memo = (stat.st_mtime_ns, stat.st_size, cache)
         except Exception as e:
             logger.debug(f"[Uni-Lab-OS Registry] 缓存保存失败: {e}")
 
@@ -1586,7 +1618,7 @@ class Registry:
                     rid = future_to_rid[future]
                     logger.warning(f"[Uni-Lab-OS Registry] 资源 {rid} config_info 线程异常: {e}")
 
-        if own_cache:
+        if own_cache and cache_misses:
             self._save_config_cache(config_cache)
 
         elapsed = _time.perf_counter() - t0
@@ -1596,6 +1628,7 @@ class Registry:
             f"{cache_hits}/{total} 命中, {cache_misses} 重新生成 "
             f"(耗时 {elapsed:.2f}s)"
         )
+        return cache_misses
 
     # ------------------------------------------------------------------
     # Verify & Resolve (实际 import 验证)
@@ -1846,7 +1879,8 @@ class Registry:
             return {}, {}, False
 
         if not data:
-            return {}, {}, False
+            # 空文件是合法的（占位 / 全注释）：按"有效、零条目"处理，让它进缓存
+            return {}, {}, True
 
         complete_data = {}
         skip_ids = set()
@@ -1949,7 +1983,9 @@ class Registry:
                             self._module_source_hash(m) == h
                             for m, h in module_hashes.items()
                         ) if module_hashes else True
-                        if all_ok and cached.get("entries"):
+                        # 空文件（{} / 全注释）的 entries 是空字典，同样算命中：否则它每次启动
+                        # 都被当成缺失，触发重新加载并把十几 MB 的缓存整体重写一遍
+                        if all_ok and cached.get("entries") is not None:
                             for rid, entry in cached["entries"].items():
                                 self.resource_type_registry[rid] = entry
                             yaml_cache_hits += 1
@@ -2032,7 +2068,8 @@ class Registry:
             return {}, {}, False, []
 
         if not data:
-            return {}, {}, False, []
+            # 空文件是合法的（占位 / 全注释）：按"有效、零条目"处理，让它进缓存
+            return {}, {}, True, []
 
         complete_data = {}
         action_str_type_mapping = {
@@ -2445,7 +2482,8 @@ class Registry:
                     uncached_files.append(file)
                     continue
                 cached = yaml_dev_cache.get(file_key)
-                if cached and cached.get("yaml_md5") == yaml_md5 and cached.get("entries"):
+                # 空文件的 entries 是空字典，同样算命中（见 load_resource_types 的说明）
+                if cached and cached.get("yaml_md5") == yaml_md5 and cached.get("entries") is not None:
                     complete_data = cached["entries"]
                     # 过滤掉 AST 已有的设备
                     complete_data = {

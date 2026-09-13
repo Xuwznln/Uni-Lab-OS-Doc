@@ -97,6 +97,10 @@ class HostNetworkService:
             ActionType.MATERIAL_APPLY_SNAPSHOT,
             self._material_apply_snapshot,
         )
+        self.server.register_handler(
+            ActionType.MATERIAL_APPLY_DELTA,
+            self._material_apply_delta,
+        )
         self.server.register_handler(ActionType.ROS_INFO, self._ros_info)
         self._bind_material_transfer_dispatcher()
 
@@ -266,12 +270,11 @@ class HostNetworkService:
         return gateway
 
     def _material_template_list(
-        self, _data: dict[str, Any], _peer: dict[str, Any]
+        self, data: dict[str, Any], peer: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        return [
-            item.model_dump(mode="json", exclude_none=False)
-            for item in self._require_material_gateway().list_templates()
-        ]
+        from unilabos.backend.hostlink.materials_proxy import template_list
+
+        return template_list(self._require_material_gateway(), data, peer)
 
     def _material_template_create(
         self, data: dict[str, Any], _peer: dict[str, Any]
@@ -430,6 +433,17 @@ class HostNetworkService:
         snapshot = MaterialSnapshot.model_validate(mutation.payload)
         return self._require_material_gateway().apply_snapshot(
             mutation, snapshot
+        ).model_dump(mode="json", exclude_none=False)
+
+    def _material_apply_delta(
+        self, data: dict[str, Any], _peer: dict[str, Any]
+    ) -> dict[str, Any]:
+        from unilabos.protocol.materials import InventoryMutation, MaterialDelta
+
+        mutation = InventoryMutation.model_validate(data)
+        delta = MaterialDelta.model_validate(mutation.payload)
+        return self._require_material_gateway().apply_delta(
+            mutation, delta
         ).model_dump(mode="json", exclude_none=False)
 
     def _ros_info(

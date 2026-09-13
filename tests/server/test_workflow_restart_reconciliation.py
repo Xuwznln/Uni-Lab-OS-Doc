@@ -320,6 +320,8 @@ def _crashed_two_node_workflow_task(service: WorkflowService) -> tuple[dict, lis
         f"/api/v1/workflows/{workflow['uuid']}/graph",
         json={
             "revision": workflow["revision"],
+            # 本夹具只有模拟执行器，不提供物料/动作注册表；不在此测试程序化 Site 解析。
+            "site_binding_mode": "preserve",
             "nodes": [node(first, "prepare", [], 1), node(second, "measure", [first], 2)],
             "edges": [],
         },

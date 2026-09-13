@@ -237,3 +237,39 @@ class TestLivePayload:
                 "id": "edge-1",
             }
         ]
+
+    def test_live_payload_keeps_parent_hierarchy(self, service) -> None:
+        """运行期挂到设备下的台面（parent=设备物料）在实时拓扑里必须带 parent，
+        前端才会把它和它的 sites 画进设备卡片，而不是当成独立根节点。"""
+
+        service.put_template(
+            _mutation("put_template"),
+            ResourceTemplateWrite(
+                template_uuid="bench-template", name="bench_demo", display_name="bench",
+                resource_type="device", class_name="bench_demo",
+            ),
+        )
+        device_uuid = service.create_tree(
+            _mutation("create_material_tree"),
+            MaterialTreeCreate(nodes=[MaterialNodeCreate(
+                client_ref="dev",
+                identity=MaterialIdentityWrite(
+                    resource_id="bench", name="物料工作台", resource_type="device",
+                    class_name="bench_demo", template_name="bench_demo",
+                ),
+                data=MaterialDataWrite(),
+            )]),
+        ).data.root_material_uuid
+        deck_uuid = _create_root(service, "deck")
+        from unilabos.protocol.materials import MaterialMove
+
+        service.move_material(
+            _mutation("move_material"),
+            MaterialMove(material_uuid=deck_uuid, parent_material_uuid=device_uuid),
+        )
+
+        payload = GraphService(service).live_payload()
+        by_uuid = {node["uuid"]: node for node in payload["nodes"]}
+        assert by_uuid[deck_uuid]["parent"] == "bench"
+        assert by_uuid[deck_uuid]["parent_uuid"] == device_uuid
+        assert by_uuid[device_uuid]["parent"] is None

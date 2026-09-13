@@ -135,6 +135,40 @@ def test_dispatch_preserves_attempt_group_and_retry_link() -> None:
     assert content.attempt_group_uuid == "run-1"
     assert content.attempt_no == 2
     assert content.retry_of_job_uuid == "job-1"
+    assert content.attempt_trigger == "initial"
+
+
+def test_dispatch_carries_loop_iteration_attempts_without_a_retry_link() -> None:
+    """循环体第 N 轮：attempt_no > 1、无重试链，靠 attempt_trigger=loop_iteration 通过 runtime.v1 校验；
+    retry_count 由调度器给出（不能再从 attempt_no 推）。"""
+
+    service = _service()
+    service.attach_connection()
+    service.dispatch(
+        build_job_start_payload(
+            job_id="job-3",
+            task_id="task-1",
+            workflow_id="workflow-1",
+            node_id="node-1",
+            node_run_uuid="run-1",
+            attempt_no=3,
+            attempt_trigger="loop_iteration",
+            retry_count=0,
+            device_id="device-1",
+            action_name="pick",
+            action_type="UniAction",
+            action_args={"volume": 5},
+        )
+    )
+    notice = BackendCommandNotice.model_validate(service.outgoing.get_nowait()["data"])
+    document = BackendCommandDocument.model_validate(
+        service.get_command_document(notice.command_uuid)
+    )
+    content = ExecuteJobContent.model_validate(document.payload)
+    assert content.attempt_no == 3
+    assert content.retry_of_job_uuid is None
+    assert content.attempt_trigger == "loop_iteration"
+    assert content.retry_count == 0
 
 
 def test_terminal_event_invokes_listener_with_local_semantics() -> None:
@@ -489,11 +523,15 @@ def test_server_receive_loop_answers_ping_while_business_handler_is_blocked() ->
     async def scenario() -> None:
         business_started = threading.Event()
         business_release = threading.Event()
+        log_received = asyncio.Event()
 
         class _Service:
             connection_epoch = "epoch-1"
 
             def handle_message(self, action: str, data: dict[str, Any]):
+                if action == "runtime_logs_changed":
+                    log_received.set()
+                    return None
                 if action == "edge_change":
                     business_started.set()
                     business_release.wait(timeout=2)
@@ -530,6 +568,8 @@ def test_server_receive_loop_answers_ping_while_business_handler_is_blocked() ->
                 json.dumps({"action": "edge_change", "data": {"event_sequence": 1}})
             )
             assert await asyncio.to_thread(business_started.wait, 1)
+            await socket.incoming.put(json.dumps({"action": "runtime_logs_changed", "data": {"source_ids": ["host"]}}))
+            await asyncio.wait_for(log_received.wait(), timeout=.5)
             await socket.incoming.put(
                 json.dumps(
                     {

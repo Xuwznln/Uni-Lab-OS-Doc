@@ -103,6 +103,11 @@ def test_normalize_is_identity_for_current_contract_node():
     before = dict(node)
     assert normalize_legacy_graph_node(node) == before
     assert legacy_graph_markers({"nodes": [node], "links": []}) == {}
+    # 受管进程图 / 前端导出常带空 children 列表：派生字段，不是旧格式
+    assert legacy_graph_markers({"nodes": [{**node, "children": []}], "links": []}) == {}
+    assert legacy_graph_markers({"nodes": [{**node, "children": ["x"]}], "links": []}) == {
+        "children 列表": 1
+    }
 
 
 def test_normalize_legacy_liquid_fields():
@@ -230,7 +235,8 @@ def test_legacy_graph_markers_and_upgrade_report():
     assert markers["class 无 template_name"] == 6
     assert markers["根级 position"] == 6
     assert markers["pose.position_3d"] == 6
-    assert markers["children 列表"] == 6
+    # 只有真正用 children 表达层级的节点算旧格式；其余 5 个节点的 children 是空列表
+    assert markers["children 列表"] == 1
     assert markers["edges 键"] == 1
     assert markers["边仅有 uuid 端点"] == 2
     assert markers["边 source_handle/target_handle"] == 1

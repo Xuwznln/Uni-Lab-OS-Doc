@@ -8,7 +8,7 @@ from typing import Any, Iterator
 from unilabos.config.config import HOST_NODE_REGISTRY_NAME
 from unilabos.registry.init_enforce import merge_init_param_enforce
 from unilabos.registry.material_locks import normalize_material_parameter_names
-from unilabos.resources.adapters.device_site import apply_device_available_sites
+from unilabos.resources.adapters.device_site import apply_device_authority_state
 from unilabos.resources.resource_tracker import ResourceDictInstance
 from unilabos.backend.runtime.exception import DeviceClassInvalid
 from unilabos.utils.import_manager import default_manager
@@ -141,7 +141,8 @@ def resolve_device_definition(
                 f"supported: {', '.join(supported)}"
             )
 
-    apply_device_available_sites(device_config, registry_entry, registry_name)
+    # 权威优先：设备的 Site 快照与它持有的物料（图中子节点）都以物料权威为准
+    apply_device_authority_state(device_config, registry_entry, registry_name)
     raw_config = device_config.res_content.config
     runtime_config = merge_init_param_enforce(
         raw_config if isinstance(raw_config, dict) else {},

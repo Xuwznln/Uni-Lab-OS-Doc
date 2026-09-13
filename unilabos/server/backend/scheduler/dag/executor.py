@@ -166,14 +166,20 @@ class DagExecutor:
                     if status == NodeState.SUCCESS:
                         self.walk.on_success(nid)
                     elif status == NodeState.CANCELLED:
-                        # 外部取消回流：不触发 fail-fast，直接落 CANCELLED 终态
+                        # 取消回流：不算失败（不置 failed），直接落 CANCELLED 终态
                         self.walk.states[nid] = NodeState.CANCELLED
                     else:
                         self.walk.on_failed(nid)
                     self._notify_terminal(nid, status)
-                    # fail-fast：某节点**失败**即取消其余在跑并停止调度（取消不算失败）
+                    # fail-fast：某节点**失败**即取消其余在跑并停止调度
                     if status == NodeState.FAILED:
                         await self._cancel_inflight(inflight)
+                        return self.walk.snapshot()
+                    # 某节点被取消（执行面撤单）：后继依赖永远不满足，同样停止走图，
+                    # 其余节点收敛为 CANCELLED——但不是失败
+                    if status == NodeState.CANCELLED and not self._cancelled:
+                        await self._cancel_inflight(inflight)
+                        self.walk.cancel_remaining()
                         return self.walk.snapshot()
         finally:
             if inflight:

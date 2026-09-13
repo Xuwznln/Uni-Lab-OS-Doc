@@ -47,6 +47,8 @@ logger = logging.getLogger(__name__)
 RESTART_EXIT_CODE = 75
 # 98 = EADDRINUSE：管理端口被占（Host 子进程不监听端口，只在单进程 / 权威自己身上出现）
 PORT_IN_USE_EXIT_CODE = 98
+# 进程编排环境变量与配置覆盖共用 UNILABOS_ 前缀；新增时同步登记到
+# config.config._NON_CONFIG_ENV_KEYS，否则配置加载会告警"未找到类"。
 SUPERVISOR_INNER_ENV = "UNILABOS_SUPERVISOR_INNER"
 #: 收到中断后给子进程自己走完退出链路的时间（uvicorn 优雅停机 + 关库 + 停 backend）
 CHILD_EXIT_GRACE_S = 30.0
@@ -315,6 +317,9 @@ class HostChildSupervisor:
         self._lock = threading.Lock()
         self._child: Optional[subprocess.Popen[Any]] = None
         self._stopping = threading.Event()
+        # 已向当前子进程发过退出请求：再发一次 Ctrl+Break 会让子进程的 KeyboardInterrupt
+        # 打断正在进行的清理
+        self._exit_requested = False
         self._thread: Optional[threading.Thread] = None
         self.restart_count = 0
         self.crash_count = 0
@@ -339,6 +344,20 @@ class HostChildSupervisor:
         self._thread = threading.Thread(target=self._run, name="HostChildSupervisor", daemon=True)
         self._thread.start()
 
+    def request_stop(self) -> None:
+        """非阻塞地请 Host 开始退出（Ctrl+Break / SIGTERM），不等它结束。
+
+        权威一收到停机信号就调用：Host 与权威并行收尾，而不是等权威的 uvicorn 停完
+        再串行地停 Host——那样 Host 会先看到控制 WS 断开、去重连一个已经关掉的端口。
+        """
+
+        self._stopping.set()
+        with self._lock:
+            child = self._child
+        if child is not None and child.poll() is None and not self._exit_requested:
+            self._exit_requested = True
+            _request_graceful_exit(child)
+
     def stop(self, *, timeout: float = CHILD_EXIT_GRACE_S) -> None:
         """有序停掉 Host：先请它自己走退出链路（Ctrl+Break / SIGTERM），超时再结束。"""
 
@@ -346,7 +365,8 @@ class HostChildSupervisor:
         with self._lock:
             child = self._child
         if child is not None and child.poll() is None:
-            _request_graceful_exit(child)
+            if not self._exit_requested:
+                _request_graceful_exit(child)
             try:
                 child.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
@@ -365,6 +385,7 @@ class HostChildSupervisor:
             self._job.assign(child)
         with self._lock:
             self._child = child
+            self._exit_requested = False
         logger.info("[HostChild] Host 子进程已拉起 (pid %s)", child.pid)
         return child
 

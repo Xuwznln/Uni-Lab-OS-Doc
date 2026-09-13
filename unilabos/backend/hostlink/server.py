@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import errno
+import os
 import socket
 import socketserver
 import threading
@@ -26,6 +28,7 @@ from unilabos.backend.hostlink.protocol import (
     new_response,
     read_message,
     send_message,
+    send_response_or_reject,
 )
 from unilabos.utils import logger
 
@@ -164,11 +167,47 @@ class _PeerSession:
             pending.resolve({"ok": False, "error": "connection closed"})
 
 
+class HostLinkPortInUseError(OSError):
+    """HostLink 监听端口已被其他进程占用。"""
+
+    def __init__(self, bind: str, port: int) -> None:
+        self.bind = bind
+        self.port = port
+        locate = (
+            f"netstat -ano | findstr :{port}"
+            if os.name == "nt"
+            else f"lsof -i :{port}"
+        )
+        super().__init__(
+            errno.EADDRINUSE,
+            f"HostLink 端口 {bind}:{port} 已被占用（多半是上一个未退出的 Host 进程，"
+            f"可用 `{locate}` 找到占用者）。请结束该进程后重启，"
+            "或用 --hostlink_port <其他端口> 换端口（Slave 侧需同步改 --hostlink_port）",
+        )
+
+
+_ADDR_IN_USE_ERRNOS = {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", 10048)}
+
+
+def _is_addr_in_use(exc: OSError) -> bool:
+    return exc.errno in _ADDR_IN_USE_ERRNOS or getattr(exc, "winerror", None) == 10048
+
+
 class _LinkTCPServer(socketserver.ThreadingTCPServer):
-    allow_reuse_address = True
+    # POSIX：SO_REUSEADDR 只是让重启能立刻重绑 TIME_WAIT 中的端口。
+    # Windows 上它的语义完全不同：允许与另一个仍在 LISTEN 的进程同时绑同一端口，
+    # 新连接落到哪个进程不确定——上次没退干净的 Host 会把 Slave 全部"接走"，
+    # 本进程既不报错也看不到任何设备。Windows 改用 SO_EXCLUSIVEADDRUSE 独占。
+    allow_reuse_address = os.name != "nt"
     daemon_threads = True
 
     link: "HostLinkServer"
+
+    def server_bind(self) -> None:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if not self.allow_reuse_address and exclusive is not None:
+            self.socket.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        super().server_bind()
 
 
 class _LinkRequestHandler(socketserver.BaseRequestHandler):
@@ -235,6 +274,7 @@ class HostLinkServer:
         )
         self.register_handler(ActionType.HELLO, self._handle_hello)
         self.register_handler(ActionType.PING, self._handle_ping)
+        self.register_handler(ActionType.LOG_CHANGED, self._handle_log_changed)
         self.register_handler(ActionType.ROS_INFO, self._handle_ros_info)
         self.register_handler(ActionType.DEVICE_STATE, self._handle_device_state)
 
@@ -242,7 +282,12 @@ class HostLinkServer:
         if self._thread is not None and self._thread.is_alive():
             return self
         self.stopping.clear()
-        self._tcp = _LinkTCPServer((self._bind, self._port), _LinkRequestHandler)
+        try:
+            self._tcp = _LinkTCPServer((self._bind, self._port), _LinkRequestHandler)
+        except OSError as exc:
+            if _is_addr_in_use(exc):
+                raise HostLinkPortInUseError(self._bind, self._port) from exc
+            raise
         self._tcp.link = self
         self._port = int(self._tcp.server_address[1])
         self._thread = threading.Thread(
@@ -368,7 +413,7 @@ class HostLinkServer:
         def serve() -> None:
             response = self.dispatch(message, peer_key)
             try:
-                session.send(response)
+                send_response_or_reject(session.send, message, response, peer_key)
             except OSError:
                 pass
 
@@ -501,18 +546,12 @@ class HostLinkServer:
                     | set(devices)
                 )
                 machine_name = str(data.get("machine_name") or "").strip()
-                node_id = str(data.get("node_id") or "").strip()
-                if device_ids:
-                    incoming_devices = set(device_ids)
-                    node_id = ""
-                    for known_node_id, known_peer in self._peers.items():
-                        known_devices = set(known_peer.get("device_ids") or [])
-                        if incoming_devices.intersection(known_devices):
-                            node_id = known_node_id
-                            break
-                    if not node_id:
-                        node_id = f"device:{device_ids[0]}"
-                node_id = node_id or machine_name or peer_key
+                if not machine_name:
+                    raise ValueError("HostLink HELLO 缺少 machine_name，请显式指定节点身份")
+                node_id = machine_name
+                existing = self._peers.get(node_id)
+                if existing and existing.get("connected") and existing.get("addr") != peer_key:
+                    raise ValueError(f"machine_name={machine_name!r} 已被活跃连接占用，请指定不同的 --machine-name")
                 if known_node and known_node != node_id:
                     temporary = self._peers.get(known_node)
                     if temporary and temporary.get("addr") == peer_key:
@@ -572,6 +611,10 @@ class HostLinkServer:
                                     "id": device_id,
                                 }
                         peer["devices"] = devices
+                        if peer.get("device_ids") != sorted(devices):
+                            from unilabos.utils.log_notices import log_notices
+
+                            log_notices.changed(f"slave:{node_id}", sources_changed=True)
                         peer["device_ids"] = sorted(devices)
                     device_id = str(data.get("device_id") or "").strip()
                     state = data.get("state")
@@ -587,6 +630,9 @@ class HostLinkServer:
             peer = self._peers.get(node_id)
             if peer is not None and peer.get("addr") == peer_key:
                 peer["connected"] = False
+        from unilabos.utils.log_notices import log_notices
+
+        log_notices.changed(f"slave:{node_id}", sources_changed=True)
 
     def peers(self) -> List[Dict[str, Any]]:
         """Return all known Slaves with a calculated ``online`` field."""
@@ -630,6 +676,9 @@ class HostLinkServer:
         _data: Dict[str, Any],
         peer: Dict[str, Any],
     ) -> Dict[str, Any]:
+        from unilabos.utils.log_notices import log_notices
+
+        log_notices.changed(f"slave:{peer['node_id']}", sources_changed=True)
         return {
             "server_time": time.time(),
             "heartbeat_timeout": self.heartbeat_timeout,
@@ -637,6 +686,14 @@ class HostLinkServer:
             "assigned_node_id": peer.get("node_id"),
             "device_ids": list(peer.get("device_ids") or []),
         }
+
+    def _handle_log_changed(self, data: Dict[str, Any], peer: Dict[str, Any]) -> Dict[str, Any]:
+        if data or not peer.get("machine_name"):
+            raise ValueError("日志通知只接受已注册连接的空通知，不接受正文或其它节点身份")
+        from unilabos.utils.log_notices import log_notices
+
+        log_notices.changed(f"slave:{peer['node_id']}")
+        return {"accepted": True}
 
     def _handle_ping(
         self,
@@ -684,6 +741,7 @@ def get_hostlink_server() -> Optional[HostLinkServer]:
 
 __all__ = [
     "Handler",
+    "HostLinkPortInUseError",
     "HostLinkServer",
     "get_hostlink_server",
     "set_hostlink_server",

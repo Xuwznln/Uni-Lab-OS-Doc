@@ -17,13 +17,23 @@ import logging
 import math
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Dict, Optional
 from uuid import UUID, uuid5
 
 from unilabos.client.materials.core import MaterialsHTTPError
 from unilabos.protocol.materials import InventoryMutation
+from unilabos.protocol.runtime.loop import (
+    LoopCondition,
+    LoopSpec,
+    compare as compare_condition,
+    loop_context,
+    parse_loop_spec,
+    substitute_loop_placeholders,
+)
+from unilabos.protocol.utils.workflow_hierarchy import HierarchyError, lift_edge
+from unilabos.registry.action_policy import SUCCESS_TYPE_CANCELLATION
 from unilabos.protocol.materials import (
     InventoryReservationCreate,
     InventoryReservationTransition,
@@ -46,8 +56,14 @@ from unilabos.server.backend.scheduler.parameters import (
     json_set,
 )
 from unilabos.server.backend.scheduler.dag.executor import DagWalk
-from unilabos.server.backend.scheduler.dag.models import DagEdge, DagNode, NodeState, TaskDag
-from unilabos.server.backend.scheduler.dag.runner import TaskDagRunner
+from unilabos.server.backend.scheduler.dag.models import (
+    NODE_KIND_LOOP,
+    DagEdge,
+    DagNode,
+    NodeState,
+    TaskDag,
+)
+from unilabos.server.backend.scheduler.dag.runner import RunBodyFn, TaskDagRunner
 from unilabos.server.backend.scheduler.resource_manager import (
     ResourceNotFound,
     SchedulerResourceManager,
@@ -57,6 +73,16 @@ from unilabos.server.services.runtime.workflow.service import WorkflowService
 logger = logging.getLogger(__name__)
 
 _RUN_TERMINAL = {"succeeded", "failed", "skipped", "canceled", "timeout"}
+
+
+def _run_status_to_state(status: str) -> NodeState:
+    """节点运行终态 → DAG 节点态：取消不算失败（不 fail-fast、不进失败决策）。"""
+
+    if status in {"succeeded", "skipped"}:
+        return NodeState.SUCCESS
+    if status == "canceled":
+        return NodeState.CANCELLED
+    return NodeState.FAILED
 # 上一进程留下、必须由人裁决而不能重放的节点运行状态（与 store 口径一致）
 _RUN_NEEDS_RECONCILIATION = frozenset({"execution_unknown", "intervention_required"})
 # 同一 attempt 的裁决 id 跨进程稳定：再次重启后前端拿着旧 id 仍能提交
@@ -166,18 +192,25 @@ class BackendScheduler:
         materials_need_lock_resolver: Optional[
             Callable[[str, str], list[str]]
         ] = None,
+        device_state_reader: Optional[Callable[[str], Mapping[str, Any]]] = None,
     ) -> None:
         self.workflow = workflow
         self.executor = executor
         self.materials_gateway = materials_gateway
         self.resources = resource_manager or SchedulerResourceManager()
         self._materials_need_lock_resolver = materials_need_lock_resolver
+        # while 循环的设备状态条件：device_id -> {field: value}。缺省从执行适配器的
+        # 设备状态投影读（telemetry 最新快照）。
+        self._device_state_reader = device_state_reader
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._started = threading.Event()
         self._guard = threading.RLock()
         self._runners: Dict[str, TaskDagRunner] = {}
         self._scheduled: set[str] = set()
+        self._control_wakeups: set[str] = set()
+        # 已满足 DAG 依赖、尚未获得单点许可的叶节点；此时不申请动作/物料锁。
+        self._waiting_step_nodes: Dict[str, tuple[Dict[str, Any], DagNode]] = {}
         # 以下均以节点运行 uuid（DAG 节点键）为键
         self._run_to_task: Dict[str, str] = {}
         self._run_specs: Dict[str, Dict[str, Any]] = {}
@@ -196,6 +229,9 @@ class BackendScheduler:
         resolver = getattr(self.workflow, "set_manual_confirmation_resolver", None)
         if callable(resolver):
             resolver(self._on_manual_confirmation_decided)
+        controller = getattr(self.workflow, "set_task_controller", None)
+        if callable(controller):
+            controller(self._on_task_control)
 
     @property
     def dispatch_paused(self) -> bool:
@@ -245,12 +281,44 @@ class BackendScheduler:
         def report(done: Any) -> None:
             with self._guard:
                 self._scheduled.discard(task_uuid)
+                wake = task_uuid in self._control_wakeups
+                self._control_wakeups.discard(task_uuid)
+            if done.cancelled():
+                return
             try:
                 done.result()
             except Exception:  # noqa: BLE001 - task state is persisted by run_task
                 logger.exception("workflow task %s execution failed", task_uuid)
+            # 创建时的 paused 检查与第一条 step 命令可能交错，不能吞掉这次唤醒。
+            if wake:
+                self.submit(task_uuid)
 
         future.add_done_callback(report)
+
+    def _on_task_control(self, task_uuid: str) -> None:
+        """命令先落库，再在调度线程唤醒原 DAG；不新建任务或独立单点 job。"""
+        self.start(recover=False)
+        assert self._loop is not None
+
+        def wake() -> None:
+            with self._guard:
+                active = task_uuid in self._runners
+                if not active and task_uuid in self._scheduled:
+                    self._control_wakeups.add(task_uuid)
+                    return
+                waiting = [entry for entry in self._waiting_step_nodes.values()
+                           if str(entry[0]["uuid"]) == task_uuid]
+            if not active:
+                self.submit(task_uuid)
+                return
+            for task, node in waiting:
+                try:
+                    self._start_node(task, node)
+                except Exception:
+                    logger.exception("单点节点 %s 起跑失败", node.node_id)
+                    self._notify_start_failure(node.node_id)
+
+        self._loop.call_soon_threadsafe(wake)
 
     async def run_task(self, task_uuid: str) -> Dict[str, NodeState]:
         prepared = self.workflow.prepare_workflow_task_execution(task_uuid)
@@ -286,6 +354,7 @@ class BackendScheduler:
             lambda node: self._start_node(task, node),
             on_node_terminal=self._on_node_terminal,
             on_cancel_remaining=lambda: self._cancel_task(task_uuid),
+            on_run_loop=lambda node, run_body: self._run_loop_node(task, node, run_body),
             loop=asyncio.get_running_loop(),
             walk=walk,
         )
@@ -335,6 +404,7 @@ class BackendScheduler:
                     spec = self._run_specs.pop(run_uuid, {})
                     self._run_to_task.pop(run_uuid, None)
                     self._run_context.pop(run_uuid, None)
+                    self._waiting_step_nodes.pop(run_uuid, None)
                     for job_uuid in spec.get("job_uuids", ()):
                         self._job_runs.pop(job_uuid, None)
                         self._waiting_resource_jobs.pop(job_uuid, None)
@@ -358,8 +428,14 @@ class BackendScheduler:
                 if (run_uuid := self._job_runs.get(job_uuid)) is not None
                 if (task_uuid := self._run_to_task.get(run_uuid)) is not None
             }
+            step_candidates = {
+                str(task["uuid"]) for task, _node in self._run_context.values()
+                if task.get("run_mode") == "step"
+            } | {str(task["uuid"]) for task, _node in self._waiting_step_nodes.values()}
         for task_uuid, runner in runners:
-            if task_uuid not in manual_task_ids:
+            # 单步等待/在飞的许可已持久化。停进程不等于取消实验，恢复时未知执行仍走裁决。
+            preserve_step = task_uuid in step_candidates and self.workflow.get_workflow_task(task_uuid)["run_mode"] == "step"
+            if task_uuid not in manual_task_ids and not preserve_step:
                 runner.cancel()
         if loop is not None and loop.is_running():
             loop.call_soon_threadsafe(loop.stop)
@@ -408,38 +484,60 @@ class BackendScheduler:
         )
         dag_nodes: Dict[str, DagNode] = {}
         specs: Dict[str, Dict[str, Any]] = {}
+        # 执行父级（最近的循环容器），按工作流节点 uuid；来自执行计划
+        parents: Dict[str, Optional[str]] = {}
         for workflow_node_uuid, run in runs_by_node.items():
             planned = planned_nodes.get(workflow_node_uuid, {})
             source = snapshot_nodes.get(workflow_node_uuid, {})
-            if run["executor_kind"] != "device_action":
+            parent = planned.get("parent_uuid")
+            parents[workflow_node_uuid] = (
+                str(parent) if parent and str(parent) in runs_by_node else None
+            )
+            run_uuid = str(run["uuid"])
+            policy = run.get("execution_policy") or {}
+            param = dict(run.get("param") or planned.get("param") or {})
+            source_meta = dict(source.get("meta_data") or {})
+            if run["executor_kind"] == NODE_KIND_LOOP:
+                try:
+                    loop_spec = parse_loop_spec(param)
+                except ValueError as exc:
+                    raise BackendSchedulingError(
+                        f"workflow node {workflow_node_uuid}: {exc}"
+                    ) from exc
+                dag_nodes[run_uuid] = DagNode(
+                    node_id=run_uuid,
+                    device_id="",
+                    action="",
+                    kind=NODE_KIND_LOOP,
+                    loop_spec=loop_spec.model_dump(mode="json"),
+                    action_args=param,
+                )
+            elif run["executor_kind"] != "device_action":
                 raise BackendSchedulingError(
                     f"executor_kind {run['executor_kind']!r} is not wired locally"
                 )
-            param = dict(run.get("param") or planned.get("param") or {})
-            source_meta = dict(source.get("meta_data") or {})
-            device_id = str(
-                source_meta.get("target_device_id")
-                or run.get("material_uuid")
-                or planned.get("material_uuid")
-                or source.get("material_uuid")
-                or param.get("device_id")
-                or ""
-            )
-            action = str(source.get("action_name") or param.get("action") or "")
-            if not device_id or not action:
-                raise BackendSchedulingError(
-                    f"workflow node {workflow_node_uuid} lacks material_uuid/device action"
+            else:
+                device_id = str(
+                    source_meta.get("target_device_id")
+                    or run.get("material_uuid")
+                    or planned.get("material_uuid")
+                    or source.get("material_uuid")
+                    or param.get("device_id")
+                    or ""
                 )
-            run_uuid = str(run["uuid"])
-            policy = run.get("execution_policy") or {}
-            dag_nodes[run_uuid] = DagNode(
-                node_id=run_uuid,
-                device_id=device_id,
-                action=action,
-                action_type=str(source.get("action_type") or ""),
-                action_args=param,
-                always_free=bool(policy.get("always_free")),
-            )
+                action = str(source.get("action_name") or param.get("action") or "")
+                if not device_id or not action:
+                    raise BackendSchedulingError(
+                        f"workflow node {workflow_node_uuid} lacks material_uuid/device action"
+                    )
+                dag_nodes[run_uuid] = DagNode(
+                    node_id=run_uuid,
+                    device_id=device_id,
+                    action=action,
+                    action_type=str(source.get("action_type") or ""),
+                    action_args=param,
+                    always_free=bool(policy.get("always_free")),
+                )
             current_job_uuid = str(run["current_job_uuid"])
             current_job = self._current_job_metadata(current_job_uuid)
             attempt_no = int(
@@ -451,6 +549,7 @@ class BackendScheduler:
                 (current_job or {}).get("retry_of_job_uuid")
                 or run.get("retry_of_job_uuid")
             )
+            attempt_trigger = str((current_job or {}).get("trigger") or "initial")
             specs[run_uuid] = {
                 "workflow_node_uuid": workflow_node_uuid,
                 # 节点显式声明优先；未声明时派发前按注册表 @action(always_free) 解析
@@ -474,6 +573,12 @@ class BackendScheduler:
                 "retry_of_job_uuid": (
                     str(retry_of_job_uuid) if retry_of_job_uuid else None
                 ),
+                # attempt 为何产生（runtime.v1 execute_job 的一致性校验字段）；
+                # 已重试次数：只有 retry 决策追加的 attempt 才算，循环下一轮不算
+                "attempt_trigger": attempt_trigger,
+                "retry_count": (
+                    max(attempt_no - 1, 0) if attempt_trigger == "retry_decision" else 0
+                ),
                 "job_uuids": [current_job_uuid],
             }
             manual_meta = source_meta.get("manual_confirm")
@@ -483,44 +588,66 @@ class BackendScheduler:
                 # 上一进程留下的 attempt：起跑时不下发设备，改为向用户开裁决
                 specs[run_uuid]["recovered_status"] = str(run["status"])
 
-        dag_edges = []
-        seen_edges: set[tuple[str, str]] = set()
+        run_of = {node_uuid: str(node_run["uuid"]) for node_uuid, node_run in runs_by_node.items()}
+        for workflow_node_uuid, parent in parents.items():
+            spec = specs[run_of[workflow_node_uuid]]
+            spec["parent_run_uuid"] = run_of[parent] if parent else None
+            spec["kind"] = str(runs_by_node[workflow_node_uuid]["executor_kind"])
+        # 循环节点：循环体（含嵌套）的全部节点运行，每轮为它们追加 attempt
+        for workflow_node_uuid in parents:
+            chain = parents.get(workflow_node_uuid)
+            while chain is not None:
+                specs[run_of[chain]].setdefault("body_run_uuids", []).append(
+                    run_of[workflow_node_uuid]
+                )
+                chain = parents.get(chain)
 
-        def add_dag_edge(source_node: str, target_node: str) -> None:
-            source_run = runs_by_node.get(source_node)
-            target_run = runs_by_node.get(target_node)
-            if source_run is None or target_run is None:
-                return
-            key = (str(source_run["uuid"]), str(target_run["uuid"]))
-            if key in seen_edges or key[0] == key[1]:
-                return
-            seen_edges.add(key)
-            dag_edges.append(
-                DagEdge(source_node_uuid=key[0], target_node_uuid=key[1])
-            )
-
+        # 依赖对（工作流节点 uuid）：handle 边 + execution_policy.depends_on（@workflow
+        # 声明式步骤等无 handle 数据流的节点用它表达串行），跨循环边界的提升到容器所在层级
+        pairs: list[tuple[str, str]] = []
         for edge in plan.get("edges") or []:
-            add_dag_edge(
-                str(edge["source_node_uuid"]), str(edge["target_node_uuid"])
-            )
-        # execution_policy.depends_on：纯执行序依赖（@workflow 声明式步骤等
-        # 无 handle 数据流的节点用它表达串行），与 handle 边合并去重。
+            pairs.append((str(edge["source_node_uuid"]), str(edge["target_node_uuid"])))
         for workflow_node_uuid, run in runs_by_node.items():
             depends_on = (run.get("execution_policy") or {}).get("depends_on") or []
             if not isinstance(depends_on, list):
                 continue
             for upstream in depends_on:
-                add_dag_edge(str(upstream), workflow_node_uuid)
-        return (
-            TaskDag(
+                pairs.append((str(upstream), workflow_node_uuid))
+        edges_by_container: Dict[Optional[str], list[DagEdge]] = {}
+        seen_edges: set[tuple[str, str]] = set()
+        for source_node, target_node in pairs:
+            if source_node not in runs_by_node or target_node not in runs_by_node:
+                continue
+            try:
+                lifted_source, lifted_target = lift_edge(parents, source_node, target_node)
+            except HierarchyError as exc:
+                raise BackendSchedulingError(str(exc)) from exc
+            key = (run_of[lifted_source], run_of[lifted_target])
+            if key in seen_edges or key[0] == key[1]:
+                continue
+            seen_edges.add(key)
+            edges_by_container.setdefault(parents.get(lifted_source), []).append(
+                DagEdge(source_node_uuid=key[0], target_node_uuid=key[1])
+            )
+
+        def build_level(container: Optional[str]) -> TaskDag:
+            level_nodes: Dict[str, DagNode] = {}
+            for node_uuid, parent in parents.items():
+                if parent != container:
+                    continue
+                node = dag_nodes[run_of[node_uuid]]
+                if node.is_loop:
+                    node.body = build_level(node_uuid)
+                level_nodes[node.node_id] = node
+            return TaskDag(
                 task_id=str(task["uuid"]),
                 notebook_id="",
                 server_info={},
-                nodes=dag_nodes,
-                edges=dag_edges,
-            ),
-            specs,
-        )
+                nodes=level_nodes,
+                edges=list(edges_by_container.get(container, [])),
+            )
+
+        return build_level(None), specs
 
     def _current_job_metadata(self, job_uuid: str) -> Dict[str, Any]:
         """读取当前 attempt 的 retry 元数据；兼容精简测试替身。"""
@@ -547,6 +674,12 @@ class BackendScheduler:
         if recovered_status is not None:
             self._open_reconciliation_decision(task, node, spec, recovered_status)
             return
+        if task.get("run_mode") == "step":
+            with self._guard:
+                if not self.workflow.claim_task_step(str(task["uuid"]), spec["current_job_uuid"]):
+                    self._waiting_step_nodes[node.node_id] = (task, node)
+                    return
+                self._waiting_step_nodes.pop(node.node_id, None)
         args = self._resolve_action_args(node.node_id)
         # InventoryRequirement 是节点上的声明；权威预留后解析出的具体出库内容
         # （物料 uuid / lot 与数量）按需求 key 注入同名动作参数，设备拿到的已是具体引用。
@@ -683,6 +816,8 @@ class BackendScheduler:
                 node_run_uuid=node.node_id,
                 attempt_no=spec["attempt_no"],
                 retry_of_job_uuid=spec.get("retry_of_job_uuid"),
+                attempt_trigger=str(spec.get("attempt_trigger") or "initial"),
+                retry_count=spec.get("retry_count"),
             )
             payload["always_free"] = spec.get("always_free", node.always_free)
             timeouts = self._action_timeouts(node, spec, args)
@@ -1040,7 +1175,324 @@ class BackendScheduler:
                         f"value not exist: nested target key {nested!r}"
                     )
             result = json_set(result, keys[-1], value)
+        context = self._loop_context_for(run_uuid)
+        if context is not None:
+            # 循环体节点的 {{loop.index}} / {{loop.iteration}} / {{loop.count}}：取最内层循环的当前轮
+            result = substitute_loop_placeholders(result, context)
         return dict(result)
+
+    def _loop_context_for(self, run_uuid: str) -> Optional[Dict[str, Any]]:
+        """节点运行所在最内层循环的当前迭代变量；不在循环体内返回 None。"""
+
+        with self._guard:
+            parent = self._run_specs.get(run_uuid, {}).get("parent_run_uuid")
+            while parent is not None:
+                loop_spec = self._run_specs.get(parent, {})
+                context = loop_spec.get("loop_context")
+                if context is not None:
+                    return dict(context)
+                parent = loop_spec.get("parent_run_uuid")
+        return None
+
+    # ── 循环容器 ──────────────────────────────────────────────
+
+    async def _run_loop_node(
+        self,
+        task: Dict[str, Any],
+        node: DagNode,
+        run_body: RunBodyFn,
+    ) -> NodeState:
+        """驱动一个循环节点：按 LoopSpec 决定轮数，每轮重臂循环体 attempt 后跑循环体子 DAG。
+
+        - ``for``：固定 ``count`` 轮；``while``：每轮前求值条件，假即结束；达到
+          ``max_iterations`` 视为失败（条件永不为假是配置错误，不能无限占用设备）。
+        - 循环体某节点失败 / 被取消：循环节点同态收敛，外层 fail-fast 与普通节点一致。
+        - 循环节点自身没有执行器 job：attempt 由这里直接 running → 终态，``return_value``
+          给出轮数；每轮的迭代变量写在 ``control_data.loop``，供前端展示与下游读取。
+        - 重启恢复：从 ``control_data.loop.iteration`` 记录的轮次继续，本轮已成功的循环体
+          节点不重跑（DagWalk completed）。
+        """
+
+        spec = self._run_specs[node.node_id]
+        loop_spec = LoopSpec.model_validate(node.loop_spec)
+        job_uuid = str(spec["current_job_uuid"])
+        body_runs: list[str] = list(spec.get("body_run_uuids") or [])
+        body_node_ids = set(node.body.nodes) if node.body is not None else set()
+
+        def resolve_status(status: str, return_value: Dict[str, Any], error: Optional[str]) -> NodeState:
+            self._settle_loop_run(job_uuid, status=status, return_value=return_value, error=error)
+            return _run_status_to_state(status)
+
+        try:
+            self.workflow.mark_workflow_node_job_running(job_uuid)
+        except Exception as exc:  # noqa: BLE001 - attempt 已终态等异常按失败收敛
+            logger.exception("loop node %s cannot start", spec["workflow_node_uuid"])
+            return resolve_status("failed", {"iterations": 0}, f"loop start failed: {exc}")
+
+        iteration = self._recovered_loop_iteration(node.node_id)
+        resumed = iteration > 0 or self._loop_body_in_progress(body_runs)
+        completed_iterations = iteration
+        while True:
+            if self._task_cancelled(task):
+                return resolve_status("canceled", {"iterations": completed_iterations}, None)
+            if resumed:
+                # 恢复到一轮的中途：先把这一轮跑完，不重新判定条件
+                pass
+            elif loop_spec.mode == "for":
+                assert loop_spec.count is not None
+                if iteration >= loop_spec.count:
+                    break
+            else:
+                if iteration >= loop_spec.max_iterations:
+                    return resolve_status(
+                        "failed",
+                        {"iterations": completed_iterations},
+                        f"while 循环达到 max_iterations={loop_spec.max_iterations} 仍未结束"
+                        f"（条件：{loop_spec.condition.describe() if loop_spec.condition else ''}）",
+                    )
+                try:
+                    proceed = self._evaluate_loop_condition(task, spec, loop_spec.condition)
+                except Exception as exc:  # noqa: BLE001 - 条件不可求值是配置/数据错误
+                    logger.warning(
+                        "loop node %s condition failed: %s", spec["workflow_node_uuid"], exc
+                    )
+                    return resolve_status(
+                        "failed",
+                        {"iterations": completed_iterations},
+                        f"while 条件无法求值：{exc}",
+                    )
+                if not proceed:
+                    break
+            progress = {
+                "mode": loop_spec.mode,
+                "count": loop_spec.count,
+                "max_iterations": loop_spec.max_iterations if loop_spec.mode == "while" else None,
+                "condition": (
+                    loop_spec.condition.describe() if loop_spec.condition is not None else None
+                ),
+            }
+            context = loop_context(iteration, loop_spec.count)
+            with self._guard:
+                spec["loop_context"] = context
+            completed: list[str] = []
+            if resumed:
+                # 恢复：沿用本轮已有的 attempt（在飞的由裁决收敛），已成功的循环体节点不重跑
+                completed = self._completed_body_runs(body_runs, body_node_ids)
+                resumed = False
+            else:
+                try:
+                    self._begin_loop_iteration(task, node.node_id, iteration, progress, body_runs)
+                except Exception as exc:  # noqa: BLE001 - 重臂失败（库存不足等）按失败收敛
+                    logger.exception(
+                        "loop node %s failed to arm iteration %s",
+                        spec["workflow_node_uuid"],
+                        iteration,
+                    )
+                    return resolve_status(
+                        "failed",
+                        {"iterations": completed_iterations},
+                        f"第 {iteration + 1} 轮无法开始：{exc}",
+                    )
+            result = await run_body(completed)
+            for body_run_uuid, state in result.items():
+                self._persist_terminal_if_needed(body_run_uuid, state)
+            if any(state == NodeState.FAILED for state in result.values()):
+                return resolve_status(
+                    "failed",
+                    {"iterations": completed_iterations, "failed_iteration": iteration + 1},
+                    f"第 {iteration + 1} 轮循环体执行失败",
+                )
+            if any(state != NodeState.SUCCESS for state in result.values()):
+                return resolve_status("canceled", {"iterations": completed_iterations}, None)
+            iteration += 1
+            completed_iterations = iteration
+            if loop_spec.interval_seconds > 0:
+                await asyncio.sleep(loop_spec.interval_seconds)
+        return resolve_status("succeeded", {"iterations": completed_iterations, "mode": loop_spec.mode}, None)
+
+    def _task_cancelled(self, task: Dict[str, Any]) -> bool:
+        with self._guard:
+            runner = self._runners.get(str(task["uuid"]))
+        return runner is None or bool(getattr(runner, "cancelled", False))
+
+    def _recovered_loop_iteration(self, run_uuid: str) -> int:
+        """重启恢复时从循环节点运行的 control_data.loop.iteration 续跑。"""
+
+        try:
+            run = self.workflow.get_workflow_node_run(run_uuid)
+        except Exception:  # noqa: BLE001 - 精简测试替身可能没有该方法
+            return 0
+        loop_state = (run.get("control_data") or {}).get("loop") or {}
+        iteration = loop_state.get("iteration")
+        return int(iteration) if isinstance(iteration, int) and iteration > 0 else 0
+
+    def _loop_body_in_progress(self, body_runs: Iterable[str]) -> bool:
+        """循环体里已有节点跑完（succeeded/skipped）：说明是恢复而不是首轮起跑。"""
+
+        for run_uuid in body_runs:
+            try:
+                run = self.workflow.get_workflow_node_run(run_uuid)
+            except Exception:  # noqa: BLE001
+                return False
+            if str(run.get("status") or "") in {"succeeded", "skipped"}:
+                return True
+        return False
+
+    def _completed_body_runs(self, body_runs: Iterable[str], body_node_ids: set[str]) -> list[str]:
+        completed: list[str] = []
+        for run_uuid in body_runs:
+            if run_uuid not in body_node_ids:
+                continue
+            try:
+                run = self.workflow.get_workflow_node_run(run_uuid)
+            except Exception:  # noqa: BLE001
+                continue
+            if str(run.get("status") or "") in {"succeeded", "skipped"}:
+                completed.append(run_uuid)
+        return completed
+
+    def _begin_loop_iteration(
+        self,
+        task: Dict[str, Any],
+        loop_run_uuid: str,
+        iteration: int,
+        progress: Dict[str, Any],
+        body_runs: list[str],
+    ) -> None:
+        """持久化本轮开始：循环体节点运行追加新 attempt，并把调度器簿记切到新 attempt。"""
+
+        outcome = self.workflow.begin_workflow_loop_iteration(
+            loop_run_uuid,
+            iteration=iteration,
+            progress=progress,
+            body_run_uuids=body_runs,
+        )
+        rearmed: list[tuple[str, Dict[str, Any]]] = []
+        for run_uuid, next_job in (outcome.get("next_jobs") or {}).items():
+            spec = self._run_specs.get(run_uuid)
+            if spec is None:
+                continue
+            with self._guard:
+                self._arm_next_attempt(spec, next_job, retry_of=None)
+            if spec.get("inventory_requirements"):
+                rearmed.append((str(spec["current_job_uuid"]), spec))
+        if rearmed:
+            # 库存 reservation 绑定 attempt：每轮为循环体重新预留一次（与 retry 同构）
+            self._reserve_inventory(
+                task,
+                rearmed,
+                command_suffix=f":loop:{loop_run_uuid}:{iteration}",
+            )
+
+    def _arm_next_attempt(
+        self, spec: Dict[str, Any], next_job: Dict[str, Any], *, retry_of: Optional[str]
+    ) -> None:
+        """把 spec 的当前 attempt 切到 store 追加的新 attempt（retry / 循环下一轮共用）。"""
+
+        spec["current_job_uuid"] = str(next_job["uuid"])
+        spec["attempt_no"] = int(next_job.get("attempt_no") or spec["attempt_no"] + 1)
+        spec["retry_of_job_uuid"] = (
+            str(next_job.get("retry_of_job_uuid") or retry_of) if retry_of else None
+        )
+        if retry_of:
+            spec["attempt_trigger"] = str(next_job.get("trigger") or "retry_decision")
+            spec["retry_count"] = int(spec.get("retry_count") or 0) + 1
+        else:
+            # 循环下一轮：新一轮从零计重试
+            spec["attempt_trigger"] = str(next_job.get("trigger") or "loop_iteration")
+            spec["retry_count"] = 0
+        spec["job_uuids"].append(str(next_job["uuid"]))
+        spec.pop("inventory_reservation_uuid", None)
+        spec["reserved_material_uuids"] = []
+
+    def _evaluate_loop_condition(
+        self,
+        task: Dict[str, Any],
+        loop_spec: Dict[str, Any],
+        condition: Optional[LoopCondition],
+    ) -> bool:
+        """while 条件：设备状态字段 / 某节点最近一次成功输出 与 value 比较。"""
+
+        if condition is None:
+            return False
+        if condition.source == "device_state":
+            snapshot = self._read_device_state(str(condition.device_id))
+            if condition.field not in snapshot:
+                if condition.op == "exists":
+                    return False
+                raise BackendSchedulingError(
+                    f"设备 {condition.device_id} 没有状态字段 {condition.field!r}"
+                    f"（已知字段：{sorted(snapshot)}）"
+                )
+            return compare_condition(condition.op, snapshot[condition.field], condition.value)
+        run_uuid = loop_spec["runs_by_node"].get(str(condition.node_uuid))
+        if not run_uuid:
+            raise BackendSchedulingError(
+                f"条件引用的节点 {condition.node_uuid} 不在本任务里"
+            )
+        run = self.workflow.get_workflow_node_run(run_uuid)
+        if str(run.get("status") or "") not in {"succeeded", "skipped"}:
+            # 被引用节点还没有产出（首轮之前 / 上轮没轮到它）：继续，让循环体至少跑一轮
+            return True
+        value: Any = (run.get("return_info") or {}).get("return_value")
+        if condition.data_key:
+            exists, value = json_get_exists(value, condition.data_key)
+            if not exists:
+                if condition.op == "exists":
+                    return False
+                raise BackendSchedulingError(
+                    f"节点 {condition.node_uuid} 的返回值里没有 {condition.data_key!r}"
+                )
+        return compare_condition(condition.op, value, condition.value)
+
+    def _read_device_state(self, device_id: str) -> Dict[str, Any]:
+        """设备最新状态字段 -> 值；来源是注入的读取器或执行适配器的设备状态投影。"""
+
+        reader = self._device_state_reader
+        if reader is None:
+            projection = getattr(self.executor, "device_state", None)
+            latest_for = getattr(projection, "latest_for", None)
+            if not callable(latest_for):
+                raise BackendSchedulingError(
+                    "本机没有设备状态投影，无法对设备状态做 while 判断"
+                )
+            reader = latest_for
+        snapshot = reader(device_id) or {}
+        values: Dict[str, Any] = {}
+        for field, item in dict(snapshot).items():
+            # 投影形状 {prop: {"value", "updated_at", ...}}；也接受已经展平的 {prop: value}
+            if isinstance(item, Mapping) and "value" in item:
+                values[str(field)] = item["value"]
+            else:
+                values[str(field)] = item
+        return values
+
+    def _settle_loop_run(
+        self,
+        job_uuid: str,
+        *,
+        status: str,
+        return_value: Dict[str, Any],
+        error: Optional[str],
+    ) -> None:
+        """循环节点 attempt 的终态：没有执行器回报，由调度器直接落表。"""
+
+        error_info: list[Dict[str, Any]] = []
+        if status == "failed":
+            error_info = [{"code": "loop_failed", "message": error or "loop failed"}]
+        try:
+            self.workflow.record_workflow_node_job_terminal(
+                job_uuid,
+                status=status,
+                return_info={
+                    "suc": status == "succeeded",
+                    "suc_type": "loop",
+                    "return_value": return_value,
+                },
+                error_info=error_info,
+            )
+        except Exception:  # noqa: BLE001 - 已终态（取消收敛先到）等情况不再改写
+            logger.exception("failed to settle loop attempt %s", job_uuid)
 
     def _on_manual_confirmation_decided(
         self, confirmation: Dict[str, Any]
@@ -1134,9 +1586,14 @@ class BackendScheduler:
         if not owned:
             # 非本调度器派发的 job（如 Backend-controlled 下发的 execution_job）
             return
-        job_status = "skipped" if success and suc_type == "skip" else (
-            "succeeded" if success else "failed"
-        )
+        if success:
+            job_status = "skipped" if suc_type == "skip" else "succeeded"
+        elif suc_type == SUCCESS_TYPE_CANCELLATION:
+            # 执行面被取消（运行时页取消 job / 停机撤单）不是设备失败：attempt 落 canceled，
+            # 节点走 CANCELLED（不触发失败决策与重试），任务终态为 canceled 而非 failed。
+            job_status = "canceled"
+        else:
+            job_status = "failed"
         resolution = (
             (return_info or {}).get("error_resolution")
             if isinstance(return_info, dict)
@@ -1192,16 +1649,9 @@ class BackendScheduler:
             # 这里只需为新 attempt 重新预留库存、申请资源并下发，DAG 节点不终结。
             task, node = context
             with self._guard:
-                spec["current_job_uuid"] = str(next_job["uuid"])
-                spec["attempt_no"] = int(next_job.get("attempt_no") or spec["attempt_no"] + 1)
-                # store 在 retry 决策事务中会写入该字段；缺失时用当前
+                # store 在 retry 决策事务中会写入 retry_of_job_uuid；缺失时用当前
                 # attempt 作为保守兜底，保证 runtime.v1 的 retry 链仍可验证。
-                spec["retry_of_job_uuid"] = str(
-                    next_job.get("retry_of_job_uuid") or job_id
-                )
-                spec["job_uuids"].append(str(next_job["uuid"]))
-                spec.pop("inventory_reservation_uuid", None)
-                spec["reserved_material_uuids"] = []
+                self._arm_next_attempt(spec, next_job, retry_of=job_id)
             logger.info(
                 "workflow node %s retrying as attempt %s (job %s -> %s)",
                 spec["workflow_node_uuid"],
@@ -1227,12 +1677,7 @@ class BackendScheduler:
             return
 
         if run["status"] in _RUN_TERMINAL:
-            runner.notify_terminal(
-                run_uuid,
-                NodeState.SUCCESS
-                if run["status"] in {"succeeded", "skipped"}
-                else NodeState.FAILED,
-            )
+            runner.notify_terminal(run_uuid, _run_status_to_state(str(run["status"])))
 
     def publish_job_error_decision_required(self, report: Dict[str, Any]) -> bool:
         """执行面决策桥：本机派发的 attempt 失败并挂起等待决策。"""

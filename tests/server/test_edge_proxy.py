@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -83,6 +84,12 @@ def test_proxy_forwards_host_routes_over_control_plane(host_app: FastAPI, author
     }
     assert fake.requests[-1] == ("GET", "/api/v1/driver-packages?a=1")
 
+    # 日志复用 hostlink 路由代理，不能在调度权威进程误读成自己的日志。
+    cursor = "a" * 24 + ":42"
+    response = client.get("/api/v1/hostlink/logs", params={"source_id": "slave:机器 A", "cursor": cursor})
+    assert response.json()["query"] == {"source_id": "slave:机器 A", "cursor": cursor}
+    assert client.get("/api/v1/hostlink/log-sources").json()["path"] == "/api/v1/hostlink/log-sources"
+
     response = client.post("/api/v1/device-processes/abc/start", json={"x": 1})
     assert response.status_code == 200
     assert response.json()["path"] == "/api/v1/device-processes/abc/start"
@@ -105,6 +112,34 @@ def test_proxy_returns_503_while_host_is_offline(host_app: FastAPI, authority_ap
     edge_control.set_edge_control_service(None)
     assert TestClient(authority_app).get("/api/v1/runtime/endpoints").status_code == 503
     assert edge_proxy.edge_http("GET", "/api/v1/health") is None
+
+
+def test_proxy_logs_host_offline_once_per_episode(
+    host_app: FastAPI, authority_app: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Host 启动期间前端每秒轮询多条路由：只在开始拒绝 / 恢复各记一条，不逐请求刷屏。"""
+
+    fake = _FakeEdgeControl(host_app, connected=False)
+    edge_control.set_edge_control_service(fake)
+    client = TestClient(authority_app)
+    with caplog.at_level(logging.INFO, logger=edge_proxy.__name__):
+        for path in ("/api/v1/telemetry/states", "/api/v1/hostlink/peers", "/api/v1/runtime/endpoints"):
+            assert client.get(path).status_code == 503
+        offline = [r for r in caplog.records if "尚未接入" in r.getMessage()]
+        assert len(offline) == 1
+        assert "GET /api/v1/telemetry/states" in offline[0].getMessage()
+
+        fake.connected = True
+        assert client.get("/api/v1/telemetry/states").status_code == 200
+        assert client.get("/api/v1/hostlink/peers").status_code == 200
+        online = [r for r in caplog.records if "恢复转发" in r.getMessage()]
+        assert len(online) == 1
+
+        # 再次掉线：新一轮只再记一条
+        fake.connected = False
+        assert client.get("/api/v1/telemetry/states").status_code == 503
+        assert client.get("/api/v1/hostlink/peers").status_code == 503
+        assert len([r for r in caplog.records if "尚未接入" in r.getMessage()]) == 2
 
 
 def test_proxy_disabled_when_not_configured(host_app: FastAPI, authority_app: FastAPI) -> None:

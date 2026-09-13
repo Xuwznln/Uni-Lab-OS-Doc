@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, FastAPI, Header, Query, Request
+from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -55,14 +54,17 @@ class _BackendJSONRoute(APIRoute):
             mime = content_type.split(";", 1)[0].strip().lower()
             if mime == "application/json" or mime.endswith("+json"):
                 body = await request.body()
-                try:
-                    request._json = decode_json_bytes(body)
-                except (
-                    OverflowError,
-                    UnicodeError,
-                    ValueError,
-                ):
-                    return _error(WorkflowError("invalid_input"))
+                # 无 body 的 GET / DELETE 也常带 JSON Content-Type（httpx / axios 默认头），
+                # 与 FastAPI 自身一致：空 body 不解码，是否缺参交给路由参数校验判定。
+                if body:
+                    try:
+                        request._json = decode_json_bytes(body)
+                    except (
+                        OverflowError,
+                        UnicodeError,
+                        ValueError,
+                    ):
+                        return _error(WorkflowError("invalid_input"))
             return await route_handler(request)
 
         return backend_json_route_handler
@@ -110,10 +112,35 @@ class WorkflowUpdateRequest(WorkflowCreateRequest):
     pass
 
 
+class WorkflowFromTemplateRequest(_BackendModel):
+    """把注册表里的工作流模板（设备包 ``@workflow``）按角色绑定实例化成可运行的工作流。
+
+    ``bindings`` 是 ``{角色 id: device_id}``：设备角色缺省即其设备 id，类角色在物料
+    权威里恰有一个该类设备时自动填充，否则必须显式给出。同一模板 + 同一组绑定
+    反复调用幂等覆盖同一个工作流（脚本 / e2e 的"运行模板"入口）。
+    """
+
+    template_uuid: str
+    bindings: Dict[str, str] = Field(default_factory=dict)
+    name: Optional[str] = None
+    site_binding_mode: Literal["resolve", "preserve"] = Field(
+        default="resolve", description="resolve：程序化导入按目标物料解析 Site 标签；preserve：保留浏览器草稿，等待用户确认。"
+    )
+
+    @field_validator("bindings", mode="before")
+    @classmethod
+    def _string_map(cls, value: Any) -> Dict[str, str]:
+        mapping = normalize_json_object(value)
+        return {str(key): str(item) for key, item in mapping.items()}
+
+
 class GraphWriteRequest(_BackendModel):
     revision: int = Field(ge=1, le=_INT64_MAX, strict=True)
     nodes: List[WorkflowNodeWrite] = Field(default_factory=list)
     edges: List[WorkflowEdgeWrite] = Field(default_factory=list)
+    site_binding_mode: Literal["resolve", "preserve"] = Field(
+        default="resolve", description="SiteSlot 导入策略；浏览器保存草稿必须传 preserve，确认后参数中存放 site_uuid。"
+    )
 
     @field_validator("nodes", "edges", mode="before")
     @classmethod
@@ -147,6 +174,14 @@ class WorkflowTaskCreateRequest(_BackendModel):
     @classmethod
     def _json_object(cls, value: Any) -> Dict[str, Any]:
         return normalize_json_object(value)
+
+
+class WorkflowTaskCommandRequest(_StrictModel):
+    """step 放行一个动作；resume 切回自动。版本与幂等键防止跨页面重复放行。"""
+
+    type: Literal["step", "resume"]
+    expected_revision: int = Field(ge=0, le=_INT64_MAX, strict=True)
+    idempotency_key: str = Field(min_length=1, max_length=200)
 
 
 class ManualConfirmationDecisionRequest(_BackendModel):
@@ -222,13 +257,13 @@ def _error(error: WorkflowError) -> _BackendJSONResponse:
         "manual_confirmation_decided",
         "manual_confirmation_key_used",
     }
-    if error.code == "invalid_input":
+    if error.code in {"invalid_input", "template_binding_invalid", "site_binding_invalid"}:
         business_code = 1000
-    elif error.code in {"not_found", "workflow_not_found"}:
+    elif error.code in {"not_found", "workflow_not_found", "workflow_template_not_found"}:
         business_code = 3002
     elif error.code in conflict_codes:
         business_code = 3003
-    elif error.code == "template_catalog_unavailable":
+    elif error.code in {"template_catalog_unavailable", "workflow_template_unavailable"}:
         business_code = 5001
     else:
         business_code = 1
@@ -259,10 +294,69 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
         route_class=_BackendJSONRoute,
     )
 
+    def bind_sites(nodes: List[Any], *, mapped_paths: Optional[Dict[str, List[str]]] = None) -> List[Any]:
+        from unilabos.server.backend.composition import get_materials_service
+        from unilabos.server.services.runtime.registry import get_registry_service
+        from unilabos.server.services.runtime.workflow.site_bindings import (
+            SiteBindingError, resolve_workflow_sites,
+        )
+
+        registry = get_registry_service()
+        materials = get_materials_service()
+        try:
+            return resolve_workflow_sites(
+                nodes, registry=registry,
+                materials=materials.list_materials() if materials is not None else [],
+                mapped_paths=mapped_paths,
+            )
+        except SiteBindingError as exc:
+            raise WorkflowError("site_binding_invalid", detail=str(exc)) from exc
+
     @router.post("/workflows")
     def create_workflow(body: WorkflowCreateRequest) -> JSONResponse:
         return _success(
             service.create_workflow(**body.model_dump()),
+            status=201,
+        )
+
+    @router.post("/workflows/from-template")
+    def create_workflow_from_template(body: WorkflowFromTemplateRequest) -> JSONResponse:
+        """注册表工作流模板 → 可运行工作流（角色绑定 + 类单实例自动解析，幂等 upsert）。"""
+
+        from unilabos.registry.workflows import (
+            DeviceCatalog,
+            WorkflowTemplateBindingError,
+            materialize_workflow_template,
+            upsert_workflow,
+        )
+        from unilabos.server.backend.composition import get_materials_service
+        from unilabos.server.services.runtime.registry import get_registry_service
+
+        registry = get_registry_service()
+        if registry is None:
+            raise WorkflowError("workflow_template_unavailable")
+        template = registry.get_workflow_template(body.template_uuid)
+        if template is None:
+            raise WorkflowError("workflow_template_not_found")
+        catalog = DeviceCatalog.from_materials_service(get_materials_service())
+        try:
+            payload = materialize_workflow_template(
+                template, catalog, body.bindings, name=body.name or ""
+            )
+        except WorkflowTemplateBindingError as exc:
+            raise WorkflowError("template_binding_invalid", detail=str(exc)) from exc
+        except ValueError as exc:
+            raise WorkflowError("invalid_input") from exc
+        if body.site_binding_mode == "resolve":
+            # 先完成全部绑定再 upsert，失败时不留下半个工作流或覆盖原有参数。
+            payload["nodes"] = bind_sites(payload["nodes"])
+        workflow = upsert_workflow(service, payload)
+        return _success(
+            {
+                "workflow": workflow,
+                "template_uuid": str(template["uuid"]),
+                "bindings": payload["bindings"],
+            },
             status=201,
         )
 
@@ -305,11 +399,23 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
         workflow_uuid: str,
         body: GraphWriteRequest,
     ) -> JSONResponse:
+        nodes: List[Any] = body.nodes
+        if body.site_binding_mode == "resolve":
+            mapped_paths: Dict[str, List[str]] = {}
+            if body.edges:
+                graph = service.get_graph(workflow_uuid)
+                handles = {str(item["uuid"]): item for item in graph.get("handle_templates", [])}
+                for edge in body.edges:
+                    handle = handles.get(edge.target_handle_uuid, {})
+                    path = str(handle.get("data_key") or handle.get("handle_key") or "").split("@@@")[-1]
+                    if path and path != "ready":
+                        mapped_paths.setdefault(edge.target_node_uuid, []).append(path)
+            nodes = bind_sites(body.nodes, mapped_paths=mapped_paths)
         return _success(
             service.save_graph(
                 workflow_uuid,
                 revision=body.revision,
-                nodes=body.nodes,
+                nodes=nodes,
                 edges=body.edges,
             )
         )
@@ -368,6 +474,13 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
     @router.get("/workflow-tasks/{task_uuid}")
     def get_workflow_task(task_uuid: str) -> JSONResponse:
         return _success(service.get_workflow_task(task_uuid))
+
+    @router.post("/workflow-tasks/{task_uuid}/commands")
+    def command_workflow_task(task_uuid: str, body: WorkflowTaskCommandRequest) -> JSONResponse:
+        return _success(service.command_workflow_task(
+            task_uuid, command_type=body.type, expected_revision=body.expected_revision,
+            idempotency_key=body.idempotency_key,
+        ))
 
     @router.get("/workflow-tasks/{task_uuid}/node-runs")
     def list_workflow_node_runs(task_uuid: str) -> JSONResponse:
@@ -509,60 +622,9 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
             )
         )
 
-    @router.get("/events")
-    async def events(
-        request: Request,
-        last_event_id: Optional[str] = Header(
-            default=None,
-            alias="Last-Event-ID",
-        ),
-    ) -> Response:
-        try:
-            raw_cursor = next(
-                (
-                    value
-                    for name, value in request.scope["headers"]
-                    if name.lower() == b"last-event-id"
-                ),
-                None,
-            )
-            cursor_text = (
-                raw_cursor.decode("utf-8")
-                if raw_cursor is not None
-                else (last_event_id or "")
-            ).strip(_GO_WHITE_SPACE)
-            if not cursor_text:
-                cursor = 0
-            else:
-                cursor = _parse_non_negative_int64_decimal(cursor_text)
-        except (UnicodeError, ValueError):
-            cursor = -1
-        if cursor == -1:
-            return _error(WorkflowError("invalid_input"))
+    from unilabos.server.api.runtime.events import create_runtime_events_router
 
-        async def stream():
-            nonlocal cursor
-            yield "retry: 3000\n: connected\n\n"
-            while not await request.is_disconnected():
-                events_page = service.list_events(
-                    after_id=cursor,
-                    limit=100,
-                )["items"]
-                for event in events_page:
-                    cursor = event["id"]
-                    yield format_sse_event(event)
-                if not events_page:
-                    yield ": keepalive\n\n"
-                await asyncio.sleep(1)
-
-        return StreamingResponse(
-            stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
-        )
+    router.include_router(create_runtime_events_router(service))
 
     return router
 
@@ -593,9 +655,16 @@ def install_workflow_api(app: FastAPI, service: WorkflowService) -> None:
             request.url.path == prefix or request.url.path.startswith(f"{prefix}/")
             for prefix in workflow_prefixes
         ):
-            return _error(WorkflowError("invalid_input"))
+            # 只回字段路径与校验信息，不把完整输入（可能含驱动凭据）或堆栈回显。
+            detail = "; ".join(
+                f"{'.'.join(map(str, item['loc']))}: {item['msg']}"
+                for item in error.errors()[:5]
+            )
+            return _error(WorkflowError("invalid_input", detail=detail))
         return await request_validation_exception_handler(request, error)
 
+    # 同进程后装配 Workflow Authority 时替换无工作流读取器的公共通知路由。
+    app.router.routes[:] = [route for route in app.router.routes if getattr(route, "name", "") != "runtime_events"]
     app.include_router(create_workflow_router(service))
 
 

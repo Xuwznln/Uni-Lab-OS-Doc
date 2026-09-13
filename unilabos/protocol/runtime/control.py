@@ -13,7 +13,12 @@ from typing import Literal, Optional
 from pydantic import Field, JsonValue, model_validator
 
 from unilabos.protocol.base import JsonObject, NonEmptyStr, ServerObject
-from unilabos.server.database.tables.runtime import MaterialBinding, Transport
+from unilabos.server.database.tables.runtime import (
+    AttemptTrigger,
+    MaterialBinding,
+    Transport,
+    validate_attempt_link,
+)
 from unilabos.protocol.materials import InventoryRequirement
 from unilabos.protocol.runtime.data import (
     RUNTIME_PROTOCOL_VERSION,
@@ -93,6 +98,11 @@ class ExecuteJobContent(ServerObject):
     attempt_group_uuid: NonEmptyStr
     retry_of_job_uuid: Optional[NonEmptyStr] = None
     attempt_no: int = Field(default=1, ge=1)
+    #: attempt 为何产生；attempt > 1 且无重试链只允许 ``loop_iteration``（循环体下一轮）。
+    attempt_trigger: AttemptTrigger = "initial"
+    #: 本节点已重试的次数（错误决策报告的 ``retry_count``）；循环下一轮不算重试，所以不能从
+    #: ``attempt_no`` 推。缺省由执行面按 ``attempt_no - 1`` 兜底。
+    retry_count: Optional[int] = Field(default=None, ge=0)
     device_uuid: NonEmptyStr
     action_name: NonEmptyStr
     action_type: str = ""
@@ -117,8 +127,7 @@ class ExecuteJobContent(ServerObject):
 
     @model_validator(mode="after")
     def _validate_attempt_and_route(self) -> "ExecuteJobContent":
-        if (self.retry_of_job_uuid is None) != (self.attempt_no == 1):
-            raise ValueError("retry link and attempt number must agree")
+        validate_attempt_link(self.retry_of_job_uuid, self.attempt_no, self.attempt_trigger)
         route = (self.route_uuid, self.endpoint_uuid, self.transport)
         if any(value is None for value in route) and any(
             value is not None for value in route

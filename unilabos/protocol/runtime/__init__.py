@@ -9,7 +9,9 @@ Edge 与 runtime（微后端/Backend）之间的通信只有一个协议版本
 - ``control``：业务控制面（命令下发通知、命令正文、事件回收），
   Backend/Edge 的轻通知与 HTTP 权威文档；
 - ``workflow``：节点/边写入 DTO、JSON 值约束与 UUID 规范化；
-- ``registry``：Registry Authority 条目状态、挂起冲突与上报批次统计
+- ``loop``：循环容器节点（``type="loop"``）的参数契约、条件求值与迭代变量；
+- ``registry``：Registry Authority 条目状态、挂起冲突、上报批次统计，以及
+  按内容哈希增量上报的 digest / report 形状
   （与 edge-ui ``@openlab/protocol`` registry 域同名字段对齐）。
 """
 
@@ -49,16 +51,30 @@ from unilabos.protocol.runtime.data import (
     ExecutionJobFeedback,
     ExecutionJobTransition,
 )
+from unilabos.protocol.runtime.loop import (
+    LOOP_ITERATION_TRIGGER,
+    LOOP_NODE_TYPE,
+    LoopCondition,
+    LoopSpec,
+    parse_loop_spec,
+    substitute_loop_placeholders,
+)
 from unilabos.protocol.runtime.registry import (
+    REGISTRY_PROTOCOL_VERSION,
     RegistryAffectedNode,
     RegistryConflict,
     RegistryConflictReason,
+    RegistryDigest,
     RegistryEntryStatus,
     RegistryEntrySummary,
     RegistryPendingImpact,
     RegistryPendingItem,
+    RegistryReport,
     RegistryReportCounts,
+    RegistryReportEntry,
+    RegistryReportResult,
     RegistryReportSummary,
+    RegistryTemplateIdentity,
     RegistryUnusableItem,
 )
 from unilabos.protocol.runtime.workflow import (
@@ -126,15 +142,28 @@ __all__ = [
     "normalize_json_object",
     "validate_json_value",
     "validate_uuid",
+    # loop
+    "LOOP_ITERATION_TRIGGER",
+    "LOOP_NODE_TYPE",
+    "LoopCondition",
+    "LoopSpec",
+    "parse_loop_spec",
+    "substitute_loop_placeholders",
     # registry
+    "REGISTRY_PROTOCOL_VERSION",
     "RegistryAffectedNode",
     "RegistryConflict",
     "RegistryConflictReason",
+    "RegistryDigest",
     "RegistryEntryStatus",
     "RegistryEntrySummary",
     "RegistryPendingImpact",
     "RegistryPendingItem",
+    "RegistryReport",
     "RegistryReportCounts",
+    "RegistryReportEntry",
+    "RegistryReportResult",
     "RegistryReportSummary",
+    "RegistryTemplateIdentity",
     "RegistryUnusableItem",
 ]

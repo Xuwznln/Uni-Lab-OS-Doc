@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Literal, Optional
 
@@ -11,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field
 
 from unilabos.server.database.tables.base import NonEmptyStr, ServerObject
+from unilabos.server.lifecycle import shutting_down, sleep_unless_shutting_down
 from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     InventoryLotInbound,
@@ -19,6 +19,7 @@ from unilabos.protocol.materials import (
     InventoryTaskReservationCreate,
     MaterialDataWrite,
     MaterialDelete,
+    MaterialDelta,
     MaterialInstantiate,
     MaterialMove,
     MaterialPatch,
@@ -115,18 +116,24 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
 
     @router.get("/templates")
     async def list_templates(
+        name: Optional[str] = Query(
+            default=None,
+            description="按模板 name 精确筛选：存在性检查 / 按名取 uuid 只回 0 或 1 条。",
+        ),
         include_definition: bool = Query(
-            default=True,
+            default=False,
             description=(
-                "false 时省略 registry 全量 definition（全注册表可达十几 MB），"
-                "只返回名称 / 类型 / 分类 / 位点 / 版本等目录字段，供前端选择器使用。"
+                "默认只返回名称 / uuid / 类型 / 分类 / 位点 / 版本 / definition_hash 等"
+                "目录字段（前端选择器、存在性检查、变更判定够用）；true 时附带 registry "
+                "全量 definition（全注册表可达十几 MB），只在确实要读 definition 正文时开。"
             ),
         ),
     ):
-        templates = _call(service.list_templates)
-        if include_definition:
-            return templates
-        return [item.model_copy(update={"definition": {}}) for item in templates]
+        # 筛选与目录模式都在 SQL 层完成：前端每隔几秒轮询一次，不能每次都反序列化
+        # 并校验十几 MB 的 definition 再丢掉
+        return _call(
+            service.list_templates, name=name, include_definition=include_definition
+        )
 
     @router.get("/templates/{template_uuid}")
     async def get_template(template_uuid: str):
@@ -441,6 +448,15 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
             _payload(mutation, MaterialSnapshot),
         )
 
+    @router.post("/snapshots/delta")
+    async def apply_delta(mutation: InventoryMutation):
+        """设备增量上报：只带变了的节点 / 段，权威按段合并（乐观锁在节点内）。"""
+        return _call(
+            service.apply_delta,
+            mutation,
+            _payload(mutation, MaterialDelta),
+        )
+
     @router.post("/notify-device", response_model=ResourceTreeNotifyResult)
     def notify_device(value: ResourceTreeNotify):
         """把权威已完成的物料变更分发到目标设备（本进程直调 / 跨机 HostLink）。
@@ -491,6 +507,11 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
             except ValueError:
                 raise HTTPException(status_code=422, detail="invalid Last-Event-ID")
 
+        if not replay:
+            # 必须在发出响应头/onopen 之前固定基线。否则浏览器已校准 HTTP 快照后，
+            # 首连再追平账本会吞掉这期间的创建/移动；用 MAX 查询也避免全量扫描历史。
+            cursor = service.latest_ledger_sequence()
+
         def _format_event(row) -> str:
             data = json.dumps(
                 {
@@ -507,21 +528,16 @@ def create_materials_router(service: MaterialsService) -> APIRouter:
         async def stream():
             nonlocal cursor
             yield "retry: 3000\n: connected\n\n"
-            if not replay:
-                # 首连不重放历史：把游标推进到账本尾部
-                while True:
-                    rows = service.changes(after_sequence=cursor, limit=1000)
-                    if not rows:
-                        break
-                    cursor = rows[-1].sequence
-            while not await request.is_disconnected():
+            # 停机开始就主动结束：浏览器按 retry 自动重连，uvicorn 不必超时取消
+            while not shutting_down() and not await request.is_disconnected():
                 rows = service.changes(after_sequence=cursor, limit=500)
                 for row in rows:
                     cursor = row.sequence
                     yield _format_event(row)
                 if not rows:
                     yield ": keepalive\n\n"
-                await asyncio.sleep(1)
+                if not await sleep_unless_shutting_down(1):
+                    return
 
         return StreamingResponse(
             stream(),

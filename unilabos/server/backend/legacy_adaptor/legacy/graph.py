@@ -337,7 +337,9 @@ def legacy_graph_markers(payload: Mapping[str, Any]) -> Dict[str, int]:
             hit("class 无 template_name")
         if "position" in node:
             hit("根级 position")
-        if "children" in node:
+        # children 是派生字段，读取时本就丢弃；空列表不携带任何旧格式信息，
+        # 只有真的用它表达父子关系才算旧格式（否则受管进程图每次启动都告警）。
+        if node.get("children"):
             hit("children 列表")
         pose = node.get("pose")
         if isinstance(pose, Mapping) and any(key in pose for key in _LEGACY_POSE_VECTOR_ALIASES):

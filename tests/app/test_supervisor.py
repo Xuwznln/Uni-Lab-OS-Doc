@@ -265,6 +265,41 @@ def test_host_child_supervisor_stop_requests_graceful_exit(monkeypatch: pytest.M
     assert child.alive() is False
 
 
+def test_request_stop_signals_child_once_and_stop_only_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """权威收到停机信号先非阻塞地请 Host 退出；随后的 stop() 不再补发第二个 Ctrl+Break。"""
+
+    fake = _FakeChild(0)
+    fake._code = None
+    started = threading.Event()
+
+    def fake_popen(command, env=None, creationflags=0, **_kwargs):
+        started.set()
+        return fake
+
+    exit_requested = threading.Event()
+
+    def graceful(child):
+        exit_requested.set()
+        child.send_signal("CTRL_BREAK")
+
+    monkeypatch.setattr(supervisor.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(supervisor._KillOnCloseJob, "create", classmethod(lambda cls: None))
+    monkeypatch.setattr(supervisor, "_POLL_S", 0.001)
+    monkeypatch.setattr(supervisor, "_request_graceful_exit", graceful)
+
+    child = supervisor.HostChildSupervisor(["python"])
+    child.start()
+    assert started.wait(timeout=2)
+
+    child.request_stop()
+    assert exit_requested.is_set()
+    assert fake.signals == ["CTRL_BREAK"]
+    child.request_stop()  # 幂等
+    child.stop(timeout=1)
+    assert fake.signals == ["CTRL_BREAK"]  # 没有第二个信号打断子进程的清理
+    assert child.alive() is False
+
+
 def test_host_child_serves_backend_http_in_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """Host 子进程不监听端口：WS 收到 backend_http 后对自己的 ASGI 应用执行，再 POST 结果回权威。"""
 

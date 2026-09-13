@@ -7,12 +7,13 @@ import threading
 import webbrowser
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import ClientDisconnect
 from starlette.responses import Response
 
 from unilabos.config.config import HTTPConfig
+from unilabos.server import lifecycle
 from unilabos.utils.fastapi.log_adapter import setup_fastapi_logging
 from unilabos.utils.log import info, error
 from unilabos.utils.tracing import install_http_tracing
@@ -97,6 +98,17 @@ async def _on_client_disconnect(_request: Request, _exc: ClientDisconnect) -> Re
     """
 
     return Response(status_code=499)
+
+
+@app.middleware("http")
+async def reset_maintenance_gate(request: Request, call_next):
+    from unilabos.server.backend.reset import get_reset_controller
+
+    controller = get_reset_controller()
+    if controller is not None and controller.pending and request.method != "OPTIONS":
+        if request.url.path not in ("/api/v1/reset", "/api/v1/health"):
+            return JSONResponse({"detail": "正在全量重置，停止接受业务请求"}, status_code=503)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -318,10 +330,12 @@ def setup_server() -> FastAPI:
             )
             from unilabos.server.api.driver_packages import create_driver_packages_router
             from unilabos.server.api.host_relay import create_host_relay_router
+            from unilabos.server.api.runtime.logs import create_runtime_logs_router
 
             app.include_router(create_driver_packages_router())
             app.include_router(create_driver_package_graphs_router())
             app.include_router(create_device_processes_router())
+            app.include_router(create_runtime_logs_router())
             # 调度权威（materials 权威）把物料投影下行经这里送到设备
             app.include_router(create_host_relay_router())
             driver_packages_mounted = True
@@ -407,6 +421,14 @@ def setup_server() -> FastAPI:
         except Exception as exc:  # noqa: BLE001 - 保留基础管理 API
             error(f"[Microbackend] 挂载 Materials Provider 失败: {exc}")
 
+    if not any(getattr(route, "path", "") == "/api/v1/events" for route in app.routes):
+        from unilabos.server.api.runtime.events import create_runtime_events_router
+
+        # 仅执行面的 Host 也使用同一通知通道，但不伪造 Workflow Authority。
+        app.include_router(create_runtime_events_router(), prefix="/api/v1")
+    from unilabos.server.mcp import install_mcp
+
+    install_mcp(app)
     _routes_ready.set()
     return app
 
@@ -415,6 +437,8 @@ _uvicorn_server = None
 # 不监听端口的 Host 子进程：主线程在这里等停机请求，管理 API 由权威经控制 WS 下发执行
 _control_plane_stop = threading.Event()
 _serving_over_control_plane = False
+# 设备 runtime 线程致命失败：服务循环不再进入 / 立即返回（与停机请求不同，服务尚未开始也生效）
+_abort_serving = threading.Event()
 # setup_server() 挂完路由才置位。Host 子进程里控制 WS 先于主线程的 setup_server 连上权威，
 # 极快的动作会在路由挂好之前就跑完并上报；权威随即经 backend_http 来拉结果 payload，
 # 若此时对着还没挂 /history 的 app 执行就会 404。代理执行前先等这个事件。
@@ -439,12 +463,27 @@ def request_server_shutdown() -> bool:
     """
     server = _uvicorn_server
     if server is not None:
+        lifecycle.begin_shutdown()
         server.should_exit = True
         return True
     if _serving_over_control_plane:
+        lifecycle.begin_shutdown()
         _control_plane_stop.set()
         return True
     return False
+
+
+def abort_serving() -> None:
+    """设备 runtime 线程致命失败时由该线程调用：让主线程的服务循环尽快返回。
+
+    与 :func:`request_server_shutdown` 的区别是不依赖服务是否已经开始——backend 线程
+    往往在主线程进入 ``start_server`` / ``serve_over_control_plane`` 之前就失败了，
+    只置 should_exit 会让主线程随后进入一个永远不会被唤醒的等待。
+    """
+
+    _abort_serving.set()
+    lifecycle.begin_shutdown()
+    request_server_shutdown()
 
 
 def serve_over_control_plane() -> None:
@@ -457,10 +496,12 @@ def serve_over_control_plane() -> None:
     global _serving_over_control_plane
     setup_server()
     _control_plane_stop.clear()
+    if not _abort_serving.is_set():
+        lifecycle.reset_shutdown_state()
     _serving_over_control_plane = True
     try:
         # 分段等待：Windows 上无限期 wait 收不到信号处理器（Ctrl+Break / SIGTERM）
-        while not _control_plane_stop.wait(0.5):
+        while not _abort_serving.is_set() and not _control_plane_stop.wait(0.5):
             pass
     finally:
         _serving_over_control_plane = False
@@ -533,7 +574,18 @@ def start_server(host: str = "0.0.0.0", port: int = 8002, open_browser: bool = T
     """
     from uvicorn import Config, Server
 
+    if _abort_serving.is_set():
+        return
     ensure_port_available(host, port)
+    lifecycle.reset_shutdown_state()
+
+    class _SignalAwareServer(Server):
+        """Ctrl+C / SIGTERM 由 uvicorn 自己的信号处理器接住：在这里同步打停机信号，
+        让 SSE 长连接在 uvicorn 开始等待之前就自行结束。"""
+
+        def handle_exit(self, sig, frame) -> None:  # type: ignore[override]
+            lifecycle.begin_shutdown()
+            super().handle_exit(sig, frame)
 
     # 设置服务器
     setup_server()
@@ -553,9 +605,8 @@ def start_server(host: str = "0.0.0.0", port: int = 8002, open_browser: bool = T
     # 启动服务器
     info(f"[Microbackend] 启动 FastAPI: {host}:{port}")
 
-    # 浏览器长期挂着 SSE（/events、/materials/events），uvicorn 默认优雅停机会一直
-    # "Waiting for connections to close"，安静点重启就永远走不到拉起新进程那一步。
-    # 给个上限：超过后强制关闭剩余连接（前端 EventSource 会自动重连）。
+    # SSE 长连接会在停机信号后一个心跳周期内自行结束（见 server.lifecycle）；这里的
+    # 上限只是兜底：万一还有别的在途请求拖着，超过后强制关闭，安静点重启才走得下去。
     config = Config(
         app=app,
         host=host,
@@ -563,10 +614,13 @@ def start_server(host: str = "0.0.0.0", port: int = 8002, open_browser: bool = T
         log_config=log_config,
         timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_TIMEOUT_S,
     )
-    server = Server(config)
+    server = _SignalAwareServer(config)
 
     global _uvicorn_server
     _uvicorn_server = server
+    # backend 线程可能恰好在上面几行之间失败：should_exit 让 uvicorn 起来后立刻退出
+    if _abort_serving.is_set():
+        server.should_exit = True
     try:
         server.run()
     except SystemExit:

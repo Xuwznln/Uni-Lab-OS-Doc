@@ -217,6 +217,30 @@ class ColoredFormatter(logging.Formatter):
         return formatted_exc
 
 
+def _console_colors_enabled() -> bool:
+    """遵循 https://no-color.org：非空 NO_COLOR 关闭控制台着色（受管子进程由拉起方设置）。"""
+
+    return not os.environ.get("NO_COLOR")
+
+
+def _create_log_file(logs_dir: str, stem: str) -> str:
+    """独占创建日志文件并返回路径。
+
+    文件名只到秒：同一秒拉起的多个进程（Host 同时启动几个受管 Slave）会算出同一个
+    名字，各自 append 就混成一份日志。首选名已存在时改用 ``<stem>-<pid>.log``。
+    """
+
+    candidates = [f"{stem}.log", f"{stem}-{os.getpid()}.log"]
+    for filename in candidates:
+        path = os.path.join(logs_dir, filename)
+        try:
+            os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            continue
+        return path
+    return os.path.join(logs_dir, candidates[-1])
+
+
 def _to_numeric_level(loglevel, default=logging.DEBUG) -> int:
     """将日志级别(字符串/常量)统一转换为数字级别。
 
@@ -238,6 +262,14 @@ def _to_numeric_level(loglevel, default=logging.DEBUG) -> int:
 
 
 # 配置日志处理器
+_log_file_path: str | None = None
+
+
+def get_log_file_path() -> str | None:
+    """仅暴露本进程 configure_logger 选择的主日志，不包含通信日志或任意文件。"""
+    return _log_file_path
+
+
 def configure_logger(loglevel=None, working_dir=None):
     """配置日志记录器
 
@@ -245,6 +277,8 @@ def configure_logger(loglevel=None, working_dir=None):
         loglevel: 日志级别，可以是字符串（'TRACE', 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'）
                  或logging模块的常量（如logging.DEBUG）或TRACE_LEVEL
     """
+    global _log_file_path
+    _log_file_path = None
     # 获取根日志记录器
     root_logger = logging.getLogger()
     root_logger.setLevel(TRACE_LEVEL)
@@ -260,7 +294,7 @@ def configure_logger(loglevel=None, working_dir=None):
     console_handler.setLevel(numeric_level)  # 使用与根记录器相同的级别
 
     # 使用自定义的颜色格式化器
-    color_formatter = ColoredFormatter()
+    color_formatter = ColoredFormatter(use_colors=_console_colors_enabled())
     console_handler.setFormatter(color_formatter)
 
     # 添加处理器到根日志记录器
@@ -273,8 +307,7 @@ def configure_logger(loglevel=None, working_dir=None):
         os.makedirs(logs_dir, exist_ok=True)
 
         # 生成日志文件名：日期 时间.log
-        log_filename = datetime.now().strftime("%Y-%m-%d %H-%M-%S") + ".log"
-        log_filepath = os.path.join(logs_dir, log_filename)
+        log_filepath = _create_log_file(logs_dir, datetime.now().strftime("%Y-%m-%d %H-%M-%S"))
 
         # 创建文件处理器
         file_handler = logging.FileHandler(log_filepath, encoding="utf-8")
@@ -285,6 +318,10 @@ def configure_logger(loglevel=None, working_dir=None):
         file_handler.setFormatter(file_formatter)
 
         root_logger.addHandler(file_handler)
+        _log_file_path = log_filepath
+        from unilabos.utils.log_notices import LogAppendHandler
+
+        root_logger.addHandler(LogAppendHandler())
 
     logging.getLogger("asyncio").setLevel(logging.INFO)
     logging.getLogger("urllib3").setLevel(logging.INFO)
@@ -355,7 +392,9 @@ def configure_comm_logger(working_dir=None, loglevel=None):
     # 控制台 handler：保留实时可见性，带线程名便于现场观察
     console_handler = logging.StreamHandler()
     console_handler.setLevel(_to_numeric_level(loglevel))
-    console_handler.setFormatter(ColoredFormatter(use_colors=True, show_thread=True))
+    console_handler.setFormatter(
+        ColoredFormatter(use_colors=_console_colors_enabled(), show_thread=True)
+    )
     comm_logger.addHandler(console_handler)
 
     log_filepath = None
@@ -363,8 +402,9 @@ def configure_comm_logger(working_dir=None, loglevel=None):
         logs_dir = os.path.join(working_dir, "logs")
         os.makedirs(logs_dir, exist_ok=True)
 
-        log_filename = "ws_comm_" + datetime.now().strftime("%Y-%m-%d %H-%M-%S") + ".log"
-        log_filepath = os.path.join(logs_dir, log_filename)
+        log_filepath = _create_log_file(
+            logs_dir, "ws_comm_" + datetime.now().strftime("%Y-%m-%d %H-%M-%S")
+        )
 
         file_handler = logging.FileHandler(log_filepath, encoding="utf-8")
         file_handler.setLevel(TRACE_LEVEL)  # 全量保留到本地

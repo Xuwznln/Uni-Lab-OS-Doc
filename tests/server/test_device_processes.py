@@ -129,8 +129,10 @@ def test_start_stop_and_crash_restart(service: dpx.DeviceProcessService) -> None
         service.start(process_id)  # 已在运行
 
     time.sleep(0.1)
-    logs = service.logs(process_id)
-    assert "[INFO] HostLink connected" in logs["lines"]  # ANSI 着色已剥掉
+    from unilabos.server.services.runtime.logs import RuntimeLogService
+
+    logs = RuntimeLogService(service, None, machine_name="host").read(f"managed:{process_id}")
+    assert "[INFO] HostLink connected" in [line.text for line in logs.lines]  # ANSI 着色已剥掉
 
     # 模拟崩溃：看护线程应在退避后拉起第二个进程
     FakePopen.instances[0].exit_code = 1
@@ -193,7 +195,7 @@ def test_router_roundtrip(service: dpx.DeviceProcessService) -> None:
 
     assert client.post(f"/api/v1/device-processes/{process_id}/start").json()["status"] == "running"
     assert client.post(f"/api/v1/device-processes/{process_id}/start").status_code == 409
-    assert client.get(f"/api/v1/device-processes/{process_id}/logs?tail=10").status_code == 200
+    assert client.get(f"/api/v1/device-processes/{process_id}/logs?tail=10").status_code == 404
     assert client.post(f"/api/v1/device-processes/{process_id}/stop").json()["status"] == "stopped"
     assert client.delete(f"/api/v1/device-processes/{process_id}").status_code == 204
     assert client.get(f"/api/v1/device-processes/{process_id}").status_code == 404

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Optional
 
 from unilabos.server.backend.scheduler.dag.executor import DagExecutor, DagWalk, OnTerminalFn
@@ -31,6 +31,11 @@ StartNodeFn = Callable[[DagNode], None]
 # 走图终止（失败/取消）后清理仍在设备侧运行的本 task 任务（ws 侧提供，
 # 复用 DeviceActionManager.cancel_jobs_by_task_id）。
 CancelRemainingFn = Callable[[], None]
+# 跑一轮循环体：入参是本轮可视作已完成的节点（恢复用），返回循环体各节点终态。
+RunBodyFn = Callable[[Iterable[str]], Awaitable[dict[str, NodeState]]]
+# 循环节点的驱动（调度器提供）：按 LoopSpec 决定跑几轮、每轮前重臂循环体 attempt、
+# 求值 while 条件，最终给出循环节点自己的终态。
+RunLoopFn = Callable[[DagNode, RunBodyFn], Awaitable[NodeState]]
 
 
 def _status_to_state(status: str) -> NodeState:
@@ -48,18 +53,27 @@ class TaskDagRunner:
         *,
         on_node_terminal: Optional[OnTerminalFn] = None,
         on_cancel_remaining: Optional[CancelRemainingFn] = None,
+        on_run_loop: Optional[RunLoopFn] = None,
         loop: Optional[asyncio.AbstractEventLoop] = None,
         walk: Optional[DagWalk] = None,
     ) -> None:
         self.dag = dag
         self._on_start_node = on_start_node
+        self._on_node_terminal = on_node_terminal
         self._on_cancel_remaining = on_cancel_remaining
+        self._on_run_loop = on_run_loop
         self._loop = loop
         self._pending: dict[str, asyncio.Future] = {}  # node_id(=job_id) -> future
         self._cancelled = False
         self._executor = DagExecutor(
             dag, self._submit, on_node_terminal=on_node_terminal, walk=walk
         )
+        # 正在跑的循环体执行器（嵌套层级各一个），取消时一并停掉
+        self._nested: set[DagExecutor] = set()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
 
     async def run(self) -> dict[str, NodeState]:
         """走完整张 DAG，返回每节点终态。失败/取消后清理设备侧残余任务。"""
@@ -81,7 +95,13 @@ class TaskDagRunner:
         return result
 
     async def _submit(self, node: DagNode) -> NodeState:
-        """DagExecutor 注入点：登记 future -> 触发入队/起跑 -> 等终态。"""
+        """DagExecutor 注入点：登记 future -> 触发入队/起跑 -> 等终态。
+
+        循环容器不下发设备：交给调度器的循环驱动，循环体每轮作为嵌套 DAG 用同一个
+        ``_submit`` 跑（循环体里的设备节点、嵌套循环都走这里）。
+        """
+        if node.is_loop:
+            return await self._run_loop_node(node)
         loop = self._loop or asyncio.get_running_loop()
         fut: asyncio.Future = loop.create_future()
         # 先登记再触发副作用：即便终态瞬间回流（跨线程 call_soon_threadsafe），
@@ -97,6 +117,37 @@ class TaskDagRunner:
             self._pending.pop(node.node_id, None)
             return NodeState.FAILED
         return await fut
+
+    async def _run_loop_node(self, node: DagNode) -> NodeState:
+        if self._cancelled:
+            return NodeState.CANCELLED
+        if self._on_run_loop is None or node.body is None:
+            logger.error("TaskDagRunner 没有循环驱动，循环节点 %s 置 FAILED", node.node_id)
+            return NodeState.FAILED
+        body = node.body
+
+        async def run_body(completed: Iterable[str]) -> dict[str, NodeState]:
+            if self._cancelled:
+                return {node_id: NodeState.CANCELLED for node_id in body.nodes}
+            executor = DagExecutor(
+                body,
+                self._submit,
+                on_node_terminal=self._on_node_terminal,
+                walk=DagWalk(body, completed=completed),
+            )
+            self._nested.add(executor)
+            try:
+                return await executor.run()
+            finally:
+                self._nested.discard(executor)
+
+        try:
+            return await self._on_run_loop(node, run_body)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 —— 循环驱动异常即该循环失败，不拖垮整张图的收敛
+            logger.exception("循环节点 %s 执行异常，置 FAILED", node.node_id)
+            return NodeState.FAILED
 
     def notify_terminal(self, job_id: str, status: str | NodeState) -> None:
         """由 publish_job_status 终态时**跨线程**回调，解析对应节点 future。"""
@@ -115,6 +166,8 @@ class TaskDagRunner:
         """
         self._cancelled = True
         self._executor.cancel()
+        for nested in list(self._nested):
+            nested.cancel()
         loop = self._loop
         if loop is None:
             self._resolve_all_pending(NodeState.CANCELLED)

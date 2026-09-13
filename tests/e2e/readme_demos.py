@@ -1,6 +1,6 @@
-"""README 示例设备包（六个 demo 仓库）的引用清单、源码解析与运行时驻留工具。
+"""README 示例设备包（七个 demo 仓库）的引用清单、源码解析与运行时驻留工具。
 
-unilabos 侧在这里固定引用六个 demo 仓库（URL + 已验证提交；同一份清单也收录在
+unilabos 侧在这里固定引用七个 demo 仓库（URL + 已验证提交；同一份清单也收录在
 awesome-lab-devices 索引里供 OpenLab 一键安装），e2e 用例按以下
 顺序取得仓库源码：
 
@@ -186,6 +186,32 @@ DEMOS: tuple[DemoSpec, ...] = (
                 error_decision={"action": "retry", "reason": "readme demo e2e 重试瞬时故障"},
             ),
         ),
+    ),
+    DemoSpec(
+        repo="LabDeviceComplexWorkflowDemo",
+        url="https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo",
+        # TODO: 仓库推送后填首个提交 SHA；本地联调走同级目录 ../LabDeviceComplexWorkflowDemo。
+        ref="0000000000000000000000000000000000000000",
+        package="complex_workflow_demo",
+        host_graph="graph/complex_workflow_demo.json",
+        # 循环容器：循环体节点每轮一个 attempt（trigger=loop_iteration），循环节点自身 1 个 attempt；
+        # 嵌套时内层循环节点随外层每轮重臂。设备状态确定性演化，轮数可精确断言。
+        workflows=(
+            # 复位 / 加样 ×3(loop) / 加样 ×3 轮 / 汇总
+            WorkflowExpectation(name="循环演示：定次加样", node_count=4, attempt_counts=(1, 1, 3, 1)),
+            # 空循环体按设备状态轮询：轮数取决于升温耗时，不断言；循环节点仍是 1 个 attempt
+            WorkflowExpectation(name="循环演示：等待升温", node_count=5),
+            # 复位 / 循环 / 提纯 ×2 / 取样检测 ×2 / 汇总
+            WorkflowExpectation(name="循环演示：提纯达标", node_count=5, attempt_counts=(1, 1, 2, 2, 1)),
+            # 复位 / 板 ×2 / 切换到板 ×2 / 板孔 ×3（内层 loop，外层每轮一次）×2 / 孔位加样 ×6 / 汇总
+            WorkflowExpectation(name="循环演示：嵌套板孔", node_count=6, attempt_counts=(1, 1, 2, 2, 6, 1)),
+            WorkflowExpectation(
+                name="复杂工作流演示",
+                node_count=10,
+                attempt_counts=(1, 1, 2, 1, 1, 1, 1, 2, 2, 1),
+            ),
+        ),
+        timeout=90.0,
     ),
     DemoSpec(
         repo="LabDeviceMaterialsDemo",

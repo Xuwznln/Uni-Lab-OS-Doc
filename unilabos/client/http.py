@@ -56,8 +56,12 @@ class HTTPClient:
             timeout=config.timeout,
         )
 
-    def _get_headers(self) -> Dict[str, str]:
-        headers = {"Content-Type": "application/json"}
+    def _get_headers(self, *, has_body: bool) -> Dict[str, str]:
+        # 只有带 body 的请求才声明 Content-Type：无 body 的 GET/DELETE 带上它会让
+        # 严格的服务端（如 Workflow 路由）去解析空 body 并判为格式错误
+        headers: Dict[str, str] = {}
+        if has_body:
+            headers["Content-Type"] = "application/json"
         if self.get_auth_secret:
             secret = self.get_auth_secret()
             if secret:
@@ -74,7 +78,10 @@ class HTTPClient:
             EnvelopeError: 业务错误（code != 0）
             httpx.HTTPError: HTTP 错误
         """
-        headers = self._get_headers()
+        has_body = any(
+            kwargs.get(key) is not None for key in ("json", "content", "data", "files")
+        )
+        headers = self._get_headers(has_body=has_body)
         kwargs.setdefault("headers", {}).update(headers)
 
         retries = 0

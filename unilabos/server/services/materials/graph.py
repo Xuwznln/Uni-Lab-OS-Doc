@@ -376,6 +376,110 @@ def reconcile_graph_payload(
     return normalized, summary
 
 
+def _link_key(link: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(link.get("source") or link.get("source_uuid") or ""),
+        str(link.get("target") or link.get("target_uuid") or ""),
+        str(link.get("sourceHandle") or ""),
+        str(link.get("targetHandle") or ""),
+    )
+
+
+def adopt_graph_payload(
+    payload: Mapping[str, Any], previous_payload: Mapping[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """「权威优先」合并：既有节点/连线一律沿用权威版本，只把权威没有的补进来。
+
+    与 ``materials.ensure`` 对启动物料的处理一致——启动文件是创建入口，不是运行
+    真相：文件对既有节点的修改（pose / config / 删除）不生效；文件里带的 uuid 与
+    权威同 id 节点不一致，或与权威另一节点撞 uuid，都是身份冲突，拒绝。
+
+    返回 (合并后的 payload, {"adopted": [...], "kept": [...], "added": [...]})：
+    ``adopted`` 文件里也有的权威节点、``kept`` 只在权威里的节点、``added`` 只在
+    文件里的节点（随后由 reconcile 发号 / 实例化模板 Site）。
+    """
+
+    previous_nodes = [
+        node for node in (previous_payload.get("nodes") or []) if isinstance(node, Mapping)
+    ]
+    previous_by_id: dict[str, list[Mapping[str, Any]]] = {}
+    previous_by_uuid: dict[str, Mapping[str, Any]] = {}
+    for node in previous_nodes:
+        node_id = str(node.get("id") or node.get("name") or "").strip()
+        node_uuid = str(node.get("uuid") or "").strip()
+        if node_id:
+            previous_by_id.setdefault(node_id, []).append(node)
+        if node_uuid:
+            previous_by_uuid[node_uuid] = node
+
+    local_nodes = [node for node in (payload.get("nodes") or []) if isinstance(node, Mapping)]
+    adopted: list[str] = []
+    added_nodes: list[dict[str, Any]] = []
+    matched_previous: set[str] = set()
+    for node in local_nodes:
+        node_id = str(node.get("id") or node.get("name") or "").strip()
+        if not node_id:
+            raise GraphError("invalid_payload", "graph 节点缺少 id")
+        node_uuid = str(node.get("uuid") or "").strip()
+        candidates = previous_by_id.get(node_id, [])
+        match: Optional[Mapping[str, Any]] = None
+        if node_uuid and node_uuid in previous_by_uuid:
+            match = previous_by_uuid[node_uuid]
+            if str(match.get("id") or match.get("name") or "").strip() != node_id:
+                raise GraphError(
+                    "identity_conflict",
+                    f"节点 {node_id} 的 uuid ({node_uuid}) 已属于权威节点 "
+                    f"{match.get('id')}；启动文件与权威身份不一致",
+                )
+        elif len(candidates) == 1:
+            match = candidates[0]
+            previous_uuid = str(match.get("uuid") or "").strip()
+            if node_uuid and previous_uuid and node_uuid != previous_uuid:
+                raise GraphError(
+                    "identity_conflict",
+                    f"节点 {node_id} 的 uuid ({node_uuid}) 与权威已登记 uuid "
+                    f"({previous_uuid}) 不一致；如需重建身份请先删除图或移除 uuid 字段",
+                )
+        elif len(candidates) > 1:
+            raise GraphError(
+                "invalid_payload",
+                f"权威中 id={node_id} 有多个节点，启动文件必须带 uuid 才能对应",
+            )
+        if match is not None:
+            adopted.append(node_id)
+            matched_previous.add(str(match.get("uuid") or ""))
+        else:
+            added_nodes.append(copy.deepcopy(dict(node)))
+
+    kept = [
+        str(node.get("id") or node.get("name") or "")
+        for node in previous_nodes
+        if str(node.get("uuid") or "") not in matched_previous
+    ]
+
+    previous_links = [
+        link for link in (previous_payload.get("links") or []) if isinstance(link, Mapping)
+    ]
+    known_links = {_link_key(link) for link in previous_links}
+    added_links = [
+        copy.deepcopy(dict(link))
+        for link in (payload.get("links") or [])
+        if isinstance(link, Mapping) and _link_key(link) not in known_links
+    ]
+
+    merged: dict[str, Any] = copy.deepcopy(dict(previous_payload))
+    for key, value in payload.items():
+        if key not in merged and key not in ("nodes", "links"):
+            merged[key] = copy.deepcopy(value)
+    merged["nodes"] = [copy.deepcopy(dict(node)) for node in previous_nodes] + added_nodes
+    merged["links"] = [copy.deepcopy(dict(link)) for link in previous_links] + added_links
+    return merged, {
+        "adopted": adopted,
+        "kept": kept,
+        "added": [str(node.get("id") or node.get("name") or "") for node in added_nodes],
+    }
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
@@ -478,15 +582,26 @@ class GraphService(MaterialsRepository):
         description: Optional[str] = None,
         meta_data: Optional[Mapping[str, Any]] = None,
         device_site_templates: Optional[Mapping[str, Sequence[Any]]] = None,
+        on_existing: str = "replace",
     ) -> dict[str, Any]:
         """创建/更新图快照（唯一入口）：先做节点身份对账再落库。
 
         草稿图（节点/Site 无 uuid）由本方法发号；``device_site_templates``
         提供时设备节点的模板 Site 也在此实例化。返回值携带 ``summary``
-        （created/updated/removed/unchanged 节点 id 与 uuid_assigned 计数）。
-        与既有快照内容一致时不递增 revision。
+        （created/updated/removed/unchanged 节点 id 与 uuid_assigned 计数，以及
+        ``existing`` 表示落库前权威是否已有该图）。与既有快照内容一致时不递增 revision。
+
+        ``on_existing`` 决定权威已有同名/同 uuid 图时怎么对待传入 payload：
+
+        - ``"replace"``（前端 / CLI 上传即编辑）：以传入 payload 为准，既有节点按 id
+          复用身份，文件里删掉的节点随之移除；
+        - ``"adopt"``（``unilab -g <文件>`` 启动）：以权威为准，只把权威没有的节点 /
+          连线补进来，既有节点沿用权威版本；带 uuid 且与权威不一致即身份冲突拒绝。
+          与 ``materials.ensure`` 对启动物料的语义一致。
         """
 
+        if on_existing not in ("replace", "adopt"):
+            raise GraphError("invalid_input", f"on_existing 取值非法: {on_existing!r}")
         name = (name or "").strip()
         if not name:
             raise GraphError("invalid_input", "graph 名称不能为空")
@@ -501,12 +616,18 @@ class GraphService(MaterialsRepository):
                 existing = self.find_graph_by_name(name)
 
             previous_payload = existing.payload if existing is not None and existing.deleted_at is None else None
+            adoption: dict[str, Any] = {}
+            incoming: Mapping[str, Any] = validated
+            if on_existing == "adopt" and previous_payload is not None:
+                incoming, adoption = adopt_graph_payload(validated, previous_payload)
             normalized, summary = reconcile_graph_payload(
-                validated,
+                incoming,
                 previous_payload,
                 existing.uuid if existing is not None else graph_uuid,
                 device_site_templates=device_site_templates,
             )
+            summary["existing"] = previous_payload is not None
+            summary.update(adoption)
 
             now = _now()
             if existing is not None:
@@ -599,8 +720,16 @@ class GraphService(MaterialsRepository):
             )
             tree_set = material_tree_to_resource_tree(tree_read)
             for node in tree_set.all_nodes:
-                nodes.append(node.res_content.model_dump(by_alias=True))
-                uuid_to_id[node.res_content.uuid] = node.res_content.id
+                content = node.res_content
+                payload = content.model_dump(by_alias=True)
+                # ResourceDict 的 parent 字段是对象引用、导出时被排除，node-link 契约里
+                # 层级要靠 parent（父 id）表达；不补上，前端就把设备下的台面 / 耗材都画成
+                # 独立根节点，设备卡片里看不到运行期挂上去的 sites。
+                payload["parent"] = (
+                    content.parent.id if content.parent is not None else None
+                )
+                nodes.append(payload)
+                uuid_to_id[content.uuid] = content.id
         links = [
             link_payload(record, uuid_to_id)
             for record in MaterialsRepository.list_links(self)
@@ -612,6 +741,7 @@ __all__ = [
     "GRAPH_NAMESPACE",
     "GraphError",
     "GraphService",
+    "adopt_graph_payload",
     "graph_uuid_for_name",
     "link_payload",
     "reconcile_graph_payload",

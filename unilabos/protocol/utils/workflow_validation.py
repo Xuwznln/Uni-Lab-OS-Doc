@@ -8,7 +8,13 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Mapping
 
+from unilabos.protocol.runtime.loop import parse_loop_spec, references_loop_placeholder
 from unilabos.protocol.utils.json_codec import encode_json, strict_json_equal
+from unilabos.protocol.utils.workflow_hierarchy import (
+    HierarchyError,
+    execution_parents,
+    lifted_pairs,
+)
 from unilabos.protocol.runtime.workflow import WorkflowEdgeWrite, WorkflowNodeWrite
 
 _MAX_SCHEMA_DEPTH = 64
@@ -85,6 +91,12 @@ def validate_graph(
         for node in nodes
         if not node.disabled and _node_kind(node, templates) != "group"
     }
+    kinds = {node.uuid: _node_kind(node, templates) for node in nodes}
+    try:
+        parents = execution_parents(node_by_uuid, kinds, enabled=enabled)
+    except HierarchyError as exc:
+        raise GraphValidationError(str(exc)) from exc
+    _validate_loop_nodes(enabled, kinds, parents, effective_params)
     enabled_edges: List[WorkflowEdgeWrite] = []
     incoming: Dict[tuple[str, str], str] = {}
     connected_inputs: Dict[tuple[str, str], str] = {}
@@ -110,7 +122,7 @@ def validate_graph(
                 _handle_data_key(target_handle)
             )
 
-    _validate_edge_cycles(enabled, enabled_edges)
+    _validate_edge_cycles(enabled, enabled_edges, parents)
     for node_uuid, node in enabled.items():
         param = effective_params[node_uuid]
         bindings = bindings_by_node[node_uuid]
@@ -153,6 +165,39 @@ def validate_graph(
         if _node_kind(node, templates) == "device_action":
             if node.material_uuid is None:
                 raise GraphValidationError("设备动作节点必须绑定 material_uuid")
+        if parents.get(node_uuid) is None and references_loop_placeholder(param):
+            raise GraphValidationError(
+                f"节点 {node.name!r} 引用了 {{{{loop.*}}}} 迭代变量，但它不在任何循环体内"
+            )
+
+
+def _validate_loop_nodes(
+    enabled: Mapping[str, WorkflowNodeWrite],
+    kinds: Mapping[str, str],
+    parents: Mapping[str, str | None],
+    effective_params: Mapping[str, Dict[str, Any]],
+) -> None:
+    """循环节点参数合法；空循环体的 while 必须有轮询间隔。"""
+
+    body_sizes: Dict[str, int] = defaultdict(int)
+    for node_uuid, parent in parents.items():
+        if parent is not None:
+            body_sizes[parent] += 1
+    for node_uuid, node in enabled.items():
+        if kinds.get(node_uuid) != "loop":
+            continue
+        try:
+            spec = parse_loop_spec(effective_params.get(node_uuid) or node.param or {})
+        except ValueError as exc:
+            raise GraphValidationError(f"{node.name!r}: {exc}") from exc
+        if (
+            spec.mode == "while"
+            and body_sizes[node_uuid] == 0
+            and spec.interval_seconds <= 0
+        ):
+            raise GraphValidationError(
+                f"{node.name!r}: 空循环体的 while 循环必须设置 interval_seconds（轮询间隔）"
+            )
 
 
 def _validate_parent_cycles(nodes: Iterable[WorkflowNodeWrite]) -> None:
@@ -210,6 +255,7 @@ def _node_kind(
         "workflow": "workflow",
         "tool_call": "tool_call",
         "manual_confirm": "manual_confirm",
+        "loop": "loop",
     }
     kind = aliases.get(str(raw_kind).strip().lower())
     if kind is None:
@@ -220,12 +266,22 @@ def _node_kind(
 def _validate_edge_cycles(
     enabled: Mapping[str, WorkflowNodeWrite],
     edges: Iterable[WorkflowEdgeWrite],
+    parents: Mapping[str, str | None],
 ) -> None:
+    """跨循环边界的边提升到同级后做环检测：循环体内外的依赖都归到容器上。"""
+
+    try:
+        pairs = lifted_pairs(
+            parents,
+            ((edge.source_node_uuid, edge.target_node_uuid) for edge in edges),
+        )
+    except HierarchyError as exc:
+        raise GraphValidationError(str(exc)) from exc
     indegree = {node_uuid: 0 for node_uuid in enabled}
     outgoing: Dict[str, List[str]] = defaultdict(list)
-    for edge in edges:
-        indegree[edge.target_node_uuid] += 1
-        outgoing[edge.source_node_uuid].append(edge.target_node_uuid)
+    for source, target in pairs:
+        indegree[target] += 1
+        outgoing[source].append(target)
     ready = [node_uuid for node_uuid, degree in indegree.items() if degree == 0]
     visited = 0
     while ready:
