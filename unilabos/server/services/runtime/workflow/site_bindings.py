@@ -95,6 +95,7 @@ class SiteBindingIndex:
 def resolve_workflow_sites(
     nodes: Sequence[Any], *, registry: Any, materials: Sequence[Any],
     mapped_paths: Mapping[str, Sequence[str]] | None = None,
+    endpoints: Sequence[Any] = (),
 ) -> list[dict[str, Any]]:
     """程序化导入自动解析；浏览器草稿保存必须显式跳过此步骤。
 
@@ -105,6 +106,19 @@ def resolve_workflow_sites(
 
     result = [deepcopy(_dict(node)) for node in nodes]
     index = SiteBindingIndex(materials)
+    # 执行设备 ID 不等于物料树路径（工作站子设备尤其如此）。动作声明应与
+    # 前端一样读权威 endpoint 能力；物料目录仅用于确定 Site 的实际归属。
+    declarations: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for raw_endpoint in endpoints:
+        endpoint = _dict(raw_endpoint)
+        if endpoint.get("state") != "online":
+            continue
+        for raw_capability in endpoint.get("action_capabilities", []):
+            capability = _dict(raw_capability)
+            if capability.get("state") != "active":
+                continue
+            key = (str(capability.get("device_uuid") or ""), str(capability.get("action_name") or ""))
+            declarations.setdefault(key, []).append(_dict(capability.get("descriptor")))
     by_uuid = {str(node.get("uuid")): node for node in result}
     for node in result:
         ancestor = node
@@ -121,12 +135,20 @@ def resolve_workflow_sites(
         }:
             continue
         meta = _dict(node.get("meta_data"))
-        device = index.device(str(meta.get("target_device_id") or node.get("material_uuid") or ""))
+        device_id = str(meta.get("target_device_id") or node.get("material_uuid") or "")
+        device = index.device(device_id)
         klass = str(device.get("template_name") or "")
         if not klass and meta.get("target_device_id") == "host_node":
             klass = "host_node"
         label = node.get("name") or node.get("uuid") or node.get("action_name")
-        declaration = registry.action_definition(klass, str(node["action_name"])) if registry is not None else None
+        action_name = str(node["action_name"])
+        candidates = declarations.get((device_id, action_name)) or declarations.get((device_id, f"auto-{action_name}"))
+        if candidates:
+            if any(candidate != candidates[0] for candidate in candidates[1:]):
+                raise SiteBindingError(f"节点 {label!r} 的动作声明在不同 endpoint 上不一致，请先对齐设备能力")
+            declaration = candidates[0]
+        else:
+            declaration = registry.action_definition(klass, action_name) if registry is not None else None
         if declaration is None:
             raise SiteBindingError(
                 f"节点 {label!r} 的目标设备或动作声明尚未就绪，无法校验 Site 参数；"
