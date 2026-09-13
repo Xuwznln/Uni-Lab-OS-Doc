@@ -1,4 +1,5 @@
 """Site 标签导入：目标作用域、草稿确认以及失败的事务边界。"""
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 from uuid import uuid4
@@ -183,6 +184,7 @@ def authority(tmp_path, monkeypatch):
     monkeypatch.setattr("unilabos.server.backend.composition.get_materials_service", lambda: mat)
     monkeypatch.setattr("unilabos.server.services.runtime.registry.get_registry_service", lambda: registry)
     monkeypatch.setattr("unilabos.server.composition.get_server_services", lambda: None)
+    monkeypatch.setattr("unilabos.server.api.edge_proxy.edge_proxy_enabled", lambda: False)
     app = FastAPI()
     install_workflow_api(app, workflow)
     with TestClient(app) as api:
@@ -228,11 +230,19 @@ def test_failed_import_leaves_existing_graph_unchanged(authority):
     assert service.get_graph(workflow_uuid) == before
 
 
-def test_http_import_reads_subdevice_endpoint_capabilities(authority, monkeypatch):
+@pytest.mark.parametrize("split", [False, True])
+def test_http_import_reads_subdevice_endpoint_capabilities(authority, monkeypatch, split):
     api, service, _materials, _tree, template = authority
     snapshots = [endpoint("sensor", "probe", {"schema": {}, "goal_default": {"value": 1}})]
     runtime = SimpleNamespace(list_endpoint_snapshots=lambda **_: snapshots)
     monkeypatch.setattr("unilabos.server.composition.get_server_services", lambda: SimpleNamespace(runtime=runtime))
+    if split:
+        def forward(method, path, **kwargs):
+            assert method == "GET" and path == "/api/v1/runtime/endpoints?state=online&limit=1000"
+            return SimpleNamespace(status_code=200, body_bytes=lambda: json.dumps(snapshots).encode())
+        monkeypatch.setattr("unilabos.server.api.edge_proxy.edge_proxy_enabled", lambda: True)
+        monkeypatch.setattr("unilabos.server.api.edge_proxy.edge_http", forward)
+        runtime.list_endpoint_snapshots = lambda **_: pytest.fail("分进程不能读取调度权威自己的 endpoint 表")
     created = api.post("/api/v1/workflows/from-template", json={"template_uuid": template["uuid"]}).json()
     before = service.get_graph(created["data"]["workflow"]["uuid"])
     draft = deepcopy(before["nodes"][0])
@@ -243,3 +253,18 @@ def test_http_import_reads_subdevice_endpoint_capabilities(authority, monkeypatc
     }).json()
     assert saved["code"] == 0, saved
     assert saved["data"]["nodes"][0]["param"] == {"value": 3}
+
+
+@pytest.mark.parametrize("response", [None, SimpleNamespace(status_code=503),
+    SimpleNamespace(status_code=200, body_bytes=lambda: b'{}'),
+    SimpleNamespace(status_code=200, body_bytes=lambda: b'invalid-json'),
+])
+def test_unavailable_host_capabilities_do_not_modify_workflows(authority, monkeypatch, response):
+    api, service, _materials, _tree, template = authority
+    created = api.post("/api/v1/workflows/from-template", json={"template_uuid": template["uuid"]}).json()
+    before = service.get_graph(created["data"]["workflow"]["uuid"])
+    monkeypatch.setattr("unilabos.server.api.edge_proxy.edge_proxy_enabled", lambda: True)
+    monkeypatch.setattr("unilabos.server.api.edge_proxy.edge_http", lambda *_args, **_kwargs: response)
+    failed = api.post("/api/v1/workflows/from-template", json={"template_uuid": template["uuid"]}).json()
+    assert failed["code"] == 1000 and "Host 动作能力" in failed["error"]["msg"], failed
+    assert service.get_graph(before["workflow"]["uuid"]) == before
