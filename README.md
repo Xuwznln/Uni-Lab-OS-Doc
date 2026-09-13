@@ -189,7 +189,7 @@ See [Best Practice Guide](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/b
 
 ## Reference Driver Implementations
 
-Six runnable example device packages are maintained as standalone GitHub repositories (generated
+Seven runnable example device packages are maintained as standalone GitHub repositories (generated
 from [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate)). Clone any of them, load it
 with `--devices <pkg> --external_devices_only`, and read it when writing your own drivers:
 
@@ -201,11 +201,15 @@ with `--devices <pkg> --external_devices_only`, and read it when writing your ow
 | [LabDeviceMaterialsDemo](https://github.com/Xuwznln/LabDeviceMaterialsDemo) | Host/slave dual process — `@device(available_sites=...)` fixed sites (declaration → registry template → authoritative site instances → occupancy), `@resource` labware with the `materials.*` CRUD facade across HostLink, and `SiteSlot` action parameters (frontend Site picker uuid or label shorthand); outbound plate + fill entirely over the web-style HTTP API — `POST /materials/instantiate` two plates per item, `POST /materials/lots/inbound` (deliberately too little) water by quantity, `POST /workflows` + `PUT graph` a three-node graph (`host_node/apply_deduct_resource` with a `material` requirement and `mount_resource={"name": ...}` referencing the deck by name only → device `fill_well` with a `lot` requirement → report); the first submission fails whole-task reservation with `plan_not_executable` (neither plate nor water left reserved, device never called), restock and resubmit succeeds — plate `active → in_use` mounted cross-process on the slave deck, lot deducted, well contents in the authority |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo) | Scheduler lock semantics made observable through concurrently submitted workflows: the `(device, action)` action lock serializes two `occupy` calls in submission order (the second shows up `waiting` with `blockers` in `/api/v1/scheduler/resources`), `@action(always_free=True)` lets two `peek` calls of the same action overlap, and `materials_need_lock=["plate"]` locks per authoritative plate uuid (two devices on one plate serialize, one device on two plates runs in parallel); a `lock_auditor` node reads the probes' ledgers and fails the task if any conclusion does not hold |
 | [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo) | Quantity-based inventory through workflows: a registry `@resource` reagent template, `restock` as the web's `POST /api/v1/materials/lots/inbound` (100 ml into a fixed lot), a `dispense` step whose `inventory=[...]` requirement is reserved all-or-nothing at task start and deducted right before the action (device reports the lot after deduction, `60 / 60 / 0`), and a 500 ml requirement refused at reservation time — task `failed` / `plan_not_executable` ("short by 440 ml"), node `canceled`, device never called, lot unchanged |
+| [LabDeviceComplexWorkflowDemo](https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo) | **Runtime control flow** in workflows — loop containers executed round by round by the scheduler (each round is a new attempt of the body nodes, `trigger=loop_iteration`): `with ctx.loop_for(3)` with `{{loop.iteration}}` generating sample ids, `ctx.loop_while(ctx.device_state("reactor", "temperature_c", "<", 80))` polling a device state field with an empty body while the device heats in the background ("wait until a state"), `ctx.loop_while(ctx.step_output("取样检测", "ready", "==", False))` referencing a probe step inside the body ("repeat until ready"), nested `for` over plates × wells, and a final template chaining all three into one procedure verified by a single report |
 
 Every example starts its devices with `unilab -g` and then runs workflows through the management
-HTTP API (`POST /api/v1/workflow-tasks`); each repository README ships a step-by-step launch
+HTTP API: a package's `@workflow` functions are **workflow templates** (reported with the registry,
+`GET /api/v1/registry/workflow-templates`), instantiated with role bindings via
+`POST /api/v1/workflows/from-template` and then run with `POST /api/v1/workflow-tasks`; each
+repository README ships a step-by-step launch
 tutorial with verified output, and every package carries a terminating dual-runtime smoke
-(`python -m <pkg>.smoke --backend hostlink|ros2`). All six are also verified end to end in this
+(`python -m <pkg>.smoke --backend hostlink|ros2`). All seven are also verified end to end in this
 repository's CI. For the underlying communication-sharing mechanism see
 [Best Practice Guide §11.5](https://deepmodeling.github.io/Uni-Lab-OS/user_guide/best_practice.html);
 to write a new driver from scratch see [Add Device](https://deepmodeling.github.io/Uni-Lab-OS/developer_guide/add_device.html).

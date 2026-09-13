@@ -128,6 +128,17 @@ unilab --config path/to/your/config.py
 
 使用 `-g` 时，组态&拓扑图应包含实验室所有信息，详见{ref}`graph`。目前支持 GraphML 和 node-link JSON 两种格式。格式可参照 `tests/experiments` 下的启动文件。
 
+`-g <文件>.json` 是**创建入口，不是运行真相**。启动时文件先登记到 Graph Authority
+（materials.db 的图快照），随后一切从权威拉取——设备的位点、持有的物料都以权威为准：
+
+- 权威还没有这张图（按文件名）→ 整图创建，节点 / 位点在此获得权威 uuid；
+- 权威已有这张图 → 沿用权威快照，文件里权威没有的节点 / 连线补进去；文件对既有节点的
+  修改（位置、config、删除）**不生效**——改图请用前端画布或 `unilab graph upload`；
+- 文件里的 uuid 与权威身份不一致、payload 非法、Graph Authority 不可达 → 拒绝启动。
+
+`-g <图名|uuid>` 直接以权威中的图启动。物料同理：图中的物料按 uuid 对齐到物料权威
+（`materials.ensure`），权威已有的沿用、没有的创建、uuid 冲突拒绝。
+
 ### 2. 分别指定控制逻辑
 
 使用 `-c` 传入控制逻辑配置。

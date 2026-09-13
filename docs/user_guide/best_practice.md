@@ -1616,7 +1616,7 @@ solenoid_valve:
 
 ### 11.6 参考驱动实现（可运行示例仓库）
 
-为了让上述机制有可直接运行、可对照学习的范本，我们提供了六个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，并自带可终止的双运行时 smoke（`python -m <包名>.smoke --backend hostlink|ros2`），建议在编写自己的驱动前先跑一遍。
+为了让上述机制有可直接运行、可对照学习的范本，我们提供了七个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，并自带可终止的双运行时 smoke（`python -m <包名>.smoke --backend hostlink|ros2`），建议在编写自己的驱动前先跑一遍。
 
 | 示例仓库                                                                          | 演示要点                                           | 关键技术                                                                                                |
 | --------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -1626,6 +1626,7 @@ solenoid_valve:
 | [LabDeviceMaterialsDemo](https://github.com/Xuwznln/LabDeviceMaterialsDemo)                 | host/slave 双进程：固定位点、物料 CRUD、出库装板三条权威链 | `@device(available_sites=...)` 声明 → 注册表模板 → 权威位点实例 → 占用流转；`@resource` 物料 + `materials.*` 门面跨 HostLink 创建/赋值/转移/删除；`SiteSlot` 参数（uuid 或 label）；全 HTTP 的出库装板：按件 `POST /materials/instantiate` + 按量 `POST /materials/lots/inbound` 登记 → `POST /workflows` + `PUT graph` 上传三节点图（`host_node/apply_deduct_resource` 带 `kind: "material"` 需求、`mount_resource={"name": ...}` 只按名字引用台面 → `fill_well` 带 `kind: "lot"` 需求 → 报告）→ 首次提交整任务预留失败 `plan_not_executable`（板与水都无预留痕迹）→ 补料再提交成功（板 `active → in_use` 跨进程挂到 slave 台面、lot 扣减、孔位内容物落权威） |
 | [LabDeviceLockDemo](https://github.com/Xuwznln/LabDeviceLockDemo)                 | 调度器锁语义：并发提交工作流制造竞争，账本区间即证据 | `(device, action)` 动作锁串行、先提交先执行（`/api/v1/scheduler/resources` 的 `waiting` + `blockers`）；`@action(always_free=True)` 同一动作两次并行；`materials_need_lock=["plate"]` 按权威 `material_uuid` 互斥；`lock_auditor` 点对点读账本核对四条结论 |
 | [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo)       | 按数量计量的库存：入库、带预留的出库、数量不足拒绝 | `@resource` 试剂模板同步为权威模板；`restock` → `inbound_inventory_lot`（固定 lot）；`ctx.run(..., inventory=[...])` 声明试剂需求 → 任务启动 all-or-nothing 预留 → 动作开始扣减；不足时任务 `plan_not_executable` 且库存不变 |
+| [LabDeviceComplexWorkflowDemo](https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo) | 工作流运行时控制流：for / while 循环容器由调度器逐轮执行 | `with ctx.loop_for(3)` + 参数 `{{loop.iteration}}`；`ctx.loop_while(ctx.device_state(...))` 空循环体按间隔轮询设备状态字段（设备后台升温，"等到某状态"）；`ctx.loop_while(ctx.step_output("取样检测", ...))` 条件引用循环体里的检测步骤（"重复直到达标"）；两层 `for` 嵌套；每轮 = 循环体节点的新 attempt（`trigger=loop_iteration`），循环节点 `control_data.loop` 显示轮次 |
 
 **快速启动（通用形式，单进程）：**
 
