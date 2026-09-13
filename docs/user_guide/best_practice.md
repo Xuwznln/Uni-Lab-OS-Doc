@@ -1616,7 +1616,7 @@ solenoid_valve:
 
 ### 11.6 参考驱动实现（可运行示例仓库）
 
-为了让上述机制有可直接运行、可对照学习的范本，我们提供了七个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载，每个仓库的 README 都附带分步启动教程和实测日志输出，并自带可终止的双运行时 smoke（`python -m <包名>.smoke --backend hostlink|ros2`），建议在编写自己的驱动前先跑一遍。
+为了让上述机制有可直接运行、可对照学习的范本，我们提供了七个**自包含外部设备包**，均作为独立 GitHub 仓库维护（由 [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) fork 生成）。克隆后通过 `--devices <包目录> --external_devices_only` 加载。当前主仓库支持的 demo 版本固定在 `tests/e2e/readme_demos.py`；完整验证使用[七个 demo 回归指南](../developer_guide/readme_demo_tests.md)，覆盖 HostLink / ROS2 与单进程 / 默认拆分拓扑。各 demo 自带的 `smoke` 脚本与其固定的主仓库版本配套，不应把旧脚本通过当作当前主仓库的验证结果。
 
 | 示例仓库                                                                          | 演示要点                                           | 关键技术                                                                                                |
 | --------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -1628,24 +1628,24 @@ solenoid_valve:
 | [LabDeviceInventoryDemo](https://github.com/Xuwznln/LabDeviceInventoryDemo)       | 按数量计量的库存：入库、带预留的出库、数量不足拒绝 | `@resource` 试剂模板同步为权威模板；`restock` → `inbound_inventory_lot`（固定 lot）；`ctx.run(..., inventory=[...])` 声明试剂需求 → 任务启动 all-or-nothing 预留 → 动作开始扣减；不足时任务 `plan_not_executable` 且库存不变 |
 | [LabDeviceComplexWorkflowDemo](https://github.com/Xuwznln/LabDeviceComplexWorkflowDemo) | 工作流运行时控制流：for / while 循环容器由调度器逐轮执行 | `with ctx.loop_for(3)` + 参数 `{{loop.iteration}}`；`ctx.loop_while(ctx.device_state(...))` 空循环体按间隔轮询设备状态字段（设备后台升温，"等到某状态"）；`ctx.loop_while(ctx.step_output("取样检测", ...))` 条件引用循环体里的检测步骤（"重复直到达标"）；两层 `for` 嵌套；每轮 = 循环体节点的新 attempt（`trigger=loop_iteration`），循环节点 `control_data.loop` 显示轮次 |
 
-**快速启动（通用形式，单进程）：**
+**快速启动（本地微后端 + Host，默认拆分进程）：**
 
 ```bash
-conda activate unilab
+conda activate unilab-dev-jazzy
 git clone https://github.com/Xuwznln/LabDeviceWorkstationDemo.git
 python -m unilabos.app.main \
   --devices <克隆目录下的设备包目录> \
   --external_devices_only \
-  --ak your_ak --sk your_sk --address test \
-  --disable_browser --port-management 8100 \
+  --backend hostlink --machine_name demo-host \
+  --disable_browser --port 8100 \
   -g <仓库内提供的图文件>
 ```
 
 `--devices` 指向的设备包目录、`-g` 图文件等具体路径以各仓库 README 为准；`LabDeviceLanDemo` 与 `LabDeviceMaterialsDemo` 还需按「先 host 后 slave」启动两个进程（仅图文件与 `--is_slave` 不同）。
 
-**一键安装（不克隆源码）：** 六个包都收录在驱动包索引 [awesome-lab-devices](https://github.com/Xuwznln/awesome-lab-devices)（`index.json`）。先用空图起一个 Host（`unilab --backend hostlink`，不带 `-g`），打开 [OpenLab](https://xuwznln.github.io/OpenLab-site/) 连接 `http://127.0.0.1:8002`，在「驱动包」页点「安装到 Edge」——浏览器直接读索引，把 `spec`（`git+https://github.com/Xuwznln/LabDevice…Demo.git`）下发给微后端 `POST /api/v1/driver-packages/install` 执行 `pip install`；装完后「启动」即把随包设备图作为受管设备进程拉起，不需要重启 Host。命令行等价形式是 `unilab package install "<spec>"` 后重启。索引本身是浏览器读取的，Edge 不需要出网；内网可把 `index.json` 放镜像并在 `local_config.py` 设 `HTTPConfig.driver_package_index_url`，或在 `unilabos_data/driver_package_catalog.json` 登记实验室自用包。
+**一键安装（不克隆源码）：** 七个包都收录在驱动包索引 [awesome-lab-devices](https://github.com/Xuwznln/awesome-lab-devices)（`index.json`）。先用空图起一个 Host（`unilab --backend hostlink`，不带 `-g`），打开 [OpenLab](https://xuwznln.github.io/OpenLab-site/) 连接 `http://127.0.0.1:8002`，在「驱动包」页点「安装到 Edge」——浏览器直接读索引，把 `spec`（`git+https://github.com/Xuwznln/LabDevice…Demo.git`）下发给微后端 `POST /api/v1/driver-packages/install` 执行 `pip install`；装完后「启动」即把随包设备图作为受管设备进程拉起，不需要重启 Host。命令行等价形式是 `unilab package install "<spec>"` 后重启。浏览器需要访问索引，安装执行侧也需要访问包源及依赖下载地址；离线环境应使用可达的内网包源。
 
-> 这六个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可，再给 awesome-lab-devices 提 PR 收录。六个示例都在主仓库 CI 中端到端验证，各仓库自己的 CI 也会跑双运行时 smoke。
+> 这七个仓库同时是 §9（自定义设备）、§11.5（通信共享机制）、§12（物料定义）的可运行落地示例：想从零写一个新驱动，可直接 fork [LabDeviceTemplate](https://github.com/Xuwznln/LabDeviceTemplate) 作为脚手架，改写设备类与图文件即可，再给 awesome-lab-devices 提 PR 收录。主仓库 CI 对 pinned 版本运行完整工作流，除终态外还核对实验实值、权威物料与库存账目。
 
 ---
 

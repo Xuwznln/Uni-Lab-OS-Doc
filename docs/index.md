@@ -20,6 +20,7 @@ developer_guide/http_api.md
 developer_guide/mcp.md
 developer_guide/mcp_guide.md
 developer_guide/mcp_demo_validation_20260913.md
+developer_guide/readme_demo_tests.md
 developer_guide/networking_overview.md
 developer_guide/add_device.md
 developer_guide/add_action.md

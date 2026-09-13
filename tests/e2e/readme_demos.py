@@ -2,11 +2,8 @@
 
 unilabos 侧在这里固定引用七个 demo 仓库（URL + 已验证提交；同一份清单也收录在
 awesome-lab-devices 索引里供 OpenLab 一键安装），e2e 用例按以下
-顺序取得仓库源码：
-
-1. ``UNILABOS_README_EXAMPLES_ROOT/<仓库名>``（外部预先 checkout）；
-2. 与本仓库同级的开发目录 ``../<仓库名>``（本地联调，允许领先于 pinned 提交）；
-3. 按 pinned 提交浅克隆到临时缓存目录（需要 git 与网络；CI 走这条）。
+规则取得仓库源码：默认只运行 pinned 提交，不隐式使用同级开发目录；本地联调须显式设置
+``UNILABOS_README_EXAMPLES_ROOT/<仓库名>``。显式路径错误或克隆失败必须报错，不能跳过。
 
 pinned 提交与各 demo 仓库 CI 里固定的 Uni-Lab-OS 提交互相锁定：core 有破坏性
 改动时先改 demo 并推送，再在此处 bump。
@@ -24,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -46,17 +44,10 @@ if E2E_BACKEND not in {"hostlink", "ros2"}:
     raise RuntimeError(f"UNILABOS_E2E_BACKEND 必须是 hostlink 或 ros2，当前: {E2E_BACKEND!r}")
 #: 进程拓扑：``single``（缺省）加 ``--no_safe_restart``，调度权威与 Host 同进程，用例直接
 #: 管这个进程的生死；``split`` 走默认拓扑（监督进程 → 调度权威 → Host 子进程），
-#: 验证浏览器只连权威端口时六个 demo 的图 / 工作流 / 决策链仍完整。
+#: 验证浏览器只连权威端口时七个 demo 的图 / 工作流 / 决策链仍完整。
 E2E_TOPOLOGY = os.environ.get("UNILABOS_E2E_TOPOLOGY", "single").strip().lower()
 if E2E_TOPOLOGY not in {"single", "split"}:
     raise RuntimeError(f"UNILABOS_E2E_TOPOLOGY 必须是 single 或 split，当前: {E2E_TOPOLOGY!r}")
-#: 只属于测试夹具的控制变量。``UNILABOS_`` 前缀在运行时进程里是配置覆盖协议
-#: （``UNILABOS_<Config类>_<字段>``），这些变量不能泄漏进被测进程。
-HARNESS_ENV_VARS = (
-    "UNILABOS_E2E_BACKEND",
-    "UNILABOS_E2E_TOPOLOGY",
-    "UNILABOS_README_EXAMPLES_ROOT",
-)
 #: ROS 2 节点启动与发现比 HostLink 慢，闭环与工作流等待窗口相应放宽。
 _ROS2_TIMEOUT_SCALE = 1.5
 
@@ -215,10 +206,7 @@ DEMOS: tuple[DemoSpec, ...] = (
     DemoSpec(
         repo="LabDeviceMaterialsDemo",
         url="https://github.com/Xuwznln/LabDeviceMaterialsDemo",
-        # c0751d42：改名 + 设备不自跑（两轮闭环都是 @workflow）+ 阶段三「出库装板并加液」
-        # （纯 HTTP 上传的工作流由其自带 smoke 覆盖，这里只跑 @workflow 上报的四条）+ 库存需求
-        # kind reagent -> lot。阶段三依赖本仓库的 HostLink id/name ResourceSlot 兜底与注册表懒加载
-        # PLR 类，@workflow 四条不依赖。
+        # 四条 @workflow 后继续经 API 上传阶段三「出库装板并加液」，验证缺料回滚与补料后出库。
         # 默认启动先准备台面，让 API 导入时能把 T1-T4 绑定到已存在的权威 Site。
         ref="7a9c0434305cbf0070413ca444d20cc0035b0f0e",
         package="materials_demo",
@@ -251,9 +239,7 @@ DEMOS: tuple[DemoSpec, ...] = (
             WorkflowExpectation(name="always_free：探测 A（第二次）", node_count=1, group="action-lock"),
             # 物料锁：B 处理同一块 P1 排在 A 后面；A 同时处理 P2 与 P1 并行。
             WorkflowExpectation(name="物料锁：A 处理 P1", node_count=1, group="material-lock"),
-            WorkflowExpectation(
-                name="物料锁：B 处理 P1", node_count=1, group="material-lock", expect_waiting=True
-            ),
+            WorkflowExpectation(name="物料锁：B 处理 P1", node_count=1, group="material-lock", expect_waiting=True),
             WorkflowExpectation(name="物料锁：A 处理 P2", node_count=1, group="material-lock"),
             # 审计器读两台探针的账本：四条结论任一不成立即任务失败
             WorkflowExpectation(name="锁账本审计", node_count=1),
@@ -294,11 +280,7 @@ def workflow_batches(
 
     batches: list[list[WorkflowExpectation]] = []
     for expectation in expectations:
-        if (
-            expectation.group is not None
-            and batches
-            and batches[-1][0].group == expectation.group
-        ):
+        if expectation.group is not None and batches and batches[-1][0].group == expectation.group:
             batches[-1].append(expectation)
         else:
             batches.append([expectation])
@@ -323,40 +305,55 @@ def _git(*args: str, cwd: Path) -> str:
 
 def _clone_pinned(spec: DemoSpec, cache_root: Path) -> Path:
     target = cache_root / f"{spec.repo}-{spec.ref[:12]}"
-    if (target / ".git").is_dir():
+    if target.exists():
         try:
-            if _git("rev-parse", "HEAD", cwd=target) == spec.ref:
-                return target
-        except (subprocess.SubprocessError, OSError):
-            pass
-    target.mkdir(parents=True, exist_ok=True)
-    _git("init", "-q", cwd=target)
-    _git("remote", "add", "origin", spec.url, cwd=target)
-    _git("fetch", "-q", "--depth", "1", "origin", spec.ref, cwd=target)
-    _git("-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD", cwd=target)
+            valid = (
+                (target / ".git").is_dir()
+                and _git("rev-parse", "HEAD", cwd=target) == spec.ref
+                and _git("remote", "get-url", "origin", cwd=target).removesuffix(".git") == spec.url
+                and not _git("status", "--porcelain", cwd=target)
+            )
+        except subprocess.CalledProcessError:
+            valid = False  # 旧夹具可能在最终路径里留下未 fetch 完的空仓库。
+        if valid:
+            return target
+        # 保留用户/旧测试留下的修改；下方另取干净的同版本副本，绝不 reset/覆盖此目录。
+    cache_root.mkdir(parents=True, exist_ok=True)
+    # 未成功的下载不占用最终缓存路径；断网后可以重试，不会撞到重复 origin。
+    staging = Path(tempfile.mkdtemp(prefix=f"{spec.repo}-fetch-", dir=cache_root))
+    _git("init", "-q", cwd=staging)
+    _git("remote", "add", "origin", spec.url, cwd=staging)
+    _git("fetch", "-q", "--depth", "1", "origin", spec.ref, cwd=staging)
+    _git("-c", "advice.detachedHead=false", "checkout", "-q", "FETCH_HEAD", cwd=staging)
+    assert _git("rev-parse", "HEAD", cwd=staging) == spec.ref
+    if target.exists():
+        return staging
+    try:
+        staging.rename(target)
+    except FileExistsError:
+        # 同时运行的另一个用例可能先完成下载；仍要验证最终缓存。
+        return _clone_pinned(spec, cache_root)
     return target
 
 
-def resolve_demo_source(
-    spec: DemoSpec, cache_root: Optional[Path] = None
-) -> tuple[Path, str]:
-    """返回 (仓库根目录, 来源说明)；三种来源都不可用时抛 RuntimeError。"""
+def resolve_demo_source(spec: DemoSpec, cache_root: Optional[Path] = None) -> tuple[Path, str]:
+    """返回 (仓库根目录, 来源说明)，禁止失败后静默换版本或 skip。"""
 
     examples_root = os.environ.get("UNILABOS_README_EXAMPLES_ROOT")
     if examples_root:
         candidate = Path(examples_root) / spec.repo
-        if (candidate / spec.package).is_dir():
-            return candidate, f"UNILABOS_README_EXAMPLES_ROOT ({candidate})"
-    sibling = REPO_ROOT.parent / spec.repo
-    if (sibling / spec.package).is_dir():
-        return sibling, f"sibling checkout ({sibling})"
+        required = [candidate / spec.package / "smoke.py", candidate / spec.host_graph]
+        if spec.slave_graph:
+            required.append(candidate / spec.slave_graph)
+        if not all(path.is_file() for path in required):
+            raise RuntimeError(f"显式 demo 源码不完整：{candidate}，需要 {required}")
+        return candidate, f"explicit checkout ({candidate})"
     cache_root = cache_root or Path(tempfile.gettempdir()) / "unilabos-readme-demos"
     try:
         cloned = _clone_pinned(spec, cache_root)
     except (subprocess.SubprocessError, OSError) as exc:
         raise RuntimeError(
-            f"无法取得 {spec.repo}：未设置 UNILABOS_README_EXAMPLES_ROOT、"
-            f"没有同级目录 {sibling}，按 {spec.ref[:12]} 克隆失败: {exc}"
+            f"无法取得 {spec.repo} pinned {spec.ref}：{exc}；" "离线运行请显式设置 UNILABOS_README_EXAMPLES_ROOT"
         ) from exc
     return cloned, f"pinned clone {spec.ref[:12]} ({cloned})"
 
@@ -366,10 +363,13 @@ def resolve_demo_source(
 # ---------------------------------------------------------------------------
 
 
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.bind(("127.0.0.1", 0))
-        return int(server.getsockname()[1])
+def free_port(*, exclude: tuple[int, ...] = ()) -> int:
+    while True:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+            server.bind(("127.0.0.1", 0))
+            port = int(server.getsockname()[1])
+        if port not in exclude:
+            return port
 
 
 def unilab_command(*args: str) -> list[str]:
@@ -403,6 +403,8 @@ def runtime_command(
     command = unilab_command(
         "--backend",
         backend,
+        "--machine_name",
+        f"e2e_{package_dir.name}_{hostlink_port}_{'slave' if is_slave else 'host'}",
         "--skip_env_check",
         "--devices",
         str(package_dir),
@@ -441,19 +443,33 @@ def runtime_command(
 
 def subprocess_env(extra: dict[str, str]) -> dict[str, str]:
     environment = {
-        key: value for key, value in os.environ.items() if key not in HARNESS_ENV_VARS
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("UNILABOS_") and not any(key.startswith(spec.package.upper() + "_") for spec in DEMOS)
     }
-    environment.update(
-        {"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-    )
+    environment.update({"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
     environment.update(extra)
     return environment
 
 
 def stop_process(process: subprocess.Popen[Any]) -> None:
+    """只结束本测试启动的进程树；split 下不能只杀权威、留下 Host 占用资源。"""
+
     if process.poll() is not None:
         return
-    process.terminate()
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+            timeout=15,
+        )
+    else:
+        # _DemoProcesses 用 start_new_session 创建独立进程组，绝不杀测试运行器所在组。
+        if os.getpgid(process.pid) == process.pid:
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
@@ -461,14 +477,14 @@ def stop_process(process: subprocess.Popen[Any]) -> None:
         process.wait(timeout=5)
 
 
-def api_request(port: int, path: str, payload: Optional[dict[str, Any]] = None) -> Any:
+def api_request(port: int, path: str, payload: Optional[dict[str, Any]] = None, *, method: str | None = None) -> Any:
     """请求管理 API；``{"code":0,"data":...}`` 信封自动解包，其余原样返回。"""
 
     url = f"http://127.0.0.1:{port}/api/v1{path}"
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {} if payload is None else {"Content-Type": "application/json"}
     request = urllib.request.Request(
-        url, data=data, headers=headers, method="GET" if payload is None else "POST"
+        url, data=data, headers=headers, method=method or ("GET" if payload is None else "POST")
     )
     with urllib.request.urlopen(request, timeout=5) as response:
         body = json.loads(response.read().decode("utf-8"))
@@ -496,15 +512,14 @@ def wait_until(
             raise RuntimeError(f"等待 {description or 'condition'} 期间被中止")
         try:
             value = predicate()
-        except (urllib.error.URLError, OSError, RuntimeError, KeyError, ValueError) as exc:
+        except (urllib.error.URLError, OSError) as exc:
             last_error = exc
             value = None
         if value:
             return value
         time.sleep(interval)
     raise TimeoutError(
-        f"{timeout}s 内未满足 {description or 'condition'}"
-        + (f"（最后错误: {last_error!r}）" if last_error else "")
+        f"{timeout}s 内未满足 {description or 'condition'}" + (f"（最后错误: {last_error!r}）" if last_error else "")
     )
 
 
