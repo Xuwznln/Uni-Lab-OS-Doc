@@ -473,6 +473,20 @@ class HostNode(HostAdapterBase, Node):
             d = None
         if d is None:
             return
+        self._register_local_device(device_id, d)
+
+    def _register_local_device(self, device_id: str, d: Any) -> None:
+        """登记已初始化的设备及其工作站子设备，不依赖 DDS 延后发现本机子节点。
+
+        工作站负责构造子设备，但 Host 同样需要它们的动作声明、派发客户端和锁状态。
+        只登记父工作站会让 endpoint 快照漏报子动作，也会使工作流导入/调度无法寻址。
+        """
+
+        existing = self.devices_instances.get(device_id)
+        if existing is d:
+            return
+        if existing is not None:
+            raise ValueError(f"本机设备身份重复：{device_id}")
         # noinspection PyProtectedMember
         self.devices_names[device_id] = d._ros_node.namespace  # 这里不涉及二级device_id
         self.device_machine_names[device_id] = "本地"
@@ -514,6 +528,9 @@ class HostNode(HostAdapterBase, Node):
         device_key = f"{self.devices_names[device_id]}/{device_id}"  # 这里不涉及二级device_id
         self._online_devices.add(device_key)
         self._report_action_locks_free(new_action_pairs)
+        for child_id, child in getattr(d._ros_node, "sub_devices", {}).items():
+            if child is not None:
+                self._register_local_device(child_id, child)
 
     def update_device_status_subscriptions(self) -> None:
         """扫描所有设备话题，为新话题创建订阅（不重复订阅）。"""
