@@ -58,29 +58,22 @@ gas_source.mock:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: close参数
           type: object
         type: EmptyIn
       open:
@@ -91,29 +84,22 @@ gas_source.mock:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: open参数
           type: object
         type: EmptyIn
       set_status:
@@ -122,39 +108,29 @@ gas_source.mock:
         goal:
           string: string
         goal_default:
-          string: ''
+          string: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 string:
                   type: string
+              required:
+              - string
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
-              type: object
           required:
           - goal
-          title: StrSingleInput
+          title: set_status参数
           type: object
         type: StrSingleInput
     module: unilabos.devices.pump_and_valve.vacuum_pump_mock:VacuumPumpMock
@@ -254,29 +230,22 @@ vacuum_pump.mock:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: close参数
           type: object
         type: EmptyIn
       open:
@@ -287,29 +256,22 @@ vacuum_pump.mock:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: EmptyIn_Feedback
-              type: object
             goal:
-              additionalProperties: true
+              properties: {}
+              required: []
               title: EmptyIn_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
               title: EmptyIn_Result
-              type: object
           required:
           - goal
-          title: EmptyIn
+          title: open参数
           type: object
         type: EmptyIn
       set_status:
@@ -318,39 +280,29 @@ vacuum_pump.mock:
         goal:
           string: string
         goal_default:
-          string: ''
+          string: null
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result:
-          return_info: return_info
-          success: success
+        result: {}
         schema:
           description: ''
           properties:
             feedback:
-              additionalProperties: true
               title: StrSingleInput_Feedback
-              type: object
             goal:
-              additionalProperties: false
               properties:
                 string:
                   type: string
+              required:
+              - string
               title: StrSingleInput_Goal
               type: object
             result:
-              additionalProperties: false
-              properties:
-                return_info:
-                  type: string
-                success:
-                  type: boolean
               title: StrSingleInput_Result
-              type: object
           required:
           - goal
-          title: StrSingleInput
+          title: set_status参数
           type: object
         type: StrSingleInput
     module: unilabos.devices.pump_and_valve.vacuum_pump_mock:VacuumPumpMock
