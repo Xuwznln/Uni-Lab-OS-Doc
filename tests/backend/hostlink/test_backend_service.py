@@ -207,17 +207,19 @@ def test_host_microbackend_owns_listener_material_and_ros(
         material_service.close()
 
 
-def test_slave_microbackend_applies_host_ros_config_before_ros_init() -> None:
+def test_slave_microbackend_applies_host_ros_config_before_ros_init(monkeypatch) -> None:
     service = setup_host_network_service()
     assert service is not None
     HostLinkConfig.host = "127.0.0.1"
     HostLinkConfig.port = service.server.port
+    monkeypatch.setattr(BasicConfig, "machine_name", "edge-slave-test")
 
     client, domain_id = setup_slave_network_client(
         device_ids=["sensor-b", "pump-a"]
     )
     assert client is not None and client.online
-    assert client.node_id == "device:pump-a"
+    # 通信身份来自显式 machine_name，与设备配置列表的内容和顺序无关。
+    assert client.node_id == "edge-slave-test"
     assert client.device_ids == ["pump-a", "sensor-b"]
     assert get_hostlink_client() is client
     assert domain_id == 73

@@ -288,7 +288,7 @@ def test_materialized_workflow_upsert_is_idempotent() -> None:
         service.close()
 
 
-def test_upsert_over_http_like_client_survives_bodiless_get() -> None:
+def test_upsert_over_http_like_client_survives_bodiless_get(monkeypatch) -> None:
     """upsert 经 HTTPWorkflowClient 走 POST 冲突 → GET → PUT → PUT graph。
 
     回归：HTTPClient 曾对无 body 的 GET 也带 ``Content-Type: application/json``，
@@ -297,6 +297,7 @@ def test_upsert_over_http_like_client_survives_bodiless_get() -> None:
     """
 
     from fastapi.testclient import TestClient
+    from types import SimpleNamespace
 
     from unilabos.client.http import HTTPClient, HTTPClientConfig
     from unilabos.client.runtime.workflow import HTTPWorkflowClient
@@ -315,6 +316,17 @@ def test_upsert_over_http_like_client_survives_bodiless_get() -> None:
     reporter = HTTPWorkflowClient("http://testserver", http_client=http)
     try:
         payload = materialize_workflow_template(template, _catalog())
+        # 程序化写图需要权威设备/动作声明，不能把无 schema 的夹具当成已校验。
+        # 本用例的 value 是普通参数，不包含 Site；保持客户端默认 resolve 行为。
+        authority_materials = SimpleNamespace(list_materials=lambda: [{"material": {
+            "material_uuid": payload["nodes"][0]["material_uuid"],
+            "resource_id": "device-1", "template_name": "demo_class",
+        }}])
+        authority_registry = SimpleNamespace(action_definition=lambda klass, action: {
+            "schema": {"properties": {"goal": {"type": "object", "properties": {"value": {"type": "integer"}}}}},
+        } if (klass, action) == ("demo_class", "succeed") else None)
+        monkeypatch.setattr("unilabos.server.backend.composition.get_materials_service", lambda: authority_materials)
+        monkeypatch.setattr("unilabos.server.services.runtime.registry.get_registry_service", lambda: authority_registry)
         upsert_workflow(reporter, payload)
         upsert_workflow(reporter, payload)
         assert service.get_workflow(payload["workflow_uuid"])["revision"] >= 2
