@@ -130,33 +130,47 @@ raman.home_made:
         type: UniLabJsonCommand
       raman_cmd:
         error_policy: {}
-        feedback: {}
+        feedback:
+          status: status
         goal:
           command: command
         goal_default:
-          command: null
+          command: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: false
+              properties:
+                status:
+                  type: string
               title: SendCmd_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
                 command:
                   type: string
-              required:
-              - command
               title: SendCmd_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: SendCmd_Result
+              type: object
           required:
           - goal
-          title: raman_cmd参数
+          title: SendCmd
           type: object
         type: SendCmd
     module: unilabos.devices.raman_uv.home_made_raman:RamanObj

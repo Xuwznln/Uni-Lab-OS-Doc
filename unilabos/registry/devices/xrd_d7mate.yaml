@@ -118,31 +118,41 @@ xrd_d7mate:
           int_input: int_input
           sample_station: sample_station
         goal_default:
-          sample_station: null
+          int_input: 0
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
+          success: success
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: IntSingleInput_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
-                sample_station:
-                  description: 下样工位（1, 2, 3）
+                int_input:
+                  maximum: 2147483647
+                  minimum: -2147483648
                   type: integer
-              required:
-              - sample_station
               title: IntSingleInput_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
+                success:
+                  type: boolean
               title: IntSingleInput_Result
               type: object
           required:
           - goal
-          title: get_sample_down参数
+          title: IntSingleInput
           type: object
         type: IntSingleInput
       get_sample_request:
@@ -215,23 +225,29 @@ xrd_d7mate:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: EmptyIn_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: true
               title: EmptyIn_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: send_sample_down_ready参数
+          title: EmptyIn
           type: object
         type: EmptyIn
       send_sample_ready:
@@ -299,23 +315,29 @@ xrd_d7mate:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: EmptyIn_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: true
               title: EmptyIn_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: set_power_off参数
+          title: EmptyIn
           type: object
         type: EmptyIn
       set_power_on:
@@ -326,23 +348,29 @@ xrd_d7mate:
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: EmptyIn_Feedback
+              type: object
             goal:
-              properties: {}
-              required: []
+              additionalProperties: true
               title: EmptyIn_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: EmptyIn_Result
               type: object
           required:
           - goal
-          title: set_power_on参数
+          title: EmptyIn
           type: object
         type: EmptyIn
       set_voltage_current:

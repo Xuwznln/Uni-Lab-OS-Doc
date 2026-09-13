@@ -425,39 +425,43 @@ bioyond_dispensing_station:
           speed: speed
           temperature: temperature
         goal_default:
-          delay_time: null
-          hold_m_name: null
-          order_name: null
-          percent_10_1_assign_material_name: null
-          percent_10_1_liquid_material_name: null
-          percent_10_1_target_weigh: null
-          percent_10_1_volume: null
-          percent_10_2_assign_material_name: null
-          percent_10_2_liquid_material_name: null
-          percent_10_2_target_weigh: null
-          percent_10_2_volume: null
-          percent_10_3_assign_material_name: null
-          percent_10_3_liquid_material_name: null
-          percent_10_3_target_weigh: null
-          percent_10_3_volume: null
-          percent_90_1_assign_material_name: null
-          percent_90_1_target_weigh: null
-          percent_90_2_assign_material_name: null
-          percent_90_2_target_weigh: null
-          percent_90_3_assign_material_name: null
-          percent_90_3_target_weigh: null
-          speed: null
-          temperature: null
+          delay_time: ''
+          hold_m_name: ''
+          order_name: ''
+          percent_10_1_assign_material_name: ''
+          percent_10_1_liquid_material_name: ''
+          percent_10_1_target_weigh: ''
+          percent_10_1_volume: ''
+          percent_10_2_assign_material_name: ''
+          percent_10_2_liquid_material_name: ''
+          percent_10_2_target_weigh: ''
+          percent_10_2_volume: ''
+          percent_10_3_assign_material_name: ''
+          percent_10_3_liquid_material_name: ''
+          percent_10_3_target_weigh: ''
+          percent_10_3_volume: ''
+          percent_90_1_assign_material_name: ''
+          percent_90_1_target_weigh: ''
+          percent_90_2_assign_material_name: ''
+          percent_90_2_target_weigh: ''
+          percent_90_3_assign_material_name: ''
+          percent_90_3_target_weigh: ''
+          speed: ''
+          temperature: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: DispenStationVialFeed_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
                 delay_time:
                   type: string
@@ -505,15 +509,18 @@ bioyond_dispensing_station:
                   type: string
                 temperature:
                   type: string
-              required: []
               title: DispenStationVialFeed_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: DispenStationVialFeed_Result
               type: object
           required:
           - goal
-          title: create_90_10_vial_feeding_task参数
+          title: DispenStationVialFeed
           type: object
         type: DispenStationVialFeed
       create_diamine_solution_task:
@@ -530,32 +537,35 @@ bioyond_dispensing_station:
           temperature: temperature
           volume: volume
         goal_default:
-          delay_time: null
-          hold_m_name: null
-          liquid_material_name: NMP
-          material_name: null
-          order_name: null
-          speed: null
-          target_weigh: null
-          temperature: null
-          volume: null
+          delay_time: ''
+          hold_m_name: ''
+          liquid_material_name: ''
+          material_name: ''
+          order_name: ''
+          speed: ''
+          target_weigh: ''
+          temperature: ''
+          volume: ''
         handles: {}
         materials_need_lock: []
         placeholder_keys: {}
-        result: {}
+        result:
+          return_info: return_info
         schema:
           description: ''
           properties:
             feedback:
+              additionalProperties: true
               title: DispenStationSolnPrep_Feedback
+              type: object
             goal:
+              additionalProperties: false
               properties:
                 delay_time:
                   type: string
                 hold_m_name:
                   type: string
                 liquid_material_name:
-                  default: NMP
                   type: string
                 material_name:
                   type: string
@@ -569,15 +579,18 @@ bioyond_dispensing_station:
                   type: string
                 volume:
                   type: string
-              required: []
               title: DispenStationSolnPrep_Goal
               type: object
             result:
+              additionalProperties: false
+              properties:
+                return_info:
+                  type: string
               title: DispenStationSolnPrep_Result
               type: object
           required:
           - goal
-          title: create_diamine_solution_task参数
+          title: DispenStationSolnPrep
           type: object
         type: DispenStationSolnPrep
       scheduler_start:
