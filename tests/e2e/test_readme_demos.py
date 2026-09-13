@@ -215,16 +215,29 @@ class _DemoProcesses:
 def _submit_workflow(
     port: int, expectation: WorkflowExpectation, *, timeout: float, abort
 ) -> tuple[dict[str, Any], str]:
-    """经管理 API 找到 @workflow 上报的模板并创建任务（网页"运行"按钮）。"""
+    """经管理 API 找到 @workflow 上报的**模板**，按默认角色绑定实例化成工作流再创建任务。
 
-    def find_workflow():
-        listing = api_request(port, "/workflows?page=1&page_size=100")
-        matches = [item for item in listing["items"] if item["name"] == expectation.name]
+    与网页流程等价：模板面板 → 插入画布（角色绑定；类角色单实例自动填）→ 运行。
+    脚本走 ``POST /workflows/from-template``，同一模板 + 同一组设备幂等复用同一个工作流。
+    """
+
+    def find_template():
+        listing = api_request(port, "/registry/workflow-templates")
+        matches = [
+            item for item in listing["templates"] if item["display_name"] == expectation.name
+        ]
         return matches[0] if matches else None
 
-    workflow = wait_until(
-        find_workflow, timeout=timeout, abort=abort, description=f"工作流 {expectation.name!r} 上报可检索"
+    template = wait_until(
+        find_template,
+        timeout=timeout,
+        abort=abort,
+        description=f"工作流模板 {expectation.name!r} 上报可检索",
     )
+    instantiated = api_request(
+        port, "/workflows/from-template", {"template_uuid": template["uuid"], "bindings": {}}
+    )
+    workflow = instantiated["workflow"]
     task = api_request(
         port, "/workflow-tasks", {"workflow_uuid": workflow["uuid"], "run_mode": "normal"}
     )
@@ -342,7 +355,9 @@ def _await_workflow(
 
 def _assert_attempt_history(expectation: WorkflowExpectation, run: dict) -> None:
     """节点运行 = 当前 attempt 的投影 + attempts 历史：序号连续、被重试的 attempt 保留为 failed 并
-    记录 retry 决策、后一 attempt 指回前一 attempt、当前结果等于最后一个 attempt。"""
+    记录 retry 决策、后一 attempt 指回前一 attempt、当前结果等于最后一个 attempt。
+
+    循环体节点每轮追加一个 ``loop_iteration`` attempt：前一轮是成功的、不是重试链。"""
 
     attempts = run["attempts"]
     assert len(attempts) == run["attempt_count"], run
@@ -351,6 +366,12 @@ def _assert_attempt_history(expectation: WorkflowExpectation, run: dict) -> None
     )
     assert attempts[0]["trigger"] == "initial" and "retry_of_job_uuid" not in attempts[0]
     for previous, current in zip(attempts, attempts[1:]):
+        if current["trigger"] == "loop_iteration":
+            assert previous["status"] in {"succeeded", "skipped"}, (
+                f"循环下一轮之前的 attempt 应已成功: {previous}"
+            )
+            assert not current.get("retry_of_job_uuid"), current
+            continue
         assert previous["status"] == "failed", f"被重试的 attempt 必须保留为 failed: {previous}"
         assert previous["error_resolution"]["selected_action"] == "retry", previous
         assert current["retry_of_job_uuid"] == previous["uuid"], current

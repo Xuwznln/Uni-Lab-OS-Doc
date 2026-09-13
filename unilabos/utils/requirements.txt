@@ -9,6 +9,7 @@ sqlmodel>=0.0.39,<0.1
 jinja2>=3.1.4
 requests>=2.32
 httpx>=0.27.0
+mcp>=1.30,<2
 uvicorn>=0.30
 pyautogui>=0.9.54
 opcua>=0.98.13

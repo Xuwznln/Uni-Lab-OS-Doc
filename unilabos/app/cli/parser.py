@@ -32,6 +32,7 @@ def _add(target: Any, *option_strings: str, **kwargs: Any) -> None:
 
 def _register_runtime_arguments(parser: argparse.ArgumentParser) -> None:
     group = parser.add_argument_group("runtime")
+    _add(group, "--machine_name", default=None, help="Unique runtime machine name; independent of device graph.")
     _add(group, "-g", "--graph", help="Physical setup graph file path.")
     _add(
         group,

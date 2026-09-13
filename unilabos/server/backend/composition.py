@@ -35,6 +35,7 @@ _materials: Optional[MaterialsService] = None
 _materials_gateway: Any = None
 _device_state_projection: Optional[TelemetryDeviceStateProjection] = None
 _workflow_service: Any = None
+_release_log_notices: Any = None
 
 
 def _status_incident_history_listener(
@@ -170,6 +171,7 @@ def setup_local_scheduler(
         materials_need_lock_resolver=(
             execution_backend.resolve_material_lock_parameters
         ),
+        device_state_reader=make_device_state_reader(execution_backend),
     )
     service.set_task_submitter(scheduler.submit)
     # 本机调度器是其派发 job 的生命周期 owner：失败 attempt 挂起等待决策时由它
@@ -183,6 +185,49 @@ def setup_local_scheduler(
         "[WorkflowIntegration] local Workflow Authority ready (runtime.db shared)",
     )
     return service
+
+
+def make_device_state_reader(execution_backend: Any):
+    """工作流 while 循环读设备状态字段的入口：``device_id -> {field: {"value", "updated_at"}}``。
+
+    Host 与调度权威同进程时直接读执行面的设备状态投影（telemetry 最新快照）；默认拓扑下
+    Host 是不监听端口的子进程，遥测库在它那边，权威经控制面让 Host 执行
+    ``GET /api/v1/telemetry/states`` 再按 device_uuid 取最新一条。
+    """
+
+    import json
+
+    projection = getattr(execution_backend, "device_state", None)
+    latest_for = getattr(projection, "latest_for", None)
+    if callable(latest_for):
+        return latest_for
+
+    def read_via_host(device_id: str) -> dict[str, Any]:
+        from unilabos.server.api.edge_proxy import edge_http
+
+        response = edge_http("GET", "/api/v1/telemetry/states", timeout=5.0)
+        if response is None:
+            raise RuntimeError("Host 未接入控制面，读不到设备状态")
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Host 遥测接口返回 {response.status_code}，读不到设备状态"
+            )
+        states = json.loads(response.body_bytes().decode("utf-8") or "[]")
+        latest: Optional[dict[str, Any]] = None
+        for state in states if isinstance(states, list) else []:
+            if not isinstance(state, dict) or str(state.get("device_uuid")) != str(device_id):
+                continue
+            if latest is None or int(state.get("observed_at_ms") or 0) > int(latest.get("observed_at_ms") or 0):
+                latest = state
+        if latest is None:
+            return {}
+        observed = latest.get("observed_at_ms")
+        return {
+            str(name): {"value": value, "updated_at": observed}
+            for name, value in (latest.get("properties") or {}).items()
+        }
+
+    return read_via_host
 
 
 def _setup_registry_authority(runtime_service: Any) -> None:
@@ -252,7 +297,7 @@ def setup_execution_backend(
 ) -> JobExecutionBackend:
     """装配 Job 执行面、运行时协调器及设备状态投影。"""
 
-    global _backend, _coordinator, _device_state_projection
+    global _backend, _coordinator, _device_state_projection, _release_log_notices
     if _backend is not None:
         return _backend
 
@@ -314,6 +359,16 @@ def setup_execution_backend(
     # 镜像成 job_status 回旧后端，因此也挂为 result bridge。
     if control_client is not None and getattr(control_client, "mirrors_job_results", False):
         backend.result_bridges.append(control_client)
+    elif control_client is not None:
+        from unilabos.utils.log_notices import log_notices
+
+        # 复用 runtime.v1 控制连接；旧后端的 legacy result bridge 不订阅此通知。
+        # 不落 durable outbox，避免日志噪声占用四库和调度事件序号。
+        _release_log_notices = log_notices.subscribe(
+            lambda notice: control_client._queue_message({
+                "action": "runtime_logs_changed", "data": notice.model_dump(),
+            })
+        )
     _coordinator = coordinator
     backend.start()
     backend.rebuild_status_incidents()
@@ -330,7 +385,11 @@ def shutdown_backend_services() -> None:
     """关闭执行 bridge 和四库组合根。"""
 
     global _backend, _coordinator, _materials, _materials_gateway
-    global _device_state_projection, _workflow_service, _scheduler
+    global _device_state_projection, _workflow_service, _scheduler, _release_log_notices
+
+    if _release_log_notices is not None:
+        _release_log_notices()
+        _release_log_notices = None
 
     if BasicConfig.backend == "ros2":
         from unilabos.backend.hostlink.network import shutdown_network_services

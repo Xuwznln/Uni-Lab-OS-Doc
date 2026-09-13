@@ -187,6 +187,21 @@ class CommandInboxRecord(TableObject, table=True):
         return self
 
 
+#: attempt 为何产生：首次派发 / 决策链 retry / 重启恢复 / 循环下一轮。
+AttemptTrigger = Literal["initial", "retry_decision", "recovery", "loop_iteration"]
+
+
+def validate_attempt_link(
+    retry_of_job_uuid: Optional[str], attempt_no: int, attempt_trigger: str
+) -> None:
+    """attempt 1 没有重试链；attempt > 1 要么是重试（带 ``retry_of_job_uuid``），要么是循环下一轮。"""
+
+    if retry_of_job_uuid is not None and attempt_no == 1:
+        raise ValueError("retry link and attempt number must agree")
+    if retry_of_job_uuid is None and attempt_no > 1 and attempt_trigger != "loop_iteration":
+        raise ValueError("retry link and attempt number must agree")
+
+
 class ExecutionJobRecord(TableObject, table=True):
     __tablename__: ClassVar[str] = "execution_job"
 
@@ -196,6 +211,7 @@ class ExecutionJobRecord(TableObject, table=True):
     attempt_group_uuid: NonEmptyStr
     retry_of_job_uuid: Optional[NonEmptyStr] = None
     attempt_no: int = Field(default=1, ge=1)
+    attempt_trigger: AttemptTrigger = Field(default="initial", sa_type=Text)
     execute_command_uuid: NonEmptyStr
     device_uuid: NonEmptyStr
     action_name: NonEmptyStr
@@ -266,8 +282,7 @@ class ExecutionJobRecord(TableObject, table=True):
 
     @model_validator(mode="after")
     def _validate_job(self) -> "ExecutionJobRecord":
-        if (self.retry_of_job_uuid is None) != (self.attempt_no == 1):
-            raise ValueError("retry link and attempt number must agree")
+        validate_attempt_link(self.retry_of_job_uuid, self.attempt_no, self.attempt_trigger)
         route_values = (self.route_uuid, self.endpoint_uuid, self.transport)
         if any(value is None for value in route_values) and any(
             value is not None for value in route_values
@@ -544,6 +559,9 @@ DATA_TABLES = (
             attempt_group_uuid TEXT NOT NULL CHECK (TRIM(attempt_group_uuid) <> ''),
             retry_of_job_uuid TEXT,
             attempt_no INTEGER NOT NULL DEFAULT 1 CHECK (attempt_no > 0),
+            attempt_trigger TEXT NOT NULL DEFAULT 'initial' CHECK (
+                attempt_trigger IN ('initial','retry_decision','recovery','loop_iteration')
+            ),
             execute_command_uuid TEXT NOT NULL UNIQUE,
             device_uuid TEXT NOT NULL CHECK (TRIM(device_uuid) <> ''),
             action_name TEXT NOT NULL CHECK (TRIM(action_name) <> ''),
@@ -597,6 +615,7 @@ DATA_TABLES = (
             CHECK (
                 (retry_of_job_uuid IS NULL AND attempt_no = 1)
                 OR (retry_of_job_uuid IS NOT NULL AND attempt_no > 1)
+                OR (attempt_trigger = 'loop_iteration' AND retry_of_job_uuid IS NULL AND attempt_no > 1)
             ),
             CHECK (
                 (endpoint_uuid IS NULL AND transport IS NULL AND route_uuid IS NULL)

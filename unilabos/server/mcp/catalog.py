@@ -1,0 +1,162 @@
+"""公开业务操作白名单（与 OpenLab protocol 的操作 ID 一致）。
+
+参数和返回值契约从微后端 OpenAPI / unilabos.protocol 获取，不在 MCP 重写。
+新增操作须显式登记；未列出的控制面写操作永远不会自动暴露给 AI。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Operation:
+    id: str
+    domain: str
+    method: str
+    path: str
+    summary: str
+    role: str
+
+    @property
+    def tool_name(self) -> str:
+        return self.id.replace(".", "_").replace("-", "_")
+
+    @property
+    def mutates(self) -> bool:
+        return self.method != "GET"
+
+
+OPERATIONS: tuple[Operation, ...] = (
+    Operation("system.reset.preview", "system", "GET", "/api/v1/reset", "全量重置范围及确认令牌", "any"),
+    Operation("system.reset.request", "system", "POST", "/api/v1/reset", "停机归档全部业务数据", "any"),
+    Operation("system.health", "system", "GET", "/api/v1/health", "健康状态：scheduler local/remote、execution ready/disabled", "any"),
+    Operation("system.ping", "system", "GET", "/api/v1/ping", "HTTP ping-pong：回显客户端时间戳并附服务端时钟（链路时延 / 时钟偏差）", "any"),
+    Operation("system.hostlink.peers", "system", "GET", "/api/v1/hostlink/peers", "HostLink 组网：host/slave 角色、在线 peer 与设备档案", "any"),
+    Operation("system.scheduler.resources", "system", "GET", "/api/v1/scheduler/resources", "本机调度资源快照（503 = 调度权威在远端）", "any"),
+    Operation("system.restart.status", "system", "GET", "/api/v1/restart", "安静点重启等待状态", "any"),
+    Operation("system.restart.request", "system", "POST", "/api/v1/restart", "登记安静点重启（暂停派发，active job 清空后重启）", "any"),
+    Operation("system.restart.cancel", "system", "DELETE", "/api/v1/restart", "取消等待中的重启并恢复派发", "any"),
+    Operation("system.log-sources.list", "system", "GET", "/api/v1/hostlink/log-sources", "Host 与各 Slave 日志来源目录", "host"),
+    Operation("system.logs.read", "system", "GET", "/api/v1/hostlink/logs", "有界增量读取进程日志（每个读取者独立游标）", "host"),
+    Operation("runtime-v1.sessions.list", "runtime-v1", "GET", "/api/v1/runtime/sessions", "Backend 控制会话列表", "any"),
+    Operation("runtime-v1.sessions.get", "runtime-v1", "GET", "/api/v1/runtime/sessions/{session_uuid}", "Backend 控制会话详情", "any"),
+    Operation("runtime-v1.endpoints.list", "runtime-v1", "GET", "/api/v1/runtime/endpoints", "执行 endpoint 快照：设备路由 + 动作能力（设备目录权威）", "any"),
+    Operation("runtime-v1.endpoints.get", "runtime-v1", "GET", "/api/v1/runtime/endpoints/{endpoint_uuid}", "执行 endpoint 快照详情", "any"),
+    Operation("runtime-v1.commands.list", "runtime-v1", "GET", "/api/v1/runtime/commands", "Backend command inbox 列表", "any"),
+    Operation("runtime-v1.commands.get", "runtime-v1", "GET", "/api/v1/runtime/commands/{command_uuid}", "Backend command inbox 详情", "any"),
+    Operation("runtime-v1.jobs.list", "runtime-v1", "GET", "/api/v1/runtime/jobs", "执行 job 列表（status/device_uuid 过滤）", "any"),
+    Operation("runtime-v1.jobs.get", "runtime-v1", "GET", "/api/v1/runtime/jobs/{job_uuid}", "执行 job 详情", "any"),
+    Operation("runtime-v1.adapter-commands.list", "runtime-v1", "GET", "/api/v1/runtime/adapter-commands", "Adapter durable outbox 列表", "any"),
+    Operation("runtime-v1.adapter-commands.get", "runtime-v1", "GET", "/api/v1/runtime/adapter-commands/{adapter_command_uuid}", "Adapter durable outbox 详情", "any"),
+    Operation("runtime-v1.backend-events.list", "runtime-v1", "GET", "/api/v1/runtime/backend-events", "Backend event durable outbox 列表", "any"),
+    Operation("runtime-v1.backend-events.get", "runtime-v1", "GET", "/api/v1/runtime/backend-events/{event_uuid}", "Backend event durable outbox 详情", "any"),
+    Operation("workflow.workflow.create", "workflow", "POST", "/api/v1/workflows", "创建 Workflow 定义", "any"),
+    Operation("workflow.workflow.from-template", "workflow", "POST", "/api/v1/workflows/from-template", "注册表工作流模板按角色绑定实例化为工作流（脚本入口；同模板同绑定幂等）", "any"),
+    Operation("workflow.workflow.list", "workflow", "GET", "/api/v1/workflows", "Workflow 定义分页列表", "any"),
+    Operation("workflow.workflow.get", "workflow", "GET", "/api/v1/workflows/{workflow_uuid}", "Workflow 定义详情", "any"),
+    Operation("workflow.workflow.update", "workflow", "PUT", "/api/v1/workflows/{workflow_uuid}", "更新 Workflow 定义元数据", "any"),
+    Operation("workflow.workflow.delete", "workflow", "DELETE", "/api/v1/workflows/{workflow_uuid}", "软删除 Workflow 并级联节点/边", "any"),
+    Operation("workflow.graph.get", "workflow", "GET", "/api/v1/workflows/{workflow_uuid}/graph", "整图 hydration（nodes/edges/node_templates/handle_templates）", "any"),
+    Operation("workflow.graph.save", "workflow", "PUT", "/api/v1/workflows/{workflow_uuid}/graph", "revision 乐观锁全量协调 Graph", "any"),
+    Operation("workflow.task.create", "workflow", "POST", "/api/v1/workflow-tasks", "提交运行：整图（workflow）或单点设备动作（ad_hoc_device_action）", "any"),
+    Operation("workflow.task.list", "workflow", "GET", "/api/v1/workflow-tasks", "运行分页列表（status/workflow_uuid 过滤）", "any"),
+    Operation("workflow.task.get", "workflow", "GET", "/api/v1/workflow-tasks/{task_uuid}", "运行详情", "any"),
+    Operation("workflow.task.command", "workflow", "POST", "/api/v1/workflow-tasks/{task_uuid}/commands", "逐步任务：放行一个动作或转为自动执行（版本校验与幂等）", "any"),
+    Operation("workflow.task.jobs", "workflow", "GET", "/api/v1/workflow-tasks/{task_uuid}/jobs", "运行的全部 attempt（节点作业）平铺列表", "any"),
+    Operation("workflow.task.node-runs", "workflow", "GET", "/api/v1/workflow-tasks/{task_uuid}/node-runs", "运行的节点运行视图：每节点一条，当前 attempt 结果 + attempts 历史", "any"),
+    Operation("workflow.node-run.get", "workflow", "GET", "/api/v1/workflow-node-runs/{run_uuid}", "节点运行详情（含 attempts）", "any"),
+    Operation("workflow.task.manual-confirmations", "workflow", "GET", "/api/v1/workflow-tasks/{task_uuid}/manual-confirmations", "task 的人工确认待办与历史", "any"),
+    Operation("workflow.manual-confirmation.get", "workflow", "GET", "/api/v1/workflow-manual-confirmations/{confirmation_uuid}", "人工确认详情", "any"),
+    Operation("workflow.manual-confirmation.decide", "workflow", "POST", "/api/v1/workflow-manual-confirmations/{confirmation_uuid}/decision", "提交人工确认决策", "any"),
+    Operation("workflow.task.manual-confirmation.decide", "workflow", "POST", "/api/v1/workflow-tasks/{task_uuid}/manual-confirmations/{confirmation_uuid}/decision", "按任务校验并提交人工确认决策", "any"),
+    Operation("workflow.task.interventions", "workflow", "GET", "/api/v1/workflow-tasks/{task_uuid}/interventions", "task 的干预记录", "any"),
+    Operation("workflow.job.get", "workflow", "GET", "/api/v1/workflow-node-jobs/{job_uuid}", "节点作业详情", "any"),
+    Operation("workflow.job.results", "workflow", "GET", "/api/v1/workflow-node-jobs/{job_uuid}/results", "job 执行结果", "any"),
+    Operation("workflow.job.feedback-history", "workflow", "GET", "/api/v1/workflow-node-jobs/{job_uuid}/feedback-history", "job 反馈归档", "any"),
+    Operation("workflow.authoring.get", "workflow", "GET", "/api/v1/workflows/{workflow_uuid}/authoring", "Authoring 状态机聚合（Draft/Candidate）", "any"),
+    Operation("workflow.authoring.draft", "workflow", "PUT", "/api/v1/workflows/{workflow_uuid}/authoring/draft", "保存 Draft 源码（hash+revision 前置校验）", "any"),
+    Operation("workflow.authoring.apply", "workflow", "POST", "/api/v1/workflows/{workflow_uuid}/authoring/apply", "Apply Candidate 到 Graph", "any"),
+    Operation("registry.entries.list", "registry", "GET", "/api/v1/registry/entries", "注册表条目状态列表（status 过滤 active/pending/removed/unusable）", "any"),
+    Operation("registry.entries.get", "registry", "GET", "/api/v1/registry/entries/{name}", "条目详情（含生效/挂起 payload 与冲突明细）", "any"),
+    Operation("registry.pending-impacts.list", "registry", "GET", "/api/v1/registry/pending-impacts", "挂起条目影响面：冲突 action 反查受影响 workflow 节点", "any"),
+    Operation("registry.entry-versions.list", "registry", "GET", "/api/v1/registry/entries/{name}/versions", "条目版本历史（新在前）", "any"),
+    Operation("registry.entry-versions.get", "registry", "GET", "/api/v1/registry/entries/{name}/versions/{version}", "条目单版本全文", "any"),
+    Operation("registry.entries.apply", "registry", "POST", "/api/v1/registry/entries/{name}/apply", "升级：挂起版本切换为生效版本", "any"),
+    Operation("registry.entries.dismiss", "registry", "POST", "/api/v1/registry/entries/{name}/dismiss", "忽略挂起版本（生效版本不动，历史保留）", "any"),
+    Operation("registry.entries.restore", "registry", "POST", "/api/v1/registry/entries/{name}/restore/{version}", "历史版本还原为新的生效版本", "any"),
+    Operation("registry.reports.list", "registry", "GET", "/api/v1/registry/reports", "Edge 上报批次统计", "any"),
+    Operation("registry.workflow-templates.list", "registry", "GET", "/api/v1/registry/workflow-templates", "生效的设备包 @workflow 工作流模板（角色占位，插入画布时绑定设备）", "any"),
+    Operation("materials-v1.templates.list", "materials-v1", "GET", "/api/v1/materials/templates", "资源模板列表（含 registry 全量定义）", "any"),
+    Operation("materials-v1.templates.get", "materials-v1", "GET", "/api/v1/materials/templates/{template_uuid}", "资源模板详情", "any"),
+    Operation("materials-v1.templates.create", "materials-v1", "POST", "/api/v1/materials/templates", "新建模板（权威分配 uuid）", "any"),
+    Operation("materials-v1.templates.put", "materials-v1", "PUT", "/api/v1/materials/templates/{template_uuid}", "更新模板", "any"),
+    Operation("materials-v1.templates.delete", "materials-v1", "DELETE", "/api/v1/materials/templates/{template_uuid}", "删除未被引用的模板", "any"),
+    Operation("materials-v1.registry-classes.list", "materials-v1", "GET", "/api/v1/materials/registry-classes", "registry 可实例化资源类目录（出库选择器）", "any"),
+    Operation("materials-v1.instances.list", "materials-v1", "GET", "/api/v1/materials/instances", "物料聚合列表（roots_only / name 精确搜索）", "any"),
+    Operation("materials-v1.instances.by-resource-id", "materials-v1", "GET", "/api/v1/materials/instances/by-resource-id/{resource_id}", "按 resource_id 读取物料聚合", "any"),
+    Operation("materials-v1.instances.get", "materials-v1", "GET", "/api/v1/materials/instances/{material_uuid}", "物料聚合详情", "any"),
+    Operation("materials-v1.instances.tree", "materials-v1", "GET", "/api/v1/materials/instances/{material_uuid}/tree", "物料树一致性快照", "any"),
+    Operation("materials-v1.instances.instantiate", "materials-v1", "POST", "/api/v1/materials/instantiate", "出库：按 registry 资源类实例化并权威登记", "any"),
+    Operation("materials-v1.trees.create", "materials-v1", "POST", "/api/v1/materials/trees", "提交完整创建树", "any"),
+    Operation("materials-v1.instances.patch", "materials-v1", "PATCH", "/api/v1/materials/instances/{material_uuid}", "修改标识字段（名称/条码/生命周期…）", "any"),
+    Operation("materials-v1.instances.data", "materials-v1", "PUT", "/api/v1/materials/instances/{material_uuid}/data", "写入内容物与业务数据", "any"),
+    Operation("materials-v1.instances.position", "materials-v1", "PUT", "/api/v1/materials/instances/{material_uuid}/position", "写入位置/尺寸", "any"),
+    Operation("materials-v1.instances.delete", "materials-v1", "DELETE", "/api/v1/materials/instances/{material_uuid}", "删除物料（可递归）并释放位点", "any"),
+    Operation("materials-v1.move", "materials-v1", "POST", "/api/v1/materials/move", "权威内换位点/换父物料", "any"),
+    Operation("materials-v1.transfer", "materials-v1", "POST", "/api/v1/materials/transfer", "跨设备转运并同步两端设备", "any"),
+    Operation("materials-v1.notify-device", "materials-v1", "POST", "/api/v1/materials/notify-device", "把权威变更分发到目标设备", "host"),
+    Operation("materials-v1.links.list", "materials-v1", "GET", "/api/v1/materials/links", "拓扑边查询", "any"),
+    Operation("materials-v1.links.upsert", "materials-v1", "POST", "/api/v1/materials/links", "拓扑边 upsert（幂等）", "any"),
+    Operation("materials-v1.links.delete", "materials-v1", "DELETE", "/api/v1/materials/links/{link_uuid}", "删除拓扑边", "any"),
+    Operation("materials-v1.lots.list", "materials-v1", "GET", "/api/v1/materials/lots", "库存批次列表", "any"),
+    Operation("materials-v1.lots.get", "materials-v1", "GET", "/api/v1/materials/lots/{lot_uuid}", "库存批次详情", "any"),
+    Operation("materials-v1.lots.inbound", "materials-v1", "POST", "/api/v1/materials/lots/inbound", "批次入库或补充", "any"),
+    Operation("materials-v1.reservations.list", "materials-v1", "GET", "/api/v1/materials/reservations", "库存预留列表", "any"),
+    Operation("materials-v1.reservations.get", "materials-v1", "GET", "/api/v1/materials/reservations/{reservation_uuid}", "库存预留详情", "any"),
+    Operation("materials-v1.reservations.by-job", "materials-v1", "GET", "/api/v1/materials/reservations/by-job/{job_uuid}", "按 Job 读取库存预留", "any"),
+    Operation("materials-v1.changes.list", "materials-v1", "GET", "/api/v1/materials/changes", "物料 append-only 变更账本", "any"),
+    Operation("graphs-v1.graphs.list", "graphs-v1", "GET", "/api/v1/graphs", "图快照分页列表", "any"),
+    Operation("graphs-v1.graphs.get", "graphs-v1", "GET", "/api/v1/graphs/{identity}", "按 uuid 或 name 读取图", "any"),
+    Operation("graphs-v1.graphs.payload", "graphs-v1", "GET", "/api/v1/graphs/{identity}/payload", "图快照 node-link 载荷", "any"),
+    Operation("graphs-v1.graphs.live", "graphs-v1", "GET", "/api/v1/graphs/live/payload", "当前真实拓扑（material + material_link 实时序列化）", "any"),
+    Operation("graphs-v1.graphs.upsert", "graphs-v1", "POST", "/api/v1/graphs", "上传/更新图快照", "any"),
+    Operation("graphs-v1.graphs.delete", "graphs-v1", "DELETE", "/api/v1/graphs/{identity}", "删除图快照", "any"),
+    Operation("telemetry-v1.events.list", "telemetry-v1", "GET", "/api/v1/telemetry/events", "遥测追加事件查询", "any"),
+    Operation("telemetry-v1.events.get", "telemetry-v1", "GET", "/api/v1/telemetry/events/{event_uuid}", "遥测事件详情", "any"),
+    Operation("telemetry-v1.sources.cursor", "telemetry-v1", "GET", "/api/v1/telemetry/sources/{endpoint_uuid}/cursor", "endpoint 遥测来源游标", "any"),
+    Operation("telemetry-v1.states.list", "telemetry-v1", "GET", "/api/v1/telemetry/states", "设备最新状态快照列表", "any"),
+    Operation("telemetry-v1.states.get", "telemetry-v1", "GET", "/api/v1/telemetry/states/{endpoint_uuid}/{device_uuid}", "设备最新状态快照", "any"),
+    Operation("history-v1.payloads.get", "history-v1", "GET", "/api/v1/history/payloads/{payload_uuid}", "不可变 payload 元数据/正文", "any"),
+    Operation("history-v1.events.list", "history-v1", "GET", "/api/v1/history/events", "统一 append-only 历史流", "any"),
+    Operation("history-v1.events.get", "history-v1", "GET", "/api/v1/history/events/{event_uuid}", "统一历史事件详情", "any"),
+    Operation("history-v1.events.replacement-chain", "history-v1", "GET", "/api/v1/history/events/{event_uuid}/replacement-chain", "结果替换审计链", "any"),
+    Operation("decisions.status-incidents.list", "decisions", "GET", "/api/v1/status-incidents", "状态联锁 incident 与调度 hold 快照", "host"),
+    Operation("decisions.status-incidents.resolve", "decisions", "POST", "/api/v1/status-incidents/{incident_id}", "提交状态联锁决策（仅限 Host 返回的 options）", "host"),
+    Operation("decisions.error-decisions.list", "decisions", "GET", "/api/v1/error-decisions", "待处理动作异常", "host"),
+    Operation("decisions.error-decisions.resolve", "decisions", "POST", "/api/v1/error-decisions/{decision_id}", "处理动作异常（重试/跳过/中止/人工替换结果）", "host"),
+    Operation("driver-packages.inventory", "driver-packages", "GET", "/api/v1/driver-packages", "驱动包台账 + 本次启动扫描目录 + 是否需重启", "host"),
+    Operation("driver-packages.catalog", "driver-packages", "GET", "/api/v1/driver-packages/catalog", "官方 / 社区驱动包目录（远程索引 + 本地补充），供一键安装", "host"),
+    Operation("driver-packages.install", "driver-packages", "POST", "/api/v1/driver-packages/install", "安装驱动包：GitHub 仓库 / 归档地址下载到 unilabos_data 或本机目录原地登记，uv 预装依赖，返回后台 operation", "host"),
+    Operation("driver-packages.operations.list", "driver-packages", "GET", "/api/v1/driver-packages/operations", "最近的安装 / 卸载操作", "host"),
+    Operation("driver-packages.operations.get", "driver-packages", "GET", "/api/v1/driver-packages/operations/{operation_id}", "轮询单个操作的状态与日志（下载 / 依赖安装 / 扫描）", "host"),
+    Operation("driver-packages.set-enabled", "driver-packages", "PUT", "/api/v1/driver-packages/{name}/enabled", "启用 / 停用驱动包（下次启动生效）", "host"),
+    Operation("driver-packages.uninstall", "driver-packages", "DELETE", "/api/v1/driver-packages/{name}", "删除 unilabos_data 里的源码树并移出台账，返回后台 operation", "host"),
+    Operation("driver-packages.graphs.list", "driver-packages", "GET", "/api/v1/driver-packages/{name}/graphs", "驱动包随包设备图（data-files share/<包>/graph 或源码 graph/）", "host"),
+    Operation("driver-packages.graphs.get", "driver-packages", "GET", "/api/v1/driver-packages/{name}/graphs/{graph_name}", "随包设备图的 node-link 载荷", "host"),
+    Operation("driver-packages.graphs.launch", "driver-packages", "POST", "/api/v1/driver-packages/{name}/graphs/{graph_name}/launch", "把随包图作为受管设备进程拉起（同名进程存在则更新并重启）", "host"),
+    Operation("device-processes.list", "device-processes", "GET", "/api/v1/device-processes", "全部受管进程（规格 + 运行态）与子进程应连的 HostLink 地址", "host"),
+    Operation("device-processes.device-classes", "device-processes", "GET", "/api/v1/device-processes/device-classes", "可配置的设备类（注册表已加载 + 驱动包扫描到）", "host"),
+    Operation("device-processes.create", "device-processes", "POST", "/api/v1/device-processes", "新建受管进程：设备节点 + 驱动包 + 重启策略", "host"),
+    Operation("device-processes.get", "device-processes", "GET", "/api/v1/device-processes/{process_id}", "单个受管进程", "host"),
+    Operation("device-processes.update", "device-processes", "PUT", "/api/v1/device-processes/{process_id}", "修改规格（运行中需重启生效）", "host"),
+    Operation("device-processes.delete", "device-processes", "DELETE", "/api/v1/device-processes/{process_id}", "停止并删除受管进程", "host"),
+    Operation("device-processes.start", "device-processes", "POST", "/api/v1/device-processes/{process_id}/start", "拉起子进程（已在运行 409）", "host"),
+    Operation("device-processes.stop", "device-processes", "POST", "/api/v1/device-processes/{process_id}/stop", "结束子进程（不触发看护重启）", "host"),
+    Operation("device-processes.restart", "device-processes", "POST", "/api/v1/device-processes/{process_id}/restart", "停止后重新拉起", "host"),
+    Operation("lab-v1.layout.get", "lab-v1", "GET", "/api/v1/lab/layout", "实验室布局文档（从未保存时 revision 0）", "any"),
+    Operation("lab-v1.layout.put", "lab-v1", "PUT", "/api/v1/lab/layout", "整份替换布局（revision 乐观锁，409 = 过期）", "any"),
+    Operation("lab-v1.layout.reset", "lab-v1", "DELETE", "/api/v1/lab/layout", "重置布局为未保存状态", "any"),
+    Operation("debug.databases.list", "debug", "GET", "/api/v1/debug/databases", "四库文件状态与每张表行数", "any"),
+    Operation("debug.databases.table", "debug", "GET", "/api/v1/debug/databases/{database}/tables/{table}", "单表分页浏览（列定义 + 行数据）", "any"),
+)

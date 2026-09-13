@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import uuid4
 
 from pylabrobot.resources import Coordinate
 import pytest
@@ -192,6 +193,226 @@ def test_snapshot_observer_diffs_the_complete_root_with_all_descendants(
 
     try:
         asyncio.run(run())
+    finally:
+        materials.close()
+
+
+class _CountingGateway:
+    """记录每个网关方法被调用的次数：快照上行到底向服务器发了什么。"""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.calls: dict[str, int] = {}
+
+    def reset(self) -> None:
+        self.calls.clear()
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._inner, name)
+        if not callable(attr):
+            return attr
+
+        def counted(*args, **kwargs):
+            self.calls[name] = self.calls.get(name, 0) + 1
+            return attr(*args, **kwargs)
+
+        return counted
+
+
+def _deck_with_wells(materials: MaterialsService, service: AuthorityResourceService):
+    deck = _container("deck")
+    for name in ("w1", "w2", "w3"):
+        deck.assign_child_resource(_container(name), Coordinate.zero())
+    created = asyncio.run(service.create_resources("device-1", "device-uuid", deck))
+    return created.resources[0]
+
+
+def test_snapshot_flush_uses_cached_baseline_and_local_diff(tmp_path) -> None:
+    """设备实例是工作真相：flush 不为算归属 / 算 diff 读服务器。
+
+    首次 flush 读一次基线；之后无变化的 flush 零请求，有变化的 flush 只有一次
+    apply_snapshot，基线由返回值刷新。
+    """
+    materials = MaterialsService(tmp_path / "materials.db")
+    gateway = _CountingGateway(LocalMaterialsClient(materials))
+    service = AuthorityResourceService(gateway)
+    try:
+        root = _deck_with_wells(materials, service)
+        gateway.reset()
+
+        # 首次：一次 get_tree 建基线，无变化不 apply；绝不逐节点 get_material
+        asyncio.run(service.snapshot_resource_tree("device-1", "device-uuid", root))
+        assert gateway.calls == {"get_tree": 1}
+
+        # 无变化再 flush：零服务器调用
+        gateway.reset()
+        asyncio.run(service.snapshot_resource_tree("device-1", "device-uuid", root))
+        assert gateway.calls == {}
+
+        # 改一个孔：只有一次 apply_snapshot，不读基线、不 compare_snapshot
+        gateway.reset()
+        root.children[1].tracker.set_liquids([("water", 5.0, "ul")])
+        asyncio.run(service.snapshot_resource_tree("device-1", "device-uuid", root))
+        assert gateway.calls == {"apply_snapshot": 1}
+        stored = materials.get_material(root.children[1].unilabos_uuid)
+        assert [(s.name, s.quantity) for s in stored.data.substances] == [("water", 5.0)]
+
+        # 基线已由 apply 结果刷新：紧接着的无变化 flush 仍是零请求
+        gateway.reset()
+        asyncio.run(service.snapshot_resource_tree("device-1", "device-uuid", root))
+        assert gateway.calls == {}
+    finally:
+        materials.close()
+
+
+def test_partial_update_derives_roots_locally(tmp_path) -> None:
+    """materials.update(某个孔) 的根归属沿本地 .parent 推导，不再逐节点问权威。"""
+    materials = MaterialsService(tmp_path / "materials.db")
+    gateway = _CountingGateway(LocalMaterialsClient(materials))
+    service = AuthorityResourceService(gateway)
+    try:
+        root = _deck_with_wells(materials, service)
+        gateway.reset()
+        well = root.children[0]
+        well.tracker.set_liquids([("buffer", 9.0, "ul")])
+
+        service.update_resources_sync("device-1", "device-uuid", well)
+
+        assert "get_material" not in gateway.calls
+        assert gateway.calls["get_tree"] == 1 and gateway.calls["apply_snapshot"] == 1
+        assert materials.get_material(well.unilabos_uuid).data.substances[0].name == "buffer"
+    finally:
+        materials.close()
+
+
+def test_stale_baseline_is_refetched_on_conflict_and_after_authority_moves(tmp_path) -> None:
+    """外部改了权威（版本前进 / 结构变化）：靠 precondition 冲突和下行作废基线各重拉一次。"""
+    from unilabos.protocol.materials import MaterialMove
+
+    materials = MaterialsService(tmp_path / "materials.db")
+    gateway = _CountingGateway(LocalMaterialsClient(materials))
+    service = AuthorityResourceService(gateway)
+    other = AuthorityResourceService(LocalMaterialsClient(materials))
+    try:
+        root = _deck_with_wells(materials, service)
+        asyncio.run(service.snapshot_resource_tree("device-1", "device-uuid", root))
+
+        # 另一方（前端 / 其它设备）推进了权威版本：本地基线过期 → 冲突 → 重拉 → 成功
+        other_view = asyncio.run(other.get_resources("x", [root.unilabos_uuid], True))
+        other_well = other_view.to_plr_resources()[0].children[2]
+        other_well.tracker.set_liquids([("acid", 1.0, "ul")])
+        other.update_resources_sync("other", "other-uuid", other_well)
+
+        gateway.reset()
+        root.children[0].tracker.set_liquids([("base", 2.0, "ul")])
+        asyncio.run(
+            service.update_resources(  # 默认重试路径（观察者路径把冲突交给上层重新冻结）
+                "device-1", "device-uuid", root
+            )
+        )
+        assert gateway.calls["apply_snapshot"] == 2 and gateway.calls["get_tree"] == 1
+        stored = {n.material.name: n for n in materials.get_tree(root.unilabos_uuid).nodes}
+        assert stored["w1"].data.substances[0].name == "base"
+        # 设备持有的实例是这棵树的工作真相：绕过设备直写权威的 w3 被设备的整树快照
+        # 覆盖回设备所见（外部改动应经下行投影到设备实例，而不是直写权威）
+        assert stored["w3"].data.substances == []
+
+        # 结构变化：一个孔被 move 走 → 本 service 的 move 作废基线；下一次 flush 重拉一次
+        gateway.reset()
+        moved = root.children[2]
+        service.move_resource_sync(
+            "device-1", "device-uuid", moved.unilabos_uuid, parent_material_uuid=None
+        )
+        root.unassign_child_resource(moved)
+        asyncio.run(service.snapshot_resource_tree("device-1", "device-uuid", root))
+        assert gateway.calls.get("get_tree") == 1
+        assert {n.material.name for n in materials.get_tree(root.unilabos_uuid).nodes} == {
+            "deck", "w1", "w2",
+        }
+    finally:
+        materials.close()
+
+
+def test_observer_reports_state_changes_as_node_deltas_and_structure_as_snapshot(
+    tmp_path,
+) -> None:
+    """状态变化只上报变了的节点（增量）；assign / unassign 走整树快照。"""
+    materials = MaterialsService(tmp_path / "materials.db")
+    gateway = _CountingGateway(LocalMaterialsClient(materials))
+    service = AuthorityResourceService(gateway)
+    root = _deck_with_wells(materials, service)
+
+    async def run() -> None:
+        observer = MaterialSnapshotObserver(
+            service,
+            device_id=lambda: "device-1",
+            device_uuid=lambda: "device-uuid",
+            schedule=asyncio.create_task,
+        )
+        observer.observe(root)
+        gateway.reset()
+
+        # 首次：缺版本表 → 拉一次根树；然后只发一个节点的增量
+        root.children[1].tracker.set_liquids([("water", 5.0, "ul")])
+        await observer.wait_idle()
+        assert observer.errors == ()
+        assert gateway.calls == {"get_tree": 1, "apply_delta": 1}
+        stored = materials.get_material(root.children[1].unilabos_uuid)
+        assert [(s.name, s.quantity) for s in stored.data.substances] == [("water", 5.0)]
+
+        # 再改两个孔：版本表已就位，一次增量、零读取；台面等其它节点版本不动
+        gateway.reset()
+        root.children[0].tracker.set_liquids([("acid", 1.0, "ul")])
+        root.children[2].tracker.set_liquids([("base", 2.0, "ul")])
+        await observer.wait_idle()
+        assert observer.errors == ()
+        assert gateway.calls == {"apply_delta": 1}
+        assert materials.get_material(root.unilabos_uuid).material.version == 1
+
+        # 结构变化（挂一个新孔）：退回严格整树快照 —— 新节点不在权威树里，快照按漂移拒绝
+        gateway.reset()
+        stray = _container("stray")
+        stray.unilabos_uuid = str(uuid4())
+        root.assign_child_resource(stray, Coordinate.zero())
+        await observer.wait_idle()
+        assert "apply_delta" not in gateway.calls
+        assert "apply_snapshot" not in gateway.calls  # 权威没有这个节点：整树快照按漂移拒绝，不落库
+        # 增量之后整树基线已丢 → 重拉一次；发现漂移再重拉一次确认 → 共两次读
+        assert gateway.calls.get("get_tree") == 2
+
+    try:
+        asyncio.run(run())
+    finally:
+        materials.close()
+
+
+def test_delta_conflict_refreshes_versions_and_retries(tmp_path) -> None:
+    materials = MaterialsService(tmp_path / "materials.db")
+    gateway = _CountingGateway(LocalMaterialsClient(materials))
+    service = AuthorityResourceService(gateway)
+    other = AuthorityResourceService(LocalMaterialsClient(materials))
+    try:
+        root = _deck_with_wells(materials, service)
+        well = root.children[0]
+        well.tracker.set_liquids([("a", 1.0, "ul")])
+        assert service.apply_node_deltas_sync("device-1", "device-uuid", root, [well]) is True
+
+        # 另一方推进了同一个孔的版本
+        view = asyncio.run(other.get_resources("x", [root.unilabos_uuid], True)).to_plr_resources()[0]
+        view.children[0].tracker.set_liquids([("b", 2.0, "ul")])
+        other.update_resources_sync("other", "other-uuid", view.children[0])
+
+        gateway.reset()
+        well.tracker.set_liquids([("c", 3.0, "ul")])
+        assert service.apply_node_deltas_sync("device-1", "device-uuid", root, [well]) is True
+        # 冲突 → 重拉一次根树刷新版本 → 第二次增量成功
+        assert gateway.calls == {"apply_delta": 2, "get_tree": 1}
+        assert materials.get_material(well.unilabos_uuid).data.substances[0].name == "c"
+
+        # 权威已是该状态：no_change 不是错误
+        gateway.reset()
+        assert service.apply_node_deltas_sync("device-1", "device-uuid", root, [well]) is False
+        assert gateway.calls == {"apply_delta": 1}
     finally:
         materials.close()
 

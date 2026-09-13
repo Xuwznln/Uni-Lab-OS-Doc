@@ -29,13 +29,16 @@ def build_job_start_payload(
     attempt_no: int = 1,
     server_info: Optional[Dict[str, Any]] = None,
     retry_of_job_uuid: Optional[str] = None,
+    attempt_trigger: str = "initial",
+    retry_count: Optional[int] = None,
 ) -> DispatchPayload:
     """构造执行器消费的 Backend ``execute_job`` 载荷。
 
     ``job_id`` 是本次 attempt 的 uuid；``node_run_uuid`` 是所属节点运行
-    （≡ runtime.v1 ``attempt_group_uuid``），``attempt_no`` 从 1 计，执行器据此
-    在错误决策报告里给出 ``retry_count``。``origin`` 标记生命周期 owner 是本机调度器，
-    执行面据此只把该 job 的生命周期回调路由给本机调度权威。
+    （≡ runtime.v1 ``attempt_group_uuid``），``attempt_no`` 从 1 计。``retry_count`` 是本节点
+    已重试的次数（执行器据此在错误决策报告里给出 ``retry_count / max_retries``）；循环体节点
+    每轮追加的 ``loop_iteration`` attempt 不算重试，所以不能从 ``attempt_no`` 推。``origin``
+    标记生命周期 owner 是本机调度器，执行面据此只把该 job 的生命周期回调路由给本机调度权威。
     """
     # test_latency 的 ping-pong 需要知道 Backend 真正签发该 attempt 的
     # wall-clock。它和 manual_confirm 的元数据一样属于控制面特殊字段，
@@ -63,7 +66,10 @@ def build_job_start_payload(
         scheduler_revision=scheduler_revision,
         node_run_uuid=node_run_uuid,
         attempt_no=int(attempt_no),
-        retry_count=max(int(attempt_no) - 1, 0),
+        retry_count=(
+            max(int(retry_count), 0) if retry_count is not None else max(int(attempt_no) - 1, 0)
+        ),
+        attempt_trigger=str(attempt_trigger or "initial"),
         origin=JOB_ORIGIN_LOCAL_SCHEDULER,
         sample_material={},
     )

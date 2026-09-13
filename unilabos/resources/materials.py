@@ -41,8 +41,10 @@ from unilabos.protocol.materials import InventoryMutation
 from unilabos.protocol.materials import (
     ACTOR_DEVICE,
     ACTOR_EDGE,
+    MaterialMove,
     MaterialTransfer,
     MaterialTransferItem,
+    MaterialTreeRead,
 )
 from unilabos.resources.objects.resource import EXTRA_BOUND_DEVICE
 from unilabos.utils.log import trace
@@ -502,9 +504,10 @@ def owner_device_of(
     *,
     gateway: MaterialGateway | None = None,
 ) -> str:
-    """推断物料所属的设备 id（沿权威 parent 链爬到根，读根 extra 的归属登记）。
+    """沿权威 parent 链找到最近的设备祖先，取其全局 resource_id 作为路由身份。
 
-    归属由两个写点维护，天然覆盖所有根树：
+    已挂在设备下的树以设备身份为准（包括工作站的子设备），不依赖额外重复标记。
+    尚未并入设备树的独立根仍由两个写点显式登记归属：
 
     - ``materials.create(..., node=)``：本地创建即登记（syncer / 驱动创建）；
     - ``DeviceNode.append_resource`` 挂载到设备自身（根树上台面）时登记。
@@ -517,8 +520,15 @@ def owner_device_of(
     uuid_ = material_uuid(value, "归属推断")
     current = gw.get_material(uuid_)
     seen = {uuid_}
-    while current.material.parent_material_uuid:
-        parent_uuid = str(current.material.parent_material_uuid)
+    while True:
+        identity = current.material
+        if identity.resource_type == "device":
+            # 设备图落库本来就有全局 ID。不能继续爬到工作站根，把子设备的物料误送给父设备；
+            # 也不能优先用物料自身的旧绑定，跨设备 transfer 后应跟随新的权威父链。
+            return str(identity.resource_id)
+        if not identity.parent_material_uuid:
+            break
+        parent_uuid = str(identity.parent_material_uuid)
         if parent_uuid in seen:
             raise ValueError(f"物料 {uuid_} 的权威 parent 链成环: {parent_uuid}")
         seen.add(parent_uuid)
@@ -808,18 +818,52 @@ def ensure(
 ) -> ResourceTreeSet:
     """确保权威中存在与输入 uuid「一模一样」的物料树，返回权威形态。
 
-    逐棵树按根 uuid 询问权威：已存在直接取权威树（以权威为准）；不存在则以
-    原 uuid 显式创建（带条件的 create，adopt 语义）。host / slave 开机图物料
-    对齐、出库扣减产物落库共用此入口；Slave 侧 gateway 自动经 HostLink。
+    逐棵树按根 uuid 询问权威：不存在则以原 uuid 显式创建（带条件的 create，
+    adopt 语义）；已存在则以权威树为准，只把图里有、权威该树下没有的子节点
+    （图中新挂到既有设备 / 台面上的物料）补建并挂到图声明的父节点与位点上。
+    已在权威别处的物料（运行期被移走）不动。host / slave 开机图物料对齐、出库
+    扣减产物落库共用此入口；Slave 侧 gateway 自动经 HostLink。
+
+    图里尚未实例化 Site 的设备节点（Graph Authority 不可达时的原始启动文件），
+    创建请求补上注册表 ``available_sites`` 定义，由权威发放 Site uuid：设备一落库
+    就带齐位点，而不是留下一行以后补不了 Site 的设备。
 
     ``actor_type`` / ``actor_uuid`` 落账本变更来源（前端来源 tag）：开机图对齐
     传 ``graph`` + 图 uuid，云端同步传 ``backend``，工作流出库传 ``workflow`` +
     ``job_uuid``；不传则为 ``edge`` 兜底。
     """
 
+    from unilabos.resources.adapters.device_site import (
+        fill_device_site_creates,
+        registry_device_site_templates,
+    )
+
     gw = gateway or resolve_materials_gateway()
     tree_set = _as_tree_set(resources)
     result = ResourceTreeSet([])
+    device_site_templates: Dict[str, Any] | None = None
+
+    def mutation(operation: str, target_uuid: str) -> InventoryMutation:
+        command_uuid = str(uuid4())
+        return InventoryMutation(
+            command_uuid=command_uuid,
+            effect_key=f"ensure_{operation}:{target_uuid}:{command_uuid}",
+            operation=operation,
+            actor_type=actor_type,
+            actor_uuid=actor_uuid or None,
+            job_uuid=job_uuid or None,
+        )
+
+    def create(subtree: ResourceTreeInstance) -> MaterialTreeRead:
+        nonlocal device_site_templates
+        request = resource_tree_to_create(ResourceTreeSet([subtree]), adopt_uuid=True)
+        if any(node.identity.resource_type == "device" for node in request.nodes):
+            if device_site_templates is None:
+                device_site_templates = registry_device_site_templates()
+            fill_device_site_creates(request, device_site_templates)
+        root_uuid = str(subtree.root_node.res_content.uuid)
+        return gw.create_tree(mutation("create_material_tree", root_uuid), request).data
+
     for tree in tree_set.trees:
         root_uuid = str(tree.root_node.res_content.uuid or "").strip()
         if not root_uuid:
@@ -829,26 +873,89 @@ def ensure(
             exists = True
         except Exception:
             exists = False
-        if exists:
-            result.trees.extend(_material_tree_set(gw, root_uuid, True).trees)
+        if not exists:
+            result.trees.extend(material_tree_to_resource_tree(create(tree)).trees)
             continue
-        command_uuid = str(uuid4())
-        request_mutation = InventoryMutation(
-            command_uuid=command_uuid,
-            effect_key=f"ensure_material_tree:{root_uuid}:{command_uuid}",
-            operation="create_material_tree",
-            actor_type=actor_type,
-            actor_uuid=actor_uuid or None,
-            job_uuid=job_uuid or None,
-        )
-        request = resource_tree_to_create(
-            ResourceTreeSet([tree]), adopt_uuid=True
-        )
-        created = gw.create_tree(request_mutation, request)
-        result.trees.extend(
-            material_tree_to_resource_tree(created.data).trees
-        )
+        authority = _material_tree_set(gw, root_uuid, True)
+        if _ensure_missing_descendants(gw, tree, authority, create, mutation):
+            authority = _material_tree_set(gw, root_uuid, True)
+        result.trees.extend(authority.trees)
     return result
+
+
+def _ensure_missing_descendants(
+    gw: MaterialGateway,
+    local: ResourceTreeInstance,
+    authority: ResourceTreeSet,
+    create: Any,
+    mutation: Any,
+) -> bool:
+    """把图中有、权威该树下没有的子树补建并挂到父节点/位点上；返回是否有变更。
+
+    父节点优先遍历：一个缺失节点连同其整个子树一次创建（adopt uuid），随后 move 到
+    图声明的父节点；父节点 Site 快照里标为被它占用的位点，按 label 映射到权威 Site。
+    uuid 已在权威别处（运行期被移到其它设备 / 台面）的物料不重建也不挪回。
+    """
+
+    known: dict[str, Any] = {
+        node.res_content.uuid: node.res_content for node in authority.all_nodes
+    }
+    changed = False
+    for node in local.get_all_nodes():
+        resource = node.res_content
+        uuid = str(resource.uuid or "")
+        parent_uuid = str(resource.uuid_parent or "")
+        if uuid in known or parent_uuid not in known:
+            # 父节点也缺失时，它已随祖先子树一起创建（否则本节点也不该在这里出现）
+            continue
+        try:
+            gw.get_material(uuid)
+            trace(
+                f"[materials.ensure] 图中 {resource.id}({uuid}) 已在权威别处，"
+                f"以权威为准不挪回 {parent_uuid}"
+            )
+            continue
+        except Exception:
+            pass
+        created = material_tree_to_resource_tree(create(ResourceTreeInstance(node)))
+        known.update(
+            (item.res_content.uuid, item.res_content) for item in created.all_nodes
+        )
+        site_uuid = _authority_site_occupied_by(
+            resource.parent, known[parent_uuid], uuid
+        )
+        gw.move_material(
+            mutation("move_material", uuid),
+            MaterialMove(
+                material_uuid=uuid,
+                parent_material_uuid=parent_uuid,
+                destination_site_uuid=site_uuid,
+            ),
+        )
+        trace(
+            f"[materials.ensure] 图中新增物料 {resource.id}({uuid}) 已建并挂到 "
+            f"{parent_uuid}" + (f" 位点 {site_uuid}" if site_uuid else "")
+        )
+        changed = True
+    return changed
+
+
+def _authority_site_occupied_by(
+    local_parent: Any, authority_parent: Any, occupant_uuid: str
+) -> Optional[str]:
+    """图中父节点 Site 快照里被 occupant 占用的位点，按 label 映射成权威 Site uuid。"""
+
+    for site in getattr(local_parent, "sites", None) or []:
+        if site.occupied_material_uuid != occupant_uuid:
+            continue
+        label = str(site.label).casefold()
+        for candidate in getattr(authority_parent, "sites", None) or []:
+            if str(candidate.label).casefold() == label:
+                return str(candidate.uuid)
+        raise ValueError(
+            f"图中 {occupant_uuid} 占用父节点位点 {site.label}，但权威父节点没有该位点"
+        )
+    return None
 
 
 def update(

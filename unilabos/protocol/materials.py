@@ -682,6 +682,91 @@ class MaterialSnapshotDiff(ServerObject):
         return bool(self.changes)
 
 
+# ── 增量同步：设备按 uuid 只上报变了的对象，权威按段合并 ───────────────────
+#
+# 整树快照（MaterialSnapshot）要求节点集合与权威完全一致，适合结构变化与漂移
+# 检测；日常的状态变化（体积、tip、位姿）用增量：每个节点只带要改的段，未给出
+# 的段沿用权威现值。乐观锁靠每个节点 / 位点自带的 expected_version。
+
+
+class MaterialDataDelta(ServerObject):
+    """data 段的增量：字段为 None 表示不改。``substances`` 给出即整体替换内容物列表。"""
+
+    data: Optional[JsonObject] = None
+    substances: Optional[list[MaterialSubstance]] = None
+    state_status: Optional[NonEmptyStr] = None
+    unknown_counter: Optional[int] = Field(default=None, ge=0)
+    observed_at_ms: int = Field(default=0, ge=0)
+
+    @property
+    def empty(self) -> bool:
+        return (
+            self.data is None
+            and self.substances is None
+            and self.state_status is None
+            and self.unknown_counter is None
+        )
+
+
+class SiteDelta(ServerObject):
+    """位点的非结构字段增量。
+
+    占用关系不在这里：谁占着哪个位点与父子关系绑定（占用物必须是位点 owner 的后代），
+    由 ``move_material`` / ``transfer_material`` 原子维护。
+    """
+
+    site_uuid: NonEmptyStr
+    expected_version: Optional[int] = Field(default=None, ge=1)
+    visible: Optional[bool] = None
+    meta_data: Optional[JsonObject] = None
+    extra: Optional[JsonObject] = None
+
+    @property
+    def empty(self) -> bool:
+        return self.visible is None and self.meta_data is None and self.extra is None
+
+
+class MaterialNodeDelta(ServerObject):
+    """一个物料节点的增量：至少带一个段。"""
+
+    material_uuid: NonEmptyStr
+    expected_version: Optional[int] = Field(default=None, ge=1)
+    expected_state_hash: Optional[NonEmptyStr] = None
+    data: Optional[MaterialDataDelta] = None
+    position: Optional[MaterialPosition] = None
+    sites: list[SiteDelta] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _has_a_section(self) -> "MaterialNodeDelta":
+        if (self.data is None or self.data.empty) and self.position is None and not self.sites:
+            raise ValueError("material node delta carries no section")
+        site_uuids = [site.site_uuid for site in self.sites]
+        if len(site_uuids) != len(set(site_uuids)):
+            raise ValueError("material node delta site_uuid values must be unique")
+        return self
+
+
+class MaterialDelta(ServerObject):
+    root_material_uuid: NonEmptyStr
+    nodes: list[MaterialNodeDelta]
+
+    @model_validator(mode="after")
+    def _validate_nodes(self) -> "MaterialDelta":
+        if not self.nodes:
+            raise ValueError("material delta requires at least one node")
+        uuids = [node.material_uuid for node in self.nodes]
+        if len(uuids) != len(set(uuids)):
+            raise ValueError("material delta material_uuid values must be unique")
+        return self
+
+
+class MaterialDeltaResult(ServerObject):
+    root_material_uuid: NonEmptyStr
+    applied_material_uuids: list[NonEmptyStr] = Field(default_factory=list)
+    applied_site_uuids: list[NonEmptyStr] = Field(default_factory=list)
+    unchanged_material_uuids: list[NonEmptyStr] = Field(default_factory=list)
+
+
 __all__ = [
     "ACTOR_BACKEND",
     "ACTOR_DEVICE",
@@ -721,6 +806,10 @@ __all__ = [
     "MaterialNodeCreate",
     "MaterialPatch",
     "MaterialPosition",
+    "MaterialDataDelta",
+    "MaterialDelta",
+    "MaterialDeltaResult",
+    "MaterialNodeDelta",
     "MaterialSnapshot",
     "MaterialSnapshotChange",
     "MaterialSnapshotDiff",
@@ -733,6 +822,7 @@ __all__ = [
     "ResourceTemplateRead",
     "ResourceTemplateWrite",
     "SiteCreate",
+    "SiteDelta",
     "SiteRead",
     "SiteWrite",
 ]

@@ -10,6 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from unilabos.protocol.base import canonical_hash
 from unilabos.server.api.runtime.registry import install_registry_api
 from unilabos.server.services.runtime.registry import (
     RegistryAuthorityError,
@@ -36,6 +37,28 @@ def _device(name: str, *, module: str = "pkg.mod:Cls", lock=None, goal=None) -> 
             "action_value_mappings": {"run": action},
         },
         "handles": [],
+    }
+
+
+def _workflow_template(name: str, display_name: str) -> dict[str, Any]:
+    """一个 @workflow 模板条目（``build_workflow_template_payload`` 的输出形状）。"""
+
+    return {
+        "id": name,
+        "registry_type": "workflow",
+        "uuid": "6c4a2f9e-3b1d-5f0a-9c2e-7d8b1a4e5f60",
+        "display_name": display_name,
+        "description": "",
+        "tags": ["demo"],
+        "roles": [
+            {"role": "class:rack_demo", "label": "rack_demo", "kind": "class",
+             "device_class": "rack_demo", "matches": ["rack_demo"]},
+        ],
+        "nodes": [
+            {"key": "step-0", "kind": "action", "role": "class:rack_demo",
+             "action_name": "load", "name": "装载", "param": {"site": "A1"}},
+        ],
+        "edges": [],
     }
 
 
@@ -386,6 +409,98 @@ class TestWorkflowReferenceRows:
         ]
 
 
+class TestHashedReport:
+    """按哈希增量上报：每个条目带 content_sha256，权威没有该哈希的才带 payload。"""
+
+    @staticmethod
+    def _entry(definition: dict[str, Any], *, with_payload: bool) -> dict[str, Any]:
+        return {
+            "id": definition["id"],
+            "content_sha256": canonical_hash(definition),
+            "payload": definition if with_payload else None,
+        }
+
+    def test_first_report_needs_payloads_and_digest_then_holds_them(self, service) -> None:
+        pump, stirrer = _device("pump"), _device("stirrer")
+        assert service.digest() == {"active": {}, "pending": {}}
+
+        report = service.report_entries(
+            [self._entry(pump, with_payload=True), self._entry(stirrer, with_payload=True)],
+            edge_uuid="host",
+        )
+        assert report["summary"]["counts"]["added"] == 2 and report["missing"] == []
+        digest = service.digest()
+        assert digest["active"] == {"pump": canonical_hash(pump), "stirrer": canonical_hash(stirrer)}
+        assert digest["pending"] == {}
+
+        # 第二次只发哈希：全部"未变"，不生成版本，不需要 payload
+        again = service.report_entries(
+            [self._entry(pump, with_payload=False), self._entry(stirrer, with_payload=False)]
+        )
+        assert again["summary"]["counts"]["unchanged"] == 2 and again["missing"] == []
+        assert service.list_entries()[0]["active_version"] == 1
+
+    def test_unknown_hash_without_payload_is_reported_missing_not_removed(self, service) -> None:
+        pump = _device("pump")
+        service.report([pump])
+        changed = _device("pump", goal={"speed": 9})
+
+        report = service.report_entries([self._entry(changed, with_payload=False)])
+        assert report["missing"] == ["pump"]
+        assert report["templates"] == []  # 身份只发给已落库的条目
+        # 条目仍在上报集合里：不能被当成"消失"而软移除，生效版本也不动
+        entry = service.entry_detail("pump")
+        assert "removed" not in entry["status"] and entry["active_version"] == 1
+
+        # Host 补上 payload 再报：正常升版本
+        report = service.report_entries([self._entry(changed, with_payload=True)])
+        assert report["missing"] == [] and report["summary"]["counts"]["updated"] == 1
+        assert service.entry_detail("pump")["active_version"] == 2
+
+    def test_claimed_hash_is_not_trusted_when_payload_is_present(self, service) -> None:
+        pump = _device("pump")
+        report = service.report_entries(
+            [{"id": "pump", "content_sha256": "deadbeef", "payload": pump}]
+        )
+        assert report["summary"]["counts"]["added"] == 1
+        assert service.digest()["active"]["pump"] == canonical_hash(pump)
+
+    def test_pending_hash_is_held_and_not_reversioned(self, service, refs) -> None:
+        service.report([_device("pump", goal={"speed": 1})])
+        refs.append(_ref_row("pump", "run"))
+        changed = _device("pump", goal={"speed": 2})
+        service.report([changed])  # 被引用的 action 变了 → 挂起 v2
+        digest = service.digest()
+        assert digest["pending"] == {"pump": canonical_hash(changed)}
+        assert digest["active"]["pump"] == canonical_hash(_device("pump", goal={"speed": 1}))
+
+        # Host 重启后再报同一份挂起内容：只发哈希即可，不再多生成版本
+        report = service.report_entries([self._entry(changed, with_payload=False)])
+        assert report["missing"] == []
+        assert [item["name"] for item in report["summary"]["pending"]] == ["pump"]
+        assert [v["version"] for v in service.entry_versions("pump")] == [2, 1]
+
+    def test_removed_entry_revives_by_hash_alone(self, service) -> None:
+        pump, stirrer = _device("pump"), _device("stirrer")
+        service.report([pump, stirrer])
+        service.report([pump])  # stirrer 软移除
+        assert "removed" in service.entry_detail("stirrer")["status"]
+        assert service.digest()["active"]["stirrer"] == canonical_hash(stirrer)
+
+        report = service.report_entries(
+            [self._entry(pump, with_payload=False), self._entry(stirrer, with_payload=False)]
+        )
+        assert report["summary"]["revived"] == ["stirrer"] and report["missing"] == []
+        assert service.action_definition("stirrer", "run") is not None
+
+    def test_entries_without_hash_or_payload_are_unusable(self, service) -> None:
+        report = service.report_entries([{"id": "pump"}, {"id": "", "content_sha256": "x"}])
+        assert [item["reason"] for item in report["summary"]["unusable"]] == [
+            "missing-payload-and-hash",
+            "missing-id",
+        ]
+
+
 class TestRegistryApi:
     @pytest.fixture()
     def client(self, service):
@@ -466,3 +581,213 @@ class TestRegistryApi:
         set_registry_service(None)
         response = TestClient(app).get("/api/v1/registry/entries")
         assert response.status_code == 503
+
+    def test_workflow_templates_ride_the_snapshot_report(self, client, service) -> None:
+        """包里的 @workflow 模板随同一份快照上报（独立键，旧权威忽略），与设备条目同一套
+        版本化：内容变了升版本、从快照里消失即软移除、再出现即复活。"""
+
+        template = _workflow_template("demo.workflows:tour", "位点操作演示")
+        response = client.post(
+            "/api/v1/resource-templates",
+            json={"resources": [_device("pump")], "workflow_templates": [template]},
+        ).json()
+        assert response["code"] == 0
+        assert [item["name"] for item in response["data"]["templates"]] == ["demo.workflows:tour", "pump"]
+        assert response["data"]["summary"]["counts"]["added"] == 2
+
+        listed = client.get("/api/v1/registry/workflow-templates").json()["data"]["templates"]
+        assert [item["uuid"] for item in listed] == [template["uuid"]]
+        assert listed[0]["nodes"][0]["action_name"] == "load"
+        assert service.get_workflow_template(template["uuid"])["display_name"] == "位点操作演示"
+
+        # 不认识的键类型 / 形状错误的模板进不可用明细，不进模板列表
+        broken = {**template, "id": "demo.workflows:broken", "uuid": "not-a-uuid"}
+        bad_guide = {**template, "id": "demo.workflows:bad_guide", "guide": {"steps": ["x"]}}
+        guided = {
+            **template,
+            "id": "demo.workflows:guided",
+            "guide": {"preparation": ["出库一块板"], "expected": ["T1 有板"], "notes": []},
+            "nodes": [{**template["nodes"][0], "description": "把样品放到 A1"}],
+        }
+        client.post(
+            "/api/v1/resource-templates",
+            json={
+                "resources": [_device("pump")],
+                "workflow_templates": [template, broken, bad_guide, guided],
+            },
+        )
+        assert [item["id"] for item in service.list_workflow_templates()] == [
+            "demo.workflows:guided",
+            "demo.workflows:tour",
+        ]
+        assert service.entry_detail("demo.workflows:broken")["unusable_reason"] == "missing-template-uuid"
+        assert service.entry_detail("demo.workflows:bad_guide")["unusable_reason"] == "invalid-guide"
+        stored_guided = next(
+            item for item in service.list_workflow_templates() if item["id"] == "demo.workflows:guided"
+        )
+        assert stored_guided["guide"]["preparation"] == ["出库一块板"]
+        assert stored_guided["nodes"][0]["description"] == "把样品放到 A1"
+
+        # 包卸载：快照里没有模板 → 软移除，列表为空；再上报复活
+        client.post("/api/v1/resource-templates", json={"resources": [_device("pump")]})
+        assert service.list_workflow_templates() == []
+        assert "removed" in service.entry_detail("demo.workflows:tour")["status"]
+        client.post(
+            "/api/v1/resource-templates",
+            json={"resources": [_device("pump")], "workflow_templates": [template]},
+        )
+        assert [item["uuid"] for item in service.list_workflow_templates()] == [template["uuid"]]
+
+        # 只认 resources 的旧客户端形状照常工作；workflow_templates 不是列表则 400
+        assert client.post(
+            "/api/v1/resource-templates",
+            json={"resources": [_device("pump")], "workflow_templates": {"x": 1}},
+        ).status_code == 400
+
+    def test_digest_and_hashed_report_shapes(self, client) -> None:
+        pump = _device("pump")
+        digest = client.get("/api/v1/registry/digest").json()["data"]
+        assert digest == {"protocol_version": "runtime.v1", "active": {}, "pending": {}}
+
+        response = client.post(
+            "/api/v1/resource-templates",
+            json={
+                "protocol_version": "runtime.v1",
+                "edge_uuid": "host-a",
+                "entries": [{"id": "pump", "content_sha256": canonical_hash(pump), "payload": pump}],
+            },
+        ).json()
+        assert response["code"] == 0
+        assert response["data"]["summary"]["counts"]["added"] == 1 and response["data"]["missing"] == []
+        assert client.get("/api/v1/registry/digest").json()["data"]["active"] == {
+            "pump": canonical_hash(pump)
+        }
+
+        # 只发哈希：对得上就"未变"，对不上进 missing
+        response = client.post(
+            "/api/v1/resource-templates",
+            json={"entries": [
+                {"id": "pump", "content_sha256": canonical_hash(pump)},
+                {"id": "stirrer", "content_sha256": canonical_hash(_device("stirrer"))},
+            ]},
+        ).json()["data"]
+        assert response["summary"]["counts"]["unchanged"] == 1 and response["missing"] == ["stirrer"]
+
+        # 形状错误（entries 不是列表 / 条目缺字段）→ 400
+        assert client.post("/api/v1/resource-templates", json={"entries": {"x": 1}}).status_code == 400
+        assert client.post(
+            "/api/v1/resource-templates", json={"entries": [{"content_sha256": "x"}]}
+        ).status_code == 400
+
+
+class _SessionOverTestClient:
+    """让 TemplateSynchronizer 的 requests.Session 调用落到 FastAPI TestClient 上。"""
+
+    def __init__(self, client: TestClient) -> None:
+        self.client = client
+        self.posted: list[dict[str, Any]] = []
+
+    @staticmethod
+    def _path(url: str) -> str:
+        from urllib.parse import urlsplit
+
+        return urlsplit(url).path
+
+    def get(self, url: str, headers=None, timeout=None):
+        return self.client.get(self._path(url), headers=headers or {})
+
+    def post(self, url: str, data=None, headers=None, timeout=None):
+        self.posted.append(json.loads(gzip.decompress(data)))
+        return self.client.post(self._path(url), content=data, headers=headers or {})
+
+
+class _FakeRegistry:
+    def __init__(self, devices: dict[str, Any]) -> None:
+        self.device_type_registry = devices
+        self.resource_type_registry: dict[str, Any] = {}
+        self.workflow_registry: dict[str, Any] = {}
+
+    def obtain_registry_device_info(self):
+        return [dict(item) for item in self.device_type_registry.values()]
+
+    def obtain_registry_resource_info(self):
+        return []
+
+
+class TestTemplateSynchronizerOverHttp:
+    """Host 侧上报客户端：首次全量、之后只发哈希、变更只发变更、缺定义补发、旧权威回退。"""
+
+    @pytest.fixture()
+    def stack(self, service):
+        app = FastAPI()
+        install_registry_api(app)
+        set_registry_service(service)
+        try:
+            yield TestClient(app)
+        finally:
+            set_registry_service(None)
+
+    @staticmethod
+    def _payload_names(posted: dict[str, Any]) -> list[str]:
+        return sorted(entry["id"] for entry in posted["entries"] if "payload" in entry)
+
+    def test_incremental_report_over_http(self, stack, service) -> None:
+        from unilabos.server.backend.legacy_adaptor.sync.templates import TemplateSynchronizer
+
+        registry = _FakeRegistry({"pump": _device("pump"), "stirrer": _device("stirrer")})
+        session = _SessionOverTestClient(stack)
+        synchronizer = TemplateSynchronizer("http://authority", session=session)
+
+        first = synchronizer.sync(registry)
+        assert first.summary["counts"]["added"] == 2
+        assert self._payload_names(session.posted[-1]) == ["pump", "stirrer"]  # 首次：全部定义
+
+        second = synchronizer.sync(registry)
+        assert second.summary["counts"]["unchanged"] == 2
+        assert self._payload_names(session.posted[-1]) == []  # 之后：只剩哈希清单
+        assert all("content_sha256" in entry for entry in session.posted[-1]["entries"])
+        assert second.template_uuids == {"pump": template_uuid("pump"), "stirrer": template_uuid("stirrer")}
+
+        registry.device_type_registry["pump"] = _device("pump", goal={"speed": 3})
+        third = synchronizer.sync(registry)
+        assert third.summary["counts"]["updated"] == 1 and third.summary["counts"]["unchanged"] == 1
+        assert self._payload_names(session.posted[-1]) == ["pump"]  # 只带变了的那个
+        assert service.entry_detail("pump")["active_version"] == 2
+
+    def test_missing_entries_are_resent_with_payload(self, stack, service, monkeypatch) -> None:
+        from unilabos.protocol.runtime.registry import RegistryDigest
+        from unilabos.server.backend.legacy_adaptor.sync.templates import (
+            TemplateSynchronizer,
+            collect_registry_templates,
+        )
+
+        registry = _FakeRegistry({"pump": _device("pump")})
+        session = _SessionOverTestClient(stack)
+        synchronizer = TemplateSynchronizer("http://authority", session=session)
+        # 索引声称权威已持有该哈希（例如取索引后权威被重置）：第一次只发哈希会被判 missing
+        projected_pump = collect_registry_templates(registry)[0][0]
+        stale = RegistryDigest(active={"pump": canonical_hash(projected_pump)})
+        monkeypatch.setattr(synchronizer, "_fetch_digest", lambda: stale)
+
+        report = synchronizer.sync(registry)
+        assert report.summary["counts"]["added"] == 1
+        assert len(session.posted) == 2
+        assert self._payload_names(session.posted[0]) == []
+        assert self._payload_names(session.posted[1]) == ["pump"]
+
+    def test_old_authority_without_digest_gets_full_snapshot(self, stack, monkeypatch) -> None:
+        from unilabos.server.backend.legacy_adaptor.sync.templates import TemplateSynchronizer
+
+        registry = _FakeRegistry({"pump": _device("pump")})
+        session = _SessionOverTestClient(stack)
+        original_get = session.get
+
+        def get_without_digest(url, headers=None, timeout=None):
+            if url.endswith("/registry/digest"):
+                return stack.get("/api/v1/registry/does-not-exist")  # 旧权威：404
+            return original_get(url, headers=headers, timeout=timeout)
+
+        monkeypatch.setattr(session, "get", get_without_digest)
+        report = TemplateSynchronizer("http://authority", session=session).sync(registry)
+        assert report.summary["counts"]["added"] == 1
+        assert "resources" in session.posted[-1] and "entries" not in session.posted[-1]

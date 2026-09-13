@@ -1,4 +1,4 @@
-"""@workflow 装饰器 + 构建 + 上报 + 端到端调度合同测试。"""
+"""@workflow 装饰器 + 模板载荷 + 按绑定实例化 + 端到端调度合同测试。"""
 
 from __future__ import annotations
 
@@ -12,10 +12,14 @@ from unilabos.registry.ast_registry_scanner import _parse_file
 from unilabos.registry.workflows import (
     DeviceCatalog,
     WorkflowBuildContext,
-    build_workflow_payload,
+    WorkflowTemplateBindingError,
+    build_workflow_template_payload,
+    class_role_id,
     clear_registered_workflows,
     get_registered_workflows,
-    report_workflows_to_service,
+    instantiated_workflow_uuid,
+    materialize_workflow_template,
+    upsert_workflow,
     workflow,
     workflow_uuid_for,
     _step_node_uuid,
@@ -77,26 +81,110 @@ def test_step_node_uuid_orders_lexicographically() -> None:
     assert _step_node_uuid(wf_uuid, 3) == _step_node_uuid(wf_uuid, 3)
 
 
-def test_build_payload_resolves_run_and_run_template() -> None:
+def test_template_payload_uses_roles_and_needs_no_device_graph() -> None:
+    """@workflow → 注册表模板条目：run 的角色是设备 id，run_template 的角色是设备类，
+    步骤按声明序用 edges 串成链；构建不依赖任何设备图（类无实例也能上报）。"""
+
+    @workflow(display_name="双步流", description="d", tags=["t"])
+    def two_steps(ctx: WorkflowBuildContext) -> None:
+        ctx.run("external-device/do_thing", {"a": 1})
+        ctx.run_template("nowhere_class/do_other", {"b": 2}, name="第二步")
+
+    definition = next(iter(get_registered_workflows().values()))
+    template = build_workflow_template_payload(definition)
+
+    assert template["registry_type"] == "workflow"
+    assert template["id"] == definition.source_path
+    assert template["uuid"] == definition.uuid
+    # 来源包 = 模块路径顶层包名（前端"设备包"徽标），module 为完整模块路径
+    assert template["module"] == definition.source_path.partition(":")[0]
+    assert template["package"] == template["module"].partition(".")[0]
+    assert (template["display_name"], template["description"], template["tags"]) == ("双步流", "d", ["t"])
+    assert template["roles"] == [
+        {"role": "external-device", "label": "external-device", "kind": "device",
+         "device_id": "external-device", "matches": ["external-device"]},
+        {"role": class_role_id("nowhere_class"), "label": "nowhere_class", "kind": "class",
+         "device_class": "nowhere_class", "matches": ["nowhere_class"]},
+    ]
+    assert [node["key"] for node in template["nodes"]] == ["step-0", "step-1"]
+    assert template["nodes"][0] == {
+        "key": "step-0", "kind": "action", "role": "external-device",
+        "action_name": "do_thing", "name": "external-device.do_thing", "param": {"a": 1},
+    }
+    assert template["nodes"][1]["role"] == class_role_id("nowhere_class")
+    assert template["nodes"][1]["name"] == "第二步"
+    assert template["edges"] == [{"source": "step-0", "target": "step-1"}]
+
+
+def test_template_payload_carries_guide_and_step_descriptions() -> None:
+    """guide（准备 / 预期 / 注意）+ 每步 description 组成前端"全流程"说明；
+    dict 形态与 WorkflowGuide 等价，空条目 / 未知键在声明时就拒绝。"""
+
+    from unilabos.registry.workflows import WorkflowGuide
+
+    @workflow(
+        display_name="有指引的流",
+        guide={
+            "preparation": ["物料仓储出库一块板", "挂到 bench 的 T1 位"],
+            "expected": ["台面报告里 T1 有板"],
+        },
+    )
+    def guided(ctx: WorkflowBuildContext) -> None:
+        ctx.run("bench/report", {}, name="台面报告", description="列出台面上每个位点的占用")
+        ctx.run("bench/clear", {})
+
+    template = build_workflow_template_payload(next(iter(get_registered_workflows().values())))
+    assert template["guide"] == {
+        "preparation": ["物料仓储出库一块板", "挂到 bench 的 T1 位"],
+        "expected": ["台面报告里 T1 有板"],
+        "notes": [],
+    }
+    assert template["nodes"][0]["description"] == "列出台面上每个位点的占用"
+    assert "description" not in template["nodes"][1]
+
+    clear_registered_workflows()
+
+    @workflow(display_name="无指引", guide=WorkflowGuide())
+    def plain(ctx: WorkflowBuildContext) -> None:
+        ctx.run("bench/report", {})
+
+    assert "guide" not in build_workflow_template_payload(next(iter(get_registered_workflows().values())))
+
+    with pytest.raises(ValueError, match="preparation / expected / notes"):
+        workflow(display_name="x", guide={"steps": ["a"]})
+    with pytest.raises(ValueError, match="空条目"):
+        workflow(display_name="x", guide={"expected": ["ok", "  "]})
+    with pytest.raises(ValueError, match="字符串列表"):
+        workflow(display_name="x", guide={"expected": "一句话"})
+
+
+def test_materialize_resolves_roles_and_builds_serial_nodes() -> None:
     @workflow(display_name="双步流")
     def two_steps(ctx: WorkflowBuildContext) -> None:
         ctx.run("external-device/do_thing", {"a": 1})
         ctx.run_template("demo_class/do_other", {"b": 2}, name="第二步")
 
     definition = next(iter(get_registered_workflows().values()))
+    template = build_workflow_template_payload(definition)
     catalog = _catalog()
-    payload = build_workflow_payload(definition, catalog)
+    payload = materialize_workflow_template(template, catalog)
 
-    assert payload["workflow_uuid"] == definition.uuid
     assert payload["name"] == "双步流"
     assert payload["edges"] == []
+    # 工作流 uuid 由模板 uuid + 绑定派生：同一组设备幂等，换设备则是另一个工作流
+    assert payload["bindings"] == {"external-device": "external-device", class_role_id("demo_class"): "device-1"}
+    assert payload["workflow_uuid"] == instantiated_workflow_uuid(definition.uuid, payload["bindings"])
+    assert payload["workflow_uuid"] != definition.uuid
+    other = materialize_workflow_template(template, catalog, {class_role_id("demo_class"): "dup-a"})
+    assert other["workflow_uuid"] != payload["workflow_uuid"]
+
     nodes = payload["nodes"]
     assert [node["action_name"] for node in nodes] == ["do_thing", "do_other"]
-    # run: 显式 device_id；设备不在目录时 material_uuid 稳定占位
+    # 设备角色：显式 device_id；设备不在目录时 material_uuid 稳定占位
     assert nodes[0]["meta_data"]["target_device_id"] == "external-device"
     assert uuid.UUID(nodes[0]["material_uuid"])
     assert nodes[0]["param"] == {"a": 1}
-    # run_template: 单实例自动填 device_id 与真实资源 uuid
+    # 类角色：单实例自动填 device_id 与真实资源 uuid
     assert nodes[1]["meta_data"]["target_device_id"] == "device-1"
     assert nodes[1]["material_uuid"] == catalog.by_device_id["device-1"]["uuid"]
     assert nodes[1]["name"] == "第二步"
@@ -107,14 +195,19 @@ def test_build_payload_resolves_run_and_run_template() -> None:
     assert nodes[1]["execution_policy"] == {"depends_on": [nodes[0]["uuid"]]}
 
 
-def test_run_template_requires_single_instance() -> None:
+def test_class_role_needs_binding_unless_single_instance() -> None:
     @workflow(display_name="多实例流")
     def ambiguous(ctx: WorkflowBuildContext) -> None:
         ctx.run_template("dup_class/act", {})
 
-    definition = next(iter(get_registered_workflows().values()))
-    with pytest.raises(ValueError, match="多个实例"):
-        build_workflow_payload(definition, _catalog())
+    template = build_workflow_template_payload(next(iter(get_registered_workflows().values())))
+    with pytest.raises(WorkflowTemplateBindingError, match="多个实例"):
+        materialize_workflow_template(template, _catalog())
+    # 显式绑定即可实例化；绑定到模板没有的角色被拒绝
+    bound = materialize_workflow_template(template, _catalog(), {class_role_id("dup_class"): "dup-b"})
+    assert bound["nodes"][0]["meta_data"]["target_device_id"] == "dup-b"
+    with pytest.raises(WorkflowTemplateBindingError, match="没有这些角色"):
+        materialize_workflow_template(template, _catalog(), {"ghost": "dup-b"})
 
     clear_registered_workflows()
 
@@ -122,13 +215,13 @@ def test_run_template_requires_single_instance() -> None:
     def missing(ctx: WorkflowBuildContext) -> None:
         ctx.run_template("nowhere_class/act", {})
 
-    definition = next(iter(get_registered_workflows().values()))
-    with pytest.raises(ValueError, match="没有类"):
-        build_workflow_payload(definition, _catalog())
+    template = build_workflow_template_payload(next(iter(get_registered_workflows().values())))
+    with pytest.raises(WorkflowTemplateBindingError, match="没有类"):
+        materialize_workflow_template(template, _catalog())
 
 
 def test_step_inventory_requirements_land_in_node_meta_data() -> None:
-    """ctx.run(inventory=[...]) 声明时按 InventoryRequirement 校验，构建后进 meta_data.inventory_requirements。"""
+    """ctx.run(inventory=[...]) 声明时按 InventoryRequirement 校验，实例化后进 meta_data.inventory_requirements。"""
 
     requirement = {
         "key": "water",
@@ -143,8 +236,10 @@ def test_step_inventory_requirements_land_in_node_meta_data() -> None:
         ctx.run("device-1/dispense", {"volume": 40}, inventory=[requirement])
         ctx.run("device-1/report", {})
 
-    definition = next(iter(get_registered_workflows().values()))
-    nodes = build_workflow_payload(definition, _catalog())["nodes"]
+    template = build_workflow_template_payload(next(iter(get_registered_workflows().values())))
+    assert template["nodes"][0]["inventory_requirements"][0]["key"] == "water"
+    assert "inventory_requirements" not in template["nodes"][1]
+    nodes = materialize_workflow_template(template, _catalog())["nodes"]
     frozen = nodes[0]["meta_data"]["inventory_requirements"]
     assert len(frozen) == 1
     assert frozen[0]["key"] == "water" and frozen[0]["kind"] == "lot"
@@ -168,30 +263,115 @@ def test_step_target_must_contain_action() -> None:
         ctx.run_template("only_class", {})
 
 
-def test_report_workflows_is_idempotent_upsert() -> None:
+def test_materialized_workflow_upsert_is_idempotent() -> None:
+    """同一模板 + 同一组设备反复实例化：uuid 不变、图被覆盖更新，不会堆出重复工作流。"""
+
     @workflow(display_name="上报流", tags=["demo"])
     def reported(ctx: WorkflowBuildContext) -> None:
         ctx.run("device-1/succeed", {"value": 5})
         ctx.run("device-1/succeed", {"value": 6})
 
-    definition = next(iter(get_registered_workflows().values()))
+    template = build_workflow_template_payload(next(iter(get_registered_workflows().values())))
     service = WorkflowService(":memory:")
     try:
-        catalog = _catalog()
-        first = report_workflows_to_service(service, catalog)
-        assert first == {definition.uuid: "上报流"}
-        graph = service.get_graph(definition.uuid)
-        assert len(graph["nodes"]) == 2
+        payload = materialize_workflow_template(template, _catalog())
+        first = upsert_workflow(service, payload)
+        assert first["uuid"] == payload["workflow_uuid"] and first["name"] == "上报流"
+        assert len(service.get_graph(first["uuid"])["nodes"]) == 2
 
-        # 重复上报（模拟重启）：uuid 不变、图被覆盖更新、不报错
-        second = report_workflows_to_service(service, catalog)
-        assert second == first
-        graph = service.get_graph(definition.uuid)
-        assert len(graph["nodes"]) == 2
-        record = service.get_workflow(definition.uuid)
-        assert record["name"] == "上报流"
+        second = upsert_workflow(service, materialize_workflow_template(template, _catalog()))
+        assert second["uuid"] == first["uuid"]
+        assert second["revision"] > first["revision"]
+        assert len(service.get_graph(first["uuid"])["nodes"]) == 2
+        assert service.list_workflows(page=1, page_size=10, name="上报流")["total"] == 1
     finally:
         service.close()
+
+
+def test_upsert_over_http_like_client_survives_bodiless_get() -> None:
+    """upsert 经 HTTPWorkflowClient 走 POST 冲突 → GET → PUT → PUT graph。
+
+    回归：HTTPClient 曾对无 body 的 GET 也带 ``Content-Type: application/json``，
+    Workflow 路由把空 body 判为格式错误（1000），create 冲突后的查询失败被
+    ``raise create_error from lookup_error`` 盖住，日志只剩误导性的 3003。
+    """
+
+    from fastapi.testclient import TestClient
+
+    from unilabos.client.http import HTTPClient, HTTPClientConfig
+    from unilabos.client.runtime.workflow import HTTPWorkflowClient
+    from unilabos.server.api.runtime.workflow import create_workflow_app
+
+    @workflow(display_name="HTTP 上报流", tags=["demo"])
+    def reported(ctx: WorkflowBuildContext) -> None:
+        ctx.run("device-1/succeed", {"value": 5})
+
+    template = build_workflow_template_payload(next(iter(get_registered_workflows().values())))
+    service = WorkflowService(":memory:")
+    base_url = "http://testserver/api/v1"
+    http = HTTPClient(HTTPClientConfig(base_url=base_url))
+    http._client.close()
+    http._client = TestClient(create_workflow_app(service), base_url=base_url)
+    reporter = HTTPWorkflowClient("http://testserver", http_client=http)
+    try:
+        payload = materialize_workflow_template(template, _catalog())
+        upsert_workflow(reporter, payload)
+        upsert_workflow(reporter, payload)
+        assert service.get_workflow(payload["workflow_uuid"])["revision"] >= 2
+        assert len(service.get_graph(payload["workflow_uuid"])["nodes"]) == 1
+    finally:
+        service.close()
+
+
+def test_workflow_route_accepts_bodiless_get_with_json_content_type() -> None:
+    """浏览器 / httpx 一类客户端默认给所有请求带 JSON Content-Type，空 body 不是格式错误。"""
+
+    from fastapi.testclient import TestClient
+
+    from unilabos.server.api.runtime.workflow import create_workflow_app
+
+    service = WorkflowService(":memory:")
+    client = TestClient(create_workflow_app(service))
+    try:
+        created = client.post("/api/v1/workflows", json={"name": "wf", "tags": []}).json()
+        assert created["code"] == 0, created
+        fetched = client.get(
+            f"/api/v1/workflows/{created['data']['uuid']}",
+            headers={"Content-Type": "application/json"},
+        ).json()
+        assert fetched["code"] == 0, fetched
+        # 真正缺 body 的写请求仍按格式错误拒绝
+        empty_post = client.post(
+            "/api/v1/workflows", headers={"Content-Type": "application/json"}
+        ).json()
+        assert empty_post["code"] == 1000, empty_post
+    finally:
+        service.close()
+
+
+def test_http_client_only_declares_content_type_with_body() -> None:
+    import httpx
+
+    from unilabos.client.http import HTTPClient, HTTPClientConfig
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"code": 0, "data": None})
+
+    http = HTTPClient(HTTPClientConfig(base_url="http://testserver/api/v1"))
+    http._client.close()
+    http._client = httpx.Client(
+        base_url="http://testserver/api/v1", transport=httpx.MockTransport(handler)
+    )
+    try:
+        http.get("/workflows/x")
+        http.post("/workflows", json={"name": "wf"})
+    finally:
+        http.close()
+    assert "content-type" not in seen[0].headers
+    assert seen[1].headers["content-type"] == "application/json"
 
 
 def test_ast_scanner_discovers_module_level_workflow(tmp_path: Path) -> None:
@@ -260,7 +440,7 @@ class OrderedDriver:
 
 
 def test_workflow_end_to_end_runs_via_local_scheduler() -> None:
-    """@workflow -> 上报 -> 创建任务 -> HostLink 执行栈真实跑通并按序执行。"""
+    """@workflow -> 模板 -> 实例化 -> 创建任务 -> HostLink 执行栈真实跑通并按序执行。"""
 
     from unilabos.backend.hostlink.adapter_registry import clear_execution_adapter
     from unilabos.backend.hostlink.backend import HostLinkBackend
@@ -303,11 +483,13 @@ def test_workflow_end_to_end_runs_via_local_scheduler() -> None:
         definition = next(iter(get_registered_workflows().values()))
         catalog = DeviceCatalog()
         catalog.add("wf-device", "wf_demo_class", str(uuid.uuid4()))
-        reported = report_workflows_to_service(service, catalog)
-        assert definition.uuid in reported
+        template = build_workflow_template_payload(definition)
+        workflow_record = upsert_workflow(
+            service, materialize_workflow_template(template, catalog)
+        )
 
         task = service.create_workflow_task(
-            workflow_uuid=definition.uuid,
+            workflow_uuid=workflow_record["uuid"],
             run_mode="normal",
             target_node_uuid=None,
             input_value={},

@@ -122,6 +122,44 @@ def test_template_and_material_tree_roundtrip_is_authoritative(tmp_path) -> None
         service.close()
 
 
+def test_list_templates_filters_by_name_and_skips_definitions_on_the_server(tmp_path) -> None:
+    """存在性检查 / 按名取 uuid 由权威按 name 精确筛选，目录模式不带 definition。
+
+    回归：Slave 为了确认一个模板存在，把全注册表 130 个模板连 definition（近 10MB）
+    一起拉过 HostLink。
+    """
+
+    service = MaterialsService(tmp_path / "materials.db")
+    try:
+        service.put_template(
+            _mutation("put_template"),
+            ResourceTemplateWrite(
+                template_uuid="deck-template",
+                name="deck",
+                class_name="Deck",
+                definition={"config_info": [{"config": {"sites": [{"index": 0}]}}]},
+            ),
+        )
+        _template(service, "tube-template", "tube")
+
+        assert [item.name for item in service.list_templates()] == ["deck", "tube"]
+
+        # 默认目录模式：name / uuid / hash 齐全，definition 不下发
+        catalog = service.list_templates(name="deck")
+        assert [item.template_uuid for item in catalog] == ["deck-template"]
+        assert catalog[0].definition == {}
+        assert catalog[0].definition_hash  # 变更判定仍可用
+
+        full = service.list_templates(name="deck", include_definition=True)
+        assert full[0].definition["config_info"][0]["config"]["sites"] == [{"index": 0}]
+        assert full[0].definition_hash == catalog[0].definition_hash
+
+        assert service.list_templates(name="Deck") == []  # 精确匹配，不做大小写折叠
+        assert service.list_templates(name="missing") == []
+    finally:
+        service.close()
+
+
 def test_material_display_name_defaults_and_patch(tmp_path) -> None:
     """display_name 根字段：缺省回退 name（与 device 的 id/display_name 约定一致），
     显式值保留，且可经 patch 单独修改。"""
@@ -398,6 +436,49 @@ def test_recursive_delete_and_change_feed_are_aggregate_based(tmp_path) -> None:
         assert not hasattr(changes[-1], "delta_json")
         assert service.acknowledge_changes(changes[-1].sequence) == len(changes)
         assert all(item.delivery_status == "acknowledged" for item in service.changes())
+
+        # 软删除不该让 resource_id 永久占坑：同名（同 resource_id / 同根名）的物料可以重建。
+        # 设备 provision 一类动作重试、演示脚本重跑都会这样重建同名耗材。
+        recreated = service.create_tree(
+            _mutation("create_material_tree"),
+            MaterialTreeCreate(nodes=[_node("deck", "deck"), _node("tube", "tube", parent="deck")]),
+        )
+        assert recreated.data.root_material_uuid != created.data.root_material_uuid
+        assert service.get_material_by_resource_id("resource-deck").material.material_uuid == (
+            recreated.data.root_material_uuid
+        )
+        assert [m.material.name for m in service.list_materials(roots_only=True)] == ["deck"]
+    finally:
+        service.close()
+
+
+def test_template_sync_records_create_and_update_but_never_a_no_op(tmp_path) -> None:
+    """模板登记是物料变更：新建 / 定义变更各落一条账本；内容相同的重复写入被拒绝，
+    不产生账本行（前端"物料变更"以账本为源，重启重放不能刷屏）。"""
+    from unilabos.protocol.materials import ACTOR_REGISTRY
+    from unilabos.server.services.materials import MaterialNoChangeError
+
+    service = MaterialsService(tmp_path / "materials.db")
+    try:
+        write = ResourceTemplateWrite(
+            template_uuid=None, name="plate", resource_type="container", class_name="Plate"
+        )
+        synced = service.put_template(
+            _mutation("sync_template", actor_type=ACTOR_REGISTRY, actor_uuid="plate"), write
+        )
+        same = write.model_copy(update={"template_uuid": synced.data.template_uuid})
+        with pytest.raises(MaterialNoChangeError):
+            service.put_template(
+                _mutation("sync_template", actor_type=ACTOR_REGISTRY, actor_uuid="plate"), same
+            )
+        changed = same.model_copy(update={"display_name": "Plate v2"})
+        service.put_template(
+            _mutation("sync_template", actor_type=ACTOR_REGISTRY, actor_uuid="plate"), changed
+        )
+
+        rows = [(row.operation, row.actor_type, row.actor_uuid) for row in service.changes()]
+        assert rows == [("create", "registry", "plate"), ("update", "registry", "plate")]
+        assert service.latest_ledger_sequence() == 2
     finally:
         service.close()
 

@@ -752,7 +752,7 @@ class JobExecutionBackend:
             suc_type=SUCCESS_TYPE_CANCELLATION,
         )
         self._publish_to_result_bridges({}, item, "failed", return_info)
-        self._notify_finished(job_id, False, None, "normal", return_info)
+        self._notify_finished(job_id, False, None, SUCCESS_TYPE_CANCELLATION, return_info)
         return True
 
     def cancel_task(self, task_id: str) -> List[str]:
@@ -789,7 +789,7 @@ class JobExecutionBackend:
                 suc_type=SUCCESS_TYPE_CANCELLATION,
             )
             self._publish_to_result_bridges({}, item, "failed", cancel_info)
-            self._notify_finished(job_id, False, None, "normal", cancel_info)
+            self._notify_finished(job_id, False, None, SUCCESS_TYPE_CANCELLATION, cancel_info)
         return [job.job_id for job in cancelled_jobs]
 
     @staticmethod

@@ -32,6 +32,7 @@ from unilabos.resources.resource_tracker import (
     apply_plr_site_metadata,
     extract_plr_sites,
     find_plr_resource_class,
+    require_plr_config_type,
     get_plr_template_name,
     plr_class_accepts_serialized_sites,
     repair_itemized_ordering,
@@ -702,6 +703,10 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
     def resource_ulab_to_plr_inner(resource: dict):
         all_states[resource["name"]] = tracker_state(resource)
         config = dict(resource.get("config") or {})
+        plr_type = require_plr_config_type(
+            config, uuid=str(resource.get("uuid") or ""),
+            template_name=str(resource.get("template_name") or ""),
+        )
         missing = object()
         config_meta_data = config.pop("meta_data", missing)
         root_sites = resource.get("sites")
@@ -786,7 +791,7 @@ def resource_ulab_to_plr(resource: dict, plr_model=False) -> "ResourcePLR":
         repair_itemized_ordering(config, serialized_children)
         d = {
             "name": resource["name"],
-            "type": config.get("type", resource["type"]),
+            "type": plr_type,
             "size_x": config.get("size_x", 0),
             "size_y": config.get("size_y", 0),
             "size_z": config.get("size_z", 0),

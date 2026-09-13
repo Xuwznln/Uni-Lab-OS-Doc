@@ -667,7 +667,7 @@ MATERIALS_TABLES = (
         """
         CREATE TABLE IF NOT EXISTS material (
             material_uuid TEXT PRIMARY KEY CHECK (TRIM(material_uuid) <> ''),
-            resource_id TEXT NOT NULL UNIQUE CHECK (TRIM(resource_id) <> ''),
+            resource_id TEXT NOT NULL CHECK (TRIM(resource_id) <> ''),
             template_uuid TEXT NOT NULL,
             parent_material_uuid TEXT,
             ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
@@ -719,6 +719,11 @@ MATERIALS_TABLES = (
             CREATE UNIQUE INDEX IF NOT EXISTS ux_material_root_name_active
             ON material(LOWER(name))
             WHERE parent_material_uuid IS NULL AND deleted_at_ms IS NULL
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_material_resource_id_active
+            ON material(resource_id)
+            WHERE deleted_at_ms IS NULL
             """,
             """
             CREATE INDEX IF NOT EXISTS idx_material_parent
@@ -1208,7 +1213,9 @@ MATERIALS_DATABASE = DatabaseSpec(
     # v2：inventory_command_effect 的请求信封改为携带 actor_type=registry /
     # actor_uuid=<模板名>，且 sync_template 的 command_uuid 改为按整条请求派生；
     # 旧库中的效果行与新请求同键不同哈希，必须整库重建。
-    contract_version=2,
+    # v3：material.resource_id 的唯一约束改为只对未删除行生效（部分唯一索引）：
+    # 删除是软删除，被删物料的 resource_id 不该永久占坑，否则同名重建一律 409。
+    contract_version=3,
 )
 
 __all__ = [

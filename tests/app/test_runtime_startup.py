@@ -1,13 +1,19 @@
-﻿"""Host 启动提示与管理端端口预检。"""
+﻿"""Host 启动提示、管理端端口预检，以及启动编排：就绪横幅 / 受管 Slave 拉起必须等设备 runtime 真正起来。"""
 
 from __future__ import annotations
 
+import errno
 import socket
+import threading
 
 import pytest
 
+from unilabos.app import runtime_startup
 from unilabos.app.cli.parser import build_parser
 from unilabos.app.runtime_startup import build_slave_launch_command
+from unilabos.app.supervisor import PORT_IN_USE_EXIT_CODE
+from unilabos.backend import BACKEND_PROFILES
+from unilabos.backend.hostlink import adapter_registry
 from unilabos.server.api.app import ManagementPortInUseError, ensure_port_available
 
 
@@ -54,3 +60,93 @@ def test_port_check_reports_actionable_hint_when_in_use() -> None:
     assert f"--port {port + 1}" in message
     # 端口释放后预检必须放行
     ensure_port_available("127.0.0.1", port)
+
+
+# ── 启动编排：等设备 runtime 真正就绪 ──────────────────────────────────
+
+
+@pytest.fixture()
+def _clean_adapter_registry():
+    adapter_registry.clear_execution_adapter()
+    yield
+    adapter_registry.clear_execution_adapter()
+
+
+def _thread(target) -> threading.Thread:
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start()
+    return thread
+
+
+@pytest.mark.usefixtures("_clean_adapter_registry")
+def test_ready_banner_and_managed_processes_wait_for_execution_adapter(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(runtime_startup, "print_slave_launch_hint", lambda: calls.append("hint"))
+    monkeypatch.setattr(
+        runtime_startup, "_start_managed_device_processes", lambda: calls.append("managed")
+    )
+    monkeypatch.setattr(runtime_startup, "BACKEND_READY_TIMEOUT_S", 5.0)
+
+    release = threading.Event()
+    stop = threading.Event()
+
+    def backend():
+        release.wait(5.0)
+        adapter_registry.set_execution_adapter(object())  # HostNode 建好、HostLink 已监听
+        stop.wait(5.0)
+
+    backend_thread = _thread(backend)
+    announcer = _thread(lambda: runtime_startup._announce_ready_and_start_managed(backend_thread))
+    try:
+        announcer.join(0.3)
+        assert announcer.is_alive() and calls == []  # 端口还没绑上：什么都不做
+        release.set()
+        announcer.join(3.0)
+        assert not announcer.is_alive()
+        assert calls == ["hint", "managed"]
+    finally:
+        release.set()
+        stop.set()
+
+
+@pytest.mark.usefixtures("_clean_adapter_registry")
+def test_nothing_is_launched_when_backend_dies_before_ready(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(runtime_startup, "print_slave_launch_hint", lambda: calls.append("hint"))
+    monkeypatch.setattr(
+        runtime_startup, "_start_managed_device_processes", lambda: calls.append("managed")
+    )
+    monkeypatch.setattr(runtime_startup, "BACKEND_READY_TIMEOUT_S", 5.0)
+
+    # 模拟 HostLink 端口被占：backend 线程未注册适配器就结束了
+    backend_thread = _thread(lambda: None)
+    backend_thread.join(2.0)
+    runtime_startup._announce_ready_and_start_managed(backend_thread)
+    assert calls == []
+
+
+def test_exit_code_follows_backend_failure_kind(monkeypatch) -> None:
+    from unilabos import backend as backend_module
+
+    monkeypatch.setattr(backend_module, "_fatal_failure", None)
+    runtime_startup._exit_on_backend_failure()  # 正常运行：不退出
+
+    profile = BACKEND_PROFILES["hostlink"]
+    monkeypatch.setattr("unilabos.server.api.app.abort_serving", lambda: None)
+
+    def port_taken(*_):
+        raise OSError(errno.EADDRINUSE, "HostLink 端口 7302 已被占用")
+
+    backend_module._run_entrypoint(profile, port_taken, (None,))
+    with pytest.raises(SystemExit) as excinfo:
+        runtime_startup._exit_on_backend_failure()
+    assert excinfo.value.code == PORT_IN_USE_EXIT_CODE  # 监督进程退避重试，占用者退出后自动恢复
+
+    def driver_crashed(*_):
+        raise RuntimeError("driver init failed")
+
+    monkeypatch.setattr(backend_module, "_fatal_failure", None)
+    backend_module._run_entrypoint(profile, driver_crashed, (None,))
+    with pytest.raises(SystemExit) as excinfo:
+        runtime_startup._exit_on_backend_failure()
+    assert excinfo.value.code == 1

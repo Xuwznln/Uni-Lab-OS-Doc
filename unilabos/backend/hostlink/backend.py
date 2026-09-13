@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from unilabos.config.config import BasicConfig, HostLinkConfig
 from unilabos.backend.runtime.action import ActionCancelled, ActionContext
@@ -66,7 +66,18 @@ class HostLinkBackend:
             self._on_local_subscription_change
         )
 
-    def start(self) -> None:
+    def start(
+        self,
+        populate: Optional[Callable[[HostLinkLocalRuntime], None]] = None,
+    ) -> None:
+        """启动 backend。``populate`` 在物料权威可达之后、本地设备启动之前装配设备图。
+
+        Slave 先建链再装配：设备装配（``resolve_device_definition``）按权威优先取 Site
+        与持有的物料，需要 HostLink 已连上 Host；与 Host / ROS2 Slave「先对齐权威、再
+        建设备」的顺序一致。设备仍由 ``local.start()`` 反向启动（工作站 post_init 前
+        其子设备已就绪），随后把完整设备描述立刻通告 Host。
+        """
+
         if self._started:
             return
         if not HostLinkConfig.enable:
@@ -74,10 +85,23 @@ class HostLinkBackend:
         try:
             if self.is_slave:
                 self._start_slave()
+                self._connect_slave()
+                if populate is not None:
+                    populate(self.local)
+                # 驱动 post_init / 定时发布启动前先确认 Host 已登记设备归属。
+                # 保持当前连接身份，由心跳更新设备集合，避免重握手迁移订阅。
+                if self.client is not None:
+                    self.client.configure_device_descriptors(self.local.descriptors())
+                    self.client.heartbeat_now()
+                    logger.info(
+                        "[HostLink] Slave 注册确认: machine_name=%s, Host=%s:%s, devices=%s",
+                        self.client.machine_name, self.client.host, self.client.port,
+                        self.client.device_ids,
+                    )
                 self.local.start()
                 if self.client is not None:
                     self.client.configure_device_descriptors(self.local.descriptors())
-                self._connect_slave()
+                    self.announce_devices()
             else:
                 from unilabos.server.backend.composition import (
                     get_materials_gateway,
@@ -88,6 +112,8 @@ class HostLinkBackend:
                         gateway_provider=get_materials_gateway
                     )
                 )
+                if populate is not None:
+                    populate(self.local)
                 self.local.start()
                 # 内置 host 服务设备：承载 transfer/出库/加试剂等物料编排动作，
                 # 与 ROS2 HostNode 的 @action 同 device_id、同 schema。
@@ -188,6 +214,10 @@ class HostLinkBackend:
             ActionType.MATERIAL_APPLY_SNAPSHOT,
             self._handle_material_apply_snapshot,
         )
+        self.server.register_handler(
+            ActionType.MATERIAL_APPLY_DELTA,
+            self._handle_material_apply_delta,
+        )
         self.server.start()
         set_hostlink_server(self.server)
         self._bind_material_transfer_dispatcher()
@@ -200,17 +230,15 @@ class HostLinkBackend:
 
     @staticmethod
     def _handle_material_template_list(
-        _data: dict[str, Any], _peer: dict[str, Any]
+        data: dict[str, Any], peer: dict[str, Any]
     ) -> list[dict[str, Any]]:
+        from unilabos.backend.hostlink.materials_proxy import template_list
         from unilabos.server.backend.composition import get_materials_gateway
 
         gateway = get_materials_gateway()
         if gateway is None:
             raise RuntimeError("Host 尚未配置 materials authority")
-        return [
-            item.model_dump(mode="json", exclude_none=False)
-            for item in gateway.list_templates()
-        ]
+        return template_list(gateway, data, peer)
 
     @staticmethod
     def _handle_material_template_create(
@@ -443,6 +471,22 @@ class HostLinkBackend:
             mode="json", exclude_none=False
         )
 
+    @staticmethod
+    def _handle_material_apply_delta(
+        data: dict[str, Any], _peer: dict[str, Any]
+    ) -> dict[str, Any]:
+        from unilabos.protocol.materials import InventoryMutation, MaterialDelta
+        from unilabos.server.backend.composition import get_materials_gateway
+
+        gateway = get_materials_gateway()
+        if gateway is None:
+            raise RuntimeError("Host 尚未配置 materials authority")
+        mutation = InventoryMutation.model_validate(data)
+        delta = MaterialDelta.model_validate(mutation.payload)
+        return gateway.apply_delta(mutation, delta).model_dump(
+            mode="json", exclude_none=False
+        )
+
     # ------------------------------------------------------------------
     # 物料下行链路（Host → 设备投影），与 presets/downlink 的本地执行语义一致
     # ------------------------------------------------------------------
@@ -555,11 +599,22 @@ class HostLinkBackend:
         elif not client.connect_blocking(HostLinkConfig.connect_timeout):
             raise LinkError(f"无法连接 HostLink Host：{host}:{HostLinkConfig.port}")
         logger.info(
-            "[HostLink backend] Slave 已启动：Host=%s:%d，本地设备=%s",
+            "[HostLink backend] Slave 已连上 Host=%s:%d，本地设备=%s",
             host,
             HostLinkConfig.port,
             sorted(self.local.devices),
         )
+
+    def announce_devices(self) -> None:
+        """Slave：把当前设备描述与状态立刻推给 Host，不等下一个心跳。"""
+
+        client = self.client
+        if client is None or not client.online:
+            return
+        try:
+            client.heartbeat_now()
+        except Exception:  # noqa: BLE001 - 心跳循环随后会补上，通告失败不影响启动
+            logger.warning("[HostLink backend] 设备描述即时通告失败，等待下一个心跳", exc_info=True)
 
     def register_service(
         self,

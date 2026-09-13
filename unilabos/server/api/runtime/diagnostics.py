@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Optional
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 
@@ -37,6 +37,19 @@ class RestartRequest(BaseModel):
 
     mode: str = "quiescent"
     scope: str = "auto"
+
+
+class ResetRequest(BaseModel):
+    confirmation_token: str = Field(min_length=1, max_length=128)
+    confirmation: str = Field(min_length=1, max_length=64)
+
+
+class ResetStatus(BaseModel):
+    supported: bool
+    pending: bool
+    confirmation_token: str
+    backup_path: str
+    detail: str
 
 
 def _hostlink_snapshot() -> dict[str, Any]:
@@ -83,6 +96,33 @@ def create_backend_router(
     """创建不复制 Runtime/History/Telemetry 数据面的诊断路由。"""
 
     router = APIRouter(prefix="/api/v1", tags=["backend"])
+
+    @router.get("/reset", response_model=ResetStatus)
+    def reset_preview() -> dict[str, Any]:
+        from unilabos.server.backend.reset import get_reset_controller, ResetConflict
+
+        controller = get_reset_controller()
+        if controller is None:
+            return {"supported": False, "pending": False, "confirmation_token": "", "backup_path": "", "detail": "全量重置仅支持默认本机分离部署；独立远端或单进程请停机后维护"}
+        try:
+            return controller.preview()
+        except ResetConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @router.post("/reset", status_code=202, response_model=ResetStatus)
+    def reset_request(body: ResetRequest, background: BackgroundTasks) -> dict[str, Any]:
+        from unilabos.server.backend.reset import get_reset_controller, ResetConflict
+        from unilabos.server.api.app import request_server_shutdown
+
+        controller = get_reset_controller()
+        if controller is None:
+            raise HTTPException(status_code=409, detail="当前部署不支持全量重置")
+        try:
+            result = controller.request(body.confirmation_token, body.confirmation)
+        except ResetConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        background.add_task(request_server_shutdown)
+        return result
 
     def execution() -> Any:
         value = get_execution_backend()

@@ -35,6 +35,8 @@ HOST_ONLY_PREFIXES: Tuple[str, ...] = (
     f"{API_PREFIX}/driver-packages",
     f"{API_PREFIX}/device-processes",
     f"{API_PREFIX}/materials/notify-device",
+    f"{API_PREFIX}/hostlink/log-sources",
+    f"{API_PREFIX}/hostlink/logs",
 )
 BACKEND_ONLY_PREFIXES: Tuple[str, ...] = ()
 
@@ -58,6 +60,7 @@ def build_contract_app(workdir: Path) -> Tuple[FastAPI, Any]:
     from unilabos.server.api.driver_package_graphs import create_driver_package_graphs_router
     from unilabos.server.api.driver_packages import create_driver_packages_router
     from unilabos.server.api.runtime.diagnostics import create_backend_router
+    from unilabos.server.api.runtime.logs import create_runtime_logs_router
     from unilabos.server.api.runtime.registry import install_registry_api
     from unilabos.server.api.runtime.workflow import install_workflow_api
     from unilabos.server.composition import ServerServices
@@ -84,6 +87,7 @@ def build_contract_app(workdir: Path) -> Tuple[FastAPI, Any]:
     app.include_router(create_driver_packages_router())
     app.include_router(create_driver_package_graphs_router())
     app.include_router(create_device_processes_router())
+    app.include_router(create_runtime_logs_router())
     return app, services
 
 

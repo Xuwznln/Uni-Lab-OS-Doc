@@ -23,6 +23,7 @@ from unilabos.server.database.tables.runtime.data import (
     DATA_TABLE_MODELS,
     AdapterCommandOutboxRecord,
     AdapterEventInboxRecord,
+    AttemptTrigger,
     BackendEventOutboxRecord,
     BackendSessionRecord,
     CommandInboxRecord,
@@ -32,6 +33,7 @@ from unilabos.server.database.tables.runtime.data import (
     ExecutorEndpointRecord,
     MaterialBinding,
     Transport,
+    validate_attempt_link,
 )
 from unilabos.server.database.tables.runtime.registry import (
     REGISTRY_TABLES,
@@ -98,6 +100,7 @@ __all__ = [
     # control（运行控制）
     "AdapterCommandOutboxRecord",
     "AdapterEventInboxRecord",
+    "AttemptTrigger",
     "BackendEventOutboxRecord",
     "BackendSessionRecord",
     "CommandInboxRecord",
@@ -107,6 +110,7 @@ __all__ = [
     "ExecutorEndpointRecord",
     "MaterialBinding",
     "Transport",
+    "validate_attempt_link",
     # workflow（Workflow Authority）
     "ExecutionLockLeaseRecord",
     "FrontendEventRecord",

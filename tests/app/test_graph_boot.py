@@ -197,7 +197,157 @@ class TestUpsertReconcile:
         assert excinfo.value.code == "invalid_payload"
 
 
+class TestAdoptExistingGraph:
+    """启动登记（on_existing="adopt"）：权威已有该图时以权威为准，只补权威没有的。"""
+
+    def test_missing_graph_is_created_like_replace(self, authority) -> None:
+        service, _paths = authority
+        stored = service.upsert_graph(
+            name="lab", payload={"nodes": [{"id": "pump"}]}, on_existing="adopt"
+        )
+        assert stored["revision"] == 1
+        assert stored["summary"]["existing"] is False
+        assert stored["summary"]["created"] == ["pump"]
+        assert stored["payload"]["nodes"][0]["uuid"]
+
+    def test_existing_nodes_keep_authority_version_and_additions_are_registered(
+        self, authority
+    ) -> None:
+        service, _paths = authority
+        first = service.upsert_graph(
+            name="lab",
+            payload={
+                "nodes": [
+                    {"id": "pump", "pose": {"position": {"x": 1, "y": 1, "z": 0}}},
+                    {"id": "rack"},
+                ],
+                "links": [{"source": "pump", "target": "rack", "sourceHandle": "out", "targetHandle": "in"}],
+            },
+        )
+        pump_uuid = {n["id"]: n["uuid"] for n in first["payload"]["nodes"]}["pump"]
+
+        # 本地文件：改了 pump 的位置、删了 rack、新增 valve 和一条连线
+        local = {
+            "nodes": [
+                {"id": "pump", "pose": {"position": {"x": 99, "y": 99, "z": 0}}},
+                {"id": "valve"},
+            ],
+            "links": [
+                {"source": "pump", "target": "rack", "sourceHandle": "out", "targetHandle": "in"},
+                {"source": "pump", "target": "valve"},
+            ],
+        }
+        adopted = service.upsert_graph(name="lab", payload=local, on_existing="adopt")
+
+        nodes = {n["id"]: n for n in adopted["payload"]["nodes"]}
+        assert set(nodes) == {"pump", "rack", "valve"}  # 删除不生效、新增补进
+        assert nodes["pump"]["uuid"] == pump_uuid
+        assert nodes["pump"]["pose"]["position"] == {"x": 1, "y": 1, "z": 0}  # 修改不生效
+        assert nodes["valve"]["uuid"]
+        assert len(adopted["payload"]["links"]) == 2  # 既有连线不重复，新连线补进
+        summary = adopted["summary"]
+        assert summary["existing"] is True
+        assert summary["adopted"] == ["pump"]
+        assert summary["kept"] == ["rack"]
+        assert summary["created"] == ["valve"]
+        assert summary["removed"] == [] and summary["updated"] == []
+        assert adopted["revision"] == 2
+
+        # 同一文件再启动：内容与权威一致，revision 不变
+        again = service.upsert_graph(name="lab", payload=local, on_existing="adopt")
+        assert again["revision"] == 2
+        assert again["summary"]["created"] == []
+
+    def test_conflicting_uuid_is_rejected_even_in_adopt_mode(self, authority) -> None:
+        service, _paths = authority
+        service.upsert_graph(name="lab", payload={"nodes": [{"id": "pump"}, {"id": "rack"}]})
+        rack_uuid = {n["id"]: n["uuid"] for n in service.get_graph("lab")["payload"]["nodes"]}["rack"]
+
+        with pytest.raises(GraphError) as by_id:
+            service.upsert_graph(
+                name="lab",
+                payload={"nodes": [{"id": "pump", "uuid": "11111111-1111-1111-1111-111111111111"}]},
+                on_existing="adopt",
+            )
+        assert by_id.value.code == "identity_conflict"
+
+        with pytest.raises(GraphError) as by_uuid:
+            service.upsert_graph(
+                name="lab",
+                payload={"nodes": [{"id": "pump", "uuid": rack_uuid}]},
+                on_existing="adopt",
+            )
+        assert by_uuid.value.code == "identity_conflict"
+
+    def test_replace_mode_still_applies_file_changes(self, authority) -> None:
+        service, _paths = authority
+        service.upsert_graph(name="lab", payload={"nodes": [{"id": "pump"}, {"id": "rack"}]})
+        replaced = service.upsert_graph(name="lab", payload={"nodes": [{"id": "pump"}]})
+        assert [n["id"] for n in replaced["payload"]["nodes"]] == ["pump"]
+        assert replaced["summary"]["removed"] == ["rack"]
+
+    def test_invalid_mode_is_rejected(self, authority) -> None:
+        service, _paths = authority
+        with pytest.raises(GraphError) as excinfo:
+            service.upsert_graph(name="lab", payload=PAYLOAD, on_existing="merge")
+        assert excinfo.value.code == "invalid_input"
+
+
 class TestRegisterGraphFileToAuthority:
+    def test_modified_file_on_reboot_runs_from_authority_snapshot(
+        self, authority, tmp_path
+    ) -> None:
+        """再次启动时改过的本地文件：既有节点以权威为准，新增节点登记，缓存即权威 payload。"""
+        service, _paths = authority
+        graph_file = tmp_path / "my_lab.json"
+        graph_file.write_text(
+            json.dumps({"nodes": [{"id": "pump", "pose": {"position": {"x": 1, "y": 1, "z": 0}}}], "links": []}),
+            encoding="utf-8",
+        )
+        args_dict = {"server_database_root": str(tmp_path)}
+        _register_graph_file_to_authority(str(graph_file), args_dict, str(tmp_path))
+
+        graph_file.write_text(
+            json.dumps(
+                {
+                    "nodes": [
+                        {"id": "pump", "pose": {"position": {"x": 5, "y": 5, "z": 0}}},
+                        {"id": "valve"},
+                    ],
+                    "links": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        cache_path = _register_graph_file_to_authority(str(graph_file), args_dict, str(tmp_path))
+        with open(cache_path, encoding="utf-8") as stream:
+            cached = {n["id"]: n for n in json.load(stream)["nodes"]}
+        assert cached["pump"]["pose"]["position"] == {"x": 1, "y": 1, "z": 0}
+        assert cached["valve"]["uuid"]
+        assert service.get_graph("my_lab")["revision"] == 2
+
+    def test_conflicting_file_refuses_to_start(self, authority, tmp_path, monkeypatch) -> None:
+        import unilabos.app.main as main_module
+
+        class _Exit(Exception):
+            pass
+
+        def _exit(code: int) -> None:
+            raise _Exit(code)
+
+        monkeypatch.setattr(main_module.os, "_exit", _exit)
+        graph_file = tmp_path / "my_lab.json"
+        graph_file.write_text(json.dumps(PAYLOAD), encoding="utf-8")
+        args_dict = {"server_database_root": str(tmp_path)}
+        _register_graph_file_to_authority(str(graph_file), args_dict, str(tmp_path))
+
+        graph_file.write_text(
+            json.dumps({"nodes": [{"id": "pump", "uuid": "11111111-1111-1111-1111-111111111111"}]}),
+            encoding="utf-8",
+        )
+        with pytest.raises(_Exit):
+            _register_graph_file_to_authority(str(graph_file), args_dict, str(tmp_path))
+
     def test_draft_file_registered_and_cached_with_identity(
         self, authority, tmp_path
     ) -> None:

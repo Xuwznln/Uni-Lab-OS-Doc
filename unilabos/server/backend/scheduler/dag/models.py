@@ -38,11 +38,20 @@ class DagValidationError(ValueError):
     """task_dag 载荷非法时抛出：缺字段 / node_id 重复 / 悬空边 / 含环（I5）。"""
 
 
+#: 节点种类：设备动作（镜像 backend SendActionData）或循环容器（本地执行器扩展）。
+NODE_KIND_DEVICE_ACTION = "device_action"
+NODE_KIND_LOOP = "loop"
+
+
 @dataclass
 class DagNode:
-    """一个可执行动作节点。字段镜像 backend SendActionData。
+    """一个可执行节点。设备动作字段镜像 backend SendActionData。
 
     node_id 同时用作该节点的 job_id，幂等键为 (task_id, node_id)。
+
+    ``kind == "loop"`` 时是循环容器：``device_id`` / ``action`` 为空，``loop_spec`` 是
+    ``LoopSpec`` 的 JSON 形态，``body`` 是循环体子 DAG（同级节点 + 已提升到该层的边），
+    由 TaskDagRunner 逐轮执行。
     """
 
     node_id: str
@@ -54,6 +63,13 @@ class DagNode:
     sample_material: dict[str, str] = field(default_factory=dict)
     # 可选；缺省由 registry 决定，OS 不强依赖此字段
     always_free: bool = False
+    kind: str = NODE_KIND_DEVICE_ACTION
+    loop_spec: dict[str, Any] = field(default_factory=dict)
+    body: "TaskDag | None" = None
+
+    @property
+    def is_loop(self) -> bool:
+        return self.kind == NODE_KIND_LOOP
 
     @property
     def device_action_key(self) -> str:
@@ -175,6 +191,16 @@ class TaskDag:
         for edge in self.edges:
             indeg[edge.target_node_uuid] += 1
         return indeg
+
+    def all_nodes(self) -> dict[str, "DagNode"]:
+        """本层与所有嵌套循环体里的节点（node_id -> DagNode）。"""
+
+        collected: dict[str, DagNode] = {}
+        for node_id, node in self.nodes.items():
+            collected[node_id] = node
+            if node.body is not None:
+                collected.update(node.body.all_nodes())
+        return collected
 
     def successors(self, node_id: str) -> list[str]:
         """node_id 的直接后继（out-edge 的 target）。"""

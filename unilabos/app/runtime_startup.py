@@ -2,11 +2,51 @@
 
 from __future__ import annotations
 
+import errno
 import threading
+import time
 from typing import Any
 
 from unilabos.config.config import BasicConfig
 from unilabos.utils.banner_print import print_status
+
+#: 设备 runtime 就绪等待上限：真实驱动初始化（串口 / 网络设备握手）可能要几十秒
+BACKEND_READY_TIMEOUT_S = 120.0
+
+
+def _wait_backend_ready(backend_thread: threading.Thread, timeout: float) -> bool:
+    """等设备执行适配器注册（HostLink 已监听 / ROS HostNode 已建）或 backend 线程退出。"""
+
+    from unilabos.backend.hostlink.adapter_registry import get_execution_adapter
+
+    deadline = time.monotonic() + timeout
+    while backend_thread.is_alive():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        if get_execution_adapter(timeout=min(0.5, remaining)) is not None:
+            return True
+    return get_execution_adapter() is not None
+
+
+def _announce_ready_and_start_managed(backend_thread: threading.Thread) -> None:
+    """设备 runtime 真正就绪后才打就绪横幅、拉起受管 Slave（在后台线程运行）。
+
+    ``start_backend`` 只是起了线程：这时 HostLink 端口还没绑上，先打"已就绪"再拉 Slave
+    会让 Slave 连到一个不存在（或上次没退干净）的 Host；runtime 起不来时更不该拉起任何东西。
+    """
+
+    ready = _wait_backend_ready(backend_thread, BACKEND_READY_TIMEOUT_S)
+    if not ready and not backend_thread.is_alive():
+        return  # runtime 起不来：主线程按 backend_fatal_failure 退出
+    if not ready:
+        print_status(
+            f"设备 runtime {BACKEND_READY_TIMEOUT_S:.0f}s 内仍未就绪；"
+            "受管设备进程照常拉起，Slave 会自行重连",
+            "warning",
+        )
+    print_slave_launch_hint()
+    _start_managed_device_processes()
 
 
 def _start_managed_device_processes() -> None:
@@ -89,6 +129,24 @@ def _fail_on_port_in_use(exc: OSError) -> None:
     raise SystemExit(PORT_IN_USE_EXIT_CODE) from exc
 
 
+def _exit_on_backend_failure() -> None:
+    """设备 runtime 线程异常退出后，服务循环已被它叫停：按原因给出退出码，别当正常退出。
+
+    HostLink 端口被占（多半是上次没退干净的 Host）与管理端口被占同一退出码，监督进程
+    会退避重试，占用者被结束后即可自动恢复；其它 runtime 崩溃按普通失败退出。
+    """
+
+    from unilabos.backend import backend_fatal_failure
+
+    failure = backend_fatal_failure()
+    if failure is None:
+        return
+    if isinstance(failure, OSError) and failure.errno == errno.EADDRINUSE:
+        _fail_on_port_in_use(failure)
+    print_status(f"设备 runtime 启动失败，进程退出：{failure}", "error")
+    raise SystemExit(1) from failure
+
+
 def _serves_over_control_plane() -> bool:
     """调度权威拉起的 Host 子进程不监听端口：管理 API 由权威经控制 WS 下发、在进程内执行。"""
 
@@ -129,11 +187,17 @@ def _start_management_server() -> None:
 def _run_management_or_wait(backend_thread: threading.Thread) -> None:
     if not BasicConfig.is_host_mode:
         backend_thread.join()
+        _exit_on_backend_failure()
         return
 
-    print_slave_launch_hint()
-    _start_managed_device_processes()
+    threading.Thread(
+        target=_announce_ready_and_start_managed,
+        args=(backend_thread,),
+        name="UniLabBackendReady",
+        daemon=True,
+    ).start()
     _start_management_server()
+    _exit_on_backend_failure()
 
 
 def run_runtime(args: dict[str, Any]) -> None:
@@ -165,8 +229,12 @@ def run_runtime(args: dict[str, Any]) -> None:
     backend_thread = start_backend(**args)
 
     if BasicConfig.is_host_mode:
-        print_slave_launch_hint()
-        _start_managed_device_processes()
+        threading.Thread(
+            target=_announce_ready_and_start_managed,
+            args=(backend_thread,),
+            name="UniLabBackendReady",
+            daemon=True,
+        ).start()
         threading.Thread(
             target=_start_management_server,
             daemon=True,
@@ -188,6 +256,7 @@ def run_runtime(args: dict[str, Any]) -> None:
         )
 
     backend_thread.join()
+    _exit_on_backend_failure()
 
 
 __all__ = ["build_slave_launch_command", "print_slave_launch_hint", "run_runtime"]

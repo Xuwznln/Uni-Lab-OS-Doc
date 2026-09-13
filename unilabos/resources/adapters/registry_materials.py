@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -23,7 +22,9 @@ _REGISTRY_SYNC_NAMESPACE = UUID("9e5f7a4a-cae5-4d89-a039-c10c9c065ad1")
 
 
 class TemplateGateway(Protocol):
-    def list_templates(self) -> list[ResourceTemplateRead]: ...
+    def list_templates(
+        self, *, name: str | None = None, include_definition: bool = False
+    ) -> list[ResourceTemplateRead]: ...
 
     def put_template(self, mutation, value): ...
 
@@ -137,9 +138,13 @@ def _handles(definition: Mapping[str, Any]) -> list[ResourceTemplateHandle]:
 def registry_definition_to_template(
     definition: Mapping[str, Any], *, template_uuid: str | None = None
 ) -> ResourceTemplateWrite:
-    """将上传后端的 Registry 形状投影成微后端规范模板。"""
+    """将上传后端的 Registry 形状投影成微后端规范模板。
 
-    values = copy.deepcopy(dict(definition))
+    只弹出顶层的提升字段，浅拷贝即可；调用方传入的已是 ``normalize_json`` 产出的
+    独立 JSON 结构，逐个深拷贝十几 MB 的 definition 只是白花几百毫秒。
+    """
+
+    values = dict(definition)
     name = str(values.get("id") or "").strip()
     if not name:
         raise ValueError("registry resource template id is required")
@@ -205,6 +210,7 @@ def register_resource_definitions(
         seen_names.add(name)
         normalized.append(definition)
     normalized.sort(key=lambda item: str(item["id"]))
+    # 变更判定只看 definition_hash：目录模式（默认）不拉、不校验十几 MB 的 definition
     existing = {item.name: item for item in gateway.list_templates()}
     identities: dict[str, str] = {}
     for definition in normalized:
@@ -249,9 +255,10 @@ def register_resource_definitions(
 
 
 def sync_registry_resources(registry: Any, gateway: TemplateGateway) -> RegistryTemplateReport:
-    from unilabos.app.register import collect_devices_and_resources
-
-    _, resources = collect_devices_and_resources(registry)
+    # 只投影资源：设备条目的深拷贝 + 规范化要几百毫秒，这里用不到
+    resources = {
+        item["id"]: item for item in registry.obtain_registry_resource_info()
+    }
     return register_resource_definitions(resources.values(), gateway)
 
 

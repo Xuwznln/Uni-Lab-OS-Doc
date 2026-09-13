@@ -238,6 +238,10 @@ class EdgeControlService:
             attempt_group_uuid=str(payload.get("node_run_uuid") or job_uuid),
             retry_of_job_uuid=retry_of_job_uuid,
             attempt_no=attempt_no,
+            attempt_trigger=str(payload.get("attempt_trigger") or "initial"),
+            retry_count=(
+                int(payload["retry_count"]) if payload.get("retry_count") is not None else None
+            ),
             device_uuid=str(payload["device_id"]),
             action_name=str(payload["action"]),
             action_type=str(payload.get("action_type") or ""),
@@ -663,6 +667,9 @@ class EdgeControlService:
             epoch,
             len(pending),
         )
+        from unilabos.utils.log_notices import log_notices
+
+        log_notices.changed(sources_changed=True, all_sources=True)
         for notice_item in sorted(pending, key=lambda item: item.backend_sequence):
             resend = notice_item.model_copy(update={"connection_epoch": epoch})
             self.outgoing.put(
@@ -693,6 +700,9 @@ class EdgeControlService:
         # 正在等 Edge 回 HTTP 结果的调用方立刻拿到 None，而不是干等到超时
         self._fail_http_waiters()
         logger.info("[EdgeControl] Edge 连接已断开")
+        from unilabos.utils.log_notices import log_notices
+
+        log_notices.changed(sources_changed=True, all_sources=True)
 
     def _drain_outgoing(self) -> None:
         while True:
@@ -721,6 +731,12 @@ class EdgeControlService:
     def handle_message(self, action: str, data: dict[str, Any]) -> Optional[dict[str, Any]]:
         """处理一条 Edge 上行消息，返回需要回发的消息（如 ack/pong）。"""
 
+        if action == "runtime_logs_changed":
+            from unilabos.protocol.runtime.logs import RuntimeLogNotice
+            from unilabos.utils.log_notices import log_notices
+
+            log_notices.publish(RuntimeLogNotice.model_validate(data))
+            return None
         if action == "ping":
             # ping/pong 是控制面的快速诊断消息，不经过命令/事件协调器。
             # 严格重建字段，避免把旧协议或业务正文透传到 runtime.v1。

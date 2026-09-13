@@ -705,7 +705,7 @@ class RuntimeService(SqliteDomain):
             """
             INSERT INTO execution_job(
                 job_uuid,task_uuid,node_uuid,attempt_group_uuid,retry_of_job_uuid,
-                attempt_no,execute_command_uuid,device_uuid,action_name,
+                attempt_no,attempt_trigger,execute_command_uuid,device_uuid,action_name,
                 action_payload_uuid,route_uuid,endpoint_uuid,transport,
                 material_bindings_json,scheduler_revision,scheduler_status_version,
                 status,feedback_sequence,result_uuid,error_code,error_summary,
@@ -717,7 +717,7 @@ class RuntimeService(SqliteDomain):
                 dispatched_at_ms,started_at_ms,finished_at_ms,version
             ) VALUES (
                 :job_uuid,:task_uuid,:node_uuid,:attempt_group_uuid,:retry_of_job_uuid,
-                :attempt_no,:execute_command_uuid,:device_uuid,:action_name,
+                :attempt_no,:attempt_trigger,:execute_command_uuid,:device_uuid,:action_name,
                 :action_payload_uuid,:route_uuid,:endpoint_uuid,:transport,
                 :material_bindings_json,:scheduler_revision,:scheduler_status_version,
                 :status,:feedback_sequence,:result_uuid,:error_code,:error_summary,

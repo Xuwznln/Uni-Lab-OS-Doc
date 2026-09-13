@@ -17,6 +17,7 @@ from queue import Empty, Full, PriorityQueue
 from typing import Any, Optional
 
 import websockets
+from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from unilabos.backend.hostlink.adapter_registry import get_execution_adapter
 from unilabos.config.config import BasicConfig, WSConfig
@@ -103,6 +104,8 @@ class BackendWebSocketClient(BaseBackendClient):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._websocket: Any = None
         self._reconnect_count = 0
+        # 在事件循环线程内创建；stop() 经 call_soon_threadsafe 置位，打断重连等待
+        self._stop_event: Optional[asyncio.Event] = None
         # 业务通知串行处理，避免 coordinator 的 HTTP 拉取阻塞 WS 接收器。
         # ping/pong 不进入此队列，始终在接收协程中快速处理。
         self._business_queue: Optional[
@@ -130,9 +133,14 @@ class BackendWebSocketClient(BaseBackendClient):
         self._running = False
         websocket = self._websocket
         loop = self._loop
-        if websocket is not None and loop is not None and loop.is_running():
+        stop_event = self._stop_event
+        if loop is not None and loop.is_running():
             try:
-                asyncio.run_coroutine_threadsafe(websocket.close(), loop)
+                if stop_event is not None:
+                    # 唤醒正在等重连间隔的循环，否则 join 只能等到超时
+                    loop.call_soon_threadsafe(stop_event.set)
+                if websocket is not None:
+                    asyncio.run_coroutine_threadsafe(websocket.close(), loop)
             except Exception:  # noqa: BLE001 - shutdown is best effort
                 pass
         if self._thread is not None and self._thread.is_alive():
@@ -215,7 +223,9 @@ class BackendWebSocketClient(BaseBackendClient):
             self._loop = None
 
     async def _connection_handler(self) -> None:
+        self._stop_event = asyncio.Event()
         while self._running:
+            closed_notice: Optional[str] = None
             try:
                 ssl_context = None
                 if self.websocket_url.startswith("wss://"):
@@ -287,13 +297,14 @@ class BackendWebSocketClient(BaseBackendClient):
                             except asyncio.CancelledError:
                                 pass
                         self._discard_queued_notices()
-            except websockets.exceptions.ConnectionClosed:
-                logger.warning("[ControlProtocol] Backend connection closed")
+            except ConnectionClosed:
+                # 先不出声：权威停机时先关 WS、紧接着才请本进程退出，两者只差几毫秒；
+                # 等过了重连间隔还在运行，才是真正需要报出来的断线。
+                closed_notice = "Backend connection closed"
             except TimeoutError:
-                logger.warning("[ControlProtocol] Backend connection timed out")
+                self._report_connect_failure("Backend connection timed out")
             except Exception as exc:  # noqa: BLE001 - reconnect after reporting
-                logger.error("[ControlProtocol] Connection error: %s", exc)
-                logger.debug(traceback.format_exc())
+                self._report_connect_failure(f"Connection error: {exc}", exc)
             finally:
                 self._connected = False
                 self._session_bound_for_connection = False
@@ -305,7 +316,41 @@ class BackendWebSocketClient(BaseBackendClient):
                 logger.error("[ControlProtocol] Max reconnection attempts reached")
                 break
             self._reconnect_count += 1
-            await asyncio.sleep(WSConfig.reconnect_interval)
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), WSConfig.reconnect_interval)
+            except asyncio.TimeoutError:
+                pass
+            if closed_notice and self._running:
+                logger.warning("[ControlProtocol] %s; reconnecting", closed_notice)
+
+    #: 连续重连失败每隔这么多次升一次 ERROR（默认 5s 间隔 ≈ 每分钟一条），其余走 DEBUG
+    _RECONNECT_ESCALATE_EVERY = 12
+
+    def _report_connect_failure(self, message: str, exc: Optional[BaseException] = None) -> None:
+        """连不上权威：首次 WARNING、之后 DEBUG、长时间不通定期 ERROR；停机中一律 DEBUG。
+
+        权威重启 / 本进程被权威叫停时连接被拒是正常现象，逐次 ERROR + 堆栈只会淹掉真问题。
+        网络类异常（拒绝连接、超时、握手失败）本身就是原因，不再附堆栈。
+        """
+
+        if not self._running:
+            logger.debug("[ControlProtocol] %s (shutting down)", message)
+            return
+        # 连接成功会把计数归零：attempt 0 是进程刚启动的首连，1 是断线后的首次重连
+        attempt = self._reconnect_count
+        if attempt <= 1:
+            logger.warning(
+                "[ControlProtocol] %s; retrying every %ss", message, WSConfig.reconnect_interval
+            )
+        elif attempt % self._RECONNECT_ESCALATE_EVERY == 0:
+            logger.error(
+                "[ControlProtocol] %s; still unreachable after %d attempts", message, attempt
+            )
+        else:
+            logger.debug("[ControlProtocol] %s (attempt %d)", message, attempt)
+        network_error = isinstance(exc, (OSError, TimeoutError, WebSocketException))
+        if exc is not None and not network_error:
+            logger.debug(traceback.format_exc())
 
     async def _handle_raw_message(self, raw_message: str | bytes) -> None:
         try:

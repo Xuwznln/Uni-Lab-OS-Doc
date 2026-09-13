@@ -6,7 +6,7 @@ import uuid
 
 from unilabos.backend.hostlink.local_runtime import HostLinkDriverSpec, HostLinkLocalRuntime
 from unilabos.client.materials import LocalMaterialsClient
-from unilabos.config.config import BasicConfig
+from unilabos.config.config import BasicConfig, HostLinkConfig
 from unilabos.devices.virtual.heating_platform import VirtualHeatingPlatform
 from unilabos.backend.hostlink.backend import HostLinkBackend
 from unilabos.backend.hostlink.host_node import HostNode
@@ -63,6 +63,7 @@ def test_test_mode_executes_only_explicit_virtual_simulator_and_records_status_h
 ) -> None:
     monkeypatch.setattr(BasicConfig, "test_mode", True)
     monkeypatch.setattr(BasicConfig, "is_host_mode", True)
+    monkeypatch.setattr(HostLinkConfig, "port", 0)  # 不占真实 7302：本机可能正跑着 Host
     material_service = MaterialsService(tmp_path / "materials.db")
     set_materials_gateway(LocalMaterialsClient(material_service))
     telemetry_service = TelemetryService(tmp_path / "telemetry.db")

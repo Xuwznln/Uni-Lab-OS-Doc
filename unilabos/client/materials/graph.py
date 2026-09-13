@@ -69,6 +69,7 @@ class HTTPGraphClient:
         description: Optional[str] = None,
         meta_data: Optional[Mapping[str, Any]] = None,
         device_site_templates: Optional[Mapping[str, Sequence[Any]]] = None,
+        on_existing: str = "replace",
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "name": name,
@@ -77,6 +78,7 @@ class HTTPGraphClient:
             "tags": list(tags),
             "description": description,
             "meta_data": dict(meta_data or {}),
+            "on_existing": on_existing,
         }
         if device_site_templates is not None:
             body["device_site_templates"] = {

@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Optional, Protocol, Sequence
 
 from unilabos.resources.objects.resource import ResourceDict
 from unilabos.resources.resource_tracker import ResourceTreeSet
 from unilabos.protocol.materials import InventoryMutation, MutationResult
 from unilabos.protocol.materials import (
     MaterialAggregateRead,
+    MaterialDataDelta,
     MaterialDataRead,
     MaterialDataWrite,
+    MaterialDelta,
+    MaterialDeltaResult,
     MaterialIdentityRead,
     MaterialIdentityWrite,
     MaterialMove,
     MaterialNodeCreate,
+    MaterialNodeDelta,
     MaterialPosition,
     MaterialSnapshot,
     MaterialSnapshotDiff,
@@ -64,6 +68,10 @@ class MaterialGateway(Protocol):
     def apply_snapshot(
         self, mutation: InventoryMutation, value: MaterialSnapshot
     ) -> MutationResult[MaterialTreeRead]: ...
+
+    def apply_delta(
+        self, mutation: InventoryMutation, value: MaterialDelta
+    ) -> MutationResult[MaterialDeltaResult]: ...
 
 
 def _position_from_resource(resource: ResourceDict) -> MaterialPosition:
@@ -304,6 +312,27 @@ def plr_resources_to_create(resources: Sequence[Any]) -> MaterialTreeCreate:
     return resource_tree_to_create(tree)
 
 
+def site_read_to_resource_site(site: Any) -> dict[str, Any]:
+    """权威 ``SiteRead`` → 根字段 ``sites[]`` 的 canonical ``ResourceSite`` 输入。"""
+
+    return {
+        "schema_version": site.schema_version,
+        "uuid": site.site_uuid,
+        "template_name": site.template_name,
+        "material_uuid": site.owner_material_uuid,
+        "index": site.site_index,
+        "label": site.label,
+        "visible": site.visible,
+        "occupied_material_uuid": site.occupied_material_uuid,
+        "pose": site.pose,
+        "allowed_resource_categories": site.allowed_resource_categories,
+        "parent_link": site.parent_link,
+        "description": site.description,
+        "meta_data": site.meta_data,
+        "extra": site.extra,
+    }
+
+
 def material_tree_to_resource_tree(value: MaterialTreeRead) -> ResourceTreeSet:
     raw: list[dict[str, Any]] = []
     for node in value.nodes:
@@ -345,25 +374,7 @@ def material_tree_to_resource_tree(value: MaterialTreeRead) -> ResourceTreeSet:
                 "template_name": material.template_name,
                 "resource_template_uuid": material.template_uuid,
                 "joint_state": None,
-                "sites": [
-                    {
-                        "schema_version": site.schema_version,
-                        "uuid": site.site_uuid,
-                        "template_name": site.template_name,
-                        "material_uuid": site.owner_material_uuid,
-                        "index": site.site_index,
-                        "label": site.label,
-                        "visible": site.visible,
-                        "occupied_material_uuid": site.occupied_material_uuid,
-                        "pose": site.pose,
-                        "allowed_resource_categories": site.allowed_resource_categories,
-                        "parent_link": site.parent_link,
-                        "description": site.description,
-                        "meta_data": site.meta_data,
-                        "extra": site.extra,
-                    }
-                    for site in node.sites
-                ],
+                "sites": [site_read_to_resource_site(site) for site in node.sites],
                 "sites_initialized": node.data.sites_initialized,
                 "substances": [
                     (item.name, item.quantity, item.quantity_unit)
@@ -501,6 +512,30 @@ def resource_tree_to_snapshot(
     return MaterialSnapshot(root_material_uuid=base.root_material_uuid, nodes=nodes)
 
 
+def resource_to_node_delta(
+    resource: ResourceDict,
+    *,
+    expected_version: Optional[int] = None,
+    expected_state_hash: Optional[str] = None,
+) -> MaterialNodeDelta:
+    """把一个运行时节点的状态段（data / 内容物 / 位姿）做成增量；不碰身份与结构。
+
+    结构变化（父子、位点占用）走整树快照或 move；这里只表达设备自己拥有的运行态。
+    """
+
+    return MaterialNodeDelta(
+        material_uuid=resource.uuid,
+        expected_version=expected_version,
+        expected_state_hash=expected_state_hash,
+        data=MaterialDataDelta(
+            data=resource.data,
+            substances=_substances_from_resource(resource),
+            unknown_counter=resource.unknown_counter,
+        ),
+        position=_position_from_resource(resource),
+    )
+
+
 @dataclass(frozen=True)
 class CreatedPLRMaterials:
     result: MutationResult[MaterialTreeRead]
@@ -543,6 +578,8 @@ __all__ = [
     "material_tree_to_plr_resources",
     "material_tree_to_resource_tree",
     "plr_resources_to_create",
+    "resource_to_node_delta",
     "resource_tree_to_create",
     "resource_tree_to_snapshot",
+    "site_read_to_resource_site",
 ]

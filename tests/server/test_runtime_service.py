@@ -318,6 +318,80 @@ def test_error_gate_release_and_backend_owned_retry(tmp_path) -> None:
         service.close()
 
 
+def test_loop_iteration_job_is_a_new_attempt_without_a_retry_link(tmp_path) -> None:
+    """工作流循环体每轮追加 attempt：attempt_no > 1 但不是重试，靠 attempt_trigger=loop_iteration 放行。"""
+
+    service = RuntimeService(tmp_path / "runtime.db")
+    try:
+        _session(service)
+        _endpoint(service)
+        _command(service, 1, "execute-1", "execute_job", job_uuid="job-1")
+        service.create_execution_job(
+            ExecutionJobCreate(
+                job_uuid="job-1",
+                task_uuid="task",
+                node_uuid="node",
+                attempt_group_uuid="attempt-group",
+                execute_command_uuid="execute-1",
+                device_uuid="device",
+                action_name="transfer",
+                action_payload_uuid="payload-1",
+                scheduler_revision=1,
+            )
+        )
+        # 没有 trigger 的第二次 attempt 仍然必须带重试链
+        with pytest.raises(ValueError, match="retry link and attempt number"):
+            ExecutionJobCreate(
+                job_uuid="job-2",
+                task_uuid="task",
+                node_uuid="node",
+                attempt_group_uuid="attempt-group",
+                attempt_no=2,
+                execute_command_uuid="execute-2",
+                device_uuid="device",
+                action_name="transfer",
+                action_payload_uuid="payload-2",
+                scheduler_revision=1,
+            )
+        _command(service, 2, "execute-2", "execute_job", job_uuid="job-2")
+        second_round = service.create_execution_job(
+            ExecutionJobCreate(
+                job_uuid="job-2",
+                task_uuid="task",
+                node_uuid="node",
+                attempt_group_uuid="attempt-group",
+                attempt_no=2,
+                attempt_trigger="loop_iteration",
+                execute_command_uuid="execute-2",
+                device_uuid="device",
+                action_name="transfer",
+                action_payload_uuid="payload-2",
+                scheduler_revision=1,
+            )
+        )
+        assert second_round.attempt_no == 2
+        assert second_round.retry_of_job_uuid is None
+        assert second_round.attempt_trigger == "loop_iteration"
+        assert service.get_execution_job("job-2").attempt_trigger == "loop_iteration"
+        # 重试链不能挂在 attempt 1 上
+        with pytest.raises(ValueError, match="retry link and attempt number"):
+            ExecutionJobCreate(
+                job_uuid="job-3",
+                task_uuid="task",
+                node_uuid="node",
+                attempt_group_uuid="attempt-group",
+                retry_of_job_uuid="job-2",
+                attempt_no=1,
+                execute_command_uuid="execute-3",
+                device_uuid="device",
+                action_name="transfer",
+                action_payload_uuid="payload-3",
+                scheduler_revision=1,
+            )
+    finally:
+        service.close()
+
+
 def test_adapter_and_backend_outboxes_claim_retry_and_ack(tmp_path) -> None:
     service = RuntimeService(tmp_path / "runtime.db")
     try:

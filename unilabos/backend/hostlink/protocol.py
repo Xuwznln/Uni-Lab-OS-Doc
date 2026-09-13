@@ -2,6 +2,12 @@
 
 ROS2 mode uses the control messages for assisted discovery. The standalone
 HostLink backend additionally uses the same connection for device RPC/state.
+
+一帧就是一行 JSON。单帧上限 ``MAX_FRAME_BYTES``；超过的消息（整套物料模板定义、
+大物料树快照）由 ``encode_frames`` 切成若干 chunk 连续发送：每个 chunk 是一行
+``kind="chunk"`` 头（带 ``len``）加紧随其后的 ``len`` 字节原始 JSON 正文，正文不再
+二次转义。``read_message`` 重组后再交给上层，上层只见 ``req`` / ``resp``。整条消息
+上限 ``MAX_MESSAGE_BYTES``。
 """
 
 from __future__ import annotations
@@ -10,12 +16,14 @@ import json
 import socket
 import traceback
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from unilabos.backend.hostlink.topic import message_to_value
+from unilabos.utils import logger
 
 PROTOCOL_VERSION = 1
 MAX_FRAME_BYTES = 8 * 1024 * 1024
+MAX_MESSAGE_BYTES = 256 * 1024 * 1024
 
 
 class ActionType:
@@ -23,6 +31,8 @@ class ActionType:
 
     HELLO = "hello"
     PING = "ping"
+    LOG_READ = "process.log.read"
+    LOG_CHANGED = "process.log.changed"
     # Slave 只经 HostLink 提交物料请求；Host 再代理到配置的 materials authority。
     MATERIAL_TEMPLATE_LIST = "material.template.list"
     MATERIAL_TEMPLATE_CREATE = "material.template.create"
@@ -36,6 +46,7 @@ class ActionType:
     MATERIAL_DELETE = "material.delete"
     MATERIAL_COMPARE_SNAPSHOT = "material.snapshot.compare"
     MATERIAL_APPLY_SNAPSHOT = "material.snapshot.apply"
+    MATERIAL_APPLY_DELTA = "material.delta.apply"
     # Host → 设备的物料/管理下行链路（不建 ROS service，本进程直调 / 跨机走 HostLink）。
     RESOURCE_TREE_SYNC = "resource.tree.sync"
     RESOURCE_APPEND = "resource.append"
@@ -129,23 +140,91 @@ def new_response(
     return message
 
 
-def encode_frame(message: Dict[str, Any]) -> bytes:
-    raw = (
-        json.dumps(
-            message,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            default=message_to_value,
-        ).encode("utf-8")
-        + b"\n"
+def _dumps(message: Dict[str, Any]) -> str:
+    return json.dumps(
+        message,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=message_to_value,
     )
+
+
+def encode_frame(message: Dict[str, Any]) -> bytes:
+    """Encode one message as exactly one frame; raises when it does not fit."""
+
+    raw = _dumps(message).encode("utf-8") + b"\n"
     if len(raw) > MAX_FRAME_BYTES:
         raise LinkError(f"frame too large: {len(raw)} bytes > {MAX_FRAME_BYTES}")
     return raw
 
 
+_CHUNK_HEADER_RESERVE = 256
+
+
+def encode_frames(message: Dict[str, Any]) -> List[bytes]:
+    """Encode a message as one frame, or as a run of chunks when it is too big.
+
+    每个返回项都是一次 ``sendall`` 的内容：普通帧就是一行；chunk 则是头行加正文，
+    头行 ``len`` 告诉接收端正文有多少字节。正文是原始 JSON 字节切片，按字节切开也
+    没关系——接收端先把所有正文拼回来再解码。
+    """
+
+    raw = _dumps(message).encode("utf-8")
+    if len(raw) + 1 <= MAX_FRAME_BYTES:
+        return [raw + b"\n"]
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise LinkError(f"message too large: {len(raw)} bytes > {MAX_MESSAGE_BYTES}")
+    step = max(1, MAX_FRAME_BYTES - _CHUNK_HEADER_RESERVE)
+    bodies = [raw[offset : offset + step] for offset in range(0, len(raw), step)]
+    transfer_id = uuid.uuid4().hex
+    frames: List[bytes] = []
+    for index, body in enumerate(bodies):
+        header = encode_frame(
+            {
+                "v": PROTOCOL_VERSION,
+                "kind": "chunk",
+                "id": transfer_id,
+                "seq": index,
+                "n": len(bodies),
+                "len": len(body),
+            }
+        )
+        frames.append(header + body)
+    return frames
+
+
 def send_message(sock: socket.socket, message: Dict[str, Any]) -> None:
-    sock.sendall(encode_frame(message))
+    """Send one message; callers hold the socket's write lock so chunk runs stay contiguous."""
+
+    for frame in encode_frames(message):
+        sock.sendall(frame)
+
+
+def send_response_or_reject(
+    send: Callable[[Dict[str, Any]], None],
+    request: Dict[str, Any],
+    response: Dict[str, Any],
+    peer: str,
+) -> None:
+    """发送一条应答；应答连分片都装不下（超过 MAX_MESSAGE_BYTES）时改发明确的错误应答。
+
+    否则 LinkError 只会在执行线程里被吞掉，对端等到超时都不知道原因——分片之前整套
+    物料模板定义（近 10MB > 8MB 单帧）就是这样把 Slave 的 ``material.template.list``
+    拖到 request timeout 的。
+    """
+
+    try:
+        send(response)
+    except LinkError as exc:
+        action = str(request.get("action_type") or "")
+        logger.warning("[HostLink] %s 的应答无法发给 %s: %s", action, peer, exc)
+        send(
+            new_response(
+                str(request.get("id") or ""),
+                False,
+                error=f"response to {action} exceeds the HostLink message limit: {exc}",
+            )
+        )
 
 
 class LineReader:
@@ -173,17 +252,29 @@ class LineReader:
                     self._buffer.clear()
                     return remainder
                 return b""
-            chunk = self._sock.recv(65536)
-            if chunk:
-                self._buffer.extend(chunk)
-            else:
-                self._eof = True
+            self._fill()
+
+    def read(self, size: int) -> bytes:
+        """Return exactly ``size`` bytes, or fewer only when the peer closed the socket."""
+
+        while len(self._buffer) < size and not self._eof:
+            self._fill()
+        data = bytes(self._buffer[:size])
+        del self._buffer[:size]
+        return data
+
+    def _fill(self) -> None:
+        chunk = self._sock.recv(65536)
+        if chunk:
+            self._buffer.extend(chunk)
+        else:
+            self._eof = True
 
     def close(self) -> None:
         self._buffer.clear()
 
 
-def read_message(reader: Any) -> Optional[Dict[str, Any]]:
+def _read_frame(reader: Any) -> Optional[Dict[str, Any]]:
     line = reader.readline(MAX_FRAME_BYTES + 2)
     if not line:
         return None
@@ -192,12 +283,70 @@ def read_message(reader: Any) -> Optional[Dict[str, Any]]:
     if not line.endswith(b"\n"):
         raise LinkError("truncated frame (no trailing newline)")
     try:
-        message = json.loads(line)
+        frame = json.loads(line)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise LinkError(f"invalid json frame: {exc}") from exc
+    if not isinstance(frame, dict):
+        raise LinkError("invalid envelope")
+    return frame
+
+
+def _validate_envelope(message: Any) -> Dict[str, Any]:
     if not isinstance(message, dict) or message.get("kind") not in {"req", "resp"}:
         raise LinkError("invalid envelope")
     return message
+
+
+def _positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _read_chunked(reader: Any, first: Dict[str, Any]) -> Dict[str, Any]:
+    """Reassemble a contiguous run of chunks started by header ``first``."""
+
+    transfer_id = first.get("id")
+    total = first.get("n")
+    if not _positive_int(total) or total < 1:
+        raise LinkError("invalid chunk header")
+    parts: List[bytes] = []
+    received = 0
+    header: Optional[Dict[str, Any]] = first
+    for expected in range(total):
+        if header is None:
+            raise LinkError(f"connection closed after {expected}/{total} chunks")
+        length = header.get("len")
+        if (
+            header.get("kind") != "chunk"
+            or header.get("id") != transfer_id
+            or header.get("seq") != expected
+            or not _positive_int(length)
+            or length > MAX_FRAME_BYTES
+        ):
+            raise LinkError(f"chunk sequence broken at {expected}/{total}")
+        received += length
+        if received > MAX_MESSAGE_BYTES:
+            raise LinkError(f"message too large: >{MAX_MESSAGE_BYTES} bytes")
+        body = reader.read(length)
+        if len(body) != length:
+            raise LinkError(f"truncated chunk body at {expected}/{total}")
+        parts.append(body)
+        if expected + 1 < total:
+            header = _read_frame(reader)
+    try:
+        return _validate_envelope(json.loads(b"".join(parts)))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LinkError(f"invalid json in chunked message: {exc}") from exc
+
+
+def read_message(reader: Any) -> Optional[Dict[str, Any]]:
+    """Return the next ``req``/``resp`` message, transparently reassembling chunk runs."""
+
+    frame = _read_frame(reader)
+    if frame is None:
+        return None
+    if frame.get("kind") == "chunk":
+        return _read_chunked(reader, frame)
+    return _validate_envelope(frame)
 
 
 __all__ = [
@@ -205,12 +354,15 @@ __all__ = [
     "LineReader",
     "LinkError",
     "MAX_FRAME_BYTES",
+    "MAX_MESSAGE_BYTES",
     "PROTOCOL_VERSION",
     "RemoteError",
     "encode_frame",
+    "encode_frames",
     "exception_error_info",
     "new_request",
     "new_response",
     "read_message",
     "send_message",
+    "send_response_or_reject",
 ]

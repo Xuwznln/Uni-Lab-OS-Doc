@@ -271,6 +271,67 @@ def test_ast_cache_rejects_previous_metadata_version(tmp_path) -> None:
     assert cache == {"version": _CACHE_VERSION, "files": {}}
 
 
+def test_build_cache_slots_are_isolated_per_scan_configuration_and_not_rewritten_on_hit(
+    monkeypatch,
+) -> None:
+    """受管 Slave（external_only）与权威（全量）共用一个 pkl：各自命中各自的槽，不互相覆盖；
+    全部命中时不重写缓存文件。"""
+
+    full_result = {
+        "devices": {"pump": {"device_id": "pump"}},
+        "resources": {},
+        "_cache_stats": {"hits": 3, "misses": 0, "total": 3},
+    }
+    slave_result = {
+        "devices": {"rack": {"device_id": "rack"}},
+        "resources": {},
+        "_cache_stats": {"hits": 1, "misses": 0, "total": 1},
+    }
+
+    def make_registry(cache: dict, scan_result: dict, built: list, saves: list) -> Registry:
+        registry = Registry()
+        monkeypatch.setattr(registry, "_startup_executor", None)
+        monkeypatch.setattr(registry, "device_type_registry", {})
+        monkeypatch.setattr(registry, "resource_type_registry", {})
+        monkeypatch.setattr(registry, "_load_config_cache", lambda: cache)
+        monkeypatch.setattr(registry, "_save_config_cache", lambda c: saves.append(dict(c)))
+        monkeypatch.setattr(
+            registry,
+            "_build_device_entry_from_ast",
+            lambda device_id, meta: built.append(device_id) or {"device_id": device_id, "built": True},
+        )
+
+        def fake_scan_directory(*_args, cache, include_files=None, **_kwargs):
+            if include_files is not None and any(str(f).endswith("host_services.py") for f in include_files):
+                return {"devices": {}, "resources": {}, "_cache_stats": {"hits": 0, "misses": 0, "total": 0}}
+            return {k: (dict(v) if isinstance(v, dict) else v) for k, v in scan_result.items()}
+
+        monkeypatch.setattr("unilabos.registry.ast_registry_scanner.scan_directory", fake_scan_directory)
+        return registry
+
+    shared_cache: dict = {"_ast_scan": {"version": _CACHE_VERSION, "files": {}}}
+
+    # 1) 权威全量扫描：首次构建并落盘
+    built, saves = [], []
+    make_registry(shared_cache, full_result, built, saves)._run_ast_scan(devices_dirs=[])
+    assert built == ["pump"] and len(saves) == 1
+    shared_cache = saves[-1]
+
+    # 2) 受管 Slave 的 external_only 扫描：构建自己的槽，不覆盖权威的槽
+    built, saves = [], []
+    make_registry(shared_cache, slave_result, built, saves)._run_ast_scan(devices_dirs=[], external_only=True)
+    assert built == ["rack"] and len(saves) == 1
+    shared_cache = saves[-1]
+    assert len(shared_cache["_build_results"]) == 2
+
+    # 3) 权威再次启动：全部命中，不重建、不重写缓存
+    built, saves = [], []
+    registry = make_registry(shared_cache, full_result, built, saves)
+    registry._run_ast_scan(devices_dirs=[])
+    assert built == [] and saves == []
+    assert registry.device_type_registry == {"pump": {"device_id": "pump", "built": True}}
+
+
 def test_registry_run_ast_scan_invalidates_stale_scan_and_build_caches(
     monkeypatch,
 ) -> None:
@@ -355,7 +416,12 @@ def test_registry_run_ast_scan_invalidates_stale_scan_and_build_caches(
             }
         },
     }
-    assert saved_cache["_build_results"] == {
+    # build 结果按扫描配置分槽（权威 / Host 全量扫描与 external_only 的受管 Slave 共用一个 pkl）
+    build_slots = saved_cache["_build_results"]
+    assert len(build_slots) == 1
+    (build_key, built), = build_slots.items()
+    assert '"external_only": false' in build_key
+    assert built == {
         "devices": {
             "fresh-device": {"device_id": "fresh-device", "fresh": True}
         },

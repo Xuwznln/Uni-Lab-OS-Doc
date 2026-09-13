@@ -1,8 +1,14 @@
 """Registry Authority API：Edge 上报 + 条目级版本管理。
 
-``POST /api/v1/resource-templates`` 接收 gzip JSON 全量快照，并返回
-``{code, data:{templates:[{name,uuid}]}}``。其余端点提供条目状态、
-版本历史、挂起版本确认或忽略、历史还原及上报批次统计。
+``GET /api/v1/registry/digest`` 返回权威持有的条目内容哈希（生效 / 挂起），Host 据此决定
+哪些条目要附完整定义。``POST /api/v1/resource-templates`` 接收 gzip JSON 上报，两种形状：
+
+- 按哈希增量（``RegistryReport``）：``{"entries": [{"id", "content_sha256", "payload"?}]}``，
+  每个条目都带哈希，权威没有该哈希的才带 payload；结果里的 ``missing`` 列出仍缺定义的条目。
+- 旧全量快照：``{"resources": [...], "workflow_templates": [...]}``，每个条目都是完整定义。
+
+其余端点提供条目状态、版本历史、挂起版本确认或忽略、历史还原、上报批次统计，
+以及生效的工作流模板列表。
 """
 
 from __future__ import annotations
@@ -12,7 +18,9 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
+from pydantic import ValidationError
 
+from unilabos.protocol.runtime.registry import RegistryDigest, RegistryReport
 from unilabos.server.services.runtime.registry import (
     RegistryAuthorityError,
     RegistryService,
@@ -33,6 +41,14 @@ def _ok(data: Any) -> dict[str, Any]:
     return {"code": 0, "data": data}
 
 
+@router.get("/api/v1/registry/digest")
+def get_registry_digest() -> dict[str, Any]:
+    """权威持有的条目内容哈希索引：Host 上报前先取，只为权威没有的哈希附完整定义。"""
+
+    digest = _require_service().digest()
+    return _ok(RegistryDigest(**digest).model_dump(mode="json"))
+
+
 @router.post("/api/v1/resource-templates")
 async def report_resource_templates(request: Request) -> dict[str, Any]:
     """Edge 全量上报（条目级替换：变了才升该条目版本，冲突挂起待确认）。"""
@@ -48,15 +64,45 @@ async def report_resource_templates(request: Request) -> dict[str, Any]:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail="invalid JSON body") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("resources"), list):
-        raise HTTPException(status_code=400, detail="body must contain resources list")
-
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
     edge_uuid = str(payload.get("edge_uuid") or request.headers.get("x-edge-uuid") or "")
+
+    if "entries" in payload:
+        # 按哈希增量：每个条目带 id + content_sha256，权威没有该哈希的才带 payload
+        try:
+            report_body = RegistryReport.model_validate(payload)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid registry report: {exc}") from exc
+        try:
+            report = service.report_entries(
+                [item.model_dump(mode="json") for item in report_body.entries],
+                edge_uuid=edge_uuid,
+            )
+        except RegistryAuthorityError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _ok(report)
+
+    if not isinstance(payload.get("resources"), list):
+        raise HTTPException(status_code=400, detail="body must contain resources list")
+    # 包里 @workflow 声明的工作流模板与设备 / 资源同批上报、同一套条目版本化
+    workflow_templates = payload.get("workflow_templates", [])
+    if not isinstance(workflow_templates, list):
+        raise HTTPException(status_code=400, detail="workflow_templates must be a list")
     try:
-        report = service.report(payload["resources"], edge_uuid=edge_uuid)
+        report = service.report(
+            [*payload["resources"], *workflow_templates], edge_uuid=edge_uuid
+        )
     except RegistryAuthorityError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _ok(report)
+
+
+@router.get("/api/v1/registry/workflow-templates")
+def list_registry_workflow_templates() -> dict[str, Any]:
+    """生效的工作流模板（设备包 ``@workflow``）：前端模板面板与脚本实例化的数据源。"""
+
+    return _ok({"templates": _require_service().list_workflow_templates()})
 
 
 @router.get("/api/v1/registry/entries")

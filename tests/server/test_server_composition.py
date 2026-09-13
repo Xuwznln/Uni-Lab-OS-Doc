@@ -145,6 +145,13 @@ def test_local_scheduler_publishes_registry_authority_and_mounts_api(
         registry_service = get_registry_service()
         assert registry_service is not None
 
+        from unilabos.registry.workflows import (
+            WorkflowBuildContext,
+            clear_registered_workflows,
+            get_registered_workflows,
+            workflow,
+        )
+
         class _Registry:
             device_type_registry = {
                 "pump": {
@@ -155,20 +162,40 @@ def test_local_scheduler_publishes_registry_authority_and_mounts_api(
                 }
             }
             resource_type_registry: dict = {}
+            # 包里的 @workflow：扫描器记录模块名，上报时 import 并构建成模板条目
+            workflow_registry = {"tests.mod:flow": {"module": "tests_registry_snapshot_flow_module"}}
+
+        snapshot = get_registered_workflows()
+        clear_registered_workflows()
+
+        @workflow(display_name="演示流")
+        def demo_flow(ctx: WorkflowBuildContext) -> None:
+            ctx.run("pump-1/run", {})
 
         monkeypatch.setattr(
             "unilabos.app.register.collect_devices_and_resources",
             lambda registry: (registry.device_type_registry, registry.resource_type_registry),
         )
-        report = report_registry_snapshot_local(_Registry(), registry_service, edge_uuid="host")
-        assert report is not None and report.device_count == 1
-        assert report.summary["counts"]["added"] == 1
+        # 模块已在本进程"导入"（装饰器注册）；import 失败只告警不影响上报
+        try:
+            report = report_registry_snapshot_local(_Registry(), registry_service, edge_uuid="host")
+        finally:
+            clear_registered_workflows()
+            from unilabos.registry.workflows import _registered_workflows
+
+            _registered_workflows.update(snapshot)
+        assert report is not None and report.device_count == 1 and report.workflow_count == 1
+        assert report.summary["counts"]["added"] == 2
 
         app = app_module.setup_server()
         with TestClient(app) as client:
             response = client.get("/api/v1/registry/entries")
+            templates = client.get("/api/v1/registry/workflow-templates").json()["data"]["templates"]
         assert response.status_code == 200
-        assert [entry["name"] for entry in response.json()["data"]["entries"]] == ["pump"]
+        names = [entry["name"] for entry in response.json()["data"]["entries"]]
+        assert "pump" in names and any(name.endswith("demo_flow") for name in names)
+        assert [item["display_name"] for item in templates] == ["演示流"]
+        assert templates[0]["roles"][0]["kind"] == "device"
     finally:
         reset_for_test()
         assert get_registry_service() is None

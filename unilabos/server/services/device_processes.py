@@ -15,27 +15,23 @@ from __future__ import annotations
 import atexit
 import json
 import os
-import re
 import subprocess
 import sys
 import threading
 import time
 import uuid
-from collections import deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from unilabos.utils import logger
+from unilabos.utils.log_notices import log_notices
 
 SPEC_FILENAME = "device_processes.json"
 PROCESS_DIRNAME = "device_processes"
-LOG_TAIL_LINES = 300
 STOP_GRACE_S = 8.0
 RESTART_BACKOFF_S = (2.0, 4.0, 8.0, 15.0, 30.0)
 RESTART_POLICIES = ("never", "on-failure", "always")
-# 终端着色 / 光标控制序列；子进程即便无视 NO_COLOR，尾部缓存里也只留纯文本
-_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
 class DeviceProcessError(RuntimeError):
@@ -170,7 +166,6 @@ class DeviceProcessService:
         self._lock = threading.RLock()
         self._runtime: Dict[str, DeviceProcessRuntime] = {}
         self._procs: Dict[str, subprocess.Popen[bytes]] = {}
-        self._tails: Dict[str, Deque[str]] = {}
         self._stop_requested: set[str] = set()
         self._monitor: Optional[threading.Thread] = None
         self._closing = False
@@ -216,6 +211,8 @@ class DeviceProcessService:
             "--backend",
             backend,
             "--is_slave",
+            "--machine_name",
+            f"{BasicConfig.machine_name}_managed_{spec.id.replace('-', '_')}",
             "--skip_env_check",
             "--disable_browser",
             "--visual",
@@ -270,6 +267,7 @@ class DeviceProcessService:
         specs[spec.id] = spec
         save_specs(self.working_dir, specs)
         self._write_graph(spec)
+        log_notices.changed(sources_changed=True)
         return self._view(spec)
 
     def update(self, process_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -281,6 +279,7 @@ class DeviceProcessService:
         specs[process_id] = spec
         save_specs(self.working_dir, specs)
         self._write_graph(spec)
+        log_notices.changed(sources_changed=True)
         return self._view(spec)
 
     def delete(self, process_id: str) -> None:
@@ -292,7 +291,7 @@ class DeviceProcessService:
         save_specs(self.working_dir, specs)
         with self._lock:
             self._runtime.pop(process_id, None)
-            self._tails.pop(process_id, None)
+        log_notices.changed(sources_changed=True)
 
     def _spec_from_payload(self, payload: Dict[str, Any], existing: Optional[DeviceProcessSpec]) -> DeviceProcessSpec:
         name = str(payload.get("name") or (existing.name if existing else "")).strip()
@@ -354,6 +353,7 @@ class DeviceProcessService:
             if proc is not None:
                 runtime.last_exit_code = proc.poll()
             self._procs.pop(process_id, None)
+        log_notices.changed(f"managed:{process_id}", sources_changed=True)
         return self._view(spec)
 
     def restart(self, process_id: str) -> Dict[str, Any]:
@@ -372,14 +372,6 @@ class DeviceProcessService:
             except DeviceProcessError as exc:
                 logger.warning(f"[DeviceProcesses] 自动启动 {spec.name} 失败: {exc}")
         return started
-
-    def logs(self, process_id: str, tail: int = LOG_TAIL_LINES) -> Dict[str, Any]:
-        if process_id not in load_specs(self.working_dir):
-            raise DeviceProcessError(f"device process not found: {process_id}")
-        with self._lock:
-            lines = list(self._tails.get(process_id, ()))[-max(1, tail):]
-            runtime = self._runtime.get(process_id)
-        return {"process_id": process_id, "lines": lines, "path": runtime.log_path if runtime else ""}
 
     def shutdown(self) -> None:
         """Host 退出 / 重启时结束全部子进程（不留孤儿）。"""
@@ -429,8 +421,7 @@ class DeviceProcessService:
         runtime.stopped_at_ms = None
         runtime.status = "running"
         self._procs[spec.id] = proc
-        tail = self._tails.setdefault(spec.id, deque(maxlen=LOG_TAIL_LINES))
-        tail.append(f"[{time.strftime('%H:%M:%S')}] $ {' '.join(command)}")
+        log_notices.changed(f"managed:{spec.id}", sources_changed=True)
         threading.Thread(
             target=self._pump_output,
             args=(spec.id, proc, log_path),
@@ -440,14 +431,12 @@ class DeviceProcessService:
         logger.info(f"[DeviceProcesses] 已启动 {spec.name} (pid {proc.pid})")
 
     def _pump_output(self, process_id: str, proc: subprocess.Popen[bytes], log_path: Path) -> None:
-        tail = self._tails.setdefault(process_id, deque(maxlen=LOG_TAIL_LINES))
         with log_path.open("ab") as handle:
             assert proc.stdout is not None
             for raw in proc.stdout:
                 handle.write(raw)
                 handle.flush()
-                text = _ANSI_ESCAPE.sub("", raw.decode("utf-8", errors="replace")).rstrip("\r\n")
-                tail.append(text)
+                log_notices.changed(f"managed:{process_id}")
 
     def _terminate(self, proc: subprocess.Popen[bytes], *, wait: bool) -> None:
         try:
@@ -489,6 +478,7 @@ class DeviceProcessService:
                     runtime.stopped_at_ms = _now_ms()
                     self._procs.pop(process_id, None)
                     requested = process_id in self._stop_requested
+                log_notices.changed(f"managed:{process_id}", sources_changed=True)
                 if requested:
                     runtime.status = "stopped"
                     continue

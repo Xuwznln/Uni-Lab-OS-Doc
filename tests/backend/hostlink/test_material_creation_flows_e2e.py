@@ -227,6 +227,8 @@ def test_material_creation_flows_host_plus_slave(tmp_path, monkeypatch) -> None:
         _append_via_hostlink(host, deck_uuid, bind_parent_id=DEVICE_ID)
         deck_inst = node.resource_tracker.uuid_to_resources[deck_uuid]
         assert len(node.driver.added_batches) == 1  # deck 一批
+        # 设备在权威里没有物料行（本测试不登记设备图）：台面保持根树，不报错
+        assert service.get_material(deck_uuid).material.parent_material_uuid is None
 
         # ================= 场景 1：Syncer（本地接管外部物料系统，实时上报） =================
         # 外部系统出现一块板（本地草稿无 uuid，A1 已有 40ul Water）
@@ -414,5 +416,110 @@ def test_material_creation_flows_host_plus_slave(tmp_path, monkeypatch) -> None:
     finally:
         slave.stop()
         host.stop()
+        set_materials_gateway(None)
+        service.close()
+
+
+def test_deck_mounted_on_device_by_action_becomes_child_of_device_material(tmp_path, monkeypatch) -> None:
+    """设备动作里 ensure 台面再 ``materials.assign(node, deck_uuid)``（挂到设备自身）：
+
+    设备在权威里有物料行（开机图 / 受管进程图对齐后的常态）时，台面要真正成为设备物料的
+    子节点——前端设备卡片下才看得到它的 sites，``get_tree(设备)`` 也能带出台面。之后在
+    台面上 create+assign 耗材、快照、transfer 换位都照常工作；台面重复挂载幂等。
+    """
+    from unilabos.protocol.materials import (
+        InventoryMutation,
+        MaterialDataWrite,
+        MaterialIdentityWrite,
+        MaterialNodeCreate,
+        MaterialTreeCreate,
+        ResourceTemplateWrite,
+    )
+
+    service = MaterialsService(tmp_path / "materials.db")
+    gateway = LocalMaterialsClient(service)
+    set_materials_gateway(gateway)
+    monkeypatch.setattr(HostLinkConfig, "enable", True)
+    monkeypatch.setattr(HostLinkConfig, "bind", "127.0.0.1")
+    monkeypatch.setattr(HostLinkConfig, "port", 0)
+    monkeypatch.setattr(BasicConfig, "is_host_mode", True)
+
+    def _mutation(operation: str) -> InventoryMutation:
+        return InventoryMutation(
+            command_uuid=str(uuid4()), effect_key=operation, operation=operation,
+            actor_type="graph", actor_uuid="test",
+        )
+
+    device_uuid = str(uuid4())
+    # 开机图对齐会落的设备物料行
+    service.put_template(_mutation("put_template"), ResourceTemplateWrite(
+        name="bench_demo", display_name="bench", resource_type="device", class_name="bench_demo",
+    ))
+    service.create_tree(_mutation("create_material_tree"), MaterialTreeCreate(nodes=[MaterialNodeCreate(
+        client_ref="dev", material_uuid=device_uuid,
+        identity=MaterialIdentityWrite(
+            resource_id="bench", name="物料工作台", resource_type="device",
+            class_name="bench_demo", template_name="bench_demo",
+        ),
+        data=MaterialDataWrite(data={}, sites_initialized=True, state_status="ready"),
+    )]))
+
+    local = HostLinkLocalRuntime()
+    node = local.add_driver(HostLinkDriverSpec("bench", _PrcxiDriver, {}, resource_uuid=device_uuid))
+    backend = HostLinkBackend(local, is_slave=False)
+    backend.start()
+    try:
+        deck_uuid = str(uuid4())
+        materials.ensure(_build_deck(deck_uuid), gateway=gateway)
+        materials.assign(node, deck_uuid)  # prepare_bench 同款：挂到设备自身
+
+        assert service.get_material(deck_uuid).material.parent_material_uuid == device_uuid
+        device_tree = service.get_tree(device_uuid)
+        assert [n.material.name for n in device_tree.nodes] == ["物料工作台", "PRCXI_Deck"]
+        assert [s.label for n in device_tree.nodes for s in n.sites] == ["T1", "T2", "T3", "T4"]
+        assert [m.material.name for m in service.list_materials(roots_only=True)] == ["物料工作台"]
+
+        # 幂等：再挂一次不报错、父不变
+        materials.assign(node, deck_uuid)
+        assert service.get_material(deck_uuid).material.parent_material_uuid == device_uuid
+
+        # 台面上的耗材照常：create + assign 上 T1，快照按设备根树提交，transfer 换到 T3
+        from unilabos.registry.registry import lab_registry
+
+        monkeypatch.setitem(lab_registry.resource_type_registry, "PRCXI_300ul_Tips", {"class": {
+            "module": "unilabos.devices.liquid_handling.prcxi.prcxi_labware:PRCXI_300ul_Tips",
+            "type": "pylabrobot",
+        }})
+        tips = materials.create("PRCXI_300ul_Tips", name="tips_r1", node=node)
+        materials.assign(node, tips, parent="PRCXI_Deck", slot="T1")
+        assert service.get_material(tips.unilabos_uuid).material.parent_material_uuid == deck_uuid
+        assert _site_by_label(service, deck_uuid, "T1").occupied_material_uuid == tips.unilabos_uuid
+
+        # 快照按"设备下的那棵树"（台面）分组提交，而不是把设备连同所有台面当一棵树
+        updated = materials.update(node, tips)
+        assert {t.root_node.res_content.uuid for t in updated.trees} == {deck_uuid}
+        observer = node.resource_tracker._material_snapshot_observer
+        assert observer is not None and observer.errors == ()
+
+        # 观察者自动快照（孔位加液同款：本地 state 变化 + commit -> 自动上报）在台面挂设备后
+        # 照常到达权威：hydrate_well 之前卡死就是因为根被解析成设备、快照集合对不上
+        plate = materials.create(PRCXI_BioER_96_wellplate(name="plate_r1"), node=node)
+        materials.assign(node, plate, parent="PRCXI_Deck", slot="T2")
+        well = plate.get_well("A1")
+        well.tracker.add_liquid("Buffer", 25.0)
+        well.tracker.commit()
+        assert _wait_until(
+            lambda: _substances_of(service, deck_uuid, well.unilabos_uuid) == [("Buffer", 25.0, "ul")]
+        ), "台面挂到设备后，观察者自动快照未到达权威"
+        assert observer.errors == ()
+
+        result = asyncio.run(materials.transfer(
+            tips.unilabos_uuid, "bench", deck_uuid, "T3", source_device_id="bench", gateway=gateway,
+        ))
+        assert result["success"] is True
+        assert _site_by_label(service, deck_uuid, "T1").occupied_material_uuid is None
+        assert _site_by_label(service, deck_uuid, "T3").occupied_material_uuid == tips.unilabos_uuid
+    finally:
+        backend.stop()
         set_materials_gateway(None)
         service.close()

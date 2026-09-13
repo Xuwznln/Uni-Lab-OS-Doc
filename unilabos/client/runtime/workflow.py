@@ -188,8 +188,8 @@ class HTTPWorkflowClient:
         nodes: list[dict[str, Any]],
         edges: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """与 ``WorkflowService.save_graph`` 同签名，便于 ``report_workflows_to_service``
-        经 HTTP 向远端 Workflow Authority 上报 ``@workflow`` 模板。"""
+        """与 ``WorkflowService.save_graph`` 同签名，便于 ``registry.workflows.upsert_workflow``
+        经 HTTP 向远端 Workflow Authority 写入实例化后的工作流。"""
 
         return self.save_workflow_graph(
             workflow_uuid, revision=revision, nodes=nodes, edges=edges
@@ -247,6 +247,16 @@ class HTTPWorkflowClient:
 
     def get_task(self, task_uuid: str) -> dict[str, Any]:
         return self._http.get(f"/workflow-tasks/{task_uuid}")
+
+    def command_task(
+        self, task_uuid: str, *, command_type: str,
+        expected_revision: int, idempotency_key: str,
+    ) -> dict[str, Any]:
+        """step 放行一个动作 / resume 转自动；调用者保留幂等键供网络重传。"""
+        return self._http.post(f"/workflow-tasks/{task_uuid}/commands", json={
+            "type": command_type, "expected_revision": expected_revision,
+            "idempotency_key": idempotency_key,
+        })
 
     def list_task_jobs(self, task_uuid: str) -> list[dict[str, Any]]:
         return self._http.get(f"/workflow-tasks/{task_uuid}/jobs")

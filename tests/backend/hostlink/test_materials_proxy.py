@@ -31,6 +31,49 @@ def _mutation(operation: str) -> InventoryMutation:
     )
 
 
+def test_template_list_query_decodes_hostlink_payload() -> None:
+    from unilabos.backend.hostlink.materials_proxy import template_list_query
+
+    # 链路默认目录模式：不带 include_definition 的对端拿 name/uuid/hash，不拿 definition
+    assert template_list_query(None) == {"name": None, "include_definition": False}
+    assert template_list_query({"name": "", "include_definition": True}) == {
+        "name": None,
+        "include_definition": True,
+    }
+    assert template_list_query({"name": "deck"}) == {
+        "name": "deck",
+        "include_definition": False,
+    }
+
+
+def test_template_list_warns_once_per_peer_about_full_definitions(monkeypatch) -> None:
+    """显式要完整 definition 又不带 name 的全量列表是 Slave 侧最大的浪费，Host 提示一次；
+    默认的目录模式和按 name 取正文都不算。"""
+
+    from unilabos.backend.hostlink import materials_proxy
+
+    warnings: list[str] = []
+    monkeypatch.setattr(materials_proxy, "_warned_peers", set())
+    monkeypatch.setattr(
+        materials_proxy.logger, "warning", lambda msg, *args: warnings.append(msg % args)
+    )
+
+    class Gateway:
+        def list_templates(self, *, name=None, include_definition=False):
+            return []
+
+    peer = {"node_id": "slave-1", "machine_name": "bench"}
+    materials_proxy.template_list(Gateway(), {}, peer)
+    materials_proxy.template_list(Gateway(), {"name": "deck"}, peer)
+    materials_proxy.template_list(Gateway(), {"name": "deck", "include_definition": True}, peer)
+    assert warnings == []
+
+    materials_proxy.template_list(Gateway(), {"include_definition": True}, peer)
+    materials_proxy.template_list(Gateway(), {"include_definition": True}, peer)
+    assert len(warnings) == 1
+    assert "bench" in warnings[0] and "definition" in warnings[0]
+
+
 def test_hostlink_proxy_supports_demo_template_create_and_passive_data_put(
     tmp_path, monkeypatch
 ) -> None:
@@ -71,6 +114,15 @@ def test_hostlink_proxy_supports_demo_template_create_and_passive_data_put(
         assert [item.name for item in materials.list_templates()] == [
             "proxy-demo-sample"
         ]
+        # 存在性检查 / 按名取 uuid：筛选在权威侧完成，链路上默认只回目录字段
+        found = materials.list_templates(name="proxy-demo-sample")
+        assert [item.name for item in found] == ["proxy-demo-sample"]
+        assert found[0].template_uuid
+        assert found[0].definition == {}
+        assert materials.list_templates(name="no-such-template") == []
+        # 只有显式开 include_definition 才把 definition 正文拖过链路
+        full = materials.list_templates(name="proxy-demo-sample", include_definition=True)
+        assert full[0].definition_hash == found[0].definition_hash
 
         created = materials.create_tree(
             _mutation("create_material_tree"),
@@ -107,6 +159,26 @@ def test_hostlink_proxy_supports_demo_template_create_and_passive_data_put(
         material = service.get_material(material_uuid)
         assert material.data.data["temperature_c"] == 63.5
         assert material.data.source_job_uuid == "demo-job"
+
+        # 增量上报也经 Host 代理：只带一个节点的一段，回 affected 版本，不回整树
+        from unilabos.protocol.materials import MaterialDataDelta, MaterialDelta, MaterialNodeDelta
+
+        delta_result = materials.apply_delta(
+            _mutation("apply_material_delta"),
+            MaterialDelta(
+                root_material_uuid=material_uuid,
+                nodes=[
+                    MaterialNodeDelta(
+                        material_uuid=material_uuid,
+                        expected_version=material.material.version,
+                        data=MaterialDataDelta(data={**material.data.data, "temperature_c": 70.0}),
+                    )
+                ],
+            ),
+        )
+        assert delta_result.data.applied_material_uuids == [material_uuid]
+        assert delta_result.affected[0].version == material.material.version + 1
+        assert service.get_material(material_uuid).data.data["temperature_c"] == 70.0
     finally:
         if client is not None:
             client.close()

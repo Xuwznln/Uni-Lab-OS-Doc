@@ -1,4 +1,4 @@
-"""把 Edge Registry 作为完整模板快照上报到微后端 Registry Authority。"""
+"""把 Edge Registry 按内容哈希增量上报到微后端 Registry Authority（协议见 protocol.runtime.registry）。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,13 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+from unilabos.config.config import BasicConfig
+from unilabos.protocol.base import canonical_hash
+from unilabos.protocol.runtime.registry import (
+    RegistryDigest,
+    RegistryReport,
+    RegistryReportEntry,
+)
 from unilabos.utils.serialization import normalize_json
 from unilabos.utils.tracing import inject_trace_context, span
 
@@ -39,6 +46,8 @@ class TemplateSyncReport:
     template_uuids: Dict[str, str]
     report_id: Optional[int] = None
     summary: Dict[str, Any] = field(default_factory=dict)
+    #: 包里 @workflow 声明的工作流模板条目数（旧权威不认识该类型时仍为上报数）
+    workflow_count: int = 0
 
 
 class TemplateSynchronizer:
@@ -56,12 +65,114 @@ class TemplateSynchronizer:
         self.timeout = timeout
 
     def sync(self, registry: Any) -> TemplateSyncReport:
-        """收集设备和器材模板，并通过一次 HTTP 请求事务性同步。"""
+        """收集设备 / 器材 / 工作流模板，按内容哈希增量上报。
 
-        devices, resources = collect_registry_templates(registry)
-        definitions = [*devices, *resources]
+        先取权威的哈希索引，每个条目都带 ``content_sha256``，只有权威没有该哈希的
+        条目才附完整定义：首次上报（索引为空）等于全量，之后每次启动只剩一份哈希清单。
+        权威回 ``missing``（只发了哈希却对不上的条目）时补 payload 再报一次。
+        不提供 digest 端点的旧权威退回全量定义上报。
+        """
 
-        payload = {"resources": definitions}
+        devices, resources, workflows = collect_registry_templates(registry)
+        definitions = [*devices, *resources, *workflows]
+        digest = self._fetch_digest()
+        if digest is None:
+            result = self._post_full_snapshot(devices, resources, workflows)
+            return _build_report(result, devices, resources, workflows)
+
+        hashes = {definition["id"]: canonical_hash(definition) for definition in definitions}
+        need_payload = {
+            name for name, sha in hashes.items() if not digest.holds(name, sha)
+        }
+        result = self._post_hashed_report(definitions, hashes, need_payload)
+        missing = [str(name) for name in result.get("missing") or []]
+        if missing:
+            # 权威对不上我们声明的哈希（极少见：本地哈希与权威重算不一致等）：补全定义再报一次
+            logger.info(
+                "[Registry Sync] 权威缺 %d 个条目的定义，补发: %s",
+                len(missing),
+                ", ".join(missing[:10]) + ("…" if len(missing) > 10 else ""),
+            )
+            result = self._post_hashed_report(
+                definitions, hashes, need_payload | set(missing)
+            )
+        return _build_report(result, devices, resources, workflows)
+
+    def _fetch_digest(self) -> Optional[RegistryDigest]:
+        """权威持有的内容哈希；端点不存在（旧权威）返回 None。"""
+
+        url = f"{self.backend_api}/registry/digest"
+        headers: Dict[str, str] = {}
+        inject_trace_context(headers)
+        response = self.session.get(url, headers=headers, timeout=self.timeout)
+        if response.status_code == 404:
+            return None
+        try:
+            payload = response.json()
+        except (TypeError, ValueError) as exc:
+            raise TemplateSyncError(
+                f"registry digest returned non-JSON HTTP {response.status_code}"
+            ) from exc
+        if response.status_code < 200 or response.status_code >= 300:
+            raise TemplateSyncError(
+                f"registry digest returned HTTP {response.status_code}: {payload}"
+            )
+        data = payload.get("data", payload) if isinstance(payload, Mapping) else None
+        if not isinstance(data, Mapping):
+            raise TemplateSyncError("registry digest returned a non-object response")
+        try:
+            return RegistryDigest.model_validate(dict(data))
+        except ValueError as exc:
+            raise TemplateSyncError(f"registry digest is malformed: {exc}") from exc
+
+    def _post_hashed_report(
+        self,
+        definitions: list[Dict[str, Any]],
+        hashes: Mapping[str, str],
+        need_payload: set[str],
+    ) -> Dict[str, Any]:
+        report = RegistryReport(
+            edge_uuid=BasicConfig.machine_name or "",
+            entries=[
+                RegistryReportEntry(
+                    id=definition["id"],
+                    content_sha256=hashes[definition["id"]],
+                    payload=definition if definition["id"] in need_payload else None,
+                )
+                for definition in definitions
+            ],
+        )
+        body = report.model_dump(mode="json", exclude_none=True)
+        return self._post_report(
+            body,
+            attributes={
+                "template.entry.count": len(definitions),
+                "template.payload.count": len(need_payload),
+            },
+        )
+
+    def _post_full_snapshot(
+        self,
+        devices: list[Dict[str, Any]],
+        resources: list[Dict[str, Any]],
+        workflows: list[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        # 旧权威：工作流模板单独一个键，只认 resources 的权威会原样忽略
+        payload: Dict[str, Any] = {"resources": [*devices, *resources]}
+        if workflows:
+            payload["workflow_templates"] = workflows
+        return self._post_report(
+            payload,
+            attributes={
+                "template.device.count": len(devices),
+                "template.resource.count": len(resources),
+                "template.workflow.count": len(workflows),
+            },
+        )
+
+    def _post_report(
+        self, payload: Mapping[str, Any], *, attributes: Mapping[str, Any]
+    ) -> Dict[str, Any]:
         encoded = json.dumps(
             payload,
             ensure_ascii=False,
@@ -80,8 +191,7 @@ class TemplateSynchronizer:
                 "http.request.method": "POST",
                 "http.route": "/api/v1/resource-templates",
                 "server.address": target.hostname or "",
-                "template.device.count": len(devices),
-                "template.resource.count": len(resources),
+                **attributes,
             },
         ) as request_span:
             inject_trace_context(headers)
@@ -97,19 +207,20 @@ class TemplateSynchronizer:
                 )
             except Exception:  # noqa: BLE001 - tracing must remain fail-open
                 pass
-
-        return _build_report(_decode_sync_response(response), devices, resources)
+        return _decode_sync_response(response)
 
 
 def collect_registry_templates(
     registry: Any,
-) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
-    """把 Edge Registry 投影成 Registry Authority 的 ``(devices, resources)`` 模板定义。
+) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]], list[Dict[str, Any]]]:
+    """把 Edge Registry 投影成 Registry Authority 的 ``(devices, resources, workflows)`` 条目。
 
     HTTP 上报与进程内上报共用这一份投影，保证两种部署形态下条目内容逐字节一致。
+    工作流模板来自包里的 ``@workflow`` 声明，与设备 / 资源一样按条目版本化。
     """
 
     from unilabos.app.register import collect_devices_and_resources
+    from unilabos.registry.workflows import collect_workflow_templates
 
     device_definitions, resource_definitions = collect_devices_and_resources(registry)
     devices = _collect_templates(device_definitions.values(), expected_type="device")
@@ -118,13 +229,15 @@ def collect_registry_templates(
     )
     if not devices and not resources:
         raise TemplateSyncError("Edge Registry does not contain any templates")
-    return devices, resources
+    workflows = [normalize_json(item) for item in collect_workflow_templates(registry)]
+    return devices, resources, workflows
 
 
 def _build_report(
     result: Mapping[str, Any],
     devices: list[Dict[str, Any]],
     resources: list[Dict[str, Any]],
+    workflows: list[Dict[str, Any]] = (),  # type: ignore[assignment]
 ) -> TemplateSyncReport:
     template_uuids = {
         str(identity["name"]): str(identity["uuid"])
@@ -133,11 +246,18 @@ def _build_report(
         and identity.get("name")
         and identity.get("uuid")
     }
+    # 设备 / 资源身份必须齐全；工作流模板的身份缺失只说明对端是不认识该类型的旧权威
     expected_names = {definition["id"] for definition in (*devices, *resources)}
-    if set(template_uuids) != expected_names:
+    if not expected_names <= set(template_uuids):
         missing = sorted(expected_names - set(template_uuids))
         raise TemplateSyncError(
             f"backend response is missing template identities: {missing}"
+        )
+    workflow_names = {definition["id"] for definition in workflows}
+    if workflow_names and not workflow_names <= set(template_uuids):
+        logger.warning(
+            "[Registry Sync] 权威未接收工作流模板（可能是旧版本），%d 个 @workflow 模板未登记",
+            len(workflow_names - set(template_uuids)),
         )
     report_id = result.get("report_id")
     summary = result.get("summary")
@@ -147,6 +267,7 @@ def _build_report(
         template_uuids=template_uuids,
         report_id=int(report_id) if isinstance(report_id, int) else None,
         summary=dict(summary) if isinstance(summary, Mapping) else {},
+        workflow_count=len(workflows),
     )
 
 
@@ -163,9 +284,11 @@ def report_registry_snapshot_local(
     """
 
     try:
-        devices, resources = collect_registry_templates(registry)
-        result = registry_service.report([*devices, *resources], edge_uuid=edge_uuid)
-        return _build_report(result, devices, resources)
+        devices, resources, workflows = collect_registry_templates(registry)
+        result = registry_service.report(
+            [*devices, *resources, *workflows], edge_uuid=edge_uuid
+        )
+        return _build_report(result, devices, resources, workflows)
     except Exception as exc:  # noqa: BLE001 - 注册表镜像缺失不阻断启动
         logger.warning("[Registry Sync] 本机注册表上报失败（不阻断启动）: %s", exc)
         return None

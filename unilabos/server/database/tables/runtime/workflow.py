@@ -993,7 +993,7 @@ WORKFLOW_TABLES = (
             topological_index INTEGER NOT NULL DEFAULT 0 CHECK (topological_index >= 0),
             executor_kind TEXT NOT NULL DEFAULT 'compute' CHECK (executor_kind IN (
                 'device_action', 'compute', 'condition', 'script', 'tool_call',
-                'manual_confirm'
+                'manual_confirm', 'loop'
             )),
             execution_policy TEXT NOT NULL DEFAULT '{}' CHECK (
                 json_valid(execution_policy) AND json_type(execution_policy) = 'object'
@@ -1045,7 +1045,7 @@ WORKFLOW_TABLES = (
             ON workflow_node_run(update_time, uuid)
             WHERE deleted_at IS NULL
               AND executor_kind IN (
-                  'compute', 'condition', 'script', 'tool_call', 'manual_confirm'
+                  'compute', 'condition', 'script', 'tool_call', 'manual_confirm', 'loop'
               )
               AND status IN ('dispatched', 'running')
             """,
@@ -1067,7 +1067,7 @@ WORKFLOW_TABLES = (
             attempt_no INTEGER NOT NULL DEFAULT 1 CHECK (attempt_no > 0),
             retry_of_job_uuid TEXT,
             trigger TEXT NOT NULL DEFAULT 'initial' CHECK (trigger IN (
-                'initial', 'retry_decision', 'recovery'
+                'initial', 'retry_decision', 'recovery', 'loop_iteration'
             )),
             edge_agent_uuid TEXT,
             edge_command_uuid TEXT,
@@ -1108,6 +1108,7 @@ WORKFLOW_TABLES = (
             CHECK (
                 (retry_of_job_uuid IS NULL AND attempt_no = 1)
                 OR (retry_of_job_uuid IS NOT NULL AND attempt_no > 1)
+                OR (trigger = 'loop_iteration' AND retry_of_job_uuid IS NULL AND attempt_no > 1)
             ),
             FOREIGN KEY(workflow_node_run_uuid) REFERENCES workflow_node_run(uuid),
             FOREIGN KEY(workflow_task_uuid) REFERENCES workflow_task(uuid)

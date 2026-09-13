@@ -54,13 +54,37 @@ PROXY_TIMEOUT_S = 60.0
 _UNAVAILABLE_DETAIL = "host execution process is not available (starting or restarting)"
 
 _enabled = False
+# Host 启动 / 重启期间前端每秒轮询多条 Host 路由，逐条打日志只会淹掉控制台：
+# 只在"开始拒绝"与"恢复"两个状态切换点各记一条。
+_host_offline_logged = False
 
 
 def configure_edge_proxy(enabled: bool) -> None:
     """本进程是否把 Host 专有路由交给控制面上的 Host 执行。"""
 
-    global _enabled
+    global _enabled, _host_offline_logged
     _enabled = bool(enabled)
+    _host_offline_logged = False
+
+
+def _note_host_offline(method: str, path: str) -> None:
+    global _host_offline_logged
+    if _host_offline_logged:
+        return
+    _host_offline_logged = True
+    logger.info(
+        "[EdgeProxy] Host 尚未接入控制面，Host 专有路由暂返回 503（首个请求 %s %s）",
+        method,
+        path,
+    )
+
+
+def _note_host_online() -> None:
+    global _host_offline_logged
+    if not _host_offline_logged:
+        return
+    _host_offline_logged = False
+    logger.info("[EdgeProxy] Host 已接入，Host 专有路由恢复转发")
 
 
 def edge_proxy_enabled() -> bool:
@@ -106,13 +130,25 @@ async def _forward(request: Request) -> Response:
         if key.lower() not in _DROP_REQUEST_HEADERS
     }
     body = await request.body()
+    from unilabos.server.backend.edge_control import get_edge_control_service
+
+    service = get_edge_control_service()
+    if service is None or not service.connected:
+        _note_host_offline(request.method, path)
+        return _unavailable()
     # http_request 阻塞等 Host 回结果；放线程池，别占住事件循环
     upstream = await asyncio.to_thread(
-        edge_http, request.method, path, headers=headers, body=body
+        service.http_request,
+        request.method,
+        path,
+        headers=headers,
+        body=body,
+        timeout=PROXY_TIMEOUT_S,
     )
     if upstream is None:
-        logger.debug("[EdgeProxy] %s %s 未得到 Host 响应", request.method, path)
+        # Host 在线但超时 / 中途掉线：EdgeControl 已按请求告警，这里不再重复
         return _unavailable()
+    _note_host_online()
     response_headers = {
         key: value
         for key, value in upstream.headers.items()

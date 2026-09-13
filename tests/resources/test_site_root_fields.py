@@ -17,13 +17,13 @@ from unilabos.resources.objects.site import normalize_available_sites
 from unilabos.resources.resource_tracker import (
     EXTRA_RESOURCE_CLASS,
     EXTRA_SITES,
-    DeviceNodeResourceTracker,
     ResourceTreeSet,
     apply_plr_site_metadata,
     extract_plr_sites,
     merge_resource_sites,
     prepare_resource_creation_payloads,
     prepare_resource_tree_for_creation,
+    replace_resource_uuids_in_tree,
     set_plr_template_name,
     sites_for_plr_deserialization,
 )
@@ -252,9 +252,8 @@ def test_plr_offline_uuid_migration_updates_site_sidecar_references():
         ],
     }
 
-    tracker = DeviceNodeResourceTracker()
     assert (
-        tracker.loop_update_uuid(
+        replace_resource_uuids_in_tree(
             resource,
             {owner_uuid: migrated_owner_uuid, occupant_uuid: migrated_occupant_uuid},
         )

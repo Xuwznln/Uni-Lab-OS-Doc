@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from unilabos.server.services.device_processes import (
@@ -126,10 +126,6 @@ def create_device_processes_router() -> APIRouter:
     @router.post("/{process_id}/restart")
     def restart(process_id: str) -> Dict[str, Any]:
         return _call(get_device_process_service().restart, process_id)
-
-    @router.get("/{process_id}/logs")
-    def logs(process_id: str, tail: int = Query(default=200, ge=1, le=2000)) -> Dict[str, Any]:
-        return _call(get_device_process_service().logs, process_id, tail)
 
     return router
 

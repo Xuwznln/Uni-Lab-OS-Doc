@@ -21,6 +21,11 @@ import time
 import uuid as uuid_module
 from typing import Any, Callable, Collection, Dict, List, Mapping, Optional, Sequence
 
+try:  # 200 个条目的 payload 合计十几 MB，orjson 解析比标准库快数倍
+    import orjson as _orjson
+except ImportError:  # pragma: no cover - orjson 是可选加速
+    _orjson = None
+
 from unilabos.protocol.base import canonical_hash
 from unilabos.protocol.runtime.registry import (
     RegistryAffectedNode,
@@ -43,7 +48,10 @@ REGISTRY_TEMPLATE_NAMESPACE = uuid_module.uuid5(
     uuid_module.NAMESPACE_URL, "unilabos://registry-template"
 )
 
-_VALID_REGISTRY_TYPES = frozenset({"device", "resource"})
+#: ``workflow``：设备包 ``@workflow`` 声明的工作流模板，与设备 / 资源同一套条目版本化。
+_VALID_REGISTRY_TYPES = frozenset({"device", "resource", "workflow"})
+#: ``loop``：循环容器（``with ctx.loop_for / ctx.loop_while``），循环体节点以 ``parent`` 指向它。
+_WORKFLOW_TEMPLATE_NODE_KINDS = frozenset({"action", "slot", "template", "loop"})
 
 #: 返回活跃 workflow 节点对模板 action 的引用明细行，字段见
 #: ``WorkflowService.list_template_action_references``（template_uuid / action /
@@ -78,6 +86,8 @@ class RegistryService(SqliteDomain):
         super().__init__(database, RUNTIME_DATABASE)
         self._resolver = reference_rows_resolver
         self._lock = threading.RLock()
+        # 生效条目的 content_sha256 索引：上报比对只看哈希，不必为每个条目重算 payload 哈希
+        self._active_hashes: Dict[str, str] = {}
         self._active: Dict[str, Dict[str, Any]] = self._load_active_payloads()
 
     # ── registry_entry（不可变版本行） ──────────────────────────
@@ -85,7 +95,7 @@ class RegistryService(SqliteDomain):
     @staticmethod
     def _entry(row: sqlite3.Row) -> RegistryEntryRecord:
         values = dict(row)
-        values["payload"] = json.loads(values["payload"])
+        values["payload"] = _load(values["payload"])
         return RegistryEntryRecord.model_validate(values)
 
     def _insert_entry(self, record: RegistryEntryRecord) -> None:
@@ -138,7 +148,7 @@ class RegistryService(SqliteDomain):
     @staticmethod
     def _state(row: sqlite3.Row) -> RegistryEntryStateRecord:
         values = dict(row)
-        values["pending_conflicts"] = json.loads(values["pending_conflicts"])
+        values["pending_conflicts"] = _load(values["pending_conflicts"])
         return RegistryEntryStateRecord.model_validate(values)
 
     def _find_state(self, name: str) -> Optional[RegistryEntryStateRecord]:
@@ -186,19 +196,20 @@ class RegistryService(SqliteDomain):
             return [self._state(row) for row in rows]
 
     def _load_active_payloads(self) -> dict[str, dict[str, Any]]:
-        """一次 JOIN 加载全部生效条目的 payload（服务启动时重建索引）。"""
+        """一次 JOIN 加载全部生效条目的 payload 与内容哈希（服务启动时重建索引）。"""
 
         with self.write_lock:
             rows = self.connection.execute(
                 """
-                SELECT s.name AS name, e.payload AS payload
+                SELECT s.name AS name, e.payload AS payload, e.content_sha256 AS content_sha256
                 FROM registry_entry_state s
                 JOIN registry_entry e
                   ON e.name = s.name AND e.version = s.active_version
                 WHERE s.active_version IS NOT NULL AND s.removed_at_ms IS NULL
                 """
             ).fetchall()
-            return {row["name"]: json.loads(row["payload"]) for row in rows}
+            self._active_hashes = {row["name"]: str(row["content_sha256"]) for row in rows}
+            return {row["name"]: _load(row["payload"]) for row in rows}
 
     # ── registry_report（上报批次统计） ────────────────────────
 
@@ -220,16 +231,90 @@ class RegistryService(SqliteDomain):
     # 上报（条目级替换）
     # ------------------------------------------------------------------
 
+    def digest(self) -> Dict[str, Dict[str, str]]:
+        """权威当前持有的内容哈希：``{"active": {name: sha}, "pending": {name: sha}}``。
+
+        Host 上报前先取这份索引，只为权威没有的哈希附完整定义。挂起版本也算持有：
+        再报同一份挂起内容不必重传，也不再多生成一个版本。软移除条目的生效哈希也在
+        ``active`` 里（再报同一哈希即复活），所以这里按状态表查而不只看活跃索引。
+        """
+
+        with self._lock:
+            active: Dict[str, str] = {}
+            pending: Dict[str, str] = {}
+            for state in self._list_states():
+                if state.active_version is not None:
+                    sha = self._active_hashes.get(state.name)
+                    if sha is None:
+                        entry = self.find_entry(state.name, state.active_version)
+                        sha = entry.content_sha256 if entry is not None else None
+                    if sha is not None:
+                        active[state.name] = sha
+                if state.pending_version is not None:
+                    entry = self.find_entry(state.name, state.pending_version)
+                    if entry is not None:
+                        pending[state.name] = entry.content_sha256
+        return {"active": active, "pending": pending}
+
     def report(
         self,
         definitions: Sequence[Mapping[str, Any]],
         *,
         edge_uuid: str = "",
     ) -> Dict[str, Any]:
-        """全量上报。逐条目比对：变了就为该条目升版本；被 workflow 引用的
-        action 发生删除/变化时挂起为 pending，否则自动生效。"""
+        """全量上报（旧形状：每个条目都是完整定义）。逐条目比对：变了就为该条目升版本；
+        被 workflow 引用的 action 发生删除/变化时挂起为 pending，否则自动生效。"""
 
         entries, unusable = _normalize_definitions(definitions)
+        return self._report(
+            {name: (entry, None) for name, entry in entries.items()},
+            unusable,
+            edge_uuid=edge_uuid,
+        )
+
+    def report_entries(
+        self,
+        entries: Sequence[Mapping[str, Any]],
+        *,
+        edge_uuid: str = "",
+    ) -> Dict[str, Any]:
+        """按哈希增量的全量上报：``[{id, content_sha256, payload?}]``。
+
+        带 payload 的条目与旧形状同样处理（哈希由权威自己重算）；只带哈希的条目必须命中
+        权威已有的生效 / 挂起版本，否则进结果的 ``missing``，由 Host 补 payload 再报。
+        """
+
+        normalized: Dict[str, tuple[Optional[Dict[str, Any]], Optional[str]]] = {}
+        unusable: List[Dict[str, str]] = []
+        for raw in entries:
+            if not isinstance(raw, Mapping):
+                unusable.append({"id": "", "reason": "not-an-object"})
+                continue
+            name = str(raw.get("id") or "").strip()
+            if not name:
+                unusable.append({"id": "", "reason": "missing-id"})
+                continue
+            if name in normalized:
+                unusable.append({"id": name, "reason": "duplicate-id"})
+                continue
+            payload = raw.get("payload")
+            claimed = str(raw.get("content_sha256") or "").strip()
+            if payload is None and not claimed:
+                unusable.append({"id": name, "reason": "missing-payload-and-hash"})
+                continue
+            if payload is not None and not isinstance(payload, Mapping):
+                unusable.append({"id": name, "reason": "not-an-object"})
+                continue
+            normalized[name] = (dict(payload) if payload is not None else None, claimed or None)
+        return self._report(normalized, unusable, edge_uuid=edge_uuid)
+
+    def _report(
+        self,
+        entries: Mapping[str, tuple[Optional[Dict[str, Any]], Optional[str]]],
+        unusable: List[Dict[str, str]],
+        *,
+        edge_uuid: str,
+    ) -> Dict[str, Any]:
         referenced = self._referenced_actions()
         now_ms = int(time.time() * 1000)
 
@@ -242,14 +327,19 @@ class RegistryService(SqliteDomain):
             "revived": [],
             "unusable": unusable,
         }
+        missing: List[str] = []
 
         with self._lock:
-            for name, entry in entries.items():
-                self._report_entry(
-                    name, entry, referenced, now_ms, edge_uuid, detail
-                )
+            for name, (payload, claimed_sha) in entries.items():
+                if payload is not None:
+                    self._report_entry(
+                        name, payload, referenced, now_ms, edge_uuid, detail
+                    )
+                elif not self._report_hash_only(name, claimed_sha or "", now_ms, detail):
+                    missing.append(name)
 
             # 上报集合外的既有条目转为软移除；非 active 条目不重复计数。
+            # 只发哈希、尚待补 payload 的条目也在集合里，不会被误判为移除。
             reported_names = set(entries)
             for state in self._list_states():
                 if state.name in reported_names:
@@ -259,7 +349,7 @@ class RegistryService(SqliteDomain):
                 state.removed_at_ms = now_ms
                 state.updated_at_ms = now_ms
                 self._upsert_state(state)
-                self._active.pop(state.name, None)
+                self._drop_active(state.name)
                 detail["removed"].append(state.name)
 
             summary = _summarize(detail, total=len(entries))
@@ -276,9 +366,60 @@ class RegistryService(SqliteDomain):
             "created_at_ms": now_ms,
             "summary": summary,
             "templates": [
-                {"name": name, "uuid": template_uuid(name)} for name in sorted(entries)
+                {"name": name, "uuid": template_uuid(name)}
+                for name in sorted(entries)
+                if name not in missing
             ],
+            "missing": missing,
         }
+
+    def _report_hash_only(
+        self, name: str, claimed_sha: str, now_ms: int, detail: Dict[str, Any]
+    ) -> bool:
+        """只带哈希的条目：命中生效版本按"未变"（软移除的则复活），命中挂起版本按"仍挂起"。
+
+        Returns:
+            False 表示权威没有这个哈希的版本，需要 Host 补完整 payload。
+        """
+
+        state = self._find_state(name)
+        if state is None or not claimed_sha:
+            return False
+        active_sha = self._active_hashes.get(name)
+        active_entry = None
+        if state.active_version is not None and active_sha is None:
+            # 软移除条目不在活跃索引中：从版本表读生效版本
+            active_entry = self.find_entry(name, state.active_version)
+            active_sha = active_entry.content_sha256 if active_entry is not None else None
+
+        if state.active_version is not None and active_sha == claimed_sha:
+            was_removed = state.removed_at_ms is not None
+            changed = bool(state.unusable_reason) or was_removed
+            state.unusable_reason = ""
+            if was_removed:
+                state.removed_at_ms = None
+                detail["revived"].append(name)
+                payload = active_entry.payload if active_entry is not None else None
+                if payload is None:
+                    stored = self.find_entry(name, state.active_version)
+                    payload = stored.payload if stored is not None else {}
+                self._set_active(name, payload, claimed_sha)
+            else:
+                detail["unchanged"].append(name)
+            if changed:
+                state.updated_at_ms = now_ms
+                self._upsert_state(state)
+            return True
+
+        if state.pending_version is not None:
+            pending = self.find_entry(name, state.pending_version)
+            if pending is not None and pending.content_sha256 == claimed_sha:
+                # 同一份挂起内容再报一次：不再生成新版本，等前端确认或忽略
+                detail["pending"].append(
+                    {"name": name, "conflicts": list(state.pending_conflicts)}
+                )
+                return True
+        return False
 
     def _report_entry(
         self,
@@ -303,20 +444,21 @@ class RegistryService(SqliteDomain):
 
         content_sha = canonical_hash(entry)
         active_payload = self._active.get(name)
+        active_sha = self._active_hashes.get(name)
         was_removed = state is not None and state.removed_at_ms is not None
 
-        if state is not None and state.active_version is not None:
-            active_record = active_payload is not None
-            if not active_record:
-                # 软移除条目不在活跃索引中，需从版本表读取生效内容。
-                stored = self.find_entry(name, state.active_version)
-                active_payload = stored.payload if stored else None
+        if state is not None and state.active_version is not None and active_payload is None:
+            # 软移除条目不在活跃索引中，需从版本表读取生效内容。
+            stored = self.find_entry(name, state.active_version)
+            if stored is not None:
+                active_payload = stored.payload
+                active_sha = stored.content_sha256
 
         if (
             state is not None
             and state.active_version is not None
             and active_payload is not None
-            and canonical_hash(active_payload) == content_sha
+            and active_sha == content_sha
         ):
             # 相同内容不会生成版本；重新上报可恢复软移除条目。
             changed = bool(state.unusable_reason) or was_removed
@@ -324,7 +466,7 @@ class RegistryService(SqliteDomain):
             if was_removed:
                 state.removed_at_ms = None
                 detail["revived"].append(name)
-                self._active[name] = dict(entry)
+                self._set_active(name, entry, content_sha)
             else:
                 detail["unchanged"].append(name)
             if changed:
@@ -355,7 +497,7 @@ class RegistryService(SqliteDomain):
             record.removed_at_ms = None
             record.updated_at_ms = now_ms
             self._upsert_state(record)
-            self._active[name] = dict(entry)
+            self._set_active(name, entry, content_sha)
             detail["added"].append(name)
             return
 
@@ -378,10 +520,18 @@ class RegistryService(SqliteDomain):
             state.active_version = version
             state.pending_version = None
             state.pending_conflicts = []
-            self._active[name] = dict(entry)
+            self._set_active(name, entry, content_sha)
             detail["updated"].append(name)
         state.updated_at_ms = now_ms
         self._upsert_state(state)
+
+    def _set_active(self, name: str, payload: Mapping[str, Any], content_sha: str) -> None:
+        self._active[name] = dict(payload)
+        self._active_hashes[name] = content_sha
+
+    def _drop_active(self, name: str) -> None:
+        self._active.pop(name, None)
+        self._active_hashes.pop(name, None)
 
     # ------------------------------------------------------------------
     # 前端操作：确认 / 忽略 / 还原
@@ -405,7 +555,7 @@ class RegistryService(SqliteDomain):
             state.removed_at_ms = None
             state.updated_at_ms = int(time.time() * 1000)
             self._upsert_state(state)
-            self._active[name] = dict(entry.payload)
+            self._set_active(name, entry.payload, entry.content_sha256)
             return self._entry_summary(state)
 
     def dismiss_pending(self, name: str) -> Dict[str, Any]:
@@ -436,12 +586,11 @@ class RegistryService(SqliteDomain):
             state = self._require_state(name)
             now_ms = int(time.time() * 1000)
 
-            active_payload = self._active.get(name)
             if (
                 state.active_version is not None
                 and state.removed_at_ms is None
-                and active_payload is not None
-                and canonical_hash(active_payload) == snapshot.content_sha256
+                and name in self._active
+                and self._active_hashes.get(name) == snapshot.content_sha256
             ):
                 return self._entry_summary(state)
 
@@ -465,7 +614,7 @@ class RegistryService(SqliteDomain):
             state.removed_at_ms = None
             state.updated_at_ms = now_ms
             self._upsert_state(state)
-            self._active[name] = dict(snapshot.payload)
+            self._set_active(name, snapshot.payload, snapshot.content_sha256)
             return self._entry_summary(state)
 
     # ------------------------------------------------------------------
@@ -587,6 +736,31 @@ class RegistryService(SqliteDomain):
             )
         return reports, total
 
+    def list_workflow_templates(self) -> List[Dict[str, Any]]:
+        """生效的工作流模板条目（``registry_type=workflow``）payload，按显示名排序。
+
+        前端"工作流模板"面板与 ``POST /workflows/from-template`` 的数据源；软移除 /
+        挂起中的版本不在其中。
+        """
+
+        with self._lock:
+            templates = [
+                dict(payload)
+                for payload in self._active.values()
+                if str(payload.get("registry_type") or "") == "workflow"
+            ]
+        templates.sort(key=lambda item: (str(item.get("display_name") or ""), str(item.get("id"))))
+        return templates
+
+    def get_workflow_template(self, template_uuid: str) -> Optional[Dict[str, Any]]:
+        """按模板 uuid 取生效模板；找不到（或已软移除）返回 None。"""
+
+        wanted = str(template_uuid or "")
+        for template in self.list_workflow_templates():
+            if str(template.get("uuid") or "") == wanted:
+                return template
+        return None
+
     def action_definition(
         self, device_class: str, action_name: str
     ) -> Optional[Mapping[str, Any]]:
@@ -676,6 +850,12 @@ def _dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def _load(text: Any) -> Any:
+    if _orjson is not None:
+        return _orjson.loads(text)
+    return json.loads(text)
+
+
 def _new_state(name: str, now_ms: int) -> RegistryEntryStateRecord:
     return RegistryEntryStateRecord(
         name=name,
@@ -714,6 +894,8 @@ def _usability_issue(entry: Mapping[str, Any]) -> str:
     registry_type = str(entry.get("registry_type") or "").strip()
     if registry_type not in _VALID_REGISTRY_TYPES:
         return "invalid-registry-type"
+    if registry_type == "workflow":
+        return _workflow_template_issue(entry)
     klass = entry.get("class")
     if not isinstance(klass, Mapping):
         return "missing-class"
@@ -727,6 +909,83 @@ def _usability_issue(entry: Mapping[str, Any]) -> str:
     ):
         return "invalid-handles"
     return ""
+
+
+def _workflow_template_issue(entry: Mapping[str, Any]) -> str:
+    """工作流模板条目形状：稳定 uuid + 显示名 + 角色 / 节点 / 边（前端模板同形）。"""
+
+    try:
+        uuid_module.UUID(str(entry.get("uuid") or ""))
+    except ValueError:
+        return "missing-template-uuid"
+    if not str(entry.get("display_name") or "").strip():
+        return "missing-display-name"
+    nodes = entry.get("nodes")
+    if not isinstance(nodes, list) or not nodes:
+        return "missing-nodes"
+    keys: set[str] = set()
+    for node in nodes:
+        if not isinstance(node, Mapping):
+            return "invalid-nodes"
+        key = str(node.get("key") or "")
+        if not key or key in keys:
+            return "invalid-node-key"
+        keys.add(key)
+        if str(node.get("kind") or "") not in _WORKFLOW_TEMPLATE_NODE_KINDS:
+            return "invalid-node-kind"
+        if node.get("kind") == "action" and not (
+            str(node.get("role") or "") and str(node.get("action_name") or "")
+        ):
+            return "invalid-action-node"
+        if node.get("kind") == "loop" and not isinstance(node.get("param"), Mapping):
+            return "invalid-loop-node"
+        if "description" in node and not isinstance(node["description"], str):
+            return "invalid-node-description"
+    # 循环体成员的 parent 必须指向本模板里的 loop 节点
+    kinds_by_key = {str(node.get("key")): str(node.get("kind") or "") for node in nodes}
+    for node in nodes:
+        parent = node.get("parent")
+        if parent is None:
+            continue
+        if kinds_by_key.get(str(parent)) != "loop" or str(parent) == str(node.get("key")):
+            return "invalid-node-parent"
+    if entry.get("guide") is not None and not _valid_workflow_guide(entry["guide"]):
+        return "invalid-guide"
+    roles = entry.get("roles")
+    if not isinstance(roles, list) or any(
+        not isinstance(role, Mapping) or not str(role.get("role") or "") for role in roles
+    ):
+        return "invalid-roles"
+    role_ids = {str(role["role"]) for role in roles}
+    if any(
+        node.get("kind") == "action" and str(node.get("role")) not in role_ids
+        for node in nodes
+    ):
+        return "unknown-node-role"
+    edges = entry.get("edges")
+    if not isinstance(edges, list) or any(
+        not isinstance(edge, Mapping)
+        or str(edge.get("source") or "") not in keys
+        or str(edge.get("target") or "") not in keys
+        for edge in edges
+    ):
+        return "invalid-edges"
+    return ""
+
+
+_WORKFLOW_GUIDE_SECTIONS = ("preparation", "expected", "notes")
+
+
+def _valid_workflow_guide(guide: Any) -> bool:
+    """操作指引：三段可选的字符串列表（运行前准备 / 预期效果 / 注意事项）。"""
+
+    if not isinstance(guide, Mapping) or set(guide) - set(_WORKFLOW_GUIDE_SECTIONS):
+        return False
+    return all(
+        isinstance(guide.get(section, []), list)
+        and all(isinstance(item, str) for item in guide.get(section, []))
+        for section in _WORKFLOW_GUIDE_SECTIONS
+    )
 
 
 def _action_definitions(entry: Mapping[str, Any]) -> Mapping[str, Any]:

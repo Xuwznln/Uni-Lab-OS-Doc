@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from unilabos.backend.hostlink.adapter_registry import clear_execution_adapter
 from unilabos.backend.runtime.definition import (
@@ -33,7 +33,18 @@ def get_runtime() -> Optional[HostLinkBackend]:
 def build_runtime(devices_config: Any) -> HostLinkLocalRuntime:
     """从设备图构造 HostLink 本地驱动运行时。"""
 
-    runtime = HostLinkLocalRuntime()
+    return populate_runtime(HostLinkLocalRuntime(), devices_config)
+
+
+def populate_runtime(
+    runtime: HostLinkLocalRuntime, devices_config: Any
+) -> HostLinkLocalRuntime:
+    """把设备图装配进尚未启动的运行时。
+
+    每台设备经 ``resolve_device_definition`` 装配：物料权威可达时按权威优先取回
+    Site 快照与持有的物料，所以 Slave 要在 HostLink 连上之后再调用。
+    """
+
     if devices_config is None:
         return runtime
 
@@ -80,6 +91,48 @@ def build_runtime(devices_config: Any) -> HostLinkLocalRuntime:
     return runtime
 
 
+def _align_slave_materials(resources_config: Any) -> None:
+    """Slave 经 HostLink 调用 materials.ensure：采用图中的物料 UUID，权威缺失时以该 UUID 创建。"""
+
+    from unilabos.config.config import BasicConfig
+
+    if (
+        resources_config is None
+        or not getattr(resources_config, "trees", None)
+        or BasicConfig.slave_no_host
+    ):
+        return
+    from unilabos.protocol.materials import ACTOR_GRAPH
+    from unilabos.resources import materials
+
+    ensured = materials.ensure(
+        resources_config,
+        actor_type=ACTOR_GRAPH,
+        actor_uuid=BasicConfig.machine_name or None,
+    )
+    logger.info(
+        "[HostLink] Slave 物料权威对齐完成: %s 棵树（uuid 与图一致）",
+        len(ensured.trees),
+    )
+
+
+def startup_populate(
+    devices_config: Any, resources_config: Any, *, is_slave: bool
+) -> Callable[[HostLinkLocalRuntime], None]:
+    """``HostLinkBackend.start(populate=...)`` 用的设备图装配步骤。
+
+    Slave 在此刻已连上 Host：先按图对齐物料权威，再装配设备，设备的 Site 与持有
+    的物料按权威优先取回。Host 侧的对齐已在 main.py 启动流程里完成。
+    """
+
+    def populate(local: HostLinkLocalRuntime) -> None:
+        if is_slave:
+            _align_slave_materials(resources_config)
+        populate_runtime(local, devices_config)
+
+    return populate
+
+
 def _run(
     devices_config: Any,
     resources_config: Any,
@@ -88,35 +141,12 @@ def _run(
     bridges: Optional[list[Any]] = None,
 ) -> None:
     global _host_node, _runtime
-    runtime = HostLinkBackend(
-        build_runtime(devices_config),
-        is_slave=is_slave,
-    )
+    runtime = HostLinkBackend(HostLinkLocalRuntime(), is_slave=is_slave)
     _runtime = runtime
     try:
-        runtime.start()
-        if is_slave:
-            # Slave 通过 HostLink 调用 materials.ensure：采用图中的物料 UUID，
-            # 并在权威缺失时以该 UUID 创建记录。
-            from unilabos.config.config import BasicConfig
-
-            if (
-                resources_config is not None
-                and getattr(resources_config, "trees", None)
-                and not BasicConfig.slave_no_host
-            ):
-                from unilabos.protocol.materials import ACTOR_GRAPH
-                from unilabos.resources import materials
-
-                ensured = materials.ensure(
-                    resources_config,
-                    actor_type=ACTOR_GRAPH,
-                    actor_uuid=BasicConfig.machine_name or None,
-                )
-                logger.info(
-                    "[HostLink] Slave 物料权威对齐完成: %s 棵树（uuid 与图一致）",
-                    len(ensured.trees),
-                )
+        runtime.start(
+            populate=startup_populate(devices_config, resources_config, is_slave=is_slave)
+        )
         if not is_slave:
             from unilabos.backend.hostlink.host_node import HostNode
             from unilabos.config.config import BasicConfig
@@ -194,8 +224,11 @@ def slave(
 
 
 __all__ = [
+    "build_runtime",
     "get_runtime",
     "main",
+    "populate_runtime",
     "slave",
+    "startup_populate",
     "validate_environment",
 ]

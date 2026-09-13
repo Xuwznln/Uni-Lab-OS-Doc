@@ -171,6 +171,35 @@ def test_reserved_warehouse_material_is_part_of_the_same_resource_request() -> N
     assert executor.dispatched[0]["inventory_reservation_uuid"] == "reservation-1"
 
 
+def test_cancelled_attempt_settles_as_canceled_not_failed() -> None:
+    """执行面撤单（suc_type=cancellation）不是设备失败：attempt 落 canceled、不带 action_failed，
+    节点以 CANCELLED 收敛（不 fail-fast 成失败、不进失败决策）。"""
+
+    workflow = _Workflow()
+    executor = _Executor()
+    scheduler = BackendScheduler(workflow, executor)  # type: ignore[arg-type]
+    task = {"uuid": "task-1", "workflow_uuid": "workflow-1"}
+    node = DagNode(node_id="run-1", device_id="device-a", action="use")
+    runner = _attach(scheduler, workflow, task, node)
+    scheduler._start_node(task, node)  # noqa: SLF001
+
+    scheduler._on_executor_finished(  # noqa: SLF001
+        "run-1-a1", False, None, "cancellation", {"suc": False, "suc_type": "cancellation"}
+    )
+
+    assert workflow.terminal == [("run-1-a1", "canceled", {})]
+    assert workflow.runs["run-1"]["status"] == "canceled"
+    assert runner.terminal == [("run-1", NodeState.CANCELLED)]
+
+    # 普通失败仍然是 failed + FAILED
+    other = DagNode(node_id="run-2", device_id="device-b", action="use")
+    _attach(scheduler, workflow, task, other)
+    scheduler._start_node(task, other)  # noqa: SLF001
+    scheduler._on_executor_finished("run-2-a1", False, None, "normal", {})  # noqa: SLF001
+    assert workflow.terminal[-1][:2] == ("run-2-a1", "failed")
+    assert runner.terminal[-1] == ("run-2", NodeState.FAILED)
+
+
 def test_retry_decision_redispatches_next_attempt_without_ending_the_node_run() -> None:
     """retry：store 返回 next_job → 新 attempt 重新申请资源并下发，DAG 节点不终结。"""
 

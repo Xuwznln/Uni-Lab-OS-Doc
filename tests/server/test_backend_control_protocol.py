@@ -87,6 +87,49 @@ def test_http_client_fetches_full_document_from_uuid_derived_path() -> None:
     assert session.calls[0][0].endswith("/edge/commands/command%2F1")
 
 
+def test_reconnect_failures_are_not_logged_as_errors_each_time(caplog) -> None:
+    """连不上权威：首连 / 断线后首次重连 WARNING，随后 DEBUG，长时间不通定期 ERROR；停机中只 DEBUG。
+
+    权威重启、或权威停机时先关 WS 再请本进程退出都是正常现象，逐次 ERROR + 堆栈会淹掉真问题。
+    """
+
+    import logging
+
+    comm_logger = logging.getLogger("unilabos.comm")
+    previous_propagate = comm_logger.propagate
+    comm_logger.propagate = True  # 通信日志独立成文件时不向上传播，caplog 需要它传播
+    client = BackendWebSocketClient("ws://127.0.0.1:1/api/v1/ws/schedule")
+    client._running = True
+    refused = ConnectionRefusedError(1225, "远程计算机拒绝网络连接")
+    try:
+        with caplog.at_level(logging.DEBUG, logger="unilabos.comm"):
+            _drive_reconnect_failures(client, refused)
+    finally:
+        comm_logger.propagate = previous_propagate
+
+    levels = [record.levelname for record in caplog.records if "Connection error" in record.getMessage()]
+    assert levels[:2] == ["WARNING", "WARNING"]
+    assert set(levels[2:12]) == {"DEBUG"}
+    assert levels[12] == "ERROR" and "12 attempts" in caplog.records[12].getMessage()
+    assert levels[13] == "DEBUG" and "shutting down" in caplog.records[13].getMessage()
+    # 网络类异常本身就是原因，不附堆栈
+    assert not any("Traceback" in record.getMessage() for record in caplog.records)
+
+
+def _drive_reconnect_failures(client: BackendWebSocketClient, refused: Exception) -> None:
+    client._reconnect_count = 0  # 进程刚启动，权威尚未起来
+    client._report_connect_failure("Connection error: refused", refused)
+    client._reconnect_count = 1  # 断线后的首次重连
+    client._report_connect_failure("Connection error: refused", refused)
+    for attempt in range(2, 12):
+        client._reconnect_count = attempt
+        client._report_connect_failure("Connection error: refused", refused)
+    client._reconnect_count = 12
+    client._report_connect_failure("Connection error: refused", refused)
+    client._running = False  # 本进程正在退出
+    client._report_connect_failure("Connection error: refused", refused)
+
+
 def test_backend_adaptor_owns_transport_and_data_sync() -> None:
     """Backend 传输与同步实现归属 ``legacy_adaptor`` 命名空间。"""
 

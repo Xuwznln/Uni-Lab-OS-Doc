@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, FastAPI, Query
 from fastapi.responses import JSONResponse
@@ -32,6 +32,9 @@ class GraphUpsertRequest(BaseModel):
     #: 调用方（Host 子进程）注册表里的设备模板 Site；缺省用本进程注册表。Host 刚装的
     #: 驱动包本进程注册表还没有，由 Host 随图带上。
     device_site_templates: Optional[Dict[str, List[Any]]] = None
+    #: 权威已有该图时：replace 以上传为准（前端 / CLI 编辑）；adopt 以权威为准、只补
+    #: 权威没有的节点（``unilab -g <文件>`` 启动登记）。
+    on_existing: Literal["replace", "adopt"] = "replace"
 
 
 def _success(data: Any = None) -> JSONResponse:
@@ -87,6 +90,7 @@ def create_graph_router(service: GraphService) -> APIRouter:
                     description=value.description,
                     meta_data=value.meta_data,
                     device_site_templates=device_site_templates,
+                    on_existing=value.on_existing,
                 )
             )
         except GraphError as error:
