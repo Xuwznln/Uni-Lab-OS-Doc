@@ -92,6 +92,14 @@ jobs:
           echo Running README demo e2e (check_mode, graph CLI, runtime, management API)...
           python -m pytest -q tests\e2e -p no:launch_testing -p no:launch_ros
 
+      - name: Validate default split-process demo topology
+        env:
+          UNILABOS_E2E_TOPOLOGY: split
+        run: |
+          call conda activate check-env
+          call install\unilabos_msgs\setup.bat
+          python -m pytest -q tests\e2e\test_readme_demos.py -p no:launch_testing -p no:launch_ros
+
       - name: Gate HostLink direct and ROS2-assisted networking
         run: |
           call conda activate check-env
