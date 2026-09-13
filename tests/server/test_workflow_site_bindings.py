@@ -107,6 +107,49 @@ def test_unknown_device_or_schema_is_not_reported_as_resolved(materials):
         resolve_workflow_sites([node()], registry=None, materials=materials)
 
 
+def endpoint(device_id, action_name, descriptor):
+    return {"state": "online", "action_capabilities": [{
+        "device_uuid": device_id, "action_name": action_name, "state": "active", "descriptor": descriptor,
+    }]}
+
+
+def test_subdevice_action_uses_runtime_identity_not_material_path(materials):
+    materials.append(aggregate("sensor-uuid", "bench/sensor", device=True, parent="dev"))
+    draft = node()
+    draft.update(action_name="probe", material_uuid="placeholder-uuid", param={"value": 3})
+    draft["meta_data"]["target_device_id"] = "sensor"
+    snapshots = [endpoint("sensor", "probe", {"schema": {}, "goal_default": {"value": 1}})]
+    assert resolve([draft], materials, endpoints=snapshots)[0]["param"] == {"value": 3}
+
+
+def test_endpoint_site_declaration_still_requires_authoritative_owner(materials):
+    draft = node()
+    draft["meta_data"]["target_device_id"] = "sensor"
+    snapshots = [endpoint("sensor", "load", ACTION)]
+    with pytest.raises(SiteBindingError, match="目标物料/设备尚未登记"):
+        resolve([draft], materials, endpoints=snapshots)
+    draft["meta_data"]["site_binding_owners"] = {"site": "deck"}
+    assert resolve([draft], materials, endpoints=snapshots)[0]["param"]["site"] == "s1"
+
+
+@pytest.mark.parametrize("retired", [True, False])
+def test_inactive_endpoint_capabilities_do_not_enable_import(materials, retired):
+    draft = node()
+    draft["meta_data"]["target_device_id"] = "sensor"
+    snapshot = endpoint("sensor", "load", {})
+    if retired:
+        snapshot["action_capabilities"][0]["state"] = "retired"
+    else:
+        snapshot["state"] = "offline"
+    with pytest.raises(SiteBindingError, match="尚未就绪"):
+        resolve([draft], materials, endpoints=[snapshot])
+
+
+def test_conflicting_endpoint_declarations_do_not_pick_first(materials):
+    with pytest.raises(SiteBindingError, match="不一致"):
+        resolve([node()], materials, endpoints=[endpoint("bench", "load", {}), endpoint("bench", "load", ACTION)])
+
+
 @pytest.fixture
 def authority(tmp_path, monkeypatch):
     from unilabos.protocol.materials import (
@@ -139,6 +182,7 @@ def authority(tmp_path, monkeypatch):
     registry.report([{"id": "bench", "registry_type": "device", "class": {"module": "test:Bench", "type": "python", "action_value_mappings": {"load": ACTION}}}, template], edge_uuid="test")
     monkeypatch.setattr("unilabos.server.backend.composition.get_materials_service", lambda: mat)
     monkeypatch.setattr("unilabos.server.services.runtime.registry.get_registry_service", lambda: registry)
+    monkeypatch.setattr("unilabos.server.composition.get_server_services", lambda: None)
     app = FastAPI()
     install_workflow_api(app, workflow)
     with TestClient(app) as api:
@@ -182,3 +226,20 @@ def test_failed_import_leaves_existing_graph_unchanged(authority):
         "revision": before["workflow"]["revision"], "nodes": nodes, "edges": []}).json()
     assert failed["code"] == 1000 and "T404" in failed["error"]["msg"], failed
     assert service.get_graph(workflow_uuid) == before
+
+
+def test_http_import_reads_subdevice_endpoint_capabilities(authority, monkeypatch):
+    api, service, _materials, _tree, template = authority
+    snapshots = [endpoint("sensor", "probe", {"schema": {}, "goal_default": {"value": 1}})]
+    runtime = SimpleNamespace(list_endpoint_snapshots=lambda **_: snapshots)
+    monkeypatch.setattr("unilabos.server.composition.get_server_services", lambda: SimpleNamespace(runtime=runtime))
+    created = api.post("/api/v1/workflows/from-template", json={"template_uuid": template["uuid"]}).json()
+    before = service.get_graph(created["data"]["workflow"]["uuid"])
+    draft = deepcopy(before["nodes"][0])
+    draft.update(action_name="probe", material_uuid=str(uuid4()), param={"value": 3})
+    draft["meta_data"] = {"target_device_id": "sensor"}
+    saved = api.put(f"/api/v1/workflows/{before['workflow']['uuid']}/graph", json={
+        "revision": before["workflow"]["revision"], "nodes": [draft], "edges": [],
+    }).json()
+    assert saved["code"] == 0, saved
+    assert saved["data"]["nodes"][0]["param"] == {"value": 3}

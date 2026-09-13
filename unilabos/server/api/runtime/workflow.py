@@ -296,6 +296,7 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
 
     def bind_sites(nodes: List[Any], *, mapped_paths: Optional[Dict[str, List[str]]] = None) -> List[Any]:
         from unilabos.server.backend.composition import get_materials_service
+        from unilabos.server.composition import get_server_services
         from unilabos.server.services.runtime.registry import get_registry_service
         from unilabos.server.services.runtime.workflow.site_bindings import (
             SiteBindingError, resolve_workflow_sites,
@@ -303,11 +304,13 @@ def create_workflow_router(service: WorkflowService) -> APIRouter:
 
         registry = get_registry_service()
         materials = get_materials_service()
+        services = get_server_services()
         try:
             return resolve_workflow_sites(
                 nodes, registry=registry,
                 materials=materials.list_materials() if materials is not None else [],
                 mapped_paths=mapped_paths,
+                endpoints=services.runtime.list_endpoint_snapshots(state="online", limit=1000) if services is not None else [],
             )
         except SiteBindingError as exc:
             raise WorkflowError("site_binding_invalid", detail=str(exc)) from exc
