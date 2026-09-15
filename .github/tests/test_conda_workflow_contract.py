@@ -65,6 +65,14 @@ def artifact(prefix, sha=SHA, state="published", expired=False):
 
 
 class CondaWorkflowContractTests(unittest.TestCase):
+    def test_ci_only_main_sync_does_not_build_old_main_source(self):
+        # BaseLoader 避免 YAML 1.1 把 GitHub 的 on 键当成布尔值。
+        definition = yaml.load(
+            (WORKFLOWS / "multi-platform-build.yml").read_text(encoding="utf-8"),
+            Loader=yaml.BaseLoader,
+        )
+        self.assertEqual(definition["on"]["workflow_run"]["branches"], ["dev"])
+
     def test_ros_matrix_channels_and_recipes(self):
         for name in ("multi-platform-build.yml", "unilabos-conda-build.yml"):
             definition = workflow(name)
@@ -149,4 +157,3 @@ class CondaWorkflowContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

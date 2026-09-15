@@ -1,12 +1,12 @@
 name: Multi-Platform Conda Build
 
 on:
-  # 在 CI Check 工作流完成后触发（仅限 main/dev 分支）
+  # 日常构建只接 dev 的 CI；main 目前仅同步工作流定义，不能误打包旧业务源码。
   workflow_run:
     workflows: ["CI Check"]
     types:
       - completed
-    branches: [main, dev]
+    branches: [dev]
   # 支持 tag 推送（不依赖 CI Check）
   push:
     tags: ['v*']
