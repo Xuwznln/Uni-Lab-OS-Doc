@@ -16,7 +16,9 @@
 
 ## 运行方式
 
-激活项目环境（例如 `unilab-dev-jazzy`），安装测试依赖；ROS2 测试还需该发行版的原生 `rclpy`、DDS 与 `unilabos_msgs`，不能只安装消息占位包。
+默认使用独立 Python 3.12 环境，安装默认包和 `pytest` / `pytest-asyncio`，不安装 ROS。
+开发者可直接使用 `python scripts/dev_install.py --extras full`。ROS2 测试另用
+Jazzy/Humble 环境，需要该发行版的原生 `rclpy`、DDS 与 `unilabos_msgs`，不能只安装消息占位包。
 
 PowerShell 示例：
 
@@ -37,6 +39,16 @@ CI 在 Jazzy、Humble 环境各自执行四种组合；发行版矩阵本身不�
 
 所有实例使用临时数据库、独立端口及机器名，不读取用户的 `UNILABOS_*` 配置覆盖或 demo 控制变量。
 注册表校验和图生成也在临时工作目录执行，避免污染 demo checkout。结束时清理本测试启动的进程树。
+
+## 无 ROS 安装验证
+
+从 0.12.3 起，CI 增加独立的无 ROS Python 安装矩阵（Windows、Linux、macOS）：
+只安装默认包和测试工具，执行 `pip check` 和 `verify_installation.py --assert-no-ros`，再运行七个 demo 的
+完整 CLI/HTTP/HostLink 链路。不能用已安装 Jazzy/Humble 的环境代替此项。
+证据产物为 `no-ros-evidence-<系统>`；原有 ROS2 的两发行版回归继续保留。
+
+Slave 在物料和服务初始化完成前仅登记通信归属，不进入调度能力快照。
+测试应等待真实就绪状态，不靠固定 sleep 掩盖 Site 尚未创建的竞态。
 
 ## Site 与业务断言
 

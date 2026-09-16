@@ -31,52 +31,62 @@ Detailed documentation can be found at:
 
 ## Supported Runtime
 
-The current binary and development baseline is **Python 3.12.13 (`cp312`) + NumPy
-2**. ROS 2 Jazzy is the default (`robostack-jazzy`, mutex `0.15.*`), and ROS 2
-Humble is also supported (`robostack-humble`, mutex `0.9.*`). Use separate Conda
-environments and never mix the two RoboStack channels. See the
-[runtime and ABI baseline](docs/user_guide/runtime_baseline.md) for migration and
-verification instructions.
+The default installation and runtime are **Python 3.12 + NumPy 2 + HostLink,
+without ROS**. ROS 2 Jazzy/Humble remain explicit optional backends. Ordinary
+Python drivers, Host/Slave, Workstation/sub-devices, materials, workflows,
+HTTP/WS APIs and MCP do not require ROS. MoveIt, RViz and ROS-native drivers or
+image pipelines still require an appropriate ROS environment.
+
+See the [installation guide](docs/user_guide/installation.md) and
+[runtime baseline](docs/user_guide/runtime_baseline.md) for the exact boundaries.
 
 ## Quick Start
 
-### 1. Setup Conda Environment
+### 1. Install without ROS (default)
 
-Uni-Lab-OS recommends using `mamba` for environment management. Choose the package that fits your needs:
-
-| Package | Use Case | Contents |
-|---------|----------|----------|
-| `unilabos` | **Recommended for most users** | Complete package, ready to use |
-| `unilabos-env` | Developers (editable install) | Environment only, install unilabos via pip |
-| `unilabos-full` | Simulation/Visualization | unilabos + ROS2 Desktop + Gazebo + MoveIt |
+From source (works before the new Conda release is published):
 
 ```bash
-# Create new environment
-mamba create -n unilab python=3.12.13
-mamba activate unilab
-
-# Option A: Standard installation (recommended for most users)
-mamba install uni-lab::unilabos -c uni-lab -c conda-forge -c robostack-jazzy
-
-# Option B: For developers (editable mode development)
-mamba install uni-lab::unilabos-env -c uni-lab -c conda-forge -c robostack-jazzy
-# Then install unilabos and dependencies:
-git clone https://github.com/deepmodeling/Uni-Lab-OS.git && cd Uni-Lab-OS
-pip install -e .
-uv pip install -r unilabos/utils/requirements.txt
-
-# Option C: Full installation (simulation/visualization)
-mamba install uni-lab::unilabos-full -c uni-lab -c conda-forge -c robostack-jazzy
+git clone -b dev https://github.com/deepmodeling/Uni-Lab-OS.git
+cd Uni-Lab-OS
+python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv/Scripts/Activate.ps1
+python scripts/dev_install.py
+unilab --disable-browser
 ```
 
-For ROS 2 Humble, create a separate environment and replace every
-`-c robostack-jazzy` above with `-c robostack-humble`; Conda will select the
-matching `humble_1` package build automatically.
+Alternatively, extract the platform-specific companion wheel bundle and run
+`python install_wheel_release.py` with Python 3.12. It creates a new environment,
+installs all default dependencies offline and verifies an Opentrons 96-well plate.
+The patched Opentrons and pinned PLR wheels are release assets, not PyPI uploads.
+Bare `pip install unilabos` against PyPI cannot discover these companion wheels;
+use the installer or `--find-links <bundle>/wheelhouse`. Source development uses
+the helper above to build them first. See the [installation guide](docs/user_guide/installation.md).
 
-**When to use which?**
-- **unilabos**: Standard installation for production deployment and general usage (recommended)
-- **unilabos-env**: For developers who need `pip install -e .` editable mode, modify source code
-- **unilabos-full**: For simulation (Gazebo), visualization (rviz2), and Jupyter notebooks
+For the **0.12.3+ default Conda package**, once published:
+
+```bash
+mamba create -n unilab --override-channels -c uni-lab -c conda-forge "unilabos>=0.12.3"
+mamba activate unilab
+unilab --disable-browser
+```
+
+Older Conda releases still include ROS. Do not add a RoboStack channel for the
+default installation.
+
+| Package | Purpose |
+| --- | --- |
+| `unilabos` | Default application and ROS-free dependencies |
+| `unilabos-ros2` | Explicit Jazzy/Humble runtime and message extension |
+| `unilabos-full` | Complete runtime, ROS desktop, documentation, tests and development tools |
+
+ROS users install the matching `unilabos-ros2` variant in a separate environment
+and select `--backend ros2`; see the installation guide for commands. Individual
+hardware SDKs belong to their device packages. For source development, use
+`python scripts/dev_install.py --extras full`. The only pip extras are `ros2`
+and `full`; native ROS is installed separately via Conda/RoboStack.
+`unilabos-env` is retired; default dependencies are declared by `unilabos` itself.
 
 ### 2. Clone Repository (Optional, for developers)
 
@@ -88,10 +98,9 @@ cd Uni-Lab-OS
 
 ### 3. Start Uni-Lab
 
-An Edge process owns a device graph and exposes two separate local endpoints:
-the management/HTTP API (default `8002`) and the HostLink TCP channel (default
-`7302`). The default `hostlink` backend does not require DDS or a ROS 2 daemon;
-the `ros2` backend runs device actions and topics through ROS 2.
+The default launcher starts a microbackend authority and a supervised Host child.
+The authority serves the management/HTTP API (default `8002`); the Host serves
+HostLink TCP (default `7302`). Neither requires ROS with the default backend.
 
 ```bash
 # HostLink runtime (the default)

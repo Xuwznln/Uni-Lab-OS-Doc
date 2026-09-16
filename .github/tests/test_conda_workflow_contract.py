@@ -18,7 +18,7 @@ def workflow(name):
 
 
 def script_result(filename, job, *, event="workflow_run", conclusion="success",
-                  upstream_event="workflow_run", artifacts=()):
+                  upstream_event="push", artifacts=(), requested_ref="dev"):
     script = workflow(filename)["jobs"][job]["steps"][0]["with"]["script"]
     harness = """
 const fs = require("fs");
@@ -31,7 +31,8 @@ const core = {
 };
 const context = {
   eventName: data.event, repo: {owner: "deepmodeling", repo: "Uni-Lab-OS"},
-  payload: {workflow_run: {id: 123, conclusion: data.conclusion, event: data.upstream_event}}
+  payload: {workflow_run: {id: 123, conclusion: data.conclusion, event: data.upstream_event,
+                          head_branch: "dev", head_sha: data.sha}}
 };
 const github = {
   rest: {actions: {listWorkflowRunArtifacts: "list"}, repos: {
@@ -55,26 +56,45 @@ new AsyncFunction("core", "context", "github", data.script)(core, context, githu
             "script": script, "event": event, "conclusion": conclusion,
             "upstream_event": upstream_event, "artifacts": list(artifacts), "sha": SHA,
         }), text=True, capture_output=True, check=True,
-        env={**os.environ, "REQUESTED_REF": "dev"},
+        env={**os.environ, "REQUESTED_REF": requested_ref},
     )
     return json.loads(process.stdout)
 
 
 def artifact(prefix, sha=SHA, state="published", expired=False):
-    return {"name": f"{prefix}-source-{state}-{sha}-jazzy-linux-64", "expired": expired}
+    return {"name": f"{prefix}-source-{state}-{sha}-hostlink-linux-64", "expired": expired}
 
 
 class CondaWorkflowContractTests(unittest.TestCase):
-    def test_ci_only_main_sync_does_not_build_old_main_source(self):
+    def test_companion_wheels_are_release_assets_not_pypi_uploads(self):
+        definition = workflow("wheel-release.yml")
+        entries = definition["jobs"]["build"]["strategy"]["matrix"]["include"]
+        self.assertEqual({x["platform"] for x in entries}, {"linux-64", "osx-64", "osx-arm64", "win-64"})
+        upload = definition["jobs"]["attach-release"]
+        self.assertEqual(upload["needs"], "build")
+        self.assertIn("github.event_name == 'release'", upload["if"])
+        self.assertIn("gh release upload", upload["steps"][-1]["run"])
+        source = (WORKFLOWS / "wheel-release.yml").read_text(encoding="utf-8")
+        self.assertNotIn("pypa/gh-action-pypi-publish", source)
+        self.assertNotIn("twine upload", source)
+        self.assertNotIn("--clobber", source)
+
+    def test_default_build_is_independent_of_ros_messages(self):
         # BaseLoader 避免 YAML 1.1 把 GitHub 的 on 键当成布尔值。
         definition = yaml.load(
-            (WORKFLOWS / "multi-platform-build.yml").read_text(encoding="utf-8"),
+            (WORKFLOWS / "unilabos-conda-build.yml").read_text(encoding="utf-8"),
             Loader=yaml.BaseLoader,
         )
         self.assertEqual(definition["on"]["workflow_run"]["branches"], ["dev"])
+        self.assertEqual(definition["on"]["workflow_run"]["workflows"], ["CI Check"])
+        self.assertEqual(definition["on"]["workflow_dispatch"]["inputs"]["ros_distros"]["default"], "")
+        ros = yaml.load((WORKFLOWS / "multi-platform-build.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        self.assertNotIn("workflow_run", ros["on"])
+        self.assertNotIn("release", ros["on"])
+        self.assertEqual(ros["on"]["push"]["tags"], ["msgs-v*"])
 
     def test_ros_matrix_channels_and_recipes(self):
-        for name in ("multi-platform-build.yml", "unilabos-conda-build.yml"):
+        for name in ("multi-platform-build.yml",):
             definition = workflow(name)
             entries = definition["jobs"]["build"]["strategy"]["matrix"]["include"]
             self.assertEqual(len(entries), 8)
@@ -85,6 +105,9 @@ class CondaWorkflowContractTests(unittest.TestCase):
             )
             for entry in entries:
                 self.assertEqual(entry["ros_channel"], f"robostack-{entry['ros_distro']}")
+        core = workflow("unilabos-conda-build.yml")["jobs"]["build"]["strategy"]["matrix"]["include"]
+        self.assertEqual(len(core), 4)
+        self.assertTrue(all("ros_distro" not in item for item in core))
 
     def test_provenance_is_after_builds_and_uploads(self):
         for name in ("multi-platform-build.yml", "unilabos-conda-build.yml"):
@@ -99,23 +122,21 @@ class CondaWorkflowContractTests(unittest.TestCase):
                 if step.get("uses", "").startswith("actions/upload-artifact"):
                     self.assertEqual(step["with"]["if-no-files-found"], "error")
 
-    def test_upstream_ci_success_is_not_a_release(self):
-        result = script_result("unilabos-conda-build.yml", "wait-for-upstream")
-        self.assertEqual(result["outputs"]["should_continue"], "false")
-
-    def test_release_requires_unique_published_provenance(self):
-        for items in ([], [artifact("msgs", state="tested")],
-                      [artifact("msgs"), artifact("msgs", OTHER)]):
-            with self.subTest(items=items):
-                result = script_result("unilabos-conda-build.yml", "wait-for-upstream",
-                                       upstream_event="release", artifacts=items)
-                self.assertEqual(result["outputs"]["should_continue"], "false")
-                self.assertTrue(result["errors"])
-
-    def test_release_uses_built_source(self):
-        result = script_result("unilabos-conda-build.yml", "wait-for-upstream",
-                               upstream_event="release", artifacts=[artifact("msgs")])
+    def test_upstream_ci_builds_exact_source_without_publishing(self):
+        result = script_result("unilabos-conda-build.yml", "resolve-source")
         self.assertEqual(result["outputs"], {"should_continue": "true", "source_sha": SHA})
+        steps = workflow("unilabos-conda-build.yml")["jobs"]["build"]["steps"]
+        upload = next(x for x in steps if x.get("name") == "Upload packages after successful tests")
+        self.assertNotIn("workflow_run", upload["if"])
+
+    def test_release_resolves_requested_source(self):
+        result = script_result("unilabos-conda-build.yml", "resolve-source", event="release")
+        self.assertEqual(result["outputs"], {"should_continue": "true", "source_sha": SHA})
+
+    def test_message_release_does_not_republish_core(self):
+        result = script_result("unilabos-conda-build.yml", "resolve-source", event="release",
+                               requested_ref="msgs-v0.12.1")
+        self.assertEqual(result["outputs"], {"should_continue": "false"})
 
     def test_conda_pack_skips_wait_only_or_unpublished_build(self):
         for items in ([], [artifact("unilabos", state="tested")],
@@ -134,11 +155,15 @@ class CondaWorkflowContractTests(unittest.TestCase):
     def test_conda_pack_uses_built_source(self):
         result = script_result("conda-pack-build.yml", "resolve-source",
                                artifacts=[artifact("unilabos")])
-        self.assertEqual(result["outputs"], {"should_continue": "true", "source_sha": SHA})
+        self.assertEqual(result["outputs"], {"should_continue": "true", "source_sha": SHA, "platforms": "linux-64"})
+        steps = workflow("conda-pack-build.yml")["jobs"]["build-conda-pack"]["steps"]
+        download = next(x for x in steps if x.get("uses", "").startswith("actions/download-artifact"))
+        self.assertIn("github.event.workflow_run.id", download["with"]["run-id"])
 
     def test_conda_pack_manual_branch_is_resolved_once(self):
         result = script_result("conda-pack-build.yml", "resolve-source", event="workflow_dispatch")
-        self.assertEqual(result["outputs"], {"should_continue": "true", "source_sha": SHA})
+        self.assertEqual(result["outputs"]["source_sha"], SHA)
+        self.assertEqual(result["outputs"]["should_continue"], "true")
         build = workflow("conda-pack-build.yml")["jobs"]["build-conda-pack"]
         self.assertIn("resolve-source.outputs.source_sha", build["env"]["PACKAGE_REF"])
         checkout = next(step for step in build["steps"]
@@ -147,7 +172,7 @@ class CondaWorkflowContractTests(unittest.TestCase):
 
     def test_failed_upstream_never_proceeds(self):
         for filename, job, prefix in (
-            ("unilabos-conda-build.yml", "wait-for-upstream", "msgs"),
+            ("unilabos-conda-build.yml", "resolve-source", "msgs"),
             ("conda-pack-build.yml", "resolve-source", "unilabos"),
         ):
             result = script_result(filename, job, conclusion="failure",

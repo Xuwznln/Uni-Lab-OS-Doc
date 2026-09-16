@@ -4,8 +4,8 @@
 
 本指南将引导您从零开始完成 Uni-Lab-OS 实验室系统的完整搭建，从环境安装到高级设备开发。无论您是初次接触 Uni-Lab-OS 的用户，还是希望深入定制开发的开发者，都能在本指南中找到清晰的步骤和实用建议。
 
-> 本指南统一以 Python 3.12.13（`cp312`）、ROS 2 Jazzy 和 NumPy 2 为基线。
-> 从 Python 3.11/ROS 2 Humble 环境迁移时，请先阅读[运行时与 ABI 基线](runtime_baseline.md)。
+> 默认环境为 Python 3.12、HostLink 和 NumPy 2，不需要 ROS；ROS2 仅显式选装。
+> 旧 ROS 环境迁移及 ROS 专用设备的安装见[运行时与 ABI 基线](runtime_baseline.md)。
 
 ### 适用对象
 
@@ -38,9 +38,9 @@
 
 | 安装包          | 适用场景                     | 包含组件                                      |
 | --------------- | ---------------------------- | --------------------------------------------- |
-| `unilabos`      | **推荐大多数用户**，生产部署 | 完整安装包，开箱即用                          |
-| `unilabos-env`  | 开发者（可编辑安装）         | 仅环境依赖，通过 pip 安装 unilabos            |
-| `unilabos-full` | 仿真/可视化                  | unilabos + 完整 ROS2 桌面版 + Gazebo + MoveIt |
+| `unilabos`      | **推荐大多数用户**，生产部署 | 无 ROS 的 HostLink / 微后端应用                |
+| `unilabos-ros2` | ROS 专用驱动                 | 显式选装 Jazzy/Humble 运行时及消息             |
+| `unilabos-full` | 完整开发与仿真               | 运行、文档、测试、开发工具及完整 ROS2 桌面环境 |
 
 **关键步骤：**
 
@@ -57,21 +57,22 @@ mamba activate unilab
 # 4. 安装 Uni-Lab-OS（选择其一）
 
 # 方案 A：标准安装（推荐大多数用户）
-mamba install uni-lab::unilabos -c uni-lab -c conda-forge -c robostack-jazzy
+mamba install --override-channels -c uni-lab -c conda-forge "unilabos>=0.12.3"
 
 # 方案 B：开发者环境（可编辑模式开发）
-mamba install uni-lab::unilabos-env -c uni-lab -c conda-forge -c robostack-jazzy
-pip install -e /path/to/Uni-Lab-OS  # 可编辑安装
-uv pip install -r unilabos/utils/requirements.txt  # 安装 pip 依赖
+cd /path/to/Uni-Lab-OS
+python scripts/dev_install.py --extras full  # 可编辑安装
 
 # 方案 C：完整版（仿真/可视化）
-mamba install uni-lab::unilabos-full -c uni-lab -c conda-forge -c robostack-jazzy
+mamba install --override-channels -c uni-lab -c conda-forge -c robostack-jazzy "unilabos-full=0.12.3=jazzy_0"
 ```
+
+以上 Conda 命令需对应新版本已发布；发布前可按安装指南从源码安装。
 
 **选择建议：**
 
 - **日常使用/生产部署**：使用 `unilabos`（推荐），完整功能，开箱即用
-- **开发者**：使用 `unilabos-env` + `pip install -e .` + `uv pip install -r unilabos/utils/requirements.txt`，代码修改立即生效
+- **开发者**：使用 Python 3.12 虚拟环境 + `python scripts/dev_install.py --extras full`，一次安装全部 Python 开发依赖；需要原生 ROS 时选 Conda full
 - **仿真/可视化**：使用 `unilabos-full`，含 Gazebo、rviz2、MoveIt
 
 #### 1.2 验证安装
@@ -80,11 +81,12 @@ mamba install uni-lab::unilabos-full -c uni-lab -c conda-forge -c robostack-jazz
 # 检查 unilabos 是否安装成功
 python -c "import unilabos; print(unilabos.__version__)"
 
-# 验证 ROS 消息包
-python -c "from unilabos_msgs.msg import Resource; print('ROS msgs OK')"
+# 验证默认运行时
+python -c "from unilabos.backend.hostlink.local_runtime import HostLinkLocalRuntime; print('HostLink OK')"
+python -m pip check
 ```
 
-如果两条命令都正常输出，说明安装成功。
+进一步的安装验证与显式 ROS 消息检查见安装指南。
 
 ---
 
@@ -798,39 +800,34 @@ Waiting for host service...
 
 #### 9.1 开发环境准备
 
-**推荐使用 `unilabos-env` + `pip install -e .` + `uv pip install`** 进行设备开发：
+**推荐使用 `full` 档位**进行设备开发；不再单独安装 `unilabos-env`：
 
 ```bash
-# 1. 创建环境并安装 unilabos-env（ROS2 + conda 依赖 + uv）
+# 1. 创建 Python 环境；需要原生 ROS 时改用安装指南中的 Conda full
 mamba create -n unilab python=3.12.13
 conda activate unilab
-mamba install uni-lab::unilabos-env -c uni-lab -c conda-forge -c robostack-jazzy
 
 # 2. 克隆代码
 git clone https://github.com/deepmodeling/Uni-Lab-OS.git
 cd Uni-Lab-OS
 
 # 3. 以可编辑模式安装（推荐使用脚本，自动检测中文环境）
-python scripts/dev_install.py
-
-# 或手动安装：
-pip install -e .
-uv pip install -r unilabos/utils/requirements.txt
+python scripts/dev_install.py --extras full
 ```
 
 **为什么使用这种方式？**
 
-- `unilabos-env` 提供 ROS2 核心组件和 uv（通过 conda 安装，避免编译）
-- `unilabos/utils/requirements.txt` 包含所有运行时需要的 pip 依赖
-- `dev_install.py` 自动检测中文环境，中文系统自动使用清华镜像
-- 使用 `uv` 替代 `pip`，安装速度更快
+- 默认安装仅包含运行依赖；`full` 同时包含内置驱动 SDK、文档、测试和开发工具
+- pip 不安装原生 ROS；完整 ROS 环境使用 `unilabos-full`，硬件系统驱动仍按设备包准备
+- `dev_install.py` 先构建固定 PLR / Opentrons 配套 wheel，再安装源码；普通包可使用清华镜像
+- 已有发行包时，可用 `--wheelhouse <解压目录>/wheelhouse` 跳过配套依赖构建；修正版不在公共 PyPI
+- 已安装 `uv` 时脚本优先使用它，并明确指定当前 Python；否则使用 pip
 - 可编辑模式：代码修改**立即生效**，无需重新安装
 
 **如果安装失败或速度太慢**，可以手动执行（使用清华镜像）：
 
 ```bash
-pip install -e . -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
-uv pip install -r unilabos/utils/requirements.txt -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+python scripts/dev_install.py --extras full --china
 ```
 
 #### 9.2 为什么需要自定义设备？

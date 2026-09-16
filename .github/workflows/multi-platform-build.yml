@@ -1,18 +1,9 @@
 name: Multi-Platform Conda Build
 
 on:
-  # 日常构建只接 dev 的 CI；main 目前仅同步工作流定义，不能误打包旧业务源码。
-  workflow_run:
-    workflows: ["CI Check"]
-    types:
-      - completed
-    branches: [dev]
-  # 支持 tag 推送（不依赖 CI Check）
+  # ROS 消息独立发布，不由默认 Python/HostLink 发布触发。
   push:
-    tags: ['v*']
-  # GitHub Release 发布时自动构建并上传
-  release:
-    types: [published]
+    tags: ['msgs-v*']
   # 手动触发
   workflow_dispatch:
     inputs:
@@ -34,37 +25,9 @@ on:
         required: false
         default: false
         type: boolean
-      skip_ci_check:
-        description: '跳过等待 CI Check (手动触发时可选)'
-        required: false
-        default: false
-        type: boolean
 
 jobs:
-  # 等待 CI Check 完成的 job (仅用于 workflow_run 触发)
-  wait-for-ci:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_run'
-    outputs:
-      should_continue: ${{ steps.check.outputs.should_continue }}
-    steps:
-      - name: Check CI status
-        id: check
-        run: |
-          if [[ "${{ github.event.workflow_run.conclusion }}" == "success" ]]; then
-            echo "should_continue=true" >> $GITHUB_OUTPUT
-            echo "CI Check passed, proceeding with build"
-          else
-            echo "should_continue=false" >> $GITHUB_OUTPUT
-            echo "CI Check did not succeed (status: ${{ github.event.workflow_run.conclusion }}), skipping build"
-          fi
-
   build:
-    needs: [wait-for-ci]
-    # 运行条件：workflow_run 触发且 CI 成功，或者其他触发方式
-    if: |
-      always() &&
-      (needs.wait-for-ci.result == 'skipped' || needs.wait-for-ci.outputs.should_continue == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -123,8 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # 如果是 workflow_run 触发，使用触发 CI Check 的 commit
-          ref: ${{ inputs.source_ref || github.event.workflow_run.head_sha || github.event.release.tag_name || github.ref }}
+          ref: ${{ inputs.source_ref || github.ref }}
           fetch-depth: 0
 
       - name: Check if platform should be built
@@ -215,7 +177,6 @@ jobs:
         if: |
           steps.should_build.outputs.should_build == 'true' &&
           (
-            github.event_name == 'release' ||
             startsWith(github.ref, 'refs/tags/') ||
             github.event.inputs.upload_to_anaconda == 'true'
           )
@@ -230,7 +191,7 @@ jobs:
         id: source
         if: steps.should_build.outputs.should_build == 'true'
         env:
-          PUBLISHED: ${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || inputs.upload_to_anaconda == true }}
+          PUBLISHED: ${{ startsWith(github.ref, 'refs/tags/') || inputs.upload_to_anaconda == true }}
         run: |
           sha="$(git rev-parse HEAD)"
           state=tested

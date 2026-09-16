@@ -7,6 +7,44 @@ on:
     branches: [main, dev]
 
 jobs:
+  hostlink-no-ros:
+    name: hostlink-no-ros (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-latest]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      UNILABOS_E2E_BACKEND: hostlink
+      UNILABOS_E2E_TOPOLOGY: split
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build companion wheels without uploading to PyPI
+        run: python scripts/build_wheel_release.py --dependencies-only
+      - name: Install only the default Python distribution
+        run: python -m pip install --find-links dist/wheel-release/wheelhouse . "pytest>=8" "pytest-asyncio>=0.23"
+      - name: Verify installation without ROS or auto-install
+        run: |
+          python -m pip check
+          python scripts/verify_installation.py --assert-no-ros
+          unilab --help
+      - name: Test Python-only API and runtime contracts
+        run: python -m pytest -q tests/app/test_no_ros_installation.py tests/app/test_wheel_release.py tests/app/test_docs_build.py tests/server tests/protocol tests/backend/hostlink
+      - name: Test seven complete demos including graph CLI and split Host/Slave
+        run: python -m pytest -q tests/e2e/test_readme_demos.py --basetemp="${{ runner.temp }}/no-ros-demos" --junitxml="${{ runner.temp }}/no-ros-demos.xml"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: no-ros-evidence-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/no-ros-demos
+            ${{ runner.temp }}/no-ros-demos.xml
+
   registry-check:
     name: registry-check (${{ matrix.ros_distro }})
     runs-on: windows-2022
@@ -75,11 +113,11 @@ jobs:
           call conda activate check-env
           call install\unilabos_msgs\setup.bat
           echo Installing pip dependencies...
-          uv pip install -r unilabos/utils/requirements.txt
-          uv pip install pywinauto git+https://github.com/Xuwznln/pylabrobot.git@rebase-official-main
+          python scripts/build_wheel_release.py --dependencies-only
+          uv pip install --find-links dist/wheel-release/wheelhouse ".[full]"
           uv pip uninstall enum34 || echo enum34 not installed, skipping
           uv pip install pytest
-          uv pip install .
+          uv pip install --find-links dist/wheel-release/wheelhouse .
 
       # README 中列出的七个外部设备示例随主仓库接口一起端到端验证：
       # tests/e2e/readme_demos.py 固定引用七个仓库的已验证提交（示例仓库 CI 反向

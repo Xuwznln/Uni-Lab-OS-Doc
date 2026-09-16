@@ -5,13 +5,13 @@ This file provides guidance for coding agents working in this repository.
 ## Build & Development
 
 ```bash
-# Install in editable mode (requires Python 3.12 and either ROS 2 Jazzy or Humble)
-pip install -e .
-uv pip install -r unilabos/utils/requirements.txt
+# Default installation needs only Python 3.12; ROS 2 is explicitly optional
+python scripts/dev_install.py  # builds companion PLR / Opentrons wheels; no PyPI upload
+python scripts/dev_install.py --extras full  # docs, tests, driver SDKs and development tools
 
 # Run with a device graph
-unilab --graph <graph.json> --config <config.py> --backend ros2
-unilab --graph <graph.json> --config <config.py> --backend hostlink  # no ROS2 runtime
+unilab --graph <graph.json> --config <config.py>  # HostLink, no ROS runtime or messages
+unilab --graph <graph.json> --config <config.py> --backend ros2  # requires unilabos-ros2
 
 # Common CLI flags
 unilab --test_mode                        # simulate hardware, no real execution

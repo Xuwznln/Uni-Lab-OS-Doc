@@ -3,10 +3,10 @@ name: CI Workflow Contracts
 on:
   pull_request:
     branches: [main, dev]
-    paths: ['.github/workflows/**', '.github/tests/**']
+    paths: ['.github/workflows/**', '.github/tests/**', '.conda/**', 'recipes/**', 'scripts/*release.py', 'setup.py', 'unilabos/__init__.py', 'unilabos/utils/requirements*.txt']
   push:
     branches: [main, dev]
-    paths: ['.github/workflows/**', '.github/tests/**']
+    paths: ['.github/workflows/**', '.github/tests/**', '.conda/**', 'recipes/**', 'scripts/*release.py', 'setup.py', 'unilabos/__init__.py', 'unilabos/utils/requirements*.txt']
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
           go-version: stable
           cache: false
       - name: Validate workflow syntax
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck='' -pyflakes='' .github/workflows/multi-platform-build.yml .github/workflows/unilabos-conda-build.yml .github/workflows/conda-pack-build.yml .github/workflows/ci-workflows-check.yml
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck='' -pyflakes='' .github/workflows/ci-check.yml .github/workflows/multi-platform-build.yml .github/workflows/unilabos-conda-build.yml .github/workflows/conda-pack-build.yml .github/workflows/wheel-release.yml .github/workflows/ci-workflows-check.yml .github/workflows/deploy-docs.yml
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
