@@ -174,6 +174,10 @@ python -m pytest tests/
 python -m sphinx -b html -d .local/docs/doctrees docs .local/docs/html
 ```
 
+`full` 统一包含文档、测试、开发工具和内置驱动的通用 Python SDK，不再拆分额外档位。
+Conda 发行同时提供 PDF 字体和各平台的 OPC-UA 依赖；Windows GUI 自动化依赖仅在
+Windows 安装，因为对应的 Agilent HPLC 驱动依赖 Windows 应用，并不支持其他操作系统。
+
 正式文档构建设置 `UNILABOS_DOCS_REQUIRE_ROS=1`，缺少 `control_msgs` / `nav2_msgs`
 动作定义时直接失败，不静默生成缺页文档。无 ROS 环境只做普通页面预览；若已有另一套 ROS
 环境，可设置 `UNILABOS_DOCS_ROS_PREFIX` 指向它，仅复用 `share` 中的消息定义，不混用 Python 包。

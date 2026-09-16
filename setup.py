@@ -17,7 +17,9 @@ dependency_groups = {
     'docs': read_requirements('requirements-docs.txt'),
     'drivers': [
         'opcua>=0.98.13', 'pandas>=2.2', 'matplotlib>=3.8',
-        'pylibftdi>=0.22', 'pprp>=0.2.7', 'pyautogui>=0.9.54',
+        'pylibftdi>=0.22', 'pprp>=0.2.7',
+        # Agilent HPLC 的 Windows GUI 驱动；其他平台没有对应运行入口。
+        'pyautogui>=0.9.54; sys_platform == "win32"',
         'pywinauto>=0.6.8; sys_platform == "win32"',
     ],
     'test': ['pytest>=8', 'pytest-asyncio>=0.23'],

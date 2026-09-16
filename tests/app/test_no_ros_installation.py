@@ -74,7 +74,7 @@ class Counter:
 
 
 def test_conda_build_default_has_no_ros_channels():
-    from scripts.build_conda_release import recipes
+    from scripts.build_conda_release import FULL_SUPPORT_RECIPES, recipes
 
     assert recipes() == [(name, []) for name in ("msgcenterpy", "pylabrobot", "mcp", "base")]
     assert recipes("jazzy")[-1] == ("ros2", ["robostack-jazzy"])
@@ -83,7 +83,8 @@ def test_conda_build_default_has_no_ros_channels():
     with pytest.raises(ValueError, match="显式"):
         recipes(extensions_only=True)
     assert recipes("jazzy", full=True, extensions_only=True) == [
-        ("pprp", []), ("ros2", ["robostack-jazzy"]), ("full", ["robostack-jazzy"]),
+        *((name, []) for name in FULL_SUPPORT_RECIPES),
+        ("ros2", ["robostack-jazzy"]), ("full", ["robostack-jazzy"]),
     ]
 
 
@@ -94,6 +95,9 @@ def test_extension_upload_does_not_republish_default_packages(monkeypatch, tmp_p
         package = tmp_path / "win-64" / name
         package.parent.mkdir(exist_ok=True)
         package.touch()
+    support = tmp_path / "noarch" / "rinoh-typeface-dejavuserif-0.1.3-py_0.conda"
+    support.parent.mkdir()
+    support.touch()
     monkeypatch.setenv("ANACONDA_API_TOKEN", "test-token-not-a-secret")
     monkeypatch.setattr(sys, "argv", ["build_conda_release.py", "upload", "--platform", "win-64",
                                      "--ros-distros", "jazzy", "--full", "--extensions-only",
@@ -103,7 +107,7 @@ def test_extension_upload_does_not_republish_default_packages(monkeypatch, tmp_p
                         lambda command, **kw: uploads.append(Path(command[-1]).name)
                         or subprocess.CompletedProcess(command, 0))
     build_conda_release.main()
-    assert uploads == ["unilabos-full-0.12.3-jazzy_0.conda"]
+    assert uploads == [support.name, "unilabos-full-0.12.3-jazzy_0.conda"]
 
 
 def test_conda_upload_reuses_dependencies_without_overwriting_framework(monkeypatch, tmp_path):
@@ -318,6 +322,12 @@ def test_full_profile_contains_all_python_development_dependencies(monkeypatch):
     assert {line.strip() for line in docs.splitlines() if line.strip() and not line.startswith("#")} <= set(extras["full"])
     assert "-r ../unilabos/utils/requirements-docs.txt" in (root / "docs/requirements.txt").read_text()
     assert not any("ros-" in raw or "rclpy" in raw for raw in captured["install_requires"])
+    for raw in extras["full"]:
+        requirement = Requirement(raw)
+        if requirement.name in {"pyautogui", "pywinauto"}:
+            assert requirement.marker.evaluate({"sys_platform": "win32"})
+            assert not requirement.marker.evaluate({"sys_platform": "linux"})
+            assert not requirement.marker.evaluate({"sys_platform": "darwin"})
 
 
 def test_full_conda_profiles_cover_python_extras(monkeypatch):
@@ -345,6 +355,26 @@ def test_full_conda_profiles_cover_python_extras(monkeypatch):
         for raw in captured["extras_require"]["full"]:
             requirement = Requirement(raw)
             assert canonicalize_name(conda_names.get(requirement.name, requirement.name)) in names
+
+
+def test_full_conda_support_packages_and_closed_dependency_validation():
+    import yaml
+    from scripts.build_conda_release import FULL_SUPPORT_RECIPES
+
+    root = Path(__file__).resolve().parents[2]
+    for name in FULL_SUPPORT_RECIPES:
+        recipe = yaml.safe_load((root / f".conda/{name}/recipe.yaml").read_text(encoding="utf-8"))
+        assert recipe["package"]["name"] == name
+        assert recipe["build"]["noarch"] == "python"
+        sources = recipe["source"] if isinstance(recipe["source"], list) else [recipe["source"]]
+        assert all(len(source["sha256"]) == 64 for source in sources)
+    for suffix in ("", "-humble"):
+        full = yaml.safe_load((root / f".conda/full{suffix}/recipe.yaml").read_text(encoding="utf-8"))
+        dependencies = full["requirements"]["run"]
+        assert "colcon-notification" in dependencies
+        assert set(FULL_SUPPORT_RECIPES) <= {dep.split()[0] for dep in dependencies if isinstance(dep, str)}
+        assert {"if": "win", "then": "pyautogui >=0.9.54"} in dependencies
+        assert any(test.get("python", {}).get("pip_check") is True for test in full["tests"])
 
 
 def test_offline_release_rejects_wrong_source_before_installing(monkeypatch, tmp_path):

@@ -22,6 +22,11 @@ requirements:
   - sphinx-copybutton >=0.5
   - sphinx-autobuild >=2024.2.4
   - rinohtype >=0.5.4
+  # 上游 Conda 元数据漏列字体依赖；由本发布链构建原始字体发行包。
+  - rinoh-typeface-dejavuserif
+  - rinoh-typeface-texgyrecursor
+  - rinoh-typeface-texgyreheros
+  - rinoh-typeface-texgyrepagella
   - sphinx-simplepdf >=1.6
   # 内置驱动 Python SDK
   - opcua >=0.98.13
@@ -29,7 +34,8 @@ requirements:
   - matplotlib-base >=3.8
   - pylibftdi >=0.22
   - pprp >=0.2.7
-  - pyautogui >=0.9.54
+  - if: win
+    then: pyautogui >=0.9.54
   - if: win
     then: pywinauto >=0.6.8
   # Web UI
@@ -45,6 +51,7 @@ requirements:
   - jupyter
   - jupyros
   - colcon-common-extensions
+  - colcon-notification
   # ROS2 full desktop (includes rviz2, gazebo, etc.)
   - ros-jazzy-desktop-full
   # Navigation and motion control
@@ -68,6 +75,11 @@ tests:
         - pytest
         - IPython
         - jupyterlab
+        - opcua
+        - rinoh_typeface_dejavuserif
+        - rinoh_typeface_texgyrecursor
+        - rinoh_typeface_texgyreheros
+        - rinoh_typeface_texgyrepagella
       pip_check: true
   - script:
       - python -c "from importlib.metadata import requires, version; from packaging.requirements import Requirement; reqs = [Requirement(r) for r in requires('unilabos')]; missing = [str(r) for r in reqs if (r.marker is None or r.marker.evaluate({'extra':'full'})) and not r.specifier.contains(version(r.name))]; assert not missing, missing"

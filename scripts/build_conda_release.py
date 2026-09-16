@@ -10,6 +10,13 @@ import subprocess
 import sys
 
 
+# 公共 channel 缺失的纯 Python/字体包，仅 full 需要，不增加用户安装档位。
+FULL_SUPPORT_RECIPES = (
+    "pprp", "opcua", "rinoh-typeface-dejavuserif", "rinoh-typeface-texgyrecursor",
+    "rinoh-typeface-texgyreheros", "rinoh-typeface-texgyrepagella",
+)
+
+
 def recipes(ros_distros: str = "", full: bool = False, extensions_only: bool = False) -> list[tuple[str, list[str]]]:
     distros = list(dict.fromkeys(x.strip() for x in ros_distros.split(",") if x.strip()))
     if any(x not in ("jazzy", "humble") for x in distros):
@@ -20,7 +27,7 @@ def recipes(ros_distros: str = "", full: bool = False, extensions_only: bool = F
         raise ValueError("仅构建扩展必须显式选择 ros_distros，并先发布同版本默认包")
     result = [] if extensions_only else [(name, []) for name in ("msgcenterpy", "pylabrobot", "mcp", "base")]
     if full:
-        result.append(("pprp", []))
+        result.extend((name, []) for name in FULL_SUPPORT_RECIPES)
     for distro in distros:
         suffix = "-humble" if distro == "humble" else ""
         result.append((f"ros2{suffix}", [f"robostack-{distro}"]))
@@ -72,7 +79,7 @@ def main() -> None:
         raise RuntimeError("没有已构建的 .conda 产物，禁止写入 published 凭证")
     for package in packages:
         package_name = package.name.rsplit("-", 2)[0]
-        if args.extensions_only and package_name not in {"unilabos-ros2", "unilabos-full", "pprp"}:
+        if args.extensions_only and package_name not in {"unilabos-ros2", "unilabos-full", *FULL_SUPPORT_RECIPES}:
             continue
         command = [sys.executable, "-m", "binstar_client.scripts.cli", "-t", token,
                    "upload", "--user", "uni-lab", "--register"]
