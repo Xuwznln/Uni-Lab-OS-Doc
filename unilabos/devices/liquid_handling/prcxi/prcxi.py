@@ -2106,6 +2106,8 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         protocol_version: Literal["v03", "v04"] = "v03",
         reset_status_inverted: Optional[bool] = None,
         wait_finish_timeout_s: Optional[float] = None,
+        sim_action_delay_s: float = 0.0,
+        sim_setliquid_delay_s: float = 0.0,
     ):
         # 枪头轴配置：``{"left": {"vol": 100, "channels": 8}, "right": {"vol": 1000, "channels": 1}}``
         # 代表左轴 100µL/8 通道、右轴 1000µL/1 通道。None → 走 legacy 路由（≤10µL→右单通道[1]、
@@ -2189,6 +2191,20 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         self.skip_position_recalc_when_matrix_exists = bool(
             skip_position_recalc_when_matrix_exists
         )
+        # 仿真节拍：debug/simulator 模式下动作会秒回（不连真机、不产生硬件步骤），
+        # 导致前端 2D 一闪而过。配置 sim_action_delay_s（秒）后，每个 transfer_liquid
+        # 完成时按此值等待，模拟真机执行节奏。默认 0 → 不影响真机及其它环境。
+        try:
+            self._sim_action_delay_s = max(float(sim_action_delay_s or 0.0), 0.0)
+        except (TypeError, ValueError):
+            self._sim_action_delay_s = 0.0
+        # 上料动作（set_liquid_from_plate）专用的“铺开”延时：这些 job 会被一次性批量提交，
+        # 后端对排队 job 有 ~20s 硬窗口且不续期，故此值必须很小（建议 ≤0.3s，42 步累计 <20s），
+        # 仅用于让开头铺液渐进展开；默认 0（瞬间铺满，最稳）。
+        try:
+            self._sim_setliquid_delay_s = max(float(sim_setliquid_delay_s or 0.0), 0.0)
+        except (TypeError, ValueError):
+            self._sim_setliquid_delay_s = 0.0
 
         if calibration_points is not None:
             self.calibrate_from_points(calibration_points, labware_type=self.calibration_labware_type)
@@ -2943,13 +2959,20 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
         plate: Optional[ResourceSlot] = None,
         well_names: Optional[list[str]] = None,
     ) -> SetLiquidFromPlateReturn:
-        return super().set_liquid_from_plate(
+        res = super().set_liquid_from_plate(
             wells=wells,
             liquid_names=liquid_names,
             volumes=volumes,
             plate=plate,
             well_names=well_names,
         )
+        # 仿真节拍：上料动作（set_liquid_from_plate）在一次工作流里会被“同时批量提交”，
+        # 后端对每个排队中的 job 只有 ~20s 硬窗口且不续期，若在此串行慢放会导致排在后面的 job 超时取消。
+        # 因此这里只允许极小的“铺开”延时（_sim_setliquid_delay_s，默认 0），
+        # 总体仿真时长仍主要由 transfer_liquid 的 _sim_action_delay_s 承担。
+        if getattr(self, "_sim_setliquid_delay_s", 0.0) > 0:
+            time.sleep(self._sim_setliquid_delay_s)
+        return res
 
     def set_group(self, group_name: str, wells: List[Well], volumes: List[float]):
         return super().set_group(group_name, wells, volumes)
@@ -3357,6 +3380,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             )
             if self.step_mode:
                 await self.run_protocol()
+            # 仿真节拍：debug/simulator 下动作秒回，按配置等待以模拟真机执行时长，
+            # 让前端 2D 有可观察的节奏（默认 0 → 真机不受影响）。
+            # 优先用 ROS 节点 sleep，避免阻塞执行器；无 ROS 节点时回退 asyncio.sleep。
+            if getattr(self, "_sim_action_delay_s", 0.0) > 0:
+                if getattr(self, "_ros_node", None) is not None:
+                    await self._ros_node.sleep(self._sim_action_delay_s)
+                else:
+                    await asyncio.sleep(self._sim_action_delay_s)
             return res
         except Exception:
             # 中途失败（构建期 super().transfer_liquid 或执行期 run_protocol）：清理残留 tip +
@@ -3532,6 +3563,14 @@ class PRCXI9300Handler(LiquidHandlerAbstract):
             )
             if self.step_mode:
                 await self.run_protocol()
+            # 仿真节拍：debug/simulator 下动作秒回，按配置等待以模拟真机执行时长，
+            # 让前端 2D 有可观察的节奏（默认 0 → 真机不受影响）。
+            # 优先用 ROS 节点 sleep，避免阻塞执行器；无 ROS 节点时回退 asyncio.sleep。
+            if getattr(self, "_sim_action_delay_s", 0.0) > 0:
+                if getattr(self, "_ros_node", None) is not None:
+                    await self._ros_node.sleep(self._sim_action_delay_s)
+                else:
+                    await asyncio.sleep(self._sim_action_delay_s)
             return res
         except Exception:
             # 中途失败：清理残留 tip + 清 head 软件状态，下次 transfer 无需重启 edge。

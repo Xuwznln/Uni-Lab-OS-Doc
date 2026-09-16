@@ -27,6 +27,7 @@
                 "timeout": 10,
                 "matrix_id": "a0b93cb0-3cf2-4d24-9fc2-bf9147a2ec08",
                 "simulator": true,
+                "sim_action_delay_s": 16,
                 "channel_num": 8,
                 "pip_setting": {
                     "left": {"vol": 1000, "channels": 1},
