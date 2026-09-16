@@ -375,6 +375,10 @@ def test_full_conda_support_packages_and_closed_dependency_validation():
         assert set(FULL_SUPPORT_RECIPES) <= {dep.split()[0] for dep in dependencies if isinstance(dep, str)}
         assert {"if": "win", "then": "pyautogui >=0.9.54"} in dependencies
         assert any(test.get("python", {}).get("pip_check") is True for test in full["tests"])
+        commands = next(test["script"] for test in full["tests"] if "script" in test)
+        assert commands[0]["if"] == "win"
+        assert all("%USERPROFILE%\\AppData\\" in command for command in commands[0]["then"])
+        assert "import rinoh_typeface_dejavuserif" in commands[1]
 
 
 def test_offline_release_rejects_wrong_source_before_installing(monkeypatch, tmp_path):
