@@ -80,6 +80,30 @@ def test_conda_build_default_has_no_ros_channels():
     assert recipes("jazzy")[-1] == ("ros2", ["robostack-jazzy"])
     with pytest.raises(ValueError, match="显式"):
         recipes(full=True)
+    with pytest.raises(ValueError, match="显式"):
+        recipes(extensions_only=True)
+    assert recipes("jazzy", full=True, extensions_only=True) == [
+        ("pprp", []), ("ros2", ["robostack-jazzy"]), ("full", ["robostack-jazzy"]),
+    ]
+
+
+def test_extension_upload_does_not_republish_default_packages(monkeypatch, tmp_path):
+    from scripts import build_conda_release
+
+    for name in ("unilabos-0.12.3-py312_0.conda", "unilabos-full-0.12.3-jazzy_0.conda"):
+        package = tmp_path / "win-64" / name
+        package.parent.mkdir(exist_ok=True)
+        package.touch()
+    monkeypatch.setenv("ANACONDA_API_TOKEN", "test-token-not-a-secret")
+    monkeypatch.setattr(sys, "argv", ["build_conda_release.py", "upload", "--platform", "win-64",
+                                     "--ros-distros", "jazzy", "--full", "--extensions-only",
+                                     "--output-dir", str(tmp_path)])
+    uploads = []
+    monkeypatch.setattr(build_conda_release.subprocess, "run",
+                        lambda command, **kw: uploads.append(Path(command[-1]).name)
+                        or subprocess.CompletedProcess(command, 0))
+    build_conda_release.main()
+    assert uploads == ["unilabos-full-0.12.3-jazzy_0.conda"]
 
 
 def test_conda_upload_reuses_dependencies_without_overwriting_framework(monkeypatch, tmp_path):

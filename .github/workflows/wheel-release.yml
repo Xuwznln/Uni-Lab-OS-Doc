@@ -5,7 +5,7 @@ on:
     branches: [dev]
     paths: ['recipes/**', '.conda/pylabrobot/**', 'scripts/*wheel_release.py', 'scripts/verify_installation.py', 'setup.py', 'pyproject.toml', 'MANIFEST.in', 'unilabos/utils/requirements*.txt', '.github/workflows/wheel-release.yml']
   pull_request:
-    branches: [main, dev]
+    branches: [dev]
     paths: ['recipes/**', '.conda/pylabrobot/**', 'scripts/*wheel_release.py', 'scripts/verify_installation.py', 'setup.py', 'pyproject.toml', 'MANIFEST.in', 'unilabos/utils/requirements*.txt', '.github/workflows/wheel-release.yml']
   release:
     types: [published]

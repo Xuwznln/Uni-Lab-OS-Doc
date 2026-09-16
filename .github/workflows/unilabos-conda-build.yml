@@ -24,7 +24,11 @@ on:
         default: ''
         type: string
       build_full:
-        description: '额外构建 ROS Desktop/MoveIt；必须显式选择 ros_distros'
+        description: '额外构建完整运行/文档/开发环境；必须显式选择 ros_distros'
+        default: false
+        type: boolean
+      extensions_only:
+        description: '默认包已发布后，仅构建/上传 ROS2 和 full，不重新上传默认包'
         default: false
         type: boolean
       upload_to_anaconda:
@@ -90,6 +94,7 @@ jobs:
     env:
       ROS_DISTROS: ${{ inputs.ros_distros }}
       BUILD_FULL: ${{ inputs.build_full == true }}
+      EXTENSIONS_ONLY: ${{ inputs.extensions_only == true }}
       PYTHONUTF8: '1'
       ANACONDA_CLIENT_FORCE_STANDALONE: '1'
     steps:
@@ -131,12 +136,17 @@ jobs:
         run: |
           extra=()
           if [[ "$BUILD_FULL" == "true" ]]; then extra+=(--full); fi
+          if [[ "$EXTENSIONS_ONLY" == "true" ]]; then extra+=(--extensions-only); fi
           python scripts/build_conda_release.py build --platform "${{ matrix.platform }}" --ros-distros "$ROS_DISTROS" "${extra[@]}"
       - name: Upload packages after successful tests
         if: steps.should_build.outputs.should_build == 'true' && (github.event_name == 'release' || inputs.upload_to_anaconda == true)
         env:
           ANACONDA_API_TOKEN: ${{ secrets.ANACONDA_API_TOKEN }}
-        run: python scripts/build_conda_release.py upload --platform "${{ matrix.platform }}" --ros-distros "$ROS_DISTROS"
+        run: |
+          extra=()
+          if [[ "$BUILD_FULL" == "true" ]]; then extra+=(--full); fi
+          if [[ "$EXTENSIONS_ONLY" == "true" ]]; then extra+=(--extensions-only); fi
+          python scripts/build_conda_release.py upload --platform "${{ matrix.platform }}" --ros-distros "$ROS_DISTROS" "${extra[@]}"
       - uses: actions/upload-artifact@v6
         if: steps.should_build.outputs.should_build == 'true'
         with:
@@ -145,7 +155,7 @@ jobs:
           if-no-files-found: error
       - name: Record successful source provenance
         id: source
-        if: steps.should_build.outputs.should_build == 'true'
+        if: steps.should_build.outputs.should_build == 'true' && env.EXTENSIONS_ONLY != 'true'
         env:
           PUBLISHED: ${{ github.event_name == 'release' || inputs.upload_to_anaconda == true }}
         run: |
@@ -156,7 +166,7 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "state=$state" >> "$GITHUB_OUTPUT"
       - name: Upload successful source provenance
-        if: steps.should_build.outputs.should_build == 'true'
+        if: steps.should_build.outputs.should_build == 'true' && env.EXTENSIONS_ONLY != 'true'
         uses: actions/upload-artifact@v6
         with:
           name: unilabos-source-${{ steps.source.outputs.state }}-${{ steps.source.outputs.sha }}-hostlink-${{ matrix.platform }}

@@ -10,13 +10,15 @@ import subprocess
 import sys
 
 
-def recipes(ros_distros: str = "", full: bool = False) -> list[tuple[str, list[str]]]:
+def recipes(ros_distros: str = "", full: bool = False, extensions_only: bool = False) -> list[tuple[str, list[str]]]:
     distros = list(dict.fromkeys(x.strip() for x in ros_distros.split(",") if x.strip()))
     if any(x not in ("jazzy", "humble") for x in distros):
         raise ValueError("ros_distros 只能为空、jazzy、humble 或 jazzy,humble")
     if full and not distros:
         raise ValueError("build_full 必须显式选择 ros_distros")
-    result = [(name, []) for name in ("msgcenterpy", "pylabrobot", "mcp", "base")]
+    if extensions_only and not distros:
+        raise ValueError("仅构建扩展必须显式选择 ros_distros，并先发布同版本默认包")
+    result = [] if extensions_only else [(name, []) for name in ("msgcenterpy", "pylabrobot", "mcp", "base")]
     if full:
         result.append(("pprp", []))
     for distro in distros:
@@ -33,10 +35,11 @@ def main() -> None:
     parser.add_argument("--platform", required=True, choices=("linux-64", "osx-64", "osx-arm64", "win-64"))
     parser.add_argument("--ros-distros", default="")
     parser.add_argument("--full", action="store_true")
+    parser.add_argument("--extensions-only", action="store_true", help="复用已发布的默认包，仅构建/上传 ROS2/full 扩展")
     parser.add_argument("--output-dir", default="output")
     parser.add_argument("--artifact-dir", default="conda-artifacts")
     args = parser.parse_args()
-    selected = recipes(args.ros_distros, args.full)
+    selected = recipes(args.ros_distros, args.full, args.extensions_only)
     output = Path(args.output_dir).resolve()
     if args.operation == "build":
         build_env = os.environ.copy()
@@ -68,9 +71,11 @@ def main() -> None:
     if not packages:
         raise RuntimeError("没有已构建的 .conda 产物，禁止写入 published 凭证")
     for package in packages:
+        package_name = package.name.rsplit("-", 2)[0]
+        if args.extensions_only and package_name not in {"unilabos-ros2", "unilabos-full", "pprp"}:
+            continue
         command = [sys.executable, "-m", "binstar_client.scripts.cli", "-t", token,
                    "upload", "--user", "uni-lab", "--register"]
-        package_name = package.name.rsplit("-", 2)[0]
         if package.parent.name == "noarch" or package_name == "mcp":
             command.append("--skip-existing")
         command.append(str(package))
