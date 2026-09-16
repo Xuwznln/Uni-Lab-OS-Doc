@@ -3,42 +3,75 @@
 
 package:
   name: unilabos-full
-  version: 0.12.2
+  version: 0.12.3
 
 build:
-  noarch: generic
   number: 0
   string: jazzy_0
 
 requirements:
   run:
-  # Base unilabos package (includes unilabos-env)
-  - unilabos ==0.12.2 jazzy_0
+  # 完整 ROS2 运行时，默认依赖直接由 unilabos 声明，不再发布 unilabos-env。
+  - unilabos-ros2 ==0.12.3 jazzy_0
   # Documentation tools
-  - sphinx
-  - sphinx_rtd_theme
+  - sphinx >=7
+  - sphinx_rtd_theme >=2
+  - myst-parser >=2
+  - sphinxcontrib-mermaid
+  - myst-nb >=1
+  - sphinx-copybutton >=0.5
+  - sphinx-autobuild >=2024.2.4
+  - rinohtype >=0.5.4
+  - sphinx-simplepdf >=1.6
+  # 内置驱动 Python SDK
+  - opcua >=0.98.13
+  - pandas >=2.2
+  - matplotlib-base >=3.8
+  - pylibftdi >=0.22
+  - pprp >=0.2.7
+  - pyautogui >=0.9.54
+  - if: win
+    then: pywinauto >=0.6.8
   # Web UI
   - gradio
   - flask
   # Interactive development
-  - ipython
+  - ipython >=8
+  - jupyterlab >=4
+  - pytest >=8
+  - pytest-asyncio >=0.23
+  - python-build >=1.2
+  - ruff >=0.9
   - jupyter
   - jupyros
   - colcon-common-extensions
   # ROS2 full desktop (includes rviz2, gazebo, etc.)
-  - robostack-jazzy::ros-jazzy-desktop-full
+  - ros-jazzy-desktop-full
   # Navigation and motion control
-  - robostack-jazzy::ros-jazzy-navigation2
-  - robostack-jazzy::ros-jazzy-ros2-control
-  - robostack-jazzy::ros-jazzy-robot-state-publisher
-  - robostack-jazzy::ros-jazzy-joint-state-publisher
+  - ros-jazzy-navigation2
+  - ros-jazzy-ros2-control
+  - ros-jazzy-robot-state-publisher
+  - ros-jazzy-joint-state-publisher
   # MoveIt motion planning
-  - robostack-jazzy::ros-jazzy-moveit
-  - robostack-jazzy::ros-jazzy-moveit-servo
+  - ros-jazzy-moveit
+  - ros-jazzy-moveit-servo
   # Simulation
-  - robostack-jazzy::ros-jazzy-simulation
+  - ros-jazzy-simulation
 
+tests:
+  - python:
+      imports:
+        - rclpy
+        - unilabos_msgs.action
+        - sphinx
+        - myst_parser
+        - pytest
+        - IPython
+        - jupyterlab
+      pip_check: true
+  - script:
+      - python -c "from importlib.metadata import requires, version; from packaging.requirements import Requirement; reqs = [Requirement(r) for r in requires('unilabos')]; missing = [str(r) for r in reqs if (r.marker is None or r.marker.evaluate({'extra':'full'})) and not r.specifier.contains(version(r.name))]; assert not missing, missing"
 about:
   repository: https://github.com/deepmodeling/Uni-Lab-OS
   license: GPL-3.0-only
-  description: "UniLabOS Full - ROS 2 Jazzy Desktop, MoveIt, Navigation2, Gazebo, and Jupyter"
+  description: "UniLabOS Full - runtime, docs, tests, development and ROS 2 Jazzy Desktop"

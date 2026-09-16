@@ -276,6 +276,7 @@ class HostLinkDeviceNode(DeviceNode):
         )
         self._loop_ready = threading.Event()
         self._started = False
+        self._ready = False
         self._status_lock = threading.Lock()
         self._decorated_subscriptions: list[Any] = []
         self._status_bindings = self._build_status_bindings()
@@ -615,6 +616,7 @@ class HostLinkDeviceNode(DeviceNode):
         except Exception:
             self.stop()
             raise
+        self._ready = True
         self._logger.info("HostLink 设备已就绪：%s", self.device_id)
 
     def _setup_decorated_subscriptions(self) -> None:
@@ -1069,6 +1071,8 @@ class HostLinkDeviceNode(DeviceNode):
     def describe(self) -> Dict[str, Any]:
         descriptor = {
             "id": self.device_id,
+            # 归属须在 post_init 前登记，但调度只能在物料/服务初始化完成后看到设备。
+            "ready": self._ready,
             "registry_name": self.registry_name,
             "display_name": self.display_name,
             "actions": list(self.action_names),
@@ -1099,6 +1103,7 @@ class HostLinkDeviceNode(DeviceNode):
         return descriptor
 
     def stop(self) -> None:
+        self._ready = False
         if not self._started:
             return
         for subscription in self._decorated_subscriptions:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
@@ -123,10 +124,11 @@ def test_workstation_shared_logic_is_single_source_across_backends() -> None:
     """
     import unilabos.backend.hostlink.local_runtime as local_runtime_module
     import unilabos.backend.hostlink.workstation as hostlink_workstation_module
-    import unilabos.backend.ros2.base_device_node as base_device_node_module
     from unilabos.backend.runtime import workstation_protocol
 
-    base_source = inspect.getsource(base_device_node_module.ROS2DeviceNode.__init__)
+    # 验证装配关系时不导入 ROS 运行时，无 ROS 的 HostLink CI 也覆盖此契约。
+    ros2_directory = Path(local_runtime_module.__file__).parents[1] / "ros2"
+    base_source = (ros2_directory / "base_device_node.py").read_text(encoding="utf-8")
     assert "unilabos.backend.ros2.presets.workstation" in base_source
 
     runtime_source = inspect.getsource(local_runtime_module.HostLinkLocalRuntime.add_driver)
@@ -149,11 +151,7 @@ def test_workstation_shared_logic_is_single_source_across_backends() -> None:
         assert hasattr(workstation_protocol, name), name
     hostlink_source = inspect.getsource(hostlink_workstation_module)
     assert "unilabos.backend.runtime.workstation_protocol" in hostlink_source
-    import pathlib
-
-    ros2_workstation_path = (
-        pathlib.Path(base_device_node_module.__file__).parent / "presets" / "workstation.py"
-    )
+    ros2_workstation_path = ros2_directory / "presets" / "workstation.py"
     assert ros2_workstation_path.is_file()
     assert "unilabos.backend.runtime.workstation_protocol" in ros2_workstation_path.read_text(
         encoding="utf-8"

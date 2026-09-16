@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import time
+import threading
 
 import pytest
 import yaml
@@ -244,6 +245,33 @@ def test_hostlink_runtime_constructs_and_sets_up_pylabrobot_style_driver() -> No
         node.stop()
 
 
+def test_hostlink_readiness_waits_for_post_init() -> None:
+    entered, release = threading.Event(), threading.Event()
+
+    class InitializingDriver:
+        def post_init(self, node):
+            entered.set()
+            assert release.wait(10), "测试没有释放初始化屏障"
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    node = HostLinkDeviceNode(driver=InitializingDriver(), device_id="initializing")
+    assert node.describe()["ready"] is False
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        started = executor.submit(node.start)
+        try:
+            assert entered.wait(5)
+            assert node.describe()["ready"] is False
+        finally:
+            release.set()
+        try:
+            started.result(timeout=10)
+            assert node.describe()["ready"] is True
+        finally:
+            node.stop()
+    assert node.describe()["ready"] is False
+
+
 def test_hostlink_device_lifecycle_and_direct_action() -> None:
     driver = AsyncDriver("dev-1", {})
     node = HostLinkDeviceNode(driver, "dev-1")
@@ -326,6 +354,7 @@ def test_hostlink_runtime_exposes_registered_actions_and_status() -> None:
         assert runtime.descriptors() == [
             {
                 "id": "dev-1",
+                "ready": True,
                 "registry_name": "async_driver",
                 "display_name": "Async Driver",
                 "actions": ["auto-add"],

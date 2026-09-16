@@ -24,7 +24,7 @@ from unilabos.backend.hostlink.downlink import (
     run_node_coroutine,
     sync_resource_tree_to_device,
 )
-from unilabos.backend.ros2.base_device_node import registered_devices
+from unilabos.config.config import BasicConfig
 
 
 class _FakeTask:
@@ -91,9 +91,23 @@ class _FakeNode:
         return {"created_resource_tree": [[{"id": "r1"}]], "substance_resource_tree": []}
 
 
-@pytest.fixture()
-def fake_device():
+@pytest.fixture(params=["hostlink", "ros2"])
+def fake_device(request, monkeypatch):
     node = _FakeNode()
+    monkeypatch.setattr(BasicConfig, "backend", request.param)
+    if request.param == "hostlink":
+        from types import SimpleNamespace
+        from unilabos.backend.hostlink import main_hostlink_run
+
+        runtime = SimpleNamespace(local=SimpleNamespace(
+            get_device=lambda identity: node if identity == node.device_id else None,
+        ))
+        monkeypatch.setattr(main_hostlink_run, "get_runtime", lambda: runtime)
+        yield node
+        return
+    pytest.importorskip("rclpy", reason="仅 ROS2 设备表分支需要选装 ROS")
+    from unilabos.backend.ros2.base_device_node import registered_devices
+
     registered_devices[node.device_id] = {"base_node_instance": node}  # type: ignore[typeddict-item]
     try:
         yield node

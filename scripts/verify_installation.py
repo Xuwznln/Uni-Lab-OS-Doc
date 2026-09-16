@@ -47,6 +47,7 @@ if sys.platform == "win32":
 
 # Now import other modules
 import importlib
+import importlib.util
 
 # Use ASCII-safe symbols that work across all platforms
 CHECK_MARK = "[OK]"
@@ -89,6 +90,25 @@ def check_python_version() -> bool:
         return False
 
 
+def check_material_catalog() -> bool:
+    """必须实际创建物料：PLR 的可选导入可能把缺失的 Opentrons 依赖隐藏起来。"""
+    try:
+        import numpy as np
+        from opentrons_shared_data.labware import labware_definition as ld
+        from pylabrobot.resources.opentrons.plates import corning_96_wellplate_360ul_flat
+
+        if int(np.__version__.split(".")[0]) != 2 or ld.trapezoid([1, 2, 3]) != 4:
+            raise RuntimeError("NumPy 2 积分接口不正确")
+        plate = corning_96_wellplate_360ul_flat("installation_check")
+        if plate.num_items != 96:
+            raise RuntimeError("Opentrons 标准孔板定义不完整")
+        print(f"  {CHECK_MARK} NumPy 2 / Opentrons 96 孔板创建成功")
+        return True
+    except Exception as exc:
+        print(f"  {CROSS_MARK} 物料库验证失败：{exc}")
+        return False
+
+
 def main():
     """Run all verification checks."""
     # Parse command line arguments
@@ -101,6 +121,9 @@ def main():
         action="store_true",
         help="Automatically install missing packages",
     )
+    parser.add_argument("--backend", choices=("hostlink", "ros2"), default="hostlink")
+    parser.add_argument("--assert-no-ros", action="store_true", help="验证默认发行包未安装 ROS 运行时")
+    parser.add_argument("--materials-only", action="store_true", help="只验证 PLR / Opentrons 物料依赖，不要求安装 UniLabOS")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -120,11 +143,17 @@ def main():
         all_passed = False
     print()
 
-    # Check ROS2 rclpy
-    print("Checking ROS2 rclpy...")
-    if not check_package("rclpy", "ROS2 rclpy"):
-        all_passed = False
-    print()
+    if args.backend == "ros2":
+        for module in ("rclpy", "unilabos_msgs.msg", "unilabos_msgs.action"):
+            all_passed = check_package(module) and all_passed
+    elif args.assert_no_ros:
+        for module in ("rclpy", "rosidl_runtime_py", "ament_index_python"):
+            if importlib.util.find_spec(module) is not None:
+                print(f"  {CROSS_MARK} 默认包不应包含 {module}")
+                all_passed = False
+
+    if args.materials_only:
+        return 0 if check_material_catalog() and all_passed else 1
 
     # Run environment checker from unilabos
     print("Checking Uni-Lab-OS and dependencies...")
@@ -140,14 +169,19 @@ def main():
         if env_check_passed:
             print(f"  {CHECK_MARK} All required packages available")
         else:
-            print(f"  {CROSS_MARK} Some optional packages are missing")
+            all_passed = False
+            print(f"  {CROSS_MARK} Some required packages are missing")
             if not args.auto_install:
                 print("  Hint: Run with --auto-install to automatically install missing packages")
     except ImportError:
         print(f"  {CROSS_MARK} Uni-Lab-OS not installed")
         all_passed = False
     except Exception as e:
+        all_passed = False
         print(f"  {CROSS_MARK} Environment check failed: {str(e)}")
+    for module in ("unilabos.server.api.app", "unilabos.backend.hostlink.local_runtime"):
+        all_passed = check_package(module) and all_passed
+    all_passed = check_material_catalog() and all_passed
     print()
 
     # Summary

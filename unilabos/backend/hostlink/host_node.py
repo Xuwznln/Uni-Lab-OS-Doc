@@ -152,9 +152,14 @@ class HostNode(HostAdapterBase):
 
     def _device_snapshot(self, *, initial: bool) -> Dict[str, Dict[str, Any]]:
         if initial:
-            return self.runtime.devices(online_only=True)
+            return {
+                key: value for key, value in self.runtime.devices(online_only=True).items()
+                if value.get("device", {}).get("ready", True)
+            }
         result: Dict[str, Dict[str, Any]] = {}
         for descriptor in self.runtime.local.descriptors():
+            if not descriptor.get("ready", True):
+                continue
             device_id = str(descriptor["id"])
             node = self.runtime.local.devices[device_id]
             result[device_id] = {
@@ -165,6 +170,8 @@ class HostNode(HostAdapterBase):
             }
         if self.runtime.server is not None:
             for device_id, peer in self.runtime.server.devices(True).items():
+                if not peer.get("device", {}).get("ready", True):
+                    continue
                 remote = dict(peer)
                 remote["location"] = "remote"
                 result.setdefault(device_id, remote)

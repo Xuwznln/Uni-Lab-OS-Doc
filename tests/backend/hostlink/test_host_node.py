@@ -29,6 +29,25 @@ class CommunicationError(RuntimeError):
     severity = "recoverable"
 
 
+def test_initializing_device_is_owned_but_not_schedulable():
+    """初始化期间的服务路由仍可用，调度能力快照须等 post_init 完成。"""
+    from types import SimpleNamespace
+
+    pending = {"device": {"id": "bench", "ready": False}, "online": True}
+    ready = {"device": {"id": "rack", "ready": True}, "online": True}
+    runtime = SimpleNamespace(
+        devices=lambda **kwargs: {"bench": pending, "rack": ready},
+        local=SimpleNamespace(descriptors=lambda: []),
+        server=SimpleNamespace(devices=lambda online: {"bench": pending, "rack": ready}),
+    )
+    host = object.__new__(HostNode)
+    host.runtime = runtime
+    assert set(host._device_snapshot(initial=True)) == {"rack"}
+    assert set(host._device_snapshot(initial=False)) == {"rack"}
+    pending["device"]["ready"] = True
+    assert set(host._device_snapshot(initial=False)) == {"bench", "rack"}
+
+
 class AdapterDriver:
     def __init__(self) -> None:
         self.calls = 0

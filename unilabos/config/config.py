@@ -26,7 +26,7 @@ _NON_CONFIG_ENV_KEYS = frozenset(
 
 class BasicConfig:
     # 运行时 backend 名称由 unilabos.backend 统一规范化。
-    backend: Literal["hostlink", "ros2"] = "ros2"
+    backend: Literal["hostlink", "ros2"] = "hostlink"
     ak = ""
     sk = ""
     working_dir = ""

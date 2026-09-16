@@ -345,7 +345,14 @@ def main():
     except BackendConfigurationError as exc:
         parser.error(str(exc))
     args_dict["backend"] = backend_selection.name
-    if backend_selection.name == "ros2":
+    if backend_selection.name == "ros2" and args_dict.get("role") != "backend":
+        import importlib.util
+
+        if importlib.util.find_spec("rclpy") is None:
+            parser.error(
+                "当前为无 ROS 安装。默认请使用 --backend hostlink；"
+                "仅需 ROS2 时安装 unilabos-ros2（jazzy/humble）及对应消息包。"
+            )
         # HostLink direct backend must not probe/import rclpy as a side effect.
         from unilabos.app.utils import patch_rclpy_dll_windows
 

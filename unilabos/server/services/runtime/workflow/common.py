@@ -104,8 +104,6 @@ import re
 import uuid
 
 import networkx as nx
-from networkx.drawing.nx_agraph import to_agraph
-import matplotlib.pyplot as plt
 from typing import Dict, List, Any, Optional
 
 Json = Dict[str, Any]
@@ -633,6 +631,8 @@ def draw_protocol_graph(protocol_graph: WorkflowGraph, output_path: str):
     """
     (辅助功能) 使用 networkx 和 matplotlib 绘制协议工作流图，用于可视化。
     """
+    import matplotlib.pyplot as plt
+
     if not protocol_graph:
         print("Cannot draw graph: Graph object is empty.")
         return
@@ -686,6 +686,8 @@ def draw_protocol_graph_with_ports(protocol_graph, output_path: str, rankdir: st
     - 否则自动为节点创建 record 形状并定义命名端口 <portname>。
     最终由 PyGraphviz 渲染并输出到 output_path（后缀决定格式，如 .png/.svg/.pdf）。
     """
+    from networkx.drawing.nx_agraph import to_agraph
+
     if not protocol_graph:
         print("Cannot draw graph: Graph object is empty.")
         return

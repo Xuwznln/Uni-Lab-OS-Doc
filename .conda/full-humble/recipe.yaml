@@ -2,34 +2,66 @@
 
 package:
   name: unilabos-full
-  version: 0.12.2
+  version: 0.12.3
 
 build:
-  noarch: generic
   number: 0
   string: humble_0
 
 requirements:
   run:
-  - unilabos ==0.12.2 humble_0
-  - sphinx
-  - sphinx_rtd_theme
+  - unilabos-ros2 ==0.12.3 humble_0
+  - sphinx >=7
+  - sphinx_rtd_theme >=2
+  - myst-parser >=2
+  - sphinxcontrib-mermaid
+  - myst-nb >=1
+  - sphinx-copybutton >=0.5
+  - sphinx-autobuild >=2024.2.4
+  - rinohtype >=0.5.4
+  - sphinx-simplepdf >=1.6
+  - opcua >=0.98.13
+  - pandas >=2.2
+  - matplotlib-base >=3.8
+  - pylibftdi >=0.22
+  - pprp >=0.2.7
+  - pyautogui >=0.9.54
+  - if: win
+    then: pywinauto >=0.6.8
   - gradio
   - flask
-  - ipython
+  - ipython >=8
+  - jupyterlab >=4
+  - pytest >=8
+  - pytest-asyncio >=0.23
+  - python-build >=1.2
+  - ruff >=0.9
   - jupyter
   - jupyros
   - colcon-common-extensions
-  - robostack-humble::ros-humble-desktop-full
-  - robostack-humble::ros-humble-navigation2
-  - robostack-humble::ros-humble-ros2-control
-  - robostack-humble::ros-humble-robot-state-publisher
-  - robostack-humble::ros-humble-joint-state-publisher
-  - robostack-humble::ros-humble-moveit
-  - robostack-humble::ros-humble-moveit-servo
-  - robostack-humble::ros-humble-simulation
+  - ros-humble-desktop-full
+  - ros-humble-navigation2
+  - ros-humble-ros2-control
+  - ros-humble-robot-state-publisher
+  - ros-humble-joint-state-publisher
+  - ros-humble-moveit
+  - ros-humble-moveit-servo
+  - ros-humble-simulation
 
+tests:
+  - python:
+      imports:
+        - rclpy
+        - unilabos_msgs.action
+        - sphinx
+        - myst_parser
+        - pytest
+        - IPython
+        - jupyterlab
+      pip_check: true
+  - script:
+      - python -c "from importlib.metadata import requires, version; from packaging.requirements import Requirement; reqs = [Requirement(r) for r in requires('unilabos')]; missing = [str(r) for r in reqs if (r.marker is None or r.marker.evaluate({'extra':'full'})) and not r.specifier.contains(version(r.name))]; assert not missing, missing"
 about:
   repository: https://github.com/deepmodeling/Uni-Lab-OS
   license: GPL-3.0-only
-  description: "UniLabOS Full - ROS 2 Humble Desktop, MoveIt, Navigation2, Gazebo, and Jupyter"
+  description: "UniLabOS Full - runtime, docs, tests, development and ROS 2 Humble Desktop"
