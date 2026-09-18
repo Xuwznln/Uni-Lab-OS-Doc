@@ -1,0 +1,55 @@
+# Uni-Lab layout-optimizer 场景用 fleet 配置（对齐 ros2sp rmf_demos 2.0.4 格式）
+rmf_fleet:
+  name: "unilab_agv"
+  fleet_manager:
+    ip: "127.0.0.1"
+    port: 22011
+    user: "unilab"
+    password: "unilab"
+  limits:
+    linear: [1.5, 0.75]
+    angular: [0.6, 2.0]
+  profile:
+    footprint: 0.35
+    vicinity: 0.5
+  reversible: true
+  battery_system:
+    voltage: 12.0
+    capacity: 24.0
+    charging_current: 5.0
+  mechanical_system:
+    mass: 20.0
+    moment_of_inertia: 10.0
+    friction_coefficient: 0.22
+  ambient_system:
+    power: 20.0
+  tool_system:
+    power: 0.0
+  recharge_threshold: 0.10
+  recharge_soc: 1.0
+  publish_fleet_state: 10.0
+  # mock 小车电量恒定、不真正充电；关掉电量估算 + 收尾不充电，
+  # 避免 ChargeBattery 任务"等充到 100%"永不完成而卡住后续派单（#18 §10.4）
+  account_for_battery_drain: false
+  task_capabilities:
+    loop: true
+    delivery: true
+    clean: false
+    finishing_request: "nothing"
+
+robots:
+  unilab_agv1:
+    robot_config:
+      max_delay: 15.0
+      # OS(rmf.coordinator) 为车队最终控制端：关 RMF 空闲 responsive_wait，
+      # 避免它每 ~30s 把空闲车“拉回”停靠点，与 OS designer 直驱(plan_mode=designer)打架（#22）。
+      responsive_wait: false
+    rmf_config:
+      robot_state_update_frequency: 10.0
+      start:
+        map_name: "L1"
+        waypoint: "dock_96_0"
+        orientation: 0.0
+      charger:
+        waypoint: "dock_96_0"
+

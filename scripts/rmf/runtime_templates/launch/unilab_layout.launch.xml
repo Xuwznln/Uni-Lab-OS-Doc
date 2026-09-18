@@ -1,0 +1,69 @@
+<?xml version='1.0' ?>
+
+<!--
+  Uni-Lab layout-optimizer 编译地图 → RMF core + Gazebo 仿真。
+  由 run_rmf_layout.sh 在启动前调用 ensure_latest_map.sh 刷新产物。
+-->
+<launch>
+  <arg name="map_dir" description="ensure_latest_map.sh 输出目录（含 building.yaml / nav_graphs / world）"/>
+  <arg name="lab_uuid" default="demo_lab"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="headless" default="true" description="Gazebo 无 GUI（-s）"/>
+  <arg name="server_uri" default="ws://localhost:8000/_internal" description="fleet adapter → api-server"/>
+  <arg name="sim_update_rate" default="100"/>
+  <arg name="initial_map" default="L1"/>
+
+  <let name="building_yaml" value="$(var map_dir)/$(var lab_uuid).building.yaml"/>
+  <let name="nav_graph_file" value="$(var map_dir)/nav_graphs/0.yaml"/>
+  <let name="fleet_config_file" value="$(var map_dir)/fleet_config.yaml"/>
+  <let name="world_path" value="$(var map_dir)/unilab_layout.world"/>
+  <let name="model_path" value="$(var map_dir)/models"/>
+
+  <include file="$(find-pkg-share rmf_demos)/common.launch.xml">
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="headless" value="true"/>
+    <arg name="config_file" value="$(var building_yaml)"/>
+    <arg name="initial_map" value="$(var initial_map)"/>
+    <arg name="server_uri" value="$(var server_uri)"/>
+    <arg name="use_rmf_panel" value="false"/>
+  </include>
+
+  <!--
+    黑点 + 墙钟联调（#18 §10.4）：只起 fleet_adapter，**不起** rmf_demos 自带 fleet_manager。
+    robot 侧由 edge 的 fleet_manager_http（rmf.coordinator 内置，监听 fleet_config.fleet_manager.port=22011）承担，
+    避免 22011 端口冲突导致 OS 车队主无法上线、Cloud 小车不更新。
+  -->
+  <group>
+    <group if="$(var use_sim_time)">
+      <node pkg="rmf_demos_fleet_adapter" exec="fleet_adapter"
+            args="-c $(var fleet_config_file) -n $(var nav_graph_file) -sim"
+            output="both">
+        <param name="use_sim_time" value="$(var use_sim_time)"/>
+        <param name="server_uri" value="$(var server_uri)"/>
+      </node>
+    </group>
+
+    <group unless="$(var use_sim_time)">
+      <node pkg="rmf_demos_fleet_adapter" exec="fleet_adapter"
+            args="-c $(var fleet_config_file) -n $(var nav_graph_file)"
+            output="both">
+        <param name="use_sim_time" value="$(var use_sim_time)"/>
+        <param name="server_uri" value="$(var server_uri)"/>
+      </node>
+    </group>
+  </group>
+
+  <let name="gz_headless" if="$(var headless)" value="-s"/>
+  <let name="gz_headless" unless="$(var headless)" value=""/>
+
+  <group>
+    <set_env name="GZ_SIM_RESOURCE_PATH" value="$(env GZ_SIM_RESOURCE_PATH):$(var model_path)"/>
+    <include file="$(find-pkg-share ros_gz_sim)/launch/gz_sim.launch.py">
+      <arg name="gz_args" value="$(var gz_headless) -r -v 3 $(var world_path) -z $(var sim_update_rate)"/>
+    </include>
+  </group>
+
+  <node pkg="ros_gz_bridge" exec="parameter_bridge"
+    args="/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"/>
+</launch>
+

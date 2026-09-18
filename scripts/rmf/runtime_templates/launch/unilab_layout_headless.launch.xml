@@ -1,0 +1,57 @@
+<?xml version='1.0' ?>
+
+<!--
+  Uni-Lab layout-optimizer 编译地图 → RMF core（无 Gazebo）。
+  用于验证 building_map_server / nav_graph / Dashboard 地图显示。
+-->
+<launch>
+  <arg name="map_dir" description="ensure_latest_map.sh 输出目录"/>
+  <arg name="lab_uuid" default="demo_lab"/>
+  <arg name="use_sim_time" default="false"/>
+  <arg name="server_uri" default="ws://localhost:8000/_internal"/>
+  <arg name="initial_map" default="L1"/>
+  <arg name="script_dir" default="" description="runtime 根目录（strict_fleet_adapter.py 所在目录，由 run_rmf_layout.sh 传入）"/>
+
+  <let name="building_yaml" value="$(var map_dir)/$(var lab_uuid).building.yaml"/>
+  <let name="nav_graph_file" value="$(var map_dir)/nav_graphs/0.yaml"/>
+  <let name="fleet_config_file" value="$(var map_dir)/fleet_config.yaml"/>
+
+  <include file="$(find-pkg-share rmf_demos)/common.launch.xml">
+    <arg name="use_sim_time" value="$(var use_sim_time)"/>
+    <arg name="headless" value="true"/>
+    <arg name="config_file" value="$(var building_yaml)"/>
+    <arg name="initial_map" value="$(var initial_map)"/>
+    <arg name="server_uri" value="$(var server_uri)"/>
+    <arg name="use_rmf_panel" value="false"/>
+  </include>
+
+  <!--
+    黑点 + 墙钟联调（#18 §10.4）：只起 fleet_adapter，**不起** rmf_demos 自带 fleet_manager。
+    robot 侧由 edge 的 fleet_manager_http（HTTP→edge mock，监听 fleet_config.fleet_manager.port=22011）替代。
+
+    严格 RMF（rmf-strict-planning 规则）：使用 strict_fleet_adapter.py 替代官方 fleet_adapter，
+    其 StrictRobotCommandHandle 覆盖 follow_new_path，到达每个 waypoint 后按 Plan::Waypoint.time
+    原地等待再前往下一段，从而真实执行 RMF traffic scheduler 协商出的 hold/让行（官方参考实现未做）。
+    RMF_USE_SIM_TIME 由 use_sim_time 决定：为真时脚本给 adapter 注入 -sim（adapter 时钟=sim，
+    与 mock 的 sim 快进运动同源）。脚本运行在 ROS2 python，自包含、不依赖 conda/unilabos。
+  -->
+  <!-- MutexGroup 仲裁：Humble apt 无官方 supervisor，仓库内轻量节点消费已有 msgs -->
+  <group>
+    <executable
+        cmd="python3 $(var script_dir)/mutex_group_supervisor.py"
+        output="both"
+        shell="false">
+      <env name="RMF_USE_SIM_TIME" value="$(var use_sim_time)"/>
+    </executable>
+  </group>
+
+  <group>
+    <executable
+        cmd="python3 $(var script_dir)/strict_fleet_adapter.py -c $(var fleet_config_file) -n $(var nav_graph_file) --ros-args -p server_uri:=$(var server_uri)"
+        output="both"
+        shell="false">
+      <env name="RMF_USE_SIM_TIME" value="$(var use_sim_time)"/>
+    </executable>
+  </group>
+</launch>
+

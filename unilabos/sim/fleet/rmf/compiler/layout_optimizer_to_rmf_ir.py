@@ -301,17 +301,21 @@ def build_ir_from_agv_routes(
             continue
         x, y = float(wp.get("x", 0.0)), float(wp.get("y", 0.0))
         kind = str(wp.get("kind") or "device_dock")
-        params: Dict[str, Any]
-        if kind == "turn_star":
-            params = {
-                "is_holding_point": True,
-            }
-        else:
-            params = {
-                "is_holding_point": True,
-                "pickup_dispenser": str(wp.get("pickupDispenser") or f"d_{name}"),
-                "dropoff_ingestor": str(wp.get("dropoffIngestor") or f"i_{name}"),
-            }
+        is_charger = bool(wp.get("isCharger")) or kind == "charge_dock"
+        params: Dict[str, Any] = {"is_holding_point": True}
+        if kind != "turn_star":
+            if is_charger:
+                params["is_charger"] = True
+                # 充电点默认不暴露 pickup/dropoff 语义，避免被当作工艺任务端点。
+                pickup = str(wp.get("pickupDispenser") or "").strip()
+                dropoff = str(wp.get("dropoffIngestor") or "").strip()
+                if pickup:
+                    params["pickup_dispenser"] = pickup
+                if dropoff:
+                    params["dropoff_ingestor"] = dropoff
+            else:
+                params["pickup_dispenser"] = str(wp.get("pickupDispenser") or f"d_{name}")
+                params["dropoff_ingestor"] = str(wp.get("dropoffIngestor") or f"i_{name}")
         idx = level.add_vertex(
             RmfVertexIR(
                 name=name,

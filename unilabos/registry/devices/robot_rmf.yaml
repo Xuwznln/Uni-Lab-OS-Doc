@@ -388,12 +388,30 @@ rmf.coordinator:
   init_param_schema:
     config:
       properties:
+        auto_compile_map:
+          type: boolean
+        auto_start_runtime:
+          type: boolean
         fleet_name:
           type: string
         lab_uuid:
           type: string
+        layout_optimizer_dir:
+          type: string
         map_source:
           type: string
+        runtime_launcher_enabled:
+          type: boolean
+        runtime_mode:
+          type: string
+        runtime_root:
+          type: string
+        runtime_use_sim_time:
+          type: boolean
+        start_api_server:
+          type: boolean
+        stop_before_start:
+          type: boolean
       type: object
     data:
       properties:

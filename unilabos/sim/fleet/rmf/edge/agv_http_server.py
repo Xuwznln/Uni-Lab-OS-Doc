@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import threading
 import time
@@ -50,11 +51,13 @@ class MockAgvServer:
         robots: List[MockAgvHardware],
         *,
         step_dt: float = _STEP_DT,
+        min_separation_m: float = 0.0,
         log: Optional[Callable[[str], None]] = None,
         clock: Optional["SimClock"] = None,
     ) -> None:
         self.robots: Dict[str, MockAgvHardware] = {hw.robot: hw for hw in robots}
         self._step_dt = step_dt
+        self._min_separation_m = max(0.0, float(min_separation_m))
         self._log = log
         # 仅在 OS 进程内由 RMFSim 注入；CLI 独立运行时保持墙钟推进。
         self._clock = clock
@@ -66,11 +69,44 @@ class MockAgvServer:
     def log(self, msg: str) -> None:
         (self._log or (lambda m: print(m, flush=True)))(msg)
 
+    def _step_once_with_separation(self, dt: float) -> None:
+        hws = list(self.robots.values())
+        if not hws:
+            return
+        if len(hws) == 1 or self._min_separation_m <= 1e-6:
+            for hw in hws:
+                hw.step(dt)
+            return
+
+        before: Dict[str, Dict[str, float]] = {hw.robot: hw.motion_snapshot() for hw in hws}
+        for hw in hws:
+            hw.step(dt)
+        after: Dict[str, Dict[str, float]] = {hw.robot: hw.motion_snapshot() for hw in hws}
+
+        names = sorted(self.robots.keys())
+        min_sep = self._min_separation_m
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                a, b = names[i], names[j]
+                pa, pb = after[a], after[b]
+                dist = math.hypot(float(pa["x"]) - float(pb["x"]), float(pa["y"]) - float(pb["y"]))
+                if dist + 1e-9 >= min_sep:
+                    continue
+                move_a = math.hypot(float(pa["x"]) - float(before[a]["x"]), float(pa["y"]) - float(before[a]["y"]))
+                move_b = math.hypot(float(pb["x"]) - float(before[b]["x"]), float(pb["y"]) - float(before[b]["y"]))
+                if move_a > move_b + 1e-9:
+                    loser = a
+                elif move_b > move_a + 1e-9:
+                    loser = b
+                else:
+                    loser = max(a, b)
+                self.robots[loser].restore_motion_snapshot(before[loser], zero_velocity=True)
+                after[loser] = before[loser]
+
     def _stepper(self) -> None:
         if self._clock is None:
             while not self._stop.is_set():
-                for hw in list(self.robots.values()):
-                    hw.step(self._step_dt)
+                self._step_once_with_separation(self._step_dt)
                 self._stop.wait(self._step_dt)
             return
 
@@ -90,8 +126,7 @@ class MockAgvServer:
             # 防止线程偶发卡顿导致一次性跨过过大位移，按切片推进更稳定。
             while dt > 1e-9:
                 step_dt = min(dt, max_slice)
-                for hw in list(self.robots.values()):
-                    hw.step(step_dt)
+                self._step_once_with_separation(step_dt)
                 dt -= step_dt
             self._stop.wait(self._step_dt)
 
@@ -101,7 +136,10 @@ class MockAgvServer:
         self._server = ThreadingHTTPServer((host, port), self._make_handler())
         self._srv_thread = threading.Thread(target=self._server.serve_forever, name="mock-agv-http", daemon=True)
         self._srv_thread.start()
-        self.log(f"[mock-agv] /agv/* http://{host}:{port}  robots={list(self.robots)}")
+        self.log(
+            f"[mock-agv] /agv/* http://{host}:{port}  robots={list(self.robots)}"
+            f"  min_separation={self._min_separation_m:.2f}m"
+        )
 
     def stop(self) -> None:
         self._stop.set()
@@ -220,15 +258,22 @@ def main() -> None:
         default=[],
         help="机器人初始位姿 name[:x:y[:yaw]]，可多次；默认 unilab_agv1",
     )
-    ap.add_argument("--speed", type=float, default=0.5, help="线速度 m/s")
+    ap.add_argument("--speed", type=float, default=0.5, help="巡航线速度 m/s")
+    ap.add_argument("--accel", type=float, default=0.75, help="线加/减速度 m/s²")
+    ap.add_argument("--ang-speed", type=float, default=0.6, help="角速度上限 rad/s")
+    ap.add_argument("--ang-accel", type=float, default=2.0, help="角加/减速度 rad/s²")
+    ap.add_argument("--min-separation", type=float, default=0.0, help="机器人最小间距（米，0=关闭本地回滚）")
     args = ap.parse_args()
 
     robots: List[MockAgvHardware] = []
     for spec in args.robot or ["unilab_agv1"]:
         hw = _parse_robot(spec)
         hw.linear_speed = args.speed
+        hw.linear_accel = args.accel
+        hw.max_angular_speed = args.ang_speed
+        hw.angular_accel = args.ang_accel
         robots.append(hw)
-    MockAgvServer(robots).serve_forever(args.host, args.port)
+    MockAgvServer(robots, min_separation_m=float(args.min_separation)).serve_forever(args.host, args.port)
 
 
 if __name__ == "__main__":

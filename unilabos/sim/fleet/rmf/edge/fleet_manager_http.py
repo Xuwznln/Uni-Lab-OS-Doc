@@ -31,13 +31,39 @@ import requests
 
 DEFAULT_EDGE_URL = "http://127.0.0.1:8090"
 DEFAULT_NOMINAL_V = 0.5  # m/s（fleet_config limits.linear[0]），用于 destination_arrival 估时
+DEFAULT_LINEAR_ACCEL = 0.75
+DEFAULT_ANGULAR_SPEED = 0.6
+DEFAULT_ANGULAR_ACCEL = 2.0
 DEFAULT_POLL_HZ = 10.0
+
+
+def _wrap_angle(a: float) -> float:
+    return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
+def _trapezoid_profile_time(distance: float, *, vmax: float, accel: float) -> float:
+    """静止到静止的梯形/三角速度剖面时间。"""
+    d = max(0.0, float(distance))
+    v = max(1e-3, float(vmax))
+    a = max(1e-3, float(accel))
+    switch = (v * v) / a
+    if d <= switch:
+        return 2.0 * math.sqrt(d / a)
+    return 2.0 * (v / a) + (d - switch) / v
 
 
 class RobotBridge:
     """单机器人桥状态：缓存 edge 位姿 + 跟踪 destination/cmd 完成（复刻 rmf_demos 完成判定）。"""
 
-    def __init__(self, name: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        nominal_velocity: float = DEFAULT_NOMINAL_V,
+        linear_accel: float = DEFAULT_LINEAR_ACCEL,
+        angular_speed: float = DEFAULT_ANGULAR_SPEED,
+        angular_accel: float = DEFAULT_ANGULAR_ACCEL,
+    ) -> None:
         self.name = name
         self.x = 0.0
         self.y = 0.0
@@ -48,6 +74,10 @@ class RobotBridge:
         self.last_cmd_id = 0
         self.destination: Optional[Dict[str, float]] = None
         self.last_completed_request = 0
+        self.nominal_v = max(1e-3, float(nominal_velocity))
+        self.linear_accel = max(1e-3, float(linear_accel))
+        self.angular_speed = max(1e-3, float(angular_speed))
+        self.angular_accel = max(1e-3, float(angular_accel))
         self._lock = threading.Lock()
 
     def update_from_edge(self, st: Dict[str, Any]) -> None:
@@ -77,7 +107,21 @@ class RobotBridge:
             self.last_cmd_id = int(cmd_id)
             self.destination = None
 
-    def status_data(self, nominal_v: float) -> Dict[str, Any]:
+    def _estimate_arrival_duration(self, tx: float, ty: float) -> float:
+        dx = float(tx) - self.x
+        dy = float(ty) - self.y
+        dist = math.hypot(dx, dy)
+        if dist <= 1e-6:
+            return 0.0
+        desired = math.atan2(dy, dx)
+        yaw_err = abs(_wrap_angle(desired - self.yaw))
+        turn_t = _trapezoid_profile_time(yaw_err, vmax=self.angular_speed, accel=self.angular_accel)
+        move_t = _trapezoid_profile_time(dist, vmax=self.nominal_v, accel=self.linear_accel)
+        # 与 mock 运动学一致的真实到达估时（转向 + 线速度梯形剖面）。
+        # 交给 RMF traffic scheduler 用它做 traffic 协商，不人为放大。
+        return turn_t + move_t
+
+    def status_data(self) -> Dict[str, Any]:
         """复刻 rmf_demos get_robot_state 的 data 形状（无时间戳）。"""
         with self._lock:
             data: Dict[str, Any] = {
@@ -88,10 +132,11 @@ class RobotBridge:
                 "last_completed_request": self.last_completed_request,
             }
             if self.destination is not None:
-                dx = self.destination["x"] - self.x
-                dy = self.destination["y"] - self.y
-                duration = math.hypot(dx, dy) / max(nominal_v, 1e-3)
-                data["destination_arrival"] = {"cmd_id": self.last_cmd_id, "duration": duration}
+                duration = self._estimate_arrival_duration(
+                    float(self.destination["x"]),
+                    float(self.destination["y"]),
+                )
+                data["destination_arrival"] = {"cmd_id": self.last_cmd_id, "duration": max(0.1, duration)}
             else:
                 data["destination_arrival"] = None
             return data
@@ -110,14 +155,29 @@ class EdgeFleetManager:
         robot_names: Optional[List[str]] = None,
         *,
         nominal_velocity: float = DEFAULT_NOMINAL_V,
+        linear_accel: float = DEFAULT_LINEAR_ACCEL,
+        angular_speed: float = DEFAULT_ANGULAR_SPEED,
+        angular_accel: float = DEFAULT_ANGULAR_ACCEL,
         poll_hz: float = DEFAULT_POLL_HZ,
         log: Optional[Callable[..., None]] = None,
     ) -> None:
         self.edge_url = edge_url.rstrip("/")
         self.nominal_v = float(nominal_velocity)
+        self.linear_accel = float(linear_accel)
+        self.angular_speed = float(angular_speed)
+        self.angular_accel = float(angular_accel)
         self.poll_hz = float(poll_hz)
         self._log = log
-        self.robots: Dict[str, RobotBridge] = {n: RobotBridge(n) for n in (robot_names or ["unilab_agv1"])}
+        self.robots: Dict[str, RobotBridge] = {
+            n: RobotBridge(
+                n,
+                nominal_velocity=self.nominal_v,
+                linear_accel=self.linear_accel,
+                angular_speed=self.angular_speed,
+                angular_accel=self.angular_accel,
+            )
+            for n in (robot_names or ["unilab_agv1"])
+        }
         self._stop = threading.Event()
         self._server: Optional[ThreadingHTTPServer] = None
         self._poll_thread: Optional[threading.Thread] = None
@@ -172,7 +232,7 @@ class EdgeFleetManager:
 
     # ------------------------------------------------------------ 对外控制 API（供 OS 设备 status）
     def robot_states(self) -> List[Dict[str, Any]]:
-        return [rb.status_data(self.nominal_v) for rb in self.robots.values()]
+        return [rb.status_data() for rb in self.robots.values()]
 
     # ------------------------------------------------------------ 生命周期
     def start(self, host: str = "127.0.0.1", port: int = 22011) -> None:
@@ -248,7 +308,7 @@ class EdgeFleetManager:
                         if rb is None:
                             self._send(200, resp)
                             return
-                        resp["data"] = rb.status_data(mgr.nominal_v)
+                        resp["data"] = rb.status_data()
                         resp["success"] = True
                     self._send(200, resp)
                     return
@@ -306,12 +366,20 @@ def main() -> None:
     ap.add_argument("--edge-url", default=DEFAULT_EDGE_URL, help="edge AGV HTTP 服务地址（§10.3）")
     ap.add_argument("--robot", action="append", default=[], help="机器人名，可多次；默认 unilab_agv1")
     ap.add_argument("--nominal-velocity", type=float, default=DEFAULT_NOMINAL_V)
+    ap.add_argument("--poll-hz", type=float, default=DEFAULT_POLL_HZ, help="edge 位姿轮询频率（墙钟 Hz）")
+    ap.add_argument("--linear-accel", type=float, default=DEFAULT_LINEAR_ACCEL)
+    ap.add_argument("--angular-speed", "--ang-speed", dest="angular_speed", type=float, default=DEFAULT_ANGULAR_SPEED)
+    ap.add_argument("--angular-accel", "--ang-accel", dest="angular_accel", type=float, default=DEFAULT_ANGULAR_ACCEL)
     args = ap.parse_args()
 
     mgr = EdgeFleetManager(
         edge_url=args.edge_url,
         robot_names=args.robot or ["unilab_agv1"],
         nominal_velocity=args.nominal_velocity,
+        poll_hz=args.poll_hz,
+        linear_accel=args.linear_accel,
+        angular_speed=args.angular_speed,
+        angular_accel=args.angular_accel,
     )
     print(f"[os-fleet] CLI 启动：RMF↔edge 桥 http://{args.host}:{args.port}  edge={args.edge_url}", flush=True)
     mgr.serve_forever(args.host, args.port)

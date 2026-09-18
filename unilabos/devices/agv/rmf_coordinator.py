@@ -81,6 +81,7 @@ class RmfCoordinator:
         self._dispatcher = None
         self._gateway = None
         self._reporter = None
+        self._runtime_launcher = None
         self._live_source = None
         self._last_building: Optional[Dict[str, Any]] = None
         self._last_semantic: Optional[Dict[str, Any]] = None
@@ -96,10 +97,14 @@ class RmfCoordinator:
         # 框架不调用 async initialize()，故在 __init__（构造时必执行）直接启动。
         self._fleet_manager = None  # EdgeFleetManager
         self._designer_replay = None  # DesignerRouteReplay（designer 规划模式回放设计折线，#22 §3）
+        self._bootstrap_thread: Optional[threading.Thread] = None
+        self._bootstrap_started = False
+        self._bootstrap_lock = threading.Lock()
         self._start_fleet_manager()
         self._load_designer_transfer_run_state()
         # 初始化能力快照（部分启动路径不会及时回调 initialize()，先给 data 落一份当前值）
         self._refresh_data()
+        self._start_bootstrap_if_needed()
 
     async def initialize(self) -> bool:
         self._refresh_data()
@@ -115,12 +120,15 @@ class RmfCoordinator:
             pass
         # 兜底：若框架未在 __init__ 后保留实例，这里再确保车队主在跑（幂等）
         self._start_fleet_manager()
+        self._start_bootstrap_if_needed()
         return True
 
     async def cleanup(self) -> bool:
         if self._designer_transfer_thread is not None and self._designer_transfer_thread.is_alive():
             self._designer_transfer_cancel.set()
             self._designer_transfer_thread.join(timeout=2.0)
+        if self._bootstrap_thread is not None and self._bootstrap_thread.is_alive():
+            self._bootstrap_thread.join(timeout=1.5)
         if self._fleet_manager is not None:
             try:
                 self._fleet_manager.stop()
@@ -186,9 +194,10 @@ class RmfCoordinator:
         return result
 
     def start_runtime(self, mode: str = "sim", artifact_id: str = "") -> Dict[str, Any]:
-        """启动 RMF runtime（gateway + reporter）。无 ProcessSpec/无 ROS 时优雅降级。"""
+        """启动 RMF runtime（优先统一 launcher，兼容旧 gateway 行为）。"""
         self._runtime_status = "starting"
         self._refresh_data()
+        launcher_detail: Dict[str, Any] = {}
         try:
             self._ensure_gateway()
             building_path = os.path.join(self.generated_map_dir, f"{self.lab_uuid or 'lab'}.building.yaml")
@@ -197,18 +206,49 @@ class RmfCoordinator:
                     self._gateway.generate_nav_graph(building_path)
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"[rmf] nav_graph 生成跳过（无 RMF 工具链？）: {e}")
+            # 优先走统一 launcher（#25.0），失败则降级到旧 gateway.start()
+            use_launcher = self._runtime_launcher_enabled()
+            if use_launcher:
+                opt = self._launcher_options(mode=mode, use_sim_time=str(mode).strip().lower() == "sim")
+                launcher_detail = self._runtime_launcher_instance().start_runtime_stack(opt)
+                if not launcher_detail.get("success", False):
+                    raise RuntimeError(str(launcher_detail.get("error") or "runtime launcher start failed"))
+            elif self._gateway is not None and os.path.exists(building_path):
                 self._gateway.start()
             session_id = self._ensure_reporter(mode)
             self._runtime_status = "running"
             self._refresh_data()
-            return {"success": True, "session_id": session_id}
+            result: Dict[str, Any] = {"success": True, "session_id": session_id}
+            if launcher_detail:
+                result["launcher"] = launcher_detail
+            return result
         except Exception as e:  # noqa: BLE001
             self._runtime_status = "error"
             self._diagnostics.append({"level": "error", "code": "start_failed", "message": str(e)})
+            if launcher_detail:
+                self._diagnostics.append(
+                    {
+                        "level": "warning",
+                        "code": "runtime_launcher_detail",
+                        "message": json.dumps(launcher_detail, ensure_ascii=False)[:500],
+                    }
+                )
             self._refresh_data()
             return {"success": False, "session_id": "", "error": str(e)}
 
     def stop_runtime(self, session_id: str = "") -> Dict[str, Any]:
+        launcher_detail: Dict[str, Any] = {}
+        if self._runtime_launcher is not None:
+            try:
+                launcher_detail = self._runtime_launcher.stop_runtime_stack(
+                    self._launcher_options(
+                        mode=str(self.config.get("runtime_mode") or "headless"),
+                        use_sim_time=False,
+                    ),
+                    include_shell_stop=False,
+                )
+            except Exception as e:  # noqa: BLE001
+                self._diagnostics.append({"level": "warning", "code": "stop_launcher_failed", "message": str(e)})
         if self._gateway is not None:
             self._gateway.stop()
         if self._reporter is not None:
@@ -216,7 +256,10 @@ class RmfCoordinator:
             self._reporter.stop()
         self._runtime_status = "stopped"
         self._refresh_data()
-        return {"success": True}
+        out: Dict[str, Any] = {"success": True}
+        if launcher_detail:
+            out["launcher"] = launcher_detail
+        return out
 
     def dispatch_go_to(
         self,
@@ -790,7 +833,7 @@ class RmfCoordinator:
           - fleet_manager_port：= fleet_config.rmf_fleet.fleet_manager.port（默认 22011）
           - edge_url：mock AGV 硬件 HTTP 地址（默认 http://127.0.0.1:8090）
           - robots：机器人名列表（默认 [fleet 的单车 unilab_agv1]）
-          - fleet_manager_host / nominal_velocity：可选
+          - fleet_manager_host / nominal_velocity / linear_accel / angular_speed / angular_accel：可选
         config.enable_fleet_manager=false 可关闭（纯调度、不接管小车）。
         """
         if str(self.config.get("enable_fleet_manager", True)).lower() in ("0", "false", "no"):
@@ -810,6 +853,13 @@ class RmfCoordinator:
         if isinstance(robots, str):
             robots = [robots]
         nominal_v = float(self.config.get("nominal_velocity") or 0.5)
+        linear_accel = float(self.config.get("linear_accel") or 0.75)
+        angular_speed = float(
+            self.config.get("angular_speed")
+            or self.config.get("max_angular_speed")
+            or 0.6
+        )
+        angular_accel = float(self.config.get("angular_accel") or 2.0)
 
         def _os_log(msg: str, level: str = "info") -> None:
             getattr(logger, level, logger.info)(msg)
@@ -819,6 +869,9 @@ class RmfCoordinator:
                 edge_url=edge_url,
                 robot_names=list(robots),
                 nominal_velocity=nominal_v,
+                linear_accel=linear_accel,
+                angular_speed=angular_speed,
+                angular_accel=angular_accel,
                 log=_os_log,
             )
             self._fleet_manager.start(host, port)
@@ -1332,6 +1385,141 @@ class RmfCoordinator:
         except Exception as e:  # noqa: BLE001
             logger.warning(f"[rmf] 写编译产物失败: {e}")
         return self.generated_map_dir
+
+    def _runtime_launcher_enabled(self) -> bool:
+        raw = self.config.get("runtime_launcher_enabled")
+        parsed = self._parse_bool(raw)
+        if parsed is None:
+            return True
+        return bool(parsed)
+
+    def _runtime_launcher_instance(self):
+        if self._runtime_launcher is None:
+            from unilabos.sim.fleet.rmf.runtime.launcher import RmfRuntimeLauncher
+
+            self._runtime_launcher = RmfRuntimeLauncher()
+        return self._runtime_launcher
+
+    @staticmethod
+    def _infer_runtime_root(map_dir: str) -> str:
+        if not map_dir:
+            return ""
+        p = os.path.abspath(map_dir)
+        latest = os.path.basename(p)
+        parent = os.path.basename(os.path.dirname(p))
+        if latest == "latest" and parent == "maps":
+            return os.path.dirname(os.path.dirname(p))
+        if parent == "maps":
+            return os.path.dirname(os.path.dirname(p))
+        return os.path.dirname(p)
+
+    def _launcher_options(
+        self,
+        *,
+        mode: str,
+        use_sim_time: bool,
+        start_api_server: Optional[bool] = None,
+        stop_before_start: Optional[bool] = None,
+        prepare_map: bool = False,
+    ):
+        from unilabos.sim.fleet.rmf.runtime.launcher import RmfRuntimeOptions
+        from unilabos.sim.fleet.rmf.runtime.policy import build_startup_policy
+
+        policy = build_startup_policy(self.config, generated_map_dir=self.generated_map_dir)
+        runtime_root = str(policy.runtime_root or self._infer_runtime_root(self.generated_map_dir))
+        map_dir = str(policy.map_dir or self.generated_map_dir)
+
+        api_start = bool(policy.start_api_server) if start_api_server is None else bool(start_api_server)
+        before_start = bool(policy.stop_before_start) if stop_before_start is None else bool(stop_before_start)
+
+        runtime_mode = str(policy.runtime_mode or "headless").strip().lower()
+        if runtime_mode not in ("headless", "sim"):
+            runtime_mode = "headless"
+        # start_runtime action 的 mode 延续兼容语义：sim/real；
+        # 统一 launcher 的 mode 用 headless/sim，优先图配置 runtime_mode。
+        if runtime_mode == "headless" and str(mode).strip().lower() == "sim":
+            runtime_mode = "sim"
+
+        return RmfRuntimeOptions(
+            runtime_root=runtime_root,
+            map_dir=map_dir,
+            layout_dir=str(policy.layout_optimizer_dir or ""),
+            lab_uuid=str(self.lab_uuid or self.config.get("lab_uuid") or "demo_lab"),
+            mode=runtime_mode,
+            use_sim_time=bool(use_sim_time),
+            prepare_map=bool(prepare_map),
+            start_api_server=api_start,
+            start_rmf_core=True,
+            stop_before_start=before_start,
+            bridge_mode="none",  # OS-first：fleet_manager 由本进程托管（#22）
+            api_url=str(self.config.get("api_url") or os.environ.get("RMF_API_URL") or "http://127.0.0.1:8000"),
+            api_token=str(self.config.get("api_token") or _DEFAULT_API_JWT),
+            logs_dir=str(self.config.get("runtime_logs_dir") or runtime_root),
+        )
+
+    def _start_bootstrap_if_needed(self) -> None:
+        """graph 驱动自动 bootstrap：可选 compile_map + 可选 start_runtime（#25.0）。"""
+        try:
+            from unilabos.sim.fleet.rmf.runtime.policy import build_startup_policy
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"[rmf] bootstrap policy 导入失败，跳过自动启动: {e}")
+            return
+
+        with self._bootstrap_lock:
+            if self._bootstrap_started:
+                return
+            policy = build_startup_policy(self.config, generated_map_dir=self.generated_map_dir)
+            if not policy.should_bootstrap:
+                return
+            self._bootstrap_started = True
+            self._bootstrap_thread = threading.Thread(
+                target=self._bootstrap_worker,
+                args=(policy,),
+                name="rmf-bootstrap",
+                daemon=True,
+            )
+            self._bootstrap_thread.start()
+
+    def _bootstrap_worker(self, policy) -> None:
+        """后台执行 auto_compile_map / auto_start_runtime，避免阻塞设备初始化。"""
+        try:
+            logger.info(
+                f"[rmf] graph bootstrap start: "
+                f"auto_compile_map={policy.auto_compile_map} auto_start_runtime={policy.auto_start_runtime} "
+                f"runtime_mode={policy.runtime_mode}"
+            )
+
+            compile_ok = True
+            if policy.auto_compile_map:
+                compile_res = self.compile_map(
+                    layout_optimizer_dir=str(policy.layout_optimizer_dir or "") or None,
+                    scene_hash=str(self._scene_hash or ""),
+                    force=False,
+                )
+                compile_ok = bool(compile_res.get("success", False))
+                if not compile_ok:
+                    msg = str(compile_res.get("error") or "compile_map failed")
+                    self._diagnostics.append({"level": "error", "code": "bootstrap_compile_failed", "message": msg})
+                    self._refresh_data()
+                    logger.warning(f"[rmf] graph bootstrap compile_map 失败: {msg}")
+
+            if policy.auto_start_runtime and compile_ok:
+                # 老 action 语义：mode=sim 表示用 sim clock；否则按墙钟。
+                start_mode = "sim" if bool(policy.runtime_use_sim_time) else "real"
+                start_res = self.start_runtime(mode=start_mode)
+                if not bool(start_res.get("success", False)):
+                    msg = str(start_res.get("error") or "start_runtime failed")
+                    self._diagnostics.append({"level": "error", "code": "bootstrap_runtime_failed", "message": msg})
+                    logger.warning(f"[rmf] graph bootstrap start_runtime 失败: {msg}")
+                else:
+                    logger.info("[rmf] graph bootstrap start_runtime 完成")
+            elif policy.auto_start_runtime and not compile_ok:
+                logger.warning("[rmf] graph bootstrap 跳过 start_runtime：compile_map 失败")
+        except Exception as e:  # noqa: BLE001
+            self._diagnostics.append({"level": "error", "code": "bootstrap_crash", "message": str(e)})
+            self._runtime_status = "error"
+            self._refresh_data()
+            logger.exception(f"[rmf] graph bootstrap 异常: {e}")
 
     def _runtime_clock_status(self) -> Dict[str, Any]:
         mode = self._detect_runtime_mode()
