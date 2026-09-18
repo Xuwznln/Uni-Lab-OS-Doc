@@ -125,7 +125,7 @@ coincellassemblyworkstation_device:
                 battery_pressure_mode:
                   default: true
                   title: 电池压制模式
-                  description: False=压力检测模式，True=距离模式
+                  description: False=距离模式，True=压力检测模式
                   type: boolean
                 positive_plate_pick_mode:
                   default: false
