@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: Resolve the source that was actually built and uploaded
         id: source
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           REQUESTED_REF: ${{ inputs.branch }}
           PLATFORMS: ${{ inputs.platforms }}
