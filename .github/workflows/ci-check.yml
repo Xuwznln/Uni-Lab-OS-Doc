@@ -21,7 +21,7 @@ jobs:
       UNILABOS_E2E_TOPOLOGY: split
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Build companion wheels without uploading to PyPI

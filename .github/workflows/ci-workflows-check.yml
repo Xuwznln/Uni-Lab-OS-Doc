@@ -23,7 +23,7 @@ jobs:
           cache: false
       - name: Validate workflow syntax
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck='' -pyflakes='' .github/workflows/ci-check.yml .github/workflows/multi-platform-build.yml .github/workflows/unilabos-conda-build.yml .github/workflows/conda-pack-build.yml .github/workflows/wheel-release.yml .github/workflows/ci-workflows-check.yml .github/workflows/deploy-docs.yml
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Test build provenance and no-op handling
