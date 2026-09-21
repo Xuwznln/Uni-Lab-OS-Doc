@@ -125,7 +125,7 @@ jobs:
           fi
       - name: Download the exact upstream packages
         if: steps.should_build.outputs.should_build == 'true' && github.event_name == 'workflow_run'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: conda-package-unilabos-hostlink-${{ matrix.platform }}
           path: conda-artifacts
