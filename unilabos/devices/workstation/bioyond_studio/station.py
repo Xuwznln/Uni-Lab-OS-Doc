@@ -948,6 +948,9 @@ class BioyondWorkstation(WorkstationBase):
             logger.info("Deck 无仓库子节点，调用 setup() 初始化仓库")
             self.deck.setup()
 
+        # 需在 post_init 末尾上传 deck 之前完成
+        self._apply_scan_location_uuids()
+
         # 初始化同步器并执行首次同步（需在仓库初始化之后）
         self.resource_synchronizer = BioyondResourceSynchronizer(self)
         self.resource_synchronizer.sync_from_external()
@@ -1272,6 +1275,40 @@ class BioyondWorkstation(WorkstationBase):
         except (TypeError, ValueError):
             skip = 5.0
         self._warehouse_refresh_skip_until = time.time() + max(skip, 0)
+
+    # 支持扫码上料的仓库；库位二维码内容即奔曜库位 UUID
+    SCAN_INBOUND_WAREHOUSES = ("手动堆栈左", "手动堆栈右")
+
+    def _apply_scan_location_uuids(self) -> None:
+        """把 warehouse_mapping 中的奔曜仓库/库位 UUID 写到 deck 仓库上，随 deck 上传给前端。"""
+        mapping = self.bioyond_config.get("warehouse_mapping", {}) or {}
+        warehouses = getattr(self.deck, "warehouses", {}) or {}
+        for wh_name in self.SCAN_INBOUND_WAREHOUSES:
+            warehouse = warehouses.get(wh_name)
+            if not isinstance(warehouse, WareHouse):
+                logger.warning(f"[扫码库位] deck 上未找到仓库 {wh_name}，跳过库位 UUID 注入")
+                continue
+            info = mapping.get(wh_name)
+            if not info:
+                logger.warning(f"[扫码库位] warehouse_mapping 中未配置仓库 {wh_name}，跳过库位 UUID 注入")
+                continue
+
+            site_uuids = info.get("site_uuids") or {}
+            labels = list(getattr(warehouse, "_ordering", {}).keys())
+            missing = [label for label in labels if not site_uuids.get(label)]
+            unknown = [site for site in site_uuids if site not in labels]
+            if missing:
+                logger.warning(f"[扫码库位] {wh_name} 以下库位缺少奔曜 UUID: {missing}")
+            if unknown:
+                logger.warning(f"[扫码库位] {wh_name} 配置中以下库位在 deck 上不存在: {unknown}")
+
+            warehouse.warehouse_uuid = info.get("uuid") or None
+            warehouse.site_location_uuids = {
+                label: site_uuids[label] for label in labels if site_uuids.get(label)
+            }
+            logger.info(
+                f"[扫码库位] {wh_name} 已注入 {len(warehouse.site_location_uuids)}/{len(labels)} 个库位 UUID"
+            )
 
     def _build_location_reverse_lookup(self) -> Dict[str, Tuple[str, str]]:
         """locationId → (deck 仓库名, 槽位名)，只收录 deck 上实际存在的格。"""

@@ -114,8 +114,16 @@ class WareHouse(ItemizedCarrier):
         category: str = "warehouse",
         model: Optional[str] = None,
         ordering_layout: str = "col-major",
+        warehouse_uuid: Optional[str] = None,
         **kwargs
     ):
+        # 反序列化时 sites 是 list，外部库位 UUID 需在父类丢弃多余字段前取出
+        site_location_uuids: Dict[str, str] = {}
+        if isinstance(sites, list):
+            for site in sites:
+                if isinstance(site, dict) and site.get("location_uuid"):
+                    site_location_uuids[str(site["label"])] = site["location_uuid"]
+
         super().__init__(
             name=name,
             size_x=size_x,
@@ -136,10 +144,21 @@ class WareHouse(ItemizedCarrier):
         # 使用独立属性避免与父类的layout冲突
         self.ordering_layout = ordering_layout
 
+        # 外部 LIMS（如奔曜）的仓库 UUID 与库位 UUID，供前端扫码上料匹配；未配置时不序列化
+        self.warehouse_uuid: Optional[str] = warehouse_uuid
+        self.site_location_uuids: Dict[str, str] = site_location_uuids
+
     def serialize(self) -> dict:
-        """序列化时保存 ordering_layout 属性"""
+        """序列化时保存 ordering_layout 属性及外部仓库/库位 UUID"""
         data = super().serialize()
         data['ordering_layout'] = self.ordering_layout
+        if self.warehouse_uuid:
+            data['warehouse_uuid'] = self.warehouse_uuid
+        if self.site_location_uuids:
+            for site in data.get('sites', []):
+                location_uuid = self.site_location_uuids.get(site.get('label'))
+                if location_uuid:
+                    site['location_uuid'] = location_uuid
         return data
 
     def get_site_by_layer_position(self, row: int, col: int, layer: int) -> ResourceHolder:
