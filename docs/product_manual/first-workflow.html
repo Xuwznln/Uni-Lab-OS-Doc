@@ -1,0 +1,649 @@
+<!doctype html>
+<html class="no-js" lang="zh-CN" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="alternate" type="text/markdown" href="first-workflow.md">
+<link rel="describedby" type="text/plain" href="llms.txt">
+<link rel="index" title="索引" href="genindex.html"><link rel="search" title="搜索" href="search.html"><link rel="next" title="AI 编写工作流（推荐）" href="ai-workflow-authoring.html"><link rel="prev" title="工作流补料与物料来源" href="workflow-replenishment.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>手写并运行第一个工作流（用户设备包 教学） - Uni-Lab OS 产品使用说明书</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=35d0322d" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  --color-brand-primary: #2757dd;
+  --color-brand-content: #2757dd;
+  --color-sidebar-background: #f8f9fb;
+  --color-sidebar-background-border: #eeebee;
+  --color-admonition-background: #f8f9fb;
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-stack--monospace: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">Uni-Lab OS 产品使用说明书</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">Uni-Lab OS 产品使用说明书</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="搜索" name="q" aria-label="搜索">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">认识与快速上手</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="overview.html">认识 Uni-Lab OS</a></li>
+<li class="toctree-l1"><a class="reference internal" href="demo-lab.html">示例设备包</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">系统安装与配置</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">系统安装</a></li>
+<li class="toctree-l1"><a class="reference internal" href="environment.html">环境与运行配置</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">设备包开发规范</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="unilabos-installation.html">设备包规范与系统启动</a><input aria-label="Toggle navigation of 设备包规范与系统启动" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="workspace.html">工作区</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="device-template.html">1. 设备接入模板</a><input aria-label="Toggle navigation of 1. 设备接入模板" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="template-library.html">设备模板库与类别选择</a></li>
+<li class="toctree-l3"><a class="reference internal" href="device-registration.html">设备登记、动作表单与设备联动</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generic-device.html">通用设备规范</a></li>
+<li class="toctree-l3"><a class="reference internal" href="plc-station.html">PLC 控制的工站</a></li>
+<li class="toctree-l3"><a class="reference internal" href="serial-network.html">串口／网络连接</a></li>
+<li class="toctree-l3"><a class="reference internal" href="host-api.html">上位机 API 接入</a></li>
+<li class="toctree-l3"><a class="reference internal" href="mouse-automation.html">鼠标模拟点击（可选）</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="material-template.html">2. 物料定义模板</a><input aria-label="Toggle navigation of 2. 物料定义模板" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="deck-warehouse.html">工作站台面与仓库</a></li>
+<li class="toctree-l3"><a class="reference internal" href="stack.html">光电堆栈与旋转堆栈：物料 + 设备</a></li>
+<li class="toctree-l3"><a class="reference internal" href="plate-tiprack.html">孔板与吸头盒（Plate／Tiprack）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="container-template.html">容器（Container）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="vial-rack.html">小瓶载架</a></li>
+<li class="toctree-l3"><a class="reference internal" href="magazine.html">弹夹</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sheet-battery.html">片状物料与组装成品</a></li>
+<li class="toctree-l3"><a class="reference internal" href="material-state.html">物料状态、条码与内容物</a></li>
+<li class="toctree-l3"><a class="reference internal" href="other-materials.html">其他可追踪物料</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="startup-files.html">3. 启动文件</a><input aria-label="Toggle navigation of 3. 启动文件" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="graph-json.html">启动图（Graph JSON）编写指南</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current has-children"><a class="reference internal" href="workflow.html">4. 工作流运行</a><input aria-label="Toggle navigation of 4. 工作流运行" checked="" class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="workflow-concepts.html">先理解工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflow-features.html">工作流编排特性</a></li>
+<li class="toctree-l3"><a class="reference internal" href="experiment-operations.html">实验操作</a></li>
+<li class="toctree-l3"><a class="reference internal" href="complete-workflow.html">完整工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflow-replenishment.html">工作流补料与物料来源</a></li>
+<li class="toctree-l3 current current-page"><a class="current reference internal" href="#">手写并运行第一个工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ai-workflow-authoring.html">AI 编写工作流（推荐）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html">工作流发布与任务运行</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="参考文档.html">5. 参考文档</a><input aria-label="Toggle navigation of 5. 参考文档" class="toctree-checkbox" id="toctree-checkbox-reference" name="toctree-checkbox-reference" role="switch" type="checkbox"/><label for="toctree-checkbox-reference"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul></ul>
+</li>
+</ul>
+</li>
+
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="repository-builder-skill.html">使用 AI 设备包生成器（实验性）</a></li>
+<li class="toctree-l1"><a class="reference internal" href="scenario-guide.html">设备包验收</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">参考</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">故障排查</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API 使用参考</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          
+<div class="ai-docs-toolbar" data-ai-docs-toolbar
+     data-markdown-url="first-workflow.md"
+     data-llms-url="llms.txt"
+     data-llms-full-url="llms-full.txt">
+  <div class="ai-docs-menu-shell">
+    <div class="ai-docs-split">
+      <button class="ai-docs-copy-primary" type="button" data-ai-docs-copy
+              aria-disabled="true" disabled>
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
+          <path d="M9 5h6m-6 4h6m-6 4h4M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/>
+        </svg>
+        <span data-ai-docs-trigger-label>复制页面</span>
+      </button>
+      <button class="ai-docs-trigger" type="button" aria-expanded="false"
+              aria-controls="ai-docs-menu-first-workflow" aria-label="打开 AI 文档菜单">
+        <svg class="ai-docs-chevron" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14">
+          <path d="m7 10 5 5 5-5"/>
+        </svg>
+      </button>
+    </div>
+    <div class="ai-docs-popover" id="ai-docs-menu-first-workflow" hidden>
+      <button class="ai-docs-menu-item" type="button" data-ai-docs-copy
+              aria-disabled="true" disabled>
+        <span class="ai-docs-item-icon" aria-hidden="true">⧉</span>
+        <span><strong>复制页面</strong><small data-ai-docs-copy-help>正在准备本页 Markdown</small></span>
+      </button>
+      <a class="ai-docs-menu-item" href="first-workflow.md" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">M↓</span>
+        <span><strong>以 Markdown 格式查看 <span aria-hidden="true">↗</span></strong><small>打开本页纯文本版本</small></span>
+      </a>
+      <a class="ai-docs-menu-item" href="llms.txt" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">AI</span>
+        <span><strong>LLMs.txt <span aria-hidden="true">↗</span></strong><small>让 AI 按主题发现全部文档</small></span>
+      </a>
+      <a class="ai-docs-menu-item" href="llms-full.txt" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">≡</span>
+        <span><strong>LLMs-full.txt <span aria-hidden="true">↗</span></strong><small>获取整本说明书的 Markdown</small></span>
+      </a>
+    </div>
+  </div>
+  <span class="ai-docs-status" role="status" aria-live="polite"></span>
+</div>
+<section id="id1">
+<h1>手写并运行第一个工作流（用户设备包 教学）<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h1>
+<div class="admonition- admonition">
+<p class="admonition-title">阅读角色</p>
+<ul class="simple">
+<li><p><strong>业务负责人</strong>：确认实验目的、输入输出、参数单位、成功标准和失败处理。</p></li>
+<li><p><strong>开发人员</strong>：编写或编排节点、物料流、控制结构、设备绑定和正式合同。</p></li>
+<li><p><strong>验收人员</strong>：执行静态检查、预检、模拟运行、异常路径和受控真机验收。</p></li>
+</ul>
+</div>
+<p>本教程使用无硬件副作用的软件探针，创建一个全新的普通工作流。你会亲手完成写源码、导入、诊断、发布、预检、创建 Task 和查看结果。</p>
+<p>本页示例假定用户设备包已经提供一个无硬件副作用的软件探针。开发自己的设备包时，先完成<a class="reference internal" href="workspace.html"><span class="std std-doc">工作区与设备包加载</span></a>，再用设备包中已登记的安全测试设备和动作替换示例探针。</p>
+<p>日常工作流推荐按<a class="reference internal" href="ai-workflow-authoring.html"><span class="std std-doc">用 AI 编写工作流</span></a>的方式生成；本教程保留手写过程，是为了让你能够读懂、审查和排查 AI 产出的静态 DSL。无论源码由谁写，后面的产品编译、人工发布、预检和运行步骤完全相同。</p>
+<p>用户设备包 控制流探针在设备元数据中声明 <code class="docutils literal notranslate"><span class="pre">hardware_side_effects=False</span></code>。本地环境仍应保持<a class="reference internal" href="installation.html"><span class="std std-doc">安装教程</span></a>启动的 <code class="docutils literal notranslate"><span class="pre">dry-run</span></code>，这样即使误选其他动作，也不会构造真机驱动。</p>
+<section id="id2">
+<h2>完成前检查<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>Uni-Lab OS 整体状态为 <code class="docutils literal notranslate"><span class="pre">ready</span></code>，且设备连接正常；</p></li>
+<li><p>Uni-Lab OS 的“设备”页能找到 <code class="docutils literal notranslate"><span class="pre">example_lab_control_flow_probe</span></code>；</p></li>
+<li><p>“工作流”页能看到 用户设备包 已登记流程；</p></li>
+<li><p>当前 Runtime 使用 <code class="docutils literal notranslate"><span class="pre">dry-run</span></code>，并按 readiness 返回的能力执行。</p></li>
+</ul>
+<p>如果还没有本地环境，先完成<a class="reference internal" href="installation.html"><span class="std std-doc">系统安装</span></a>。</p>
+</section>
+<section id="id3">
+<h2>1. 创建源码文件<a class="headerlink" href="#id3" title="链接到此标题。">¶</a></h2>
+<p>在任意个人练习目录新建 <code class="docutils literal notranslate"><span class="pre">hello_probe.py</span></code>，保存为 UTF-8，内容如下：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">TypedDict</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">example_device_package.devices.control_flow_probe.device</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">用户设备包ControlFlowProbeDevice</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">unilabos.workflow.authoring</span><span class="w"> </span><span class="kn">import</span> <span class="n">device</span><span class="p">,</span> <span class="n">workflow</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ProbeOutput</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
+    <span class="n">observed</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">message</span><span class="p">:</span> <span class="nb">str</span>
+
+
+<span class="n">probe</span><span class="p">:</span> <span class="n">用户设备包ControlFlowProbeDevice</span> <span class="o">=</span> <span class="n">device</span><span class="p">(</span><span class="s2">&quot;example_lab_control_flow_probe&quot;</span><span class="p">)</span>
+
+
+<span class="nd">@workflow</span><span class="p">(</span>
+    <span class="n">workflow_uuid</span><span class="o">=</span><span class="s2">&quot;683cd317-1767-465c-9483-1664b17a2088&quot;</span><span class="p">,</span>
+    <span class="n">displayname</span><span class="o">=</span><span class="s2">&quot;我的第一个软件探针流程&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;读取一个布尔值并返回观察结果。&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">hello_probe</span><span class="p">(</span><span class="o">*</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ProbeOutput</span><span class="p">:</span>
+    <span class="c1"># unilab:node_uuid=966d4242-af1f-400f-93c9-268927de1451</span>
+    <span class="n">observed</span> <span class="o">=</span> <span class="n">probe</span><span class="o">.</span><span class="n">observe_boolean</span><span class="p">(</span><span class="n">value</span><span class="o">=</span><span class="n">value</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;observed&quot;</span><span class="p">:</span> <span class="n">observed</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+        <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="n">observed</span><span class="o">.</span><span class="n">message</span><span class="p">,</span>
+    <span class="p">}</span>
+</pre></div>
+</div>
+<div class="admonition important">
+<p class="admonition-title">重要</p>
+<p>这组 UUID 只适合第一次照做。如果当前 Workspace 已导入过本教程，请为工作流和节点生成新的 UUID 字面量。源码里不能写 <code class="docutils literal notranslate"><span class="pre">uuid.uuid4()</span></code>；编译器只接受稳定字符串。</p>
+</div>
+<p>生成两个新 UUID 的辅助命令：</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;from uuid import uuid4; print(uuid4()); print(uuid4())&quot;</span>
+</pre></div>
+</div>
+</section>
+<section id="id4">
+<h2>2. 读懂这 27 行代码<a class="headerlink" href="#id4" title="链接到此标题。">¶</a></h2>
+<ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">TypedDict</span></code> 定义可供上层流程和用户读取的输出合同。</p></li>
+<li><p>设备类型来自真实 用户设备包 驱动包；编译器用它解析动作签名。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">device(&quot;example_lab_control_flow_probe&quot;)</span></code> 固定绑定启动图（Graph JSON）中的无硬件副作用设备。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&#64;workflow</span></code> 声明稳定身份、展示名和说明；默认类型是 <code class="docutils literal notranslate"><span class="pre">normal</span></code>。</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">*</span></code> 之后的 <code class="docutils literal notranslate"><span class="pre">value:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></code> 是公开、带类型、带默认值的输入。</p></li>
+<li><p>节点 UUID 注释紧邻动作，它是这个节点跨修订保持不变的身份。</p></li>
+<li><p>动作用命名参数调用并赋值给简单变量。</p></li>
+<li><p>返回值只引用动作结果，没有伪造常量结果。</p></li>
+</ol>
+<p>不要执行 <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">hello_probe.py</span></code>。文件是 AST DSL，应该交给 Uni-Lab OS 静态导入。</p>
+</section>
+<section id="id5">
+<h2>3. 导入工作流<a class="headerlink" href="#id5" title="链接到此标题。">¶</a></h2>
+<ol class="arabic simple">
+<li><p>打开 <code class="docutils literal notranslate"><span class="pre">workspace</span> <span class="pre">status</span></code> 返回的 Uni-Lab OS 页面地址。</p></li>
+<li><p>在左侧进入“工作流”。</p></li>
+<li><p>点击“导入 Python”。</p></li>
+<li><p>选择 <code class="docutils literal notranslate"><span class="pre">hello_probe.py</span></code>。</p></li>
+<li><p>等待成功提示，并打开“我的第一个软件探针流程”。</p></li>
+</ol>
+<p>导入只接受单个 <code class="docutils literal notranslate"><span class="pre">.py</span></code> 文件，文件名不能含路径；一个文件必须且只能声明一个有效的工作流 UUID。服务会先验证 UTF-8、Python AST、动作模板、节点身份和完整候选图，全部通过后才原子创建定义并把规范源码登记到 Workspace 包清单。它不会 import 或执行上传文件。</p>
+<p>如果失败，先读错误中的行列号和第一个 diagnostic。最常见原因是 UUID 重复、缺节点 UUID、动作参数写成位置参数、设备类型没有显式导入，或动作名不在当前 Catalog。</p>
+</section>
+<section id="id6">
+<h2>4. 检查定义<a class="headerlink" href="#id6" title="链接到此标题。">¶</a></h2>
+<p>在详情中依次确认：</p>
+<ul class="simple">
+<li><p>类型为普通工作流；</p></li>
+<li><p>当前修订存在，但尚未发布；</p></li>
+<li><p>拓扑只有一个设备动作节点；</p></li>
+<li><p>输入合同包含布尔字段 <code class="docutils literal notranslate"><span class="pre">value</span></code>；</p></li>
+<li><p>输出合同包含 <code class="docutils literal notranslate"><span class="pre">observed</span></code> 和 <code class="docutils literal notranslate"><span class="pre">message</span></code>；</p></li>
+<li><p>诊断没有 error；</p></li>
+<li><p>源码页显示系统保存的规范源码。</p></li>
+</ul>
+<p>如果页面显示模板或设备未绑定，不要继续发布。返回安装检查，确认用户设备包、启动图 与 Uni-Lab OS 设备目录属于同一代 Workspace。</p>
+</section>
+<section id="id7">
+<h2>5. 发布修订<a class="headerlink" href="#id7" title="链接到此标题。">¶</a></h2>
+<p>点击“发布”，确认发布当前修订。发布完成后，页面应显示已发布状态和不可变发布合同。</p>
+<p>发布只冻结定义，不是安全审批，也不会启动设备。以后修改源定义会产生新修订；已创建 Task 仍使用自己的旧快照。</p>
+</section>
+<section id="id8">
+<h2>6. 运行前检查<a class="headerlink" href="#id8" title="链接到此标题。">¶</a></h2>
+<p>进入“运行准备”：</p>
+<ol class="arabic simple">
+<li><p>输入 <code class="docutils literal notranslate"><span class="pre">value</span> <span class="pre">=</span> <span class="pre">true</span></code>；</p></li>
+<li><p>运行方式选择“普通运行”；</p></li>
+<li><p>优先级选择“普通”；</p></li>
+<li><p>描述填写“新手教程：hello probe”；</p></li>
+<li><p>点击“运行前检查”。</p></li>
+</ol>
+<p>结果应为 <code class="docutils literal notranslate"><span class="pre">runnable_now</span></code>。预检不会创建 Task、占用设备或写库存；它只是当前快照上的零写入判断。</p>
+<p>如果是 <code class="docutils literal notranslate"><span class="pre">temporarily_unavailable</span></code>，先确认 Uni-Lab OS 中设备已连接且软件探针没有被其他任务占用。如果是 <code class="docutils literal notranslate"><span class="pre">invalid</span></code>，回到诊断、输入与发布状态逐项修复。</p>
+</section>
+<section id="task">
+<h2>7. 创建 Task 并查看结果<a class="headerlink" href="#task" title="链接到此标题。">¶</a></h2>
+<p>点击“创建任务”，然后进入“任务”页：</p>
+<ol class="arabic simple">
+<li><p>找到描述为“新手教程：hello probe”的任务；</p></li>
+<li><p>打开任务，观察它从等待/运行进入完成；</p></li>
+<li><p>点击唯一的 Job；</p></li>
+<li><p>查看实际输入、<code class="docutils literal notranslate"><span class="pre">feedback_data</span></code>、<code class="docutils literal notranslate"><span class="pre">return_info</span></code> 和输出；</p></li>
+<li><p>回到 Task 详情核对工作流输出。</p></li>
+</ol>
+<p>在 <code class="docutils literal notranslate"><span class="pre">dry-run</span></code> 中，模拟器会按动作结果合同生成确定性回执：同名输出优先透传输入，所以 <code class="docutils literal notranslate"><span class="pre">observed</span></code> 应与提交的 <code class="docutils literal notranslate"><span class="pre">value</span></code> 相同。字符串 <code class="docutils literal notranslate"><span class="pre">message</span></code> 可以是模拟默认值；它不是 用户设备包 真驱动生成的中文消息。</p>
+<p>再创建一次 Task，把 <code class="docutils literal notranslate"><span class="pre">value</span></code> 改为 <code class="docutils literal notranslate"><span class="pre">false</span></code>。如果两次 Task 都完成且 <code class="docutils literal notranslate"><span class="pre">observed</span></code> 分别为 <code class="docutils literal notranslate"><span class="pre">true</span></code>、<code class="docutils literal notranslate"><span class="pre">false</span></code>，你已经验证了：</p>
+<ul class="simple">
+<li><p>Uni-Lab OS 页面与 API 可用；</p></li>
+<li><p>Python DSL 能被静态编译；</p></li>
+<li><p>发布合同可运行；</p></li>
+<li><p>Uni-Lab OS 能创建并派发 Job；</p></li>
+<li><p>模拟动作能通过 Uni-Lab OS 的正常结果通道回传；</p></li>
+<li><p>工作流输出能从动作结果投影。</p></li>
+</ul>
+</section>
+<section id="api">
+<h2>8. 改用 API 完成同一闭环（可选）<a class="headerlink" href="#api" title="链接到此标题。">¶</a></h2>
+<p>网页是推荐入口；下面的 API 是尚未执行网页导入时的等价入口，不要在已导入同一 UUID 后重复调用。先把 <code class="docutils literal notranslate"><span class="pre">BACKEND_URL</span></code> 改为状态命令返回的 Uni-Lab OS API 地址；如果你已经完成前面的网页教程，请先为工作流和节点换一组新 UUID。</p>
+<p>导入：</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;</span><span class="nv">$BACKEND_URL</span><span class="s2">/api/v1/local/workflows/import-python&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: text/x-python&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-Workflow-Filename: hello_probe.py&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-binary<span class="w"> </span>@hello_probe.py
+</pre></div>
+</div>
+<p>发布当前修订：</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;</span><span class="nv">$BACKEND_URL</span><span class="s2">/api/v1/workflows/683cd317-1767-465c-9483-1664b17a2088/publications&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;revision&quot;: 1}&#39;</span>
+</pre></div>
+</div>
+<p>零写入预检：</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;</span><span class="nv">$BACKEND_URL</span><span class="s2">/api/v1/workflows/683cd317-1767-465c-9483-1664b17a2088/run-preflight&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;run_mode&quot;: &quot;normal&quot;,</span>
+<span class="s1">    &quot;target_node_uuid&quot;: null,</span>
+<span class="s1">    &quot;input&quot;: {&quot;value&quot;: true},</span>
+<span class="s1">    &quot;inventory_bindings&quot;: []</span>
+<span class="s1">  }&#39;</span>
+</pre></div>
+</div>
+<p>创建 Task：</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-fsS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;</span><span class="nv">$BACKEND_URL</span><span class="s2">/api/v1/workflow-tasks&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;workflow_uuid&quot;: &quot;683cd317-1767-465c-9483-1664b17a2088&quot;,</span>
+<span class="s1">    &quot;run_mode&quot;: &quot;normal&quot;,</span>
+<span class="s1">    &quot;priority&quot;: &quot;normal&quot;,</span>
+<span class="s1">    &quot;input&quot;: {&quot;value&quot;: true},</span>
+<span class="s1">    &quot;inventory_bindings&quot;: [],</span>
+<span class="s1">    &quot;description&quot;: &quot;新手教程：hello probe&quot;</span>
+<span class="s1">  }&#39;</span>
+</pre></div>
+</div>
+<p>接口响应中的 Task UUID 可用于读取 <code class="docutils literal notranslate"><span class="pre">/api/v1/workflow-tasks/{task_uuid}</span></code>、<code class="docutils literal notranslate"><span class="pre">/jobs</span></code> 和 <code class="docutils literal notranslate"><span class="pre">/events</span></code>。</p>
+<div class="admonition note">
+<p class="admonition-title">备注</p>
+<p>Python 导入是“创建新定义”，不是覆盖已有 UUID。需要长期迭代时，把源码放在设备包的 <code class="docutils literal notranslate"><span class="pre">workflows/</span></code> 目录并登记到 <code class="docutils literal notranslate"><span class="pre">package.yaml</span></code>，或使用 Authoring 的 draft → candidate → apply 并发控制接口。不要反复上传同一个 UUID 期待覆盖。</p>
+</div>
+</section>
+<section id="id9">
+<h2>下一课<a class="headerlink" href="#id9" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>先在<a class="reference internal" href="materials.html"><span class="std std-doc">物料管理</span></a>和<a class="reference internal" href="reagents.html"><span class="std std-doc">试剂管理</span></a>中理解工作流绑定的运行资源；</p></li>
+<li><p>用<a class="reference internal" href="workflow-features.html"><span class="std std-doc">工作流编排特性</span></a>把单动作流程扩展成条件、循环与并行流程；</p></li>
+<li><p>用<a class="reference internal" href="experiment-operations.html"><span class="std std-doc">实验操作（子工作流）</span></a>学习子流程的创建、发布和复用；</p></li>
+<li><p>后续日常创作按<a class="reference internal" href="ai-workflow-authoring.html"><span class="std std-doc">用 AI 编写工作流（推荐）</span></a>完成；</p></li>
+<li><p>上线前完成<a class="reference internal" href="runtime-safety.html"><span class="std std-doc">运行安全</span></a>和<a class="reference internal" href="deployment.html"><span class="std std-doc">Kubernetes 部署</span></a>，再管理工作流和任务。</p></li>
+</ul>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="ai-workflow-authoring.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">AI 编写工作流（推荐）</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="workflow-replenishment.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">工作流补料与物料来源</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Uni-Lab
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            <div class="last-updated">
+              Last updated on 2026-09-08</div>
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">手写并运行第一个工作流（用户设备包 教学）</a><ul>
+<li><a class="reference internal" href="#id2">完成前检查</a></li>
+<li><a class="reference internal" href="#id3">1. 创建源码文件</a></li>
+<li><a class="reference internal" href="#id4">2. 读懂这 27 行代码</a></li>
+<li><a class="reference internal" href="#id5">3. 导入工作流</a></li>
+<li><a class="reference internal" href="#id6">4. 检查定义</a></li>
+<li><a class="reference internal" href="#id7">5. 发布修订</a></li>
+<li><a class="reference internal" href="#id8">6. 运行前检查</a></li>
+<li><a class="reference internal" href="#task">7. 创建 Task 并查看结果</a></li>
+<li><a class="reference internal" href="#api">8. 改用 API 完成同一闭环（可选）</a></li>
+<li><a class="reference internal" href="#id9">下一课</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=4041f460"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="_static/translations.js?v=540d3cec"></script>
+    <script src="_static/ai-docs.js?v=118f57a4"></script>
+    </body>
+</html>

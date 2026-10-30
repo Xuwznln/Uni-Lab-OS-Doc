@@ -1,0 +1,21 @@
+{
+  "format": "unilab.scheduler.plugin-manifest.v1",
+  "engine_id": "example.scheduler",
+  "engine_version": "0.0.0",
+  "build_id": "synthetic-r3-example",
+  "contract": {
+    "schema_version": "1.0",
+    "release_state": "draft",
+    "draft_revision": 3,
+    "contract_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "artifact": {
+    "kind": "native",
+    "path": "libexample.dylib",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "abi": {
+    "major": 1,
+    "minor": 0
+  }
+}

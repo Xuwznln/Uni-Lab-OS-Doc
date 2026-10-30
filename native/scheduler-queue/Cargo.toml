@@ -1,0 +1,20 @@
+[package]
+name = "unilab-scheduler-queue"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+unilab-scheduler-core = { path = "../scheduler_shared" }
+
+[build-dependencies]
+sha2 = "0.10"
+serde_json = "1"
+
+[profile.release]
+panic = "unwind"
+strip = "symbols"
+lto = true

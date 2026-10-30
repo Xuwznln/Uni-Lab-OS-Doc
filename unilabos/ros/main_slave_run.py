@@ -1,0 +1,371 @@
+import json
+import os
+
+# from nt import device_encoding
+import threading
+import time
+import uuid
+from typing import Any, Dict, List, Optional
+
+# rcutils 会缓存首次日志初始化时的输出流，必须先固定到受控的 stderr。
+os.environ["RCUTILS_LOGGING_USE_STDOUT"] = "0"
+
+import rclpy
+from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
+from rclpy.timer import Timer
+from unilabos_msgs.srv._serial_command import SerialCommand_Response
+
+from unilabos.app.register import register_devices_and_resources
+from unilabos.app.runtime_thread_lifecycle import (
+    begin_runtime_shutdown,
+    publish_edge_runtime_ready_signal,
+    start_runtime_thread,
+)
+from unilabos.config.config import BasicConfig, EdgeControlConfig
+from unilabos.devices.ros_dev.liquid_handler_joint_publisher import (
+    LiquidHandlerJointPublisher,
+)
+from unilabos.registry.registry import lab_registry
+from unilabos.resources.resource_tracker import (
+    DeviceNodeResourceTracker,
+    ResourceTreeSet,
+)
+from unilabos.ros.executor import RuntimeExecutor, ensure_executor_thread_running
+from unilabos.ros.hostlink_runtime import (
+    attach_hostlink_runtime as _attach_hostlink_runtime,
+)
+from unilabos.ros.hostlink_runtime import (
+    setup_host_network_before_ros as _setup_host_network_before_ros,
+)
+from unilabos.ros.hostlink_runtime import (
+    start_hostlink_server as _start_hostlink_server,
+)
+from unilabos.ros.initialize_device import initialize_device_from_dict
+from unilabos.ros.logging import close_ros_logging, prepare_ros_logging
+from unilabos.ros.nodes.presets.host_node import HostNode
+from unilabos.ros.nodes.presets.resource_mesh_manager import ResourceMeshManager
+from unilabos.utils import logger
+from unilabos.utils.type_check import TypeEncoder
+from unilabos_msgs.srv import SerialCommand  # type: ignore
+
+
+def exit() -> None:
+    """关闭ROS节点和资源"""
+    begin_runtime_shutdown()
+    host_instance = HostNode.get_instance()
+    if host_instance is not None:
+        # 停止发现定时器
+        # noinspection PyProtectedMember
+        if hasattr(host_instance, "_discovery_timer") and isinstance(
+            host_instance._discovery_timer, Timer
+        ):
+            # noinspection PyProtectedMember
+            host_instance._discovery_timer.cancel()
+        for _, device_node in host_instance.devices_instances.items():
+            if hasattr(device_node, "destroy_node"):
+                device_node.ros_node_instance.destroy_node()
+        host_instance.destroy_node()
+    try:
+        rclpy.shutdown()
+    finally:
+        close_ros_logging()
+
+
+def _wait_for_control_plane(bridges: List[Any], thread: threading.Thread) -> None:
+    """在可配置预算内等待 Edge 控制桥完成首次连接。"""
+
+    deadline = time.monotonic() + float(EdgeControlConfig.readiness_timeout)
+    control_bridges = [
+        bridge
+        for bridge in bridges
+        if callable(getattr(bridge, "is_connected", None))
+    ]
+    while control_bridges and time.monotonic() < deadline:
+        ensure_executor_thread_running(thread)
+        if all(bridge.is_connected() for bridge in control_bridges):
+            break
+        time.sleep(0.05)
+    if control_bridges and not all(
+        bridge.is_connected() for bridge in control_bridges
+    ):
+        raise RuntimeError(
+            "Edge Runtime failed to connect its control plane before readiness"
+        )
+
+
+def main(
+    devices_config: ResourceTreeSet,
+    resources_config: ResourceTreeSet,
+    resources_edge_config: list[dict] = [],
+    graph: Optional[Dict[str, Any]] = None,
+    controllers_config: Dict[str, Any] = {},
+    bridges: List[Any] = [],
+    visual: str = "disable",
+    resources_mesh_config: dict = {},
+    rclpy_init_args: Optional[List[str]] = None,
+    discovery_interval: float = 15.0,
+) -> None:
+    """主函数"""
+
+    _setup_host_network_before_ros()
+
+    rclpy_init_args = prepare_ros_logging(
+        rclpy_init_args, context_initialized=rclpy.ok()
+    )
+    # Support restart - check if rclpy is already initialized
+    if not rclpy.ok():
+        # 应用先标记正常关闭再停止 ROS，禁止原生信号线程抢先关闭 context。
+        rclpy.init(args=rclpy_init_args, signal_handler_options=SignalHandlerOptions.NO)
+    else:
+        logger.info("[ROS] rclpy already initialized, reusing context")
+    executor = rclpy.__executor = RuntimeExecutor(
+        num_threads=max(os.cpu_count() * 4, 48)
+    )
+    # 创建主机节点
+    host_node = HostNode(
+        "host_node",
+        devices_config,
+        resources_config,
+        resources_edge_config,
+        graph,
+        controllers_config,
+        bridges,
+        discovery_interval,
+    )
+
+    # HostLink 由 Edge 微后端在 HostNode 之前启动；ROS 层只挂接
+    # 实时资源树，不再拥有 TCP 监听或 ROS 组网配置。
+    _attach_hostlink_runtime(host_node)
+
+    if visual != "disable":
+        from unilabos.ros.nodes.presets.joint_republisher import JointRepublisher
+
+        # 将 ResourceTreeSet 转换为 list 用于 visual 组件
+        resources_list = (
+            [
+                node.res_content.model_dump(by_alias=True)
+                for node in resources_config.all_nodes
+            ]
+            if resources_config
+            else []
+        )
+        resource_mesh_manager = ResourceMeshManager(
+            resources_mesh_config,
+            resources_list,
+            resource_tracker=host_node.resource_tracker,
+            device_id="resource_mesh_manager",
+            device_uuid=str(uuid.uuid4()),
+        )
+        joint_republisher = JointRepublisher(
+            "joint_republisher", host_node.resource_tracker
+        )
+        # lh_joint_pub = LiquidHandlerJointPublisher(
+        #     resources_config=resources_list, resource_tracker=host_node.resource_tracker
+        # )
+        executor.add_node(resource_mesh_manager)
+        executor.add_node(joint_republisher)
+        # executor.add_node(lh_joint_pub)
+
+    thread = start_runtime_thread(
+        target=executor.spin, name="host_executor_thread"
+    )
+
+    if BasicConfig.process_role == "edge_runtime":
+        _wait_for_control_plane(bridges, thread)
+        publish_edge_runtime_ready_signal()
+
+    while True:
+        time.sleep(1)
+        ensure_executor_thread_running(thread)
+
+
+def slave(
+    devices_config: ResourceTreeSet,
+    resources_config: ResourceTreeSet,
+    resources_edge_config: list = [],
+    graph: Optional[Dict[str, Any]] = None,
+    controllers_config: Dict[str, Any] = {},
+    bridges: List[Any] = [],
+    visual: str = "disable",
+    resources_mesh_config: dict = {},
+    rclpy_init_args: Optional[List[str]] = None,
+) -> None:
+    """从节点函数"""
+    # 0. Slave 网络连接与 ROS 配置由微后端统一管理；此处只在
+    # rclpy.init 前取回已套用的 domain id。直接调用本函数时，
+    # setup_slave_network_client 也会完成微后端兜底装配。
+    from unilabos.app.scheduler.host_network import (
+        require_slave_startup_device_ids,
+        setup_slave_network_client,
+    )
+
+    _link_client, hostlink_domain_id = setup_slave_network_client(
+        device_ids=require_slave_startup_device_ids(devices_config)
+    )
+
+    rclpy_init_args = prepare_ros_logging(
+        rclpy_init_args, context_initialized=rclpy.ok()
+    )
+    # 1. 初始化 ROS2（domain_id=None 时 rclpy 回退环境变量/默认域）
+    if not rclpy.ok():
+        try:
+            rclpy.init(
+                args=rclpy_init_args,
+                domain_id=hostlink_domain_id,
+                signal_handler_options=SignalHandlerOptions.NO,
+            )
+        except TypeError:
+            # 旧版 rclpy 无 domain_id 形参：环境变量路径已在上面套用
+            rclpy.init(args=rclpy_init_args, signal_handler_options=SignalHandlerOptions.NO)
+    executor = rclpy.__executor
+    if not executor:
+        executor = rclpy.__executor = RuntimeExecutor(
+            num_threads=max(os.cpu_count() * 4, 48)
+        )
+
+    # 1.5 启动 executor 线程
+    thread = start_runtime_thread(
+        target=executor.spin, name="slave_executor_thread"
+    )
+
+    # 2. 创建 Slave Machine Node
+    n = Node(f"slaveMachine_{BasicConfig.machine_name}", parameter_overrides=[])
+    executor.add_node(n)
+
+    # 3. 向 Host 报送节点信息和物料，获取 UUID 映射
+    uuid_mapping = {}
+    if not BasicConfig.slave_no_host:
+        # 3.1 报送节点信息
+        sclient = n.create_client(SerialCommand, "/node_info_update")
+        while not sclient.wait_for_service(timeout_sec=5.0):
+            if not rclpy.ok():
+                raise RuntimeError("ROS stopped while waiting for Host /node_info_update")
+            logger.info(
+                "Waiting for HostNode ROS registration service; HostLink is only "
+                "the directed-discovery control plane."
+            )
+
+        registry_config = {}
+        devices_to_register, resources_to_register = register_devices_and_resources(
+            lab_registry, True
+        )
+        registry_config.update(devices_to_register)
+        registry_config.update(resources_to_register)
+        request = SerialCommand.Request()
+        request.command = json.dumps(
+            {
+                "machine_name": BasicConfig.machine_name,
+                "type": "slave",
+                "devices_config": devices_config.dump(),
+                "registry_config": registry_config,
+            },
+            ensure_ascii=False,
+            cls=TypeEncoder,
+        )
+        registration_done = threading.Event()
+        registration_future = sclient.call_async(request)
+        registration_future.add_done_callback(lambda _future: registration_done.set())
+        if not registration_done.wait(timeout=30.0):
+            raise RuntimeError("Timed out registering Slave graph with HostNode over ROS")
+        registration_response = registration_future.result()
+        if registration_response is None or registration_response.response != "OK":
+            raise RuntimeError("HostNode rejected Slave graph registration")
+        logger.info("Slave node info registered through ROS.")
+
+        # 3.2 报送物料树，获取 UUID 映射
+        if resources_config:
+            rclient = n.create_client(SerialCommand, "/c2s_update_resource_tree")
+            while not rclient.wait_for_service(timeout_sec=5.0):
+                if not rclpy.ok():
+                    raise RuntimeError(
+                        "ROS stopped while waiting for Host resource service"
+                    )
+                logger.info("Waiting for HostNode ROS resource service.")
+
+            request = SerialCommand.Request()
+            request.command = json.dumps(
+                {
+                    "data": {
+                        "data": resources_config.dump(),
+                        "mount_uuid": "",
+                        "first_add": True,
+                    },
+                    "action": "add",
+                },
+                ensure_ascii=False,
+            )
+            tree_response: SerialCommand_Response = rclient.call(request)
+            uuid_mapping = json.loads(tree_response.response)
+            logger.info(
+                f"Slave resource tree added. UUID mapping: {len(uuid_mapping)} nodes"
+            )
+
+            # 3.3 使用 UUID 映射更新 resources_config 的 UUID（参考 client.py 逻辑）
+            old_uuids = {
+                node.res_content.uuid: node for node in resources_config.all_nodes
+            }
+            for old_uuid, node in old_uuids.items():
+                if old_uuid in uuid_mapping:
+                    new_uuid = uuid_mapping[old_uuid]
+                    node.res_content.uuid = new_uuid
+                    # 更新所有子节点的 parent_uuid
+                    for child in node.children:
+                        child.res_content.parent_uuid = new_uuid
+                else:
+                    logger.warning(f"资源UUID未更新: {old_uuid}")
+        else:
+            logger.info("No resources to add.")
+
+    # 4. 初始化所有设备实例（此时 resources_config 的 UUID 已更新）
+    devices_instances = {}
+    for device_config in devices_config.root_nodes:
+        device_id = device_config.res_content.id
+        if device_config.res_content.type == "device":
+            d = initialize_device_from_dict(device_id, device_config)
+            if d is not None:
+                devices_instances[device_id] = d
+                logger.info(f"Device {device_id} initialized.")
+            else:
+                logger.warning(f"Device {device_id} initialization failed.")
+
+    # 5. 如果启用可视化，创建可视化相关节点
+    if visual != "disable":
+        from unilabos.ros.nodes.presets.joint_republisher import JointRepublisher
+
+        # 将 ResourceTreeSet 转换为 list 用于 visual 组件
+        resources_list = (
+            [
+                node.res_content.model_dump(by_alias=True)
+                for node in resources_config.all_nodes
+            ]
+            if resources_config
+            else []
+        )
+        resource_mesh_manager = ResourceMeshManager(
+            resources_mesh_config,
+            resources_list,
+            resource_tracker=DeviceNodeResourceTracker(),
+            device_id="resource_mesh_manager",
+        )
+        joint_republisher = JointRepublisher(
+            "joint_republisher", DeviceNodeResourceTracker()
+        )
+        lh_joint_pub = LiquidHandlerJointPublisher(
+            resources_config=resources_list,
+            resource_tracker=DeviceNodeResourceTracker(),
+        )
+        executor.add_node(resource_mesh_manager)
+        executor.add_node(joint_republisher)
+        executor.add_node(lh_joint_pub)
+
+    publish_edge_runtime_ready_signal()
+
+    # 7. 保持运行
+    while True:
+        time.sleep(1)
+        ensure_executor_thread_running(thread)
+
+
+if __name__ == "__main__":
+    main()

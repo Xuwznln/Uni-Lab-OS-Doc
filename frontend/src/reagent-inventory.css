@@ -1,0 +1,146 @@
+/* 表头和分组内的数据行共用列轨道；滚动发生在整个库存区域内。 */
+.reagents-page .reagent-table.reagent-inventory-table {
+  --inventory-columns: minmax(180px, 1.6fr) minmax(112px, 1fr) minmax(120px, 1fr) minmax(140px, 1.15fr) 144px;
+  --inventory-column-gap: 12px;
+  --inventory-inline-padding: 14px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  color: var(--ink);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-inventory-grid {
+  width: 100%;
+  min-width: 780px;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .inventory-columns,
+.reagents-page .reagent-table.reagent-inventory-table .reagent-bottle {
+  display: grid;
+  grid-template-columns: var(--inventory-columns);
+  gap: var(--inventory-column-gap);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 12px var(--inventory-inline-padding);
+  text-align: center;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .inventory-columns {
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .inventory-columns > span,
+.reagents-page .reagent-table.reagent-inventory-table .reagent-bottle > span {
+  min-width: 0;
+  text-align: center;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-bottle > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .inventory-container-name {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-branch {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--blue);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-group {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-group-header {
+  padding: 10px var(--inventory-inline-padding);
+  background: var(--surface-soft);
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-group-header > div {
+  overflow-wrap: anywhere;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-bottle {
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-bottle-child {
+  background: var(--surface-soft);
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-lineage-chip {
+  max-width: 100%;
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-lineage-chip.muted {
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-bottle > .reagent-row-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-row-actions button {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+}
+
+.reagents-page .reagent-table.reagent-inventory-table .reagent-detail-link {
+  align-self: center;
+}
+
+@media (pointer: coarse) {
+  .reagents-page .reagent-table.reagent-inventory-table {
+    --inventory-columns: minmax(180px, 1.6fr) minmax(112px, 1fr) minmax(120px, 1fr) minmax(140px, 1.15fr) 200px;
+  }
+
+  .reagents-page .reagent-table.reagent-inventory-table .reagent-inventory-grid {
+    min-width: 836px;
+  }
+
+  .reagents-page .reagent-table.reagent-inventory-table .reagent-row-actions button {
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .reagents-page .reagent-table.reagent-inventory-table .reagent-bottle > .reagent-row-actions {
+    gap: 8px;
+  }
+}

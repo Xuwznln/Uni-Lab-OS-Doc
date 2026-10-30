@@ -1,0 +1,874 @@
+<!doctype html>
+<html class="no-js" lang="zh-CN" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="alternate" type="text/markdown" href="complete-workflow.md">
+<link rel="describedby" type="text/plain" href="llms.txt">
+<link rel="index" title="索引" href="genindex.html"><link rel="search" title="搜索" href="search.html"><link rel="next" title="工作流补料与物料来源" href="workflow-replenishment.html"><link rel="prev" title="实验操作（子工作流）" href="experiment-operations.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>完整工作流 - Uni-Lab OS 产品使用说明书</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=35d0322d" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  --color-brand-primary: #2757dd;
+  --color-brand-content: #2757dd;
+  --color-sidebar-background: #f8f9fb;
+  --color-sidebar-background-border: #eeebee;
+  --color-admonition-background: #f8f9fb;
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-stack--monospace: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">Uni-Lab OS 产品使用说明书</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">Uni-Lab OS 产品使用说明书</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="搜索" name="q" aria-label="搜索">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">认识与快速上手</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="overview.html">认识 Uni-Lab OS</a></li>
+<li class="toctree-l1"><a class="reference internal" href="demo-lab.html">示例设备包</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">系统安装与配置</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">系统安装</a></li>
+<li class="toctree-l1"><a class="reference internal" href="environment.html">环境与运行配置</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">设备包开发规范</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="unilabos-installation.html">设备包规范与系统启动</a><input aria-label="Toggle navigation of 设备包规范与系统启动" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="workspace.html">工作区</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="device-template.html">1. 设备接入模板</a><input aria-label="Toggle navigation of 1. 设备接入模板" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="template-library.html">设备模板库与类别选择</a></li>
+<li class="toctree-l3"><a class="reference internal" href="device-registration.html">设备登记、动作表单与设备联动</a></li>
+<li class="toctree-l3"><a class="reference internal" href="generic-device.html">通用设备规范</a></li>
+<li class="toctree-l3"><a class="reference internal" href="plc-station.html">PLC 控制的工站</a></li>
+<li class="toctree-l3"><a class="reference internal" href="serial-network.html">串口／网络连接</a></li>
+<li class="toctree-l3"><a class="reference internal" href="host-api.html">上位机 API 接入</a></li>
+<li class="toctree-l3"><a class="reference internal" href="mouse-automation.html">鼠标模拟点击（可选）</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="material-template.html">2. 物料定义模板</a><input aria-label="Toggle navigation of 2. 物料定义模板" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="deck-warehouse.html">工作站台面与仓库</a></li>
+<li class="toctree-l3"><a class="reference internal" href="stack.html">光电堆栈与旋转堆栈：物料 + 设备</a></li>
+<li class="toctree-l3"><a class="reference internal" href="plate-tiprack.html">孔板与吸头盒（Plate／Tiprack）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="container-template.html">容器（Container）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="vial-rack.html">小瓶载架</a></li>
+<li class="toctree-l3"><a class="reference internal" href="magazine.html">弹夹</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sheet-battery.html">片状物料与组装成品</a></li>
+<li class="toctree-l3"><a class="reference internal" href="material-state.html">物料状态、条码与内容物</a></li>
+<li class="toctree-l3"><a class="reference internal" href="other-materials.html">其他可追踪物料</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="startup-files.html">3. 启动文件</a><input aria-label="Toggle navigation of 3. 启动文件" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="graph-json.html">启动图（Graph JSON）编写指南</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current has-children"><a class="reference internal" href="workflow.html">4. 工作流运行</a><input aria-label="Toggle navigation of 4. 工作流运行" checked="" class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="workflow-concepts.html">先理解工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflow-features.html">工作流编排特性</a></li>
+<li class="toctree-l3"><a class="reference internal" href="experiment-operations.html">实验操作</a></li>
+<li class="toctree-l3 current current-page"><a class="current reference internal" href="#">完整工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflow-replenishment.html">工作流补料与物料来源</a></li>
+<li class="toctree-l3"><a class="reference internal" href="first-workflow.html">手写并运行第一个工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ai-workflow-authoring.html">AI 编写工作流（推荐）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html">工作流发布与任务运行</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="参考文档.html">5. 参考文档</a><input aria-label="Toggle navigation of 5. 参考文档" class="toctree-checkbox" id="toctree-checkbox-reference" name="toctree-checkbox-reference" role="switch" type="checkbox"/><label for="toctree-checkbox-reference"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul></ul>
+</li>
+</ul>
+</li>
+
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="repository-builder-skill.html">使用 AI 设备包生成器（实验性）</a></li>
+<li class="toctree-l1"><a class="reference internal" href="scenario-guide.html">设备包验收</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">参考</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">故障排查</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API 使用参考</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          
+<div class="ai-docs-toolbar" data-ai-docs-toolbar
+     data-markdown-url="complete-workflow.md"
+     data-llms-url="llms.txt"
+     data-llms-full-url="llms-full.txt">
+  <div class="ai-docs-menu-shell">
+    <div class="ai-docs-split">
+      <button class="ai-docs-copy-primary" type="button" data-ai-docs-copy
+              aria-disabled="true" disabled>
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
+          <path d="M9 5h6m-6 4h6m-6 4h4M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/>
+        </svg>
+        <span data-ai-docs-trigger-label>复制页面</span>
+      </button>
+      <button class="ai-docs-trigger" type="button" aria-expanded="false"
+              aria-controls="ai-docs-menu-complete-workflow" aria-label="打开 AI 文档菜单">
+        <svg class="ai-docs-chevron" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14">
+          <path d="m7 10 5 5 5-5"/>
+        </svg>
+      </button>
+    </div>
+    <div class="ai-docs-popover" id="ai-docs-menu-complete-workflow" hidden>
+      <button class="ai-docs-menu-item" type="button" data-ai-docs-copy
+              aria-disabled="true" disabled>
+        <span class="ai-docs-item-icon" aria-hidden="true">⧉</span>
+        <span><strong>复制页面</strong><small data-ai-docs-copy-help>正在准备本页 Markdown</small></span>
+      </button>
+      <a class="ai-docs-menu-item" href="complete-workflow.md" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">M↓</span>
+        <span><strong>以 Markdown 格式查看 <span aria-hidden="true">↗</span></strong><small>打开本页纯文本版本</small></span>
+      </a>
+      <a class="ai-docs-menu-item" href="llms.txt" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">AI</span>
+        <span><strong>LLMs.txt <span aria-hidden="true">↗</span></strong><small>让 AI 按主题发现全部文档</small></span>
+      </a>
+      <a class="ai-docs-menu-item" href="llms-full.txt" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">≡</span>
+        <span><strong>LLMs-full.txt <span aria-hidden="true">↗</span></strong><small>获取整本说明书的 Markdown</small></span>
+      </a>
+    </div>
+  </div>
+  <span class="ai-docs-status" role="status" aria-live="polite"></span>
+</div>
+<section id="id1">
+<h1>完整工作流<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h1>
+<div class="admonition- admonition">
+<p class="admonition-title">阅读角色</p>
+<ul class="simple">
+<li><p><strong>业务负责人</strong>：确认实验目的、输入输出、参数单位、成功标准和失败处理。</p></li>
+<li><p><strong>开发人员</strong>：编写或编排节点、物料流、控制结构、设备绑定和正式合同。</p></li>
+<li><p><strong>验收人员</strong>：执行静态检查、预检、模拟运行、异常路径和受控真机验收。</p></li>
+</ul>
+</div>
+<p>完整工作流面向一次完整实验目标。它负责选择物料、安排实验操作和设备动作、建立先后关系、记录消耗并返回最终结果。</p>
+<p>本页用“取出样品 → 搬到混合位 → 混合 → 放回目标位”说明完整写法。示例不代表任何现场设备，所有类型、实例和动作都要替换为用户设备包实际定义。</p>
+<section id="graph-json">
+<h2>1. 确认启动图（Graph JSON）中的实例<a class="headerlink" href="#graph-json" title="链接到此标题。">¶</a></h2>
+<p>在编写前确认以下 ID 已存在：</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>ID</p></th>
+<th class="head"><p>用途</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">transport_robot_01</span></code></p></td>
+<td><p>执行标准转运</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mixing_station_01</span></code></p></td>
+<td><p>执行混合动作</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">source_rack</span></code></p></td>
+<td><p>样品来源仓库</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">mixing_process_rack</span></code></p></td>
+<td><p>混合工艺位</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">finished_rack</span></code></p></td>
+<td><p>完成后的目标仓库</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>还要确认 <code class="docutils literal notranslate"><span class="pre">sample_container</span></code> 已登记为物料模板，实验操作“标准物料转运”已经检查并发布。</p>
+</section>
+<section id="id2">
+<h2>2. 完整工作流撰写规范<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h2>
+<p>完整工作流应把一次实验从开始条件写到最终结果。它负责组合已登记的物料、设备动作和已发布实验操作，不负责实现底层通信。</p>
+<section id="id3">
+<h3>用业务阶段组织，不按设备清单堆动作<a class="headerlink" href="#id3" title="链接到此标题。">¶</a></h3>
+<p>先把实验写成可验收的阶段，例如：</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>准备物料 → 搬运到工位 → 执行处理 → 检查结果 → 归位 → 输出结果
+</pre></div>
+</div>
+<p>每个阶段说明输入物料、使用设备、完成标志和失败后的现场状态。代码中的 <code class="docutils literal notranslate"><span class="pre">group(name=&quot;...&quot;)</span></code> 可以对应这些业务阶段，名称应让操作人员能直接理解。分组只改善展示，不会自动建立先后关系；真正的顺序由上下游数据引用和控制结构决定。</p>
+</section>
+<section id="id4">
+<h3>物料来源集中声明<a class="headerlink" href="#id4" title="链接到此标题。">¶</a></h3>
+<p>在流程前部使用 <code class="docutils literal notranslate"><span class="pre">material_source(...)</span></code> 声明任务所需的样品、试剂和耗材。每一项至少明确：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">resource_template</span></code>：允许选择的物料模板；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mode</span></code>：使用已有物料还是按流程创建；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">mount</span></code>：物料所在仓库或设备资源；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">site</span></code> 或可选范围：允许选择的库位；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">flow_role</span></code>：主样品、试剂或耗材等业务角色；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">custody_policy</span></code>：任务独占还是允许作为共享来源。</p></li>
+</ul>
+<p><code class="docutils literal notranslate"><span class="pre">material_uuid</span></code> 只在流程明确绑定某一个固定实例时填写。通用流程通常留空，由任务创建时选择合规物料。不要把某次部署生成的内部 UUID 写进通用示例。</p>
+</section>
+<section id="id5">
+<h3>用真实结果连接步骤<a class="headerlink" href="#id5" title="链接到此标题。">¶</a></h3>
+<p>同一物料在整条流程中只能沿设备动作的实际输出继续传递：</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>source_sample → moved.resource → processed.sample → stored.resource
+</pre></div>
+</div>
+<p>不允许在处理完成后又使用旧的 <code class="docutils literal notranslate"><span class="pre">source_sample</span></code> 继续搬运。旧引用代表处理前的状态，会造成位置和状态记录不一致。试剂瓶、吸头盒、粉料盒等参与动作后，也应继续传递动作返回的对应资源字段。</p>
+</section>
+<section id="id6">
+<h3>子操作调用<a class="headerlink" href="#id6" title="链接到此标题。">¶</a></h3>
+<ul class="simple">
+<li><p>只调用已经检查并发布的实验操作；</p></li>
+<li><p>为每次调用分别绑定公开输入、设备实例、资源来源和上游结果；</p></li>
+<li><p>子操作返回什么字段，上层就按该合同读取什么字段，不读取其内部临时变量；</p></li>
+<li><p>子操作已经完成的物料提交、安全检查或重试处理，上层不得重复实现；</p></li>
+<li><p>子操作合同变化后，先验证并发布子操作，再检查和发布完整工作流。</p></li>
+</ul>
+</section>
+<section id="id7">
+<h3>参数与固定配置的边界<a class="headerlink" href="#id7" title="链接到此标题。">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>信息</p></th>
+<th class="head"><p>放置位置</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>每次实验会变化的速度、时间、体积、样品编号</p></td>
+<td><p>工作流公开输入</p></td>
+</tr>
+<tr class="row-odd"><td><p>参数单位、范围、默认值、选项</p></td>
+<td><p>类型注解和 <code class="docutils literal notranslate"><span class="pre">Field</span></code> 约束</p></td>
+</tr>
+<tr class="row-even"><td><p>设备地址、串口、凭据、协议超时</p></td>
+<td><p>设备实例配置</p></td>
+</tr>
+<tr class="row-odd"><td><p>设备、仓库及其父子关系</p></td>
+<td><p>启动图</p></td>
+</tr>
+<tr class="row-even"><td><p>设备类型、动作合同、物料模板</p></td>
+<td><p>设备包源码与登记清单</p></td>
+</tr>
+<tr class="row-odd"><td><p>某次任务选择的具体物料</p></td>
+<td><p>任务输入或 <code class="docutils literal notranslate"><span class="pre">material_source</span></code> 解析结果</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id8">
+<h3>条件、循环和并行<a class="headerlink" href="#id8" title="链接到此标题。">¶</a></h3>
+<ul class="simple">
+<li><p>条件表达式只读取公开输入或上游节点结果；未选择的分支不能产生物理副作用；</p></li>
+<li><p>循环必须有 <code class="docutils literal notranslate"><span class="pre">max_iterations</span></code> 和可验证的 <code class="docutils literal notranslate"><span class="pre">until(...)</span></code>，并说明达到上限时如何结束；</p></li>
+<li><p>每轮会改变物料或设备状态时，将本轮结果传入下一轮，不能继续使用循环前的旧状态；</p></li>
+<li><p>只有业务上互不依赖、不会同时占用同一物料的步骤才放入 <code class="docutils literal notranslate"><span class="pre">parallel()</span></code>；</p></li>
+<li><p>并行分支共享设备、库位或库存时，仍以 Uni-Lab OS 的资源锁和调度结果为准；</p></li>
+<li><p>需要操作员决定时使用人工确认节点，并设置合理超时，不能用普通 Python <code class="docutils literal notranslate"><span class="pre">input()</span></code>。</p></li>
+</ul>
+</section>
+<section id="id9">
+<h3>最终输出和完成标准<a class="headerlink" href="#id9" title="链接到此标题。">¶</a></h3>
+<p>返回值应让业务人员能判断实验结果并继续追溯，通常包括：</p>
+<ul class="simple">
+<li><p>最终样品或产品的 <code class="docutils literal notranslate"><span class="pre">ResourceSlot</span></code>；</p></li>
+<li><p>最终库位或挂载位置；</p></li>
+<li><p>设备实际返回的关键测量值；</p></li>
+<li><p>成功、失败或未知状态及可读消息；</p></li>
+<li><p>需要归档的文件路径、批次号或检测结果。</p></li>
+</ul>
+<p>不得用固定成功值掩盖中间失败。只要关键动作没有得到确定结果，完整工作流就不应继续执行依赖步骤或声明成功。</p>
+</section>
+<section id="id10">
+<h3>推荐撰写顺序<a class="headerlink" href="#id10" title="链接到此标题。">¶</a></h3>
+<ol class="arabic simple">
+<li><p>写清实验目的、开始条件、成功标准和失败处理；</p></li>
+<li><p>列出物料清单和 启动图 实例清单；</p></li>
+<li><p>将可复用步骤先写成实验操作并发布；</p></li>
+<li><p>声明全部公开输入和正式输出；</p></li>
+<li><p>声明物料来源，再按实际物料流连接动作；</p></li>
+<li><p>最后添加条件、循环、并行、数量预留和人工确认；</p></li>
+<li><p>登记 <code class="docutils literal notranslate"><span class="pre">package.yaml</span></code>，运行静态检查、预检和 dry-run；</p></li>
+<li><p>逐项验证异常路径后，再进行受控真机验收。</p></li>
+</ol>
+</section>
+</section>
+<section id="id11">
+<h2>3. 创建工作流文件<a class="headerlink" href="#id11" title="链接到此标题。">¶</a></h2>
+<p>创建：</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>example_lab/workflows/mix_sample.py
+</pre></div>
+</div>
+</section>
+<section id="id12">
+<h2>4. 编写完整示例<a class="headerlink" href="#id12" title="链接到此标题。">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Annotated</span><span class="p">,</span> <span class="n">TypedDict</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">Field</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">unilabos.registry.placeholder_type</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceSlot</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">unilabos.workflow.authoring</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">MaterialCustodyPolicy</span><span class="p">,</span>
+    <span class="n">MaterialFlowRole</span><span class="p">,</span>
+    <span class="n">device</span><span class="p">,</span>
+    <span class="n">group</span><span class="p">,</span>
+    <span class="n">material_source</span><span class="p">,</span>
+    <span class="n">resource_ref</span><span class="p">,</span>
+    <span class="n">workflow</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">example_lab.devices.mixing_station.device</span><span class="w"> </span><span class="kn">import</span> <span class="n">MixingStation</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">example_lab.experiment_operations.standard_material_transfer</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">standard_material_transfer</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">example_lab.resources.materials</span><span class="w"> </span><span class="kn">import</span> <span class="n">sample_container</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MixSampleResult</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">):</span>
+    <span class="n">sample</span><span class="p">:</span> <span class="n">ResourceSlot</span>
+    <span class="n">final_site</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">success</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">message</span><span class="p">:</span> <span class="nb">str</span>
+
+
+<span class="n">mixing_station</span><span class="p">:</span> <span class="n">MixingStation</span> <span class="o">=</span> <span class="n">device</span><span class="p">(</span><span class="s2">&quot;mixing_station_01&quot;</span><span class="p">)</span>
+
+
+<span class="nd">@workflow</span><span class="p">(</span>
+    <span class="n">workflow_uuid</span><span class="o">=</span><span class="s2">&quot;e96ea082-d18d-40da-907d-13cfc5b899af&quot;</span><span class="p">,</span>
+    <span class="n">displayname</span><span class="o">=</span><span class="s2">&quot;样品混合与归位&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;取得一件样品，完成混合后放入指定完成库位。&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">mix_sample</span><span class="p">(</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">source_site</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">target_site</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="n">speed_rpm</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span>
+        <span class="nb">int</span><span class="p">,</span>
+        <span class="n">Field</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;混合速度&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;设备目标转速&quot;</span><span class="p">,</span> <span class="n">ge</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mi">1000</span><span class="p">),</span>
+    <span class="p">]</span> <span class="o">=</span> <span class="mi">300</span><span class="p">,</span>
+    <span class="n">duration_seconds</span><span class="p">:</span> <span class="n">Annotated</span><span class="p">[</span>
+        <span class="nb">int</span><span class="p">,</span>
+        <span class="n">Field</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;混合时间&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;持续时间，单位秒&quot;</span><span class="p">,</span> <span class="n">ge</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">le</span><span class="o">=</span><span class="mi">600</span><span class="p">),</span>
+    <span class="p">]</span> <span class="o">=</span> <span class="mi">30</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">MixSampleResult</span><span class="p">:</span>
+    <span class="c1"># unilab:node_uuid=2d6ff315-01ac-4df6-9268-27e7c26732d1</span>
+    <span class="n">source_sample</span> <span class="o">=</span> <span class="n">material_source</span><span class="p">(</span>
+        <span class="n">resource_template</span><span class="o">=</span><span class="n">sample_container</span><span class="p">,</span>
+        <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;existing&quot;</span><span class="p">,</span>
+        <span class="n">mount</span><span class="o">=</span><span class="n">resource_ref</span><span class="p">(</span><span class="s2">&quot;source_rack&quot;</span><span class="p">),</span>
+        <span class="n">material_uuid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">site</span><span class="o">=</span><span class="n">source_site</span><span class="p">,</span>
+        <span class="n">slot_range</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">flow_role</span><span class="o">=</span><span class="n">MaterialFlowRole</span><span class="o">.</span><span class="n">PRIMARY_SAMPLE</span><span class="p">,</span>
+        <span class="n">custody_policy</span><span class="o">=</span><span class="n">MaterialCustodyPolicy</span><span class="o">.</span><span class="n">TASK_EXCLUSIVE</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># unilab:node_uuid=21c18b30-7ab7-4e6f-906c-dd9b33a78685</span>
+    <span class="k">with</span> <span class="n">group</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;搬运到混合工站&quot;</span><span class="p">):</span>
+        <span class="n">at_mixer</span> <span class="o">=</span> <span class="n">standard_material_transfer</span><span class="p">(</span>
+            <span class="n">resource</span><span class="o">=</span><span class="n">source_sample</span><span class="p">,</span>
+            <span class="n">source_warehouse</span><span class="o">=</span><span class="n">resource_ref</span><span class="p">(</span><span class="s2">&quot;source_rack&quot;</span><span class="p">),</span>
+            <span class="n">target_device</span><span class="o">=</span><span class="s2">&quot;mixing_station_01&quot;</span><span class="p">,</span>
+            <span class="n">target_warehouse</span><span class="o">=</span><span class="n">resource_ref</span><span class="p">(</span><span class="s2">&quot;mixing_process_rack&quot;</span><span class="p">),</span>
+            <span class="n">source_site</span><span class="o">=</span><span class="n">source_site</span><span class="p">,</span>
+            <span class="n">target_site</span><span class="o">=</span><span class="s2">&quot;MIX_01&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="c1"># unilab:node_uuid=27489c55-4678-428f-b655-c06bc97b5bfc</span>
+    <span class="k">with</span> <span class="n">group</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;执行混合&quot;</span><span class="p">):</span>
+        <span class="n">mixed</span> <span class="o">=</span> <span class="n">mixing_station</span><span class="o">.</span><span class="n">mix</span><span class="p">(</span>
+            <span class="n">sample</span><span class="o">=</span><span class="n">at_mixer</span><span class="o">.</span><span class="n">resource</span><span class="p">,</span>
+            <span class="n">speed_rpm</span><span class="o">=</span><span class="n">speed_rpm</span><span class="p">,</span>
+            <span class="n">duration_seconds</span><span class="o">=</span><span class="n">duration_seconds</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="c1"># unilab:node_uuid=98e5407f-4368-4f89-ad8f-cbabb76af20c</span>
+    <span class="k">with</span> <span class="n">group</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;放入完成区&quot;</span><span class="p">):</span>
+        <span class="n">stored</span> <span class="o">=</span> <span class="n">standard_material_transfer</span><span class="p">(</span>
+            <span class="n">resource</span><span class="o">=</span><span class="n">mixed</span><span class="o">.</span><span class="n">sample</span><span class="p">,</span>
+            <span class="n">source_warehouse</span><span class="o">=</span><span class="n">resource_ref</span><span class="p">(</span><span class="s2">&quot;mixing_process_rack&quot;</span><span class="p">),</span>
+            <span class="n">target_device</span><span class="o">=</span><span class="s2">&quot;host_node&quot;</span><span class="p">,</span>
+            <span class="n">target_warehouse</span><span class="o">=</span><span class="n">resource_ref</span><span class="p">(</span><span class="s2">&quot;finished_rack&quot;</span><span class="p">),</span>
+            <span class="n">source_site</span><span class="o">=</span><span class="s2">&quot;MIX_01&quot;</span><span class="p">,</span>
+            <span class="n">target_site</span><span class="o">=</span><span class="n">target_site</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">&quot;sample&quot;</span><span class="p">:</span> <span class="n">stored</span><span class="o">.</span><span class="n">resource</span><span class="p">,</span>
+        <span class="s2">&quot;final_site&quot;</span><span class="p">:</span> <span class="n">stored</span><span class="o">.</span><span class="n">site</span><span class="p">,</span>
+        <span class="s2">&quot;success&quot;</span><span class="p">:</span> <span class="n">mixed</span><span class="o">.</span><span class="n">success</span><span class="p">,</span>
+        <span class="s2">&quot;message&quot;</span><span class="p">:</span> <span class="n">mixed</span><span class="o">.</span><span class="n">message</span><span class="p">,</span>
+    <span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="id13">
+<h2>5. 理解依赖关系<a class="headerlink" href="#id13" title="链接到此标题。">¶</a></h2>
+<p>代码没有手工画箭头，但数据引用会形成顺序：</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>source_sample
+    ↓
+at_mixer.resource
+    ↓
+mixed.sample
+    ↓
+stored.resource
+</pre></div>
+</div>
+<p>后一步使用前一步输出，因此只有前一步成功后才会继续。不要绕过 <code class="docutils literal notranslate"><span class="pre">mixed.sample</span></code> 再次使用旧的 <code class="docutils literal notranslate"><span class="pre">source_sample</span></code>，否则物料链会与实际位置不一致。</p>
+</section>
+<section id="id14">
+<h2>6. 输入参数规范<a class="headerlink" href="#id14" title="链接到此标题。">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>参数</p></th>
+<th class="head"><p>类型</p></th>
+<th class="head"><p>规范</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">source_site</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">str</span></code> 或受控 <code class="docutils literal notranslate"><span class="pre">Literal</span></code></p></td>
+<td><p>必须属于来源仓库，并且有匹配物料</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">target_site</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">str</span></code> 或 <code class="docutils literal notranslate"><span class="pre">site_group</span></code></p></td>
+<td><p>必须属于目标仓库且允许放置该模板</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">speed_rpm</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Annotated[int,</span> <span class="pre">Field]</span></code></p></td>
+<td><p>标题、业务含义、单位和范围明确</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">duration_seconds</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">Annotated[int,</span> <span class="pre">Field]</span></code></p></td>
+<td><p>字段名直接包含单位，设置最大值</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>固定且数量较少的库位可以使用 <code class="docutils literal notranslate"><span class="pre">Literal[&quot;SRC_01&quot;,</span> <span class="pre">&quot;SRC_02&quot;]</span></code>。库位可能动态变化时，使用设备包正式定义的放置位组（Site Group），不要把现场 UUID 硬编码到通用模板。</p>
+</section>
+<section id="id15">
+<h2>7. 添加并行的原则<a class="headerlink" href="#id15" title="链接到此标题。">¶</a></h2>
+<p>只有两条分支操作不同物料，且业务上互不依赖时才使用 <code class="docutils literal notranslate"><span class="pre">parallel()</span></code>：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">unilabos.workflow.authoring</span><span class="w"> </span><span class="kn">import</span> <span class="n">group</span><span class="p">,</span> <span class="n">parallel</span>
+
+<span class="k">with</span> <span class="n">parallel</span><span class="p">():</span>
+    <span class="k">with</span> <span class="n">group</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;样品检测&quot;</span><span class="p">):</span>
+        <span class="n">sample_result</span> <span class="o">=</span> <span class="n">analyzer</span><span class="o">.</span><span class="n">inspect</span><span class="p">(</span><span class="n">sample</span><span class="o">=</span><span class="n">sample_a</span><span class="p">)</span>
+    <span class="k">with</span> <span class="n">group</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;容器准备&quot;</span><span class="p">):</span>
+        <span class="n">prepared</span> <span class="o">=</span> <span class="n">cap_station</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">container</span><span class="o">=</span><span class="n">container_b</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>同一 <code class="docutils literal notranslate"><span class="pre">ResourceSlot</span></code> 不能同时交给两个物理分支。即使写成并行，共享同一设备、工位或区域时，Uni-Lab OS 仍会按资源锁串行执行。</p>
+</section>
+<section id="id16">
+<h2>8. 添加数量消耗<a class="headerlink" href="#id16" title="链接到此标题。">¶</a></h2>
+<p>加液、投料等动作应分别保留指令量、设备回执和实测量。需要库存预留时，在动作之后声明数量关系：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">unilabos.workflow.authoring</span><span class="w"> </span><span class="kn">import</span> <span class="n">quantity_requirement</span>
+
+<span class="n">quantity_requirement</span><span class="p">(</span>
+    <span class="n">requirement_key</span><span class="o">=</span><span class="s2">&quot;solvent_for_sample&quot;</span><span class="p">,</span>
+    <span class="n">source</span><span class="o">=</span><span class="n">solvent_source</span><span class="p">,</span>
+    <span class="n">consume</span><span class="o">=</span><span class="n">dispensed</span><span class="p">,</span>
+    <span class="n">quantity</span><span class="o">=</span><span class="n">volume_ml</span><span class="p">,</span>
+    <span class="n">quantity_unit</span><span class="o">=</span><span class="s2">&quot;mL&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;本次样品处理需要的溶剂体积&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">quantity_requirement</span></code> 管理预留和账本，不代替泵、秤或传感器测量。</p>
+</section>
+<section id="id17">
+<h2>9. 添加条件和循环<a class="headerlink" href="#id17" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>条件只使用已定义的输入或动作结果；</p></li>
+<li><p>每个分支都说明未命中时的结果；</p></li>
+<li><p>循环使用 <code class="docutils literal notranslate"><span class="pre">repeat_until</span></code>，必须设置 <code class="docutils literal notranslate"><span class="pre">max_iterations</span></code>；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">until(...)</span></code> 使用可验证的布尔结果；</p></li>
+<li><p>循环内有物理副作用时，要明确每轮物料状态和失败恢复。</p></li>
+</ul>
+<p>没有最大次数的“直到成功”会产生不可控运行，不允许进入生产流程。</p>
+</section>
+<section id="id18">
+<h2>10. 登记与验证<a class="headerlink" href="#id18" title="链接到此标题。">¶</a></h2>
+<p>在 <code class="docutils literal notranslate"><span class="pre">package.yaml</span></code> 中加入：</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">workflow_uuid</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">e96ea082-d18d-40da-907d-13cfc5b899af</span>
+<span class="w">  </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">example_lab/workflows/mix_sample.py</span>
+</pre></div>
+</div>
+<p>然后执行：</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>compileall<span class="w"> </span>example_lab/workflows
+unilab<span class="w"> </span>package<span class="w"> </span>inspect<span class="w"> </span>--path<span class="w"> </span>.<span class="w"> </span>--out<span class="w"> </span>/tmp/device-package-inspect
+
+unilab<span class="w"> </span>workspace<span class="w"> </span>start<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--workspace<span class="w"> </span>.<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--graph<span class="w"> </span>deployment/graphs/simulation.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--runtime-mode<span class="w"> </span>dry-run<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--wait<span class="w"> </span><span class="m">300</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--json
+</pre></div>
+</div>
+<p>在 Uni-Lab OS 中依次完成：检查输入表单 → 发布修订 → 零写入预检 → 创建 dry-run Task → 查看每个 Job 和最终输出。</p>
+</section>
+<section id="id19">
+<h2>11. 必须验证的失败路径<a class="headerlink" href="#id19" title="链接到此标题。">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>场景</p></th>
+<th class="head"><p>预期结果</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>来源库位没有物料</p></td>
+<td><p>预检失败，不下发设备动作</p></td>
+</tr>
+<tr class="row-odd"><td><p>目标库位被占用</p></td>
+<td><p>等待或预检失败，不覆盖原物料</p></td>
+</tr>
+<tr class="row-even"><td><p>转速或时间越界</p></td>
+<td><p>表单或编译校验失败</p></td>
+</tr>
+<tr class="row-odd"><td><p>设备离线</p></td>
+<td><p>不派发动作，显示具体设备原因</p></td>
+</tr>
+<tr class="row-even"><td><p>搬运超时、结果未知</p></td>
+<td><p>停止后继步骤，要求核对现场，不自动重发</p></td>
+</tr>
+<tr class="row-odd"><td><p>混合失败</p></td>
+<td><p>不执行“放入完成区”，保留可追踪失败结果</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id20">
+<h2>12. 发布前清单<a class="headerlink" href="#id20" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p>[ ] 完整流程有清楚的开始条件和成功标准；</p></li>
+<li><p>[ ] 每个输入都有类型、单位、范围和业务说明；</p></li>
+<li><p>[ ] 设备选择器与当前 启动图 实例 ID 一致；</p></li>
+<li><p>[ ] 每个动作、物料来源和控制结构 UUID 唯一且稳定；</p></li>
+<li><p>[ ] <code class="docutils literal notranslate"><span class="pre">ResourceSlot</span></code> 从来源连续传到最终输出；</p></li>
+<li><p>[ ] 子工作流已发布，输入输出合同匹配；</p></li>
+<li><p>[ ] 共享资源、并行、数量预留和人工确认符合现场规则；</p></li>
+<li><p>[ ] 静态检查、预检、dry-run 和失败路径全部通过；</p></li>
+<li><p>[ ] 真实运行前已完成设备、物料和安全验收。</p></li>
+</ul>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="workflow-replenishment.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">工作流补料与物料来源</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="experiment-operations.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">实验操作（子工作流）</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Uni-Lab
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            <div class="last-updated">
+              Last updated on 2026-09-08</div>
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">完整工作流</a><ul>
+<li><a class="reference internal" href="#graph-json">1. 确认启动图（Graph JSON）中的实例</a></li>
+<li><a class="reference internal" href="#id2">2. 完整工作流撰写规范</a><ul>
+<li><a class="reference internal" href="#id3">用业务阶段组织，不按设备清单堆动作</a></li>
+<li><a class="reference internal" href="#id4">物料来源集中声明</a></li>
+<li><a class="reference internal" href="#id5">用真实结果连接步骤</a></li>
+<li><a class="reference internal" href="#id6">子操作调用</a></li>
+<li><a class="reference internal" href="#id7">参数与固定配置的边界</a></li>
+<li><a class="reference internal" href="#id8">条件、循环和并行</a></li>
+<li><a class="reference internal" href="#id9">最终输出和完成标准</a></li>
+<li><a class="reference internal" href="#id10">推荐撰写顺序</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id11">3. 创建工作流文件</a></li>
+<li><a class="reference internal" href="#id12">4. 编写完整示例</a></li>
+<li><a class="reference internal" href="#id13">5. 理解依赖关系</a></li>
+<li><a class="reference internal" href="#id14">6. 输入参数规范</a></li>
+<li><a class="reference internal" href="#id15">7. 添加并行的原则</a></li>
+<li><a class="reference internal" href="#id16">8. 添加数量消耗</a></li>
+<li><a class="reference internal" href="#id17">9. 添加条件和循环</a></li>
+<li><a class="reference internal" href="#id18">10. 登记与验证</a></li>
+<li><a class="reference internal" href="#id19">11. 必须验证的失败路径</a></li>
+<li><a class="reference internal" href="#id20">12. 发布前清单</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=4041f460"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="_static/translations.js?v=540d3cec"></script>
+    <script src="_static/ai-docs.js?v=118f57a4"></script>
+    </body>
+</html>

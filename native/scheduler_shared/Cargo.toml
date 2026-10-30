@@ -1,0 +1,18 @@
+[package]
+name = "unilab-scheduler-core"
+version = "1.0.0"
+edition = "2021"
+publish = false
+build = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip", "unbounded_depth"] }
+jsonschema = { version = "0.29", default-features = false }
+sha2 = "0.10"
+serde_stacker = "0.1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v5"] }

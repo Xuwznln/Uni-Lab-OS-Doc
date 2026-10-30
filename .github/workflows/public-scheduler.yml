@@ -1,0 +1,39 @@
+name: 公开串行动态库
+
+on: [push, pull_request]
+
+jobs:
+  serial-library:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      UNILAB_TEST_NATIVE_PROFILE: release
+      UNILAB_TEST_CLEAN_INSTALL: "1"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: 准备串行构建依赖
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          python -m pip install setuptools wheel packaging pytest
+          python -m pip install -e .
+      - name: 构建真实动态库并验证公开契约
+        run: |
+          cargo test --locked --manifest-path native/scheduler_shared/Cargo.toml
+          cargo test --locked --manifest-path native/scheduler-queue/Cargo.toml
+          python native/scheduler-queue/build.py --destination unilabos/scheduling/queue_native
+          python -m pytest -q tests/scheduling --junitxml=public-scheduler-results.xml
+      - name: 保留公开版验收记录
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: public-scheduler-${{ matrix.os }}
+          path: public-scheduler-results.xml

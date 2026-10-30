@@ -1,0 +1,331 @@
+# GitLab CI：main 上维护。MR→main 跑单元测试；release tag 跑安装器构建与发布。
+# 不执行 GitHub 定时同步。构建辅助脚本取自 main，安装器源码取自触发流水线的 tag。
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$/'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - when: never
+
+stages:
+  - test
+  - build
+  - publish
+
+variables:
+  GIT_STRATEGY: fetch
+  GIT_DEPTH: "0"
+  GIT_TERMINAL_PROMPT: "0"
+  GITLAB_RELEASE_BRANCH: "main"
+
+lint_ruff:
+  stage: test
+  # 轻量静态检查：未定义名、裸 except、非法转义、import 排序。不卡行宽。
+  image: registry.dp.tech/public/ubuntu:gitlab-docker
+  tags:
+    - shared-cpu-abroad
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - when: never
+  timeout: 10 minutes
+  script:
+    - bash ci/ruff.sh
+
+unit_tests_scheduler_core:
+  stage: test
+  # 对齐 GitHub CI Check 的 scheduler-core-test。
+  image: registry.dp.tech/public/ubuntu:gitlab-docker
+  tags:
+    - shared-cpu-abroad
+  variables:
+    MAMBA_ROOT_PREFIX: "$CI_PROJECT_DIR/.mamba"
+    CONDA_PKGS_DIRS: "$CI_PROJECT_DIR/.conda-pkgs"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - when: never
+  timeout: 15 minutes
+  script:
+    - bash ci/unit-tests-scheduler-core.sh
+
+unit_tests_python_suite:
+  stage: test
+  # 对齐 GitHub CI Check 的 python-suite（无 ROS + 覆盖率门槛）。
+  image: registry.dp.tech/public/ubuntu:gitlab-docker
+  tags:
+    - shared-cpu-abroad
+  variables:
+    MAMBA_ROOT_PREFIX: "$CI_PROJECT_DIR/.mamba"
+    CONDA_PKGS_DIRS: "$CI_PROJECT_DIR/.conda-pkgs"
+    MPLBACKEND: Agg
+    PYTHONUTF8: "1"
+    PYTHONIOENCODING: utf-8
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    - when: never
+  timeout: 45 minutes
+  script:
+    - bash ci/unit-tests-python-suite.sh
+
+build_linux_installer:
+  stage: build
+  # 该 job 的配置来自 main，但实际 checkout 是触发发布的 tag。
+  image: registry.dp.tech/public/ubuntu:gitlab-docker
+  tags:
+    - shared-cpu-abroad
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+    MAMBA_ROOT_PREFIX: "$CI_PROJECT_DIR/.mamba"
+    CONDA_PKGS_DIRS: "$CI_PROJECT_DIR/.conda-pkgs"
+    UNILABOS_INSTALLER_PACKAGE: unilabos
+  # 固定 pylabrobot recipe 内容作为缓存键；命中后无需再访问 GitHub 下载源码快照。
+  cache:
+    key:
+      files:
+        - .conda/vendor/pylabrobot/recipe.yaml
+      prefix: installer-pylabrobot-source
+    paths:
+      - .ci-source-cache/pylabrobot/
+    policy: pull-push
+  rules:
+    # 创建 release tag 后自动启动平台构建。
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$/'
+    - when: never
+  script:
+    - |
+      set -euo pipefail
+      apt-get update -qq
+      apt-get install -y --no-install-recommends ca-certificates curl bzip2 tar xz-utils python3 python3-pip
+
+      release_tag="$CI_COMMIT_TAG"
+      release_version="${release_tag#v}"
+      git fetch --force origin "+refs/heads/${GITLAB_RELEASE_BRANCH}:refs/remotes/origin/${GITLAB_RELEASE_BRANCH}"
+      git show "origin/${GITLAB_RELEASE_BRANCH}:ci/prepare-release-version.py" > .ci-prepare-release-version.py
+      git show "origin/${GITLAB_RELEASE_BRANCH}:ci/check-oss-release.py" > .ci-check-oss-release.py
+      python3 .ci-prepare-release-version.py --repo "$CI_PROJECT_DIR" --tag "$release_tag"
+      python3 -m pip install --no-cache-dir oss2
+      python3 .ci-check-oss-release.py --prefix "${OSS_PREFIX%/}/installer/${release_version}/linux-64"
+
+      # rattler-build 默认只尝试 3 次 GitHub 源码下载。预先用 curl 下载并缓存，
+      # 使首次构建具有更长的退避重试，后续构建不再依赖 GitHub 网络。
+      pylabrobot_commit="1317a3eec20cb28757283b1de0edcd2e1b2f252e"
+      pylabrobot_sha256="4dac1abc3fd4cf3e84141dbd39e18f486749328ff044156fab86011a54bf5649"
+      pylabrobot_archive="$CI_PROJECT_DIR/.ci-source-cache/pylabrobot/${pylabrobot_commit}.tar.gz"
+      mkdir -p "${pylabrobot_archive%/*}"
+      if ! test -s "$pylabrobot_archive" || ! printf '%s  %s\n' "$pylabrobot_sha256" "$pylabrobot_archive" | sha256sum -c - >/dev/null; then
+        rm -f "$pylabrobot_archive"
+        curl --fail --location --retry 12 --retry-all-errors --retry-delay 5 \
+          --connect-timeout 30 --output "$pylabrobot_archive" \
+          "https://codeload.github.com/Xuwznln/pylabrobot/tar.gz/${pylabrobot_commit}"
+      fi
+      printf '%s  %s\n' "$pylabrobot_sha256" "$pylabrobot_archive" | sha256sum -c -
+
+      # 只改 CI 中的临时 recipe；源码仓库仍保留可独立使用的远程 source 定义。
+      pylabrobot_recipe_dir="$(mktemp -d)"
+      cp -R .conda/vendor/pylabrobot/. "$pylabrobot_recipe_dir/"
+      perl -0pi -e 's{source:\n  - url: [^\n]+\n    sha256: [^\n]+}{source:\n  - path: '"$pylabrobot_archive"'}' "$pylabrobot_recipe_dir/recipe.yaml"
+
+      # 前端产物不提交到源码；安装器须先嵌入当前 revision 的控制台静态文件。
+      node_version="22.22.0"
+      curl --fail --location --retry 3 --output /tmp/node.tar.xz \
+        "https://nodejs.org/dist/v${node_version}/node-v${node_version}-linux-x64.tar.xz"
+      tar -xJf /tmp/node.tar.xz -C /opt
+      export PATH="/opt/node-v${node_version}-linux-x64/bin:$PATH"
+      node --version
+      npm --version
+      (cd frontend && npm ci && npm run build)
+      test -s unilabos/app/web/static/console/index.html
+      test "$(find unilabos/app/web/static/console -type f | wc -l | tr -d ' ')" -gt 1
+
+      curl --fail --location --retry 3 --output /tmp/micromamba.tar.bz2 \
+        'https://micro.mamba.pm/api/micromamba/linux-64/2.8.1'
+      tar -xjf /tmp/micromamba.tar.bz2 -C /tmp bin/micromamba
+      /tmp/bin/micromamba create -y -r "$MAMBA_ROOT_PREFIX" -n constructor-build -c conda-forge \
+        constructor=3.16.1 micromamba=2.8.1 rattler-build pip
+      MAMBA="$MAMBA_ROOT_PREFIX/envs/constructor-build/bin/micromamba"
+      CONSTRUCTOR_CONDA_EXE="$MAMBA"
+      "$MAMBA" run -r "$MAMBA_ROOT_PREFIX" -n constructor-build python -m pip --version
+
+      UNILABOS_INSTALLER_VERSION="$release_version"
+      export UNILABOS_INSTALLER_VERSION UNILABOS_INSTALLER_PACKAGE CONSTRUCTOR_CONDA_EXE
+
+      # Constructor 必须优先使用本 job 构建的 channel，确保安装器包含当前 tag 的源码。
+      mkdir -p output
+      rb=("$MAMBA" run -r "$MAMBA_ROOT_PREFIX" -n constructor-build rattler-build build)
+      "${rb[@]}" -r recipes/msgs/recipe.yaml --target-platform linux-64 -c robostack -c robostack-staging -c conda-forge --output-dir ./output
+      "${rb[@]}" -r .conda/environment/recipe.yaml --target-platform linux-64 -c uni-lab -c robostack-staging -c conda-forge --channel ./output --output-dir ./output
+      "${rb[@]}" -r .conda/vendor/rfc8785/recipe.yaml --target-platform linux-64 -c conda-forge --output-dir ./output
+      "${rb[@]}" -r .conda/vendor/opcua/recipe.yaml --target-platform linux-64 -c conda-forge --output-dir ./output
+      "${rb[@]}" -r .conda/vendor/msgcenterpy/recipe.yaml --target-platform linux-64 -c conda-forge --channel ./output --output-dir ./output
+      "${rb[@]}" -r "$pylabrobot_recipe_dir/recipe.yaml" --target-platform linux-64 -c conda-forge --channel ./output --output-dir ./output
+      "${rb[@]}" -r .conda/base/recipe.yaml --target-platform linux-64 -c uni-lab -c robostack-staging -c conda-forge --channel ./output --output-dir ./output
+
+      runtime_package="$(find output -type f -name "unilabos-${UNILABOS_INSTALLER_VERSION}-*.conda" -print -quit)"
+      test -n "$runtime_package"
+      runtime_package_name="${runtime_package##*/}"
+      runtime_package_name="${runtime_package_name%.conda}"
+      UNILABOS_INSTALLER_BUILD="${runtime_package_name#"unilabos-${UNILABOS_INSTALLER_VERSION}-"}"
+      UNILABOS_INSTALLER_CHANNEL="$($MAMBA run -r "$MAMBA_ROOT_PREFIX" -n constructor-build python -c 'from pathlib import Path; print(Path("output").resolve().as_uri())')"
+      export UNILABOS_INSTALLER_BUILD UNILABOS_INSTALLER_CHANNEL
+
+      "$MAMBA" run -r "$MAMBA_ROOT_PREFIX" -n constructor-build constructor .conda/constructor \
+        --platform linux-64 --conda-exe "$CONSTRUCTOR_CONDA_EXE" --output-dir dist/constructor
+      installer="dist/constructor/Uni-Lab-OS-${UNILABOS_INSTALLER_VERSION}-linux-64.sh"
+      test -s "$installer"
+      sha256sum "$installer" > "${installer}.sha256"
+  artifacts:
+    name: "Uni-Lab-OS-${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}-linux-64"
+    paths:
+      - dist/constructor/
+    expire_in: 30 days
+
+build_windows_installer:
+  stage: build
+  # Windows 安装器直接在具备代理和 OSS 可达性的 Windows Runner 上构建、上传。
+  tags:
+    - win-runner-915
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$/'
+    - when: never
+  script:
+    - |
+      $ErrorActionPreference = 'Stop'
+      $controlRef = "refs/heads/$env:GITLAB_RELEASE_BRANCH"
+      $controlTrackingRef = "refs/remotes/origin/$env:GITLAB_RELEASE_BRANCH"
+      # Shell runners retain .git across jobs. An explicit destination refspec
+      # replaces any cached control-branch ref before extracting the script.
+      git fetch --force origin "+${controlRef}:${controlTrackingRef}"
+      $controlCommit = (git rev-parse $controlTrackingRef).Trim()
+      Write-Host "Using CI control commit: $controlCommit"
+      New-Item -ItemType Directory -Path "$env:CI_PROJECT_DIR\ci" -Force | Out-Null
+      git show "${controlTrackingRef}:ci/build-runtime-windows.ps1" |
+        Out-File -LiteralPath "$env:CI_PROJECT_DIR\ci\build-runtime-windows.ps1" -Encoding utf8
+      git show "${controlTrackingRef}:ci/upload-oss.py" |
+        Out-File -LiteralPath "$env:CI_PROJECT_DIR\ci\upload-oss.py" -Encoding utf8
+      git show "${controlTrackingRef}:ci/prepare-release-version.py" |
+        Out-File -LiteralPath "$env:CI_PROJECT_DIR\ci\prepare-release-version.py" -Encoding utf8
+      git show "${controlTrackingRef}:ci/check-oss-release.py" |
+        Out-File -LiteralPath "$env:CI_PROJECT_DIR\ci\check-oss-release.py" -Encoding utf8
+      git show "${controlTrackingRef}:ci/notify-feishu-release.py" |
+        Out-File -LiteralPath "$env:CI_PROJECT_DIR\ci\notify-feishu-release.py" -Encoding utf8
+      git show "${controlTrackingRef}:ci/oss-public-url.py" |
+        Out-File -LiteralPath "$env:CI_PROJECT_DIR\ci\oss-public-url.py" -Encoding utf8
+      $scriptHash = (Get-FileHash -LiteralPath (Join-Path $env:CI_PROJECT_DIR 'ci\build-runtime-windows.ps1') -Algorithm SHA256).Hash
+      Write-Host "Windows build script SHA256: $scriptHash"
+      if ($env:CI_COMMIT_TAG) {
+        $ref = $env:CI_COMMIT_TAG
+      } else {
+        $ref = $env:CI_COMMIT_SHA
+      }
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:CI_PROJECT_DIR\ci\build-runtime-windows.ps1" `
+        -Repo $env:CI_PROJECT_DIR `
+        -Ref $ref `
+        -ExpectedCommit $env:CI_COMMIT_SHA `
+        -Builder 'D:\ub\build-tools' `
+        -BuildRoot "D:\ub\w\$env:CI_PIPELINE_ID-$env:CI_JOB_ID" `
+        -ArtifactDir "$env:CI_PROJECT_DIR\dist\windows" `
+        -Uploader "$env:CI_PROJECT_DIR\ci\upload-oss.py" `
+        -VersionPreparer "$env:CI_PROJECT_DIR\ci\prepare-release-version.py" `
+        -OssPrecheck "$env:CI_PROJECT_DIR\ci\check-oss-release.py" `
+        -Notifier "$env:CI_PROJECT_DIR\ci\notify-feishu-release.py" `
+        -OssPublicUrl "$env:CI_PROJECT_DIR\ci\oss-public-url.py" `
+        -ReleaseTag $env:CI_COMMIT_TAG
+  artifacts:
+    name: "Uni-Lab-OS-${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}-win-64"
+    paths:
+      - dist/windows/
+    when: always
+    expire_in: 30 days
+
+build_macos_arm64_installer:
+  stage: build
+  # 原生 Apple Silicon Runner 负责构建、烟测、上传 OSS 和发送飞书通知。
+  tags:
+    - mac-runner
+  variables:
+    GIT_STRATEGY: fetch
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$/'
+    - when: never
+  script:
+    - |
+      set -euo pipefail
+      control_ref="refs/heads/${GITLAB_RELEASE_BRANCH}"
+      control_tracking_ref="refs/remotes/origin/${GITLAB_RELEASE_BRANCH}"
+      git fetch --force origin "+${control_ref}:${control_tracking_ref}"
+      control_commit="$(git rev-parse "$control_tracking_ref")"
+      echo "Using CI control commit: ${control_commit}"
+      mkdir -p ci
+      git show "${control_tracking_ref}:ci/build-runtime-macos-arm64.sh" > ci/build-runtime-macos-arm64.sh
+      git show "${control_tracking_ref}:ci/upload-oss.py" > ci/upload-oss.py
+      git show "${control_tracking_ref}:ci/prepare-release-version.py" > ci/prepare-release-version.py
+      git show "${control_tracking_ref}:ci/check-oss-release.py" > ci/check-oss-release.py
+      git show "${control_tracking_ref}:ci/notify-feishu-release.py" > ci/notify-feishu-release.py
+      git show "${control_tracking_ref}:ci/oss-public-url.py" > ci/oss-public-url.py
+      shasum -a 256 ci/build-runtime-macos-arm64.sh
+      bash ci/build-runtime-macos-arm64.sh \
+        --repo "$CI_PROJECT_DIR" \
+        --expected-commit "$CI_COMMIT_SHA" \
+        --release-tag "$CI_COMMIT_TAG" \
+        --build-root "$CI_PROJECT_DIR/.ci-macos-build-${CI_PIPELINE_ID}-${CI_JOB_ID}" \
+        --artifact-dir "$CI_PROJECT_DIR/dist/macos-arm64" \
+        --uploader "$CI_PROJECT_DIR/ci/upload-oss.py" \
+        --version-preparer "$CI_PROJECT_DIR/ci/prepare-release-version.py" \
+        --oss-precheck "$CI_PROJECT_DIR/ci/check-oss-release.py" \
+        --notifier "$CI_PROJECT_DIR/ci/notify-feishu-release.py" \
+        --oss-public-url "$CI_PROJECT_DIR/ci/oss-public-url.py"
+  artifacts:
+    name: "Uni-Lab-OS-${CI_COMMIT_TAG:-$CI_COMMIT_SHORT_SHA}-osx-arm64"
+    paths:
+      - dist/macos-arm64/
+    when: always
+    expire_in: 30 days
+
+upload_linux_installer:
+  stage: publish
+  # 构建在海外完成，上传则由国内 Runner 通过 GitLab artifact 接力，避免跨境上传 OSS。
+  image: registry.dp.tech/public/ubuntu:gitlab-docker
+  tags:
+    - k8s-runner-ack
+  needs:
+    - job: build_linux_installer
+      artifacts: true
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+([.+-][0-9A-Za-z.-]+)?$/'
+  script:
+    - |
+      set -euo pipefail
+      test -n "$OSS_ACCESS_KEY_ID"
+      test -n "$OSS_ACCESS_KEY_SECRET"
+      test -n "$OSS_ENDPOINT"
+      test -n "$OSS_PREFIX"
+      case "$OSS_PREFIX" in oss://*) ;; *) echo "OSS_PREFIX 必须以 oss:// 开头" >&2; exit 1;; esac
+
+      installer="$(find dist/constructor -maxdepth 1 -type f -name 'Uni-Lab-OS-*-linux-64.sh' -print -quit)"
+      test -n "$installer"
+      test -s "$installer"
+      test -s "${installer}.sha256"
+      installer_name="${installer##*/}"
+      UNILABOS_INSTALLER_VERSION="${installer_name#Uni-Lab-OS-}"
+      UNILABOS_INSTALLER_VERSION="${UNILABOS_INSTALLER_VERSION%-linux-64.sh}"
+      export OSS_UPLOAD_PREFIX="${OSS_PREFIX%/}/installer/${UNILABOS_INSTALLER_VERSION}/linux-64"
+      export OSS_UPLOAD_FILES="$installer;${installer}.sha256"
+      apt-get update -qq
+      apt-get install -y --no-install-recommends ca-certificates python3 python3-pip
+      python3 -m pip install --no-cache-dir oss2
+      git fetch --force origin "+refs/heads/${GITLAB_RELEASE_BRANCH}:refs/remotes/origin/${GITLAB_RELEASE_BRANCH}"
+      git show "origin/${GITLAB_RELEASE_BRANCH}:ci/upload-oss.py" > .ci-upload-oss.py
+      git show "origin/${GITLAB_RELEASE_BRANCH}:ci/notify-feishu-release.py" > .ci-notify-feishu-release.py
+      git show "origin/${GITLAB_RELEASE_BRANCH}:ci/oss-public-url.py" > .ci-oss-public-url.py
+      python3 .ci-upload-oss.py
+      installer_url="$(python3 .ci-oss-public-url.py --prefix "$OSS_UPLOAD_PREFIX" --object-name "${installer##*/}")"
+      echo "Installer download URL: ${installer_url}"
+      python3 .ci-notify-feishu-release.py --system "Linux x64" --version "$UNILABOS_INSTALLER_VERSION" --oss-url "$installer_url"

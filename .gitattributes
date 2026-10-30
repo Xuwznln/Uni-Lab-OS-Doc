@@ -1,0 +1,5 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Scheduler protocol files are hashed; keep them as LF even on Windows checkouts.
+unilabos/scheduling/contract/** -text

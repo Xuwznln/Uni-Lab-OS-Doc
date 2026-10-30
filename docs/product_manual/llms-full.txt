@@ -1,0 +1,6720 @@
+# Uni-Lab OS 产品使用说明书 — 完整 Markdown
+
+> 本文件按推荐阅读顺序合并整本产品手册；每节都标出原始 Markdown 地址。
+
+---
+
+Source: /index.md
+
+# Uni-Lab OS 产品使用说明书
+
+产品定位、业务能力和核心对象统一见[认识 Uni-Lab OS](overview.md)。本页只用于选择适合当前任务的阅读入口。
+
+<div class="manual-meta">
+适用环境：通用安装与接入场景　·　手册版本：2026.09.10　·　设备包可在安装 OS 后创建
+</div>
+
+<div class="entry-links">
+<p><strong>Uni-Lab OS 入口</strong>：安装完成后运行 <code>unilab workspace status --json</code>，从实际输出取得页面和 API 地址。</p>
+</div>
+
+:::{warning}
+不要把本地开发端口直接暴露到公网。生产部署应在入口前配置 TLS、身份认证、授权和网络访问控制，并通过密钥系统提供凭证。
+:::
+
+## 从哪里开始
+
+- **已有可用环境**：先读[认识产品](overview.md)，再进入[Uni-Lab OS 快速上手](console.md)。
+- **从零建设环境**：先完成[系统安装](installation.md)，再下载并启动[示例设备包](demo-lab.md)，最后按[设备包规范与系统启动](unilabos-installation.md)替换为真实设备。
+- **编写设备包**：先用[初始化工作区](workspace.md#初始化工作区)中的 `unilab workspace init` 创建设备包骨架，再按[设备包规范与系统启动](unilabos-installation.md)补充设备、物料、启动图和工作流。
+- **发布并运行**：进入[工作流发布与任务运行](workflows.md)，生产上线前完成[运行模式、安全与恢复](runtime-safety.md)和[Kubernetes 部署](deployment.md)。
+- **验收与排查**：使用[设备包验收](scenario-guide.md)、[故障排查](troubleshooting.md)和[API 使用参考](api-reference.md)。
+
+## 本手册如何描述能力
+
+同一功能在源码、控制台和线上环境中可能处于不同阶段。本手册统一使用以下状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| <span class="status status-ready">当前可用</span> | 本次安装已加载、连接并完成对应验收。 |
+| <span class="status status-config">需要配置</span> | 代码已实现，但依赖设备、凭证、联网服务或运行模式。 |
+| <span class="status status-limited">当前受限</span> | 只有 API 或开发工具支持，Uni-Lab OS 页面没有入口，或能力有明确限制。 |
+| <span class="status status-unavailable">当前不可用</span> | 接口已退役、执行器未启用，或界面只是占位。 |
+| <span class="status status-experimental">实验验证</span> | 只在隔离测试中验证，尚未批准用于生产。 |
+
+“源码已定义”不等于“当前线上已发布”，而“仿真通过”也不等于“真机已完成安全验收”。各页会明确说明这些边界。
+
+```{toctree}
+:caption: 认识与快速上手
+:maxdepth: 1
+
+overview
+示例设备包 <demo-lab>
+```
+
+```{toctree}
+:caption: 系统安装与配置
+:maxdepth: 1
+
+installation
+environment
+```
+
+```{toctree}
+:caption: 设备包开发规范
+:maxdepth: 2
+
+unilabos-installation
+使用 AI 设备包生成器（实验性） <repository-builder-skill>
+scenario-guide
+```
+
+```{toctree}
+:caption: 参考
+:maxdepth: 1
+
+troubleshooting
+api-reference
+```
+
+---
+
+Source: /overview.md
+
+# 认识 Uni-Lab OS
+
+Uni-Lab OS 是面向实验室自动化的统一运行与管理平台。它把设备、物料、试剂、实验操作、工作流和执行任务放在同一套业务模型中，让实验从资源准备、流程设计，到自动执行和结果追溯形成完整闭环。
+
+简单来说，Uni-Lab OS 不只负责“让设备执行一个动作”，还要回答以下问题：
+
+- 这次实验需要哪些设备、物料和试剂，它们当前是否可用；
+- 每一步要做什么、使用哪些参数，前后步骤如何衔接；
+- 多个任务同时运行时，谁可以使用某台设备或某个工位；
+- 执行到了哪一步，设备返回了什么，异常后应如何处理；
+- 实验结束后，能否查清使用了什么、执行了什么，以及得到什么结果。
+
+## 从准备到追溯的业务闭环
+
+Uni-Lab OS 将一次实验组织为五个连续阶段：
+
+1. **准备资源**：登记物料和试剂，确认库位、数量、状态以及设备是否在线。
+2. **设计实验**：将设备动作组合成可复用的实验操作，再将实验操作编排为完整工作流。
+3. **运行前检查**：检查输入参数、设备、物料、试剂、工位和库存是否满足执行要求。
+4. **调度与执行**：创建实验任务，由系统拆分具体动作、占用所需资源，并按依赖顺序下发执行。
+5. **记录与追溯**：保存任务进度、设备反馈、人工确认、异常处理、物料变化和实验结果。
+
+> 设备、物料与试剂准备 → 实验操作设计 → 工作流编排与发布 → 创建任务并预检 → 自动调度与执行 → 查看结果与追溯记录
+
+## 八项核心能力
+
+### 设备管理
+
+系统统一识别设备及其业务动作，并记录在线状态、动作参数、执行反馈和状态变化。例如，一台移液设备可以提供“吸液”“排液”等动作，每个动作都要明确体积、速度、位置等参数的名称、类型、单位和允许范围。
+
+设备能够执行哪些动作，由用户准备的设备包定义。设备包加载后，可通过系统接口或获准使用的调试工具进行单动作测试。设备显示“在线”只代表通信可用，不代表所有动作已经完成现场安全验收。
+
+### 试剂管理
+
+系统分别管理“试剂是什么”和“这份试剂在哪里、有多少”：
+
+- 试剂档案记录名称、标识、规格等身份信息；
+- 试剂库存记录承载容器、当前位置、数量、浓度、单位和批次信息；
+- 分装、转移、消耗和调整形成可追溯记录；
+- 工作流可按规则预留和扣减库存，避免同一份试剂被多个任务重复使用。
+
+数量和浓度必须带有明确单位。自动扣减反映系统账面变化，不代替称重、液位或其他现场检测。
+
+### 物料与库位
+
+物料模板描述一类物料应具备哪些字段、容量、槽位和约束；物料实例表示现场某一个真实对象，例如一块孔板、一个吸头盒、一个样品瓶载架或一个弹夹。
+
+系统可记录物料的唯一标识、条码、父子关系、当前位置和历史变化。例如，“样品瓶位于载架第 3 个槽位，载架位于上料工位”。上料、移动、下料和盘点时，应同时更新现场状态和系统记录，不能只修改页面数据。
+
+### 实验操作
+
+实验操作是可重复使用的一段标准实验步骤。它可以组合多个设备动作，并加入条件判断、重复执行、人工确认和其他已发布操作。
+
+适合复用的步骤应先整理成实验操作，例如“取样并加入反应容器”或“检测并保存结果”。这样，同一段操作可被不同工作流调用，修改和验证也更集中。
+
+### 工作流管理
+
+工作流描述一项完整实验如何完成，包括输入、输出、执行节点以及节点之间的先后依赖。业务人员可以查看、导入、编辑、检查和发布工作流；流程设计人员需要为每个输入和结果说明名称、用途、数据类型、单位、是否必填以及允许范围。
+
+工作流发布后形成不可变的发布合同。已经创建的任务继续使用创建时冻结的执行图和源码快照，不会因为之后再次编辑而悄悄改变。正式运行前，应先完成结构检查、参数检查和隔离环境验证。
+
+### 任务执行
+
+一次工作流运行称为 **Task（任务）**。系统会把任务拆分成若干 **Job（执行步骤）**，再将每个步骤派发给对应设备。
+
+在任务执行过程中，可以查看整体状态、当前步骤、设备反馈和结果；遇到需要人员判断的环节，可处理人工确认；出现已知异常时，可按获准规程停止、恢复或处理。对于设备已执行但系统未收到明确结果的情况，必须先核对现场，再决定如何结算，不能直接重试可能产生二次动作的步骤。
+
+### 并行调度
+
+系统可以同时管理多个实验任务，并通过资源锁和库存预留避免冲突：
+
+- 设备、物料或工位被一个任务占用时，其他任务等待；
+- 前置步骤完成并释放资源后，满足条件的任务自动继续；
+- 维护或异常处理期间，可停止新的任务派发，再在确认安全后恢复；
+- 调度记录可用于查看任务等待、占用和释放资源的过程。
+
+“并行调度”表示系统可以同时安排不存在资源冲突的任务，不表示同一台物理设备能够同时执行多个动作。真实并发能力必须以设备、工艺和安全联锁的验收结果为准。
+
+### 日志与记录
+
+系统保留与实验执行相关的业务记录，包括任务和步骤状态、设备动作与反馈、人工确认、工作流修订、物料位置变化、试剂库存变化和处理结果。按部署配置启用追踪能力后，还可以关联一次请求在不同执行环节中的记录。
+
+日志用于还原“系统当时收到和处理了什么”，不能替代现场检查记录、法定审计材料或仪器原始数据。需要长期保存的数据，应按组织的数据管理制度设置归档和备份。
+
+## 两条常用业务流程
+
+### 流程一：实验设计与调试
+
+1. 在设备包中定义设备连接方式、业务动作、动作参数和返回结果。
+2. 在安全环境中确认设备上线，并逐项测试动作及失败处理。
+3. 创建实验操作，将已验证的动作组合成可复用步骤。
+4. 编排完整工作流，设置输入、输出、条件、循环和步骤依赖。
+5. 执行结构检查、运行前检查和模拟或隔离测试。
+6. 审核通过后发布当前工作流修订，供实验任务选择。
+
+### 流程二：实验任务执行
+
+1. 准备物料和试剂，完成上料、位置和数量核对。
+2. 选择已发布且适用于当前场景的工作流。
+3. 填写实验参数并绑定本次使用的物料、试剂和工位。
+4. 通过运行前检查后创建任务。
+5. 由 Uni-Lab OS 分配资源、调度设备并执行各步骤。
+6. 查看进度，按规程处理人工确认和异常。
+7. 核对执行结果、资源变化和追溯记录，完成实验收尾。
+
+## 先理解六个核心对象
+
+| 对象 | 业务含义 | 典型内容 |
+| --- | --- | --- |
+| 设备与动作 | 现场设备以及设备可以完成的业务能力 | 设备标识、连接状态、动作名称、输入参数、返回结果 |
+| 物料 | 实验中被放置、承载、搬运或处理的实物 | 孔板、吸头盒、容器、载架、弹夹、样品容器 |
+| 试剂 | 试剂身份及其实际库存 | 名称、批次、容器、数量、浓度、单位、位置 |
+| 实验操作 | 可重复使用的一组实验步骤 | 设备动作、条件、循环、人工确认、子操作 |
+| 工作流 | 面向完整实验目标的流程定义 | 输入、输出、节点、依赖、发布合同 |
+| Task 与 Job | 一次实验运行及其具体执行步骤 | 任务状态、步骤状态、设备反馈、结果、异常处理 |
+
+这些对象之间的关系可以概括为：
+
+> 设备提供动作；物料、试剂和库位提供实验资源；实验操作组合动作；工作流组织操作；Task 启动一次工作流；Job 执行其中的具体步骤；日志与记录贯穿全过程。
+
+## 用户设备包的作用
+
+Uni-Lab OS 提供统一的管理、预检、调度、执行和记录能力，但不会预先知道某个实验室有哪些设备、物料和工艺。用户需要准备与现场一致的设备包，至少说明：
+
+- **设备**：有哪些设备实例，如何连接，每台设备提供哪些动作；
+- **动作合同**：每个动作接收什么参数、返回什么结果、如何超时和报错；
+- **物料模板**：现场使用哪些物料类型，各自有哪些字段、容量、槽位和约束；
+- **启动图**：本次环境要加载哪些设备和资源实例，它们如何连接和定位；
+- **实验操作与工作流**：现场批准执行的步骤、顺序、输入、输出和异常处理方式。
+
+安装 Uni-Lab OS 后，还需要安装或挂载用户自己的设备包，并通过启动图加载当前实验室的实际配置。设备包定义的是“系统应当认识什么”，启动图定义的是“这次启动具体加载什么”。两者缺一不可。
+
+设备包的目录、配置和检查方法见[设备包规范与系统启动](unilabos-installation.md)。从零部署产品时，先完成[系统安装](installation.md)。
+
+## 使用边界
+
+为避免把“系统记录正确”误解为“现场一定安全”，使用时必须遵守以下原则：
+
+- 系统中的库存、位置和设备状态需要通过现场操作或设备反馈保持同步；
+- 运行前检查只能发现系统已知的问题，不能代替机械限位、急停和安全联锁；
+- 模拟运行通过不等于真实设备已经验收，真机动作必须逐项测试；
+- 工作流可执行不等于工艺已获批准，发布和运行权限应分开管理；
+- 异常恢复前必须确认设备、物料和试剂的真实状态，避免重复投料、重复移动或重复检测。
+
+## 建议的首次使用顺序
+
+如果已有可用环境，先阅读[使用 Uni-Lab OS](console.md)，再按[体验已部署的安全工作流](quickstart.md)熟悉页面和任务过程。
+
+如果需要从零建设环境，按以下顺序进行：
+
+1. [系统安装](installation.md)
+2. [设备包规范与系统启动](unilabos-installation.md)
+3. [环境与运行配置](environment.md)
+4. [设备与动作](devices.md)
+5. [工作流基本概念](workflow-concepts.md)
+
+完成安装、设备包加载和现场验收后，才进入正式实验运行。
+
+---
+
+Source: /installation.md
+
+# 系统安装
+
+:::{admonition} 阅读角色
+- **首次使用者**：先安装并验证 Uni-Lab OS，再创建自己的第一个设备包。
+- **开发或运维人员**：选择安装方式，维护环境、源码版本和启动配置。
+- **验收人员**：确认安装来源、版本、初始 `dry-run` 和停止流程均可追溯。
+:::
+
+本页按“**安装 Uni-Lab OS → 下载示例设备包 → 启动示例**”的顺序操作。安装系统时不要求用户提前准备设备包；OS 命令可用后，再下载带有示例驱动、示例工作流和安全启动图的 `demo-lab` 设备包。
+
+:::{important}
+第一次启动固定使用示例设备包自带的 `dry-run` 启动图。它只用于验证 OS、设备包发现和工作流加载，不连接真实设备，也不能代替真机安全验收。
+:::
+
+## 1. 选择安装路径
+
+按使用方式选择下面一条安装路径：
+
+| 路径 | 适合谁 | 得到什么 |
+| --- | --- | --- |
+| **一键安装包** | 首次体验、演示和不修改 OS 源码的用户 | 已打包的 Uni-Lab OS 运行环境和命令行；本页提供 macOS Apple 芯片版和 Windows x64 版安装步骤 |
+| **Conda/Mamba + `unilabos-env` + 源码** | 需要创建设备包、开发驱动或修改 OS 的用户 | ROS/Python 依赖和可编辑的 OS 源码 |
+
+`unilabos-full` 等仿真和可视化环境不是默认安装路径。确实需要 Gazebo、RViz 或 MoveIt 时，再按[环境与运行配置](environment.md)选择。
+
+## 2. 安装前检查
+
+| 项目 | 要求 |
+| --- | --- |
+| 操作系统 | macOS 安装包适用于 macOS 11.0 及以上、Apple 芯片（M 系列）；Windows 安装包适用于 Windows x64（Intel/AMD 64 位）。请按操作系统和 CPU 架构选择对应安装包 |
+| Python | 安装路径会准备兼容的 Python 3.11 环境 |
+| 磁盘空间 | 至少 10 GB 可用空间 |
+| 网络 | 源码安装时能访问 Conda 软件源和 Git 仓库 |
+| Conda/Mamba | 一键安装包已包含环境管理工具，无需提前安装；源码安装需先准备，推荐 Miniforge |
+| 设备包 | **不需要提前准备**，安装 OS 后再创建 |
+
+使用一键安装包时，直接继续第 3 节。选择源码安装时，如果终端中还不能执行 `conda --version` 或 `mamba --version`，请先安装 Miniforge，并重新打开终端。
+
+## 3. 路径一：使用一键安装包
+
+一键安装包已包含 Python 运行环境和 Uni-Lab OS，不需要提前安装 Conda/Mamba，也不需要克隆 OS 源码。实验室设备包在 OS 安装完成后再准备。
+
+### 3.1 下载安装包（macOS Apple 芯片）
+
+下载 [Uni-Lab OS 0.11.4 · macOS ARM64 安装包](https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-installer/v0.3.0/macOS-ARM64/Uni-Lab-OS-0.11.4-osx-arm64.sh)，保存到系统的“下载”文件夹。
+
+此安装包适用于 Apple 芯片（M 系列），不适用于 Intel Mac、Windows 或 Linux。Windows x64 用户请直接阅读第 3.3 节。
+
+### 3.2 安装（macOS）
+
+打开 macOS 的“终端”，执行以下命令，无需解压安装包：
+
+```bash
+cd "$HOME/Downloads"
+bash Uni-Lab-OS-0.11.4-osx-arm64.sh
+```
+
+按终端提示阅读许可协议，确认同意后输入 `yes`；选择安装位置时，直接按回车使用默认目录 `$HOME/uni-lab-os`（即当前用户主目录下的 `uni-lab-os`）。若询问是否初始化 Conda，可以选择 `no`，后续按第 5 节手动激活环境即可。
+
+如果默认目录已经存在，请选择另一个尚不存在、且不含空格的目录，不要覆盖或删除仍在使用的环境。若安装包保存在其他位置，请先进入实际下载目录再执行安装命令。
+
+完成后继续执行第 5 节“验证 OS 安装”。
+
+### 3.3 下载安装包（Windows x64）
+
+下载 [Uni-Lab OS 0.11.4 · Windows x64 安装包](https://uni-lab.oss-cn-zhangjiakou.aliyuncs.com/uni-lab-installer/v0.3.0/Windows-X64/Uni-Lab-OS-0.11.4-win-64.exe)，保存到系统的“下载”文件夹。
+
+此安装包适用于 Intel/AMD x64 架构的 Windows 电脑，已包含 Python 运行环境、Uni-Lab OS 和前端，无需提前安装 Python、Conda/Mamba 或克隆 OS 源码。
+
+### 3.4 安装（Windows x64）
+
+1. 双击下载的 `Uni-Lab-OS-0.11.4-win-64.exe`，无需解压。
+2. 按向导阅读并同意许可协议，选择 `Just Me`（仅当前用户）安装。
+3. 选择一个尚不存在、当前用户可写、路径较短且不含空格和中文的目录。下文以 `C:\UniLabOS` 为例；它是示例路径，请以实际选择的安装位置为准。不要覆盖或删除仍在使用的旧环境。
+4. 保持“添加到 PATH”和“注册为默认 Python”等选项不勾选，点击安装，等待向导提示完成。安装时需要解压并配置运行环境，可能需要数分钟；完成前不要关闭安装程序。
+5. 安装完成后，打开 Windows 的“命令提示符”（CMD），继续执行第 5 节“验证 OS 安装”。
+
+## 4. 路径二：安装 `unilabos-env` 后拉取源码
+
+这条路径适合设备包和驱动开发。`unilabos-env` 只提供 ROS2、Python 依赖和 `uv` 等开发环境；Uni-Lab OS 本身随后从仓库以可编辑模式安装。
+
+### 4.1 安装来源与源码分支
+
+| 内容 | 安装或拉取地址 | 版本或分支 |
+| --- | --- | --- |
+| **Conda/Mamba** | [Miniforge 官方安装包](https://github.com/conda-forge/miniforge/releases/latest) | 按操作系统和 CPU 架构选择最新的 `Miniforge3` 安装包；不对应 Uni-Lab OS 分支 |
+| **`unilabos-env`** | [Anaconda.org：`uni-lab/unilabos-env`](https://anaconda.org/uni-lab/unilabos-env) | 从 `uni-lab` channel 安装；不对应 Git 分支 |
+| **Uni-Lab OS 源码** | [GitHub：`Uni-Lab-OS/Uni-Lab-OS`](https://github.com/Uni-Lab-OS/Uni-Lab-OS) | `product/durable-scheduler-kernel-v2` |
+
+Conda/Mamba 是环境管理工具，`unilabos-env` 是 Conda 环境依赖包，Uni-Lab OS 才是需要指定 Git 分支的源码仓库。三者不是同一个安装包，也不共用一个“分支”概念。
+
+### 4.2 创建并激活环境
+
+下面的 `unilabos-env` 安装方式与仓库根目录的 `README_zh.md` 保持一致：
+
+```bash
+mamba create -n unilab python=3.11.14
+mamba activate unilab
+mamba install uni-lab::unilabos-env -c robostack-staging -c conda-forge
+```
+
+如果使用 Conda 激活环境，也可以执行 `conda activate unilab`。后续所有命令必须在同一个 `unilab` 环境中运行。
+
+### 4.3 克隆 `kernel-v2` 分支并安装 Uni-Lab OS
+
+```bash
+git clone \
+  --branch product/durable-scheduler-kernel-v2 \
+  --single-branch \
+  https://github.com/Uni-Lab-OS/Uni-Lab-OS.git
+cd Uni-Lab-OS
+pip install -e .
+uv pip install -r unilabos/utils/requirements.txt
+```
+
+已经克隆过该仓库时，在仓库目录内更新同一分支：
+
+```bash
+git switch product/durable-scheduler-kernel-v2
+git pull --ff-only origin product/durable-scheduler-kernel-v2
+```
+
+:::{note}
+`pip install -e .` 让本地源码修改立即生效；`uv pip install` 安装运行所需的 pip 依赖。以后切换仓库分支或拉取新代码时，应重新验证依赖和命令版本。
+:::
+
+## 5. 验证 OS 安装
+
+先按安装方式激活环境。每次新打开终端时，都需要重新激活。
+
+**一键安装包（macOS）：**
+
+```bash
+source "$HOME/uni-lab-os/bin/activate" "$HOME/uni-lab-os"
+```
+
+如果安装时修改了目录，请将命令中的两处 `$HOME/uni-lab-os` 都替换为实际安装路径。
+
+**一键安装包（Windows x64，CMD）：**
+
+```bat
+call "C:\UniLabOS\Scripts\activate.bat" "C:\UniLabOS"
+```
+
+请将命令中的两处 `C:\UniLabOS` 都替换为实际安装路径。此命令激活安装包自带的环境，不需要提前执行 `conda init`。
+
+**源码安装：**
+
+```bash
+conda activate unilab
+```
+
+激活后，两种安装方式都执行以下命令（macOS 终端和 Windows CMD 通用）：
+
+```bash
+python -c "import sys; print(sys.executable)"
+python -c "import unilabos; print(unilabos.__version__)"
+unilab --help
+unilab workspace --help
+```
+
+确认 Python 路径指向刚安装的环境、版本号与所装版本一致，且两条帮助命令能正常显示。此时 OS 安装验证完成，即使还没有准备设备包，也可以继续下一节。
+
+## 6. 准备并安装设备包
+
+安装 OS 后，按用途选择下面一种方式准备设备包，再执行本节末尾的安装和检查命令。
+
+### 方式一：命令创建最小设备包
+
+准备开发自己的设备包时，先确认当前环境包含初始化命令，再创建一个新目录：
+
+```bash
+unilab workspace init --help
+unilab workspace init --output ./sample-lab
+export DEVICE_PACKAGE_ROOT="$(pwd)/sample-lab"
+cd "$DEVICE_PACKAGE_ROOT"
+```
+
+生成内容包括示例设备、`echo` 动作、普通工作流、启动图和测试，共 15 个文件。目标目录必须尚不存在。`--name`、`--json` 参数和完整文件清单见[初始化工作区](workspace.md#初始化工作区)。
+
+若当前版本没有 `init` 子命令，使用包含该功能的版本，或选择下面的示例包下载方式。
+
+### 方式二：下载完整演示设备包
+
+希望体验“标准样品称量分装”流程时，下载已准备好的示例设备包：
+
+:::{admonition} 示例文件下载
+:class: note
+
+- {download}`下载 demo-lab.zip <_static/example-package/demo-lab.zip>`
+- [查看示例设备包说明](demo-lab.md)
+:::
+
+将下载的压缩包放到准备使用的目录，解压后进入设备包：
+
+```bash
+unzip demo-lab.zip
+export DEVICE_PACKAGE_ROOT="$(pwd)/demo-lab"
+cd "$DEVICE_PACKAGE_ROOT"
+```
+
+### 安装并检查所选设备包
+
+完成任意一种准备方式后，在对应设备包根目录运行：
+
+```bash
+python -m pip install -e '.[dev]'
+python -m pytest -q
+unilab package inspect --path . --out dist/inspect
+```
+
+这些检查通过后，只能说明教学设备包可以被发现和静态解析，不表示任何真实设备已经接入。
+
+## 7. 以安全模式启动
+
+第一次启动显式指定所选设备包自带的启动图。以上两种方式都提供 `deployment/graphs/dry-run.json`：
+
+```bash
+unilab workspace start \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --component all \
+  --graph "$DEVICE_PACKAGE_ROOT/deployment/graphs/dry-run.json" \
+  --runtime-mode dry-run \
+  --json
+```
+
+查看状态：
+
+```bash
+unilab workspace status \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --json
+```
+
+如果启动失败，先查看组件日志，不要改用真实设备配置反复尝试：
+
+```bash
+unilab workspace logs \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --component backend \
+  --json
+```
+
+结束体验后停止工作区：
+
+```bash
+unilab workspace stop \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --component all \
+  --json
+```
+
+## 8. 从示例转为真实设备包
+
+确认 OS、设备包示例和 `dry-run` 都能正常工作后，再按以下顺序替换示例内容：
+
+1. 填写 `DEVICE_PACKAGE_REQUIREMENTS.md`，记录设备型号、协议、动作、单位和安全边界；
+2. 按[设备接入模板](device-template.md)实现真实驱动；
+3. 按[物料定义模板](material-template.md)登记物料与位置；
+4. 新建独立的联调或生产启动图，不修改教学 `dry-run.json` 来承载生产地址；
+5. 按[工作流运行](workflow.md)编写和验证工作流；
+6. 完成[设备包验收](scenario-guide.md)后，才进入受控真机运行。
+
+安装和初次启动的最短顺序始终是：**先安装 OS，再创建设备包，最后启动设备包**。用户不需要为了安装 Uni-Lab OS 预先取得一个现场设备包。
+
+---
+
+Source: /environment.md
+
+# 环境与运行配置
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认部署目的、设备包来源、运行环境、安全边界和成功标准。
+- **开发或运维人员**：执行安装、配置、启动、升级和故障处理。
+- **验收人员**：核对版本、运行状态、失败路径、安全配置和回滚能力。
+:::
+
+Uni-Lab OS 的“环境”分为三层：Conda 软件环境决定有哪些 Python/ROS 能力，Workspace 决定加载哪个设备包和设备图，运行配置决定以什么安全模式启动。新手最容易遇到的问题，是把这三层混成一份配置。
+
+## 选择 Conda 环境
+
+Uni-Lab OS 提供三档 Conda 包。默认安装入口只推荐“一键安装包”和“`unilabos-env` + 仓库源码”两条路径；这里解释各包用途，不重复安装步骤。首次安装统一按照[系统安装](installation.md)中的顺序执行。
+
+| 包 | 适合谁 | 包含什么 | 本手册建议 |
+| --- | --- | --- | --- |
+| `unilabos` | 只运行已有产品的操作员、部署镜像 | Uni-Lab OS 完整包与核心 ROS 环境 | 普通使用的首选 |
+| `unilabos-env` | 需要修改 OS 源码、构建操作页面的开发者 | Python/ROS 环境，不固定 OS 源码 | 本手册源码教程使用 |
+| `unilabos-full` | 需要 RViz、Gazebo、MoveIt 或 Jupyter 的仿真开发者 | `unilabos` 加桌面仿真与可视化栈 | 仅按需安装 |
+
+本手册的源码安装路径使用 `unilabos-env`，随后拉取仓库并以可编辑模式安装；仓库已经包含可由 Workspace Backend 提供的轻量操作页面。`unilabos` 是标准 Conda 发布包，`unilabos-full` 只在确实需要三维仿真或可视化时选择。
+
+:::{note}
+`--override-channels`、版本号和频道顺序用于保证安装结果一致。升级 Uni-Lab OS 时，应同时确认设备包、启动图（Graph JSON）和环境版本的兼容性，并重新执行验收。
+:::
+
+### 环境自检
+
+```bash
+python -c "import sys, unilabos; print('python =', sys.executable); print('unilabos =', unilabos.__file__); print('version =', unilabos.__version__)"
+python -m pip show unilabos
+python -c "import rclpy; print('rclpy: OK')"
+python -c "import networkx, yaml, fastapi, uvicorn, multipart; print('核心依赖：OK')"
+ros2 interface list | grep unilabos_msgs
+ros2 interface show unilabos_msgs/action/StrSingleInput
+python -m pip check
+```
+
+以第一条命令显示的 Python 解释器和 `unilabos.__file__` 为准，不要根据相邻源码目录、终端提示符或记忆判断当前运行的是哪套 OS。后续的安装、检查、Workspace 启动和测试都应使用同一个 `python`。
+
+`pip show` 中的 `Location` 或 `Editable project location` 应指向预期安装来源，`Version` 应与导入后的 `unilabos.__version__` 一致。两者不一致表示包元数据与源码已漂移，应先重装或重建环境，再继续排查设备包。
+
+接口验收应使用所安装版本实际提供的消息类型，例如 `StrSingleInput`，不要使用已经不存在的类型。
+
+## Workspace 的五个事实输入
+
+以 `user-device-package` 为例，一个可启动 Workspace 至少要能解析以下内容：
+
+| 文件/目录 | 负责什么 | 用户设备包 示例 |
+| --- | --- | --- |
+| `pyproject.toml` | Python distribution、版本和依赖 | `example_lab-poly-studio` |
+| 规范 Python import package | 递归静态扫描 `@device`、`@resource`、动作和模型声明 | `example_device_package/` |
+| `package.yaml` | 只登记允许加载的工作流源码和 UUID | 当前登记的 用户设备包 工作流 |
+| `deployment/graphs/*.json` | 本次启动的设备实例、资源拓扑与连接参数 | `example_lab-local-debug.json` |
+| `deployment/local_config.py` | 本地进程默认配置 | 日志级别、浏览器行为等 |
+
+启动图 是本次激活设备实例和物料拓扑的权威；规范 import package 是设备与资源定义来源；`package.yaml` 只是 Workflow Source 白名单。`devices/`、`resources/` 是推荐的组织目录，不是特殊注册入口，系统会递归静态扫描整个规范 import package。只安装 Python 包但不给 启动图，运行时不会猜测或从远端自动下载设备图。
+
+需要新建设备包时，先用[初始化工作区](workspace.md#初始化工作区)生成最小骨架，再按[工作区](workspace.md)补充设备定义、启动图和工作流清单，完成验证。
+
+## Workspace Host 环境文件
+
+Workspace Host 把本地选择保存在：
+
+```text
+<workspace>/.unilabos/environment.local.json
+```
+
+最小示例：
+
+```json
+{
+  "schemaVersion": 1,
+  "graphPath": "deployment/graphs/example_lab-local-debug.json",
+  "externalDevicesOnly": true,
+  "runtimeMode": "dry-run",
+  "domainMode": "local",
+  "backendUrl": null,
+  "schedulerUrl": null
+}
+```
+
+字段含义：
+
+| 字段 | 可选值 | 说明 |
+| --- | --- | --- |
+| `schemaVersion` | 当前必须为 `1` | Workspace Host 文件格式版本 |
+| `graphPath` | Workspace 内相对路径 | 设备/资源图；路径必须留在 Workspace 边界内 |
+| `externalDevicesOnly` | `true` / `false` | `true` 时只激活 Workspace 设备包中的外部设备目录 |
+| `runtimeMode` | `dry-run` / `normal` | 模拟动作或真实动作；新手固定使用 `dry-run` |
+| Runtime 能力 | 能力字段 | 分别控制定义编辑、草稿查看、未发布运行、单步调试和设备动作 |
+| `domainMode` | 只允许 `local` | 当前控制面固定由本机 OS 持有 |
+| `backendUrl` | `null` | 历史兼容字段，当前本地控制面不使用 |
+| `schedulerUrl` | `null` 或 HTTP(S) URL | 可选的调度地址元数据；普通本地 Workspace 留空 |
+
+第一次学习无需手工创建该文件：`workspace start` 的显式参数会形成启动计划。需要稳定默认值时再保存；命令行传入的 `--graph` 和 `--runtime-mode` 优先用于本次启动。运行权限从 `/api/v1/readiness` 返回的 `capabilities` 读取。
+
+:::{warning}
+不要把旧配置中的 `domainMode: "backend"`、远端 WebSocket bridge 或 `--use_remote_resource` 带入当前产品。代码已经关闭这些常驻远端控制面入口，并会失败关闭。
+:::
+
+## 运行配置：运行方式与 Runtime 能力
+
+`runtimeMode` 控制是否接触真实硬件；Runtime 能力分别控制定义、草稿、未发布运行、单步调试和设备动作。普通任务可以并行运行。提交 `run_mode=step` 时，Runtime 会先检查当前没有其他活动任务且没有待完成的任务清理；如果已有活动任务或任务清理未完成，会返回 `debug_task_conflict`。已有单步任务活动期间，普通任务也会被拒绝。`normal` 也不能替代设备级联锁和现场验收。
+
+PLC-Sim 联调必须让 Driver 真正连接 OPC UA，所以使用 `normal`，同时用专用 启动图 把端点限制在模拟器。具体地址、配置和启动顺序见[PLC-Sim 仿真器](plc-sim.md)。不要仅凭“使用了 PLC-Sim”就把任意 `normal` 启动图 视为安全。
+
+## `local_config.py`
+
+本地模板建议保持最小配置：
+
+```python
+class BasicConfig:
+    ak = ""
+    sk = ""
+    disable_browser = True
+    no_update_feedback = True
+    log_level = "INFO"
+
+
+class WSConfig:
+    reconnect_interval = 5
+    max_reconnect_attempts = 999
+    ws_ping_interval = 5
+    ws_ping_timeout = 8
+```
+
+本地控制面不需要 AK/SK，所以示例保持空值。不要把真实凭证写进 Git。`disable_browser=True` 只是不让进程自动拉起浏览器，不会关闭 `/console/`；`no_update_feedback=True` 降低设备反馈刷新；`log_level` 支持 `TRACE`、`DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL`。
+
+当前 Workspace Host 会显式决定进程职责、ROS backend、bridge、端口和 action mode。不要在 `local_config.py` 中与启动计划重复维护这些字段。
+
+## 用环境变量覆盖配置
+
+配置加载器接受统一格式：
+
+```text
+UNILABOS_<配置类名>_<字段名>
+```
+
+例如：
+
+```bash
+export UNILABOS_BASICCONFIG_LOG_LEVEL="DEBUG"
+export UNILABOS_BASICCONFIG_FRONTEND_ALLOWED_HOSTS="127.0.0.1,localhost"
+export UNILABOS_BASICCONFIG_FRONTEND_SAME_ORIGIN="true"
+```
+
+环境变量在 `local_config.py` 之后应用，布尔值接受 `true`、`1` 或 `yes`。包含 `secret`、`token`、`password`、`api_key`、`headers`、`ak` 或 `sk` 的字段会在配置日志中遮蔽，但仍应通过 Secret 管理系统注入，不能写进源码、命令历史或文档。
+
+## Uni-Lab OS 的网络边界
+
+本地教程使用 Workspace Host 返回的 loopback 地址。若要让同一局域网中的浏览器访问，至少配置：
+
+- `frontend_allowed_hosts`：允许的 Host 列表；
+- `frontend_same_origin=True`：浏览器访问 `/api/` 时强制同源；
+- 可信的反向代理与 TLS；
+- 独立的用户认证和授权层。
+
+当前产品没有通用的全局用户登录中间件。不要把本地开发端口直接暴露公网。本手册提供的公网演示入口属于明确授权的测试部署，不能照搬为生产配置。
+
+## 配置完成后的只读核对
+
+```bash
+unilab workspace status --workspace "$DEVICE_PACKAGE_ROOT" --json
+unilab workspace logs --workspace "$DEVICE_PACKAGE_ROOT" --component backend --json
+unilab workspace logs --workspace "$DEVICE_PACKAGE_ROOT" --component edge --json
+```
+
+业务人员只需确认 Uni-Lab OS 整体就绪、设备连接正常且工作流加载完整。状态和日志中仍可能出现 `backend`、`edge` 等内部组件字段，供开发人员定位问题；这些字段不代表多个独立产品。单个内部健康检查正常，也不能替代整套系统和设备连接验收。
+
+---
+
+Source: /interfaces.md
+
+---
+orphan: true
+---
+
+# 开发工具与接口
+
+:::{admonition} 阅读角色
+- **业务负责人**：提供使用场景和预期结果，不直接操作调试接口或恢复命令。
+- **开发或运维人员**：使用开发工具、接口和日志定位并处理问题。
+- **验收人员**：确认权限、输入输出、异常处理和操作记录符合要求。
+:::
+
+本页面向设备包开发、系统集成和技术运维人员，集中说明 Workbench、命令行、MCP 和协议联调工具。业务人员的网页入口、页面导航和第一次安全操作统一见[Uni-Lab OS 快速上手](console.md)。这些工具属于同一个 Uni-Lab OS 产品，不是独立产品。
+
+## Theia Workbench
+
+Theia Workbench 是桌面/Workbench 产品，Activity Bar 包含：
+
+- 设备；
+- 机器人动作调试；
+- 机器人点位；
+- 实验台；
+- 试剂；
+- 物料；
+- 工作流；
+- Agent；
+- 环境管理和设置。
+
+实际功能由连接 Profile 决定：
+
+| 能力 | Go Backend Profile | Python Local Profile |
+| --- | --- | --- |
+| 设备目录与动作运行 | 支持 | 支持 |
+| 强制解锁 | 不支持 | 支持 |
+| 工作流读写、运行和 SSE | 支持 | 支持 |
+| Python 源码编辑 | 不支持 | 支持 |
+| 物料读取 | 支持 | 支持 |
+| 物料写入 | 不支持 | 不支持 |
+| 试剂身份 CRUD | 支持 | 不支持 |
+| 试剂库存 | CRUD + 历史 | 只读 |
+
+Local Profile 以 Python 源码/编译结果为权威；Backend Profile 以画布启动图（Graph JSON）为权威。切换 Profile 只影响之后的任务，不迁移已有任务，且未保存修改会阻止切换。
+
+### 本地安装与启动
+
+Workbench 是可选的开发入口，不是运行 Uni-Lab OS 网页或 CLI 的前置。它要求 Node 20/22、pnpm `10.13.1`、有效设备包工作区，以及同时含 Python 与 `unilab` 的环境。
+
+Workbench 的定位和入口说明见本节；实际安装应以 `uni-lab-fe` 仓库 README 为准。服务器、TLS 和公网入口仍以[Kubernetes 部署与上线](deployment.md)为准。
+
+### Agent 与设备包生成器
+
+本地 Workbench 的 Activity Bar 提供“Agent”入口，环境管理器也能启动、停止和查看当前 Workspace Agent。打开所选 Editable Package 并启动 Agent 后，右侧面板会显示当前 Workspace 会话。
+
+Workbench 随应用打包一组托管 Skill。Agent 启动时会把它们播种到当前 Workspace 的 `.agents/skills/`；其中 `unilab-domain-repo-builder` 可辅助新建、迁移和诊断实验室设备包。用户修改过的 Skill 会保留，不会被更新静默覆盖。
+
+Agent 和设备包生成器都是可选开发能力；不用它们也能手写仓库并运行产品。它们不在 Uni-Lab OS 业务页面中，也不代表生产验收。使用条件与操作步骤见[使用 AI 设备包生成器（实验性）](repository-builder-skill.md)。
+
+Workbench 的实验台只读展示逻辑站点占用，不是传感器事实；机器人点位当前不可用；Catalog 的新建、删除、变更日志和状态筛选被隐藏。旧 breakpoint debugger 与当前退役 Debug API 不兼容。
+
+### Workbench 远程共享
+
+桌面环境管理器可以启动一个秘密链接进行远程共享。代码要求非 loopback 监听必须配置 TLS 证书、HTTPS public origin、Host/Origin 校验，并用一次性 token 换取 HttpOnly cookie；默认 capability 有效期为 12 小时，停止或重启会撤销旧 generation。
+
+同一个远程 Workbench 是共享会话，不支持多人协同编辑协议。不要让两个人同时保存同一文件。
+
+## 产品口径
+
+操作页面、工作区服务、任务调度和设备运行能力统一称为 **Uni-Lab OS**。文档不再将它们列为不同产品。只有在查看日志、状态 JSON、部署清单或内部 API 时，才可能看到 `backend`、`scheduler`、`edge` 等组件名称；这些名称只用于技术定位。
+
+## 命令行
+
+安装 Uni-Lab OS 后，代码注册三个主要入口：`unilab`、`unilab-supervisor` 和 `unilab-mcp`。
+
+常用命令族：
+
+```text
+unilab workspace status|start|stop|restart|reset-local
+unilab workflow list|inspect|run|watch|command
+unilab material scene|layout|template
+unilab package inspect|build|upload|add|update|remove
+unilab login|logout|whoami
+unilab template-sync
+unilab instance-sync
+unilab doctor net|talker|listener|fake-device
+```
+
+从零创建一个能被这些命令检查、构建并由 Uni-Lab OS 加载的设备包，见[工作区](workspace.md)。
+
+`reset-local` 需要显式确认；`whoami` 只显示凭证来源，不会向服务端验证身份。旧 `workflow debug` 走退役 API，不应使用。
+
+## MCP Agent 工具
+
+安装可选 `mcp` 依赖后，`unilab-mcp --workspace <设备包工作区绝对路径>` 暴露：
+
+- Workspace 状态、单组件启停、日志和重置；
+- 工作流列表、检查、Task 运行/观察/命令，以及等待 Authoring 修订；
+- 物料 scene 捕获与检查；
+- 布局检查、预览和应用；
+- 可视回归比较与批准；
+- 模板校验。
+
+MCP 适合为 AI 提供当前工作区和运行状态，但当前没有工作流源码生成、写入、导入、发布或运行前预检工具。`wait_authoring` 只在 revision 增长或存在非空诊断时可靠返回，不能用它判断同一 revision 下的无诊断 candidate 已经生成；这时应读取 Authoring REST 状态。推荐的 AI 创作组合与安装命令见[用 AI 编写工作流](ai-workflow-authoring.md)。
+
+MCP 是由客户端拉起的本地命令型 Server，不是公网服务，也不是人类权限系统。`run_workflow` 会直接创建 Task，不能提交完整库存绑定和优先级字段，且它的 `operation_id` 不是创建幂等键；必须放在人工审查、发布和产品预检之后。重置仍需显式确认。
+
+`debug_workflow` 和带 `hold_uuid` 的旧调试命令受 HTTP 410 限制；请改用 `run_mode="step"` 的标准 Task 和普通 `step`/`resume`/`cancel` 命令。
+
+已注册的 `switch_workspace_authority` 当前会被 Workspace Host 以 `backend_mode_removed` 拒绝，不能当作可用能力。真机环境也不要用单组件 MCP stop 代替 `unilab workspace stop` 的完整排空流程。
+
+## PLC-Sim 与 Modbus-Sim
+
+Uni-Lab-Sim 仓库提供：
+
+- PLC/OPC UA 仿真器：用于模拟动作、传感器、握手、超时和故障；只有用户设备包明确需要并提供配置时才部署，完整步骤见[PLC / OPC UA 仿真器](plc-sim.md)；
+- Modbus-Sim：Modbus TCP、RTU RS-485、RTU RS-232、ASCII、多从站、CSV 寄存器和报文监视。
+
+两者是设备/工业协议联调工具，不承担 Uni-Lab OS 的任务调度、库存权威或运动安全。默认 GUI 面向本机/可信实验室网络，没有公网用户鉴权。
+
+## 不应作为正式入口的代码
+
+- `unilab-os-task-console-prototype` 是历史任务台原型，多个按钮是占位，所谓 SSE 实际为 15 秒轮询。
+- `kernel-web` 中有设备广场等实验页面，但没有挂到正式 Theia Activity Bar。
+- `apps/cloud-web` 目前只是未来占位。
+- VS Code 扩展负责打开/高亮工作流和资源、地图选择、诊断与发布快照，不会启动或控制 Runtime。
+
+---
+
+Source: /unilabos-installation.md
+
+# 设备包规范与系统启动
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备、物料、工艺流程、现场约束和设备包交付范围。
+- **开发人员**：完成工作区、设备、物料、启动图和工作流定义。
+- **验收人员**：按章节顺序检查设备包、模拟启动、异常路径和真机边界。
+:::
+
+本目录面向负责设备包开发、设备联调和实验流程配置的人员。文档按照“准备工作区 → 接入设备 → 定义物料 → 编写启动文件 → 编写工作流”的顺序组织，完成从设备包目录准备到模拟启动的全过程。
+
+> **推荐阅读顺序：** 先了解工作区和设备包组成结构，用初始化命令创建最小骨架，再根据设备控制方式选择接入模板；随后定义物料、编写启动图（Graph JSON），最后完成实验操作（子工作流）和完整工作流。
+
+```{toctree}
+:maxdepth: 1
+
+workspace
+device-template
+material-template
+startup-files
+workflow
+```
+
+## 工作区（设备包组成结构）
+
+工作区是设备包项目的根目录，用于统一保存包描述文件、设备接入代码、物料定义、启动图、工作流和测试。
+
+新建设备包可运行：
+
+```bash
+unilab workspace init --output ./sample-lab
+```
+
+命令创建 15 个文件，包含一个示例设备、一个回显动作和一个普通工作流，以及启动图、配置和测试。物料和实验操作目录预留为空，后续按实际业务补充。完整参数、文件清单和检查命令见[初始化工作区](workspace.md#初始化工作区)。
+
+## 1. 设备接入模板
+
+- [设备模板库与类别选择](template-library.md)
+- [通用规范](generic-device.md)
+- [PLC 控制的工站](plc-station.md)
+- [串口／网络连接](serial-network.md)
+- [上位机 API 接入](host-api.md)
+- [鼠标模拟点击（可选）](mouse-automation.md)
+
+## 2. 物料定义模板
+
+- [工作站台面与仓库](deck-warehouse.md)
+- [光电堆栈与旋转堆栈：物料 + 设备](stack.md)
+- [孔板与吸头盒（Plate／Tiprack）](plate-tiprack.md)
+- [容器（Container）](container-template.md)
+- [小瓶载架](vial-rack.md)
+- [弹夹](magazine.md)
+- [其他可追踪物料](other-materials.md)
+
+## 3. 启动文件
+
+编写 `启动图`，声明设备实例、物料库位、连接参数和运行配置；模拟环境和真实环境应使用不同配置。
+
+## 4. 工作流运行
+
+包括可复用的实验操作（子工作流）和完整工作流的编写。工作流只调用已登记的设备动作和物料资源，并在 `package.yaml` 中登记唯一的 `workflow_uuid` 与源文件。
+
+---
+
+Source: /repository-builder-skill.md
+
+# 使用 AI 设备包生成器（实验性）
+
+:::{admonition} 这页适合谁
+- **业务负责人**：说明设备、动作、单位、现场限制和交付目标，不需要编写代码。
+- **开发人员**：让 Coding Agent 在明确边界内创建或修改设备包，并运行当前仓库支持的检查。
+- **验收人员**：区分静态检查、构建、模拟加载和真机验收，不把较低等级的证据写成生产通过。
+:::
+
+当前 `Uni-Lab-OS` 仓库已经提供 `unilab-domain-repo-builder` Skill。它可以协助新建设备包、迁移旧代码或分层诊断设备包问题，但不会自动知道实验室现场事实，也不能代替人工审查和产品验收。
+
+:::{warning}
+这不是一键生成器。地址、单位、超时、联锁、物料位置、工作流 UUID 和凭证必须来自用户确认的资料。资料缺失时，AI 应停止猜测并列出待确认项。
+:::
+
+## 当前仓库中可以使用的内容
+
+先将本机的 Uni-Lab OS 源码目录填写为通用变量：
+
+```bash
+export UNILAB_ROOT="/absolute/path/to/Uni-Lab-OS"
+```
+
+在该源码仓库中可以核对到：
+
+| 路径 | 用途 |
+| --- | --- |
+| `$UNILAB_ROOT/` | Uni-Lab OS 源码、CLI、设备包合同和产品手册 |
+| `$UNILAB_ROOT/.cursor/skills/unilab-domain-repo-builder/SKILL.md` | 新建、迁移、诊断和验证设备包的 Coding Agent 指南 |
+| `$UNILAB_ROOT/.cursor/skills/unilab-domain-repo-builder/references/` | 包模板、装饰器和 Workflow Python 合同 |
+| `$UNILAB_ROOT/.cursor/skills/add-device/SKILL.md` | 编写单个设备驱动时的补充参考 |
+| `PLC-Sim/` | 可选的 PLC、OPC UA 和 Modbus 联调工具；仅在设备包明确需要时使用 |
+
+先在终端执行只读检查：
+
+```bash
+test -f "$UNILAB_ROOT/setup.py"
+test -f "$UNILAB_ROOT/unilabos/package_manager/cli.py"
+test -f "$UNILAB_ROOT/.cursor/skills/unilab-domain-repo-builder/SKILL.md"
+test -f "$UNILAB_ROOT/.cursor/skills/add-device/SKILL.md"
+```
+
+四条命令都不输出错误，才说明本页引用的 Uni-Lab OS 文件在当前仓库中存在。`PLC-Sim` 是可选工具，不是设备包开发或 Uni-Lab OS 启动的必需条件。
+
+## AI 能做什么
+
+| 场景 | 可以请 AI 完成 | 必须由人确认 |
+| --- | --- | --- |
+| 新建设备包 | 创建包结构、清单、设备和工作流骨架，补充测试 | 业务名称、设备型号、动作含义、单位和交付范围 |
+| 迁移设备包 | 盘点旧代码，逐步迁移装饰器、清单、模拟器和测试 | 兼容范围、现场协议和允许删除的旧能力 |
+| 修改设备 | 找到同类实现，小范围修改 Driver、模拟器、启动图和测试 | 地址表、参数、超时、安全联锁和恢复方式 |
+| 排查失败 | 按 Package、Registry、Catalog、Authoring、Runtime 分层定位 | 现场连接、硬件故障和真机验收结论 |
+
+AI 不应连接真机、启动实验、发布包、写入凭证或更改生产配置，除非业务负责人对本次任务明确授权。
+
+## 第一步：确认目标设备包
+
+设备包是用户自己的项目，不由本手册虚构名称。先取得它的绝对路径，并确认至少包含以下文件：
+
+```bash
+export DEVICE_PACKAGE_ROOT="/absolute/path/to/user-device-package"
+
+test -f "$DEVICE_PACKAGE_ROOT/pyproject.toml"
+test -f "$DEVICE_PACKAGE_ROOT/package.yaml"
+test -f "$DEVICE_PACKAGE_ROOT/deployment/local_config.py"
+```
+
+如果文件缺失，不要从其他项目复制现场数据。新项目应先按[初始化工作区](workspace.md#初始化工作区)创建带教学示例的最小骨架，再填写需求卡和自己的配置；已有项目按[工作区规范](workspace.md)补齐，初始化命令不会覆盖已有目录。
+
+## 第二步：填写需求卡
+
+把下面内容复制到任务中。不会填写的项目写“待确认”。
+
+```text
+任务类型：新建 / 迁移 / 修改 / 只读排查
+目标设备包绝对路径：
+业务目标：完成后用户能够做什么
+
+发布名称与 Python 包名：
+设备名称和型号：
+通信协议：串口 / Modbus / OPC UA / HTTP / 其他
+协议资料或地址表：文件路径、版本和负责人
+动作：名称、输入、单位、输出、超时和失败表现
+状态：需要展示或记录的状态、单位和更新频率
+
+资源与放置位：容器、载架、父子关系和允许位置
+目标工作流：输入、输出、顺序、并行和失败条件
+模拟范围：可以模拟什么，哪些项目必须真机确认
+
+允许 AI 执行：只读 / 修改代码 / 运行测试 / 构建 / dry-run
+禁止 AI 执行：连接真机 / 启动任务 / 发布 / 写入凭证 / 其他
+完成标准：本次允许执行到哪一道验证门
+```
+
+业务负责人至少确认业务目标、动作含义、单位、失败表现、现场限制和完成标准。技术字段可以由开发人员补充，但必须注明资料来源。
+
+## 第三步：把任务交给 Coding Agent
+
+将下面提示词中的路径替换为实际设备包路径，然后连同填写好的需求卡一起提交：
+
+```text
+请使用以下本地 Skill 处理 Uni-Lab OS 设备包任务：
+<Uni-Lab-OS 源码绝对路径>/.cursor/skills/unilab-domain-repo-builder/SKILL.md
+
+如需修改单个设备驱动，再读取：
+<Uni-Lab-OS 源码绝对路径>/.cursor/skills/add-device/SKILL.md
+
+目标设备包：/absolute/path/to/user-device-package
+
+开始前先读取目标设备包内实际存在的 AGENTS.md、pyproject.toml、package.yaml、
+README、目标启动图和相关测试，并报告 Git 状态。使用实际运行该设备包的 Python，
+输出 sys.executable、unilabos.__file__ 和 pip show unilabos。不要根据相邻目录、
+旧文档或其他设备包猜测版本和现场事实。
+
+先列出已知事实、待确认项、拟修改文件和验证计划。每次只完成一个可验证的小闭环。
+不要发明设备、动作、单位、地址、NodeId、资源关系、UUID、超时、联锁或凭证；
+保留已有修改，不覆盖无关工作。未经需求卡明确授权，不连接真机、不启动实验、
+不发布、不写入密钥。
+
+修改后按产品手册的依赖与 Python 包、package inspect、package build 和 dry-run
+验证门逐项检查。报告每条命令、退出状态、运行模式、关键结果、剩余风险和人工待办。
+任何一道门失败，都不要声称设备包已经可用。
+
+需求卡：
+<粘贴填写后的需求卡>
+```
+
+如果本轮只需要诊断，在提示词第一行补充：
+
+```text
+本轮只做只读排查，不修改文件、不安装依赖、不启动服务、模拟器或设备。
+```
+
+## 第四步：人工审查修改
+
+运行服务前，先由开发人员检查改动。下面命令中的路径必须是已经确认的设备包路径：
+
+```bash
+git -C "$DEVICE_PACKAGE_ROOT" status --short
+git -C "$DEVICE_PACKAGE_ROOT" diff
+```
+
+至少确认：
+
+- 修改只发生在目标设备包，没有覆盖其他人的工作；
+- 没有密钥、令牌、生产地址或个人信息；
+- `pyproject.toml`、Python 包目录和 `package.yaml` 使用同一包身份；
+- 动作名称、参数、类型、单位、返回值和状态符合需求卡；
+- 真实驱动与模拟器使用相同的动作合同；
+- 启动图中的实例和连接配置有明确来源；
+- 工作流没有复制其他项目的现场 UUID、地址或物理布局。
+
+有任何现场事实无法确认时，停止验收，回到需求卡补充。
+
+## 第五步：按验证门检查
+
+先激活当前安装使用的环境，并确认 Python 来源：
+
+```bash
+mamba activate unilab
+export UNILAB_ROOT="/absolute/path/to/Uni-Lab-OS"
+export DEVICE_PACKAGE_ROOT="/absolute/path/to/user-device-package"
+cd "$DEVICE_PACKAGE_ROOT"
+
+python -c 'import sys, unilabos; print(sys.executable); print(unilabos.__file__)'
+python -m pip show unilabos
+```
+
+### 验证门一：依赖和 Python 包
+
+```bash
+python -m pip install -e '.[dev]'
+python -m pip check
+python -m compileall <实际的_Python_包目录>
+```
+
+尖括号中的内容必须替换为 `pyproject.toml` 中登记并实际存在的 Python 包目录。不要直接复制占位符执行。
+
+### 验证门二：设备包目录与合同
+
+```bash
+unilab package inspect \
+  --path "$DEVICE_PACKAGE_ROOT" \
+  --out "$DEVICE_PACKAGE_ROOT/dist/inspect"
+```
+
+报告中不能有语法错误、重复 ID、重复 UUID、缺失源文件或无法解析的类型。
+
+### 验证门三：构建交付物
+
+```bash
+unilab package build \
+  --path "$DEVICE_PACKAGE_ROOT" \
+  --out "$DEVICE_PACKAGE_ROOT/dist/build"
+```
+
+检查 wheel、Catalog 和设备包需要的配置、模型及图片是否都进入交付物。构建成功不代表设备已连接。
+
+### 验证门四：安全加载
+
+只有需求卡明确允许启动本地组件时才执行，并将启动图替换为设备包中真实存在的模拟或隔离测试文件：
+
+```bash
+unilab workspace start \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --graph deployment/graphs/<实际的测试启动图>.json \
+  --runtime-mode dry-run \
+  --wait 300 \
+  --json
+
+unilab workspace status \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --json
+
+unilab workspace stop \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --wait 300 \
+  --json
+```
+
+`dry-run` 只证明 Uni-Lab OS 能在安全模式发现和加载设备包，不能证明通信、联锁、急停或物理动作正确。
+
+## 如何写验收结论
+
+| 已取得的证据 | 可以得出的结论 | 不能得出的结论 |
+| --- | --- | --- |
+| Python 编译成功 | 源码可解析 | 设备包合同正确 |
+| `package inspect` 成功 | 包结构和静态合同可检查 | 运行时或真机正常 |
+| 测试及 `package build` 成功 | 已覆盖测试通过，交付物可生成 | 所有现场场景都已覆盖 |
+| Workspace `dry-run` 成功 | 产品可安全发现并加载设备包 | 模拟器或真机已经通过 |
+| 隔离模拟器通过 | 指定的模拟行为通过 | 真实硬件和联锁正确 |
+| 受控真机验收通过 | 记录中覆盖的硬件场景通过 | 未验收的型号或工况也通过 |
+
+推荐写法是：“已通过 Package 检查、构建和 dry-run，真机未验收。”不要只写“设备包已完成”。
+
+## 常见失败
+
+| 现象 | 处理方式 |
+| --- | --- |
+| 找不到 Skill | 确认 `$UNILAB_ROOT` 指向当前 Uni-Lab OS 源码仓库，再检查上文列出的实际文件路径 |
+| `ModuleNotFoundError` | 核对 `sys.executable` 和 `unilabos.__file__`，切换到实际 Uni-Lab 环境 |
+| `package inspect` 失败 | 从第一条错误开始修复包名、清单、源码、UUID 或注册信息 |
+| 构建后缺文件 | 补充 `pyproject.toml` 的 package data 配置，再重新构建和检查 wheel |
+| dry-run 成功、真机失败 | 单独检查协议、地址、超时、联锁和硬件状态，不把 dry-run 当真机证据 |
+
+设备包每个文件的职责和完整验证要求见[工作区](workspace.md)；单个设备驱动的业务模板见[设备接入模板](device-template.md)。
+
+---
+
+Source: /scenario-guide.md
+
+# 设备包验收
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认可运行范围、审批条件、结果要求和异常处置责任。
+- **开发或运维人员**：配置运行模式、资源调度、监控、停止和恢复机制。
+- **验收人员**：验证资源冲突、超时、取消、未知结果、安全停机和追溯记录。
+:::
+
+本页说明如何验证用户自行准备的设备包。验收目标不是“页面能打开”，而是确认设备、物料、工作流和现场约束在同一个配置版本下能够正确配合。
+
+开始前先用[能力检查表](capability-matrix.md)确认设备包已经达到“已定义、已加载、已连接、已联调”中的哪一层；验收完成后，按[版本与验收记录](evidence.md)保存系统版本、设备包版本、启动图（Graph JSON）和结果证据。
+
+## 先确认验收范围
+
+设备包负责人应提供：设备包版本、启动图、运行模式、工作流清单、所需物料、可用设备、风险说明和预期结果。安装人员通过 `unilab package inspect` 与 `unilab workspace status` 核对实际加载内容，不能使用记忆中的数量或旧截图判断。
+
+## 分阶段验收
+
+| 阶段 | 目的 | 建议场景 |
+| --- | --- | --- |
+| 静态检查 | 发现缺文件、重复 ID 和参数错误 | 检查设备包与 启动图，不启动设备 |
+| 模拟联调 | 验证动作合同、状态转换和失败路径 | 全模拟设备或协议仿真器 |
+| 单设备测试 | 验证一台真实设备的连接和基础动作 | 只加载获准测试的设备 |
+| 多设备联调 | 验证搬运、共享资源和步骤依赖 | 小批量、无危险材料的测试流程 |
+| 生产验收 | 验证正式 启动图、权限和安全规程 | 审批后的完整流程 |
+
+前一阶段没有通过时，不进入下一阶段。
+
+## 工作流覆盖建议
+
+设备包至少应准备以下类型的验收工作流：
+
+- 只读状态检查：不产生设备动作，用于确认实例和连接；
+- 单动作冒烟测试：用安全参数验证每类设备的一个核心动作；
+- 物料约束测试：验证物料类型、单位、容量、库位和占用规则；
+- 多设备串联测试：验证上一步输出能否正确传给下一台设备；
+- 共享资源测试：两个任务竞争同一设备或库位时应等待，而不是同时占用；
+- 故障测试：设备离线、参数越界、超时和人工取消都要有清楚结果。
+
+## 创建任务前的业务核对
+
+1. 工作流名称、用途和风险与本次验收一致。
+2. 输入参数标明单位、允许范围和默认值，默认值不会触发危险动作。
+3. 所有设备在线，且实例 ID 与 启动图 一致。
+4. 物料类型正确，数量、容量、状态和当前位置满足要求。
+5. 来源和目标库位存在、空闲且允许放置该物料。
+6. 模拟与真实设备没有混用，生产地址没有进入测试 启动图。
+7. 急停、互锁、人员防护和现场清场已经按管理制度确认。
+
+## 通用端到端示例
+
+下面是一条与具体行业无关的样品处理流程，用于说明验收思路：
+
+1. 从原料区取得容器并确认容器类型。
+2. 由加料设备按目标量加入物料。
+3. 将容器移动到混合设备，按规定时间和速度处理。
+4. 将样品送到检测设备并记录结果。
+5. 将容器送回指定库位，提交最终物料位置和状态。
+
+验收时为每一步记录：调用的设备实例、输入参数、开始/结束时间、输出、物料位置变化和异常。示例中的设备名称必须替换为用户设备包实际定义的实例，不能照抄为生产配置。
+
+## 如何判断等待与故障
+
+共享设备、机械臂或唯一库位被占用时，任务可以进入等待。应在任务详情中看到具体等待对象；资源释放后任务继续。以下情况应判为故障并处理，而不是无限等待：设备持续离线、目标库位不存在、输入不合法、互锁未满足、动作超过规定超时。
+
+## 结果验收
+
+| 结果 | 需要确认 |
+| --- | --- |
+| 任务成功 | 所有必要步骤成功，且没有被忽略的设备告警 |
+| 设备输出 | 数值有单位和合理范围，文件或检测结果确实存在 |
+| 物料变化 | 数量、状态和位置与实际现场一致 |
+| 调度记录 | 共享资源没有被重复占用，等待和释放顺序可解释 |
+| 失败结果 | 明确指出失败步骤、设备和原因，不把超时当成功 |
+
+设备发出的“目标值”不一定等于传感器实测值。设备包应为两类字段使用不同名称，并在页面说明其业务含义。
+
+## 验收完成的判据
+
+- 使用的 Uni-Lab OS、设备包和 启动图 版本均有记录；
+- 关键工作流在规定模式下通过；
+- 参数越界、设备离线和超时能够安全失败；
+- 物料账面位置与现场一致；
+- 生产所需的人工步骤、权限和恢复办法已写入交付记录。
+
+未满足任一项时，应记录问题并回到相应的设备、物料或部署章节修正。
+
+---
+
+Source: /workspace.md
+
+# 工作区
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备包范围、现场对象、业务名称和交付目标。
+- **开发人员**：建立目录、登记清单、依赖、启动图和测试。
+- **验收人员**：确认设备包能够被检查、构建、模拟启动并留下版本记录。
+:::
+
+工作区是用户设备包的项目根目录。它把设备类型、物料模板、启动图（Graph JSON）、工作流和测试放在同一个可交付版本中，供 Uni-Lab OS 检查和加载。
+
+设备包由用户自行准备。Uni-Lab OS 不会从任意目录猜测要加载哪些文件；启动时必须通过 `--workspace` 指向一个明确的设备包根目录。
+
+(workspace-initialization)=
+## 初始化工作区
+
+安装 Uni-Lab OS 后，可以用 `unilab workspace init` 创建一个设备包工作区。命令生成 15 个文件，包含一个无硬件副作用的示例设备、一个 `echo` 动作和一个调用该动作的普通工作流。
+
+### 创建命令
+
+在已经安装 Uni-Lab OS 的 Python 环境中运行：
+
+```bash
+unilab workspace init --help
+```
+
+若提示没有 `init` 子命令，当前安装的版本尚未包含此功能，需要更新到包含该功能的版本；也可以先使用[已准备好的示例设备包](demo-lab.md)。命令可用后创建工作区：
+
+```bash
+unilab workspace init --output ./sample-lab
+```
+
+目标目录必须尚不存在，已有空目录也会被拒绝。命令只生成文件；依赖安装、设备包检查和工作区启动由后续命令完成。
+
+默认使用输出目录名派生包身份：`sample-lab` 对应发布名称 `sample-lab`、Python 包目录 `sample_lab/` 和类型命名空间 `community.sample_lab`。需要单独指定名称或供脚本读取时：
+
+```bash
+unilab workspace init --output ./device-workspace --name sample_lab --json
+```
+
+`--name` 以小写英文字母开头，以字母或数字结尾，中间可以使用小写字母、数字、点、连字符和下划线。连续分隔符统一折叠为一个下划线；规范化后不能是 `class`、`import` 等 Python 关键字。省略 `--name` 时，目录名先转为小写再按相同规则检查。
+
+`--json` 返回工作区绝对路径、发布名称、Python 包名、创建的文件清单和下一步命令。非法名称、目标已存在或写入失败时，命令以非零状态退出并返回错误码；不会覆盖已有目录。
+
+### 生成内容
+
+```text
+sample-lab/
+├── .gitignore
+├── DEVICE_PACKAGE_REQUIREMENTS.md
+├── README.md
+├── pyproject.toml
+├── package.yaml
+├── deployment/
+│   ├── local_config.py
+│   └── graphs/
+│       └── dry-run.json
+├── sample_lab/
+│   ├── __init__.py
+│   ├── devices/
+│   │   ├── __init__.py
+│   │   └── demo_device.py
+│   ├── resources/
+│   │   └── __init__.py
+│   ├── experiment_operations/
+│   │   └── __init__.py
+│   └── workflows/
+│       ├── __init__.py
+│       └── demo_workflow.py
+└── tests/
+    └── test_workspace_contract.py
+```
+
+- `pyproject.toml`：一致的包身份、构建配置、开发依赖以及默认启动图和配置文件。
+- `package.yaml`：登记示例工作流的源文件和 UUID，与源码装饰器保持一致。
+- `demo_device.py`：定义 `DemoDevice.echo(text)`，返回 `success` 和 `echoed_text`。
+- `demo_workflow.py`：调用 `demo_device_01` 的 `echo` 动作并返回结果。
+- `dry-run.json`：包含一个示例设备实例，其 `class` 与生成的设备类型一致。
+- `local_config.py`：关闭自动打开浏览器和更新反馈，设置 INFO 日志级别。
+- 需求卡、README 和测试：记录待确认的业务事实，并验证包身份、启动文件、目录发现和回显动作。
+
+`resources/` 和 `experiment_operations/` 当前只有 `__init__.py`，分别预留给物料模板和可复用实验操作。初始化没有生成物料类型、PLC 协议适配、PLC-Sim 配置或生产图。按下文规范补充实际需要的内容；`common/` 等共享代码目录按需创建。
+
+### 验证和继续开发
+
+先进入生成的目录并执行：
+
+```bash
+cd sample-lab
+python -m pip install -e '.[dev]'
+python -m pytest -q
+unilab package inspect --path . --out dist/inspect
+unilab package build --path . --out dist/build
+```
+
+预期自带的两项测试通过，设备包目录中有一个设备类型和一个普通工作流，并成功生成 wheel。`unilab package build` 会把默认启动图和本地配置收录到构建产物；后续新增的图片、模型等资产仍需按工作区规范声明打包规则。
+
+需要验证运行时加载时，继续完成[下文的四道验证门](#workspace-validation)，使用 `dry-run` 启动并检查状态。示例回显和构建通过仅证明基础骨架可用。
+
+接入实际设备前，填写 `DEVICE_PACKAGE_REQUIREMENTS.md` 中的设备型号、协议、动作、参数单位、状态、异常和验收要求，再按[设备接入模板](device-template.md)、[物料定义模板](material-template.md)和[工作流](workflow.md)逐步替换教学示例。
+
+下文说明设备包的文件职责和扩展规范。初始化已生成的文件可直接检查，并按实际业务补充；文档中的 `example_lab` 请替换为自己的 Python 包名。
+
+## 设备包的文件组成与作用
+
+```text
+pyproject.toml ───────────────► 包名称、版本、依赖和 Python 导入目录
+Python 包中的设备与物料定义 ─► 可用类型、动作、状态和资源合同
+package.yaml ────────────────► 本次允许加载的工作流源文件
+启动图 ──────────────────────► 本次启用的设备、物料、放置位和连接配置
+                                      │
+                                      ▼
+                                 Uni-Lab OS
+```
+
+这四部分各有明确职责，不能互相替代：
+
+| 文件或内容 | 负责什么 | 不负责什么 |
+| --- | --- | --- |
+| `pyproject.toml` | 包名称、版本、依赖和构建配置 | 不选择本次启用的设备实例 |
+| 设备与物料定义 | 声明可用类型、动作、状态和约束 | 不保存现场连接地址 |
+| `package.yaml` | 列出允许加载的工作流及其 UUID | 不登记设备或物料实例 |
+| 启动图 | 创建实例、建立拓扑并提供非敏感连接配置 | 不自动加载未登记的工作流 |
+
+## 步骤一：确定规范目录
+
+下面的结构适合从零创建并长期维护一个设备包。`example_lab` 是示例 Python 包名，请替换为自己的业务名称，并在所有配置中保持一致。
+
+```text
+device-package/
+├── pyproject.toml
+├── package.yaml
+├── example_lab/
+│   ├── __init__.py
+│   ├── common/                         # 多个设备共用的协议、日志和工具
+│   ├── devices/                        # 设备类型、动作和驱动
+│   ├── resources/                      # 物料、容器、仓库和放置位模板
+│   ├── experiment_operations/          # 可复用实验操作
+│   └── workflows/                      # 完整工作流
+├── deployment/
+│   ├── local_config.py
+│   └── graphs/
+│       ├── dry-run.json                # 模拟检查使用
+│       └── production.json             # 真实环境使用
+├── tests/                              # 合同、模拟和异常路径测试
+└── README.md                           # 安装、启动、安全和恢复说明
+```
+
+:::{warning}
+Python 导入包必须直接位于工作区根目录，并包含 `__init__.py`。不要改成 `<workspace>/src/example_lab/`，也不要同时维护两套包目录，否则 Uni-Lab OS 可能无法发现规范包。
+:::
+
+只创建实际需要的目录。设备和物料可以按业务领域继续分层，但工作流源文件必须在 `package.yaml` 中逐项登记。
+
+## 步骤二：统一包身份
+
+在 `pyproject.toml` 中声明设备包的名称、版本、依赖和启动文件：
+
+```toml
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "example-lab"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["unilabos"]
+
+[project.optional-dependencies]
+dev = ["build>=1.2", "pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["example_lab*"]
+
+[tool.unilabos.startup]
+graph = "deployment/graphs/dry-run.json"
+config = "deployment/local_config.py"
+ensure_dependencies = true
+```
+
+同一个设备包的身份必须前后一致：
+
+| 用途 | 示例 | 约束 |
+| --- | --- | --- |
+| 发布名称 | `example-lab` | 写在 `project.name` 中 |
+| Python 包目录 | `example_lab/` | 使用小写字母和下划线 |
+| 清单包名 | `example_lab` | 与规范化后的 Python 包名一致 |
+| 类型命名空间 | `community.example_lab` | 由检查结果确认，不手工另造一套名称 |
+
+如需随包发布 CSV、JSON、YAML、图片或三维模型，应把相应扩展名加入 setuptools 的 package data。否则本地开发可能正常，构建后的安装包却会缺少资产。
+
+设备驱动使用的第三方库应声明在 `dependencies` 中。密码、令牌和生产密钥不得写入 `pyproject.toml`、启动图或源码，应由运行环境的密钥配置提供。
+
+## 步骤三：登记工作流
+
+`package.yaml` 是允许加载的工作流清单：
+
+```yaml
+package:
+  name: example_lab
+
+workflows:
+  - workflow_uuid: 41d51b13-8269-47cc-ad16-a553ed926f11
+    source: example_lab/experiment_operations/standard_transfer.py
+  - workflow_uuid: e96ea082-d18d-40da-907d-13cfc5b899af
+    source: example_lab/workflows/sample_process.py
+```
+
+必须遵守以下约束：
+
+- 顶层只写 `package` 和 `workflows`；
+- 每个工作流只写 `workflow_uuid` 和 `source`；
+- `source` 使用设备包内相对路径，且文件必须真实存在；
+- UUID 必须与源码装饰器中的 `workflow_uuid` 完全一致；
+- 同一 UUID 或路径不能重复；
+- 暂时没有工作流时写 `workflows: []`，不能写 `null`；
+- 位于 `workflows/` 的文件不会自动加载，仍然必须进入该清单。
+
+设备和物料类型由 Python 包中的规范定义形成目录，具体写法见[设备接入模板](device-template.md)和[物料定义模板](material-template.md)。实例、连接参数和父子关系写入[启动文件](startup-files.md)，流程源码按[工作流](workflow.md)中的规范登记。
+
+## 步骤四：准备本地配置
+
+在 `deployment/local_config.py` 中保存非敏感的本地运行设置：
+
+```python
+class BasicConfig:
+    ak = ""
+    sk = ""
+    disable_browser = True
+    no_update_feedback = True
+    log_level = "INFO"
+```
+
+本地开发时 `ak`、`sk` 保持为空。真实凭证使用环境变量或部署密钥注入，不得提交到设备包。
+
+(workspace-validation)=
+## 步骤五：通过四道验证门
+
+先把命令中的路径替换为实际设备包绝对路径：
+
+```bash
+export DEVICE_PACKAGE_ROOT="/absolute/path/to/device-package"
+cd "$DEVICE_PACKAGE_ROOT"
+```
+
+### 验证门一：依赖与 Python 包
+
+```bash
+python -m pip install -e '.[dev]'
+python -m pip check
+python -m compileall example_lab
+```
+
+只有三条命令都成功，才能继续。若 Python 包名不是 `example_lab`，最后一条命令使用实际目录名。
+
+### 验证门二：设备包目录与合同
+
+```bash
+unilab package inspect \
+  --path "$DEVICE_PACKAGE_ROOT" \
+  --out "$DEVICE_PACKAGE_ROOT/dist/inspect"
+```
+
+检查报告中不得出现语法错误、重复 ID、重复 UUID、缺失源文件或无法解析的设备与物料类型。启动图中的 `class` 应从检查结果复制，不能依靠猜测填写。
+
+### 验证门三：构建交付物
+
+```bash
+unilab package build \
+  --path "$DEVICE_PACKAGE_ROOT" \
+  --out "$DEVICE_PACKAGE_ROOT/dist/build"
+```
+
+构建完成后检查安装包和 Catalog 是否同时生成，并确认配置表、模型和图片等运行资产已经进入交付物。构建成功不代表真机已经连接。
+
+### 验证门四：安全加载工作区
+
+```bash
+unilab workspace start \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --graph deployment/graphs/dry-run.json \
+  --runtime-mode dry-run \
+  --wait 300 \
+  --json
+
+unilab workspace status \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --json
+```
+
+验收人员应确认：Uni-Lab OS 已就绪、设备包版本正确、设备与物料实例完整、工作流全部加载，并且没有真实设备动作。检查结束后停止工作区：
+
+```bash
+unilab workspace stop \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --wait 300 \
+  --json
+```
+
+`dry-run` 只证明设备包发现、合同解析、启动图和工作流能够安全加载，不能证明真实驱动、现场联锁或物理动作已经通过验收。切换 `normal` 前必须另做隔离模拟器或受控真机验收。
+
+## 步骤六：按小闭环逐步扩展
+
+不要一次接入全部设备。推荐每次完成一个可验证的小闭环：
+
+1. 增加一个设备或物料类型；
+2. 在启动图中增加一个实例；
+3. 编写一个只使用该实例的最小工作流；
+4. 增加正常、超时和失败测试；
+5. 重新执行检查、构建和 dry-run；
+6. 验收通过后再接入下一个对象。
+
+多个工站共用同一控制器时，只建立一个控制器连接，由各业务设备引用该连接；不要让每个设备重复建立会话。真实实现与模拟实现可以使用不同通信方式，但动作名称、参数、结果和状态合同必须一致。
+
+## 常见问题
+
+| 现象 | 常见原因 | 处理方式 |
+| --- | --- | --- |
+| 找不到规范 Python 包 | 包放在 `src/` 下、名称不一致或缺少 `__init__.py` | 把唯一的规范包直接放到工作区根目录 |
+| `package.yaml` 无法读取 | 字段多写、漏写、重复或 `workflows: null` | 按本页封闭结构修改，空清单写 `[]` |
+| 工作流没有出现 | 未登记源文件，或清单 UUID 与源码不一致 | 同步相对路径和 UUID 后重新加载 |
+| 设备类型找不到 | 启动图中的 `class` 不存在或含义不明确 | 从 `package inspect` 结果复制完整类型名称 |
+| 工作流绑定不到设备 | 工作流使用了设备类型 ID，而不是启动图实例 ID | 改为启动图中稳定且唯一的实例 ID |
+| 本地可用、构建后缺文件 | 资产或子包没有进入构建配置 | 补充 package data 后重新构建并检查 |
+| dry-run 成功但真实运行失败 | dry-run 不连接真实驱动 | 在隔离环境检查构造参数、通信、超时和联锁 |
+
+## 交付前核对
+
+- [ ] `project.name`、Python 包目录、`package.yaml` 和类型命名空间一致；
+- [ ] 设备、物料、放置位和工作流身份稳定且唯一；
+- [ ] 模拟与生产启动图分离，生产地址和密钥未进入源码；
+- [ ] `package.yaml` 中每个源文件和 UUID 均可核对；
+- [ ] 驱动依赖及运行资产完整进入交付物；
+- [ ] 依赖检查、设备包检查、构建和 dry-run 全部通过；
+- [ ] 真实运行前已完成连接、联锁、急停、取消和异常恢复验收；
+- [ ] README 说明安装、启动、停止、升级和故障处理方式。
+
+---
+
+Source: /device-template.md
+
+# 1. 设备接入模板
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+这组模板写给第一次接触 Uni-Lab OS 的业务人员、项目实施人员和设备开发人员。按照本章操作后，一台真实设备应能出现在系统设备清单中，页面能显示它的状态，工作流也能调用它的动作。
+
+文档中所说的“设备接入”，可以简单理解为：先告诉系统“这是什么设备、能做什么”，再补充“系统通过什么方式控制它”。前一部分要保持稳定，后一部分可以根据 PLC、串口或厂商软件分别实现。这样将来更换设备品牌时，原有业务流程不需要全部重写。
+
+:::{note} 本章中的几个词
+**设备类型**表示一类设备，例如“蠕动泵”；**设备实例**表示现场的一台具体设备，例如“一号蠕动泵”；**动作**表示操作员希望设备完成的事情，例如“设置转速”；**启动图（Graph JSON）** 是系统启动时读取的设备和物料清单；**Catalog** 是系统从设备包中识别出的可用类型清单。
+:::
+
+```{toctree}
+:maxdepth: 1
+
+template-library
+device-registration
+generic-device
+plc-station
+serial-network
+host-api
+mouse-automation
+```
+
+## 先判断设备由什么方式控制
+
+| 设备现状 | 优先阅读 | 典型设备 |
+| --- | --- | --- |
+| 设备有 PLC 和状态点位 | PLC 控制的工站 | 传送、抓取、液体处理工站 |
+| 设备提供串口、TCP 或 Modbus 协议 | 串口／网络连接 | 泵、阀、温控器、网关 |
+| 设备只能由厂商软件控制 | 上位机 API 接入；没有 API 时再看鼠标模拟 | 分析仪、读板机、封闭软件 |
+| 设备会旋转、选层或用光电判断占位 | [光电堆栈与旋转堆栈：物料 + 设备](stack.md) | 旋转仓、带光电的料架；同时登记 Stack/Site 物料树和设备能力 |
+| 需要先统一设备的动作名称和参数 | 通用设备规范 | 加热器、振荡器、泵、测试设备 |
+
+## 从资料准备到现场可用
+
+无论设备使用哪种协议，都按同一顺序完成：
+
+1. **收集设备资料**：型号、固件、协议、动作、参数、单位、范围、返回值、错误码和安全条件；
+2. **列出系统要提供的能力**：用 `@device` 登记设备，用 `@action` 登记可执行操作，用 `@topic_config` 登记页面需要显示的只读状态；
+3. **实现控制方式**：把 PLC、串口、TCP、HTTP/SDK 或鼠标操作写在设备驱动内部，不暴露给业务流程；
+4. **让系统发现设备**：在 `devices/__init__.py` 中导入设备模块，避免代码已经写好但系统清单中找不到；
+5. **加入启动清单**：在 启动图 中填写现场设备的唯一编号、设备类型和连接参数；
+6. **先做离线检查**：检查代码和设备包结构，再使用模拟设备进行试运行；
+7. **现场验收**：最后验证真机、联锁、超时、断线和恢复。
+
+完成接入至少要交付：设备 Python 模块、启动图 节点、模拟或测试替身、参数/错误说明和自动化测试。
+
+## 最小设备包目录
+
+```text
+my-device-package/
+├── pyproject.toml
+├── package.yaml
+├── README.md
+└── my_device_package/
+    ├── __init__.py
+    ├── devices/
+    │   ├── __init__.py
+    │   └── pump.py
+    ├── config/
+    │   └── graph.json
+    ├── resources/
+    ├── workflows/
+    └── tests/
+```
+
+`my_device_package/devices/__init__.py`：
+
+```python
+from .pump import MyLabPump
+
+__all__ = ["MyLabPump"]
+```
+
+## 每个字段应该怎样填写
+
+| 项目 | 必须遵守的规则 | 示例 |
+| --- | --- | --- |
+| `@device.id` | 设备类型的永久编号。全局唯一、稳定、使用小写英文和下划线；不使用中文、空格、IP 或序列号 | `my_lab_pump` |
+| 启动图 `id` | 现场这台设备的编号。同型号有多台设备时，每台都要不同 | `pump_01` |
+| `category` | 按工艺能力分类，不按厂商营销名称分类 | `['liquid_handling', 'pump']` |
+| 动作名 | 使用业务动词，`snake_case`；不暴露 HTTP 路径、寄存器或按钮坐标 | `set_speed` |
+| 参数名 | 表达业务含义并保持跨驱动一致 | `speed_rpm` |
+| 参数类型 | 必须有 Python 类型注解；避免无约束 `Any` | `float` |
+| 单位 | 写入参数名或描述，且只允许一种单位 | `temperature_c` |
+| 范围 | 在驱动入口校验；越界立即抛 `ValueError` | `0 <= speed_rpm <= 300` |
+| 默认值 | 只使用安全、无歧义默认值；危险动作参数不应靠默认值启动 | `speed_rpm=0.0` |
+| 返回结果 | 使用固定结构，至少能判断成功或失败；不能同一个动作有时返回文字、有时返回数字 | `{'success': True, 'message': '...'}` |
+| 页面状态 | 读取状态不能让设备产生动作；要能表示待机、运行、故障和无法确认 | `idle/running/fault/unknown` |
+| 密码或令牌 | 不写在代码和 启动图 中，通过环境变量或系统密钥功能提供 | `token_env='PUMP_TOKEN'` |
+
+动作说明至少写清：用途、参数单位和范围、成功判据、超时语义、是否可取消、是否允许安全重试。
+
+## 把现场设备加入启动清单
+
+```json
+{
+  "id": "pump_01",
+  "name": "一号蠕动泵",
+  "children": [],
+  "parent": null,
+  "type": "device",
+  "class": "community.my_device_package.my_lab_pump",
+  "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+  "config": {
+    "port": "/dev/tty.usbserial-0001",
+    "baudrate": 9600,
+    "timeout": 2.0,
+    "auto_connect": false
+  },
+  "data": {"status": "offline"}
+}
+```
+
+- `class` 表示使用哪一种设备模板，必须从设备包检查报告中复制完整类型名称，例如 `community.my_device_package.my_lab_pump`；不要凭文件路径猜写；
+- `config` 保存这台设备的连接设置，字段名称必须与设备代码接收的参数名称一致；
+- `data` 保存页面首次显示的状态，不能用于保存密码；
+- `position` 只决定页面中的布局位置，不代表机器人可以直接使用的运动坐标；
+- 新接入阶段保持 `auto_connect: false`，先显式连接和验证身份。
+
+## 交付前检查
+
+```bash
+python -m compileall my_device_package
+unilab package inspect --path . --out ./inspect-output
+```
+
+第一条命令检查代码是否能正常加载；第二条命令生成设备包检查报告。报告必须满足：设备编号没有重复、动作表单中的字段正确、启动图 能找到对应设备类型、仅仅启动系统不会让设备自动运动，以及错误配置会给出明确提示。
+
+## 接入完成的判定
+
+- Uni-Lab OS 页面中能看到设备实例、状态和可用动作；
+- 每个动作的输入字段有中文说明、单位和取值范围；
+- 成功、失败、超时和人工介入状态有明确提示；
+- 设备断线、报警、急停或条件不安全时不会继续执行动作；
+- 模拟模式完成一条成功路径和参数越界、超时、断线三条失败路径；
+- 真机验收记录能对应到设备版本、启动图 配置和测试结果。
+
+## 开发约束
+
+- 设备构造阶段不自动连接或执行写操作；
+- `connect`、`disconnect`、`status` 等生命周期能力显式定义；
+- 动作输入和输出必须能保存为标准 JSON 数据；
+- 明确说明超时、取消和重试后的处理方式；重复发送同一请求时，必须说明是否会造成设备重复执行；
+- 运动、加热、开门等动作先检查联锁；
+- 日志不记录密码、令牌或敏感实验数据。
+- 未连接真机或可靠模拟器时，只能标记为静态/模拟验证通过。
+
+---
+
+Source: /template-library.md
+
+# 设备模板库与类别选择
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+设备模板库可以理解为一份“常见设备能力清单”。它按设备用途和可执行操作分类，帮助项目先统一业务名称，再接入具体品牌和型号。用户只需选择与现场设备能力匹配的类别，不需要接入模板库中的全部类别。
+
+模板类别和数量会随 Uni-Lab OS 版本及用户设备包发生变化。接入时请以当前设备包检查报告和 Uni-Lab OS 实际识别出的设备类别、动作与状态为准，不使用固定数量判断模板是否完整。
+
+## 第一次接入时如何选模板
+
+按下面顺序描述设备，比直接搜索厂商型号更容易找到可复用模板：
+
+1. **用途**：设备是移液、温控、读板、存储、搬运，还是检测？
+2. **对象**：它处理液体、微孔板、吸头、瓶子，还是其他物料？
+3. **动作**：需要“设置/启动/停止/读取/装载/取出”中的哪些动作？
+4. **接口**：设备通过 PLC、串口、网络 API 还是桌面软件连接？
+5. **安全条件**：有哪些门禁、急停、温度上限或人工确认要求？
+
+| 业务描述 | 可先查看的类别示例 | 需要进一步确认 |
+| --- | --- | --- |
+| 按体积吸液和分液 | 液体处理设备 | 通道数、吸头和容器兼容性 |
+| 控温并振荡微孔板 | 加热/振荡设备 | 温度范围、转速和板位锁定 |
+| 读取板的光学信号 | 读板设备 | 检测方式、协议和结果文件 |
+| 在多个位置存取微孔板 | 存储设备（培养箱、板酒店、旋转堆栈） | 同时登记 Stack/Site 物料树和旋转/光电设备能力，见[光电堆栈与旋转堆栈：物料 + 设备](stack.md) |
+| 控制一组气缸、阀和传感器 | PLC 工站 | 点位表、握手和联锁 |
+
+表中的类别只是选择方向，不代表指定分支的完整清单。找不到完全匹配时，先选语义最
+接近的类别，并记录缺少的动作，避免在工作流里调用私有方法。
+
+## 当前代码已经覆盖的主要设备方向
+
+Uni-Lab OS 支持以下主要设备方向。这表示系统具备相应的接入结构，不代表所有品牌型号都已完成真机验证。接入新设备时，仍要以本地设备包检查报告和现场验收结果为准。
+
+| 业务方向 | 包含的设备示例 |
+| --- | --- |
+| 液体与反应处理 | 液体处理工作站、泵和阀、粉体加料、加热搅拌、旋转蒸发、真空设备 |
+| 分析检测 | HPLC、GCMS、NMR、拉曼、紫外、XRD、读板机、天平 |
+| 搬运与执行 | 机械臂、AGV、夹爪、电机、CNC、分离和封口设备 |
+| 存储与培养 | 自动仓储/培养设备、资源容器和组合工作站 |
+| 电池实验 | 电池测试系统和扣式电池装配相关设备 |
+| 系统验证 | 虚拟设备和模拟工作台 |
+
+业务人员先选择最接近的方向，再由开发人员检查同类实现的动作名称、参数和状态。不能仅凭“代码中有这个目录”就判断某个具体型号已经可用。
+
+## 一个合格模板应该说明什么
+
+| 内容 | 业务解释 | 验收问题 |
+| --- | --- | --- |
+| 设备 ID | 系统识别设备的稳定身份证 | 更换中文名称后，历史流程是否仍能找到它？ |
+| 显示名称/描述 | 页面上给操作者看的名称和用途 | 不看代码能否知道它做什么？ |
+| 动作说明 | 每个动作的输入、输出、单位和失败条件 | 操作者能否按表单填写？ |
+| 状态 | 连接、忙、就绪、报警等只读信息 | 运行中能否判断下一步？ |
+| 连接配置 | PLC 地址、端口、API 地址等 | 是否与凭证分开保存？ |
+| 模拟实现 | 不连接真机的验证路径 | 能否先验证工作流？ |
+
+## 设备包的最小目录
+
+```text
+my-device-package/
+├── pyproject.toml                  # Python 包与依赖
+├── package.yaml                    # 包身份和工作流清单
+├── README.md                       # 使用说明、版本和限制
+├── devices/                        # 设备类与动作
+├── registry/devices/               # 需要 YAML 注册时的目录
+├── resources/                      # 设备/物料模型（如有）
+├── workflows/                      # 可复用操作和完整流程
+├── tests/                          # 动作规范、模拟和启动清单检查
+└── .github/workflows/              # 自动检查（可选）
+```
+
+设备类别、动作和实现应保持一一对应：设备 ID 不能重复，工作流不能依赖没有登记的
+方法。模板仓库中的适配器通常把 Uni-Lab 装饰器放在设备类旁边，同时将底层驱动作为
+内部实现，这样换通信方式时不会改变业务工作流。
+
+## 把业务操作登记成系统动作
+
+```python
+from unilabos.registry.decorators import action, device, topic_config
+
+
+@device(
+    id="example_reader",
+    category=["plate_reader"],
+    displayname="示例读板机",
+    description="读取微孔板信号",
+)
+class ExampleReader:
+    @property
+    @topic_config(period=5.0)
+    def status(self) -> str:
+        return "ready"
+
+    @action(displayname="读取板信号", description="按协议读取一次板信号")
+    def read_plate(self, plate_barcode: str) -> dict:
+        return {"success": True, "plate_barcode": plate_barcode, "result_uri": "..."}
+```
+
+- `@device` 标记设备身份、分类和说明；
+- `@action` 标记可被工作流调用的业务动作；
+- `@topic_config` 标记需要定期对外发布的只读状态；
+- 参数类型注解和 `Args:` 文档会帮助系统生成页面表单；
+- 内部辅助方法以下划线开头，或用 `@not_action` 明确不作为动作公开。
+
+### 动作参数规范
+
+| 规则 | 正确示例 | 错误示例 |
+| --- | --- | --- |
+| 名称表达业务含义 | `temperature_c` | `p1`、`register_4001` |
+| 类型明确 | `float`、`int`、`bool`、`str` | 无注解、`Any` |
+| 单位唯一 | 参数名/描述明确 `c`、`rpm`、`ml` | 同一参数同时接受 °C/°F |
+| 范围可校验 | `0 <= speed_rpm <= 300` | “正常范围” |
+| 枚举有限 | `mode in {'heat', 'cool'}` | 任意字符串透传设备 |
+| 默认值安全 | 查询参数或停止值 | 默认启动加热/运动 |
+| 返回结构稳定 | `success/message/value` | 有时 `bool`、有时字符串 |
+
+参数校验放在驱动边界，协议转换之前执行。错误输入使用 `ValueError`；通信失败、超时和设备拒绝使用可区分的异常，不要统一返回 `False`。
+
+每个需要出现在页面和工作流中的操作都应明确使用 `@action` 登记。不要依赖系统自动猜测哪些程序方法属于业务动作，否则升级后动作名称可能发生变化。
+
+## 怎样检查模板是否可用
+
+开发人员完成模板后，可在包根目录执行：
+
+```bash
+python -m compileall my_device_package
+unilab package inspect --path . --out ./inspect-output
+```
+
+结果中重点看：
+
+- 设备 ID 和类别是否出现在目录；
+- 动作参数是否有正确类型和描述；
+- 构造函数是否没有自动连接硬件；
+- `package.yaml` 引用的文件是否全部存在；
+- 模拟启动图（Graph JSON）是否能完成一次成功和一次失败路径。
+
+## 成功后业务人员会看到什么
+
+- 目录中能按类别找到设备，中文名称和用途清楚；
+- 动作表单只显示允许填写的字段，并注明单位和范围；
+- 工作流画布可以拖入已登记动作，而不需要记忆厂商命令；
+- 设备状态和错误提示能帮助判断是参数问题、通信问题还是设备报警；
+- 新型号可以复用同一类别的动作规范，不必重写已有工作流。
+
+## 常见问题
+
+| 问题 | 原因 | 建议 |
+| --- | --- | --- |
+| 找不到对应类别 | 当前 Catalog 没有完全匹配项 | 选择最接近类别并记录缺口，不自行杜撰类别 |
+| 一个型号出现两次 | ID 在 AST 和 YAML 中重复登记 | 保留一个明确的注册所有者 |
+| 动作名称太技术化 | 直接暴露厂商函数名 | 映射为“启动/停止/读取”等业务名称 |
+| 模板通过检查但不能运行 | 只验证了导入，未验证连接和状态 | 增加模拟 启动图 和真实联调验收 |
+| 模板数量与其他环境不一致 | Uni-Lab OS 版本或用户设备包不同 | 以当前设备包检查报告和运行环境实际识别结果为准 |
+
+## 上线前检查清单
+
+- [ ] 已按用途、物料和动作选择类别，而不是只按厂商名称选择；
+- [ ] 设备 ID 唯一稳定，显示名称和 ID 分离；
+- [ ] 每个动作有业务名称、参数、单位、结果和错误说明；
+- [ ] 状态、连接和安全停止动作已登记；
+- [ ] 模拟路径与真实路径的动作名称和参数保持一致；
+- [ ] `package.yaml`、注册文件和 Python 类的身份一致；
+- [ ] 已运行 Python 编译和包检查，并保留结果；
+- [ ] 模板缺口和未验证能力已在 README 中标注。
+
+设备接入的具体实现见[设备接入模板总览](device-template.md)；如果需要先定义设备
+动作而尚未确定通信方式，可从[通用设备规范](generic-device.md)开始。
+
+---
+
+Source: /device-registration.md
+
+# 设备登记、动作表单与设备联动
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+本页说明怎样把业务人员确认的设备能力，登记成 Uni-Lab OS 页面和工作流可以使用的内容。设备定义使用 `@device`、`@action`、`@topic_config`、`ResourceSlot` 和 `DeviceSlot` 等正式接口。
+
+:::{admonition} 本页完成条件
+设备能出现在系统清单中；动作名称和输入表单对业务人员清楚；状态能稳定刷新；需要选择物料或其他设备时，页面提供选择器而不是要求填写内部编号；多设备联动在断线时能给出明确失败结果。
+:::
+
+## 1. 先登记设备基本信息
+
+```python
+from unilabos.registry.decorators import device
+
+
+@device(
+    id="my_lab_plate_reader",
+    category=["analysis", "plate_reader"],
+    displayname="微孔板读板机",
+    description="读取微孔板检测结果；支持启动、查询进度和获取结果。",
+    version="1.0.0",
+    metadata={"supported_plate_formats": [96, 384]},
+)
+class MyLabPlateReader:
+    ...
+```
+
+| 字段 | 业务含义 | 填写规则 |
+| --- | --- | --- |
+| `id` | 这一类设备的永久编号 | 只能使用英文字母、数字和下划线；设备发布后不要随意修改 |
+| `category` | 设备按什么能力分类 | 从大类写到小类，不使用房间号、IP 或资产编号 |
+| `displayname` | 页面显示名称 | 使用操作员熟悉的中文名称 |
+| `description` | 设备用途 | 写清处理对象、主要能力和限制，不只写品牌型号 |
+| `version` | 当前模板版本 | 动作或参数发生不兼容变化时升级版本 |
+| `metadata` | 便于展示和筛选的固定规格 | 只写型号能力、量程、通道数等固定信息，不写运行状态或密码 |
+| `model` | 可选三维模型 | 模型仅用于展示或布局；机器人运动仍以现场标定为准 |
+| `available_sites` | 设备自带的固定放置位 | 例如读板机进样位、加热位；每个位置必须固定编号 |
+| `handles` | 工作流画布上的输入输出端口 | 只有确实需要用连线表达数据或物料流向时才填写 |
+
+同一个 Python 类确实对应多个型号时，可以用 `ids` 和 `id_meta` 一次登记多个设备类型。每个型号可以覆盖显示名称、端口、放置位和固定规格。型号之间动作或参数不同较大时，应拆成不同类，避免一个类中出现大量型号判断。
+
+## 2. 让动作表单对业务人员可读
+
+```python
+from unilabos.registry.decorators import action
+from unilabos.registry.placeholder_type import ResourceSlot
+
+
+@action(
+    displayname="开始读取微孔板",
+    description="按指定检测方案读取一块微孔板。",
+)
+def read_plate(self, plate: ResourceSlot, protocol_name: str) -> dict:
+    """
+    Args:
+        plate[待检测孔板]: 选择已经放在读板机进样位的孔板。
+        protocol_name[检测方案]: 填写厂商软件中已经保存的方案名称。
+    """
+    ...
+```
+
+`displayname` 是页面上的动作名称，`description` 说明这个动作做什么。函数说明中的 `Args:` 会生成表单字段：方括号中写中文字段名，冒号后写填写要求。每个参数都应说明单位、范围、可选值和示例。
+
+| 参数情况 | 应怎样写 |
+| --- | --- |
+| 数值 | 写明单位和允许范围，例如“温度，单位 °C，允许 20–80” |
+| 固定选项 | 明确列出选项及含义，不让用户自由输入任意文字 |
+| 危险动作 | 不提供会直接启动运动或加热的默认值 |
+| 物料 | 使用 `ResourceSlot`，让页面从现有物料中选择 |
+| 其他设备 | 使用 `DeviceSlot`，让页面从现有设备中选择 |
+| 返回结果 | 固定包含 `success`；需要展示的信息放在 `message`、`data` 或 `error` 中 |
+
+没有使用 `@action` 的公开方法可能被兼容扫描成 `auto-` 动作。新设备不要依赖这种自动猜测；需要给业务人员使用的动作应明确登记，内部辅助方法以下划线开头或使用 `@not_action` 排除。
+
+## 3. 状态字段怎么定义
+
+```python
+from unilabos.registry.decorators import topic_config
+
+
+@property
+@topic_config(period=2.0)
+def status(self) -> str:
+    return self.data.get("status", "Unknown")
+```
+
+- 状态名称在同类设备间保持一致，例如 `Idle`、`Running`、`Error`、`Offline`、`Unknown`；
+- `period=2.0` 表示每两秒刷新一次，刷新频率不能高到影响设备通信；
+- 读取状态不能触发设备动作；
+- 无法读取时返回 `Unknown` 或抛出明确错误，不能用“正常”掩盖失联；
+- `self.data` 在设备启动时预先放入所有状态字段，避免页面首次加载时字段忽隐忽现。
+
+## 4. 设备启动后的初始化
+
+设备构造函数只保存配置，不应自动连接或执行危险动作。系统完成设备节点创建后，才会通过 `post_init` 提供运行环境：
+
+```python
+from unilabos.registry.decorators import not_action
+
+
+@not_action
+def post_init(self, ros_node) -> None:
+    self._ros_node = ros_node
+```
+
+`post_init` 不是业务动作，必须排除在动作清单外。跨设备调用、系统计时等依赖运行环境的能力，只能在此步骤之后使用。
+
+## 5. 设备自带放置位
+
+如果设备本身有固定进样位、加热位或反应位，可通过 `available_sites` 登记：
+
+```python
+READER_SITES = [{
+    "index": 0,
+    "label": "plate_in",
+    "visible": True,
+    "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+    "size": {"width": 128.0, "height": 86.0, "depth": 20.0},
+    "content_type": ["my_lab_96_well_plate"],
+    "description": "读板机进样位",
+}]
+```
+
+同一设备模板内，`index` 和 `label` 都不能重复。尺寸不能为负数；`content_type` 只能填写已登记的物料类型。这里定义的是设备固定拥有的位置，不写当前由哪件物料占用，也不写实例 UUID。
+
+## 6. 什么时候允许设备自动联动
+
+只有业务确实要求“设备 A 的状态变化后，设备 B 自动响应”时，才使用跨设备订阅。订阅目标的设备实例编号必须与启动图（Graph JSON）中的 `id` 一致：
+
+```python
+from unilabos.utils.decorator import subscribe
+
+
+@subscribe(device_id="pump_01", status_name="pressure", trigger_when_change=True)
+def on_pressure_changed(self, value) -> None:
+    ...
+```
+
+- `@subscribe` 只用于读取其他设备的状态；本设备状态直接读取自身属性；
+- `trigger_when_change=True` 表示只有数值变化时才处理，避免重复触发；
+- 发布设备尚未启动时系统会继续尝试建立订阅，但业务流程仍要能显示“等待设备”状态；
+- 联动涉及运动、加热或放料时，必须再次检查联锁，不能把“收到状态”直接等同于“允许执行”；
+- 调用其他设备动作失败时要保留失败原因，不能返回假成功。
+
+## 7. 交付前检查
+
+1. 页面名称和字段说明由不参与开发的业务人员试填一次；
+2. 同类设备的动作名、参数名、单位和状态值保持一致；
+3. 模拟设备覆盖成功、参数错误、超时、断线和设备拒绝五种结果；
+4. 放置位编号与设备面板、现场标签和 启动图 完全一致；
+5. 启动图 使用设备包检查报告给出的规范完整类型名称；
+6. 密码、令牌和实验敏感信息没有写入代码、日志或 启动图。
+
+---
+
+Source: /generic-device.md
+
+# 通用设备规范
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+本章说明所有设备都要遵守的共同规则。业务人员先确认设备能做什么、需要填写哪些参数、怎样判断成功；开发人员再把这些要求写成系统接口。后续无论使用 PLC、串口还是厂商软件，页面和工作流看到的名称都应保持一致。
+
+```{important}
+工作流只使用“设置温度、启动、停止、读取结果”等业务动作，不直接使用品牌命令、寄存器地址或软件按钮坐标。
+可以把标准模板理解成设备的“服务清单”，把具体驱动理解成完成这些服务的“控制方法”。
+```
+
+## 每台设备必须说明四件事
+
+| 部分 | 作用 | 约束 |
+| --- | --- | --- |
+| 身份 | 系统编号、分类、页面名称和用途 | 系统编号稳定且唯一 |
+| 构造配置 | 连接地址、端口、超时和可选认证引用 | 参数必须有类型和安全默认值，构造阶段不执行危险动作 |
+| 动作 | `@action` 方法 | 参数、单位、范围、返回值和失败语义明确 |
+| 状态 | `@topic_config` 只读属性 | 无副作用，支持 `unknown/offline/fault`，刷新周期明确 |
+
+## 先按用途选择设备类别
+
+1. 按工艺能力查看当前 Workspace Catalog，选择语义最接近的设备大类，不要先按品牌建类。
+2. 确认标准动作和状态能表达真实设备能力。
+3. 品牌协议、寄存器地址、量程或单位不同，仍应复用同一大类。
+4. 只有工作流语义发生变化时，才提出新增大类或兼容性扩展。
+
+业务人员在开发前应确认三件事：设备完成什么业务动作、每个动作需要哪些输入及单位、
+以及怎样判断成功、失败、超时和需要人工处理。不要用 `POST /run`、寄存器地址或按钮坐标
+描述业务动作，应使用“设置温度”“正转”“启动读板”等跨协议语义。
+
+| 术语 | 业务含义 | 在模板中的位置 |
+| --- | --- | --- |
+| 设备 | 可被系统识别和调度的一台仪器或工站 | `@device` |
+| 动作 | 对外提供的一项完整操作 | `@action` 方法 |
+| 状态 | 定期读取、不会改变设备的只读信息 | `@topic_config` 属性 |
+| 注册 ID | 启动图（Graph JSON）和历史工作流引用的稳定身份 | `@device(id=...)` |
+| 模拟验证 | 不连接真实设备，只检查动作、参数和流程 | 使用模拟设备或离线试运行 启动图 |
+
+## 动作和状态的填写规则
+
+- `device_id` 和 Python 接口名使用 `snake_case`，大类 ID 不含品牌或型号。
+- 接口类型只能是 `action` 或 `property`。
+- 动作参数必须保持名称、类型、默认值和返回注解一致。
+- 动作参数使用明确的 Python 类型；只有当前运行版本实际支持时才使用复杂嵌套类型。
+- 动作返回结构化结果，例如 `{"success": true, "message": "..."}`。
+- 属性只暴露状态，不得在读取属性时触发有副作用的设备动作。
+- 驱动边界必须校验范围和单位；发生换算时必须显式记录。
+- 超时、设备拒绝、无效响应和断线应抛出可定位问题的异常。
+- 不得绕过设备或 PLC 内的门禁、急停、报警和安全联锁。
+
+## 设备包目录模板
+
+```text
+my-device-package/
+├── pyproject.toml
+├── package.yaml
+├── README.md
+├── my_device_package/
+│   ├── __init__.py
+│   └── devices/
+│       └── vendor_model_peristaltic_pump.py
+├── resources/
+├── workflows/
+└── tests/
+```
+
+`pyproject.toml` 至少声明 Python 版本、`unilabos` 依赖和包发现规则；`package.yaml` 保存包身份
+和工作流清单。连接地址属于 启动图 实例配置；账号和密钥通过 Secret/环境变量注入，不应写入标准类或提交到仓库。
+
+## 设备基本信息怎么填写
+
+```python
+@device(
+    id="my_lab_peristaltic_pump",
+    category=["liquid_handling", "pump", "peristaltic_pump"],
+    displayname="蠕动泵",
+    description="按指定转速输送液体，并提供运行和故障状态。",
+)
+```
+
+| 参数 | 写法 |
+| --- | --- |
+| `id` | `snake_case`，不带实例编号；同一 Python 类永久稳定 |
+| `category` | 从大类到小类排列；不写 IP、房间号或厂商网址 |
+| `displayname` | 操作者可理解的短名称 |
+| `description` | 一句话写清能力、对象和限制 |
+
+动作参数应在签名中完成类型和默认值，在方法开头完成范围/枚举校验：
+
+```python
+@action(description="设置转速；单位 rpm，允许范围 0-300")
+def set_speed(self, speed_rpm: float) -> dict[str, object]:
+    if not 0.0 <= speed_rpm <= 300.0:
+        raise ValueError("speed_rpm 必须在 0-300 rpm")
+    ...
+```
+
+危险动作不要提供会立即运动/加热的默认值。无法确认结果时抛出异常或返回明确的 `unknown`，不得返回假成功。
+
+## 标准类示例：蠕动泵
+
+下面用蠕动泵展示一份完整的动作和状态清单。标准模板不负责实际通信；具体型号的驱动必须提供相同的动作名称、参数和返回结果。
+
+```python
+from typing import Any, Dict, Optional
+
+from unilabos.registry.decorators import action, device, topic_config
+
+
+@device(
+    id="peristaltic_pump",
+    category=["合成制备仪器与设备", "实验泵", "蠕动泵"],
+    description="蠕动泵标准接口：同一大类跨品牌统一的动作与参数。",
+    displayname="蠕动泵",
+)
+class PeristalticPump:
+    def __init__(
+        self,
+        device_id: Optional[str] = None,
+        port: str = "/dev/ttyUSB0",
+        baudrate: int = 9600,
+        timeout: float = 2.0,
+        **kwargs,
+    ):
+        """
+        Args:
+            device_id[设备实例编号]: 与 启动图 中的设备 id 一致。
+            port[串口]: 设备连接的串口名称。
+            baudrate[波特率]: 必须与设备通信设置一致。
+            timeout[超时时间(s)]: 单次通信最长等待时间，必须大于 0。
+        """
+        if timeout <= 0:
+            raise ValueError("timeout 必须大于 0 秒")
+        self.device_id = device_id or "peristaltic_pump"
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self.data: Dict[str, Any] = {"status": "Idle", "fault": False}
+
+    @action(description="设置转动速度")
+    def set_speed(self, speed_rpm: float) -> Dict[str, Any]:
+        raise NotImplementedError("请在设备包中实现该动作")
+
+    @action(description="正转")
+    def rotate_forward(self) -> Dict[str, Any]:
+        raise NotImplementedError("请在设备包中实现该动作")
+
+    @property
+    @topic_config()
+    def status(self) -> str:
+        return self.data.get("status", "Unknown")
+
+    @property
+    @topic_config()
+    def fault(self) -> bool:
+        return self.data.get("fault", False)
+```
+
+具体型号应使用自己的类型编号，但继续归入相同类别，并保持
+`set_speed(speed_rpm: float)`、`rotate_forward()`、`status: str` 和 `fault: bool` 等动作与状态定义不变。
+
+## 怎样确认设备已经可以交付
+
+```bash
+python -m compileall my_device_package
+unilab package inspect --path . --out ./inspect-output
+```
+
+- 标准模板与具体实现的动作、参数、返回类型和属性一致；
+- 每个动作都有协议命令或 PLC 节点映射；
+- 每个属性都有数据来源、类型、单位和刷新策略；
+- 已覆盖正常、非法参数、超时、设备故障和断线恢复；
+- 未连接真机或可靠模拟器时，只能标记为静态/模拟验证通过。
+
+## 常见问题
+
+| 现象 | 常见原因 | 处理建议 |
+| --- | --- | --- |
+| 设备出现但没有动作 | 动作没有登记，或系统没有加载对应文件 | 核对 `@action` 并重新执行设备包检查 |
+| 页面参数名称难以理解 | 缺少中文说明、单位或清楚的字段名 | 修改设备的统一动作定义，不要只在某一个页面临时改名 |
+| 状态一直为空或旧值 | 属性来源不可靠或缓存没有有效期 | 核对 `@topic_config`、查询方式和刷新策略 |
+| 换品牌后工作流失效 | 厂商驱动改变了标准接口 | 恢复同大类接口一致性，把差异封装在驱动内部 |
+| 重试后设备执行两次 | 把未知结果直接当失败重放 | 先查询设备状态，再由恢复流程决定是否重试 |
+
+---
+
+Source: /plc-station.md
+
+# PLC 控制的工站
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+本页适用于由 PLC 控制的自动化工站，例如传送、抓取、加液或装配工位。业务人员负责确认动作、完成条件和安全联锁；自动化工程师提供点位表；开发人员把点位转换成 Uni-Lab OS 能调用的业务动作。
+
+PLC 接入是标准设备接口的一种底层实现。PLC 负责实时顺序、执行器控制和安全联锁，Uni-Lab
+负责下发标准动作、读取状态并编排工作流。本页给出第一次接入 PLC 工站所需的资料、点表、代码、启动图（Graph JSON）和验收约束。
+
+:::{admonition} 本页完成条件
+交付标准设备类、PLC 驱动、节点映射表、启动图 节点和模拟测试；动作握手、范围、超时、复位、报警与联锁均有验证结果。
+:::
+
+## 各方需要负责什么
+
+- 工作流调用“启动、停止、设置温度”等业务动作，不直接读写 PLC 点位地址（NodeId）。
+- PLC 驱动与标准类的动作名、参数名、类型、默认值和属性集合必须一致。
+- 通用动作定义只保存容易理解的点位名称，不保存现场 PLC 地址。
+- 现场点位表使用 CSV 文件保存中文名称、英文名称、读写用途、数据类型和 PLC 地址。CSV 是可以用表格软件打开的文本表格。
+- 安全联锁、急停和设备保护保留在 PLC；Python 驱动不得绕过。
+
+## 开始前要准备哪些资料
+
+- 工站名称、用途、设备大类和包含的执行部件；
+- PLC/OPC UA 地址、控制器程序版本和正式点位表；
+- 每个点位的读写方向、数据类型、单位和逻辑含义；
+- 启动、已接收、运行、完成、报警、急停和门禁时序；
+- 每个动作的正常时长、最大等待时间和人工恢复方式；
+- 与现场点位同语义的仿真映射或 PLC 模拟器。
+
+只提供带地址的截图是不够的；缺少含义、类型和单位时，不能可靠判断一个布尔值代表启动、
+开门还是报警。
+
+## 按这个顺序完成接入
+
+1. 在 `devices/plc_station.py` 中先定义与协议无关的动作和状态；
+2. 建立 `config/plc_station_nodes.csv`，把每个业务名称对应到现场 PLC 地址；
+3. 在构造函数中读取 `url`、`csv_path`、超时和订阅参数，但不自动触发动作；
+4. 有参动作先校验范围/单位，再写设定值；触发动作执行完整握手；
+5. 在 启动图 中创建一个 `type: device` 节点；
+6. 使用模拟 OPC UA 服务验证后，再连接隔离 PLC；
+7. 最后验证急停、门禁、报警、掉线和结果未知场景。
+
+构造参数规范：
+
+| 参数 | 类型 | 必填 | 约束 |
+| --- | --- | --- | --- |
+| `url` | `str` | 是 | 完整 OPC UA URL，不在代码中写死 |
+| `csv_path` | `str` | 是 | 相对设备包根目录或明确的绝对部署路径 |
+| `username` | `str \| None` | 否 | 不写入 启动图，优先通过 Secret 注入 |
+| `password` | `str \| None` | 否 | 禁止日志输出 |
+| `action_timeout` | `float` | 是 | 秒，必须大于 0；按最长正常动作加余量 |
+| `subscription_interval` | `int` | 否 | 毫秒；过小会造成 PLC/网络压力 |
+| `auto_connect` | `bool` | 否 | 初次接入固定为 `false` |
+
+## PLC 点位常见的三种用法
+
+| 接口 | PLC 交互 | 示例 |
+| --- | --- | --- |
+| 有参设置动作 | 写入设定值节点 | `set_speed(speed)` → `Speed_Setpoint` |
+| 无参触发动作 | 触发、等待完成、复位、等待完成复位 | `rotate_forward()` |
+| 状态属性 | 强制从服务端读取逻辑状态节点 | `fault` → `Fault` |
+
+触发动作的完整时序为：
+
+```text
+写 Trigger=True
+→ 等待 Complete=True
+→ 写 Trigger=False
+→ 等待 Complete=False
+→ 返回成功
+```
+
+轮询完成节点时必须强制服务端读取，不能只相信可能过期的订阅缓存。
+
+## 把业务名称和 PLC 地址对应起来
+
+```text
+Name,EnglishName,NodeType,DataType,NodeId
+正转触发,Rotate_Forward_Trigger,Variable,Boolean,ns=4;s=Pump.RotateForward.Trigger
+正转完成,Rotate_Forward_Complete,Variable,Boolean,ns=4;s=Pump.RotateForward.Complete
+速度设定,Speed_Setpoint,Variable,Double,ns=4;s=Pump.Speed.Setpoint
+运行状态,Status,Variable,String,ns=4;s=Pump.Status
+故障状态,Fault,Variable,Boolean,ns=4;s=Pump.Fault
+```
+
+PLC 地址必须来自正式点位表或经过验证的模拟器，不能根据名称猜测。
+
+## 开发人员可复制的代码模板
+
+下面用蠕动泵展示接口和握手方式。`OpcUaClientWithSubscription` 表示设备包中经测试的 OPC UA 客户端封装：
+
+```python
+from typing import Any, Dict
+
+from unilabos.registry.decorators import action, device, topic_config
+from base_opcua_client import OpcUaClientWithSubscription
+
+
+@device(
+    id="vendor_model_peristaltic_pump_plc",
+    category=["合成制备仪器与设备", "实验泵", "蠕动泵"],
+    description="某型号蠕动泵 PLC/OPC UA 驱动",
+    displayname="蠕动泵（PLC）",
+)
+class VendorModelPeristalticPumpPLC(OpcUaClientWithSubscription):
+    def __init__(self, url: str, csv_path: str, action_timeout: float = 120.0,
+                 username: str | None = None, password: str | None = None,
+                 **kwargs):
+        super().__init__(url=url, username=username, password=password, **kwargs)
+        if action_timeout <= 0:
+            raise ValueError("action_timeout 必须大于 0")
+        self.action_timeout = action_timeout
+        self.load_nodes_from_csv(csv_path)
+
+    @action(description="设置转动速度")
+    def set_speed(self, speed: float = 0.0) -> Dict[str, Any]:
+        if speed < 0:
+            raise ValueError("speed 必须大于或等于 0")
+        self.set_node_value("Speed_Setpoint", speed)
+        return {"success": True, "message": "设置转动速度已下发", "speed": speed}
+
+    @action(description="正转")
+    def rotate_forward(self) -> Dict[str, Any]:
+        self.set_node_value("Rotate_Forward_Trigger", True)
+        if not self._wait_until_true("Rotate_Forward_Complete", description="正转完成"):
+            raise TimeoutError("正转失败：动作未完成")
+        self.set_node_value("Rotate_Forward_Trigger", False)
+        if not self._wait_until_false("Rotate_Forward_Complete", description="正转完成复位"):
+            raise TimeoutError("正转失败：完成状态复位超时")
+        return {"success": True, "message": "正转完成"}
+
+    @property
+    @topic_config()
+    def fault(self) -> bool:
+        value = self.get_node_value("Fault", force_read=True)
+        return bool(value) if value is not None else False
+```
+
+## 把现场工站加入启动清单
+
+```json
+{
+  "id": "pump_01",
+  "type": "vendor_model_peristaltic_pump_plc",
+  "config": {
+    "url": "opc.tcp://127.0.0.1:4840",
+    "csv_path": "config/pump_01_nodes.csv",
+    "action_timeout": 120.0,
+    "use_subscription": true,
+    "cache_timeout": 5.0,
+    "subscription_interval": 500
+  }
+}
+```
+
+真实地址和凭证应从部署配置或密钥系统注入；示例地址不能直接用于生产。
+
+## 怎样确认工站可以交付
+
+- 标准类与 PLC 类的公开接口完全一致；
+- 现场点表的数据类型、读写权限和 Namespace 已核对；
+- 触发与完成位在成功和失败路径都能正确复位；
+- 设置值具有范围、单位和缩放验证；
+- 超时后不会继续执行下一动作或报告假成功；
+- 断线、重连、PLC 报警、急停和重启路径均有证据；
+- 如果项目会根据点位表自动生成代码，不要直接修改生成结果；应修改动作规范或点位表后重新生成。
+
+## 常见问题
+
+| 现象 | 可能原因 | 建议处理 |
+| --- | --- | --- |
+| 一直显示未就绪 | PLC 未置位或逻辑名与现场映射不一致 | 先核对 PLC 画面，再检查映射 CSV |
+| 写入类型不匹配 | 布尔值、整数或小数的定义不一致 | 以 PLC 服务器导出的类型为准，修正点位表和动作定义 |
+| 动作完成但页面超时 | 完成位或复位时序不一致 | 对照 PLC 时序记录，不盲目延长超时 |
+| 断线后重复执行 | 重连逻辑自动重放物理动作 | 重连只恢复通信，先查询状态并人工确认 |
+| 仿真通过、现场失败 | 仿真与真实点表版本不一致 | 两份映射保持同名同语义并记录版本 |
+
+---
+
+Source: /serial-network.md
+
+# 串口／网络连接
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+本页适用于通过串口线、TCP 网络或 Modbus 控制的设备。业务人员只需要确认页面上要提供哪些操作和状态；通信指令、报文校验和重连逻辑由开发人员封装在设备驱动中，不暴露给工作流。
+
+串口、TCP、UDP、Modbus 等连接统一归为“直连驱动”：传输方式可以不同，但
+工作流中看到的动作和状态必须与所选设备类别一致。本章以蠕动泵为例；代码中的通信报文只是填写位置，实际使用时必须替换为设备正式手册中的命令。
+
+:::{admonition} 本页完成条件
+交付标准设备类、直连驱动、启动图（Graph JSON）连接配置和协议测试；已验证分帧、校验、超时、断线、错误响应和重复发送边界。
+:::
+
+```{warning}
+不存在能直接连接任意品牌设备的通用串口/TCP 命令。波特率、帧格式、校验、寄存器和响应含义必须来自设备手册或现场抓包验证。
+```
+
+## 需要填写哪些连接信息
+
+| 配置 | 串口 | TCP/网络 | 要求 |
+| --- | --- | --- | --- |
+| 地址 | `port` | `host`、`port` | 属于实例配置，不写死在标准类 |
+| 链路参数 | 波特率、数据位、校验、停止位 | 连接/读取超时、TLS | 明确默认值和允许范围 |
+| 帧边界 | 终止符、固定长度或长度字段 | 长度字段或协议消息 | 禁止用一次 `read()` 猜完整响应 |
+| 完整性 | 校验和/CRC | 协议校验、TLS | 校验失败不得报告成功 |
+| 重试 | 有限次数 | 有限次数 | 只重试可安全重复的请求 |
+| 身份确认 | 型号/序列号查询 | 握手或版本接口 | 连接后确认不是错误设备 |
+
+接入前需准备设备型号、固件版本、正式协议、连接地址、命令与响应样例、单位、错误码、超时、
+重复发送的后果及可用模拟器。密码、Token 和证书私钥通过 Secret 或环境变量注入，不得写入
+启动图、源码或截图。
+
+## 从设备手册到可用动作
+
+1. 从当前 Workspace Catalog 选择设备大类和接口。
+2. 为具体型号分配唯一 `@device` ID，分类路径保持与标准类一致。
+3. 在 `connect()` 中建立连接、设置超时并核对设备身份。
+4. 把每个标准动作映射为命令编码、发送、响应解析和错误转换。
+5. 把状态属性映射为查询结果或带有效期的可靠缓存。
+6. 在驱动边界校验范围、单位、枚举和设备返回值。
+7. 在 `disconnect()` 中安全关闭连接并清理后台读取任务。
+
+参数约束建议直接写入构造函数：
+
+| 参数 | 类型 | 串口约束 | 网络约束 |
+| --- | --- | --- | --- |
+| `port` | `str` / `int` | 非空设备路径 | 1-65535 端口号 |
+| `host` | `str` | 不适用 | 主机名/IP，不包含协议前缀 |
+| `baudrate` | `int` | 必须属于设备支持集合 | 不适用 |
+| `timeout` | `float` | 秒，必须大于 0 | 连接/读取分别设置更佳 |
+| `address` | `int` | RS-485/Modbus 从站地址 | Modbus TCP 单元号按协议确认 |
+| `auto_connect` | `bool` | 初次接入为 `false` | 初次接入为 `false` |
+
+## 串口设备代码模板
+
+```python
+from typing import Any, Dict
+
+from unilabos.registry.decorators import action, device, topic_config
+
+
+@device(
+    id="vendor_model_peristaltic_pump_serial",
+    category=["合成制备仪器与设备", "实验泵", "蠕动泵"],
+    description="某型号蠕动泵串口驱动",
+    displayname="蠕动泵（串口）",
+)
+class VendorModelPeristalticPumpSerial:
+    def __init__(self, port: str, baudrate: int = 9600,
+                 timeout: float = 2.0, **kwargs):
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self._transport = None
+        self._status = "offline"
+        self._fault = False
+
+    def connect(self) -> None:
+        self._transport = self._open_serial()  # 使用项目选定的串口库
+        identity = self._request("IDENTIFY")
+        if not self._is_expected_device(identity):
+            self.disconnect()
+            raise ConnectionError("串口设备身份不匹配")
+        self._status = "idle"
+
+    @action(description="设置转动速度")
+    def set_speed(self, speed: float = 0.0) -> Dict[str, Any]:
+        if not 0.0 <= speed <= self._max_speed():
+            raise ValueError("speed 超出设备允许范围")
+        response = self._request(self._encode_set_speed(speed))
+        self._require_ack(response, action="set_speed")
+        return {"success": True, "message": "转速设置成功", "speed": speed}
+
+    @action(description="正转")
+    def rotate_forward(self) -> Dict[str, Any]:
+        response = self._request(self._encode_rotate_forward())
+        self._require_ack(response, action="rotate_forward")
+        return {"success": True, "message": "正转已启动"}
+
+    @property
+    @topic_config()
+    def status(self) -> str:
+        return self._status
+
+    @property
+    @topic_config()
+    def fault(self) -> bool:
+        return self._fault
+```
+
+`_open_serial()`、命令编码和响应解析故意留为协议边界；必须依据设备协议实现并用录制报文/模拟器测试，不能从模板猜测。
+
+## 把现场设备加入启动清单
+
+```json
+{
+  "id": "pump_serial_01",
+  "name": "串口蠕动泵 01",
+  "children": [],
+  "parent": null,
+  "type": "device",
+  "class": "community.my_device_package.my_lab_pump_serial",
+  "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+  "config": {
+    "port": "/dev/tty.usbserial-0001",
+    "baudrate": 9600,
+    "timeout": 2.0,
+    "auto_connect": false
+  },
+  "data": {"status": "offline", "fault": false}
+}
+```
+
+启动图 的 `config` 键必须与构造函数参数一致。TCP 设备将 `port` 改为数值端口，并增加 `host`；Modbus 设备再增加从站/单元地址、字节序和缩放配置。
+
+## 使用 TCP 或 Modbus 时怎么调整
+
+TCP 实现应复用相同的 `set_speed()`、`rotate_forward()`、`status` 和 `fault`，只替换传输层。
+必须处理半包、粘包、连接中断和服务端关闭；如果使用 Modbus，还要记录功能码、寄存器类型、
+字节序、缩放和读写权限。
+
+```python
+def _request(self, payload: bytes) -> bytes:
+    self._socket.sendall(self._frame(payload))
+    header = self._recv_exact(self.HEADER_SIZE)
+    body_length = self._parse_length(header)
+    body = self._recv_exact(body_length)
+    return self._validate_frame(header + body)
+```
+
+## 怎样确认设备可以交付
+
+- 动作与属性接口通过标准 CSV/代码一致性检查；
+- 已验证错误端口、错误波特率、错误 IP、拒绝连接和中途断线；
+- 已验证半包、粘包、CRC/校验失败、乱码和未知响应；
+- 只有查询类操作或已经确认重复发送不会导致重复动作的命令才可以自动重试；
+- 状态缓存有明确有效期，故障状态不会被默认值掩盖；
+- 模拟器验证与真机验证分开记录。
+
+## 常见问题
+
+| 现象 | 可能原因 | 建议处理 |
+| --- | --- | --- |
+| 找不到串口 | 端口名变化、权限不足或线缆未接 | 在部署主机确认端口，再注入实例配置 |
+| 能连接但没有响应 | 波特率、校验位、地址或结束符不匹配 | 对照设备手册和抓包逐项核对 |
+| 返回乱码 | 编码、帧长度或边界错误 | 保留原始字节，先修复解码和分帧 |
+| TCP 偶发解析错误 | 没有处理半包和粘包 | 按长度字段或协议边界使用 `_recv_exact` |
+| 请求超时后重复动作 | 设备已执行但响应丢失 | 先查状态或任务号，不直接重放 |
+
+---
+
+Source: /host-api.md
+
+# 上位机 API 接入
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+“上位机”是设备厂商提供的控制软件。本页适用于该软件提供 HTTP 接口或 SDK 的情况。接入完成后，业务人员在 Uni-Lab OS 中直接选择“开始检测、查询进度、读取结果”等动作，不需要打开厂商软件或填写接口地址。
+
+当设备由厂商软件、网关服务或电脑后台程序控制时，应把厂商提供的接口转换成统一的业务动作。接口只是控制设备的技术方式，不应改变同一类设备在页面上显示的动作和状态名称。
+
+:::{admonition} 本页完成条件
+交付物应包含设备动作定义、接口连接代码、启动配置和返回数据检查。还要说明登录认证、任务是立即完成还是后台执行、重复请求会不会重复创建任务、超时后怎么办、服务重启后怎样恢复，以及各错误码代表什么。
+:::
+
+## 什么情况下使用这种方式
+
+- 厂商提供稳定的 HTTP、WebSocket、gRPC、COM 或 Python/.NET SDK；
+- 上位机能够返回任务 ID、状态或明确的完成结果；
+- 可以配置连接、读取和动作完成超时；
+- 鉴权信息能够从环境或密钥系统注入。
+
+如果上位机仅有图形界面且没有受支持 API，再使用[鼠标模拟点击](mouse-automation.md)。
+
+## 开始前要确认的规则
+
+1. 先从当前工作区的设备类型清单中选择最接近的类别和动作。
+2. 每个 API 路径映射到一个标准动作或状态，不向工作流暴露厂商路径。
+3. 同步 API 只有在设备动作真正完成后才返回成功。
+4. 异步 API 保存任务 ID，并轮询或订阅到终态；仅收到 HTTP 202 不算动作成功。
+5. 将 HTTP 状态、厂商错误码和超时转换为可定位异常。
+6. API 响应必须校验结构和类型，不接受缺字段时的猜测默认值。
+7. 日志只记录请求 ID、动作和非敏感结果，不记录令牌或完整实验数据。
+
+接入前应向厂商确认服务地址、接口版本、加密和登录方式、参数单位和范围、任务是否立即完成、哪些状态代表最终完成、错误码含义、用于防止重复创建任务的请求编号，以及服务重启后的任务恢复方式。
+
+构造参数规范：
+
+| 参数 | 类型 | 约束 |
+| --- | --- | --- |
+| `base_url` | `str` | 含协议和版本前缀；去除末尾 `/` 后保存 |
+| `connect_timeout` | `float` | 秒，必须大于 0 |
+| `read_timeout` | `float` | 秒，查询与动作轮询可分别配置 |
+| `action_timeout` | `float` | 秒，大于最长正常动作时间 |
+| `token_env` | `str` | 保存环境变量名，不保存 Token 值 |
+| `verify_tls` | `bool` | 生产环境保持 `true`，禁止静默关闭证书校验 |
+
+## 连接信息怎么填写
+
+```json
+{
+  "id": "pump_api_01",
+  "type": "vendor_model_peristaltic_pump_api",
+  "config": {
+    "base_url": "http://127.0.0.1:9080/api/v1",
+    "connect_timeout": 3.0,
+    "read_timeout": 10.0,
+    "action_timeout": 120.0,
+    "token_env": "PUMP_API_TOKEN"
+  }
+}
+```
+
+## 开发人员可复制的代码模板
+
+以下示例使用蠕动泵标准接口。URL 和 JSON 字段是适配结构示意，必须按厂商 API 文档替换。
+
+```python
+from typing import Any, Dict
+
+from unilabos.registry.decorators import action, device, topic_config
+
+
+@device(
+    id="vendor_model_peristaltic_pump_api",
+    category=["合成制备仪器与设备", "实验泵", "蠕动泵"],
+    description="某型号蠕动泵上位机 API 驱动",
+    displayname="蠕动泵（上位机 API）",
+)
+class VendorModelPeristalticPumpAPI:
+    def __init__(self, base_url: str, action_timeout: float = 120.0, **kwargs):
+        self.base_url = base_url.rstrip("/")
+        self.action_timeout = action_timeout
+        self._client = self._build_client(**kwargs)
+
+    @action(description="设置转动速度")
+    def set_speed(self, speed: float = 0.0) -> Dict[str, Any]:
+        if speed < 0:
+            raise ValueError("speed 必须大于或等于 0")
+        response = self._client.put("/pump/speed", json={"speed": speed})
+        payload = self._require_json_success(response, action="set_speed")
+        return {"success": True, "message": "转速设置成功", "speed": payload["speed"]}
+
+    @action(description="正转")
+    def rotate_forward(self) -> Dict[str, Any]:
+        response = self._client.post("/pump/actions/rotate-forward")
+        payload = self._require_json_success(response, action="rotate_forward")
+        result = self._wait_for_job(payload["job_id"], timeout=self.action_timeout)
+        if result["state"] != "completed":
+            raise RuntimeError(f"正转失败：{result['state']}")
+        return {"success": True, "message": "正转完成", "job_id": payload["job_id"]}
+
+    @property
+    @topic_config()
+    def status(self) -> str:
+        payload = self._get_status()
+        return str(payload["status"])
+
+    @property
+    @topic_config()
+    def fault(self) -> bool:
+        payload = self._get_status()
+        return bool(payload["fault"])
+```
+
+## 任务不会立即完成时怎样显示进度
+
+建议将厂商状态归一为有限集合：`queued`、`running`、`completed`、`failed`、`cancelled`、
+`unknown`。驱动必须为未知状态失败关闭，不得把未知或超时当作成功。
+
+| 情况 | 标准处理 | 是否直接重试 |
+| --- | --- | --- |
+| 2xx 且返回任务号 | 记录任务号并等待终态 | 否 |
+| 4xx 参数或权限错误 | 返回可行动错误，修正输入/权限 | 修正后再试 |
+| 5xx 服务错误 | 标记服务不可用并保留请求 ID | 先确认服务状态 |
+| 请求超时 | 标记为“结果待确认”，使用原请求编号或任务号查询 | 否 |
+| 任务状态 `failed` | 映射厂商错误码和恢复建议 | 按错误类型决定 |
+
+## 怎样确认接口可以交付
+
+- 标准接口与 API 映射表完整，每个动作和属性都有来源；
+- 已验证 2xx、4xx、5xx、无效 JSON、缺字段和错误类型；
+- 异步任务只在终态完成后返回成功；
+- 请求必须设置超时时间；自动重试前要确认不会让设备重复执行；
+- 令牌、账号和证书未写入启动图（Graph JSON）或日志；
+- 上位机重启、任务丢失和网络分区有明确恢复策略；
+- 真机验收记录包含请求 ID、设备结果和标准动作返回值。
+
+## 常见问题
+
+| 现象 | 可能原因 | 建议处理 |
+| --- | --- | --- |
+| 返回 401/403 | Token 过期或权限不足 | 更新 Secret 并确认权限范围 |
+| 返回 404 | API 路径或版本不一致 | 核对厂商文档和服务版本 |
+| 返回 202 后一直运行 | 请求只是异步受理 | 用任务号轮询或订阅终态 |
+| 超时后创建了重复任务 | 没有保存任务号或防重复请求编号 | 先查询厂商服务中的原任务，不要自动重新提交 |
+| JSON 字段缺失 | 厂商版本变化或异常响应 | 校验响应 Schema 并记录版本 |
+
+---
+
+Source: /mouse-automation.md
+
+# 鼠标模拟点击（可选）
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认设备用途、动作名称、参数单位、成功标准和安全边界。
+- **开发人员**：实现设备合同、连接方式、启动图节点、模拟能力和测试。
+- **验收人员**：验证参数越界、断线、超时、联锁、未知结果和真机恢复。
+:::
+
+本页适用于设备只能通过桌面软件操作、又没有可用接口的特殊情况。系统通过识别窗口并模拟鼠标键盘完成操作。由于窗口位置、弹窗和软件升级都可能导致操作失效，这种方式只作为临时或最后选择。
+
+鼠标/键盘自动化只用于厂商软件没有程序接口、串口、网络协议或 PLC 接口的情况。
+即使使用鼠标点击，工作流中仍应显示“开始检测、导出结果”等业务动作，不能让操作员填写坐标、窗口标题或按钮编号。
+
+:::{admonition} 本页完成条件
+交付标准设备类、GUI 适配器、受控桌面基线和异常测试；每次操作都能确认窗口、控件和完成状态，任何不确定结果都会停止并转人工。
+:::
+
+```{warning}
+不存在可直接复用于任意厂商软件的鼠标自动化驱动。示例选择器必须依据目标上位机的实际可访问性树验证。
+```
+
+## 先确认没有更稳定的控制方式
+
+```text
+官方 API / SDK
+→ 串口或网络协议
+→ PLC / OPC UA
+→ 可访问性控件自动化
+→ 固定坐标和图像识别（最后选择）
+```
+
+固定坐标最容易受分辨率、缩放、窗口位置、主题和弹窗影响。能够使用控件名称、Automation ID
+或可访问性角色时，不要使用坐标。
+
+| 场景 | 建议 |
+| --- | --- |
+| 厂商提供 API、SDK、串口或 PLC 接口 | 不使用鼠标自动化 |
+| 旧仪器只能通过固定桌面软件操作 | 可在隔离桌面评估 |
+| 无人值守启动高温、运动等危险动作 | 不建议使用 |
+| 低风险读取或临时演示 | 只在离线试运行或专用测试电脑上使用 |
+
+## 必须提前约定的运行条件
+
+- 自动化进程与 Uni-Lab 设备驱动分层，窗口操作封装在私有适配器中。
+- 公开类继续使用选定大类的 `@action`、参数和 `@topic_config` 属性。
+- 每次动作先确认应用进程、窗口身份、设备连接状态和安全条件。
+- 点击前确认目标控件唯一、可见且可操作；点击后读取可验证的完成状态。
+- 弹窗、失焦、遮挡、分辨率变化和应用重启必须进入失败或人工介入状态。
+- 不通过盲目重复点击“解决”超时；不确定上一次动作是否完成时停止并核对。
+- 截图和日志不得包含账号、样品隐私或其他敏感信息。
+
+配置参数建议：
+
+| 参数 | 类型 | 约束 |
+| --- | --- | --- |
+| `app_path` | `str` | 固定到已验收的软件版本，不从网页输入任意程序 |
+| `window_identity` | `str` | 使用进程/窗口身份规则，不只匹配易变化标题 |
+| `action_timeout` | `float` | 秒，必须大于 0 |
+| `baseline_version` | `str` | 记录操作系统、软件版本和控件基线 |
+| `screenshot_on_error` | `bool` | 仅保存脱敏错误证据 |
+| `auto_start` | `bool` | 初次接入使用 `false`，由人工确认环境后启动 |
+
+## 开发人员可复制的代码模板
+
+示例实现蠕动泵的动作和状态。`DesktopAdapter` 代表项目选定并经过验证的 UI 自动化库，不是 Uni-Lab OS 内置类，接入者必须自行实现或替换。
+
+```python
+from typing import Any, Dict
+
+from unilabos.registry.decorators import action, device, topic_config
+
+
+@device(
+    id="vendor_model_peristaltic_pump_gui",
+    category=["合成制备仪器与设备", "实验泵", "蠕动泵"],
+    description="某型号蠕动泵厂商上位机 GUI 兼容驱动",
+    displayname="蠕动泵（GUI 自动化）",
+)
+class VendorModelPeristalticPumpGUI:
+    def __init__(self, app_path: str, window_identity: str, **kwargs):
+        self._ui = DesktopAdapter(app_path=app_path)
+        self._window_identity = window_identity
+
+    def connect(self) -> None:
+        self._ui.attach_or_start()
+        window = self._ui.require_window(self._window_identity)
+        if not window.is_ready():
+            raise ConnectionError("厂商上位机窗口未就绪")
+
+    @action(description="设置转动速度")
+    def set_speed(self, speed: float = 0.0) -> Dict[str, Any]:
+        if speed < 0:
+            raise ValueError("speed 必须大于或等于 0")
+        field = self._ui.require_control(role="textbox", automation_id="speed")
+        field.replace_text(str(speed))
+        self._ui.require_control(role="button", name="应用").invoke()
+        shown = float(self._ui.require_control(automation_id="current-speed").value())
+        if shown != speed:
+            raise RuntimeError("上位机未确认新的转速")
+        return {"success": True, "message": "转速设置成功", "speed": shown}
+
+    @action(description="正转")
+    def rotate_forward(self) -> Dict[str, Any]:
+        self._ui.require_control(role="button", name="正转").invoke()
+        self._ui.wait_until_text(automation_id="run-state", value="运行中", timeout=10.0)
+        return {"success": True, "message": "正转已启动"}
+
+    @property
+    @topic_config()
+    def status(self) -> str:
+        return self._ui.require_control(automation_id="run-state").text()
+
+    @property
+    @topic_config()
+    def fault(self) -> bool:
+        return self._ui.require_control(automation_id="alarm-state").text() != "正常"
+```
+
+## 把桌面软件加入启动清单
+
+```json
+{
+  "id": "pump_gui_01",
+  "name": "GUI 蠕动泵 01",
+  "children": [],
+  "parent": null,
+  "type": "device",
+  "class": "community.my_device_package.my_lab_pump_gui",
+  "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+  "config": {
+    "app_path": "/Applications/VendorApp.app",
+    "window_identity": "vendor-main-window",
+    "action_timeout": 30.0,
+    "baseline_version": "approved-baseline-1",
+    "screenshot_on_error": true,
+    "auto_start": false
+  },
+  "data": {"status": "offline"}
+}
+```
+
+路径和窗口身份是部署配置，不是公共动作参数。软件升级或控件树变化时应让基线校验失败，并重新验收后再更新 `baseline_version`。
+
+## 必须固定并记录的电脑环境
+
+| 项目 | 示例 |
+| --- | --- |
+| 操作系统和版本 | Windows 11 23H2 |
+| 厂商软件版本 | 明确到构建号 |
+| 显示缩放 | 100%（仅坐标方案需要固定） |
+| 窗口身份 | 进程名、标题规则、Automation ID |
+| 控件定位 | 角色 + 名称/Automation ID |
+| 完成判据 | 状态文本、进度控件或结果文件 |
+| 异常证据 | 错误文本、可脱敏截图、时间和动作 ID |
+
+## 怎样确认自动操作可以交付
+
+- 标准动作和状态与同大类串口、API、PLC 实现一致；
+- 正常、重复提交、弹窗、失焦、遮挡和窗口关闭均有测试；
+- 更换分辨率、缩放或软件版本时会明确失败，不会点错控件；
+- 每个动作都有可观测完成条件，不能以“点击成功”代替设备成功；
+- 超时不会无限点击或继续工作流；
+- 无真实上位机验证时明确标为示例或待验收。
+
+## 常见问题
+
+| 现象 | 可能原因 | 建议处理 |
+| --- | --- | --- |
+| 找不到窗口 | 软件未启动、标题变化或登录失效 | 停止并人工核对软件版本和窗口身份 |
+| 找到错误按钮 | 只使用坐标，分辨率或缩放变化 | 改用角色、名称、Automation ID 和层级 |
+| 点击后没有完成提示 | 设备忙、弹窗遮挡或等待条件错误 | 保存脱敏证据并转人工，不继续点击 |
+| 远程桌面中失效 | 锁屏、会话切换或焦点被抢占 | 使用受控专用桌面并限制并发 |
+| 软件升级后异常 | 控件结构或文案变化 | 绑定版本并重新评审、验收 |
+
+---
+
+Source: /stack.md
+
+# 光电堆栈与旋转堆栈：物料 + 设备
+
+:::{admonition} 必须同时定义物料面和设备面
+:class: warning
+
+光电堆栈和旋转堆栈都是**物料资源 + 设备能力**组成的复合对象，不能只登记其中一面：物料面登记整机、纵向 Stack、层位 Site、交互位和库存；设备面登记连接、动作、传感器状态、故障和生命周期。
+
+Uni-Lab OS 当前已有旋转堆栈的设备动作参考；光电堆栈只有物料面可以按本页规范交付，设备面尚无统一动作与状态规范。因此，光电堆栈可以完成资源布局和库存登记，但在设备规范补齐前不能宣称“光电能力已经接入”。
+:::
+
+:::{admonition} 阅读角色
+- **业务负责人**：同时确认承载结构、库位、库存规则，以及运动、光电、门和故障能力。
+- **开发人员**：用设备节点登记整机身份与动作，在其下面分别声明每个纵向 Stack、层位 Site 和交互位；设备地址来自已验收的 Stack/层位表。
+- **验收人员**：分别验收物料树和设备能力，再验收两者地址映射；任何一面缺失都不能算完整接入。
+:::
+
+现场的一台堆栈同时有两个不可替代的侧面。一面是**物料资源**：保存有哪些纵向 Stack、每根 Stack 有哪些层位、每位允许放什么、现在被谁占用；另一面是**设备能力**：电机旋转、选 Stack/层、光电判断有无料、开关门和报故障。两面描述的是同一台实物，不是两台互不相关的对象。
+
+两类设备当前状态不同：
+
+| 现场对象 | 物料面 | 设备面 | 当前状态 |
+| --- | --- | --- | --- |
+| 带光电传感器的堆栈 | 必须登记整机、Stack、Site、兼容类型和库存 | 光电状态与故障接口尚无统一规范 | <span class="status status-limited">当前受限</span>：物料面可用，设备面不能按官方规范验收 |
+| 可驱动的旋转堆栈 | 必须登记整机、Stack、Site、交互位和库存 | 必须登记出库、入库、状态、故障和连接生命周期 | <span class="status status-ready">当前可用</span>：两面都按本页规范接入 |
+| 没有电机、没有光电的多层料架 | 按仓库登记 | 无设备面 | <span class="status status-ready">当前可用</span>：按仓库页登记 |
+
+:::{admonition} 本页完成条件
+静止料架并入[工作站台面与仓库](deck-warehouse.md)。光电堆栈必须交付物料树，并把设备能力标为未规范；旋转堆栈必须同时交付设备定义和挂在该设备节点下的物料树。工作流只调用已登记动作和 Site，设备成功后才更新库存。
+:::
+
+## 1. 设备 + 物料的强制定义规范
+
+同一台光电或旋转堆栈必须包含下面四项交付物：
+
+| 交付物 | 定义方式 | 保存什么 | 不保存什么 |
+| --- | --- | --- | --- |
+| 整机设备类型 | `@device` | 动作、状态、故障、连接参数和生命周期 | 不保存每个 Site 当前放了什么 |
+| Stack 物料类型 | `@resource` | 单根纵向 Stack 的规格、层数、层间距和 Site 模板 | 不发送电机或光电命令 |
+| 现场复合实例 | 启动图 | 一个 `type: device` 的整机根节点，以及挂在它下面的 Stack、Site 和交互位 | 不重复定义类型规范 |
+| 地址映射合同 | Stack/Site 元数据 + 驱动校验 | 每个 Site 唯一对应 `stacker` / `level`，交互位唯一对应 `TFS1` | 不用画布坐标或数组下标猜控制器地址 |
+
+启动图中的设备节点不只是执行入口。实例同步会为它建立 Material 身份，并把它的子资源纳入同一棵资源树。因此，推荐结构是一个复合根，而不是两个平级根：
+
+```text
+cytomat_01（type=device；同时是整机 Material 身份）
+├── stack_01（type=plate_carrier；物料资源）
+│   ├── S01-L01（Site）
+│   └── ...
+├── stack_02（type=plate_carrier；物料资源）
+│   └── ...
+└── transfer_station（物料资源）
+    └── TFS1（Site）
+```
+
+设备动作必须通过同一地址映射找到这棵树中的 Site；库存系统必须通过同一 Site 找到设备命令所用的 `stacker` / `level`。禁止建立一个孤立的设备节点和一个无法追溯到它的仓库根，也禁止让设备与物料各维护一份可独立修改的地址表。
+
+因此：
+
+- 没有电机、没有光电、只是多层/多列料架 → 不要读本页，去仓库页。
+- 带光电 → 先完整登记物料树；设备面记为未规范缺口，不要把“物料树已完成”说成“光电已接入”。
+- 能旋转驱动 → 在同一复合实例中同时交付「Stack/Site 物料树 + 设备动作」，任何一面都不能省略。
+
+## 2. 光电堆栈：物料面必须定义，设备面尚无统一规范
+
+带光电传感器的堆栈看起来像架子，实际上是一台要轮询状态的设备。典型能力包括：某层/某列是否有料、交互位是否到位、门是否关闭、故障或遮挡。
+
+物料面仍按第 1 节定义整机 Material 身份、各纵向 Stack、逐层 Site 和交互位。**只有设备面到此为止。** Uni-Lab OS 核心仓库没有光电堆栈的标准设备类、标准动作名或示例驱动。下面几条只是将来补齐设备规范时仍应遵守的通用原则，**不是**现在可以照着实现并验收通过的设备清单：
+
+- 将来用 `@device` 登记身份和类别，不要用仓库工厂冒充设备；
+- 将来用 `@action` 表达业务动作，不要把光电地址暴露给工作流；
+- 将来用 `@topic_config` 发布占位、门、故障等只读状态；
+- 光电读数不能代替库存权威。传感器说“有料”、库存说“空位”时，先停在人工核对。
+
+在设备规范发布前：新项目可以交付光电堆栈的物料模板与资源树，但不要自封“官方光电堆栈设备模板”；不要把“页面上能画出一排槽位”理解成“光电堆栈已经可驱动”。需要接入光电能力时，先作为项目缺口登记，再按[通用设备规范](generic-device.md)另开设备类，并在验收记录里写明：这是项目私有实现，不是产品设备规范。
+
+## 3. 旋转堆栈：物料树 + 标准设备类
+
+可驱动的旋转堆栈是复合对象。整机设备节点同时拥有 Material 身份；纵向 Stack、库位 Site 和交互位作为它的子资源，旋转、选层、出库、入库走设备动作。只有载架循环而没有 `@device` 动作，或只有驱动而没有物料树，都不能称为已经接入旋转堆栈。
+
+必须同时交付三件事：
+
+| 交付物 | 职责 | 不负责 |
+| --- | --- | --- |
+| 设备类 | 出库、入库；把 Stack/层位转换成控制器命令；返回结构化成功/失败 | 不保存“这个槽位现在是谁” |
+| 启动图复合实例 | 现场这一台堆栈的设备/Material 身份、连接参数、超时和子资源关系 | 不代替类型定义 |
+| 仓库 / 放置位 | 每根纵向 Stack、每一层、允许物料类型和交互位 | 不代替电机命令 |
+
+工作流只调用业务动作 `outbound` / `inbound`，参数只用已标定的 Stack 编号和层号。驱动在内部映射到控制器协议。工作流不得出现品牌命令名、寄存器地址或画布 `x/y/z`。
+
+### 3.1 业务能力怎样落到动作
+
+现场常说的“旋转、回零、选层/列、报告在位”，按本规范这样落地，不要再发明一套平行接口：
+
+| 现场说法 | 本规范怎么做 | 不要怎么做 |
+| --- | --- | --- |
+| 选 Stack / 选层 | 出库、入库的必填参数 `stacker`（第几根纵向 Stack）、`level`（第几层） | 不要传视觉坐标；不要让驱动猜默认地址 |
+| 旋转 | 出库、入库时，设备把该 Stack/层位转到交互位（或从交互位收回） | 不要单独暴露“转多少度”给工作流 |
+| 回零 | **不是必选动作**。已验收协议只有出库、入库两项，没有独立回零命令。零点由现场标定写入启动图/驱动配置 | 不要在动作里给行列默认值来冒充回零；不要返回假成功 |
+| 在位状态 | 设备报告运行状态 `status` / `fault`。槽位占用以库存树为准，在动作成功后更新一次 | 不要用圆心、半径、层高推断占位；协议没有按槽查询时不要伪造光电读数 |
+
+某型号若另外提供回零或槽位光电，作为**该型号扩展**登记，不改变本大类必选动作。扩展动作仍须遵守[通用设备规范](generic-device.md)：有协议映射、有成功/失败语义、未知结果不得写成成功。
+
+### 3.2 建模原则：先声明每个纵向 Stack，再组装整机
+
+旋转堆栈不能直接定义成一张扁平的“行 × 列”库位表。一个完整设备必须按实物结构拆成以下资源树：
+
+```text
+cytomat_01（整机设备节点 / Material 身份）
+├── stack_01（纵向 Stack 1）
+│   ├── L01
+│   ├── L02
+│   └── ...
+├── stack_02（纵向 Stack 2）
+│   └── ...
+├── ...
+└── transfer_station（交互位）
+    └── TFS1
+```
+
+每个纵向 Stack 都是一个独立载架实例，拥有自己的稳定编号、层数、层间距和逐层 Site。整机只负责组装这些 Stack、保存它们在转盘上的相对位置，并提供设备动作。不得把 `stack=03, level=07` 压成一个不透明的连续序号，否则现场更换单个 Stack、调整层间距或停用某层时会破坏全部库位身份。
+
+| 层级 | 稳定身份示例 | 发布后允许变化的内容 | 不允许静默变化的内容 |
+| --- | --- | --- | --- |
+| 整机 | `cytomat_01` | 连接参数、超时 | 设备实例 ID |
+| 纵向 Stack | `stack_03` | 经变更确认的层间距 | Stack 编号、父级 |
+| 层位 Site | `S03-L07` | 占用物料 | Site 名称、对应的 `stacker=3, level=7` |
+| 交互位 | `TFS1` | 占用物料 | 名称和机械交接含义 |
+
+下面用仓库已有 Cytomat 串口原型中的命令作为贯穿示例。它展示完整的定义和生命周期，但**不是某个 Cytomat 型号的出厂参数**；Stack 数量、每 Stack 层数、层间距、应答成功码、门和联锁必须用项目所装设备的手册与现场验收记录替换。
+
+### 3.3 Cytomat 资源定义：纵向 Stack 与整机组装
+
+先定义“一个纵向 Stack”。同类 Stack 可以复用同一工厂，但必须逐个创建独立实例，不能让多个 Stack 共享 `sites` 或 Site 对象。
+
+```python
+from math import cos, radians, sin
+from typing import Dict
+
+from pylabrobot.resources import Coordinate, PlateCarrier, PlateHolder, Resource
+from unilabos.registry.decorators import resource
+
+
+def make_cytomat_vertical_stack(
+    *,
+    name: str,
+    stacker: int,
+    levels: int,
+    pitch_mm: float,
+) -> PlateCarrier:
+    """声明一个纵向 Stack；构造期间只创建资源，不连接或驱动设备。"""
+    if stacker <= 0 or levels <= 0 or pitch_mm <= 0:
+        raise ValueError("stacker、levels 和 pitch_mm 必须大于 0")
+
+    sites: Dict[int, PlateHolder] = {}
+    for level in range(1, levels + 1):
+        site = PlateHolder(
+            name=f"S{stacker:02d}-L{level:02d}",
+            size_x=128.0,
+            size_y=86.0,
+            size_z=pitch_mm,
+            pedestal_size_z=0.0,
+        )
+        site.location = Coordinate(0.0, 0.0, (level - 1) * pitch_mm)
+        site.unilabos_extra = {
+            "content_type": ["my_lab_sbs_plate"],
+            "controller_address": {"stacker": stacker, "level": level},
+        }
+        sites[level - 1] = site
+
+    stack = PlateCarrier(
+        name=name,
+        size_x=140.0,
+        size_y=100.0,
+        size_z=levels * pitch_mm,
+        sites=sites,
+        category="cytomat_vertical_stack",
+    )
+    stack.unilabos_extra = {
+        "stacker": stacker,
+        "levels": levels,
+        "pitch_mm": pitch_mm,
+    }
+    return stack
+
+
+@resource(
+    id="my_lab_cytomat_carousel",
+    category=["warehouse", "plate_storage", "rotating_stack", "cytomat"],
+    displayname="Cytomat 旋转堆栈总成",
+    description="由多个独立纵向 Stack 和一个 TFS1 交互位组装。",
+)
+class MyLabCytomatCarousel(Resource):
+    def __init__(
+        self,
+        name: str = "cytomat_carousel",
+        setup: bool = False,
+        **kwargs,
+    ):
+        super().__init__(
+            name=name,
+            size_x=1200.0,
+            size_y=1200.0,
+            size_z=900.0,
+            category="rotating_stack",
+        )
+        if setup:
+            self.setup()
+
+    def setup(self) -> None:
+        # 每项都代表一根实物纵向 Stack。示例值必须替换为本机验收表。
+        stack_specs = [
+            {"stacker": 1, "levels": 21, "pitch_mm": 25.0},
+            {"stacker": 2, "levels": 21, "pitch_mm": 25.0},
+            {"stacker": 3, "levels": 15, "pitch_mm": 35.0},
+            {"stacker": 4, "levels": 15, "pitch_mm": 35.0},
+        ]
+        radius_mm = 430.0
+
+        for index, spec in enumerate(stack_specs):
+            stacker = spec["stacker"]
+            stack = make_cytomat_vertical_stack(
+                name=f"stack_{stacker:02d}",
+                **spec,
+            )
+            angle = index * 360.0 / len(stack_specs)
+            self.assign_child_resource(
+                stack,
+                location=Coordinate(
+                    radius_mm * cos(radians(angle)) + 600.0,
+                    radius_mm * sin(radians(angle)) + 600.0,
+                    0.0,
+                ),
+            )
+
+        tfs_site = PlateHolder(
+            name="TFS1",
+            size_x=128.0,
+            size_y=86.0,
+            size_z=40.0,
+            pedestal_size_z=0.0,
+        )
+        tfs_site.location = Coordinate.zero()
+        tfs_site.unilabos_extra = {"content_type": ["my_lab_sbs_plate"]}
+        transfer_station = PlateCarrier(
+            name="transfer_station",
+            size_x=160.0,
+            size_y=120.0,
+            size_z=80.0,
+            sites={0: tfs_site},
+            category="plate_transfer_station",
+        )
+        self.assign_child_resource(
+            transfer_station,
+            location=Coordinate(520.0, 0.0, 300.0),
+        )
+```
+
+`setup=False` 必须保留。Registry 扫描类型时不能顺便生成数百个 Site；只有启动图实例明确传入 `setup: true` 时才组装整机。生产设备包宜把 `stack_specs` 移到经过版本管理的型号配置中，但仍应逐项列出每个 Stack，不能只写一个无法审计的总容量。
+
+示例中的尺寸和四根 Stack 只是演示如何组装，不代表任何 Cytomat 型号。正式交付至少要为每根 Stack 登记：`stacker`、`levels`、`pitch_mm`、启用/停用层，以及每层允许的板型。
+
+### 3.4 Cytomat 设备定义：地址解析与动作边界
+
+设备驱动使用同一组 `stacker` / `level` 地址访问上面的 Site。仓库现有原型使用 `ll:in` 初始化、`se:cs` 设置单个 Stack 层间距、`mv:st` 从库位送到 TFS1、`mv:ts` 从 TFS1 收回库位；设备包应把串口对象封装进类中，不能在模块导入时打开端口。
+
+```python
+from typing import Any, Dict, Optional
+
+from unilabos.registry.decorators import action, device, topic_config
+
+
+@device(
+    id="my_lab_cytomat",
+    category=["plate_storage", "rotating_stack", "cytomat"],
+    description="Cytomat 参考接口；按独立 Stack 编号和层号存取微孔板。",
+    displayname="Cytomat 旋转堆栈",
+)
+class MyLabCytomat:
+    def __init__(
+        self,
+        device_id: Optional[str] = None,
+        port: str = "COM18",
+        baudrate: int = 9600,
+        timeout: float = 15.0,
+        stack_levels: Optional[Dict[int, int]] = None,
+        **kwargs,
+    ):
+        if timeout <= 0:
+            raise ValueError("timeout 必须大于 0 秒")
+        self.device_id = device_id or "cytomat_01"
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self.stack_levels = stack_levels or {1: 21, 2: 21, 3: 15, 4: 15}
+        self._serial = None
+        self.data: Dict[str, Any] = {"status": "Offline", "fault": False}
+
+    def _validate_address(self, stacker: int, level: int) -> None:
+        if isinstance(stacker, bool) or not isinstance(stacker, int):
+            raise TypeError("stacker 必须是整数")
+        if isinstance(level, bool) or not isinstance(level, int):
+            raise TypeError("level 必须是整数")
+        if stacker not in self.stack_levels:
+            raise ValueError(f"未登记的 Stack: {stacker}")
+        if not 1 <= level <= self.stack_levels[stacker]:
+            raise ValueError(f"Stack {stacker} 没有第 {level} 层")
+
+    def _send_checked(self, command: str) -> str:
+        """发送命令，并按本机协议校验应答；失败或未知应答必须抛异常。"""
+        raise NotImplementedError("按所装 Cytomat 型号实现串口收发和成功码解析")
+
+    def connect(self) -> None:
+        """显式打开串口；模块导入和构造函数中不得连接设备。"""
+        raise NotImplementedError("创建 serial.Serial，并保存到 self._serial")
+
+    def initialize(self, pitch_by_stack: Dict[int, int]) -> Dict[str, Any]:
+        self._send_checked("ll:in")
+        for stacker, pitch_mm in pitch_by_stack.items():
+            if stacker not in self.stack_levels or pitch_mm <= 0:
+                raise ValueError("初始化参数与资源定义不一致")
+            self._send_checked(f"se:cs {stacker:02d} {pitch_mm}")
+        self.data.update(status="Idle", fault=False)
+        return {"success": True, "message": "Cytomat 初始化完成"}
+
+    @action(description="从指定纵向 Stack 的层位送板到 TFS1")
+    def outbound(self, stacker: int, level: int) -> Dict[str, Any]:
+        self._validate_address(stacker, level)
+        response = self._send_checked(f"mv:st {stacker:02d} {level:02d}")
+        return {"success": True, "stacker": stacker, "level": level, "response": response}
+
+    @action(description="从 TFS1 收板到指定纵向 Stack 的层位")
+    def inbound(self, stacker: int, level: int) -> Dict[str, Any]:
+        self._validate_address(stacker, level)
+        response = self._send_checked(f"mv:ts {stacker:02d} {level:02d}")
+        return {"success": True, "stacker": stacker, "level": level, "response": response}
+
+    def shutdown(self) -> None:
+        """停止轮询并关闭串口；不改写库存归属。"""
+        if self._serial is not None:
+            self._serial.close()
+            self._serial = None
+        self.data["status"] = "Offline"
+
+    @property
+    @topic_config()
+    def status(self) -> str:
+        return self.data.get("status", "Unknown")
+
+    @property
+    @topic_config()
+    def fault(self) -> bool:
+        return self.data.get("fault", False)
+```
+
+这里将通用动作参数明确为 `stacker` / `level`，因为它们与资源树和 Cytomat 协议一一对应。若上层合同仍使用 `row` / `column`，必须在设备包中固定映射 `column → stacker`、`row → level`，对外只保留一种叫法，不得让同一 Site 同时存在两套可漂移地址。
+
+动作至少返回 `success: bool`。只有 `_send_checked` 已确认设备成功应答时才能返回 `success=true`；超时、断线、设备拒绝、无效响应或结果不确定时必须抛异常或返回明确失败。出库、入库会改变设备姿态和物料位置，不能标记为 `always_free`。
+
+### 3.5 启动图：一个设备根节点挂载完整物料总成
+
+启动图中只使用一个整机根节点：它以 `type: device` 提供串口连接和动作，同时由实例同步取得 Material 身份。资源总成作为它的子节点，继续承载各 Stack、Site 与库存。设备面和物料面职责分开，但在同一棵树中通过父子关系明确绑定。
+
+```json
+{
+  "nodes": [
+    {
+      "id": "cytomat_01",
+      "name": "Cytomat 01 控制器",
+      "type": "device",
+      "class": "community.my_device_package.MyLabCytomat",
+      "children": ["cytomat_01_storage"],
+      "parent": null,
+      "config": {
+        "port": "COM18",
+        "baudrate": 9600,
+        "timeout": 15.0,
+        "stack_levels": {"1": 21, "2": 21, "3": 15, "4": 15}
+      },
+      "data": {}
+    },
+    {
+      "id": "cytomat_01_storage",
+      "name": "Cytomat 01 库位总成",
+      "type": "warehouse",
+      "class": "community.my_device_package.MyLabCytomatCarousel",
+      "children": [],
+      "parent": "cytomat_01",
+      "config": {"setup": true},
+      "data": {}
+    }
+  ]
+}
+```
+
+示例省略了由 `setup()` 生成的子树序列化结果；系统加载后必须能从 `cytomat_01` 展开到 `cytomat_01_storage`，再看到 `stack_01` 至 `stack_04`。每个 Stack 下分别出现自己的 Site，以及独立的 `transfer_station/TFS1`。验收时应导出实际资源树，逐项比对设备上的标签，并确认设备注册中的 `material_uuid` 指向这个整机 Material 实例。
+
+### 3.6 完整生命周期：定义、启动、出库、入库、恢复、停机
+
+| 阶段 | 设备动作 | 资源 / 库存动作 | 失败规则 |
+| --- | --- | --- | --- |
+| 定义 | 登记 Cytomat 驱动类型 | 分别声明每个纵向 Stack，再组装整机与 TFS1 | Stack 数量、层数或地址表不一致则禁止发布 |
+| 实例化 | 读取端口、波特率、超时，不运动 | `setup=true` 创建资源树并恢复库存 | 构造期间不得打开串口或发送命令 |
+| 启动 | `connect()`，再执行 `ll:in`；按 Stack 执行 `se:cs` | 核对资源树地址表与驱动 `stack_levels` 完全一致 | 任一初始化命令失败则保持未就绪 |
+| 出库前 | 确认设备空闲、门和联锁满足 | 锁定 `Sxx-Lyy`、其中的板以及空的 `TFS1` | 空位、TFS1 被占或类型不兼容时不发命令 |
+| 出库 | `mv:st stacker level` | 暂不改库存 | 超时或未知结果进入人工核对 |
+| 出库确认 | 解析明确成功应答 | 只更新一次：板从 `Sxx-Lyy` 移到 `TFS1` | 未确认成功不得改归属 |
+| 入库前 | 确认设备空闲 | 锁定 TFS1 中的板和空目标层位 | 目标已占用时不发命令 |
+| 入库 | `mv:ts stacker level` | 暂不改库存 | 超时或未知结果进入人工核对 |
+| 入库确认 | 解析明确成功应答 | 只更新一次：板从 `TFS1` 移到目标层位 | 未确认成功不得改归属 |
+| 重连恢复 | 查询 Basic State（原型命令 `ch:bs`）并恢复就绪态 | 对照 TFS1、目标层位和现场实物；不自动猜位置 | 设备状态与库存冲突时冻结相关 Site |
+| 停机 | 停止轮询并关闭串口 | 持久化已确认库存，不移动物料 | 正在动作或结果不确定时先进入人工处置 |
+
+工作流绑定启动图里的设备实例 ID，并显式传递资源树中解析出的 Stack 编号和层号：
+
+```python
+from unilabos.workflow.authoring import device, workflow
+
+cytomat = device("cytomat_01")
+
+
+@workflow(workflow_uuid="...", displayname="Cytomat 单板往返验证")
+def cytomat_round_trip(*, stacker: int, level: int) -> None:
+    cytomat.outbound(stacker=stacker, level=level)
+    # 设备成功后，由库存转移合同把板从 Sxx-Lyy 更新到 TFS1。
+    cytomat.inbound(stacker=stacker, level=level)
+    # 设备成功后，再把同一块板从 TFS1 更新回原 Site。
+```
+
+工作流不得根据列表下标猜 `stacker`，也不得把画布 `x/y/z` 当控制器地址。库存权威在资源树；设备成功只是更新库存的前提，见第 4 节。
+
+## 4. 设备确认成功后再更新库存
+
+无论将来接入光电还是现在接入旋转，库存更新顺序相同：
+
+1. 校验来源放置位有物料、交互位为空且类型兼容；
+2. 锁定设备、目标放置位和物料实例；
+3. 调用设备动作（出库、入库等）；
+4. 确认设备返回成功，并核对接线的在位/光电信号（若有；光电规范未发布前不得把未接入的光电当成已核对）；
+5. 只更新一次库存归属，把物料挂到交互位或目标载架；
+6. 失败或结果不确定时不改归属，进入人工核对。
+
+动作参数使用稳定放置位或设备层/列；由驱动转换成控制器字段。工作流不要传视觉 `x/y/z`。
+
+## 5. 交付前必须检查
+
+- 静止料架已经在仓库页完成；
+- 光电堆栈的物料树已经验收；设备面在没有产品规范时不得因槽位画完就通过；
+- 旋转堆栈已分别声明每个纵向 Stack，并组装为包含交互位的完整资源树；
+- 旋转堆栈只有一个整机设备根，其 Material 身份、子资源树和设备注册 `material_uuid` 能互相对应；
+- `outbound` / `inbound` 的名称、`stacker` / `level` 参数类型和返回结构与设备类一致；
+- 启动图设备实例 ID 与工作流 `device(...)` 一致；每个 Site 与唯一的 Stack/层位地址一致；
+- 空位、占用、错误类型、满栈和重复请求会被拒绝；
+- Stack 编号和层号来自标定/库存目录；驱动无默认位置；非法类型（浮点、字符串数字、布尔）会被拒绝；
+- 旋转堆栈的零点、方向、超时与联锁不由视觉模型推断；
+- 光电占位与库存不一致时有人工路径，不会静默改树；
+- 离线试运行走完“出库 → 交互位 → 入库”，库存只更新一次；
+- 真机前单独验证门、急停、掉电和动作结果不确定场景。
+
+---
+
+Source: /material-template.md
+
+# 2. 物料定义模板
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本目录写给第一次配置 Uni-Lab OS 物料的业务人员、项目实施人员和开发人员。目标是把实验室里的孔板、吸头盒、瓶子、载架、仓库和工位，按照统一规则登记到自己的设备包中。完成后，系统应能识别物料、判断它能放在哪里，并在搬运后继续追踪它的位置和状态。
+
+你不需要先理解全部程序概念。可以先把现实关系说清楚：**是什么物料、外形和容量是多少、能放在哪些位置、现场这一件物料的条码是什么**。再按照本章给出的表格和代码模板填写。
+
+:::{note} 本章中的几个词
+**模板**表示一类物料的固定规格，例如“50 mL 样品瓶”；**实例**表示现场的一件实物，例如条码为 `SAMPLE-001` 的瓶子；**载架**表示能放置物料的架子；**放置位（Site）**表示载架上的一个具体位置；**启动图（Graph JSON）**是系统启动时读取的设备与物料清单；**资源树**就是“载架下面有哪些放置位、每个放置位上有什么物料”的层级关系。
+:::
+
+```{toctree}
+:maxdepth: 1
+
+deck-warehouse
+stack
+plate-tiprack
+container-template
+vial-rack
+magazine
+sheet-battery
+material-state
+other-materials
+```
+
+## 先分清“规格、实物和位置”
+
+| 层次 | 回答的问题 | 设备包中的实现 |
+| --- | --- | --- |
+| 物料模板 | “这类东西是什么、规格是多少？” | 使用 `@resource` 登记，并选择 `Resource`、`Container`、`Plate`、`TipRack` 等合适的基础类型 |
+| 载架/仓库模板 | “它能放在哪里？” | `PlateCarrier`、`BottleCarrier`、`ResourceHolder`、`PlateHolder` |
+| 放置位（放置位） | “载架中的哪个位置？” | 给每个位置固定编号，并用 `content_type` 说明允许放什么 |
+| 物料实例 | “当前是哪一个实物？” | 启动图/库存中的实例、条码、批次、当前位置与状态 |
+| 工作流引用 | “流程使用哪一个实例？” | `ResourceSlot`，以及动作成功后的 `host.transfer_resource(...)` |
+
+不要把这几层混在一起。模板保存不会随单件实物变化的规格，例如尺寸和容量；实例保存条码、批次、当前体积和当前位置；设备负责实际取放；只有设备确认动作成功后，系统才更新物料位置。
+
+## 在自己的设备包中建立目录
+
+下面是推荐的最小目录。业务人员只需知道：`materials.py` 放物料规格，`carriers.py` 放载架和放置位，`graph.json` 放现场实际存在的设备与物料。开发人员按下面结构建文件即可。
+
+```text
+your_lab_package/
+├── package.yaml
+└── your_lab/
+    ├── resources/
+    │   ├── __init__.py
+    │   ├── materials.py       # 板、瓶、吸头盒等物料本体
+    │   ├── carriers.py        # 载架、仓库、工位及 放置位
+    │   └── models/
+    │       └── <resource_id>/
+    │           ├── resource.xacro
+    │           ├── shape.yml
+    │           └── meshes/
+    ├── workflows/
+    └── config/
+        └── graph.json
+```
+
+三维模型可以按物料分别存放，也可以集中存放。无论选择哪一种方式，登记表中的模型路径必须能找到文件，物料类型编号和模型目录也不要随意改名。
+
+在 `resources/__init__.py` 中加入下面两行，让系统启动检查设备包时能够找到这些物料定义：
+
+```python
+from . import carriers, materials
+
+__all__ = ["carriers", "materials"]
+```
+
+## 第一步：选择最接近的物料类型
+
+| 你的物料 | 建议基类 | 适用结构 |
+| --- | --- | --- |
+| 整体烧杯、样品瓶、试剂瓶、废液桶 | `Container` | 单体容器 |
+| 规则孔板 | `Plate` + `Well` | 有序孔位 |
+| 吸头盒 | `TipRack` + `TipSpot` + `Tip` | 有序吸头位 |
+| 板库、缓存位、设备工位 | `PlateCarrier` + `PlateHolder` | 板型物料库位 |
+| 瓶架、粉桶架、TIP 盒堆栈 | `BottleCarrier` + `ResourceHolder` | 通用物料库位 |
+| 规则排列的多层仓库 | `WareHouse` + `warehouse_factory` | 按行、列、层生成固定位置 |
+| 一台工作站的完整台面 | `Deck` | 组装多个仓库、载架和设备固定位置 |
+| 极片、隔膜、垫片、箔材 | `ElectrodeSheet` | 需要厚度、质量和材料状态的片状物料 |
+| 组装完成的电池 | `Battery` | 保存电解液、压力和检测结果等实例状态 |
+| 每个洞位能堆叠多张片材的弹夹 | `MagazineHolder` + `Magazine` | 多洞位、多层片材堆栈 |
+| 无孔、无容量但需要追踪的夹具/盖板 | `Resource` 或 `Container` | 可整体搬运和追踪的普通物料 |
+
+优先选择表中已有类型。只有现有类型无法表达关键业务结构时，才开发新的类型。只是名称、品牌或容量不同，不需要再创造一套新的基础类型。
+
+## 第二步：登记物料规格
+
+下面使用可复用的 Container 工厂模式。把 ID、尺寸、容量和说明换成你已确认的数据：
+
+```python
+from pylabrobot.resources import Container
+from unilabos.registry.decorators import resource
+
+
+@resource(
+    id="my_lab_sample_vial_50ml",
+    displayname="My Lab 50 mL 样品瓶",
+    category=["my_lab", "container", "sample_vial"],
+    description="可在样品瓶载架与检测工位之间转运的 50 mL 样品瓶。",
+)
+def sample_vial_50ml(name: str = "MyLabSampleVial50mL") -> Container:
+    return Container(
+        name=name,
+        size_x=40.0,
+        size_y=40.0,
+        size_z=80.0,
+        max_volume=50_000.0,
+        category="sample_vial",
+    )
+```
+
+`id` 是系统识别“这一类物料”的永久编号，不是现场实物的条码。中文名称或供应商名称变化时不要修改它。如果尺寸、孔位或兼容规则发生变化，导致旧流程不能继续使用，应登记一个新的类型编号，并安排已有库存的数据迁移。
+
+### 物料登记字段怎么填写
+
+| 参数 | 是否必填 | 类型 | 规范 |
+| --- | --- | --- | --- |
+| `id` | 是 | 文字 | 物料类型的永久编号，使用小写英文和下划线；不能包含条码、实物编号或位置编号 |
+| `displayname` | 建议 | `str` | 操作者可理解的名称和规格，如“50 mL 样品瓶” |
+| `category` | 是 | 文字列表 | 从大类写到小类；它用于分类检索，不能代替“这个位置允许放什么”的兼容规则 |
+| `description` | 是 | `str` | 写清用途、承载对象和限制，不只写型号 |
+| `version` | 建议 | `str` | 采用明确版本规则；不兼容结构变化必须升级 |
+| `class_type` | 视系统版本而定 | 文字 | 只有当前版本的设备包检查工具明确要求时才填写 |
+| `model` | 可选 | `dict` | 只包含受支持格式、入口、宏和 shape；路径相对定义模块解析 |
+| `metadata` | 可选 | 键值表 | 保存材质、规格来源、模型精度等补充信息；不保存某件实物的当前位置、条码或密码 |
+| `available_sites` | 可选 | 放置位列表 | 物料模板自身固定拥有的位置；每个位置的编号和名称唯一，不保存当前占用信息 |
+| `handles` | 可选 | 端口列表 | 只有工作流画布确实需要表达输入输出流向时才填写 |
+
+下面这些字段描述物料的实际尺寸和结构：
+
+| 参数 | 单位/类型 | 约束 |
+| --- | --- | --- |
+| `name` | `str` | 实例显示名；提供稳定且无副作用的默认值 |
+| `size_x/y/z` | `float`，mm | 均大于 0；坐标系和放置方向必须记录 |
+| `max_volume` | `float`，µL | 仅容器/Well 使用；不能用 mL 数值冒充 µL |
+| `category` | `str` | 资源实例类别，与装饰器分类语义一致 |
+| `sites` | 放置位清单 | 每个位置编号必须唯一且长期稳定；一个位置最多直接放一件物料 |
+| `ordered_items/ordering` | 有顺序的位置清单 | 需要按孔或按位置操作时必须填写，名称和顺序发布后不能随意改变 |
+| `unilabos_extra` | 补充信息 | 其中 `content_type` 必须填写系统已经登记的物料类型编号 |
+
+## 第三步：给每个放置位置固定编号
+
+对于堆栈和板库，每个实际位置都应有一个长期不变的放置位编号。开发人员用 `ResourceHolder` 表示普通物料放置位：
+
+```python
+from pylabrobot.resources import Coordinate, ResourceHolder
+
+holder = ResourceHolder(
+    name="sample_rack_slot_01",
+    size_x=40.0,
+    size_y=40.0,
+    size_z=80.0,
+)
+holder.location = Coordinate(x=10.0, y=10.0, z=0.0)
+holder.unilabos_extra = {
+    "content_type": ["my_lab_sample_vial_50ml"],
+}
+```
+
+`content_type` 表示“这个位置允许放哪些物料”。它必须填写前一步已经登记的物料类型编号，不能写“任何瓶子”等模糊文字。没有经过尺寸和工艺验证的物料，也不能为了让流程通过而加入允许列表。
+
+## 第四步：补充外形和三维模型
+
+如有三维模型，可登记 Xacro 模型文件和用于页面布局、碰撞检查的简化形状文件：
+
+```python
+@resource(
+    id="my_lab_sample_vial_50ml",
+    category=["my_lab", "container", "sample_vial"],
+    model={
+        "format": "xacro",
+        "entry": "models/my_lab_sample_vial_50ml/resource.xacro",
+        "macro": "my_lab_sample_vial_50ml",
+        "shape": {
+            "format": "unilab.shape/v1",
+            "entry": "models/my_lab_sample_vial_50ml/shape.yml",
+        },
+    },
+)
+```
+
+没有精确三维模型时，可以先用长、宽、高组成的外接盒表示占用空间，并明确标注“仅用于页面布局”。未经测量和现场标定的数据不能作为机器人抓取或运动坐标。
+
+## 第五步：把现场实物加入启动清单
+
+前面的代码定义“这一类物料的固定规格”，启动图 定义“现场现在有哪些实物”。下面示例表示一号载架的 `R01C01` 位置放着条码为 `SAMPLE-001` 的样品瓶。`class` 要替换成设备包检查报告中显示的完整类型名称：
+
+```json
+{
+  "nodes": [
+    {
+      "id": "sample_rack_01",
+      "name": "一号样品瓶载架",
+      "children": ["vial_001"],
+      "parent": null,
+      "type": "warehouse",
+      "class": "community.my_device_package.my_lab_vial_rack_12",
+      "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+      "config": {
+        "sites": [{
+          "label": "R01C01",
+          "name": "R01C01",
+          "position": {"x": 10.0, "y": 10.0, "z": 0.0},
+          "size": {"width": 40.0, "height": 40.0, "depth": 80.0},
+          "content_type": ["my_lab_sample_vial_50ml"],
+          "visible": true,
+          "occupied_by": "vial_001"
+        }]
+      },
+      "data": {}
+    },
+    {
+      "id": "vial_001",
+      "name": "样品瓶 001",
+      "children": [],
+      "parent": "sample_rack_01",
+      "type": "container",
+      "class": "community.my_device_package.my_lab_sample_vial_50ml",
+      "position": {"x": 10.0, "y": 10.0, "z": 0.0},
+      "config": {
+        "size_x": 40.0,
+        "size_y": 40.0,
+        "size_z": 80.0,
+        "max_volume": 50000.0,
+        "category": "sample_vial"
+      },
+      "data": {"barcode": "SAMPLE-001", "current_volume_ul": 12500.0}
+    }
+  ]
+}
+```
+
+载架的 `children`、瓶子的 `parent` 和放置位的 `occupied_by` 必须互相对应，三处都指向同一个瓶子编号。空位置不要填写 `occupied_by`。整份 启动图 中每个 `id` 都必须唯一，位置统一使用毫米。某件实物的条码只写在实例数据中，不能写进通用物料模板。
+
+## 第六步：搬运成功后再更新物料位置
+
+工作流需要同时传递“搬什么、从哪里搬、搬到哪里”。`ResourceSlot` 是系统用于传递这些物料对象的标准字段。只有机械设备明确返回成功后，才调用一次 `transfer_resource` 更新库存位置：
+
+```python
+from unilabos.registry.placeholder_type import ResourceSlot
+
+
+def transfer(
+    resource: ResourceSlot,
+    source_warehouse: ResourceSlot,
+    target_warehouse: ResourceSlot,
+    source_site: str,
+    target_site: str,
+):
+    got = robot.get_resource(
+        resource=resource,
+        warehouse=source_warehouse,
+        site=source_site,
+    )
+    put = robot.put_resource(
+        resource=got.resource,
+        warehouse=target_warehouse,
+        site=target_site,
+    )
+    return host.transfer_resource(
+        resource=put.resource,
+        target_device="target_device_id",
+        mount_resource=target_warehouse,
+        site=target_site,
+    )
+```
+
+如果设备失败、超时，或无法确认物料是否已经搬走，系统中的位置先保持不变，并提示现场人员核对。不要在结果不确定时提前把物料标记到目标位置。
+
+## 怎样确认已经接入成功
+
+```bash
+python -m compileall your_lab
+unilab package inspect --path . --out ./inspect-output
+```
+
+然后依次验证：
+
+1. Catalog 能发现每个 `@resource`，ID、类别和模型路径正确；
+2. 启动图 能创建资源树，所有 放置位 名称唯一且 `content_type` 可解析；
+3. 正确物料能放入，错误类型、超尺寸和已占用 放置位 会被拒绝；
+4. 离线试运行中能完成选料、锁定、模拟动作和一次库存位置更新；
+5. 真实设备验收前，坐标、方向、夹持、联锁和在位信号均有现场依据。
+
+## 各类型适配指南
+
+- [工作站台面与仓库](deck-warehouse.md)：Deck、WareHouse、普通堆栈/料架、位置坐标和排列顺序；
+- [光电堆栈与旋转堆栈：物料 + 设备](stack.md)：同时定义整机设备能力和挂在设备节点下的 Stack/Site 物料树；光电设备面尚无统一规范；
+- [孔板与吸头盒（Plate／Tiprack）](plate-tiprack.md)：孔、吸头位和资源树规模；
+- [Container](container-template.md)：烧杯、样品瓶、试剂瓶与容量；
+- [小瓶载架](vial-rack.md)：小瓶架、放置位以及载架与瓶子的归属关系；
+- [弹夹](magazine.md)：顺序槽位、换夹和批次追踪；
+- [片状物料与组装成品](sheet-battery.md)：极片、垫片、箔材和组装后成品；
+- [物料状态与内容物](material-state.md)：条码、液体、固体和运行状态的保存规则；
+- [其他可追踪物料](other-materials.md)：盖板、底座、夹具及自定义资源。
+
+---
+
+Source: /deck-warehouse.md
+
+# 工作站台面与仓库
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本页说明怎样把一台工作站的台面、仓库和固定放置位登记到 Uni-Lab OS。可以把它们理解成一张分层地图：Deck 是整台工作站的台面，WareHouse 是台面上的一个仓库，放置位（Site）是仓库中的一个具体位置。
+
+现场常说的“堆栈”，如果只是多层料架、板库或缓存架，**没有电机、也没有光电**，就按本页的仓库登记，不要再单独做一页物料模板。带光电传感器或可旋转驱动的堆栈必须同时定义物料面和设备面，见[光电堆栈与旋转堆栈：物料 + 设备](stack.md)。
+
+:::{admonition} 本页完成条件
+业务人员能用现场标签找到每个位置；页面显示的排列方向与实物一致；每个位置只接受经过验证的物料；系统重启后仍能恢复相同的位置名称和层级关系。
+:::
+
+## 1. 先画出现场地图
+
+开始写代码前先形成一张经现场确认的表：
+
+| 要确认的内容 | 示例 | 规则 |
+| --- | --- | --- |
+| 台面名称 | `assembly_deck` | 一台工作站只使用一个稳定名称 |
+| 仓库名称 | `left_store` | 与现场标签一致，不使用临时昵称 |
+| 行、列、层数 | 4 列 × 4 行 × 1 层 | 停用位置也要记录 |
+| 第一个位置坐标 | X=10, Y=10, Z=10 mm | 相对仓库原点，来自图纸或实测 |
+| 相邻位置间距 | X=147, Y=106, Z=130 mm | 是中心间距，不是物料尺寸 |
+| 位置可用空间 | 127 × 86 × 100 mm | 用于判断物料能否放入 |
+| 编号顺序 | 行优先或列优先 | 与操作员、设备协议和页面保持一致 |
+
+## 2. 使用仓库工厂生成固定位置
+
+当前代码提供 `warehouse_factory`，适合规则排列的仓库：
+
+```python
+from unilabos.registry.decorators import resource
+from unilabos.resources.warehouse import warehouse_factory
+
+
+@resource(
+    id="my_lab_warehouse_4x4",
+    category=["warehouse"],
+    displayname="四行四列板库",
+    description="用于存放标准微孔板载架。",
+)
+def my_lab_warehouse_4x4(name: str):
+    return warehouse_factory(
+        name=name,
+        num_items_x=4,
+        num_items_y=4,
+        num_items_z=1,
+        dx=10.0,
+        dy=10.0,
+        dz=10.0,
+        item_dx=147.0,
+        item_dy=106.0,
+        item_dz=130.0,
+        resource_size_x=127.0,
+        resource_size_y=86.0,
+        resource_size_z=100.0,
+        layout="row-major",
+    )
+```
+
+| 参数 | 业务含义 | 约束 |
+| --- | --- | --- |
+| `num_items_x/y/z` | X、Y、Z 三个方向的位置数量 | 必须与启用位置数量一致 |
+| `dx/dy/dz` | 第一个位置相对仓库原点的偏移 | 单位 mm，来自实测或正式图纸 |
+| `item_dx/dy/dz` | 相邻位置之间的距离 | 单位 mm，不能与物料长宽高混淆 |
+| `resource_size_x/y/z` | 每个位置允许占用的空间 | 单位 mm，不得小于目标物料外形 |
+| `removed_positions` | 不可用或被机械结构占用的位置 | 按生成顺序填写；上线前逐项核对 |
+| `col_offset/row_offset` | 编号从哪一列或哪一行开始 | 只影响显示编号，不改变实际坐标 |
+| `layout` | 位置编号的排列方式 | 发布后不要随意修改，否则库存会对应到错误位置 |
+
+`row-major` 表示先按行编号，`col-major` 表示先按列编号，`vertical-col-major` 用于竖向仓库并反转 Y 方向。必须选用与现场标签和设备协议一致的一种。
+
+## 3. 不规则层列用载架登记，仍算仓库
+
+行列工厂适合规整网格。层数、列距不规则时，用 `BottleCarrier + ResourceHolder`（容器/小瓶）或 `PlateCarrier + PlateHolder`（微孔板）列出每个放置位。它们仍然是仓库/载架，不是设备：
+
+```python
+from pylabrobot.resources import Coordinate, ResourceHolder
+from unilabos.registry.decorators import resource
+from unilabos.resources.itemized_carrier import BottleCarrier
+
+
+@resource(
+    id="my_lab_vial_stack",
+    displayname="My Lab 样品瓶堆栈",
+    category=["my_lab", "warehouse", "stack"],
+    description="2 层 × 3 列；每个放置位最多放一只 50 mL 样品瓶。",
+    metadata={"site_count": 6},
+)
+def make_vial_stack(name: str = "my-lab-vial-stack") -> BottleCarrier:
+    sites = {}
+    for layer in range(2):
+        for column in range(3):
+            label = f"L{layer + 1}C{column + 1}"
+            holder = ResourceHolder(
+                name=f"{name}_{label}",
+                size_x=40.0,
+                size_y=40.0,
+                size_z=80.0,
+            )
+            holder.location = Coordinate(
+                x=20.0 + column * 60.0,
+                y=20.0,
+                z=20.0 + layer * 100.0,
+            )
+            holder.unilabos_extra = {
+                "content_type": ["my_lab_sample_vial_50ml"],
+            }
+            sites[label] = holder
+
+    return BottleCarrier(
+        name=name,
+        size_x=200.0,
+        size_y=80.0,
+        size_z=220.0,
+        sites=sites,
+        category="vial_stack",
+    )
+```
+
+示例坐标必须换成实测或 CAD 数据。放置位名称一旦进入启动图、库存和工作流，不要随意变更。所有启用位置都要有长期稳定的编号，并写明允许的物料类型。
+
+若这排槽位还要读光电或由电机转到交互位，必须在同一复合实例中保留物料树，并增加设备动作和状态，见[光电堆栈与旋转堆栈：物料 + 设备](stack.md)。
+
+## 4. 在 Deck 中组装多个仓库
+
+```python
+from pylabrobot.resources import Coordinate, Deck
+from unilabos.registry.decorators import resource
+
+
+@resource(
+    id="my_lab_station_deck",
+    category=["deck"],
+    displayname="装配工作站台面",
+    description="包含左右两个板库。",
+)
+class MyLabStationDeck(Deck):
+    def __init__(
+        self,
+        name: str = "my_lab_station_deck",
+        size_x: float = 2700.0,
+        size_y: float = 1080.0,
+        size_z: float = 1500.0,
+        setup: bool = False,
+        **kwargs,
+    ):
+        super().__init__(name=name, size_x=size_x, size_y=size_y, size_z=size_z)
+        if setup:
+            self.setup()
+
+    def setup(self) -> None:
+        left = my_lab_warehouse_4x4("left_store")
+        right = my_lab_warehouse_4x4("right_store")
+        self.assign_child_resource(left, location=Coordinate(-200.0, 400.0, 0.0))
+        self.assign_child_resource(right, location=Coordinate(2350.0, 400.0, 0.0))
+```
+
+`setup=False` 必须保留。启动图（Graph JSON）中填写 `setup: true` 时才组装默认台面，避免系统只是读取模板时就重复创建子物料。构造函数还应接受反序列化时可能传回的字段，通常通过明确参数和 `**kwargs` 兼容。
+
+## 5. 不规则位置使用 `available_sites`
+
+设备上的固定位置不规则时，不要强行套用行列工厂。可以直接登记位置清单：
+
+```python
+AVAILABLE_SITES = [{
+    "index": "T1",
+    "label": "T1",
+    "visible": True,
+    "position_x": 0.0,
+    "position_y": 0.0,
+    "position_z": 0.0,
+    "width": 128.0,
+    "length": 86.0,
+    "depth": 20.0,
+    "content_type": ["my_lab_96_well_plate"],
+    "description": "台面左前方板位",
+}]
+```
+
+`index` 是系统内部稳定索引，`label` 是页面和现场共同使用的位置名称。两者在同一模板中都不能重复。`visible=false` 只表示页面不显示，不能用来绕过库存和安全检查。
+
+## 6. 交付前必须检查
+
+- 用一件标准物料逐个核对所有启用位置；
+- 页面上的上下、左右和层级方向与实物一致；
+- 行列顺序、偏移量和停用位置有正式记录；
+- 错误类型、超尺寸和已占用位置会被拒绝；
+- 台面重新加载后，位置名称和物料归属没有变化；
+- 页面布局坐标与机器人运动坐标分开管理，机器人仍需单独标定；
+- 带光电或旋转驱动的对象已改走设备页，没有把电机和传感器写进仓库模板。
+
+---
+
+Source: /plate-tiprack.md
+
+# 孔板与吸头盒（Plate／Tiprack）
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本页说明怎样登记孔板和吸头盒。业务人员需要提供外形、孔位或吸头位数量、编号方向、容量及适用设备；开发人员把这些信息写成可检查的模板。完成后，系统应能准确选择 A1、B2 等位置，并拒绝不兼容或已经使用的物料。
+
+本页说明如何在自己的设备包中接入孔板和吸头盒。两者都是“外层资源 + 有序子资源”：Plate 包含 Well，TipRack 包含 TipSpot/Tip。
+
+:::{admonition} 本页完成条件
+在 `resources/materials.py` 中登记具体孔板或吸头盒；为每个孔或吸头位置建立固定编号；在载架放置位的 `content_type` 中写入允许的物料类型，并完成逐孔或逐吸头测试。
+:::
+
+实际接入时可以建立公共 Plate/TipRack 基类来复用尺寸和元数据，再通过 `@resource` 为每种规格注册独立模板。需要特别注意：完整生成 96/384 个子节点会增大资源树；如果省略子节点，页面可以展示外壳，但工作流也不能再逐孔/逐吸头位寻址。
+
+## 1. 什么情况下需要新增一种规格
+
+以下任一项不同，都应评估新建模板，而不是只改显示名称：
+
+- 外形尺寸、行列数或孔距；
+- Well 的截面、底形、深度或最大体积；
+- Plate 的 skirt/trough 类型或设备兼容性；
+- Tip 的最大体积、长度、装配深度、滤芯或复用策略；
+- 模型、方向或条码规则发生不兼容变化。
+
+## 2. 按模板登记可逐孔操作的孔板
+
+```python
+from pylabrobot.resources import Plate, Well, create_ordered_items_2d
+from pylabrobot.resources.well import CrossSectionType, WellBottomType
+from unilabos.registry.decorators import resource
+
+
+def make_96_wells():
+    return create_ordered_items_2d(
+        Well,
+        num_items_x=12,
+        num_items_y=8,
+        dx=10.98,
+        dy=7.84,
+        dz=1.7,
+        item_dx=9.0,
+        item_dy=9.0,
+        size_x=6.8,
+        size_y=6.8,
+        size_z=10.5,
+        max_volume=350.0,
+        cross_section_type=CrossSectionType.CIRCLE,
+        bottom_type=WellBottomType.FLAT,
+    )
+
+
+@resource(
+    id="my_lab_96_well_assay_plate",
+    displayname="My Lab 96 孔检测板",
+    category=["my_lab", "labware", "plate"],
+    description="按 A1-H12 寻址的 96 孔检测板。",
+    metadata={"well_count": 96, "volume_unit": "uL"},
+)
+class MyLab96WellPlate(Plate):
+    def __init__(self, name: str = "my-lab-96-well-plate", **kwargs):
+        kwargs.setdefault("ordered_items", make_96_wells())
+        super().__init__(
+            name=name,
+            size_x=127.76,
+            size_y=85.48,
+            size_z=14.35,
+            plate_type="skirted",
+            **kwargs,
+        )
+```
+
+示例数值必须按供应商图纸或测量结果替换。创建后检查 `A1`、`H12` 的名称、顺序、中心距和坐标方向是否与设备协议一致。
+
+## 3. 按模板登记吸头盒
+
+```python
+from pylabrobot.resources import Tip, TipRack, TipSpot, create_ordered_items_2d
+from unilabos.registry.decorators import resource
+
+
+def make_tip_spots():
+    def make_tip():
+        return Tip(
+            has_filter=True,
+            maximal_volume=200.0,
+            total_tip_length=52.0,
+            fitting_depth=5.0,
+        )
+
+    return create_ordered_items_2d(
+        TipSpot,
+        num_items_x=12,
+        num_items_y=8,
+        dx=10.0,
+        dy=7.0,
+        dz=2.0,
+        item_dx=9.0,
+        item_dy=9.0,
+        size_x=8.0,
+        size_y=8.0,
+        make_tip=make_tip,
+    )
+
+
+@resource(
+    id="my_lab_200ul_filter_tip_rack",
+    displayname="My Lab 200 µL 滤芯吸头盒",
+    category=["my_lab", "labware", "tip_rack"],
+    metadata={"tip_count": 96, "max_volume_ul": 200, "has_filter": True},
+)
+class MyLab200uLTipRack(TipRack):
+    def __init__(self, name: str = "my-lab-200ul-tip-rack", **kwargs):
+        kwargs.setdefault("ordered_items", make_tip_spots())
+        super().__init__(
+            name=name,
+            size_x=127.76,
+            size_y=85.48,
+            size_z=60.0,
+            category="tip_rack",
+            with_tips=True,
+            **kwargs,
+        )
+```
+
+实际 PyLabRobot 版本的 `TipSpot` 工厂参数以设备包锁定依赖为准。重点是把 Tip 的容量、长度、装配深度、滤芯属性和放置位（Site）顺序变成可检查的定义。
+
+## 4. 决定是否需要逐孔或逐吸头追踪
+
+| 需求 | 建议 |
+| --- | --- |
+| 工作流按 `A1`/`B2` 操作 | 必须生成稳定 Well 子资源 |
+| 系统追踪每支吸头是否用过 | 必须生成 TipSpot，并维护使用状态 |
+| 只整板搬运、不逐孔操作 | 可只保留板外壳，但文档中明确能力限制 |
+| 页面因 96/384 个位置数据过多而变慢 | 先测量数据量，再考虑分批加载或简化画面；不能在没有说明的情况下删除逐孔操作能力 |
+
+某些设备包为了控制前后端通信体积，会对部分 96/384 孔板和 TipRack 使用空 `ordered_items/ordering`。这是特定场景的性能折中，不应直接作为所有设备包的默认做法。
+
+## 5. 说明哪些位置和设备允许使用它
+
+孔板或吸头盒本身不记录它能放到哪个工位。应在载架或设备的放置位上用 `content_type` 明确允许的物料类型，例如：
+
+```python
+plate_site.unilabos_extra = {
+    "content_type": ["my_lab_96_well_assay_plate"],
+}
+tip_site.unilabos_extra = {
+    "content_type": ["my_lab_200ul_filter_tip_rack"],
+}
+```
+
+## 6. 交付前必须检查
+
+- Catalog 能分别发现每种 Plate/TipRack 模板；
+- 外形、孔距、容量、方向和单位有来源记录；
+- `A1`、末孔/末 TipSpot 和排序方向与工艺一致；
+- 超容量、错误板型、错误吸头规格和已用吸头会被拒绝；
+- 整板搬运与逐孔/逐 Tip 操作的能力边界写清楚；
+- 模型是精确、代理还是仅布局用途已标注；
+- 离线试运行能够完成装载、逐项选择、状态更新和卸载。
+
+---
+
+Source: /container-template.md
+
+# 容器（Container）
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本页说明怎样登记烧杯、样品瓶、试剂瓶、粉桶和废液桶等整体容器。如果需要对每个孔单独操作，请查看 [孔板与吸头盒（Plate／Tiprack）](plate-tiprack.md)；如果一个架子上能放多件物料，还要为每个位置建立固定的放置位。
+
+:::{admonition} 本页完成条件
+在 `resources/materials.py` 中登记容器规格；尺寸统一使用毫米，容量统一使用微升；再把现场实物加入启动图（Graph JSON），并检查容量、条码、允许放置的位置和搬运后的库存位置。
+:::
+
+推荐使用内部 `_container(...)` 工厂统一构造 `Container`，再用不同的 `@resource` 注册烧杯、样品瓶、试剂瓶和注粉瓶。
+
+## 1. 收集定义数据
+
+| 数据 | 放在哪里 | 注意事项 |
+| --- | --- | --- |
+| 长、宽、高 | `size_x/y/z` | 单位统一为 mm，并明确原点/放置方向 |
+| 最大容量 | `max_volume` | PyLabRobot 示例使用 µL；不要和 mL 混写 |
+| 安全工作容量 | `metadata` 或工艺约束 | 不等同于标称最大容量 |
+| 用途分类 | `category` | 如 `sample_vial`、`liquid_reagent`、`powder_reagent` |
+| 模型/形状 | `model` | 可选，但来源和精度必须可追溯 |
+| 条码、批次、当前体积 | 物料实例 | 不写入模板默认常量 |
+
+### 选择 `Bottle` 还是 `Container`
+
+| 情况 | 建议类型 | 原因 |
+| --- | --- | --- |
+| 圆形瓶、烧杯、反应器，需要按容量追踪内容物 | `Bottle` | 当前代码将直径、高度和最大容量封装成统一瓶类 |
+| 方形、异形或更通用的整体容器 | `Container` | 可以分别填写长、宽、高 |
+| 有多个孔或多个独立位置 | `Plate`、`TipRack` 或 Carrier | 需要逐孔或逐位置追踪，不能只当成一个整体瓶子 |
+
+当前 `Bottle` 的构造参数使用 `diameter`、`height` 和 `max_volume`。条码属于现场实例身份，应通过 启动图 或库存设置，不依赖构造函数中的固定默认值。
+
+```python
+from unilabos.registry.decorators import resource
+from unilabos.resources.itemized_carrier import Bottle
+
+
+@resource(
+    id="my_lab_reagent_bottle_500ml",
+    category=["my_lab", "bottle", "liquid_reagent"],
+    displayname="500 mL 试剂瓶",
+    description="用于保存液体试剂的圆形瓶。",
+    metadata={"nominal_volume_ml": 500, "material": "glass"},
+)
+def reagent_bottle_500ml(name: str) -> Bottle:
+    return Bottle(
+        name=name,
+        diameter=70.0,
+        height=120.0,
+        max_volume=500_000.0,
+        category="liquid_reagent",
+        model="my_lab_reagent_bottle_500ml",
+    )
+```
+
+## 2. 按模板填写容器规格
+
+```python
+from pylabrobot.resources import Container
+from unilabos.registry.decorators import resource
+
+
+def _container(
+    *, name: str, diameter_mm: float, height_mm: float,
+    max_volume_ul: float, category: str,
+) -> Container:
+    return Container(
+        name=name,
+        size_x=diameter_mm,
+        size_y=diameter_mm,
+        size_z=height_mm,
+        max_volume=max_volume_ul,
+        category=category,
+    )
+
+
+@resource(
+    id="my_lab_sample_vial_50ml",
+    displayname="My Lab 50 mL 样品瓶",
+    category=["my_lab", "container", "sample_vial"],
+    description="由样品瓶载架承载，可整体转运至检测工位。",
+    metadata={
+        "nominal_volume_ml": 50,
+        "working_volume_ml": 40,
+        "material": "PP",
+    },
+)
+def sample_vial_50ml(name: str = "MyLabSampleVial50mL") -> Container:
+    return _container(
+        name=name,
+        diameter_mm=40.0,
+        height_mm=80.0,
+        max_volume_ul=50_000.0,
+        category="sample_vial",
+    )
+```
+
+圆柱容器可以把直径同时填入 `size_x` 和 `size_y`，表示它在桌面上占用的最大范围。异形容器应填写真实长宽，必要时补充简化形状或三维模型，不能为了套用圆柱模板而忽略会影响放置和抓取的外形。
+
+## 3. 如有需要，补充三维模型
+
+如果已经有三维模型，可以同时登记 Xacro 模型文件和简化形状文件 `shape.yml`：
+
+```python
+@resource(
+    id="my_lab_sample_vial_50ml",
+    category=["my_lab", "container", "sample_vial"],
+    model={
+        "format": "xacro",
+        "entry": "models/my_lab_sample_vial_50ml/resource.xacro",
+        "macro": "my_lab_sample_vial_50ml",
+        "shape": {
+            "format": "unilab.shape/v1",
+            "entry": "models/my_lab_sample_vial_50ml/shape.yml",
+        },
+    },
+)
+```
+
+模型文件描述视觉和碰撞包络，不授予机器人运动权限。夹取点、速度、重量和安全联锁属于设备接入/现场标定。
+
+## 4. 说明哪些位置允许放这种容器
+
+在承载它的放置位中声明：
+
+```python
+holder.unilabos_extra = {
+    "content_type": ["my_lab_sample_vial_50ml"],
+}
+```
+
+同一放置位（Site）确实兼容多个模板时可以列出多个 ID，但需要分别验证高度、直径、方向和夹持约束。
+
+## 5. 分清“容器规格”和“现场实物”
+
+```json
+{
+  "template_id": "my_lab_sample_vial_50ml",
+  "instance_id": "vial_001",
+  "barcode": "SMP-2026-0001",
+  "lot": "LOT-A",
+  "current_volume_ml": 12.5,
+  "site": "sample_rack_01/slot_01"
+}
+```
+
+上面展示的是一件现场实物的数据。具体字段以当前系统提供的 启动图 和库存字段说明为准。模板定义最大容量，现场实例记录当前内容物和状态。
+
+## 6. 交付前必须检查
+
+- `@resource` ID 唯一，Catalog 可发现；
+- 尺寸、容量、材质、方向和单位有来源；
+- 标称容量与安全工作容量分开；
+- 正确 放置位 可装载，错误类型、超尺寸和已占用 放置位 被拒绝；
+- 加液/取液不会超过上限或低于死体积；
+- 转运成功后只更新实例位置，不修改模板；
+- 模型缺失或仅为代理时，页面明确显示其精度边界。
+
+---
+
+Source: /vial-rack.md
+
+# 小瓶载架
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本页说明怎样登记小瓶载架。可以把它理解为三层：载架是整个架子，每个孔位是一个固定放置位，现场的瓶子放在某个位置上。系统依靠这三层关系判断每只瓶子在哪里。
+
+:::{admonition} 本页完成条件
+先登记小瓶规格，再登记载架；为每个放置位设置固定编号和允许的物料类型，最后在启动图（Graph JSON）中建立“载架→放置位→小瓶”的归属关系。
+:::
+
+开发人员可使用 `BottleCarrier + ResourceHolder` 表示烧杯、样品瓶和试剂瓶载架，使用 `PlateCarrier + PlateHolder` 表示板型物料载架。无论使用哪一种代码类型，都要明确载架、放置位和物料之间的归属关系。
+
+## 1. 先定义瓶子，再定义载架
+
+载架的 `content_type` 要引用已经注册的小瓶模板，因此建议顺序为：
+
+1. 在 `resources/materials.py` 定义 `my_lab_sample_vial_50ml`；
+2. 在 `resources/carriers.py` 定义载架和放置位（Site）；
+3. 在 `resources/__init__.py` 导入两个模块；
+4. 在 启动图/库存中创建载架实例和小瓶实例；
+5. 把小瓶实例挂到具体 放置位，而不是在模板中写死条码。
+
+## 2. 给载架和每个放置位固定编号
+
+```python
+from pylabrobot.resources import Coordinate, ResourceHolder
+from unilabos.registry.decorators import resource
+from unilabos.resources.itemized_carrier import BottleCarrier
+
+
+@resource(
+    id="my_lab_vial_rack_12",
+    displayname="My Lab 12 位样品瓶载架",
+    category=["my_lab", "carrier", "vial_rack"],
+    description="3 行 × 4 列；每个位点最多放一只 50 mL 样品瓶。",
+    metadata={"site_count": 12, "site_naming": "R01C01..R03C04"},
+)
+def make_vial_rack(name: str = "my-lab-vial-rack") -> BottleCarrier:
+    sites = {}
+    for row in range(3):
+        for column in range(4):
+            label = f"R{row + 1:02d}C{column + 1:02d}"
+            holder = ResourceHolder(
+                name=f"{name}_{label}",
+                size_x=40.0,
+                size_y=40.0,
+                size_z=80.0,
+            )
+            holder.location = Coordinate(
+                x=10.0 + column * 50.0,
+                y=10.0 + row * 50.0,
+                z=0.0,
+            )
+            holder.unilabos_extra = {
+                "content_type": ["my_lab_sample_vial_50ml"],
+            }
+            sites[label] = holder
+
+    carrier = BottleCarrier(
+        name=name,
+        size_x=210.0,
+        size_y=160.0,
+        size_z=90.0,
+        sites=sites,
+        category="vial_rack",
+    )
+    carrier.num_items_x = 4
+    carrier.num_items_y = 3
+    carrier.num_items_z = 1
+    return carrier
+```
+
+示例坐标和尺寸只展示结构，必须替换为图纸/实测值。不要依赖 `dict` 的临时序号表达设备槽位；放置位 名称应直接对应操作员、启动图 和设备协议都能核对的编号。
+
+## 3. 是否预先放入演示用物料
+
+载架模板可以提供 `fill_placeholders=True`，用于在演示或调试时预先显示吸头盒、烧杯或试剂瓶。使用时必须明确：
+
+- 占位物料只用于演示/仿真初始化；
+- 生产库存必须由真实实例、条码和盘点结果建立；
+- 不要让占位实例与真实条码同时存在；
+- `fill_placeholders=False` 时应得到结构完整但槽位为空的载架。
+
+## 4. 单瓶转运与整架转运
+
+- **单瓶转运**：锁定来源位置和目标位置，动作成功后再把瓶子的库存位置改到目标放置位；
+- **整架转运**：移动载架根节点，所有子瓶继续保持在原 放置位 下；
+- **结果不确定**：不改变资源树，要求扫码/现场确认；
+- **错瓶/重复条码**：提交动作前拒绝，不通过改 放置位 名称绕过。
+
+## 5. 交付前必须检查
+
+- 放置位 数量、行列、命名、方向和停用位与实物一致；
+- 每个放置位的尺寸都能容纳目标小瓶，允许的物料类型能被系统识别；
+- 空架、满架、错瓶、重复条码、占用位和扫描失败均有负例；
+- 单瓶取放后只有目标放置位 的父子关系变化；
+- 整架移动时全部子瓶随载架移动，不产生重复实例；
+- 设备超时或断线时库存不会提前标记“已取出”。
+
+---
+
+Source: /magazine.md
+
+# 弹夹
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本页说明怎样登记弹夹、料匣或按顺序取用的耗材盒。业务上要说清楚四件事：弹夹有多少位置、按什么顺序取用、每个位置允许放什么，以及当前已经取到哪个位置。当前代码同时支持“每个槽位放一件物料”的普通弹夹，以及“每个洞位堆叠多张片材”的片材弹夹。
+
+:::{admonition} 本页完成条件
+根据实物选择普通多槽载架或 `MagazineHolder`；填写固定取用顺序、方向、容量和允许物料；在现场实例中记录当前槽位、锁定状态和批次，并检查换夹、空槽、粘片和卡料后的恢复流程。
+:::
+
+## 1. 先确认弹夹的使用规则
+
+弹夹与普通载架的区别通常不在几何，而在运行规则：
+
+- 有明确取用顺序（FIFO、LIFO 或指定槽位）；
+- 有正反方向、锁定/解锁或换夹动作；
+- 整夹有条码，槽内物料也可能有独立条码；
+- 设备维护当前槽位，但库存仍要保存每个放置位（Site）的物料归属。
+
+如果没有这些顺序/换夹语义，按[小瓶载架](vial-rack.md)或[工作站台面与仓库](deck-warehouse.md)建模即可。带光电或旋转驱动的对象见[光电堆栈与旋转堆栈：物料 + 设备](stack.md)。
+
+## 2. 先选择弹夹结构
+
+| 实物结构 | 使用方式 | 典型例子 |
+| --- | --- | --- |
+| 每个槽位最多放一瓶或一盒 | `BottleCarrier` 加多个固定放置位 | 试剂瓶弹夹、吸头盒料匣 |
+| 每个洞位上下堆叠多张片材 | `MagazineHolder`，每个洞位是一个 `Magazine` 堆栈 | 极片、隔膜、垫片弹夹 |
+| 只有一个连续堆栈 | 单个 `Magazine` 或普通资源堆栈 | 单列片材供料 |
+
+不要只因为业务名称都叫“弹夹”就使用同一种结构。能否在一个位置内堆叠多件物料，是选择类型的关键。
+
+## 3. 普通多槽弹夹模板
+
+```python
+from pylabrobot.resources import Coordinate, ResourceHolder
+from unilabos.registry.decorators import resource
+from unilabos.resources.itemized_carrier import BottleCarrier
+
+
+SLOT_ORDER = [f"slot_{index:02d}" for index in range(1, 7)]
+
+
+@resource(
+    id="my_lab_reagent_magazine_6",
+    displayname="My Lab 六位试剂弹夹",
+    category=["my_lab", "carrier", "magazine"],
+    description="从 slot_01 到 slot_06 顺序取用的可更换试剂弹夹。",
+    metadata={
+        "slot_count": 6,
+        "slot_order": SLOT_ORDER,
+        "orientation": "front_to_back",
+    },
+)
+def make_reagent_magazine(name: str = "my-lab-reagent-magazine") -> BottleCarrier:
+    sites = {}
+    for index, label in enumerate(SLOT_ORDER):
+        holder = ResourceHolder(
+            name=f"{name}_{label}",
+            size_x=40.0,
+            size_y=40.0,
+            size_z=80.0,
+        )
+        holder.location = Coordinate(x=10.0 + index * 50.0, y=10.0, z=0.0)
+        holder.unilabos_extra = {
+            "content_type": ["my_lab_sample_vial_50ml"],
+        }
+        sites[label] = holder
+
+    return BottleCarrier(
+        name=name,
+        size_x=310.0,
+        size_y=60.0,
+        size_z=90.0,
+        sites=sites,
+        category="magazine",
+    )
+```
+
+`slot_order` 是模板规则；`current_slot`、剩余数量、锁定状态、弹夹条码和批次属于实例/设备运行状态。
+
+## 4. 片材弹夹模板
+
+当前代码提供 `MagazineHolder`、`Magazine` 和 `magazine_factory`。`MagazineHolder` 表示整个弹夹，`Magazine` 表示其中一个可以上下堆叠片材的洞位：
+
+```python
+from pylabrobot.resources import Coordinate
+from unilabos.registry.decorators import resource
+from unilabos.resources.battery.magazine import magazine_factory
+
+
+@resource(
+    id="my_lab_sheet_magazine_6",
+    displayname="六洞片材弹夹",
+    category=["battery_material", "magazine_holder"],
+    description="六个洞位，每个洞位最多堆叠 100 张片材。",
+    metadata={"hole_count": 6, "max_sheets_per_hole": 100},
+)
+def make_sheet_magazine(name: str):
+    return magazine_factory(
+        name=name,
+        size_x=80.0,
+        size_y=80.0,
+        size_z=40.0,
+        locations=[
+            Coordinate(20.0, 20.0, 30.0),
+            Coordinate(40.0, 20.0, 30.0),
+            Coordinate(60.0, 20.0, 30.0),
+            Coordinate(20.0, 50.0, 30.0),
+            Coordinate(40.0, 50.0, 30.0),
+            Coordinate(60.0, 50.0, 30.0),
+        ],
+        hole_diameter=14.0,
+        hole_depth=10.0,
+        max_sheets_per_hole=100,
+        category="magazine_holder",
+        model="my_lab_sheet_magazine_6",
+    )
+```
+
+| 参数 | 单位 | 约束 |
+| --- | --- | --- |
+| `locations` | mm | 每个洞位中心坐标，顺序决定 A1、A2 等编号 |
+| `hole_diameter` | mm | 必须大于片材直径并保留经验证的间隙 |
+| `hole_depth` | mm | 与最大堆叠高度和取料安全距离一致 |
+| `max_sheets_per_hole` | 张 | 不能只按几何理论值计算，要考虑公差、粘片和安全余量 |
+| `direction` | `x/y/z` | 片材堆叠方向；通常为 `z` |
+| `klasses` | 物料工厂列表 | 仅用于明确的模拟初始化；生产库存应由真实盘点建立 |
+
+## 5. 设备需要提供哪些业务动作
+
+弹夹设备通常应提供：装载、卸载、锁定、解锁、读取状态和按 放置位 取料等动作。动作参数使用稳定 放置位 名称或经确认的槽位编号，由驱动转换为协议地址。
+
+一次“取下一件物料”应：
+
+1. 根据实例状态和 `slot_order` 解析目标放置位；
+2. 校验 放置位 有兼容物料、弹夹已锁定且设备就绪；
+3. 执行取料动作；
+4. 设备确认成功后提交一次库存转移并推进 `current_slot`；
+5. 卡料/超时后保持原库存事实，现场核对后再恢复。
+
+## 6. 交付前必须检查
+
+- 槽位数量、顺序和 0/1 起始约定与设备协议一致；
+- 正反方向和锁定状态能阻止错误运行；
+- 空槽、跳槽、错误类型、满夹、粘片和重复取料有失败测试；
+- 换夹先卸载并盘点旧夹，再登记新夹，不覆盖历史实例；
+- 整夹条码、槽内条码和批次均可追溯；
+- 动作失败时不推进当前槽位、不改变物料归属。
+
+普通瓶盒弹夹使用多槽载架即可；片材弹夹应优先使用当前代码已经提供的 `MagazineHolder` 和 `Magazine`，不要再开发一套含义重复的基础类型。
+
+---
+
+Source: /sheet-battery.md
+
+# 片状物料与组装成品
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本页适用于极片、隔膜、垫片、弹片、金属箔等片状物料，以及由多件物料组装形成的电池或其他成品。当前代码提供 `ElectrodeSheet` 和 `Battery` 两类基础实现，自己的设备包应在此基础上登记本项目的具体规格。
+
+:::{admonition} 本页完成条件
+每一种片材和成品都有稳定类型编号；固定规格与现场状态分开保存；厚度、质量、直径和用量单位明确；片材装入弹夹、取出和组装后，系统中的数量与归属保持正确。
+:::
+
+## 1. 区分固定规格和现场状态
+
+| 数据 | 放在模板中 | 放在现场实例状态中 |
+| --- | --- | --- |
+| 物料类别、标称直径、标称厚度 | 是 | 否 |
+| 材质和页面颜色 | 是 | 只有批次差异时才放实例 |
+| 实际质量、检测结果 | 否 | 是 |
+| 条码、批次、当前位置 | 否 | 是 |
+| 组装压力、电解液信息、开路电压 | 否 | 是 |
+
+同一类型的外形或用途已经不兼容时，应新增类型编号。仅批次、实测质量或检测结果不同，不需要创建新模板。
+
+## 2. 登记一种片状物料
+
+```python
+from unilabos.registry.decorators import resource
+from unilabos.resources.battery.electrode_sheet import ElectrodeSheet
+
+
+@resource(
+    id="my_lab_positive_electrode_14mm",
+    category=["battery_material", "electrode_sheet"],
+    displayname="14 mm 正极片",
+    description="用于扣式电池装配的圆形正极片。",
+    metadata={
+        "diameter_mm": 14.0,
+        "nominal_thickness_mm": 0.10,
+        "material_type": "positive_electrode",
+    },
+)
+def positive_electrode_14mm(name: str) -> ElectrodeSheet:
+    sheet = ElectrodeSheet(
+        name=name,
+        size_x=14.0,
+        size_y=14.0,
+        size_z=0.10,
+        category="electrode_sheet",
+        model="positive_electrode_14mm",
+    )
+    sheet.load_state({
+        "diameter": 14.0,
+        "thickness": 0.10,
+        "mass": 0.0,
+        "material_type": "positive_electrode",
+        "color": "#cc3333",
+        "info": None,
+    })
+    return sheet
+```
+
+| 字段 | 单位 | 填写规则 |
+| --- | --- | --- |
+| `size_x/size_y` | mm | 圆片通常填写直径；异形片填写实际最大长宽 |
+| `size_z` | mm | 填写厚度，不能用层数代替 |
+| `diameter` | mm | 只适用于圆形片材；与外形定义保持一致 |
+| `thickness` | mm | 明确是标称值还是实测值 |
+| `mass` | g | 未测量时使用约定的空值策略，不能填写猜测值 |
+| `material_type` | 固定英文值 | 同一种材料在所有批次中保持一致 |
+| `color` | 十六进制颜色 | 只用于页面识别，不代表真实检测结果 |
+| `info` | 文字或空值 | 只写必要补充说明，不堆放结构化业务数据 |
+
+## 3. 登记组装完成的成品
+
+`Battery` 适合表示已经完成组装、需要继续追踪和检测的电池实例。当前实现可保存电解液名称、外部电解液编码、开路电压、组装压力和电解液用量。
+
+这些字段属于现场实例状态，不应写成所有电池共用的模板默认事实：
+
+| 状态字段 | 建议单位 | 业务含义 |
+| --- | --- | --- |
+| `electrolyte_name` | 文字 | 实际使用的电解液名称 |
+| `data_electrolyte_code` | 文字 | 外部系统或批次编码 |
+| `open_circuit_voltage` | V | 实测开路电压 |
+| `assembly_pressure` | 项目统一单位 | 组装压力；单位必须在项目规范中固定 |
+| `electrolyte_volume` | µL | 实际加入的电解液体积 |
+| `info` | 文字或空值 | 异常或必要备注 |
+
+如果项目无法确认 `assembly_pressure` 的统一单位，禁止直接上线该字段；应先与工艺和设备团队确定单位并补充到字段名称或说明中。
+
+## 4. 与弹夹和工作流配合
+
+- 每个弹夹洞位保存片材堆栈，不把多层片材压成一个数量字段；
+- 工作流取片成功后再从来源堆栈移除，并加入目标位置；
+- 结果不确定时不减少库存，进入人工盘点；
+- 组装完成后创建或更新成品实例，并保留所用批次的追溯关系；
+- 页面颜色只帮助辨认物料，不能替代条码、批次或视觉检测。
+
+## 5. 交付前必须检查
+
+- 类型编号、外形、材质和单位有正式来源；
+- 片材厚度不会被错误写成毫米以外的单位；
+- 弹夹最大层数与实际深度、片材厚度和安全余量相符；
+- 空洞、满洞、粘片、重复取片和结果不确定都有处理路径；
+- 成品状态可以保存、重新加载并保持不变；
+- 所有状态值都能保存为标准 JSON 数据。
+
+---
+
+Source: /material-state.md
+
+# 物料状态、条码与内容物
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+物料模板回答“这类物料的固定规格是什么”，物料状态回答“现场这一件物料现在是什么情况”。本页说明条码、液体、固体和自定义状态应该怎样保存，避免重启后丢失或同一数据在多个位置互相冲突。
+
+:::{admonition} 本页完成条件
+同一件实物具有唯一身份；条码、当前位置和内容物能够保存并恢复；液体与固体使用统一单位；动作失败或结果不确定时不会提前改写库存事实。
+:::
+
+## 1. 哪些数据属于现场实例
+
+| 数据 | 示例 | 规则 |
+| --- | --- | --- |
+| 实例 `id`/UUID | `vial_001` | 系统内唯一，用于稳定追踪 |
+| 条码和码制 | `SAMPLE-001`、`Code 128` | 条码可更换，但不能与类型编号混用 |
+| 批次 | `LOT-A` | 保存实际批次，不写入通用模板 |
+| 当前位置 | `rack_01/R01C01` | 由载架、放置位和父子关系共同表达 |
+| 当前内容物 | 水 500 µL | 液体统一使用 µL，固体统一使用 µg |
+| 历史变化 | 加入 500 µL、取出 100 µL | 记录增减事件，便于追溯当前量 |
+| 业务状态 | 已使用、待检测、报废 | 使用稳定枚举，不使用随意备注代替 |
+
+## 2. 内容物和单位规则
+
+当前代码对内容物采用统一单位：液体使用微升 `µL`，固体使用微克 `µg`。对外页面可以同时显示 mL 或 mg，但写入系统前必须完成单位换算。
+
+```text
+1 mL = 1,000 µL
+1 mg = 1,000 µg
+```
+
+- `max_volume` 表示容器最大容量，单位 µL；
+- 当前液体组成和历史变化属于实例状态，不属于模板规格；
+- 不知道物质名称时可使用系统的未知物质规则，但后续确认后要完成更正和追溯；
+- 取液不能让当前量变成负数，加液不能超过允许容量；
+- 同时操作多个孔位时，物质名称、用量和目标位置的数量必须一一对应。
+
+## 3. 保存自定义运行状态
+
+自定义资源可以通过 `serialize_state()` 返回需要持久保存的状态，并通过 `load_state()` 恢复。状态只能包含 JSON 支持的基础数据：文字、数字、真假值、空值、列表和键值表。
+
+不要保存以下内容：
+
+- 打开的串口、网络连接或文件对象；
+- Python 类实例和不能转成 JSON 的对象；
+- 可以从固定规格重新计算出的重复数据；
+- 密码、令牌和不应进入库存的敏感实验数据；
+- 同一事实的第二份副本，例如同时在 `config` 和 `data` 保存两个不同条码。
+
+构造函数必须能够接收资源保存后再次加载时返回的字段。新增重要状态字段时，要同时验证“保存→重启→恢复→再次保存”的完整往返过程。
+
+## 4. 动作什么时候更新状态
+
+| 动作结果 | 库存和物料状态 |
+| --- | --- |
+| 设备明确成功 | 一次性提交内容物或位置变化 |
+| 设备明确失败且未动作 | 保持原状态，记录失败原因 |
+| 超时、断线、结果不确定 | 保持原事实，标记待人工核对 |
+| 人工确认已完成 | 按确认结果补记变化，并保存确认记录 |
+| 重试请求 | 先查询原任务，避免重复加液、取料或搬运 |
+
+## 5. 交付前必须检查
+
+- 同一个条码不会同时对应两件有效物料；
+- 模板编号、实例编号和条码三者没有混用；
+- 容量和质量换算有自动测试；
+- 多孔物料能够按位置读取和保存内容物；
+- 系统重启后条码、内容物、历史和当前位置保持一致；
+- 失败、超时和人工修正都留有可追溯记录。
+
+---
+
+Source: /other-materials.md
+
+# 其他可追踪物料
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认物料名称、规格、容量、放置规则、条码和现场状态。
+- **开发人员**：实现物料模板、放置位约束、启动图实例和工作流资源合同。
+- **验收人员**：核对实物兼容性、位置关系、数量变化、搬运和异常恢复。
+:::
+
+本页用于登记盖板、封膜底座、转接夹具、配平块、保护罩等其他物料。只要系统需要识别它、追踪它的位置，或在工作流中使用它，就应该按照本页规则登记。
+
+:::{admonition} 本页完成条件
+选择最接近的普通物料、容器或载架类型，登记长期稳定的类型编号；如果它能承载其他物料，必须建立固定放置位，并在启动图（Graph JSON）中检查现场实例、允许物料和状态追踪。
+:::
+
+盖板、封膜底座等整体搬运的物料可以使用 `Container`；自身还能放置另一件物料的底座，则使用带一个放置位的 `ItemizedCarrier`。这样系统可以自动判断物料能否放入，而不是只在备注里写“其他物料”。
+
+## 1. 根据实际用途选择类型
+
+| 对象特征 | 建议实现 |
+| --- | --- |
+| 只是整体可搬运对象 | `Resource` |
+| 有整体包络/容量语义 | `Container` |
+| 承载一个子物料 | 单个放置位（Site），使用 `ItemizedCarrier` / `PlateCarrier` |
+| 承载多个独立物料 | 多 放置位 Carrier，转到对应载架章节 |
+| 只是一种运行状态 | 不建物料；放在实例或设备状态中 |
+
+## 2. 登记不能承载其他物料的对象
+
+```python
+from pylabrobot.resources import Container
+from unilabos.registry.decorators import resource
+
+
+@resource(
+    id="my_lab_plate_cover",
+    displayname="My Lab 孔板盖",
+    category=["my_lab", "labware", "plate_cover"],
+    description="可独立取放和追踪的孔板盖；不承载液体。",
+    metadata={"reusable": True, "model_accuracy": "layout_only"},
+)
+class MyLabPlateCover(Container):
+    def __init__(self, name: str = "my-lab-plate-cover", **kwargs):
+        super().__init__(
+            name=name,
+            size_x=127.76,
+            size_y=85.48,
+            size_z=10.0,
+            category="plate_cover",
+            **kwargs,
+        )
+```
+
+如果对象没有容量，可以选择普通 `Resource` 类型；应优先使用当前系统版本能够稳定保存和读取的最接近类型。
+
+## 3. 登记带一个放置位的转接底座
+
+```python
+from collections import OrderedDict
+from pylabrobot.resources import Coordinate, ResourceHolder
+from unilabos.resources.itemized_carrier import ItemizedCarrier
+
+
+def make_adapter_base(name: str) -> ItemizedCarrier:
+    holder = ResourceHolder(
+        name="slot",
+        size_x=127.76,
+        size_y=85.48,
+        size_z=5.0,
+        child_location=Coordinate(0.0, 0.0, 5.0),
+    )
+    holder.unilabos_extra = {
+        "content_type": ["my_lab_96_well_assay_plate"],
+    }
+    return ItemizedCarrier(
+        name=name,
+        size_x=127.76,
+        size_y=85.48,
+        size_z=20.0,
+        num_items_x=1,
+        num_items_y=1,
+        num_items_z=1,
+        sites=OrderedDict({"A1": holder}),
+        category="plate_adapter",
+    )
+```
+
+用 `@resource` 为该工厂补充稳定 ID、类别、显示名称和描述。底座与板的关系由 放置位 表达，不要只写在 `metadata` 备注中。
+
+## 4. 补充信息中可以写什么
+
+可以在 `metadata` / `unilabos_extra` 中记录模型精度、供应商代码、外部系统物料类型码、视觉颜色和 放置位 角色，但这些数据应：
+
+- 能保存为标准 JSON 数据；
+- 不覆盖 Uni-Lab OS 已有的标准字段；
+- 不包含某个实物的条码、当前位置或当前批次；
+- 不把视觉近似值描述成真机标定值；
+- 有明确消费者，避免堆积无人读取的自由文本。
+
+外部物料类型码/ID可以合并到 `unilabos_extra`，并为代理模型记录来源和精度。这类映射适合放在设备包边界，便于与外部系统互操作。
+
+## 5. 交付前必须检查
+
+- 已确认标准物料类确实不能表达该对象；
+- 资源 ID、类别、包络和用途清楚且稳定；
+- 有子物料时使用 放置位/父子关系，而不是备注；
+- 清洁、校准、寿命、条码等实例状态有明确归属；
+- 代理模型和布局坐标标注精度，不参与真机授权；
+- Catalog、启动图、兼容 放置位、转运和历史实例均能正确读取。
+
+---
+
+Source: /startup-files.md
+
+# 3. 启动文件
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认本次环境需要加载的设备、物料、库位和使用目的。
+- **开发人员**：编写并检查模拟、联调和生产启动图及其连接配置。
+- **验收人员**：核对实例、父子关系、环境隔离、启动结果和版本记录。
+:::
+
+```{toctree}
+:maxdepth: 1
+
+graph-json
+```
+
+启动文件是设备包交给 Uni-Lab OS 的“现场清单”。它说明本次启动有哪些设备、物料、仓库和库位，以及这些实例使用什么连接参数。设备包可以定义很多类型，但只有写进本次启动图的实例才会被加载。
+
+## 完成本节后你将得到什么
+
+- 一份只连接模拟设备的 `simulation.json`；
+- 一份经过审批后才使用的 `production.json`；
+- 一张设备实例与连接参数确认表；
+- 一次能够复现的启动检查记录。
+
+## 先分清四类文件
+
+| 文件 | 回答的问题 | 不应该放什么 |
+| --- | --- | --- |
+| 设备源码 | 这类设备有哪些动作、参数和结果？ | 现场实例地址 |
+| 物料源码 | 这类物料有什么尺寸、容量和库位约束？ | 某批物料的临时位置 |
+| 启动图（Graph JSON） | 本次启动哪些实例，它们在哪里、怎样连接？ | 完整实验步骤和明文密钥 |
+| 工作流源码 | 实验按什么顺序执行？ | 驱动通信实现 |
+
+## 推荐目录
+
+```text
+device-package/
+└── deployment/
+    ├── graphs/
+    │   ├── simulation.json
+    │   ├── integration.json
+    │   └── production.json
+    └── README.md
+```
+
+三份文件分别用于模拟验证、隔离设备联调和生产运行。不能只维护一份 启动图，然后在启动前临时修改地址。
+
+## 业务人员先填写实例表
+
+在写 JSON 前，先由设备、工艺和现场负责人共同确认：
+
+| 实例 ID | 业务名称 | 类型 | 模板类 | 父级/库位 | 连接方式 | 使用环境 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `transport_robot_01` | 搬运机器人 1 | 设备 | 从检查报告复制 | 无 | 模拟或厂商接口 | 模拟/生产 |
+| `mixing_station_01` | 混合工站 1 | 设备 | 从检查报告复制 | 无 | 模拟或网络地址 | 模拟/生产 |
+| `main_deck` | 主工作台 | 资源 | 从检查报告复制 | 无 | 不适用 | 全部 |
+| `source_rack` | 原料载架 | 资源 | 从检查报告复制 | `main_deck` | 不适用 | 全部 |
+| `sample_001` | 测试样品容器 | 资源 | 从检查报告复制 | `source_rack` | 不适用 | 模拟 |
+
+实例 ID 一旦被工作流、库存或运行记录引用，就不要随意修改。生产地址、串口、证书和安全参数必须由对应负责人确认，开发人员不能自行猜测。
+
+## 按步骤操作
+
+1. 安装用户设备包并运行 `unilab package inspect`。
+2. 从检查报告复制设备和物料的完整 `class`，不要根据文件名手写。
+3. 按上表确定每个实例的稳定 `id`、业务名称和父级。
+4. 先创建 `simulation.json`，所有设备使用模拟实现或隔离端点。
+5. 加入工作台、仓库、工艺位和测试物料，并核对父子关系。
+6. 执行 JSON、重复 ID、父级和类型检查。
+7. 使用 `dry-run` 启动 Uni-Lab OS。
+8. 页面中核对设备、物料和库位，再运行安全测试工作流。
+9. 模拟配置通过后，复制为 `integration.json`，只接入获准测试的真实设备。
+10. 生产 启动图 由项目负责人审批并锁定版本，不能从测试文件直接临时改出。
+
+## 启动与验收
+
+```bash
+export DEVICE_PACKAGE_ROOT="/absolute/path/to/device-package"
+export GRAPH_FILE="$DEVICE_PACKAGE_ROOT/deployment/graphs/simulation.json"
+
+unilab workspace start \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --graph "$GRAPH_FILE" \
+  --runtime-mode dry-run \
+  --wait 300 \
+  --json
+
+unilab workspace status \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --json
+```
+
+成功标准：Uni-Lab OS 整体就绪、工作流完整加载、设备数量与 启动图 一致、物料父子关系正确，而且模拟配置没有访问生产地址。
+
+停止时使用整套系统命令：
+
+```bash
+unilab workspace stop \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --wait 300 \
+  --json
+```
+
+下一页将逐字段编写一份可检查的 [启动图](graph-json.md)。
+
+---
+
+Source: /graph-json.md
+
+# 启动图（Graph JSON）编写指南
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认本次环境需要加载的设备、物料、库位和使用目的。
+- **开发人员**：编写并检查模拟、联调和生产启动图及其连接配置。
+- **验收人员**：核对实例、父子关系、环境隔离、启动结果和版本记录。
+:::
+
+启动图 是 Uni-Lab OS 的启动图。它描述“本次加载哪些实例”，不描述实验步骤。最外层必须是 JSON 对象，`nodes` 必须是数组。
+
+## 1. 节点字段
+
+| 字段 | 是否必须 | 写法与约束 |
+| --- | --- | --- |
+| `id` | 必须 | 启动图 内唯一、长期稳定，只用字母、数字和下划线更易维护 |
+| `name` | 建议 | 给业务人员看的名称；不填时通常回退到 `id` |
+| `type` | 建议明确 | 设备写 `device`；工作台、仓库、容器等资源使用相应资源类型 |
+| `class` | 必须 | 从 `package inspect` 结果复制完整类型标识 |
+| `parent` | 资源通常必须 | 填父节点的 `id`；根设备和根工作台可以为空 |
+| `position` | 按需 | 相对父级的 `x/y/z`；单位由设备包约定，通常为 mm |
+| `config` | 必须为对象 | 构造实例所需参数；字段必须与类型定义一致 |
+| `data` | 建议为对象 | 非构造参数的初始业务数据；没有时写 `{}` |
+| `children` | 可选兼容 | 可以帮助阅读，但父子关系以每个子节点的 `parent` 为准 |
+
+不要给 启动图 节点自行添加工作流节点 UUID。启动图的稳定身份是 `id`；工作流节点 UUID 属于工作流源码。
+
+## 2. 创建最小模拟 启动图
+
+创建 `deployment/graphs/simulation.json`：
+
+```json
+{
+  "metadata": {
+    "purpose": "simulation",
+    "owner": "project-team",
+    "version": "1.0.0"
+  },
+  "nodes": [
+    {
+      "id": "main_deck",
+      "name": "主工作台",
+      "type": "deck",
+      "class": "community.example_lab.main_deck",
+      "parent": null,
+      "position": {"x": 0, "y": 0, "z": 0},
+      "config": {
+        "size_x": 2000,
+        "size_y": 1000,
+        "size_z": 20
+      },
+      "data": {}
+    },
+    {
+      "id": "source_rack",
+      "name": "原料载架",
+      "type": "warehouse",
+      "class": "community.example_lab.sample_rack",
+      "parent": "main_deck",
+      "position": {"x": 100, "y": 100, "z": 20},
+      "config": {
+        "sites": [
+          {
+            "label": "SRC_01",
+            "name": "原料位 1",
+            "position": {"x": 10, "y": 10, "z": 0},
+            "size": {"width": 90, "height": 90, "depth": 120},
+            "content_type": ["sample_container"],
+            "visible": true,
+            "occupied_by": "sample_001"
+          }
+        ]
+      },
+      "data": {}
+    },
+    {
+      "id": "sample_001",
+      "name": "测试样品容器 001",
+      "type": "container",
+      "class": "community.example_lab.sample_container",
+      "parent": "source_rack",
+      "barcode": "TEST-SAMPLE-001",
+      "config": {},
+      "data": {"lifecycle_state": "available"}
+    },
+    {
+      "id": "transport_robot_01",
+      "name": "搬运机器人 1",
+      "type": "device",
+      "class": "community.example_lab.transport_robot_sim",
+      "parent": null,
+      "config": {
+        "endpoint": "sim://local",
+        "command_timeout_seconds": 60
+      },
+      "data": {}
+    },
+    {
+      "id": "mixing_station_01",
+      "name": "混合工站 1",
+      "type": "device",
+      "class": "community.example_lab.mixing_station_sim",
+      "parent": null,
+      "config": {
+        "endpoint": "sim://local",
+        "command_timeout_seconds": 120
+      },
+      "data": {}
+    },
+    {
+      "id": "mixing_process_rack",
+      "name": "混合工艺位",
+      "type": "warehouse",
+      "class": "community.example_lab.process_rack",
+      "parent": "mixing_station_01",
+      "config": {
+        "logical_mount": true,
+        "sites": [
+          {
+            "label": "MIX_01",
+            "name": "混合位 1",
+            "position": {"x": 0, "y": 0, "z": 0},
+            "size": {"width": 100, "height": 100, "depth": 150},
+            "content_type": ["sample_container"],
+            "visible": true,
+            "occupied_by": null
+          }
+        ]
+      },
+      "data": {}
+    }
+  ]
+}
+```
+
+示例的 `class`、尺寸、动作超时和 `config` 字段只用于说明结构。必须替换为用户设备包检查报告与现场确认值。
+
+## 3. 配置设备节点
+
+设备节点的 `config` 会传给设备构造器，因此字段名、类型和默认值必须完全一致。
+
+| 连接方式 | 常见配置 | 必须补充的约束 |
+| --- | --- | --- |
+| 模拟设备 | `endpoint: sim://local`、故障注入 | 不得调用真实传输 |
+| 串口 | `port`、`baudrate`、`timeout` | 端口权限、帧格式、结束符和重连规则 |
+| 网络/API | `base_url`、`connect_timeout`、`request_timeout` | TLS、认证、幂等和重试边界 |
+| PLC/OPC UA | `endpoint`、命名空间、点位配置 | 点位类型、握手、故障和复位规则 |
+| 上位机 | 服务地址或受控自动化配置 | 软件版本、窗口状态和人工接管 |
+
+实例条码写在节点顶层 `barcode`；不要把它误写进设备构造参数 `config`。密码、Token、证书私钥和生产配方不写入 启动图。启动图 只保存 Secret 的引用方式或环境变量占位符。
+
+## 4. 配置仓库、库位和物料
+
+资源关系从根到叶通常是：
+
+```text
+工作台或设备
+└── 仓库/载架
+    └── 容器、板、吸头盒或其他物料
+```
+
+必须满足：
+
+- 每个非根资源的 `parent` 指向 启动图 中存在的节点；
+- 放置位（Site）的 `occupied_by` 为空，或指向实际占位物料的 `id`；
+- 占位物料的 `parent` 与 放置位 所属仓库一致；
+- `content_type` 与允许放入的物料模板一致；
+- 位置和尺寸来自正式图纸或测量记录，单位统一；
+- 同一物料不能同时占用两个库位。
+
+## 5. 分离模拟、联调和生产配置
+
+| 配置 | 允许的连接 | 禁止事项 |
+| --- | --- | --- |
+| `simulation.json` | 纯模拟类或隔离仿真器 | 生产 IP、真实串口、真实凭证 |
+| `integration.json` | 获准测试的真实设备 | 未纳入测试的设备和生产物料 |
+| `production.json` | 审批后的正式设备 | 临时地址、调试开关和模拟类 |
+
+三份文件可以共享节点命名，但不能靠运行前手工改值切换环境。生产文件应纳入版本和变更审批。
+
+## 6. 本地静态检查
+
+```bash
+export GRAPH_FILE="deployment/graphs/simulation.json"
+
+jq empty "$GRAPH_FILE"
+jq -e '.nodes | type == "array"' "$GRAPH_FILE"
+
+# 有输出表示存在重复 ID
+jq -r '.nodes[].id' "$GRAPH_FILE" | sort | uniq -d
+
+# 有输出表示 parent 找不到
+jq -r '
+  (.nodes | map(.id) | INDEX(.)) as $ids
+  | .nodes[]
+  | select(.parent != null and .parent != "" and ($ids[.parent] == null))
+  | "\(.id) -> \(.parent)"
+' "$GRAPH_FILE"
+
+# 人工核对本次引用的全部模板类
+jq -r '.nodes[] | [.type, .id, .class] | @tsv' "$GRAPH_FILE" | sort
+```
+
+所有检查都无异常后，再运行：
+
+```bash
+unilab package inspect \
+  --path /absolute/path/to/device-package \
+  --out /tmp/device-package-inspect
+```
+
+`package inspect` 负责检查设备包定义；真正加载 启动图 还必须通过 Workspace 启动验证。
+
+## 7. 使用模拟配置启动
+
+```bash
+unilab workspace start \
+  --workspace /absolute/path/to/device-package \
+  --graph deployment/graphs/simulation.json \
+  --runtime-mode dry-run \
+  --wait 300 \
+  --json
+```
+
+启动后逐项核对：
+
+1. Uni-Lab OS 整体为 `ready`；
+2. 设备实例 ID、名称和数量与 启动图 一致；
+3. 物料树中的父级、库位和条码正确；
+4. 工作流引用的设备 ID 和资源 ID 都能找到；
+5. 日志没有类型解析、重复 ID、缺失父级或构造参数错误。
+
+## 8. 常见错误
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| `class` 找不到 | 使用了文件名、类名或不完整短名 | 从检查报告复制完整类型标识 |
+| 设备未出现 | 节点没有进入本次 启动图，或类型解析失败 | 检查 `nodes`、`type` 和日志 |
+| 资源成为根节点 | `parent` 拼写错误或父节点缺失 | 修正子节点的 `parent` |
+| 放置位 显示空闲但实际有物料 | `occupied_by` 与物料 `parent` 不一致 | 重新盘点并同步两处关系 |
+| 模拟启动访问真实设备 | 启动图 中仍有生产端点或真实类 | 立即停止，使用独立模拟 启动图 |
+| 修改后旧任务无法解释 | 覆盖了运行任务使用的 启动图 | 恢复旧版本，为新配置创建新版本 |
+
+## 9. 提交前清单
+
+- [ ] `nodes` 是数组，每个节点都有唯一 `id` 和有效 `class`；
+- [ ] 设备和资源 `type` 清楚；
+- [ ] 所有 `parent`、放置位 和 `occupied_by` 能互相核对；
+- [ ] `config` 与设备或资源构造参数一致；
+- [ ] 模拟、联调和生产 启动图 物理分离；
+- [ ] 文件中没有明文凭证和敏感业务数据；
+- [ ] JSON、重复 ID、父级、Catalog 和启动验证全部通过；
+- [ ] 启动图 版本、校验值、审批记录和回滚文件已保存。
+
+---
+
+Source: /workflow.md
+
+# 4. 工作流运行
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认实验目的、输入输出、参数单位、成功标准和失败处理。
+- **开发人员**：编写或编排节点、物料流、控制结构、设备绑定和正式合同。
+- **验收人员**：执行静态检查、预检、模拟运行、异常路径和受控真机验收。
+:::
+
+```{toctree}
+:maxdepth: 1
+
+先理解工作流 <workflow-concepts>
+工作流编排特性 <workflow-features>
+实验操作 <experiment-operations>
+完整工作流 <complete-workflow>
+手写并运行第一个工作流 <first-workflow>
+AI 编写工作流（推荐） <ai-workflow-authoring>
+工作流发布与任务运行 <workflows>
+```
+
+工作流把业务人员描述的实验步骤转换成 Uni-Lab OS 能检查、调度和追踪的流程。它只能使用用户设备包中已经登记的设备动作、物料模板和启动图（Graph JSON）实例，不能在工作流里重新实现设备通信。
+
+## 完成本节后你将得到什么
+
+- 一个可复用的实验操作；
+- 一个调用该操作的完整工作流；
+- 与源码一致的 `package.yaml` 登记；
+- 一次静态检查、模拟运行和人工验收记录。
+
+## 先分清两个层级
+
+| 层级 | 适合做什么 | 示例 |
+| --- | --- | --- |
+| 实验操作 `experiment_operation` | 可被多个流程复用的单一业务能力 | 标准转运、开盖、恒温混合 |
+| 完整工作流 `normal` | 从准备到结果的一次完整实验 | 取样、混合、检测并归位 |
+
+一个实验操作只解决一个明确问题。完整工作流负责组合顺序、条件、并行、物料流和最终输出。
+
+## 统一撰写规范
+
+实验操作和完整工作流使用同一套静态定义规则。建议按“先写业务合同，再写节点，最后登记和验证”的顺序撰写。
+
+### 文件与命名
+
+| 对象 | 推荐写法 | 必须满足的约束 |
+| --- | --- | --- |
+| 文件名 | `standard_material_transfer.py` | 使用小写字母和下划线；一个文件只放一个主要定义 |
+| 函数名 | `standard_material_transfer` | 与文件用途一致；发布后不要随意改名 |
+| 页面名称 | `标准物料转运` | 使用业务人员看得懂的“对象 + 动作”名称 |
+| `workflow_uuid` | 标准 UUID | 在整个设备包内唯一；同一定义持续使用，复制为新定义时重新生成 |
+| 节点 UUID | `# unilab:node_uuid=<UUID>` | 紧邻对应节点、同一文件内唯一；移动或格式化已有节点时保持不变 |
+
+`description` 不能只重复名称，应在一句话中说明“处理什么对象、完成什么结果、产生什么重要副作用”。例如：“搬运一件样品容器，并在设备确认成功后提交新的库位归属。”
+
+### 输入合同
+
+- 所有公开参数都放在函数参数中的 `*` 之后，调用时必须写参数名；
+- 每个参数都声明类型；数值参数同时写业务名称、单位、最小值、最大值和合理默认值；
+- 有固定选项时使用枚举或 `Literal`，避免让业务人员输入任意文本；
+- 物料、容器、仓库等运行资源使用 `ResourceSlot`，不能使用名称字符串代替；
+- 密码、令牌、生产地址和串口号不作为工作流公开参数，应由设备实例配置管理；
+- 只有每次任务确实可能变化的值才公开。部署时固定的设备和仓库由启动图绑定。
+
+### 节点写法
+
+每个设备动作、物料来源、子工作流调用、条件、循环和展示分组都是需要稳定识别的节点。统一按下面的顺序写：
+
+```python
+# [可选业务标题]: 说明这一步为什么存在
+# unilab:node_uuid=<稳定且唯一的 UUID>
+result = device_selector.action_name(
+    input_name=upstream.output_name,
+    parameter_name=public_parameter,
+)
+```
+
+- 动作只使用命名参数，参数名和结果字段必须与设备动作合同完全一致；
+- 变量名描述动作完成后的状态，例如 `opened_container`、`sample_at_mixer`；
+- 后一步读取前一步结果来建立依赖，不用注释中的序号代替数据连接；
+- 不在工作流文件顶层执行网络请求、文件写入、设备连接或其他运行逻辑；
+- 工作流是由 Uni-Lab OS 静态解析的定义文件，不作为普通 Python 脚本执行。
+
+### 输出合同
+
+正式业务输出使用 `TypedDict` 命名，并为每个字段声明类型。输出值只能来自公开输入、物料来源或节点实际结果。不得返回固定的 `True`、固定成功文本或计划位置来冒充设备执行结果。
+
+对物料有影响的流程必须返回更新后的 `ResourceSlot`。目标量、设备回执量和实测量应使用不同字段，例如 `target_volume_ml`、`dispensed_volume_ml`、`measured_volume_ml`。
+
+### 审查顺序
+
+1. 业务审查：名称、目的、开始条件、成功标准和失败处理是否清楚；
+2. 合同审查：输入、输出、单位、范围和资源类型是否完整；
+3. 设备审查：实例、动作、参数和返回字段是否真实存在；
+4. 物料审查：来源、流转、消耗、占用和最终位置是否连续；
+5. 调度审查：顺序、并行、条件、循环和共享资源是否符合现场规则；
+6. 运行审查：静态检查、预检、dry-run、失败路径和真实验收是否通过。
+
+## 步骤一：业务人员填写需求卡
+
+不要直接从代码开始。先用业务语言填写：
+
+```text
+流程名称：样品混合与归位
+业务目的：将指定样品送到混合工站处理，完成后放回目标库位
+输入物料：样品容器 1 个
+输入参数：速度 rpm、时间 s
+使用设备：搬运机器人、混合工站
+开始条件：设备在线，来源有物料，目标位为空
+成功标准：混合动作成功，样品位于目标库位
+最长等待：搬运 60 s，混合 180 s
+失败处理：停止后续动作，保留现场位置，通知操作员核对
+输出：样品引用、最终库位、混合结果和消息
+```
+
+每个数值都写单位、允许范围和默认值。目标值与实测值必须使用不同字段名。
+
+## 步骤二：把需求映射到设备包
+
+开发人员制作映射表：
+
+| 业务步骤 | 启动图实例 ID | 动作 | 关键参数 | 结果字段 |
+| --- | --- | --- | --- | --- |
+| 搬到工站 | `transport_robot_01` | `transfer_material_atomic` | 来源/目标仓库与放置位（Site） | `resource`、`site`、`result` |
+| 混合 | `mixing_station_01` | `mix` | `speed_rpm`、`duration_seconds` | `sample`、`success`、`message` |
+| 放回库位 | `transport_robot_01` | `transfer_material_atomic` | 最终仓库与放置位 | `resource`、`site`、`result` |
+
+动作名、参数和返回字段必须从设备源码或 Catalog 复制。若某一项不存在，应先补设备动作，不得在工作流中猜测。
+
+## 步骤三：准备目录和身份
+
+```text
+example_lab/
+├── experiment_operations/
+│   ├── __init__.py
+│   └── standard_material_transfer.py
+└── workflows/
+    ├── __init__.py
+    └── mix_sample.py
+```
+
+为每个工作流和每个持久节点生成一次 UUID：
+
+```bash
+python -c "import uuid; print(uuid.uuid4())"
+```
+
+UUID 写入源码后保持稳定。复制模板创建新流程时必须生成新 UUID；修改同一流程时不要无故更换。
+
+## 步骤四：先写实验操作
+
+先完成[实验操作（子工作流）](experiment-operations.md)。它应明确输入、输出、副作用和失败边界，并只在物理动作成功后提交一次物料位置变化。
+
+## 步骤五：组合完整工作流
+
+再按[完整工作流](complete-workflow.md)声明物料来源、调用实验操作、执行工艺动作并返回最终结果。
+
+## 步骤六：登记 `package.yaml`
+
+```yaml
+package:
+  name: example_lab
+
+workflows:
+  - workflow_uuid: 41d51b13-8269-47cc-ad16-a553ed926f11
+    source: example_lab/experiment_operations/standard_material_transfer.py
+  - workflow_uuid: e96ea082-d18d-40da-907d-13cfc5b899af
+    source: example_lab/workflows/mix_sample.py
+```
+
+必须遵守：
+
+- `workflow_uuid` 与对应源码装饰器完全一致；
+- `source` 是设备包内相对路径；
+- 只登记希望 Uni-Lab OS 加载的流程；
+- 同一 UUID 和路径不能重复；
+- 空清单写 `workflows: []`，不能写 `null`。
+
+## 步骤七：执行检查
+
+```bash
+export DEVICE_PACKAGE_ROOT="/absolute/path/to/device-package"
+
+python -m compileall \
+  "$DEVICE_PACKAGE_ROOT/example_lab/experiment_operations" \
+  "$DEVICE_PACKAGE_ROOT/example_lab/workflows"
+
+unilab package inspect \
+  --path "$DEVICE_PACKAGE_ROOT" \
+  --out /tmp/device-package-inspect
+```
+
+检查报告中不得出现语法错误、重复 UUID、找不到的设备类型、动作或资源模板。
+
+不要直接运行 `python mix_sample.py`。工作流文件是供 Uni-Lab OS 静态编译的 DSL，不是普通 Python 脚本。
+
+## 步骤八：模拟启动和预检
+
+```bash
+unilab workspace start \
+  --workspace "$DEVICE_PACKAGE_ROOT" \
+  --graph deployment/graphs/simulation.json \
+  --runtime-mode dry-run \
+  --wait 300 \
+  --json
+```
+
+在 Uni-Lab OS 页面中：
+
+1. 确认实验操作和完整工作流都已加载；
+2. 检查输入名称、单位、范围和默认值；
+3. 发布本次修订；
+4. 运行零写入预检；
+5. 使用测试物料创建 dry-run Task；
+6. 查看每一步、等待原因、输出和物料位置变化；
+7. 验证参数越界、设备离线和超时能明确失败。
+
+## 修改与发布
+
+已发布工作流应视为不可变合同。修改输入、输出、动作或资源关系时创建新修订，完成同样的检查和预检。正在运行的 Task 继续使用创建时冻结的执行图和源码快照；不要覆盖旧文件后假设旧任务会自动迁移。
+
+## 提交与发布前核对
+
+- [ ] 需求卡和动作映射表已确认；
+- [ ] 实验操作职责单一，完整工作流边界清楚；
+- [ ] 输入、输出、单位、范围和失败语义明确；
+- [ ] 设备、物料、仓库和放置位都来自当前设备包与启动图；
+- [ ] `package.yaml` 与源码 UUID/路径一致；
+- [ ] 静态检查、设备包检查和 dry-run 通过；
+- [ ] 资源等待、超时、取消和异常恢复经过验证；
+- [ ] 真实运行前完成设备和现场安全验收。
+
+---
+
+Source: /experiment-operations.md
+
+# 实验操作（子工作流）
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认实验目的、输入输出、参数单位、成功标准和失败处理。
+- **开发人员**：编写或编排节点、物料流、控制结构、设备绑定和正式合同。
+- **验收人员**：执行静态检查、预检、模拟运行、异常路径和受控真机验收。
+:::
+
+实验操作是可以重复使用的业务步骤。例如“把物料从一个库位转移到另一个库位”。它应像一份稳定合同：调用方只需要知道输入、输出和失败含义，不需要了解机器人通信细节。
+
+它在 Uni-Lab OS 的“实验室操作”页面中维护，类型标识为 `experiment_operation`。完整工作流可以引用已经发布的实验操作，但不能把实验操作当作一次完整实验直接运行。
+
+## 1. 什么时候使用
+
+当多个工作流会重复使用同一组动作、参数和资源规则时，应先把这组步骤定义为实验操作。例如“标准物料转运”“开盖后移液”或“一次搅拌”。这样可以统一设备绑定、输入输出和异常处理，避免在多个完整工作流中复制同一段逻辑。
+
+如果一组步骤只属于某一个实验，而且没有独立的业务输入和输出，就直接写在完整工作流中，不必为了拆分而拆分。
+
+## 2. 先定义业务边界
+
+以“标准物料转运”为例：
+
+| 项目 | 定义 |
+| --- | --- |
+| 输入 | 待搬物料、来源仓库、目标仓库、来源放置位（Site）、目标放置位、目标设备 |
+| 执行者 | 启动图（Graph JSON）中的搬运机器人实例 |
+| 成功副作用 | 物料实际搬运成功，并唯一一次提交新位置 |
+| 输出 | 搬运后的物料、目标挂载资源、目标放置位 和结果说明 |
+| 失败 | 不提交计划位置；保留错误并要求核对现场 |
+
+若底层设备只提供分散的 `pick`、`place` 动作，必须先明确断线、重试和位置提交策略。优先由设备包提供能够处理幂等与未知结果的原子搬运动作。
+
+## 3. 实验操作撰写规范
+
+实验操作应写成可以被不同完整工作流重复调用的稳定合同。撰写时必须满足以下要求。
+
+### 职责只保留一个
+
+名称应采用“业务对象 + 业务动作”，例如“标准物料转运”“样品容器开盖”“恒温混合”。一个实验操作只完成一个能够独立说明、独立验收的业务目的。
+
+以下情况应拆分：
+
+- 输入、输出和失败处理可以独立说明；
+- 同一段步骤会被两个或更多完整工作流复用；
+- 某段步骤需要单独发布、单独验收或单独升级。
+
+不要把“准备全部物料、完成多站加工、生成结果并归位”写成一个实验操作。这属于完整工作流。
+
+### 合同先于实现
+
+编写代码前，先填写以下内容；缺少任何一项都不进入实现：
+
+```text
+名称：标准物料转运
+目的：把一件物料从来源位安全送到目标位
+公开输入：物料、来源仓库、目标仓库、来源放置位、目标放置位、目标设备
+公开输出：搬运后的物料、挂载资源、最终 放置位、执行结果
+成功副作用：物理搬运成功，并提交一次物料新位置
+失败语义：不提交计划位置；结果未知时停止并要求核对现场
+使用设备：启动图 中的搬运设备实例
+最长等待：由动作合同和现场规程确定
+```
+
+### 装饰器和函数
+
+- 使用 `@workflow(...)`；
+- `workflow_uuid` 全局唯一，同一实验操作升级时保持不变；
+- `displayname` 面向业务人员，不使用内部缩写；
+- `description` 写明对象、结果和重要副作用；
+- 必须设置 `workflow_type="experiment_operation"`；
+- 函数使用关键字专用参数，并声明正式返回类型。
+
+### 输入和输出
+
+| 内容 | 规范 |
+| --- | --- |
+| 普通参数 | 声明类型、单位、范围、默认值和业务含义 |
+| 物料输入 | 使用 `ResourceSlot`；需要限制类型时增加允许的物料模板约束 |
+| 设备与仓库 | 绑定 启动图 实例或接收合规资源引用，不写设备类型 ID |
+| 结果记录 | 使用命名明确的 `TypedDict` |
+| 物料输出 | 返回设备动作确认后的物料字段，不返回调用前的旧引用 |
+| 状态输出 | 区分成功、失败和未知；不能只写“已完成” |
+
+输出字段一经被完整工作流使用，就属于发布合同。改变字段名、类型或含义前，要检查所有调用方并发布新的修订。
+
+### 设备动作和物料副作用
+
+- 设备通信、协议重试和原子操作由设备动作实现，实验操作只进行业务组合；
+- 设备动作必须从当前设备包的动作目录选择，参数名和返回字段不能凭经验猜测；
+- 同一物理变化只能由一个责任方提交。例如原子搬运动作已经提交物料位置，外层实验操作不能再次提交；
+- 有开盖、加液、取样、消耗或搬运等副作用时，输出必须反映动作后的真实对象；
+- 超时或断线导致结果未知时，不自动重发可能产生重复副作用的动作。
+
+### 节点身份和可读性
+
+每个动作或子操作调用前写一个稳定、唯一的 `node_uuid`。新建节点时生成新 UUID；只调整缩进、注释或展示顺序时保留原 UUID。变量名使用动作后的状态，例如 `opened_bottle`、`transferred_sample`，不要使用 `result1`、`tmp` 等无法审查的名称。
+
+### 复用边界
+
+实验操作只暴露业务调用方真正需要选择的参数。设备地址、账号、串口和协议细节留在设备配置中；固定库位关系留在 启动图 或部署配置中。只有需要由不同完整工作流选择的来源、目标或工艺参数才成为公开输入。
+
+完成后的实验操作必须能够在不阅读内部代码的情况下，仅凭名称、说明、输入、输出和失败语义被正确调用。
+
+## 4. 选择创建方式
+
+实验操作可以通过两种方式创建：流程设计人员可以在“实验室操作”页面编排；开发人员也可以编写静态定义文件后导入。两种方式生成的是同一种实验操作合同，最终都要经过检查和发布。
+
+### 方式一：编写或导入定义文件
+
+创建文件：
+
+创建：
+
+```text
+example_lab/experiment_operations/standard_material_transfer.py
+```
+
+### 编写结构模板
+
+```python
+from typing import TypedDict
+
+from unilabos.registry.placeholder_type import ResourceSlot
+from unilabos.workflow.authoring import device, workflow
+
+from example_lab.devices.transport_robot.device import TransportRobot
+
+
+class StandardMaterialTransferResult(TypedDict):
+    resource: ResourceSlot
+    mount_resource: ResourceSlot
+    site: str
+    result: str
+
+
+transport_robot: TransportRobot = device("transport_robot_01")
+
+
+@workflow(
+    workflow_uuid="41d51b13-8269-47cc-ad16-a553ed926f11",
+    displayname="标准物料转运",
+    description="搬运一件物料，并在成功后提交新的库位归属。",
+    workflow_type="experiment_operation",
+)
+def standard_material_transfer(
+    *,
+    resource: ResourceSlot,
+    source_warehouse: ResourceSlot,
+    target_device: str,
+    target_warehouse: ResourceSlot,
+    source_site: str,
+    target_site: str,
+    check_source_presence: bool = True,
+    check_target_presence: bool = True,
+    check_gripper_payload: bool = True,
+) -> StandardMaterialTransferResult:
+    # unilab:node_uuid=8a2d717d-8c45-4d88-8fdc-4b308f69db95
+    moved = transport_robot.transfer_material_atomic(
+        resource=resource,
+        source_warehouse=source_warehouse,
+        target_warehouse=target_warehouse,
+        target_device=target_device,
+        source_site=source_site,
+        target_site=target_site,
+        check_source_presence=check_source_presence,
+        check_target_presence=check_target_presence,
+        check_gripper_payload=check_gripper_payload,
+    )
+    return {
+        "resource": moved.resource,
+        "mount_resource": moved.mount_resource,
+        "site": moved.site,
+        "result": moved.result,
+    }
+```
+
+这段代码是结构模板。`TransportRobot`、实例 ID、动作名、参数和返回字段必须替换为用户设备包实际定义。
+
+### 理解关键写法
+
+| 写法 | 作用 | 约束 |
+| --- | --- | --- |
+| `TypedDict` | 固定调用方能取得的输出字段 | 字段必须来自真实动作结果 |
+| `device("transport_robot_01")` | 绑定 启动图 中的实例 | 填实例 ID，不填设备类型 ID |
+| `workflow_type="experiment_operation"` | 允许其他工作流复用 | 发布后才能作为稳定子合同使用 |
+| `*` | 强制所有输入使用名称传入 | 避免参数顺序错误 |
+| `ResourceSlot` | 传递真实物料或仓库引用 | 不能用普通字符串替代 |
+| `node_uuid` | 稳定标识动作节点 | 新节点生成新 UUID，已有节点保持不变 |
+| `moved.resource` | 将动作结果传给调用方 | 不返回计划中的旧物料位置 |
+
+### 方式二：在“实验室操作”页面编排
+
+1. 新建实验操作，填写稳定的名称、用途和说明。
+2. 从设备与动作目录选择动作，并绑定当前 启动图 中的设备实例。
+3. 为每个动作参数选择固定值、公开输入、上游结果或物料来源。
+4. 按需要添加条件、循环和已发布的子操作。
+5. 定义公开输入和输出，核对字段名称、类型、单位、是否必填和资源约束。
+6. 保存后处理页面给出的节点、连线、绑定或类型错误。
+
+人工确认不是独立的 Python 控制语句。需要人员确认时，在页面中用人工确认包装已经绑定的真实设备动作，并设置 1 到 86400 秒的合理超时。超时不会自动视为批准，拒绝或超时会取消任务。完整约束见[人工确认](workflow-features.md#人工确认)。
+
+## 5. 安全约束
+
+- presence、夹爪负载和目标空位检查默认开启；
+- 只有设备能力与现场规程明确允许时才关闭某项检查；
+- 超时后不能自动再次搬运，因为原动作可能已经完成；
+- 动作失败或结果未知时，不提交计划目标位置；
+- 外层工作流不得再次提交同一次位置变化；
+- 返回 `result` 应能区分成功、失败和未知，而不是只返回模糊文本。
+
+## 6. 登记、导入和检查
+
+在 `package.yaml` 中登记：
+
+```yaml
+- workflow_uuid: 41d51b13-8269-47cc-ad16-a553ed926f11
+  source: example_lab/experiment_operations/standard_material_transfer.py
+```
+
+然后运行：
+
+```bash
+python -m compileall example_lab/experiment_operations
+unilab package inspect --path . --out /tmp/device-package-inspect
+```
+
+如果使用页面创建或导入，还要核对节点、连线、设备绑定、公开合同和资源来源。导入成功只代表系统已经读取定义，不代表该操作可以直接运行。
+
+## 7. 发布和复用
+
+检查通过后发布当前修订。发布会形成稳定的可引用合同；之后再次编辑会产生新修订，已有任务继续使用创建时冻结的执行图和源码快照。
+
+在完整工作流中引用时，需要为本次调用分别配置：
+
+- 公开输入参数；
+- 设备实例绑定；
+- 输入输出连接；
+- 物料、试剂或站点来源。
+
+发布只固定合同，不代表真机安全审批已经完成。设备、动作参数或工艺发生变化后，仍需重新测试和验收。
+
+删除实验操作前，必须确认没有已发布工作流仍在引用它。历史任务会保留冻结快照，但上层工作流之后可能因合同缺失而无法检查或发布。
+
+## 8. 单独验收
+
+1. 使用模拟 启动图 启动 Uni-Lab OS。
+2. 确认实验操作显示为“标准物料转运”。
+3. 选择一件测试物料、有效来源位和空目标位。
+4. 运行预检，确认错误来源、占位或设备离线会被阻止。
+5. 创建 dry-run Task，检查动作参数和输出字段。
+6. 模拟失败和结果未知，确认不会错误更新物料位置。
+
+## 9. 常见错误
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 找不到机器人 | `device()` 使用了类型 ID | 改为 启动图 实例 ID |
+| 调用方拿不到物料 | 返回值未声明 `ResourceSlot` | 在结果合同和 `return` 中保留物料字段 |
+| 位置更新两次 | 设备原子动作和外层流程都提交 | 只保留一个位置提交方 |
+| 失败后显示已到目标位 | 使用了计划值而非动作结果 | 只返回并提交设备确认后的结果 |
+| 子工作流无法引用 | 未发布或类型不是 `experiment_operation` | 修正类型，检查后发布 |
+
+## 10. 完成清单
+
+- [ ] 只承担一个可复用业务目的；
+- [ ] 输入、输出和副作用写清楚；
+- [ ] 使用 启动图 实例 ID 和真实动作合同；
+- [ ] 物料使用 `ResourceSlot` 连续传递；
+- [ ] 位置只在物理成功后提交一次；
+- [ ] 成功、失败、超时和未知结果均已验证；
+- [ ] 已登记、检查、发布并能被完整工作流调用。
+
+---
+
+Source: /complete-workflow.md
+
+# 完整工作流
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认实验目的、输入输出、参数单位、成功标准和失败处理。
+- **开发人员**：编写或编排节点、物料流、控制结构、设备绑定和正式合同。
+- **验收人员**：执行静态检查、预检、模拟运行、异常路径和受控真机验收。
+:::
+
+完整工作流面向一次完整实验目标。它负责选择物料、安排实验操作和设备动作、建立先后关系、记录消耗并返回最终结果。
+
+本页用“取出样品 → 搬到混合位 → 混合 → 放回目标位”说明完整写法。示例不代表任何现场设备，所有类型、实例和动作都要替换为用户设备包实际定义。
+
+## 1. 确认启动图（Graph JSON）中的实例
+
+在编写前确认以下 ID 已存在：
+
+| ID | 用途 |
+| --- | --- |
+| `transport_robot_01` | 执行标准转运 |
+| `mixing_station_01` | 执行混合动作 |
+| `source_rack` | 样品来源仓库 |
+| `mixing_process_rack` | 混合工艺位 |
+| `finished_rack` | 完成后的目标仓库 |
+
+还要确认 `sample_container` 已登记为物料模板，实验操作“标准物料转运”已经检查并发布。
+
+## 2. 完整工作流撰写规范
+
+完整工作流应把一次实验从开始条件写到最终结果。它负责组合已登记的物料、设备动作和已发布实验操作，不负责实现底层通信。
+
+### 用业务阶段组织，不按设备清单堆动作
+
+先把实验写成可验收的阶段，例如：
+
+```text
+准备物料 → 搬运到工位 → 执行处理 → 检查结果 → 归位 → 输出结果
+```
+
+每个阶段说明输入物料、使用设备、完成标志和失败后的现场状态。代码中的 `group(name="...")` 可以对应这些业务阶段，名称应让操作人员能直接理解。分组只改善展示，不会自动建立先后关系；真正的顺序由上下游数据引用和控制结构决定。
+
+### 物料来源集中声明
+
+在流程前部使用 `material_source(...)` 声明任务所需的样品、试剂和耗材。每一项至少明确：
+
+- `resource_template`：允许选择的物料模板；
+- `mode`：使用已有物料还是按流程创建；
+- `mount`：物料所在仓库或设备资源；
+- `site` 或可选范围：允许选择的库位；
+- `flow_role`：主样品、试剂或耗材等业务角色；
+- `custody_policy`：任务独占还是允许作为共享来源。
+
+`material_uuid` 只在流程明确绑定某一个固定实例时填写。通用流程通常留空，由任务创建时选择合规物料。不要把某次部署生成的内部 UUID 写进通用示例。
+
+### 用真实结果连接步骤
+
+同一物料在整条流程中只能沿设备动作的实际输出继续传递：
+
+```text
+source_sample → moved.resource → processed.sample → stored.resource
+```
+
+不允许在处理完成后又使用旧的 `source_sample` 继续搬运。旧引用代表处理前的状态，会造成位置和状态记录不一致。试剂瓶、吸头盒、粉料盒等参与动作后，也应继续传递动作返回的对应资源字段。
+
+### 子操作调用
+
+- 只调用已经检查并发布的实验操作；
+- 为每次调用分别绑定公开输入、设备实例、资源来源和上游结果；
+- 子操作返回什么字段，上层就按该合同读取什么字段，不读取其内部临时变量；
+- 子操作已经完成的物料提交、安全检查或重试处理，上层不得重复实现；
+- 子操作合同变化后，先验证并发布子操作，再检查和发布完整工作流。
+
+### 参数与固定配置的边界
+
+| 信息 | 放置位置 |
+| --- | --- |
+| 每次实验会变化的速度、时间、体积、样品编号 | 工作流公开输入 |
+| 参数单位、范围、默认值、选项 | 类型注解和 `Field` 约束 |
+| 设备地址、串口、凭据、协议超时 | 设备实例配置 |
+| 设备、仓库及其父子关系 | 启动图 |
+| 设备类型、动作合同、物料模板 | 设备包源码与登记清单 |
+| 某次任务选择的具体物料 | 任务输入或 `material_source` 解析结果 |
+
+### 条件、循环和并行
+
+- 条件表达式只读取公开输入或上游节点结果；未选择的分支不能产生物理副作用；
+- 循环必须有 `max_iterations` 和可验证的 `until(...)`，并说明达到上限时如何结束；
+- 每轮会改变物料或设备状态时，将本轮结果传入下一轮，不能继续使用循环前的旧状态；
+- 只有业务上互不依赖、不会同时占用同一物料的步骤才放入 `parallel()`；
+- 并行分支共享设备、库位或库存时，仍以 Uni-Lab OS 的资源锁和调度结果为准；
+- 需要操作员决定时使用人工确认节点，并设置合理超时，不能用普通 Python `input()`。
+
+### 最终输出和完成标准
+
+返回值应让业务人员能判断实验结果并继续追溯，通常包括：
+
+- 最终样品或产品的 `ResourceSlot`；
+- 最终库位或挂载位置；
+- 设备实际返回的关键测量值；
+- 成功、失败或未知状态及可读消息；
+- 需要归档的文件路径、批次号或检测结果。
+
+不得用固定成功值掩盖中间失败。只要关键动作没有得到确定结果，完整工作流就不应继续执行依赖步骤或声明成功。
+
+### 推荐撰写顺序
+
+1. 写清实验目的、开始条件、成功标准和失败处理；
+2. 列出物料清单和 启动图 实例清单；
+3. 将可复用步骤先写成实验操作并发布；
+4. 声明全部公开输入和正式输出；
+5. 声明物料来源，再按实际物料流连接动作；
+6. 最后添加条件、循环、并行、数量预留和人工确认；
+7. 登记 `package.yaml`，运行静态检查、预检和 dry-run；
+8. 逐项验证异常路径后，再进行受控真机验收。
+
+## 3. 创建工作流文件
+
+创建：
+
+```text
+example_lab/workflows/mix_sample.py
+```
+
+## 4. 编写完整示例
+
+```python
+from typing import Annotated, TypedDict
+
+from pydantic import Field
+from unilabos.registry.placeholder_type import ResourceSlot
+from unilabos.workflow.authoring import (
+    MaterialCustodyPolicy,
+    MaterialFlowRole,
+    device,
+    group,
+    material_source,
+    resource_ref,
+    workflow,
+)
+
+from example_lab.devices.mixing_station.device import MixingStation
+from example_lab.experiment_operations.standard_material_transfer import (
+    standard_material_transfer,
+)
+from example_lab.resources.materials import sample_container
+
+
+class MixSampleResult(TypedDict):
+    sample: ResourceSlot
+    final_site: str
+    success: bool
+    message: str
+
+
+mixing_station: MixingStation = device("mixing_station_01")
+
+
+@workflow(
+    workflow_uuid="e96ea082-d18d-40da-907d-13cfc5b899af",
+    displayname="样品混合与归位",
+    description="取得一件样品，完成混合后放入指定完成库位。",
+)
+def mix_sample(
+    *,
+    source_site: str,
+    target_site: str,
+    speed_rpm: Annotated[
+        int,
+        Field(title="混合速度", description="设备目标转速", ge=100, le=1000),
+    ] = 300,
+    duration_seconds: Annotated[
+        int,
+        Field(title="混合时间", description="持续时间，单位秒", ge=1, le=600),
+    ] = 30,
+) -> MixSampleResult:
+    # unilab:node_uuid=2d6ff315-01ac-4df6-9268-27e7c26732d1
+    source_sample = material_source(
+        resource_template=sample_container,
+        mode="existing",
+        mount=resource_ref("source_rack"),
+        material_uuid=None,
+        site=source_site,
+        slot_range=None,
+        flow_role=MaterialFlowRole.PRIMARY_SAMPLE,
+        custody_policy=MaterialCustodyPolicy.TASK_EXCLUSIVE,
+    )
+
+    # unilab:node_uuid=21c18b30-7ab7-4e6f-906c-dd9b33a78685
+    with group(name="搬运到混合工站"):
+        at_mixer = standard_material_transfer(
+            resource=source_sample,
+            source_warehouse=resource_ref("source_rack"),
+            target_device="mixing_station_01",
+            target_warehouse=resource_ref("mixing_process_rack"),
+            source_site=source_site,
+            target_site="MIX_01",
+        )
+
+    # unilab:node_uuid=27489c55-4678-428f-b655-c06bc97b5bfc
+    with group(name="执行混合"):
+        mixed = mixing_station.mix(
+            sample=at_mixer.resource,
+            speed_rpm=speed_rpm,
+            duration_seconds=duration_seconds,
+        )
+
+    # unilab:node_uuid=98e5407f-4368-4f89-ad8f-cbabb76af20c
+    with group(name="放入完成区"):
+        stored = standard_material_transfer(
+            resource=mixed.sample,
+            source_warehouse=resource_ref("mixing_process_rack"),
+            target_device="host_node",
+            target_warehouse=resource_ref("finished_rack"),
+            source_site="MIX_01",
+            target_site=target_site,
+        )
+
+    return {
+        "sample": stored.resource,
+        "final_site": stored.site,
+        "success": mixed.success,
+        "message": mixed.message,
+    }
+```
+
+## 5. 理解依赖关系
+
+代码没有手工画箭头，但数据引用会形成顺序：
+
+```text
+source_sample
+    ↓
+at_mixer.resource
+    ↓
+mixed.sample
+    ↓
+stored.resource
+```
+
+后一步使用前一步输出，因此只有前一步成功后才会继续。不要绕过 `mixed.sample` 再次使用旧的 `source_sample`，否则物料链会与实际位置不一致。
+
+## 6. 输入参数规范
+
+| 参数 | 类型 | 规范 |
+| --- | --- | --- |
+| `source_site` | `str` 或受控 `Literal` | 必须属于来源仓库，并且有匹配物料 |
+| `target_site` | `str` 或 `site_group` | 必须属于目标仓库且允许放置该模板 |
+| `speed_rpm` | `Annotated[int, Field]` | 标题、业务含义、单位和范围明确 |
+| `duration_seconds` | `Annotated[int, Field]` | 字段名直接包含单位，设置最大值 |
+
+固定且数量较少的库位可以使用 `Literal["SRC_01", "SRC_02"]`。库位可能动态变化时，使用设备包正式定义的放置位组（Site Group），不要把现场 UUID 硬编码到通用模板。
+
+## 7. 添加并行的原则
+
+只有两条分支操作不同物料，且业务上互不依赖时才使用 `parallel()`：
+
+```python
+from unilabos.workflow.authoring import group, parallel
+
+with parallel():
+    with group(name="样品检测"):
+        sample_result = analyzer.inspect(sample=sample_a)
+    with group(name="容器准备"):
+        prepared = cap_station.open(container=container_b)
+```
+
+同一 `ResourceSlot` 不能同时交给两个物理分支。即使写成并行，共享同一设备、工位或区域时，Uni-Lab OS 仍会按资源锁串行执行。
+
+## 8. 添加数量消耗
+
+加液、投料等动作应分别保留指令量、设备回执和实测量。需要库存预留时，在动作之后声明数量关系：
+
+```python
+from unilabos.workflow.authoring import quantity_requirement
+
+quantity_requirement(
+    requirement_key="solvent_for_sample",
+    source=solvent_source,
+    consume=dispensed,
+    quantity=volume_ml,
+    quantity_unit="mL",
+    description="本次样品处理需要的溶剂体积",
+)
+```
+
+`quantity_requirement` 管理预留和账本，不代替泵、秤或传感器测量。
+
+## 9. 添加条件和循环
+
+- 条件只使用已定义的输入或动作结果；
+- 每个分支都说明未命中时的结果；
+- 循环使用 `repeat_until`，必须设置 `max_iterations`；
+- `until(...)` 使用可验证的布尔结果；
+- 循环内有物理副作用时，要明确每轮物料状态和失败恢复。
+
+没有最大次数的“直到成功”会产生不可控运行，不允许进入生产流程。
+
+## 10. 登记与验证
+
+在 `package.yaml` 中加入：
+
+```yaml
+- workflow_uuid: e96ea082-d18d-40da-907d-13cfc5b899af
+  source: example_lab/workflows/mix_sample.py
+```
+
+然后执行：
+
+```bash
+python -m compileall example_lab/workflows
+unilab package inspect --path . --out /tmp/device-package-inspect
+
+unilab workspace start \
+  --workspace . \
+  --graph deployment/graphs/simulation.json \
+  --runtime-mode dry-run \
+  --wait 300 \
+  --json
+```
+
+在 Uni-Lab OS 中依次完成：检查输入表单 → 发布修订 → 零写入预检 → 创建 dry-run Task → 查看每个 Job 和最终输出。
+
+## 11. 必须验证的失败路径
+
+| 场景 | 预期结果 |
+| --- | --- |
+| 来源库位没有物料 | 预检失败，不下发设备动作 |
+| 目标库位被占用 | 等待或预检失败，不覆盖原物料 |
+| 转速或时间越界 | 表单或编译校验失败 |
+| 设备离线 | 不派发动作，显示具体设备原因 |
+| 搬运超时、结果未知 | 停止后继步骤，要求核对现场，不自动重发 |
+| 混合失败 | 不执行“放入完成区”，保留可追踪失败结果 |
+
+## 12. 发布前清单
+
+- [ ] 完整流程有清楚的开始条件和成功标准；
+- [ ] 每个输入都有类型、单位、范围和业务说明；
+- [ ] 设备选择器与当前 启动图 实例 ID 一致；
+- [ ] 每个动作、物料来源和控制结构 UUID 唯一且稳定；
+- [ ] `ResourceSlot` 从来源连续传到最终输出；
+- [ ] 子工作流已发布，输入输出合同匹配；
+- [ ] 共享资源、并行、数量预留和人工确认符合现场规则；
+- [ ] 静态检查、预检、dry-run 和失败路径全部通过；
+- [ ] 真实运行前已完成设备、物料和安全验收。
+
+---
+
+Source: /ai-workflow-authoring.md
+
+# AI 编写工作流（推荐）
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认实验目的、输入输出、参数单位、成功标准和失败处理。
+- **开发人员**：编写或编排节点、物料流、控制结构、设备绑定和正式合同。
+- **验收人员**：执行静态检查、预检、模拟运行、异常路径和受控真机验收。
+:::
+
+本页假设设备包已经能被 Uni-Lab OS 加载，而且你已完成[工作流基础](workflow-concepts.md)、[用户设备包 手写教程](first-workflow.md)和[编排特性](workflow-features.md)。这些基础让你能够审查 AI 生成的 DSL，而不是直接相信生成结果。
+
+若你还没有 `pyproject.toml`、设备定义、启动图（Graph JSON）和 `package.yaml`，先按[工作区](workspace.md)完成最小闭环。维护用户自己的设备包时，也可使用[AI 设备包生成器（实验性）](repository-builder-skill.md)，让本地 Coding Agent 协助修改或排查。
+
+日常工作流创作推荐交给能够读取当前 Uni-Lab OS 与实验室设备包的 AI 编码助手：让它先从 Catalog、设备驱动、资源模板和 用户设备包 已登记流程中取证，再生成静态 Python DSL。人负责确认实验意图、审查证据、批准发布，并决定是否运行。
+
+这不是“让 AI 猜一段 Python 后直接开设备”。推荐闭环是：
+
+```text
+实验需求
+   │
+   ▼
+AI 只读扫描当前代码与 Catalog ──► 选择 用户设备包 相似流程
+   │
+   ▼
+生成静态 DSL 草稿 ──► 人工审查 diff 与动作证据
+   │
+   ▼
+产品静态编译 / 导入 ──► package inspect ──► 诊断归零
+   │
+   ▼
+人工发布 ──► 零写入预检 ──► dry-run Task ──► 结果验收
+   │
+   └────────────────────────► 单独的真机安全验收
+```
+
+AI 负责提高创作效率；Uni-Lab OS 的编译器、发布合同、预检、调度和设备执行结果仍是判断“能否进入产品运行链路”的权威。AI 的文字回答或语法高亮不能代替这些检查。
+
+## 当前支持到什么程度
+
+| 环节 | 推荐工具 | 当前边界 |
+| --- | --- | --- |
+| 查找相似流程、驱动和资源 | 能读取两个仓库的 AI 编码助手 | 必须以当前检出的已跟踪代码为证据，不能凭模型记忆发明动作。 |
+| 生成或修改源码 | AI 在个人草稿文件中生成静态 DSL | 新定义先生成草稿；不要直接执行该 Python 文件。 |
+| 创建新定义 | Uni-Lab OS 页面/API 的“导入 Python” | 静态编译通过后，产品才原子写入设备包源码并登记 `package.yaml`。 |
+| 修改现有定义 | Local Authoring 编辑链路 | 使用 draft → candidate → apply 的并发控制；不能把同一 UUID 当作新文件重复导入。 |
+| 检查与观察 | Uni-Lab OS 页面、CLI；可选 MCP | MCP 能查看工作区/流程/Task 并等待创作修订，但当前没有生成、写入、导入、发布或预检工作流的 MCP 工具。 |
+| 发布与运行 | 人在 Uni-Lab OS 页面明确确认 | `run_workflow` 会直接创建 Task；不要授权 AI 在未审查、未预检时调用。 |
+
+因此，现阶段最稳妥的组合是“AI 读仓库和写草稿 + Uni-Lab OS 导入与运行”，而不是期待页面内有一个通用的“一键 AI 生成并运行”按钮。
+
+## 1. 建立干净基线
+
+先完成[系统安装](installation.md)，保持 `dry-run`。在让 AI 修改任何内容前运行：
+
+```bash
+git -C "$LAB_ROOT/Uni-Lab OS" status --short
+git -C "$LAB_ROOT/user-device-package" status --short
+git -C "$LAB_ROOT/user-device-package" ls-files \
+  'example_device_package/workflows/*.py'
+
+cd "$LAB_ROOT/user-device-package"
+./scripts/check-package.sh
+mkdir -p workflow_drafts
+```
+
+记录检查结果和原有未提交修改。AI 必须保留与本次工作流无关的修改；若基线检查已经失败，先分清旧问题与新问题，不能把旧失败归咎于生成结果。
+
+`git ls-files` 的结果是可作为产品示例的已跟踪流程清单。已跟踪文件本身若出现在 `git status` 中，也要先看 diff；需要锁定基线时让 AI 读取 `git show HEAD:<相对路径>`，不能把未提交内容冒充版本事实。不要让 AI 把本地未跟踪的验证夹具、临时产物或历史脚本当作产品语法依据。
+
+## 2. 写清实验需求卡
+
+先把需求写成这张卡，再交给 AI。信息不确定时写“待确认”，不要让 AI 自行补成看似合理的设备参数。
+
+```yaml
+目标: "这个流程最终完成什么实验结果"
+流程类型: "normal 或 experiment_operation"
+公开输入:
+  - "名称 / 类型 / 单位 / 默认值 / 合法范围"
+正式输出:
+  - "名称 / 类型 / 来源"
+步骤:
+  - "按实验语义列出，不要先写代码"
+允许使用的设备:
+  - "设备业务 ID；未知时写待扫描"
+物料与试剂:
+  - "模板、来源工位、保管策略、用量与单位"
+控制流: "条件 / 循环上限 / 可并行步骤"
+共享资源: "设备、工位或区域互斥要求"
+人工复核点: "哪些真实动作下发前必须确认"
+目标 启动图: "要在哪一张部署 启动图 中编译和验收"
+运行环境: "dry-run / 隔离 driver-sim / 真机"
+验收结果: "dry-run 中应观察到的 Task、Job 和输出"
+```
+
+`normal` 表示可直接创建完整实验 Task；`experiment_operation` 表示先发布，再由其他流程复用。不能确定时，完整实验目标通常选 `normal`，可复用的局部工艺才选 `experiment_operation`。
+
+## 3. 让 AI 先理解当前设备包
+
+不要让 AI 根据设备名称猜测动作。应先让它读取用户设备包中本次要用的内容：
+
+| 想实现的能力 | 必须检查 | 重点确认 |
+| --- | --- | --- |
+| 单设备动作 | 对应 `device.py` | 动作名、参数类型、单位、默认值和返回字段 |
+| 条件与循环 | 编译器约束和已有安全测试流程 | 条件来源、最大循环次数和退出条件 |
+| 物料搬运 | 资源模板、启动图 和原子搬运动作 | 来源、目标、占位、位置提交和失败恢复 |
+| 并行处理 | 设备、工位和区域资源声明 | 哪些步骤可并行，哪些共享资源必须串行 |
+| 可复用实验操作 | 已发布的操作合同 | 输入输出、合同 UUID/digest 和物料连续性 |
+| 动态库位和数量记账 | 站点组与数量约束 | 候选站点、单位、预留、消费和回位 |
+
+旧流程可能包含兼容写法或固定现场身份。创建新流程时，以当前编译诊断、设备动作合同和本次 启动图 为准；不能照抄设备 ID、物料 UUID、站点 UUID、体积或安全阈值。
+
+AI 在写代码前至少要读取：
+
+1. `package.yaml` 中的工作流登记；
+2. 所选相似流程的完整源码；
+3. 每个目标设备对应的 `devices/.../device.py` 动作签名与返回类型；
+4. 使用到的 `resources/` 模板定义；
+5. 本次 启动图 中的设备业务 ID、资源映射和动作模式；
+6. Uni-Lab OS 的 `unilabos/workflow/authoring.py` 和相关编译约束，或本手册的[工作流编排特性](workflow-features.md)。
+
+如果这些证据不能证明某个动作、参数、输出字段或资源存在，AI 应停在“待确认”，而不是生成猜测代码。
+
+## 4. 复制这段提示词
+
+把下面提示词和上一节的需求卡一起交给能访问当前工作区的 AI 编码助手；将 `<流程名>` 换成小写英文文件名。
+
+```text
+请为当前 user-device-package 工作区编写一个新的 Uni-Lab 静态 Python DSL 工作流。
+代码事实优先级：当前 Uni-Lab OS 编译器 > 用户设备包驱动与 package.yaml >
+设备包内已批准的工作流 > 我的自然语言描述。发现冲突时先报告，
+不要自行猜测。
+
+阶段 1 只读取证：
+1. 记录 Uni-Lab OS、用户设备包和 启动图 的版本，确认使用的是本次批准配置；
+2. 读取 package.yaml、指定 启动图、相关 device.py、资源模板和已批准的相似工作流；
+3. 输出“需求步骤 → 设备动作 → 参数/返回类型 → 定义位置”的表；
+4. 列出仍需我确认的设备 ID、站点、物料、单位、安全阈值、动作模式和并行假设。
+
+阶段 2 生成草稿：
+1. 仅在 workflow_drafts/<流程名>.py 写一个新定义，不改现有工作流，不改 package.yaml；
+2. 使用现代 @workflow、绝对 import、带类型的关键字专用输入和真实设备类；
+3. 每个动作、物料来源和持久控制结构使用唯一且稳定的 UUID 字面量；动作只用命名参数；
+4. 输出只引用输入、物料来源或动作结果；不得发明 action、返回字段、资源或 Python DSL marker；
+5. 条件、循环、并行、资源、物料和子工作流严格遵守当前编译器约束；
+6. 物理搬运优先使用驱动已提供的原子动作，不拆成独立 pick/place/库存记账；
+7. 没有现场证据时保留 presence、gripper payload 等驱动安全检查的默认值；
+8. 不运行 python <流程名>.py，不发布工作流，不创建 Task，不连接或操作真实设备。
+
+阶段 3 验证与交付：
+1. 展示完整草稿、代码证据表、假设和人工复核项；
+2. 只运行静态/只读检查，报告原始命令与结果；
+3. 若诊断失败，只修复诊断明确指出的问题，不用删掉安全合同来换取通过；
+4. 此阶段只证明草稿可交给产品导入，不宣称它已经通过 Uni-Lab 编译；
+5. 导入、package inspect、发布、预检和运行都等待我确认。
+```
+
+如果 AI 在阶段 1 就发现需求缺少关键现场值，先回答它的问题。高质量生成的标志不是代码长，而是每个动作和资源选择都能追溯到当前仓库中的事实。
+
+## 5. 审查 AI 草稿
+
+导入前先逐项确认：
+
+- 工作流 UUID、每个节点 UUID 都是唯一的固定字符串，修改代码时不会重新生成；
+- 函数名和包内源码路径没有被当作排版随意改变；需要迁移身份时已同步检查 `package.yaml` 和引用方；
+- 文件只包含允许的 import、设备声明、可选输出 `TypedDict` 和一个工作流函数；
+- 所有设备类型、设备业务 ID、动作名、参数和结果字段都能定位到当前代码；
+- 输入有类型、单位、范围和合理默认值，危险参数没有宽松默认值；
+- 条件分支、循环上限和并行边界符合实验语义；
+- `group` 没被误当成锁，`parallel` 没被误写成“保证物理同时”；
+- 物料模板、来源、保管策略、站点与数量单位经过现场负责人确认；
+- 没有硬编码从别的 用户设备包 流程复制来的物料实例 UUID 或 site UUID；
+- 原子物理动作与唯一库存提交没有被 AI 拆成可分别调度的步骤；
+- 普通值的 fan-out 与 `ResourceSlot` 的物理线性已经区分；无序分样由真实 split/aliquot Action 产生新身份；
+- `check_source_presence`、`check_target_presence`、`check_gripper_payload` 等安全见证保持驱动默认值；任何关闭都有明确现场依据和审批人；
+- 没有 `manual_confirm()` 之类不存在的 Python 语法；需要人工确认时，把该动作设计为实验操作，并在实验操作画布包装已绑定的真实设备动作；
+- AI 没有顺手修改驱动、启动图、运行模式或无关文件。
+
+需要改动时，把编译 diagnostic 原文连同行列号交回 AI，例如：
+
+```text
+只修复下面的 Uni-Lab 编译诊断，保留已经确认的实验语义、节点 UUID、
+输入输出合同和安全约束。先解释根因与代码证据，再给最小 diff。
+不要通过删除物料要求、缩短流程或改成未知动作来绕过错误。
+
+<粘贴 diagnostic>
+```
+
+## 6. 用产品导入并验证
+
+### 新工作流
+
+在 Uni-Lab OS 的“工作流”页点击“导入 Python”，选择 `workflow_drafts/<流程名>.py`。产品会静态解析文件；完整候选通过后，才把规范源码写入设备包的 `workflows/`（实验操作写入对应目录）并向 `package.yaml` 追加登记。上传文件不会被 Python import 或执行。
+
+导入要求当前 Workspace 恰好有一个可编辑的设备包源码目标。若返回 `source_target_unavailable`，先通过 `GET /api/v1/workspace/package-mounts` 检查 package mount 的 `editable` 状态，不要让 AI 猜测应写入哪个包。
+
+导入成功后回到终端检查产品实际落盘结果：
+
+```bash
+cd "$LAB_ROOT/user-device-package"
+git status --short
+git diff -- package.yaml example_device_package/workflows
+python -m unilabos.app.main package inspect --path .
+./scripts/check-package.sh
+```
+
+同时在工作流详情确认：拓扑、输入输出合同、设备绑定、物料要求和 diagnostics 与需求一致。AI 草稿只是输入，产品保存的规范源码和编译图才是待发布候选。
+
+涉及并行、组合流程、物料链或画布断边时，还要把产品生成的规范 Python 再次编译，并确认第二张图与第一张图语义等价。若出现 round-trip diagnostic，应保留原草稿，只让 AI 根据诊断做最小修复；不要使用 magic comment、空 `pass` 或伪 Fork/Join 绕过。
+
+### 修改已有工作流
+
+不要重复导入相同 UUID。先取得现有 authoring 修订和源码，让 AI 生成最小 diff，再通过 Local Authoring 的 draft → candidate → apply 链路提交；该链路使用 draft hash、工作流 revision 和 candidate hash 防止覆盖并发修改。应用后仍要重新运行本节的检查。
+
+## 7. 人工批准发布和运行
+
+只有下列条件全部满足后才发布：
+
+1. AI 的动作证据表已经由人复核；
+2. 编译 diagnostics 没有 error；
+3. `package inspect` 和用户设备包检查通过；
+4. 工作流详情中的图、合同和材料依赖正确；
+5. 发布的是刚刚审查过的 revision。
+
+发布后按[管理与运行工作流](workflows.md)执行零写入预检。第一次运行固定使用 `dry-run`；预检为 `runnable_now` 后，再由人创建 Task，并按[用户设备包 手写教程](first-workflow.md)的方法检查每个 Job、回执和正式输出。
+
+`dry-run` 不构造设备驱动，因此只能证明编译、合同、调度和结果投影链路。需要验证仿真驱动时，下一阶段应明确选择隔离的模拟 启动图，并让 Uni-Lab OS 以真实动作模式构造仿真 Driver；它与真机 启动图 必须物理隔离。仿真 Driver 通过仍不证明真机联锁和运动安全。
+
+真机运行是另一项验收。必须重新核对连接、急停、联锁、点位、夹具、载荷、库存、人员和恢复方案，不能因为 AI 生成成功或 dry-run 通过就自动切换到 `normal`。
+
+## 可选：给 AI 接入 Workspace MCP
+
+如果使用的 AI 客户端支持 MCP，可在已安装的源码环境中增加可选依赖：
+
+```bash
+cd "$LAB_ROOT/Uni-Lab OS"
+python -m pip install -e ".[mcp]"
+unilab-mcp --workspace "$LAB_ROOT/user-device-package"
+```
+
+在 AI 客户端中把命令配置为 `unilab-mcp`，参数使用 `--workspace` 和 用户设备包 绝对路径。具体配置文件格式由 AI 客户端决定。它是由本地 MCP Client 拉起的命令型 Server，不是 Uni-Lab 自带的公网 MCP 服务；不要暴露 Workspace Host 端口或本地 token。
+
+MCP 适合让 AI 调用 `workspace_status`、`list_workflows`、`inspect_workflow`、`inspect_task` 和 `watch_task` 获取产品事实。开始时只授予读取和观察任务所需的能力。
+
+`wait_authoring` 只适合等待工作流 revision 增长或非空诊断。同一 revision 下产生无诊断的有效 candidate 时，它可能超时；这时应读取 `/api/v1/workflows/{uuid}/authoring` 的最新状态。当前尤其要遵守六条边界：
+
+- MCP 没有工作流源码生成、写入、导入、发布或运行前预检工具，生成仍由代码助手完成，写入仍走产品 Authoring/导入链路；
+- `run_workflow` 会直接创建 Task，而且不能提交完整的库存绑定和优先级字段；涉及物料绑定时使用 Uni-Lab OS 页面或 HTTP API。它只能在人工明确批准且产品预检通过后调用；
+- `run_workflow` 的 `operation_id` 只是关联元数据，不是创建 Task 的幂等键；响应不确定时先查询已有 Task，不能盲目重试；
+- 不使用 `debug_workflow`，它仍指向已退役、固定返回 HTTP 410 的旧 Debug API；调试请创建标准 step Task。
+- 不使用 `switch_workspace_authority`；该名字虽然仍被注册，当前 Workspace Host 会以 `backend_mode_removed` 拒绝；
+- 真机环境不要用 MCP 的单组件 stop 代替 `unilab workspace stop`，后者才执行 Uni-Lab OS 的完整排空与停止顺序。
+
+## 推荐的团队交付物
+
+每个由 AI 辅助创作的工作流至少保留：
+
+- 需求卡；
+- AI 使用的参考文件清单；
+- 动作/资源证据表；
+- 工作流源码和 `package.yaml` diff；
+- 编译与包检查结果；
+- 发布 revision；
+- 预检结果、dry-run Task UUID 和验收结论；
+- 真机验收是否完成的独立状态。
+
+这样后续维护者可以分清“AI 建议了什么”“产品验证了什么”“人批准了什么”和“设备实际执行了什么”。
+
+## 后续日常使用
+
+- 每次生成前让 AI 重新扫描当前 Catalog、驱动和相似流程，不复用过期动作记忆；
+- 用[工作流编排特性](workflow-features.md)作为提示词约束与代码审查手册；
+- 用[管理与运行工作流](workflows.md)完成发布、预检、Task 和修订管理。
+
+---
+
+Source: /workflows.md
+
+# 工作流发布与任务运行
+
+:::{admonition} 阅读角色
+- **业务负责人**：确认实验目的、输入输出、参数单位、成功标准和失败处理。
+- **开发人员**：编写或编排节点、物料流、控制结构、设备绑定和正式合同。
+- **验收人员**：执行静态检查、预检、模拟运行、异常路径和受控真机验收。
+:::
+
+工作流面向一次完整实验目标。用户从已发布修订准备输入，先执行零写入预检，再创建普通或单步任务。
+
+本页解释已经进入产品目录的工作流怎样发布、预检和运行。第一次创作应先完成[工作流基础](workflow-concepts.md)、[用户设备包 手写教程](first-workflow.md)和[编排特性](workflow-features.md)，之后日常创作推荐使用[AI 辅助方式](ai-workflow-authoring.md)。
+
+开始实际运行前，还应准备[物料](materials.md)与[试剂](reagents.md)，发布被引用的[实验操作（子工作流）](experiment-operations.md)，并理解[运行模式、安全与恢复](runtime-safety.md)。
+
+## 两种创作入口
+
+- **AI 辅助创作（推荐）**：AI 先读取当前 Catalog、驱动、资源与 用户设备包 已跟踪流程，生成静态 Python DSL 草稿；人审查后通过“导入 Python”创建，再检查、发布和运行。
+- **人工创作**：作者直接编写静态 Python DSL，适合学习最小语法、修复诊断和审查 AI 结果。
+- **可复用实验操作**：在“实验室操作”画布创建或导入 `experiment_operation`，发布后插入上层流程。
+
+当前“新建工作流”按钮只是入口占位，不能从空白画布创建普通工作流；Uni-Lab OS 页面也没有通用的一键 AI 生成入口。AI 的推荐接入方式与安全边界见[用 AI 编写工作流](ai-workflow-authoring.md)，完整语法和约束见[工作流编排特性](workflow-features.md)。
+
+## 查找和理解工作流
+
+进入“工作流”页后：
+
+1. 按名称或关键词搜索。
+2. 打开详情，查看类型、当前修订和发布状态。
+3. 在“拓扑”中查看节点和依赖。
+4. 在“合同”中查看公开输入、输出和资源要求。
+5. 在“诊断”中处理定义错误或未绑定项。
+6. 在“源码”中只读查看或复制定义。
+
+工作流可以从 Python 或 JSON 导入。Python 文件只进入静态 AST 编译器，不会作为普通程序执行；导入用于创建新身份，不覆盖已经存在的工作流 UUID。
+
+## 发布修订
+
+当 Runtime 的 `can_run_unpublished` 能力关闭时，只运行已发布内容。发布前应确认：
+
+- 节点与连线完整；
+- 每个设备动作绑定到有效实例；
+- 必填参数有来源；
+- 输入输出类型兼容；
+- 子工作流引用已发布合同；
+- 材料来源和站点选择不冲突。
+
+发布当前修订形成不可变的发布合同。已经创建的任务持有自己的冻结执行图和源码快照，之后编辑或发布新修订不会改变它。
+
+## 准备一次运行
+
+打开“运行准备”，完成以下内容：
+
+1. 选择已发布修订。
+2. 填写公开输入。
+3. 为每个 `ResourceSlot` 选择具体物料或来源站点。
+4. 如果工作流暴露站点参数，保证同类来源没有选择同一占用位。
+5. 选择运行方式：普通或单步。
+6. 选择普通/高优先级并填写描述。
+7. 核对页面推导出的材料依赖和试剂数量要求。
+
+优先级只影响可调度节点之间的选择，不会绕过设备锁、工位锁、库存预留或安全条件。
+
+## 运行前检查
+
+预检可能给出三类结果：
+
+| 结果 | 含义 | 下一步 |
+| --- | --- | --- |
+| `runnable_now` | 当前快照下满足运行条件。 | 可以提交；提交时仍会复检。 |
+| `temporarily_unavailable` | 定义有效，但设备、资源或库存暂时不可用。 | 查看阻塞明细，处理后重检。 |
+| `invalid` | 输入、定义、绑定或资源合同不成立。 | 修正配置或重新发布。 |
+
+预检是零写入操作：不会创建 Task、Job、执行锁或库存预留。任务提交会重新检查并原子地建立需要的运行状态，因此“刚才预检通过”不保证此刻一定立即运行。
+
+## 普通运行与单步运行
+
+- **普通运行**按依赖和资源条件持续调度，适合已验证流程。
+- **单步运行**创建标准 step Task，初始或切换后由操作员选择下一个可执行节点，提交前要求没有其他活动任务且没有待完成的任务清理。
+
+旧的 `/api/v1/debug/*` 断点调试接口已经固定返回 HTTP 410。不要使用旧 CLI、MCP 或 Workbench 中仍指向该接口的“debug launch/breakpoint”；当前正确路径是标准 step Task。
+
+## 组合工作流
+
+工作流可以引用已发布实验操作。调度器在运行计划中原子展开组合调用，同时保留合同 UUID/digest、参数、设备绑定和物料依赖。不要依赖“子操作最近发布的合同”这种隐式行为；每次修改后应重新检查并发布上层工作流。
+
+## 提交后的去向
+
+创建成功后转到“任务”页。任务会经历等待资源、运行、暂停、需要人工处理、成功、失败或取消等状态。继续按[任务运行、并行调度与异常处理](tasks.md)查看节点、理解等待、处理人工确认并核对结果。
+
+---
+
+Source: /troubleshooting.md
+
+# 故障排查
+
+:::{admonition} 阅读角色
+- **业务负责人**：提供使用场景和预期结果，不直接操作调试接口或恢复命令。
+- **开发或运维人员**：使用开发工具、接口和日志定位并处理问题。
+- **验收人员**：确认权限、输入输出、异常处理和操作记录符合要求。
+:::
+
+先判断问题属于页面连接、定义/输入、资源等待、设备执行还是恢复状态。保留任务 UUID、节点 UUID、Job UUID、时间和 Trace ID，再进行操作。
+
+## 安装与本地启动
+
+### `unilab` 命令不存在
+
+先激活安装 Uni-Lab OS 的 Conda 环境，再检查 `python -m pip show unilabos`。源码安装还应确认 `pip install -e .` 和 `uv pip install -r unilabos/utils/requirements.txt` 已成功结束。不要在系统 Python 和 Conda Python 之间混装。
+
+### `import rclpy` 失败
+
+完整 Uni-Lab OS 即使在 dry-run 中也会初始化 ROS。只创建裸 Python 环境不够；按[环境与运行配置](environment.md#选择-conda-环境)安装 `unilabos-env`、`unilabos` 或 `unilabos-full`。
+
+### `import yaml` 失败
+
+Uni-Lab OS 启动时需要导入 `PyYAML`。在已激活环境执行：
+
+```bash
+python -m pip install "PyYAML>=6"
+```
+
+### Health 正常但 `/console/` 返回 404
+
+干净源码不带已编译 React bundle。在 `Uni-Lab OS/frontend` 中确认 Node ≥22.13，然后执行 `npm ci && npm run build`；看到 `unilabos/app/web/static/console/index.html` 后重启 Workspace。
+
+### `--skip_env_check` 或 `--test_mode` 不识别
+
+这是旧脚本参数。当前解析器明确拒绝，改用：
+
+```bash
+unilab workspace start \
+  --workspace /absolute/path/to/user-device-package \
+  --graph deployment/graphs/example_lab-local-debug.json \
+  --runtime-mode dry-run \
+  --wait 300 \
+  --json
+```
+
+### Uni-Lab OS 页面可用但设备连接未就绪
+
+网页/API 可用只证明 Uni-Lab OS 的访问入口正常。设备连接未就绪时，读取内部设备运行日志：
+
+```bash
+unilab workspace logs \
+  --workspace /absolute/path/to/user-device-package \
+  --component edge \
+  --json
+```
+
+检查 ROS 环境、启动图（Graph JSON）、用户设备包 Catalog 和动态端口。不要改用 `--backend simple`；当前完整实现只支持 ROS backend。
+
+## 快速健康检查
+
+管理员可以先从 `unilab workspace status --json` 取得 Uni-Lab OS API 地址，再用以下只读接口检查：
+
+```bash
+curl -fsS "$BACKEND_URL/api/v1/health"
+curl -fsS "$BACKEND_URL/api/v1/readiness"
+curl -fsS "$BACKEND_URL/api/v1/edge/readiness"
+```
+
+正常情况下，Uni-Lab OS 和工作流运行时应为 `ready`，设备连接应为 `connected: true`，且设备数量与本次 启动图 一致。
+
+## 连接与页面问题
+
+### Uni-Lab OS 页面无法打开
+
+1. 访问 `/api/v1/health`，区分 Runtime 不可用和静态资源问题。
+2. 确认 URL 以 `/console/` 结尾。
+3. 如果 API 正常而页面返回 404，运行镜像可能没有包含前端 bundle。
+4. 如果返回 403，检查 Host allowlist 和浏览器同源来源。
+
+### 页面显示重连中或只读快照
+
+不要继续提交写操作。检查 Readiness、网络和 Pod 状态，等页面重新显示在线后刷新数据。只读快照是最后一次成功结果，不代表当前设备/库存事实。
+
+### 设备未连接或设备数为 0
+
+检查 Uni-Lab OS 运行实例、设备控制连接、活动 启动图 和设备注册错误。设备注册至少需要一台有效设备，并会校验本地 ID、动作和绑定材料唯一性。恢复连接后再次查看在线设备，不要直接重试在途物理动作。
+
+### PLC 仿真器页面可打开，但设备动作没有响应
+
+GUI 健康只证明 Web 进程存在。按[PLC / OPC UA 仿真器](plc-sim.md)依次检查 OPC UA Server、可选握手代理和 Uni-Lab OS 设备会话；所需组件必须同时就绪。再确认活动 启动图 使用设备包部署说明提供的协议地址，且对应 PLC 实例在线。
+
+如果任务已经越过派发边界，不要通过重启 Server/Agent 或重建 Task 来重试。先停止新派发，核对 Job、PLC-Sim 状态和现场/仿真事实，再按原任务的失败或未知结果流程处理。
+
+## 工作流与预检
+
+### 找不到工作流
+
+- 清空搜索条件；
+- 确认该修订已经发布，或 Runtime 的 `can_run_unpublished` 能力已开启；
+- 检查 Readiness 中的已加载数量是否与设备包检查报告一致；
+- 设备包中有源码定义的流程，不一定已进入本次发布目录。
+
+### Python 工作流导入冲突
+
+导入用于创建新定义，同一工作流 UUID、节点 UUID 或作者函数名已存在时会拒绝，不会覆盖。为独立练习生成新 UUID；修改现有定义时使用其 Authoring draft/apply 流程或维护包内源文件。
+
+### 导入时报动作或设备类型未知
+
+确认设备类型使用绝对 import，规范 import package 中的 `@device` 已被 Catalog 静态扫描，启动图 `class` 能解析到该定义，并且运行中的 Workspace Catalog 是修改后的同一代。`package.yaml` 只登记工作流，不登记设备或资源；导入源码也不会执行 import 来“临时发现”类型。
+
+### “新建工作流”没有打开编辑器
+
+这是 Uni-Lab OS 页面的已知边界。使用“实验室操作”画布创建可复用操作，或从 Python/JSON 导入工作流。
+
+### 预检返回 `invalid`
+
+依次检查公开输入类型、必填值、设备绑定、子操作发布合同、`ResourceSlot`、来源站点重复和工作流诊断。修改定义后需要保存并重新发布。
+
+### 预检返回 `temporarily_unavailable`
+
+定义本身可能有效。检查设备在线状态、现有执行锁、物料位置、空闲站点、试剂数量预留和 Uni-Lab OS 排空状态。处理后重新预检。
+
+### 预检通过但提交失败或进入等待
+
+预检是零写入快照；另一个任务可能在你提交前占用了资源。以提交时返回和任务阻塞明细为准，不要重复创建任务。
+
+### Debug API 返回 HTTP 410
+
+旧 `/api/v1/debug/*` 已退役。创建标准 step Task；单步提交前需要确认当前没有其他活动任务且没有待完成的任务清理。
+
+## 任务与资源
+
+### 单步与普通任务冲突
+
+单步任务只允许在当前没有其他活动任务且没有待完成的任务清理时提交；如果返回 `debug_task_conflict`，先处理正在运行的任务并等待清理完成。
+
+### 任务长时间等待资源
+
+打开节点和“阻塞与异常”，找到具体设备、物料、工位、库存或前置依赖。正常共享资源等待不需要人工释放。若 holder 对应已结束任务，再由管理员核对持久状态和现场后处理陈旧锁。
+
+### 物料位置更新冲突
+
+说明对象修订已经变化。刷新物料详情，确认是其他用户还是任务完成了移动，再基于最新位置操作。不要重复发送旧 revision。
+
+### 没有可选择的试剂容器
+
+目标物料必须使用带 `container` 标签的模板、尚未绑定试剂，并处于允许登记的状态。先到物料页核对容器和占用。
+
+### 无法删除试剂或目录项
+
+库存可能被任务预留，或目录项仍被库存引用。先查看消耗/预留和引用关系；不要删除正在被任务使用的数据。
+
+## 设备和恢复
+
+### 物料转移动作失败，现场位置与页面不一致
+
+停止后继物理动作，现场确认真实站点，然后使用原任务的“物料转移结算”入口选择实际位置并填写原因。不要把物料手工移动到计划目标来掩盖失败。
+
+### 节点显示 `execution_unknown`
+
+不要重建任务或重发动作。检查机械臂/设备 journal、传感器和现场物体，完成只读对账后，在原任务解决未知结果。
+
+### 强制解锁后设备仍在运行
+
+强制解锁不会控制物理设备。立即按现场安全规程停机/急停，并禁止新任务派发；之后再对账 Job、物料和锁。
+
+### 图像设备没有返回文件路径或算法结论
+
+先核对设备动作合同：有些动作只表示触发成功，并不承诺返回文件或算法结论。不应通过反复执行解决接口能力缺失。
+
+### 投料输出质量与秤读数理解不一致
+
+先区分“目标/指令质量”和“传感器实测质量”。查看设备包定义的称量历史与最终秤结果，并按工艺容差单独判断。
+
+## Trace 与日志
+
+### 任务没有 Trace 链接
+
+先确认 Readiness 是否配置 `traceUiUrl`，任务是否有 `trace_id`，追踪服务是否可达。Trace 上报 fail-open；没有 Trace 时仍要查看任务、Job、Uni-Lab OS 和设备日志。
+
+### SSE 断开后状态不更新
+
+任务事件是“需要重新读取”的通知，不是完整状态权威。重新加载 REST 详情；客户端也会使用轮询恢复。不要仅凭丢失的一条 SSE 判定任务没有变化。
+
+## 提交问题时保留什么
+
+- Uni-Lab OS 页面与发生时间；
+- workflow/task/node/job UUID；
+- 运行模式和发布修订；
+- 输入、资源来源和预检结果；
+- 设备在线状态、锁 holder 和内部设备会话；
+- 错误 envelope 中的业务 `code` 与消息；
+- Trace ID 及相关动作日志；
+- 现场物料与设备状态，不包含密码、Token 或密钥。
+
+---
+
+Source: /api-reference.md
+
+# API 使用参考
+
+:::{admonition} 阅读角色
+- **业务负责人**：提供使用场景和预期结果，不直接操作调试接口或恢复命令。
+- **开发或运维人员**：使用开发工具、接口和日志定位并处理问题。
+- **验收人员**：确认权限、输入输出、异常处理和操作记录符合要求。
+:::
+
+API 是 Uni-Lab OS 网页、Workbench 和自动化工具共用的产品能力入口。日常实验优先使用 Uni-Lab OS 页面；批量导入、设备单动作、调度运维和系统集成再使用 API。
+
+## 入口
+
+当前演示环境可直接打开以下入口；部署到其他环境时，将示例地址替换为实际的 `<BACKEND_URL>`：
+
+| 入口 | 地址 |
+| --- | --- |
+| Swagger | [打开当前演示环境 Swagger UI](http://115.190.137.109:30183/api/docs) · `<BACKEND_URL>/api/docs` |
+| OpenAPI JSON | [查看当前演示环境 OpenAPI JSON](http://115.190.137.109:30183/api/openapi.json) · `<BACKEND_URL>/api/openapi.json` |
+| Uni-Lab OS 页面 | `<BACKEND_URL>/console/` |
+
+:::{warning}
+当前演示 API 没有通用用户认证。不要把公网地址、真实 UUID 或示例请求直接用于生产自动化。生产集成必须经过受控网关、HTTPS、身份认证和最小权限授权。
+:::
+
+## 调用约定
+
+### 同时检查 HTTP 与业务码
+
+健康接口直接返回状态对象；多数业务接口返回 envelope。部分业务错误仍可能使用 HTTP 200，因此客户端必须同时检查：
+
+- HTTP 状态；
+- 响应 envelope 中的业务 `code`；
+- `data` 或 `error.msg`；
+- 对异步恢复操作，是否返回 HTTP 202。
+
+### 写操作使用幂等身份
+
+库存命令、任务命令和人工恢复可能要求 `Idempotency-Key`、命令 UUID 或 resolution UUID。同一次逻辑操作重试时必须复用原身份；生成新身份可能创建第二次业务操作。
+
+### 更新使用期望修订
+
+物料、试剂、工作流草稿和恢复操作会使用 `expected_revision`、claim/fencing 或其他比较并交换字段。发生冲突时重新读取最新对象再决定，不要改大修订号或移除约束。
+
+### SSE 是变化通知
+
+`/api/v1/events` 和 `/api/v1/monitor/events` 提供 Server-Sent Events。任务事件用于提示客户端重新读取 REST 权威状态，不应把单条事件当作完整任务快照。断线重连时按接口支持使用 `Last-Event-ID`；任务事件最多保留最近 500 条。
+
+## 只读健康检查
+
+```bash
+curl -fsS "$BACKEND_URL/api/v1/health"
+curl -fsS "$BACKEND_URL/api/v1/readiness"
+curl -fsS "$BACKEND_URL/api/v1/edge/readiness"
+curl -fsS "$BACKEND_URL/api/v1/online-devices"
+```
+
+这些接口适合监控连通性，不代表具体设备已经满足物理安全条件。
+
+## 功能分组
+
+下表列出 OpenAPI 中的主要产品域。具体方法、字段和响应以本次安装的 Swagger 为准。
+
+| 产品域 | 代表路径 | 用途 |
+| --- | --- | --- |
+| 健康与 Runtime 能力 | `/api/v1/health`、`/readiness` | 服务就绪、工作流加载进度和 `capabilities` 权限投影。 |
+| 设备连接与在线设备 | `/api/v1/edge/readiness`、`/edge/sessions`、`/online-devices` | Uni-Lab OS 内部设备连接、注册和在线节点。 |
+| 设备与动作 | `/api/v1/devices`、`/actions`、`/device-action-runs` | 设备目录、动作 schema 和标准单动作 Task。 |
+| 设备状态 | `/api/v1/device-state`、`/device-state/history` | 当前设备状态、上报与历史。 |
+| 物料与模板 | `/api/v1/materials`、`/materials/graph`、`/resource-templates` | 物料实例、关系图、模板、站点和历史。 |
+| 实验室布局 | `/api/v1/lab/layout`、`/lab/placements`、`/lab/zones` | 布局、放置、区域、装配与仓库视图。 |
+| 样品与内容物 | `/api/v1/samples`、`/current-substances`、`/inventory/contents` | 样品、当前物质和容器内容物。 |
+| 试剂身份 | `/api/v1/reagent-infos`、`/compounds/{cas}` | 试剂目录、批量/文件导入和 CAS 查询。 |
+| 试剂库存 | `/api/v1/reagents`、`/inventory/commands`、`/reagent-history/{id}` | 库存 CRUD、原子分装、历史、预留和消耗。 |
+| 工作流创作 | `/api/v1/workflows`、`/authoring/*`、`/workflow-nodes`、`/workflow-edges` | 定义、导入、编译、启动图（Graph JSON）、节点、连线和草稿 CAS。 |
+| 发布与组合 | `/api/v1/workflows/{id}/publications`、`/composite-invocations` | 不可变发布合同和子工作流调用。 |
+| 运行前检查 | `/api/v1/workflows/{id}/run-preflight` | 零写入检查输入、设备、资源和库存。 |
+| 任务 | `/api/v1/workflow-tasks`、`/{id}/jobs`、`/{id}/commands` | 创建、查询、控制任务和查看冻结 Job。 |
+| 人工确认与恢复 | `/manual-confirmation`、`/resolve-uncertain`、`/settle-material-transfer` | 确认、未知结果和物料转移结算。 |
+| 执行锁 | `/workflow-tasks/{id}/execution-locks`、`/force-release` | 查看和受审计强制释放锁。 |
+| 工作流干预 | `/api/v1/workflow-interventions`、`/{id}/decisions` | 查询开放干预并提交合法选项。 |
+| 调度运维 | `/api/v1/reschedule`、`/scheduler/drain`、`/timeline` | 重算、排空/恢复和 Job 时间线。 |
+| 监控与历史 | `/api/v1/monitor/snapshot`、`/monitor/events`、`/history/jobs` | 调度快照、SSE 和历史。 |
+| Workspace | `/api/v1/workspace/package-mounts`、`/file-browser` | 包挂载和受控文件浏览。 |
+
+## 退役接口
+
+以下三个路径仍出现在 OpenAPI 中，但固定返回 HTTP 410：
+
+```text
+/api/v1/debug/workflow-tasks
+/api/v1/debug/workflow-tasks/{task_uuid}
+/api/v1/debug/workflow-tasks/{task_uuid}/commands
+```
+
+新集成应创建标准 `mode=step` 的 workflow Task，并使用标准 task commands。
+
+## 接口集成检查表
+
+在写入生产数据前确认：
+
+- 已经过 TLS 和身份认证网关；
+- 使用调用方自己的最小权限凭证；
+- 记录幂等键、对象 UUID 和期望修订；
+- 对业务 `code`、HTTP 202、409/冲突和 5xx 分别处理；
+- 只对网络错误和允许重放的操作重试；
+- SSE 断线后重新读取 REST 状态；
+- 写日志时脱敏 Token、Authorization、密码和访问密钥；
+- 恢复类接口需要现场确认和审计原因。

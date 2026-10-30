@@ -1,0 +1,717 @@
+<!doctype html>
+<html class="no-js" lang="zh-CN" data-content_root="./">
+  <head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="alternate" type="text/markdown" href="generic-device.md">
+<link rel="describedby" type="text/plain" href="llms.txt">
+<link rel="index" title="索引" href="genindex.html"><link rel="search" title="搜索" href="search.html"><link rel="next" title="PLC 控制的工站" href="plc-station.html"><link rel="prev" title="设备登记、动作表单与设备联动" href="device-registration.html">
+
+    <!-- Generated with Sphinx 9.0.4 and Furo 2025.12.19 -->
+        <title>通用设备规范 - Uni-Lab OS 产品使用说明书</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=d111a655" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo.css?v=7bdb33bb" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/furo-extensions.css?v=8dab3a3b" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=35d0322d" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  --color-brand-primary: #2757dd;
+  --color-brand-content: #2757dd;
+  --color-sidebar-background: #f8f9fb;
+  --color-sidebar-background-border: #eeebee;
+  --color-admonition-background: #f8f9fb;
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-stack--monospace: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation" aria-label="Toggle site navigation sidebar">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc" aria-label="Toggle table of contents sidebar">
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="index.html"><div class="brand">Uni-Lab OS 产品使用说明书</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="index.html">
+  
+  <span class="sidebar-brand-text">Uni-Lab OS 产品使用说明书</span>
+  
+</a><form class="sidebar-search-container" method="get" action="search.html" role="search">
+  <input class="sidebar-search" placeholder="搜索" name="q" aria-label="搜索">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">认识与快速上手</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="overview.html">认识 Uni-Lab OS</a></li>
+<li class="toctree-l1"><a class="reference internal" href="demo-lab.html">示例设备包</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">系统安装与配置</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">系统安装</a></li>
+<li class="toctree-l1"><a class="reference internal" href="environment.html">环境与运行配置</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">设备包开发规范</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="unilabos-installation.html">设备包规范与系统启动</a><input aria-label="Toggle navigation of 设备包规范与系统启动" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="workspace.html">工作区</a></li>
+<li class="toctree-l2 current has-children"><a class="reference internal" href="device-template.html">1. 设备接入模板</a><input aria-label="Toggle navigation of 1. 设备接入模板" checked="" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l3"><a class="reference internal" href="template-library.html">设备模板库与类别选择</a></li>
+<li class="toctree-l3"><a class="reference internal" href="device-registration.html">设备登记、动作表单与设备联动</a></li>
+<li class="toctree-l3 current current-page"><a class="current reference internal" href="#">通用设备规范</a></li>
+<li class="toctree-l3"><a class="reference internal" href="plc-station.html">PLC 控制的工站</a></li>
+<li class="toctree-l3"><a class="reference internal" href="serial-network.html">串口／网络连接</a></li>
+<li class="toctree-l3"><a class="reference internal" href="host-api.html">上位机 API 接入</a></li>
+<li class="toctree-l3"><a class="reference internal" href="mouse-automation.html">鼠标模拟点击（可选）</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="material-template.html">2. 物料定义模板</a><input aria-label="Toggle navigation of 2. 物料定义模板" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="deck-warehouse.html">工作站台面与仓库</a></li>
+<li class="toctree-l3"><a class="reference internal" href="stack.html">光电堆栈与旋转堆栈：物料 + 设备</a></li>
+<li class="toctree-l3"><a class="reference internal" href="plate-tiprack.html">孔板与吸头盒（Plate／Tiprack）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="container-template.html">容器（Container）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="vial-rack.html">小瓶载架</a></li>
+<li class="toctree-l3"><a class="reference internal" href="magazine.html">弹夹</a></li>
+<li class="toctree-l3"><a class="reference internal" href="sheet-battery.html">片状物料与组装成品</a></li>
+<li class="toctree-l3"><a class="reference internal" href="material-state.html">物料状态、条码与内容物</a></li>
+<li class="toctree-l3"><a class="reference internal" href="other-materials.html">其他可追踪物料</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="startup-files.html">3. 启动文件</a><input aria-label="Toggle navigation of 3. 启动文件" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="graph-json.html">启动图（Graph JSON）编写指南</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="workflow.html">4. 工作流运行</a><input aria-label="Toggle navigation of 4. 工作流运行" class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflow-concepts.html">先理解工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflow-features.html">工作流编排特性</a></li>
+<li class="toctree-l3"><a class="reference internal" href="experiment-operations.html">实验操作</a></li>
+<li class="toctree-l3"><a class="reference internal" href="complete-workflow.html">完整工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflow-replenishment.html">工作流补料与物料来源</a></li>
+<li class="toctree-l3"><a class="reference internal" href="first-workflow.html">手写并运行第一个工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="ai-workflow-authoring.html">AI 编写工作流（推荐）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html">工作流发布与任务运行</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="参考文档.html">5. 参考文档</a><input aria-label="Toggle navigation of 5. 参考文档" class="toctree-checkbox" id="toctree-checkbox-reference" name="toctree-checkbox-reference" role="switch" type="checkbox"/><label for="toctree-checkbox-reference"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul></ul>
+</li>
+</ul>
+</li>
+
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="repository-builder-skill.html">使用 AI 设备包生成器（实验性）</a></li>
+<li class="toctree-l1"><a class="reference internal" href="scenario-guide.html">设备包验收</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">参考</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="troubleshooting.html">故障排查</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api-reference.html">API 使用参考</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle" aria-label="Toggle Light / Dark / Auto color theme">
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          
+<div class="ai-docs-toolbar" data-ai-docs-toolbar
+     data-markdown-url="generic-device.md"
+     data-llms-url="llms.txt"
+     data-llms-full-url="llms-full.txt">
+  <div class="ai-docs-menu-shell">
+    <div class="ai-docs-split">
+      <button class="ai-docs-copy-primary" type="button" data-ai-docs-copy
+              aria-disabled="true" disabled>
+        <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
+          <path d="M9 5h6m-6 4h6m-6 4h4M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/>
+        </svg>
+        <span data-ai-docs-trigger-label>复制页面</span>
+      </button>
+      <button class="ai-docs-trigger" type="button" aria-expanded="false"
+              aria-controls="ai-docs-menu-generic-device" aria-label="打开 AI 文档菜单">
+        <svg class="ai-docs-chevron" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14">
+          <path d="m7 10 5 5 5-5"/>
+        </svg>
+      </button>
+    </div>
+    <div class="ai-docs-popover" id="ai-docs-menu-generic-device" hidden>
+      <button class="ai-docs-menu-item" type="button" data-ai-docs-copy
+              aria-disabled="true" disabled>
+        <span class="ai-docs-item-icon" aria-hidden="true">⧉</span>
+        <span><strong>复制页面</strong><small data-ai-docs-copy-help>正在准备本页 Markdown</small></span>
+      </button>
+      <a class="ai-docs-menu-item" href="generic-device.md" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">M↓</span>
+        <span><strong>以 Markdown 格式查看 <span aria-hidden="true">↗</span></strong><small>打开本页纯文本版本</small></span>
+      </a>
+      <a class="ai-docs-menu-item" href="llms.txt" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">AI</span>
+        <span><strong>LLMs.txt <span aria-hidden="true">↗</span></strong><small>让 AI 按主题发现全部文档</small></span>
+      </a>
+      <a class="ai-docs-menu-item" href="llms-full.txt" target="_blank" rel="noopener noreferrer">
+        <span class="ai-docs-item-icon" aria-hidden="true">≡</span>
+        <span><strong>LLMs-full.txt <span aria-hidden="true">↗</span></strong><small>获取整本说明书的 Markdown</small></span>
+      </a>
+    </div>
+  </div>
+  <span class="ai-docs-status" role="status" aria-live="polite"></span>
+</div>
+<section id="id1">
+<h1>通用设备规范<a class="headerlink" href="#id1" title="链接到此标题。">¶</a></h1>
+<div class="admonition- admonition">
+<p class="admonition-title">阅读角色</p>
+<ul class="simple">
+<li><p><strong>业务负责人</strong>：确认设备用途、动作名称、参数单位、成功标准和安全边界。</p></li>
+<li><p><strong>开发人员</strong>：实现设备合同、连接方式、启动图节点、模拟能力和测试。</p></li>
+<li><p><strong>验收人员</strong>：验证参数越界、断线、超时、联锁、未知结果和真机恢复。</p></li>
+</ul>
+</div>
+<p>本章说明所有设备都要遵守的共同规则。业务人员先确认设备能做什么、需要填写哪些参数、怎样判断成功；开发人员再把这些要求写成系统接口。后续无论使用 PLC、串口还是厂商软件，页面和工作流看到的名称都应保持一致。</p>
+<div class="admonition important">
+<p class="admonition-title">重要</p>
+<p>工作流只使用“设置温度、启动、停止、读取结果”等业务动作，不直接使用品牌命令、寄存器地址或软件按钮坐标。
+可以把标准模板理解成设备的“服务清单”，把具体驱动理解成完成这些服务的“控制方法”。</p>
+</div>
+<section id="id2">
+<h2>每台设备必须说明四件事<a class="headerlink" href="#id2" title="链接到此标题。">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>部分</p></th>
+<th class="head"><p>作用</p></th>
+<th class="head"><p>约束</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>身份</p></td>
+<td><p>系统编号、分类、页面名称和用途</p></td>
+<td><p>系统编号稳定且唯一</p></td>
+</tr>
+<tr class="row-odd"><td><p>构造配置</p></td>
+<td><p>连接地址、端口、超时和可选认证引用</p></td>
+<td><p>参数必须有类型和安全默认值，构造阶段不执行危险动作</p></td>
+</tr>
+<tr class="row-even"><td><p>动作</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&#64;action</span></code> 方法</p></td>
+<td><p>参数、单位、范围、返回值和失败语义明确</p></td>
+</tr>
+<tr class="row-odd"><td><p>状态</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&#64;topic_config</span></code> 只读属性</p></td>
+<td><p>无副作用，支持 <code class="docutils literal notranslate"><span class="pre">unknown/offline/fault</span></code>，刷新周期明确</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id3">
+<h2>先按用途选择设备类别<a class="headerlink" href="#id3" title="链接到此标题。">¶</a></h2>
+<ol class="arabic simple">
+<li><p>按工艺能力查看当前 Workspace Catalog，选择语义最接近的设备大类，不要先按品牌建类。</p></li>
+<li><p>确认标准动作和状态能表达真实设备能力。</p></li>
+<li><p>品牌协议、寄存器地址、量程或单位不同，仍应复用同一大类。</p></li>
+<li><p>只有工作流语义发生变化时，才提出新增大类或兼容性扩展。</p></li>
+</ol>
+<p>业务人员在开发前应确认三件事：设备完成什么业务动作、每个动作需要哪些输入及单位、
+以及怎样判断成功、失败、超时和需要人工处理。不要用 <code class="docutils literal notranslate"><span class="pre">POST</span> <span class="pre">/run</span></code>、寄存器地址或按钮坐标
+描述业务动作，应使用“设置温度”“正转”“启动读板”等跨协议语义。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>术语</p></th>
+<th class="head"><p>业务含义</p></th>
+<th class="head"><p>在模板中的位置</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>设备</p></td>
+<td><p>可被系统识别和调度的一台仪器或工站</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&#64;device</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>动作</p></td>
+<td><p>对外提供的一项完整操作</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&#64;action</span></code> 方法</p></td>
+</tr>
+<tr class="row-even"><td><p>状态</p></td>
+<td><p>定期读取、不会改变设备的只读信息</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&#64;topic_config</span></code> 属性</p></td>
+</tr>
+<tr class="row-odd"><td><p>注册 ID</p></td>
+<td><p>启动图（Graph JSON）和历史工作流引用的稳定身份</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">&#64;device(id=...)</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>模拟验证</p></td>
+<td><p>不连接真实设备，只检查动作、参数和流程</p></td>
+<td><p>使用模拟设备或离线试运行 启动图</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id4">
+<h2>动作和状态的填写规则<a class="headerlink" href="#id4" title="链接到此标题。">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">device_id</span></code> 和 Python 接口名使用 <code class="docutils literal notranslate"><span class="pre">snake_case</span></code>，大类 ID 不含品牌或型号。</p></li>
+<li><p>接口类型只能是 <code class="docutils literal notranslate"><span class="pre">action</span></code> 或 <code class="docutils literal notranslate"><span class="pre">property</span></code>。</p></li>
+<li><p>动作参数必须保持名称、类型、默认值和返回注解一致。</p></li>
+<li><p>动作参数使用明确的 Python 类型；只有当前运行版本实际支持时才使用复杂嵌套类型。</p></li>
+<li><p>动作返回结构化结果，例如 <code class="docutils literal notranslate"><span class="pre">{&quot;success&quot;:</span> <span class="pre">true,</span> <span class="pre">&quot;message&quot;:</span> <span class="pre">&quot;...&quot;}</span></code>。</p></li>
+<li><p>属性只暴露状态，不得在读取属性时触发有副作用的设备动作。</p></li>
+<li><p>驱动边界必须校验范围和单位；发生换算时必须显式记录。</p></li>
+<li><p>超时、设备拒绝、无效响应和断线应抛出可定位问题的异常。</p></li>
+<li><p>不得绕过设备或 PLC 内的门禁、急停、报警和安全联锁。</p></li>
+</ul>
+</section>
+<section id="id5">
+<h2>设备包目录模板<a class="headerlink" href="#id5" title="链接到此标题。">¶</a></h2>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>my-device-package/
+├── pyproject.toml
+├── package.yaml
+├── README.md
+├── my_device_package/
+│   ├── __init__.py
+│   └── devices/
+│       └── vendor_model_peristaltic_pump.py
+├── resources/
+├── workflows/
+└── tests/
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">pyproject.toml</span></code> 至少声明 Python 版本、<code class="docutils literal notranslate"><span class="pre">unilabos</span></code> 依赖和包发现规则；<code class="docutils literal notranslate"><span class="pre">package.yaml</span></code> 保存包身份
+和工作流清单。连接地址属于 启动图 实例配置；账号和密钥通过 Secret/环境变量注入，不应写入标准类或提交到仓库。</p>
+</section>
+<section id="id6">
+<h2>设备基本信息怎么填写<a class="headerlink" href="#id6" title="链接到此标题。">¶</a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@device</span><span class="p">(</span>
+    <span class="nb">id</span><span class="o">=</span><span class="s2">&quot;my_lab_peristaltic_pump&quot;</span><span class="p">,</span>
+    <span class="n">category</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;liquid_handling&quot;</span><span class="p">,</span> <span class="s2">&quot;pump&quot;</span><span class="p">,</span> <span class="s2">&quot;peristaltic_pump&quot;</span><span class="p">],</span>
+    <span class="n">displayname</span><span class="o">=</span><span class="s2">&quot;蠕动泵&quot;</span><span class="p">,</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;按指定转速输送液体，并提供运行和故障状态。&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>参数</p></th>
+<th class="head"><p>写法</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">id</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">snake_case</span></code>，不带实例编号；同一 Python 类永久稳定</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">category</span></code></p></td>
+<td><p>从大类到小类排列；不写 IP、房间号或厂商网址</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">displayname</span></code></p></td>
+<td><p>操作者可理解的短名称</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">description</span></code></p></td>
+<td><p>一句话写清能力、对象和限制</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>动作参数应在签名中完成类型和默认值，在方法开头完成范围/枚举校验：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@action</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s2">&quot;设置转速；单位 rpm，允许范围 0-300&quot;</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">set_speed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">speed_rpm</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">speed_rpm</span> <span class="o">&lt;=</span> <span class="mf">300.0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;speed_rpm 必须在 0-300 rpm&quot;</span><span class="p">)</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p>危险动作不要提供会立即运动/加热的默认值。无法确认结果时抛出异常或返回明确的 <code class="docutils literal notranslate"><span class="pre">unknown</span></code>，不得返回假成功。</p>
+</section>
+<section id="id7">
+<h2>标准类示例：蠕动泵<a class="headerlink" href="#id7" title="链接到此标题。">¶</a></h2>
+<p>下面用蠕动泵展示一份完整的动作和状态清单。标准模板不负责实际通信；具体型号的驱动必须提供相同的动作名称、参数和返回结果。</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">unilabos.registry.decorators</span><span class="w"> </span><span class="kn">import</span> <span class="n">action</span><span class="p">,</span> <span class="n">device</span><span class="p">,</span> <span class="n">topic_config</span>
+
+
+<span class="nd">@device</span><span class="p">(</span>
+    <span class="nb">id</span><span class="o">=</span><span class="s2">&quot;peristaltic_pump&quot;</span><span class="p">,</span>
+    <span class="n">category</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;合成制备仪器与设备&quot;</span><span class="p">,</span> <span class="s2">&quot;实验泵&quot;</span><span class="p">,</span> <span class="s2">&quot;蠕动泵&quot;</span><span class="p">],</span>
+    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;蠕动泵标准接口：同一大类跨品牌统一的动作与参数。&quot;</span><span class="p">,</span>
+    <span class="n">displayname</span><span class="o">=</span><span class="s2">&quot;蠕动泵&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">PeristalticPump</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">device_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">port</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;/dev/ttyUSB0&quot;</span><span class="p">,</span>
+        <span class="n">baudrate</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">9600</span><span class="p">,</span>
+        <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">2.0</span><span class="p">,</span>
+        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            device_id[设备实例编号]: 与 启动图 中的设备 id 一致。</span>
+<span class="sd">            port[串口]: 设备连接的串口名称。</span>
+<span class="sd">            baudrate[波特率]: 必须与设备通信设置一致。</span>
+<span class="sd">            timeout[超时时间(s)]: 单次通信最长等待时间，必须大于 0。</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">timeout</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;timeout 必须大于 0 秒&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">device_id</span> <span class="o">=</span> <span class="n">device_id</span> <span class="ow">or</span> <span class="s2">&quot;peristaltic_pump&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">port</span> <span class="o">=</span> <span class="n">port</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">baudrate</span> <span class="o">=</span> <span class="n">baudrate</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timeout</span> <span class="o">=</span> <span class="n">timeout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;Idle&quot;</span><span class="p">,</span> <span class="s2">&quot;fault&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+
+    <span class="nd">@action</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s2">&quot;设置转动速度&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">set_speed</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">speed_rpm</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;请在设备包中实现该动作&quot;</span><span class="p">)</span>
+
+    <span class="nd">@action</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s2">&quot;正转&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">rotate_forward</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+        <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="s2">&quot;请在设备包中实现该动作&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@topic_config</span><span class="p">()</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">status</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;Unknown&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="nd">@topic_config</span><span class="p">()</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">fault</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;fault&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>具体型号应使用自己的类型编号，但继续归入相同类别，并保持
+<code class="docutils literal notranslate"><span class="pre">set_speed(speed_rpm:</span> <span class="pre">float)</span></code>、<code class="docutils literal notranslate"><span class="pre">rotate_forward()</span></code>、<code class="docutils literal notranslate"><span class="pre">status:</span> <span class="pre">str</span></code> 和 <code class="docutils literal notranslate"><span class="pre">fault:</span> <span class="pre">bool</span></code> 等动作与状态定义不变。</p>
+</section>
+<section id="id8">
+<h2>怎样确认设备已经可以交付<a class="headerlink" href="#id8" title="链接到此标题。">¶</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>compileall<span class="w"> </span>my_device_package
+unilab<span class="w"> </span>package<span class="w"> </span>inspect<span class="w"> </span>--path<span class="w"> </span>.<span class="w"> </span>--out<span class="w"> </span>./inspect-output
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>标准模板与具体实现的动作、参数、返回类型和属性一致；</p></li>
+<li><p>每个动作都有协议命令或 PLC 节点映射；</p></li>
+<li><p>每个属性都有数据来源、类型、单位和刷新策略；</p></li>
+<li><p>已覆盖正常、非法参数、超时、设备故障和断线恢复；</p></li>
+<li><p>未连接真机或可靠模拟器时，只能标记为静态/模拟验证通过。</p></li>
+</ul>
+</section>
+<section id="id9">
+<h2>常见问题<a class="headerlink" href="#id9" title="链接到此标题。">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>现象</p></th>
+<th class="head"><p>常见原因</p></th>
+<th class="head"><p>处理建议</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>设备出现但没有动作</p></td>
+<td><p>动作没有登记，或系统没有加载对应文件</p></td>
+<td><p>核对 <code class="docutils literal notranslate"><span class="pre">&#64;action</span></code> 并重新执行设备包检查</p></td>
+</tr>
+<tr class="row-odd"><td><p>页面参数名称难以理解</p></td>
+<td><p>缺少中文说明、单位或清楚的字段名</p></td>
+<td><p>修改设备的统一动作定义，不要只在某一个页面临时改名</p></td>
+</tr>
+<tr class="row-even"><td><p>状态一直为空或旧值</p></td>
+<td><p>属性来源不可靠或缓存没有有效期</p></td>
+<td><p>核对 <code class="docutils literal notranslate"><span class="pre">&#64;topic_config</span></code>、查询方式和刷新策略</p></td>
+</tr>
+<tr class="row-odd"><td><p>换品牌后工作流失效</p></td>
+<td><p>厂商驱动改变了标准接口</p></td>
+<td><p>恢复同大类接口一致性，把差异封装在驱动内部</p></td>
+</tr>
+<tr class="row-even"><td><p>重试后设备执行两次</p></td>
+<td><p>把未知结果直接当失败重放</p></td>
+<td><p>先查询设备状态，再由恢复流程决定是否重试</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="plc-station.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">PLC 控制的工站</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="device-registration.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title">设备登记、动作表单与设备联动</div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2026, Uni-Lab
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            <div class="last-updated">
+              Last updated on 2026-09-08</div>
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">通用设备规范</a><ul>
+<li><a class="reference internal" href="#id2">每台设备必须说明四件事</a></li>
+<li><a class="reference internal" href="#id3">先按用途选择设备类别</a></li>
+<li><a class="reference internal" href="#id4">动作和状态的填写规则</a></li>
+<li><a class="reference internal" href="#id5">设备包目录模板</a></li>
+<li><a class="reference internal" href="#id6">设备基本信息怎么填写</a></li>
+<li><a class="reference internal" href="#id7">标准类示例：蠕动泵</a></li>
+<li><a class="reference internal" href="#id8">怎样确认设备已经可以交付</a></li>
+<li><a class="reference internal" href="#id9">常见问题</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="_static/documentation_options.js?v=4041f460"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/scripts/furo.js?v=46bd48cc"></script>
+    <script src="_static/translations.js?v=540d3cec"></script>
+    <script src="_static/ai-docs.js?v=118f57a4"></script>
+    </body>
+</html>

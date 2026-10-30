@@ -1,0 +1,22 @@
+.time-schedule-panel { margin-top: 16px; overflow: hidden; }
+.time-schedule-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 0 20px; color: #475467; font-size: 12px; }
+.time-schedule-summary strong { color: #175cd3; }
+.time-schedule-summary code { color: #667085; font-size: 11px; }
+.time-schedule-note,.time-schedule-empty,.time-schedule-error { margin: 12px 20px; font-size: 12px; line-height: 1.6; }
+.time-schedule-note { padding: 10px 12px; color: #344054; background: #f2f4f7; border-radius: 7px; }
+.time-schedule-empty { color: #667085; }
+.time-schedule-error { color: #b42318; overflow-wrap: anywhere; }
+.time-schedule-table-wrap { max-height: 330px; margin: 0 20px 16px; overflow: auto; border: 1px solid #eaecf0; border-radius: 7px; }
+.time-schedule-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.time-schedule-table th { position: sticky; top: 0; z-index: 1; background: #f9fafb; color: #475467; font-weight: 600; }
+.time-schedule-table th,.time-schedule-table td { padding: 10px 12px; border-bottom: 1px solid #eaecf0; vertical-align: top; }
+.time-schedule-table td { color: #344054; white-space: nowrap; }
+.time-schedule-table td:first-child { min-width: 180px; max-width: 340px; white-space: normal; overflow-wrap: anywhere; }
+.time-schedule-table td strong,.time-schedule-table td span,.time-schedule-table td code { display: block; margin-bottom: 3px; }
+.time-schedule-table td code { color: #667085; font-size: 10px; }
+.time-schedule-blocked { margin: 12px 20px 16px; font-size: 12px; }
+.time-schedule-blocked summary { cursor: pointer; font-weight: 600; color: #475467; }
+.time-schedule-blocked ul { max-height: 180px; overflow: auto; margin: 10px 0 0; padding: 0; list-style: none; }
+.time-schedule-blocked li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; padding: 7px 0; border-bottom: 1px solid #eaecf0; overflow-wrap: anywhere; }
+.time-schedule-blocked li span { color: #475467; }
+.time-schedule-blocked li strong { color: #93370d; font-weight: 500; }

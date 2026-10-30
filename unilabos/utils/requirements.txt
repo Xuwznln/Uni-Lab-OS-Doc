@@ -1,0 +1,29 @@
+networkx
+typing_extensions
+websockets
+msgcenterpy>=0.1.8
+orjson>=3.11
+opentrons_shared_data
+pint
+fastapi
+python-multipart>=0.0.9,<1
+openpyxl>=3.1,<4
+jinja2
+requests
+httpx>=0.27.0
+uvicorn
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-exporter-otlp-proto-http
+pyautogui
+opcua
+pyserial
+pandas
+crcmod-plus
+pymodbus
+matplotlib
+pylibftdi
+
+# 源码开发与旧算法回归使用；公开宿主仅在 scheduling-cpsat extra 中声明此依赖。
+# 此版本兼容现有 NumPy 1.x 驱动环境。

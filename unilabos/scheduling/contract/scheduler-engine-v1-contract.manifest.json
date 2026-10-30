@@ -1,0 +1,17 @@
+{
+  "format": "unilab.scheduler.contract-manifest.v1",
+  "protocol": "unilab.scheduler",
+  "schema_version": "1.0",
+  "release_state": "draft",
+  "draft_revision": 3,
+  "files": {
+    "scheduler-engine-v1.schema.json": "ce71ef704603bd6b6f0e3ae326db887e485409dffff545b62b87b3f61a2df152",
+    "scheduler-engine-v1.examples.json": "943ccf4342495175d8a4a2593a7f7f13157a59a7ec2e407ec4c9bfd1c96fda0d",
+    "scheduler-engine-v1.h": "a017776e4398ce756a8c00b4c2f692d6440f14a047a35ab05da41d24ed007de8",
+    "scheduler-engine-v1-manifest.schema.json": "3cb04fa73b9e0aab794517cfa6063f626f0fd579d07e507c2f8e1428936fde0c",
+    "scheduler-engine-plugin-manifest.example.json": "8c175edc89d7ae510ee874d96e21cfdd4524811fc6544f0dc6dc7b063bb8ecb5",
+    "semantic-rules.md": "b3e6c16405f43fc98c94bdbe92f7b5dce01d21360b766630b52e0929df9c67f9",
+    "validation-report.json": "5ce074a556ad2c908a871aa0754a0593b938610b21318d37374f40925aaae62a"
+  },
+  "contract_sha256": "972d73fe8ee3c03d4ca91c19699d3d00db67b566d5b28550d708405d20a31a13"
+}

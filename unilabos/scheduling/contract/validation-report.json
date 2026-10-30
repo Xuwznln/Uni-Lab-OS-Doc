@@ -1,0 +1,22 @@
+{
+  "contract_draft_revision": 3,
+  "schema_definitions": 64,
+  "manifest_definitions": 2,
+  "structure_cases": 68,
+  "snapshot_cases_checked": 33,
+  "request_response_pairs": 17,
+  "manifest_metadata_cases": 9,
+  "catchup_traces_checked": 2,
+  "scenario_specifications": 14,
+  "header_syntax": [
+    "C:pass",
+    "C++:pass"
+  ],
+  "result": "pass",
+  "limits": [
+    "Semantic checks cover the listed fields and relationships; they are not a complete production validator.",
+    "Catchup traces and manifest fixtures are spec models, not UniLabOS integration tests.",
+    "The 14 scenario specifications were not executed against UniLabOS.",
+    "No native library was loaded; no crash injection, device action, production code change or runtime acceptance was performed."
+  ]
+}

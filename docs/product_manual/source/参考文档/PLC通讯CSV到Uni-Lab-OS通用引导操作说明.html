@@ -1,0 +1,1573 @@
+<!DOCTYPE html>
+
+<html class="no-js" data-content_root="../" lang="zh-CN">
+<head><meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<meta content="light dark" name="color-scheme"/><meta content="width=device-width, initial-scale=1" name="viewport"/>
+<link href="../参考文档/PLC通讯CSV到Uni-Lab-OS通用引导操作说明.md" rel="alternate" type="text/markdown"/>
+<link href="../llms.txt" rel="describedby" type="text/plain"/>
+<link href="../genindex.html" rel="index" title="索引"/><link href="../search.html" rel="search" title="搜索"/><link href="../repository-builder-skill.html" rel="next" title="使用 AI 设备包生成器（实验性）"/><link href="index.html" rel="prev" title="参考文档"/>
+<!-- Generated with Sphinx 8.2.3 and Furo 2025.12.19 -->
+<title>PLC通讯CSV到 Uni-Lab-OS 通用引导操作说明 - Uni-Lab OS 产品使用说明书</title>
+<link href="../_static/pygments.css?v=d111a655" rel="stylesheet" type="text/css"/>
+<link href="../_static/styles/furo.css?v=7bdb33bb" rel="stylesheet" type="text/css"/>
+<link href="../_static/styles/furo-extensions.css?v=8dab3a3b" rel="stylesheet" type="text/css"/>
+<link href="../_static/custom.css?v=35d0322d" rel="stylesheet" type="text/css"/>
+<style>
+  body {
+    --color-code-background: #f2f2f2;
+  --color-code-foreground: #1e1e1e;
+  --color-brand-primary: #2757dd;
+  --color-brand-content: #2757dd;
+  --color-sidebar-background: #f8f9fb;
+  --color-sidebar-background-border: #eeebee;
+  --color-admonition-background: #f8f9fb;
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-stack--monospace: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  --color-brand-primary: #5ca5ff;
+  --color-brand-content: #5ca5ff;
+  --color-background-primary: #131416;
+  --color-background-secondary: #1a1c1e;
+  --color-sidebar-background: #1a1c1e;
+  --color-sidebar-background-border: #303335;
+  --color-admonition-background: #1a1c1e;
+  
+      }
+    }
+  }
+</style></head>
+<body>
+<script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+<svg style="display: none;" xmlns="http://www.w3.org/2000/svg">
+<symbol id="svg-toc" viewbox="0 0 24 24">
+<title>Contents</title>
+<svg fill="currentColor" stroke="currentColor" stroke-width="0" viewbox="0 0 1024 1024">
+<path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"></path>
+</svg>
+</symbol>
+<symbol id="svg-menu" viewbox="0 0 24 24">
+<title>Menu</title>
+<svg class="feather-menu" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<line x1="3" x2="21" y1="12" y2="12"></line>
+<line x1="3" x2="21" y1="6" y2="6"></line>
+<line x1="3" x2="21" y1="18" y2="18"></line>
+</svg>
+</symbol>
+<symbol id="svg-arrow-right" viewbox="0 0 24 24">
+<title>Expand</title>
+<svg class="feather-chevron-right" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<polyline points="9 18 15 12 9 6"></polyline>
+</svg>
+</symbol>
+<symbol id="svg-sun" viewbox="0 0 24 24">
+<title>Light mode</title>
+<svg class="feather-sun" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<circle cx="12" cy="12" r="5"></circle>
+<line x1="12" x2="12" y1="1" y2="3"></line>
+<line x1="12" x2="12" y1="21" y2="23"></line>
+<line x1="4.22" x2="5.64" y1="4.22" y2="5.64"></line>
+<line x1="18.36" x2="19.78" y1="18.36" y2="19.78"></line>
+<line x1="1" x2="3" y1="12" y2="12"></line>
+<line x1="21" x2="23" y1="12" y2="12"></line>
+<line x1="4.22" x2="5.64" y1="19.78" y2="18.36"></line>
+<line x1="18.36" x2="19.78" y1="5.64" y2="4.22"></line>
+</svg>
+</symbol>
+<symbol id="svg-moon" viewbox="0 0 24 24">
+<title>Dark mode</title>
+<svg class="icon-tabler-moon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 0h24v24H0z" fill="none" stroke="none"></path>
+<path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"></path>
+</svg>
+</symbol>
+<symbol id="svg-sun-with-moon" viewbox="0 0 24 24">
+<title>Auto light/dark, in light mode</title>
+<svg class="icon-custom-derived-from-feather-sun-and-tabler-moon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z" style="opacity: 50%"></path>
+<line x1="14.5" x2="14.5" y1="3.25" y2="1.25"></line>
+<line x1="14.5" x2="14.5" y1="15.85" y2="17.85"></line>
+<line x1="10.044" x2="8.63" y1="5.094" y2="3.68"></line>
+<line x1="19" x2="20.414" y1="14.05" y2="15.464"></line>
+<line x1="8.2" x2="6.2" y1="9.55" y2="9.55"></line>
+<line x1="20.8" x2="22.8" y1="9.55" y2="9.55"></line>
+<line x1="10.044" x2="8.63" y1="14.006" y2="15.42"></line>
+<line x1="19" x2="20.414" y1="5.05" y2="3.636"></line>
+<circle cx="14.5" cy="9.55" r="3.6"></circle>
+</svg>
+</symbol>
+<symbol id="svg-moon-with-sun" viewbox="0 0 24 24">
+<title>Auto light/dark, in dark mode</title>
+<svg class="icon-custom-derived-from-feather-sun-and-tabler-moon" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"></path>
+<line style="opacity: 50%" x1="18" x2="18" y1="3.705" y2="2.5"></line>
+<line style="opacity: 50%" x1="18" x2="18" y1="11.295" y2="12.5"></line>
+<line style="opacity: 50%" x1="15.316" x2="14.464" y1="4.816" y2="3.964"></line>
+<line style="opacity: 50%" x1="20.711" x2="21.563" y1="10.212" y2="11.063"></line>
+<line style="opacity: 50%" x1="14.205" x2="13.001" y1="7.5" y2="7.5"></line>
+<line style="opacity: 50%" x1="21.795" x2="23" y1="7.5" y2="7.5"></line>
+<line style="opacity: 50%" x1="15.316" x2="14.464" y1="10.184" y2="11.036"></line>
+<line style="opacity: 50%" x1="20.711" x2="21.563" y1="4.789" y2="3.937"></line>
+<circle cx="18" cy="7.5" r="2.169" style="opacity: 50%"></circle>
+</svg>
+</symbol>
+<symbol id="svg-pencil" viewbox="0 0 24 24">
+<svg class="icon-tabler-pencil-code" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"></path>
+<path d="M13.5 6.5l4 4"></path>
+<path d="M20 21l2 -2l-2 -2"></path>
+<path d="M17 17l-2 2l2 2"></path>
+</svg>
+</symbol>
+<symbol id="svg-eye" viewbox="0 0 24 24">
+<svg class="icon-tabler-eye-code" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M0 0h24v24H0z" fill="none" stroke="none"></path>
+<path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"></path>
+<path d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008"></path>
+<path d="M20 21l2 -2l-2 -2"></path>
+<path d="M17 17l-2 2l2 2"></path>
+</svg>
+</symbol>
+</svg>
+<input aria-label="Toggle site navigation sidebar" class="sidebar-toggle" id="__navigation" name="__navigation" type="checkbox"/>
+<input aria-label="Toggle table of contents sidebar" class="sidebar-toggle" id="__toc" name="__toc" type="checkbox"/>
+<label class="overlay sidebar-overlay" for="__navigation"></label>
+<label class="overlay toc-overlay" for="__toc"></label>
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+<div class="page">
+<header class="mobile-header">
+<div class="header-left">
+<label class="nav-overlay-icon" for="__navigation">
+<span class="icon"><svg><use href="#svg-menu"></use></svg></span>
+</label>
+</div>
+<div class="header-center">
+<a href="../index.html"><div class="brand">Uni-Lab OS 产品使用说明书</div></a>
+</div>
+<div class="header-right">
+<div class="theme-toggle-container theme-toggle-header">
+<button aria-label="Toggle Light / Dark / Auto color theme" class="theme-toggle">
+<svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+<svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+<svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+<svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+</button>
+</div>
+<label class="toc-overlay-icon toc-header-icon" for="__toc">
+<span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+</label>
+</div>
+</header>
+<aside class="sidebar-drawer">
+<div class="sidebar-container">
+<div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
+<span class="sidebar-brand-text">Uni-Lab OS 产品使用说明书</span>
+</a><form action="../search.html" class="sidebar-search-container" method="get" role="search">
+<input aria-label="搜索" class="sidebar-search" name="q" placeholder="搜索"/>
+<input name="check_keywords" type="hidden" value="yes"/>
+<input name="area" type="hidden" value="default"/>
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+<p class="caption" role="heading"><span class="caption-text">认识与快速上手</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../overview.html">认识 Uni-Lab OS</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../demo-lab.html">示例设备包</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">系统安装与配置</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">系统安装</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../observability.html">监控、Trace 与日志（可选）</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../environment.html">环境与运行配置</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">设备包开发规范</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="../unilabos-installation.html">设备包规范与系统启动</a><input aria-label="Toggle navigation of 设备包规范与系统启动" checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="../workspace.html">工作区</a></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../device-template.html">1. 设备接入模板</a><input aria-label="Toggle navigation of 1. 设备接入模板" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../template-library.html">设备模板库与类别选择</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../device-registration.html">设备登记、动作表单与设备联动</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../generic-device.html">通用设备规范</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../plc-station.html">PLC 控制的工站</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../serial-network.html">串口／网络连接</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../host-api.html">上位机 API 接入</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../mouse-automation.html">鼠标模拟点击（可选）</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../material-template.html">2. 物料定义模板</a><input aria-label="Toggle navigation of 2. 物料定义模板" class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../deck-warehouse.html">工作站台面与仓库</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../stack.html">光电堆栈与旋转堆栈：物料 + 设备</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../plate-tiprack.html">孔板与吸头盒（Plate／Tiprack）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../container-template.html">容器（Container）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../vial-rack.html">小瓶载架</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../magazine.html">弹夹</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../sheet-battery.html">片状物料与组装成品</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../material-state.html">物料状态、条码与内容物</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../other-materials.html">其他可追踪物料</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../startup-files.html">3. 启动文件</a><input aria-label="Toggle navigation of 3. 启动文件" class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../graph-json.html">启动图（Graph JSON）编写指南</a></li>
+</ul>
+</li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="../workflow.html">4. 工作流运行</a><input aria-label="Toggle navigation of 4. 工作流运行" class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul>
+<li class="toctree-l3"><a class="reference internal" href="../workflow-concepts.html">先理解工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../workflow-features.html">工作流编排特性</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../experiment-operations.html">实验操作</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../complete-workflow.html">完整工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../first-workflow.html">手写并运行第一个工作流</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../ai-workflow-authoring.html">AI 编写工作流（推荐）</a></li>
+<li class="toctree-l3"><a class="reference internal" href="../workflows.html">工作流发布与任务运行</a></li>
+</ul>
+</li>
+<li class="toctree-l2 current has-children"><a class="reference internal" href="index.html">5. 参考文档</a><input aria-label="Toggle navigation of 5. 参考文档" checked="" class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><span class="icon"><svg><use href="#svg-arrow-right"></use></svg></span></label><ul class="current">
+<li class="toctree-l3 current current-page"><a class="current reference internal" href="#">PLC通讯CSV到 Uni-Lab-OS 通用引导操作说明</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../repository-builder-skill.html">使用 AI 设备包生成器（实验性）</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../scenario-guide.html">设备包验收</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">参考</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../troubleshooting.html">故障排查</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api-reference.html">API 使用参考</a></li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<div class="main">
+<div class="content">
+<div class="article-container">
+<a class="back-to-top muted-link" href="#">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+</svg>
+<span>Back to top</span>
+</a>
+<div class="content-icon-container">
+<div class="theme-toggle-container theme-toggle-content">
+<button aria-label="Toggle Light / Dark / Auto color theme" class="theme-toggle">
+<svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+<svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+<svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+<svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+</button>
+</div>
+<label class="toc-overlay-icon toc-content-icon" for="__toc">
+<span class="icon"><svg><use href="#svg-toc"></use></svg></span>
+</label>
+</div>
+<article id="furo-main-content" role="main">
+<div class="ai-docs-toolbar" data-ai-docs-toolbar="" data-llms-full-url="../llms-full.txt" data-llms-url="../llms.txt" data-markdown-url="../参考文档/PLC通讯CSV到Uni-Lab-OS通用引导操作说明.md">
+<div class="ai-docs-menu-shell">
+<div class="ai-docs-split">
+<button aria-disabled="true" class="ai-docs-copy-primary" data-ai-docs-copy="" disabled="" type="button">
+<svg aria-hidden="true" height="16" viewbox="0 0 24 24" width="16">
+<path d="M9 5h6m-6 4h6m-6 4h4M8 3h8a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"></path>
+</svg>
+<span data-ai-docs-trigger-label="">复制页面</span>
+</button>
+<button aria-controls="ai-docs-menu-参考文档-PLC通讯CSV到Uni-Lab-OS通用引导操作说明" aria-expanded="false" aria-label="打开 AI 文档菜单" class="ai-docs-trigger" type="button">
+<svg aria-hidden="true" class="ai-docs-chevron" height="14" viewbox="0 0 24 24" width="14">
+<path d="m7 10 5 5 5-5"></path>
+</svg>
+</button>
+</div>
+<div class="ai-docs-popover" hidden="" id="ai-docs-menu-参考文档-PLC通讯CSV到Uni-Lab-OS通用引导操作说明">
+<button aria-disabled="true" class="ai-docs-menu-item" data-ai-docs-copy="" disabled="" type="button">
+<span aria-hidden="true" class="ai-docs-item-icon">⧉</span>
+<span><strong>复制页面</strong><small data-ai-docs-copy-help="">正在准备本页 Markdown</small></span>
+</button>
+<a class="ai-docs-menu-item" href="../参考文档/PLC通讯CSV到Uni-Lab-OS通用引导操作说明.md" rel="noopener noreferrer" target="_blank">
+<span aria-hidden="true" class="ai-docs-item-icon">M↓</span>
+<span><strong>以 Markdown 格式查看 <span aria-hidden="true">↗</span></strong><small>打开本页纯文本版本</small></span>
+</a>
+<a class="ai-docs-menu-item" href="../llms.txt" rel="noopener noreferrer" target="_blank">
+<span aria-hidden="true" class="ai-docs-item-icon">AI</span>
+<span><strong>LLMs.txt <span aria-hidden="true">↗</span></strong><small>让 AI 按主题发现全部文档</small></span>
+</a>
+<a class="ai-docs-menu-item" href="../llms-full.txt" rel="noopener noreferrer" target="_blank">
+<span aria-hidden="true" class="ai-docs-item-icon">≡</span>
+<span><strong>LLMs-full.txt <span aria-hidden="true">↗</span></strong><small>获取整本说明书的 Markdown</small></span>
+</a>
+</div>
+</div>
+<span aria-live="polite" class="ai-docs-status" role="status"></span>
+</div>
+<section id="plc-uni-lab-os">
+<h1>PLC通讯CSV到 Uni-Lab-OS 通用引导操作说明<a class="headerlink" href="#plc-uni-lab-os" title="Link to this heading">¶</a></h1>
+<section id="id1">
+<h2>设备包、实验操作、工作流与任务执行通用引导操作说明<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h2>
+<blockquote>
+<div><p>本页由《PLC通讯CSV到 Uni-Lab OS 通用引导操作说明》整理而来。示例名称、编号、参数和地址均为可替换占位。</p>
+</div></blockquote>
+<p>PLC通讯CSV到 Uni-Lab-OS 通用引导操作说明</p>
+<p>设备包、实验操作、工作流与任务执行通用引导操作说明</p>
+<p>适用于：把任意 PLC 通讯变量表整理成可检查、可发布、可执行的 Uni-Lab OS 交付</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>文档性质</p></th>
+<th class="head"><p>可迁移的 step-by-step 引导；示例名称、编号、参数和地址均为可替换占位</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>输入</p></td>
+<td><p>PLC 通讯变量表（CSV；编码、列结构和变量名以实际附件为准）</p></td>
+</tr>
+<tr class="row-odd"><td><p>输出</p></td>
+<td><p>设备、设备动作、库位、物料/试剂、实验操作、父工作流、任务和运行证据</p></td>
+</tr>
+<tr class="row-even"><td><p>编制日期</p></td>
+<td><p>2026-09-13</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>阅读方式：用户要求与参考资料的边界</p>
+<p>本说明只描述可迁移的方法。文中的“示例设备”“示例库位”“示例任务号”和“示例参数”用于说明字段关系，执行时必须换成目标实验室的实际值。</p>
+<p>用户提出的目标是：读取 PLC 通讯变量表，按功能拆分设备和动作，创建资源与库存，建立至少含一个设备动作的实验操作，再建立至少调用一个已发布实验操作的父工作流，完成发布、预检、任务执行和结果记录。</p>
+<p>外部资料只用于补充产品安装、PLC-Sim 和 Demo Lab 的界面或概念背景。若在线资料与目标服务版本不一致，以目标服务实际返回的 schema、状态和诊断信息为准。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>占位符约定：&lt;包工作区&gt;、&lt;CSV源&gt;、&lt;API_BASE&gt;、&lt;设备类型 ID&gt;、&lt;实例 UUID&gt;、&lt;工作流 UUID&gt;、&lt;任务 UUID&gt;、&lt;动态端口&gt;。尖括号中的内容不是固定值。</p></th>
+</tr>
+</thead>
+</table>
+</div>
+<section id="id2">
+<h3>在线参考资料<a class="headerlink" href="#id2" title="Link to this heading">¶</a></h3>
+<p>需要引用安装或示例时，请直接打开下列地址：</p>
+<p>PLC-Sim 产品手册：<a class="reference external" href="https://github.com/raoyi971102-gif/Uni-Lab-Sim/tree/main/PLC-Sim/docs/product_manual">https://github.com/raoyi971102-gif/Uni-Lab-Sim/tree/main/PLC-Sim/docs/product_manual</a></p>
+<p>Uni-Lab OS 安装说明：<a class="reference external" href="http://115.190.137.109:30184/unilabos-installation.html">http://115.190.137.109:30184/unilabos-installation.html</a></p>
+<p>Demo Lab 案例：<a class="reference external" href="http://115.190.137.109:30184/demo-lab.html">http://115.190.137.109:30184/demo-lab.html</a></p>
+<p>链接属于外部参考；本手册不复制其中的本机路径、固定端口或版本专属内容。</p>
+</section>
+</section>
+<section id="id3">
+<h2>一、先建立对象关系<a class="headerlink" href="#id3" title="Link to this heading">¶</a></h2>
+<p>建议先画出对象关系，再写代码或在控制台录入对象。关系闭合后，发布和任务预检才有明确的失败位置。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>层级</p></th>
+<th class="head"><p>对象</p></th>
+<th class="head"><p>必须回答的问题</p></th>
+<th class="head"><p>通过标志</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>设备类型 / 设备实例</p></td>
+<td><p>哪个物理单元负责这组变量？实例如何唯一识别？</p></td>
+<td><p>类型可注册、实例可加载、状态可读取</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>设备动作</p></td>
+<td><p>一次动作写哪些变量、等哪些返回状态、如何报告结果？</p></td>
+<td><p>参数有单位，状态机可判定成功/失败/超时</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>资源与库位</p></td>
+<td><p>动作取放什么资源，资源当前在哪个库位？</p></td>
+<td><p>库位类型、容量、占用关系闭合</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>物料与试剂</p></td>
+<td><p>条码、数量、容器和最低库存是什么？</p></td>
+<td><p>可查询、可摆放、可被预检锁定</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>实验操作</p></td>
+<td><p>哪些资源输入经过哪些设备动作得到什么输出？</p></td>
+<td><p>类型为 experiment_operation，至少一个设备动作节点</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>父工作流</p></td>
+<td><p>如何组合已发布的实验操作？</p></td>
+<td><p>类型为 normal，引用已发布 child 发布合同</p></td>
+</tr>
+<tr class="row-even"><td><p>7</p></td>
+<td><p>实验任务</p></td>
+<td><p>用哪一个已发布父工作流、哪批物料、哪些参数执行？</p></td>
+<td><p>预检通过，任务和作业终态可查询</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>推荐的闭环：变量表 → 变量分组 → 设备动作 → 资源/库位 → 实验操作 → 发布 → 父工作流 → 发布 → 摆放与预检 → 任务 → 证据。</p>
+</section>
+<section id="plc">
+<h2>二、检查 PLC 通讯变量表<a class="headerlink" href="#plc" title="Link to this heading">¶</a></h2>
+<section id="id4">
+<h3>2.1 保留原始字节并确认编码<a class="headerlink" href="#id4" title="Link to this heading">¶</a></h3>
+<p>把用户提供的 CSV 作为只读输入，先记录文件大小、行数、编码和校验值；不要先用表格软件另存，以免改变编码、引号或换行。</p>
+<p>优先尝试 GB18030，再按实际结果处理 UTF-8 with BOM 或其他编码。解析失败时停止后续建模，先解决编码问题。</p>
+<p>检查“变量名”是否唯一；检查数据类型、初始值、掉电保持、网络公开、注释和软元件地址是否成列对齐。</p>
+</section>
+<section id="csv">
+<h3>CSV 检查逻辑（伪代码）<a class="headerlink" href="#csv" title="Link to this heading">¶</a></h3>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span># 仅示意：将 &lt;CSV源&gt;、&lt;编码&gt; 和 &lt;输出摘要&gt; 替换为当前环境值
+</pre></div>
+</div>
+<p>read_csv(&lt;CSV源&gt;, encoding=&lt;编码&gt;)</p>
+<p>assert required_columns &lt;= columns</p>
+<p>assert variable_name_is_unique(rows)</p>
+<p>write_summary(&lt;输出摘要&gt;, row_count, encoding, sha256, duplicate_names)</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>检查项</p></th>
+<th class="head"><p>建议规则</p></th>
+<th class="head"><p>失败处理</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>编码</p></td>
+<td><p>能完整读取中文变量名，不能出现替换字符</p></td>
+<td><p>保留原始输入，换编码重试</p></td>
+</tr>
+<tr class="row-odd"><td><p>变量名</p></td>
+<td><p>顶层结构体和叶子变量都可定位</p></td>
+<td><p>报告重复或空名称，停止建模</p></td>
+</tr>
+<tr class="row-even"><td><p>类型</p></td>
+<td><p>INT、REAL、STRING、结构体/数组与 PLC 定义一致</p></td>
+<td><p>建立类型映射表后再写动作</p></td>
+</tr>
+<tr class="row-odd"><td><p>地址</p></td>
+<td><p>地址连续性与数组步长符合 PLC 规范</p></td>
+<td><p>让协议负责人确认，不自行猜测</p></td>
+</tr>
+<tr class="row-even"><td><p>状态</p></td>
+<td><p>每个写入动作都有对应返回状态或错误信号</p></td>
+<td><p>补充状态机或标记为不可执行</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id5">
+<h3>2.2 按功能分组，不按每一行机械拆分<a class="headerlink" href="#id5" title="Link to this heading">¶</a></h3>
+<p>用顶层结构体、动作语义和返回状态共同分组。一个动作通常由“任务号 + 参数数组/位置 + 触发约定 + 返回状态”组成。下表是从通讯表抽象出的示例分组；名称用于帮助读者定位，不限制实际命名。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>变量表分组示例</p></th>
+<th class="head"><p>动作语义</p></th>
+<th class="head"><p>建议归属</p></th>
+<th class="head"><p>关键返回字段</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>上料流程通讯数据2</p></td>
+<td><p>把托盘或样品从源位搬到目标位</p></td>
+<td><p>物料搬运机器人</p></td>
+<td><p>PLC返回数据.上料任务状态</p></td>
+</tr>
+<tr class="row-odd"><td><p>加样流程通讯数据3</p></td>
+<td><p>按重量和精度向样品加入试剂/粉体</p></td>
+<td><p>加样工站</p></td>
+<td><p>PLC返回数据.加样加球磨任务状态、加样重量、加样结果</p></td>
+</tr>
+<tr class="row-even"><td><p>烧结上料流程通讯数据4</p></td>
+<td><p>把坩埚送入烧结位置并写入工艺参数</p></td>
+<td><p>烧结工站</p></td>
+<td><p>PLC返回数据.烧结上料任务状态、马弗炉状态</p></td>
+</tr>
+<tr class="row-odd"><td><p>声共振上料流程通讯数据8</p></td>
+<td><p>把托盘送入声共振设备并执行参数段</p></td>
+<td><p>物料搬运机器人或声共振工站</p></td>
+<td><p>PLC返回数据.声共振上料任务状态</p></td>
+</tr>
+<tr class="row-even"><td><p>声共振下料流程通讯数据9</p></td>
+<td><p>把托盘从声共振设备取出</p></td>
+<td><p>物料搬运机器人或声共振工站</p></td>
+<td><p>PLC返回数据.声共振下料任务状态</p></td>
+</tr>
+<tr class="row-odd"><td><p>烧结下料流程通讯数据5</p></td>
+<td><p>把完成处理的坩埚送到结果位</p></td>
+<td><p>物料搬运机器人</p></td>
+<td><p>PLC返回数据.烧结下料任务状态</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>如果一组变量既包含搬运又包含工艺设定，可拆成一个动作的两个阶段，或拆成两个设备动作；选择依据是现场是否有独立的资源占用、状态和故障恢复边界。</p>
+</section>
+</section>
+<section id="id6">
+<h2>三、设计设备和设备动作<a class="headerlink" href="#id6" title="Link to this heading">¶</a></h2>
+<section id="id7">
+<h3>3.1 设备划分原则<a class="headerlink" href="#id7" title="Link to this heading">¶</a></h3>
+<p>按可独立调度、可独立占用、可独立报错的物理单元划分设备。</p>
+<p>设备动作对应一个可观察的业务结果；动作输入应包含资源、位置、工艺参数和任务号。</p>
+<p>动作内部统一经历：校验参数 → 写入 PLC → 轮询状态 → 读取结果 → 更新资源/库存 → 返回公开结果。</p>
+<p>真实 PLC 与 dry-run 使用同一动作接口；只在驱动层切换，不在工作流里写两套逻辑。</p>
+</section>
+<section id="id8">
+<h3>3.2 设备清单参考示例<a class="headerlink" href="#id8" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>示例设备</p></th>
+<th class="head"><p>类别</p></th>
+<th class="head"><p>动作示例</p></th>
+<th class="head"><p>占用资源</p></th>
+<th class="head"><p>最低验收</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>物料搬运机器人</p></td>
+<td><p>robot / material_transfer</p></td>
+<td><p>run_loading、run_resonance_load、run_resonance_unload、run_unloading</p></td>
+<td><p>托盘、坩埚、目标库位</p></td>
+<td><p>返回资源与目标库位，状态最终为完成</p></td>
+</tr>
+<tr class="row-odd"><td><p>加样工站</p></td>
+<td><p>process_station / dosing</p></td>
+<td><p>run_dosing</p></td>
+<td><p>样品托盘、试剂瓶、粉体瓶、球磨珠容器</p></td>
+<td><p>重量在精度范围内，消耗量有记录</p></td>
+</tr>
+<tr class="row-even"><td><p>烧结工站</p></td>
+<td><p>process_station / sintering</p></td>
+<td><p>run_sintering</p></td>
+<td><p>坩埚、工艺位置、烧结腔位</p></td>
+<td><p>温度/时间参数被确认，炉状态完成</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id9">
+<h3>3.3 动作参数和 CSV 映射示例<a class="headerlink" href="#id9" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>动作</p></th>
+<th class="head"><p>输入参数示例</p></th>
+<th class="head"><p>写入变量示例</p></th>
+<th class="head"><p>成功判定</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>run_loading</p></td>
+<td><p>task_no、pick_place=[1,2]</p></td>
+<td><p>上料流程通讯数据2.任务号；上料流程通讯数据2.取放编号[0].取编号/放编号</p></td>
+<td><p>上料任务状态从 0 → 1 → 2</p></td>
+</tr>
+<tr class="row-odd"><td><p>run_dosing</p></td>
+<td><p>task_no、source_position、dose_g=12.5、tolerance_g=0.5、bead_count=10</p></td>
+<td><p>加样流程通讯数据3.任务号；加样数据[0].加样重量；加样数据[0].精度；球磨珠数量</p></td>
+<td><p>加样加球磨任务状态=2 且加样结果=1</p></td>
+</tr>
+<tr class="row-even"><td><p>run_sintering</p></td>
+<td><p>task_no、temperature_c=850、hold_s=600</p></td>
+<td><p>烧结上料流程通讯数据4.干锅上料数据[0].工艺温度1/工艺时间1；焦耳热数据.恒温温度设置/恒温保温时间设置</p></td>
+<td><p>烧结上料任务状态=2，炉状态为完成</p></td>
+</tr>
+<tr class="row-odd"><td><p>run_resonance_load</p></td>
+<td><p>task_no、acceleration_g=2、frequency_hz=1000、time_s=30</p></td>
+<td><p>声共振上料流程通讯数据8.加速度1/频率1/时间1</p></td>
+<td><p>声共振上料任务状态=2</p></td>
+</tr>
+<tr class="row-even"><td><p>run_resonance_unload</p></td>
+<td><p>task_no、source_position、target_position</p></td>
+<td><p>声共振下料流程通讯数据9.取托盘位置/放托盘位置</p></td>
+<td><p>声共振下料任务状态=2</p></td>
+</tr>
+<tr class="row-odd"><td><p>run_unloading</p></td>
+<td><p>task_no、pick_position、place_position、graphite_boat_type</p></td>
+<td><p>烧结下料流程通讯数据5.取放编号[0].取料位置/放料位置；石墨舟类型</p></td>
+<td><p>烧结下料任务状态=2</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>上表的 850 °C、600 s、12.5 g 等是演示参数。发布前要按工艺规程设置范围、单位、精度和上限，并把越界检查放在动作入口。</p></th>
+</tr>
+</thead>
+</table>
+</div>
+</section>
+</section>
+<section id="id10">
+<h2>四、创建通用设备包结构<a class="headerlink" href="#id10" title="Link to this heading">¶</a></h2>
+<p>在包工作区中创建以下“职责区域”。区域可以由目录、模块或平台对象承载，名称由项目规范决定；本手册不要求固定文件名。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>职责区域</p></th>
+<th class="head"><p>写入内容</p></th>
+<th class="head"><p>依赖关系</p></th>
+<th class="head"><p>检查点</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>包元数据</p></td>
+<td><p>包标识、版本、依赖和启动拓扑</p></td>
+<td><p>引用设备/资源/工作流的公开 ID</p></td>
+<td><p>标识唯一，版本可追溯</p></td>
+</tr>
+<tr class="row-odd"><td><p>设备声明</p></td>
+<td><p>设备类型、实例、通信配置、动作和状态映射</p></td>
+<td><p>变量映射、驱动基类</p></td>
+<td><p>导入不触发真实动作</p></td>
+</tr>
+<tr class="row-even"><td><p>资源声明</p></td>
+<td><p>托盘、料架、容器、工艺腔位和可用库位</p></td>
+<td><p>库位模板和容量</p></td>
+<td><p>父子层级无环，站点索引唯一</p></td>
+</tr>
+<tr class="row-odd"><td><p>实验操作定义</p></td>
+<td><p>资源输入、设备动作节点、输出和节点 UUID</p></td>
+<td><p>已注册设备与资源</p></td>
+<td><p>类型为 experiment_operation</p></td>
+</tr>
+<tr class="row-even"><td><p>父工作流定义</p></td>
+<td><p>调用实验操作、参数传递和结果汇总</p></td>
+<td><p>已发布 child 发布合同</p></td>
+<td><p>类型为 normal</p></td>
+</tr>
+<tr class="row-odd"><td><p>验证与证据</p></td>
+<td><p>静态检查、运行预检、任务事件和库存快照</p></td>
+<td><p>目标服务 API</p></td>
+<td><p>证据来自本轮运行</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="id11">
+<h3>设备和动作声明（示意代码）<a class="headerlink" href="#id11" title="Link to this heading">¶</a></h3><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-python">@device(
+id="&lt;transport_device_type&gt;",
+category=["custom", "robot", "material_transfer"],
+displayname="示例物料搬运机器人",
+)
+class TransferRobot(PLCFlowDevice):
+@action(displayname="托盘上料")
+def run_loading(self, task_no: int, pick_place: list[int],
+resource: ResourceSlot, target_site: str):
+payload = {
+"上料流程通讯数据2.任务号": task_no,
+"上料流程通讯数据2.取放编号[0].取编号": pick_place[0],
+"上料流程通讯数据2.取放编号[0].放编号": pick_place[1],
+}
+return self.run_and_confirm("上料", payload, resource, target_site)</code></pre>
+</section>
+</section>
+<section id="id12">
+<h2>五、资源、库位、物料和试剂<a class="headerlink" href="#id12" title="Link to this heading">¶</a></h2>
+<section id="id13">
+<h3>5.1 库位设计示例<a class="headerlink" href="#id13" title="Link to this heading">¶</a></h3>
+<p>下面的库位编码用于演示“来源 → 工艺 → 结果”的路径。真实项目可换成现场编码，但必须保持每个编码在资源图中唯一。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>库位编码</p></th>
+<th class="head"><p>用途</p></th>
+<th class="head"><p>允许内容</p></th>
+<th class="head"><p>示例容器/资源</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>T01</p></td>
+<td><p>样品输入位</p></td>
+<td><p>样品托盘</p></td>
+<td><p>输入托盘</p></td>
+</tr>
+<tr class="row-odd"><td><p>T02</p></td>
+<td><p>声共振待处理位</p></td>
+<td><p>样品托盘</p></td>
+<td><p>中转托盘</p></td>
+</tr>
+<tr class="row-even"><td><p>E01</p></td>
+<td><p>液体试剂位</p></td>
+<td><p>液体试剂瓶</p></td>
+<td><p>乙醇瓶</p></td>
+</tr>
+<tr class="row-odd"><td><p>A01</p></td>
+<td><p>粉体试剂位</p></td>
+<td><p>粉体容器</p></td>
+<td><p>氧化铝粉体瓶</p></td>
+</tr>
+<tr class="row-even"><td><p>C01 / C02</p></td>
+<td><p>坩埚准备位</p></td>
+<td><p>坩埚</p></td>
+<td><p>氧化铝坩埚</p></td>
+</tr>
+<tr class="row-odd"><td><p>D01</p></td>
+<td><p>加样工站位</p></td>
+<td><p>托盘或球磨罐</p></td>
+<td><p>加样工位</p></td>
+</tr>
+<tr class="row-even"><td><p>SINT01</p></td>
+<td><p>烧结工艺位</p></td>
+<td><p>坩埚</p></td>
+<td><p>烧结腔位</p></td>
+</tr>
+<tr class="row-odd"><td><p>RES01</p></td>
+<td><p>声共振工艺位</p></td>
+<td><p>托盘</p></td>
+<td><p>声共振腔位</p></td>
+</tr>
+<tr class="row-even"><td><p>PT01 / PC01</p></td>
+<td><p>结果与人工取出位</p></td>
+<td><p>托盘或坩埚</p></td>
+<td><p>结果架/人工位</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id14">
+<h3>5.2 库存实例示例<a class="headerlink" href="#id14" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>对象</p></th>
+<th class="head"><p>容器</p></th>
+<th class="head"><p>条码示例</p></th>
+<th class="head"><p>数量示例</p></th>
+<th class="head"><p>初始库位</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>样品托盘</p></td>
+<td><p>托盘</p></td>
+<td><p>SAMPLE-TRAY-####</p></td>
+<td><p>1 个</p></td>
+<td><p>T01</p></td>
+</tr>
+<tr class="row-odd"><td><p>乙醇</p></td>
+<td><p>液体试剂瓶</p></td>
+<td><p>ETHANOL-####</p></td>
+<td><p>50 mL（最低 10 mL）</p></td>
+<td><p>E01</p></td>
+</tr>
+<tr class="row-even"><td><p>氧化铝粉体</p></td>
+<td><p>粉体瓶</p></td>
+<td><p>ALUMINA-####</p></td>
+<td><p>80 g（最低 20 g）</p></td>
+<td><p>A01</p></td>
+</tr>
+<tr class="row-odd"><td><p>氧化铝坩埚</p></td>
+<td><p>坩埚</p></td>
+<td><p>CRUCIBLE-####</p></td>
+<td><p>1 个</p></td>
+<td><p>C01</p></td>
+</tr>
+<tr class="row-even"><td><p>球磨珠</p></td>
+<td><p>球磨珠容器</p></td>
+<td><p>BEAD-####</p></td>
+<td><p>按颗数或质量计量</p></td>
+<td><p>D01 附近的供料位</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>条码只是示例格式。预检使用实际条码和服务端 material UUID；不要把“名称相同”当作同一物料。试剂必须同时检查当前数量、单位、最低可用量和容器兼容性。</p></th>
+</tr>
+</thead>
+</table>
+</div>
+</section>
+<section id="id15">
+<h3>5.3 摆放与移动规则<a class="headerlink" href="#id15" title="Link to this heading">¶</a></h3>
+<p>先读取资源图，确认目标库位存在、允许的 content_type 匹配、当前没有其他物料占用。</p>
+<p>再读取物料详情，确认 revision、current_site 和条码；把实际实物放入对应容器和库位。</p>
+<p>若需要服务端调整库位，使用带 expected_revision 的原子放置请求；成功后重新读取并核对 current_site。</p>
+</section>
+<section id="id16">
+<h3>库存查询与受控摆放（接口示意）<a class="headerlink" href="#id16" title="Link to this heading">¶</a></h3><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-http">GET  {API_BASE}/materials/graph
+GET  {API_BASE}/materials/{material_uuid}
+PUT  {API_BASE}/materials/{material_uuid}
+{
+"site_placement": {"action": "place", "site_uuid": "&lt;target_site_uuid&gt;"},
+"expected_revision": &lt;revision_from_latest_read&gt;
+}
+如果存在 active、unknown 或未结算的任务，先查任务、作业和库存结算，再决定是否恢复库位；不能直接覆盖服务端状态。
+</code></pre>
+</section>
+</section>
+<section id="id17">
+<h2>六、设计并发布实验操作节点<a class="headerlink" href="#id17" title="Link to this heading">¶</a></h2>
+<p>实验操作是可复用的最小实验单元。每个操作都必须包含至少一个设备动作节点，并明确资源输入、输出和库存变化。</p>
+<section id="id18">
+<h3>6.1 操作一：样品上料与加样<a class="headerlink" href="#id18" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>顺序</p></th>
+<th class="head"><p>节点类型</p></th>
+<th class="head"><p>节点内容</p></th>
+<th class="head"><p>输入/输出</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>资源节点</p></td>
+<td><p>从 T01 取得样品托盘，从 E01 取得乙醇</p></td>
+<td><p>sample_tray、ethanol</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>设备动作</p></td>
+<td><p>transport_robot.run_loading(pick_place=[1,2])</p></td>
+<td><p>托盘到 D01，返回 resource/site</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>设备动作</p></td>
+<td><p>dosing_station.run_dosing(dose_g=12.5, tolerance_g=0.5)</p></td>
+<td><p>消耗乙醇，返回实际重量和结果</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>结果节点</p></td>
+<td><p>记录批次、条码、实际重量和事件</p></td>
+<td><p>sample_tray、consumption、evidence</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id19">
+<h3>实验操作一（示意代码）<a class="headerlink" href="#id19" title="Link to this heading">¶</a></h3><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-python">@workflow(workflow_uuid="&lt;operation_uuid&gt;",
+displayname="样品上料与加样操作",
+workflow_type="experiment_operation")
+def sample_loading_operation(sample, ethanol, task_no, dose_g=12.5):
+tray = material_source(sample, site="T01")
+loaded = transport_robot.run_loading(
+task_no=task_no, pick_place=[1, 2], resource=tray, target_site="D01")
+return dosing_station.run_dosing(
+task_no=task_no, source_position=1, target_position=2,
+dose_g=dose_g, tolerance_g=0.5,
+sample=loaded.resource, reagent=material_source(ethanol, site="E01"))</code></pre>
+</section>
+<section id="id20">
+<h3>6.2 操作二：烧结与声共振<a class="headerlink" href="#id20" title="Link to this heading">¶</a></h3>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>顺序</p></th>
+<th class="head"><p>节点类型</p></th>
+<th class="head"><p>节点内容</p></th>
+<th class="head"><p>输入/输出</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>资源节点</p></td>
+<td><p>从 C01 取得坩埚，从 A01 取得氧化铝，从 T02 取得托盘</p></td>
+<td><p>crucible、powder、tray</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>设备动作</p></td>
+<td><p>sintering_station.run_sintering(temperature_c=850, hold_s=600)</p></td>
+<td><p>坩埚到 SINT01</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>设备动作</p></td>
+<td><p>transport_robot.run_resonance_load(acceleration_g=2, frequency_hz=1000, time_s=30)</p></td>
+<td><p>托盘到 RES01</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>设备动作</p></td>
+<td><p>transport_robot.run_resonance_unload()</p></td>
+<td><p>托盘到 PT01</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>设备动作</p></td>
+<td><p>transport_robot.run_unloading()</p></td>
+<td><p>坩埚到 PC01</p></td>
+</tr>
+<tr class="row-odd"><td><p>6</p></td>
+<td><p>结果节点</p></td>
+<td><p>记录炉状态、共振参数、条码和事件</p></td>
+<td><p>结果物料与证据</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id21">
+<h3>实验操作二（示意代码）<a class="headerlink" href="#id21" title="Link to this heading">¶</a></h3><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-python">@workflow(workflow_uuid="&lt;operation_uuid&gt;",
+displayname="烧结与声共振操作",
+workflow_type="experiment_operation")
+def sintering_resonance_operation(crucible, powder, tray, task_no):
+sintered = sintering_station.run_sintering(
+task_no=task_no, crucible_position=1,
+temperature_c=850, hold_s=600,
+resource=material_source(crucible, site="C01"),
+reagent=material_source(powder, site="A01"))
+loaded = transport_robot.run_resonance_load(
+task_no=task_no, source_position=2,
+acceleration_g=2, frequency_hz=1000, time_s=30,
+resource=material_source(tray, site="T02"))
+transport_robot.run_resonance_unload(
+task_no=task_no, source_position=1, target_position=2,
+resource=loaded.resource)
+return transport_robot.run_unloading(
+task_no=task_no, pick_position=1, place_position=1,
+graphite_boat_type=0, resource=sintered.resource)</code></pre>
+</section>
+</section>
+<section id="id22">
+<h2>七、建立父工作流并发布<a class="headerlink" href="#id22" title="Link to this heading">¶</a></h2>
+<p>父工作流负责组合操作和传递参数。它不重复实现设备通讯。每个父工作流至少调用一个已经发布的实验操作。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>父工作流示例</p></th>
+<th class="head"><p>子操作</p></th>
+<th class="head"><p>输入</p></th>
+<th class="head"><p>发布顺序</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>样品上料与加样工作流</p></td>
+<td><p>样品上料与加样操作</p></td>
+<td><p>样品、乙醇、任务号、目标剂量</p></td>
+<td><p>先发布 child，再保存/应用 parent，最后发布 parent</p></td>
+</tr>
+<tr class="row-odd"><td><p>烧结与声共振工作流</p></td>
+<td><p>烧结与声共振操作</p></td>
+<td><p>坩埚、氧化铝、托盘、工艺参数、任务号</p></td>
+<td><p>同上；child 发布合同必须来自当前服务</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="id23">
+<h3>父工作流与子操作关系（示意代码）<a class="headerlink" href="#id23" title="Link to this heading">¶</a></h3><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-python">@workflow(workflow_uuid="&lt;parent_uuid&gt;",
+displayname="样品上料与加样工作流",
+workflow_type="normal")
+def sample_loading_workflow(inputs):
+return sample_loading_operation(
+sample=inputs.sample, ethanol=inputs.ethanol,
+task_no=inputs.task_no, dose_g=inputs.dose_g)
+# 1) child 发布成功
+# 2) parent 保存并 apply authoring
+# 3) parent 发布时使用当前 revision 和 child contract UUID/digest
+| 不要手填旧的 contract UUID、revision 或 digest。每次新建工作区都从当前服务的 authoring 和 publication 响应读取这些值，并把响应保存为本轮证据。 |
+| --- |</code></pre>
+</section>
+</section>
+<section id="plc-sim-uni-lab-os">
+<h2>八、启动 PLC-Sim 与 Uni-Lab OS 服务<a class="headerlink" href="#plc-sim-uni-lab-os" title="Link to this heading">¶</a></h2>
+<p>启动前先确认目标环境的 Python/依赖、PLC-Sim 模式和 Uni-Lab OS 版本。安装背景和 PLC-Sim 操作可参考本手册开头的在线地址。</p>
+<p>打开两个终端或两个服务面板：一个运行 PLC-Sim，一个运行 Uni-Lab OS Host、backend 和 edge。</p>
+<p>让服务自行分配或显示协议端口；记录启动输出中的实际 endpoint，不在文档或脚本里写死端口。</p>
+<p>等待 Host、backend、edge 均为 ready，再查询健康状态；若为 dry-run，确认运行模式与预期一致。</p>
+<section id="id24">
+<h3>服务状态检查（命令示意）<a class="headerlink" href="#id24" title="Link to this heading">¶</a></h3>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>export LAB_ROOT='&lt;包工作区&gt;'
+export API_BASE='&lt;Uni-Lab OS API 地址&gt;'
+export PLC_ENDPOINT='&lt;PLC-Sim 或真实 PLC 地址&gt;'
+unilab workspace status --workspace "$LAB_ROOT" --json
+curl -s "$API_BASE/health"
+# PLC_ENDPOINT 只用于当前环境配置，不复制到工作流业务逻辑
+</pre></div>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>状态</p></th>
+<th class="head"><p>可以继续</p></th>
+<th class="head"><p>需要处理</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Host/backend/edge ready，health 正常</p></td>
+<td><p>注册设备、加载资源、发布工作流</p></td>
+<td><p>—</p></td>
+</tr>
+<tr class="row-odd"><td><p>服务启动但 PLC 为 idle（dry-run）</p></td>
+<td><p>可以做软件链路和动作 smoke</p></td>
+<td><p>真实执行前还要完成协议和安全联锁验证</p></td>
+</tr>
+<tr class="row-even"><td><p>offline / unreachable / schema mismatch</p></td>
+<td><p>—</p></td>
+<td><p>查看服务日志、版本和 endpoint，修复后重新检查</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<section id="smoke">
+<h2>九、加载、静态检查和动作 smoke<a class="headerlink" href="#smoke" title="Link to this heading">¶</a></h2>
+<p>把设备包注册到当前工作区，确认包元数据、设备类型、资源模板和工作流源被识别。</p>
+<p>执行静态检查：导入不应触发真实动作；所有装饰器、公开 ID、节点 UUID 和资源引用都应可解析。</p>
+<p>逐个执行设备动作 smoke。只使用模拟数据或空载资源，验证参数校验、状态轮询、超时和错误映射。</p>
+<section id="id25">
+<h3>加载与静态检查（命令示意）<a class="headerlink" href="#id25" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">unilab</span> <span class="n">package</span> <span class="n">inspect</span> <span class="o">--</span><span class="n">path</span> <span class="s2">"$LAB_ROOT"</span>
+<span class="n">unilab</span> <span class="n">package</span> <span class="n">validate</span> <span class="o">--</span><span class="n">path</span> <span class="s2">"$LAB_ROOT"</span>
+<span class="n">unilab</span> <span class="n">device</span> <span class="n">action</span><span class="o">-</span><span class="n">smoke</span> <span class="o">--</span><span class="n">device</span> <span class="o">&lt;</span><span class="n">设备实例</span> <span class="n">ID</span><span class="o">&gt;</span> <span class="o">--</span><span class="n">action</span> <span class="o">&lt;</span><span class="n">动作名</span><span class="o">&gt;</span>
+<span class="c1"># 通过标准：设备可注册，动作可发现，dry-run 返回结构化 success/message/result</span>
+</pre></div>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>检查对象</p></th>
+<th class="head"><p>最低通过标准</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>设备</p></td>
+<td><p>三个示例设备类型可加载，实例 ID 唯一，初始化不执行真实动作</p></td>
+</tr>
+<tr class="row-odd"><td><p>动作</p></td>
+<td><p>六个示例动作可发现；参数类型、单位、必填项和默认值明确</p></td>
+</tr>
+<tr class="row-even"><td><p>资源</p></td>
+<td><p>托盘、坩埚、容器和工艺位可查询，库位类型与容量闭合</p></td>
+</tr>
+<tr class="row-odd"><td><p>工作流源</p></td>
+<td><p>两个 child 和两个 parent 的 UUID/节点标记唯一，引用关系可解析</p></td>
+</tr>
+<tr class="row-even"><td><p>驱动</p></td>
+<td><p>dry-run 与真实驱动共享动作接口，未确认协议时拒绝真实写入</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<section id="id26">
+<h2>十、发布前检查、保存和发布<a class="headerlink" href="#id26" title="Link to this heading">¶</a></h2>
+<section id="api">
+<h3>10.1 API 检查闭环<a class="headerlink" href="#api" title="Link to this heading">¶</a></h3>
+<p>常用接口（路径示意；以目标服务 OpenAPI 为准）</p>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>GET  {API_BASE}/health
+GET  {API_BASE}/workflows/{workflow_uuid}/authoring
+POST {API_BASE}/workflows/{workflow_uuid}/publications
+POST {API_BASE}/workflows/{workflow_uuid}/run-preflight
+GET  {API_BASE}/materials/graph
+</pre></div>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>步骤</p></th>
+<th class="head"><p>动作</p></th>
+<th class="head"><p>成功响应应保存什么</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>读取 child authoring</p></td>
+<td><p>当前 workflow revision、diagnostics、source node UUID</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>发布 child</p></td>
+<td><p>publication status、contract UUID、version、digest/source hash</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>保存并 apply parent</p></td>
+<td><p>parent authoring revision、child contract UUID/digest 引用</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>发布 parent</p></td>
+<td><p>parent publication status 和合同信息</p></td>
+</tr>
+<tr class="row-even"><td><p>5</p></td>
+<td><p>运行 preflight</p></td>
+<td><p>每个门禁的 pass/fail、诊断和所需资源</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>发布前的硬门禁：child 必须为 published；parent 必须为 normal 且引用当前 child；authoring 已 applied；diagnostics 为空；每个操作至少一个设备动作节点。</p>
+</section>
+</section>
+<section id="id27">
+<h2>十一、准备实验任务并预检<a class="headerlink" href="#id27" title="Link to this heading">¶</a></h2>
+<section id="id28">
+<h3>11.1 任务输入示例<a class="headerlink" href="#id28" title="Link to this heading">¶</a></h3>
+</section>
+<section id="json">
+<h3>实验任务输入（示意 JSON）<a class="headerlink" href="#json" title="Link to this heading">¶</a></h3><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-json">{
+"workflow_uuid": "&lt;published_parent_uuid&gt;",
+"inputs": {
+"sample_barcode": "SAMPLE-TRAY-####",
+"reagent_barcode": "ETHANOL-####",
+"crucible_barcode": "CRUCIBLE-####",
+"powder_barcode": "ALUMINA-####",
+"task_no": "&lt;PLC任务号&gt;",
+"dose_g": 12.5,
+"temperature_c": 850,
+"hold_s": 600
+}
+}
+</code></pre>
+</section>
+<section id="id29">
+<h3>11.2 实物与服务端库存同时就位<a class="headerlink" href="#id29" title="Link to this heading">¶</a></h3>
+<p>按资源图把样品托盘、试剂瓶、粉体瓶、坩埚和球磨珠容器放到示例库位；现场条码必须与服务端实例一致。</p>
+<p>拍照或记录摆放前快照，查询所有相关物料的 current_site、数量和 revision。</p>
+<p>运行 parent 的 run-preflight；确认设备 ready、动作参数在范围内、库位空闲、试剂余量足够、child/parent 已发布。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>预检门禁</p></th>
+<th class="head"><p>通过条件</p></th>
+<th class="head"><p>不通过时的调整</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>发布状态</p></td>
+<td><p>工作流修订与 child 发布合同一致</p></td>
+<td><p>重新读取 authoring，按 child → parent 顺序发布</p></td>
+</tr>
+<tr class="row-odd"><td><p>设备状态</p></td>
+<td><p>Host、设备实例和驱动 ready</p></td>
+<td><p>检查服务状态、endpoint、模式和安全联锁</p></td>
+</tr>
+<tr class="row-even"><td><p>资源占用</p></td>
+<td><p>每个输入物料只在一个合法库位，目标位可用</p></td>
+<td><p>先查 active 任务和占用，再受控移动</p></td>
+</tr>
+<tr class="row-odd"><td><p>库存数量</p></td>
+<td><p>当前量 − 预计消耗 ≥ 最低可用量</p></td>
+<td><p>补充试剂或降低批量，重新预检</p></td>
+</tr>
+<tr class="row-even"><td><p>参数范围</p></td>
+<td><p>温度、时间、重量、频率、加速度均有单位且在限值内</p></td>
+<td><p>修改任务输入，不绕过动作入口校验</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</section>
+<section id="id30">
+<h2>十二、执行两个实验任务并记录结果<a class="headerlink" href="#id30" title="Link to this heading">¶</a></h2>
+<section id="id31">
+<h3>12.1 任务一：样品上料与加样<a class="headerlink" href="#id31" title="Link to this heading">¶</a></h3>
+<p>提交已发布的“样品上料与加样工作流”，使用一组新的 PLC 任务号和实际条码。</p>
+<p>等待任务进入可执行状态；记录 task UUID、job UUID、设备动作顺序和每个状态变化。</p>
+<p>确认上料状态完成、加样结果 OK、实际重量在容差内，且乙醇消耗被结算。</p>
+</section>
+<section id="id32">
+<h3>12.2 任务二：烧结与声共振<a class="headerlink" href="#id32" title="Link to this heading">¶</a></h3>
+<p>提交已发布的“烧结与声共振工作流”，使用实际坩埚、粉体和托盘条码。</p>
+<p>确认烧结上料、声共振上料、声共振下料和烧结下料按顺序完成；每个动作均有成功事件。</p>
+<p>确认坩埚、托盘和剩余试剂的最终库位/数量与实验设计一致。</p>
+</section>
+<section id="id33">
+<h3>任务状态和证据查询（接口示意）<a class="headerlink" href="#id33" title="Link to this heading">¶</a></h3>
+<div class="highlight-text notranslate"><div class="highlight"><pre><span></span>POST {API_BASE}/workflow-tasks
+GET  {API_BASE}/workflow-tasks/{task_uuid}
+GET  {API_BASE}/workflow-tasks/{task_uuid}/jobs
+GET  {API_BASE}/workflow-tasks/{task_uuid}/events
+GET  {API_BASE}/workflow-tasks/{task_uuid}/inventory-consumptions
+</pre></div>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>证据类别</p></th>
+<th class="head"><p>至少记录</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>任务</p></td>
+<td><p>task UUID、parent workflow UUID、提交时间、最终状态</p></td>
+</tr>
+<tr class="row-odd"><td><p>作业</p></td>
+<td><p>job UUID、动作名、开始/结束时间、状态和错误信息</p></td>
+</tr>
+<tr class="row-even"><td><p>PLC</p></td>
+<td><p>任务号、写入参数、返回状态、实际重量/结果、超时信息</p></td>
+</tr>
+<tr class="row-odd"><td><p>库存</p></td>
+<td><p>物料 UUID、条码、执行前后库位、试剂消耗和单位</p></td>
+</tr>
+<tr class="row-even"><td><p>发布</p></td>
+<td><p>child/parent publication status、contract/version、revision</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>只有服务端任务终态、作业终态、库存结算和事件记录都一致，才把任务标记为“执行成功”。命令行超时本身不能证明服务端任务已停止。</p></th>
+</tr>
+</thead>
+</table>
+</div>
+</section>
+</section>
+<section id="id34">
+<h2>十三、不满足条件时的调整处理<a class="headerlink" href="#id34" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>现象</p></th>
+<th class="head"><p>可能原因</p></th>
+<th class="head"><p>处理顺序</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>CSV 无法解析</p></td>
+<td><p>编码或列结构不符</p></td>
+<td><p>保留原始字节 → 检查编码 → 检查列名/重复变量 → 重新生成映射</p></td>
+</tr>
+<tr class="row-odd"><td><p>设备动作不可发现</p></td>
+<td><p>设备未注册、导入失败或 ID 不一致</p></td>
+<td><p>查注册清单 → 查动作索引 → 修正声明 → 重启/重新加载</p></td>
+</tr>
+<tr class="row-even"><td><p>child 发布失败</p></td>
+<td><p>类型不是 experiment_operation、节点 UUID 重复或诊断不为空</p></td>
+<td><p>读取 authoring diagnostics → 修正节点/引用 → 重新保存和发布</p></td>
+</tr>
+<tr class="row-odd"><td><p>parent invalid</p></td>
+<td><p>child 未发布或 contract/version 过期</p></td>
+<td><p>先发布 child → 重新读取 parent authoring → apply → 发布 parent</p></td>
+</tr>
+<tr class="row-even"><td><p>预检缺料/占位</p></td>
+<td><p>条码、库位、容器或数量不满足</p></td>
+<td><p>盘点实物和服务端 → 受控摆放 → 重新预检</p></td>
+</tr>
+<tr class="row-odd"><td><p>任务 failed/unknown</p></td>
+<td><p>PLC 返回失败、断线、超时或动作幂等问题</p></td>
+<td><p>保留 task/jobs/events → 确认设备安全状态 → 依据恢复方案处理，不盲目重提</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<section id="id35">
+<h3>13.1 受控库存恢复<a class="headerlink" href="#id35" title="Link to this heading">¶</a></h3>
+<p>先查询相关任务是否 active、unknown 或存在未结算 consumption；有则先完成任务处置。</p>
+<p>读取物料最新 revision 和 current_site，确认目标位空闲且类型兼容。</p>
+<p>使用 expected_revision 执行放置，重新读取确认；记录恢复原因、操作者和时间。</p>
+<p>恢复不会补回已经消耗的试剂；补充数量必须依据实际盘点。</p>
+</section>
+</section>
+<section id="id36">
+<h2>十四、最终验收清单<a class="headerlink" href="#id36" title="Link to this heading">¶</a></h2>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>领域</p></th>
+<th class="head"><p>验收问题</p></th>
+<th class="head"><p>结果栏</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>输入</p></td>
+<td><p>CSV 编码、列结构、变量名唯一，原始字节有记录</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-odd"><td><p>设备</p></td>
+<td><p>设备类型和实例可加载，导入不触发真实动作</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-even"><td><p>动作</p></td>
+<td><p>每个动作有参数/单位/状态机，至少完成一次 smoke</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-odd"><td><p>资源</p></td>
+<td><p>资源模板、库位 content_type、容量和父子关系闭合</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-even"><td><p>物料/试剂</p></td>
+<td><p>条码、容器、数量、最低库存和实际摆放一致</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-odd"><td><p>操作</p></td>
+<td><p>两个 child 都是 experiment_operation，且各含设备动作节点</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-even"><td><p>工作流</p></td>
+<td><p>两个 parent 都是 normal，并引用已发布 child</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-odd"><td><p>发布</p></td>
+<td><p>authoring applied、diagnostics 为空、publication 成功</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-even"><td><p>执行</p></td>
+<td><p>两个任务预检通过，终态 succeeded，事件和库存结算一致</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+<tr class="row-odd"><td><p>证据</p></td>
+<td><p>保存本轮 UUID、版本、时间、模式、日志和库存快照</p></td>
+<td><p>□ 通过  □ 待处理</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>附录 A｜可复用的最小模板</p>
+<p>A.1 动作返回值</p><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-json">{
+"success": true,
+"message": "动作完成",
+"status_code": 2,
+"task_no": "&lt;PLC任务号&gt;",
+"resource": "&lt;material_uuid&gt;",
+"site": "&lt;site_uuid&gt;",
+"result": "success",
+"evidence": {"started_at": "
+", "finished_at": "
+"}
+}
+</code></pre>
+<p>A.2 状态机约定</p>
+<p>未执行(0) → 执行中(1) → 执行完成(2)</p>
+<p>↘ 任务失败(3)</p>
+<p>动作轮询必须设置超时；超时后返回 unknown/timeout，保留最后一次状态和请求参数。</p>
+<p>A.3 变量映射登记表</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>动作名</p></th>
+<th class="head"><p>写入字段</p></th>
+<th class="head"><p>读取字段</p></th>
+<th class="head"><p>类型/单位</p></th>
+<th class="head"><p>备注</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>&lt;action_name&gt;</p></td>
+<td><p>&lt;write_variable&gt;</p></td>
+<td><p>&lt;status_variable&gt;</p></td>
+<td><p>&lt;INT/REAL + unit&gt;</p></td>
+<td><p>任务号和触发约定</p></td>
+</tr>
+<tr class="row-odd"><td><p>&lt;action_name&gt;</p></td>
+<td><p>&lt;parameter_variable&gt;</p></td>
+<td><p>&lt;result_variable&gt;</p></td>
+<td><p>&lt;type + unit&gt;</p></td>
+<td><p>范围与精度</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>A.4 运行证据索引</p><pre class="highlight" style="background:#f3f3f3; padding:1em; border-radius:6px; overflow-x:auto;"><code class="language-json">{
+"source": "&lt;CSV源说明&gt;",
+"package_identity": "&lt;示例设备包 ID&gt;",
+"published_workflows": ["&lt;child_uuid&gt;", "&lt;parent_uuid&gt;"],
+"tasks": ["&lt;task_uuid_1&gt;", "&lt;task_uuid_2&gt;"],
+"runtime_mode": "&lt;dry-run|real&gt;",
+"captured_at": "
+",
+"inventory_snapshot": "
+"
+}
+</code></pre>
+<p>附录 B｜交付前填写页</p>
+<p>将下表复制到项目记录中填写。填写内容应来自当前服务和当前实物盘点，不能从旧任务或别的工作区复制。</p>
+<div class="table-wrapper colwidths-auto docutils container">
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>项目</p></th>
+<th class="head"><p>本轮实际值</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>CSV 编码 / 行数 / 校验值</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p>Uni-Lab OS API 地址 / 运行模式</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p>PLC endpoint / 协议确认人</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p>设备实例与动作清单</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p>库位图版本 / 物料条码</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p>child publication / contract / revision</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p>parent publication / contract / revision</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-odd"><td><p>任务 UUID 与最终状态</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p>异常、调整和恢复记录</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>完成以上填写并核对“最终验收清单”后，才把设备包和工作流交给下一位操作者或现场系统。</p>
+</section>
+<section id="id37">
+<h2>附件<a class="headerlink" href="#id37" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><a class="reference download internal" download="" href="../_downloads/97468caf22801fcff0080eecae3211d8/PLC%E9%80%9A%E8%AE%AFCSV%E5%88%B0Uni-Lab-OS%E5%B7%A5%E4%BD%9C%E6%B5%81%E6%89%A7%E8%A1%8C%E5%85%A8%E6%B5%81%E7%A8%8Bskill.md"><code class="xref download docutils literal notranslate"><span class="pre">PLC通讯CSV到Uni-Lab-OS工作流执行全流程skill.md</span></code></a></p></li>
+</ul>
+</section>
+</section>
+</article>
+</div>
+<footer>
+<div class="related-pages">
+<a class="next-page" href="../repository-builder-skill.html">
+<div class="page-info">
+<div class="context">
+<span>Next</span>
+</div>
+<div class="title">使用 AI 设备包生成器（实验性）</div>
+</div>
+<svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+</a>
+<a class="prev-page" href="index.html">
+<svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+<div class="page-info">
+<div class="context">
+<span>Previous</span>
+</div>
+<div class="title">参考文档</div>
+</div>
+</a>
+</div>
+<div class="bottom-of-page">
+<div class="left-details">
+<div class="copyright">
+                Copyright © 2026, Uni-Lab
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+<div class="last-updated">
+              Last updated on 2026-09-14</div>
+</div>
+<div class="right-details">
+</div>
+</div>
+</footer>
+</div>
+<aside class="toc-drawer">
+<div class="toc-sticky toc-scroll">
+<div class="toc-title-container">
+<span class="toc-title">
+            On this page
+          </span>
+</div>
+<div class="toc-tree-container">
+<div class="toc-tree">
+<ul>
+<li><a class="reference internal" href="#">PLC通讯CSV到 Uni-Lab-OS 通用引导操作说明</a><ul>
+<li><a class="reference internal" href="#id1">设备包、实验操作、工作流与任务执行通用引导操作说明</a><ul>
+<li><a class="reference internal" href="#id2">在线参考资料</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id3">一、先建立对象关系</a></li>
+<li><a class="reference internal" href="#plc">二、检查 PLC 通讯变量表</a><ul>
+<li><a class="reference internal" href="#id4">2.1 保留原始字节并确认编码</a></li>
+<li><a class="reference internal" href="#csv">CSV 检查逻辑（伪代码）</a></li>
+<li><a class="reference internal" href="#id5">2.2 按功能分组，不按每一行机械拆分</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id6">三、设计设备和设备动作</a><ul>
+<li><a class="reference internal" href="#id7">3.1 设备划分原则</a></li>
+<li><a class="reference internal" href="#id8">3.2 设备清单参考示例</a></li>
+<li><a class="reference internal" href="#id9">3.3 动作参数和 CSV 映射示例</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id10">四、创建通用设备包结构</a><ul>
+<li><a class="reference internal" href="#id11">设备和动作声明（示意代码）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id12">五、资源、库位、物料和试剂</a><ul>
+<li><a class="reference internal" href="#id13">5.1 库位设计示例</a></li>
+<li><a class="reference internal" href="#id14">5.2 库存实例示例</a></li>
+<li><a class="reference internal" href="#id15">5.3 摆放与移动规则</a></li>
+<li><a class="reference internal" href="#id16">库存查询与受控摆放（接口示意）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id17">六、设计并发布实验操作节点</a><ul>
+<li><a class="reference internal" href="#id18">6.1 操作一：样品上料与加样</a></li>
+<li><a class="reference internal" href="#id19">实验操作一（示意代码）</a></li>
+<li><a class="reference internal" href="#id20">6.2 操作二：烧结与声共振</a></li>
+<li><a class="reference internal" href="#id21">实验操作二（示意代码）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id22">七、建立父工作流并发布</a><ul>
+<li><a class="reference internal" href="#id23">父工作流与子操作关系（示意代码）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#plc-sim-uni-lab-os">八、启动 PLC-Sim 与 Uni-Lab OS 服务</a><ul>
+<li><a class="reference internal" href="#id24">服务状态检查（命令示意）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#smoke">九、加载、静态检查和动作 smoke</a><ul>
+<li><a class="reference internal" href="#id25">加载与静态检查（命令示意）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id26">十、发布前检查、保存和发布</a><ul>
+<li><a class="reference internal" href="#api">10.1 API 检查闭环</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id27">十一、准备实验任务并预检</a><ul>
+<li><a class="reference internal" href="#id28">11.1 任务输入示例</a></li>
+<li><a class="reference internal" href="#json">实验任务输入（示意 JSON）</a></li>
+<li><a class="reference internal" href="#id29">11.2 实物与服务端库存同时就位</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id30">十二、执行两个实验任务并记录结果</a><ul>
+<li><a class="reference internal" href="#id31">12.1 任务一：样品上料与加样</a></li>
+<li><a class="reference internal" href="#id32">12.2 任务二：烧结与声共振</a></li>
+<li><a class="reference internal" href="#id33">任务状态和证据查询（接口示意）</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id34">十三、不满足条件时的调整处理</a><ul>
+<li><a class="reference internal" href="#id35">13.1 受控库存恢复</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id36">十四、最终验收清单</a></li>
+<li><a class="reference internal" href="#id37">附件</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</aside>
+</div>
+</div><script src="../_static/documentation_options.js?v=4041f460"></script>
+<script src="../_static/doctools.js?v=9bcbadda"></script>
+<script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+<script src="../_static/scripts/furo.js?v=46bd48cc"></script>
+<script src="../_static/translations.js?v=beaddf03"></script>
+<script src="../_static/ai-docs.js?v=118f57a4"></script>
+</body>
+</html>

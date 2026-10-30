@@ -1,0 +1,15 @@
+recursive-include unilabos/test *
+recursive-include unilabos/utils *
+recursive-include unilabos/registry *.yaml
+recursive-include unilabos/app/web/static *
+recursive-include unilabos/app/web/templates *
+recursive-include unilabos/device_mesh/devices *
+recursive-include unilabos/device_mesh/resources *
+# 不将独立构建的商业引擎源码随公开宿主源码包发布。
+prune unilabos/scheduling/cpsat
+prune native/scheduler-cpsat
+prune unilabos/devices
+recursive-include native/scheduler-queue *.py *.rs *.toml Cargo.lock
+recursive-include native/scheduler_shared *.py *.rs *.toml Cargo.lock *.txt
+prune native/scheduler_shared/target
+prune native/scheduler-queue/target

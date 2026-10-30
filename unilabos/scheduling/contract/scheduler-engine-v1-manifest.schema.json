@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Scheduler contract and plugin manifests v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ContractManifest"
+    },
+    {
+      "$ref": "#/$defs/PluginManifest"
+    }
+  ],
+  "$defs": {
+    "ContractManifest": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "unilab.scheduler.contract-manifest.v1"
+        },
+        "protocol": {
+          "const": "unilab.scheduler"
+        },
+        "schema_version": {
+          "const": "1.0"
+        },
+        "release_state": {
+          "enum": [
+            "draft",
+            "released"
+          ]
+        },
+        "draft_revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "files": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "contract_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "format",
+        "protocol",
+        "schema_version",
+        "release_state",
+        "draft_revision",
+        "files",
+        "contract_sha256"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "release_state": {
+                "const": "draft"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "draft_revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "draft_revision": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "PluginManifest": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "const": "unilab.scheduler.plugin-manifest.v1"
+        },
+        "engine_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "engine_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contract": {
+          "type": "object",
+          "properties": {
+            "schema_version": {
+              "const": "1.0"
+            },
+            "release_state": {
+              "enum": [
+                "draft",
+                "released"
+              ]
+            },
+            "draft_revision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "contract_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "schema_version",
+            "release_state",
+            "draft_revision",
+            "contract_sha256"
+          ],
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "release_state": {
+                    "const": "draft"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "draft_revision": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "else": {
+                "properties": {
+                  "draft_revision": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "artifact": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "enum": [
+                "native",
+                "python_bundle"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9_.-]+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "sha256"
+          ],
+          "additionalProperties": false
+        },
+        "abi": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "major": {
+                  "const": 1
+                },
+                "minor": {
+                  "const": 0
+                }
+              },
+              "required": [
+                "major",
+                "minor"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "format",
+        "engine_id",
+        "engine_version",
+        "build_id",
+        "contract",
+        "artifact",
+        "abi"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "artifact": {
+                "properties": {
+                  "kind": {
+                    "const": "native"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "abi": {
+                "type": "object"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "abi": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
