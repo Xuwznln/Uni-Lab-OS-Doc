@@ -1654,6 +1654,11 @@ class WorkflowService(WorkflowDefinitionEditing, NodeTemplateCatalog, WorkflowSt
     ) -> Dict[str, Any]:
         return self.set_node_run_execution_timeout(run_uuid, seconds)
 
+    def set_workflow_node_job_estimate(
+        self, job_uuid: str, estimated_s: Optional[float], source: Optional[str]
+    ) -> None:
+        self.set_job_estimate(job_uuid, estimated_s, source)
+
     def record_workflow_node_job_terminal(
         self,
         job_uuid: str,

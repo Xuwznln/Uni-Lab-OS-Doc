@@ -122,8 +122,8 @@ RUNTIME_DATABASE = DatabaseSpec(
         *PROCESS_MANAGEMENT_TABLES,
     ),
     # 0.13 发布线的基线是 schema v1；之后改 DDL / contract_version 时提升 schema_version，
-    # 并在 migrations.py 里补对应迁移（v2：资源等待记录的入队时间）。
-    schema_version=2,
+    # 并在 migrations.py 里补对应迁移（v2：资源等待记录的入队时间；v3：attempt 的预计时长）。
+    schema_version=3,
     migrations=RUNTIME_MIGRATIONS,
     released_checksums=RUNTIME_RELEASED_CHECKSUMS,
     # 工作流定义、任务与注册表记录：结构变化必须带迁移。没有迁移路径时拒绝启动、保留旧库；

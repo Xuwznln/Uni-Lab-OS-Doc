@@ -59,7 +59,7 @@ PR #329–357 已合并；#358 是本次唯一尚未合并的 PR。其他人的 
 | W02 action 返回值驱动 `if/else` | Dev 未接通；V1 有实现和专门测试 | 将上游具名输出绑定到条件节点，等待生产者完成，再只执行命中分支；未选节点标记 skipped。覆盖 false、缺字段、非布尔、失败/重试、冻结快照、暂停恢复。已按 V1 的静态编译实现（`compiler="ast"`），2026-11-13 起为默认，辅助函数在编译前按源码展开；builder 模式里对结果判断真假会在注册时报错。 |
 | W03 并行 | Dev DAG 已有；`parallel(A, B)` 作者接口没有 | Dev 保留调度实现；作者层编译出分叉/汇合并定义返回引用和失败语义。V1 实际写法是 `with parallel():` + `group`，不是 `parallel(A, B)`。 |
 | W04 循环 | Dev 已有 for/while 及 `ctx.step_output` 条件 | 现有循环测试通过。它不能抵消 W02 的 if/else 缺口；后续只补作者语法和嵌套组合回归。 |
-| A01 动作预计时长 | Dev 尚无预计时长合同 | 现有 `timeout` / `execution_timeout` 是硬/软超时，后者允许参数表达式。需增加独立预计时长字段、参数求值、冻结计划和调度消费；检查负数、缺参数、表达式限制。 |
+| A01 动作预计时长 | 已实现（2026-11-14） | `@action(estimate_duration_fixed / estimate_duration_express)`，字段名与 V1 相同，表达式也认 V1 的 `{name}` 写法；派发时用最终参数求值并记在 attempt 上（runtime.db v3），时间线依次取声明值 → 历史实测 → 60 s 兜底。只用于展示与观测，不是准入条件。V1 的学习型估时与时间求解属于闭源引擎，不移植。 |
 | A02 严格动作合同 | #358 已实现基础，未合并 | `contract="typed"`、AST 参数/具名返回 Schema、冻结和派发/Host 校验已接入；先解决 C01。 |
 | A03 高级资源合同 | 仅能解析部分声明，运行语义未接入 | `device_tenancy`、`transfer`、`transfer_step`、`operate_in_place`、`aliquot`、`order_sensitive` 当前拒绝未实现语义。按物理效果和持久占用分别移植，验收不能止于解析成功。 |
 | I01 库存增量 | #358 已实现基础，未合并 | 单位换算、整批虚拟余量预检、容量、计数盘点；先解决 C01，再合入。 |

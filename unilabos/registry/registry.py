@@ -21,6 +21,12 @@ import yaml
 
 from unilabos.config.config import BasicConfig
 from unilabos.registry.utils.backend_metadata import normalize_supported_backends
+from unilabos.registry.action_duration import (
+    EXPRESS_FIELD as ESTIMATE_EXPRESS_FIELD,
+    FIXED_FIELD as ESTIMATE_FIXED_FIELD,
+    normalize_estimate_duration_express,
+    normalize_estimate_duration_fixed,
+)
 from unilabos.registry.action_timeout import (
     normalize_action_timeout,
     normalize_execution_timeout,
@@ -124,10 +130,11 @@ def _apply_action_timeouts(
     action_parameter_names: Any,
     action_name: str,
 ) -> None:
-    """把 ``timeout`` / ``execution_timeout`` 声明写入注册表动作条目。
+    """把 ``timeout`` / ``execution_timeout`` 与预计时长声明写入注册表动作条目。
 
     与 ``always_free`` 一样只在声明了才写键，未声明的动作条目保持原形状，
-    避免重生成 YAML 时全量抖动。表达式按动作入参名校验并归一化。
+    避免重生成 YAML 时全量抖动。表达式按动作入参名校验并归一化。预计时长的
+    ``estimate_duration_fixed`` 写了就保留（包括 ``None``：不提供兜底），没写则由调度器按 60 s 兜底。
     """
 
     if not isinstance(source, dict):
@@ -143,6 +150,15 @@ def _apply_action_timeouts(
     )
     if soft is not None:
         entry["execution_timeout"] = soft
+    if ESTIMATE_FIXED_FIELD in source:
+        entry[ESTIMATE_FIXED_FIELD] = normalize_estimate_duration_fixed(
+            source.get(ESTIMATE_FIXED_FIELD), action_name=action_name
+        )
+    express = normalize_estimate_duration_express(
+        source.get(ESTIMATE_EXPRESS_FIELD), action_parameter_names=parameter_names, action_name=action_name,
+    )
+    if express:
+        entry[ESTIMATE_EXPRESS_FIELD] = express
 
 
 def _normalize_status_return_type(return_type: Any) -> str:

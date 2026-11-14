@@ -1143,6 +1143,28 @@ def _extract_class_body(
                 action_parameter_names=(param["name"] for param in method_params),
                 action_name=method_name,
             )
+            # 预计时长：兜底写了才保留（含 None），表达式按入参名校验并归一化
+            from unilabos.registry.action_duration import (
+                EXPRESS_FIELD,
+                FIXED_FIELD,
+                normalize_estimate_duration_express,
+                normalize_estimate_duration_fixed,
+            )
+
+            if FIXED_FIELD in action_args:
+                action_args[FIXED_FIELD] = normalize_estimate_duration_fixed(
+                    action_args[FIXED_FIELD], action_name=method_name
+                )
+            if EXPRESS_FIELD in action_args:
+                express = normalize_estimate_duration_express(
+                    action_args[EXPRESS_FIELD],
+                    action_parameter_names=(param["name"] for param in method_params),
+                    action_name=method_name,
+                )
+                if express:
+                    action_args[EXPRESS_FIELD] = express
+                else:
+                    action_args.pop(EXPRESS_FIELD)
             return_type = _get_annotation_str(item.returns, import_map)
             is_async = isinstance(item, ast.AsyncFunctionDef)
             method_doc = ast.get_docstring(item)

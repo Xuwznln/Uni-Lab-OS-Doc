@@ -1170,6 +1170,7 @@ class BackendScheduler:
             if timeouts.get("execution_timeout") is not None:
                 payload["execution_timeout_seconds"] = float(timeouts["execution_timeout"])
             self._persist_node_run_timeouts(node.node_id, timeouts)
+            self._persist_job_estimate(job_uuid, node, args)
             payload["execution_permit"] = self._execution_claims.seal_dispatch(job_uuid, payload, self._authority_epoch)
             dispatch_invoked = True
             self.executor.dispatch(payload)
@@ -1340,6 +1341,26 @@ class BackendScheduler:
             logger.warning(
                 "failed to persist execution_timeout_seconds for node run %s", run_uuid
             )
+
+    def _persist_job_estimate(self, job_uuid: str, node: DagNode, action_args: Dict[str, Any]) -> None:
+        """派发前按注册表 ``@action(estimate_duration_*)`` 求出预计时长，写到 attempt 上。
+
+        表达式用**最终** ``action_args``（含上游 handle 解析结果）求值，失败退回兜底。预计时长只用于
+        时间线 / 监控 / ETA，不是准入条件；解析或写入失败只记录，不阻断派发。
+        """
+
+        resolver = getattr(self.executor, "resolve_action_estimate", None)
+        setter = getattr(self.workflow, "set_workflow_node_job_estimate", None)
+        if not callable(resolver) or not callable(setter):
+            return
+        try:
+            estimate = resolver(node.device_id, node.action, action_args) or {}
+            if estimate.get("error"):
+                logger.info("动作 %s.%s 的预计时长表达式未能求值，退回兜底：%s",
+                            node.device_id, node.action, estimate["error"])
+            setter(job_uuid, estimate.get("estimated_s"), estimate.get("estimate_source"))
+        except Exception:  # noqa: BLE001 - 展示字段写失败不影响派发
+            logger.warning("failed to persist estimated duration for job %s", job_uuid, exc_info=True)
 
     def _retry_physical_outcomes(self) -> None:
         with self._guard:

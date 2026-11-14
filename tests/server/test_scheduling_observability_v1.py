@@ -31,11 +31,11 @@ def test_timeline_reports_running_and_completed_with_observed_estimates(stack: S
     timeline = ok_data(stack.client.get("/api/v1/timeline", params={"window_s": 600}))
     assert set(timeline) == {"now", "window_s", "running", "completed", "time_schedule", "estimator"}
     assert timeline["time_schedule"] == {"enabled": False, "algorithm": "stable-ready-order"}
-    assert timeline["estimator"]["mode"] == "observed" and timeline["estimator"]["default_s"] is None
+    assert timeline["estimator"]["mode"] == "declared+observed" and timeline["estimator"]["default_s"] == 60.0
     running = timeline["running"][0]
     assert running["device_id"] == "device-a" and running["action_name"] == "record"
     assert running["device_action_key"] == "device-a:record" and running["elapsed_s"] >= 0
-    assert running["estimate_source"] in {"observed", "unknown"}
+    assert running["estimate_source"] in {"expression", "fixed", "observed", "default", "unknown"}
     assert any(entry["workflow_id"] == first["uuid"] and entry["state"] == "success"
                for entry in timeline["completed"])
 

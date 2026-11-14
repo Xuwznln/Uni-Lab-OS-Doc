@@ -403,6 +403,21 @@ class JobExecutionBackend:
             )
         return resolved
 
+    def resolve_action_estimate(
+        self,
+        device_id: str,
+        action_name: str,
+        action_args: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """注册表为该动作声明的预计时长（``@action(estimate_duration_fixed / express)``），
+        表达式按 ``goal_default`` 叠加 ``action_args`` 求值；失败只降级为兜底，不抛异常。"""
+
+        from unilabos.registry.action_duration import resolve_action_estimate
+
+        return resolve_action_estimate(
+            self._action_mapping(device_id, action_name), action_args, action_name=f"{device_id}.{action_name}"
+        )
+
     def _arm_job_timeouts(self, job: JobInfo) -> Dict[str, Any]:
         """动作真正下发后启动硬 / 软超时看门狗；到期事件回到 worker 线程串行处理。
 

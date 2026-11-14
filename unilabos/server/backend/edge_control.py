@@ -454,6 +454,20 @@ class EdgeControlService:
             logger.warning("[EdgeControl] execution_timeout 求值失败，放弃软超时: %s", exc)
         return resolved
 
+    def resolve_action_estimate(
+        self,
+        device_id: str,
+        action_name: str,
+        action_args: Optional[Mapping[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """从 Edge 上报的注册表快照解析预计时长；与 JobExecutionBackend 同形。"""
+
+        from unilabos.registry.action_duration import resolve_action_estimate
+
+        return resolve_action_estimate(
+            self._action_definition(device_id, action_name), action_args, action_name=f"{device_id}.{action_name}"
+        )
+
     # ── 失败决策（Edge 打开终态闸门，Backend 放行） ─────────────────
 
     def list_error_decisions(self) -> list[dict[str, Any]]:

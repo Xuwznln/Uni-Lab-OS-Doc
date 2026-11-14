@@ -6,9 +6,10 @@ V1 的候选时间计划来自商用 CP-SAT 引擎，开源树里已经剥离；
 - ``/scheduler/time-plan``：没有配置时间计划引擎，按 V1 同情形返回 ``{"enabled": false,
   "algorithm": "stable-ready-order"}``，不伪造候选计划。
 - ``/timeline``：执行中作业（持久状态 dispatched / running / cancel_requested）与窗口内已完结
-  作业（runtime.db ``job_runs`` 视图），预估耗时取同一 ``设备:动作`` 的历史实测均值
-  （``estimate_source=observed``，无历史时为 ``unknown``，``estimated_s`` 为 None），
-  ``estimator`` 给出这份实测统计。
+  作业（runtime.db ``job_runs`` 视图）。预估耗时依次取：派发时按 ``@action(estimate_duration_*)``
+  求出、记在 attempt 上的值（``expression`` / ``fixed``）→ 同一 ``设备:动作`` 的历史实测均值
+  （``observed``）→ 未声明兜底时的 60 s（``default``）→ 没有（``unknown``，``estimated_s`` 为 None）。
+  ``estimator`` 给出实测统计与兜底秒数。
 - ``/monitor/*``：V1 进程内四通道总线（material / device / action / scheduler）在 dev 上以持久
   前端通知（``frontend_event``）为唯一来源投影：作业变化 → action，任务 / 工站变化 → scheduler，
   资源占用变化 → device；物料变化在 materials.db 的独立事件流里，这里不复制（material 通道为空）。
@@ -20,6 +21,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from unilabos.registry.action_duration import DEFAULT_ESTIMATE_DURATION_S
 from unilabos.server.services.runtime.workflow.store import _load
 
 CHANNELS = ("material", "device", "action", "scheduler")
@@ -55,17 +57,24 @@ class ExecutionTimeline:
         return stats
 
     @staticmethod
-    def _estimate(stats: Dict[str, Dict[str, Any]], key: str) -> tuple[Optional[float], str]:
+    def _estimate(
+        stats: Dict[str, Dict[str, Any]], key: str,
+        declared_s: Optional[float] = None, declared_source: Optional[str] = None,
+    ) -> tuple[Optional[float], str]:
+        if declared_s is not None and declared_source in {"expression", "fixed"}:
+            return round(float(declared_s), 3), str(declared_source)
         observed = stats.get(key)
-        if observed is None:
-            return None, "unknown"
-        return observed["mean_s"], "observed"
+        if observed is not None:
+            return observed["mean_s"], "observed"
+        if declared_s is not None and declared_source == "default":
+            return round(float(declared_s), 3), "default"
+        return None, "unknown"
 
     def _running(self, conn, stats, now: float) -> List[Dict[str, Any]]:
         rows = conn.execute(
             f"""
             SELECT job.uuid, job.workflow_task_uuid, job.workflow_node_uuid, job.param, job.started_at,
-                   job.create_time, job.edge_agent_uuid, task.workflow_snapshot
+                   job.create_time, job.edge_agent_uuid, job.estimated_s, job.estimate_source, task.workflow_snapshot
             FROM workflow_node_job AS job JOIN workflow_task AS task ON task.uuid = job.workflow_task_uuid
             WHERE job.deleted_at IS NULL AND job.status IN ({",".join("?" for _ in _IN_FLIGHT)})
             ORDER BY job.create_time
@@ -82,7 +91,7 @@ class ExecutionTimeline:
             action = str(node.get("action_name") or _load(row["param"], {}).get("action") or "")
             key = f"{device_id}:{action}" if device_id else ""
             started = _epoch(row["started_at"]) or _epoch(row["create_time"]) or now
-            estimated, source = self._estimate(stats, key)
+            estimated, source = self._estimate(stats, key, row["estimated_s"], row["estimate_source"])
             running.append({
                 "job_id": row["uuid"], "workflow_id": row["workflow_task_uuid"], "node_id": row["workflow_node_uuid"],
                 "device_id": device_id, "action_name": action, "device_action_key": key, "started_at": started,
@@ -104,13 +113,15 @@ class ExecutionTimeline:
                 (cutoff,),
             ).fetchall():
                 entry = {key: row[key] for key in row.keys() if key not in {"ret_json", "id"}}
-                estimated, source = self._estimate(stats, row["device_action_key"])
+                estimated, source = self._estimate(
+                    stats, row["device_action_key"], row["estimated_s"], row["estimate_source"],
+                )
                 entry.update({"estimated_s": estimated, "estimate_source": source})
                 completed.append(entry)
         return {
             "now": now, "window_s": window_s, "running": running, "completed": completed,
             "time_schedule": self.time_plan(),
-            "estimator": {"mode": "observed", "default_s": None, "stats": stats},
+            "estimator": {"mode": "declared+observed", "default_s": DEFAULT_ESTIMATE_DURATION_S, "stats": stats},
         }
 
     @staticmethod

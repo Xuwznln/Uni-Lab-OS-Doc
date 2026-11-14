@@ -374,6 +374,9 @@ class WorkflowNodeJobRecord(TableObject, table=True):
     uncertainty_reason: Optional[str] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    #: 派发时按 ``@action(estimate_duration_*)`` 求出的预计时长（秒）与来源（expression / fixed / default）
+    estimated_s: Optional[float] = None
+    estimate_source: Optional[str] = None
 
 
 class WorkflowTaskCommandRecord(TableObject, table=True):
@@ -693,8 +696,8 @@ _LEGACY_PROJECTION_VIEWS = (
             (julianday(REPLACE(job.finished_at, 'Z', '+00:00'))
              - julianday(REPLACE(job.started_at, 'Z', '+00:00'))) * 86400.0
             END AS actual_s,
-        0.0 AS estimated_s,
-        'canonical_projection' AS estimate_source,
+        COALESCE(job.estimated_s, 0.0) AS estimated_s,
+        COALESCE(job.estimate_source, 'unknown') AS estimate_source,
         CASE job.status WHEN 'succeeded' THEN 'success' ELSE job.status END AS state,
         CASE job.status WHEN 'skipped' THEN 'skip' ELSE 'normal' END AS suc_type,
         job.return_info AS ret_json
@@ -1184,6 +1187,8 @@ WORKFLOW_TABLES = (
             uncertainty_reason TEXT,
             started_at TEXT,
             finished_at TEXT,
+            estimated_s REAL,
+            estimate_source TEXT,
             CHECK (retry_of_job_uuid IS NULL OR retry_of_job_uuid <> uuid),
             CHECK (
                 (retry_of_job_uuid IS NULL AND attempt_no = 1)

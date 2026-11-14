@@ -378,6 +378,34 @@ async def heat_to(self, temperature: float = 25.0, duration: float = 60.0) -> Di
 > 配合取消，让驱动尽快真正返回；否则只能等它自然返回，或由操作员在现场核实后经
 > `POST /api/v1/workflow-tasks/{uuid}/execution-locks/{lease_uuid}/force-release` 强制释放。
 
+### 预计时长：`estimate_duration_fixed` 与 `estimate_duration_express`
+
+预计时长告诉操作员一个动作大概要跑多久，用在时间线（`/api/v1/timeline`）、监控面板和任务 ETA 上。
+它**不是**准入条件，也不影响上面两道超时。字段名与 V1 相同，V1 写的驱动可以原样迁移：
+
+```python
+@action(
+    description="离心",
+    estimate_duration_fixed=30,                  # 兜底秒数（≥ 0）
+    estimate_duration_express="cycles * 20 + 5",  # 按入参计算；也认 V1 写法 "{cycles} * 20 + 5"
+)
+def spin(self, cycles: int = 3) -> Dict[str, Any]:
+    ...
+```
+
+| 声明 | 派发时得到的预计时长 |
+| --- | --- |
+| 表达式能用**最终** `action_args`（叠加 `goal_default`）求出 ≥ 0 的有限数 | 表达式的值，来源 `expression` |
+| 表达式缺参数、参数不是数字、除零或结果为负 | 退回兜底，原因记日志 |
+| 写了 `estimate_duration_fixed` | 该秒数，来源 `fixed` |
+| 两个都没写 | 60 s，来源 `default`（与 V1 相同） |
+| `estimate_duration_fixed=None` | 不给出预计时长 |
+
+表达式与 `execution_timeout` 同一套语法（只允许入参名、数字、`+ - * /`、括号、一元正负号），声明期
+校验语法与入参名。调度器在派发每个 attempt 时求值，结果记在 attempt 上（`estimated_s` /
+`estimate_source`，`GET /api/v1/workflow-node-jobs/{uuid}` 可见）。时间线依次取：attempt 上的
+`expression` / `fixed` → 同一「设备:动作」的历史实测均值（`observed`）→ `default` 的 60 s → 没有（`unknown`）。
+
 ### 返回值设计指南
 
 > **⚠️ 重要：返回值会自动显示在前端**

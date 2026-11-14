@@ -2844,6 +2844,22 @@ class WorkflowStore:
                 )
         return self.get_node_run(run_uuid)
 
+    def set_job_estimate(self, job_uuid: str, estimated_s: Optional[float], source: Optional[str]) -> None:
+        """写入调度器派发时求出的预计时长（秒，≥ 0）与来源；``None`` 表示没有预计时长。"""
+
+        if estimated_s is not None:
+            if isinstance(estimated_s, bool) or not isinstance(estimated_s, (int, float)) or not estimated_s >= 0:
+                raise StoreConflict("estimated_s must be a non-negative number")
+            if not source:
+                raise StoreConflict("estimate_source is required with estimated_s")
+        with self.transaction() as conn:
+            updated = conn.execute(
+                "UPDATE workflow_node_job SET estimated_s=?, estimate_source=? WHERE uuid=? AND deleted_at IS NULL",
+                (None if estimated_s is None else float(estimated_s), source if estimated_s is not None else None, job_uuid),
+            ).rowcount
+            if not updated:
+                raise StoreNotFound(f"workflow node job {job_uuid} not found")
+
     def mark_job_decision_resumed(
         self, job_uuid: str, decision_id: str = ""
     ) -> Dict[str, Any]:
@@ -4067,6 +4083,8 @@ class WorkflowStore:
             "uncertainty_reason",
             "started_at",
             "finished_at",
+            "estimated_s",
+            "estimate_source",
         )
         return result
 

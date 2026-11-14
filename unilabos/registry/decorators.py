@@ -373,6 +373,8 @@ def device(
 
 # 区分 "用户没传 action_type" 和 "用户传了 None"
 _ACTION_TYPE_UNSET = object()
+#: 未声明 estimate_duration_fixed（区别于显式 None：不提供兜底）
+_ESTIMATE_UNSET = object()
 
 
 # noinspection PyShadowingNames
@@ -397,6 +399,8 @@ def action(
     materials_free: Optional[List[str]] = None,
     timeout: Optional[float] = None,
     execution_timeout: Optional[Union[float, str]] = None,
+    estimate_duration_fixed: Any = _ESTIMATE_UNSET,
+    estimate_duration_express: str = "",
     contract: str = "legacy",
     resource_contract: Optional[Dict[str, Any]] = None,
 ):
@@ -450,6 +454,12 @@ def action(
                            到期后动作继续执行，执行面以 ExecutionTimeoutException 打开
                            一条带 wait 选项的决策；表达式在下发时按真实 action_args
                            （叠加 goal_default）求值。详见 unilabos.registry.action_timeout。
+        estimate_duration_fixed: 预计时长兜底（秒，≥ 0）。不写时调度器按 60 s 兜底；写 None
+                                 表示不提供兜底。只用于时间线 / 监控 / ETA，不是准入条件。
+        estimate_duration_express: 按动作入参计算预计时长的四则运算表达式，与 execution_timeout
+                                   同一语法（"cycles * 2"，也认 V1 的 "{cycles} * 2"）；派发时
+                                   按真实 action_args 求值，失败时退回兜底。
+                                   详见 unilabos.registry.action_duration。
     """
 
     if contract not in {"legacy", "typed"}:
@@ -532,6 +542,22 @@ def action(
         )
         if normalized_execution_timeout is not None:
             meta["execution_timeout"] = normalized_execution_timeout
+        from unilabos.registry.action_duration import (
+            EXPRESS_FIELD,
+            FIXED_FIELD,
+            normalize_estimate_duration_express,
+            normalize_estimate_duration_fixed,
+        )
+
+        if estimate_duration_fixed is not _ESTIMATE_UNSET:
+            meta[FIXED_FIELD] = normalize_estimate_duration_fixed(
+                estimate_duration_fixed, action_name=func.__qualname__
+            )
+        normalized_express = normalize_estimate_duration_express(
+            estimate_duration_express, action_parameter_names=signature_parameters, action_name=func.__qualname__,
+        )
+        if normalized_express:
+            meta[EXPRESS_FIELD] = normalized_express
         wrapper._action_registry_meta = meta  # type: ignore[attr-defined]
         wrapper._action_error_policy = normalized_error_policy  # type: ignore[attr-defined]
 
