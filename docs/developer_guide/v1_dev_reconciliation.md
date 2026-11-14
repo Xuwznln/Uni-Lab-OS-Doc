@@ -1,12 +1,54 @@
 # V1 → Dev 逐项消解清单
 
-核验日期：2026-11-09。本文区分“已实现”“保留 Dev 设计而关闭差异”“待移植”和“待验收”，不以文件差异消失代表功能完成。
+核验日期：2026-11-09；复核：2026-11-14（见下一节「当前状态」，之后各节保留 11-09 的原始记录）。本文区分“已实现”“保留 Dev 设计而关闭差异”“待移植”和“待验收”，不以文件差异消失代表功能完成。
 
 2026-11-10 更新：生命周期 DTO、HTTP SDK 和 V1 的 drain 接口已在本地工作分支接入现有 server/protocol/client 分层，见 [生命周期协议迁移](runtime_lifecycle_migration.md)。用户确认一个 backend 对应一个主 Host/runtime，设备通过多 slave 扩展；多主 Host 不属于目标差异。布局、模板和旧管理操作日志仍需单独处理，详见 [Workspace Host 规整说明](workspace_host_cleanup.md)。
 
 同日后续：C01 容量/资源快照回归已本地修复，相关回归 114 项通过。旧 `max_volume` 允许保存无法可靠换算体积的事实，已知体积仍受上限约束；显式 `capacity` 继续完整校验。详见 [容量规则与兼容边界](v1_inventory_preflight_contracts.md#容量)。修复未推送，#358 的远端 CI 和合入仍待完成。
 
-## 基线与原始目标
+## 当前状态（2026-11-14 复核）
+
+以统一分支 #361（`feat/unify-dev-v1-py314`，`8895daa9`）加 A01 分支 `feat/v1-estimated-duration` 为准，逐项对照代码。
+11-09 记录的大部分差异已在 #361 中关闭（#358 的内容也已全部并入）；仍开放的只有下表标 **开放** / **部分** / **待定** 的行。
+
+| ID | 11-09 | 2026-11-14 | 证据 / 剩余 |
+| --- | --- | --- | --- |
+| D01 | 本地已完成 | 已完成 | 仓库已无 `frontend/` |
+| D02 | 业务协议待归位 | 已完成 | `protocol/runtime/` 下 `lifecycle`、`lab`（布局）、`logs`、`process_management`；V1 `/v1/operations` 等已移植（`api_v1_route_map.md` p8） |
+| D03 | 现场验收待做 | 不变 | 现场验收并入 T02 |
+| D04 / D06 | 按设计消解 / 已配置 | 不变 | |
+| D05 | 按设计消解 | 已更新 | runtime.db 已有 v2（等待顺序）、v3（预计时长）迁移；迁移只认已发布版本的结构指纹 |
+| M01 | Dev 已有 | 已有 | |
+| M02 | 部分基础 | 已实现 | 显式作用域 `ctx.resource_scope`、空闲借出与归还（`resource_loans.py`）、持久区间准入与老化优先级排队（SC-N4）；`test_workflow_resource_custody.py`、`test_workflow_resource_intervals.py`、`test_resource_admission_order.py` |
+| W01 | 不支持 | **待定** | `@workflow` 仍需 `display_name`，没有 `action.lock`；锁语义已由 `ctx.resource_scope` 提供，是否加语法糖（`display_name` 可选、`ctx.lock` 别名）待用户决定 |
+| W02 | 未接通 | 已实现 | 默认 `compiler="ast"`，支持按动作结果的 if/elif/else，辅助函数编译前按源码展开；builder 模式对结果判断真假会报错 |
+| W03 | 作者接口没有 | 已实现 | `with ctx.parallel():` + `ctx.group`（与 V1 写法一致） |
+| W04 | 已有 | 已有 | |
+| A01 | 无预计时长合同 | 已实现（A01 分支） | `@action(estimate_duration_fixed / estimate_duration_express)`，派发时求值记在 attempt 上，时间线消费；V1 闭源引擎的学习估时与时间求解不移植 |
+| A02 | #358 未合并 | 已实现 | `contract="typed"`、`registry/typed_contract.py` 等已在 #361 |
+| A03 | 仅能解析 | **部分** | `device_tenancy` / `operate_in_place` / `transfer` / `transfer_step` / `aliquot` 在调度器托管下启用（`scheduler/physical_contract.py`、`materials/execution.py`）；`order_sensitive` 仍被拒绝（`registry/typed_contract.py`），需补「同一资源的无序兄弟动作必须显式排序」的发布期检查 |
+| I01 | #358 未合并 | 已实现 | `materials/quantity.py`、`capacity.py`，批次计数盘点 `stocktake_inventory_lot` |
+| I02 | 未对齐 | **部分** | 批次侧（多任务共享数量、`on_ready` 缺料等待、执行结果不明时冻结）已有；容器内物质的工作流预留 / 结算 / 补偿、运行时补料分支（`material_source` + `sufficient` + `material_io`）、Saga 未做；任务开始即缺料时仍直接失败（V1 为等待并在入库后继续），是否改为等待待用户决定 |
+| I03 | 未完整 | **部分** | 搬运 / 分装按执行回执结算（`materials/execution.py`），人工计数盘点已有；按测量作业证据自动盘点未实现 |
+| I04 | 已修复 | 已修复 | |
+| P01 | FE 未兼容 | 后端已实现 | `/workflows/{uuid}/run-preflight`，接受 `inventory_bindings`；正式 FE 对接见 F 行 |
+| R01 | 尚未移植 | 已实现 | `server/backend/execution_start.py`（开始许可；应答不确定时禁止再调用驱动，保留资源等待核实） |
+| R02 | 未完全等同 | 基本完成 | 持久 claim / lease、硬超时保锁（ADR 0008）、重启恢复与人工裁决；容器内物质预留的恢复随 I02 补 |
+| C01 | 远端 CI 待做 | 已消解 | #358 新增的 15 个文件全部在 #361 中；#361 合入后关闭 #358 |
+| T01 / T02 | TODO | **开放** | 等用户提供设备状态合同 / 苏州工站测试材料 |
+| U01 | 待逐项核验 | **开放** | 全文件差异索引尚未逐项核验 |
+| F01–F07 | 前端与 Dev 不兼容 | 后端已就绪，**FE 待适配** | Dev 已按 V1 合同提供 `workflow_type` 与状态过滤、`inventory_bindings` / `priority` / `expected_revision`、job 的 `topological_index` / `executor_kind`、`/inventory/*` 与 `/reagents`、`/devices` 与作者目录、任务展示 / 执行锁 / 人工确认 / 干预（`api_v1_route_map.md` p7-a–p7-d）；正式前端 uni-lab-fe 尚未改为调用它们（另需 `X-UniLab-Token`、V1 信封、5001 + `Retry-After` 重试） |
+| F08 | Center 分流 | 不变 | Center / project / experiment 路由不属于 OS 本地 backend |
+| F09 | 未执行 | **开放** | FE 适配后与 T02 一起做浏览器联调 |
+
+11-09「作者语法的实测结果」现已变化：`workflow()` 仍需 `display_name`、仍无 `action.lock`；`ctx.parallel` 已有；
+builder 模式下 `bool(step)` 会报错并提示改用 AST；AST 模式支持等待测量结果再判断 `measurement.qualified`；
+`condition` 节点已接入调度器；`estimate_duration_*` 已实现（A01）。
+
+剩余顺序建议：I02 第一步（容器内物质的工作流预留与结算、补偿与恢复，不改变产品行为）→ 待用户决定的
+I02 缺料等待、运行时补料、A03 `order_sensitive`、W01 → 正式前端适配与 F09 / T02 联调 → U01 → T01。
+
+## 基线与原始目标（11-09 原始记录）
 
 | 对象 | 固定版本 | 当前含义 |
 | --- | --- | --- |
@@ -41,7 +83,7 @@ PR #329–357 已合并；#358 是本次唯一尚未合并的 PR。其他人的 
 | ID | 状态 | 决定与证据 |
 | --- | --- | --- |
 | D01 | 本地已完成 | 删除 `frontend/` 全部 React 调试站及 `tests/frontend/test_debug_console_api.py`；README 改指正式前端。后端 OpenAPI 导出和 API 测试保留。 |
-| D02 | 生命周期协议已本地迁移；业务协议待归位 | 状态/重启/重置 DTO 与 SDK 归入 protocol/runtime、client/runtime；drain 三个接口接入 server/backend 与 server/api/runtime。保留 Dev 主进程监督；布局、模板及旧操作日志尚不能判为已消解。 |
+| D02 | 已完成（11-14 复核） | 状态/重启/重置 DTO 与 SDK 归入 protocol/runtime、client/runtime；drain 三个接口接入 server/backend 与 server/api/runtime。保留 Dev 主进程监督；布局、模板及旧操作日志尚不能判为已消解。 |
 | D03 | 拓扑按设计消解，现场验收待做 | 一个 backend 对应一个主 Host/runtime，下接多个 slave；符合本轮用户确认，不再把多主 Host 列为缺失能力。现有 supervisor、device-processes、driver-packages、HostLink 覆盖基本路径，真实工站验收列 T02。 |
 | D04 | 按设计消解 | 保留并行任务和任务级单步；不将 V1 当前工站级单步准入策略直接复制过来。 |
 | D05 | 按设计消解 | 保留原生授锁插件可选、加载失败回退 Python；保留版本化数据库迁移机制。0.13 发布线四个库都从 schema v1 开始（2026-11-13 把开发期 runtime v2–v12、materials v2–v8 迁移链压平为 v1 基线），旧开发库没有迁移路径：runtime / materials 拒绝启动（`database_rebuild_on_mismatch` 可显式允许备份后重建），telemetry / history 自动备份后重建；之后改结构从 v2 起追加迁移（`runtime.db` v2：资源等待记录的 `enqueued_at`）。准入的等待顺序按 V1 的老化优先级 FIFO 持久化在 `runtime.db`（让行不闭合等待环）；授予策略插件只裁决恢复路径上的内存争用。 |
@@ -54,22 +96,22 @@ PR #329–357 已合并；#358 是本次唯一尚未合并的 PR。其他人的 
 | ID | 当前状态 | 下一步与关闭条件 |
 | --- | --- | --- |
 | M01 默认物料锁 | Dev 已有；本轮只纠正术语 | ResourceSlot 等物料参数默认申请互斥锁，正常终态释放。保留显式免锁例外；不得把共享资源解释成 `materials_free`。 |
-| M02 空闲借出 / 独占区间 | 部分基础已有，完整策略未接入 | 明确所有者区间、动作使用区间、借出和归还、取消/异常/未知执行。验收：A 空闲时 B 可借共享资源；A 占用使用时不能冲突；独占资源在整个声明区间不得借出。 |
+| M02 空闲借出 / 独占区间 | 已实现（11-14 复核，见「当前状态」） | 明确所有者区间、动作使用区间、借出和归还、取消/异常/未知执行。验收：A 空闲时 B 可借共享资源；A 占用使用时不能冲突；独占资源在整个声明区间不得借出。 |
 | W01 `@workflow()` / `action.lock.x()` | 用户给定写法当前不支持 | Dev 装饰器需要 `display_name`，函数接收 ctx；`action` 无 `lock` 属性。先冻结作者接口，再接入资源区间；不能仅新增一个装饰器别名就宣称锁语义完成。 |
 | W02 action 返回值驱动 `if/else` | Dev 未接通；V1 有实现和专门测试 | 将上游具名输出绑定到条件节点，等待生产者完成，再只执行命中分支；未选节点标记 skipped。覆盖 false、缺字段、非布尔、失败/重试、冻结快照、暂停恢复。已按 V1 的静态编译实现（`compiler="ast"`），2026-11-13 起为默认，辅助函数在编译前按源码展开；builder 模式里对结果判断真假会在注册时报错。 |
-| W03 并行 | Dev DAG 已有；`parallel(A, B)` 作者接口没有 | Dev 保留调度实现；作者层编译出分叉/汇合并定义返回引用和失败语义。V1 实际写法是 `with parallel():` + `group`，不是 `parallel(A, B)`。 |
+| W03 并行 | 已实现：`with ctx.parallel():` + `group`（11-14 复核） | Dev 保留调度实现；作者层编译出分叉/汇合并定义返回引用和失败语义。V1 实际写法是 `with parallel():` + `group`，不是 `parallel(A, B)`。 |
 | W04 循环 | Dev 已有 for/while 及 `ctx.step_output` 条件 | 现有循环测试通过。它不能抵消 W02 的 if/else 缺口；后续只补作者语法和嵌套组合回归。 |
 | A01 动作预计时长 | 已实现（2026-11-14） | `@action(estimate_duration_fixed / estimate_duration_express)`，字段名与 V1 相同，表达式也认 V1 的 `{name}` 写法；派发时用最终参数求值并记在 attempt 上（runtime.db v3），时间线依次取声明值 → 历史实测 → 60 s 兜底。只用于展示与观测，不是准入条件。V1 的学习型估时与时间求解属于闭源引擎，不移植。 |
-| A02 严格动作合同 | #358 已实现基础，未合并 | `contract="typed"`、AST 参数/具名返回 Schema、冻结和派发/Host 校验已接入；先解决 C01。 |
-| A03 高级资源合同 | 仅能解析部分声明，运行语义未接入 | `device_tenancy`、`transfer`、`transfer_step`、`operate_in_place`、`aliquot`、`order_sensitive` 当前拒绝未实现语义。按物理效果和持久占用分别移植，验收不能止于解析成功。 |
-| I01 库存增量 | #358 已实现基础，未合并 | 单位换算、整批虚拟余量预检、容量、计数盘点；先解决 C01，再合入。 |
-| I02 内容物数量共享与补料 | V1 语义尚未对齐 | 对接 Dev lot/material/substance，补多任务数量预留、Saga、补料分支和失败补偿。数量预留不能用 M02 的物理锁代替。 |
-| I03 物理效果结算 | 未移植完整 | 搬运/分装按真实结果结算、与通用扣减去重、测量 Job 证据自动盘点；未知执行不能当“未消耗”回补。 |
+| A02 严格动作合同 | 已在 #361（11-14 复核） | `contract="typed"`、AST 参数/具名返回 Schema、冻结和派发/Host 校验已接入；先解决 C01。 |
+| A03 高级资源合同 | 部分：除 `order_sensitive` 外已启用（11-14 复核） | `device_tenancy`、`transfer`、`transfer_step`、`operate_in_place`、`aliquot`、`order_sensitive` 当前拒绝未实现语义。按物理效果和持久占用分别移植，验收不能止于解析成功。 |
+| I01 库存增量 | 已在 #361（11-14 复核） | 单位换算、整批虚拟余量预检、容量、计数盘点；先解决 C01，再合入。 |
+| I02 内容物数量共享与补料 | 部分：批次侧已有，内容物与补料未做（11-14 复核） | 对接 Dev lot/material/substance，补多任务数量预留、Saga、补料分支和失败补偿。数量预留不能用 M02 的物理锁代替。 |
+| I03 物理效果结算 | 部分：按回执结算已有，测量自动盘点未做（11-14 复核） | 搬运/分装按真实结果结算、与通用扣减去重、测量 Job 证据自动盘点；未知执行不能当“未消耗”回补。 |
 | I04 废弃枪头仍留在物料权威 | 已修复：被丢弃的枪头随同一快照退役 | 原问题：设备拿起枪头不放回（`TipSpot.get_tip()` + `empty()` + `tracker.commit()`，或通道丢进废料槽）后同步台面，本地 PLR 树里已没有这支 Tip，权威里它仍是孔位/通道的子物料，从权威恢复（重启、transfer 重新实例化）时凭空多出一支枪头。规则：设备上报一棵树时，权威里 `resource_type` 为 `tip` 的物料，若它的父节点在本次上报里，而它既不在上报里、也不再被设备运行时持有，就视为被丢弃。“运行时持有”取 `ResourceTreeSet.runtime_material_uuids`：`from_plr_resources` 从上报资源的 PLR 顶层祖先遍历的全部物料，包括旧式液体处理器（台面的 PLR 父节点）通道上的枪头，所以只上报台面时，拿在通道上的枪头不会被当成丢弃。`resource_tree_to_snapshot`（`discarded_tip_uuids`）把它写成 `lifecycle_status="retired"` + `parent_material_uuid=None`，`apply_snapshot` 在同一写事务内退役。表示与显式 delete 相同：retired + 软删除，保留记录、最后的父节点与账本；账本操作为 `retire`（`reason=tip_discarded`）。不采用 mark_used 的“原位 retired”：枪头必须离开孔位，否则恢复时仍会复活。脱离父节点却不软删除，它就成了根物料，占用 `resource_id` / 根名唯一索引；同名枪头盒重建、另一支同名枪头退役时会冲突。不推断丢弃的情形：父节点不在上报里；局部上报没有覆盖的子树；原始字典或权威读回的树集（`runtime_material_uuids is None`，如旧后端通知）。其他类型照旧不能借快照创建或删除。处于 reserved / quarantined / consumed 的枪头被拒绝（`conflict:state`），执行占用中的被拒绝（`active_claim`）。所有设备树同步共用 `AuthorityResourceService`：`update_resource` / `materials.update`、HostLink 与 ROS2 的快照观察者；增量（delta）只承载状态，结构变化总是走快照。旧后端镜像把 `retire` 与 `delete` 一样上报废弃。限制：`LiquidHandlerAbstract` 开启 PLR 枪头追踪时，丢进废料槽不触发台面回调，退役在下一次上报台面（`update_resource` 或下一次成功的结构快照）时落库；PLR 默认不追踪枪头，孔位不交出枪头，也就没有可退役的枪头。回归：`tests/backend/hostlink/test_material_creation_flows_e2e.py` 的 `test_discarded_tip_is_removed_from_authority`（去掉 xfail）、`test_slave_observer_retires_discarded_tip_over_hostlink`、`test_retired_tip_does_not_come_back_on_restore`；`tests/backend/runtime/test_discarded_tip_retirement.py`（通道丢弃、`LiquidHandlerAbstract` 丢弃/放回、非枪头缺席、无运行时证据）；`tests/server/test_materials_service.py` 的权威规则。 |
-| P01 运行预检 | #358 已有 Dev API；正式 FE 未兼容 | 复用 Dev 执行计划/输入/当前库存，无业务写入；保留运行时 deferred 检查。先修 F02/F03，绑定修订并回归只读性。 |
-| R01 启动许可 / fencing | 尚未移植 | 设备调用前确认当前 attempt 的开始权限并持久化；处理消息重发、旧 epoch、应答丢失和重启。许可不是执行成功或实际用量证据。 |
-| R02 持久 Claim/Lease 与恢复 | Dev 有锁恢复/人工裁决基础；未完全等同 V1 | 保留 Dev 的未知执行和人工裁决；围绕 R01/M02/A03/I03 设计持久事实和迁移，补 Host/权威重启与重放回归。 |
-| C01 #358 合并 | 容量回归本地已修复；远端 CI / 合入待做 | 保留原资源测试，按旧规格与显式容量声明区分校验；本轮 114 项回归通过。远端仍为 `0c940ded`、CI `42584235496` 未更新，不能按本地结果宣称合并完成。 |
+| P01 运行预检 | 后端已在 #361；正式 FE 未兼容（11-14 复核） | 复用 Dev 执行计划/输入/当前库存，无业务写入；保留运行时 deferred 检查。先修 F02/F03，绑定修订并回归只读性。 |
+| R01 启动许可 / fencing | 已实现：`execution_start.py`（11-14 复核） | 设备调用前确认当前 attempt 的开始权限并持久化；处理消息重发、旧 epoch、应答丢失和重启。许可不是执行成功或实际用量证据。 |
+| R02 持久 Claim/Lease 与恢复 | 基本完成（11-14 复核） | 保留 Dev 的未知执行和人工裁决；围绕 R01/M02/A03/I03 设计持久事实和迁移，补 Host/权威重启与重放回归。 |
+| C01 #358 合并 | 已消解：内容已并入 #361（11-14 复核） | 保留原资源测试，按旧规格与显式容量声明区分校验；本轮 114 项回归通过。远端仍为 `0c940ded`、CI `42584235496` 未更新，不能按本地结果宣称合并完成。 |
 | T01 device status | TODO，按用户要求后续做 | 现有 telemetry / status_fields / device_state 不等于用户要求的新设备状态合同；本轮不实现。 |
 | T02 苏州工站 Markdown 测试 | TODO，等待用户提供 | 收到测试 Markdown、工站包和预期后，覆盖主 runtime 下多 slave、共享/独占锁、if、parallel、预计时长、正式 FE 的整链路场景。 |
 | U01 其他文件差异 | 已建立全文件索引，待逐项核验 | 目录迁移、文档、生成物、测试和驱动差异不能按行数判定为缺失能力；索引中的“待核验”不可当作已关闭。 |
@@ -82,7 +124,7 @@ PR #329–357 已合并；#358 是本次唯一尚未合并的 PR。其他人的 
 
 V1 的 `scheduling/resource_bindings.py` 区分完整绑定和 `active_resource_ids`，支持显式区间内纯所有权共享、活动使用互斥。这可作为 M02 参考，但不能仅凭名字中的 shared 就断言已覆盖用户所说的跨任务空闲借出。`MaterialLock(free=True)` 是免锁，不是默认共享锁。
 
-## 作者语法的实测结果
+## 作者语法的实测结果（11-09 原始记录）
 
 目前 Dev 可写：
 
@@ -102,7 +144,7 @@ def inspect_flow(ctx):
 - V1 的 `tests/workflow/test_structured_condition_authoring.py::test_condition_waits_for_and_reads_previous_node_result` 覆盖了用户所说的等待测量结果，再判断 `measurement.qualified` 的场景；这是移植候选，不是 Dev 已通过的测试。
 - V1 声明了 `estimate_duration_fixed` 和 `estimate_duration_express`，注册表与 AST 有投影测试。本轮没有证明这些字段已被 V1 排程引擎端到端消费；Dev 当前连这两个预计字段也没有，不能用超时表达式冒充。
 
-## 正式前端 API 消解清单
+## 正式前端 API 消解清单（11-09 原始记录）
 
 本轮在正式前端原始 main 运行 core 测试，然后用它的真实 FetchTransport / domain clients 请求 Dev 候选的临时 HTTP 服务。数据库全为临时数据，未启动调度器和设备；这验证请求和解码，不是浏览器 E2E 或工站执行验收。
 
@@ -120,7 +162,7 @@ def inspect_flow(ctx):
 
 静态扫描范围是 `packages/core/src/domain` 的显式 method+url 请求对象：106 处请求、102 个去重操作，14 个在 Dev 候选 OpenAPI 存在、88 个未命中，另有 29 处动态 URL/方法未解析。这是用于定位的扫描结果，既不是“只有 14 个 API 可用”，也不是“Dev 缺 88 个必做功能”；存在的路由仍可能有 DTO 不兼容，Center 路由需要 F08 分流。逐条结果和源码行号在 patch 包 `evidence/frontend-routes.json`。
 
-## 验证、阻塞与后续顺序
+## 验证、阻塞与后续顺序（11-09 原始记录）
 
 - Python 3.12.16；核心相关回归：113 passed / 2 skipped。覆盖 OpenAPI、预检、token、backend-only、物料锁、超时、授锁、单步并行和循环。
 - 补充进程/包拓扑回归：36 passed，覆盖 supervisor、device-processes、driver-packages、HostLink hello/RPC。
