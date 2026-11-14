@@ -838,10 +838,27 @@ class MaterialsService(MaterialsRepository):
                         "version": material.version + 1,
                     })
                     material_updates.append((material, updated))
-                else:
+                elif allocation.kind == "lot":
                     lot_reserved[allocation.lot_uuid] = (
                         lot_reserved.get(allocation.lot_uuid, 0.0) + allocation.quantity
                     )
+            # 内容物：随作业预留创建 material_content_reservation；其他任务的可用量即时扣除这份预留
+            contents = None
+            for index, allocation in enumerate(allocations):
+                if allocation.kind != "content":
+                    continue
+                contents = contents or self._content_contract()
+                content_reservation_uuid = str(uuid4())
+                contents.reserve_content({
+                    "reservation_uuid": content_reservation_uuid,
+                    "substance_uuid": allocation.substance_uuid,
+                    "task_uuid": value.task_uuid,
+                    "node_uuid": value.node_uuid,
+                    "job_uuid": value.job_uuid,
+                    "quantity": allocation.quantity,
+                    "quantity_unit": allocation.unit,
+                })
+                allocations[index] = allocation.model_copy(update={"content_reservation_uuid": content_reservation_uuid})
 
             affected: list[AggregateVersion] = []
             sequences: list[int] = []
@@ -1090,7 +1107,15 @@ class MaterialsService(MaterialsRepository):
         shortages: list[dict[str, Any]] = []
         selected_materials: set[str] = set()
         lot_reserved: dict[str, float] = {}
+        content_planned: dict[str, float] = {}
         for requirement in requirements:
+            if requirement.kind == "content":
+                planned = self._plan_content(requirement, content_planned)
+                if isinstance(planned, InventoryAllocation):
+                    allocations.append(planned)
+                else:
+                    shortages.append(planned)
+                continue
             if requirement.kind == "material":
                 try:
                     material = self._select_inventory_material(requirement, selected_materials=selected_materials)
@@ -1130,6 +1155,126 @@ class MaterialsService(MaterialsRepository):
                     "message": f"库存需求 {requirement.key} 缺少 {remaining:g} {requirement.unit}",
                 })
         return allocations, shortages
+
+    # ── 内容物（容器里的一份 substance）数量 ───────────────────────────
+
+    def _content_contract(self) -> Any:
+        from unilabos.server.services.materials.contents import ContentContract
+
+        return ContentContract(self, compound_source=None)
+
+    def _content_substance(self, requirement: InventoryRequirement) -> Any:
+        """按容器 + substance_uuid / 容器内唯一的 substance_name 选中一份内容物。"""
+
+        rows = self.connection.execute(
+            "SELECT ms.substance_uuid, ms.material_uuid, ms.name, ms.quantity, ms.quantity_unit, ms.physical_state, "
+            "mc.concentration_value, mc.density_g_per_ml, m.template_uuid FROM material_substance ms "
+            "JOIN material m USING(material_uuid) LEFT JOIN material_content mc USING(substance_uuid) "
+            "WHERE ms.material_uuid=? AND m.deleted_at_ms IS NULL AND m.lifecycle_status NOT IN ('retired','quarantined') "
+            "AND (ms.substance_uuid=? OR (? IS NOT NULL AND ms.name=?))",
+            (requirement.material_uuid, requirement.substance_uuid, requirement.substance_name, requirement.substance_name),
+        ).fetchall()
+        label = requirement.substance_uuid or requirement.substance_name
+        if not rows:
+            raise MaterialNotFoundError(f"容器 {requirement.material_uuid} 里没有内容物 {label}", subject="material")
+        if len(rows) > 1:
+            raise MaterialValidationError(f"容器 {requirement.material_uuid} 里有多份名为 {label} 的内容物，请改用 substance_uuid")
+        return rows[0]
+
+    def content_reserved(
+        self, substance_uuid: str, unit: str, *, physical: Mapping[str, Any],
+        exclude_reservation: Optional[str] = None, exclude_task: Optional[str] = None,
+    ) -> float:
+        """某份内容物上仍有效的预留合计（换算到 ``unit``）；单位换算不了时拒绝，不按原数字硬算。"""
+
+        total = 0.0
+        for row in self.connection.execute(
+            "SELECT reservation_uuid, task_uuid, quantity, quantity_unit FROM material_content_reservation "
+            "WHERE substance_uuid=? AND status='active'", (substance_uuid,),
+        ).fetchall():
+            if row["reservation_uuid"] == exclude_reservation or (exclude_task is not None and row["task_uuid"] == exclude_task):
+                continue
+            converted = convert_quantity(
+                float(row["quantity"]), row["quantity_unit"], unit, inventory_type="content",
+                physical_state=physical.get("physical_state"), concentration_value=physical.get("concentration_value"),
+                density_g_per_ml=physical.get("density_g_per_ml"),
+            )
+            if converted is None:
+                raise MaterialConflictError(
+                    f"内容物 {substance_uuid} 的有效预留单位 {row['quantity_unit']} 无法换算为 {unit}", conflict="state",
+                )
+            total += converted[0]
+        return total
+
+    def _plan_content(self, requirement: InventoryRequirement, planned: dict[str, float]) -> Any:
+        """内容物需求：可用量 = 现量 − 其他预留 − 同一批已规划的量；返回分配或短缺说明。"""
+
+        try:
+            row = self._content_substance(requirement)
+        except (MaterialNotFoundError, MaterialValidationError) as error:
+            return {"key": requirement.key, "kind": "content", "message": str(error)}
+        physical = {key: row[key] for key in ("physical_state", "concentration_value", "density_g_per_ml")}
+        converted = convert_quantity(
+            float(requirement.quantity), requirement.unit, row["quantity_unit"], inventory_type="content", **physical,
+        )
+        if converted is None:
+            return {"key": requirement.key, "kind": "content",
+                    "message": f"库存需求 {requirement.key} 的单位 {requirement.unit} 无法换算为内容物单位 {row['quantity_unit']}"}
+        need = converted[0]
+        try:
+            reserved = self.content_reserved(row["substance_uuid"], row["quantity_unit"], physical=physical)
+        except MaterialConflictError as error:
+            return {"key": requirement.key, "kind": "content", "message": str(error)}
+        available = float(row["quantity"]) - reserved - planned.get(row["substance_uuid"], 0.0)
+        if need > available + quantity_tolerance(available, need):
+            factor = need / float(requirement.quantity)
+            short = (need - max(available, 0.0)) / factor
+            return {
+                "key": requirement.key, "kind": "content", "material_uuid": requirement.material_uuid,
+                "substance_uuid": row["substance_uuid"], "required": float(requirement.quantity),
+                "available": max(available, 0.0) / factor, "shortage": short, "unit": requirement.unit,
+                "message": f"库存需求 {requirement.key} 缺少 {short:g} {requirement.unit}（容器 {row['name']} 的未预留余量不足）",
+            }
+        planned[row["substance_uuid"]] = planned.get(row["substance_uuid"], 0.0) + need
+        return InventoryAllocation(
+            key=requirement.key, kind="content", material_uuid=requirement.material_uuid,
+            template_uuid=row["template_uuid"], substance_uuid=row["substance_uuid"],
+            quantity=float(requirement.quantity), unit=requirement.unit,
+        )
+
+    def replace_substances(self, material_uuid: str, records: Sequence[MaterialSubstanceRecord]) -> None:
+        """整份替换容器内容物（API 写入与设备快照都经过这里）。
+
+        工作流作业持有有效预留的内容物不能被移除，单位也不能改成与预留无法换算的单位——否则那份
+        预留会悄悄失效、作业结算时对不上账；数量下降是设备上报的事实，不在这里拦。
+        """
+
+        rows = self.connection.execute(
+            "SELECT r.substance_uuid, r.quantity, r.quantity_unit, s.name, mc.concentration_value, mc.density_g_per_ml "
+            "FROM material_content_reservation r LEFT JOIN material_substance s USING(substance_uuid) "
+            "LEFT JOIN material_content mc USING(substance_uuid) "
+            "WHERE r.material_uuid=? AND r.status='active' AND r.job_uuid IS NOT NULL",
+            (material_uuid,),
+        ).fetchall()
+        if rows:
+            incoming = {record.substance_uuid: record for record in records}
+            for row in rows:
+                label = row["name"] or row["substance_uuid"]
+                record = incoming.get(row["substance_uuid"])
+                if record is None:
+                    raise MaterialConflictError(
+                        f"内容物 {label} 有工作流作业的有效预留，不能从容器移除", conflict="state",
+                    )
+                if convert_quantity(
+                    float(row["quantity"]), row["quantity_unit"], record.quantity_unit, inventory_type="content",
+                    physical_state=record.physical_state, concentration_value=row["concentration_value"],
+                    density_g_per_ml=row["density_g_per_ml"],
+                ) is None:
+                    raise MaterialConflictError(
+                        f"内容物 {label} 有工作流作业的有效预留（{row['quantity_unit']}），单位不能改成 {record.quantity_unit}",
+                        conflict="state",
+                    )
+        super().replace_substances(material_uuid, records)
 
     def preview_inventory(self, requirements: Sequence[InventoryRequirement]) -> dict[str, Any]:
         """只读库存快照，不创建预留、命令效果或流水。结果不是派发许可。"""
@@ -1368,6 +1513,18 @@ class MaterialsService(MaterialsRepository):
                     version=updated_material.version,
                     state_hash=material_hash,
                 ))
+
+            # 内容物与批次同一规则：动作开始（consumed）或结果不明（从 active 隔离）时按预留量扣减，
+            # 未开始即失败（released）只释放；已扣减后再隔离不退回。
+            content_items = [
+                item for item in allocations if item.kind == "content" and item.content_reservation_uuid
+            ]
+            if content_items and current.status == "active":
+                contents = self._content_contract()
+                for item in content_items:
+                    contents.finish_content_reservation(
+                        item.content_reservation_uuid, "released" if target_status == "released" else "consumed",
+                    )
 
             updated = current.model_copy(
                 update={

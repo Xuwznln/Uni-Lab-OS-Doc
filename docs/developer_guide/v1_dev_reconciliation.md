@@ -28,7 +28,7 @@
 | A02 | #358 未合并 | 已实现 | `contract="typed"`、`registry/typed_contract.py` 等已在 #361 |
 | A03 | 仅能解析 | **部分** | `device_tenancy` / `operate_in_place` / `transfer` / `transfer_step` / `aliquot` 在调度器托管下启用（`scheduler/physical_contract.py`、`materials/execution.py`）；`order_sensitive` 仍被拒绝（`registry/typed_contract.py`），需补「同一资源的无序兄弟动作必须显式排序」的发布期检查 |
 | I01 | #358 未合并 | 已实现 | `materials/quantity.py`、`capacity.py`，批次计数盘点 `stocktake_inventory_lot` |
-| I02 | 未对齐 | **部分** | 批次侧（多任务共享数量、`on_ready` 缺料等待、执行结果不明时冻结）已有；容器内物质的工作流预留 / 结算 / 补偿、运行时补料分支（`material_source` + `sufficient` + `material_io`）、Saga 未做；任务开始即缺料时仍直接失败（V1 为等待并在入库后继续），是否改为等待待用户决定 |
+| I02 | 未对齐 | **部分** | 批次侧（多任务共享数量、`on_ready` 缺料等待、执行结果不明时冻结）已有；容器内物质（`kind="content"`）的工作流预留、多任务共享、随作业结算与恢复、一次性实际用量更正、结算防错（不吃别人的预留、单位换算失败即拒绝、快照不能移除已预留内容物）已实现（I02 分支）；运行时补料分支（`material_source` + `sufficient` + `material_io`）未做；任务开始即缺料时仍直接失败（V1 为等待并在入库后继续），是否改为等待待用户决定 |
 | I03 | 未完整 | **部分** | 搬运 / 分装按执行回执结算（`materials/execution.py`），人工计数盘点已有；按测量作业证据自动盘点未实现 |
 | I04 | 已修复 | 已修复 | |
 | P01 | FE 未兼容 | 后端已实现 | `/workflows/{uuid}/run-preflight`，接受 `inventory_bindings`；正式 FE 对接见 F 行 |

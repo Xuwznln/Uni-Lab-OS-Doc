@@ -609,14 +609,16 @@ class InventoryLotRead(ServerObject):
 class InventoryRequirement(ServerObject):
     """调度器冻结的一项库存需求。
 
-    两种 kind 区分的是账目形态而不是物料种类：``material`` 表示独立物料实例
+    三种 kind 区分的是账目形态而不是物料种类：``material`` 表示独立物料实例
     （有 uuid、可放到位点的个体，例如枪头盒、孔板、试剂瓶），只改变生命周期而不
     扣数量；``lot`` 表示按量计量的 ``inventory_lot`` 库存（散装试剂、散装耗材等），
-    按 lot FIFO 从 available 预留并在动作开始时扣减。
+    按 lot FIFO 从 available 预留并在动作开始时扣减；``content`` 表示某个容器里的
+    一份内容物（``material_uuid`` 是容器，用 ``substance_uuid`` 或容器内唯一的
+    ``substance_name`` 选中），多个任务共享同一份内容物的余量，在动作开始时扣减。
     """
 
     key: NonEmptyStr
-    kind: Literal["material", "lot"]
+    kind: Literal["material", "lot", "content"]
     material_uuid: Optional[NonEmptyStr] = None
     template_uuid: Optional[NonEmptyStr] = None
     lot_uuid: Optional[NonEmptyStr] = None
@@ -624,9 +626,33 @@ class InventoryRequirement(ServerObject):
     site_uuid: Optional[NonEmptyStr] = None
     quantity: Optional[float] = Field(default=None, gt=0)
     unit: Optional[NonEmptyStr] = None
+    substance_uuid: Optional[NonEmptyStr] = None
+    substance_name: Optional[NonEmptyStr] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_content_fields(self, handler: Any) -> Any:
+        # 内容物专用字段为空时不进入序列化：material / lot 需求的形状与请求哈希保持升级前不变
+        data = handler(self)
+        if isinstance(data, dict):
+            for name in ("substance_uuid", "substance_name"):
+                if data.get(name) is None:
+                    data.pop(name, None)
+        return data
 
     @model_validator(mode="after")
     def _validate_requirement(self) -> "InventoryRequirement":
+        if self.kind == "content":
+            if self.material_uuid is None:
+                raise ValueError("content requirement needs the container material_uuid")
+            if (self.substance_uuid is None) == (self.substance_name is None):
+                raise ValueError("content requirement needs exactly one of substance_uuid/substance_name")
+            if self.quantity is None or self.unit is None:
+                raise ValueError("content requirement needs quantity and unit")
+            if any(value is not None for value in (self.template_uuid, self.lot_uuid, self.parent_material_uuid, self.site_uuid)):
+                raise ValueError("content requirement cannot carry lot or warehouse selectors")
+            return self
+        if self.substance_uuid is not None or self.substance_name is not None:
+            raise ValueError("only content requirements can select a substance")
         if self.kind == "material":
             if self.quantity is not None or self.unit is not None or self.lot_uuid is not None:
                 raise ValueError("material requirement cannot carry lot quantity fields")
@@ -700,12 +726,25 @@ class InventoryTaskReservationCreate(ServerObject):
 
 class InventoryAllocation(ServerObject):
     key: NonEmptyStr
-    kind: Literal["material", "lot"]
+    kind: Literal["material", "lot", "content"]
     material_uuid: Optional[NonEmptyStr] = None
     template_uuid: NonEmptyStr
     lot_uuid: Optional[NonEmptyStr] = None
     quantity: Optional[float] = Field(default=None, gt=0)
     unit: Optional[NonEmptyStr] = None
+    #: ``content``：选中的内容物，以及随预留创建的 ``material_content_reservation``
+    substance_uuid: Optional[NonEmptyStr] = None
+    content_reservation_uuid: Optional[NonEmptyStr] = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_content_fields(self, handler: Any) -> Any:
+        # 内容物专用字段为空时不进入序列化：material / lot 需求的形状与请求哈希保持升级前不变
+        data = handler(self)
+        if isinstance(data, dict):
+            for name in ("substance_uuid", "content_reservation_uuid"):
+                if data.get(name) is None:
+                    data.pop(name, None)
+        return data
 
 
 class InventoryReservationRead(ServerObject):

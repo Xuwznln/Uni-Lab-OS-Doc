@@ -146,7 +146,9 @@ def allocation_arguments(
     - ``material``：一个需求恰好选出一个物料实例，值是 ResourceSlot 引用形态
       ``{"uuid": material_uuid, ...}``，框架在 send_goal 解析为 PLR 实例；
     - ``lot``（按量计量的 inventory_lot 库存）：同一需求可能按 FIFO 拆到多个 lot，
-      值给出合计数量与 lot 明细 ``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``。
+      值给出合计数量与 lot 明细 ``{"quantity", "unit", "lots": [{"lot_uuid", "quantity"}]}``；
+    - ``content``（容器里的一份内容物）：参数带物料锁时与 ``material`` 相同，给容器的 ResourceSlot
+      引用；否则给 ``{"material_uuid", "substance_uuid", "quantity", "unit"}``。
     """
 
     from unilabos.server.services.materials.quantity import convert_quantity
@@ -163,6 +165,19 @@ def allocation_arguments(
                 "kind": "material",
                 "uuid": item.material_uuid,
                 "template_uuid": item.template_uuid,
+            }
+            continue
+        if item.kind == "content":
+            if "x-unilabos-material-lock" in fields.get(item.key, {}):
+                arguments[item.key] = {"uuid": item.material_uuid}
+                continue
+            arguments[item.key] = {
+                "key": item.key,
+                "kind": "content",
+                "material_uuid": item.material_uuid,
+                "substance_uuid": item.substance_uuid,
+                "quantity": item.quantity,
+                "unit": item.unit,
             }
             continue
         current = arguments.setdefault(

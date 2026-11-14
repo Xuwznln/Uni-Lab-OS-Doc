@@ -314,17 +314,20 @@ class ContentContract:
         )
         return history_uuid
 
-    def _reserved(self, substance_uuid: str, unit: str, *, exclude_task: Optional[str] = None) -> float:
-        total = 0.0
-        for row in self.connection.execute(
-            "SELECT quantity, quantity_unit, task_uuid FROM material_content_reservation "
-            "WHERE substance_uuid=? AND status='active'", (substance_uuid,),
-        ).fetchall():
-            if exclude_task is not None and row["task_uuid"] == exclude_task:
-                continue
-            converted = convert_quantity(float(row["quantity"]), row["quantity_unit"], unit, inventory_type="content")
-            total += converted[0] if converted else float(row["quantity"])
-        return total
+    def _physical(self, substance_uuid: str) -> dict[str, Any]:
+        row = self.connection.execute(
+            "SELECT ms.physical_state, mc.concentration_value, mc.density_g_per_ml FROM material_substance ms "
+            "LEFT JOIN material_content mc USING(substance_uuid) WHERE ms.substance_uuid=?", (substance_uuid,),
+        ).fetchone()
+        return {key: row[key] for key in row.keys()} if row is not None else {}
+
+    def _reserved(self, substance_uuid: str, unit: str, *, exclude_task: Optional[str] = None,
+                  exclude_reservation: Optional[str] = None) -> float:
+        # 按内容物的物态 / 浓度 / 密度换算；换算不了时拒绝（以前按原数字相加，单位不同会算错）
+        return self.materials.content_reserved(
+            substance_uuid, unit, physical=self._physical(substance_uuid),
+            exclude_task=exclude_task, exclude_reservation=exclude_reservation,
+        )
 
     def _assert_not_below_reserved(self, substance_uuid: str, quantity: float, unit: str) -> None:
         reserved = self._reserved(substance_uuid, unit)
@@ -553,7 +556,7 @@ class ContentContract:
         with self.materials.write():
             content = self._content(identity, "reagent")
             material_uuid = content["material_uuid"]
-            if self._reserved(identity, "ul") > 0 or self.connection.execute(
+            if self.connection.execute(
                 "SELECT 1 FROM material_content_reservation WHERE substance_uuid=? AND status='active'", (identity,)
             ).fetchone():
                 raise MaterialConflictError("reagent is reserved by an active workflow", conflict="state")
@@ -1028,10 +1031,25 @@ class ContentContract:
                 target = next((item for item in substances if item.substance_uuid == row["substance_uuid"]), None)
                 if target is None:
                     raise MaterialNotFoundError(f"container content not found: {row['substance_uuid']}")
-                converted = convert_quantity(used, row["quantity_unit"], target.quantity_unit, inventory_type="content")
-                amount = converted[0] if converted else used
+                physical = self._physical(target.substance_uuid)
+                converted = convert_quantity(used, row["quantity_unit"], target.quantity_unit, inventory_type="content",
+                                             physical_state=physical.get("physical_state"),
+                                             concentration_value=physical.get("concentration_value"),
+                                             density_g_per_ml=physical.get("density_g_per_ml"))
+                if converted is None:
+                    raise MaterialValidationError(
+                        f"consumption unit {row['quantity_unit']} cannot be converted to the content unit {target.quantity_unit}"
+                    )
+                amount = converted[0]
                 if amount > target.quantity + quantity_tolerance(target.quantity, amount):
                     raise MaterialConflictError("consumption exceeds the container content", conflict="state")
+                # 实际用量不能占用其他任务仍有效的预留（超出自己预留的部分只能从未预留余量里出）
+                others = self._reserved(target.substance_uuid, target.quantity_unit, exclude_reservation=reservation_uuid)
+                if amount > target.quantity - others + quantity_tolerance(target.quantity, amount):
+                    raise MaterialConflictError(
+                        f"consumption of {amount:g} {target.quantity_unit} would take other tasks' active reservations "
+                        f"({others:g} {target.quantity_unit})", conflict="state",
+                    )
                 balance_after = max(0.0, target.quantity - amount)
                 updated = target.model_copy(update={"quantity": balance_after})
                 self._put_substances(row["material_uuid"],
@@ -1051,6 +1069,8 @@ class ContentContract:
                     quantity_unit=target.quantity_unit, revision=None, previous=None, result=None,
                     extension={
                         "reservation_uuid": reservation_uuid,
+                        # plan：动作开始按计划量扣减（之后可更正一次）；reconcile：核对时直接按实际量结算
+                        "settled_by": "plan" if consumed_quantity is None else "reconcile",
                         "planned_quantity": float(row["quantity"]),
                         "planned_quantity_unit": row["quantity_unit"],
                         "reported_quantity": used,
@@ -1062,6 +1082,113 @@ class ContentContract:
                     },
                     operator_type="workflow", task_uuid=row["task_uuid"], job_uuid=row["job_uuid"],
                 )
+        return self.get_content_reservation(reservation_uuid)
+
+    def _reported_content_quantity(self, row: Any) -> float:
+        """已结算内容物预留最近一次落账的上报量（预留单位）：最新的 consume / reconcile 记录，缺省为预留量。"""
+
+        for candidate in self.connection.execute(
+            "SELECT extension_json FROM material_content_history WHERE subject_uuid=? AND event_type IN ('consume','reconcile') "
+            "ORDER BY recorded_at_ms DESC, history_uuid DESC", (row["substance_uuid"],),
+        ).fetchall():
+            extension = json.loads(candidate[0] or "{}")
+            if extension.get("reservation_uuid") == row["reservation_uuid"] and extension.get("reported_quantity") is not None:
+                return float(extension["reported_quantity"])
+        return float(row["quantity"])
+
+    def content_correctable(self, row: Any) -> bool:
+        """已结算的内容物预留能否再按实际用量更正：只有动作开始时按计划量扣减、还没核对过的才可以（一次）。"""
+
+        for candidate in self.connection.execute(
+            "SELECT event_type, extension_json FROM material_content_history WHERE subject_uuid=? "
+            "AND event_type IN ('consume','reconcile') ORDER BY recorded_at_ms DESC, history_uuid DESC",
+            (row["substance_uuid"],),
+        ).fetchall():
+            extension = json.loads(candidate[1] or "{}")
+            if extension.get("reservation_uuid") != row["reservation_uuid"]:
+                continue
+            return candidate[0] == "consume" and extension.get("settled_by") == "plan"
+        return False
+
+    def adjust_consumed_content(self, reservation_uuid: str, actual_quantity: float, *, reason: str = "") -> dict[str, Any]:
+        """按实际用量更正已结算的内容物预留（动作开始时按计划量扣减过）。
+
+        少用的部分退回容器；多用的部分只能从未预留余量里扣，不能占用其他任务仍有效的预留。
+        每次更正记一条 ``reconcile`` 历史（预留单位的上报量、内容物单位的累计实际量与前后余量）。
+        """
+
+        actual = _quantity(actual_quantity, "actual_quantity")
+        if actual < 0:
+            raise MaterialValidationError("actual_quantity must not be negative")
+        with self.materials.write():
+            row = self.connection.execute(
+                "SELECT * FROM material_content_reservation WHERE reservation_uuid=?", (reservation_uuid,)
+            ).fetchone()
+            if row is None:
+                raise MaterialNotFoundError(f"content reservation not found: {reservation_uuid}", subject="reservation")
+            if row["status"] != "consumed":
+                raise MaterialConflictError(f"content reservation is {row['status']}, not consumed", conflict="state")
+            previous = self._reported_content_quantity(row)
+            if abs(previous - actual) <= quantity_tolerance(previous, actual):
+                return self._reservation_row(row)
+            if not self.content_correctable(row):
+                raise MaterialConflictError("content usage was already reconciled", conflict="state")
+            _, substances = self._substances(row["material_uuid"])
+            target = next((item for item in substances if item.substance_uuid == row["substance_uuid"]), None)
+            if target is None:
+                raise MaterialNotFoundError(f"container content not found: {row['substance_uuid']}")
+            physical = self._physical(target.substance_uuid)
+
+            def to_content_unit(value: float) -> float:
+                converted = convert_quantity(value, row["quantity_unit"], target.quantity_unit, inventory_type="content",
+                                             physical_state=physical.get("physical_state"),
+                                             concentration_value=physical.get("concentration_value"),
+                                             density_g_per_ml=physical.get("density_g_per_ml"))
+                if converted is None:
+                    raise MaterialValidationError(
+                        f"reservation unit {row['quantity_unit']} cannot be converted to the content unit {target.quantity_unit}"
+                    )
+                return converted[0]
+
+            delta = to_content_unit(abs(previous - actual))
+            if actual < previous:
+                balance_after = target.quantity + delta
+            else:
+                others = self._reserved(target.substance_uuid, target.quantity_unit)
+                if delta > target.quantity - others + quantity_tolerance(target.quantity, delta):
+                    raise MaterialConflictError(
+                        f"extra use of {delta:g} {target.quantity_unit} would take other tasks' active reservations",
+                        conflict="state",
+                    )
+                balance_after = max(0.0, target.quantity - delta)
+            updated = target.model_copy(update={"quantity": balance_after})
+            self._put_substances(row["material_uuid"],
+                                 [updated if item.substance_uuid == target.substance_uuid else item for item in substances],
+                                 job_uuid=row["job_uuid"])
+            kind = self.connection.execute(
+                "SELECT content_kind FROM material_content WHERE substance_uuid=?", (target.substance_uuid,)
+            ).fetchone()
+            now = self._now()
+            if kind is not None:
+                self._update_content(target.substance_uuid, now)
+            self._append_history(
+                material_uuid=row["material_uuid"],
+                subject_type={"current": "current_substance"}.get(kind[0], kind[0]) if kind else "current_substance",
+                subject_uuid=target.substance_uuid, event_type="reconcile",
+                quantity_delta=delta if actual < previous else -delta, quantity_unit=target.quantity_unit,
+                revision=None, previous=None, result=None,
+                extension={
+                    "reservation_uuid": reservation_uuid,
+                    "reported_quantity": actual,
+                    "reported_quantity_unit": row["quantity_unit"],
+                    "actual_quantity": to_content_unit(actual),
+                    "quantity_unit": target.quantity_unit,
+                    "balance_before": target.quantity,
+                    "balance_after": balance_after,
+                    "reconciliation": {"previous_reported_quantity": previous, "reason": reason},
+                },
+                operator_type="user", task_uuid=row["task_uuid"], job_uuid=row["job_uuid"],
+            )
         return self.get_content_reservation(reservation_uuid)
 
     def list_content_reservations(self, *, status: str = "", task_uuid: str = "", limit: int = 500) -> list[dict[str, Any]]:

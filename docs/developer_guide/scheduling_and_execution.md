@@ -327,6 +327,17 @@ CI 在 Linux / macOS / Windows 上编译它，并用随机场景与 Python 实�
    单独的实例，或用 `parent_material_uuid` / `site_uuid` 选择器限定。同一张任务同时含
    `material` 与 `lot` 需求时任一不足整张回滚——LabDeviceMaterialsDemo 的出库装板阶段
    即以此证明"板够、水不够 → 板也不会被预留"。
+
+   第三种 `content` 是**某个容器里的一份内容物**（`material_substance`，例如试剂瓶里的 PBS）：
+   `{"key": "buffer", "kind": "content", "material_uuid": <容器>, "substance_name": "PBS"
+   （或 "substance_uuid"）, "quantity": 4, "unit": "ml"}`。可用量 = 内容物现量 − 其他任务仍有效的预留，
+   所以多个任务共享同一瓶的余量，不足时整张回滚并说明缺多少。预留随作业预留一起写入
+   `material_content_reservation`，结算规则与 `lot` 相同：动作开始扣减、未开始即失败释放、
+   结果不明按预留量扣减且不退回。注入动作参数时，带物料锁的参数得到容器的 ResourceSlot 引用，
+   否则得到 `{"material_uuid", "substance_uuid", "quantity", "unit"}`。动作开始后可经
+   `POST /api/v1/workflow-node-jobs/{uuid}/reconcile-quantity` 按实际用量更正**一次**：少用的退回容器，
+   多用的只能从未预留余量里扣。作业持有有效预留的内容物不能被（包括设备快照）移除，单位也不能改成
+   与预留无法换算的单位；内容物单位换算一律按物态 / 浓度 / 密度进行，换算不了就拒绝。
 2. **每轮资源重算都带入物料**：每个 Node 的完整资源申请包含 action 参数物料和
    reservation 分配出的实体物料，所以不同设备也不能同时操作同一物料。
 3. **驱动调用前只消费一次**：`ExecutionInventoryCoordinator` 校验 reservation
@@ -334,8 +345,9 @@ CI 在 Linux / macOS / Windows 上编译它，并用随机场景与 Python 实�
 4. **终态收口**：未 consume 的 active reservation 在 Task 终态释放；已经 consume
    的数量不返还，失败或取消的实体物料进入 quarantine，成功按账本完成。
 
-Scheduler 不直接修改 `material_substance` 快照，数量权威是 `inventory_lot`，所有
-reserve/consume/release/quarantine 事实进入 `inventory_ledger`。命令以
+Scheduler 不直接修改 `material_substance` 快照：批次的数量权威是 `inventory_lot`，容器内容物的
+数量权威是 `material_substance`（预留在 `material_content_reservation`，消费与更正记在
+`material_content_history`），所有 reserve/consume/release/quarantine 事实进入 `inventory_ledger`。命令以
 `(command_uuid, effect_key)` 幂等，因此恢复和重复投递不会重复扣减。
 
 ## 8. Edge 内部通信机制

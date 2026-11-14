@@ -225,6 +225,17 @@ class InventoryConsumptions:
             if history and "actual_quantity" not in extension and history[0]["quantity_delta"] is not None:
                 extension = {"actual_quantity": -float(history[0]["quantity_delta"]),
                              "quantity_unit": history[0]["quantity_unit"]}
+            # 动作开始按计划量扣减后，人工核对的实际用量（最新一次 reconcile）覆盖实际量与余量
+            for candidate in self.connection.execute(
+                "SELECT extension_json FROM material_content_history WHERE subject_uuid=? AND event_type='reconcile' "
+                "ORDER BY recorded_at_ms DESC, history_uuid DESC", (row["substance_uuid"],),
+            ).fetchall():
+                reconciled = _load(candidate["extension_json"], {})
+                if reconciled.get("reservation_uuid") == row["reservation_uuid"]:
+                    extension = {**extension, **{key: reconciled[key] for key in (
+                        "actual_quantity", "quantity_unit", "reported_quantity", "reported_quantity_unit",
+                        "balance_after", "reconciliation") if key in reconciled}}
+                    break
             barcode, name = self._container(row["material_uuid"])
             subject_type = history[0]["subject_type"] if history else None
             at_ms = int(history[0]["recorded_at_ms"]) if history else int(row["updated_at_ms"])

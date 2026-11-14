@@ -198,12 +198,21 @@ class QuantityReconciliation:
         actual = converted[0]
         if row["status"] == "released":
             raise StoreConflict("该内容物预留已释放，不能再核对实际用量")
+        reservation_uuid = row["reservation_uuid"]
         if row["status"] == "consumed":
             recorded = self._recorded_content_actual(row)
             if recorded is not None and _close(recorded, actual):
                 return lambda: False
-            raise StoreConflict("该内容物的实际用量已经落账，不能改成其他数量")
-        reservation_uuid = row["reservation_uuid"]
+            if not ContentContract(self.materials, compound_source=None).content_correctable(row):
+                raise StoreConflict("该内容物的实际用量已经落账，不能改成其他数量")
+
+            def adjust() -> bool:
+                # 动作开始时按计划量扣减过：按差额退回（少用）或从未预留余量补扣（多用）
+                ContentContract(self.materials, compound_source=None).adjust_consumed_content(
+                    reservation_uuid, actual, reason=str(item.get("reason") or ""))
+                return True
+
+            return adjust
 
         def apply() -> bool:
             ContentContract(self.materials, compound_source=None).finish_content_reservation(
@@ -216,7 +225,7 @@ class QuantityReconciliation:
         """已结算内容物预留的实际量（预留单位）；旧记录没有扩展时按预留量。"""
 
         for candidate in self.materials.connection.execute(
-            "SELECT extension_json FROM material_content_history WHERE subject_uuid=? AND event_type='consume' "
+            "SELECT extension_json FROM material_content_history WHERE subject_uuid=? AND event_type IN ('consume','reconcile') "
             "ORDER BY recorded_at_ms DESC, history_uuid DESC", (row["substance_uuid"],),
         ).fetchall():
             extension = decode_json_bytes(str(candidate[0] or "{}").encode("utf-8"))

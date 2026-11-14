@@ -20,7 +20,7 @@ def normalize_inventory(items: Any, *, template: bool = False) -> list[dict[str,
         probe, bindings = dict(item), {}
         for key, value in item.items():
             if isinstance(value, Mapping):
-                if key not in {"material_uuid", "template_uuid", "lot_uuid", "parent_material_uuid", "site_uuid", "quantity", "unit"}:
+                if key not in {"material_uuid", "template_uuid", "lot_uuid", "parent_material_uuid", "site_uuid", "quantity", "unit", "substance_uuid", "substance_name"}:
                     raise ValueError(f"库存字段 {key} 不能使用动态引用")
                 if value.get("kind") == "workflow_input":
                     input_references(value)

@@ -32,7 +32,9 @@
   运行前该在前端做什么 → 每一步做什么 → 跑完该看到什么。
 - 两者都接受 ``inventory=[...]``：该步骤的库存需求（``InventoryRequirement``
   形态，如 ``{"key": "water", "kind": "lot", "lot_uuid": ..., "quantity": 40,
-  "unit": "ml"}``），实例化后写入节点 ``meta_data.inventory_requirements``；调度器在
+  "unit": "ml"}``；从某个容器取内容物用 ``{"key": "buffer", "kind": "content",
+  "material_uuid": ..., "substance_name": "PBS", "quantity": 4, "unit": "ml"}``，多个任务
+  共享同一容器的余量），实例化后写入节点 ``meta_data.inventory_requirements``；调度器在
   任务启动时 all-or-nothing 预留，数量不足则任务在派发前失败（``plan_not_executable``），
   动作开始时由执行面扣减。
 
