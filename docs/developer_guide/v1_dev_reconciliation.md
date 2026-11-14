@@ -17,7 +17,7 @@
 | D02 | 业务协议待归位 | 已完成 | `protocol/runtime/` 下 `lifecycle`、`lab`（布局）、`logs`、`process_management`；V1 `/v1/operations` 等已移植（`api_v1_route_map.md` p8） |
 | D03 | 现场验收待做 | 不变 | 现场验收并入 T02 |
 | D04 / D06 | 按设计消解 / 已配置 | 不变 | |
-| D05 | 按设计消解 | 已更新 | runtime.db 已有 v2（等待顺序）、v3（预计时长）迁移；迁移只认已发布版本的结构指纹 |
+| D05 | 按设计消解 | 不变 | 0.13 未发布，四个库都仍是 v1 基线（等待顺序、预计时长等结构变化直接并进 v1）；发布后加迁移时只认已发布版本的结构指纹 |
 | M01 | Dev 已有 | 已有 | |
 | M02 | 部分基础 | 已实现 | 显式作用域 `ctx.resource_scope`、空闲借出与归还（`resource_loans.py`）、持久区间准入与老化优先级排队（SC-N4）；`test_workflow_resource_custody.py`、`test_workflow_resource_intervals.py`、`test_resource_admission_order.py` |
 | W01 | 不支持 | **待定** | `@workflow` 仍需 `display_name`，没有 `action.lock`；锁语义已由 `ctx.resource_scope` 提供，是否加语法糖（`display_name` 可选、`ctx.lock` 别名）待用户决定 |
@@ -86,7 +86,7 @@ PR #329–357 已合并；#358 是本次唯一尚未合并的 PR。其他人的 
 | D02 | 已完成（11-14 复核） | 状态/重启/重置 DTO 与 SDK 归入 protocol/runtime、client/runtime；drain 三个接口接入 server/backend 与 server/api/runtime。保留 Dev 主进程监督；布局、模板及旧操作日志尚不能判为已消解。 |
 | D03 | 拓扑按设计消解，现场验收待做 | 一个 backend 对应一个主 Host/runtime，下接多个 slave；符合本轮用户确认，不再把多主 Host 列为缺失能力。现有 supervisor、device-processes、driver-packages、HostLink 覆盖基本路径，真实工站验收列 T02。 |
 | D04 | 按设计消解 | 保留并行任务和任务级单步；不将 V1 当前工站级单步准入策略直接复制过来。 |
-| D05 | 按设计消解 | 保留原生授锁插件可选、加载失败回退 Python；保留版本化数据库迁移机制。0.13 发布线四个库都从 schema v1 开始（2026-11-13 把开发期 runtime v2–v12、materials v2–v8 迁移链压平为 v1 基线），旧开发库没有迁移路径：runtime / materials 拒绝启动（`database_rebuild_on_mismatch` 可显式允许备份后重建），telemetry / history 自动备份后重建；之后改结构从 v2 起追加迁移（`runtime.db` v2：资源等待记录的 `enqueued_at`）。准入的等待顺序按 V1 的老化优先级 FIFO 持久化在 `runtime.db`（让行不闭合等待环）；授予策略插件只裁决恢复路径上的内存争用。 |
+| D05 | 按设计消解 | 保留原生授锁插件可选、加载失败回退 Python；保留版本化数据库迁移机制。0.13 发布线四个库都从 schema v1 开始（2026-11-13 把开发期 runtime v2–v12、materials v2–v8 迁移链压平为 v1 基线），旧开发库没有迁移路径：runtime / materials 拒绝启动（`database_rebuild_on_mismatch` 可显式允许备份后重建），telemetry / history 自动备份后重建；发布前的结构变化直接并进 v1，发布后改结构从 v2 起追加迁移。准入的等待顺序按 V1 的老化优先级 FIFO 持久化在 `runtime.db`（让行不闭合等待环）；授予策略插件只裁决恢复路径上的内存争用。 |
 | D06 | 已配置 | WSL 的 `git.dp.tech` 使用 Windows Git Credential Manager；站点代理 `http://127.0.0.1:3897`。克隆成功，无需再次网页登录；凭据不写入报告或 patch。 |
 
 ## 功能消解清单
@@ -101,7 +101,7 @@ PR #329–357 已合并；#358 是本次唯一尚未合并的 PR。其他人的 
 | W02 action 返回值驱动 `if/else` | Dev 未接通；V1 有实现和专门测试 | 将上游具名输出绑定到条件节点，等待生产者完成，再只执行命中分支；未选节点标记 skipped。覆盖 false、缺字段、非布尔、失败/重试、冻结快照、暂停恢复。已按 V1 的静态编译实现（`compiler="ast"`），2026-11-13 起为默认，辅助函数在编译前按源码展开；builder 模式里对结果判断真假会在注册时报错。 |
 | W03 并行 | 已实现：`with ctx.parallel():` + `group`（11-14 复核） | Dev 保留调度实现；作者层编译出分叉/汇合并定义返回引用和失败语义。V1 实际写法是 `with parallel():` + `group`，不是 `parallel(A, B)`。 |
 | W04 循环 | Dev 已有 for/while 及 `ctx.step_output` 条件 | 现有循环测试通过。它不能抵消 W02 的 if/else 缺口；后续只补作者语法和嵌套组合回归。 |
-| A01 动作预计时长 | 已实现（2026-11-14） | `@action(estimate_duration_fixed / estimate_duration_express)`，字段名与 V1 相同，表达式也认 V1 的 `{name}` 写法；派发时用最终参数求值并记在 attempt 上（runtime.db v3），时间线依次取声明值 → 历史实测 → 60 s 兜底。只用于展示与观测，不是准入条件。V1 的学习型估时与时间求解属于闭源引擎，不移植。 |
+| A01 动作预计时长 | 已实现（2026-11-14） | `@action(estimate_duration_fixed / estimate_duration_express)`，字段名与 V1 相同，表达式也认 V1 的 `{name}` 写法；派发时用最终参数求值并记在 attempt 上，时间线依次取声明值 → 历史实测 → 60 s 兜底。只用于展示与观测，不是准入条件。V1 的学习型估时与时间求解属于闭源引擎，不移植。 |
 | A02 严格动作合同 | 已在 #361（11-14 复核） | `contract="typed"`、AST 参数/具名返回 Schema、冻结和派发/Host 校验已接入；先解决 C01。 |
 | A03 高级资源合同 | 部分：除 `order_sensitive` 外已启用（11-14 复核） | `device_tenancy`、`transfer`、`transfer_step`、`operate_in_place`、`aliquot`、`order_sensitive` 当前拒绝未实现语义。按物理效果和持久占用分别移植，验收不能止于解析成功。 |
 | I01 库存增量 | 已在 #361（11-14 复核） | 单位换算、整批虚拟余量预检、容量、计数盘点；先解决 C01，再合入。 |

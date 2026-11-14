@@ -249,7 +249,7 @@ attempt 和新 `job_uuid`（与 4.1 本机调度器的 retry 语义相同，只�
 - 等待图接口（`wait_graph`）的 `waiting_since` 就是 `enqueued_at`。
 
 派发每个 attempt 时，调度器还会按注册表 `@action(estimate_duration_fixed / estimate_duration_express)`
-用最终 `action_args` 求出预计时长，写在 attempt 上（`estimated_s` / `estimate_source`，runtime.db v3）。
+用最终 `action_args` 求出预计时长，写在 attempt 上（`estimated_s` / `estimate_source`）。
 它只用于时间线、监控与 ETA，求值失败退回兜底，解析或写入失败都不阻断派发（见 `add_device.md`）。
 
 ### 5.1 可插拔的授予策略
